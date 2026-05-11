@@ -3,6 +3,7 @@ import {
   getAuthoredLiteralValue,
   isAuthoredValue,
   isExpressionAuthoredValue,
+  type AuthoredValue,
   type FeatureValueKindDescriptor,
   type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
@@ -45,13 +46,18 @@ export function authoredBooleanLiteral(
   return typeof literal === "boolean" ? literal : fallback;
 }
 
-export function authoredDefinitionValue<T>(
+export function authoredDefinitionValue<const T>(
   value: MaybeAuthoredValue<T>,
   fallback: T,
-): MaybeAuthoredValue<T> {
-  return isExpressionAuthoredValue(value)
-    ? value
-    : (getAuthoredLiteralValue(value) ?? fallback);
+): AuthoredValue<T> {
+  if (isExpressionAuthoredValue(value)) {
+    return value as AuthoredValue<T>;
+  }
+
+  return {
+    source: "literal",
+    value: getAuthoredLiteralValue(value) ?? fallback,
+  };
 }
 
 export function authoredNumberFormValue(

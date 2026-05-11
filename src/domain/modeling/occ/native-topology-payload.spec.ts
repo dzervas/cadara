@@ -90,6 +90,117 @@ function assertEveryLoopIsClosedAndConnected(
 }
 
 test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
+  function expectInvalidNativeShimPayload(
+    payload: unknown,
+    message: string,
+  ) {
+    let rejected = false;
+    try {
+      parseNativeShimPayloadJson(JSON.stringify(payload));
+    } catch {
+      rejected = true;
+    }
+
+    expectTrue(rejected, message);
+  }
+
+  function testNativeShimPayloadRejectsMalformedPrimitiveInvariants() {
+    const validPayload = {
+      schemaVersion: "occ-native-topology-payload/v1alpha1",
+      source: "occt7-shim",
+      bodyId: "body_native_invariant_probe",
+      topologyToken: "t_native_invariant_probe",
+      counts: { faces: 1, edges: 1, vertices: 1 },
+      topology: [
+        {
+          id: "face_native_invariant_probe",
+          kernelUid: "occt7-shim:face:1",
+          kind: "face",
+          bodyId: "body_native_invariant_probe",
+          index: 0,
+        },
+      ],
+      edgeVertices: [
+        {
+          edgeId: "edge_native_invariant_probe",
+          start: [0, 0, 0],
+          end: [1, 0, 0],
+        },
+      ],
+      vertexPoints: [
+        {
+          vertexId: "vertex_native_invariant_probe",
+          point: [0, 0, 0],
+        },
+      ],
+      faceEdges: [
+        {
+          faceId: "face_native_invariant_probe",
+          edgeIds: ["edge_native_invariant_probe"],
+        },
+      ],
+      mesh: {
+        nodeCount: 3,
+        triangleCount: 1,
+        linearDeflection: 0.1,
+        angularDeflection: 0.5,
+        positions: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [0, 1, 0],
+        ],
+        triangleIndices: [[0, 1, 2]],
+        triangleFaceBindings: ["face_native_invariant_probe"],
+      },
+      diagnostics: [
+        {
+          code: "native-invariant-probe",
+          severity: "warning",
+          message: "Native invariant probe diagnostic.",
+          target: null,
+          detail: null,
+        },
+      ],
+    };
+
+    expectInvalidNativeShimPayload(
+      { ...validPayload, counts: { faces: -1, edges: 1, vertices: 1 } },
+      "Native shim parsing should reject negative topology counts.",
+    );
+    expectInvalidNativeShimPayload(
+      { ...validPayload, counts: { faces: 1.5, edges: 1, vertices: 1 } },
+      "Native shim parsing should reject fractional topology counts.",
+    );
+    expectInvalidNativeShimPayload(
+      {
+        ...validPayload,
+        topology: [{ ...validPayload.topology[0], index: -1 }],
+      },
+      "Native shim parsing should reject negative topology indices.",
+    );
+    expectInvalidNativeShimPayload(
+      {
+        ...validPayload,
+        topology: [{ ...validPayload.topology[0], id: "" }],
+      },
+      "Native shim parsing should reject empty topology ids.",
+    );
+    expectInvalidNativeShimPayload(
+      {
+        ...validPayload,
+        mesh: { ...validPayload.mesh, triangleIndices: [[0, -1, 2]] },
+      },
+      "Native shim parsing should reject negative mesh triangle indices.",
+    );
+    expectInvalidNativeShimPayload(
+      {
+        ...validPayload,
+        diagnostics: [{ ...validPayload.diagnostics[0], message: "" }],
+      },
+      "Native shim parsing should reject empty native diagnostic messages.",
+    );
+  }
+
   async function loadNativeOpenCascadeForTest() {
     const module = (await import("../../../../public/cadara-occ.js")) as {
       default: NativeOpenCascadeMainJSForTest;
@@ -664,6 +775,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     boxBuilder.delete?.();
   }
 
+  testNativeShimPayloadRejectsMalformedPrimitiveInvariants();
   await testNativeShimReturnsFlatTopologyAndMeshPayloads();
   await testNativeShimReturnsStructuredDiagnosticsForInvalidCommittedShapes();
   await testNativeExactBrepExtractsCurvedTopologyInsteadOfFlatteningIt();

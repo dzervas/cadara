@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 
 import { expectTrue } from "@/testing/expect.spec";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 
@@ -157,7 +157,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     dimensions: [],
   };
 
-  const parsed = sketchDefinitionSchema.safeParse(definition);
+  const parsed = validateSketchDefinition(definition);
   expectTrue(
     parsed.success,
     "Runtime schema should accept inferred local constraint variants.",
@@ -501,7 +501,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     dimensions: [],
   };
   const parsedNormalAndSymmetric =
-    sketchDefinitionSchema.safeParse(normalAndSymmetric);
+    validateSketchDefinition(normalAndSymmetric);
   expectTrue(
     parsedNormalAndSymmetric.success,
     "Runtime schema should accept normal and symmetric constraint payloads.",

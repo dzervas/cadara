@@ -1,21 +1,27 @@
-import { z } from "zod";
+import typia from "typia";
 
-import { stringSchema } from "@/contracts/shared/runtime-schema";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
+import {
+  requireContract,
+  validateContract,
+  type ContractValidationResult,
+} from "@/contracts/shared/validation";
 
-export const embeddedBinaryAssetRecordSchema = z
-  .object({
-    assetId: stringSchema.min(1, "Embedded binary asset ID must not be empty."),
-    hash: stringSchema.regex(
-      /^sha256:[a-f0-9]{64}$/,
-      "Embedded binary asset hash must be a sha256:<hex> content hash.",
-    ),
-    byteLength: z.number().int().nonnegative(),
-    mediaType: stringSchema.min(
-      1,
-      "Embedded binary asset media type must not be empty.",
-    ),
-    fileName: stringSchema.min(1).optional(),
-  })
-  .strict()
-  .transform((value) => value as EmbeddedBinaryAssetRecord);
+const embeddedBinaryAssetRecordValidator =
+  typia.createValidateEquals<EmbeddedBinaryAssetRecord>();
+
+export function validateEmbeddedBinaryAssetRecord(
+  value: unknown,
+): ContractValidationResult<EmbeddedBinaryAssetRecord> {
+  return validateContract(embeddedBinaryAssetRecordValidator, value);
+}
+
+export function requireEmbeddedBinaryAssetRecord(
+  value: unknown,
+): EmbeddedBinaryAssetRecord {
+  return requireContract(
+    embeddedBinaryAssetRecordValidator,
+    value,
+    "Embedded binary asset record",
+  );
+}

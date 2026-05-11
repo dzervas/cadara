@@ -554,6 +554,6 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
 
   private createRequestId(prefix: string) {
     this.requestSequence += 1;
-    return `occ_${prefix}_${this.requestSequence}` as RequestId;
+    return `request_occ_${prefix}_${this.requestSequence}` as RequestId;
   }
 }

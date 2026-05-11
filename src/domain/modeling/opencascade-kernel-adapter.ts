@@ -7,7 +7,7 @@ import type {
   MeshExportAccuracy,
 } from "@/contracts/export/capabilities";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
-import { modelingDocumentRequestEnvelopeSchema } from "@/contracts/modeling/runtime-schema";
+import { validateModelingDocumentRequestEnvelope } from "@/contracts/modeling/runtime-schema";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import type {
   ProjectedSketchReferenceRecord,
@@ -207,10 +207,10 @@ function assertSupportedModelingRequest(
   },
   documentId: DocumentId,
 ) {
-  const parsed = modelingDocumentRequestEnvelopeSchema.safeParse(request);
+  const parsed = validateModelingDocumentRequestEnvelope(request);
   if (!parsed.success) {
     throw new Error(
-      parsed.error.issues[0]?.message ?? "Invalid modeling request envelope.",
+      parsed.issues[0]?.message ?? "Invalid modeling request envelope.",
     );
   }
 
@@ -560,8 +560,28 @@ function normalizeSketchDefinitionForSketchId(
         }
       : undefined;
 
+  const authoringOperations = definition.authoringOperations?.map(
+    (operation) => {
+      const { createdGraph, removedGraph, ...rest } = operation;
+      const normalizedCreatedGraph = normalizeOperationGraph(createdGraph);
+      const normalizedRemovedGraph = normalizeOperationGraph(removedGraph);
+
+      return {
+        ...rest,
+        ...(normalizedCreatedGraph
+          ? { createdGraph: normalizedCreatedGraph }
+          : {}),
+        ...(normalizedRemovedGraph
+          ? { removedGraph: normalizedRemovedGraph }
+          : {}),
+      };
+    },
+  );
+  const definitionWithoutOps = { ...definition };
+  delete definitionWithoutOps.authoringOperations;
+
   return {
-    ...definition,
+    ...definitionWithoutOps,
     points: definition.points.map((point) => ({
       ...point,
       target: {
@@ -576,21 +596,7 @@ function normalizeSketchDefinitionForSketchId(
         sketchId,
       },
     })),
-    authoringOperations: definition.authoringOperations?.map((operation) => {
-      const { createdGraph, removedGraph, ...rest } = operation;
-      const normalizedCreatedGraph = normalizeOperationGraph(createdGraph);
-      const normalizedRemovedGraph = normalizeOperationGraph(removedGraph);
-
-      return {
-        ...rest,
-        ...(normalizedCreatedGraph
-          ? { createdGraph: normalizedCreatedGraph }
-          : {}),
-        ...(normalizedRemovedGraph
-          ? { removedGraph: normalizedRemovedGraph }
-          : {}),
-      };
-    }),
+    ...(authoringOperations ? { authoringOperations } : {}),
   };
 }
 

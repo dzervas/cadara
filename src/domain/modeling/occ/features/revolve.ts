@@ -2,6 +2,7 @@ import type {
   RevolveEndCondition,
   RevolveFeatureParameters,
 } from "@/contracts/modeling/schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getRevolveFeatureExtent } from "@/contracts/modeling/feature-extents";
 import type { FeatureId } from "@/contracts/shared/ids";
 import {
@@ -74,9 +75,10 @@ function buildRevolveFeatureShape(
   const axisEdge = requireEdge(axisBody, parameters.axis.edgeId);
   const axis = buildAxisFromLineEdge(context.oc, axisEdge);
 
-  if (parameters.startAngle !== 0) {
+  const resolvedStartAngle = getAuthoredLiteralValue(parameters.startAngle) ?? 0;
+  if (resolvedStartAngle !== 0) {
     const rotation = new context.oc.gp_Trsf_1();
-    rotation.SetRotation_1(axis, parameters.startAngle);
+    rotation.SetRotation_1(axis, resolvedStartAngle);
     const transform = new context.oc.BRepBuilderAPI_Transform_2(
       profileShape,
       rotation,
@@ -356,7 +358,7 @@ function resolveRevolveAngle(
   }
 
   if (end.kind === "blind") {
-    const angle = end.angle as number;
+    const angle = getAuthoredLiteralValue(end.angle) ?? 0;
     if (angle <= 0) {
       throw new Error("Revolve end angle must be positive.");
     }
@@ -421,10 +423,14 @@ export function executeRevolveFeature(
   parameters: RevolveFeatureParameters,
 ): OccFeatureExecutionResult {
   const featureShape = buildRevolveFeatureShape(context, parameters);
+  const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
+  if (!resolvedOperation) {
+    throw new Error("Revolve operation must be a resolved literal value.");
+  }
   const result = applyBooleanPolicy(
     context,
     ownerFeatureId,
-    parameters.operation,
+    resolvedOperation,
     parameters.booleanScope,
     featureShape,
   );

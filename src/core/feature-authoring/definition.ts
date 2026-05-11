@@ -1,7 +1,8 @@
 import type {
   ExtrudeFeatureParameters,
   ExtrudeProfileRef,
-  ExtrudeEndCondition,
+  LinearExtentDirection,
+  UpToOffsetDirection,
   FeatureBooleanOperation,
   FeatureBooleanScope,
   FeatureDefinition,
@@ -10,8 +11,8 @@ import type {
   PlaneFeatureParameters,
   PreviewId,
   RevolveAxisRef,
-  RevolveEndCondition,
   RevolveFeatureParameters,
+  AngularExtentDirection,
   ShellFeatureParameters,
   AdvancedOperationIntentDescriptor,
   AdvancedFeatureOptionDescriptor,
@@ -45,22 +46,117 @@ import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-sche
 export interface ExtrudeFeatureParameterDraft {
   profileTargets: readonly ExtrudeProfileRef[];
   extentMode: "oneSide" | "symmetric" | "twoSide";
-  firstEnd: ExtrudeEndCondition;
-  secondEnd: ExtrudeEndCondition;
+  firstEnd: ExtrudeFeatureEndConditionDraft;
+  secondEnd: ExtrudeFeatureEndConditionDraft;
   operation: MaybeAuthoredValue<FeatureBooleanOperation>;
   booleanScope: FeatureBooleanScope;
 }
+
+export type ExtrudeFeatureEndConditionDraft =
+  | {
+      kind: "blind";
+      direction: LinearExtentDirection;
+      distance: MaybeAuthoredValue<number>;
+      draftAngle?: MaybeAuthoredValue<number>;
+    }
+  | {
+      kind: "upToNext";
+      direction: LinearExtentDirection;
+      offset?: {
+        distance: MaybeAuthoredValue<number>;
+        direction: UpToOffsetDirection;
+      };
+      draftAngle?: MaybeAuthoredValue<number>;
+    }
+  | {
+      kind: "upToFace";
+      direction: LinearExtentDirection;
+      target: Extract<PrimitiveRef, { kind: "face" }>;
+      offset?: {
+        distance: MaybeAuthoredValue<number>;
+        direction: UpToOffsetDirection;
+      };
+      draftAngle?: MaybeAuthoredValue<number>;
+    }
+  | {
+      kind: "upToPart";
+      direction: LinearExtentDirection;
+      target: Extract<PrimitiveRef, { kind: "body" }>;
+      offset?: {
+        distance: MaybeAuthoredValue<number>;
+        direction: UpToOffsetDirection;
+      };
+      draftAngle?: MaybeAuthoredValue<number>;
+    }
+  | {
+      kind: "upToVertex";
+      direction: LinearExtentDirection;
+      target: Extract<PrimitiveRef, { kind: "vertex" }>;
+      offset?: {
+        distance: MaybeAuthoredValue<number>;
+        direction: UpToOffsetDirection;
+      };
+      draftAngle?: MaybeAuthoredValue<number>;
+    }
+  | {
+      kind: "throughAll";
+      direction: LinearExtentDirection;
+      draftAngle?: MaybeAuthoredValue<number>;
+    };
 
 export interface RevolveFeatureParameterDraft {
   profileTargets: readonly ExtrudeProfileRef[];
   axisTarget: RevolveAxisRef | null;
   startAngle: MaybeAuthoredValue<number>;
   extentMode: "oneSide" | "symmetric" | "twoSide";
-  firstEnd: RevolveEndCondition;
-  secondEnd: Exclude<RevolveEndCondition, { kind: "full" }>;
+  firstEnd: RevolveFeatureEndConditionDraft;
+  secondEnd: Exclude<RevolveFeatureEndConditionDraft, { kind: "full" }>;
   operation: MaybeAuthoredValue<FeatureBooleanOperation>;
   booleanScope: FeatureBooleanScope;
 }
+
+export type RevolveFeatureEndConditionDraft =
+  | { kind: "full" }
+  | {
+      kind: "blind";
+      direction: AngularExtentDirection;
+      angle: MaybeAuthoredValue<number>;
+    }
+  | {
+      kind: "upToNext";
+      direction: AngularExtentDirection;
+      offset?: {
+        angle: MaybeAuthoredValue<number>;
+        direction: UpToOffsetDirection;
+      };
+    }
+  | {
+      kind: "upToFace";
+      direction: AngularExtentDirection;
+      target: Extract<PrimitiveRef, { kind: "face" }>;
+      offset?: {
+        angle: MaybeAuthoredValue<number>;
+        direction: UpToOffsetDirection;
+      };
+    }
+  | {
+      kind: "upToPart";
+      direction: AngularExtentDirection;
+      target: Extract<PrimitiveRef, { kind: "body" }>;
+      offset?: {
+        angle: MaybeAuthoredValue<number>;
+        direction: UpToOffsetDirection;
+      };
+    }
+  | {
+      kind: "upToVertex";
+      direction: AngularExtentDirection;
+      target: Extract<PrimitiveRef, { kind: "vertex" }>;
+      offset?: {
+        angle: MaybeAuthoredValue<number>;
+        direction: UpToOffsetDirection;
+      };
+    };
 
 export interface FilletFeatureParameterDraft {
   edgeTargets: readonly Extract<PrimitiveRef, { kind: "edge" }>[];

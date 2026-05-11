@@ -1,7 +1,16 @@
+import type { tags } from "typia";
+
 /**
  * SHA-256 content fingerprint for resolved import payloads and persisted bindings.
  */
-export type ImportSourceFingerprint = `sha256:${string}`;
+export type ImportSourceFingerprint = string &
+  tags.Pattern<"^sha256:[a-f0-9]{64}$">;
+
+/**
+ * Absolute URL accepted at import boundaries before transport-specific policy
+ * invariants narrow the protocol set.
+ */
+export type ImportSourceUrl = string & tags.Format<"url">;
 
 export interface LocalFileImportSource {
   kind: "localFile";
@@ -11,7 +20,7 @@ export interface LocalFileImportSource {
 
 export interface UrlImportSource {
   kind: "url";
-  url: string;
+  url: ImportSourceUrl;
 }
 
 export interface CloudObjectImportSource {

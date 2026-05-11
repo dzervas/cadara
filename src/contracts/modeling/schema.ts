@@ -41,7 +41,7 @@ import type {
   AdvancedSolidFeatureDefinition,
   AdvancedSolidFeatureKind,
 } from "@/contracts/modeling/advanced-solid";
-import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
+import type { AuthoredValue } from "@/contracts/modeling/authored-values";
 import type { GeometryAssetDiagnosticDetail } from "@/contracts/modeling/geometry-assets";
 
 export interface DocumentSnapshotProvenance {
@@ -207,12 +207,12 @@ export type AngularExtentDirection = "clockwise" | "counterClockwise";
 export type UpToOffsetDirection = "shorten" | "extend";
 
 export interface LinearUpToOffset {
-  distance: MaybeAuthoredValue<number>;
+  distance: AuthoredValue<number>;
   direction: UpToOffsetDirection;
 }
 
 export interface AngularUpToOffset {
-  angle: MaybeAuthoredValue<number>;
+  angle: AuthoredValue<number>;
   direction: UpToOffsetDirection;
 }
 
@@ -220,40 +220,40 @@ export type ExtrudeEndCondition =
   | {
       kind: "blind";
       direction: LinearExtentDirection;
-      distance: MaybeAuthoredValue<number>;
-      draftAngle?: MaybeAuthoredValue<number>;
+      distance: AuthoredValue<number>;
+      draftAngle?: AuthoredValue<number>;
     }
   | {
       kind: "upToNext";
       direction: LinearExtentDirection;
       offset?: LinearUpToOffset;
-      draftAngle?: MaybeAuthoredValue<number>;
+      draftAngle?: AuthoredValue<number>;
     }
   | {
       kind: "upToFace";
       direction: LinearExtentDirection;
       target: { kind: "face"; bodyId: BodyId; faceId: FaceId };
       offset?: LinearUpToOffset;
-      draftAngle?: MaybeAuthoredValue<number>;
+      draftAngle?: AuthoredValue<number>;
     }
   | {
       kind: "upToPart";
       direction: LinearExtentDirection;
       target: { kind: "body"; bodyId: BodyId };
       offset?: LinearUpToOffset;
-      draftAngle?: MaybeAuthoredValue<number>;
+      draftAngle?: AuthoredValue<number>;
     }
   | {
       kind: "upToVertex";
       direction: LinearExtentDirection;
       target: { kind: "vertex"; bodyId: BodyId; vertexId: VertexId };
       offset?: LinearUpToOffset;
-      draftAngle?: MaybeAuthoredValue<number>;
+      draftAngle?: AuthoredValue<number>;
     }
   | {
       kind: "throughAll";
       direction: LinearExtentDirection;
-      draftAngle?: MaybeAuthoredValue<number>;
+      draftAngle?: AuthoredValue<number>;
     };
 
 export type ExtrudeFeatureExtent =
@@ -278,7 +278,7 @@ export type RevolveEndCondition =
   | {
       kind: "blind";
       direction: AngularExtentDirection;
-      angle: MaybeAuthoredValue<number>;
+      angle: AuthoredValue<number>;
     }
   | {
       kind: "upToNext";
@@ -333,7 +333,7 @@ export interface ExtrudeFeatureParameters {
   /** Explicit end controls for all active extrude sides. */
   extent: ExtrudeFeatureExtent;
   /** Boolean behavior applied to the extrude result. */
-  operation: FeatureBooleanOperation;
+  operation: AuthoredValue<FeatureBooleanOperation>;
   /** Explicit participant scope for non-standalone boolean operations. */
   booleanScope: FeatureBooleanScope;
 }
@@ -359,7 +359,7 @@ export interface FilletFeatureParameters {
   /** Exact durable edges to round; order has no semantic meaning. */
   edgeTargets: readonly FilletEdgeRef[];
   /** Positive fillet radius in document modeling units. */
-  radius: number;
+  radius: AuthoredValue<number>;
 }
 
 /**
@@ -410,11 +410,11 @@ export interface RevolveFeatureParameters {
   /** Explicit axis reference used by the revolve. */
   axis: RevolveAxisRef;
   /** Explicit start angle in radians from the profile's zero-angle pose. */
-  startAngle: number;
+  startAngle: AuthoredValue<number>;
   /** Explicit angular end controls for all active revolve sides. */
   extent: RevolveFeatureExtent;
   /** Boolean behavior applied to the revolve result. */
-  operation: FeatureBooleanOperation;
+  operation: AuthoredValue<FeatureBooleanOperation>;
   /** Explicit participant scope for non-standalone boolean operations. */
   booleanScope: FeatureBooleanScope;
 }
@@ -442,11 +442,11 @@ export interface ShellFeatureParameters {
   /** Explicit removable faces for the shell opening. */
   faceTargets: readonly ShellFaceRef[];
   /** Positive shell thickness in document modeling units. */
-  thickness: number;
+  thickness: AuthoredValue<number>;
   /** Offset side relative to the source body. Omitted legacy values mean inside. */
   direction?: "inside" | "outside";
   /** Boolean behavior applied to the shell result. */
-  operation: FeatureBooleanOperation;
+  operation: AuthoredValue<FeatureBooleanOperation>;
   /** Explicit participant scope for non-standalone boolean operations. */
   booleanScope: FeatureBooleanScope;
 }

@@ -107,7 +107,7 @@ export const filletAuthoringDefinition = {
           featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
           parameters: {
             edgeTargets: draft.edgeTargets,
-            radius: authoredDefinitionValue(draft.radius, 1) as number,
+            radius: authoredDefinitionValue(draft.radius, 1),
           },
         }
       : null;

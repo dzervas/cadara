@@ -508,7 +508,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
               ...feature.definition,
               parameters: {
                 ...feature.definition.parameters,
-                operation: "join",
+                operation: { source: "literal", value: "join" },
                 booleanScope: {
                   kind: "targetBody",
                   bodyId: "body_missing_for_repair" as BodyId,
@@ -1022,8 +1022,8 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       "Background sketch commits should persist a fallback entry.",
     );
     expectTrue(
-      pendingHistory.payload.entries[0].payload.definition.authoringOperations
-        ?.length === 0,
+      (pendingHistory.payload.entries[0].payload.definition.authoringOperations
+        ?.length ?? 0) === 0,
       "Background sketch commit fallback should omit bulky sketch-local authoring operations.",
     );
     releaseMutate?.();

@@ -1,30 +1,16 @@
 import type { DocumentId } from "@/contracts/shared/ids";
 
-/**
- * Where the document behind this tab lives.
- *
- * - `browser`  — automerge db stored in IndexedDB only. Survives reload, lost on browser data clear.
- * - `filesystem` — bound to a local file via the File System Access API. Authoritative copy on disk.
- * - `cloud` — synced through a remote backend. Reserved for a future provider; not wired today.
- */
-export type WorkbenchTabStorageKind = "browser" | "filesystem" | "cloud";
+export type {
+  WorkbenchTab,
+  WorkbenchTabStorageKind,
+  WorkbenchTabsState,
+} from "@/contracts/workspace/workbench-tabs.runtime-schema";
 
-export interface WorkbenchTab {
-  documentId: DocumentId;
-  title: string;
-  storageKind: WorkbenchTabStorageKind;
-  /**
-   * Storage-specific display detail surfaced in the tooltip
-   * (e.g. the filename for `filesystem`, the provider for `cloud`).
-   * `null` for `browser`.
-   */
-  storageDescriptor: string | null;
-}
-
-export interface WorkbenchTabsState {
-  tabs: readonly WorkbenchTab[];
-  activeDocumentId: DocumentId;
-}
+import type {
+  WorkbenchTab,
+  WorkbenchTabStorageKind,
+  WorkbenchTabsState,
+} from "@/contracts/workspace/workbench-tabs.runtime-schema";
 
 export type WorkbenchTabsAction =
   | { type: "open"; tab: WorkbenchTab; activate?: boolean }

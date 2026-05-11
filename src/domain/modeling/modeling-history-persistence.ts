@@ -1,9 +1,9 @@
 import {
   createEmptyOperationHistory,
-  validateOperationHistoryPayload,
   type ModelingOperationHistoryPayload,
   type OperationHistoryValidationResult,
 } from "@/contracts/modeling/operation-history";
+import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import type { DocumentId } from "@/contracts/shared/ids";
 
 export const MODELING_OPERATION_HISTORY_STORAGE_KEY =

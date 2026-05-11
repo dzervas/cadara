@@ -2,6 +2,7 @@ import type {
   ExtrudeEndCondition,
   ExtrudeFeatureParameters,
 } from "@/contracts/modeling/schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getExtrudeFeatureExtent } from "@/contracts/modeling/feature-extents";
 import type { FeatureId } from "@/contracts/shared/ids";
 import type { Vec3 } from "@/domain/modeling/occ/math";
@@ -189,7 +190,7 @@ function resolveExtrudeDistance(
   end: ExtrudeEndCondition,
 ) {
   if (end.kind === "blind") {
-    const distance = end.distance as number;
+    const distance = getAuthoredLiteralValue(end.distance) ?? 0;
     if (distance <= 0) {
       throw new Error("Extrude blind distance must be positive.");
     }
@@ -486,10 +487,14 @@ export function executeExtrudeFeature(
   parameters: ExtrudeFeatureParameters,
 ): OccFeatureExecutionResult {
   const featureShape = buildExtrudeFeatureShape(context, parameters);
+  const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
+  if (!resolvedOperation) {
+    throw new Error("Extrude operation must be a resolved literal value.");
+  }
   const result = applyBooleanPolicy(
     context,
     ownerFeatureId,
-    parameters.operation,
+    resolvedOperation,
     parameters.booleanScope,
     featureShape,
   );

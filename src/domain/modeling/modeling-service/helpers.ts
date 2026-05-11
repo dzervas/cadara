@@ -31,7 +31,7 @@ import type {
   UpdateFeatureRequest,
   UpdateDocumentVariableRequest,
 } from "@/contracts/modeling/schema";
-import { documentExportRequestSchema } from "@/contracts/modeling/export.runtime-schema";
+import { requireDocumentExportRequest } from "@/contracts/modeling/export.runtime-schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -179,7 +179,13 @@ export function normalizeCommitSketchInput(
   documentId: DocumentId,
 ): CommitSketchRequest {
   assertMutationBase(input);
-  const requestInput = stripRepositoryMutationBasis(input);
+  const requestInput = stripRepositoryMutationBasis(input) as Omit<
+    ModelingCommitSketchInput,
+    "baseRepositoryHeads"
+  > & {
+    requestId?: RequestId;
+  };
+  delete requestInput.requestId;
 
   return {
     ...requestInput,
@@ -366,7 +372,7 @@ export function normalizeExportDocumentInput(
 ): DocumentExportRequest {
   assertMutationBase(input);
 
-  return documentExportRequestSchema.parse({
+  return requireDocumentExportRequest({
     ...input,
     target: assertDurableRef(input.target),
     contractVersion: CONTRACT_VERSION,

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import typia, { type tags } from "typia";
 
 import type { MeshExportAccuracy } from "@/contracts/export/capabilities";
 import type {
@@ -31,6 +31,15 @@ export const OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS = [
 
 export type OccNativeTopologyKernelEntrypoint =
   (typeof OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS)[number];
+
+type OccNativeNonEmptyString = string & tags.Pattern<"^.*\\S.*$">;
+type OccNativeNonNegativeInteger = number & tags.Type<"uint64">;
+type OccNativePositiveNumber = number & tags.ExclusiveMinimum<0>;
+type OccNativeTriangleIndex = readonly [
+  OccNativeNonNegativeInteger,
+  OccNativeNonNegativeInteger,
+  OccNativeNonNegativeInteger,
+];
 
 export interface OpenCascadeNativeTopologyKernelHost {
   CadaraNativeTopologyProbe?: {
@@ -281,9 +290,9 @@ export interface OccNativeReferenceInvalidation {
 }
 
 export interface OccNativeTopologyDiagnostic {
-  code: string;
+  code: OccNativeNonEmptyString;
   severity: "info" | "warning" | "error";
-  message: string;
+  message: OccNativeNonEmptyString;
   target: DurableRef | null;
   detail: Record<string, unknown> | null;
 }
@@ -295,10 +304,10 @@ export interface OccNativeFeatureTransactionHistoryPayload {
   schemaVersion: typeof OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION;
   source: OccNativeIdentitySource;
   status: "available" | "unsupported";
-  operation?: string;
+  operation?: OccNativeNonEmptyString;
   bodyId?: BodyId;
-  previousTopologyToken?: string;
-  topologyToken?: string;
+  previousTopologyToken?: OccNativeNonEmptyString;
+  topologyToken?: OccNativeNonEmptyString;
   records: readonly OccNativeFeatureTransactionHistoryRecord[];
   diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
@@ -370,157 +379,81 @@ export interface OccNativeTopologyCapabilityProbeResult {
 }
 
 export interface OccNativeShimMeshSummary {
-  nodeCount: number;
-  triangleCount: number;
-  linearDeflection: number;
-  angularDeflection: number;
+  nodeCount: OccNativeNonNegativeInteger;
+  triangleCount: OccNativeNonNegativeInteger;
+  linearDeflection: OccNativePositiveNumber;
+  angularDeflection: OccNativePositiveNumber;
   positions?: readonly (readonly [number, number, number])[];
-  triangleIndices?: readonly (readonly [number, number, number])[];
-  triangleFaceBindings?: readonly string[];
+  triangleIndices?: readonly OccNativeTriangleIndex[];
+  triangleFaceBindings?: readonly OccNativeNonEmptyString[];
 }
 
 export interface OccNativeShimVertexPointRecord {
-  vertexId: VertexId;
+  vertexId: OccNativeNonEmptyString;
   point: readonly [number, number, number];
 }
 
 export interface OccNativeShimFaceEdgeRecord {
-  faceId: FaceId;
-  edgeIds: readonly EdgeId[];
+  faceId: OccNativeNonEmptyString;
+  edgeIds: readonly OccNativeNonEmptyString[] & tags.MinItems<1>;
 }
 
-const nativeShimTopologyRecordSchema = z.object({
-  id: z.string().min(1),
-  kernelUid: z.string().min(1).optional(),
-  kind: z.enum(["face", "edge", "vertex"]),
-  bodyId: z.string().min(1),
-  index: z.number().int().positive(),
-});
+export interface OccNativeShimTopologyRecord {
+  id: OccNativeNonEmptyString;
+  kernelUid?: OccNativeNonEmptyString;
+  kind: "face" | "edge" | "vertex";
+  bodyId: OccNativeNonEmptyString;
+  index: OccNativeNonNegativeInteger;
+}
 
-const nativeShimEdgeVertexRecordSchema = z.object({
-  edgeId: z.string().min(1),
-  start: z.tuple([z.number(), z.number(), z.number()]),
-  end: z.tuple([z.number(), z.number(), z.number()]),
-});
+export interface OccNativeShimEdgeVertexRecord {
+  edgeId: OccNativeNonEmptyString;
+  start: readonly [number, number, number];
+  end: readonly [number, number, number];
+}
 
-const nativeShimMeshSummarySchema = z.object({
-  nodeCount: z.number().int().nonnegative(),
-  triangleCount: z.number().int().nonnegative(),
-  linearDeflection: z.number().nonnegative(),
-  angularDeflection: z.number().nonnegative(),
-  positions: z.array(z.tuple([z.number(), z.number(), z.number()])).optional(),
-  triangleIndices: z
-    .array(
-      z.tuple([
-        z.number().int().nonnegative(),
-        z.number().int().nonnegative(),
-        z.number().int().nonnegative(),
-      ]),
-    )
-    .optional(),
-  triangleFaceBindings: z.array(z.string().min(1)).optional(),
-});
+export interface OccNativeShimPayload {
+  schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION;
+  source: "occt7-shim";
+  bodyId?: OccNativeNonEmptyString;
+  topologyToken?: OccNativeNonEmptyString;
+  counts?: {
+    faces: OccNativeNonNegativeInteger;
+    edges: OccNativeNonNegativeInteger;
+    vertices: OccNativeNonNegativeInteger;
+  };
+  topology: OccNativeShimTopologyRecord[];
+  edgeVertices: OccNativeShimEdgeVertexRecord[];
+  vertexPoints: OccNativeShimVertexPointRecord[];
+  faceEdges: OccNativeShimFaceEdgeRecord[];
+  cadaraBrep?: CadaraBrepGeometryAssetData;
+  mesh?: OccNativeShimMeshSummary;
+  diagnostics: OccNativeTopologyDiagnostic[];
+}
 
-const nativeShimVertexPointRecordSchema = z.object({
-  vertexId: z.string().min(1),
-  point: z.tuple([z.number(), z.number(), z.number()]),
-});
+type OccNativeShimPayloadRaw = Omit<
+  OccNativeShimPayload,
+  "topology" | "edgeVertices" | "vertexPoints" | "faceEdges" | "diagnostics"
+> &
+  Partial<
+    Pick<
+      OccNativeShimPayload,
+      "topology" | "edgeVertices" | "vertexPoints" | "faceEdges" | "diagnostics"
+    >
+  >;
 
-const nativeShimFaceEdgeRecordSchema = z.object({
-  faceId: z.string().min(1),
-  edgeIds: z.array(z.string().min(1)),
-});
+type OccNativeFeatureTransactionHistoryPayloadRaw = Omit<
+  OccNativeFeatureTransactionHistoryPayload,
+  "records" | "diagnostics"
+> &
+  Partial<
+    Pick<OccNativeFeatureTransactionHistoryPayload, "records" | "diagnostics">
+  >;
 
-const nativeTopologyDiagnosticSchema: z.ZodType<OccNativeTopologyDiagnostic> =
-  z.object({
-    code: z.string().min(1),
-    severity: z.enum(["info", "warning", "error"]),
-    message: z.string().min(1),
-    target: z
-      .custom<DurableRef>(
-        (value) =>
-          (typeof value === "object" && value !== null && "kind" in value) ||
-          value === null,
-      )
-      .nullable(),
-    detail: z.record(z.string(), z.unknown()).nullable(),
-  });
-
-const nativeFeatureTransactionHistoryPayloadSchema: z.ZodType<OccNativeFeatureTransactionHistoryPayload> =
-  z.object({
-    schemaVersion: z.literal(
-      OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION,
-    ),
-    source: z.enum(["occt7-shim", "brepgraph"]),
-    status: z.enum(["available", "unsupported"]),
-    operation: z.string().optional(),
-    bodyId: z.string().optional() as z.ZodType<BodyId | undefined>,
-    previousTopologyToken: z.string().optional(),
-    topologyToken: z.string().optional(),
-    records: z
-      .array(
-        z.object({
-          target: z.custom<DurableRef>(
-            (value) =>
-              typeof value === "object" && value !== null && "kind" in value,
-          ),
-          reason: z.enum([
-            "unique-successor",
-            "ambiguous",
-            "deleted",
-            "missing",
-          ]),
-          successors: z.array(
-            z.custom<DurableRef>(
-              (value) =>
-                typeof value === "object" && value !== null && "kind" in value,
-            ),
-          ),
-        }),
-      )
-      .optional()
-      .default([]),
-    diagnostics: z.array(nativeTopologyDiagnosticSchema).optional().default([]),
-  });
-
-const nativeShimPayloadSchema = z.object({
-  schemaVersion: z.literal(OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION),
-  source: z.literal("occt7-shim"),
-  bodyId: z.string().min(1).optional(),
-  topologyToken: z.string().min(1).optional(),
-  counts: z
-    .object({
-      faces: z.number().int().nonnegative(),
-      edges: z.number().int().nonnegative(),
-      vertices: z.number().int().nonnegative(),
-    })
-    .optional(),
-  topology: z.array(nativeShimTopologyRecordSchema).optional().default([]),
-  edgeVertices: z
-    .array(nativeShimEdgeVertexRecordSchema)
-    .optional()
-    .default([]),
-  vertexPoints: z
-    .array(nativeShimVertexPointRecordSchema)
-    .optional()
-    .default([]),
-  faceEdges: z.array(nativeShimFaceEdgeRecordSchema).optional().default([]),
-  cadaraBrep: z
-    .custom<CadaraBrepGeometryAssetData>(
-      (value) =>
-        typeof value === "object" &&
-        value !== null &&
-        "kind" in value &&
-        value.kind === "cadaraBrep" &&
-        "schemaVersion" in value &&
-        value.schemaVersion === "cadara-brep/v1alpha1",
-    )
-    .optional(),
-  mesh: nativeShimMeshSummarySchema.optional(),
-  diagnostics: z.array(nativeTopologyDiagnosticSchema).optional().default([]),
-});
-
-export type OccNativeShimPayload = z.infer<typeof nativeShimPayloadSchema>;
+const nativeShimPayloadValidator =
+  typia.createValidateEquals<OccNativeShimPayloadRaw>();
+const nativeFeatureTransactionHistoryPayloadValidator =
+  typia.createValidateEquals<OccNativeFeatureTransactionHistoryPayloadRaw>();
 
 const emptyBuffer = new ArrayBuffer(0);
 
@@ -833,9 +766,9 @@ export function createNativeTopologyDiagnostic(
   target: DurableRef | null = null,
 ): OccNativeTopologyDiagnostic {
   return {
-    code,
+    code: code as OccNativeNonEmptyString,
     severity: "error",
-    message,
+    message: message as OccNativeNonEmptyString,
     target,
     detail,
   };
@@ -928,6 +861,71 @@ function countTopologyKinds(topology: readonly OccNativeTopologyRecord[]) {
   return counts;
 }
 
+function invariantFailure(path: string, message: string): Error {
+  return new Error(`${path}: ${message}`);
+}
+
+function assertFiniteNumber(value: number, path: string) {
+  if (!Number.isFinite(value)) {
+    throw invariantFailure(path, "must be a finite number.");
+  }
+}
+
+function assertPoint3(point: readonly [number, number, number], path: string) {
+  assertFiniteNumber(point[0], `${path}.0`);
+  assertFiniteNumber(point[1], `${path}.1`);
+  assertFiniteNumber(point[2], `${path}.2`);
+}
+
+function assertNativeShimMeshSummaryInvariants(
+  mesh: OccNativeShimMeshSummary | undefined,
+  path: string,
+) {
+  if (!mesh) {
+    return;
+  }
+
+  mesh.positions?.forEach((point, index) => {
+    assertPoint3(point, `${path}.positions.${index}`);
+  });
+  mesh.triangleIndices?.forEach((triangle, index) => {
+    if (mesh.positions && mesh.positions.length > 0) {
+      const maxIndex = mesh.positions.length - 1;
+      if (
+        triangle[0] > maxIndex ||
+        triangle[1] > maxIndex ||
+        triangle[2] > maxIndex
+      ) {
+        throw invariantFailure(
+          `${path}.triangleIndices.${index}`,
+          "must reference existing mesh positions.",
+        );
+      }
+    }
+  });
+  if (
+    mesh.triangleIndices &&
+    mesh.triangleFaceBindings &&
+    mesh.triangleFaceBindings.length !== mesh.triangleIndices.length
+  ) {
+    throw invariantFailure(
+      `${path}.triangleFaceBindings`,
+      "must align 1:1 with triangle indices.",
+    );
+  }
+}
+
+function assertNativeShimPayloadInvariants(payload: OccNativeShimPayload) {
+  payload.edgeVertices.forEach((record, index) => {
+    assertPoint3(record.start, `edgeVertices.${index}.start`);
+    assertPoint3(record.end, `edgeVertices.${index}.end`);
+  });
+  payload.vertexPoints.forEach((record, index) => {
+    assertPoint3(record.point, `vertexPoints.${index}.point`);
+  });
+  assertNativeShimMeshSummaryInvariants(payload.mesh, "mesh");
+}
+
 function createBodyTopologyRecords(
   bodyId: BodyId,
   nativePayload: OccNativeShimPayload,
@@ -955,14 +953,46 @@ function createBodyTopologyRecords(
 
 export function parseNativeShimPayloadJson(json: string): OccNativeShimPayload {
   const parsed = JSON.parse(json) as unknown;
-  return nativeShimPayloadSchema.parse(parsed);
+  const result = nativeShimPayloadValidator(parsed);
+  if (!result.success) {
+    throw new Error(
+      result.errors[0]?.description ??
+        result.errors[0]?.expected ??
+        "Native shim payload is invalid.",
+    );
+  }
+
+  const payload = {
+    ...result.data,
+    topology: result.data.topology ?? [],
+    edgeVertices: result.data.edgeVertices ?? [],
+    vertexPoints: result.data.vertexPoints ?? [],
+    faceEdges: result.data.faceEdges ?? [],
+    diagnostics: result.data.diagnostics ?? [],
+  };
+  assertNativeShimPayloadInvariants(payload);
+  return payload;
 }
 
 export function parseNativeFeatureTransactionHistoryJson(
   json: string,
 ): OccNativeFeatureTransactionHistoryPayload {
   const parsed = JSON.parse(json) as unknown;
-  return nativeFeatureTransactionHistoryPayloadSchema.parse(parsed);
+  const result = nativeFeatureTransactionHistoryPayloadValidator(parsed);
+  if (!result.success) {
+    throw new Error(
+      result.errors[0]?.description ??
+        result.errors[0]?.expected ??
+        "Native feature transaction history payload is invalid.",
+    );
+  }
+
+  const payload = {
+    ...result.data,
+    records: result.data.records ?? [],
+    diagnostics: result.data.diagnostics ?? [],
+  };
+  return payload;
 }
 
 export function createOccNativeReferenceInvalidationsFromHistoryPayload(
@@ -1235,9 +1265,10 @@ export function createMissingNativeTopologyKernelDiagnostic(
   missingEntrypoints: readonly OccNativeTopologyKernelEntrypoint[],
 ): OccNativeTopologyDiagnostic {
   return {
-    code: "occ-native-topology-entrypoint-missing",
+    code: "occ-native-topology-entrypoint-missing" as OccNativeNonEmptyString,
     severity: "error",
-    message: `Loaded OpenCascade build is missing native topology kernel entrypoints: ${missingEntrypoints.join(", ")}.`,
+    message:
+      `Loaded OpenCascade build is missing native topology kernel entrypoints: ${missingEntrypoints.join(", ")}.` as OccNativeNonEmptyString,
     target: null,
     detail: {
       missingEntrypoints: [...missingEntrypoints],

@@ -19,6 +19,7 @@ import {
 import { getRegisteredFeatureAuthoringDefinitions } from "@/core/feature-authoring/registry";
 import type { FeatureAuthoringDefinition } from "@/core/feature-authoring/definition";
 import type { FeatureEditorFormField } from "@/core/feature-authoring/form-schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 
 test("src/domain/feature-authoring/registry.spec.ts", async () => {
   function findFormField(
@@ -205,7 +206,8 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
 
     expectTrue(
       oneTargetDefinition?.kind === "extrude" &&
-        oneTargetDefinition.parameters.operation === "join" &&
+        getAuthoredLiteralValue(oneTargetDefinition.parameters.operation) ===
+          "join" &&
         oneTargetDefinition.parameters.booleanScope.kind === "targetBody" &&
         oneTargetDefinition.parameters.booleanScope.bodyId ===
           targetBodyA.bodyId,
@@ -334,7 +336,7 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
 
     expectTrue(
       definition?.kind === "revolve" &&
-        definition.parameters.operation === "cut" &&
+        getAuthoredLiteralValue(definition.parameters.operation) === "cut" &&
         definition.parameters.booleanScope.kind === "targetBody" &&
         definition.parameters.booleanScope.bodyId === targetBody.bodyId,
       "Revolve boolean target selection should build a targetBody boolean scope.",
@@ -401,12 +403,13 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Sweep definitions should preserve the selected path participant role.",
     );
     expectTrue(
-      definition.parameters.options?.profileControl === "none" &&
+      getAuthoredLiteralValue(definition.parameters.options?.profileControl) ===
+        "none" &&
         definition.parameters.options.twist &&
         typeof definition.parameters.options.twist === "object" &&
         "type" in definition.parameters.options.twist &&
         definition.parameters.options.twist.type === "none" &&
-        definition.parameters.options.endScale === 1,
+        getAuthoredLiteralValue(definition.parameters.options.endScale) === 1,
       "Sweep definitions should include default advanced control options.",
     );
 
@@ -465,8 +468,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     );
     expectTrue(
       keepOrientationDefinition?.kind === "sweep" &&
-        keepOrientationDefinition.parameters.options?.profileControl ===
-          "keepProfileOrientation",
+        getAuthoredLiteralValue(
+          keepOrientationDefinition.parameters.options?.profileControl,
+        ) === "keepProfileOrientation",
       "Sweep authoring should preserve keep profile orientation control.",
     );
 
@@ -496,8 +500,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     );
     expectTrue(
       lockFacesDefinition?.kind === "sweep" &&
-        lockFacesDefinition.parameters.options?.profileControl ===
-          "lockProfileFaces" &&
+        getAuthoredLiteralValue(
+          lockFacesDefinition.parameters.options?.profileControl,
+        ) === "lockProfileFaces" &&
         lockFacesDefinition.parameters.participants.some(
           (participant) => participant.role === "lockProfileFace",
         ),
@@ -536,8 +541,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     );
     expectTrue(
       lockDirectionDefinition?.kind === "sweep" &&
-        lockDirectionDefinition.parameters.options?.profileControl ===
-          "lockProfileDirection" &&
+        getAuthoredLiteralValue(
+          lockDirectionDefinition.parameters.options?.profileControl,
+        ) === "lockProfileDirection" &&
         lockDirectionDefinition.parameters.participants.some(
           (participant) => participant.role === "lockProfileDirection",
         ),
@@ -593,7 +599,8 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     expectTrue(
       booleanSession.featureType === "sweep" &&
         booleanDefinition?.kind === "sweep" &&
-        booleanDefinition.parameters.operationIntent === "subtract" &&
+        getAuthoredLiteralValue(booleanDefinition.parameters.operationIntent) ===
+          "subtract" &&
         booleanDefinition.parameters.participants.some(
           (participant) => participant.role === "targetBody",
         ),
@@ -693,17 +700,20 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     const definition = buildFeatureDefinition(hydrated);
     expectTrue(
       definition?.kind === "sweep" &&
-        definition.parameters.options?.profileControl ===
-          "lockProfileDirection" &&
+        getAuthoredLiteralValue(
+          definition.parameters.options?.profileControl,
+        ) === "lockProfileDirection" &&
         definition.parameters.options.twist &&
         typeof definition.parameters.options.twist === "object" &&
         "type" in definition.parameters.options.twist &&
         definition.parameters.options.twist.type === "angle" &&
         "angle" in definition.parameters.options.twist &&
         Math.abs(
-          Number(definition.parameters.options.twist.angle) - Math.PI / 3,
+          Number(getAuthoredLiteralValue(definition.parameters.options.twist.angle)) -
+            Math.PI / 3,
         ) < 0.000001 &&
-        definition.parameters.options.endScale === 1.5,
+        getAuthoredLiteralValue(definition.parameters.options.endScale) ===
+          1.5,
       "Hydrated sweep authored advanced options should rebuild as durable definition values.",
     );
   }
@@ -771,7 +781,8 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Chamfer definitions should preserve explicit edge participants.",
     );
     expectTrue(
-      definition.parameters.options?.distance === 0.75,
+      getAuthoredLiteralValue(definition.parameters.options?.distance) ===
+        0.75,
       "Chamfer definitions should preserve the constant distance option.",
     );
 
@@ -871,7 +882,14 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
           pathDefinition.parameters.options?.path as
             | { sectionCount?: unknown }
             | undefined
-        )?.sectionCount === 5,
+        ) &&
+        getAuthoredLiteralValue(
+          (
+            pathDefinition.parameters.options?.path as
+              | { sectionCount?: unknown }
+              | undefined
+          )?.sectionCount,
+        ) === 5,
       "Loft definitions should preserve path separately from guide curves and default path section count to 5.",
     );
     const sectionCountField = getFormField(pathSession, "loft-section-count");
@@ -892,7 +910,14 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
           explicitSectionDefinition.parameters.options?.path as
             | { sectionCount?: unknown }
             | undefined
-        )?.sectionCount === 7,
+        ) &&
+        getAuthoredLiteralValue(
+          (
+            explicitSectionDefinition.parameters.options?.path as
+              | { sectionCount?: unknown }
+              | undefined
+          )?.sectionCount,
+        ) === 7,
       "Loft definitions should preserve explicit path section count.",
     );
 
@@ -937,8 +962,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     );
     expectTrue(
       guideContinuityDefinition?.kind === "loft" &&
-        guideContinuityDefinition.parameters.options?.guideContinuity ===
-          "normalToGuide",
+        getAuthoredLiteralValue(
+          guideContinuityDefinition.parameters.options?.guideContinuity,
+        ) === "normalToGuide",
       "Loft definitions should preserve guide continuity controls.",
     );
     const startConditionField = getFormField(
@@ -1064,8 +1090,10 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     );
     expectTrue(
       hydrated?.draft.pathTarget?.kind === "edge" &&
-        hydrated.draft.options.path?.sectionCount === 8 &&
-        hydrated.draft.options.guideContinuity === "normalToGuide",
+        getAuthoredLiteralValue(hydrated.draft.options.path?.sectionCount) ===
+          8 &&
+        getAuthoredLiteralValue(hydrated.draft.options.guideContinuity) ===
+          "normalToGuide",
       "Loft hydration should preserve path and guide continuity options for edit sessions.",
     );
   }
@@ -1184,11 +1212,13 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Thicken definitions should preserve explicit face participants.",
     );
     expectTrue(
-      definition.parameters.options?.thickness === 1.25,
+      getAuthoredLiteralValue(definition.parameters.options?.thickness) ===
+        1.25,
       "Thicken definitions should preserve the thickness option.",
     );
     expectTrue(
-      definition.parameters.options?.side === "symmetric",
+      getAuthoredLiteralValue(definition.parameters.options?.side) ===
+        "symmetric",
       "Thicken definitions should preserve the side option.",
     );
     expectTrue(
@@ -1237,11 +1267,11 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Thicken hydration should preserve face participants for edit sessions.",
     );
     expectTrue(
-      hydrated?.draft.options.thickness === 2,
+      getAuthoredLiteralValue(hydrated?.draft.options.thickness) === 2,
       "Thicken hydration should preserve thickness.",
     );
     expectTrue(
-      hydrated?.draft.options.side === "symmetric",
+      getAuthoredLiteralValue(hydrated?.draft.options.side) === "symmetric",
       "Thicken hydration should preserve side.",
     );
   }
@@ -1387,7 +1417,8 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Completed Combine drafts should build a combine advanced-solid definition.",
     );
     expectTrue(
-      definition.parameters.operationIntent === "intersect",
+      getAuthoredLiteralValue(definition.parameters.operationIntent) ===
+        "intersect",
       "Combine definitions should preserve the explicit operation intent.",
     );
     expectTrue(
@@ -1428,7 +1459,7 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Combine hydration should preserve tool bodies.",
     );
     expectTrue(
-      hydrated.draft.operationIntent === "intersect",
+      getAuthoredLiteralValue(hydrated.draft.operationIntent) === "intersect",
       "Combine hydration should preserve operation intent.",
     );
   }
@@ -1588,7 +1619,7 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Mirror definitions should preserve the explicit mirror plane.",
     );
     expectTrue(
-      definition.parameters.options?.copy === true,
+      getAuthoredLiteralValue(definition.parameters.options?.copy) === true,
       "Mirror definitions should preserve the copy policy option.",
     );
 
@@ -1719,7 +1750,7 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Transform definitions should preserve the explicit transform reference.",
     );
     expectTrue(
-      definition.parameters.options?.distance === 2.5,
+      getAuthoredLiteralValue(definition.parameters.options?.distance) === 2.5,
       "Transform definitions should preserve the typed distance option.",
     );
   }
@@ -1904,7 +1935,8 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     );
     expectTrue(
       initialDefinition?.kind === "shell" &&
-        initialDefinition.parameters.operation === "intersect" &&
+        getAuthoredLiteralValue(initialDefinition.parameters.operation) ===
+          "intersect" &&
         initialDefinition.parameters.booleanScope.kind === "targetBody" &&
         initialDefinition.parameters.booleanScope.bodyId === "body_source",
       "Shell should build an intersect definition against the selected source body by default.",
@@ -1936,7 +1968,8 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
 
     expectTrue(
       definition?.kind === "shell" &&
-        definition.parameters.operation === "intersect" &&
+        getAuthoredLiteralValue(definition.parameters.operation) ===
+          "intersect" &&
         definition.parameters.booleanScope.kind === "targetBody" &&
         definition.parameters.booleanScope.bodyId === targetBody.bodyId,
       "Shell boolean target selection should build a targetBody boolean scope.",
@@ -2052,7 +2085,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     const thickenDefinition = buildFeatureDefinition(flippedThicken);
     expectTrue(
       thickenDefinition?.kind === "thicken" &&
-        thickenDefinition.parameters.options?.direction === "negative",
+        getAuthoredLiteralValue(
+          thickenDefinition.parameters.options?.direction,
+        ) === "negative",
       "Thicken direction flip should persist the negative normal direction.",
     );
 
@@ -2079,7 +2114,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     const transformDefinition = buildFeatureDefinition(flippedTransform);
     expectTrue(
       transformDefinition?.kind === "transform" &&
-        transformDefinition.parameters.options?.direction === "negative",
+        getAuthoredLiteralValue(
+          transformDefinition.parameters.options?.direction,
+        ) === "negative",
       "Transform direction flip should persist the negative normal direction.",
     );
 
@@ -2134,7 +2171,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       symmetricExtrude?.kind === "extrude" &&
         symmetricExtrude.parameters.extent?.mode === "symmetric" &&
         symmetricExtrude.parameters.extent.end.kind === "blind" &&
-        symmetricExtrude.parameters.extent.end.distance === 8,
+        getAuthoredLiteralValue(
+          symmetricExtrude.parameters.extent.end.distance,
+        ) === 8,
       "Symmetric extrude drafts should build one mirrored blind authored end.",
     );
 
@@ -2157,7 +2196,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
         twoSideExtrude.parameters.extent?.mode === "twoSide" &&
         twoSideExtrude.parameters.extent.firstEnd.kind === "blind" &&
         twoSideExtrude.parameters.extent.secondEnd.kind === "blind" &&
-        twoSideExtrude.parameters.extent.secondEnd.distance === 3,
+        getAuthoredLiteralValue(
+          twoSideExtrude.parameters.extent.secondEnd.distance,
+        ) === 3,
       "Two-side extrude drafts should preserve independent first and second ends.",
     );
     const hydratedTwoSideExtrude = twoSideExtrude
@@ -2170,7 +2211,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       hydratedTwoSideExtrude?.featureType === "extrude" &&
         hydratedTwoSideExtrude.draft.extentMode === "twoSide" &&
         hydratedTwoSideExtrude.draft.secondEnd.kind === "blind" &&
-        hydratedTwoSideExtrude.draft.secondEnd.distance === 3,
+        getAuthoredLiteralValue(
+          hydratedTwoSideExtrude.draft.secondEnd.distance,
+        ) === 3,
       "Advanced extrude snapshot hydration should preserve two-side end controls.",
     );
 

@@ -63,7 +63,11 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 9 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: { source: "literal", value: 9 },
+          },
         },
       },
     };
@@ -211,7 +215,11 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
             ...definition.parameters,
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 12 },
+              end: {
+                kind: "blind",
+                direction: "positive",
+                distance: { source: "literal", value: 12 },
+              },
             },
           },
         },

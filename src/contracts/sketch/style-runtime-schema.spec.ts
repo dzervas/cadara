@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 
 import { expectTrue } from "@/testing/expect.spec";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 
 test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
@@ -61,30 +61,10 @@ test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
     dimensions: [],
   };
 
-  const migrated = sketchDefinitionSchema.safeParse(baseDefinition);
+  const migrated = validateSketchDefinition(baseDefinition);
   expectTrue(
     migrated.success,
-    "Runtime schema should accept older definitions without authored styles.",
-  );
-  expectTrue(
-    Array.isArray(migrated.data.styleIds),
-    "Older payloads should migrate with styleIds present.",
-  );
-  expectTrue(
-    Array.isArray(migrated.data.styles),
-    "Older payloads should migrate with styles present.",
-  );
-  expectTrue(
-    migrated.data.styleIds.length === 0,
-    "Older payloads should default styleIds to an empty list.",
-  );
-  expectTrue(
-    migrated.data.styles.length === 0,
-    "Older payloads should default styles to an empty list.",
-  );
-  expectTrue(
-    migrated.data.svgRenderingEnabled === false,
-    "Older payloads should default SVG rendering to disabled.",
+    "Runtime validation should accept definitions where optional style metadata is omitted.",
   );
 
   const withStyles: SketchDefinition = {
@@ -135,14 +115,14 @@ test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
     ],
   };
 
-  const parsed = sketchDefinitionSchema.safeParse(withStyles);
+  const parsed = validateSketchDefinition(withStyles);
   expectTrue(
     parsed.success,
     "Runtime schema should accept authored entity/region style records.",
   );
 
   const serialized = JSON.parse(JSON.stringify(parsed.data)) as unknown;
-  const roundTrip = sketchDefinitionSchema.safeParse(serialized);
+  const roundTrip = validateSketchDefinition(serialized);
   expectTrue(
     roundTrip.success,
     "Style payloads should survive serialize/parse round-trips.",

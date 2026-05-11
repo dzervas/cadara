@@ -2,7 +2,6 @@ import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   LOFT_ADVANCED_OPTION_DESCRIPTORS,
   type AdvancedParticipantRole,
-  type AdvancedSolidOperationIntent,
   type LoftGuideContinuity,
   type LoftProfileConditionKind,
 } from "@/contracts/modeling/advanced-solid";
@@ -491,7 +490,7 @@ export const loftAuthoringDefinition = {
             operationIntent: authoredDefinitionValue(
               draft.operationIntent,
               "create",
-            ) as AdvancedSolidOperationIntent,
+            ),
             participants: buildLoftParticipants(draft),
             options: {
               ...(draft.pathTarget

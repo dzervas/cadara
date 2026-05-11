@@ -1,280 +1,189 @@
-import { z, type ZodIssue } from "zod";
+import typia from "typia";
 
 import {
   AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   CONTRACT_VERSION,
-  type AuthoredModelDocumentSchemaVersion,
 } from "@/contracts/shared/versioning";
-import {
-  bodyIdSchema,
-  contractVersionSchema,
-  documentIdSchema,
-  featureIdSchema,
-  literalVersionSchema,
-  numberSchema,
-  revisionIdSchema,
-  sketchIdSchema,
-  stringSchema,
-} from "@/contracts/shared/runtime-schema";
-import { featureDefinitionSchema } from "@/contracts/modeling/runtime-schema";
-import { sketchPlaneDefinitionSchema } from "@/contracts/shared/sketch-plane.runtime-schema";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
-import { geometryAssetManifestSchema } from "@/contracts/modeling/geometry-assets.runtime-schema";
-import { createEmptyGeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
-import { embeddedBinaryAssetRecordSchema } from "@/contracts/modeling/embedded-binary-assets.runtime-schema";
 import type {
   AuthoredModelDocument,
+  AuthoredModelDocumentDiagnostic,
   AuthoredModelDocumentMigrationResult,
 } from "@/contracts/modeling/authored-document";
+import { validateContract } from "@/contracts/shared/validation";
+import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 
-const authoredModelDocumentSchemaVersionSchema =
-  literalVersionSchema<AuthoredModelDocumentSchemaVersion>(
-    AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
-    "schemaVersion",
-    "Unsupported authored model document schema version",
-  );
+const authoredModelDocumentValidator =
+  typia.createValidateEquals<AuthoredModelDocument>();
 
-const modelingDocumentSettingsSchema = z
-  .object({
-    linearUnit: z.literal("millimeter"),
-    modelingTolerance: numberSchema,
-    angularToleranceRadians: numberSchema,
-  })
-  .strict();
+function createDiagnostic(
+  reasonCode: string,
+  message: string,
+): AuthoredModelDocumentDiagnostic {
+  return { reasonCode, message };
+}
 
-const authoredSketchRecordSchema = z
-  .object({
-    sketchId: sketchIdSchema,
-    label: stringSchema,
-    plane: sketchPlaneDefinitionSchema,
-    definition: sketchDefinitionSchema,
-  })
-  .strict();
+function validationDiagnostic(message: string): AuthoredModelDocumentDiagnostic {
+  if (message.includes("schemaVersion")) {
+    return createDiagnostic(
+      "unsupported-schema-version",
+      "Authored model document schema version is not supported.",
+    );
+  }
 
-const authoredFeatureRecordSchema = z
-  .object({
-    featureId: featureIdSchema,
-    label: stringSchema,
-    suppressed: z.boolean(),
-    definition: featureDefinitionSchema,
-  })
-  .strict();
+  if (message.includes("contractVersion")) {
+    return createDiagnostic(
+      "unsupported-contract-version",
+      "Authored model document contract version is not supported.",
+    );
+  }
 
-const authoredBodyLabelRecordSchema = z
-  .object({
-    bodyId: bodyIdSchema,
-    label: stringSchema,
-  })
-  .strict();
+  return createDiagnostic("invalid-authored-document", message);
+}
 
-const authoredDocumentFeatureCursorSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("empty") }).strict(),
-  z.object({ kind: z.literal("sketch"), sketchId: sketchIdSchema }).strict(),
-  z.object({ kind: z.literal("feature"), featureId: featureIdSchema }).strict(),
-]);
+function validateAuthoredModelDocumentInvariants(
+  document: AuthoredModelDocument,
+): AuthoredModelDocumentDiagnostic | null {
+  if (document.contractVersion !== CONTRACT_VERSION) {
+    return createDiagnostic(
+      "unsupported-contract-version",
+      "Authored model document contract version is not supported.",
+    );
+  }
 
-const authoredDocumentHistoryOrderEntrySchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("sketch"), sketchId: sketchIdSchema }).strict(),
-  z.object({ kind: z.literal("feature"), featureId: featureIdSchema }).strict(),
-]);
+  if (document.schemaVersion !== AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION) {
+    return createDiagnostic(
+      "unsupported-schema-version",
+      "Authored model document schema version is not supported.",
+    );
+  }
 
-export const authoredModelDocumentSchema = z
-  .object({
-    contractVersion: contractVersionSchema,
-    schemaVersion: authoredModelDocumentSchemaVersionSchema,
-    documentId: documentIdSchema,
-    name: stringSchema,
-    revisionId: revisionIdSchema,
-    settings: modelingDocumentSettingsSchema,
-    variables: z.array(
-      z
-        .object({
-          variableId: z
-            .string()
-            .regex(/^variable_.+$/, "Document variable ID is invalid."),
-          name: stringSchema,
-          valueText: stringSchema,
-        })
-        .strict(),
-    ),
-    sketches: z.array(authoredSketchRecordSchema),
-    features: z.array(authoredFeatureRecordSchema),
-    featureOrder: z.array(featureIdSchema),
-    historyOrder: z.array(authoredDocumentHistoryOrderEntrySchema),
-    cursor: authoredDocumentFeatureCursorSchema,
-    bodyLabels: z.array(authoredBodyLabelRecordSchema),
-    assets: geometryAssetManifestSchema.optional(),
-    embeddedBinaryAssets: z.array(embeddedBinaryAssetRecordSchema).optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    const featureIds = value.features.map((feature) => feature.featureId);
-    const featureIdSet = new Set(featureIds);
-    const orderIdSet = new Set(value.featureOrder);
+  const featureIds = document.features.map((feature) => feature.featureId);
+  const featureIdSet = new Set(featureIds);
+  const orderIdSet = new Set(document.featureOrder);
 
-    if (featureIds.length !== featureIdSet.size) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Authored model document contains duplicate feature IDs.",
-        path: ["features"],
-      });
+  for (const feature of document.features) {
+    const authoredValueIssues = validateFeatureDefinitionAuthoredValueInvariants(
+      feature.definition,
+    );
+    if (authoredValueIssues.length > 0) {
+      return createDiagnostic(
+        "invalid-authored-document",
+        authoredValueIssues[0]?.message ??
+          "Authored model document feature definition is invalid.",
+      );
     }
+  }
 
-    if (
-      value.featureOrder.length !== orderIdSet.size ||
-      featureIds.some((featureId) => !orderIdSet.has(featureId))
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "Authored model document featureOrder must contain each feature exactly once.",
-        path: ["featureOrder"],
-      });
-    }
+  if (featureIds.length !== featureIdSet.size) {
+    return createDiagnostic(
+      "invalid-authored-document",
+      "Authored model document contains duplicate feature IDs.",
+    );
+  }
 
-    const sketchIds = new Set(value.sketches.map((sketch) => sketch.sketchId));
-    const historyOrder = value.historyOrder;
-    const seenHistoryTargets = new Set<string>();
-    for (const item of historyOrder) {
-      const key =
-        item.kind === "sketch"
-          ? `sketch:${item.sketchId}`
-          : `feature:${item.featureId}`;
-      if (seenHistoryTargets.has(key)) {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "Authored model document historyOrder must not contain duplicates.",
-          path: ["historyOrder"],
-        });
-        break;
-      }
-      seenHistoryTargets.add(key);
-
-      if (item.kind === "sketch" && !sketchIds.has(item.sketchId)) {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "Authored model document historyOrder references a missing sketch.",
-          path: ["historyOrder"],
-        });
-      }
-      if (item.kind === "feature" && !featureIdSet.has(item.featureId)) {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "Authored model document historyOrder references a missing feature.",
-          path: ["historyOrder"],
-        });
-      }
-    }
-    for (const sketchId of sketchIds) {
-      if (!seenHistoryTargets.has(`sketch:${sketchId}`)) {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "Authored model document historyOrder must contain each sketch exactly once.",
-          path: ["historyOrder"],
-        });
-        break;
-      }
-    }
-    for (const featureId of featureIds) {
-      if (!seenHistoryTargets.has(`feature:${featureId}`)) {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "Authored model document historyOrder must contain each feature exactly once.",
-          path: ["historyOrder"],
-        });
-        break;
-      }
-    }
-
-    if (
-      value.cursor.kind === "feature" &&
-      !featureIdSet.has(value.cursor.featureId)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Authored model document cursor references a missing feature.",
-        path: ["cursor"],
-      });
-    }
-    if (
-      value.cursor.kind === "sketch" &&
-      !sketchIds.has(value.cursor.sketchId)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Authored model document cursor references a missing sketch.",
-        path: ["cursor"],
-      });
-    }
-  })
-  .transform((value) => {
-    const historyOrder = value.historyOrder ?? [
-      ...value.sketches.map((sketch) => ({
-        kind: "sketch" as const,
-        sketchId: sketch.sketchId,
-      })),
-      ...value.featureOrder.map((featureId) => ({
-        kind: "feature" as const,
-        featureId,
-      })),
-    ];
-
-    return {
-      ...value,
-      historyOrder,
-      assets: value.assets ?? createEmptyGeometryAssetManifest(),
-      embeddedBinaryAssets: value.embeddedBinaryAssets ?? [],
-      contractVersion: CONTRACT_VERSION,
-      schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
-    } as AuthoredModelDocument;
-  });
-
-function firstIssueMessage(issue: ZodIssue) {
   if (
-    issue.message.startsWith(
-      "Unsupported authored model document schema version",
-    )
+    document.featureOrder.length !== orderIdSet.size ||
+    featureIds.some((featureId) => !orderIdSet.has(featureId))
   ) {
-    return {
-      reasonCode: "unsupported-schema-version",
-      message: "Authored model document schema version is not supported.",
-    };
+    return createDiagnostic(
+      "invalid-authored-document",
+      "Authored model document featureOrder must contain each feature exactly once.",
+    );
   }
 
-  if (issue.message.startsWith("Unsupported contract version")) {
-    return {
-      reasonCode: "unsupported-contract-version",
-      message: "Authored model document contract version is not supported.",
-    };
+  const sketchIds = new Set(
+    document.sketches.map((sketch) => sketch.sketchId),
+  );
+  const seenHistoryTargets = new Set<string>();
+
+  for (const item of document.historyOrder) {
+    const key =
+      item.kind === "sketch"
+        ? `sketch:${item.sketchId}`
+        : `feature:${item.featureId}`;
+
+    if (seenHistoryTargets.has(key)) {
+      return createDiagnostic(
+        "invalid-authored-document",
+        "Authored model document historyOrder must not contain duplicates.",
+      );
+    }
+    seenHistoryTargets.add(key);
+
+    if (item.kind === "sketch" && !sketchIds.has(item.sketchId)) {
+      return createDiagnostic(
+        "invalid-authored-document",
+        "Authored model document historyOrder references a missing sketch.",
+      );
+    }
+
+    if (item.kind === "feature" && !featureIdSet.has(item.featureId)) {
+      return createDiagnostic(
+        "invalid-authored-document",
+        "Authored model document historyOrder references a missing feature.",
+      );
+    }
   }
 
-  if (issue.code === "unrecognized_keys") {
-    return {
-      reasonCode: "derived-field-leak",
-      message:
-        "Authored model document contains fields outside the persisted authored contract.",
-    };
+  for (const sketchId of sketchIds) {
+    if (!seenHistoryTargets.has(`sketch:${sketchId}`)) {
+      return createDiagnostic(
+        "invalid-authored-document",
+        "Authored model document historyOrder must contain each sketch exactly once.",
+      );
+    }
   }
 
-  return {
-    reasonCode: "invalid-authored-document",
-    message: issue.message,
-  };
+  for (const featureId of featureIds) {
+    if (!seenHistoryTargets.has(`feature:${featureId}`)) {
+      return createDiagnostic(
+        "invalid-authored-document",
+        "Authored model document historyOrder must contain each feature exactly once.",
+      );
+    }
+  }
+
+  if (
+    document.cursor.kind === "feature" &&
+    !featureIdSet.has(document.cursor.featureId)
+  ) {
+    return createDiagnostic(
+      "invalid-authored-document",
+      "Authored model document cursor references a missing feature.",
+    );
+  }
+
+  if (
+    document.cursor.kind === "sketch" &&
+    !sketchIds.has(document.cursor.sketchId)
+  ) {
+    return createDiagnostic(
+      "invalid-authored-document",
+      "Authored model document cursor references a missing sketch.",
+    );
+  }
+
+  return null;
 }
 
 export function migrateAuthoredModelDocument(
   value: unknown,
 ): AuthoredModelDocumentMigrationResult {
-  const result = authoredModelDocumentSchema.safeParse(value);
+  const result = validateContract(authoredModelDocumentValidator, value);
   if (!result.success) {
     return {
       ok: false,
-      diagnostic: firstIssueMessage(result.error.issues[0]!),
+      diagnostic: validationDiagnostic(
+        result.issues[0]?.message ?? "Authored model document is invalid.",
+      ),
+    };
+  }
+
+  const invariantFailure = validateAuthoredModelDocumentInvariants(result.data);
+  if (invariantFailure) {
+    return {
+      ok: false,
+      diagnostic: invariantFailure,
     };
   }
 

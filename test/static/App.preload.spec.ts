@@ -5,10 +5,6 @@ import { test } from "bun:test";
 import { expectTrue } from "@/testing/expect.spec";
 test("test/static/App.preload.spec.ts", () => {
   const appSource = readFileSync(join(process.cwd(), "src/App.tsx"), "utf8");
-  const bootstrapSource = readFileSync(
-    join(process.cwd(), "src/bootstrap.tsx"),
-    "utf8",
-  );
   const runtimeSource = readFileSync(
     join(process.cwd(), "src/infrastructure/occ/browser-kernel-runtime.ts"),
     "utf8",

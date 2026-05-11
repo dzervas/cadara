@@ -219,12 +219,9 @@ export const shellAuthoringDefinition = {
           parameters: {
             bodyTarget: draft.bodyTarget,
             faceTargets: draft.faceTargets,
-            thickness: authoredDefinitionValue(draft.thickness, 1) as number,
+            thickness: authoredDefinitionValue(draft.thickness, 1),
             direction: draft.direction,
-            operation: authoredDefinitionValue(
-              draft.operation,
-              operation,
-            ) as typeof operation,
+            operation: authoredDefinitionValue(draft.operation, operation),
             booleanScope: draft.booleanScope,
           },
         }

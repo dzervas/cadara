@@ -9,11 +9,11 @@ import {
   type ValidateSketchRequest,
 } from "./schema";
 import {
-  disposeInteractiveSketchSolveSessionRequestSchema,
-  finalizeInteractiveSketchSolveSessionRequestSchema,
-  solveSketchRequestSchema,
-  startInteractiveSketchSolveSessionRequestSchema,
-  updateInteractiveSketchSolveSessionRequestSchema,
+  validateDisposeInteractiveSketchSolveSessionRequest,
+  validateFinalizeInteractiveSketchSolveSessionRequest,
+  validateSolveSketchRequest,
+  validateStartInteractiveSketchSolveSessionRequest,
+  validateUpdateInteractiveSketchSolveSessionRequest,
 } from "./runtime-schema";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
@@ -277,7 +277,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       "Normal solve responses should not derive regions unless the caller requests them.",
     );
     expectTrue(
-      solveSketchRequestSchema.safeParse(
+      validateSolveSketchRequest(
         createSolveRequest(projection.projectedReferences),
       ).success,
       "Solve request runtime schema should accept solve-without-regions requests.",
@@ -382,13 +382,13 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       priorSolvedSnapshot: solved.solvedSnapshot,
     };
     const startParse =
-      startInteractiveSketchSolveSessionRequestSchema.safeParse(startRequest);
+      validateStartInteractiveSketchSolveSessionRequest(startRequest);
     expectTrue(
       startParse.success,
       "Interactive session start request should validate at the contract boundary.",
     );
     expectTrue(
-      !startInteractiveSketchSolveSessionRequestSchema.safeParse({
+      !validateStartInteractiveSketchSolveSessionRequest({
         ...startRequest,
         plane: undefined,
       }).success,
@@ -424,12 +424,12 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       },
     };
     expectTrue(
-      updateInteractiveSketchSolveSessionRequestSchema.safeParse(updateRequest)
+      validateUpdateInteractiveSketchSolveSessionRequest(updateRequest)
         .success,
       "Interactive update request should validate at the contract boundary.",
     );
     expectTrue(
-      !updateInteractiveSketchSolveSessionRequestSchema.safeParse({
+      !validateUpdateInteractiveSketchSolveSessionRequest({
         ...updateRequest,
         dragTarget: {
           kind: "sketchPoint",
@@ -471,7 +471,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       sessionId: started.sessionId,
     };
     expectTrue(
-      finalizeInteractiveSketchSolveSessionRequestSchema.safeParse(
+      validateFinalizeInteractiveSketchSolveSessionRequest(
         finalizeRequest,
       ).success,
       "Interactive finalize request should validate at the contract boundary.",
@@ -498,7 +498,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       sessionId: "interactive_sketch_solve_unknown" as const,
     };
     expectTrue(
-      disposeInteractiveSketchSolveSessionRequestSchema.safeParse(
+      validateDisposeInteractiveSketchSolveSessionRequest(
         disposeRequest,
       ).success,
       "Interactive dispose request should validate at the contract boundary.",

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import typia from "typia";
 
 import type {
   AddDocumentVariableRequest,
@@ -59,14 +59,10 @@ import type {
 } from "@/domain/modeling/occ/native-topology-payload";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 
-const requestIdSchema = z.string().min(1);
-
-export const occWorkerAssetConfigSchema = z.object({
-  mainWasm: z.string().min(1).optional(),
-  worker: z.string().min(1).optional(),
-});
-
-export type OccWorkerAssetConfig = z.infer<typeof occWorkerAssetConfigSchema>;
+export interface OccWorkerAssetConfig {
+  mainWasm?: string;
+  worker?: string;
+}
 
 interface AuthoredDocumentWorkerOperationBase {
   document: AuthoredModelDocument;
@@ -295,22 +291,12 @@ export interface OccWorkerFailureMessage {
   };
 }
 
-export const occWorkerRequestEnvelopeSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("invoke"),
-    requestId: requestIdSchema,
-    operation: z
-      .object({
-        kind: z.string().min(1),
-      })
-      .passthrough(),
-  }),
-  z.object({
-    kind: z.literal("cancel"),
-    requestId: requestIdSchema,
-    cancelsRequestId: requestIdSchema,
-  }),
-]);
+const occWorkerRequestEnvelopeValidator =
+  typia.createValidateEquals<OccWorkerRequest>();
+
+export function validateOccWorkerRequestEnvelope(value: unknown) {
+  return occWorkerRequestEnvelopeValidator(value);
+}
 
 export function normalizeOccWorkerFailure(
   requestId: RequestId,
@@ -323,7 +309,9 @@ export function normalizeOccWorkerFailure(
     error: {
       code,
       message:
-        error instanceof Error && error.message.trim()
+        typeof error === "string" && error.trim()
+          ? error
+          : error instanceof Error && error.message.trim()
           ? error.message
           : "OCC worker request failed.",
     },

@@ -1,5 +1,6 @@
 import type { FeatureBooleanOperation } from "@/contracts/modeling/schema";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
@@ -53,7 +54,7 @@ function getCombineBodyTargets(
 function getCombineBooleanOperation(
   definition: AdvancedSolidFeatureDefinition & { kind: "combine" },
 ): Exclude<FeatureBooleanOperation, "newBody"> {
-  const intent = definition.parameters.operationIntent;
+  const intent = getAuthoredLiteralValue(definition.parameters.operationIntent);
 
   switch (intent) {
     case "add":

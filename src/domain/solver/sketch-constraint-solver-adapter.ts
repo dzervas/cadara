@@ -23,7 +23,7 @@ import {
   type ValidateSketchRequest,
   type ValidateSketchResponse,
 } from "@/contracts/solver/schema";
-import { sketchSolverEnvelopeSchema } from "@/contracts/solver/runtime-schema";
+import { validateSketchSolverEnvelope } from "@/contracts/solver/runtime-schema";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
@@ -142,10 +142,10 @@ function assertSupportedRequest(
     | ResolveSketchReferenceRequest,
   options: SketchConstraintSolverAdapterOptions,
 ) {
-  const parsed = sketchSolverEnvelopeSchema.safeParse(request);
+  const parsed = validateSketchSolverEnvelope(request);
   if (!parsed.success) {
     throw new Error(
-      parsed.error.issues[0]?.message ??
+      parsed.issues[0]?.message ??
         "Invalid sketch solver request envelope.",
     );
   }

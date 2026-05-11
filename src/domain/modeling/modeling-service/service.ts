@@ -22,11 +22,12 @@ import {
   encodeGeometryAssetData,
   createGeometryAssetDiagnostic,
 } from "@/contracts/modeling/geometry-assets";
-import { cadaraExportOptionsSchema } from "@/contracts/modeling/export.runtime-schema";
+import { requireCadaraExportOptions } from "@/contracts/modeling/export.runtime-schema";
 import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
 } from "@/contracts/modeling/authored-document";
+import { authoredModelDocumentsEqual } from "@/contracts/modeling/authored-document-equality";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import {
   createCommitSketchHistoryEntry,
@@ -131,7 +132,7 @@ import {
   getAdapterReplayCursor,
   replayHistoryEntry,
 } from "./operation-history";
-import { renderExportSchema } from "@/contracts/render/runtime-schema";
+import { requireRenderExport } from "@/contracts/render/runtime-schema";
 
 export function createModelingService(
   adapter: ModelingKernelAdapter,
@@ -341,7 +342,7 @@ export function createModelingService(
     left: AuthoredModelDocument,
     right: AuthoredModelDocument,
   ) {
-    return JSON.stringify(left) === JSON.stringify(right);
+    return authoredModelDocumentsEqual(left, right);
   }
 
   async function exportAuthoredDocumentForRepository() {
@@ -1734,7 +1735,7 @@ export function createModelingService(
         };
       }
 
-      const cadaraOptions = cadaraExportOptionsSchema.parse(request.options);
+      const cadaraOptions = requireCadaraExportOptions(request.options);
 
       return mapExportDocumentResponse({
         ok: true,
@@ -1785,7 +1786,7 @@ export const modelingRuntimeValidators = {
   references: normalizeReferences,
   variables: normalizeDocumentVariables,
   renderables: normalizeRenderables,
-  renderExport: (value: unknown) => renderExportSchema.parse(value),
+  renderExport: requireRenderExport,
   sketches: normalizeSketches,
   features: normalizeFeatures,
   documentFeatureCursor: normalizeDocumentFeatureCursor,

@@ -49,4 +49,23 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
     !rejected.ok,
     "Authored feature records without explicit suppression state should be rejected.",
   );
+
+  const legacyRawAuthoredValue = structuredClone(authoredDocument);
+  const extrude = legacyRawAuthoredValue.features.find(
+    (feature) => feature.definition.kind === "extrude",
+  );
+  if (extrude?.definition.kind === "extrude") {
+    const end = extrude.definition.parameters.extent.end;
+    if (end.kind === "blind") {
+      end.distance = 12;
+    }
+  }
+
+  const rejectedLegacyLiteral = parseAuthoredModelDocument(
+    legacyRawAuthoredValue,
+  );
+  expectTrue(
+    !rejectedLegacyLiteral.ok,
+    "Persisted authored documents should reject legacy raw literals on feature authored-value fields.",
+  );
 });

@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 
 import { expectTrue } from "@/testing/expect.spec";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   solveSketchDefinitionCore,
   validateSketchDefinitionCore,
@@ -136,7 +136,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     },
   });
 
-  const parsed = sketchDefinitionSchema.safeParse(pointOnProjectedLine);
+  const parsed = validateSketchDefinition(pointOnProjectedLine);
   expectTrue(
     parsed.success,
     "Runtime schema should accept reference-targeted constraint payloads.",
@@ -317,7 +317,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
       },
     ],
   } satisfies SketchDefinition;
-  const parsedNormal = sketchDefinitionSchema.safeParse(normalProjectedCircle);
+  const parsedNormal = validateSketchDefinition(normalProjectedCircle);
   expectTrue(
     parsedNormal.success,
     "Runtime schema should accept projected normal constraint payloads.",
@@ -373,7 +373,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
       },
     ],
   } satisfies SketchDefinition;
-  const parsedSymmetric = sketchDefinitionSchema.safeParse(
+  const parsedSymmetric = validateSketchDefinition(
     symmetricProjectedLine,
   );
   expectTrue(

@@ -2,7 +2,7 @@ import { test } from "bun:test";
 
 import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 
 test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
   const baseDefinition: SketchDefinition = {
@@ -55,11 +55,11 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
   };
 
   expectTrue(
-    sketchDefinitionSchema.safeParse(baseDefinition).success,
+    validateSketchDefinition(baseDefinition).success,
     "Runtime schema should accept valid committed reference-image operations.",
   );
 
-  const missingPayload = sketchDefinitionSchema.safeParse({
+  const missingPayload = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -79,7 +79,7 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
     "Runtime schema should reject empty inline image payloads.",
   );
 
-  const zeroDimensions = sketchDefinitionSchema.safeParse({
+  const zeroDimensions = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -99,7 +99,7 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
     "Runtime schema should reject non-positive reference-image pixel dimensions.",
   );
 
-  const missingPlacement = sketchDefinitionSchema.safeParse({
+  const missingPlacement = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -119,7 +119,7 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
     "Runtime schema should reject non-positive placement extents.",
   );
 
-  const legacyAnchor = sketchDefinitionSchema.safeParse({
+  const legacyAnchor = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -147,7 +147,7 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
     "Runtime schema should reject calibration anchors that omit a sketch point binding.",
   );
 
-  const legacyConstraints = sketchDefinitionSchema.safeParse({
+  const legacyConstraints = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {

@@ -1,4 +1,7 @@
-import type { ImportSourceFingerprint } from "@/contracts/import/source";
+import type {
+  ImportSourceFingerprint,
+  ImportSourceUrl,
+} from "@/contracts/import/source";
 import type { ImportContractSchemaVersion } from "@/contracts/shared/versioning";
 
 /**
@@ -27,7 +30,7 @@ export interface LocalFileImportBinding extends ImportBindingBase {
  */
 export interface UrlImportBinding extends ImportBindingBase {
   kind: "url";
-  url: string;
+  url: ImportSourceUrl;
 }
 
 /**

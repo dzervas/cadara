@@ -2,17 +2,17 @@ import { test } from "bun:test";
 
 import { expectTrue } from "@/testing/expect.spec";
 import {
-  geometryAssetManifestSchema,
-  geometryAssetRecordSchema,
-  legacyGeometryAssetManifestSchema,
+  validateGeometryAssetHash,
+  validateGeometryAssetManifest,
+  validateGeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets.runtime-schema";
 
 test("geometry asset schema entrypoints accept structured Cadara B-rep and baked mesh records", () => {
   const cadaraRecord = makeCadaraBrepRecord();
   const bakedMeshRecord = makeBakedMeshRecord();
 
-  const cadaraParsed = geometryAssetRecordSchema.safeParse(cadaraRecord);
-  const bakedMeshParsed = geometryAssetRecordSchema.safeParse(bakedMeshRecord);
+  const cadaraParsed = validateGeometryAssetRecord(cadaraRecord);
+  const bakedMeshParsed = validateGeometryAssetRecord(bakedMeshRecord);
 
   expectTrue(
     cadaraParsed.success,
@@ -29,7 +29,24 @@ test("geometry asset schema entrypoints accept structured Cadara B-rep and baked
   );
 });
 
-test("legacy geometry asset manifests normalize duplicate records with merged owner feature ids", () => {
+test("geometry asset schema rejects malformed sha256 hash payloads", () => {
+  const parsedHash = validateGeometryAssetHash("sha256:not64hex");
+  const parsedRecord = validateGeometryAssetRecord({
+    ...makeBakedMeshRecord(),
+    hash: "sha256:not64hex",
+  });
+
+  expectTrue(
+    !parsedHash.success,
+    "Geometry asset hash validation should reject non-64-hex sha256 payloads.",
+  );
+  expectTrue(
+    !parsedRecord.success,
+    "Geometry asset records should reject malformed retained asset hashes.",
+  );
+});
+
+test("geometry asset manifests normalize duplicate records with merged owner feature ids", () => {
   const first = makeBakedMeshRecord({
     assetId: "asset_shared",
     ownerFeatureIds: ["feature_z", "feature_a"],
@@ -39,46 +56,35 @@ test("legacy geometry asset manifests normalize duplicate records with merged ow
     ownerFeatureIds: ["feature_b", "feature_a"],
   });
 
-  const parsed = legacyGeometryAssetManifestSchema.safeParse([first, second]);
-
-  expectTrue(
-    parsed.success,
-    `Expected legacy manifest normalization to succeed: ${formatIssues(parsed)}`,
-  );
-  expectTrue(
-    parsed.data.records.length === 1,
-    "Legacy manifests should normalize duplicate compatible records into one asset record.",
-  );
-  expectTrue(
-    parsed.data.records[0]?.ownerFeatureIds.join(",") ===
-      "feature_a,feature_b,feature_z",
-    "Legacy manifest normalization should merge and sort owner feature ids.",
-  );
-
-  const manifestParsed = geometryAssetManifestSchema.safeParse({
+  const manifestParsed = validateGeometryAssetManifest({
     schemaVersion: "geometry-asset-manifest/v1alpha1",
-    records: [second, first],
+    records: [first, second],
   });
   expectTrue(
     manifestParsed.success,
     `Expected manifest normalization to succeed: ${formatIssues(manifestParsed)}`,
   );
   expectTrue(
-    manifestParsed.data.records[0]?.assetId === "asset_shared",
-    "Versioned manifests should normalize records through the same entrypoint behavior.",
+    manifestParsed.data.records.length === 1,
+    "Versioned manifests should normalize duplicate compatible records into one asset record.",
+  );
+  expectTrue(
+    manifestParsed.data.records[0]?.ownerFeatureIds.join(",") ===
+      "feature_a,feature_b,feature_z",
+    "Manifest normalization should merge and sort owner feature ids.",
   );
 });
 
 test("geometry asset record schema rejects retained non-structured formats and mismatched structured payloads", () => {
-  const unsupportedFormat = geometryAssetRecordSchema.safeParse({
+  const unsupportedFormat = validateGeometryAssetRecord({
     ...makeCadaraBrepRecord(),
     format: "step",
   });
-  const mismatchedCadaraPayload = geometryAssetRecordSchema.safeParse({
+  const mismatchedCadaraPayload = validateGeometryAssetRecord({
     ...makeCadaraBrepRecord(),
     data: makeBakedMeshRecord().data,
   });
-  const mismatchedMeshPayload = geometryAssetRecordSchema.safeParse({
+  const mismatchedMeshPayload = validateGeometryAssetRecord({
     ...makeBakedMeshRecord(),
     data: makeCadaraBrepRecord().data,
   });
@@ -172,7 +178,7 @@ test("geometry asset record schema reports weighted-curve refinement failures at
     },
   });
 
-  const parsed = geometryAssetRecordSchema.safeParse(invalidEdgeWeights);
+  const parsed = validateGeometryAssetRecord(invalidEdgeWeights);
 
   expectTrue(
     !parsed.success,
@@ -234,7 +240,7 @@ test("geometry asset schema accepts compact analytic B-rep solids with single-co
     },
   });
 
-  const parsed = geometryAssetRecordSchema.safeParse(compactRecord);
+  const parsed = validateGeometryAssetRecord(compactRecord);
 
   expectTrue(
     parsed.success,
@@ -244,7 +250,7 @@ test("geometry asset schema accepts compact analytic B-rep solids with single-co
 
 test("geometry asset record schema reports weighted-surface and topology reference failures at the record entrypoint", () => {
   const base = makeCadaraBrepRecord();
-  const invalidSurface = geometryAssetRecordSchema.safeParse({
+  const invalidSurface = validateGeometryAssetRecord({
     ...base,
     data: {
       ...base.data!,
@@ -353,20 +359,20 @@ test("geometry asset record schema reports weighted-surface and topology referen
 });
 
 function hasIssue(
-  result: { success: false; error: { issues: { message: string }[] } },
+  result: { success: false; issues: { message: string }[] },
   message: string,
 ) {
-  return result.error.issues.some((issue) => issue.message === message);
+  return result.issues.some((issue) => issue.message === message);
 }
 
 function formatIssues(result: {
   success: boolean;
-  error?: { issues: { path: (string | number)[]; message: string }[] };
+  issues?: { path: string; message: string }[];
 }) {
   return result.success
     ? ""
-    : (result.error?.issues
-        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+    : (result.issues
+        ?.map((issue) => `${issue.path}: ${issue.message}`)
         .join("; ") ?? "unknown issues");
 }
 

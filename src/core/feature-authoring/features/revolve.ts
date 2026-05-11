@@ -4,7 +4,10 @@ import type {
   RevolveFeatureExtent,
   UpToOffsetDirection,
 } from "@/contracts/modeling/schema";
-import type { FeatureAuthoringDefinition } from "@/core/feature-authoring/definition";
+import type {
+  FeatureAuthoringDefinition,
+  RevolveFeatureEndConditionDraft,
+} from "@/core/feature-authoring/definition";
 import { getRevolveFeatureExtent } from "@/contracts/modeling/feature-extents";
 import {
   getBooleanScopeBodyTargets,
@@ -36,13 +39,16 @@ import {
 } from "@/core/feature-authoring/features/shared";
 import type { FeatureEditorFormField } from "@/core/feature-authoring/form-schema";
 
-const DEFAULT_FIRST_END: RevolveEndCondition = {
+const DEFAULT_FIRST_END: RevolveFeatureEndConditionDraft = {
   kind: "blind",
   direction: "counterClockwise",
   angle: Math.PI * 2,
 };
 
-const DEFAULT_SECOND_END: Exclude<RevolveEndCondition, { kind: "full" }> = {
+const DEFAULT_SECOND_END: Exclude<
+  RevolveFeatureEndConditionDraft,
+  { kind: "full" }
+> = {
   kind: "blind",
   direction: "clockwise",
   angle: Math.PI,
@@ -77,8 +83,8 @@ function isOffsetDirection(value: unknown): value is UpToOffsetDirection {
 
 function ensureEndSupportsMode(
   mode: "oneSide" | "symmetric" | "twoSide",
-  end: RevolveEndCondition,
-): RevolveEndCondition {
+  end: RevolveFeatureEndConditionDraft,
+): RevolveFeatureEndConditionDraft {
   if (mode === "symmetric" && end.kind !== "blind") {
     return DEFAULT_FIRST_END;
   }
@@ -107,10 +113,10 @@ function coerceTargetForEnd(kind: RevolveEndCondition["kind"], value: unknown) {
 }
 
 function patchEnd(
-  end: RevolveEndCondition,
+  end: RevolveFeatureEndConditionDraft,
   patch: Record<string, unknown>,
   prefix: "first" | "second",
-): RevolveEndCondition {
+): RevolveFeatureEndConditionDraft {
   const conditionKey =
     prefix === "first" ? "endCondition" : "secondEndCondition";
   const directionKey = prefix === "first" ? "direction" : "secondDirection";
@@ -200,7 +206,7 @@ function patchEnd(
   };
 }
 
-function endHasRequiredTarget(end: RevolveEndCondition) {
+function endHasRequiredTarget(end: RevolveFeatureEndConditionDraft) {
   if (end.kind === "upToFace") {
     return end.target.bodyId.length > 0 && end.target.faceId.length > 0;
   }
@@ -213,7 +219,7 @@ function endHasRequiredTarget(end: RevolveEndCondition) {
   return true;
 }
 
-function endHasValidScalars(end: RevolveEndCondition) {
+function endHasValidScalars(end: RevolveFeatureEndConditionDraft) {
   return (
     (end.kind !== "blind" || isPositiveAuthoredNumber(end.angle)) &&
     (!("offset" in end) ||
@@ -222,7 +228,7 @@ function endHasValidScalars(end: RevolveEndCondition) {
   );
 }
 
-function definitionEnd(end: RevolveEndCondition): RevolveEndCondition {
+function definitionEnd(end: RevolveFeatureEndConditionDraft): RevolveEndCondition {
   switch (end.kind) {
     case "blind":
       return { ...end, angle: authoredDefinitionValue(end.angle, Math.PI * 2) };
@@ -265,7 +271,7 @@ function endConditionLabel(kind: RevolveEndCondition["kind"]) {
 
 function endFields(
   prefix: "first" | "second",
-  end: RevolveEndCondition,
+  end: RevolveFeatureEndConditionDraft,
 ): FeatureEditorFormField[] {
   const idPrefix = prefix === "first" ? "revolve" : "revolve-second";
   const labelPrefix = prefix === "first" ? "" : "Second ";
@@ -534,7 +540,7 @@ export const revolveAuthoringDefinition = {
       secondEnd: ensureEndSupportsMode(
         "twoSide",
         patchEnd(draft.secondEnd, patch, "second"),
-      ) as Exclude<RevolveEndCondition, { kind: "full" }>,
+      ) as Exclude<RevolveFeatureEndConditionDraft, { kind: "full" }>,
       operation: acceptAuthoredPatch(
         patch.operation,
         draft.operation,
@@ -678,12 +684,9 @@ export const revolveAuthoringDefinition = {
               ...(typeof draft.profileTargets)[number][],
             ],
             axis: draft.axisTarget,
-            startAngle: authoredDefinitionValue(draft.startAngle, 0) as number,
+            startAngle: authoredDefinitionValue(draft.startAngle, 0),
             extent,
-            operation: authoredDefinitionValue(
-              draft.operation,
-              operation,
-            ) as typeof operation,
+            operation: authoredDefinitionValue(draft.operation, operation),
             booleanScope: draft.booleanScope,
           },
         }

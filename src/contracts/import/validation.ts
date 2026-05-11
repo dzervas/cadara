@@ -1,82 +1,72 @@
-import { z } from "zod";
+import typia from "typia";
 
-import type {
-  AddDocumentVariableRequest,
-  CommitSketchRequest,
-  CreateFeatureRequest,
-} from "@/contracts/modeling/schema";
-import {
-  featureDefinitionSchema,
-  modelingMutationRequestEnvelopeSchema,
-} from "@/contracts/modeling/runtime-schema";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
-import {
-  sketchPlaneDefinitionSchema,
-  sketchPlaneSupportRefSchema,
-} from "@/contracts/shared/sketch-plane.runtime-schema";
-import {
-  documentVariableIdSchema,
-  requestIdSchema,
-  sketchIdSchema,
-  stringSchema,
-} from "@/contracts/shared/runtime-schema";
 import type { ImportPreparedActions } from "@/contracts/import/actions";
-export {
-  importBindingSchema,
-  importDiagnosticSchema,
-  importSourceFingerprintSchema,
-  importSourceSchema,
-  resolvedImportSourceSchema,
+import {
+  validateImportBindingInvariants,
+  validateImportDiagnosticInvariants,
 } from "@/contracts/import/base-validation";
 import {
-  importBindingSchema,
-  importDiagnosticSchema,
+  ContractValidationError,
+  validateContract,
+  type ContractValidationIssue,
+  type ContractValidationResult,
+} from "@/contracts/shared/validation";
+export {
+  requireImportBinding,
+  requireImportDiagnostic,
+  requireImportSource,
+  requireResolvedImportSource,
+  validateImportBinding,
+  validateImportDiagnostic,
+  validateImportSource,
+  validateResolvedImportSource,
 } from "@/contracts/import/base-validation";
 
-const createFeatureRequestSchema = modelingMutationRequestEnvelopeSchema
-  .extend({
-    featureLabel: stringSchema.optional(),
-    definition: featureDefinitionSchema,
-  })
-  .transform((value) => value as CreateFeatureRequest);
+const importPreparedActionsValidator =
+  typia.createValidateEquals<ImportPreparedActions>();
 
-const commitSketchRequestSchema = modelingMutationRequestEnvelopeSchema
-  .extend({
-    solverCorrelation: z
-      .object({
-        requestId: requestIdSchema,
-        projectionRequestId: requestIdSchema,
-        validationRequestId: requestIdSchema,
-        solveRequestId: requestIdSchema,
-        regionRequestId: requestIdSchema,
-      })
-      .nullable(),
-    sketchId: sketchIdSchema.nullable(),
-    sketchLabel: stringSchema,
-    plane: sketchPlaneDefinitionSchema,
-    planeTarget: sketchPlaneSupportRefSchema,
-    planeKey: z
-      .union([z.literal("xy"), z.literal("yz"), z.literal("xz")])
-      .nullable(),
-    definition: sketchDefinitionSchema,
-  })
-  .transform((value) => value as CommitSketchRequest);
+function validateImportPreparedActionsInvariants(
+  actions: ImportPreparedActions,
+): ContractValidationIssue[] {
+  return [
+    ...(actions.binding
+      ? validateImportBindingInvariants(actions.binding, "binding")
+      : []),
+    ...(actions.diagnostics ?? []).flatMap((diagnostic, index) =>
+      validateImportDiagnosticInvariants(
+        diagnostic,
+        `diagnostics.${index}`,
+      ),
+    ),
+  ];
+}
 
-const addDocumentVariableRequestSchema = modelingMutationRequestEnvelopeSchema
-  .extend({
-    variableId: documentVariableIdSchema.optional(),
-    name: stringSchema,
-    valueText: stringSchema,
-  })
-  .transform((value) => value as AddDocumentVariableRequest);
+export function validateImportPreparedActions(
+  value: unknown,
+): ContractValidationResult<ImportPreparedActions> {
+  const result = validateContract(importPreparedActionsValidator, value);
+  if (!result.success) {
+    return result;
+  }
 
-export const importPreparedActionsSchema = z
-  .object({
-    createFeatures: z.array(createFeatureRequestSchema).optional(),
-    commitSketches: z.array(commitSketchRequestSchema).optional(),
-    addDocumentVariables: z.array(addDocumentVariableRequestSchema).optional(),
-    binding: importBindingSchema.optional(),
-    diagnostics: z.array(importDiagnosticSchema).optional(),
-  })
-  .strict()
-  .transform((value) => value as ImportPreparedActions);
+  const issues = validateImportPreparedActionsInvariants(result.data);
+  return issues.length === 0
+    ? result
+    : { success: false, data: result.data, issues };
+}
+
+export function requireImportPreparedActions(
+  value: unknown,
+): ImportPreparedActions {
+  const result = validateImportPreparedActions(value);
+  if (result.success) {
+    return result.data;
+  }
+
+  const firstIssue = result.issues[0];
+  throw new ContractValidationError(
+    firstIssue?.message ?? "Import prepared actions validation failed.",
+    value,
+    result.issues,
+  );
+}

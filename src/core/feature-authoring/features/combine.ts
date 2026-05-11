@@ -98,7 +98,7 @@ function buildCombineDefinition(draft: CombineFeatureParameterDraft) {
       operationIntent: authoredDefinitionValue(
         draft.operationIntent,
         "subtract",
-      ) as CombineOperationIntent,
+      ),
       participants: buildCombineParticipants(draft),
     },
   };
@@ -162,12 +162,19 @@ export const combineAuthoringDefinition = {
       )?.targets ?? [];
 
     const operationIntent = feature.parameters.operationIntent;
+    const literalOperationIntent = authoredStringLiteral(
+      operationIntent ?? "subtract",
+      "subtract",
+    );
+    const draftOperationIntent: CombineFeatureParameterDraft["operationIntent"] =
+      operationIntent !== undefined &&
+      isCombineOperationIntent(literalOperationIntent)
+        ? (operationIntent as CombineFeatureParameterDraft["operationIntent"])
+        : "subtract";
     return {
       targetBodyTargets: filterBodyTargets(getParticipantTargets("targetBody")),
       toolBodyTargets: filterBodyTargets(getParticipantTargets("toolBody")),
-      operationIntent: isCombineOperationIntent(operationIntent)
-        ? operationIntent
-        : "subtract",
+      operationIntent: draftOperationIntent,
     };
   },
   applyPatch(draft, patch) {
