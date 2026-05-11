@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { z } from "zod";
 
 import type {
   AddDocumentVariableRequest,
@@ -33,192 +33,196 @@ import type {
   UpdateDocumentVariableResponse,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
-} from '@/contracts/modeling/schema'
-import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
-import type { GeometryAssetBlobInput } from '@/contracts/modeling/geometry-assets'
-import type { BodyId, RequestId, RevisionId } from '@/contracts/shared/ids'
-import type { MeshExportAccuracy, MeshTriangle, StepWriterOptions } from '@/contracts/export/capabilities'
-import type { SketchVectorExportModel } from '@/contracts/export/sketch-vector'
-import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
-import type { DurableRef } from '@/contracts/shared/references'
+} from "@/contracts/modeling/schema";
+import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
+import type { BodyId, RequestId, RevisionId } from "@/contracts/shared/ids";
+import type {
+  MeshExportAccuracy,
+  MeshTriangle,
+  StepWriterOptions,
+} from "@/contracts/export/capabilities";
+import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
+import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
+import type { DurableRef } from "@/contracts/shared/references";
 import type {
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
-} from '@/contracts/solver/schema'
-import type { PackedWorkspaceSnapshot } from '@/domain/modeling/occ/mesh-transport'
+} from "@/contracts/solver/schema";
+import type { PackedWorkspaceSnapshot } from "@/domain/modeling/occ/mesh-transport";
 import type {
   OccNativeExactBrepPayload,
   OccNativeMeshExportPayload,
   OccNativeTopologyCapabilityProbeResult,
   OccNativeTopologyDiagnostic,
   OccNativeTopologyPayload,
-} from '@/domain/modeling/occ/native-topology-payload'
-import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
+} from "@/domain/modeling/occ/native-topology-payload";
+import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 
-const requestIdSchema = z.string().min(1)
+const requestIdSchema = z.string().min(1);
 
 export const occWorkerAssetConfigSchema = z.object({
   mainWasm: z.string().min(1).optional(),
   worker: z.string().min(1).optional(),
-})
+});
 
-export type OccWorkerAssetConfig = z.infer<typeof occWorkerAssetConfigSchema>
+export type OccWorkerAssetConfig = z.infer<typeof occWorkerAssetConfigSchema>;
 
 interface AuthoredDocumentWorkerOperationBase {
-  document: AuthoredModelDocument
-  diagnostics?: readonly ModelingDiagnostic[]
-  assets?: readonly GeometryAssetBlobInput[]
+  document: AuthoredModelDocument;
+  diagnostics?: readonly ModelingDiagnostic[];
+  assets?: readonly GeometryAssetBlobInput[];
 }
 
 export interface OccNativeTopologyUnavailableResult {
-  kind: 'nativeTopologyUnavailable'
-  diagnostics: readonly OccNativeTopologyDiagnostic[]
-  capability: OccNativeTopologyCapabilityProbeResult
+  kind: "nativeTopologyUnavailable";
+  diagnostics: readonly OccNativeTopologyDiagnostic[];
+  capability: OccNativeTopologyCapabilityProbeResult;
 }
 
 export type OccNativeTopologyWorkerResult<TPayload> =
   | {
-      kind: 'nativeTopologyPayload'
-      payload: TPayload
-      diagnostics: readonly OccNativeTopologyDiagnostic[]
+      kind: "nativeTopologyPayload";
+      payload: TPayload;
+      diagnostics: readonly OccNativeTopologyDiagnostic[];
     }
-  | OccNativeTopologyUnavailableResult
+  | OccNativeTopologyUnavailableResult;
 
 export type OccWorkerOperation =
   | {
-      kind: 'warmup'
-      assets?: OccWorkerAssetConfig
+      kind: "warmup";
+      assets?: OccWorkerAssetConfig;
     }
   | {
-      kind: 'probeNativeTopologyKernelCapabilities'
-      assets?: OccWorkerAssetConfig
+      kind: "probeNativeTopologyKernelCapabilities";
+      assets?: OccWorkerAssetConfig;
     }
   | ({
-      kind: 'restoreAuthoredModelDocument'
+      kind: "restoreAuthoredModelDocument";
     } & AuthoredDocumentWorkerOperationBase)
   | ({
-      kind: 'validateAuthoredModelDocument'
+      kind: "validateAuthoredModelDocument";
     } & AuthoredDocumentWorkerOperationBase)
   | {
-      kind: 'exportAuthoredModelDocument'
-      documentId: AuthoredModelDocument['documentId']
+      kind: "exportAuthoredModelDocument";
+      documentId: AuthoredModelDocument["documentId"];
     }
   | {
-      kind: 'getDocumentSnapshot'
-      request: GetDocumentSnapshotRequest
-      lodTierId?: OccTessellationTierId
+      kind: "getDocumentSnapshot";
+      request: GetDocumentSnapshotRequest;
+      lodTierId?: OccTessellationTierId;
     }
   | {
-      kind: 'buildNativeTopologySnapshot'
-      request: GetDocumentSnapshotRequest
-      lodTierId?: OccTessellationTierId
+      kind: "buildNativeTopologySnapshot";
+      request: GetDocumentSnapshotRequest;
+      lodTierId?: OccTessellationTierId;
     }
   | ({
-      kind: 'executeNativeFeatureHistoryRebuild'
-      lodTierId?: OccTessellationTierId
+      kind: "executeNativeFeatureHistoryRebuild";
+      lodTierId?: OccTessellationTierId;
     } & AuthoredDocumentWorkerOperationBase)
   | {
-      kind: 'buildNativeBooleanFeatureTransactionPayload'
-      documentId: AuthoredModelDocument['documentId']
-      baseRevisionId: RevisionId
-      leftBodyId: BodyId
-      rightBodyId: BodyId
-      operation: Exclude<FeatureBooleanOperation, 'newBody'>
-      lodTierId?: OccTessellationTierId
+      kind: "buildNativeBooleanFeatureTransactionPayload";
+      documentId: AuthoredModelDocument["documentId"];
+      baseRevisionId: RevisionId;
+      leftBodyId: BodyId;
+      rightBodyId: BodyId;
+      operation: Exclude<FeatureBooleanOperation, "newBody">;
+      lodTierId?: OccTessellationTierId;
     }
   | {
-      kind: 'projectSketchExternalReferences'
-      request: ProjectSketchExternalReferencesRequest
+      kind: "projectSketchExternalReferences";
+      request: ProjectSketchExternalReferencesRequest;
     }
   | {
-      kind: 'commitSketch'
-      request: CommitSketchRequest
+      kind: "commitSketch";
+      request: CommitSketchRequest;
     }
   | {
-      kind: 'createFeature'
-      request: CreateFeatureRequest
+      kind: "createFeature";
+      request: CreateFeatureRequest;
     }
   | {
-      kind: 'updateFeature'
-      request: UpdateFeatureRequest
+      kind: "updateFeature";
+      request: UpdateFeatureRequest;
     }
   | {
-      kind: 'setFeatureSuppression'
-      request: SetFeatureSuppressionRequest
+      kind: "setFeatureSuppression";
+      request: SetFeatureSuppressionRequest;
     }
   | {
-      kind: 'deleteFeature'
-      request: DeleteFeatureRequest
+      kind: "deleteFeature";
+      request: DeleteFeatureRequest;
     }
   | {
-      kind: 'deleteTarget'
-      request: DeleteDocumentTargetRequest
+      kind: "deleteTarget";
+      request: DeleteDocumentTargetRequest;
     }
   | {
-      kind: 'renameBody'
-      request: RenameBodyRequest
+      kind: "renameBody";
+      request: RenameBodyRequest;
     }
   | {
-      kind: 'reorderFeature'
-      request: ReorderFeatureRequest
+      kind: "reorderFeature";
+      request: ReorderFeatureRequest;
     }
   | {
-      kind: 'reorderDocumentHistory'
-      request: ReorderDocumentHistoryRequest
+      kind: "reorderDocumentHistory";
+      request: ReorderDocumentHistoryRequest;
     }
   | {
-      kind: 'setFeatureCursor'
-      request: SetFeatureCursorRequest
+      kind: "setFeatureCursor";
+      request: SetFeatureCursorRequest;
     }
   | {
-      kind: 'addDocumentVariable'
-      request: AddDocumentVariableRequest
+      kind: "addDocumentVariable";
+      request: AddDocumentVariableRequest;
     }
   | {
-      kind: 'updateDocumentVariable'
-      request: UpdateDocumentVariableRequest
+      kind: "updateDocumentVariable";
+      request: UpdateDocumentVariableRequest;
     }
   | {
-      kind: 'evaluatePreview'
-      request: EvaluatePreviewRequest
+      kind: "evaluatePreview";
+      request: EvaluatePreviewRequest;
     }
   | {
-      kind: 'resolveReference'
-      request: ResolveReferenceRequest
+      kind: "resolveReference";
+      request: ResolveReferenceRequest;
     }
   | {
-      kind: 'tessellateExportMesh'
-      documentId: AuthoredModelDocument['documentId']
-      baseRevisionId: RevisionId
-      target: DurableRef
-      options: MeshExportAccuracy
+      kind: "tessellateExportMesh";
+      documentId: AuthoredModelDocument["documentId"];
+      baseRevisionId: RevisionId;
+      target: DurableRef;
+      options: MeshExportAccuracy;
     }
   | {
-      kind: 'buildNativeMeshExportPayload'
-      documentId: AuthoredModelDocument['documentId']
-      baseRevisionId: RevisionId
-      target: DurableRef
-      options: MeshExportAccuracy
+      kind: "buildNativeMeshExportPayload";
+      documentId: AuthoredModelDocument["documentId"];
+      baseRevisionId: RevisionId;
+      target: DurableRef;
+      options: MeshExportAccuracy;
     }
   | {
-      kind: 'buildNativeExactBrepPayload'
-      documentId: AuthoredModelDocument['documentId']
-      baseRevisionId: RevisionId
-      target: DurableRef
+      kind: "buildNativeExactBrepPayload";
+      documentId: AuthoredModelDocument["documentId"];
+      baseRevisionId: RevisionId;
+      target: DurableRef;
     }
   | {
-      kind: 'writeStepExport'
-      documentId: AuthoredModelDocument['documentId']
-      baseRevisionId: RevisionId
-      target: DurableRef
-      options: StepWriterOptions
+      kind: "writeStepExport";
+      documentId: AuthoredModelDocument["documentId"];
+      baseRevisionId: RevisionId;
+      target: DurableRef;
+      options: StepWriterOptions;
     }
   | {
-      kind: 'resolveSketchVectorExportModel'
-      documentId: AuthoredModelDocument['documentId']
-      baseRevisionId: RevisionId
-      target: DurableRef
-    }
+      kind: "resolveSketchVectorExportModel";
+      documentId: AuthoredModelDocument["documentId"];
+      baseRevisionId: RevisionId;
+      target: DurableRef;
+    };
 
 export type OccWorkerOperationResult =
   | void
@@ -247,73 +251,81 @@ export type OccWorkerOperationResult =
   | SketchVectorExportModel
   | { payload: string }
   | { diagnostic: DocumentExportDiagnostic }
-  | DocumentExportDiagnostic
+  | DocumentExportDiagnostic;
 
 export type OccWorkerResponsePayload =
   | OccWorkerOperationResult
   | {
-      contractVersion: GetDocumentSnapshotResponse['contractVersion']
-      snapshot: GetDocumentSnapshotResponse['snapshot'] | PackedWorkspaceSnapshot
-    }
+      contractVersion: GetDocumentSnapshotResponse["contractVersion"];
+      snapshot:
+        | GetDocumentSnapshotResponse["snapshot"]
+        | PackedWorkspaceSnapshot;
+    };
 
 export type OccWorkerRequest =
   | {
-      kind: 'invoke'
-      requestId: RequestId
-      operation: OccWorkerOperation
+      kind: "invoke";
+      requestId: RequestId;
+      operation: OccWorkerOperation;
     }
   | {
-      kind: 'cancel'
-      requestId: RequestId
-      cancelsRequestId: RequestId
-    }
+      kind: "cancel";
+      requestId: RequestId;
+      cancelsRequestId: RequestId;
+    };
 
 export type OccWorkerResponse =
   | {
-      kind: 'invoked'
-      requestId: RequestId
-      operation: OccWorkerOperation['kind']
-      payload?: OccWorkerResponsePayload
+      kind: "invoked";
+      requestId: RequestId;
+      operation: OccWorkerOperation["kind"];
+      payload?: OccWorkerResponsePayload;
     }
-  | OccWorkerFailureMessage
+  | OccWorkerFailureMessage;
 
 export interface OccWorkerFailureMessage {
-  kind: 'failure'
-  requestId: RequestId
+  kind: "failure";
+  requestId: RequestId;
   error: {
-    message: string
-    code: 'occ-worker-initialization-failed' | 'occ-worker-request-failed' | 'occ-worker-request-cancelled'
-  }
+    message: string;
+    code:
+      | "occ-worker-initialization-failed"
+      | "occ-worker-request-failed"
+      | "occ-worker-request-cancelled";
+  };
 }
 
-export const occWorkerRequestEnvelopeSchema = z.discriminatedUnion('kind', [
+export const occWorkerRequestEnvelopeSchema = z.discriminatedUnion("kind", [
   z.object({
-    kind: z.literal('invoke'),
+    kind: z.literal("invoke"),
     requestId: requestIdSchema,
-    operation: z.object({
-      kind: z.string().min(1),
-    }).passthrough(),
+    operation: z
+      .object({
+        kind: z.string().min(1),
+      })
+      .passthrough(),
   }),
   z.object({
-    kind: z.literal('cancel'),
+    kind: z.literal("cancel"),
     requestId: requestIdSchema,
     cancelsRequestId: requestIdSchema,
   }),
-])
+]);
 
 export function normalizeOccWorkerFailure(
   requestId: RequestId,
   error: unknown,
-  code: OccWorkerFailureMessage['error']['code'] = 'occ-worker-request-failed',
+  code: OccWorkerFailureMessage["error"]["code"] = "occ-worker-request-failed",
 ): OccWorkerFailureMessage {
   return {
-    kind: 'failure',
+    kind: "failure",
     requestId,
     error: {
       code,
-      message: error instanceof Error && error.message.trim()
-        ? error.message
-        : 'OCC worker request failed.',
+      message:
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "OCC worker request failed.",
     },
-  }
+  };
 }

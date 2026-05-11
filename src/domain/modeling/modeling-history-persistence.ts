@@ -3,46 +3,49 @@ import {
   validateOperationHistoryPayload,
   type ModelingOperationHistoryPayload,
   type OperationHistoryValidationResult,
-} from '@/contracts/modeling/operation-history'
-import type { DocumentId } from '@/contracts/shared/ids'
+} from "@/contracts/modeling/operation-history";
+import type { DocumentId } from "@/contracts/shared/ids";
 
-export const MODELING_OPERATION_HISTORY_STORAGE_KEY = 'cad.modeling.operationHistory.v1'
+export const MODELING_OPERATION_HISTORY_STORAGE_KEY =
+  "cad.modeling.operationHistory.v1";
 
 export interface OperationHistoryStore {
-  load(): OperationHistoryValidationResult | { ok: true; payload: null }
-  save(payload: ModelingOperationHistoryPayload): void
-  clear(): void
+  load(): OperationHistoryValidationResult | { ok: true; payload: null };
+  save(payload: ModelingOperationHistoryPayload): void;
+  clear(): void;
 }
 
 export interface StorageLike {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-  removeItem(key: string): void
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
 
 export function createMemoryOperationHistoryStore(
   initialPayload: ModelingOperationHistoryPayload | null = null,
-): OperationHistoryStore & { readonly savedPayloads: ModelingOperationHistoryPayload[] } {
-  let payload = initialPayload ? structuredClone(initialPayload) : null
-  const savedPayloads: ModelingOperationHistoryPayload[] = []
+): OperationHistoryStore & {
+  readonly savedPayloads: ModelingOperationHistoryPayload[];
+} {
+  let payload = initialPayload ? structuredClone(initialPayload) : null;
+  const savedPayloads: ModelingOperationHistoryPayload[] = [];
 
   return {
     savedPayloads,
     load() {
       if (!payload) {
-        return { ok: true, payload: null }
+        return { ok: true, payload: null };
       }
 
-      return validateOperationHistoryPayload(structuredClone(payload))
+      return validateOperationHistoryPayload(structuredClone(payload));
     },
     save(nextPayload) {
-      payload = structuredClone(nextPayload)
-      savedPayloads.push(structuredClone(nextPayload))
+      payload = structuredClone(nextPayload);
+      savedPayloads.push(structuredClone(nextPayload));
     },
     clear() {
-      payload = null
+      payload = null;
     },
-  }
+  };
 }
 
 export function loadOrCreateOperationHistory(
@@ -53,18 +56,18 @@ export function loadOrCreateOperationHistory(
     return {
       ok: true,
       payload: createEmptyOperationHistory(documentId),
-    }
+    };
   }
 
-  const result = store.load()
+  const result = store.load();
   if (!result.ok) {
-    return result
+    return result;
   }
 
   return {
     ok: true,
     payload: result.payload ?? createEmptyOperationHistory(documentId),
-  }
+  };
 }
 
-export { createLocalStorageOperationHistoryStore } from '@/infrastructure/persistence/local-storage-operation-history-store'
+export { createLocalStorageOperationHistoryStore } from "@/infrastructure/persistence/local-storage-operation-history-store";

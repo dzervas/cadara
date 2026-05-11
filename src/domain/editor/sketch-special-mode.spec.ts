@@ -1,44 +1,52 @@
-import { test } from 'bun:test'
+import { test } from "bun:test";
 
-import { expectTrue } from '@/testing/expect.spec'
+import { expectTrue } from "@/testing/expect.spec";
 import {
   initialEditorState,
   runEditorEffect,
   transitionEditorState,
   type EditorEffectRuntime,
   type EditorState,
-} from '@/domain/editor/state-machine'
-import { createReferenceImageOperation } from '@/domain/reference-image/operations'
-import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
+} from "@/domain/editor/state-machine";
+import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import {
   appendReferenceImageOperations,
   createNewSketchSession,
-} from '@/domain/editor/sketch-session'
+} from "@/domain/editor/sketch-session";
 import {
   createSketchSpecialModeHandleRef,
   createSketchSpecialModeTargetRef,
-} from '@/core/sketch-special-modes/presentation'
-import type { SketchSpecialModeDefinition } from '@/core/sketch-special-modes/schema'
-import { sketchSpecialModeDefinitions } from '@/domain/sketch-special-modes/registry'
-import { createScopedRuntimeExtensionRegistryCompositionForTest } from '@/domain/extensions/test-registry-composition'
+} from "@/core/sketch-special-modes/presentation";
+import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
+import { sketchSpecialModeDefinitions } from "@/domain/sketch-special-modes/registry";
+import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain/extensions/test-registry-composition";
 
-test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {  const fixtureMode: SketchSpecialModeDefinition<{
-    clicks: number
-    lastPayload: string | null
+test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
+  const fixtureMode: SketchSpecialModeDefinition<{
+    clicks: number;
+    lastPayload: string | null;
   }> = {
-    id: 'fixture.special-mode',
-    label: 'Fixture mode',
+    id: "fixture.special-mode",
+    label: "Fixture mode",
     resolveOpenRequest: ({ target }) =>
-      target?.kind === 'sketchOperation'
-        ? { operationId: target.operationId, payload: { openedFrom: 'double-click' } }
+      target?.kind === "sketchOperation"
+        ? {
+            operationId: target.operationId,
+            payload: { openedFrom: "double-click" },
+          }
         : null,
     selection: {
-      label: 'Fixture selection',
-      description: 'Select the fixture operation only.',
-      allowedKinds: ['sketchOperation'],
+      label: "Fixture selection",
+      description: "Select the fixture operation only.",
+      allowedKinds: ["sketchOperation"],
       resolveTarget: ({ activeMode, target }) =>
-        target.kind === 'sketchOperation' && target.operationId === activeMode.operationTarget.operationId
-          ? createSketchSpecialModeTargetRef(activeMode.operationTarget.operationId, 'resolved')
+        target.kind === "sketchOperation" &&
+        target.operationId === activeMode.operationTarget.operationId
+          ? createSketchSpecialModeTargetRef(
+              activeMode.operationTarget.operationId,
+              "resolved",
+            )
           : null,
     },
     enter: ({ operationTarget }) => ({
@@ -47,8 +55,8 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {  const fi
         lastPayload: null,
       },
       effect: {
-        effectId: 'entered',
-        kind: 'fixture-entered',
+        effectId: "entered",
+        kind: "fixture-entered",
         payload: {
           operationId: operationTarget.operationId,
         },
@@ -85,13 +93,13 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {  const fi
       activeDragHandle: null,
     }),
     handlePanelAction: ({ activeMode, action }) =>
-      action.kind === 'invoke'
+      action.kind === "invoke"
         ? {
             effect: {
-              effectId: 'panel-action',
-              kind: 'fixture-panel-action',
+              effectId: "panel-action",
+              kind: "fixture-panel-action",
               payload: {
-                value: String(action.value ?? ''),
+                value: String(action.value ?? ""),
               },
             },
           }
@@ -99,7 +107,7 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {  const fi
             state: activeMode.state,
           },
     handleEffectResult: ({ activeMode, payload }) => ({
-      ...(payload.value === 'commit' || payload.value === 'cancel'
+      ...(payload.value === "commit" || payload.value === "cancel"
         ? {}
         : {
             state: {
@@ -112,118 +120,134 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {  const fi
     cancel: () => ({
       exit: true,
       effect: {
-        effectId: 'cancelled',
-        kind: 'fixture-cancelled',
+        effectId: "cancelled",
+        kind: "fixture-cancelled",
         payload: {
-          value: 'cancel',
+          value: "cancel",
         },
       },
     }),
     commit: () => ({
       exit: true,
       effect: {
-        effectId: 'committed',
-        kind: 'fixture-committed',
+        effectId: "committed",
+        kind: "fixture-committed",
         payload: {
-          value: 'commit',
+          value: "commit",
         },
       },
     }),
     buildPanel: () => null,
     buildViewport: () => null,
-  }
+  };
 
-  const fixtureRegistries = createScopedRuntimeExtensionRegistryCompositionForTest({
-    sketchSpecialModes: [fixtureMode],
-  })
+  const fixtureRegistries =
+    createScopedRuntimeExtensionRegistryCompositionForTest({
+      sketchSpecialModes: [fixtureMode],
+    });
   const fixtureDependencies = {
     importProviders: fixtureRegistries.importProviders,
     sketchSpecialModes: fixtureRegistries.sketchSpecialModes,
-  }
-  const builtinRegistries = createScopedRuntimeExtensionRegistryCompositionForTest({
-    sketchSpecialModes: sketchSpecialModeDefinitions,
-  })
+  };
+  const builtinRegistries =
+    createScopedRuntimeExtensionRegistryCompositionForTest({
+      sketchSpecialModes: sketchSpecialModeDefinitions,
+    });
   const builtinDependencies = {
     importProviders: builtinRegistries.importProviders,
     sketchSpecialModes: builtinRegistries.sketchSpecialModes,
-  }
-  const transitionWithFixtureModes = (state: EditorState, event: Parameters<typeof transitionEditorState>[1]) =>
-    transitionEditorState(state, event, fixtureDependencies)
-  const transitionWithBuiltinModes = (state: EditorState, event: Parameters<typeof transitionEditorState>[1]) =>
-    transitionEditorState(state, event, builtinDependencies)
+  };
+  const transitionWithFixtureModes = (
+    state: EditorState,
+    event: Parameters<typeof transitionEditorState>[1],
+  ) => transitionEditorState(state, event, fixtureDependencies);
+  const transitionWithBuiltinModes = (
+    state: EditorState,
+    event: Parameters<typeof transitionEditorState>[1],
+  ) => transitionEditorState(state, event, builtinDependencies);
 
   {
-    const plane = createStandardPlaneDefinition('xy')
-    const session = appendReferenceImageOperations(createNewSketchSession(plane), [
-      createReferenceImageOperation({
-        sequence: 1,
-        sketchId: 'sketch_draft',
-        payload: {
-          mediaType: 'image/png',
-          pixelWidth: 320,
-          pixelHeight: 200,
-          base64Data: 'cG5n',
-          fileName: 'fixture.png',
-        },
-      }),
-    ])
+    const plane = createStandardPlaneDefinition("xy");
+    const session = appendReferenceImageOperations(
+      createNewSketchSession(plane),
+      [
+        createReferenceImageOperation({
+          sequence: 1,
+          sketchId: "sketch_draft",
+          payload: {
+            mediaType: "image/png",
+            pixelWidth: 320,
+            pixelHeight: 200,
+            base64Data: "cG5n",
+            fileName: "fixture.png",
+          },
+        }),
+      ],
+    );
     const operationTarget = {
-      kind: 'sketchOperation' as const,
-      sketchId: 'sketch_draft',
-      operationId: 'sketch_operation_1_reference-image',
-    }
+      kind: "sketchOperation" as const,
+      sketchId: "sketch_draft",
+      operationId: "sketch_operation_1_reference-image",
+    };
     const rejectedTarget = {
-      kind: 'face' as const,
-      bodyId: 'body_fixture',
-      faceId: 'face_fixture',
-    }
+      kind: "face" as const,
+      bodyId: "body_fixture",
+      faceId: "face_fixture",
+    };
 
     const baseState: EditorState = {
       ...initialEditorState,
-      kind: 'editingSketch',
-      mode: 'sketch',
+      kind: "editingSketch",
+      mode: "sketch",
       document: {
-        documentId: 'doc_fixture',
-        revisionId: 'rev_fixture',
+        documentId: "doc_fixture",
+        revisionId: "rev_fixture",
       },
       command: {
-        commandSessionId: 'command_sketch-1',
-        toolId: 'sketch',
-        phase: 'editing',
+        commandSessionId: "command_sketch-1",
+        toolId: "sketch",
+        phase: "editing",
       },
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
       pendingImportRequestId: null,
-    }
+    };
 
     const entered = transitionWithFixtureModes(baseState, {
-      type: 'sketch.specialModeDoubleClickRequested',
+      type: "sketch.specialModeDoubleClickRequested",
       point: [4, 6],
       target: operationTarget,
-    })
-    expectTrue(entered.state.kind === 'editingSketch', 'Special mode entry should preserve sketch editing.')
-    expectTrue(entered.effects[0]?.type === 'sketch.specialModeEffect', 'Entry should emit the mode effect contract.')
+    });
     expectTrue(
-      entered.state.kind === 'editingSketch' && entered.state.session.activeSpecialMode?.modeId === fixtureMode.id,
-      'Entry should activate the registered sketch special mode.',
-    )
+      entered.state.kind === "editingSketch",
+      "Special mode entry should preserve sketch editing.",
+    );
     expectTrue(
-      entered.state.selectionFilter?.label === 'Fixture selection'
-        && entered.state.selectionFilter.allowedKinds.length === 1
-        && entered.state.selectionFilter.allowedKinds[0] === 'sketchOperation',
-      'Entering the mode should install the mode-specific pick contract as the active selection filter.',
-    )
+      entered.effects[0]?.type === "sketch.specialModeEffect",
+      "Entry should emit the mode effect contract.",
+    );
+    expectTrue(
+      entered.state.kind === "editingSketch" &&
+        entered.state.session.activeSpecialMode?.modeId === fixtureMode.id,
+      "Entry should activate the registered sketch special mode.",
+    );
+    expectTrue(
+      entered.state.selectionFilter?.label === "Fixture selection" &&
+        entered.state.selectionFilter.allowedKinds.length === 1 &&
+        entered.state.selectionFilter.allowedKinds[0] === "sketchOperation",
+      "Entering the mode should install the mode-specific pick contract as the active selection filter.",
+    );
 
     const runtime: EditorEffectRuntime = {
       async getCurrentDocumentSnapshot() {
-        throw new Error('Snapshot fetch is not used in this test.')
+        throw new Error("Snapshot fetch is not used in this test.");
       },
       async commitSketch() {
-        return null
+        return null;
       },
       async projectSketchReferences() {
-        return { projectedReferences: [], diagnostics: [] }
+        return { projectedReferences: [], diagnostics: [] };
       },
       async runSketchSpecialModeEffect(input) {
         return {
@@ -232,173 +256,203 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {  const fi
             operationId: input.payload.operationId,
             value: input.payload.value,
           },
-        }
+        };
       },
       async evaluatePreview() {
-        throw new Error('Feature preview is not used in this test.')
+        throw new Error("Feature preview is not used in this test.");
       },
       async commitFeature() {
-        throw new Error('Feature commit is not used in this test.')
+        throw new Error("Feature commit is not used in this test.");
       },
-    }
+    };
 
-    const enteredEffectEvent = await runEditorEffect(entered.effects[0]!, runtime)
-    const enteredResolved = transitionWithFixtureModes(entered.state, enteredEffectEvent)
+    const enteredEffectEvent = await runEditorEffect(
+      entered.effects[0]!,
+      runtime,
+    );
+    const enteredResolved = transitionWithFixtureModes(
+      entered.state,
+      enteredEffectEvent,
+    );
     expectTrue(
-      enteredResolved.state.kind === 'editingSketch'
-        && enteredResolved.state.session.activeSpecialMode?.state.lastPayload === operationTarget.operationId,
-      'Effect completion should re-enter the reducer through the registered mode definition.',
-    )
+      enteredResolved.state.kind === "editingSketch" &&
+        enteredResolved.state.session.activeSpecialMode?.state.lastPayload ===
+          operationTarget.operationId,
+      "Effect completion should re-enter the reducer through the registered mode definition.",
+    );
 
     const rejectedHover = transitionWithFixtureModes(enteredResolved.state, {
-      type: 'viewport.hovered',
+      type: "viewport.hovered",
       target: rejectedTarget,
-    })
+    });
     expectTrue(
-      rejectedHover.state.kind === 'editingSketch'
-        && rejectedHover.state.hoverTarget === null
-        && rejectedHover.state.session.activeSpecialMode?.hoverTarget === null,
-      'Mode-specific target contracts should reject targets outside the declared picker semantics.',
-    )
+      rejectedHover.state.kind === "editingSketch" &&
+        rejectedHover.state.hoverTarget === null &&
+        rejectedHover.state.session.activeSpecialMode?.hoverTarget === null,
+      "Mode-specific target contracts should reject targets outside the declared picker semantics.",
+    );
 
     const hovered = transitionWithFixtureModes(enteredResolved.state, {
-      type: 'viewport.hovered',
+      type: "viewport.hovered",
       target: operationTarget,
-    })
+    });
     expectTrue(
-      hovered.state.kind === 'editingSketch'
-        && hovered.state.session.activeSpecialMode?.hoverTarget?.targetId === 'sketch_special_target_resolved',
-      'Viewport hover should route through the active special-mode adapter.',
-    )
+      hovered.state.kind === "editingSketch" &&
+        hovered.state.session.activeSpecialMode?.hoverTarget?.targetId ===
+          "sketch_special_target_resolved",
+      "Viewport hover should route through the active special-mode adapter.",
+    );
 
     const clicked = transitionWithFixtureModes(hovered.state, {
-      type: 'sketch.specialModeClickRequested',
+      type: "sketch.specialModeClickRequested",
       point: [4, 6],
       target: operationTarget,
-    })
+    });
     expectTrue(
-      clicked.state.kind === 'editingSketch'
-        && clicked.state.session.activeSpecialMode?.state.clicks === 1
-        && clicked.state.session.activeSpecialMode?.selectedTarget?.targetId === 'sketch_special_target_resolved',
-      'Special-mode click events should use the resolved mode-local target contract.',
-    )
+      clicked.state.kind === "editingSketch" &&
+        clicked.state.session.activeSpecialMode?.state.clicks === 1 &&
+        clicked.state.session.activeSpecialMode?.selectedTarget?.targetId ===
+          "sketch_special_target_resolved",
+      "Special-mode click events should use the resolved mode-local target contract.",
+    );
 
-    const handle = createSketchSpecialModeHandleRef(operationTarget.operationId, 'corner-a')
+    const handle = createSketchSpecialModeHandleRef(
+      operationTarget.operationId,
+      "corner-a",
+    );
     const dragged = transitionWithFixtureModes(clicked.state, {
-      type: 'sketch.specialModeDragStarted',
+      type: "sketch.specialModeDragStarted",
       handle,
       point: [1, 2],
-    })
+    });
     const draggedMove = transitionWithFixtureModes(dragged.state, {
-      type: 'sketch.specialModeDragMoved',
+      type: "sketch.specialModeDragMoved",
       handle,
       point: [7, 9],
-    })
+    });
     const draggedEnd = transitionWithFixtureModes(draggedMove.state, {
-      type: 'sketch.specialModeDragEnded',
+      type: "sketch.specialModeDragEnded",
       handle,
       point: [10, 12],
-    })
+    });
     expectTrue(
-      draggedEnd.state.kind === 'editingSketch'
-        && draggedEnd.state.session.activeSpecialMode?.state.lastPayload === `${handle.handleId}:10,12`,
-      'Special-mode handle drags should flow through the dedicated drag channel with durable handle ids.',
-    )
+      draggedEnd.state.kind === "editingSketch" &&
+        draggedEnd.state.session.activeSpecialMode?.state.lastPayload ===
+          `${handle.handleId}:10,12`,
+      "Special-mode handle drags should flow through the dedicated drag channel with durable handle ids.",
+    );
 
     const invoked = transitionWithFixtureModes(draggedEnd.state, {
-      type: 'sketch.specialModePanelActionInvoked',
+      type: "sketch.specialModePanelActionInvoked",
       action: {
-        kind: 'invoke',
-        actionId: 'recompute',
-        value: 'panel-value',
+        kind: "invoke",
+        actionId: "recompute",
+        value: "panel-value",
       },
-    })
-    expectTrue(invoked.effects[0]?.type === 'sketch.specialModeEffect', 'Panel actions should be able to emit async mode effects.')
+    });
+    expectTrue(
+      invoked.effects[0]?.type === "sketch.specialModeEffect",
+      "Panel actions should be able to emit async mode effects.",
+    );
 
     const committed = transitionWithFixtureModes(invoked.state, {
-      type: 'command.commitRequested',
-      commandSessionId: 'command_sketch-1',
-    })
+      type: "command.commitRequested",
+      commandSessionId: "command_sketch-1",
+    });
     expectTrue(
-      committed.effects[0]?.type === 'sketch.specialModeEffect'
-        && committed.state.kind === 'editingSketch'
-        && committed.state.session.activeSpecialMode !== null,
-      'Commit requests should preserve the async special-mode effect path instead of dropping lifecycle effects.',
-    )
+      committed.effects[0]?.type === "sketch.specialModeEffect" &&
+        committed.state.kind === "editingSketch" &&
+        committed.state.session.activeSpecialMode !== null,
+      "Commit requests should preserve the async special-mode effect path instead of dropping lifecycle effects.",
+    );
 
     const committedResolved = transitionWithFixtureModes(
       committed.state,
       await runEditorEffect(committed.effects[0]!, runtime),
-    )
+    );
     expectTrue(
-      committedResolved.state.kind === 'editingSketch'
-        && committedResolved.state.session.activeSpecialMode === null
-        && committedResolved.state.selectionFilter?.kind === 'sketchSession',
-      'Completing an effectful commit should exit the mode and restore ordinary sketch selection semantics.',
-    )
+      committedResolved.state.kind === "editingSketch" &&
+        committedResolved.state.session.activeSpecialMode === null &&
+        committedResolved.state.selectionFilter?.kind === "sketchSession",
+      "Completing an effectful commit should exit the mode and restore ordinary sketch selection semantics.",
+    );
 
     const reentered = transitionWithFixtureModes(committedResolved.state, {
-      type: 'sketch.specialModeEntered',
+      type: "sketch.specialModeEntered",
       modeId: fixtureMode.id,
       operationId: operationTarget.operationId,
-    })
+    });
     const reenteredResolved = transitionWithFixtureModes(
       reentered.state,
       await runEditorEffect(reentered.effects[0]!, runtime),
-    )
+    );
 
     const cancelled = transitionWithFixtureModes(reenteredResolved.state, {
-      type: 'command.cancelled',
-      commandSessionId: 'command_sketch-1',
-    })
+      type: "command.cancelled",
+      commandSessionId: "command_sketch-1",
+    });
     expectTrue(
-      cancelled.effects[0]?.type === 'sketch.specialModeEffect'
-        && cancelled.state.kind === 'editingSketch'
-        && cancelled.state.session.activeSpecialMode !== null,
-      'Cancel requests should preserve the async special-mode effect path instead of dropping lifecycle effects.',
-    )
+      cancelled.effects[0]?.type === "sketch.specialModeEffect" &&
+        cancelled.state.kind === "editingSketch" &&
+        cancelled.state.session.activeSpecialMode !== null,
+      "Cancel requests should preserve the async special-mode effect path instead of dropping lifecycle effects.",
+    );
 
-    const cancelledEffectEvent = await runEditorEffect(cancelled.effects[0]!, runtime)
-    const cancelledResolved = transitionWithFixtureModes(cancelled.state, cancelledEffectEvent)
+    const cancelledEffectEvent = await runEditorEffect(
+      cancelled.effects[0]!,
+      runtime,
+    );
+    const cancelledResolved = transitionWithFixtureModes(
+      cancelled.state,
+      cancelledEffectEvent,
+    );
     expectTrue(
-      cancelledResolved.state.kind === 'editingSketch' && cancelledResolved.state.session.activeSpecialMode === null,
-      'Cancelling an active special mode should exit after the lifecycle effect resolves.',
-    )
+      cancelledResolved.state.kind === "editingSketch" &&
+        cancelledResolved.state.session.activeSpecialMode === null,
+      "Cancelling an active special mode should exit after the lifecycle effect resolves.",
+    );
 
-    const staleIgnored = transitionWithFixtureModes(cancelledResolved.state, cancelledEffectEvent)
+    const staleIgnored = transitionWithFixtureModes(
+      cancelledResolved.state,
+      cancelledEffectEvent,
+    );
     expectTrue(
-      staleIgnored.state.kind === 'editingSketch' && staleIgnored.state.session.activeSpecialMode === null,
-      'Stale async mode results should be ignored after mode cancellation.',
-    )
+      staleIgnored.state.kind === "editingSketch" &&
+        staleIgnored.state.session.activeSpecialMode === null,
+      "Stale async mode results should be ignored after mode cancellation.",
+    );
   }
 
-  const builtinSession = appendReferenceImageOperations(createNewSketchSession(createStandardPlaneDefinition('xy')), [
-    createReferenceImageOperation({
-      sequence: 1,
-      sketchId: 'sketch_draft',
-      payload: {
-        mediaType: 'image/png',
-        pixelWidth: 320,
-        pixelHeight: 200,
-        base64Data: 'cG5n',
-        fileName: 'builtin.png',
-      },
-    }),
-  ])
+  const builtinSession = appendReferenceImageOperations(
+    createNewSketchSession(createStandardPlaneDefinition("xy")),
+    [
+      createReferenceImageOperation({
+        sequence: 1,
+        sketchId: "sketch_draft",
+        payload: {
+          mediaType: "image/png",
+          pixelWidth: 320,
+          pixelHeight: 200,
+          base64Data: "cG5n",
+          fileName: "builtin.png",
+        },
+      }),
+    ],
+  );
 
   const builtinOpened = transitionWithBuiltinModes(
     {
       ...initialEditorState,
-      kind: 'editingSketch',
-      mode: 'sketch',
+      kind: "editingSketch",
+      mode: "sketch",
       document: {
-        documentId: 'doc_builtin',
-        revisionId: 'rev_builtin',
+        documentId: "doc_builtin",
+        revisionId: "rev_builtin",
       },
       command: {
-        commandSessionId: 'command_builtin',
-        toolId: 'sketch',
-        phase: 'editing',
+        commandSessionId: "command_builtin",
+        toolId: "sketch",
+        phase: "editing",
       },
       session: builtinSession,
       pendingCommitRequestId: null,
@@ -406,18 +460,19 @@ test('src/contracts/editor/sketch-special-mode.spec.ts', async () => {  const fi
       pendingImportRequestId: null,
     },
     {
-      type: 'sketch.specialModeDoubleClickRequested',
+      type: "sketch.specialModeDoubleClickRequested",
       point: [2, 3],
       target: {
-        kind: 'sketchOperation',
-        sketchId: 'sketch_draft',
-        operationId: 'sketch_operation_1_reference-image',
+        kind: "sketchOperation",
+        sketchId: "sketch_draft",
+        operationId: "sketch_operation_1_reference-image",
       },
     },
-  )
+  );
 
   expectTrue(
-    builtinOpened.state.kind === 'editingSketch' && builtinOpened.state.session.activeSpecialMode !== null,
-    'Scoped built-in special-mode compositions should preserve the existing reference-image mode behavior.',
-  )
-})
+    builtinOpened.state.kind === "editingSketch" &&
+      builtinOpened.state.session.activeSpecialMode !== null,
+    "Scoped built-in special-mode compositions should preserve the existing reference-image mode behavior.",
+  );
+});

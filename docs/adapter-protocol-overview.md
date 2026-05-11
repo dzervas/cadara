@@ -130,111 +130,143 @@ This flow is explicit and ordered:
 
 ```ts
 const sketchDefinition: SketchDefinition = {
-  schemaVersion: 'sketch-definition/v1alpha1',
+  schemaVersion: "sketch-definition/v1alpha1",
   referenceIds: [],
   references: [],
   pointIds: [
-    'sketch_point_a',
-    'sketch_point_b',
-    'sketch_point_c',
-    'sketch_point_d',
+    "sketch_point_a",
+    "sketch_point_b",
+    "sketch_point_c",
+    "sketch_point_d",
   ],
   points: [
     {
-      pointId: 'sketch_point_a',
-      label: 'A',
-      target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_a' },
+      pointId: "sketch_point_a",
+      label: "A",
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_profile",
+        pointId: "sketch_point_a",
+      },
       position: [0, 0],
       isConstruction: false,
     },
     {
-      pointId: 'sketch_point_b',
-      label: 'B',
-      target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_b' },
+      pointId: "sketch_point_b",
+      label: "B",
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_profile",
+        pointId: "sketch_point_b",
+      },
       position: [4, 0],
       isConstruction: false,
     },
     {
-      pointId: 'sketch_point_c',
-      label: 'C',
-      target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_c' },
+      pointId: "sketch_point_c",
+      label: "C",
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_profile",
+        pointId: "sketch_point_c",
+      },
       position: [4, 3],
       isConstruction: false,
     },
     {
-      pointId: 'sketch_point_d',
-      label: 'D',
-      target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_d' },
+      pointId: "sketch_point_d",
+      label: "D",
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_profile",
+        pointId: "sketch_point_d",
+      },
       position: [0, 3],
       isConstruction: false,
     },
   ],
   entityIds: [
-    'sketch_entity_bottom',
-    'sketch_entity_right',
-    'sketch_entity_top',
-    'sketch_entity_left',
+    "sketch_entity_bottom",
+    "sketch_entity_right",
+    "sketch_entity_top",
+    "sketch_entity_left",
   ],
   entities: [
     {
-      kind: 'lineSegment',
-      entityId: 'sketch_entity_bottom',
-      label: 'Bottom',
-      target: { kind: 'sketchEntity', sketchId: 'sketch_profile', entityId: 'sketch_entity_bottom' },
+      kind: "lineSegment",
+      entityId: "sketch_entity_bottom",
+      label: "Bottom",
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_profile",
+        entityId: "sketch_entity_bottom",
+      },
       isConstruction: false,
-      startPointId: 'sketch_point_a',
-      endPointId: 'sketch_point_b',
+      startPointId: "sketch_point_a",
+      endPointId: "sketch_point_b",
     },
     {
-      kind: 'lineSegment',
-      entityId: 'sketch_entity_right',
-      label: 'Right',
-      target: { kind: 'sketchEntity', sketchId: 'sketch_profile', entityId: 'sketch_entity_right' },
+      kind: "lineSegment",
+      entityId: "sketch_entity_right",
+      label: "Right",
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_profile",
+        entityId: "sketch_entity_right",
+      },
       isConstruction: false,
-      startPointId: 'sketch_point_b',
-      endPointId: 'sketch_point_c',
+      startPointId: "sketch_point_b",
+      endPointId: "sketch_point_c",
     },
     {
-      kind: 'lineSegment',
-      entityId: 'sketch_entity_top',
-      label: 'Top',
-      target: { kind: 'sketchEntity', sketchId: 'sketch_profile', entityId: 'sketch_entity_top' },
+      kind: "lineSegment",
+      entityId: "sketch_entity_top",
+      label: "Top",
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_profile",
+        entityId: "sketch_entity_top",
+      },
       isConstruction: false,
-      startPointId: 'sketch_point_c',
-      endPointId: 'sketch_point_d',
+      startPointId: "sketch_point_c",
+      endPointId: "sketch_point_d",
     },
     {
-      kind: 'lineSegment',
-      entityId: 'sketch_entity_left',
-      label: 'Left',
-      target: { kind: 'sketchEntity', sketchId: 'sketch_profile', entityId: 'sketch_entity_left' },
+      kind: "lineSegment",
+      entityId: "sketch_entity_left",
+      label: "Left",
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_profile",
+        entityId: "sketch_entity_left",
+      },
       isConstruction: false,
-      startPointId: 'sketch_point_d',
-      endPointId: 'sketch_point_a',
+      startPointId: "sketch_point_d",
+      endPointId: "sketch_point_a",
     },
   ],
   constraintIds: [],
   constraints: [],
   dimensionIds: [],
   dimensions: [],
-}
+};
 ```
 
 ```ts
 const projectRequest: ProjectSketchExternalReferencesRequest = {
-  contractVersion: 'modeling-contract/v1alpha1',
-  solverSchemaVersion: 'sketch-solver/v1alpha1',
-  requestId: 'request_project_1',
-  documentId: 'doc_workspace',
-  revisionId: 'rev_7',
-  sketchId: 'sketch_profile',
+  contractVersion: "modeling-contract/v1alpha1",
+  solverSchemaVersion: "sketch-solver/v1alpha1",
+  requestId: "request_project_1",
+  documentId: "doc_workspace",
+  revisionId: "rev_7",
+  sketchId: "sketch_profile",
   plane: {
     origin: [0, 0, 0],
     xAxis: [1, 0, 0],
     yAxis: [0, 1, 0],
     normal: [0, 0, 1],
-    linearUnit: 'documentLength',
-    handedness: 'rightHanded',
+    linearUnit: "documentLength",
+    handedness: "rightHanded",
   },
   tolerances: {
     coincidence: 0.0001,
@@ -242,24 +274,24 @@ const projectRequest: ProjectSketchExternalReferencesRequest = {
     minimumSegmentLength: 0.001,
   },
   references: [],
-}
+};
 ```
 
 ```ts
 const solveRequest: SolveSketchRequest = {
-  contractVersion: 'modeling-contract/v1alpha1',
-  solverSchemaVersion: 'sketch-solver/v1alpha1',
-  requestId: 'request_solve_1',
-  documentId: 'doc_workspace',
-  revisionId: 'rev_7',
-  sketchId: 'sketch_profile',
+  contractVersion: "modeling-contract/v1alpha1",
+  solverSchemaVersion: "sketch-solver/v1alpha1",
+  requestId: "request_solve_1",
+  documentId: "doc_workspace",
+  revisionId: "rev_7",
+  sketchId: "sketch_profile",
   plane: projectRequest.plane,
   tolerances: projectRequest.tolerances,
-  partialSolvePolicy: 'bestEffort',
+  partialSolvePolicy: "bestEffort",
   definition: sketchDefinition,
   projectedReferences: [],
   incrementalEdit: null,
-}
+};
 ```
 
 The solver response echoes request identity and returns:
@@ -280,28 +312,32 @@ Representative success response shape:
 
 ```ts
 const solveSketchResponse: SolveSketchResponse = {
-  contractVersion: 'modeling-contract/v1alpha1',
-  solverSchemaVersion: 'sketch-solver/v1alpha1',
-  requestId: 'request_solve_1',
-  documentId: 'doc_workspace',
-  revisionId: 'rev_7',
-  sketchId: 'sketch_profile',
-  status: 'fullyConstrained',
+  contractVersion: "modeling-contract/v1alpha1",
+  solverSchemaVersion: "sketch-solver/v1alpha1",
+  requestId: "request_solve_1",
+  documentId: "doc_workspace",
+  revisionId: "rev_7",
+  sketchId: "sketch_profile",
+  status: "fullyConstrained",
   solvedSnapshot: {
-    schemaVersion: 'solved-sketch/v1alpha1',
-    status: 'fullyConstrained',
+    schemaVersion: "solved-sketch/v1alpha1",
+    status: "fullyConstrained",
     solvedEntities: [
       {
-        entityId: 'sketch_entity_bottom',
-        kind: 'lineSegment',
+        entityId: "sketch_entity_bottom",
+        kind: "lineSegment",
         startPosition: [0, 0],
         endPosition: [4, 0],
       },
     ],
     solvedPoints: [
       {
-        pointId: 'sketch_point_a',
-        target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_a' },
+        pointId: "sketch_point_a",
+        target: {
+          kind: "sketchPoint",
+          sketchId: "sketch_profile",
+          pointId: "sketch_point_a",
+        },
         solvedPosition: [0, 0],
       },
     ],
@@ -311,22 +347,26 @@ const solveSketchResponse: SolveSketchResponse = {
   },
   derivedRegions: [
     {
-      ownerDocumentId: 'doc_workspace',
-      ownerRevisionId: 'rev_7',
+      ownerDocumentId: "doc_workspace",
+      ownerRevisionId: "rev_7",
       ownerFeatureId: null,
-      ownerSketchId: 'sketch_profile',
+      ownerSketchId: "sketch_profile",
       ownerBodyId: null,
-      regionId: 'region_outer',
-      label: 'Outer profile',
-      target: { kind: 'region', sketchId: 'sketch_profile', regionId: 'region_outer' },
-      sourceSketch: { kind: 'sketch', sketchId: 'sketch_profile' },
-      boundaryEntityIds: ['sketch_entity_bottom'],
-      boundaryPointIds: ['sketch_point_a'],
+      regionId: "region_outer",
+      label: "Outer profile",
+      target: {
+        kind: "region",
+        sketchId: "sketch_profile",
+        regionId: "region_outer",
+      },
+      sourceSketch: { kind: "sketch", sketchId: "sketch_profile" },
+      boundaryEntityIds: ["sketch_entity_bottom"],
+      boundaryPointIds: ["sketch_point_a"],
       isClosed: true,
     },
   ],
   diagnostics: [],
-}
+};
 ```
 
 ### Create Extrude
@@ -335,24 +375,24 @@ Extrude creation always uses one typed `FeatureDefinition` payload. There is no 
 
 ```ts
 const createExtrudeRequest: CreateFeatureRequest = {
-  contractVersion: 'modeling-contract/v1alpha1',
-  documentId: 'doc_workspace',
-  baseRevisionId: 'rev_7',
+  contractVersion: "modeling-contract/v1alpha1",
+  documentId: "doc_workspace",
+  baseRevisionId: "rev_7",
   definition: {
-    kind: 'extrude',
-    featureTypeVersion: 'feature-type/v1alpha1',
+    kind: "extrude",
+    featureTypeVersion: "feature-type/v1alpha1",
     parameters: {
       profile: {
-        kind: 'region',
-        sketchId: 'sketch_profile',
-        regionId: 'region_outer',
+        kind: "region",
+        sketchId: "sketch_profile",
+        regionId: "region_outer",
       },
       depth: 12,
-      direction: 'oneSided',
-      operation: 'newBody',
+      direction: "oneSided",
+      operation: "newBody",
     },
   },
-}
+};
 ```
 
 The kernel response reports revision acceptance and rebuild outcome explicitly through:
@@ -366,27 +406,27 @@ Representative success response shape:
 
 ```ts
 const createExtrudeResponse: CreateFeatureResponse = {
-  contractVersion: 'modeling-contract/v1alpha1',
-  documentId: 'doc_workspace',
-  revisionId: 'rev_8',
+  contractVersion: "modeling-contract/v1alpha1",
+  documentId: "doc_workspace",
+  revisionId: "rev_8",
   revisionState: {
-    kind: 'accepted',
-    baseRevisionId: 'rev_7',
+    kind: "accepted",
+    baseRevisionId: "rev_7",
   },
   rebuildResult: {
-    kind: 'rebuilt',
-    revisionId: 'rev_8',
+    kind: "rebuilt",
+    revisionId: "rev_8",
     invalidatedTargets: [],
     diagnostics: [],
   },
   changedTargets: [
-    { kind: 'feature', featureId: 'feature_extrude_1' },
-    { kind: 'body', bodyId: 'body_main' },
-    { kind: 'face', bodyId: 'body_main', faceId: 'face_side_1' },
+    { kind: "feature", featureId: "feature_extrude_1" },
+    { kind: "body", bodyId: "body_main" },
+    { kind: "face", bodyId: "body_main", faceId: "face_side_1" },
   ],
   diagnostics: [],
-  featureId: 'feature_extrude_1',
-}
+  featureId: "feature_extrude_1",
+};
 ```
 
 ### Preview Extrude
@@ -395,12 +435,12 @@ Preview evaluation uses the same typed feature definition family as create/updat
 
 ```ts
 const previewExtrudeRequest: EvaluatePreviewRequest = {
-  contractVersion: 'modeling-contract/v1alpha1',
-  documentId: 'doc_workspace',
-  baseRevisionId: 'rev_7',
-  previewId: 'preview_extrude_1',
+  contractVersion: "modeling-contract/v1alpha1",
+  documentId: "doc_workspace",
+  baseRevisionId: "rev_7",
+  previewId: "preview_extrude_1",
   definition: createExtrudeRequest.definition,
-}
+};
 ```
 
 The response must not mutate committed state. It returns:
@@ -417,34 +457,34 @@ Representative stale response shape:
 
 ```ts
 const previewExtrudeResponse: EvaluatePreviewResponse = {
-  contractVersion: 'modeling-contract/v1alpha1',
-  documentId: 'doc_workspace',
-  revisionId: 'rev_8',
-  previewId: 'preview_extrude_1',
+  contractVersion: "modeling-contract/v1alpha1",
+  documentId: "doc_workspace",
+  revisionId: "rev_8",
+  previewId: "preview_extrude_1",
   freshness: {
-    kind: 'stale',
-    requestedRevisionId: 'rev_7',
-    currentRevisionId: 'rev_8',
+    kind: "stale",
+    requestedRevisionId: "rev_7",
+    currentRevisionId: "rev_8",
   },
   render: {
-    schemaVersion: 'render-export/v1alpha1',
+    schemaVersion: "render-export/v1alpha1",
     records: [],
   },
   diagnostics: [
     {
-      code: 'preview.staleRevision',
-      severity: 'warning',
-      message: 'Preview response is stale and must be discarded.',
+      code: "preview.staleRevision",
+      severity: "warning",
+      message: "Preview response is stale and must be discarded.",
       target: null,
       detail: {
-        kind: 'stalePreview',
-        previewId: 'preview_extrude_1',
-        requestedRevisionId: 'rev_7',
-        currentRevisionId: 'rev_8',
+        kind: "stalePreview",
+        previewId: "preview_extrude_1",
+        requestedRevisionId: "rev_7",
+        currentRevisionId: "rev_8",
       },
     },
   ],
-}
+};
 ```
 
 ### Resolve Dead Reference
@@ -453,47 +493,47 @@ Reference resolution is explicit even when the target no longer resolves.
 
 ```ts
 const resolveReferenceRequest: ResolveReferenceRequest = {
-  contractVersion: 'modeling-contract/v1alpha1',
-  documentId: 'doc_workspace',
+  contractVersion: "modeling-contract/v1alpha1",
+  documentId: "doc_workspace",
   target: {
-    kind: 'face',
-    bodyId: 'body_main',
-    faceId: 'face_deleted',
+    kind: "face",
+    bodyId: "body_main",
+    faceId: "face_deleted",
   },
-}
+};
 ```
 
 The resolution response still returns a `ResolvedReferenceRecord`, but `resolution.invalidation` explains why the target is dead. This lets the editor present actionable failure state without parsing `message`.
 
 ```ts
 const resolveReferenceResponse: ResolveReferenceResponse = {
-  contractVersion: 'modeling-contract/v1alpha1',
+  contractVersion: "modeling-contract/v1alpha1",
   resolution: {
-    label: 'Deleted face',
+    label: "Deleted face",
     target: {
-      kind: 'face',
-      bodyId: 'body_main',
-      faceId: 'face_deleted',
+      kind: "face",
+      bodyId: "body_main",
+      faceId: "face_deleted",
     },
-    ownerDocumentId: 'doc_workspace',
-    ownerRevisionId: 'rev_8',
-    ownerFeatureId: 'feature_extrude_1',
+    ownerDocumentId: "doc_workspace",
+    ownerRevisionId: "rev_8",
+    ownerFeatureId: "feature_extrude_1",
     ownerSketchId: null,
-    ownerBodyId: 'body_main',
+    ownerBodyId: "body_main",
     invalidation: {
-      reason: 'deletedByRebuild',
+      reason: "deletedByRebuild",
       target: {
-        kind: 'face',
-        bodyId: 'body_main',
-        faceId: 'face_deleted',
+        kind: "face",
+        bodyId: "body_main",
+        faceId: "face_deleted",
       },
-      ownerFeatureId: 'feature_extrude_1',
+      ownerFeatureId: "feature_extrude_1",
       ownerSketchId: null,
       sourceTarget: null,
     },
   },
   diagnostics: [],
-}
+};
 ```
 
 ### Export Render Mesh With Bindings
@@ -502,26 +542,26 @@ Render export records are selection-capable because each record includes a seman
 
 ```ts
 const renderExport: RenderExport = {
-  schemaVersion: 'render-export/v1alpha1',
+  schemaVersion: "render-export/v1alpha1",
   records: [
     {
-      id: 'renderable_face_1',
-      label: 'Extrude Side Face',
-      ownerBodyId: 'body_main',
-      ownerFeatureId: 'feature_extrude_1',
+      id: "renderable_face_1",
+      label: "Extrude Side Face",
+      ownerBodyId: "body_main",
+      ownerFeatureId: "feature_extrude_1",
       binding: {
-        pickId: 'pick_face_1',
+        pickId: "pick_face_1",
         pickPriority: 10,
-        topology: 'face',
-        semanticClass: 'bodyFace',
+        topology: "face",
+        semanticClass: "bodyFace",
         target: {
-          kind: 'face',
-          bodyId: 'body_main',
-          faceId: 'face_side_1',
+          kind: "face",
+          bodyId: "body_main",
+          faceId: "face_side_1",
         },
       },
       geometry: {
-        kind: 'mesh',
+        kind: "mesh",
         vertexPositions: [
           [0, 0, 0],
           [1, 0, 0],
@@ -532,7 +572,7 @@ const renderExport: RenderExport = {
       },
     },
   ],
-}
+};
 ```
 
 The viewport may use `id` and `pickId` transiently, but durable selection must round-trip through `binding.target`.

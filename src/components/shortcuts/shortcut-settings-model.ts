@@ -1,10 +1,10 @@
-import type { ShortcutCommandId } from '@/core/shortcuts/commands'
-import { formatShortcut } from '@/core/shortcuts/shortcut-grammar'
+import type { ShortcutCommandId } from "@/core/shortcuts/commands";
+import { formatShortcut } from "@/core/shortcuts/shortcut-grammar";
 
 export interface ShortcutSettingsState {
-  recordingCommandId: ShortcutCommandId | null
-  recordingSteps: readonly string[]
-  conflictMessage: string | null
+  recordingCommandId: ShortcutCommandId | null;
+  recordingSteps: readonly string[];
+  conflictMessage: string | null;
 }
 
 export function createInitialShortcutSettingsState(): ShortcutSettingsState {
@@ -12,7 +12,7 @@ export function createInitialShortcutSettingsState(): ShortcutSettingsState {
     recordingCommandId: null,
     recordingSteps: [],
     conflictMessage: null,
-  }
+  };
 }
 
 export function startShortcutRecording(
@@ -24,7 +24,7 @@ export function startShortcutRecording(
     recordingCommandId: commandId,
     recordingSteps: [],
     conflictMessage: null,
-  }
+  };
 }
 
 export function appendShortcutRecordingStep(
@@ -32,21 +32,23 @@ export function appendShortcutRecordingStep(
   step: string,
 ): ShortcutSettingsState {
   if (!state.recordingCommandId) {
-    return state
+    return state;
   }
 
   return {
     ...state,
     recordingSteps: [...state.recordingSteps, step],
-  }
+  };
 }
 
 export function cancelShortcutRecording(): ShortcutSettingsState {
-  return createInitialShortcutSettingsState()
+  return createInitialShortcutSettingsState();
 }
 
 export function getPendingRecordedShortcut(state: ShortcutSettingsState) {
-  return state.recordingSteps.length > 0 ? state.recordingSteps.join('>') : null
+  return state.recordingSteps.length > 0
+    ? state.recordingSteps.join(">")
+    : null;
 }
 
 export function completeShortcutRecording(
@@ -54,10 +56,10 @@ export function completeShortcutRecording(
   conflicts: readonly { commandIds: readonly string[] }[],
 ): ShortcutSettingsState {
   if (conflicts.length > 0) {
-    return setShortcutConflictState(state, conflicts)
+    return setShortcutConflictState(state, conflicts);
   }
 
-  return createInitialShortcutSettingsState()
+  return createInitialShortcutSettingsState();
 }
 
 export function setShortcutConflictState(
@@ -66,8 +68,9 @@ export function setShortcutConflictState(
 ): ShortcutSettingsState {
   return {
     ...state,
-    conflictMessage: conflicts.length > 0 ? getShortcutConflictMessage(conflicts) : null,
-  }
+    conflictMessage:
+      conflicts.length > 0 ? getShortcutConflictMessage(conflicts) : null,
+  };
 }
 
 export function getShortcutSettingsDisplayLabel({
@@ -75,17 +78,22 @@ export function getShortcutSettingsDisplayLabel({
   recordingSteps,
   shortcutLabel,
 }: {
-  isRecording: boolean
-  recordingSteps: readonly string[]
-  shortcutLabel: string | null
+  isRecording: boolean;
+  recordingSteps: readonly string[];
+  shortcutLabel: string | null;
 }) {
   if (isRecording) {
-    return recordingSteps.map((step) => formatShortcut(step)).join(' > ') || 'Recording'
+    return (
+      recordingSteps.map((step) => formatShortcut(step)).join(" > ") ||
+      "Recording"
+    );
   }
 
-  return shortcutLabel ?? 'Unassigned'
+  return shortcutLabel ?? "Unassigned";
 }
 
-export function getShortcutConflictMessage(conflicts: readonly { commandIds: readonly string[] }[]) {
-  return `Conflict with ${conflicts[0]!.commandIds.join(', ')}.`
+export function getShortcutConflictMessage(
+  conflicts: readonly { commandIds: readonly string[] }[],
+) {
+  return `Conflict with ${conflicts[0]!.commandIds.join(", ")}.`;
 }

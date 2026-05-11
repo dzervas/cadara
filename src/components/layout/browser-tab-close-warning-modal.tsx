@@ -1,20 +1,20 @@
-import { Button, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core'
+import { Button, Group, Modal, SimpleGrid, Stack, Text } from "@mantine/core";
 
-import { WorkbenchIcon } from '@/components/ui/workbench-icon'
+import { WorkbenchIcon } from "@/components/ui/workbench-icon";
 
-export const BROWSER_TAB_CLOSE_WARNING_TITLE = 'Save before closing?'
+export const BROWSER_TAB_CLOSE_WARNING_TITLE = "Save before closing?";
 export const BROWSER_TAB_CLOSE_WARNING_MESSAGE =
-  'This document is stored only in this browser. If you close the tab without saving, it will be lost forever.'
+  "This document is stored only in this browser. If you close the tab without saving, it will be lost forever.";
 
 interface BrowserTabCloseWarningModalProps {
-  opened: boolean
-  documentTitle: string
-  pending?: boolean
-  withinPortal?: boolean
-  onCancel: () => void
-  onCloseWithoutSaving: () => void
-  onDownloadCopy: () => void
-  onSaveLinked: () => void
+  opened: boolean;
+  documentTitle: string;
+  pending?: boolean;
+  withinPortal?: boolean;
+  onCancel: () => void;
+  onCloseWithoutSaving: () => void;
+  onDownloadCopy: () => void;
+  onSaveLinked: () => void;
 }
 
 export function BrowserTabCloseWarningModal({
@@ -31,18 +31,18 @@ export function BrowserTabCloseWarningModal({
     fullWidth: true,
     styles: {
       inner: {
-        whiteSpace: 'normal',
+        whiteSpace: "normal",
         lineHeight: 1.2,
       },
       label: {
-        whiteSpace: 'normal',
+        whiteSpace: "normal",
       },
       root: {
         minHeight: 36,
-        height: 'auto',
+        height: "auto",
       },
     },
-  } as const
+  } as const;
 
   return (
     <Modal
@@ -58,7 +58,11 @@ export function BrowserTabCloseWarningModal({
           <Text size="sm" fw={600} c="var(--workbench-shell-text)">
             {documentTitle}
           </Text>
-          <Text size="sm" c="var(--workbench-shell-text-dim)" className="whitespace-normal break-words">
+          <Text
+            size="sm"
+            c="var(--workbench-shell-text-dim)"
+            className="whitespace-normal break-words"
+          >
             {BROWSER_TAB_CLOSE_WARNING_MESSAGE}
           </Text>
         </Stack>
@@ -85,14 +89,24 @@ export function BrowserTabCloseWarningModal({
         </SimpleGrid>
 
         <Group gap="xs" justify="flex-end">
-          <Button variant="subtle" color="workbench" onClick={onCancel} disabled={pending}>
+          <Button
+            variant="subtle"
+            color="workbench"
+            onClick={onCancel}
+            disabled={pending}
+          >
             Cancel
           </Button>
-          <Button variant="subtle" color="red" onClick={onCloseWithoutSaving} disabled={pending}>
+          <Button
+            variant="subtle"
+            color="red"
+            onClick={onCloseWithoutSaving}
+            disabled={pending}
+          >
             Close without saving
           </Button>
         </Group>
       </Stack>
     </Modal>
-  )
+  );
 }

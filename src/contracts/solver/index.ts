@@ -1,6 +1,6 @@
 /** Public solver-contract barrel export. */
-export type * from '@/contracts/solver/schema'
+export type * from "@/contracts/solver/schema";
 /** Public solver-contract barrel export. */
-export * from '@/contracts/solver/schema'
+export * from "@/contracts/solver/schema";
 /** Public solver-contract barrel export. */
-export type * from '@/contracts/solver/adapter'
+export type * from "@/contracts/solver/adapter";

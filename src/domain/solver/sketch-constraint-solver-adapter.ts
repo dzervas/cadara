@@ -1,4 +1,4 @@
-import type { SketchSolverAdapter } from '@/contracts/solver/adapter'
+import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import {
   SOLVER_SCHEMA_VERSION,
   type DeriveSketchRegionsRequest,
@@ -22,8 +22,8 @@ import {
   type UpdateInteractiveSketchSolveSessionResponse,
   type ValidateSketchRequest,
   type ValidateSketchResponse,
-} from '@/contracts/solver/schema'
-import { sketchSolverEnvelopeSchema } from '@/contracts/solver/runtime-schema'
+} from "@/contracts/solver/schema";
+import { sketchSolverEnvelopeSchema } from "@/contracts/solver/runtime-schema";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
@@ -34,26 +34,26 @@ import {
   type SketchCompiledSolveSession,
   type ProjectedSketchGeometryRef,
   type SketchSolveDiagnostic,
-} from '@/contracts/sketch'
-import type { DocumentId, RevisionId } from '@/contracts/shared/ids'
-import { CONTRACT_VERSION } from '@/contracts/shared/versioning'
+} from "@/contracts/sketch";
+import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
 export interface SketchConstraintSolverAdapterOptions {
-  documentId: DocumentId
-  revisionId: RevisionId | null
+  documentId: DocumentId;
+  revisionId: RevisionId | null;
 }
 
 interface StoredInteractiveSolveSession {
-  session: SketchCompiledSolveSession
-  documentId: StartInteractiveSketchSolveSessionRequest['documentId']
-  revisionId: StartInteractiveSketchSolveSessionRequest['revisionId']
-  sketchId: StartInteractiveSketchSolveSessionRequest['sketchId']
+  session: SketchCompiledSolveSession;
+  documentId: StartInteractiveSketchSolveSessionRequest["documentId"];
+  revisionId: StartInteractiveSketchSolveSessionRequest["revisionId"];
+  sketchId: StartInteractiveSketchSolveSessionRequest["sketchId"];
 }
 
 const DEFAULT_OPTIONS: SketchConstraintSolverAdapterOptions = {
-  documentId: 'doc_workspace',
-  revisionId: 'rev_0001',
-}
+  documentId: "doc_workspace",
+  revisionId: "rev_0001",
+};
 
 function makeResponseBase(
   request:
@@ -74,12 +74,12 @@ function makeResponseBase(
     documentId: request.documentId,
     revisionId: request.revisionId,
     sketchId: request.sketchId,
-  }
+  };
 }
 
 function makeProjectionDiagnostic(
   code: string,
-  severity: SketchSolveDiagnostic['severity'],
+  severity: SketchSolveDiagnostic["severity"],
   message: string,
 ): SketchSolveDiagnostic {
   return {
@@ -87,44 +87,46 @@ function makeProjectionDiagnostic(
     severity,
     message,
     target: null,
-  }
+  };
 }
 
 function projectReference(
-  reference: ProjectSketchExternalReferencesRequest['references'][number],
-): Omit<ProjectedSketchReferenceRecord, 'referenceId'> {
-  if (reference.reference.kind === 'constructionPlane') {
+  reference: ProjectSketchExternalReferencesRequest["references"][number],
+): Omit<ProjectedSketchReferenceRecord, "referenceId"> {
+  if (reference.reference.kind === "constructionPlane") {
     return {
-      status: 'projected',
+      status: "projected",
       geometry: [],
       diagnostics: [],
-    }
+    };
   }
 
-  if (reference.reference.kind === 'sketchReference') {
+  if (reference.reference.kind === "sketchReference") {
     return {
-      status: 'unsupportedSource',
+      status: "unsupportedSource",
       geometry: [],
-      diagnostics: [{
-        code: 'unsupported-sketch-reference-source',
-        severity: 'warning',
-        message: `Sketch reference ${reference.referenceId} does not expose projectable geometry in this solver.`,
-        target: null,
-      }],
-    }
+      diagnostics: [
+        {
+          code: "unsupported-sketch-reference-source",
+          severity: "warning",
+          message: `Sketch reference ${reference.referenceId} does not expose projectable geometry in this solver.`,
+          target: null,
+        },
+      ],
+    };
   }
 
   return {
-    status: 'unsupportedSource',
+    status: "unsupportedSource",
     geometry: [],
     diagnostics: [
       makeProjectionDiagnostic(
-        'unsupported-model-reference-source',
-        'warning',
+        "unsupported-model-reference-source",
+        "warning",
         `Model reference ${reference.referenceId} cannot be projected because this solver adapter has no resolved source geometry.`,
       ),
     ],
-  }
+  };
 }
 
 function assertSupportedRequest(
@@ -140,31 +142,40 @@ function assertSupportedRequest(
     | ResolveSketchReferenceRequest,
   options: SketchConstraintSolverAdapterOptions,
 ) {
-  const parsed = sketchSolverEnvelopeSchema.safeParse(request)
+  const parsed = sketchSolverEnvelopeSchema.safeParse(request);
   if (!parsed.success) {
-    throw new Error(parsed.error.issues[0]?.message ?? 'Invalid sketch solver request envelope.')
+    throw new Error(
+      parsed.error.issues[0]?.message ??
+        "Invalid sketch solver request envelope.",
+    );
   }
 
-  if (request.documentId !== options.documentId || (options.revisionId !== null && request.revisionId !== options.revisionId)) {
+  if (
+    request.documentId !== options.documentId ||
+    (options.revisionId !== null && request.revisionId !== options.revisionId)
+  ) {
     throw new Error(
       `Solver request targeted ${request.documentId}@${request.revisionId}, but the runtime is configured for ${options.documentId}@${options.revisionId}.`,
-    )
+    );
   }
 }
 
 export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
-  private readonly options: SketchConstraintSolverAdapterOptions
-  private readonly interactiveSessions = new Map<InteractiveSketchSolveSessionId, StoredInteractiveSolveSession>()
-  private nextInteractiveSessionSequence = 1
+  private readonly options: SketchConstraintSolverAdapterOptions;
+  private readonly interactiveSessions = new Map<
+    InteractiveSketchSolveSessionId,
+    StoredInteractiveSolveSession
+  >();
+  private nextInteractiveSessionSequence = 1;
 
   constructor(options: Partial<SketchConstraintSolverAdapterOptions> = {}) {
-    this.options = { ...DEFAULT_OPTIONS, ...options }
+    this.options = { ...DEFAULT_OPTIONS, ...options };
   }
 
   async projectExternalReferences(
     request: ProjectSketchExternalReferencesRequest,
   ): Promise<ProjectSketchExternalReferencesResponse> {
-    assertSupportedRequest(request, this.options)
+    assertSupportedRequest(request, this.options);
     return {
       ...makeResponseBase(request),
       projectedReferences: request.references.map((reference) => ({
@@ -172,31 +183,33 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
         ...projectReference(reference),
       })),
       diagnostics: [],
-    }
+    };
   }
 
-  async validateSketch(request: ValidateSketchRequest): Promise<ValidateSketchResponse> {
-    assertSupportedRequest(request, this.options)
+  async validateSketch(
+    request: ValidateSketchRequest,
+  ): Promise<ValidateSketchResponse> {
+    assertSupportedRequest(request, this.options);
     const validation = validateSketchDefinitionCore({
       definition: request.definition,
       projectedReferences: request.projectedReferences,
       tolerances: request.tolerances,
-    })
+    });
     return {
       ...makeResponseBase(request),
       isValid: validation.isValid,
       diagnostics: validation.diagnostics,
-    }
+    };
   }
 
   async solveSketch(request: SolveSketchRequest): Promise<SolveSketchResponse> {
-    assertSupportedRequest(request, this.options)
+    assertSupportedRequest(request, this.options);
     const solved = solveSketchDefinitionCore({
       definition: request.definition,
       projectedReferences: request.projectedReferences,
       tolerances: request.tolerances,
       partialSolvePolicy: request.partialSolvePolicy,
-    })
+    });
     const regionResult = request.includeRegions
       ? deriveSketchRegionsCore({
           documentId: request.documentId,
@@ -206,40 +219,48 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
           definition: request.definition,
           projectedReferences: request.projectedReferences,
         })
-      : null
+      : null;
 
     return {
       ...makeResponseBase(request),
       status: solved.status,
       solvedSnapshot: solved.solvedSnapshot,
       diagnostics: solved.diagnostics,
-      ...(regionResult ? { regionResult: { regions: regionResult.regions, diagnostics: regionResult.diagnostics } } : {}),
-    }
+      ...(regionResult
+        ? {
+            regionResult: {
+              regions: regionResult.regions,
+              diagnostics: regionResult.diagnostics,
+            },
+          }
+        : {}),
+    };
   }
 
   async startInteractiveSolveSession(
     request: StartInteractiveSketchSolveSessionRequest,
   ): Promise<StartInteractiveSketchSolveSessionResponse> {
-    assertSupportedRequest(request, this.options)
+    assertSupportedRequest(request, this.options);
     const program = compileSketchSolveProgram({
       definition: request.definition,
       projectedReferences: request.projectedReferences,
       tolerances: request.tolerances,
       partialSolvePolicy: request.partialSolvePolicy,
       strategy: request.strategy,
-    })
-    const sessionId = `interactive_sketch_solve_${this.nextInteractiveSessionSequence++}` as InteractiveSketchSolveSessionId
+    });
+    const sessionId =
+      `interactive_sketch_solve_${this.nextInteractiveSessionSequence++}` as InteractiveSketchSolveSessionId;
     const session = createCompiledSketchSolveSession({
       sessionId,
       program,
       priorSolvedSnapshot: request.priorSolvedSnapshot,
-    })
+    });
     this.interactiveSessions.set(sessionId, {
       session,
       documentId: request.documentId,
       revisionId: request.revisionId,
       sketchId: request.sketchId,
-    })
+    });
 
     return {
       ...makeResponseBase(request),
@@ -249,139 +270,154 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       solvedSnapshot: session.lastAcceptedSnapshot,
       status: session.lastAcceptedSnapshot.status,
       diagnostics: session.lastAcceptedSnapshot.diagnostics,
-    }
+    };
   }
 
   async updateInteractiveSolveSession(
     request: UpdateInteractiveSketchSolveSessionRequest,
   ): Promise<UpdateInteractiveSketchSolveSessionResponse> {
-    assertSupportedRequest(request, this.options)
-    const stored = this.interactiveSessions.get(request.sessionId)
+    assertSupportedRequest(request, this.options);
+    const stored = this.interactiveSessions.get(request.sessionId);
     if (!stored || stored.session.disposed) {
       return {
         ...makeResponseBase(request),
         sessionId: request.sessionId,
         result: {
-          kind: 'blocked',
-          reason: 'staleSession',
+          kind: "blocked",
+          reason: "staleSession",
           solvedSnapshot: null,
-          diagnostics: [{
-            code: 'stale-interactive-solve-session',
-            severity: 'error',
-            message: `Interactive solve session ${request.sessionId} is no longer active.`,
-            target: { kind: 'point', pointId: request.dragTarget.pointId },
-          }],
+          diagnostics: [
+            {
+              code: "stale-interactive-solve-session",
+              severity: "error",
+              message: `Interactive solve session ${request.sessionId} is no longer active.`,
+              target: { kind: "point", pointId: request.dragTarget.pointId },
+            },
+          ],
         },
-      }
+      };
     }
 
     if (
-      stored.documentId !== request.documentId
-      || stored.revisionId !== request.revisionId
-      || stored.sketchId !== request.sketchId
+      stored.documentId !== request.documentId ||
+      stored.revisionId !== request.revisionId ||
+      stored.sketchId !== request.sketchId
     ) {
       return {
         ...makeResponseBase(request),
         sessionId: request.sessionId,
         result: {
-          kind: 'blocked',
-          reason: 'staleRevision',
+          kind: "blocked",
+          reason: "staleRevision",
           solvedSnapshot: stored.session.lastAcceptedSnapshot,
-          diagnostics: [{
-            code: 'stale-interactive-solve-session-basis',
-            severity: 'error',
-            message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
-            target: { kind: 'point', pointId: request.dragTarget.pointId },
-          }],
+          diagnostics: [
+            {
+              code: "stale-interactive-solve-session-basis",
+              severity: "error",
+              message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
+              target: { kind: "point", pointId: request.dragTarget.pointId },
+            },
+          ],
         },
-      }
+      };
     }
 
-    const result = updateCompiledSketchSolveSession(stored.session, request.dragTarget, request.dragTarget.kind === 'sketchPoint' ? 1e-4 : undefined)
+    const result = updateCompiledSketchSolveSession(
+      stored.session,
+      request.dragTarget,
+      request.dragTarget.kind === "sketchPoint" ? 1e-4 : undefined,
+    );
     return {
       ...makeResponseBase(request),
       sessionId: request.sessionId,
-      result: result.kind === 'solved'
-        ? {
-            kind: 'accepted',
-            status: result.solvedSnapshot.status,
-            solvedSnapshot: result.solvedSnapshot,
-            diagnostics: result.diagnostics,
-          }
-        : {
-            kind: 'blocked',
-            reason: result.reason,
-            solvedSnapshot: result.solvedSnapshot,
-            diagnostics: result.diagnostics,
-          },
-    }
+      result:
+        result.kind === "solved"
+          ? {
+              kind: "accepted",
+              status: result.solvedSnapshot.status,
+              solvedSnapshot: result.solvedSnapshot,
+              diagnostics: result.diagnostics,
+            }
+          : {
+              kind: "blocked",
+              reason: result.reason,
+              solvedSnapshot: result.solvedSnapshot,
+              diagnostics: result.diagnostics,
+            },
+    };
   }
 
   async finalizeInteractiveSolveSession(
     request: FinalizeInteractiveSketchSolveSessionRequest,
   ): Promise<FinalizeInteractiveSketchSolveSessionResponse> {
-    assertSupportedRequest(request, this.options)
-    const stored = this.interactiveSessions.get(request.sessionId)
+    assertSupportedRequest(request, this.options);
+    const stored = this.interactiveSessions.get(request.sessionId);
     if (!stored || stored.session.disposed) {
       return {
         ...makeResponseBase(request),
         sessionId: request.sessionId,
         solvedSnapshot: null,
         status: null,
-        diagnostics: [{
-          code: 'stale-interactive-solve-session',
-          severity: 'error',
-          message: `Interactive solve session ${request.sessionId} is no longer active.`,
-          target: null,
-        }],
-      }
+        diagnostics: [
+          {
+            code: "stale-interactive-solve-session",
+            severity: "error",
+            message: `Interactive solve session ${request.sessionId} is no longer active.`,
+            target: null,
+          },
+        ],
+      };
     }
 
     if (
-      stored.documentId !== request.documentId
-      || stored.revisionId !== request.revisionId
-      || stored.sketchId !== request.sketchId
+      stored.documentId !== request.documentId ||
+      stored.revisionId !== request.revisionId ||
+      stored.sketchId !== request.sketchId
     ) {
       return {
         ...makeResponseBase(request),
         sessionId: request.sessionId,
         solvedSnapshot: null,
         status: null,
-        diagnostics: [{
-          code: 'stale-interactive-solve-session-basis',
-          severity: 'error',
-          message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
-          target: null,
-        }],
-      }
+        diagnostics: [
+          {
+            code: "stale-interactive-solve-session-basis",
+            severity: "error",
+            message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
+            target: null,
+          },
+        ],
+      };
     }
 
-    stored.session.disposed = true
-    this.interactiveSessions.delete(request.sessionId)
+    stored.session.disposed = true;
+    this.interactiveSessions.delete(request.sessionId);
     return {
       ...makeResponseBase(request),
       sessionId: request.sessionId,
       solvedSnapshot: stored.session.lastAcceptedSnapshot,
       status: stored.session.lastAcceptedSnapshot.status,
       diagnostics: stored.session.lastAcceptedSnapshot.diagnostics,
-    }
+    };
   }
 
   async disposeInteractiveSolveSession(
     request: DisposeInteractiveSketchSolveSessionRequest,
   ): Promise<DisposeInteractiveSketchSolveSessionResponse> {
-    assertSupportedRequest(request, this.options)
-    const stored = this.interactiveSessions.get(request.sessionId)
+    assertSupportedRequest(request, this.options);
+    const stored = this.interactiveSessions.get(request.sessionId);
     const basisMatches = Boolean(
-      stored
-      && stored.documentId === request.documentId
-      && stored.revisionId === request.revisionId
-      && stored.sketchId === request.sketchId,
-    )
-    const disposed = Boolean(stored && !stored.session.disposed && basisMatches)
+      stored &&
+      stored.documentId === request.documentId &&
+      stored.revisionId === request.revisionId &&
+      stored.sketchId === request.sketchId,
+    );
+    const disposed = Boolean(
+      stored && !stored.session.disposed && basisMatches,
+    );
     if (stored && basisMatches) {
-      stored.session.disposed = true
-      this.interactiveSessions.delete(request.sessionId)
+      stored.session.disposed = true;
+      this.interactiveSessions.delete(request.sessionId);
     }
     return {
       ...makeResponseBase(request),
@@ -389,26 +425,28 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       disposed,
       diagnostics: disposed
         ? []
-        : [basisMatches || !stored
-          ? {
-              code: 'stale-interactive-solve-session',
-              severity: 'warning',
-              message: `Interactive solve session ${request.sessionId} was not active.`,
-              target: null,
-            }
-          : {
-              code: 'stale-interactive-solve-session-basis',
-              severity: 'warning',
-              message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
-              target: null,
-            }],
-    }
+        : [
+            basisMatches || !stored
+              ? {
+                  code: "stale-interactive-solve-session",
+                  severity: "warning",
+                  message: `Interactive solve session ${request.sessionId} was not active.`,
+                  target: null,
+                }
+              : {
+                  code: "stale-interactive-solve-session-basis",
+                  severity: "warning",
+                  message: `Interactive solve session ${request.sessionId} does not match the request document, revision, and sketch basis.`,
+                  target: null,
+                },
+          ],
+    };
   }
 
   async deriveSketchRegions(
     request: DeriveSketchRegionsRequest,
   ): Promise<DeriveSketchRegionsResponse> {
-    assertSupportedRequest(request, this.options)
+    assertSupportedRequest(request, this.options);
     const derived = deriveSketchRegionsCore({
       documentId: request.documentId,
       revisionId: request.revisionId,
@@ -416,88 +454,102 @@ export class SketchConstraintSolverAdapter implements SketchSolverAdapter {
       solvedSnapshot: request.solvedSnapshot,
       definition: request.definition,
       projectedReferences: request.projectedReferences,
-    })
+    });
     return {
       ...makeResponseBase(request),
       regions: derived.regions,
       diagnostics: derived.diagnostics,
-    }
+    };
   }
 
   async resolveSketchReference(
     request: ResolveSketchReferenceRequest,
   ): Promise<ResolveSketchReferenceResponse> {
-    assertSupportedRequest(request, this.options)
-    const base = makeResponseBase(request)
+    assertSupportedRequest(request, this.options);
+    const base = makeResponseBase(request);
 
-    if ('referenceId' in request.target && 'geometryId' in request.target) {
-      const target: ProjectedSketchGeometryRef = request.target
-      const exists = request.definition.references.some((reference) => reference.referenceId === target.referenceId)
+    if ("referenceId" in request.target && "geometryId" in request.target) {
+      const target: ProjectedSketchGeometryRef = request.target;
+      const exists = request.definition.references.some(
+        (reference) => reference.referenceId === target.referenceId,
+      );
       return {
         ...base,
         resolution: {
           target,
           label: `Projected geometry ${target.geometryId}`,
           isValid: exists,
-          invalidationReason: exists ? null : 'missingProjectedGeometry',
+          invalidationReason: exists ? null : "missingProjectedGeometry",
         },
         diagnostics: [],
-      }
+      };
     }
 
     switch (request.target.kind) {
-      case 'sketch':
+      case "sketch":
         return {
           ...base,
           resolution: {
             target: request.target,
-            label: request.target.sketchId === request.sketchId ? 'Solved sketch' : 'Unknown sketch',
+            label:
+              request.target.sketchId === request.sketchId
+                ? "Solved sketch"
+                : "Unknown sketch",
             isValid: request.target.sketchId === request.sketchId,
-            invalidationReason: request.target.sketchId === request.sketchId ? null : 'missingSketch',
+            invalidationReason:
+              request.target.sketchId === request.sketchId
+                ? null
+                : "missingSketch",
           },
           diagnostics: [],
-        }
-      case 'sketchEntity': {
-        const target = request.target
-        const entity = request.definition.entities.find((record) => record.entityId === target.entityId)
+        };
+      case "sketchEntity": {
+        const target = request.target;
+        const entity = request.definition.entities.find(
+          (record) => record.entityId === target.entityId,
+        );
         return {
           ...base,
           resolution: {
             target,
-            label: entity?.label ?? 'Unknown sketch entity',
+            label: entity?.label ?? "Unknown sketch entity",
             isValid: Boolean(entity),
-            invalidationReason: entity ? null : 'missingEntity',
+            invalidationReason: entity ? null : "missingEntity",
           },
           diagnostics: [],
-        }
+        };
       }
-      case 'sketchPoint': {
-        const target = request.target
-        const point = request.definition.points.find((record) => record.pointId === target.pointId)
+      case "sketchPoint": {
+        const target = request.target;
+        const point = request.definition.points.find(
+          (record) => record.pointId === target.pointId,
+        );
         return {
           ...base,
           resolution: {
             target,
-            label: point?.label ?? 'Unknown sketch point',
+            label: point?.label ?? "Unknown sketch point",
             isValid: Boolean(point),
-            invalidationReason: point ? null : 'missingPoint',
+            invalidationReason: point ? null : "missingPoint",
           },
           diagnostics: [],
-        }
+        };
       }
-      case 'region': {
-        const target = request.target
-        const region = request.regions.find((record) => record.regionId === target.regionId)
+      case "region": {
+        const target = request.target;
+        const region = request.regions.find(
+          (record) => record.regionId === target.regionId,
+        );
         return {
           ...base,
           resolution: {
             target,
-            label: region?.label ?? 'Unknown region',
+            label: region?.label ?? "Unknown region",
             isValid: Boolean(region),
-            invalidationReason: region ? null : 'missingRegion',
+            invalidationReason: region ? null : "missingRegion",
           },
           diagnostics: [],
-        }
+        };
       }
     }
   }

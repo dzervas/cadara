@@ -1,6 +1,6 @@
-import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
-import { stableJsonValue } from '@/contracts/modeling/authored-document-serialization'
-import type { DocumentId } from '@/contracts/shared/ids'
+import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
+import type { DocumentId } from "@/contracts/shared/ids";
 
 export function normalizeAuthoredDocumentId(
   document: AuthoredModelDocument,
@@ -9,12 +9,15 @@ export function normalizeAuthoredDocumentId(
   return {
     ...document,
     documentId,
-  }
+  };
 }
 
 export function authoredModelDocumentsEqual(
   left: AuthoredModelDocument,
   right: AuthoredModelDocument,
 ) {
-  return JSON.stringify(stableJsonValue(left)) === JSON.stringify(stableJsonValue(right))
+  return (
+    JSON.stringify(stableJsonValue(left)) ===
+    JSON.stringify(stableJsonValue(right))
+  );
 }

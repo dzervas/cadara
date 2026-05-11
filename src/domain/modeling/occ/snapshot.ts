@@ -11,13 +11,13 @@ import type {
   SketchSnapshotRecord,
   SnapshotEntityRecord,
   WorkspaceSnapshot,
-} from '@/contracts/modeling/schema'
+} from "@/contracts/modeling/schema";
 import type {
   RenderMeshGeometry,
   RenderPoint3D,
   RenderableEntityRecord,
-} from '@/contracts/render/schema'
-import type { SolvedSketchEntityGeometryRecord } from '@/contracts/sketch/schema'
+} from "@/contracts/render/schema";
+import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
 import type {
   BodyId,
   EdgeId,
@@ -31,7 +31,7 @@ import type {
   SketchId,
   SnapshotEntityId,
   VertexId,
-} from '@/contracts/shared/ids'
+} from "@/contracts/shared/ids";
 import type {
   ConstructionRef,
   DurableRef,
@@ -41,7 +41,7 @@ import type {
   SketchEntityRef,
   SketchPointRef,
   VertexRef,
-} from '@/contracts/shared/references'
+} from "@/contracts/shared/references";
 import {
   CONTRACT_VERSION,
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -51,120 +51,130 @@ import {
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
-} from '@/contracts/shared/versioning'
+} from "@/contracts/shared/versioning";
 import {
   OCC_CONTRACT_GAP_CODES,
   OCC_PHASE0_IMPLEMENTATION_NOTES,
-} from '@/domain/modeling/occ/implementation-policy'
-import { mapSketchPointToWorld } from '@/domain/modeling/occ/geometry'
-import type { OccAuthoringState } from '@/domain/modeling/occ/authoring-state'
+} from "@/domain/modeling/occ/implementation-policy";
+import { mapSketchPointToWorld } from "@/domain/modeling/occ/geometry";
+import type { OccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import {
   OCC_KERNEL_CAPABILITIES,
   OCC_KERNEL_SETTINGS,
-} from '@/domain/modeling/opencascade-kernel-seed'
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   createDocumentHistoryItems,
   getAppliedDocumentHistoryItemsForDocumentCursor,
   getAppliedSketchIdsForDocumentCursor,
-} from '@/domain/modeling/document-history'
-import { extractPlanarFaceData } from '@/domain/modeling/occ/planes'
-import { buildRegionProfileFace } from '@/domain/modeling/occ/sketch-profile'
-import { deleteOccObject } from '@/domain/modeling/occ/memory'
+} from "@/domain/modeling/document-history";
+import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
+import { buildRegionProfileFace } from "@/domain/modeling/occ/sketch-profile";
+import { deleteOccObject } from "@/domain/modeling/occ/memory";
 import {
   getOccDurableRefKey,
   type OccTrackedBody,
-} from '@/domain/modeling/occ/topology'
+} from "@/domain/modeling/occ/topology";
 import {
   getOccTessellationTier,
   type OccTessellationTierId,
-} from '@/domain/modeling/occ/tessellation'
+} from "@/domain/modeling/occ/tessellation";
 import type {
   OccNativeShimMeshSummary,
   OccNativeTopologyBodyPayload,
   OccNativeTopologyPayload,
-} from '@/domain/modeling/occ/native-topology-payload'
+} from "@/domain/modeling/occ/native-topology-payload";
 
-const FACE_PICK_PRIORITY = 20
-const SKETCH_CURVE_PICK_PRIORITY = 12
-const EDGE_PICK_PRIORITY = 10
-const REGION_PICK_PRIORITY = 8
-const SKETCH_POINT_PICK_PRIORITY = 1
-const VERTEX_PICK_PRIORITY = 0
-const CONSTRUCTION_PICK_PRIORITY = 40
+const FACE_PICK_PRIORITY = 20;
+const SKETCH_CURVE_PICK_PRIORITY = 12;
+const EDGE_PICK_PRIORITY = 10;
+const REGION_PICK_PRIORITY = 8;
+const SKETCH_POINT_PICK_PRIORITY = 1;
+const VERTEX_PICK_PRIORITY = 0;
+const CONSTRUCTION_PICK_PRIORITY = 40;
 
-const DEFAULT_EDGE_SAMPLE_COUNT = 33
-const DEFAULT_CIRCLE_SAMPLE_COUNT = 64
-const DEFAULT_ARC_SAMPLE_COUNT = 33
-const DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT = 64
-const DEFAULT_POINT_DISPLAY_RADIUS = 0.25
-const PROFILE_TEXT_WIDTH_FACTOR = 0.6
+const DEFAULT_EDGE_SAMPLE_COUNT = 33;
+const DEFAULT_CIRCLE_SAMPLE_COUNT = 64;
+const DEFAULT_ARC_SAMPLE_COUNT = 33;
+const DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT = 64;
+const DEFAULT_POINT_DISPLAY_RADIUS = 0.25;
+const PROFILE_TEXT_WIDTH_FACTOR = 0.6;
 
 interface OccSnapshotBuildOptions {
-  lodTierId?: OccTessellationTierId
-  nativeTopologyPayload?: OccNativeTopologyPayload
+  lodTierId?: OccTessellationTierId;
+  nativeTopologyPayload?: OccNativeTopologyPayload;
 }
 
 function sanitizeIdSegment(value: string) {
   return value
-    .replace(/[^a-zA-Z0-9]+/g, '_')
-    .replace(/^_+/g, '')
-    .replace(/_+$/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+/g, "")
+    .replace(/_+$/g, "");
 }
 
 function createReferenceId(target: DurableRef) {
-  return `ref_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as ReferenceId
+  return `ref_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as ReferenceId;
 }
 
 function createSnapshotEntityId(target: DurableRef) {
-  return `snapshot_entity_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as SnapshotEntityId
+  return `snapshot_entity_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as SnapshotEntityId;
 }
 
 function orderContributorFeatureIds(
-  state: Pick<OccAuthoringState, 'features'>,
+  state: Pick<OccAuthoringState, "features">,
   featureIds: readonly FeatureId[],
 ) {
   if (featureIds.length <= 1) {
-    return [...featureIds]
+    return [...featureIds];
   }
 
-  const featureOrder = new Map(state.features.map((feature, index) => [feature.featureId, index]))
-  return [...featureIds].sort((left, right) => (featureOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (featureOrder.get(right) ?? Number.MAX_SAFE_INTEGER))
+  const featureOrder = new Map(
+    state.features.map((feature, index) => [feature.featureId, index]),
+  );
+  return [...featureIds].sort(
+    (left, right) =>
+      (featureOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+      (featureOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
+  );
 }
 
 function createRenderableId(target: DurableRef) {
-  return `renderable_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as RenderableId
+  return `renderable_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as RenderableId;
 }
 
 function createPickId(target: DurableRef) {
-  return `pick_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as PickId
+  return `pick_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as PickId;
 }
 
 function createFeatureTreeNodeId(prefix: string, target: DurableRef) {
-  return `feature_tree_node_occ_${prefix}_${sanitizeIdSegment(getOccDurableRefKey(target))}` as FeatureTreeNodeId
+  return `feature_tree_node_occ_${prefix}_${sanitizeIdSegment(getOccDurableRefKey(target))}` as FeatureTreeNodeId;
 }
 
 function createObjectTreeNodeId(prefix: string, target: DurableRef) {
-  return `object_tree_node_occ_${prefix}_${sanitizeIdSegment(getOccDurableRefKey(target))}` as ObjectTreeNodeId
+  return `object_tree_node_occ_${prefix}_${sanitizeIdSegment(getOccDurableRefKey(target))}` as ObjectTreeNodeId;
 }
 
 function createFaceTarget(bodyId: BodyId, faceId: FaceId): FaceRef {
-  return { kind: 'face', bodyId, faceId }
+  return { kind: "face", bodyId, faceId };
 }
 
 function createEdgeTarget(bodyId: BodyId, edgeId: EdgeId): EdgeRef {
-  return { kind: 'edge', bodyId, edgeId }
+  return { kind: "edge", bodyId, edgeId };
 }
 
 function createVertexTarget(bodyId: BodyId, vertexId: VertexId): VertexRef {
-  return { kind: 'vertex', bodyId, vertexId }
+  return { kind: "vertex", bodyId, vertexId };
 }
 
-function toRenderPoint(point: { X(): number; Y(): number; Z(): number }): RenderPoint3D {
-  return [point.X(), point.Y(), point.Z()]
+function toRenderPoint(point: {
+  X(): number;
+  Y(): number;
+  Z(): number;
+}): RenderPoint3D {
+  return [point.X(), point.Y(), point.Z()];
 }
 
 function buildFeatureLabel(featureId: FeatureId, explicitLabel?: string) {
-  return explicitLabel ?? featureId
+  return explicitLabel ?? featureId;
 }
 
 function createConstructionPlaneGapDiagnostic(
@@ -172,124 +182,151 @@ function createConstructionPlaneGapDiagnostic(
 ): ModelingDiagnostic {
   return {
     code: OCC_CONTRACT_GAP_CODES.constructionPlaneGeometryUnavailable,
-    severity: 'warning',
+    severity: "warning",
     message: OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots,
     target: construction.target,
     detail: null,
-  }
+  };
 }
 
 function getFaceSemanticClasses(
   state: OccAuthoringState,
-  face: InstanceType<OccAuthoringState['oc']['TopoDS_Face']>,
+  face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
 ) {
   try {
-    extractPlanarFaceData(state.oc, face)
+    extractPlanarFaceData(state.oc, face);
     return {
-      entity: ['face', 'planarFace', 'planarReference'] as const,
-      render: 'planarFace' as const,
-    }
+      entity: ["face", "planarFace", "planarReference"] as const,
+      render: "planarFace" as const,
+    };
   } catch {
     return {
-      entity: ['face'] as const,
-      render: 'bodyFace' as const,
-    }
+      entity: ["face"] as const,
+      render: "bodyFace" as const,
+    };
   }
 }
 
-type FaceSemanticClasses = ReturnType<typeof getFaceSemanticClasses>
+type FaceSemanticClasses = ReturnType<typeof getFaceSemanticClasses>;
 
-function collectFeatureConsumedTargets(definition: OccAuthoringState['features'][number]['definition']) {
-  const targets: DurableRef[] = []
+function collectFeatureConsumedTargets(
+  definition: OccAuthoringState["features"][number]["definition"],
+) {
+  const targets: DurableRef[] = [];
   let booleanScope:
-    | Extract<typeof definition, { kind: 'extrude' }>['parameters']['booleanScope']
-    | Extract<typeof definition, { kind: 'revolve' }>['parameters']['booleanScope']
-    | Extract<typeof definition, { kind: 'shell' }>['parameters']['booleanScope']
-    | null = null
+    | Extract<
+        typeof definition,
+        { kind: "extrude" }
+      >["parameters"]["booleanScope"]
+    | Extract<
+        typeof definition,
+        { kind: "revolve" }
+      >["parameters"]["booleanScope"]
+    | Extract<
+        typeof definition,
+        { kind: "shell" }
+      >["parameters"]["booleanScope"]
+    | null = null;
 
   switch (definition.kind) {
-    case 'extrude':
-      targets.push(...definition.parameters.profiles)
-      booleanScope = definition.parameters.booleanScope
-      break
-    case 'fillet':
-      targets.push(...definition.parameters.edgeTargets)
-      break
-    case 'plane':
-      targets.push(definition.parameters.reference.target)
-      break
-    case 'revolve':
-      targets.push(...definition.parameters.profiles, definition.parameters.axis)
-      booleanScope = definition.parameters.booleanScope
-      break
-    case 'shell':
-      targets.push(definition.parameters.bodyTarget, ...definition.parameters.faceTargets)
-      booleanScope = definition.parameters.booleanScope
-      break
+    case "extrude":
+      targets.push(...definition.parameters.profiles);
+      booleanScope = definition.parameters.booleanScope;
+      break;
+    case "fillet":
+      targets.push(...definition.parameters.edgeTargets);
+      break;
+    case "plane":
+      targets.push(definition.parameters.reference.target);
+      break;
+    case "revolve":
+      targets.push(
+        ...definition.parameters.profiles,
+        definition.parameters.axis,
+      );
+      booleanScope = definition.parameters.booleanScope;
+      break;
+    case "shell":
+      targets.push(
+        definition.parameters.bodyTarget,
+        ...definition.parameters.faceTargets,
+      );
+      booleanScope = definition.parameters.booleanScope;
+      break;
     default:
-      targets.push(...definition.parameters.participants.flatMap((participant) => [...participant.targets]))
-      break
+      targets.push(
+        ...definition.parameters.participants.flatMap((participant) => [
+          ...participant.targets,
+        ]),
+      );
+      break;
   }
 
-  if (booleanScope?.kind === 'targetBody') {
-    targets.push({ kind: 'body', bodyId: booleanScope.bodyId })
-  } else if (booleanScope?.kind === 'targetBodies') {
-    targets.push(...booleanScope.bodyIds.map((bodyId) => ({ kind: 'body', bodyId } as const)))
+  if (booleanScope?.kind === "targetBody") {
+    targets.push({ kind: "body", bodyId: booleanScope.bodyId });
+  } else if (booleanScope?.kind === "targetBodies") {
+    targets.push(
+      ...booleanScope.bodyIds.map(
+        (bodyId) => ({ kind: "body", bodyId }) as const,
+      ),
+    );
   }
 
-  return targets
+  return targets;
 }
 
 function getFeatureConsumerKeys(target: DurableRef) {
-  const keys = [getOccDurableRefKey(target)]
+  const keys = [getOccDurableRefKey(target)];
 
-  if (target.kind === 'region') {
-    keys.push(getOccDurableRefKey({ kind: 'sketch', sketchId: target.sketchId }))
+  if (target.kind === "region") {
+    keys.push(
+      getOccDurableRefKey({ kind: "sketch", sketchId: target.sketchId }),
+    );
   }
 
-  return keys
+  return keys;
 }
 
 function createFeatureConsumerMap(
   state: OccAuthoringState,
-  features: readonly OccAuthoringState['features'][number][] = state.features,
+  features: readonly OccAuthoringState["features"][number][] = state.features,
 ) {
-  const consumers = new Map<string, FeatureId[]>()
+  const consumers = new Map<string, FeatureId[]>();
 
   for (const feature of features) {
-    const featureId = feature.featureId
-    const uniqueKeys = new Set<string>()
+    const featureId = feature.featureId;
+    const uniqueKeys = new Set<string>();
 
     for (const target of collectFeatureConsumedTargets(feature.definition)) {
       for (const key of getFeatureConsumerKeys(target)) {
-        uniqueKeys.add(key)
+        uniqueKeys.add(key);
       }
     }
 
     for (const key of uniqueKeys) {
-      const current = consumers.get(key)
+      const current = consumers.get(key);
 
       if (current) {
-        current.push(featureId)
-        continue
+        current.push(featureId);
+        continue;
       }
 
-      consumers.set(key, [featureId])
+      consumers.set(key, [featureId]);
     }
   }
 
-  return consumers
+  return consumers;
 }
 
 function createProducedTargetsByFeatureId(
-  features: readonly OccAuthoringState['features'][number][],
+  features: readonly OccAuthoringState["features"][number][],
 ) {
-  const producedTargetsByFeatureId = new Map<FeatureId, DurableRef[]>()
+  const producedTargetsByFeatureId = new Map<FeatureId, DurableRef[]>();
 
   for (const feature of features) {
     if (!feature.producedTargets || feature.producedTargets.length === 0) {
-      producedTargetsByFeatureId.set(feature.featureId, [])
-      continue
+      producedTargetsByFeatureId.set(feature.featureId, []);
+      continue;
     }
 
     producedTargetsByFeatureId.set(
@@ -297,49 +334,49 @@ function createProducedTargetsByFeatureId(
       [...feature.producedTargets].sort((left, right) =>
         getOccDurableRefKey(left).localeCompare(getOccDurableRefKey(right)),
       ),
-    )
+    );
   }
 
-  return producedTargetsByFeatureId
+  return producedTargetsByFeatureId;
 }
 
 function createSnapshotFeatureDefinition(
-  definition: OccAuthoringState['features'][number]['definition'],
-): FeatureSnapshotRecord['definition'] {
+  definition: OccAuthoringState["features"][number]["definition"],
+): FeatureSnapshotRecord["definition"] {
   switch (definition.kind) {
-    case 'extrude':
+    case "extrude":
       return {
-        kind: 'extrude',
+        kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
           profiles: definition.parameters.profiles,
-          startExtent: { kind: 'profilePlane' },
+          startExtent: { kind: "profilePlane" },
           extent: definition.parameters.extent,
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },
-      }
-    case 'fillet':
+      };
+    case "fillet":
       return {
-        kind: 'fillet',
+        kind: "fillet",
         featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
         parameters: {
           radius: definition.parameters.radius,
           edgeTargets: definition.parameters.edgeTargets,
         },
-      }
-    case 'plane':
+      };
+    case "plane":
       return {
-        kind: 'plane',
+        kind: "plane",
         featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
         parameters: {
-          mode: 'coplanar',
+          mode: "coplanar",
           reference: definition.parameters.reference,
         },
-    }
-    case 'revolve': {
+      };
+    case "revolve": {
       return {
-        kind: 'revolve',
+        kind: "revolve",
         featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
         parameters: {
           profiles: definition.parameters.profiles,
@@ -349,11 +386,11 @@ function createSnapshotFeatureDefinition(
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },
-      }
+      };
     }
-    case 'shell':
+    case "shell":
       return {
-        kind: 'shell',
+        kind: "shell",
         featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
         parameters: {
           bodyTarget: definition.parameters.bodyTarget,
@@ -363,19 +400,21 @@ function createSnapshotFeatureDefinition(
           operation: definition.parameters.operation,
           booleanScope: definition.parameters.booleanScope,
         },
-      }
+      };
     default:
       return {
         kind: definition.kind,
         featureTypeVersion: definition.featureTypeVersion,
         parameters: {
           ...definition.parameters,
-          participants: definition.parameters.participants.map((participant) => ({
-            role: participant.role,
-            targets: [...participant.targets],
-          })),
+          participants: definition.parameters.participants.map(
+            (participant) => ({
+              role: participant.role,
+              targets: [...participant.targets],
+            }),
+          ),
         },
-      }
+      };
   }
 }
 
@@ -383,47 +422,47 @@ function buildSnapshotPresentationRecords(
   state: OccAuthoringState,
   producedTargetsByFeatureId: ReadonlyMap<FeatureId, readonly DurableRef[]>,
 ) {
-  const features: FeatureSnapshotRecord[] = []
-  const constructionFeatureTree: FeatureTreeNodeRecord[] = []
-  const objects: ObjectTreeNodeRecord[] = []
-  const sketchNodes = new Map<SketchId, FeatureTreeNodeRecord>()
-  const featureNodes = new Map<FeatureId, FeatureTreeNodeRecord>()
+  const features: FeatureSnapshotRecord[] = [];
+  const constructionFeatureTree: FeatureTreeNodeRecord[] = [];
+  const objects: ObjectTreeNodeRecord[] = [];
+  const sketchNodes = new Map<SketchId, FeatureTreeNodeRecord>();
+  const featureNodes = new Map<FeatureId, FeatureTreeNodeRecord>();
 
   for (const construction of state.constructions) {
     constructionFeatureTree.push({
-      id: createFeatureTreeNodeId('construction', construction.target),
+      id: createFeatureTreeNodeId("construction", construction.target),
       label: construction.label,
-      description: 'Construction plane',
-      kind: 'plane',
+      description: "Construction plane",
+      kind: "plane",
       target: construction.target,
       ownerFeatureId: construction.ownerFeatureId,
       ownerSketchId: null,
       sourceFeatureId: construction.ownerFeatureId,
-    })
+    });
     objects.push({
-      id: createObjectTreeNodeId('construction', construction.target),
+      id: createObjectTreeNodeId("construction", construction.target),
       label: construction.label,
-      description: 'Construction plane',
-      kind: 'construction',
+      description: "Construction plane",
+      kind: "construction",
       target: construction.target,
       ownerBodyId: null,
       ownerFeatureId: construction.ownerFeatureId,
       ownerSketchId: null,
-    })
+    });
   }
 
   for (const sketch of state.sketches) {
-    const target = { kind: 'sketch', sketchId: sketch.sketchId } as const
+    const target = { kind: "sketch", sketchId: sketch.sketchId } as const;
     sketchNodes.set(sketch.sketchId, {
-      id: createFeatureTreeNodeId('sketch', target),
+      id: createFeatureTreeNodeId("sketch", target),
       label: sketch.label,
-      description: 'Authored sketch',
-      kind: 'sketch',
+      description: "Authored sketch",
+      kind: "sketch",
       target,
       ownerFeatureId: sketch.ownerFeatureId,
       ownerSketchId: sketch.sketchId,
       sourceFeatureId: sketch.ownerFeatureId,
-    })
+    });
   }
 
   for (const feature of state.features) {
@@ -437,20 +476,25 @@ function buildSnapshotPresentationRecords(
       label: buildFeatureLabel(feature.featureId, feature.label),
       suppressed: feature.suppressed,
       definition: createSnapshotFeatureDefinition(feature.definition),
-      producedTargets: [...(producedTargetsByFeatureId.get(feature.featureId) ?? [])],
-    }
+      producedTargets: [
+        ...(producedTargetsByFeatureId.get(feature.featureId) ?? []),
+      ],
+    };
 
-    features.push(snapshot)
+    features.push(snapshot);
     featureNodes.set(snapshot.featureId, {
-      id: createFeatureTreeNodeId('feature', { kind: 'feature', featureId: snapshot.featureId }),
+      id: createFeatureTreeNodeId("feature", {
+        kind: "feature",
+        featureId: snapshot.featureId,
+      }),
       label: snapshot.label,
       description: `${snapshot.definition.kind} feature`,
-      kind: 'feature',
-      target: { kind: 'feature', featureId: snapshot.featureId },
+      kind: "feature",
+      target: { kind: "feature", featureId: snapshot.featureId },
       ownerFeatureId: snapshot.featureId,
       ownerSketchId: null,
       sourceFeatureId: null,
-    })
+    });
   }
 
   const historyItems = createDocumentHistoryItems({
@@ -458,85 +502,104 @@ function buildSnapshotPresentationRecords(
     features,
     sketches: state.sketches,
     historyOrder: state.historyOrder,
-  })
-  const appliedHistoryItems = getAppliedDocumentHistoryItemsForDocumentCursor(historyItems, state.cursor)
-  const appliedSketchIds = getAppliedSketchIdsForDocumentCursor(historyItems, state.cursor)
+  });
+  const appliedHistoryItems = getAppliedDocumentHistoryItemsForDocumentCursor(
+    historyItems,
+    state.cursor,
+  );
+  const appliedSketchIds = getAppliedSketchIdsForDocumentCursor(
+    historyItems,
+    state.cursor,
+  );
   const appliedFeatureIds = new Set(
     appliedHistoryItems
-      .filter((item): item is Extract<(typeof appliedHistoryItems)[number], { kind: 'feature' }> =>
-        item.kind === 'feature',
+      .filter(
+        (
+          item,
+        ): item is Extract<
+          (typeof appliedHistoryItems)[number],
+          { kind: "feature" }
+        > => item.kind === "feature",
       )
       .map((item) => item.featureId),
-  )
+  );
   const featureTree: FeatureTreeNodeRecord[] = [
     ...constructionFeatureTree,
     ...appliedHistoryItems.flatMap((item) => {
-      const node = item.kind === 'sketch'
-        ? sketchNodes.get(item.sketchId)
-        : featureNodes.get(item.featureId)
-      return node ? [node] : []
+      const node =
+        item.kind === "sketch"
+          ? sketchNodes.get(item.sketchId)
+          : featureNodes.get(item.featureId);
+      return node ? [node] : [];
     }),
-  ]
+  ];
 
   for (const sketch of state.sketches) {
     if (!appliedSketchIds.has(sketch.sketchId)) {
-      continue
+      continue;
     }
 
-    const target = { kind: 'sketch', sketchId: sketch.sketchId } as const
+    const target = { kind: "sketch", sketchId: sketch.sketchId } as const;
     objects.push({
-      id: createObjectTreeNodeId('sketch', target),
+      id: createObjectTreeNodeId("sketch", target),
       label: sketch.label,
-      description: 'Authored sketch',
-      kind: 'sketch',
+      description: "Authored sketch",
+      kind: "sketch",
       target,
       ownerBodyId: null,
       ownerFeatureId: sketch.ownerFeatureId,
       ownerSketchId: sketch.sketchId,
-    })
+    });
   }
 
   for (const body of state.bodies) {
-    const target = { kind: 'body', bodyId: body.bodyId } as const
+    const target = { kind: "body", bodyId: body.bodyId } as const;
     objects.push({
-      id: createObjectTreeNodeId('body', target),
+      id: createObjectTreeNodeId("body", target),
       label: body.label,
-      description: 'Solid body',
-      kind: 'body',
+      description: "Solid body",
+      kind: "body",
       target,
       ownerBodyId: body.bodyId,
       ownerFeatureId: body.ownerFeatureId,
       ownerSketchId: null,
-    })
+    });
   }
 
   return {
     features,
     featureTree,
     objects,
-    appliedSketches: state.sketches.filter((sketch) => appliedSketchIds.has(sketch.sketchId)),
-    appliedFeatures: state.features.filter((feature) => appliedFeatureIds.has(feature.featureId)),
+    appliedSketches: state.sketches.filter((sketch) =>
+      appliedSketchIds.has(sketch.sketchId),
+    ),
+    appliedFeatures: state.features.filter((feature) =>
+      appliedFeatureIds.has(feature.featureId),
+    ),
     appliedSketchIds,
-  }
+  };
 }
 
 function createFaceSemanticClassMap(state: OccAuthoringState) {
-  const faceSemanticClasses = new Map<string, FaceSemanticClasses>()
+  const faceSemanticClasses = new Map<string, FaceSemanticClasses>();
 
   for (const body of state.bodies) {
     for (const faceId of body.topology.faceIds) {
-      const face = body.facesById.get(faceId)
+      const face = body.facesById.get(faceId);
 
       if (!face) {
-        continue
+        continue;
       }
 
-      const target = createFaceTarget(body.bodyId, faceId)
-      faceSemanticClasses.set(getOccDurableRefKey(target), getFaceSemanticClasses(state, face))
+      const target = createFaceTarget(body.bodyId, faceId);
+      faceSemanticClasses.set(
+        getOccDurableRefKey(target),
+        getFaceSemanticClasses(state, face),
+      );
     }
   }
 
-  return faceSemanticClasses
+  return faceSemanticClasses;
 }
 
 function buildBodyEntities(
@@ -545,7 +608,7 @@ function buildBodyEntities(
   consumerMap: ReadonlyMap<string, FeatureId[]>,
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
 ): SnapshotEntityRecord[] {
-  const bodyTarget = { kind: 'body', bodyId: body.bodyId } as const
+  const bodyTarget = { kind: "body", bodyId: body.bodyId } as const;
   const records: SnapshotEntityRecord[] = [
     {
       ownerDocumentId: state.documentId,
@@ -557,21 +620,27 @@ function buildBodyEntities(
       label: body.label,
       target: bodyTarget,
       relatedTargets: [],
-      contributingFeatureIds: orderContributorFeatureIds(state, body.contributingFeatureIds),
-      consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(bodyTarget)) ?? [],
-      selectionSemantics: ['body'],
+      contributingFeatureIds: orderContributorFeatureIds(
+        state,
+        body.contributingFeatureIds,
+      ),
+      consumedByFeatureIds:
+        consumerMap.get(getOccDurableRefKey(bodyTarget)) ?? [],
+      selectionSemantics: ["body"],
     },
-  ]
+  ];
 
   for (const faceId of body.topology.faceIds) {
-    const target = createFaceTarget(body.bodyId, faceId)
-    const face = body.facesById.get(faceId)
+    const target = createFaceTarget(body.bodyId, faceId);
+    const face = body.facesById.get(faceId);
 
     if (!face) {
-      continue
+      continue;
     }
 
-    const semantics = faceSemanticClasses.get(getOccDurableRefKey(target)) ?? getFaceSemanticClasses(state, face)
+    const semantics =
+      faceSemanticClasses.get(getOccDurableRefKey(target)) ??
+      getFaceSemanticClasses(state, face);
     records.push({
       ownerDocumentId: state.documentId,
       ownerRevisionId: state.revisionId,
@@ -582,14 +651,17 @@ function buildBodyEntities(
       label: `${body.label} ${faceId}`,
       target,
       relatedTargets: [bodyTarget],
-      contributingFeatureIds: orderContributorFeatureIds(state, body.faceContributingFeatureIdsById.get(faceId) ?? []),
+      contributingFeatureIds: orderContributorFeatureIds(
+        state,
+        body.faceContributingFeatureIdsById.get(faceId) ?? [],
+      ),
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
       selectionSemantics: [...semantics.entity],
-    })
+    });
   }
 
   for (const edgeId of body.topology.edgeIds) {
-    const target = createEdgeTarget(body.bodyId, edgeId)
+    const target = createEdgeTarget(body.bodyId, edgeId);
     records.push({
       ownerDocumentId: state.documentId,
       ownerRevisionId: state.revisionId,
@@ -600,14 +672,17 @@ function buildBodyEntities(
       label: `${body.label} ${edgeId}`,
       target,
       relatedTargets: [bodyTarget],
-      contributingFeatureIds: orderContributorFeatureIds(state, body.edgeContributingFeatureIdsById.get(edgeId) ?? []),
+      contributingFeatureIds: orderContributorFeatureIds(
+        state,
+        body.edgeContributingFeatureIdsById.get(edgeId) ?? [],
+      ),
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
-      selectionSemantics: ['edge'],
-    })
+      selectionSemantics: ["edge"],
+    });
   }
 
   for (const vertexId of body.topology.vertexIds) {
-    const target = createVertexTarget(body.bodyId, vertexId)
+    const target = createVertexTarget(body.bodyId, vertexId);
     records.push({
       ownerDocumentId: state.documentId,
       ownerRevisionId: state.revisionId,
@@ -618,13 +693,16 @@ function buildBodyEntities(
       label: `${body.label} ${vertexId}`,
       target,
       relatedTargets: [bodyTarget],
-      contributingFeatureIds: orderContributorFeatureIds(state, body.vertexContributingFeatureIdsById.get(vertexId) ?? []),
+      contributingFeatureIds: orderContributorFeatureIds(
+        state,
+        body.vertexContributingFeatureIdsById.get(vertexId) ?? [],
+      ),
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
-      selectionSemantics: ['vertex'],
-    })
+      selectionSemantics: ["vertex"],
+    });
   }
 
-  return records
+  return records;
 }
 
 function buildConstructionEntities(
@@ -642,9 +720,10 @@ function buildConstructionEntities(
     target: construction.target,
     relatedTargets: [],
     contributingFeatureIds: [],
-    consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(construction.target)) ?? [],
-    selectionSemantics: ['constructionPlane', 'planarReference'],
-  }))
+    consumedByFeatureIds:
+      consumerMap.get(getOccDurableRefKey(construction.target)) ?? [],
+    selectionSemantics: ["constructionPlane", "planarReference"],
+  }));
 }
 
 function buildSketchEntities(
@@ -652,7 +731,7 @@ function buildSketchEntities(
   sketch: SketchSnapshotRecord,
   consumerMap: ReadonlyMap<string, FeatureId[]>,
 ): SnapshotEntityRecord[] {
-  const sketchTarget = { kind: 'sketch', sketchId: sketch.sketchId } as const
+  const sketchTarget = { kind: "sketch", sketchId: sketch.sketchId } as const;
   const records: SnapshotEntityRecord[] = [
     {
       ownerDocumentId: state.documentId,
@@ -665,10 +744,11 @@ function buildSketchEntities(
       target: sketchTarget,
       relatedTargets: [],
       contributingFeatureIds: [],
-      consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(sketchTarget)) ?? [],
-      selectionSemantics: ['existingSketch'],
+      consumedByFeatureIds:
+        consumerMap.get(getOccDurableRefKey(sketchTarget)) ?? [],
+      selectionSemantics: ["existingSketch"],
     },
-  ]
+  ];
 
   for (const region of sketch.sketch.regions) {
     records.push({
@@ -682,13 +762,18 @@ function buildSketchEntities(
       target: region.target,
       relatedTargets: [sketchTarget],
       contributingFeatureIds: [],
-      consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(region.target)) ?? [],
-      selectionSemantics: ['existingSketch'],
-    })
+      consumedByFeatureIds:
+        consumerMap.get(getOccDurableRefKey(region.target)) ?? [],
+      selectionSemantics: ["existingSketch"],
+    });
   }
 
   for (const entity of sketch.sketch.definition.entities) {
-    const target = { kind: 'sketchEntity', sketchId: sketch.sketchId, entityId: entity.entityId } as const
+    const target = {
+      kind: "sketchEntity",
+      sketchId: sketch.sketchId,
+      entityId: entity.entityId,
+    } as const;
     records.push({
       ownerDocumentId: state.documentId,
       ownerRevisionId: state.revisionId,
@@ -701,12 +786,16 @@ function buildSketchEntities(
       relatedTargets: [sketchTarget],
       contributingFeatureIds: [],
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
-      selectionSemantics: ['sketchEntity'],
-    })
+      selectionSemantics: ["sketchEntity"],
+    });
   }
 
   for (const point of sketch.sketch.definition.points) {
-    const target = { kind: 'sketchPoint', sketchId: sketch.sketchId, pointId: point.pointId } as const
+    const target = {
+      kind: "sketchPoint",
+      sketchId: sketch.sketchId,
+      pointId: point.pointId,
+    } as const;
     records.push({
       ownerDocumentId: state.documentId,
       ownerRevisionId: state.revisionId,
@@ -720,10 +809,10 @@ function buildSketchEntities(
       contributingFeatureIds: [],
       consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
       selectionSemantics: [],
-    })
+    });
   }
 
-  return records
+  return records;
 }
 
 function buildSnapshotEntities(
@@ -734,9 +823,13 @@ function buildSnapshotEntities(
 ) {
   return [
     ...buildConstructionEntities(state, consumerMap),
-    ...appliedSketches.flatMap((sketch) => buildSketchEntities(state, sketch, consumerMap)),
-    ...state.bodies.flatMap((body) => buildBodyEntities(state, body, consumerMap, faceSemanticClasses)),
-  ]
+    ...appliedSketches.flatMap((sketch) =>
+      buildSketchEntities(state, sketch, consumerMap),
+    ),
+    ...state.bodies.flatMap((body) =>
+      buildBodyEntities(state, body, consumerMap, faceSemanticClasses),
+    ),
+  ];
 }
 
 function buildReferenceRecords(
@@ -746,12 +839,20 @@ function buildReferenceRecords(
   const entries = [
     ...state.referenceState.liveReferencesByKey.values(),
     ...state.referenceState.invalidatedReferencesByKey.values(),
-  ]
+  ];
 
   return entries
-    .filter((reference) => reference.ownerSketchId === null || appliedSketchIds.has(reference.ownerSketchId))
+    .filter(
+      (reference) =>
+        reference.ownerSketchId === null ||
+        appliedSketchIds.has(reference.ownerSketchId),
+    )
     .slice()
-    .sort((left, right) => getOccDurableRefKey(left.target).localeCompare(getOccDurableRefKey(right.target)))
+    .sort((left, right) =>
+      getOccDurableRefKey(left.target).localeCompare(
+        getOccDurableRefKey(right.target),
+      ),
+    )
     .map((reference) => ({
       id: createReferenceId(reference.target),
       label: reference.label,
@@ -762,34 +863,36 @@ function buildReferenceRecords(
       ownerSketchId: reference.ownerSketchId,
       ownerBodyId: reference.ownerBodyId,
       invalidation: reference.invalidation,
-    }))
+    }));
 }
 
 export function buildOccSnapshotDiagnostics(
   state: OccAuthoringState,
   extraDiagnostics: readonly ModelingDiagnostic[],
 ): ModelingDiagnostic[] {
-  const diagnostics = [...state.diagnostics, ...extraDiagnostics]
+  const diagnostics = [...state.diagnostics, ...extraDiagnostics];
 
   for (const construction of state.constructions) {
     if (construction.ownerFeatureId !== null) {
-      diagnostics.push(createConstructionPlaneGapDiagnostic(construction))
+      diagnostics.push(createConstructionPlaneGapDiagnostic(construction));
     }
   }
 
-  return diagnostics
+  return diagnostics;
 }
 
-function buildConstructionRenderRecords(state: OccAuthoringState): RenderableEntityRecord[] {
+function buildConstructionRenderRecords(
+  state: OccAuthoringState,
+): RenderableEntityRecord[] {
   return state.constructions.flatMap((construction) => {
-    const plane = state.constructionPlanes.get(construction.constructionId)
+    const plane = state.constructionPlanes.get(construction.constructionId);
 
     if (!plane) {
-      return []
+      return [];
     }
 
-    const size = 10
-    const { origin, xAxis, yAxis } = plane.frame
+    const size = 10;
+    const { origin, xAxis, yAxis } = plane.frame;
     const points: RenderPoint3D[] = [
       [
         origin[0] + xAxis[0] * -size + yAxis[0] * -size,
@@ -811,10 +914,10 @@ function buildConstructionRenderRecords(state: OccAuthoringState): RenderableEnt
         origin[1] + xAxis[1] * -size + yAxis[1] * size,
         origin[2] + xAxis[2] * -size + yAxis[2] * size,
       ],
-    ]
+    ];
 
-    const target = construction.target as ConstructionRef
-    const normal = plane.frame.normal
+    const target = construction.target as ConstructionRef;
+    const normal = plane.frame.normal;
 
     return [
       {
@@ -827,10 +930,10 @@ function buildConstructionRenderRecords(state: OccAuthoringState): RenderableEnt
           pickPriority: CONSTRUCTION_PICK_PRIORITY,
           target,
           topology: null,
-          semanticClass: 'construction',
+          semanticClass: "construction",
         },
         geometry: {
-          kind: 'mesh',
+          kind: "mesh",
           vertexPositions: points,
           vertexNormals: [normal, normal, normal, normal],
           triangleIndices: [
@@ -849,104 +952,124 @@ function buildConstructionRenderRecords(state: OccAuthoringState): RenderableEnt
           pickPriority: CONSTRUCTION_PICK_PRIORITY,
           target,
           topology: null,
-          semanticClass: 'construction',
+          semanticClass: "construction",
         },
         geometry: {
-          kind: 'polyline',
+          kind: "polyline",
           points,
           isClosed: true,
         },
       } satisfies RenderableEntityRecord,
-    ]
-  })
+    ];
+  });
 }
 
 function buildMeshGeometryFromFace(
   state: OccAuthoringState,
-  face: InstanceType<OccAuthoringState['oc']['TopoDS_Face']>,
+  face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
 ) {
-  const location = new state.oc.TopLoc_Location_1()
-  const triangulationHandle = state.oc.BRep_Tool.Triangulation(face, location, 0 as never)
+  const location = new state.oc.TopLoc_Location_1();
+  const triangulationHandle = state.oc.BRep_Tool.Triangulation(
+    face,
+    location,
+    0 as never,
+  );
 
   if (triangulationHandle.IsNull()) {
-    return null
+    return null;
   }
 
-  const triangulation = triangulationHandle.get()
-  const nodeCount = triangulation.NbNodes()
-  const triangleCount = triangulation.NbTriangles()
-  const hasNormals = triangulation.HasNormals()
-  const isReversed = getFaceOrientationIsReversed(state, face)
-  const vertexPositions = new Array<RenderPoint3D>(nodeCount)
-  const vertexNormals = hasNormals ? new Array<RenderPoint3D>(nodeCount) : null
-  const triangleIndices = new Array<readonly [number, number, number]>(triangleCount)
+  const triangulation = triangulationHandle.get();
+  const nodeCount = triangulation.NbNodes();
+  const triangleCount = triangulation.NbTriangles();
+  const hasNormals = triangulation.HasNormals();
+  const isReversed = getFaceOrientationIsReversed(state, face);
+  const vertexPositions = new Array<RenderPoint3D>(nodeCount);
+  const vertexNormals = hasNormals ? new Array<RenderPoint3D>(nodeCount) : null;
+  const triangleIndices = new Array<readonly [number, number, number]>(
+    triangleCount,
+  );
 
   for (let index = 1; index <= nodeCount; index += 1) {
-    vertexPositions[index - 1] = applyLocationToPoint(triangulation.Node(index), location)
+    vertexPositions[index - 1] = applyLocationToPoint(
+      triangulation.Node(index),
+      location,
+    );
 
     if (vertexNormals) {
-      const transformedNormal = triangulation.Normal_1(index).Transformed(location.Transformation())
+      const transformedNormal = triangulation
+        .Normal_1(index)
+        .Transformed(location.Transformation());
       const baseNormal: RenderPoint3D = [
         transformedNormal.X(),
         transformedNormal.Y(),
         transformedNormal.Z(),
-      ]
+      ];
 
       vertexNormals[index - 1] = isReversed
         ? [-baseNormal[0], -baseNormal[1], -baseNormal[2]]
-        : baseNormal
+        : baseNormal;
     }
   }
 
   for (let index = 1; index <= triangleCount; index += 1) {
-    const triangle = triangulation.Triangle(index)
-    const first = triangle.Value(1) - 1
-    const second = triangle.Value(2) - 1
-    const third = triangle.Value(3) - 1
+    const triangle = triangulation.Triangle(index);
+    const first = triangle.Value(1) - 1;
+    const second = triangle.Value(2) - 1;
+    const third = triangle.Value(3) - 1;
 
-    triangleIndices[index - 1] =
-      isReversed
-        ? [first, third, second]
-        : [first, second, third]
+    triangleIndices[index - 1] = isReversed
+      ? [first, third, second]
+      : [first, second, third];
   }
 
   return {
     vertexPositions,
     vertexNormals,
     triangleIndices,
-  }
+  };
 }
 
 function applyLocationToPoint(
-  point: { Transformed(theT: InstanceType<OccAuthoringState['oc']['gp_Trsf']>): { X(): number; Y(): number; Z(): number } },
-  location: InstanceType<OccAuthoringState['oc']['TopLoc_Location']>,
+  point: {
+    Transformed(theT: InstanceType<OccAuthoringState["oc"]["gp_Trsf"]>): {
+      X(): number;
+      Y(): number;
+      Z(): number;
+    };
+  },
+  location: InstanceType<OccAuthoringState["oc"]["TopLoc_Location"]>,
 ) {
-  return toRenderPoint(point.Transformed(location.Transformation()))
+  return toRenderPoint(point.Transformed(location.Transformation()));
 }
 
 function getFaceOrientationIsReversed(
   state: OccAuthoringState,
-  face: InstanceType<OccAuthoringState['oc']['TopoDS_Face']>,
+  face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
 ) {
-  return (face.Orientation_1() as { value?: number }).value
-    === (state.oc.TopAbs_Orientation.TopAbs_REVERSED as { value?: number }).value
+  return (
+    (face.Orientation_1() as { value?: number }).value ===
+    (state.oc.TopAbs_Orientation.TopAbs_REVERSED as { value?: number }).value
+  );
 }
 
 function buildFaceRenderRecord(
   state: OccAuthoringState,
   body: OccTrackedBody,
   faceId: FaceId,
-  face: InstanceType<OccAuthoringState['oc']['TopoDS_Face']>,
+  face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
 ): RenderableEntityRecord | null {
-  const geometry = buildMeshGeometryFromFace(state, face)
+  const geometry = buildMeshGeometryFromFace(state, face);
 
   if (!geometry) {
-    return null
+    return null;
   }
 
-  const target: FaceRef = createFaceTarget(body.bodyId, faceId)
-  const semantics = faceSemanticClasses.get(getOccDurableRefKey(target)) ?? getFaceSemanticClasses(state, face)
+  const target: FaceRef = createFaceTarget(body.bodyId, faceId);
+  const semantics =
+    faceSemanticClasses.get(getOccDurableRefKey(target)) ??
+    getFaceSemanticClasses(state, face);
 
   return {
     id: createRenderableId(target),
@@ -957,25 +1080,25 @@ function buildFaceRenderRecord(
       pickId: createPickId(target),
       pickPriority: FACE_PICK_PRIORITY,
       target,
-      topology: 'face',
+      topology: "face",
       semanticClass: semantics.render,
     },
     geometry: {
-      kind: 'mesh',
+      kind: "mesh",
       vertexPositions: geometry.vertexPositions,
       vertexNormals: geometry.vertexNormals,
       triangleIndices: geometry.triangleIndices,
     },
-  }
+  };
 }
 
 function getNativeTopologyBodyPayload(
   body: OccTrackedBody,
   options: OccSnapshotBuildOptions,
 ) {
-  return options.nativeTopologyPayload
-    ?.bodies
-    .find((candidate) => candidate.bodyId === body.bodyId)
+  return options.nativeTopologyPayload?.bodies.find(
+    (candidate) => candidate.bodyId === body.bodyId,
+  );
 }
 
 function createNativeFaceIdAliasMap(
@@ -983,25 +1106,27 @@ function createNativeFaceIdAliasMap(
   nativeBodyPayload: OccNativeTopologyBodyPayload | undefined,
 ) {
   if (body.nativeTopologyIdAliases?.faceIdsByNativeId) {
-    return body.nativeTopologyIdAliases.faceIdsByNativeId
+    return body.nativeTopologyIdAliases.faceIdsByNativeId;
   }
 
-  const aliases = new Map<string, FaceId>(body.topology.faceIds.map((faceId) => [faceId, faceId]))
-  const nativeFaceIds = nativeBodyPayload
-    ?.topology
-    .filter((record) => record.kind === 'face')
-    .map((record) => record.id) ?? []
+  const aliases = new Map<string, FaceId>(
+    body.topology.faceIds.map((faceId) => [faceId, faceId]),
+  );
+  const nativeFaceIds =
+    nativeBodyPayload?.topology
+      .filter((record) => record.kind === "face")
+      .map((record) => record.id) ?? [];
 
   for (let index = 0; index < nativeFaceIds.length; index += 1) {
-    const durableFaceId = body.topology.faceIds[index]
-    const nativeFaceId = nativeFaceIds[index]
+    const durableFaceId = body.topology.faceIds[index];
+    const nativeFaceId = nativeFaceIds[index];
 
     if (durableFaceId && nativeFaceId) {
-      aliases.set(nativeFaceId, durableFaceId)
+      aliases.set(nativeFaceId, durableFaceId);
     }
   }
 
-  return aliases
+  return aliases;
 }
 
 function buildNativeFaceMeshGeometry(
@@ -1009,63 +1134,65 @@ function buildNativeFaceMeshGeometry(
   faceId: FaceId,
   nativeFaceIdsByDurableFaceId: ReadonlyMap<string, FaceId>,
 ): RenderMeshGeometry | null {
-  const positions = mesh.positions
-  const triangleIndices = mesh.triangleIndices
-  const triangleFaceBindings = mesh.triangleFaceBindings
+  const positions = mesh.positions;
+  const triangleIndices = mesh.triangleIndices;
+  const triangleFaceBindings = mesh.triangleFaceBindings;
 
   if (!positions || !triangleIndices || !triangleFaceBindings) {
-    return null
+    return null;
   }
 
-  const vertexPositions: RenderPoint3D[] = []
-  const nativeVertexToLocalIndex = new Map<number, number>()
-  const localTriangleIndices: Array<readonly [number, number, number]> = []
+  const vertexPositions: RenderPoint3D[] = [];
+  const nativeVertexToLocalIndex = new Map<number, number>();
+  const localTriangleIndices: Array<readonly [number, number, number]> = [];
 
   const getLocalVertexIndex = (nativeIndex: number) => {
-    const existing = nativeVertexToLocalIndex.get(nativeIndex)
+    const existing = nativeVertexToLocalIndex.get(nativeIndex);
     if (existing !== undefined) {
-      return existing
+      return existing;
     }
 
-    const position = positions[nativeIndex]
+    const position = positions[nativeIndex];
     if (!position) {
-      throw new Error(`Native render mesh triangle references missing vertex index ${nativeIndex}.`)
+      throw new Error(
+        `Native render mesh triangle references missing vertex index ${nativeIndex}.`,
+      );
     }
 
-    const localIndex = vertexPositions.length
-    nativeVertexToLocalIndex.set(nativeIndex, localIndex)
-    vertexPositions.push([position[0], position[1], position[2]])
-    return localIndex
-  }
+    const localIndex = vertexPositions.length;
+    nativeVertexToLocalIndex.set(nativeIndex, localIndex);
+    vertexPositions.push([position[0], position[1], position[2]]);
+    return localIndex;
+  };
 
   for (let index = 0; index < triangleIndices.length; index += 1) {
-    const nativeFaceId = triangleFaceBindings[index]
+    const nativeFaceId = triangleFaceBindings[index];
     if (nativeFaceIdsByDurableFaceId.get(nativeFaceId) !== faceId) {
-      continue
+      continue;
     }
 
-    const triangle = triangleIndices[index]
+    const triangle = triangleIndices[index];
     if (!triangle) {
-      continue
+      continue;
     }
 
     localTriangleIndices.push([
       getLocalVertexIndex(triangle[0]),
       getLocalVertexIndex(triangle[1]),
       getLocalVertexIndex(triangle[2]),
-    ])
+    ]);
   }
 
   if (localTriangleIndices.length === 0) {
-    return null
+    return null;
   }
 
   return {
-    kind: 'mesh',
+    kind: "mesh",
     vertexPositions,
     vertexNormals: null,
     triangleIndices: localTriangleIndices,
-  }
+  };
 }
 
 function buildNativeFaceRenderRecords(
@@ -1075,20 +1202,30 @@ function buildNativeFaceRenderRecords(
   mesh: OccNativeShimMeshSummary,
   nativeBodyPayload: OccNativeTopologyBodyPayload | undefined,
 ) {
-  const records: RenderableEntityRecord[] = []
-  const nativeFaceIdsByDurableFaceId = createNativeFaceIdAliasMap(body, nativeBodyPayload)
+  const records: RenderableEntityRecord[] = [];
+  const nativeFaceIdsByDurableFaceId = createNativeFaceIdAliasMap(
+    body,
+    nativeBodyPayload,
+  );
 
   for (const faceId of body.topology.faceIds) {
-    const geometry = buildNativeFaceMeshGeometry(mesh, faceId, nativeFaceIdsByDurableFaceId)
+    const geometry = buildNativeFaceMeshGeometry(
+      mesh,
+      faceId,
+      nativeFaceIdsByDurableFaceId,
+    );
 
     if (!geometry) {
-      continue
+      continue;
     }
 
-    const target: FaceRef = createFaceTarget(body.bodyId, faceId)
-    const face = body.facesById.get(faceId)
-    const semantics = faceSemanticClasses.get(getOccDurableRefKey(target))
-      ?? (face ? getFaceSemanticClasses(state, face) : { entity: ['face'] as const, render: 'bodyFace' as const })
+    const target: FaceRef = createFaceTarget(body.bodyId, faceId);
+    const face = body.facesById.get(faceId);
+    const semantics =
+      faceSemanticClasses.get(getOccDurableRefKey(target)) ??
+      (face
+        ? getFaceSemanticClasses(state, face)
+        : { entity: ["face"] as const, render: "bodyFace" as const });
 
     records.push({
       id: createRenderableId(target),
@@ -1099,43 +1236,46 @@ function buildNativeFaceRenderRecords(
         pickId: createPickId(target),
         pickPriority: FACE_PICK_PRIORITY,
         target,
-        topology: 'face',
+        topology: "face",
         semanticClass: semantics.render,
       },
       geometry,
-    })
+    });
   }
 
-  return records
+  return records;
 }
 
 function buildCurrentFaceMapForMeshedBody(
   state: OccAuthoringState,
   body: OccTrackedBody,
 ) {
-  const faceMap = new state.oc.TopTools_IndexedMapOfShape_1()
+  const faceMap = new state.oc.TopTools_IndexedMapOfShape_1();
   state.oc.TopExp.MapShapes_1(
     body.shape,
     state.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
     faceMap,
-  )
+  );
 
   try {
     if (faceMap.Size() !== body.topology.faceIds.length) {
-      return body.facesById
+      return body.facesById;
     }
 
-    const facesById = new Map<FaceId, InstanceType<OccAuthoringState['oc']['TopoDS_Face']>>()
+    const facesById = new Map<
+      FaceId,
+      InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>
+    >();
     for (let index = 1; index <= faceMap.Size(); index += 1) {
-      const faceId = body.topology.faceIds[index - 1]
+      const faceId = body.topology.faceIds[index - 1];
       if (faceId) {
-        facesById.set(faceId, state.oc.TopoDS.Face_1(faceMap.FindKey(index)))
+        facesById.set(faceId, state.oc.TopoDS.Face_1(faceMap.FindKey(index)));
       }
     }
 
-    return facesById
+    return facesById;
   } finally {
-    faceMap.delete()
+    faceMap.delete();
   }
 }
 
@@ -1144,43 +1284,52 @@ function buildRegionRenderRecords(
   sketches: readonly SketchSnapshotRecord[],
   options: OccSnapshotBuildOptions = {},
 ) {
-  const records: RenderableEntityRecord[] = []
-  const tessellationTier = getOccTessellationTier(options.lodTierId)
+  const records: RenderableEntityRecord[] = [];
+  const tessellationTier = getOccTessellationTier(options.lodTierId);
 
   for (const sketch of sketches) {
     for (const region of sketch.sketch.regions) {
-      let profileFace: ReturnType<typeof buildRegionProfileFace> | null = null
+      let profileFace: ReturnType<typeof buildRegionProfileFace> | null = null;
 
       try {
-        profileFace = buildRegionProfileFace(state.oc, { plane: sketch.plane, sketch: sketch.sketch }, region)
+        profileFace = buildRegionProfileFace(
+          state.oc,
+          { plane: sketch.plane, sketch: sketch.sketch },
+          region,
+        );
       } catch (error) {
         if (!isProjectedRegionContractGap(error)) {
           console.warn(
             `[occ-snapshot] Skipping region render ${region.regionId}: failed to build profile face.`,
             error,
-          )
+          );
         }
-        continue
+        continue;
       }
 
       try {
         const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
           profileFace.face,
-          Math.max(state.modelingTolerance * 10, tessellationTier.linearDeflectionModelUnits),
+          Math.max(
+            state.modelingTolerance * 10,
+            tessellationTier.linearDeflectionModelUnits,
+          ),
           false,
           tessellationTier.angularDeflectionRadians,
           false,
-        )
-        deleteOccObject(mesher)
+        );
+        deleteOccObject(mesher);
 
-        const geometry = buildMeshGeometryFromFace(state, profileFace.face)
+        const geometry = buildMeshGeometryFromFace(state, profileFace.face);
 
         if (!geometry) {
-          console.warn(`[occ-snapshot] Skipping region render ${region.regionId}: profile face produced no mesh geometry.`)
-          continue
+          console.warn(
+            `[occ-snapshot] Skipping region render ${region.regionId}: profile face produced no mesh geometry.`,
+          );
+          continue;
         }
 
-        const target = region.target as RegionRef
+        const target = region.target as RegionRef;
         records.push({
           id: createRenderableId(target),
           label: region.label,
@@ -1191,159 +1340,180 @@ function buildRegionRenderRecords(
             pickPriority: REGION_PICK_PRIORITY,
             target,
             topology: null,
-            semanticClass: 'region',
+            semanticClass: "region",
           },
           geometry: {
-            kind: 'mesh',
+            kind: "mesh",
             vertexPositions: geometry.vertexPositions,
             vertexNormals: geometry.vertexNormals,
             triangleIndices: geometry.triangleIndices,
           },
-        })
+        });
       } finally {
-        deleteOccObject(profileFace.face)
+        deleteOccObject(profileFace.face);
       }
     }
   }
 
-  return records
+  return records;
 }
 
 function isProjectedRegionContractGap(error: unknown) {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable
+  );
 }
 
 function sampleCurveByParameters(
   state: OccAuthoringState,
-  edge: InstanceType<OccAuthoringState['oc']['TopoDS_Edge']>,
+  edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
   sampleCount: number,
 ) {
-  const curve = new state.oc.BRepAdaptor_Curve_2(edge)
-  const first = curve.FirstParameter()
-  const last = curve.LastParameter()
-  const points: RenderPoint3D[] = []
+  const curve = new state.oc.BRepAdaptor_Curve_2(edge);
+  const first = curve.FirstParameter();
+  const last = curve.LastParameter();
+  const points: RenderPoint3D[] = [];
 
   if (!Number.isFinite(first) || !Number.isFinite(last) || sampleCount < 2) {
-    return null
+    return null;
   }
 
   for (let index = 0; index < sampleCount; index += 1) {
-    const parameter = first + ((last - first) * index) / (sampleCount - 1)
-    points.push(toRenderPoint(curve.Value(parameter)))
+    const parameter = first + ((last - first) * index) / (sampleCount - 1);
+    points.push(toRenderPoint(curve.Value(parameter)));
   }
 
-  const isClosed = curve.GetType() === state.oc.GeomAbs_CurveType.GeomAbs_Circle
-    && points.length > 2
-    && points[0] !== undefined
-    && points[points.length - 1] !== undefined
-    && Math.abs(points[0][0] - points[points.length - 1]![0]) < state.modelingTolerance
-    && Math.abs(points[0][1] - points[points.length - 1]![1]) < state.modelingTolerance
-    && Math.abs(points[0][2] - points[points.length - 1]![2]) < state.modelingTolerance
+  const isClosed =
+    curve.GetType() === state.oc.GeomAbs_CurveType.GeomAbs_Circle &&
+    points.length > 2 &&
+    points[0] !== undefined &&
+    points[points.length - 1] !== undefined &&
+    Math.abs(points[0][0] - points[points.length - 1]![0]) <
+      state.modelingTolerance &&
+    Math.abs(points[0][1] - points[points.length - 1]![1]) <
+      state.modelingTolerance &&
+    Math.abs(points[0][2] - points[points.length - 1]![2]) <
+      state.modelingTolerance;
 
   return {
     points,
     isClosed,
-  }
+  };
 }
 
 function countDistinctRenderPoints(points: readonly RenderPoint3D[]) {
-  return new Set(points.map((point) => `${point[0]}:${point[1]}:${point[2]}`)).size
+  return new Set(points.map((point) => `${point[0]}:${point[1]}:${point[2]}`))
+    .size;
 }
 
 function buildEdgePolylineFromTriangulation(
   state: OccAuthoringState,
-  edge: InstanceType<OccAuthoringState['oc']['TopoDS_Edge']>,
-  faces: Iterable<InstanceType<OccAuthoringState['oc']['TopoDS_Face']>>,
+  edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
+  faces: Iterable<InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>>,
 ) {
   for (const face of faces) {
-    const triangulationLocation = new state.oc.TopLoc_Location_1()
-    const triangulationHandle = state.oc.BRep_Tool.Triangulation(face, triangulationLocation, 0 as never)
+    const triangulationLocation = new state.oc.TopLoc_Location_1();
+    const triangulationHandle = state.oc.BRep_Tool.Triangulation(
+      face,
+      triangulationLocation,
+      0 as never,
+    );
 
     if (triangulationHandle.IsNull()) {
-      continue
+      continue;
     }
 
-    const polygonLocation = new state.oc.TopLoc_Location_1()
+    const polygonLocation = new state.oc.TopLoc_Location_1();
     const polygonHandle = state.oc.BRep_Tool.PolygonOnTriangulation_1(
       edge,
       triangulationHandle,
       polygonLocation,
-    )
+    );
 
     if (polygonHandle.IsNull()) {
-      continue
+      continue;
     }
 
-    const triangulation = triangulationHandle.get()
-    const polygon = polygonHandle.get()
-    const points: RenderPoint3D[] = []
+    const triangulation = triangulationHandle.get();
+    const polygon = polygonHandle.get();
+    const points: RenderPoint3D[] = [];
 
     for (let index = 1; index <= polygon.NbNodes(); index += 1) {
-      const nodeIndex = polygon.Node(index)
-      points.push(applyLocationToPoint(triangulation.Node(nodeIndex), polygonLocation))
+      const nodeIndex = polygon.Node(index);
+      points.push(
+        applyLocationToPoint(triangulation.Node(nodeIndex), polygonLocation),
+      );
     }
 
-    const isClosed = state.oc.BRep_Tool.IsClosed_4(edge, triangulationHandle, polygonLocation)
+    const isClosed = state.oc.BRep_Tool.IsClosed_4(
+      edge,
+      triangulationHandle,
+      polygonLocation,
+    );
 
-    if (points.length >= 2 && (!isClosed || countDistinctRenderPoints(points) >= 3)) {
+    if (
+      points.length >= 2 &&
+      (!isClosed || countDistinctRenderPoints(points) >= 3)
+    ) {
       return {
         points,
         isClosed,
-      }
+      };
     }
   }
 
-  return null
+  return null;
 }
 
 function buildEdgePolylineFromPolygon3D(
   state: OccAuthoringState,
-  edge: InstanceType<OccAuthoringState['oc']['TopoDS_Edge']>,
+  edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
 ) {
-  const location = new state.oc.TopLoc_Location_1()
-  const polygonHandle = state.oc.BRep_Tool.Polygon3D(edge, location)
+  const location = new state.oc.TopLoc_Location_1();
+  const polygonHandle = state.oc.BRep_Tool.Polygon3D(edge, location);
 
   if (polygonHandle.IsNull()) {
-    return null
+    return null;
   }
 
-  const polygon = polygonHandle.get()
-  const nodes = polygon.Nodes()
-  const points: RenderPoint3D[] = []
+  const polygon = polygonHandle.get();
+  const nodes = polygon.Nodes();
+  const points: RenderPoint3D[] = [];
 
   for (let index = 1; index <= polygon.NbNodes(); index += 1) {
-    points.push(applyLocationToPoint(nodes.Value(index), location))
+    points.push(applyLocationToPoint(nodes.Value(index), location));
   }
 
   if (points.length < 2) {
-    return null
+    return null;
   }
 
   return {
     points,
     isClosed: false,
-  }
+  };
 }
 
 function buildEdgeRenderRecord(
   state: OccAuthoringState,
   body: OccTrackedBody,
   edgeId: EdgeId,
-  edge: InstanceType<OccAuthoringState['oc']['TopoDS_Edge']>,
-  faces: Iterable<InstanceType<OccAuthoringState['oc']['TopoDS_Face']>>,
+  edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
+  faces: Iterable<InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>>,
 ): RenderableEntityRecord | null {
-  const polyline = buildEdgePolylineFromTriangulation(state, edge, faces)
-    ?? buildEdgePolylineFromPolygon3D(state, edge)
-    ?? sampleCurveByParameters(state, edge, DEFAULT_EDGE_SAMPLE_COUNT)
+  const polyline =
+    buildEdgePolylineFromTriangulation(state, edge, faces) ??
+    buildEdgePolylineFromPolygon3D(state, edge) ??
+    sampleCurveByParameters(state, edge, DEFAULT_EDGE_SAMPLE_COUNT);
 
   if (!polyline || polyline.points.length < 2) {
-    return null
+    return null;
   }
 
-  const target: EdgeRef = createEdgeTarget(body.bodyId, edgeId)
+  const target: EdgeRef = createEdgeTarget(body.bodyId, edgeId);
 
   return {
     id: createRenderableId(target),
@@ -1354,24 +1524,24 @@ function buildEdgeRenderRecord(
       pickId: createPickId(target),
       pickPriority: EDGE_PICK_PRIORITY,
       target,
-      topology: 'edge',
-      semanticClass: 'featureEdge',
+      topology: "edge",
+      semanticClass: "featureEdge",
     },
     geometry: {
-      kind: 'polyline',
+      kind: "polyline",
       points: polyline.points,
       isClosed: polyline.isClosed,
     },
-  }
+  };
 }
 
 function buildVertexRenderRecord(
   state: OccAuthoringState,
   body: OccTrackedBody,
   vertexId: VertexId,
-  vertex: InstanceType<OccAuthoringState['oc']['TopoDS_Vertex']>,
+  vertex: InstanceType<OccAuthoringState["oc"]["TopoDS_Vertex"]>,
 ): RenderableEntityRecord {
-  const target: VertexRef = createVertexTarget(body.bodyId, vertexId)
+  const target: VertexRef = createVertexTarget(body.bodyId, vertexId);
 
   return {
     id: createRenderableId(target),
@@ -1382,15 +1552,15 @@ function buildVertexRenderRecord(
       pickId: createPickId(target),
       pickPriority: VERTEX_PICK_PRIORITY,
       target,
-      topology: 'vertex',
-      semanticClass: 'featureVertex',
+      topology: "vertex",
+      semanticClass: "featureVertex",
     },
     geometry: {
-      kind: 'marker',
+      kind: "marker",
       position: toRenderPoint(state.oc.BRep_Tool.Pnt(vertex)),
       displayRadius: DEFAULT_POINT_DISPLAY_RADIUS,
     },
-  }
+  };
 }
 
 function buildBodyRenderRecords(
@@ -1399,95 +1569,112 @@ function buildBodyRenderRecords(
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
   options: OccSnapshotBuildOptions = {},
 ) {
-  const records: RenderableEntityRecord[] = []
-  const nativeBodyPayload = getNativeTopologyBodyPayload(body, options)
-  const nativeRenderMesh = nativeBodyPayload?.renderMeshSummary ?? null
+  const records: RenderableEntityRecord[] = [];
+  const nativeBodyPayload = getNativeTopologyBodyPayload(body, options);
+  const nativeRenderMesh = nativeBodyPayload?.renderMeshSummary ?? null;
 
   if (nativeRenderMesh) {
-    records.push(...buildNativeFaceRenderRecords(
-      state,
-      body,
-      faceSemanticClasses,
-      nativeRenderMesh,
-      nativeBodyPayload,
-    ))
+    records.push(
+      ...buildNativeFaceRenderRecords(
+        state,
+        body,
+        faceSemanticClasses,
+        nativeRenderMesh,
+        nativeBodyPayload,
+      ),
+    );
 
     for (const edgeId of body.topology.edgeIds) {
-      const edge = body.edgesById.get(edgeId)
+      const edge = body.edgesById.get(edgeId);
 
       if (!edge) {
-        continue
+        continue;
       }
 
-      const record = buildEdgeRenderRecord(state, body, edgeId, edge, [])
+      const record = buildEdgeRenderRecord(state, body, edgeId, edge, []);
       if (record) {
-        records.push(record)
+        records.push(record);
       }
     }
 
     for (const vertexId of body.topology.vertexIds) {
-      const vertex = body.verticesById.get(vertexId)
+      const vertex = body.verticesById.get(vertexId);
 
       if (!vertex) {
-        continue
+        continue;
       }
 
-      records.push(buildVertexRenderRecord(state, body, vertexId, vertex))
+      records.push(buildVertexRenderRecord(state, body, vertexId, vertex));
     }
 
-    return records
+    return records;
   }
 
-  const tessellationTier = getOccTessellationTier(options.lodTierId)
+  const tessellationTier = getOccTessellationTier(options.lodTierId);
 
   const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
     body.shape,
-    Math.max(state.modelingTolerance * 10, tessellationTier.linearDeflectionModelUnits),
+    Math.max(
+      state.modelingTolerance * 10,
+      tessellationTier.linearDeflectionModelUnits,
+    ),
     false,
     tessellationTier.angularDeflectionRadians,
     false,
-  )
-  deleteOccObject(mesher)
+  );
+  deleteOccObject(mesher);
 
-  const meshedFacesById = buildCurrentFaceMapForMeshedBody(state, body)
+  const meshedFacesById = buildCurrentFaceMapForMeshedBody(state, body);
 
   for (const faceId of body.topology.faceIds) {
-    const face = meshedFacesById.get(faceId)
+    const face = meshedFacesById.get(faceId);
 
     if (!face) {
-      continue
+      continue;
     }
 
-    const record = buildFaceRenderRecord(state, body, faceId, face, faceSemanticClasses)
+    const record = buildFaceRenderRecord(
+      state,
+      body,
+      faceId,
+      face,
+      faceSemanticClasses,
+    );
     if (record) {
-      records.push(record)
+      records.push(record);
     }
   }
 
   for (const edgeId of body.topology.edgeIds) {
-    const edge = body.edgesById.get(edgeId)
+    const edge = body.edgesById.get(edgeId);
 
     if (!edge) {
-      continue
+      continue;
     }
 
-    const record = buildEdgeRenderRecord(state, body, edgeId, edge, meshedFacesById.values())
+    const record = buildEdgeRenderRecord(
+      state,
+      body,
+      edgeId,
+      edge,
+      meshedFacesById.values(),
+    );
     if (record) {
-      records.push(record)
+      records.push(record);
     }
   }
 
   for (const vertexId of body.topology.vertexIds) {
-    const vertex = body.verticesById.get(vertexId)
+    const vertex = body.verticesById.get(vertexId);
 
     if (!vertex) {
-      continue
+      continue;
     }
 
-    records.push(buildVertexRenderRecord(state, body, vertexId, vertex))
+    records.push(buildVertexRenderRecord(state, body, vertexId, vertex));
   }
 
-  return records
+  return records;
 }
 
 function sampleCirclePoints(
@@ -1495,17 +1682,17 @@ function sampleCirclePoints(
   radius: number,
   sampleCount: number,
 ) {
-  const points: Array<readonly [number, number]> = []
+  const points: Array<readonly [number, number]> = [];
 
   for (let index = 0; index < sampleCount; index += 1) {
-    const angle = (Math.PI * 2 * index) / sampleCount
+    const angle = (Math.PI * 2 * index) / sampleCount;
     points.push([
       center[0] + Math.cos(angle) * radius,
       center[1] + Math.sin(angle) * radius,
-    ])
+    ]);
   }
 
-  return points
+  return points;
 }
 
 function sampleEllipsePoints(
@@ -1517,22 +1704,29 @@ function sampleEllipsePoints(
   const majorVector = [
     majorAxisEndpoint[0] - center[0],
     majorAxisEndpoint[1] - center[1],
-  ] as const
-  const majorRadius = Math.hypot(majorVector[0], majorVector[1])
+  ] as const;
+  const majorRadius = Math.hypot(majorVector[0], majorVector[1]);
   if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
-    return []
+    return [];
   }
 
-  const majorUnit = [majorVector[0] / majorRadius, majorVector[1] / majorRadius] as const
-  const minorUnit = [-majorUnit[1], majorUnit[0]] as const
+  const majorUnit = [
+    majorVector[0] / majorRadius,
+    majorVector[1] / majorRadius,
+  ] as const;
+  const minorUnit = [-majorUnit[1], majorUnit[0]] as const;
 
   return Array.from({ length: sampleCount }, (_, index) => {
-    const angle = (Math.PI * 2 * index) / sampleCount
+    const angle = (Math.PI * 2 * index) / sampleCount;
     return [
-      center[0] + Math.cos(angle) * majorRadius * majorUnit[0] + Math.sin(angle) * minorRadius * minorUnit[0],
-      center[1] + Math.cos(angle) * majorRadius * majorUnit[1] + Math.sin(angle) * minorRadius * minorUnit[1],
-    ] as const
-  })
+      center[0] +
+        Math.cos(angle) * majorRadius * majorUnit[0] +
+        Math.sin(angle) * minorRadius * minorUnit[0],
+      center[1] +
+        Math.cos(angle) * majorRadius * majorUnit[1] +
+        Math.sin(angle) * minorRadius * minorUnit[1],
+    ] as const;
+  });
 }
 
 function sampleEllipticalArcPoints(
@@ -1541,41 +1735,49 @@ function sampleEllipticalArcPoints(
   start: readonly [number, number],
   end: readonly [number, number],
   minorRadius: number,
-  sweepDirection: 'clockwise' | 'counterClockwise',
+  sweepDirection: "clockwise" | "counterClockwise",
   sampleCount: number,
 ) {
   const majorVector = [
     majorAxisEndpoint[0] - center[0],
     majorAxisEndpoint[1] - center[1],
-  ] as const
-  const majorRadius = Math.hypot(majorVector[0], majorVector[1])
+  ] as const;
+  const majorRadius = Math.hypot(majorVector[0], majorVector[1]);
   if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
-    return []
+    return [];
   }
 
-  const majorUnit = [majorVector[0] / majorRadius, majorVector[1] / majorRadius] as const
-  const minorUnit = [-majorUnit[1], majorUnit[0]] as const
+  const majorUnit = [
+    majorVector[0] / majorRadius,
+    majorVector[1] / majorRadius,
+  ] as const;
+  const minorUnit = [-majorUnit[1], majorUnit[0]] as const;
   const ellipseAngle = (point: readonly [number, number]) => {
-    const delta = [point[0] - center[0], point[1] - center[1]] as const
+    const delta = [point[0] - center[0], point[1] - center[1]] as const;
     return Math.atan2(
       (delta[0] * minorUnit[0] + delta[1] * minorUnit[1]) / minorRadius,
       (delta[0] * majorUnit[0] + delta[1] * majorUnit[1]) / majorRadius,
-    )
-  }
-  const startAngle = ellipseAngle(start)
-  const endAngle = ellipseAngle(end)
-  const sweep = computeArcSweep(startAngle, endAngle, sweepDirection)
+    );
+  };
+  const startAngle = ellipseAngle(start);
+  const endAngle = ellipseAngle(end);
+  const sweep = computeArcSweep(startAngle, endAngle, sweepDirection);
 
   return Array.from({ length: sampleCount }, (_, index) => {
-    const alpha = sampleCount === 1 ? 0 : index / (sampleCount - 1)
-    const angle = sweepDirection === 'counterClockwise'
-      ? startAngle + sweep * alpha
-      : startAngle - sweep * alpha
+    const alpha = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const angle =
+      sweepDirection === "counterClockwise"
+        ? startAngle + sweep * alpha
+        : startAngle - sweep * alpha;
     return [
-      center[0] + Math.cos(angle) * majorRadius * majorUnit[0] + Math.sin(angle) * minorRadius * minorUnit[0],
-      center[1] + Math.cos(angle) * majorRadius * majorUnit[1] + Math.sin(angle) * minorRadius * minorUnit[1],
-    ] as const
-  })
+      center[0] +
+        Math.cos(angle) * majorRadius * majorUnit[0] +
+        Math.sin(angle) * minorRadius * minorUnit[0],
+      center[1] +
+        Math.cos(angle) * majorRadius * majorUnit[1] +
+        Math.sin(angle) * minorRadius * minorUnit[1],
+    ] as const;
+  });
 }
 
 function sampleConicPoints(
@@ -1586,17 +1788,23 @@ function sampleConicPoints(
   sampleCount: number,
 ) {
   return Array.from({ length: sampleCount }, (_, index) => {
-    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
-    const oneMinusT = 1 - t
-    const startWeight = oneMinusT * oneMinusT
-    const controlWeight = 2 * rho * oneMinusT * t
-    const endWeight = t * t
-    const weight = startWeight + controlWeight + endWeight
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const oneMinusT = 1 - t;
+    const startWeight = oneMinusT * oneMinusT;
+    const controlWeight = 2 * rho * oneMinusT * t;
+    const endWeight = t * t;
+    const weight = startWeight + controlWeight + endWeight;
     return [
-      (startWeight * start[0] + controlWeight * control[0] + endWeight * end[0]) / weight,
-      (startWeight * start[1] + controlWeight * control[1] + endWeight * end[1]) / weight,
-    ] as const
-  })
+      (startWeight * start[0] +
+        controlWeight * control[0] +
+        endWeight * end[0]) /
+        weight,
+      (startWeight * start[1] +
+        controlWeight * control[1] +
+        endWeight * end[1]) /
+        weight,
+    ] as const;
+  });
 }
 
 function sampleBezierPoints(
@@ -1604,110 +1812,131 @@ function sampleBezierPoints(
   sampleCount: number,
 ) {
   return Array.from({ length: sampleCount }, (_, index) => {
-    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1)
-    const oneMinusT = 1 - t
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const oneMinusT = 1 - t;
     if (controlPoints.length === 3) {
-      const [p0, p1, p2] = controlPoints
+      const [p0, p1, p2] = controlPoints;
       return [
-        oneMinusT * oneMinusT * p0![0] + 2 * oneMinusT * t * p1![0] + t * t * p2![0],
-        oneMinusT * oneMinusT * p0![1] + 2 * oneMinusT * t * p1![1] + t * t * p2![1],
-      ] as const
+        oneMinusT * oneMinusT * p0![0] +
+          2 * oneMinusT * t * p1![0] +
+          t * t * p2![0],
+        oneMinusT * oneMinusT * p0![1] +
+          2 * oneMinusT * t * p1![1] +
+          t * t * p2![1],
+      ] as const;
     }
 
-    const [p0, p1, p2, p3] = controlPoints
+    const [p0, p1, p2, p3] = controlPoints;
     return [
-      oneMinusT ** 3 * p0![0] + 3 * oneMinusT * oneMinusT * t * p1![0] + 3 * oneMinusT * t * t * p2![0] + t ** 3 * p3![0],
-      oneMinusT ** 3 * p0![1] + 3 * oneMinusT * oneMinusT * t * p1![1] + 3 * oneMinusT * t * t * p2![1] + t ** 3 * p3![1],
-    ] as const
-  })
+      oneMinusT ** 3 * p0![0] +
+        3 * oneMinusT * oneMinusT * t * p1![0] +
+        3 * oneMinusT * t * t * p2![0] +
+        t ** 3 * p3![0],
+      oneMinusT ** 3 * p0![1] +
+        3 * oneMinusT * oneMinusT * t * p1![1] +
+        3 * oneMinusT * t * t * p2![1] +
+        t ** 3 * p3![1],
+    ] as const;
+  });
 }
 
-function sampleProfileTextOutlinePoints(entity: Extract<SolvedSketchEntityGeometryRecord, { kind: 'profileText' }>) {
-  const width = Math.max(entity.height * PROFILE_TEXT_WIDTH_FACTOR, entity.text.trim().length * entity.height * PROFILE_TEXT_WIDTH_FACTOR)
-  const x = entity.horizontalAlign === 'center'
-    ? -width / 2
-    : entity.horizontalAlign === 'right'
-      ? -width
-      : 0
-  const y = entity.verticalAlign === 'middle'
-    ? -entity.height / 2
-    : entity.verticalAlign === 'top'
-      ? -entity.height
-      : entity.verticalAlign === 'baseline'
-        ? -entity.height * 0.2
-        : 0
-  const cos = Math.cos(entity.rotationRadians)
-  const sin = Math.sin(entity.rotationRadians)
+function sampleProfileTextOutlinePoints(
+  entity: Extract<SolvedSketchEntityGeometryRecord, { kind: "profileText" }>,
+) {
+  const width = Math.max(
+    entity.height * PROFILE_TEXT_WIDTH_FACTOR,
+    entity.text.trim().length * entity.height * PROFILE_TEXT_WIDTH_FACTOR,
+  );
+  const x =
+    entity.horizontalAlign === "center"
+      ? -width / 2
+      : entity.horizontalAlign === "right"
+        ? -width
+        : 0;
+  const y =
+    entity.verticalAlign === "middle"
+      ? -entity.height / 2
+      : entity.verticalAlign === "top"
+        ? -entity.height
+        : entity.verticalAlign === "baseline"
+          ? -entity.height * 0.2
+          : 0;
+  const cos = Math.cos(entity.rotationRadians);
+  const sin = Math.sin(entity.rotationRadians);
 
   return [
     [x, y],
     [x + width, y],
     [x + width, y + entity.height],
     [x, y + entity.height],
-  ].map((point) => [
-    entity.anchorPosition[0] + point[0]! * cos - point[1]! * sin,
-    entity.anchorPosition[1] + point[0]! * sin + point[1]! * cos,
-  ] as const)
+  ].map(
+    (point) =>
+      [
+        entity.anchorPosition[0] + point[0]! * cos - point[1]! * sin,
+        entity.anchorPosition[1] + point[0]! * sin + point[1]! * cos,
+      ] as const,
+  );
 }
 
 function normalizeAngle(angle: number) {
   while (angle < 0) {
-    angle += Math.PI * 2
+    angle += Math.PI * 2;
   }
 
   while (angle >= Math.PI * 2) {
-    angle -= Math.PI * 2
+    angle -= Math.PI * 2;
   }
 
-  return angle
+  return angle;
 }
 
 function computeArcSweep(
   startAngle: number,
   endAngle: number,
-  sweepDirection: 'clockwise' | 'counterClockwise',
+  sweepDirection: "clockwise" | "counterClockwise",
 ) {
-  const normalizedStart = normalizeAngle(startAngle)
-  const normalizedEnd = normalizeAngle(endAngle)
+  const normalizedStart = normalizeAngle(startAngle);
+  const normalizedEnd = normalizeAngle(endAngle);
 
-  if (sweepDirection === 'counterClockwise') {
+  if (sweepDirection === "counterClockwise") {
     return normalizedEnd >= normalizedStart
       ? normalizedEnd - normalizedStart
-      : normalizedEnd + Math.PI * 2 - normalizedStart
+      : normalizedEnd + Math.PI * 2 - normalizedStart;
   }
 
   return normalizedEnd <= normalizedStart
     ? normalizedStart - normalizedEnd
-    : normalizedStart + Math.PI * 2 - normalizedEnd
+    : normalizedStart + Math.PI * 2 - normalizedEnd;
 }
 
 function sampleArcPoints(
   center: readonly [number, number],
   start: readonly [number, number],
   end: readonly [number, number],
-  sweepDirection: 'clockwise' | 'counterClockwise',
+  sweepDirection: "clockwise" | "counterClockwise",
   sampleCount: number,
 ) {
-  const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0])
-  const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0])
-  const sweep = computeArcSweep(startAngle, endAngle, sweepDirection)
-  const radius = Math.hypot(start[0] - center[0], start[1] - center[1])
-  const points: Array<readonly [number, number]> = []
+  const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
+  const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
+  const sweep = computeArcSweep(startAngle, endAngle, sweepDirection);
+  const radius = Math.hypot(start[0] - center[0], start[1] - center[1]);
+  const points: Array<readonly [number, number]> = [];
 
   for (let index = 0; index < sampleCount; index += 1) {
-    const alpha = sampleCount === 1 ? 0 : index / (sampleCount - 1)
-    const offset = sweep * alpha
-    const angle = sweepDirection === 'counterClockwise'
-      ? startAngle + offset
-      : startAngle - offset
+    const alpha = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const offset = sweep * alpha;
+    const angle =
+      sweepDirection === "counterClockwise"
+        ? startAngle + offset
+        : startAngle - offset;
 
     points.push([
       center[0] + Math.cos(angle) * radius,
       center[1] + Math.sin(angle) * radius,
-    ])
+    ]);
   }
 
-  return points
+  return points;
 }
 
 function buildSketchCurveRenderRecords(
@@ -1715,57 +1944,63 @@ function buildSketchCurveRenderRecords(
   sketch: SketchSnapshotRecord,
 ) {
   const authoredEntityMap = new Map(
-    sketch.sketch.definition.entities.map((entity) => [entity.entityId, entity] as const),
-  )
+    sketch.sketch.definition.entities.map(
+      (entity) => [entity.entityId, entity] as const,
+    ),
+  );
 
   return sketch.sketch.solvedSnapshot.solvedEntities.flatMap((entity) => {
     if (authoredEntityMap.get(entity.entityId)?.isConstruction) {
-      return []
+      return [];
     }
 
     const target: SketchEntityRef = {
-      kind: 'sketchEntity',
+      kind: "sketchEntity",
       sketchId: sketch.sketchId,
       entityId: entity.entityId,
+    };
+
+    if (entity.kind === "point") {
+      return [];
     }
 
-    if (entity.kind === 'point') {
-      return []
-    }
-
-    let points2D: ReadonlyArray<readonly [number, number]>
-    let isClosed = false
+    let points2D: ReadonlyArray<readonly [number, number]>;
+    let isClosed = false;
 
     switch (entity.kind) {
-      case 'lineSegment':
-        points2D = [entity.startPosition, entity.endPosition]
-        break
-      case 'circle':
-        points2D = sampleCirclePoints(entity.centerPosition, entity.solvedRadius, DEFAULT_CIRCLE_SAMPLE_COUNT)
-        isClosed = true
-        break
-      case 'arc':
+      case "lineSegment":
+        points2D = [entity.startPosition, entity.endPosition];
+        break;
+      case "circle":
+        points2D = sampleCirclePoints(
+          entity.centerPosition,
+          entity.solvedRadius,
+          DEFAULT_CIRCLE_SAMPLE_COUNT,
+        );
+        isClosed = true;
+        break;
+      case "arc":
         points2D = sampleArcPoints(
           entity.centerPosition,
           entity.startPosition,
           entity.endPosition,
           entity.sweepDirection,
           DEFAULT_ARC_SAMPLE_COUNT,
-        )
-        break
-      case 'spline':
-        points2D = entity.fitPoints
-        break
-      case 'ellipse':
+        );
+        break;
+      case "spline":
+        points2D = entity.fitPoints;
+        break;
+      case "ellipse":
         points2D = sampleEllipsePoints(
           entity.centerPosition,
           entity.majorAxisEndpointPosition,
           entity.minorRadius,
           DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
-        )
-        isClosed = true
-        break
-      case 'ellipticalArc':
+        );
+        isClosed = true;
+        break;
+      case "ellipticalArc":
         points2D = sampleEllipticalArcPoints(
           entity.centerPosition,
           entity.majorAxisEndpointPosition,
@@ -1774,45 +2009,52 @@ function buildSketchCurveRenderRecords(
           entity.minorRadius,
           entity.sweepDirection,
           DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
-        )
-        break
-      case 'conic':
+        );
+        break;
+      case "conic":
         points2D = sampleConicPoints(
           entity.startPosition,
           entity.controlPosition,
           entity.endPosition,
           entity.rho,
           DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
-        )
-        break
-      case 'bezierCurve':
-        points2D = sampleBezierPoints(entity.controlPoints, DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT)
-        break
-      case 'profileText':
-        points2D = sampleProfileTextOutlinePoints(entity)
-        isClosed = true
-        break
+        );
+        break;
+      case "bezierCurve":
+        points2D = sampleBezierPoints(
+          entity.controlPoints,
+          DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
+        );
+        break;
+      case "profileText":
+        points2D = sampleProfileTextOutlinePoints(entity);
+        isClosed = true;
+        break;
     }
 
-    return [{
-      id: createRenderableId(target),
-      label: `${sketch.label} ${entity.entityId}`,
-      ownerBodyId: null,
-      ownerFeatureId: sketch.ownerFeatureId,
-      binding: {
-        pickId: createPickId(target),
-        pickPriority: SKETCH_CURVE_PICK_PRIORITY,
-        target,
-        topology: null,
-        semanticClass: 'sketchCurve',
-      },
-      geometry: {
-        kind: 'polyline',
-        points: points2D.map((point) => mapSketchPointToWorld(sketch.plane, point)),
-        isClosed,
-      },
-    } satisfies RenderableEntityRecord]
-  })
+    return [
+      {
+        id: createRenderableId(target),
+        label: `${sketch.label} ${entity.entityId}`,
+        ownerBodyId: null,
+        ownerFeatureId: sketch.ownerFeatureId,
+        binding: {
+          pickId: createPickId(target),
+          pickPriority: SKETCH_CURVE_PICK_PRIORITY,
+          target,
+          topology: null,
+          semanticClass: "sketchCurve",
+        },
+        geometry: {
+          kind: "polyline",
+          points: points2D.map((point) =>
+            mapSketchPointToWorld(sketch.plane, point),
+          ),
+          isClosed,
+        },
+      } satisfies RenderableEntityRecord,
+    ];
+  });
 }
 
 function buildSketchPointRenderRecords(
@@ -1820,40 +2062,44 @@ function buildSketchPointRenderRecords(
   sketch: SketchSnapshotRecord,
 ) {
   const solvedPointById = new Map(
-    sketch.sketch.solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition] as const),
-  )
+    sketch.sketch.solvedSnapshot.solvedPoints.map(
+      (point) => [point.pointId, point.solvedPosition] as const,
+    ),
+  );
 
   return sketch.sketch.definition.points.flatMap((point) => {
     if (point.isConstruction) {
-      return []
+      return [];
     }
 
     const target: SketchPointRef = {
-      kind: 'sketchPoint',
+      kind: "sketchPoint",
       sketchId: sketch.sketchId,
       pointId: point.pointId,
-    }
-    const position = solvedPointById.get(point.pointId) ?? point.position
+    };
+    const position = solvedPointById.get(point.pointId) ?? point.position;
 
-    return [{
-      id: createRenderableId(target),
-      label: `${sketch.label} ${point.pointId}`,
-      ownerBodyId: null,
-      ownerFeatureId: sketch.ownerFeatureId,
-      binding: {
-        pickId: createPickId(target),
-        pickPriority: SKETCH_POINT_PICK_PRIORITY,
-        target,
-        topology: null,
-        semanticClass: 'sketchPoint',
-      },
-      geometry: {
-        kind: 'marker',
-        position: mapSketchPointToWorld(sketch.plane, position),
-        displayRadius: DEFAULT_POINT_DISPLAY_RADIUS,
-      },
-    } satisfies RenderableEntityRecord]
-  })
+    return [
+      {
+        id: createRenderableId(target),
+        label: `${sketch.label} ${point.pointId}`,
+        ownerBodyId: null,
+        ownerFeatureId: sketch.ownerFeatureId,
+        binding: {
+          pickId: createPickId(target),
+          pickPriority: SKETCH_POINT_PICK_PRIORITY,
+          target,
+          topology: null,
+          semanticClass: "sketchPoint",
+        },
+        geometry: {
+          kind: "marker",
+          position: mapSketchPointToWorld(sketch.plane, position),
+          displayRadius: DEFAULT_POINT_DISPLAY_RADIUS,
+        },
+      } satisfies RenderableEntityRecord,
+    ];
+  });
 }
 
 function buildSketchRenderRecords(
@@ -1867,25 +2113,30 @@ function buildSketchRenderRecords(
       ...buildSketchCurveRenderRecords(state, sketch),
       ...buildSketchPointRenderRecords(state, sketch),
     ]),
-  ]
+  ];
 }
 
 export function buildOccRenderExport(
   state: OccAuthoringState,
-  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses> = createFaceSemanticClassMap(state),
+  faceSemanticClasses: ReadonlyMap<
+    string,
+    FaceSemanticClasses
+  > = createFaceSemanticClassMap(state),
   options: OccSnapshotBuildOptions = {},
   appliedSketches: readonly SketchSnapshotRecord[] = state.sketches,
 ) {
   const records: RenderableEntityRecord[] = [
     ...buildConstructionRenderRecords(state),
     ...buildSketchRenderRecords(state, appliedSketches, options),
-    ...state.bodies.flatMap((body) => buildBodyRenderRecords(state, body, faceSemanticClasses, options)),
-  ]
+    ...state.bodies.flatMap((body) =>
+      buildBodyRenderRecords(state, body, faceSemanticClasses, options),
+    ),
+  ];
 
   return {
     schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
     records,
-  }
+  };
 }
 
 export function buildOccKernelDocumentSnapshot(
@@ -1893,8 +2144,10 @@ export function buildOccKernelDocumentSnapshot(
   extraDiagnostics: readonly ModelingDiagnostic[] = [],
   options: OccSnapshotBuildOptions = {},
 ): KernelDocumentSnapshot {
-  const producedTargetsByFeatureId = createProducedTargetsByFeatureId(state.features)
-  const faceSemanticClasses = createFaceSemanticClassMap(state)
+  const producedTargetsByFeatureId = createProducedTargetsByFeatureId(
+    state.features,
+  );
+  const faceSemanticClasses = createFaceSemanticClassMap(state);
   const {
     features,
     featureTree,
@@ -1902,11 +2155,16 @@ export function buildOccKernelDocumentSnapshot(
     appliedSketches,
     appliedFeatures,
     appliedSketchIds,
-  } = buildSnapshotPresentationRecords(state, producedTargetsByFeatureId)
-  const consumerMap = createFeatureConsumerMap(state, appliedFeatures)
-  const entities = buildSnapshotEntities(state, consumerMap, faceSemanticClasses, appliedSketches)
-  const references = buildReferenceRecords(state, appliedSketchIds)
-  const diagnostics = buildOccSnapshotDiagnostics(state, extraDiagnostics)
+  } = buildSnapshotPresentationRecords(state, producedTargetsByFeatureId);
+  const consumerMap = createFeatureConsumerMap(state, appliedFeatures);
+  const entities = buildSnapshotEntities(
+    state,
+    consumerMap,
+    faceSemanticClasses,
+    appliedSketches,
+  );
+  const references = buildReferenceRecords(state, appliedSketchIds);
+  const diagnostics = buildOccSnapshotDiagnostics(state, extraDiagnostics);
 
   return {
     contractVersion: CONTRACT_VERSION,
@@ -1931,8 +2189,13 @@ export function buildOccKernelDocumentSnapshot(
     entities,
     references,
     diagnostics,
-    render: buildOccRenderExport(state, faceSemanticClasses, options, appliedSketches),
-  }
+    render: buildOccRenderExport(
+      state,
+      faceSemanticClasses,
+      options,
+      appliedSketches,
+    ),
+  };
 }
 
 export function buildOccWorkspaceSnapshot(
@@ -1940,7 +2203,11 @@ export function buildOccWorkspaceSnapshot(
   extraDiagnostics: readonly ModelingDiagnostic[] = [],
   options: OccSnapshotBuildOptions = {},
 ): WorkspaceSnapshot {
-  const document = buildOccKernelDocumentSnapshot(state, extraDiagnostics, options)
+  const document = buildOccKernelDocumentSnapshot(
+    state,
+    extraDiagnostics,
+    options,
+  );
   const presentation: DocumentPresentationSnapshot = {
     featureTree: document.featureTree,
     objects: document.objects,
@@ -1951,11 +2218,11 @@ export function buildOccWorkspaceSnapshot(
       historyOrder: state.historyOrder,
     }),
     entities: document.entities,
-  }
+  };
 
   return {
     document,
     presentation,
     provenance: null,
-  }
+  };
 }

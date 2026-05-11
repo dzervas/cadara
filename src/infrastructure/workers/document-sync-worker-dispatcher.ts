@@ -1,40 +1,48 @@
-import type { DocumentSyncWorkerRequest } from '@/domain/modeling/document-sync-worker-protocol'
+import type { DocumentSyncWorkerRequest } from "@/domain/modeling/document-sync-worker-protocol";
 
 export type DocumentSyncWorkerBootstrapMessage = {
-  kind: 'bootstrap'
-  search: string
-}
+  kind: "bootstrap";
+  search: string;
+};
 
-type DocumentSyncWorkerIncomingMessage = DocumentSyncWorkerBootstrapMessage | DocumentSyncWorkerRequest
+type DocumentSyncWorkerIncomingMessage =
+  | DocumentSyncWorkerBootstrapMessage
+  | DocumentSyncWorkerRequest;
 
-type DocumentSyncWorkerMessageHandler = (request: DocumentSyncWorkerRequest) => Promise<void> | void
+type DocumentSyncWorkerMessageHandler = (
+  request: DocumentSyncWorkerRequest,
+) => Promise<void> | void;
 
 export function createDocumentSyncWorkerDispatcher(
-  createWorkerMessageHandler: (search: string) => DocumentSyncWorkerMessageHandler,
+  createWorkerMessageHandler: (
+    search: string,
+  ) => DocumentSyncWorkerMessageHandler,
 ) {
-  let handleMessage: DocumentSyncWorkerMessageHandler | null = null
-  const pendingRequests: DocumentSyncWorkerRequest[] = []
+  let handleMessage: DocumentSyncWorkerMessageHandler | null = null;
+  const pendingRequests: DocumentSyncWorkerRequest[] = [];
 
-  return function dispatchDocumentSyncWorkerMessage(message: DocumentSyncWorkerIncomingMessage) {
+  return function dispatchDocumentSyncWorkerMessage(
+    message: DocumentSyncWorkerIncomingMessage,
+  ) {
     if (isDocumentSyncWorkerBootstrapMessage(message)) {
-      handleMessage = createWorkerMessageHandler(message.search)
+      handleMessage = createWorkerMessageHandler(message.search);
       for (const pendingRequest of pendingRequests.splice(0)) {
-        void handleMessage(pendingRequest)
+        void handleMessage(pendingRequest);
       }
-      return
+      return;
     }
 
     if (!handleMessage) {
-      pendingRequests.push(message)
-      return
+      pendingRequests.push(message);
+      return;
     }
 
-    void handleMessage(message)
-  }
+    void handleMessage(message);
+  };
 }
 
 export function isDocumentSyncWorkerBootstrapMessage(
   message: DocumentSyncWorkerIncomingMessage,
 ): message is DocumentSyncWorkerBootstrapMessage {
-  return message.kind === 'bootstrap'
+  return message.kind === "bootstrap";
 }

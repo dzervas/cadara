@@ -1,8 +1,11 @@
 // Barrel re-exports for sketch-session module
 
 // Type re-exports from types.ts
-export type { SketchDraftEntity, SketchToolId } from '@/core/sketch-tools/definition'
-export type { SketchConstraintToolId } from '@/core/sketch-constraints/definition'
+export type {
+  SketchDraftEntity,
+  SketchToolId,
+} from "@/core/sketch-tools/definition";
+export type { SketchConstraintToolId } from "@/core/sketch-constraints/definition";
 export type {
   SketchConstructionToolId,
   SketchReferenceToolId,
@@ -26,33 +29,33 @@ export type {
   SketchHistoryCursor,
   SketchHistoryOperation,
   SketchHistoryItem,
-} from './types'
+} from "./types";
 
 export {
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
   normalizeSketchConstraintDisplayState,
-} from './annotation-display'
+} from "./annotation-display";
 
 export {
   createProjectedPrimitiveRef,
   createReferencePrimitiveRef,
   getConstraintAffectedGeometryRefs,
   getDimensionAffectedGeometryRefs,
-} from './annotation-targets'
+} from "./annotation-targets";
 
 export {
   beginSketchAnnotationEdit,
   deleteSelectedSketchAnnotation,
   getSketchAnnotationDescriptors,
   selectSketchAnnotation,
-} from './annotations'
+} from "./annotations";
 
 export {
   addAnchorOffset,
   applyPointPositionsToDefinition,
   getSketchDatumGuideExtent,
-} from './definition-patches'
+} from "./definition-patches";
 
 export {
   patchSketchConstraintValue,
@@ -62,7 +65,7 @@ export {
   shouldDeferSketchConstraintPreviewPinToSelection,
   shouldPinSketchConstraintPreviewBeforeSelection,
   updateSketchConstraintHover,
-} from './constraints'
+} from "./constraints";
 
 export {
   getSketchSessionDisplayRenderables,
@@ -70,7 +73,7 @@ export {
   getStableSketchSessionDisplayRenderables,
   getTransientSketchSessionDisplayRenderables,
   sketchSessionHasReferenceImage,
-} from './display'
+} from "./display";
 
 export {
   beginSketchGeometryDrag,
@@ -81,7 +84,7 @@ export {
   selectSketchEditToolTarget,
   updateSketchEditToolHover,
   updateSketchGeometryDrag,
-} from './editing'
+} from "./editing";
 
 export {
   buildCommitRequest,
@@ -89,20 +92,20 @@ export {
   getSketchHistoryCursorForIndex,
   getSketchHistoryCursorIndex,
   getSketchHistoryItems,
-} from './history'
+} from "./history";
 
 export {
   filterSketchDefinitionThroughCursor,
   getSketchSessionRegionDiagnostics,
   refreshLiveRegionsAfterDebounce,
   withLiveSolvedRegions,
-} from './internals'
+} from "./internals";
 
 export {
   appendReferenceImageOperations,
   updateReferenceImageOperationStates,
   updateSketchReferenceProjection,
-} from './references'
+} from "./references";
 
 export {
   getSelectedReferenceImageOperationIds,
@@ -110,7 +113,7 @@ export {
   getOperationOwnedStateTargetIds,
   pruneDirectOperationDependents,
   repairSketchHistoryCursorAfterOperationRemoval,
-} from './selection'
+} from "./selection";
 
 export {
   constraintReferencesSketchGeometry,
@@ -128,7 +131,7 @@ export {
   isSketchReferenceToolSelected,
   mapSketchPointToWorld,
   moveSketchHistoryCursor,
-} from './state'
+} from "./state";
 
 export {
   focusSketchStyleTool,
@@ -138,7 +141,7 @@ export {
   patchSketchStyleValue,
   toggleSketchSvgRendering,
   updateSketchStyleFocusTarget,
-} from './styles'
+} from "./styles";
 
 export {
   acceptSketchDraw,
@@ -154,4 +157,4 @@ export {
   startSketchDraw,
   toggleSketchConstructionTarget,
   updateSketchPointer,
-} from './tools'
+} from "./tools";

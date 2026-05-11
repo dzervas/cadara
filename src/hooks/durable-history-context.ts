@@ -1,6 +1,6 @@
-import { createContext } from 'react'
+import { createContext } from "react";
 
-import type { DurableHistoryService } from '@/application/workbench/durable-history'
+import type { DurableHistoryService } from "@/application/workbench/durable-history";
 
-export const DurableHistoryContext = createContext<DurableHistoryService | null>(null)
-
+export const DurableHistoryContext =
+  createContext<DurableHistoryService | null>(null);

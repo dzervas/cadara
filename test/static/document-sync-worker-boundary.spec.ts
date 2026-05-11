@@ -1,29 +1,54 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { test } from 'bun:test'
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "bun:test";
 
-import { expectTrue } from '@/testing/expect.spec'
-test('test/static/document-sync-worker-boundary.spec.ts', () => {  const modelingServiceSource = readFileSync(join(process.cwd(), 'src/domain/modeling/modeling-service.ts'), 'utf8')
-  const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8')
-  const workerSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync.worker.ts'), 'utf8')
-  const workerDispatcherSource = readFileSync(join(process.cwd(), 'src/infrastructure/workers/document-sync-worker-dispatcher.ts'), 'utf8')
+import { expectTrue } from "@/testing/expect.spec";
+test("test/static/document-sync-worker-boundary.spec.ts", () => {
+  const modelingServiceSource = readFileSync(
+    join(process.cwd(), "src/domain/modeling/modeling-service.ts"),
+    "utf8",
+  );
+  const appSource = readFileSync(join(process.cwd(), "src/App.tsx"), "utf8");
+  const workerSource = readFileSync(
+    join(process.cwd(), "src/infrastructure/workers/document-sync.worker.ts"),
+    "utf8",
+  );
+  const workerDispatcherSource = readFileSync(
+    join(
+      process.cwd(),
+      "src/infrastructure/workers/document-sync-worker-dispatcher.ts",
+    ),
+    "utf8",
+  );
 
   expectTrue(
-    !modelingServiceSource.includes('normalizeCollaborativeAuthoredModelDocument'),
-    'Modeling service should consume worker-normalized authored documents instead of importing main-thread collaborative normalization.',
-  )
+    !modelingServiceSource.includes(
+      "normalizeCollaborativeAuthoredModelDocument",
+    ),
+    "Modeling service should consume worker-normalized authored documents instead of importing main-thread collaborative normalization.",
+  );
   expectTrue(
-    appSource.includes('createBrowserDocumentSyncWorkerClient({ search: window.location.search })'),
-    'App should pass repository URL parameters to the browser document sync worker.',
-  )
+    appSource.includes(
+      "createBrowserDocumentSyncWorkerClient({ search: window.location.search })",
+    ),
+    "App should pass repository URL parameters to the browser document sync worker.",
+  );
   expectTrue(
-    workerSource.includes('createDocumentSyncWorkerDispatcher(createWorkerMessageHandler)')
-      && workerSource.includes("const workerSearchParams = new URLSearchParams(search)")
-      && workerSource.includes("workerSearchParams.get('cadLocalPeerSync') === '1'")
-      && workerSource.includes("workerSearchParams.get('cadLocalPeerSyncChannel')")
-      && workerSource.includes("workerSearchParams.get('cadRepositoryDbName')")
-      && workerDispatcherSource.includes("message.kind === 'bootstrap'")
-      && workerDispatcherSource.includes('pendingRequests.push(message)'),
-    'Document sync worker should consume opt-in peer-sync and repository database bootstrap parameters.',
-  )
-})
+    workerSource.includes(
+      "createDocumentSyncWorkerDispatcher(createWorkerMessageHandler)",
+    ) &&
+      workerSource.includes(
+        "const workerSearchParams = new URLSearchParams(search)",
+      ) &&
+      workerSource.includes(
+        "workerSearchParams.get('cadLocalPeerSync') === '1'",
+      ) &&
+      workerSource.includes(
+        "workerSearchParams.get('cadLocalPeerSyncChannel')",
+      ) &&
+      workerSource.includes("workerSearchParams.get('cadRepositoryDbName')") &&
+      workerDispatcherSource.includes("message.kind === 'bootstrap'") &&
+      workerDispatcherSource.includes("pendingRequests.push(message)"),
+    "Document sync worker should consume opt-in peer-sync and repository database bootstrap parameters.",
+  );
+});

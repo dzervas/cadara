@@ -1,1 +1,1 @@
-import '@/infrastructure/workers/document-sync.worker'
+import "@/infrastructure/workers/document-sync.worker";

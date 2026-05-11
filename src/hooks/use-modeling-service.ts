@@ -1,12 +1,12 @@
-import { ModelingServiceContext } from '@/hooks/modeling-service-context'
-import { createRequiredContextHook } from '@/hooks/create-required-context-hook'
+import { ModelingServiceContext } from "@/hooks/modeling-service-context";
+import { createRequiredContextHook } from "@/hooks/create-required-context-hook";
 
 const useModelingServiceContext = createRequiredContextHook(
   ModelingServiceContext,
-  'useModelingService',
-  'ModelingServiceProvider',
-)
+  "useModelingService",
+  "ModelingServiceProvider",
+);
 
 export function useModelingService() {
-  return useModelingServiceContext().modelingService
+  return useModelingServiceContext().modelingService;
 }

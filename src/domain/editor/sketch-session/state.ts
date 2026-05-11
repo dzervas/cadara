@@ -2,44 +2,36 @@ import type {
   SketchPlaneKey,
   SketchPoint,
   SketchSnapshotRecord,
-} from '@/contracts/modeling/schema'
+} from "@/contracts/modeling/schema";
 import type {
   SketchEntityId,
   SketchId,
   SketchPointId,
-} from '@/contracts/shared/ids'
+} from "@/contracts/shared/ids";
 import type {
   SketchPlaneDefinition,
   SketchPlaneSupportRef,
-} from '@/contracts/shared/sketch-plane'
-import {
-  evaluateSketchDerivations,
-} from '@/contracts/sketch/derived-geometry'
+} from "@/contracts/shared/sketch-plane";
+import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import type {
   ConstraintDefinition,
   DimensionDefinition,
   SketchAuthoringOperation,
   SolvedSketchSnapshot,
-} from '@/contracts/sketch/schema'
-import {
-  type PrimitiveRef,
-} from '@/core/editor/schema'
+} from "@/contracts/sketch/schema";
+import { type PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
   deriveStandardPlaneKeyFromConstructionId,
-} from '@/domain/modeling/opencascade-kernel-seed'
-import {
-  buildReferenceImageAnchorProjectedReferences,
-} from '@/domain/reference-image-calibration/export/references'
-import type { SketchDraftEntity } from '@/core/sketch-tools/definition'
-import {
-  mapSketchPointToWorkspaceWorld,
-} from '@/core/workspace/sketch-plane-mapping'
+} from "@/domain/modeling/opencascade-kernel-seed";
+import { buildReferenceImageAnchorProjectedReferences } from "@/domain/reference-image-calibration/export/references";
+import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
+import { mapSketchPointToWorkspaceWorld } from "@/core/workspace/sketch-plane-mapping";
 import type {
   SketchConstraintDisplayState,
   SketchHistoryCursor,
   SketchSessionState,
-} from './types'
+} from "./types";
 import {
   cloneDefinition,
   createEmptyDefinition,
@@ -57,150 +49,169 @@ import {
   mapDefinitionEntityToDraftEntity,
   rebuildSessionForDefinition,
   sketchHistoryCursorsEqual,
-} from './internals'
+} from "./internals";
 import {
   buildCommitRequest,
   createTailSketchHistoryCursor,
   getSketchHistoryCursorForIndex,
   getSketchHistoryCursorIndex,
   getSketchHistoryItems,
-} from './history'
+} from "./history";
 import {
   getSelectedReferenceImageOperationIds,
   getSelectedSketchGeometryIds,
-} from './selection'
+} from "./selection";
 
-export function derivePlaneKeyFromTarget(target: SketchPlaneSupportRef): SketchPlaneKey | null {
-  if (target.kind !== 'construction') {
-    return null
+export function derivePlaneKeyFromTarget(
+  target: SketchPlaneSupportRef,
+): SketchPlaneKey | null {
+  if (target.kind !== "construction") {
+    return null;
   }
 
-  return deriveStandardPlaneKeyFromConstructionId(target.constructionId)
+  return deriveStandardPlaneKeyFromConstructionId(target.constructionId);
 }
 
 export function normalizeSketchConstraintDisplayState(
-  status: SolvedSketchSnapshot['status'],
+  status: SolvedSketchSnapshot["status"],
   affectedTargetCount: number,
 ): SketchConstraintDisplayState {
   if (
-    status.constraintState === 'overConstrained'
-    || status.constraintState === 'inconsistent'
-    || (status.solveState !== 'solved' && affectedTargetCount > 0)
+    status.constraintState === "overConstrained" ||
+    status.constraintState === "inconsistent" ||
+    (status.solveState !== "solved" && affectedTargetCount > 0)
   ) {
-    return 'overconstrained'
+    return "overconstrained";
   }
 
-  if (status.constraintState === 'wellConstrained') {
-    return 'constrained'
+  if (status.constraintState === "wellConstrained") {
+    return "constrained";
   }
 
-  return 'underconstrained'
+  return "underconstrained";
 }
 
 export function getAuthoringOperationHistoryTarget(
   sketchId: SketchId,
   operation: SketchAuthoringOperation,
 ): PrimitiveRef | null {
-  if (operation.kind === 'referenceImage') {
-    return createSketchOperationRef(sketchId, operation.operationId)
+  if (operation.kind === "referenceImage") {
+    return createSketchOperationRef(sketchId, operation.operationId);
   }
 
   const target = [
     ...(operation.targets.created ?? []),
     ...(operation.targets.edited ?? []),
     ...(operation.targets.removed ?? []),
-  ].find((entry) =>
-    entry.kind === 'operation'
-    || entry.kind === 'entity'
-    || entry.kind === 'point'
-    || entry.kind === 'constraint'
-    || entry.kind === 'dimension',
-  )
+  ].find(
+    (entry) =>
+      entry.kind === "operation" ||
+      entry.kind === "entity" ||
+      entry.kind === "point" ||
+      entry.kind === "constraint" ||
+      entry.kind === "dimension",
+  );
 
   if (!target) {
-    return null
+    return null;
   }
 
   switch (target.kind) {
-    case 'operation':
-      return createSketchOperationRef(sketchId, target.operationId)
-    case 'point':
-      return createSketchPointRef(sketchId, target.pointId)
-    case 'entity':
-      return createSketchEntityRef(sketchId, target.entityId)
-    case 'constraint':
-      return createSketchConstraintRef(sketchId, target.constraintId)
-    case 'dimension':
-      return createSketchDimensionRef(sketchId, target.dimensionId)
+    case "operation":
+      return createSketchOperationRef(sketchId, target.operationId);
+    case "point":
+      return createSketchPointRef(sketchId, target.pointId);
+    case "entity":
+      return createSketchEntityRef(sketchId, target.entityId);
+    case "constraint":
+      return createSketchConstraintRef(sketchId, target.constraintId);
+    case "dimension":
+      return createSketchDimensionRef(sketchId, target.dimensionId);
   }
 }
 
-export function getPreviousSketchHistoryCursor(session: SketchSessionState): SketchHistoryCursor | null {
-  const operation = getSketchHistoryOperationForCursor(session, session.historyCursor)
+export function getPreviousSketchHistoryCursor(
+  session: SketchSessionState,
+): SketchHistoryCursor | null {
+  const operation = getSketchHistoryOperationForCursor(
+    session,
+    session.historyCursor,
+  );
   if (operation) {
-    return operation.beforeCursor
+    return operation.beforeCursor;
   }
 
-  const items = getSketchHistoryItems(session.fullDefinition)
-  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor)
+  const items = getSketchHistoryItems(session.fullDefinition);
+  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor);
 
-  if (session.historyCursor.kind !== 'empty' && cursorIndex < 0) {
-    return null
+  if (session.historyCursor.kind !== "empty" && cursorIndex < 0) {
+    return null;
   }
 
   if (cursorIndex <= -1) {
-    return null
+    return null;
   }
 
-  const currentSequence = getHistorySequence(items[cursorIndex]?.id ?? '')
-  let previousIndex = cursorIndex - 1
-  while (previousIndex >= 0 && getHistorySequence(items[previousIndex]?.id ?? '') === currentSequence) {
-    previousIndex -= 1
+  const currentSequence = getHistorySequence(items[cursorIndex]?.id ?? "");
+  let previousIndex = cursorIndex - 1;
+  while (
+    previousIndex >= 0 &&
+    getHistorySequence(items[previousIndex]?.id ?? "") === currentSequence
+  ) {
+    previousIndex -= 1;
   }
 
-  return getSketchHistoryCursorForIndex(items, previousIndex)
+  return getSketchHistoryCursorForIndex(items, previousIndex);
 }
 
-export function getNextSketchHistoryCursor(session: SketchSessionState): SketchHistoryCursor | null {
+export function getNextSketchHistoryCursor(
+  session: SketchSessionState,
+): SketchHistoryCursor | null {
   const operation = session.historyOperations.find((entry) =>
     sketchHistoryCursorsEqual(entry.beforeCursor, session.historyCursor),
-  )
+  );
 
   if (operation) {
-    return { kind: 'item', itemId: operation.itemId }
+    return { kind: "item", itemId: operation.itemId };
   }
 
-  const items = getSketchHistoryItems(session.fullDefinition)
-  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor)
+  const items = getSketchHistoryItems(session.fullDefinition);
+  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor);
 
-  if (session.historyCursor.kind !== 'empty' && cursorIndex < 0) {
-    return null
+  if (session.historyCursor.kind !== "empty" && cursorIndex < 0) {
+    return null;
   }
 
-  const nextIndex = cursorIndex + 1
+  const nextIndex = cursorIndex + 1;
   if (nextIndex >= items.length) {
-    return null
+    return null;
   }
 
-  const nextSequence = getHistorySequence(items[nextIndex]?.id ?? '')
-  let sequenceTailIndex = nextIndex
+  const nextSequence = getHistorySequence(items[nextIndex]?.id ?? "");
+  let sequenceTailIndex = nextIndex;
   while (
-    sequenceTailIndex + 1 < items.length
-    && getHistorySequence(items[sequenceTailIndex + 1]?.id ?? '') === nextSequence
+    sequenceTailIndex + 1 < items.length &&
+    getHistorySequence(items[sequenceTailIndex + 1]?.id ?? "") === nextSequence
   ) {
-    sequenceTailIndex += 1
+    sequenceTailIndex += 1;
   }
 
-  return getSketchHistoryCursorForIndex(items, sequenceTailIndex)
+  return getSketchHistoryCursorForIndex(items, sequenceTailIndex);
 }
 
-export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): SketchSessionState {
-  const sketchId = sketch.sketchId
-  const fullDefinition = cloneDefinition(sketch.sketch.definition)
-  const historyCursor = createTailSketchHistoryCursor(fullDefinition)
-  const definition = filterSketchDefinitionThroughCursor(fullDefinition, historyCursor)
-  const planeKey = sketch.plane.key ?? null
-  const projectedReferences = buildReferenceImageAnchorProjectedReferences(definition)
+export function createSketchSessionFromSnapshot(
+  sketch: SketchSnapshotRecord,
+): SketchSessionState {
+  const sketchId = sketch.sketchId;
+  const fullDefinition = cloneDefinition(sketch.sketch.definition);
+  const historyCursor = createTailSketchHistoryCursor(fullDefinition);
+  const definition = filterSketchDefinitionThroughCursor(
+    fullDefinition,
+    historyCursor,
+  );
+  const planeKey = sketch.plane.key ?? null;
+  const projectedReferences =
+    buildReferenceImageAnchorProjectedReferences(definition);
 
   return {
     sketchId,
@@ -214,7 +225,7 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
     historyCursor,
     historyOperations: [],
     activeTool: null,
-    status: 'idle',
+    status: "idle",
     constructionTargetPicking: false,
     referenceTargetPicking: false,
     constructionModifierActive: false,
@@ -244,26 +255,28 @@ export function createSketchSessionFromSnapshot(sketch: SketchSnapshotRecord): S
       definition,
     }),
     validationMessage: null,
-  }
+  };
 }
 
-export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSessionState {
-  const planeKey = plane.key
-  const definition = createEmptyDefinition()
+export function createNewSketchSession(
+  plane: SketchPlaneDefinition,
+): SketchSessionState {
+  const planeKey = plane.key;
+  const definition = createEmptyDefinition();
 
   return {
     sketchId: null,
-    sketchLabel: 'Sketch Draft',
+    sketchLabel: "Sketch Draft",
     plane,
     planeTarget: plane.support,
     planeKey,
     toolStagedEntities: [],
     definition,
     fullDefinition: cloneDefinition(definition),
-    historyCursor: { kind: 'empty' },
+    historyCursor: { kind: "empty" },
     historyOperations: [],
     activeTool: null,
-    status: 'idle',
+    status: "idle",
     constructionTargetPicking: false,
     referenceTargetPicking: false,
     constructionModifierActive: false,
@@ -288,131 +301,153 @@ export function createNewSketchSession(plane: SketchPlaneDefinition): SketchSess
     projectionDiagnostics: [],
     commitRequest: null,
     validationMessage: null,
-  }
+  };
 }
 
-export function deriveSketchDisplayEntities(session: SketchSessionState): readonly SketchDraftEntity[] {
-  const sketchId = getSessionSketchId(session)
-  const displayDefinition = evaluateSketchDerivations(session.definition).definition
+export function deriveSketchDisplayEntities(
+  session: SketchSessionState,
+): readonly SketchDraftEntity[] {
+  const sketchId = getSessionSketchId(session);
+  const displayDefinition = evaluateSketchDerivations(
+    session.definition,
+  ).definition;
   const acceptedEntities = displayDefinition.entities.flatMap((entity) =>
-    mapDefinitionEntityToDraftEntity(sketchId, displayDefinition.points, entity),
-  )
+    mapDefinitionEntityToDraftEntity(
+      sketchId,
+      displayDefinition.points,
+      entity,
+    ),
+  );
 
   return session.toolStagedEntities.length === 0
     ? acceptedEntities
-    : [...acceptedEntities, ...session.toolStagedEntities]
+    : [...acceptedEntities, ...session.toolStagedEntities];
 }
 
-export function createNewSketchSessionFromSupport(planeTarget: SketchPlaneSupportRef): SketchSessionState {
-  const planeKey = derivePlaneKeyFromTarget(planeTarget)
+export function createNewSketchSessionFromSupport(
+  planeTarget: SketchPlaneSupportRef,
+): SketchSessionState {
+  const planeKey = derivePlaneKeyFromTarget(planeTarget);
   const plane =
-    planeTarget.kind === 'construction' && planeKey
+    planeTarget.kind === "construction" && planeKey
       ? createStandardPlaneDefinition(planeKey)
       : {
           support: planeTarget,
-          frame: createStandardPlaneDefinition('xy').frame,
+          frame: createStandardPlaneDefinition("xy").frame,
           key: planeKey,
-        }
+        };
 
-  return createNewSketchSession(plane)
+  return createNewSketchSession(plane);
 }
 
 export function moveSketchHistoryCursor(
   session: SketchSessionState,
   cursor: SketchHistoryCursor,
 ): SketchSessionState {
-  const operation = getSketchHistoryOperationForCursor(session, cursor)
+  const operation = getSketchHistoryOperationForCursor(session, cursor);
   if (operation) {
     return rebuildSessionForDefinition(session, {
       definition: operation.afterDefinition,
       fullDefinition: operation.afterDefinition,
       historyCursor: cursor,
       historyOperations: session.historyOperations,
-    })
+    });
   }
 
   const redoSourceOperation = session.historyOperations.find((entry) =>
     sketchHistoryCursorsEqual(entry.beforeCursor, cursor),
-  )
-  const fullDefinition = redoSourceOperation?.beforeDefinition ?? session.fullDefinition
-  const items = getSketchHistoryItems(fullDefinition)
+  );
+  const fullDefinition =
+    redoSourceOperation?.beforeDefinition ?? session.fullDefinition;
+  const items = getSketchHistoryItems(fullDefinition);
   const normalizedCursor =
-    cursor.kind === 'empty' || items.some((item) => item.id === cursor.itemId)
+    cursor.kind === "empty" || items.some((item) => item.id === cursor.itemId)
       ? cursor
-      : createTailSketchHistoryCursor(fullDefinition)
-  const definition = filterSketchDefinitionThroughCursor(fullDefinition, normalizedCursor)
+      : createTailSketchHistoryCursor(fullDefinition);
+  const definition = filterSketchDefinitionThroughCursor(
+    fullDefinition,
+    normalizedCursor,
+  );
 
   return rebuildSessionForDefinition(session, {
     definition,
     fullDefinition,
     historyCursor: normalizedCursor,
     historyOperations: session.historyOperations,
-  })
+  });
 }
 
 export function isEditableSketchGeometrySelection(
   session: SketchSessionState,
   targets: readonly PrimitiveRef[],
 ) {
-  return getSelectedSketchGeometryIds(session, targets) !== null
-    || getSelectedReferenceImageOperationIds(session, targets).length > 0
+  return (
+    getSelectedSketchGeometryIds(session, targets) !== null ||
+    getSelectedReferenceImageOperationIds(session, targets).length > 0
+  );
 }
 
 export function getConnectedSketchEntitySelectionTargets(
   session: SketchSessionState,
   target: PrimitiveRef,
 ): PrimitiveRef[] {
-  if (target.kind !== 'sketchEntity') {
-    return []
+  if (target.kind !== "sketchEntity") {
+    return [];
   }
 
-  const seedEntity = session.definition.entities.find((entity) =>
-    entity.kind !== 'point' && entity.entityId === target.entityId
-  )
+  const seedEntity = session.definition.entities.find(
+    (entity) => entity.kind !== "point" && entity.entityId === target.entityId,
+  );
 
   if (!seedEntity || seedEntity.target.sketchId !== target.sketchId) {
-    return []
+    return [];
   }
 
-  const entityIdsByPointId = new Map<SketchPointId, SketchEntityId[]>()
-  const pointIdsByEntityId = new Map<SketchEntityId, readonly SketchPointId[]>()
-  const targetsByEntityId = new Map<SketchEntityId, Extract<PrimitiveRef, { kind: 'sketchEntity' }>>()
+  const entityIdsByPointId = new Map<SketchPointId, SketchEntityId[]>();
+  const pointIdsByEntityId = new Map<
+    SketchEntityId,
+    readonly SketchPointId[]
+  >();
+  const targetsByEntityId = new Map<
+    SketchEntityId,
+    Extract<PrimitiveRef, { kind: "sketchEntity" }>
+  >();
 
   for (const entity of session.definition.entities) {
-    if (entity.kind === 'point') {
-      continue
+    if (entity.kind === "point") {
+      continue;
     }
 
-    const pointIds = getEntityPointIds(entity)
-    pointIdsByEntityId.set(entity.entityId, pointIds)
-    targetsByEntityId.set(entity.entityId, entity.target)
+    const pointIds = getEntityPointIds(entity);
+    pointIdsByEntityId.set(entity.entityId, pointIds);
+    targetsByEntityId.set(entity.entityId, entity.target);
 
     for (const pointId of pointIds) {
-      const entityIds = entityIdsByPointId.get(pointId)
+      const entityIds = entityIdsByPointId.get(pointId);
       if (entityIds) {
-        entityIds.push(entity.entityId)
+        entityIds.push(entity.entityId);
       } else {
-        entityIdsByPointId.set(pointId, [entity.entityId])
+        entityIdsByPointId.set(pointId, [entity.entityId]);
       }
     }
   }
 
-  const visitedEntityIds = new Set<SketchEntityId>()
-  const pendingEntityIds: SketchEntityId[] = [seedEntity.entityId]
+  const visitedEntityIds = new Set<SketchEntityId>();
+  const pendingEntityIds: SketchEntityId[] = [seedEntity.entityId];
 
   while (pendingEntityIds.length > 0) {
-    const entityId = pendingEntityIds.pop()
+    const entityId = pendingEntityIds.pop();
 
     if (!entityId || visitedEntityIds.has(entityId)) {
-      continue
+      continue;
     }
 
-    visitedEntityIds.add(entityId)
+    visitedEntityIds.add(entityId);
 
     for (const pointId of pointIdsByEntityId.get(entityId) ?? []) {
       for (const connectedEntityId of entityIdsByPointId.get(pointId) ?? []) {
         if (!visitedEntityIds.has(connectedEntityId)) {
-          pendingEntityIds.push(connectedEntityId)
+          pendingEntityIds.push(connectedEntityId);
         }
       }
     }
@@ -421,7 +456,10 @@ export function getConnectedSketchEntitySelectionTargets(
   return session.definition.entityIds
     .filter((entityId) => visitedEntityIds.has(entityId))
     .map((entityId) => targetsByEntityId.get(entityId))
-    .filter((entity): entity is Extract<PrimitiveRef, { kind: 'sketchEntity' }> => entity !== undefined)
+    .filter(
+      (entity): entity is Extract<PrimitiveRef, { kind: "sketchEntity" }> =>
+        entity !== undefined,
+    );
 }
 
 export function constraintReferencesSketchGeometry(
@@ -430,51 +468,78 @@ export function constraintReferencesSketchGeometry(
   deletedEntityIds: ReadonlySet<SketchEntityId>,
 ) {
   switch (constraint.kind) {
-    case 'coincident':
-    case 'angle':
-      return constraint.pointIds.some((pointId) => deletedPointIds.has(pointId))
-    case 'horizontal':
-    case 'vertical':
-      return deletedEntityIds.has(constraint.entityId)
-    case 'coincidentProjectedPoint':
-    case 'pointOnProjectedCurve':
-    case 'midpointProjectedLine':
-      return deletedPointIds.has(constraint.point.pointId)
-    case 'midpoint':
-      return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.line.entityId)
-    case 'pointOnCurve':
-      return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.curve.entityId)
-    case 'collinear':
-      return operandReferencesSketchGeometry(constraint.target, deletedPointIds, deletedEntityIds)
-        || deletedEntityIds.has(constraint.line.entityId)
-    case 'collinearProjectedLine':
-      return operandReferencesSketchGeometry(constraint.target, deletedPointIds, deletedEntityIds)
-    case 'normal':
+    case "coincident":
+    case "angle":
+      return constraint.pointIds.some((pointId) =>
+        deletedPointIds.has(pointId),
+      );
+    case "horizontal":
+    case "vertical":
+      return deletedEntityIds.has(constraint.entityId);
+    case "coincidentProjectedPoint":
+    case "pointOnProjectedCurve":
+    case "midpointProjectedLine":
+      return deletedPointIds.has(constraint.point.pointId);
+    case "midpoint":
+      return (
+        deletedPointIds.has(constraint.point.pointId) ||
+        deletedEntityIds.has(constraint.line.entityId)
+      );
+    case "pointOnCurve":
+      return (
+        deletedPointIds.has(constraint.point.pointId) ||
+        deletedEntityIds.has(constraint.curve.entityId)
+      );
+    case "collinear":
+      return (
+        operandReferencesSketchGeometry(
+          constraint.target,
+          deletedPointIds,
+          deletedEntityIds,
+        ) || deletedEntityIds.has(constraint.line.entityId)
+      );
+    case "collinearProjectedLine":
+      return operandReferencesSketchGeometry(
+        constraint.target,
+        deletedPointIds,
+        deletedEntityIds,
+      );
+    case "normal":
       return (
         deletedPointIds.has(constraint.point.pointId) ||
         deletedEntityIds.has(constraint.line.entityId) ||
         deletedEntityIds.has(constraint.curve.entityId)
-      )
-    case 'normalProjectedCurve':
-      return deletedPointIds.has(constraint.point.pointId) || deletedEntityIds.has(constraint.line.entityId)
-    case 'symmetric':
-      return constraint.pointIds.some((pointId) => deletedPointIds.has(pointId)) || deletedEntityIds.has(constraint.axis.entityId)
-    case 'symmetricProjectedLine':
-      return constraint.pointIds.some((pointId) => deletedPointIds.has(pointId))
-    case 'parallelProjectedLine':
-    case 'perpendicularProjectedLine':
-      return deletedEntityIds.has(constraint.line.entityId)
-    case 'tangentProjectedCurve':
-    case 'concentricProjectedCurve':
-      return deletedEntityIds.has(constraint.curve.entityId)
-    case 'tangent':
-    case 'concentric':
-    case 'parallel':
-    case 'perpendicular':
-    case 'equalLength':
-      return constraint.entityIds.some((entityId) => deletedEntityIds.has(entityId))
-    case 'fixPoint':
-      return deletedPointIds.has(constraint.pointId)
+      );
+    case "normalProjectedCurve":
+      return (
+        deletedPointIds.has(constraint.point.pointId) ||
+        deletedEntityIds.has(constraint.line.entityId)
+      );
+    case "symmetric":
+      return (
+        constraint.pointIds.some((pointId) => deletedPointIds.has(pointId)) ||
+        deletedEntityIds.has(constraint.axis.entityId)
+      );
+    case "symmetricProjectedLine":
+      return constraint.pointIds.some((pointId) =>
+        deletedPointIds.has(pointId),
+      );
+    case "parallelProjectedLine":
+    case "perpendicularProjectedLine":
+      return deletedEntityIds.has(constraint.line.entityId);
+    case "tangentProjectedCurve":
+    case "concentricProjectedCurve":
+      return deletedEntityIds.has(constraint.curve.entityId);
+    case "tangent":
+    case "concentric":
+    case "parallel":
+    case "perpendicular":
+    case "equalLength":
+      return constraint.entityIds.some((entityId) =>
+        deletedEntityIds.has(entityId),
+      );
+    case "fixPoint":
+      return deletedPointIds.has(constraint.pointId);
   }
 }
 
@@ -483,8 +548,14 @@ function operandReferencesSketchGeometry(
   deletedPointIds: ReadonlySet<SketchPointId>,
   deletedEntityIds: ReadonlySet<SketchEntityId>,
 ) {
-  return (operand.kind === 'localPoint' && operand.pointId !== undefined && deletedPointIds.has(operand.pointId))
-    || (operand.kind === 'localEntity' && operand.entityId !== undefined && deletedEntityIds.has(operand.entityId))
+  return (
+    (operand.kind === "localPoint" &&
+      operand.pointId !== undefined &&
+      deletedPointIds.has(operand.pointId)) ||
+    (operand.kind === "localEntity" &&
+      operand.entityId !== undefined &&
+      deletedEntityIds.has(operand.entityId))
+  );
 }
 
 export function dimensionReferencesSketchGeometry(
@@ -492,44 +563,60 @@ export function dimensionReferencesSketchGeometry(
   deletedPointIds: ReadonlySet<SketchPointId>,
   deletedEntityIds: ReadonlySet<SketchEntityId>,
 ) {
-  const operandReferencesDeletedGeometry = (operand: { kind: string; pointId?: SketchPointId; entityId?: SketchEntityId }) =>
-    (operand.kind === 'localPoint' && operand.pointId !== undefined && deletedPointIds.has(operand.pointId))
-    || (operand.kind === 'localEntity' && operand.entityId !== undefined && deletedEntityIds.has(operand.entityId))
+  const operandReferencesDeletedGeometry = (operand: {
+    kind: string;
+    pointId?: SketchPointId;
+    entityId?: SketchEntityId;
+  }) =>
+    (operand.kind === "localPoint" &&
+      operand.pointId !== undefined &&
+      deletedPointIds.has(operand.pointId)) ||
+    (operand.kind === "localEntity" &&
+      operand.entityId !== undefined &&
+      deletedEntityIds.has(operand.entityId));
 
   switch (dimension.kind) {
-    case 'distance':
-    case 'horizontalDistance':
-    case 'verticalDistance':
-      return dimension.pointIds.some((pointId) => deletedPointIds.has(pointId))
-    case 'pointDatumDistance':
-      return deletedPointIds.has(dimension.point.pointId)
-    case 'circleRadius':
-    case 'diameter':
-      return deletedEntityIds.has(dimension.entityId)
-    case 'lineLength':
-      return deletedEntityIds.has(dimension.entityId)
-    case 'lineDistance':
-    case 'lineAngle':
-      return dimension.lines.some(operandReferencesDeletedGeometry)
-    case 'linePointDistance':
-      return operandReferencesDeletedGeometry(dimension.line) || operandReferencesDeletedGeometry(dimension.point)
-    case 'arcStartPointCoincident':
-    case 'arcEndPointCoincident':
-      return deletedEntityIds.has(dimension.entityId) || deletedPointIds.has(dimension.pointId)
+    case "distance":
+    case "horizontalDistance":
+    case "verticalDistance":
+      return dimension.pointIds.some((pointId) => deletedPointIds.has(pointId));
+    case "pointDatumDistance":
+      return deletedPointIds.has(dimension.point.pointId);
+    case "circleRadius":
+    case "diameter":
+      return deletedEntityIds.has(dimension.entityId);
+    case "lineLength":
+      return deletedEntityIds.has(dimension.entityId);
+    case "lineDistance":
+    case "lineAngle":
+      return dimension.lines.some(operandReferencesDeletedGeometry);
+    case "linePointDistance":
+      return (
+        operandReferencesDeletedGeometry(dimension.line) ||
+        operandReferencesDeletedGeometry(dimension.point)
+      );
+    case "arcStartPointCoincident":
+    case "arcEndPointCoincident":
+      return (
+        deletedEntityIds.has(dimension.entityId) ||
+        deletedPointIds.has(dimension.pointId)
+      );
   }
 }
 
 export function isSketchConstructionSelected(session: SketchSessionState) {
-  return session.constructionTargetPicking || session.constructionModifierActive
+  return (
+    session.constructionTargetPicking || session.constructionModifierActive
+  );
 }
 
 export function isSketchReferenceToolSelected(session: SketchSessionState) {
-  return session.referenceTargetPicking
+  return session.referenceTargetPicking;
 }
 
 export function mapSketchPointToWorld(
   plane: SketchPlaneDefinition,
   point: SketchPoint,
 ): readonly [number, number, number] {
-  return mapSketchPointToWorkspaceWorld(plane, point)
+  return mapSketchPointToWorkspaceWorld(plane, point);
 }

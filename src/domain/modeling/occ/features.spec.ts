@@ -1,39 +1,42 @@
-import { test } from 'bun:test'
-import { expectTrue } from '@/testing/expect.spec'
+import { test } from "bun:test";
+import { expectTrue } from "@/testing/expect.spec";
 import type {
   ConstructionSnapshotRecord,
   ExtrudeFeatureParameters,
   SketchSnapshotRecord,
-} from '@/contracts/modeling/schema'
+} from "@/contracts/modeling/schema";
 import {
   createConstructionPresentationArtifacts,
   executeOccFeature,
   type OccFeatureExecutionContext,
-} from '@/domain/modeling/occ/features'
+} from "@/domain/modeling/occ/features";
 import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
-} from '@/domain/modeling/occ/authoring-state'
-import { buildConstructionPlaneFromPlanarFace, getExtrusionNormalForPlanarFace } from '@/domain/modeling/occ/sketch-profile'
-import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
+} from "@/domain/modeling/occ/authoring-state";
+import {
+  buildConstructionPlaneFromPlanarFace,
+  getExtrusionNormalForPlanarFace,
+} from "@/domain/modeling/occ/sketch-profile";
+import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   getOccDurableRefKey,
   OCC_REFERENCE_INVALIDATION_REASONS,
   trackNewSolidBody,
-} from '@/domain/modeling/occ/topology'
+} from "@/domain/modeling/occ/topology";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
   createStandardPlaneDefinition,
-} from '@/domain/modeling/opencascade-kernel-seed'
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   FILLET_FEATURE_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
-} from '@/contracts/shared/versioning'
-import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from '@/contracts/modeling/advanced-solid'
+} from "@/contracts/shared/versioning";
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import type {
   BodyId,
   ConstructionId,
@@ -42,21 +45,27 @@ import type {
   SketchEntityId,
   SketchId,
   SketchPointId,
-} from '@/contracts/shared/ids'
-import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
+} from "@/contracts/shared/ids";
+import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   SKETCH_SCHEMA_VERSION,
   type RegionRecord,
   type SketchDefinition,
   type SketchRecord,
-} from '@/contracts/sketch/schema'
-import { extractPlanarFaceData, toGpPnt } from '@/domain/modeling/occ/planes'
-import { buildAxisFromLineEdge } from '@/domain/modeling/occ/sketch-profile'
+} from "@/contracts/sketch/schema";
+import { extractPlanarFaceData, toGpPnt } from "@/domain/modeling/occ/planes";
+import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
 
-test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertClose(actual: number, expected: number, tolerance: number, message: string) {
+test("src/domain/modeling/occ/features.spec.ts", async () => {
+  function assertClose(
+    actual: number,
+    expected: number,
+    tolerance: number,
+    message: string,
+  ) {
     if (Math.abs(actual - expected) > tolerance) {
-      throw new Error(`${message}: expected ${expected}, got ${actual}.`)
+      throw new Error(`${message}: expected ${expected}, got ${actual}.`);
     }
   }
 
@@ -64,24 +73,27 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
     left: readonly [number, number, number],
     right: readonly [number, number, number],
   ) {
-    return left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+    return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
   }
 
   function pointId(name: string) {
-    return `sketch_point_${name}` as SketchPointId
+    return `sketch_point_${name}` as SketchPointId;
   }
 
   function entityId(name: string) {
-    return `sketch_entity_${name}` as SketchEntityId
+    return `sketch_entity_${name}` as SketchEntityId;
   }
 
-  function createConstructionSnapshot(constructionId: ConstructionId, ownerFeatureId: FeatureId | null = null): ConstructionSnapshotRecord {
+  function createConstructionSnapshot(
+    constructionId: ConstructionId,
+    ownerFeatureId: FeatureId | null = null,
+  ): ConstructionSnapshotRecord {
     const standardKey =
-      constructionId === 'construction_plane-xy'
-        ? 'xy'
-        : constructionId === 'construction_plane-yz'
-          ? 'yz'
-          : 'xz'
+      constructionId === "construction_plane-xy"
+        ? "xy"
+        : constructionId === "construction_plane-yz"
+          ? "yz"
+          : "xz";
 
     return {
       ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
@@ -91,24 +103,26 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
       ownerBodyId: null,
       constructionId,
       label: constructionId,
-      constructionType: 'plane',
+      constructionType: "plane",
       plane: createStandardPlaneDefinition(standardKey),
-      target: { kind: 'construction', constructionId },
-    }
+      target: { kind: "construction", constructionId },
+    };
   }
 
   function requireConstructionSupport(plane: SketchPlaneDefinition) {
-    if (plane.support.kind !== 'construction') {
-      throw new Error('Expected a construction-backed sketch plane in the phase 4 test harness.')
+    if (plane.support.kind !== "construction") {
+      throw new Error(
+        "Expected a construction-backed sketch plane in the phase 4 test harness.",
+      );
     }
 
-    return plane.support
+    return plane.support;
   }
 
   function createSketchDefinition(
     sketchId: SketchId,
     points: Array<{ id: SketchPointId; position: readonly [number, number] }>,
-    entities: SketchDefinition['entities'],
+    entities: SketchDefinition["entities"],
   ): SketchDefinition {
     return {
       schemaVersion: SKETCH_SCHEMA_VERSION,
@@ -118,7 +132,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
       points: points.map((point) => ({
         pointId: point.id,
         label: point.id,
-        target: { kind: 'sketchPoint', sketchId, pointId: point.id },
+        target: { kind: "sketchPoint", sketchId, pointId: point.id },
         position: point.position,
         isConstruction: false,
       })),
@@ -128,14 +142,14 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
       constraints: [],
       dimensionIds: [],
       dimensions: [],
-    }
+    };
   }
 
   function createSketchRecord(
     sketchId: SketchId,
     plane: SketchPlaneDefinition,
     definition: SketchDefinition,
-    solvedEntities: SketchRecord['solvedSnapshot']['solvedEntities'],
+    solvedEntities: SketchRecord["solvedSnapshot"]["solvedEntities"],
     regions: RegionRecord[],
   ): SketchSnapshotRecord {
     const sketch: SketchRecord = {
@@ -151,8 +165,8 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
       solvedSnapshot: {
         schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
         status: {
-          solveState: 'solved',
-          constraintState: 'wellConstrained',
+          solveState: "solved",
+          constraintState: "wellConstrained",
         },
         solvedEntities,
         solvedPoints: [],
@@ -161,7 +175,7 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
         diagnostics: [],
       },
       regions,
-    }
+    };
 
     return {
       ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
@@ -175,67 +189,95 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
       planeTarget: plane.support,
       planeKey: plane.key,
       sketch,
-    }
+    };
   }
 
   function createRectangleSketch(
     sketchId: SketchId,
     plane: SketchPlaneDefinition,
     options: {
-      origin?: readonly [number, number]
-      width?: number
-      height?: number
+      origin?: readonly [number, number];
+      width?: number;
+      height?: number;
     } = {},
   ) {
-    const origin = options.origin ?? [0, 0]
-    const width = options.width ?? 4
-    const height = options.height ?? 3
+    const origin = options.origin ?? [0, 0];
+    const width = options.width ?? 4;
+    const height = options.height ?? 3;
     const points = [
-      { id: pointId(`${sketchId}_bottom_left`), position: [origin[0], origin[1]] as const },
-      { id: pointId(`${sketchId}_bottom_right`), position: [origin[0] + width, origin[1]] as const },
-      { id: pointId(`${sketchId}_top_right`), position: [origin[0] + width, origin[1] + height] as const },
-      { id: pointId(`${sketchId}_top_left`), position: [origin[0], origin[1] + height] as const },
-    ]
+      {
+        id: pointId(`${sketchId}_bottom_left`),
+        position: [origin[0], origin[1]] as const,
+      },
+      {
+        id: pointId(`${sketchId}_bottom_right`),
+        position: [origin[0] + width, origin[1]] as const,
+      },
+      {
+        id: pointId(`${sketchId}_top_right`),
+        position: [origin[0] + width, origin[1] + height] as const,
+      },
+      {
+        id: pointId(`${sketchId}_top_left`),
+        position: [origin[0], origin[1] + height] as const,
+      },
+    ];
     const entities = [
       {
-        kind: 'lineSegment' as const,
+        kind: "lineSegment" as const,
         entityId: entityId(`${sketchId}_bottom`),
-        label: 'bottom',
-        target: { kind: 'sketchEntity' as const, sketchId, entityId: entityId(`${sketchId}_bottom`) },
+        label: "bottom",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId,
+          entityId: entityId(`${sketchId}_bottom`),
+        },
         isConstruction: false,
         startPointId: points[0]!.id,
         endPointId: points[1]!.id,
       },
       {
-        kind: 'lineSegment' as const,
+        kind: "lineSegment" as const,
         entityId: entityId(`${sketchId}_right`),
-        label: 'right',
-        target: { kind: 'sketchEntity' as const, sketchId, entityId: entityId(`${sketchId}_right`) },
+        label: "right",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId,
+          entityId: entityId(`${sketchId}_right`),
+        },
         isConstruction: false,
         startPointId: points[1]!.id,
         endPointId: points[2]!.id,
       },
       {
-        kind: 'lineSegment' as const,
+        kind: "lineSegment" as const,
         entityId: entityId(`${sketchId}_top`),
-        label: 'top',
-        target: { kind: 'sketchEntity' as const, sketchId, entityId: entityId(`${sketchId}_top`) },
+        label: "top",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId,
+          entityId: entityId(`${sketchId}_top`),
+        },
         isConstruction: false,
         startPointId: points[2]!.id,
         endPointId: points[3]!.id,
       },
       {
-        kind: 'lineSegment' as const,
+        kind: "lineSegment" as const,
         entityId: entityId(`${sketchId}_left`),
-        label: 'left',
-        target: { kind: 'sketchEntity' as const, sketchId, entityId: entityId(`${sketchId}_left`) },
+        label: "left",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId,
+          entityId: entityId(`${sketchId}_left`),
+        },
         isConstruction: false,
         startPointId: points[3]!.id,
         endPointId: points[0]!.id,
       },
-    ]
-    const definition = createSketchDefinition(sketchId, points, entities)
-    const regionId = `region_${sketchId}_outer` as const
+    ];
+    const definition = createSketchDefinition(sketchId, points, entities);
+    const regionId = `region_${sketchId}_outer` as const;
     const region: RegionRecord = {
       ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
       ownerRevisionId: OCC_KERNEL_INITIAL_REVISION_ID,
@@ -244,15 +286,15 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
       ownerBodyId: null,
       regionId,
       label: regionId,
-      target: { kind: 'region', sketchId, regionId },
-      sourceSketch: { kind: 'sketch', sketchId },
+      target: { kind: "region", sketchId, regionId },
+      sourceSketch: { kind: "sketch", sketchId },
       loops: [
         {
           loopId: `region_loop_${sketchId}_outer` as const,
-          role: 'outer',
-          orientation: 'counterClockwise',
+          role: "outer",
+          orientation: "counterClockwise",
           segments: entities.map((entity, index) => ({
-            source: { kind: 'entity' as const, entityId: entity.entityId },
+            source: { kind: "entity" as const, entityId: entity.entityId },
             startPointId: points[index]!.id,
             endPointId: points[(index + 1) % points.length]!.id,
           })),
@@ -261,35 +303,41 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
         },
       ],
       isClosed: true,
-    }
-    const sketch = createSketchRecord(sketchId, plane, definition, [
-      {
-        kind: 'lineSegment',
-        entityId: entities[0]!.entityId,
-        startPosition: [origin[0], origin[1]],
-        endPosition: [origin[0] + width, origin[1]],
-      },
-      {
-        kind: 'lineSegment',
-        entityId: entities[1]!.entityId,
-        startPosition: [origin[0] + width, origin[1]],
-        endPosition: [origin[0] + width, origin[1] + height],
-      },
-      {
-        kind: 'lineSegment',
-        entityId: entities[2]!.entityId,
-        startPosition: [origin[0] + width, origin[1] + height],
-        endPosition: [origin[0], origin[1] + height],
-      },
-      {
-        kind: 'lineSegment',
-        entityId: entities[3]!.entityId,
-        startPosition: [origin[0], origin[1] + height],
-        endPosition: [origin[0], origin[1]],
-      },
-    ], [region])
+    };
+    const sketch = createSketchRecord(
+      sketchId,
+      plane,
+      definition,
+      [
+        {
+          kind: "lineSegment",
+          entityId: entities[0]!.entityId,
+          startPosition: [origin[0], origin[1]],
+          endPosition: [origin[0] + width, origin[1]],
+        },
+        {
+          kind: "lineSegment",
+          entityId: entities[1]!.entityId,
+          startPosition: [origin[0] + width, origin[1]],
+          endPosition: [origin[0] + width, origin[1] + height],
+        },
+        {
+          kind: "lineSegment",
+          entityId: entities[2]!.entityId,
+          startPosition: [origin[0] + width, origin[1] + height],
+          endPosition: [origin[0], origin[1] + height],
+        },
+        {
+          kind: "lineSegment",
+          entityId: entities[3]!.entityId,
+          startPosition: [origin[0], origin[1] + height],
+          endPosition: [origin[0], origin[1]],
+        },
+      ],
+      [region],
+    );
 
-    return { sketch, region }
+    return { sketch, region };
   }
 
   async function makeBoxBody(
@@ -301,36 +349,44 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
     ownerFeatureId: FeatureId,
     origin: readonly [number, number, number] = [0, 0, 0],
   ) {
-    const box = new oc.BRepPrimAPI_MakeBox_3(
-      toGpPnt(oc, origin),
-      dx,
-      dy,
-      dz,
-    )
-    box.Build(new oc.Message_ProgressRange_1())
-    expectTrue(box.IsDone(), 'Expected test box to build successfully.')
+    const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, origin), dx, dy, dz);
+    box.Build(new oc.Message_ProgressRange_1());
+    expectTrue(box.IsDone(), "Expected test box to build successfully.");
 
     return trackNewSolidBody(oc, {
       bodyId,
       label: bodyId,
       ownerFeatureId,
       shape: box.Shape(),
-    })
+    });
   }
 
-  function createContext(input?: Partial<Omit<OccFeatureExecutionContext, 'oc' | 'documentId' | 'revisionId' | 'modelingTolerance'>>) {
+  function createContext(
+    input?: Partial<
+      Omit<
+        OccFeatureExecutionContext,
+        "oc" | "documentId" | "revisionId" | "modelingTolerance"
+      >
+    >,
+  ) {
     return async () => {
-      const oc = await getDefaultOpenCascadeInstance()
-      const xyPlane = createStandardPlaneDefinition('xy')
-      const yzPlane = createStandardPlaneDefinition('yz')
-      const xzPlane = createStandardPlaneDefinition('xz')
+      const oc = await getDefaultOpenCascadeInstance();
+      const xyPlane = createStandardPlaneDefinition("xy");
+      const yzPlane = createStandardPlaneDefinition("yz");
+      const xzPlane = createStandardPlaneDefinition("xz");
 
       const constructions = [
-        createConstructionSnapshot(requireConstructionSupport(xyPlane).constructionId),
-        createConstructionSnapshot(requireConstructionSupport(yzPlane).constructionId),
-        createConstructionSnapshot(requireConstructionSupport(xzPlane).constructionId),
+        createConstructionSnapshot(
+          requireConstructionSupport(xyPlane).constructionId,
+        ),
+        createConstructionSnapshot(
+          requireConstructionSupport(yzPlane).constructionId,
+        ),
+        createConstructionSnapshot(
+          requireConstructionSupport(xzPlane).constructionId,
+        ),
         ...(input?.constructions ?? []),
-      ]
+      ];
 
       return {
         oc,
@@ -346,36 +402,47 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
           ...Array.from(input?.constructionPlanes ?? new Map()),
         ]),
         bodies: input?.bodies ?? [],
-      } satisfies OccFeatureExecutionContext
-    }
+      } satisfies OccFeatureExecutionContext;
+    };
   }
 
   async function bodyVolume(
     oc: Awaited<ReturnType<typeof getDefaultOpenCascadeInstance>>,
     shape: object,
   ) {
-    const props = new oc.GProp_GProps_1()
-    oc.BRepGProp.VolumeProperties_1(shape as InstanceType<typeof oc.TopoDS_Shape>, props, false, false, false)
-    return props.Mass()
+    const props = new oc.GProp_GProps_1();
+    oc.BRepGProp.VolumeProperties_1(
+      shape as InstanceType<typeof oc.TopoDS_Shape>,
+      props,
+      false,
+      false,
+      false,
+    );
+    return props.Mass();
   }
 
   async function producedBodyVolume(
     context: OccFeatureExecutionContext,
     result: ReturnType<typeof executeOccFeature>,
   ) {
-    let total = 0
+    let total = 0;
 
     for (const target of result.producedTargets) {
-      if (target.kind !== 'body') {
-        continue
+      if (target.kind !== "body") {
+        continue;
       }
 
-      const body = result.bodies.find((entry) => entry.bodyId === target.bodyId)
-      expectTrue(body != null, 'Produced body target should resolve to a tracked body.')
-      total += await bodyVolume(context.oc, body.shape)
+      const body = result.bodies.find(
+        (entry) => entry.bodyId === target.bodyId,
+      );
+      expectTrue(
+        body != null,
+        "Produced body target should resolve to a tracked body.",
+      );
+      total += await bodyVolume(context.oc, body.shape);
     }
 
-    return total
+    return total;
   }
 
   function findFaceIdByDirection(
@@ -383,16 +450,18 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
     body: Awaited<ReturnType<typeof makeBoxBody>>,
     direction: readonly [number, number, number],
   ) {
-    return body.topology.faceIds.find((faceId) => {
-      const face = body.facesById.get(faceId)
+    return (
+      body.topology.faceIds.find((faceId) => {
+        const face = body.facesById.get(faceId);
 
-      if (!face) {
-        return false
-      }
+        if (!face) {
+          return false;
+        }
 
-      const plane = extractPlanarFaceData(oc, face)
-      return Math.abs(dot(plane.frame.normal, direction)) >= 0.999999
-    }) ?? null
+        const plane = extractPlanarFaceData(oc, face);
+        return Math.abs(dot(plane.frame.normal, direction)) >= 0.999999;
+      }) ?? null
+    );
   }
 
   function findEdgeIdByDirection(
@@ -400,1580 +469,2956 @@ test('src/domain/modeling/occ/features.spec.ts', async () => {  function assertC
     body: Awaited<ReturnType<typeof makeBoxBody>>,
     direction: readonly [number, number, number],
   ) {
-    return body.topology.edgeIds.find((edgeId) => {
-      const edge = body.edgesById.get(edgeId)
+    return (
+      body.topology.edgeIds.find((edgeId) => {
+        const edge = body.edgesById.get(edgeId);
 
-      if (!edge) {
-        return false
-      }
+        if (!edge) {
+          return false;
+        }
 
-      const axis = buildAxisFromLineEdge(oc, edge)
-      const edgeDirection = [
-        axis.Direction().X(),
-        axis.Direction().Y(),
-        axis.Direction().Z(),
-      ] as const
-      return Math.abs(dot(edgeDirection, direction)) >= 0.999999
-    }) ?? null
+        const axis = buildAxisFromLineEdge(oc, edge);
+        const edgeDirection = [
+          axis.Direction().X(),
+          axis.Direction().Y(),
+          axis.Direction().Z(),
+        ] as const;
+        return Math.abs(dot(edgeDirection, direction)) >= 0.999999;
+      }) ?? null
+    );
   }
 
   async function testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts() {
-    const makeContext = createContext()
-    const context = await makeContext()
-    const featureId = 'feature_phase4_plane_construction' as FeatureId
+    const makeContext = createContext();
+    const context = await makeContext();
+    const featureId = "feature_phase4_plane_construction" as FeatureId;
     const result = executeOccFeature(context, featureId, {
-      kind: 'plane',
+      kind: "plane",
       featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
       parameters: {
-        mode: 'coplanar',
+        mode: "coplanar",
         reference: {
           target: {
-            kind: 'construction',
-            constructionId: 'construction_plane-xy' as ConstructionId,
+            kind: "construction",
+            constructionId: "construction_plane-xy" as ConstructionId,
           },
         },
       },
-    })
+    });
 
-    expectTrue(result.producedTargets.length === 1, 'Plane feature should produce one construction target.')
-    const target = result.producedTargets[0]
-    expectTrue(target?.kind === 'construction', 'Plane feature must produce a construction durable ref.')
-    const duplicatedPlane = result.constructionPlanes.get(target.constructionId)
-    expectTrue(duplicatedPlane != null, 'Plane feature must store an internal construction plane definition.')
-    assertClose(duplicatedPlane.frame.origin[2], 0, 1e-9, 'Copied XY plane should preserve origin.')
-    expectTrue(result.entities.length === 1, 'Plane feature should emit one construction entity row.')
-    expectTrue(result.renderRecords.length === 1, 'Plane feature should emit one construction render record.')
+    expectTrue(
+      result.producedTargets.length === 1,
+      "Plane feature should produce one construction target.",
+    );
+    const target = result.producedTargets[0];
+    expectTrue(
+      target?.kind === "construction",
+      "Plane feature must produce a construction durable ref.",
+    );
+    const duplicatedPlane = result.constructionPlanes.get(
+      target.constructionId,
+    );
+    expectTrue(
+      duplicatedPlane != null,
+      "Plane feature must store an internal construction plane definition.",
+    );
+    assertClose(
+      duplicatedPlane.frame.origin[2],
+      0,
+      1e-9,
+      "Copied XY plane should preserve origin.",
+    );
+    expectTrue(
+      result.entities.length === 1,
+      "Plane feature should emit one construction entity row.",
+    );
+    expectTrue(
+      result.renderRecords.length === 1,
+      "Plane feature should emit one construction render record.",
+    );
 
-    const construction = result.constructions.find((entry) => entry.constructionId === target.constructionId)
-    expectTrue(construction != null, 'Plane feature must append a public construction snapshot row.')
-    const artifacts = createConstructionPresentationArtifacts(context, construction, duplicatedPlane)
-    expectTrue(artifacts.entities[0]?.selectionSemantics.includes('constructionPlane'), 'Construction entity should advertise construction-plane semantics.')
-    expectTrue(artifacts.renderRecords[0]?.binding.semanticClass === 'construction', 'Construction render record should bind as construction geometry.')
+    const construction = result.constructions.find(
+      (entry) => entry.constructionId === target.constructionId,
+    );
+    expectTrue(
+      construction != null,
+      "Plane feature must append a public construction snapshot row.",
+    );
+    const artifacts = createConstructionPresentationArtifacts(
+      context,
+      construction,
+      duplicatedPlane,
+    );
+    expectTrue(
+      artifacts.entities[0]?.selectionSemantics.includes("constructionPlane"),
+      "Construction entity should advertise construction-plane semantics.",
+    );
+    expectTrue(
+      artifacts.renderRecords[0]?.binding.semanticClass === "construction",
+      "Construction render record should bind as construction geometry.",
+    );
   }
 
   async function testPlaneFeatureBuildsFaceBackedConstructionPlane() {
-    const oc = await getDefaultOpenCascadeInstance()
+    const oc = await getDefaultOpenCascadeInstance();
     const sourceBody = await makeBoxBody(
       oc,
-      'body_phase4_plane_face_source' as BodyId,
+      "body_phase4_plane_face_source" as BodyId,
       2,
       3,
       4,
-      'feature_phase4_source' as FeatureId,
-    )
-    const faceId = findFaceIdByDirection(oc, sourceBody, [1, 0, 0])
-    expectTrue(faceId != null, 'Expected tracked solid body to expose a YZ-aligned planar face.')
+      "feature_phase4_source" as FeatureId,
+    );
+    const faceId = findFaceIdByDirection(oc, sourceBody, [1, 0, 0]);
+    expectTrue(
+      faceId != null,
+      "Expected tracked solid body to expose a YZ-aligned planar face.",
+    );
 
-    const makeContext = createContext({ bodies: [sourceBody] })
-    const context = await makeContext()
-    const featureId = 'feature_phase4_plane_face' as FeatureId
+    const makeContext = createContext({ bodies: [sourceBody] });
+    const context = await makeContext();
+    const featureId = "feature_phase4_plane_face" as FeatureId;
     const result = executeOccFeature(context, featureId, {
-      kind: 'plane',
+      kind: "plane",
       featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
       parameters: {
-        mode: 'coplanar',
+        mode: "coplanar",
         reference: {
           target: {
-            kind: 'face',
+            kind: "face",
             bodyId: sourceBody.bodyId,
             faceId,
           },
         },
       },
-    })
-    const target = result.producedTargets[0]
-    expectTrue(target?.kind === 'construction', 'Face-backed plane feature must produce a construction target.')
-    const plane = result.constructionPlanes.get(target.constructionId)
-    expectTrue(plane != null, 'Face-backed plane should expose internal plane geometry.')
-    assertClose(Math.abs(plane.frame.normal[0]), 1, 1e-9, 'YZ-backed plane should preserve the face normal.')
+    });
+    const target = result.producedTargets[0];
+    expectTrue(
+      target?.kind === "construction",
+      "Face-backed plane feature must produce a construction target.",
+    );
+    const plane = result.constructionPlanes.get(target.constructionId);
+    expectTrue(
+      plane != null,
+      "Face-backed plane should expose internal plane geometry.",
+    );
+    assertClose(
+      Math.abs(plane.frame.normal[0]),
+      1,
+      1e-9,
+      "YZ-backed plane should preserve the face normal.",
+    );
   }
 
   async function testExtrudeFeatureCreatesStandaloneBodyFromRegion() {
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_extrude' as SketchId, plane)
-    const makeContext = createContext({ sketches: [sketch] })
-    const context = await makeContext()
-    const featureId = 'feature_phase4_extrude_new_body' as FeatureId
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_extrude" as SketchId,
+      plane,
+    );
+    const makeContext = createContext({ sketches: [sketch] });
+    const context = await makeContext();
+    const featureId = "feature_phase4_extrude_new_body" as FeatureId;
     const parameters: ExtrudeFeatureParameters = {
-      profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-      startExtent: { kind: 'profilePlane' },
+      profiles: [
+        {
+          kind: "region",
+          sketchId: sketch.sketchId,
+          regionId: region.regionId,
+        },
+      ],
+      startExtent: { kind: "profilePlane" },
       extent: {
-        mode: 'oneSide',
-        end: { kind: 'blind', direction: 'positive', distance: 5 },
+        mode: "oneSide",
+        end: { kind: "blind", direction: "positive", distance: 5 },
       },
-      operation: 'newBody',
-      booleanScope: { kind: 'standalone' },
-    }
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    };
 
     const result = executeOccFeature(context, featureId, {
-      kind: 'extrude',
+      kind: "extrude",
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters,
-    })
-    const bodyTarget = result.producedTargets[0]
-    expectTrue(bodyTarget?.kind === 'body', 'Standalone extrude must produce a new body target.')
-    const producedBody = result.bodies.find((entry) => entry.bodyId === bodyTarget.bodyId)
-    expectTrue(producedBody != null, 'Standalone extrude must append the produced body.')
-    assertClose(await bodyVolume(context.oc, producedBody.shape), 60, 1e-6, '4x3 rectangle extruded by 5 should produce the expected prism volume.')
-  }
-
-  async function testExtrudeUpToNextSkipsCoplanarStartFace() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const sourceBody = await makeBoxBody(
-      oc,
-      'body_phase4_extrude_up_to_next_source' as BodyId,
-      4,
-      3,
-      5,
-      'feature_phase4_up_to_next_source' as FeatureId,
-    )
-    const startFaceId = sourceBody.topology.faceIds.find((faceId) => {
-      const face = sourceBody.facesById.get(faceId)
-      if (!face) {
-        return false
-      }
-      const facePlane = extractPlanarFaceData(oc, face)
-      const normal = getExtrusionNormalForPlanarFace(oc, face, 'positive')
-      return Math.abs(facePlane.frame.origin[2]) < 0.001 && dot(normal, [0, 0, 1]) > 0.999
-    })
-    expectTrue(startFaceId != null, 'Expected the source box to expose a lower face whose positive normal points into the body.')
-    const context = await createContext({ bodies: [sourceBody] })()
-
-    const result = executeOccFeature(context, 'feature_phase4_extrude_up_to_next_face' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        profiles: [{ kind: 'face', bodyId: sourceBody.bodyId, faceId: startFaceId }],
-        startExtent: { kind: 'profilePlane' },
-        extent: {
-          mode: 'oneSide',
-          end: { kind: 'upToNext', direction: 'positive' },
-        },
-        operation: 'newBody',
-        booleanScope: { kind: 'standalone' },
-      },
-    })
-    const producedTarget = result.producedTargets[0]
-    expectTrue(producedTarget?.kind === 'body', 'Up-to-next extrude from a face should produce a body.')
-    const producedBody = result.bodies.find((body) => body.bodyId === producedTarget.bodyId)
-    expectTrue(producedBody != null, 'Up-to-next extrude should append the produced body.')
+    });
+    const bodyTarget = result.producedTargets[0];
+    expectTrue(
+      bodyTarget?.kind === "body",
+      "Standalone extrude must produce a new body target.",
+    );
+    const producedBody = result.bodies.find(
+      (entry) => entry.bodyId === bodyTarget.bodyId,
+    );
+    expectTrue(
+      producedBody != null,
+      "Standalone extrude must append the produced body.",
+    );
     assertClose(
       await bodyVolume(context.oc, producedBody.shape),
       60,
       1e-6,
-      'Up-to-next from a face must skip the coplanar start face and terminate at the next parallel face.',
-    )
+      "4x3 rectangle extruded by 5 should produce the expected prism volume.",
+    );
+  }
+
+  async function testExtrudeUpToNextSkipsCoplanarStartFace() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const sourceBody = await makeBoxBody(
+      oc,
+      "body_phase4_extrude_up_to_next_source" as BodyId,
+      4,
+      3,
+      5,
+      "feature_phase4_up_to_next_source" as FeatureId,
+    );
+    const startFaceId = sourceBody.topology.faceIds.find((faceId) => {
+      const face = sourceBody.facesById.get(faceId);
+      if (!face) {
+        return false;
+      }
+      const facePlane = extractPlanarFaceData(oc, face);
+      const normal = getExtrusionNormalForPlanarFace(oc, face, "positive");
+      return (
+        Math.abs(facePlane.frame.origin[2]) < 0.001 &&
+        dot(normal, [0, 0, 1]) > 0.999
+      );
+    });
+    expectTrue(
+      startFaceId != null,
+      "Expected the source box to expose a lower face whose positive normal points into the body.",
+    );
+    const context = await createContext({ bodies: [sourceBody] })();
+
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_extrude_up_to_next_face" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            { kind: "face", bodyId: sourceBody.bodyId, faceId: startFaceId },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "upToNext", direction: "positive" },
+          },
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
+        },
+      },
+    );
+    const producedTarget = result.producedTargets[0];
+    expectTrue(
+      producedTarget?.kind === "body",
+      "Up-to-next extrude from a face should produce a body.",
+    );
+    const producedBody = result.bodies.find(
+      (body) => body.bodyId === producedTarget.bodyId,
+    );
+    expectTrue(
+      producedBody != null,
+      "Up-to-next extrude should append the produced body.",
+    );
+    assertClose(
+      await bodyVolume(context.oc, producedBody.shape),
+      60,
+      1e-6,
+      "Up-to-next from a face must skip the coplanar start face and terminate at the next parallel face.",
+    );
   }
 
   async function testExtrudeDraftsOneSideSymmetricAndTwoSideEnds() {
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_extrude_draft' as SketchId, plane, {
-      width: 3,
-      height: 2,
-    })
-    const context = await createContext({ sketches: [sketch] })()
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_extrude_draft" as SketchId,
+      plane,
+      {
+        width: 3,
+        height: 2,
+      },
+    );
+    const context = await createContext({ sketches: [sketch] })();
     const baseParameters = {
-      profiles: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }],
-      startExtent: { kind: 'profilePlane' as const },
-      operation: 'newBody' as const,
-      booleanScope: { kind: 'standalone' as const },
-    }
+      profiles: [
+        {
+          kind: "region" as const,
+          sketchId: sketch.sketchId,
+          regionId: region.regionId,
+        },
+      ],
+      startExtent: { kind: "profilePlane" as const },
+      operation: "newBody" as const,
+      booleanScope: { kind: "standalone" as const },
+    };
 
-    const oneSide = executeOccFeature(context, 'feature_phase4_extrude_draft_one_side' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        ...baseParameters,
-        extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'positive', distance: 3, draftAngle: 0.05 },
+    const oneSide = executeOccFeature(
+      context,
+      "feature_phase4_extrude_draft_one_side" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseParameters,
+          extent: {
+            mode: "oneSide",
+            end: {
+              kind: "blind",
+              direction: "positive",
+              distance: 3,
+              draftAngle: 0.05,
+            },
+          },
         },
       },
-    })
-    const symmetric = executeOccFeature(context, 'feature_phase4_extrude_draft_symmetric' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        ...baseParameters,
-        extent: {
-          mode: 'symmetric',
-          end: { kind: 'blind', direction: 'positive', distance: 2, draftAngle: 0.04 },
+    );
+    const symmetric = executeOccFeature(
+      context,
+      "feature_phase4_extrude_draft_symmetric" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseParameters,
+          extent: {
+            mode: "symmetric",
+            end: {
+              kind: "blind",
+              direction: "positive",
+              distance: 2,
+              draftAngle: 0.04,
+            },
+          },
         },
       },
-    })
-    const twoSide = executeOccFeature(context, 'feature_phase4_extrude_draft_two_side' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        ...baseParameters,
-        extent: {
-          mode: 'twoSide',
-          firstEnd: { kind: 'blind', direction: 'positive', distance: 2, draftAngle: 0.03 },
-          secondEnd: { kind: 'blind', direction: 'negative', distance: 1, draftAngle: -0.02 },
+    );
+    const twoSide = executeOccFeature(
+      context,
+      "feature_phase4_extrude_draft_two_side" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseParameters,
+          extent: {
+            mode: "twoSide",
+            firstEnd: {
+              kind: "blind",
+              direction: "positive",
+              distance: 2,
+              draftAngle: 0.03,
+            },
+            secondEnd: {
+              kind: "blind",
+              direction: "negative",
+              distance: 1,
+              draftAngle: -0.02,
+            },
+          },
         },
       },
-    })
+    );
 
-    expectTrue(await producedBodyVolume(context, oneSide) > 0, 'One-side drafted extrude should produce solid volume.')
-    expectTrue(await producedBodyVolume(context, symmetric) > 0, 'Symmetric drafted extrude should produce solid volume.')
-    expectTrue(await producedBodyVolume(context, twoSide) > 0, 'Two-side drafted extrude should produce solid volume.')
+    expectTrue(
+      (await producedBodyVolume(context, oneSide)) > 0,
+      "One-side drafted extrude should produce solid volume.",
+    );
+    expectTrue(
+      (await producedBodyVolume(context, symmetric)) > 0,
+      "Symmetric drafted extrude should produce solid volume.",
+    );
+    expectTrue(
+      (await producedBodyVolume(context, twoSide)) > 0,
+      "Two-side drafted extrude should produce solid volume.",
+    );
   }
 
   async function testExtrudeFeatureCreatesBodiesFromMultipleRegions() {
-    const plane = createStandardPlaneDefinition('xy')
-    const primary = createRectangleSketch('sketch_phase4_extrude_multi_a' as SketchId, plane)
-    const secondary = createRectangleSketch('sketch_phase4_extrude_multi_b' as SketchId, plane, {
-      origin: [8, 0],
-      width: 2,
-      height: 3,
-    })
-    const context = await createContext({ sketches: [primary.sketch, secondary.sketch] })()
-
-    const result = executeOccFeature(context, 'feature_phase4_extrude_multi' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        profiles: [
-          { kind: 'region', sketchId: primary.sketch.sketchId, regionId: primary.region.regionId },
-          { kind: 'region', sketchId: secondary.sketch.sketchId, regionId: secondary.region.regionId },
-        ],
-        startExtent: { kind: 'profilePlane' },
-        extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'positive', distance: 5 },
-        },
-        operation: 'newBody',
-        booleanScope: { kind: 'standalone' },
+    const plane = createStandardPlaneDefinition("xy");
+    const primary = createRectangleSketch(
+      "sketch_phase4_extrude_multi_a" as SketchId,
+      plane,
+    );
+    const secondary = createRectangleSketch(
+      "sketch_phase4_extrude_multi_b" as SketchId,
+      plane,
+      {
+        origin: [8, 0],
+        width: 2,
+        height: 3,
       },
-    })
+    );
+    const context = await createContext({
+      sketches: [primary.sketch, secondary.sketch],
+    })();
 
-    expectTrue(result.producedTargets.length === 2, 'Multi-profile standalone extrude must report every produced body target.')
-    expectTrue(result.producedTargets.every((target) => target.kind === 'body'), 'Multi-profile extrude targets must be bodies.')
-    expectTrue(result.bodies.length === 2, 'Multi-profile standalone extrude must append one body per disjoint profile result.')
-    assertClose(await bodyVolume(context.oc, result.bodies[0]!.shape), 60, 1e-6, 'First extruded profile should preserve its prism volume.')
-    assertClose(await bodyVolume(context.oc, result.bodies[1]!.shape), 30, 1e-6, 'Second extruded profile should preserve its prism volume.')
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_extrude_multi" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: primary.sketch.sketchId,
+              regionId: primary.region.regionId,
+            },
+            {
+              kind: "region",
+              sketchId: secondary.sketch.sketchId,
+              regionId: secondary.region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 5 },
+          },
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
+        },
+      },
+    );
+
+    expectTrue(
+      result.producedTargets.length === 2,
+      "Multi-profile standalone extrude must report every produced body target.",
+    );
+    expectTrue(
+      result.producedTargets.every((target) => target.kind === "body"),
+      "Multi-profile extrude targets must be bodies.",
+    );
+    expectTrue(
+      result.bodies.length === 2,
+      "Multi-profile standalone extrude must append one body per disjoint profile result.",
+    );
+    assertClose(
+      await bodyVolume(context.oc, result.bodies[0]!.shape),
+      60,
+      1e-6,
+      "First extruded profile should preserve its prism volume.",
+    );
+    assertClose(
+      await bodyVolume(context.oc, result.bodies[1]!.shape),
+      30,
+      1e-6,
+      "Second extruded profile should preserve its prism volume.",
+    );
   }
 
   async function testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const bodyA = await makeBoxBody(oc, 'body_phase4_join_a' as BodyId, 1, 1, 1, 'feature_box_a' as FeatureId, [0, 0, 0])
-    const bodyB = await makeBoxBody(oc, 'body_phase4_join_b' as BodyId, 1, 1, 1, 'feature_box_b' as FeatureId, [4, 0, 0])
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_join' as SketchId, plane)
-    const context = await createContext({ sketches: [sketch], bodies: [bodyA, bodyB] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const bodyA = await makeBoxBody(
+      oc,
+      "body_phase4_join_a" as BodyId,
+      1,
+      1,
+      1,
+      "feature_box_a" as FeatureId,
+      [0, 0, 0],
+    );
+    const bodyB = await makeBoxBody(
+      oc,
+      "body_phase4_join_b" as BodyId,
+      1,
+      1,
+      1,
+      "feature_box_b" as FeatureId,
+      [4, 0, 0],
+    );
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_join" as SketchId,
+      plane,
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [bodyA, bodyB],
+    })();
 
-    const result = executeOccFeature(context, 'feature_phase4_join' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-        startExtent: { kind: 'profilePlane' },
-        extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'positive', distance: 1 },
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_join" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: sketch.sketchId,
+              regionId: region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 1 },
+          },
+          operation: "join",
+          booleanScope: {
+            kind: "targetBodies",
+            bodyIds: [bodyA.bodyId, bodyB.bodyId],
+          },
         },
-        operation: 'join',
-        booleanScope: { kind: 'targetBodies', bodyIds: [bodyA.bodyId, bodyB.bodyId] },
       },
-    })
+    );
 
-    expectTrue(result.bodies.length === 1, 'Sequential join should collapse ordered target bodies into the first target body.')
-    expectTrue(result.bodies[0]?.bodyId === bodyA.bodyId, 'Sequential join should preserve the first target body id.')
     expectTrue(
-      result.historyInvalidations.get(getOccDurableRefKey({ kind: 'body', bodyId: bodyB.bodyId }))?.reason
-        === OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
-      'Sequential join should invalidate consumed target bodies as deleted topology.',
-    )
+      result.bodies.length === 1,
+      "Sequential join should collapse ordered target bodies into the first target body.",
+    );
+    expectTrue(
+      result.bodies[0]?.bodyId === bodyA.bodyId,
+      "Sequential join should preserve the first target body id.",
+    );
+    expectTrue(
+      result.historyInvalidations.get(
+        getOccDurableRefKey({ kind: "body", bodyId: bodyB.bodyId }),
+      )?.reason === OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+      "Sequential join should invalidate consumed target bodies as deleted topology.",
+    );
   }
 
   async function testExtrudeJoinRefinesSameDomainTopology() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const baseBody = await makeBoxBody(oc, 'body_phase4_join_refine_base' as BodyId, 4, 3, 5, 'feature_phase4_join_refine_base' as FeatureId)
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_join_refine' as SketchId, plane)
-    const context = await createContext({ sketches: [sketch], bodies: [baseBody] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const baseBody = await makeBoxBody(
+      oc,
+      "body_phase4_join_refine_base" as BodyId,
+      4,
+      3,
+      5,
+      "feature_phase4_join_refine_base" as FeatureId,
+    );
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_join_refine" as SketchId,
+      plane,
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [baseBody],
+    })();
 
-    const result = executeOccFeature(context, 'feature_phase4_join_refine' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-        startExtent: { kind: 'profilePlane' },
-        extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'positive', distance: 8 },
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_join_refine" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: sketch.sketchId,
+              regionId: region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 8 },
+          },
+          operation: "join",
+          booleanScope: { kind: "targetBody", bodyId: baseBody.bodyId },
         },
-        operation: 'join',
-        booleanScope: { kind: 'targetBody', bodyId: baseBody.bodyId },
       },
-    })
-    const [joinedBody] = result.bodies
+    );
+    const [joinedBody] = result.bodies;
 
-    expectTrue(joinedBody?.bodyId === baseBody.bodyId, 'Join refinement should preserve the target body id.')
-    expectTrue(joinedBody.topology.faceIds.length === 6, `Joined rectangular extension should have only the six end/side faces, got ${joinedBody.topology.faceIds.length}.`)
-    expectTrue(joinedBody.topology.edgeIds.length === 12, `Joined rectangular extension should not keep middle seam edges, got ${joinedBody.topology.edgeIds.length}.`)
-    expectTrue(joinedBody.topology.vertexIds.length === 8, `Joined rectangular extension should not keep middle seam vertices, got ${joinedBody.topology.vertexIds.length}.`)
-    assertClose(await bodyVolume(context.oc, joinedBody.shape), 96, 1e-6, 'Joined rectangular extension should preserve the full extended prism volume.')
+    expectTrue(
+      joinedBody?.bodyId === baseBody.bodyId,
+      "Join refinement should preserve the target body id.",
+    );
+    expectTrue(
+      joinedBody.topology.faceIds.length === 6,
+      `Joined rectangular extension should have only the six end/side faces, got ${joinedBody.topology.faceIds.length}.`,
+    );
+    expectTrue(
+      joinedBody.topology.edgeIds.length === 12,
+      `Joined rectangular extension should not keep middle seam edges, got ${joinedBody.topology.edgeIds.length}.`,
+    );
+    expectTrue(
+      joinedBody.topology.vertexIds.length === 8,
+      `Joined rectangular extension should not keep middle seam vertices, got ${joinedBody.topology.vertexIds.length}.`,
+    );
+    assertClose(
+      await bodyVolume(context.oc, joinedBody.shape),
+      96,
+      1e-6,
+      "Joined rectangular extension should preserve the full extended prism volume.",
+    );
   }
 
   async function testExtrudeJoinRejectsMultiSolidResultShapes() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const bodyA = await makeBoxBody(oc, 'body_phase4_join_multi_a' as BodyId, 1, 1, 1, 'feature_box_multi_a' as FeatureId, [20, 0, 0])
-    const bodyB = await makeBoxBody(oc, 'body_phase4_join_multi_b' as BodyId, 1, 1, 1, 'feature_box_multi_b' as FeatureId, [40, 0, 0])
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_join_multi' as SketchId, plane)
-    const context = await createContext({ sketches: [sketch], bodies: [bodyA, bodyB] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const bodyA = await makeBoxBody(
+      oc,
+      "body_phase4_join_multi_a" as BodyId,
+      1,
+      1,
+      1,
+      "feature_box_multi_a" as FeatureId,
+      [20, 0, 0],
+    );
+    const bodyB = await makeBoxBody(
+      oc,
+      "body_phase4_join_multi_b" as BodyId,
+      1,
+      1,
+      1,
+      "feature_box_multi_b" as FeatureId,
+      [40, 0, 0],
+    );
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_join_multi" as SketchId,
+      plane,
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [bodyA, bodyB],
+    })();
 
-    let thrownMessage: string | null = null
+    let thrownMessage: string | null = null;
 
     try {
-      executeOccFeature(context, 'feature_phase4_join_multi' as FeatureId, {
-        kind: 'extrude',
+      executeOccFeature(context, "feature_phase4_join_multi" as FeatureId, {
+        kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
-          profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-          startExtent: { kind: 'profilePlane' },
+          profiles: [
+            {
+              kind: "region",
+              sketchId: sketch.sketchId,
+              regionId: region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
           extent: {
-            mode: 'oneSide',
-            end: { kind: 'blind', direction: 'positive', distance: 1 },
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 1 },
           },
-          operation: 'join',
-          booleanScope: { kind: 'targetBodies', bodyIds: [bodyA.bodyId, bodyB.bodyId] },
+          operation: "join",
+          booleanScope: {
+            kind: "targetBodies",
+            bodyIds: [bodyA.bodyId, bodyB.bodyId],
+          },
         },
-      })
+      });
     } catch (error) {
-      thrownMessage = error instanceof Error ? error.message : String(error)
+      thrownMessage = error instanceof Error ? error.message : String(error);
     }
 
     expectTrue(
-      thrownMessage?.includes('Phase 4') === true && thrownMessage.includes('single-body replacement'),
-      'Disjoint sequential joins should reject multi-solid replacement results explicitly.',
-    )
+      thrownMessage?.includes("Phase 4") === true &&
+        thrownMessage.includes("single-body replacement"),
+      "Disjoint sequential joins should reject multi-solid replacement results explicitly.",
+    );
   }
 
   async function testExtrudeRejectsInvalidExtentAndBooleanScope() {
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_extrude_invalid' as SketchId, plane)
-    const context = await createContext({ sketches: [sketch] })()
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_extrude_invalid" as SketchId,
+      plane,
+    );
+    const context = await createContext({ sketches: [sketch] })();
 
-    let invalidDistance: string | null = null
+    let invalidDistance: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_extrude_invalid_distance' as FeatureId, {
-        kind: 'extrude',
-        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-          startExtent: { kind: 'profilePlane' },
-          extent: {
-            mode: 'oneSide',
-            end: { kind: 'blind', direction: 'positive', distance: 0 },
+      executeOccFeature(
+        context,
+        "feature_phase4_extrude_invalid_distance" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 0 },
+            },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
           },
-          operation: 'newBody',
-          booleanScope: { kind: 'standalone' },
         },
-      })
+      );
     } catch (error) {
-      invalidDistance = error instanceof Error ? error.message : String(error)
+      invalidDistance = error instanceof Error ? error.message : String(error);
     }
 
-    let invalidScope: string | null = null
+    let invalidScope: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_extrude_invalid_scope' as FeatureId, {
-        kind: 'extrude',
-        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-          startExtent: { kind: 'profilePlane' },
-          extent: {
-            mode: 'oneSide',
-            end: { kind: 'blind', direction: 'positive', distance: 1 },
+      executeOccFeature(
+        context,
+        "feature_phase4_extrude_invalid_scope" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 1 },
+            },
+            operation: "join",
+            booleanScope: { kind: "standalone" },
           },
-          operation: 'join',
-          booleanScope: { kind: 'standalone' },
         },
-      })
+      );
     } catch (error) {
-      invalidScope = error instanceof Error ? error.message : String(error)
+      invalidScope = error instanceof Error ? error.message : String(error);
     }
 
-    let invalidNewBodyScope: string | null = null
+    let invalidNewBodyScope: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_extrude_invalid_new_body_scope' as FeatureId, {
-        kind: 'extrude',
-        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-          startExtent: { kind: 'profilePlane' },
-          extent: {
-            mode: 'oneSide',
-            end: { kind: 'blind', direction: 'positive', distance: 1 },
+      executeOccFeature(
+        context,
+        "feature_phase4_extrude_invalid_new_body_scope" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 1 },
+            },
+            operation: "newBody",
+            booleanScope: {
+              kind: "targetBody",
+              bodyId: "body_invalid_scope" as BodyId,
+            },
           },
-          operation: 'newBody',
-          booleanScope: { kind: 'targetBody', bodyId: 'body_invalid_scope' as BodyId },
         },
-      })
+      );
     } catch (error) {
-      invalidNewBodyScope = error instanceof Error ? error.message : String(error)
+      invalidNewBodyScope =
+        error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(invalidDistance === 'Extrude blind distance must be positive.', 'Extrude should reject non-positive blind distances.')
-    expectTrue(invalidScope === 'Boolean operation join requires explicit target bodies.', 'Extrude should reject standalone scope for boolean operations that need explicit participants.')
-    expectTrue(invalidNewBodyScope === 'Boolean operation newBody requires standalone scope.', 'Extrude should reject non-standalone scope for new-body operations.')
+    expectTrue(
+      invalidDistance === "Extrude blind distance must be positive.",
+      "Extrude should reject non-positive blind distances.",
+    );
+    expectTrue(
+      invalidScope ===
+        "Boolean operation join requires explicit target bodies.",
+      "Extrude should reject standalone scope for boolean operations that need explicit participants.",
+    );
+    expectTrue(
+      invalidNewBodyScope ===
+        "Boolean operation newBody requires standalone scope.",
+      "Extrude should reject non-standalone scope for new-body operations.",
+    );
   }
 
   async function testAdvancedEndConditionDiagnostics() {
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_end_diagnostics' as SketchId, plane)
-    const oc = await getDefaultOpenCascadeInstance()
-    const targetA = await makeBoxBody(oc, 'body_phase4_end_diagnostics_a' as BodyId, 1, 1, 1, 'feature_phase4_end_diagnostics_a' as FeatureId, [0, 0, 2])
-    const targetB = await makeBoxBody(oc, 'body_phase4_end_diagnostics_b' as BodyId, 1, 1, 1, 'feature_phase4_end_diagnostics_b' as FeatureId, [4, 0, 2])
-    const ambiguousContext = await createContext({ sketches: [sketch], bodies: [targetA, targetB] })()
-    const noTargetContext = await createContext({ sketches: [sketch] })()
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_end_diagnostics" as SketchId,
+      plane,
+    );
+    const oc = await getDefaultOpenCascadeInstance();
+    const targetA = await makeBoxBody(
+      oc,
+      "body_phase4_end_diagnostics_a" as BodyId,
+      1,
+      1,
+      1,
+      "feature_phase4_end_diagnostics_a" as FeatureId,
+      [0, 0, 2],
+    );
+    const targetB = await makeBoxBody(
+      oc,
+      "body_phase4_end_diagnostics_b" as BodyId,
+      1,
+      1,
+      1,
+      "feature_phase4_end_diagnostics_b" as FeatureId,
+      [4, 0, 2],
+    );
+    const ambiguousContext = await createContext({
+      sketches: [sketch],
+      bodies: [targetA, targetB],
+    })();
+    const noTargetContext = await createContext({ sketches: [sketch] })();
     const baseExtrudeParameters = {
-      profiles: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }],
-      startExtent: { kind: 'profilePlane' as const },
-      operation: 'newBody' as const,
-      booleanScope: { kind: 'standalone' as const },
-    }
+      profiles: [
+        {
+          kind: "region" as const,
+          sketchId: sketch.sketchId,
+          regionId: region.regionId,
+        },
+      ],
+      startExtent: { kind: "profilePlane" as const },
+      operation: "newBody" as const,
+      booleanScope: { kind: "standalone" as const },
+    };
 
-    let ambiguousExtrude: string | null = null
+    let ambiguousExtrude: string | null = null;
     try {
-      executeOccFeature(ambiguousContext, 'feature_phase4_extrude_ambiguous_up_to_next' as FeatureId, {
-        kind: 'extrude',
-        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          ...baseExtrudeParameters,
-          extent: {
-            mode: 'oneSide',
-            end: { kind: 'upToNext', direction: 'positive' },
+      executeOccFeature(
+        ambiguousContext,
+        "feature_phase4_extrude_ambiguous_up_to_next" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            ...baseExtrudeParameters,
+            extent: {
+              mode: "oneSide",
+              end: { kind: "upToNext", direction: "positive" },
+            },
           },
         },
-      })
+      );
     } catch (error) {
-      ambiguousExtrude = error instanceof Error ? error.message : String(error)
+      ambiguousExtrude = error instanceof Error ? error.message : String(error);
     }
 
-    let missingExtrudeTarget: string | null = null
+    let missingExtrudeTarget: string | null = null;
     try {
-      executeOccFeature(noTargetContext, 'feature_phase4_extrude_missing_up_to_next' as FeatureId, {
-        kind: 'extrude',
-        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          ...baseExtrudeParameters,
-          extent: {
-            mode: 'oneSide',
-            end: { kind: 'upToNext', direction: 'positive' },
+      executeOccFeature(
+        noTargetContext,
+        "feature_phase4_extrude_missing_up_to_next" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            ...baseExtrudeParameters,
+            extent: {
+              mode: "oneSide",
+              end: { kind: "upToNext", direction: "positive" },
+            },
           },
         },
-      })
+      );
     } catch (error) {
-      missingExtrudeTarget = error instanceof Error ? error.message : String(error)
+      missingExtrudeTarget =
+        error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(ambiguousExtrude?.includes('advanced-feature-unsupported-kernel-case') === true && ambiguousExtrude.includes('ambiguous'), 'Extrude up-to-next should diagnose ambiguous nearest bodies.')
-    expectTrue(missingExtrudeTarget?.includes('advanced-feature-unsupported-kernel-case') === true && missingExtrudeTarget.includes('no terminating geometry'), 'Extrude up-to-next should diagnose missing termination.')
+    expectTrue(
+      ambiguousExtrude?.includes("advanced-feature-unsupported-kernel-case") ===
+        true && ambiguousExtrude.includes("ambiguous"),
+      "Extrude up-to-next should diagnose ambiguous nearest bodies.",
+    );
+    expectTrue(
+      missingExtrudeTarget?.includes(
+        "advanced-feature-unsupported-kernel-case",
+      ) === true && missingExtrudeTarget.includes("no terminating geometry"),
+      "Extrude up-to-next should diagnose missing termination.",
+    );
   }
 
   async function testCutAndIntersectApplyPerTargetPolicy() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const bodyA = await makeBoxBody(oc, 'body_phase4_cut_a' as BodyId, 2, 2, 1, 'feature_phase4_cut_seed_a' as FeatureId, [0, 0, 0])
-    const bodyB = await makeBoxBody(oc, 'body_phase4_cut_b' as BodyId, 2, 2, 1, 'feature_phase4_cut_seed_b' as FeatureId, [10, 0, 0])
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_cut' as SketchId, plane, {
-      origin: [0.5, 0.5],
-      width: 1,
-      height: 1,
-    })
-    const context = await createContext({ sketches: [sketch], bodies: [bodyA, bodyB] })()
-
-    const cutResult = executeOccFeature(context, 'feature_phase4_cut' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-        startExtent: { kind: 'profilePlane' },
-        extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'positive', distance: 1 },
-        },
-        operation: 'cut',
-        booleanScope: { kind: 'targetBodies', bodyIds: [bodyA.bodyId, bodyB.bodyId] },
+    const oc = await getDefaultOpenCascadeInstance();
+    const bodyA = await makeBoxBody(
+      oc,
+      "body_phase4_cut_a" as BodyId,
+      2,
+      2,
+      1,
+      "feature_phase4_cut_seed_a" as FeatureId,
+      [0, 0, 0],
+    );
+    const bodyB = await makeBoxBody(
+      oc,
+      "body_phase4_cut_b" as BodyId,
+      2,
+      2,
+      1,
+      "feature_phase4_cut_seed_b" as FeatureId,
+      [10, 0, 0],
+    );
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_cut" as SketchId,
+      plane,
+      {
+        origin: [0.5, 0.5],
+        width: 1,
+        height: 1,
       },
-    })
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [bodyA, bodyB],
+    })();
 
-    expectTrue(cutResult.bodies.length === 2, 'Per-target cut should preserve each target body row independently.')
-    expectTrue(cutResult.bodies.some((body) => body.bodyId === bodyA.bodyId), 'Per-target cut should preserve the first target body id.')
-    expectTrue(cutResult.bodies.some((body) => body.bodyId === bodyB.bodyId), 'Per-target cut should preserve unaffected target bodies.')
-
-    const intersectResult = executeOccFeature(context, 'feature_phase4_intersect' as FeatureId, {
-      kind: 'extrude',
-      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-        startExtent: { kind: 'profilePlane' },
-        extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'positive', distance: 1 },
+    const cutResult = executeOccFeature(
+      context,
+      "feature_phase4_cut" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: sketch.sketchId,
+              regionId: region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 1 },
+          },
+          operation: "cut",
+          booleanScope: {
+            kind: "targetBodies",
+            bodyIds: [bodyA.bodyId, bodyB.bodyId],
+          },
         },
-        operation: 'intersect',
-        booleanScope: { kind: 'targetBodies', bodyIds: [bodyA.bodyId, bodyB.bodyId] },
       },
-    })
+    );
 
-    expectTrue(intersectResult.bodies.length === 1, 'Per-target intersect should drop target bodies whose solid result is empty.')
-    expectTrue(intersectResult.bodies[0]?.bodyId === bodyA.bodyId, 'Per-target intersect should preserve the remaining target body id when only one body overlaps.')
+    expectTrue(
+      cutResult.bodies.length === 2,
+      "Per-target cut should preserve each target body row independently.",
+    );
+    expectTrue(
+      cutResult.bodies.some((body) => body.bodyId === bodyA.bodyId),
+      "Per-target cut should preserve the first target body id.",
+    );
+    expectTrue(
+      cutResult.bodies.some((body) => body.bodyId === bodyB.bodyId),
+      "Per-target cut should preserve unaffected target bodies.",
+    );
+
+    const intersectResult = executeOccFeature(
+      context,
+      "feature_phase4_intersect" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: sketch.sketchId,
+              regionId: region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 1 },
+          },
+          operation: "intersect",
+          booleanScope: {
+            kind: "targetBodies",
+            bodyIds: [bodyA.bodyId, bodyB.bodyId],
+          },
+        },
+      },
+    );
+
+    expectTrue(
+      intersectResult.bodies.length === 1,
+      "Per-target intersect should drop target bodies whose solid result is empty.",
+    );
+    expectTrue(
+      intersectResult.bodies[0]?.bodyId === bodyA.bodyId,
+      "Per-target intersect should preserve the remaining target body id when only one body overlaps.",
+    );
   }
 
   async function testCombineExecutesBodyBooleansAndConsumesTools() {
-    const oc = await getDefaultOpenCascadeInstance()
+    const oc = await getDefaultOpenCascadeInstance();
 
     async function makeOverlappingContext(prefix: string) {
-      const target = await makeBoxBody(oc, `body_phase4_combine_${prefix}_target` as BodyId, 4, 4, 4, `feature_phase4_combine_${prefix}_target_seed` as FeatureId)
-      const tool = await makeBoxBody(oc, `body_phase4_combine_${prefix}_tool` as BodyId, 4, 4, 4, `feature_phase4_combine_${prefix}_tool_seed` as FeatureId, [2, 0, 0])
-      const context = await createContext({ bodies: [target, tool] })()
-      return { context, target, tool }
+      const target = await makeBoxBody(
+        oc,
+        `body_phase4_combine_${prefix}_target` as BodyId,
+        4,
+        4,
+        4,
+        `feature_phase4_combine_${prefix}_target_seed` as FeatureId,
+      );
+      const tool = await makeBoxBody(
+        oc,
+        `body_phase4_combine_${prefix}_tool` as BodyId,
+        4,
+        4,
+        4,
+        `feature_phase4_combine_${prefix}_tool_seed` as FeatureId,
+        [2, 0, 0],
+      );
+      const context = await createContext({ bodies: [target, tool] })();
+      return { context, target, tool };
     }
 
-    const add = await makeOverlappingContext('add')
-    const addResult = executeOccFeature(add.context, 'feature_phase4_combine_add' as FeatureId, {
-      kind: 'combine',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        operationIntent: 'add',
-        participants: [
-          { role: 'targetBody', targets: [{ kind: 'body', bodyId: add.target.bodyId }] },
-          { role: 'toolBody', targets: [{ kind: 'body', bodyId: add.tool.bodyId }] },
-        ],
+    const add = await makeOverlappingContext("add");
+    const addResult = executeOccFeature(
+      add.context,
+      "feature_phase4_combine_add" as FeatureId,
+      {
+        kind: "combine",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "add",
+          participants: [
+            {
+              role: "targetBody",
+              targets: [{ kind: "body", bodyId: add.target.bodyId }],
+            },
+            {
+              role: "toolBody",
+              targets: [{ kind: "body", bodyId: add.tool.bodyId }],
+            },
+          ],
+        },
       },
-    })
-    const addBody = addResult.bodies.find((body) => body.bodyId === add.target.bodyId)
-    expectTrue(addResult.bodies.length === 1, 'Combine add should consume the tool body into the target output.')
-    expectTrue(addBody != null, 'Combine add should preserve the primary target body identity.')
-    assertClose(await bodyVolume(add.context.oc, addBody.shape), 96, 1e-6, 'Combine add should fuse overlapping target and tool volumes.')
-    expectTrue(addResult.producedTargets[0]?.kind === 'body' && addResult.producedTargets[0].bodyId === add.target.bodyId, 'Combine add should report the preserved target as produced output.')
+    );
+    const addBody = addResult.bodies.find(
+      (body) => body.bodyId === add.target.bodyId,
+    );
+    expectTrue(
+      addResult.bodies.length === 1,
+      "Combine add should consume the tool body into the target output.",
+    );
+    expectTrue(
+      addBody != null,
+      "Combine add should preserve the primary target body identity.",
+    );
+    assertClose(
+      await bodyVolume(add.context.oc, addBody.shape),
+      96,
+      1e-6,
+      "Combine add should fuse overlapping target and tool volumes.",
+    );
+    expectTrue(
+      addResult.producedTargets[0]?.kind === "body" &&
+        addResult.producedTargets[0].bodyId === add.target.bodyId,
+      "Combine add should report the preserved target as produced output.",
+    );
 
-    const subtract = await makeOverlappingContext('subtract')
-    const subtractResult = executeOccFeature(subtract.context, 'feature_phase4_combine_subtract' as FeatureId, {
-      kind: 'combine',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        operationIntent: 'subtract',
-        participants: [
-          { role: 'targetBody', targets: [{ kind: 'body', bodyId: subtract.target.bodyId }] },
-          { role: 'toolBody', targets: [{ kind: 'body', bodyId: subtract.tool.bodyId }] },
-        ],
+    const subtract = await makeOverlappingContext("subtract");
+    const subtractResult = executeOccFeature(
+      subtract.context,
+      "feature_phase4_combine_subtract" as FeatureId,
+      {
+        kind: "combine",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "subtract",
+          participants: [
+            {
+              role: "targetBody",
+              targets: [{ kind: "body", bodyId: subtract.target.bodyId }],
+            },
+            {
+              role: "toolBody",
+              targets: [{ kind: "body", bodyId: subtract.tool.bodyId }],
+            },
+          ],
+        },
       },
-    })
-    const subtractBody = subtractResult.bodies.find((body) => body.bodyId === subtract.target.bodyId)
-    expectTrue(subtractResult.bodies.length === 1, 'Combine subtract should remove the consumed tool body from the body list.')
-    expectTrue(subtractBody != null, 'Combine subtract should preserve the target body identity.')
-    assertClose(await bodyVolume(subtract.context.oc, subtractBody.shape), 32, 1e-6, 'Combine subtract should cut the overlapping tool volume from the target.')
-    expectTrue(subtractResult.historyInvalidations.size > 0, 'Combine subtract should report topology invalidation history.')
+    );
+    const subtractBody = subtractResult.bodies.find(
+      (body) => body.bodyId === subtract.target.bodyId,
+    );
+    expectTrue(
+      subtractResult.bodies.length === 1,
+      "Combine subtract should remove the consumed tool body from the body list.",
+    );
+    expectTrue(
+      subtractBody != null,
+      "Combine subtract should preserve the target body identity.",
+    );
+    assertClose(
+      await bodyVolume(subtract.context.oc, subtractBody.shape),
+      32,
+      1e-6,
+      "Combine subtract should cut the overlapping tool volume from the target.",
+    );
+    expectTrue(
+      subtractResult.historyInvalidations.size > 0,
+      "Combine subtract should report topology invalidation history.",
+    );
 
-    const intersect = await makeOverlappingContext('intersect')
-    const intersectResult = executeOccFeature(intersect.context, 'feature_phase4_combine_intersect' as FeatureId, {
-      kind: 'combine',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        operationIntent: 'intersect',
-        participants: [
-          { role: 'targetBody', targets: [{ kind: 'body', bodyId: intersect.target.bodyId }] },
-          { role: 'toolBody', targets: [{ kind: 'body', bodyId: intersect.tool.bodyId }] },
-        ],
+    const intersect = await makeOverlappingContext("intersect");
+    const intersectResult = executeOccFeature(
+      intersect.context,
+      "feature_phase4_combine_intersect" as FeatureId,
+      {
+        kind: "combine",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "intersect",
+          participants: [
+            {
+              role: "targetBody",
+              targets: [{ kind: "body", bodyId: intersect.target.bodyId }],
+            },
+            {
+              role: "toolBody",
+              targets: [{ kind: "body", bodyId: intersect.tool.bodyId }],
+            },
+          ],
+        },
       },
-    })
-    const intersectBody = intersectResult.bodies.find((body) => body.bodyId === intersect.target.bodyId)
-    expectTrue(intersectResult.bodies.length === 1, 'Combine intersect should consume the tool body and keep the common target output.')
-    expectTrue(intersectBody != null, 'Combine intersect should preserve the target body identity for non-empty common volume.')
-    assertClose(await bodyVolume(intersect.context.oc, intersectBody.shape), 32, 1e-6, 'Combine intersect should keep only the common overlapping volume.')
+    );
+    const intersectBody = intersectResult.bodies.find(
+      (body) => body.bodyId === intersect.target.bodyId,
+    );
+    expectTrue(
+      intersectResult.bodies.length === 1,
+      "Combine intersect should consume the tool body and keep the common target output.",
+    );
+    expectTrue(
+      intersectBody != null,
+      "Combine intersect should preserve the target body identity for non-empty common volume.",
+    );
+    assertClose(
+      await bodyVolume(intersect.context.oc, intersectBody.shape),
+      32,
+      1e-6,
+      "Combine intersect should keep only the common overlapping volume.",
+    );
   }
 
   async function testCombineRejectsEmptyAndMalformedBodyRoles() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const target = await makeBoxBody(oc, 'body_phase4_combine_empty_target' as BodyId, 2, 2, 2, 'feature_phase4_combine_empty_target_seed' as FeatureId)
-    const disjointTool = await makeBoxBody(oc, 'body_phase4_combine_empty_tool' as BodyId, 2, 2, 2, 'feature_phase4_combine_empty_tool_seed' as FeatureId, [10, 0, 0])
-    const context = await createContext({ bodies: [target, disjointTool] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const target = await makeBoxBody(
+      oc,
+      "body_phase4_combine_empty_target" as BodyId,
+      2,
+      2,
+      2,
+      "feature_phase4_combine_empty_target_seed" as FeatureId,
+    );
+    const disjointTool = await makeBoxBody(
+      oc,
+      "body_phase4_combine_empty_tool" as BodyId,
+      2,
+      2,
+      2,
+      "feature_phase4_combine_empty_tool_seed" as FeatureId,
+      [10, 0, 0],
+    );
+    const context = await createContext({ bodies: [target, disjointTool] })();
 
-    let emptyIntersection: string | null = null
+    let emptyIntersection: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_combine_empty' as FeatureId, {
-        kind: 'combine',
+      executeOccFeature(context, "feature_phase4_combine_empty" as FeatureId, {
+        kind: "combine",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: 'intersect',
+          operationIntent: "intersect",
           participants: [
-            { role: 'targetBody', targets: [{ kind: 'body', bodyId: target.bodyId }] },
-            { role: 'toolBody', targets: [{ kind: 'body', bodyId: disjointTool.bodyId }] },
+            {
+              role: "targetBody",
+              targets: [{ kind: "body", bodyId: target.bodyId }],
+            },
+            {
+              role: "toolBody",
+              targets: [{ kind: "body", bodyId: disjointTool.bodyId }],
+            },
           ],
         },
-      })
+      });
     } catch (error) {
-      emptyIntersection = error instanceof Error ? error.message : String(error)
+      emptyIntersection =
+        error instanceof Error ? error.message : String(error);
     }
 
-    let duplicateRole: string | null = null
+    let duplicateRole: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_combine_duplicate' as FeatureId, {
-        kind: 'combine',
-        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          operationIntent: 'subtract',
-          participants: [
-            { role: 'targetBody', targets: [{ kind: 'body', bodyId: target.bodyId }] },
-            { role: 'toolBody', targets: [{ kind: 'body', bodyId: target.bodyId }] },
-          ],
+      executeOccFeature(
+        context,
+        "feature_phase4_combine_duplicate" as FeatureId,
+        {
+          kind: "combine",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: "subtract",
+            participants: [
+              {
+                role: "targetBody",
+                targets: [{ kind: "body", bodyId: target.bodyId }],
+              },
+              {
+                role: "toolBody",
+                targets: [{ kind: "body", bodyId: target.bodyId }],
+              },
+            ],
+          },
         },
-      })
+      );
     } catch (error) {
-      duplicateRole = error instanceof Error ? error.message : String(error)
+      duplicateRole = error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(emptyIntersection?.includes('OCC combine produced no solid result bodies') === true, 'Combine empty intersections should reject with an explicit empty-result diagnostic message.')
-    expectTrue(duplicateRole?.includes('target and tool bodies must be distinct') === true, 'Combine should reject duplicate target/tool body roles explicitly.')
+    expectTrue(
+      emptyIntersection?.includes(
+        "OCC combine produced no solid result bodies",
+      ) === true,
+      "Combine empty intersections should reject with an explicit empty-result diagnostic message.",
+    );
+    expectTrue(
+      duplicateRole?.includes("target and tool bodies must be distinct") ===
+        true,
+      "Combine should reject duplicate target/tool body roles explicitly.",
+    );
   }
 
   async function testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const profilePlane = createStandardPlaneDefinition('xz')
+    const oc = await getDefaultOpenCascadeInstance();
+    const profilePlane = createStandardPlaneDefinition("xz");
     const axisBody = await makeBoxBody(
       oc,
-      'body_phase4_revolve_axis' as BodyId,
+      "body_phase4_revolve_axis" as BodyId,
       1,
       1,
       4,
-      'feature_phase4_axis_seed' as FeatureId,
+      "feature_phase4_axis_seed" as FeatureId,
       [0, 0, 0],
-    )
-    const axisFaceId = findFaceIdByDirection(oc, axisBody, [1, 0, 0])
-    expectTrue(axisFaceId != null, 'Expected tracked axis body to expose a planar face id.')
-    const axisFace = axisBody.facesById.get(axisFaceId)
-    expectTrue(axisFace != null, 'Expected tracked axis body to expose a planar face shape.')
-    const axisPlane = buildConstructionPlaneFromPlanarFace(oc, axisFace, axisFaceId, {
-      kind: 'construction',
-      constructionId: 'construction_axis_seed' as ConstructionId,
-    })
-    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
-    expectTrue(axisEdgeId != null, 'Expected tracked axis body to expose a linear Z-axis edge.')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_revolve' as SketchId, profilePlane)
-    const axisConstruction = requireConstructionSupport(axisPlane)
-    const context = await createContext({ sketches: [sketch], bodies: [axisBody], constructionPlanes: new Map([[axisConstruction.constructionId, axisPlane]]) })()
+    );
+    const axisFaceId = findFaceIdByDirection(oc, axisBody, [1, 0, 0]);
+    expectTrue(
+      axisFaceId != null,
+      "Expected tracked axis body to expose a planar face id.",
+    );
+    const axisFace = axisBody.facesById.get(axisFaceId);
+    expectTrue(
+      axisFace != null,
+      "Expected tracked axis body to expose a planar face shape.",
+    );
+    const axisPlane = buildConstructionPlaneFromPlanarFace(
+      oc,
+      axisFace,
+      axisFaceId,
+      {
+        kind: "construction",
+        constructionId: "construction_axis_seed" as ConstructionId,
+      },
+    );
+    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1]);
+    expectTrue(
+      axisEdgeId != null,
+      "Expected tracked axis body to expose a linear Z-axis edge.",
+    );
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_revolve" as SketchId,
+      profilePlane,
+    );
+    const axisConstruction = requireConstructionSupport(axisPlane);
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [axisBody],
+      constructionPlanes: new Map([
+        [axisConstruction.constructionId, axisPlane],
+      ]),
+    })();
 
-    let constructionAxisError: string | null = null
+    let constructionAxisError: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_revolve_construction_axis' as FeatureId, {
-        kind: 'revolve',
-        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-          axis: { kind: 'construction', constructionId: axisConstruction.constructionId },
-          startAngle: 0,
-          extent: {
-            mode: 'oneSide',
-            end: { kind: 'blind', direction: 'counterClockwise', angle: Math.PI },
+      executeOccFeature(
+        context,
+        "feature_phase4_revolve_construction_axis" as FeatureId,
+        {
+          kind: "revolve",
+          featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            axis: {
+              kind: "construction",
+              constructionId: axisConstruction.constructionId,
+            },
+            startAngle: 0,
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "blind",
+                direction: "counterClockwise",
+                angle: Math.PI,
+              },
+            },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
           },
-          operation: 'newBody',
-          booleanScope: { kind: 'standalone' },
         },
-      })
+      );
     } catch (error) {
-      constructionAxisError = error instanceof Error ? error.message : String(error)
+      constructionAxisError =
+        error instanceof Error ? error.message : String(error);
     }
 
-    const result = executeOccFeature(context, 'feature_phase4_revolve_edge_axis' as FeatureId, {
-      kind: 'revolve',
-      featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-        axis: { kind: 'edge', bodyId: axisBody.bodyId, edgeId: axisEdgeId as EdgeId },
-        startAngle: Math.PI / 4,
-        extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'counterClockwise', angle: Math.PI },
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_revolve_edge_axis" as FeatureId,
+      {
+        kind: "revolve",
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: sketch.sketchId,
+              regionId: region.regionId,
+            },
+          ],
+          axis: {
+            kind: "edge",
+            bodyId: axisBody.bodyId,
+            edgeId: axisEdgeId as EdgeId,
+          },
+          startAngle: Math.PI / 4,
+          extent: {
+            mode: "oneSide",
+            end: {
+              kind: "blind",
+              direction: "counterClockwise",
+              angle: Math.PI,
+            },
+          },
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
         },
-        operation: 'newBody',
-        booleanScope: { kind: 'standalone' },
       },
-    })
+    );
 
-    expectTrue(constructionAxisError?.includes('occ-contract-gap-revolve-construction-axis') === true, 'Construction-backed revolve axes must reject explicitly with the contract-gap code.')
-    expectTrue(result.producedTargets[0]?.kind === 'body', 'Edge-backed revolve should produce a solid body.')
+    expectTrue(
+      constructionAxisError?.includes(
+        "occ-contract-gap-revolve-construction-axis",
+      ) === true,
+      "Construction-backed revolve axes must reject explicitly with the contract-gap code.",
+    );
+    expectTrue(
+      result.producedTargets[0]?.kind === "body",
+      "Edge-backed revolve should produce a solid body.",
+    );
   }
 
   async function testRevolveBuildsFullAndUpToPartWithOffsets() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const profilePlane = createStandardPlaneDefinition('xz')
+    const oc = await getDefaultOpenCascadeInstance();
+    const profilePlane = createStandardPlaneDefinition("xz");
     const axisBody = await makeBoxBody(
       oc,
-      'body_phase4_revolve_advanced_axis' as BodyId,
+      "body_phase4_revolve_advanced_axis" as BodyId,
       1,
       1,
       4,
-      'feature_phase4_revolve_advanced_axis_seed' as FeatureId,
+      "feature_phase4_revolve_advanced_axis_seed" as FeatureId,
       [0, 0, 0],
-    )
+    );
     const targetBody = await makeBoxBody(
       oc,
-      'body_phase4_revolve_advanced_target' as BodyId,
+      "body_phase4_revolve_advanced_target" as BodyId,
       2,
       1,
       2,
-      'feature_phase4_revolve_advanced_target_seed' as FeatureId,
+      "feature_phase4_revolve_advanced_target_seed" as FeatureId,
       [2, 8, 0],
-    )
-    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
-    expectTrue(axisEdgeId != null, 'Expected axis body to expose a linear Z edge.')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_revolve_advanced' as SketchId, profilePlane, {
-      origin: [1.25, 0.25],
-      width: 1,
-      height: 1.5,
-    })
-    const context = await createContext({ sketches: [sketch], bodies: [axisBody, targetBody] })()
+    );
+    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1]);
+    expectTrue(
+      axisEdgeId != null,
+      "Expected axis body to expose a linear Z edge.",
+    );
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_revolve_advanced" as SketchId,
+      profilePlane,
+      {
+        origin: [1.25, 0.25],
+        width: 1,
+        height: 1.5,
+      },
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [axisBody, targetBody],
+    })();
     const baseParameters = {
-      profiles: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }],
-      axis: { kind: 'edge' as const, bodyId: axisBody.bodyId, edgeId: axisEdgeId as EdgeId },
+      profiles: [
+        {
+          kind: "region" as const,
+          sketchId: sketch.sketchId,
+          regionId: region.regionId,
+        },
+      ],
+      axis: {
+        kind: "edge" as const,
+        bodyId: axisBody.bodyId,
+        edgeId: axisEdgeId as EdgeId,
+      },
       startAngle: 0,
-      operation: 'newBody' as const,
-      booleanScope: { kind: 'standalone' as const },
-    }
+      operation: "newBody" as const,
+      booleanScope: { kind: "standalone" as const },
+    };
 
-    const full = executeOccFeature(context, 'feature_phase4_revolve_full' as FeatureId, {
-      kind: 'revolve',
-      featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        ...baseParameters,
-        extent: { mode: 'oneSide', end: { kind: 'full' } },
+    const full = executeOccFeature(
+      context,
+      "feature_phase4_revolve_full" as FeatureId,
+      {
+        kind: "revolve",
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseParameters,
+          extent: { mode: "oneSide", end: { kind: "full" } },
+        },
       },
-    })
-    const upToPart = executeOccFeature(context, 'feature_phase4_revolve_up_to_part' as FeatureId, {
-      kind: 'revolve',
-      featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        ...baseParameters,
-        extent: {
-          mode: 'oneSide',
-          end: {
-            kind: 'upToPart',
-            direction: 'counterClockwise',
-            target: { kind: 'body', bodyId: targetBody.bodyId },
+    );
+    const upToPart = executeOccFeature(
+      context,
+      "feature_phase4_revolve_up_to_part" as FeatureId,
+      {
+        kind: "revolve",
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseParameters,
+          extent: {
+            mode: "oneSide",
+            end: {
+              kind: "upToPart",
+              direction: "counterClockwise",
+              target: { kind: "body", bodyId: targetBody.bodyId },
+            },
           },
         },
       },
-    })
-    const shortened = executeOccFeature(context, 'feature_phase4_revolve_up_to_part_shortened' as FeatureId, {
-      kind: 'revolve',
-      featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        ...baseParameters,
-        extent: {
-          mode: 'oneSide',
-          end: {
-            kind: 'upToPart',
-            direction: 'counterClockwise',
-            target: { kind: 'body', bodyId: targetBody.bodyId },
-            offset: { angle: 0.2, direction: 'shorten' },
+    );
+    const shortened = executeOccFeature(
+      context,
+      "feature_phase4_revolve_up_to_part_shortened" as FeatureId,
+      {
+        kind: "revolve",
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseParameters,
+          extent: {
+            mode: "oneSide",
+            end: {
+              kind: "upToPart",
+              direction: "counterClockwise",
+              target: { kind: "body", bodyId: targetBody.bodyId },
+              offset: { angle: 0.2, direction: "shorten" },
+            },
           },
         },
       },
-    })
+    );
 
-    const fullVolume = await producedBodyVolume(context, full)
-    const upToVolume = await producedBodyVolume(context, upToPart)
-    const shortenedVolume = await producedBodyVolume(context, shortened)
-    expectTrue(fullVolume > 0, 'Full revolve should produce solid volume.')
-    expectTrue(upToVolume > 0 && upToVolume < fullVolume, 'Up-to-part revolve should terminate before a full turn.')
-    expectTrue(shortenedVolume > 0 && shortenedVolume < upToVolume, 'Shortened up-to-part revolve should reduce the swept volume.')
+    const fullVolume = await producedBodyVolume(context, full);
+    const upToVolume = await producedBodyVolume(context, upToPart);
+    const shortenedVolume = await producedBodyVolume(context, shortened);
+    expectTrue(fullVolume > 0, "Full revolve should produce solid volume.");
+    expectTrue(
+      upToVolume > 0 && upToVolume < fullVolume,
+      "Up-to-part revolve should terminate before a full turn.",
+    );
+    expectTrue(
+      shortenedVolume > 0 && shortenedVolume < upToVolume,
+      "Shortened up-to-part revolve should reduce the swept volume.",
+    );
   }
 
   async function testRevolveRejectsImpossibleUpToOffset() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const profilePlane = createStandardPlaneDefinition('xz')
+    const oc = await getDefaultOpenCascadeInstance();
+    const profilePlane = createStandardPlaneDefinition("xz");
     const axisBody = await makeBoxBody(
       oc,
-      'body_phase4_revolve_offset_axis' as BodyId,
+      "body_phase4_revolve_offset_axis" as BodyId,
       1,
       1,
       4,
-      'feature_phase4_revolve_offset_axis_seed' as FeatureId,
-    )
+      "feature_phase4_revolve_offset_axis_seed" as FeatureId,
+    );
     const targetBody = await makeBoxBody(
       oc,
-      'body_phase4_revolve_offset_target' as BodyId,
+      "body_phase4_revolve_offset_target" as BodyId,
       2,
       1,
       2,
-      'feature_phase4_revolve_offset_target_seed' as FeatureId,
+      "feature_phase4_revolve_offset_target_seed" as FeatureId,
       [2, 8, 0],
-    )
-    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
-    expectTrue(axisEdgeId != null, 'Expected axis body to expose a linear Z edge.')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_revolve_offset' as SketchId, profilePlane, {
-      origin: [1.25, 0.25],
-      width: 1,
-      height: 1.5,
-    })
-    const context = await createContext({ sketches: [sketch], bodies: [axisBody, targetBody] })()
+    );
+    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1]);
+    expectTrue(
+      axisEdgeId != null,
+      "Expected axis body to expose a linear Z edge.",
+    );
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_revolve_offset" as SketchId,
+      profilePlane,
+      {
+        origin: [1.25, 0.25],
+        width: 1,
+        height: 1.5,
+      },
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [axisBody, targetBody],
+    })();
 
-    let thrownMessage: string | null = null
+    let thrownMessage: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_revolve_impossible_offset' as FeatureId, {
-        kind: 'revolve',
-        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-          axis: { kind: 'edge', bodyId: axisBody.bodyId, edgeId: axisEdgeId as EdgeId },
-          startAngle: 0,
-          extent: {
-            mode: 'oneSide',
-            end: {
-              kind: 'upToPart',
-              direction: 'counterClockwise',
-              target: { kind: 'body', bodyId: targetBody.bodyId },
-              offset: { angle: Math.PI, direction: 'shorten' },
+      executeOccFeature(
+        context,
+        "feature_phase4_revolve_impossible_offset" as FeatureId,
+        {
+          kind: "revolve",
+          featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            axis: {
+              kind: "edge",
+              bodyId: axisBody.bodyId,
+              edgeId: axisEdgeId as EdgeId,
             },
+            startAngle: 0,
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "upToPart",
+                direction: "counterClockwise",
+                target: { kind: "body", bodyId: targetBody.bodyId },
+                offset: { angle: Math.PI, direction: "shorten" },
+              },
+            },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
           },
-          operation: 'newBody',
-          booleanScope: { kind: 'standalone' },
         },
-      })
+      );
     } catch (error) {
-      thrownMessage = error instanceof Error ? error.message : String(error)
+      thrownMessage = error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(thrownMessage?.includes('advanced-feature-unsupported-kernel-case') === true && thrownMessage.includes('impossible'), 'Revolve up-to offsets that pass the target should reject explicitly.')
+    expectTrue(
+      thrownMessage?.includes("advanced-feature-unsupported-kernel-case") ===
+        true && thrownMessage.includes("impossible"),
+      "Revolve up-to offsets that pass the target should reject explicitly.",
+    );
   }
 
   async function testRevolveRejectsNonPlanarFaceProfilesExplicitly() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const cylinder = new oc.BRepPrimAPI_MakeCylinder_1(2, 5)
-    cylinder.Build(new oc.Message_ProgressRange_1())
-    expectTrue(cylinder.IsDone(), 'Expected cylindrical body seed to build successfully.')
+    const oc = await getDefaultOpenCascadeInstance();
+    const cylinder = new oc.BRepPrimAPI_MakeCylinder_1(2, 5);
+    cylinder.Build(new oc.Message_ProgressRange_1());
+    expectTrue(
+      cylinder.IsDone(),
+      "Expected cylindrical body seed to build successfully.",
+    );
     const body = trackNewSolidBody(oc, {
-      bodyId: 'body_phase4_revolve_non_planar' as BodyId,
-      label: 'non-planar',
-      ownerFeatureId: 'feature_phase4_non_planar_seed' as FeatureId,
+      bodyId: "body_phase4_revolve_non_planar" as BodyId,
+      label: "non-planar",
+      ownerFeatureId: "feature_phase4_non_planar_seed" as FeatureId,
       shape: cylinder.Shape(),
-    })
+    });
     const nonPlanarFaceId = body.topology.faceIds.find((candidate) => {
-      const face = body.facesById.get(candidate)
+      const face = body.facesById.get(candidate);
       if (!face) {
-        return false
+        return false;
       }
 
       try {
         buildConstructionPlaneFromPlanarFace(oc, face, candidate, {
-          kind: 'construction',
-          constructionId: 'construction_should_fail' as ConstructionId,
-        })
-        return false
+          kind: "construction",
+          constructionId: "construction_should_fail" as ConstructionId,
+        });
+        return false;
       } catch {
-        return true
+        return true;
       }
-    })
-    expectTrue(nonPlanarFaceId != null, 'Expected cylindrical body to expose a non-planar face.')
-    const axisBody = await makeBoxBody(oc, 'body_phase4_revolve_axis_planar_check' as BodyId, 1, 1, 4, 'feature_phase4_axis_planar_check' as FeatureId)
-    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1])
-    expectTrue(axisEdgeId != null, 'Expected axis body to expose a linear edge for revolve.')
-    const context = await createContext({ bodies: [body, axisBody] })()
+    });
+    expectTrue(
+      nonPlanarFaceId != null,
+      "Expected cylindrical body to expose a non-planar face.",
+    );
+    const axisBody = await makeBoxBody(
+      oc,
+      "body_phase4_revolve_axis_planar_check" as BodyId,
+      1,
+      1,
+      4,
+      "feature_phase4_axis_planar_check" as FeatureId,
+    );
+    const axisEdgeId = findEdgeIdByDirection(oc, axisBody, [0, 0, 1]);
+    expectTrue(
+      axisEdgeId != null,
+      "Expected axis body to expose a linear edge for revolve.",
+    );
+    const context = await createContext({ bodies: [body, axisBody] })();
 
-    let thrownMessage: string | null = null
+    let thrownMessage: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_revolve_non_planar' as FeatureId, {
-        kind: 'revolve',
-        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          profiles: [{ kind: 'face', bodyId: body.bodyId, faceId: nonPlanarFaceId }],
-          axis: { kind: 'edge', bodyId: axisBody.bodyId, edgeId: axisEdgeId as EdgeId },
-          startAngle: 0,
-          extent: {
-            mode: 'oneSide',
-            end: { kind: 'blind', direction: 'counterClockwise', angle: Math.PI / 2 },
+      executeOccFeature(
+        context,
+        "feature_phase4_revolve_non_planar" as FeatureId,
+        {
+          kind: "revolve",
+          featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [
+              { kind: "face", bodyId: body.bodyId, faceId: nonPlanarFaceId },
+            ],
+            axis: {
+              kind: "edge",
+              bodyId: axisBody.bodyId,
+              edgeId: axisEdgeId as EdgeId,
+            },
+            startAngle: 0,
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "blind",
+                direction: "counterClockwise",
+                angle: Math.PI / 2,
+              },
+            },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
           },
-          operation: 'newBody',
-          booleanScope: { kind: 'standalone' },
         },
-      })
+      );
     } catch (error) {
-      thrownMessage = error instanceof Error ? error.message : String(error)
+      thrownMessage = error instanceof Error ? error.message : String(error);
     }
 
     expectTrue(
-      thrownMessage === 'Face-backed profile requires a planar face.',
-      'Face-backed revolve profiles should reject non-planar faces before invoking OCC revolve.',
-    )
+      thrownMessage === "Face-backed profile requires a planar face.",
+      "Face-backed revolve profiles should reject non-planar faces before invoking OCC revolve.",
+    );
   }
 
   async function testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath() {
-    const oc = await getDefaultOpenCascadeInstance()
+    const oc = await getDefaultOpenCascadeInstance();
     const pathBody = await makeBoxBody(
       oc,
-      'body_phase4_sweep_path' as BodyId,
+      "body_phase4_sweep_path" as BodyId,
       1,
       1,
       4,
-      'feature_phase4_sweep_path_seed' as FeatureId,
+      "feature_phase4_sweep_path_seed" as FeatureId,
       [0, 0, 0],
-    )
-    const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1])
-    expectTrue(pathEdgeId != null, 'Expected path body to expose a linear Z edge for sweep.')
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_sweep' as SketchId, plane, {
-      origin: [-0.2, -0.2],
-      width: 0.4,
-      height: 0.4,
-    })
-    const context = await createContext({ sketches: [sketch], bodies: [pathBody] })()
-
-    const result = executeOccFeature(context, 'feature_phase4_sweep' as FeatureId, {
-      kind: 'sweep',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        operationIntent: 'create',
-        participants: [
-          { role: 'profile', targets: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }] },
-          { role: 'path', targets: [{ kind: 'edge', bodyId: pathBody.bodyId, edgeId: pathEdgeId as EdgeId }] },
-        ],
+    );
+    const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1]);
+    expectTrue(
+      pathEdgeId != null,
+      "Expected path body to expose a linear Z edge for sweep.",
+    );
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_sweep" as SketchId,
+      plane,
+      {
+        origin: [-0.2, -0.2],
+        width: 0.4,
+        height: 0.4,
       },
-    })
-    const bodyTarget = result.producedTargets[0]
-    expectTrue(bodyTarget?.kind === 'body', 'Standalone sweep must produce a new body target.')
-    const producedBody = result.bodies.find((body) => body.bodyId === bodyTarget.bodyId)
-    expectTrue(producedBody != null, 'Standalone sweep must append the produced body.')
-    expectTrue(await bodyVolume(context.oc, producedBody.shape) > 0, 'Standalone sweep should produce non-empty solid geometry.')
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [pathBody],
+    })();
+
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_sweep" as FeatureId,
+      {
+        kind: "sweep",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "create",
+          participants: [
+            {
+              role: "profile",
+              targets: [
+                {
+                  kind: "region",
+                  sketchId: sketch.sketchId,
+                  regionId: region.regionId,
+                },
+              ],
+            },
+            {
+              role: "path",
+              targets: [
+                {
+                  kind: "edge",
+                  bodyId: pathBody.bodyId,
+                  edgeId: pathEdgeId as EdgeId,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    );
+    const bodyTarget = result.producedTargets[0];
+    expectTrue(
+      bodyTarget?.kind === "body",
+      "Standalone sweep must produce a new body target.",
+    );
+    const producedBody = result.bodies.find(
+      (body) => body.bodyId === bodyTarget.bodyId,
+    );
+    expectTrue(
+      producedBody != null,
+      "Standalone sweep must append the produced body.",
+    );
+    expectTrue(
+      (await bodyVolume(context.oc, producedBody.shape)) > 0,
+      "Standalone sweep should produce non-empty solid geometry.",
+    );
   }
 
   async function testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies() {
-    const oc = await getDefaultOpenCascadeInstance()
+    const oc = await getDefaultOpenCascadeInstance();
     const pathBody = await makeBoxBody(
       oc,
-      'body_phase4_sweep_advanced_path' as BodyId,
+      "body_phase4_sweep_advanced_path" as BodyId,
       1,
       1,
       4,
-      'feature_phase4_sweep_advanced_path_seed' as FeatureId,
+      "feature_phase4_sweep_advanced_path_seed" as FeatureId,
       [0, 0, 0],
-    )
-    const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1])
-    expectTrue(pathEdgeId != null, 'Expected path body to expose a linear Z edge for advanced sweep.')
-    const lockFaceId = findFaceIdByDirection(oc, pathBody, [0, 0, 1])
-    expectTrue(lockFaceId != null, 'Expected path body to expose a planar face for lock-profile-faces coverage.')
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_sweep_advanced' as SketchId, plane, {
-      origin: [-0.2, -0.2],
-      width: 0.4,
-      height: 0.4,
-    })
-    const context = await createContext({ sketches: [sketch], bodies: [pathBody] })()
+    );
+    const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1]);
+    expectTrue(
+      pathEdgeId != null,
+      "Expected path body to expose a linear Z edge for advanced sweep.",
+    );
+    const lockFaceId = findFaceIdByDirection(oc, pathBody, [0, 0, 1]);
+    expectTrue(
+      lockFaceId != null,
+      "Expected path body to expose a planar face for lock-profile-faces coverage.",
+    );
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_sweep_advanced" as SketchId,
+      plane,
+      {
+        origin: [-0.2, -0.2],
+        width: 0.4,
+        height: 0.4,
+      },
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [pathBody],
+    })();
     const baseParticipants = [
-      { role: 'profile' as const, targets: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }] },
-      { role: 'path' as const, targets: [{ kind: 'edge' as const, bodyId: pathBody.bodyId, edgeId: pathEdgeId as EdgeId }] },
-    ]
+      {
+        role: "profile" as const,
+        targets: [
+          {
+            kind: "region" as const,
+            sketchId: sketch.sketchId,
+            regionId: region.regionId,
+          },
+        ],
+      },
+      {
+        role: "path" as const,
+        targets: [
+          {
+            kind: "edge" as const,
+            bodyId: pathBody.bodyId,
+            edgeId: pathEdgeId as EdgeId,
+          },
+        ],
+      },
+    ];
     const cases = [
-      { suffix: 'default', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'none' }, endScale: 1 } },
-      { suffix: 'keep_orientation', participants: baseParticipants, options: { profileControl: 'keepProfileOrientation', twist: { type: 'none' }, endScale: 1 } },
       {
-        suffix: 'lock_faces',
-        participants: [
-          ...baseParticipants,
-          { role: 'lockProfileFace' as const, targets: [{ kind: 'face' as const, bodyId: pathBody.bodyId, faceId: lockFaceId }] },
-        ],
-        options: { profileControl: 'lockProfileFaces', twist: { type: 'none' }, endScale: 1 },
+        suffix: "default",
+        participants: baseParticipants,
+        options: {
+          profileControl: "none",
+          twist: { type: "none" },
+          endScale: 1,
+        },
       },
       {
-        suffix: 'lock_direction',
-        participants: [
-          ...baseParticipants,
-          { role: 'lockProfileDirection' as const, targets: [{ kind: 'edge' as const, bodyId: pathBody.bodyId, edgeId: pathEdgeId as EdgeId }] },
-        ],
-        options: { profileControl: 'lockProfileDirection', twist: { type: 'none' }, endScale: 1 },
+        suffix: "keep_orientation",
+        participants: baseParticipants,
+        options: {
+          profileControl: "keepProfileOrientation",
+          twist: { type: "none" },
+          endScale: 1,
+        },
       },
       {
-        suffix: 'lock_direction_construction',
+        suffix: "lock_faces",
         participants: [
           ...baseParticipants,
-          { role: 'lockProfileDirection' as const, targets: [{ kind: 'construction' as const, constructionId: 'construction_plane-xy' as ConstructionId }] },
+          {
+            role: "lockProfileFace" as const,
+            targets: [
+              {
+                kind: "face" as const,
+                bodyId: pathBody.bodyId,
+                faceId: lockFaceId,
+              },
+            ],
+          },
         ],
-        options: { profileControl: 'lockProfileDirection', twist: { type: 'none' }, endScale: 1 },
+        options: {
+          profileControl: "lockProfileFaces",
+          twist: { type: "none" },
+          endScale: 1,
+        },
       },
-      { suffix: 'twist_turns', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'turns', turns: 0.25 }, endScale: 1 } },
-      { suffix: 'twist_angle', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'angle', angle: Math.PI / 2 }, endScale: 1 } },
-      { suffix: 'twist_pitch', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'pitch', pitch: 8 }, endScale: 1 } },
-      { suffix: 'end_scale', participants: baseParticipants, options: { profileControl: 'none', twist: { type: 'none' }, endScale: 1.5 } },
-    ]
+      {
+        suffix: "lock_direction",
+        participants: [
+          ...baseParticipants,
+          {
+            role: "lockProfileDirection" as const,
+            targets: [
+              {
+                kind: "edge" as const,
+                bodyId: pathBody.bodyId,
+                edgeId: pathEdgeId as EdgeId,
+              },
+            ],
+          },
+        ],
+        options: {
+          profileControl: "lockProfileDirection",
+          twist: { type: "none" },
+          endScale: 1,
+        },
+      },
+      {
+        suffix: "lock_direction_construction",
+        participants: [
+          ...baseParticipants,
+          {
+            role: "lockProfileDirection" as const,
+            targets: [
+              {
+                kind: "construction" as const,
+                constructionId: "construction_plane-xy" as ConstructionId,
+              },
+            ],
+          },
+        ],
+        options: {
+          profileControl: "lockProfileDirection",
+          twist: { type: "none" },
+          endScale: 1,
+        },
+      },
+      {
+        suffix: "twist_turns",
+        participants: baseParticipants,
+        options: {
+          profileControl: "none",
+          twist: { type: "turns", turns: 0.25 },
+          endScale: 1,
+        },
+      },
+      {
+        suffix: "twist_angle",
+        participants: baseParticipants,
+        options: {
+          profileControl: "none",
+          twist: { type: "angle", angle: Math.PI / 2 },
+          endScale: 1,
+        },
+      },
+      {
+        suffix: "twist_pitch",
+        participants: baseParticipants,
+        options: {
+          profileControl: "none",
+          twist: { type: "pitch", pitch: 8 },
+          endScale: 1,
+        },
+      },
+      {
+        suffix: "end_scale",
+        participants: baseParticipants,
+        options: {
+          profileControl: "none",
+          twist: { type: "none" },
+          endScale: 1.5,
+        },
+      },
+    ];
 
     for (const sweepCase of cases) {
-      const result = executeOccFeature(context, `feature_phase4_sweep_advanced_${sweepCase.suffix}` as FeatureId, {
-        kind: 'sweep',
-        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          operationIntent: 'create',
-          participants: sweepCase.participants,
-          options: sweepCase.options,
+      const result = executeOccFeature(
+        context,
+        `feature_phase4_sweep_advanced_${sweepCase.suffix}` as FeatureId,
+        {
+          kind: "sweep",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: "create",
+            participants: sweepCase.participants,
+            options: sweepCase.options,
+          },
         },
-      })
-      const bodyTarget = result.producedTargets[0]
-      expectTrue(bodyTarget?.kind === 'body', `Advanced sweep ${sweepCase.suffix} must produce a new body target.`)
-      const producedBody = result.bodies.find((body) => body.bodyId === bodyTarget.bodyId)
-      expectTrue(producedBody != null, `Advanced sweep ${sweepCase.suffix} must append a body.`)
-      expectTrue(await bodyVolume(context.oc, producedBody.shape) > 0, `Advanced sweep ${sweepCase.suffix} should produce non-empty solid geometry.`)
+      );
+      const bodyTarget = result.producedTargets[0];
+      expectTrue(
+        bodyTarget?.kind === "body",
+        `Advanced sweep ${sweepCase.suffix} must produce a new body target.`,
+      );
+      const producedBody = result.bodies.find(
+        (body) => body.bodyId === bodyTarget.bodyId,
+      );
+      expectTrue(
+        producedBody != null,
+        `Advanced sweep ${sweepCase.suffix} must append a body.`,
+      );
+      expectTrue(
+        (await bodyVolume(context.oc, producedBody.shape)) > 0,
+        `Advanced sweep ${sweepCase.suffix} should produce non-empty solid geometry.`,
+      );
     }
 
-    let unsupportedCombinationError: string | null = null
+    let unsupportedCombinationError: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_sweep_advanced_lock_twist_reject' as FeatureId, {
-        kind: 'sweep',
-        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          operationIntent: 'create',
-          participants: [
-            ...baseParticipants,
-            { role: 'lockProfileFace', targets: [{ kind: 'face', bodyId: pathBody.bodyId, faceId: lockFaceId }] },
-          ],
-          options: { profileControl: 'lockProfileFaces', twist: { type: 'turns', turns: 0.25 }, endScale: 1 },
+      executeOccFeature(
+        context,
+        "feature_phase4_sweep_advanced_lock_twist_reject" as FeatureId,
+        {
+          kind: "sweep",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: "create",
+            participants: [
+              ...baseParticipants,
+              {
+                role: "lockProfileFace",
+                targets: [
+                  { kind: "face", bodyId: pathBody.bodyId, faceId: lockFaceId },
+                ],
+              },
+            ],
+            options: {
+              profileControl: "lockProfileFaces",
+              twist: { type: "turns", turns: 0.25 },
+              endScale: 1,
+            },
+          },
         },
-      })
+      );
     } catch (error) {
-      unsupportedCombinationError = error instanceof Error ? error.message : String(error)
+      unsupportedCombinationError =
+        error instanceof Error ? error.message : String(error);
     }
 
     expectTrue(
-      unsupportedCombinationError?.includes('advanced-feature-unsupported-kernel-case') === true,
-      'OCC sweep should reject profile-control plus twist combinations explicitly instead of ignoring profile control.',
-    )
+      unsupportedCombinationError?.includes(
+        "advanced-feature-unsupported-kernel-case",
+      ) === true,
+      "OCC sweep should reject profile-control plus twist combinations explicitly instead of ignoring profile control.",
+    );
   }
 
   async function testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition() {
-    const oc = await getDefaultOpenCascadeInstance()
+    const oc = await getDefaultOpenCascadeInstance();
     const pathBody = await makeBoxBody(
       oc,
-      'body_phase4_sweep_reject_path' as BodyId,
+      "body_phase4_sweep_reject_path" as BodyId,
       1,
       1,
       4,
-      'feature_phase4_sweep_reject_path_seed' as FeatureId,
-    )
-    const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1])
-    expectTrue(pathEdgeId != null, 'Expected path body to expose a linear Z edge for sweep rejection coverage.')
-    const guideEdgeId = pathBody.topology.edgeIds.find((edgeId) => edgeId !== pathEdgeId)
-    expectTrue(guideEdgeId != null, 'Expected path body to expose a second edge for guide curve coverage.')
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_sweep_reject' as SketchId, plane, {
-      origin: [-0.2, -0.2],
-      width: 0.4,
-      height: 0.4,
-    })
-    const context = await createContext({ sketches: [sketch], bodies: [pathBody] })()
+      "feature_phase4_sweep_reject_path_seed" as FeatureId,
+    );
+    const pathEdgeId = findEdgeIdByDirection(oc, pathBody, [0, 0, 1]);
+    expectTrue(
+      pathEdgeId != null,
+      "Expected path body to expose a linear Z edge for sweep rejection coverage.",
+    );
+    const guideEdgeId = pathBody.topology.edgeIds.find(
+      (edgeId) => edgeId !== pathEdgeId,
+    );
+    expectTrue(
+      guideEdgeId != null,
+      "Expected path body to expose a second edge for guide curve coverage.",
+    );
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_sweep_reject" as SketchId,
+      plane,
+      {
+        origin: [-0.2, -0.2],
+        width: 0.4,
+        height: 0.4,
+      },
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [pathBody],
+    })();
     const baseParticipants = [
-      { role: 'profile' as const, targets: [{ kind: 'region' as const, sketchId: sketch.sketchId, regionId: region.regionId }] },
-      { role: 'path' as const, targets: [{ kind: 'edge' as const, bodyId: pathBody.bodyId, edgeId: pathEdgeId as EdgeId }] },
-    ]
+      {
+        role: "profile" as const,
+        targets: [
+          {
+            kind: "region" as const,
+            sketchId: sketch.sketchId,
+            regionId: region.regionId,
+          },
+        ],
+      },
+      {
+        role: "path" as const,
+        targets: [
+          {
+            kind: "edge" as const,
+            bodyId: pathBody.bodyId,
+            edgeId: pathEdgeId as EdgeId,
+          },
+        ],
+      },
+    ];
 
-    let guideError: string | null = null
+    let guideError: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_sweep_guide_reject' as FeatureId, {
-        kind: 'sweep',
-        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          operationIntent: 'create',
-          participants: [
-            ...baseParticipants,
-            { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: pathBody.bodyId, edgeId: guideEdgeId }] },
-          ],
+      executeOccFeature(
+        context,
+        "feature_phase4_sweep_guide_reject" as FeatureId,
+        {
+          kind: "sweep",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: "create",
+            participants: [
+              ...baseParticipants,
+              {
+                role: "guideCurve",
+                targets: [
+                  {
+                    kind: "edge",
+                    bodyId: pathBody.bodyId,
+                    edgeId: guideEdgeId,
+                  },
+                ],
+              },
+            ],
+          },
         },
-      })
+      );
     } catch (error) {
-      guideError = error instanceof Error ? error.message : String(error)
+      guideError = error instanceof Error ? error.message : String(error);
     }
 
-    let booleanError: string | null = null
+    let booleanError: string | null = null;
     try {
-      executeOccFeature(context, 'feature_phase4_sweep_boolean_reject' as FeatureId, {
-        kind: 'sweep',
-        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          operationIntent: 'subtract',
-          participants: [
-            ...baseParticipants,
-            { role: 'targetBody', targets: [{ kind: 'body', bodyId: pathBody.bodyId }] },
-          ],
+      executeOccFeature(
+        context,
+        "feature_phase4_sweep_boolean_reject" as FeatureId,
+        {
+          kind: "sweep",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: "subtract",
+            participants: [
+              ...baseParticipants,
+              {
+                role: "targetBody",
+                targets: [{ kind: "body", bodyId: pathBody.bodyId }],
+              },
+            ],
+          },
         },
-      })
+      );
     } catch (error) {
-      booleanError = error instanceof Error ? error.message : String(error)
+      booleanError = error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(guideError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Guide-curve sweeps must reject with an explicit unsupported-case code.')
-    expectTrue(booleanError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Boolean sweeps must reject with an explicit unsupported-case code.')
+    expectTrue(
+      guideError?.includes("advanced-feature-unsupported-kernel-case") === true,
+      "Guide-curve sweeps must reject with an explicit unsupported-case code.",
+    );
+    expectTrue(
+      booleanError?.includes("advanced-feature-unsupported-kernel-case") ===
+        true,
+      "Boolean sweeps must reject with an explicit unsupported-case code.",
+    );
   }
 
   async function testLoftBuildsStandaloneBodyFromOrderedProfiles() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_loft' as SketchId, plane, {
-      origin: [-0.5, -0.5],
-      width: 1,
-      height: 1,
-    })
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_loft" as SketchId,
+      plane,
+      {
+        origin: [-0.5, -0.5],
+        width: 1,
+        height: 1,
+      },
+    );
     const faceBody = await makeBoxBody(
       oc,
-      'body_phase4_loft_face' as BodyId,
+      "body_phase4_loft_face" as BodyId,
       0.7,
       0.7,
       1,
-      'feature_phase4_loft_face_seed' as FeatureId,
+      "feature_phase4_loft_face_seed" as FeatureId,
       [0.15, 0.15, 4],
-    )
-    const topFaceId = findFaceIdByDirection(oc, faceBody, [0, 0, 1])
-    const pathEdgeId = findEdgeIdByDirection(oc, faceBody, [0, 0, 1])
-    expectTrue(topFaceId != null, 'Expected loft support body to expose an upward planar face.')
-    expectTrue(pathEdgeId != null, 'Expected loft support body to expose a linear path edge.')
-    const context = await createContext({ sketches: [sketch], bodies: [faceBody] })()
+    );
+    const topFaceId = findFaceIdByDirection(oc, faceBody, [0, 0, 1]);
+    const pathEdgeId = findEdgeIdByDirection(oc, faceBody, [0, 0, 1]);
+    expectTrue(
+      topFaceId != null,
+      "Expected loft support body to expose an upward planar face.",
+    );
+    expectTrue(
+      pathEdgeId != null,
+      "Expected loft support body to expose a linear path edge.",
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [faceBody],
+    })();
 
-    const result = executeOccFeature(context, 'feature_phase4_loft' as FeatureId, {
-      kind: 'loft',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        operationIntent: 'create',
-        participants: [
-          {
-            role: 'profile',
-            targets: [
-              { kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId },
-              { kind: 'face', bodyId: faceBody.bodyId, faceId: topFaceId },
-            ],
-          },
-        ],
-      },
-    })
-    const bodyTarget = result.producedTargets[0]
-    expectTrue(bodyTarget?.kind === 'body', 'Standalone loft must produce a new body target.')
-    const producedBody = result.bodies.find((body) => body.bodyId === bodyTarget.bodyId)
-    expectTrue(producedBody != null, 'Standalone loft must append the produced body.')
-    expectTrue(await bodyVolume(context.oc, producedBody.shape) > 0, 'Standalone loft should produce non-empty solid geometry.')
-
-    const pathResult = executeOccFeature(context, 'feature_phase4_loft_path' as FeatureId, {
-      kind: 'loft',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        operationIntent: 'create',
-        participants: [
-          {
-            role: 'profile',
-            targets: [
-              { kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId },
-              { kind: 'face', bodyId: faceBody.bodyId, faceId: topFaceId },
-            ],
-          },
-          { role: 'path', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: pathEdgeId }] },
-        ],
-        options: { path: { sectionCount: 3 } },
-      },
-    })
-    const pathBodyTarget = pathResult.producedTargets[0]
-    expectTrue(pathBodyTarget?.kind === 'body', 'Path loft must produce a new body target.')
-    const pathBody = pathResult.bodies.find((body) => body.bodyId === pathBodyTarget.bodyId)
-    expectTrue(pathBody != null && await bodyVolume(context.oc, pathBody.shape) > 0, 'Path loft should produce non-empty solid geometry.')
-  }
-
-  async function testLoftAdvancedControlsAndUnsupportedCombinations() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_loft_reject' as SketchId, plane, {
-      origin: [-0.5, -0.5],
-      width: 1,
-      height: 1,
-    })
-    const faceBody = await makeBoxBody(
-      oc,
-      'body_phase4_loft_reject_face' as BodyId,
-      0.7,
-      0.7,
-      1,
-      'feature_phase4_loft_reject_seed' as FeatureId,
-      [0.15, 0.15, 4],
-    )
-    const topFaceId = findFaceIdByDirection(oc, faceBody, [0, 0, 1])
-    const guideEdgeId = findEdgeIdByDirection(oc, faceBody, [1, 0, 0]) ?? faceBody.topology.edgeIds[0]
-    expectTrue(topFaceId != null, 'Expected loft support body to expose an upward planar face.')
-    expectTrue(guideEdgeId != null, 'Expected loft support body to expose a durable guide edge.')
-    const context = await createContext({ sketches: [sketch], bodies: [faceBody] })()
-
-    const advancedResult = executeOccFeature(context, 'feature_phase4_loft_advanced' as FeatureId, {
-      kind: 'loft',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        operationIntent: 'create',
-        participants: [
-          {
-            role: 'profile',
-            targets: [
-              { kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId },
-              { kind: 'face', bodyId: faceBody.bodyId, faceId: topFaceId },
-            ],
-          },
-          { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId }] },
-        ],
-        options: {
-          guideContinuity: 'normalToGuide',
-          profileConditions: {
-            startCondition: 'normal',
-            startMagnitude: 1,
-            endCondition: 'tangent',
-            endMagnitude: 1,
-          },
-          matchConnections: [
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_loft" as FeatureId,
+      {
+        kind: "loft",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "create",
+          participants: [
             {
-              from: { kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId },
-              to: { kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId },
+              role: "profile",
+              targets: [
+                {
+                  kind: "region",
+                  sketchId: sketch.sketchId,
+                  regionId: region.regionId,
+                },
+                { kind: "face", bodyId: faceBody.bodyId, faceId: topFaceId },
+              ],
             },
           ],
         },
       },
-    })
+    );
+    const bodyTarget = result.producedTargets[0];
+    expectTrue(
+      bodyTarget?.kind === "body",
+      "Standalone loft must produce a new body target.",
+    );
+    const producedBody = result.bodies.find(
+      (body) => body.bodyId === bodyTarget.bodyId,
+    );
+    expectTrue(
+      producedBody != null,
+      "Standalone loft must append the produced body.",
+    );
+    expectTrue(
+      (await bodyVolume(context.oc, producedBody.shape)) > 0,
+      "Standalone loft should produce non-empty solid geometry.",
+    );
 
-    expectTrue(advancedResult.producedTargets[0]?.kind === 'body', 'Guide continuity, profile conditions, and one match connection should execute for loft.')
-
-    let pathGuideError: string | null = null
-    try {
-      executeOccFeature(context, 'feature_phase4_loft_path_guide_reject' as FeatureId, {
-        kind: 'loft',
+    const pathResult = executeOccFeature(
+      context,
+      "feature_phase4_loft_path" as FeatureId,
+      {
+        kind: "loft",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: 'create',
+          operationIntent: "create",
           participants: [
             {
-              role: 'profile',
+              role: "profile",
               targets: [
-                { kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId },
-                { kind: 'face', bodyId: faceBody.bodyId, faceId: topFaceId },
+                {
+                  kind: "region",
+                  sketchId: sketch.sketchId,
+                  regionId: region.regionId,
+                },
+                { kind: "face", bodyId: faceBody.bodyId, faceId: topFaceId },
               ],
             },
-            { role: 'path', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId }] },
-            { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: faceBody.bodyId, edgeId: guideEdgeId }] },
+            {
+              role: "path",
+              targets: [
+                { kind: "edge", bodyId: faceBody.bodyId, edgeId: pathEdgeId },
+              ],
+            },
           ],
           options: { path: { sectionCount: 3 } },
         },
-      })
-    } catch (error) {
-      pathGuideError = error instanceof Error ? error.message : String(error)
-    }
+      },
+    );
+    const pathBodyTarget = pathResult.producedTargets[0];
+    expectTrue(
+      pathBodyTarget?.kind === "body",
+      "Path loft must produce a new body target.",
+    );
+    const pathBody = pathResult.bodies.find(
+      (body) => body.bodyId === pathBodyTarget.bodyId,
+    );
+    expectTrue(
+      pathBody != null && (await bodyVolume(context.oc, pathBody.shape)) > 0,
+      "Path loft should produce non-empty solid geometry.",
+    );
+  }
 
-    let booleanError: string | null = null
-    try {
-      executeOccFeature(context, 'feature_phase4_loft_boolean_reject' as FeatureId, {
-        kind: 'loft',
+  async function testLoftAdvancedControlsAndUnsupportedCombinations() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_loft_reject" as SketchId,
+      plane,
+      {
+        origin: [-0.5, -0.5],
+        width: 1,
+        height: 1,
+      },
+    );
+    const faceBody = await makeBoxBody(
+      oc,
+      "body_phase4_loft_reject_face" as BodyId,
+      0.7,
+      0.7,
+      1,
+      "feature_phase4_loft_reject_seed" as FeatureId,
+      [0.15, 0.15, 4],
+    );
+    const topFaceId = findFaceIdByDirection(oc, faceBody, [0, 0, 1]);
+    const guideEdgeId =
+      findEdgeIdByDirection(oc, faceBody, [1, 0, 0]) ??
+      faceBody.topology.edgeIds[0];
+    expectTrue(
+      topFaceId != null,
+      "Expected loft support body to expose an upward planar face.",
+    );
+    expectTrue(
+      guideEdgeId != null,
+      "Expected loft support body to expose a durable guide edge.",
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [faceBody],
+    })();
+
+    const advancedResult = executeOccFeature(
+      context,
+      "feature_phase4_loft_advanced" as FeatureId,
+      {
+        kind: "loft",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: 'subtract',
+          operationIntent: "create",
           participants: [
             {
-              role: 'profile',
+              role: "profile",
               targets: [
-                { kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId },
-                { kind: 'face', bodyId: faceBody.bodyId, faceId: topFaceId },
+                {
+                  kind: "region",
+                  sketchId: sketch.sketchId,
+                  regionId: region.regionId,
+                },
+                { kind: "face", bodyId: faceBody.bodyId, faceId: topFaceId },
               ],
             },
-            { role: 'targetBody', targets: [{ kind: 'body', bodyId: faceBody.bodyId }] },
+            {
+              role: "guideCurve",
+              targets: [
+                { kind: "edge", bodyId: faceBody.bodyId, edgeId: guideEdgeId },
+              ],
+            },
           ],
+          options: {
+            guideContinuity: "normalToGuide",
+            profileConditions: {
+              startCondition: "normal",
+              startMagnitude: 1,
+              endCondition: "tangent",
+              endMagnitude: 1,
+            },
+            matchConnections: [
+              {
+                from: {
+                  kind: "edge",
+                  bodyId: faceBody.bodyId,
+                  edgeId: guideEdgeId,
+                },
+                to: {
+                  kind: "edge",
+                  bodyId: faceBody.bodyId,
+                  edgeId: guideEdgeId,
+                },
+              },
+            ],
+          },
         },
-      })
+      },
+    );
+
+    expectTrue(
+      advancedResult.producedTargets[0]?.kind === "body",
+      "Guide continuity, profile conditions, and one match connection should execute for loft.",
+    );
+
+    let pathGuideError: string | null = null;
+    try {
+      executeOccFeature(
+        context,
+        "feature_phase4_loft_path_guide_reject" as FeatureId,
+        {
+          kind: "loft",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: "create",
+            participants: [
+              {
+                role: "profile",
+                targets: [
+                  {
+                    kind: "region",
+                    sketchId: sketch.sketchId,
+                    regionId: region.regionId,
+                  },
+                  { kind: "face", bodyId: faceBody.bodyId, faceId: topFaceId },
+                ],
+              },
+              {
+                role: "path",
+                targets: [
+                  {
+                    kind: "edge",
+                    bodyId: faceBody.bodyId,
+                    edgeId: guideEdgeId,
+                  },
+                ],
+              },
+              {
+                role: "guideCurve",
+                targets: [
+                  {
+                    kind: "edge",
+                    bodyId: faceBody.bodyId,
+                    edgeId: guideEdgeId,
+                  },
+                ],
+              },
+            ],
+            options: { path: { sectionCount: 3 } },
+          },
+        },
+      );
     } catch (error) {
-      booleanError = error instanceof Error ? error.message : String(error)
+      pathGuideError = error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(pathGuideError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Path plus guide-curve lofts must reject with an explicit unsupported-case code.')
-    expectTrue(booleanError?.includes('advanced-feature-unsupported-kernel-case') === true, 'Boolean lofts must reject with an explicit unsupported-case code.')
+    let booleanError: string | null = null;
+    try {
+      executeOccFeature(
+        context,
+        "feature_phase4_loft_boolean_reject" as FeatureId,
+        {
+          kind: "loft",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: "subtract",
+            participants: [
+              {
+                role: "profile",
+                targets: [
+                  {
+                    kind: "region",
+                    sketchId: sketch.sketchId,
+                    regionId: region.regionId,
+                  },
+                  { kind: "face", bodyId: faceBody.bodyId, faceId: topFaceId },
+                ],
+              },
+              {
+                role: "targetBody",
+                targets: [{ kind: "body", bodyId: faceBody.bodyId }],
+              },
+            ],
+          },
+        },
+      );
+    } catch (error) {
+      booleanError = error instanceof Error ? error.message : String(error);
+    }
+
+    expectTrue(
+      pathGuideError?.includes("advanced-feature-unsupported-kernel-case") ===
+        true,
+      "Path plus guide-curve lofts must reject with an explicit unsupported-case code.",
+    );
+    expectTrue(
+      booleanError?.includes("advanced-feature-unsupported-kernel-case") ===
+        true,
+      "Boolean lofts must reject with an explicit unsupported-case code.",
+    );
   }
 
   async function testFilletReplacesAffectedBody() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const boxBody = await makeBoxBody(oc, 'body_phase4_fillet' as BodyId, 2, 2, 2, 'feature_phase4_box' as FeatureId)
-    const edgeId = boxBody.topology.edgeIds[0]
-    expectTrue(edgeId != null, 'Expected tracked box body to expose edge ids for fillet targets.')
-    const context = await createContext({ bodies: [boxBody] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const boxBody = await makeBoxBody(
+      oc,
+      "body_phase4_fillet" as BodyId,
+      2,
+      2,
+      2,
+      "feature_phase4_box" as FeatureId,
+    );
+    const edgeId = boxBody.topology.edgeIds[0];
+    expectTrue(
+      edgeId != null,
+      "Expected tracked box body to expose edge ids for fillet targets.",
+    );
+    const context = await createContext({ bodies: [boxBody] })();
 
-    const result = executeOccFeature(context, 'feature_phase4_fillet' as FeatureId, {
-      kind: 'fillet',
-      featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        radius: 0.2,
-        edgeTargets: [{ kind: 'edge', bodyId: boxBody.bodyId, edgeId }],
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_fillet" as FeatureId,
+      {
+        kind: "fillet",
+        featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          radius: 0.2,
+          edgeTargets: [{ kind: "edge", bodyId: boxBody.bodyId, edgeId }],
+        },
       },
-    })
+    );
 
-    expectTrue(result.bodies.length === 1, 'Fillet should replace the affected body in place.')
-    expectTrue(result.bodies[0]?.bodyId === boxBody.bodyId, 'Fillet should preserve the owning body id when replacing the body result.')
-    expectTrue(result.producedTargets[0]?.kind === 'body', 'Fillet should report the mutated body as its produced target.')
+    expectTrue(
+      result.bodies.length === 1,
+      "Fillet should replace the affected body in place.",
+    );
+    expectTrue(
+      result.bodies[0]?.bodyId === boxBody.bodyId,
+      "Fillet should preserve the owning body id when replacing the body result.",
+    );
+    expectTrue(
+      result.producedTargets[0]?.kind === "body",
+      "Fillet should report the mutated body as its produced target.",
+    );
   }
 
   async function testFilletRejectsEmptyEdgeTargetList() {
-    const context = await createContext()()
-    let thrownMessage: string | null = null
+    const context = await createContext()();
+    let thrownMessage: string | null = null;
 
     try {
-      executeOccFeature(context, 'feature_phase4_fillet_empty' as FeatureId, {
-        kind: 'fillet',
+      executeOccFeature(context, "feature_phase4_fillet_empty" as FeatureId, {
+        kind: "fillet",
         featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
         parameters: {
           radius: 0.2,
           edgeTargets: [],
         },
-      })
+      });
     } catch (error) {
-      thrownMessage = error instanceof Error ? error.message : String(error)
+      thrownMessage = error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(thrownMessage === 'Fillet requires at least one target edge.', 'Fillet should reject empty target-edge lists explicitly.')
+    expectTrue(
+      thrownMessage === "Fillet requires at least one target edge.",
+      "Fillet should reject empty target-edge lists explicitly.",
+    );
   }
 
   async function testSplitReplacesTargetBodyWithExplicitResultBodies() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const targetBody = await makeBoxBody(oc, 'body_phase4_split_target' as BodyId, 6, 4, 4, 'feature_phase4_split_seed_target' as FeatureId)
-    const toolBody = await makeBoxBody(oc, 'body_phase4_split_tool' as BodyId, 3, 4, 4, 'feature_phase4_split_seed_tool' as FeatureId, [2, 0, 0])
-    const context = await createContext({ bodies: [targetBody, toolBody] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const targetBody = await makeBoxBody(
+      oc,
+      "body_phase4_split_target" as BodyId,
+      6,
+      4,
+      4,
+      "feature_phase4_split_seed_target" as FeatureId,
+    );
+    const toolBody = await makeBoxBody(
+      oc,
+      "body_phase4_split_tool" as BodyId,
+      3,
+      4,
+      4,
+      "feature_phase4_split_seed_tool" as FeatureId,
+      [2, 0, 0],
+    );
+    const context = await createContext({ bodies: [targetBody, toolBody] })();
 
-    const result = executeOccFeature(context, 'feature_phase4_split' as FeatureId, {
-      kind: 'split',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        participants: [
-          { role: 'targetBody', targets: [{ kind: 'body', bodyId: targetBody.bodyId }] },
-          { role: 'toolBody', targets: [{ kind: 'body', bodyId: toolBody.bodyId }] },
-        ],
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_split" as FeatureId,
+      {
+        kind: "split",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "targetBody",
+              targets: [{ kind: "body", bodyId: targetBody.bodyId }],
+            },
+            {
+              role: "toolBody",
+              targets: [{ kind: "body", bodyId: toolBody.bodyId }],
+            },
+          ],
+        },
       },
-    })
+    );
 
-    expectTrue(result.bodies.every((body) => body.bodyId !== targetBody.bodyId), 'Split should remove the original target body from the next state.')
-    expectTrue(result.bodies.some((body) => body.bodyId === toolBody.bodyId), 'Split should preserve the tool body in the next state.')
-    expectTrue(result.producedTargets.length >= 2, 'Split should report the produced replacement body targets.')
     expectTrue(
-      result.bodies.filter((body) => body.bodyId.startsWith('body_feature_phase4_split_')).length >= 2,
-      'Split should append replacement split result bodies.',
-    )
+      result.bodies.every((body) => body.bodyId !== targetBody.bodyId),
+      "Split should remove the original target body from the next state.",
+    );
+    expectTrue(
+      result.bodies.some((body) => body.bodyId === toolBody.bodyId),
+      "Split should preserve the tool body in the next state.",
+    );
+    expectTrue(
+      result.producedTargets.length >= 2,
+      "Split should report the produced replacement body targets.",
+    );
+    expectTrue(
+      result.bodies.filter((body) =>
+        body.bodyId.startsWith("body_feature_phase4_split_"),
+      ).length >= 2,
+      "Split should append replacement split result bodies.",
+    );
   }
 
   async function testDeleteSolidRemovesSelectedBodiesAndKeepsInvalidationHistory() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const bodyA = await makeBoxBody(oc, 'body_phase4_delete_a' as BodyId, 4, 4, 4, 'feature_phase4_delete_seed_a' as FeatureId)
-    const bodyB = await makeBoxBody(oc, 'body_phase4_delete_b' as BodyId, 4, 4, 4, 'feature_phase4_delete_seed_b' as FeatureId, [10, 0, 0])
-    const context = await createContext({ bodies: [bodyA, bodyB] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const bodyA = await makeBoxBody(
+      oc,
+      "body_phase4_delete_a" as BodyId,
+      4,
+      4,
+      4,
+      "feature_phase4_delete_seed_a" as FeatureId,
+    );
+    const bodyB = await makeBoxBody(
+      oc,
+      "body_phase4_delete_b" as BodyId,
+      4,
+      4,
+      4,
+      "feature_phase4_delete_seed_b" as FeatureId,
+      [10, 0, 0],
+    );
+    const context = await createContext({ bodies: [bodyA, bodyB] })();
 
-    const result = executeOccFeature(context, 'feature_phase4_delete_solid' as FeatureId, {
-      kind: 'deleteSolid',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        participants: [
-          { role: 'body', targets: [{ kind: 'body', bodyId: bodyA.bodyId }] },
-        ],
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_delete_solid" as FeatureId,
+      {
+        kind: "deleteSolid",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            { role: "body", targets: [{ kind: "body", bodyId: bodyA.bodyId }] },
+          ],
+        },
       },
-    })
+    );
 
-    expectTrue(result.producedTargets.length === 0, 'Delete-solid should not report new produced bodies.')
-    expectTrue(result.bodies.every((body) => body.bodyId !== bodyA.bodyId), 'Delete-solid should remove the selected body from the next state.')
-    expectTrue(result.bodies.some((body) => body.bodyId === bodyB.bodyId), 'Delete-solid should preserve unselected bodies.')
-    expectTrue(result.historyInvalidations.size > 0, 'Delete-solid should preserve invalidation history for removed body topology.')
+    expectTrue(
+      result.producedTargets.length === 0,
+      "Delete-solid should not report new produced bodies.",
+    );
+    expectTrue(
+      result.bodies.every((body) => body.bodyId !== bodyA.bodyId),
+      "Delete-solid should remove the selected body from the next state.",
+    );
+    expectTrue(
+      result.bodies.some((body) => body.bodyId === bodyB.bodyId),
+      "Delete-solid should preserve unselected bodies.",
+    );
+    expectTrue(
+      result.historyInvalidations.size > 0,
+      "Delete-solid should preserve invalidation history for removed body topology.",
+    );
   }
 
   async function testMirrorCopiesBodiesAcrossExplicitPlanarReferences() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const body = await makeBoxBody(oc, 'body_phase4_mirror' as BodyId, 4, 4, 4, 'feature_phase4_mirror_seed' as FeatureId, [4, 0, 0])
-    const context = await createContext({ bodies: [body] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const body = await makeBoxBody(
+      oc,
+      "body_phase4_mirror" as BodyId,
+      4,
+      4,
+      4,
+      "feature_phase4_mirror_seed" as FeatureId,
+      [4, 0, 0],
+    );
+    const context = await createContext({ bodies: [body] })();
 
-    const result = executeOccFeature(context, 'feature_phase4_mirror' as FeatureId, {
-      kind: 'mirror',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        participants: [
-          { role: 'body', targets: [{ kind: 'body', bodyId: body.bodyId }] },
-          { role: 'plane', targets: [{ kind: 'construction', constructionId: 'construction_plane-yz' }] },
-        ],
-        options: { copy: true },
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_mirror" as FeatureId,
+      {
+        kind: "mirror",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+            {
+              role: "plane",
+              targets: [
+                {
+                  kind: "construction",
+                  constructionId: "construction_plane-yz",
+                },
+              ],
+            },
+          ],
+          options: { copy: true },
+        },
       },
-    })
+    );
 
-    expectTrue(result.bodies.length === 2, 'Mirror copy should preserve the source body and append one mirrored result body.')
-    expectTrue(result.bodies.some((entry) => entry.bodyId === body.bodyId), 'Mirror copy should preserve the source body id.')
-    expectTrue(result.bodies.some((entry) => entry.bodyId !== body.bodyId), 'Mirror copy should append at least one new mirrored body.')
-    expectTrue(result.producedTargets.length === 1 && result.producedTargets[0]?.kind === 'body', 'Mirror copy should report the new mirrored body as its produced target.')
+    expectTrue(
+      result.bodies.length === 2,
+      "Mirror copy should preserve the source body and append one mirrored result body.",
+    );
+    expectTrue(
+      result.bodies.some((entry) => entry.bodyId === body.bodyId),
+      "Mirror copy should preserve the source body id.",
+    );
+    expectTrue(
+      result.bodies.some((entry) => entry.bodyId !== body.bodyId),
+      "Mirror copy should append at least one new mirrored body.",
+    );
+    expectTrue(
+      result.producedTargets.length === 1 &&
+        result.producedTargets[0]?.kind === "body",
+      "Mirror copy should report the new mirrored body as its produced target.",
+    );
   }
 
   async function testTransformReplacesBodyWithTranslatedResult() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const body = await makeBoxBody(oc, 'body_phase4_transform' as BodyId, 4, 4, 4, 'feature_phase4_transform_seed' as FeatureId)
-    const context = await createContext({ bodies: [body] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const body = await makeBoxBody(
+      oc,
+      "body_phase4_transform" as BodyId,
+      4,
+      4,
+      4,
+      "feature_phase4_transform_seed" as FeatureId,
+    );
+    const context = await createContext({ bodies: [body] })();
 
-    const result = executeOccFeature(context, 'feature_phase4_transform' as FeatureId, {
-      kind: 'transform',
-      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        participants: [
-          { role: 'body', targets: [{ kind: 'body', bodyId: body.bodyId }] },
-          { role: 'transformReference', targets: [{ kind: 'construction', constructionId: 'construction_plane-xy' }] },
-        ],
-        options: { distance: 3 },
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_transform" as FeatureId,
+      {
+        kind: "transform",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+            {
+              role: "transformReference",
+              targets: [
+                {
+                  kind: "construction",
+                  constructionId: "construction_plane-xy",
+                },
+              ],
+            },
+          ],
+          options: { distance: 3 },
+        },
       },
-    })
+    );
 
-    expectTrue(result.bodies.length === 1, 'Transform should replace the selected body in place.')
-    expectTrue(result.bodies[0]?.bodyId === body.bodyId, 'Transform should preserve the selected body id when replacing the translated result.')
-    expectTrue(result.producedTargets.length === 1 && result.producedTargets[0]?.kind === 'body' && result.producedTargets[0].bodyId === body.bodyId, 'Transform should report the replaced body target.')
-    expectTrue(result.bodies[0]?.topology.faceIds.includes(body.topology.faceIds[0]!), 'Transform should preserve uniquely resolved topology ids for the replaced body.')
+    expectTrue(
+      result.bodies.length === 1,
+      "Transform should replace the selected body in place.",
+    );
+    expectTrue(
+      result.bodies[0]?.bodyId === body.bodyId,
+      "Transform should preserve the selected body id when replacing the translated result.",
+    );
+    expectTrue(
+      result.producedTargets.length === 1 &&
+        result.producedTargets[0]?.kind === "body" &&
+        result.producedTargets[0].bodyId === body.bodyId,
+      "Transform should report the replaced body target.",
+    );
+    expectTrue(
+      result.bodies[0]?.topology.faceIds.includes(body.topology.faceIds[0]!),
+      "Transform should preserve uniquely resolved topology ids for the replaced body.",
+    );
   }
 
   async function testShellBuildsPreviewableSolidFromExplicitBodyAndFaces() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const boxBody = await makeBoxBody(oc, 'body_phase4_shell' as BodyId, 4, 4, 4, 'feature_phase4_shell_seed' as FeatureId)
-    const removableFaceId = findFaceIdByDirection(oc, boxBody, [0, 0, 1])
-    expectTrue(removableFaceId != null, 'Expected box body to expose a removable top face for shell.')
-    const context = await createContext({ bodies: [boxBody] })()
+    const oc = await getDefaultOpenCascadeInstance();
+    const boxBody = await makeBoxBody(
+      oc,
+      "body_phase4_shell" as BodyId,
+      4,
+      4,
+      4,
+      "feature_phase4_shell_seed" as FeatureId,
+    );
+    const removableFaceId = findFaceIdByDirection(oc, boxBody, [0, 0, 1]);
+    expectTrue(
+      removableFaceId != null,
+      "Expected box body to expose a removable top face for shell.",
+    );
+    const context = await createContext({ bodies: [boxBody] })();
 
-    const result = executeOccFeature(context, 'feature_phase4_shell' as FeatureId, {
-      kind: 'shell',
-      featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
-      parameters: {
-        bodyTarget: { kind: 'body', bodyId: boxBody.bodyId },
-        faceTargets: [{ kind: 'face', bodyId: boxBody.bodyId, faceId: removableFaceId }],
-        thickness: 0.4,
-        operation: 'newBody',
-        booleanScope: { kind: 'standalone' },
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_shell" as FeatureId,
+      {
+        kind: "shell",
+        featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          bodyTarget: { kind: "body", bodyId: boxBody.bodyId },
+          faceTargets: [
+            { kind: "face", bodyId: boxBody.bodyId, faceId: removableFaceId },
+          ],
+          thickness: 0.4,
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
+        },
       },
-    })
+    );
 
-    expectTrue(result.producedTargets[0]?.kind === 'body', 'Shell should report its produced body target.')
-    expectTrue(result.bodies.length === 2, 'Standalone shell should preserve the source body and append the shelled result body.')
+    expectTrue(
+      result.producedTargets[0]?.kind === "body",
+      "Shell should report its produced body target.",
+    );
+    expectTrue(
+      result.bodies.length === 2,
+      "Standalone shell should preserve the source body and append the shelled result body.",
+    );
   }
 
   async function testOccAuthoringStateRebuildUsesFeatureExecutionFlow() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_rebuild' as SketchId, plane)
-    const initialState = createOccAuthoringState(oc, { sketches: [sketch] })
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_rebuild" as SketchId,
+      plane,
+    );
+    const initialState = createOccAuthoringState(oc, { sketches: [sketch] });
 
     const rebuilt = rebuildOccAuthoringState(initialState, [
       {
-        featureId: 'feature_phase4_rebuild_plane' as FeatureId,
+        featureId: "feature_phase4_rebuild_plane" as FeatureId,
         definition: {
-          kind: 'plane',
+          kind: "plane",
           featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            mode: 'coplanar',
+            mode: "coplanar",
             reference: {
               target: {
-                kind: 'construction',
-                constructionId: 'construction_plane-xy' as ConstructionId,
+                kind: "construction",
+                constructionId: "construction_plane-xy" as ConstructionId,
               },
             },
           },
         },
       },
       {
-        featureId: 'feature_phase4_rebuild_extrude' as FeatureId,
+        featureId: "feature_phase4_rebuild_extrude" as FeatureId,
         definition: {
-          kind: 'extrude',
+          kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-            startExtent: { kind: 'profilePlane' },
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
             extent: {
-              mode: 'oneSide',
-              end: { kind: 'blind', direction: 'positive', distance: 2 },
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 2 },
             },
-            operation: 'newBody',
-            booleanScope: { kind: 'standalone' },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
           },
         },
       },
-    ])
+    ]);
 
-    expectTrue(rebuilt.features.length === 2, 'Authoring-state rebuild should append every applied feature to the live OCC state.')
-    expectTrue(rebuilt.constructions.some((construction) => construction.constructionId === 'construction_feature_phase4_rebuild_plane'), 'Authoring-state rebuild should persist plane-feature construction state.')
-    expectTrue(rebuilt.bodies.some((body) => body.bodyId === 'body_feature_phase4_rebuild_extrude'), 'Authoring-state rebuild should persist feature-produced bodies.')
-    expectTrue(rebuilt.entities.length === 1, 'Authoring-state rebuild should accumulate construction entity artifacts from executed features.')
-    expectTrue(rebuilt.renderRecords.length === 1, 'Authoring-state rebuild should accumulate construction render artifacts from executed features.')
+    expectTrue(
+      rebuilt.features.length === 2,
+      "Authoring-state rebuild should append every applied feature to the live OCC state.",
+    );
+    expectTrue(
+      rebuilt.constructions.some(
+        (construction) =>
+          construction.constructionId ===
+          "construction_feature_phase4_rebuild_plane",
+      ),
+      "Authoring-state rebuild should persist plane-feature construction state.",
+    );
+    expectTrue(
+      rebuilt.bodies.some(
+        (body) => body.bodyId === "body_feature_phase4_rebuild_extrude",
+      ),
+      "Authoring-state rebuild should persist feature-produced bodies.",
+    );
+    expectTrue(
+      rebuilt.entities.length === 1,
+      "Authoring-state rebuild should accumulate construction entity artifacts from executed features.",
+    );
+    expectTrue(
+      rebuilt.renderRecords.length === 1,
+      "Authoring-state rebuild should accumulate construction render artifacts from executed features.",
+    );
   }
 
   async function testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase4_rebuild_repeat' as SketchId, plane)
-    const initialState = createOccAuthoringState(oc, { sketches: [sketch] })
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase4_rebuild_repeat" as SketchId,
+      plane,
+    );
+    const initialState = createOccAuthoringState(oc, { sketches: [sketch] });
     const features = [
       {
-        featureId: 'feature_phase4_rebuild_repeat_plane' as FeatureId,
+        featureId: "feature_phase4_rebuild_repeat_plane" as FeatureId,
         definition: {
-          kind: 'plane',
+          kind: "plane",
           featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            mode: 'coplanar',
+            mode: "coplanar",
             reference: {
               target: {
-                kind: 'construction',
-                constructionId: 'construction_plane-xy' as ConstructionId,
+                kind: "construction",
+                constructionId: "construction_plane-xy" as ConstructionId,
               },
             },
           },
         },
       },
       {
-        featureId: 'feature_phase4_rebuild_repeat_extrude' as FeatureId,
+        featureId: "feature_phase4_rebuild_repeat_extrude" as FeatureId,
         definition: {
-          kind: 'extrude',
+          kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-            startExtent: { kind: 'profilePlane' },
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
             extent: {
-              mode: 'oneSide',
-              end: { kind: 'blind', direction: 'positive', distance: 1 },
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 1 },
             },
-            operation: 'newBody',
-            booleanScope: { kind: 'standalone' },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
           },
         },
       },
-    ] as const
+    ] as const;
 
-    const first = rebuildOccAuthoringState(initialState, features)
-    const second = rebuildOccAuthoringState(first, features)
+    const first = rebuildOccAuthoringState(initialState, features);
+    const second = rebuildOccAuthoringState(first, features);
 
-    expectTrue(first.features.length === second.features.length, 'Repeated rebuilds with the same feature list should not duplicate feature rows.')
-    expectTrue(first.bodies.length === second.bodies.length, 'Repeated rebuilds with the same feature list should produce the same body count.')
-    expectTrue(first.constructions.length === second.constructions.length, 'Repeated rebuilds with the same feature list should not duplicate construction rows.')
-    expectTrue(first.entities.length === second.entities.length, 'Repeated rebuilds with the same feature list should not duplicate entity artifacts.')
-    expectTrue(first.renderRecords.length === second.renderRecords.length, 'Repeated rebuilds with the same feature list should not duplicate render artifacts.')
+    expectTrue(
+      first.features.length === second.features.length,
+      "Repeated rebuilds with the same feature list should not duplicate feature rows.",
+    );
+    expectTrue(
+      first.bodies.length === second.bodies.length,
+      "Repeated rebuilds with the same feature list should produce the same body count.",
+    );
+    expectTrue(
+      first.constructions.length === second.constructions.length,
+      "Repeated rebuilds with the same feature list should not duplicate construction rows.",
+    );
+    expectTrue(
+      first.entities.length === second.entities.length,
+      "Repeated rebuilds with the same feature list should not duplicate entity artifacts.",
+    );
+    expectTrue(
+      first.renderRecords.length === second.renderRecords.length,
+      "Repeated rebuilds with the same feature list should not duplicate render artifacts.",
+    );
   }
 
-  await testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts()
-  await testPlaneFeatureBuildsFaceBackedConstructionPlane()
-  await testExtrudeFeatureCreatesStandaloneBodyFromRegion()
-  await testExtrudeUpToNextSkipsCoplanarStartFace()
-  await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds()
-  await testExtrudeFeatureCreatesBodiesFromMultipleRegions()
-  await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy()
-  await testExtrudeJoinRefinesSameDomainTopology()
-  await testExtrudeJoinRejectsMultiSolidResultShapes()
-  await testExtrudeRejectsInvalidExtentAndBooleanScope()
-  await testAdvancedEndConditionDiagnostics()
-  await testCutAndIntersectApplyPerTargetPolicy()
-  await testCombineExecutesBodyBooleansAndConsumesTools()
-  await testCombineRejectsEmptyAndMalformedBodyRoles()
-  await testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid()
-  await testRevolveBuildsFullAndUpToPartWithOffsets()
-  await testRevolveRejectsImpossibleUpToOffset()
-  await testRevolveRejectsNonPlanarFaceProfilesExplicitly()
-  await testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath()
-  await testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies()
-  await testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition()
-  await testLoftBuildsStandaloneBodyFromOrderedProfiles()
-  await testLoftAdvancedControlsAndUnsupportedCombinations()
-  await testFilletReplacesAffectedBody()
-  await testFilletRejectsEmptyEdgeTargetList()
-  await testSplitReplacesTargetBodyWithExplicitResultBodies()
-  await testDeleteSolidRemovesSelectedBodiesAndKeepsInvalidationHistory()
-  await testMirrorCopiesBodiesAcrossExplicitPlanarReferences()
-  await testTransformReplacesBodyWithTranslatedResult()
-  await testShellBuildsPreviewableSolidFromExplicitBodyAndFaces()
-  await testOccAuthoringStateRebuildUsesFeatureExecutionFlow()
-  await testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns()
+  await testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts();
+  await testPlaneFeatureBuildsFaceBackedConstructionPlane();
+  await testExtrudeFeatureCreatesStandaloneBodyFromRegion();
+  await testExtrudeUpToNextSkipsCoplanarStartFace();
+  await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds();
+  await testExtrudeFeatureCreatesBodiesFromMultipleRegions();
+  await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy();
+  await testExtrudeJoinRefinesSameDomainTopology();
+  await testExtrudeJoinRejectsMultiSolidResultShapes();
+  await testExtrudeRejectsInvalidExtentAndBooleanScope();
+  await testAdvancedEndConditionDiagnostics();
+  await testCutAndIntersectApplyPerTargetPolicy();
+  await testCombineExecutesBodyBooleansAndConsumesTools();
+  await testCombineRejectsEmptyAndMalformedBodyRoles();
+  await testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid();
+  await testRevolveBuildsFullAndUpToPartWithOffsets();
+  await testRevolveRejectsImpossibleUpToOffset();
+  await testRevolveRejectsNonPlanarFaceProfilesExplicitly();
+  await testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath();
+  await testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies();
+  await testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition();
+  await testLoftBuildsStandaloneBodyFromOrderedProfiles();
+  await testLoftAdvancedControlsAndUnsupportedCombinations();
+  await testFilletReplacesAffectedBody();
+  await testFilletRejectsEmptyEdgeTargetList();
+  await testSplitReplacesTargetBodyWithExplicitResultBodies();
+  await testDeleteSolidRemovesSelectedBodiesAndKeepsInvalidationHistory();
+  await testMirrorCopiesBodiesAcrossExplicitPlanarReferences();
+  await testTransformReplacesBodyWithTranslatedResult();
+  await testShellBuildsPreviewableSolidFromExplicitBodyAndFaces();
+  await testOccAuthoringStateRebuildUsesFeatureExecutionFlow();
+  await testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns();
 
-  console.log('OCC phase 4 feature execution tests passed.')
-}, 15000)
+  console.log("OCC phase 4 feature execution tests passed.");
+}, 15000);

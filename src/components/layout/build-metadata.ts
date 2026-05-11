@@ -1,21 +1,21 @@
 interface BuildMetadata {
-  version: string
-  commit: string
-  mode: string | null
+  version: string;
+  commit: string;
+  mode: string | null;
 }
 
 export function getBuildModeLabel(mode: string, isDev: boolean) {
   if (isDev) {
-    return 'dev'
+    return "dev";
   }
 
-  if (mode === 'preview') {
-    return 'preview'
+  if (mode === "preview") {
+    return "preview";
   }
 
-  return mode === 'production' ? null : mode
+  return mode === "production" ? null : mode;
 }
 
 export function formatBuildMetadata({ version, commit, mode }: BuildMetadata) {
-  return [`v${version}`, commit, mode].filter(Boolean).join(' ')
+  return [`v${version}`, commit, mode].filter(Boolean).join(" ");
 }

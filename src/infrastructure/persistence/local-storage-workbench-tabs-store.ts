@@ -3,22 +3,22 @@ import {
   serializeWorkbenchTabsState,
   type WorkbenchTabsLoadFailure,
   type WorkbenchTabsLoadResult,
-} from '@/contracts/workspace/workbench-tabs.runtime-schema'
-import type { WorkbenchTabsState } from '@/domain/workspace/workbench-tabs'
+} from "@/contracts/workspace/workbench-tabs.runtime-schema";
+import type { WorkbenchTabsState } from "@/domain/workspace/workbench-tabs";
 
 export interface StorageLike {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-  removeItem(key: string): void
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
 
 export interface WorkbenchTabsStore {
-  load(): WorkbenchTabsLoadResult | WorkbenchTabsLoadFailure
-  save(state: WorkbenchTabsState): void
-  clear(): void
+  load(): WorkbenchTabsLoadResult | WorkbenchTabsLoadFailure;
+  save(state: WorkbenchTabsState): void;
+  clear(): void;
 }
 
-export const WORKBENCH_TABS_STORAGE_KEY = 'cad.workbench.tabs.v2'
+export const WORKBENCH_TABS_STORAGE_KEY = "cad.workbench.tabs.v2";
 
 export function createLocalStorageWorkbenchTabsStore(
   storage: StorageLike,
@@ -26,29 +26,29 @@ export function createLocalStorageWorkbenchTabsStore(
 ): WorkbenchTabsStore {
   return {
     load() {
-      const serialized = storage.getItem(key)
+      const serialized = storage.getItem(key);
       if (serialized === null) {
-        return { ok: true, state: null }
+        return { ok: true, state: null };
       }
 
-      let parsed: unknown
+      let parsed: unknown;
       try {
-        parsed = JSON.parse(serialized) as unknown
+        parsed = JSON.parse(serialized) as unknown;
       } catch {
         return {
           ok: false,
-          reasonCode: 'invalid-json',
-          message: 'Workbench tabs storage did not contain valid JSON.',
-        }
+          reasonCode: "invalid-json",
+          message: "Workbench tabs storage did not contain valid JSON.",
+        };
       }
 
-      return parseWorkbenchTabsPayload(parsed)
+      return parseWorkbenchTabsPayload(parsed);
     },
     save(state) {
-      storage.setItem(key, JSON.stringify(serializeWorkbenchTabsState(state)))
+      storage.setItem(key, JSON.stringify(serializeWorkbenchTabsState(state)));
     },
     clear() {
-      storage.removeItem(key)
+      storage.removeItem(key);
     },
-  }
+  };
 }

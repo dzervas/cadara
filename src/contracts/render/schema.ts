@@ -1,13 +1,27 @@
-import type { BodyId, FeatureId, PickId, RenderableId } from '@/contracts/shared/ids'
-import type { DurableRef, FaceRef, EdgeRef, VertexRef, ConstructionRef, RegionRef, SketchEntityRef, SketchPointRef } from '@/contracts/shared/references'
-import type { RenderExportSchemaVersion } from '@/contracts/shared/versioning'
+import type {
+  BodyId,
+  FeatureId,
+  PickId,
+  RenderableId,
+} from "@/contracts/shared/ids";
+import type {
+  DurableRef,
+  FaceRef,
+  EdgeRef,
+  VertexRef,
+  ConstructionRef,
+  RegionRef,
+  SketchEntityRef,
+  SketchPointRef,
+} from "@/contracts/shared/references";
+import type { RenderExportSchemaVersion } from "@/contracts/shared/versioning";
 
 /**
  * Canonical 3D point used by render export payloads.
  * Coordinates are expressed in document modeling units and are owned by the
  * kernel tessellation export, not the viewport.
  */
-export type RenderPoint3D = readonly [number, number, number]
+export type RenderPoint3D = readonly [number, number, number];
 
 /**
  * Semantic classes surfaced by render export bindings.
@@ -15,23 +29,23 @@ export type RenderPoint3D = readonly [number, number, number]
  * inferred by the viewport from geometry representation details.
  */
 export type RenderSemanticClass =
-  | 'bodyFace'
-  | 'planarFace'
-  | 'featureEdge'
-  | 'featureVertex'
-  | 'region'
-  | 'sketchCurve'
-  | 'sketchPoint'
-  | 'construction'
+  | "bodyFace"
+  | "planarFace"
+  | "featureEdge"
+  | "featureVertex"
+  | "region"
+  | "sketchCurve"
+  | "sketchPoint"
+  | "construction";
 
 interface RenderBindingBase {
   /** Transient pick-binding identifier used by viewport hit-testing. */
-  pickId: PickId
+  pickId: PickId;
   /**
    * Lower values win when multiple exports overlap at one hit location.
    * The export producer owns this ordering policy.
    */
-  pickPriority: number
+  pickPriority: number;
 }
 
 /**
@@ -40,11 +54,11 @@ interface RenderBindingBase {
  */
 export interface RenderFaceBinding extends RenderBindingBase {
   /** Durable face selected when this render record is picked. */
-  target: FaceRef
+  target: FaceRef;
   /** Authoritative topology class for durable face picks. */
-  topology: 'face'
+  topology: "face";
   /** Explicit face semantic class consumed by editor selection rules. */
-  semanticClass: 'bodyFace' | 'planarFace'
+  semanticClass: "bodyFace" | "planarFace";
 }
 
 /**
@@ -52,11 +66,11 @@ export interface RenderFaceBinding extends RenderBindingBase {
  */
 export interface RenderEdgeBinding extends RenderBindingBase {
   /** Durable edge selected when this render record is picked. */
-  target: EdgeRef
+  target: EdgeRef;
   /** Authoritative topology class for durable edge picks. */
-  topology: 'edge'
+  topology: "edge";
   /** Explicit edge semantic class consumed by editor selection rules. */
-  semanticClass: 'featureEdge'
+  semanticClass: "featureEdge";
 }
 
 /**
@@ -64,11 +78,11 @@ export interface RenderEdgeBinding extends RenderBindingBase {
  */
 export interface RenderVertexBinding extends RenderBindingBase {
   /** Durable vertex selected when this render record is picked. */
-  target: VertexRef
+  target: VertexRef;
   /** Authoritative topology class for durable vertex picks. */
-  topology: 'vertex'
+  topology: "vertex";
   /** Explicit vertex semantic class consumed by editor selection rules. */
-  semanticClass: 'featureVertex'
+  semanticClass: "featureVertex";
 }
 
 /**
@@ -76,11 +90,11 @@ export interface RenderVertexBinding extends RenderBindingBase {
  */
 export interface RenderConstructionBinding extends RenderBindingBase {
   /** Durable construction target selected when this render record is picked. */
-  target: ConstructionRef
+  target: ConstructionRef;
   /** Construction bindings do not map to body topology primitives. */
-  topology: null
+  topology: null;
   /** Explicit construction semantic class consumed by editor selection rules. */
-  semanticClass: 'construction'
+  semanticClass: "construction";
 }
 
 /**
@@ -88,11 +102,11 @@ export interface RenderConstructionBinding extends RenderBindingBase {
  */
 export interface RenderSketchCurveBinding extends RenderBindingBase {
   /** Durable sketch entity selected when this render record is picked. */
-  target: SketchEntityRef
+  target: SketchEntityRef;
   /** Sketch-curve bindings do not map to body topology primitives. */
-  topology: null
+  topology: null;
   /** Explicit sketch-curve semantic class consumed by editor selection rules. */
-  semanticClass: 'sketchCurve'
+  semanticClass: "sketchCurve";
 }
 
 /**
@@ -100,11 +114,11 @@ export interface RenderSketchCurveBinding extends RenderBindingBase {
  */
 export interface RenderRegionBinding extends RenderBindingBase {
   /** Durable sketch region selected when this render record is picked. */
-  target: RegionRef
+  target: RegionRef;
   /** Sketch-region bindings do not map to body topology primitives. */
-  topology: null
+  topology: null;
   /** Explicit region semantic class consumed by editor selection rules. */
-  semanticClass: 'region'
+  semanticClass: "region";
 }
 
 /**
@@ -112,11 +126,11 @@ export interface RenderRegionBinding extends RenderBindingBase {
  */
 export interface RenderSketchPointBinding extends RenderBindingBase {
   /** Durable sketch point selected when this render record is picked. */
-  target: SketchPointRef
+  target: SketchPointRef;
   /** Sketch-point bindings do not map to body topology primitives. */
-  topology: null
+  topology: null;
   /** Explicit sketch-point semantic class consumed by editor selection rules. */
-  semanticClass: 'sketchPoint'
+  semanticClass: "sketchPoint";
 }
 
 /**
@@ -129,7 +143,7 @@ export type RenderSemanticBinding =
   | RenderConstructionBinding
   | RenderRegionBinding
   | RenderSketchCurveBinding
-  | RenderSketchPointBinding
+  | RenderSketchPointBinding;
 
 /**
  * Triangle-mesh export suitable for real kernel tessellation backends.
@@ -141,13 +155,13 @@ export type RenderSemanticBinding =
  */
 export interface RenderMeshGeometry {
   /** Stable discriminant for triangle-mesh render records. */
-  kind: 'mesh'
+  kind: "mesh";
   /** Vertex positions in document modeling units. */
-  vertexPositions: readonly RenderPoint3D[]
+  vertexPositions: readonly RenderPoint3D[];
   /** Per-vertex normals aligned with `vertexPositions`, if the backend provides them. */
-  vertexNormals: readonly RenderPoint3D[] | null
+  vertexNormals: readonly RenderPoint3D[] | null;
   /** Triangle index triplets into `vertexPositions`. */
-  triangleIndices: readonly (readonly [number, number, number])[]
+  triangleIndices: readonly (readonly [number, number, number])[];
 }
 
 /**
@@ -159,11 +173,11 @@ export interface RenderMeshGeometry {
  */
 export interface RenderPolylineGeometry {
   /** Stable discriminant for polyline render records. */
-  kind: 'polyline'
+  kind: "polyline";
   /** Ordered world-space points in document modeling units. */
-  points: readonly RenderPoint3D[]
+  points: readonly RenderPoint3D[];
   /** True when the final point connects back to the first point. */
-  isClosed: boolean
+  isClosed: boolean;
 }
 
 /**
@@ -172,11 +186,11 @@ export interface RenderPolylineGeometry {
  */
 export interface RenderMarkerGeometry {
   /** Stable discriminant for point-marker render records. */
-  kind: 'marker'
+  kind: "marker";
   /** Marker anchor in document modeling units. */
-  position: RenderPoint3D
+  position: RenderPoint3D;
   /** View-only radius hint for marker visualization. */
-  displayRadius: number
+  displayRadius: number;
 }
 
 /**
@@ -186,17 +200,17 @@ export interface RenderMarkerGeometry {
  */
 export interface RenderableEntityRecord {
   /** Transient render-record key scoped to one export payload. */
-  id: RenderableId
+  id: RenderableId;
   /** Human-readable label for inspection/debug surfaces. */
-  label: string
+  label: string;
   /** Owning body when this export record belongs to durable body topology. */
-  ownerBodyId: BodyId | null
+  ownerBodyId: BodyId | null;
   /** Owning feature when this export record is derived from one feature. */
-  ownerFeatureId: FeatureId | null
+  ownerFeatureId: FeatureId | null;
   /** Authoritative semantic binding used for picking and highlighting. */
-  binding: RenderSemanticBinding
+  binding: RenderSemanticBinding;
   /** Renderer-neutral geometry payload owned by the export producer. */
-  geometry: RenderMeshGeometry | RenderPolylineGeometry | RenderMarkerGeometry
+  geometry: RenderMeshGeometry | RenderPolylineGeometry | RenderMarkerGeometry;
 }
 
 /**
@@ -204,12 +218,12 @@ export interface RenderableEntityRecord {
  */
 export interface RenderExport {
   /** Render export schema version for this payload family. */
-  schemaVersion: RenderExportSchemaVersion
+  schemaVersion: RenderExportSchemaVersion;
   /** Render records owned by this export. */
-  records: RenderableEntityRecord[]
+  records: RenderableEntityRecord[];
 }
 
 /**
  * Canonical durable target type that one render record may bind to.
  */
-export type RenderTarget = DurableRef
+export type RenderTarget = DurableRef;

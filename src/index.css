@@ -1,13 +1,14 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 @theme {
-  --font-sans: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 :root {
   color-scheme: dark;
-  font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
+  font-family: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -48,15 +49,26 @@ input {
   will-change: transform, background-color, border-color, box-shadow;
 }
 
-.workbench-toolbar-action:where(:hover, [data-hovered]):not(:disabled):not([data-disabled]) {
-  background-color: var(--workbench-toolbar-action-hover-bg, var(--workbench-toolbar-button-hover-background));
-  border-color: var(--workbench-toolbar-action-hover-border, var(--workbench-toolbar-button-hover-border));
+.workbench-toolbar-action:where(:hover, [data-hovered]):not(:disabled):not(
+    [data-disabled]
+  ) {
+  background-color: var(
+    --workbench-toolbar-action-hover-bg,
+    var(--workbench-toolbar-button-hover-background)
+  );
+  border-color: var(
+    --workbench-toolbar-action-hover-border,
+    var(--workbench-toolbar-button-hover-border)
+  );
   box-shadow: var(--workbench-toolbar-button-hover-shadow);
   transform: translateY(-1px);
 }
 
 .workbench-toolbar-action:where(:active):not(:disabled):not([data-disabled]) {
-  background-color: var(--workbench-toolbar-action-press-bg, var(--workbench-toolbar-button-press-background));
+  background-color: var(
+    --workbench-toolbar-action-press-bg,
+    var(--workbench-toolbar-button-press-background)
+  );
   box-shadow: var(--workbench-toolbar-button-press-shadow);
   transform: translateY(0);
 }
@@ -119,12 +131,14 @@ input {
     will-change: auto;
   }
 
-  .workbench-toolbar-action:where(:hover, [data-hovered]):not(:disabled):not([data-disabled]),
+  .workbench-toolbar-action:where(:hover, [data-hovered]):not(:disabled):not(
+      [data-disabled]
+    ),
   .workbench-spark-logo:where(:hover, [data-hovered]) {
     transform: none;
   }
 
-  [data-tab-hairline='pending'] > * {
+  [data-tab-hairline="pending"] > * {
     animation-duration: 0ms !important;
     animation-iteration-count: 1 !important;
     transform: none !important;

@@ -1,32 +1,32 @@
-import { test } from 'bun:test'
+import { test } from "bun:test";
 
-import { expectTrue } from '@/testing/expect.spec'
-import type { ReferenceImagePlacement } from '@/contracts/reference-image/schema'
-import type { SketchPoint2D } from '@/contracts/sketch/schema'
+import { expectTrue } from "@/testing/expect.spec";
+import type { ReferenceImagePlacement } from "@/contracts/reference-image/schema";
+import type { SketchPoint2D } from "@/contracts/sketch/schema";
 
-import { solveReferenceImageCalibration } from '@/domain/reference-image-calibration/solver/solve-reference-image-calibration'
+import { solveReferenceImageCalibration } from "@/domain/reference-image-calibration/solver/solve-reference-image-calibration";
 
 function mapAnchorToWorld(
   uv: SketchPoint2D,
   placement: ReferenceImagePlacement,
 ): SketchPoint2D {
-  const localX = (uv[0] - 0.5) * placement.width
-  const localY = (0.5 - uv[1]) * placement.height
-  const cos = Math.cos(placement.rotationRadians)
-  const sin = Math.sin(placement.rotationRadians)
+  const localX = (uv[0] - 0.5) * placement.width;
+  const localY = (0.5 - uv[1]) * placement.height;
+  const cos = Math.cos(placement.rotationRadians);
+  const sin = Math.sin(placement.rotationRadians);
   return [
     placement.center[0] + localX * cos - localY * sin,
     placement.center[1] + localX * sin + localY * cos,
-  ]
+  ];
 }
 
-test('src/domain/reference-image-calibration/solver/solve-reference-image-calibration.spec.ts solves rotated exact fits', () => {
+test("src/domain/reference-image-calibration/solver/solve-reference-image-calibration.spec.ts solves rotated exact fits", () => {
   const exactPlacement = {
     center: [18, -12] as const,
     width: 120,
     height: 60,
     rotationRadians: Math.PI / 4,
-  }
+  };
   const anchors = [
     [0.1, 0.2],
     [0.9, 0.2],
@@ -37,9 +37,9 @@ test('src/domain/reference-image-calibration/solver/solve-reference-image-calibr
     label: `Anchor ${index + 1}`,
     uv: uv as SketchPoint2D,
     worldPosition: mapAnchorToWorld(uv as SketchPoint2D, exactPlacement),
-  }))
+  }));
 
-  for (const scaleMode of ['lockedAspect', 'independent'] as const) {
+  for (const scaleMode of ["lockedAspect", "independent"] as const) {
     const result = solveReferenceImageCalibration({
       image: {
         pixelWidth: 400,
@@ -54,18 +54,38 @@ test('src/domain/reference-image-calibration/solver/solve-reference-image-calibr
       scaleMode,
       anchors,
       constraints: [],
-    })
+    });
 
-    expectTrue(result.diagnostics.length === 0, `${scaleMode} rotated exact fit should solve without diagnostics.`)
-    expectTrue(Math.abs(result.placement.center[0] - exactPlacement.center[0]) < 1e-3, `${scaleMode} rotated solve should recover center X.`)
-    expectTrue(Math.abs(result.placement.center[1] - exactPlacement.center[1]) < 1e-3, `${scaleMode} rotated solve should recover center Y.`)
-    expectTrue(Math.abs(result.placement.width - exactPlacement.width) < 1e-3, `${scaleMode} rotated solve should recover width.`)
-    expectTrue(Math.abs(result.placement.height - exactPlacement.height) < 1e-3, `${scaleMode} rotated solve should recover height.`)
-    expectTrue(Math.abs(result.placement.rotationRadians - exactPlacement.rotationRadians) < 1e-3, `${scaleMode} rotated solve should recover rotation.`)
+    expectTrue(
+      result.diagnostics.length === 0,
+      `${scaleMode} rotated exact fit should solve without diagnostics.`,
+    );
+    expectTrue(
+      Math.abs(result.placement.center[0] - exactPlacement.center[0]) < 1e-3,
+      `${scaleMode} rotated solve should recover center X.`,
+    );
+    expectTrue(
+      Math.abs(result.placement.center[1] - exactPlacement.center[1]) < 1e-3,
+      `${scaleMode} rotated solve should recover center Y.`,
+    );
+    expectTrue(
+      Math.abs(result.placement.width - exactPlacement.width) < 1e-3,
+      `${scaleMode} rotated solve should recover width.`,
+    );
+    expectTrue(
+      Math.abs(result.placement.height - exactPlacement.height) < 1e-3,
+      `${scaleMode} rotated solve should recover height.`,
+    );
+    expectTrue(
+      Math.abs(
+        result.placement.rotationRadians - exactPlacement.rotationRadians,
+      ) < 1e-3,
+      `${scaleMode} rotated solve should recover rotation.`,
+    );
   }
-})
+});
 
-test('src/domain/reference-image-calibration/solver/solve-reference-image-calibration.spec.ts detects independent axis-degenerate targets as underconstrained', () => {
+test("src/domain/reference-image-calibration/solver/solve-reference-image-calibration.spec.ts detects independent axis-degenerate targets as underconstrained", () => {
   const result = solveReferenceImageCalibration({
     image: {
       pixelWidth: 400,
@@ -77,32 +97,37 @@ test('src/domain/reference-image-calibration/solver/solve-reference-image-calibr
       height: 100,
       rotationRadians: 0,
     },
-    scaleMode: 'independent',
+    scaleMode: "independent",
     anchors: [
       {
-        anchorId: 'anchor_a',
-        label: 'Anchor A',
+        anchorId: "anchor_a",
+        label: "Anchor A",
         uv: [0.25, 0.5],
         worldPosition: [-50, 0],
       },
       {
-        anchorId: 'anchor_b',
-        label: 'Anchor B',
+        anchorId: "anchor_b",
+        label: "Anchor B",
         uv: [0.75, 0.5],
         worldPosition: [50, 0],
       },
     ],
     constraints: [],
-  })
+  });
 
   expectTrue(
-    result.diagnostics.some((diagnostic) => diagnostic.code === 'underconstrained-calibration'),
-    'Independent calibration should mark a single-axis target set as underconstrained.',
-  )
-  expectTrue(result.placement.height > 1, 'Independent underconstrained solves should not collapse the unconstrained image axis.')
-})
+    result.diagnostics.some(
+      (diagnostic) => diagnostic.code === "underconstrained-calibration",
+    ),
+    "Independent calibration should mark a single-axis target set as underconstrained.",
+  );
+  expectTrue(
+    result.placement.height > 1,
+    "Independent underconstrained solves should not collapse the unconstrained image axis.",
+  );
+});
 
-test('src/domain/reference-image-calibration/solver/solve-reference-image-calibration.spec.ts validates anchor-fit residuals after solving', () => {
+test("src/domain/reference-image-calibration/solver/solve-reference-image-calibration.spec.ts validates anchor-fit residuals after solving", () => {
   const result = solveReferenceImageCalibration({
     image: {
       pixelWidth: 400,
@@ -114,37 +139,43 @@ test('src/domain/reference-image-calibration/solver/solve-reference-image-calibr
       height: 100,
       rotationRadians: 0,
     },
-    scaleMode: 'lockedAspect',
+    scaleMode: "lockedAspect",
     anchors: [
       {
-        anchorId: 'anchor_a',
-        label: 'Anchor A',
+        anchorId: "anchor_a",
+        label: "Anchor A",
         uv: [0.25, 0.5],
         worldPosition: [-50, 0],
       },
       {
-        anchorId: 'anchor_b',
-        label: 'Anchor B',
+        anchorId: "anchor_b",
+        label: "Anchor B",
         uv: [0.75, 0.5],
         worldPosition: [50, 0],
       },
     ],
-    constraints: [{
-      constraintId: 'constraint_conflict',
-      kind: 'distance',
-      label: 'Conflict',
-      firstAnchorId: 'anchor_a',
-      secondAnchorId: 'anchor_b',
-      distance: 10,
-    }],
-  })
+    constraints: [
+      {
+        constraintId: "constraint_conflict",
+        kind: "distance",
+        label: "Conflict",
+        firstAnchorId: "anchor_a",
+        secondAnchorId: "anchor_b",
+        distance: 10,
+      },
+    ],
+  });
 
   expectTrue(
-    result.diagnostics.some((diagnostic) => diagnostic.code === 'unsatisfied-anchor-target'),
-    'Conflicting calibration should surface anchor-fit residual warnings, not only distance warnings.',
-  )
+    result.diagnostics.some(
+      (diagnostic) => diagnostic.code === "unsatisfied-anchor-target",
+    ),
+    "Conflicting calibration should surface anchor-fit residual warnings, not only distance warnings.",
+  );
   expectTrue(
-    result.diagnostics.some((diagnostic) => diagnostic.code === 'unsatisfied-distance-constraint'),
-    'Conflicting calibration should still report unsatisfied distance constraints.',
-  )
-})
+    result.diagnostics.some(
+      (diagnostic) => diagnostic.code === "unsatisfied-distance-constraint",
+    ),
+    "Conflicting calibration should still report unsatisfied distance constraints.",
+  );
+});

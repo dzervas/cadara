@@ -1,21 +1,26 @@
-import { buildSelectionTargetCatalog } from '@/domain/modeling/document-snapshot-view'
+import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
 import {
   getDocumentHistoryCursorBeforeTarget,
   type DocumentHistoryOrderEntry,
-} from '@/domain/modeling/document-history'
-import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
-import { hydrateSketchPlaneEditSession } from '@/domain/editor/sketch-plane-editing'
-import { isFeatureScopedModelingDiagnostic } from '@/contracts/modeling/diagnostics'
-import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
-import type { DocumentId, RevisionId } from '@/contracts/shared/ids'
-import { getDefaultSelectionFilterForMode } from '@/core/editor/schema'
-import { emitEditSessionCursorRestore, emitFeatureHydration, emitSketchOpen } from './effect-emitters'
+} from "@/domain/modeling/document-history";
+import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { hydrateSketchPlaneEditSession } from "@/domain/editor/sketch-plane-editing";
+import { isFeatureScopedModelingDiagnostic } from "@/contracts/modeling/diagnostics";
+import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
+import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
 import {
-  advanceCursorPhase,
-  getCursorPhaseAction,
-} from './cursor-lifecycle'
-import { createSketchPlaneEditingState, enterSketchEditing, withPreview } from './state-creators'
-import { isFeatureTool } from './utility-helpers'
+  emitEditSessionCursorRestore,
+  emitFeatureHydration,
+  emitSketchOpen,
+} from "./effect-emitters";
+import { advanceCursorPhase, getCursorPhaseAction } from "./cursor-lifecycle";
+import {
+  createSketchPlaneEditingState,
+  enterSketchEditing,
+  withPreview,
+} from "./state-creators";
+import { isFeatureTool } from "./utility-helpers";
 import type {
   EditorEvent,
   EditorState,
@@ -24,14 +29,17 @@ import type {
   SelectionCommandEditorState,
   SnapshotLoadedPayload,
   EditSessionCursorContext,
-} from './types'
+} from "./types";
 
-export function updateStateDocument(state: EditorState, payload: SnapshotLoadedPayload): EditorState {
+export function updateStateDocument(
+  state: EditorState,
+  payload: SnapshotLoadedPayload,
+): EditorState {
   const snapshot = applyRenderPreservationForFeatureDiagnostics(
     state.snapshot,
     payload.snapshot,
     payload.preserveRenderRecordsOnFeatureDiagnostics === true,
-  )
+  );
 
   return {
     ...state,
@@ -42,14 +50,18 @@ export function updateStateDocument(state: EditorState, payload: SnapshotLoadedP
     snapshot,
     selectionCatalog: payload.selectionCatalog,
     pendingSnapshotRequestId:
-      state.pendingSnapshotRequestId === payload.requestId ? null : state.pendingSnapshotRequestId,
-  }
+      state.pendingSnapshotRequestId === payload.requestId
+        ? null
+        : state.pendingSnapshotRequestId,
+  };
 }
 
 function hasFeatureScopedError(snapshot: WorkspaceSnapshot) {
-  return snapshot.document.diagnostics.some((diagnostic) =>
-    diagnostic.severity === 'error' && isFeatureScopedModelingDiagnostic(diagnostic),
-  )
+  return snapshot.document.diagnostics.some(
+    (diagnostic) =>
+      diagnostic.severity === "error" &&
+      isFeatureScopedModelingDiagnostic(diagnostic),
+  );
 }
 
 export function applyRenderPreservationForFeatureDiagnostics(
@@ -57,14 +69,18 @@ export function applyRenderPreservationForFeatureDiagnostics(
   nextSnapshot: WorkspaceSnapshot,
   shouldPreserve: boolean,
 ): WorkspaceSnapshot {
-  if (!shouldPreserve || !previousSnapshot || !hasFeatureScopedError(nextSnapshot)) {
-    return nextSnapshot
+  if (
+    !shouldPreserve ||
+    !previousSnapshot ||
+    !hasFeatureScopedError(nextSnapshot)
+  ) {
+    return nextSnapshot;
   }
 
   const render = {
     ...nextSnapshot.document.render,
     records: previousSnapshot.document.render.records,
-  }
+  };
 
   return {
     ...nextSnapshot,
@@ -72,10 +88,13 @@ export function applyRenderPreservationForFeatureDiagnostics(
       ...nextSnapshot.document,
       render,
     },
-  }
+  };
 }
 
-export function updateStateDocumentSnapshot(state: EditorState, snapshot: WorkspaceSnapshot): EditorState {
+export function updateStateDocumentSnapshot(
+  state: EditorState,
+  snapshot: WorkspaceSnapshot,
+): EditorState {
   return {
     ...state,
     document: {
@@ -85,13 +104,16 @@ export function updateStateDocumentSnapshot(state: EditorState, snapshot: Worksp
     snapshot,
     selectionCatalog: buildSelectionTargetCatalog(snapshot),
     pendingSnapshotRequestId: null,
-  }
+  };
 }
 
-export function replaceStateDocumentSnapshot(state: EditorState, snapshot: WorkspaceSnapshot): IdleEditorState {
+export function replaceStateDocumentSnapshot(
+  state: EditorState,
+  snapshot: WorkspaceSnapshot,
+): IdleEditorState {
   return {
-    kind: 'idle',
-    mode: 'part',
+    kind: "idle",
+    mode: "part",
     document: {
       documentId: snapshot.document.documentId,
       revisionId: snapshot.document.revisionId,
@@ -100,7 +122,7 @@ export function replaceStateDocumentSnapshot(state: EditorState, snapshot: Works
     previewRenderables: null,
     selection: [],
     hoverTarget: null,
-    selectionFilter: getDefaultSelectionFilterForMode('part'),
+    selectionFilter: getDefaultSelectionFilterForMode("part"),
     selectionCatalog: buildSelectionTargetCatalog(snapshot),
     preview: null,
     nextCommandSequence: state.nextCommandSequence,
@@ -108,44 +130,58 @@ export function replaceStateDocumentSnapshot(state: EditorState, snapshot: Works
     pendingSnapshotRequestId: null,
     pendingHistoryCursorRequestId: null,
     editSessionCursorContext: null,
-  }
+  };
 }
 
-export function continueAfterSnapshotRefresh(updatedState: EditorState): EditorTransitionResult {
-  const cursorContext = updatedState.editSessionCursorContext
+export function continueAfterSnapshotRefresh(
+  updatedState: EditorState,
+): EditorTransitionResult {
+  const cursorContext = updatedState.editSessionCursorContext;
 
   if (!cursorContext) {
     return {
       state: updatedState,
       effects: [],
-    }
+    };
   }
 
   // `getCursorPhaseAction` reports the follow-up step after the current phase
   // completes, so this is intentionally read before advancing the phase.
-  const nextPhaseAction = getCursorPhaseAction(cursorContext)
-  const nextCursorContext = advanceCursorPhase(cursorContext, 'snapshotRefreshed')
+  const nextPhaseAction = getCursorPhaseAction(cursorContext);
+  const nextCursorContext = advanceCursorPhase(
+    cursorContext,
+    "snapshotRefreshed",
+  );
   const nextState: EditorState = {
     ...updatedState,
     editSessionCursorContext: nextCursorContext,
-  }
+  };
 
   if (
-    nextPhaseAction
-    && (nextPhaseAction === 'openSketchSession' || nextPhaseAction === 'hydrateFeature' || nextPhaseAction === 'openSketchPlaneEdit')
-    && nextCursorContext
-    && updatedState.kind === 'selectionCommand'
+    nextPhaseAction &&
+    (nextPhaseAction === "openSketchSession" ||
+      nextPhaseAction === "hydrateFeature" ||
+      nextPhaseAction === "openSketchPlaneEdit") &&
+    nextCursorContext &&
+    updatedState.kind === "selectionCommand"
   ) {
     const activeState: SelectionCommandEditorState = {
       ...updatedState,
       editSessionCursorContext: nextCursorContext,
-    }
+    };
 
-    if (nextPhaseAction === 'openSketchSession' && cursorContext.target.kind === 'sketch' && activeState.command.toolId === 'sketch') {
-      const target = { kind: 'sketch', sketchId: cursorContext.target.sketchId } as const
+    if (
+      nextPhaseAction === "openSketchSession" &&
+      cursorContext.target.kind === "sketch" &&
+      activeState.command.toolId === "sketch"
+    ) {
+      const target = {
+        kind: "sketch",
+        sketchId: cursorContext.target.sketchId,
+      } as const;
       const session = activeState.snapshot
         ? openSketchSessionFromSelection([target], activeState.snapshot)
-        : null
+        : null;
 
       return session
         ? enterSketchEditing(activeState, session)
@@ -156,13 +192,20 @@ export function continueAfterSnapshotRefresh(updatedState: EditorState): EditorT
               hoverTarget: null,
             },
             [target],
-          )
+          );
     }
 
-    if (nextPhaseAction === 'openSketchPlaneEdit' && cursorContext.target.kind === 'sketch' && activeState.command.toolId === 'sketchPlaneEdit') {
+    if (
+      nextPhaseAction === "openSketchPlaneEdit" &&
+      cursorContext.target.kind === "sketch" &&
+      activeState.command.toolId === "sketchPlaneEdit"
+    ) {
       const session = activeState.snapshot
-        ? hydrateSketchPlaneEditSession(activeState.snapshot, cursorContext.target.sketchId)
-        : null
+        ? hydrateSketchPlaneEditSession(
+            activeState.snapshot,
+            cursorContext.target.sketchId,
+          )
+        : null;
 
       return session
         ? {
@@ -171,45 +214,63 @@ export function continueAfterSnapshotRefresh(updatedState: EditorState): EditorT
           }
         : {
             state: withPreview(activeState, {
-              kind: 'selection',
+              kind: "selection",
               label: `Sketch ${cursorContext.target.sketchId} does not support plane reassignment.`,
-              target: { kind: 'sketch', sketchId: cursorContext.target.sketchId },
+              target: {
+                kind: "sketch",
+                sketchId: cursorContext.target.sketchId,
+              },
             }),
             effects: [],
-          }
+          };
     }
 
-    if (nextPhaseAction === 'hydrateFeature' && cursorContext.target.kind === 'feature' && isFeatureTool(activeState.command.toolId)) {
+    if (
+      nextPhaseAction === "hydrateFeature" &&
+      cursorContext.target.kind === "feature" &&
+      isFeatureTool(activeState.command.toolId)
+    ) {
       return emitFeatureHydration(
         {
           ...activeState,
-          selection: [{ kind: 'feature', featureId: cursorContext.target.featureId }],
+          selection: [
+            { kind: "feature", featureId: cursorContext.target.featureId },
+          ],
           hoverTarget: null,
         },
         cursorContext.target.featureId,
-      )
+      );
     }
   }
 
-  if (nextPhaseAction === 'restore') {
-    return emitEditSessionCursorRestore(nextState)
+  if (nextPhaseAction === "restore") {
+    return emitEditSessionCursorRestore(nextState);
   }
 
   return {
     state: nextState,
     effects: [],
-  }
+  };
 }
 
 export function hasPendingDocumentCursorRefresh(state: EditorState) {
-  return state.pendingHistoryCursorRequestId !== null || state.pendingSnapshotRequestId !== null
+  return (
+    state.pendingHistoryCursorRequestId !== null ||
+    state.pendingSnapshotRequestId !== null
+  );
 }
 
-export function isRefreshableDocumentCursorConflict(event: Extract<EditorEvent, { type: 'effect.documentCursorMoved' }>) {
-  return event.actualRevisionId !== undefined
-    || event.diagnostics.some((diagnostic) =>
-      diagnostic.code === 'repository-head-conflict' || diagnostic.detail?.kind === 'revisionConflict',
+export function isRefreshableDocumentCursorConflict(
+  event: Extract<EditorEvent, { type: "effect.documentCursorMoved" }>,
+) {
+  return (
+    event.actualRevisionId !== undefined ||
+    event.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === "repository-head-conflict" ||
+        diagnostic.detail?.kind === "revisionConflict",
     )
+  );
 }
 
 export function eventMatchesDocument(
@@ -217,15 +278,22 @@ export function eventMatchesDocument(
   documentId: DocumentId,
   revisionId: RevisionId | null,
 ) {
-  if (state.document.documentId !== null && state.document.documentId !== documentId) {
-    return false
+  if (
+    state.document.documentId !== null &&
+    state.document.documentId !== documentId
+  ) {
+    return false;
   }
 
-  if (revisionId !== null && state.document.revisionId !== null && state.document.revisionId !== revisionId) {
-    return false
+  if (
+    revisionId !== null &&
+    state.document.revisionId !== null &&
+    state.document.revisionId !== revisionId
+  ) {
+    return false;
   }
 
-  return true
+  return true;
 }
 
 export function eventMatchesOptionalDocument(
@@ -234,28 +302,28 @@ export function eventMatchesOptionalDocument(
   revisionId: RevisionId | null,
 ) {
   if (documentId === null) {
-    return true
+    return true;
   }
 
-  return eventMatchesDocument(state, documentId, revisionId)
+  return eventMatchesDocument(state, documentId, revisionId);
 }
 
 export function createEditSessionCursorContext(
   snapshot: WorkspaceSnapshot | null,
   target: DocumentHistoryOrderEntry,
-  sessionKind: EditSessionCursorContext['sessionKind'],
+  sessionKind: EditSessionCursorContext["sessionKind"],
 ): EditSessionCursorContext | null {
   if (!snapshot) {
-    return null
+    return null;
   }
 
   const rollbackCursor = getDocumentHistoryCursorBeforeTarget(
     snapshot.presentation.documentHistory,
     target,
-  )
+  );
 
   if (!rollbackCursor) {
-    return null
+    return null;
   }
 
   return {
@@ -263,14 +331,19 @@ export function createEditSessionCursorContext(
     sessionKind,
     rollbackCursor,
     restoreCursor: structuredClone(snapshot.document.cursor),
-    phase: 'rollingBack',
-  }
+    phase: "rollingBack",
+  };
 }
 
 export function canReopenSketchDirectlyFromCurrentCursor(
   snapshot: WorkspaceSnapshot | null,
-  target: Extract<import('@/core/editor/schema').PrimitiveRef, { kind: 'sketch' }>,
+  target: Extract<
+    import("@/core/editor/schema").PrimitiveRef,
+    { kind: "sketch" }
+  >,
 ) {
-  return snapshot?.document.cursor.kind === 'sketch'
-    && snapshot.document.cursor.sketchId === target.sketchId
+  return (
+    snapshot?.document.cursor.kind === "sketch" &&
+    snapshot.document.cursor.sketchId === target.sketchId
+  );
 }

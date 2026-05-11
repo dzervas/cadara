@@ -1,10 +1,10 @@
-import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
-import type { ShortcutCommandId } from '@/core/shortcuts/commands'
+import { ShortcutHint } from "@/components/shortcuts/shortcut-hint";
+import type { ShortcutCommandId } from "@/core/shortcuts/commands";
 
 interface ToolbarTooltipContentProps {
-  title: string
-  description: string
-  commandId?: ShortcutCommandId
+  title: string;
+  description: string;
+  commandId?: ShortcutCommandId;
 }
 
 export function ToolbarTooltipContent({
@@ -22,5 +22,5 @@ export function ToolbarTooltipContent({
         {description}
       </span>
     </div>
-  )
+  );
 }

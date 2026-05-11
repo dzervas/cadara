@@ -6,15 +6,15 @@ import type {
   RevisionId,
   SketchId,
   SketchPointId,
-} from '@/contracts/shared/ids'
+} from "@/contracts/shared/ids";
 import type {
   RegionRef,
   SketchEntityRef,
   SketchPointRef,
   SketchRef,
-} from '@/contracts/shared/references'
-import type { ContractVersion } from '@/contracts/shared/versioning'
-import type { SketchPlaneFrame } from '@/contracts/shared/sketch-plane'
+} from "@/contracts/shared/references";
+import type { ContractVersion } from "@/contracts/shared/versioning";
+import type { SketchPlaneFrame } from "@/contracts/shared/sketch-plane";
 import type {
   RegionRecord,
   ProjectedSketchGeometryRef,
@@ -24,19 +24,20 @@ import type {
   SketchSolveDiagnostic,
   SolvedSketchSnapshot,
   SolvedSketchStatus,
-} from '@/contracts/sketch/schema'
+} from "@/contracts/sketch/schema";
 
 /**
  * Versioned schema identifier for the dedicated sketch solver contract family.
  * Implementers must reject requests that declare an unsupported schema version.
  */
-export type SolverSchemaVersion = 'sketch-solver/v1alpha1'
+export type SolverSchemaVersion = "sketch-solver/v1alpha1";
 
 /**
  * Current sketch solver schema version literal.
  */
-export const SOLVER_SCHEMA_VERSION: SolverSchemaVersion = 'sketch-solver/v1alpha1'
-export type { SketchPlaneFrame }
+export const SOLVER_SCHEMA_VERSION: SolverSchemaVersion =
+  "sketch-solver/v1alpha1";
+export type { SketchPlaneFrame };
 
 /**
  * Declares how the solver should treat incomplete or conflicting edits.
@@ -44,7 +45,7 @@ export type { SketchPlaneFrame }
  * `failOnConflict` requires the response to stop at diagnostics if a full solve
  * is not available.
  */
-export type SolverPartialSolvePolicy = 'bestEffort' | 'failOnConflict'
+export type SolverPartialSolvePolicy = "bestEffort" | "failOnConflict";
 
 /**
  * Explicit tolerance policy used when validating, projecting, and solving.
@@ -52,11 +53,11 @@ export type SolverPartialSolvePolicy = 'bestEffort' | 'failOnConflict'
  */
 export interface SolverTolerancePolicy {
   /** Maximum point-to-point separation treated as coincident in sketch-plane units. */
-  coincidence: number
+  coincidence: number;
   /** Maximum angular deviation treated as equal direction in radians. */
-  angleRadians: number
+  angleRadians: number;
   /** Minimum non-zero segment length considered valid in sketch-plane units. */
-  minimumSegmentLength: number
+  minimumSegmentLength: number;
 }
 
 /**
@@ -64,25 +65,26 @@ export interface SolverTolerancePolicy {
  * for a compatible authored sketch graph, projection basis, tolerances, and
  * strategy.
  */
-export type CompiledSketchSolveProgramId = `compiled_sketch_solve_${string}`
+export type CompiledSketchSolveProgramId = `compiled_sketch_solve_${string}`;
 
 /**
  * Opaque identity for an active interactive solve session.
  */
-export type InteractiveSketchSolveSessionId = `interactive_sketch_solve_${string}`
+export type InteractiveSketchSolveSessionId =
+  `interactive_sketch_solve_${string}`;
 
 /**
  * Machine-readable reason a compiled basis or interactive session cannot be
  * reused for a requested solve.
  */
 export type SketchSolveInvalidationReason =
-  | 'authoredGraphChanged'
-  | 'projectedReferencesChanged'
-  | 'tolerancePolicyChanged'
-  | 'solveStrategyChanged'
-  | 'disposedSession'
-  | 'unknownSession'
-  | 'staleRevision'
+  | "authoredGraphChanged"
+  | "projectedReferencesChanged"
+  | "tolerancePolicyChanged"
+  | "solveStrategyChanged"
+  | "disposedSession"
+  | "unknownSession"
+  | "staleRevision";
 
 /**
  * Temporary interactive drag target supplied by an editor preview.
@@ -90,11 +92,11 @@ export type SketchSolveInvalidationReason =
  */
 export interface SolverDraggedSketchPointTarget {
   /** Temporary target discriminant. */
-  kind: 'sketchPoint'
+  kind: "sketchPoint";
   /** Authored point the user is dragging. */
-  pointId: SketchPointId
+  pointId: SketchPointId;
   /** Requested sketch-plane point position for this solve. */
-  position: SketchPoint2D
+  position: SketchPoint2D;
 }
 
 /**
@@ -103,9 +105,9 @@ export interface SolverDraggedSketchPointTarget {
  */
 export interface SolverExternalReferenceInput {
   /** Authored reference identity from `SketchDefinition.referenceIds`. */
-  referenceId: ReferenceId
+  referenceId: ReferenceId;
   /** Original authored reference definition submitted for projection. */
-  reference: SketchReferenceDefinition
+  reference: SketchReferenceDefinition;
 }
 
 /**
@@ -114,11 +116,11 @@ export interface SolverExternalReferenceInput {
  */
 export interface ProjectedSketchPointGeometry {
   /** Stable projected-geometry identity scoped to one authored reference. */
-  geometryId: ProjectedGeometryId
+  geometryId: ProjectedGeometryId;
   /** Geometry discriminant for a projected point result. */
-  kind: 'point'
+  kind: "point";
   /** Projected point coordinates in sketch-plane units. */
-  position: SketchPoint2D
+  position: SketchPoint2D;
 }
 
 /**
@@ -127,13 +129,13 @@ export interface ProjectedSketchPointGeometry {
  */
 export interface ProjectedSketchLineSegmentGeometry {
   /** Stable projected-geometry identity scoped to one authored reference. */
-  geometryId: ProjectedGeometryId
+  geometryId: ProjectedGeometryId;
   /** Geometry discriminant for a projected line result. */
-  kind: 'lineSegment'
+  kind: "lineSegment";
   /** Projected line start in sketch-plane units. */
-  startPosition: SketchPoint2D
+  startPosition: SketchPoint2D;
   /** Projected line end in sketch-plane units. */
-  endPosition: SketchPoint2D
+  endPosition: SketchPoint2D;
 }
 
 /**
@@ -142,13 +144,13 @@ export interface ProjectedSketchLineSegmentGeometry {
  */
 export interface ProjectedSketchCircleGeometry {
   /** Stable projected-geometry identity scoped to one authored reference. */
-  geometryId: ProjectedGeometryId
+  geometryId: ProjectedGeometryId;
   /** Geometry discriminant for a projected circle result. */
-  kind: 'circle'
+  kind: "circle";
   /** Projected circle center in sketch-plane units. */
-  centerPosition: SketchPoint2D
+  centerPosition: SketchPoint2D;
   /** Projected circle radius in sketch-plane units. */
-  radius: number
+  radius: number;
 }
 
 /**
@@ -157,17 +159,17 @@ export interface ProjectedSketchCircleGeometry {
  */
 export interface ProjectedSketchArcGeometry {
   /** Stable projected-geometry identity scoped to one authored reference. */
-  geometryId: ProjectedGeometryId
+  geometryId: ProjectedGeometryId;
   /** Geometry discriminant for a projected arc result. */
-  kind: 'arc'
+  kind: "arc";
   /** Projected arc center in sketch-plane units. */
-  centerPosition: SketchPoint2D
+  centerPosition: SketchPoint2D;
   /** Projected arc start in sketch-plane units. */
-  startPosition: SketchPoint2D
+  startPosition: SketchPoint2D;
   /** Projected arc end in sketch-plane units. */
-  endPosition: SketchPoint2D
+  endPosition: SketchPoint2D;
   /** Sweep direction from start to end about `centerPosition`. */
-  sweepDirection: 'clockwise' | 'counterClockwise'
+  sweepDirection: "clockwise" | "counterClockwise";
 }
 
 /**
@@ -177,15 +179,15 @@ export interface ProjectedSketchArcGeometry {
  */
 export interface ProjectedSketchSplineGeometry {
   /** Stable projected-geometry identity scoped to one authored reference. */
-  geometryId: ProjectedGeometryId
+  geometryId: ProjectedGeometryId;
   /** Geometry discriminant for a projected spline/freeform result. */
-  kind: 'spline'
+  kind: "spline";
   /** Projected curve sample/control points in sketch-plane units. */
-  fitPoints: readonly SketchPoint2D[]
+  fitPoints: readonly SketchPoint2D[];
   /** Polynomial degree when known; sampled freeform curves use a bounded degree. */
-  degree: 2 | 3
+  degree: 2 | 3;
   /** True when the final point connects back to the first point. */
-  isClosed: boolean
+  isClosed: boolean;
 }
 
 /**
@@ -197,18 +199,18 @@ export type ProjectedSketchReferenceGeometry =
   | ProjectedSketchLineSegmentGeometry
   | ProjectedSketchCircleGeometry
   | ProjectedSketchArcGeometry
-  | ProjectedSketchSplineGeometry
+  | ProjectedSketchSplineGeometry;
 
 /**
  * Machine-readable projection status for an authored external reference.
  * Callers must rely on this code rather than parsing diagnostic messages.
  */
 export type ProjectedSketchReferenceStatus =
-  | 'projected'
-  | 'unsupportedSource'
-  | 'missingSource'
-  | 'outOfPlane'
-  | 'ambiguous'
+  | "projected"
+  | "unsupportedSource"
+  | "missingSource"
+  | "outOfPlane"
+  | "ambiguous";
 
 /**
  * Explicit solver-owned external-reference projection record.
@@ -217,13 +219,13 @@ export type ProjectedSketchReferenceStatus =
  */
 export interface ProjectedSketchReferenceRecord {
   /** Authored reference identity from `SketchDefinition.referenceIds`. */
-  referenceId: ReferenceId
+  referenceId: ReferenceId;
   /** Projection result status for the authored reference. */
-  status: ProjectedSketchReferenceStatus
+  status: ProjectedSketchReferenceStatus;
   /** Projected sketch-space geometry when the projection succeeded. */
-  geometry: ProjectedSketchReferenceGeometry[]
+  geometry: ProjectedSketchReferenceGeometry[];
   /** Diagnostics specific to this external reference projection. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -231,13 +233,13 @@ export interface ProjectedSketchReferenceRecord {
  */
 export interface ResolvedProjectedSketchGeometryRecord {
   /** Stable projected geometry requested by the caller. */
-  reference: ProjectedSketchGeometryRef
+  reference: ProjectedSketchGeometryRef;
   /** Human-readable label owned by the solver/kernel producer. */
-  label: string
+  label: string;
   /** Requested projected geometry is still valid at `revisionId`. */
-  isValid: boolean
+  isValid: boolean;
   /** Machine-readable invalidation reason when `isValid` is false. */
-  invalidationReason: SolverReferenceInvalidationReason | null
+  invalidationReason: SolverReferenceInvalidationReason | null;
 }
 
 /**
@@ -247,20 +249,20 @@ export interface ResolvedProjectedSketchGeometryRecord {
  */
 export interface SketchSolverRequestBase {
   /** Shared top-level contract version across the modeling/solver boundary. */
-  contractVersion: ContractVersion
+  contractVersion: ContractVersion;
   /** Version of the sketch solver contract family expected by the caller. */
-  solverSchemaVersion: SolverSchemaVersion
+  solverSchemaVersion: SolverSchemaVersion;
   /** Correlation identifier for the async request/response pair. */
-  requestId: RequestId
+  requestId: RequestId;
   /** Durable document identity against which the request is evaluated. */
-  documentId: DocumentId
+  documentId: DocumentId;
   /**
    * Base committed revision against which the request is evaluated.
    * Solvers must not silently apply the request against a different revision.
    */
-  revisionId: RevisionId
+  revisionId: RevisionId;
   /** Durable sketch identity being solved, validated, or inspected. */
-  sketchId: SketchId
+  sketchId: SketchId;
 }
 
 /**
@@ -270,17 +272,17 @@ export interface SketchSolverRequestBase {
  */
 export interface SketchSolverResponseBase {
   /** Shared top-level contract version across the modeling/solver boundary. */
-  contractVersion: ContractVersion
+  contractVersion: ContractVersion;
   /** Version of the sketch solver contract family used to produce this response. */
-  solverSchemaVersion: SolverSchemaVersion
+  solverSchemaVersion: SolverSchemaVersion;
   /** Correlation identifier copied from the originating request. */
-  requestId: RequestId
+  requestId: RequestId;
   /** Durable document identity copied from the originating request. */
-  documentId: DocumentId
+  documentId: DocumentId;
   /** Revision against which the solver evaluated this response. */
-  revisionId: RevisionId
+  revisionId: RevisionId;
   /** Durable sketch identity copied from the originating request. */
-  sketchId: SketchId
+  sketchId: SketchId;
 }
 
 /**
@@ -290,11 +292,11 @@ export interface SketchSolverResponseBase {
  */
 export interface ProjectSketchExternalReferencesRequest extends SketchSolverRequestBase {
   /** Sketch-plane frame into which external references must be projected. */
-  plane: SketchPlaneFrame
+  plane: SketchPlaneFrame;
   /** Explicit tolerance policy for projection and coplanarity checks. */
-  tolerances: SolverTolerancePolicy
+  tolerances: SolverTolerancePolicy;
   /** Authored external references from the current sketch definition. */
-  references: SolverExternalReferenceInput[]
+  references: SolverExternalReferenceInput[];
 }
 
 /**
@@ -302,9 +304,9 @@ export interface ProjectSketchExternalReferencesRequest extends SketchSolverRequ
  */
 export interface ProjectSketchExternalReferencesResponse extends SketchSolverResponseBase {
   /** Projection result per authored external reference. */
-  projectedReferences: ProjectedSketchReferenceRecord[]
+  projectedReferences: ProjectedSketchReferenceRecord[];
   /** Aggregate diagnostics not owned by any single projected reference. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -314,13 +316,13 @@ export interface ProjectSketchExternalReferencesResponse extends SketchSolverRes
  */
 export interface ValidateSketchRequest extends SketchSolverRequestBase {
   /** Sketch-plane frame used to interpret authored and projected coordinates. */
-  plane: SketchPlaneFrame
+  plane: SketchPlaneFrame;
   /** Explicit tolerance policy for validation checks. */
-  tolerances: SolverTolerancePolicy
+  tolerances: SolverTolerancePolicy;
   /** Durable authored sketch definition submitted for validation. */
-  definition: SketchDefinition
+  definition: SketchDefinition;
   /** Explicit projected external references already resolved into sketch space. */
-  projectedReferences: ProjectedSketchReferenceRecord[]
+  projectedReferences: ProjectedSketchReferenceRecord[];
 }
 
 /**
@@ -328,9 +330,9 @@ export interface ValidateSketchRequest extends SketchSolverRequestBase {
  */
 export interface ValidateSketchResponse extends SketchSolverResponseBase {
   /** True only when the authored sketch payload is valid for solving. */
-  isValid: boolean
+  isValid: boolean;
   /** Machine-readable validation diagnostics. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -340,17 +342,17 @@ export interface ValidateSketchResponse extends SketchSolverResponseBase {
  */
 export interface SolveSketchRequest extends SketchSolverRequestBase {
   /** Sketch-plane frame used to interpret authored and solved coordinates. */
-  plane: SketchPlaneFrame
+  plane: SketchPlaneFrame;
   /** Explicit tolerance policy for solve and consistency checks. */
-  tolerances: SolverTolerancePolicy
+  tolerances: SolverTolerancePolicy;
   /** Declares whether the solver may return partial results when conflicts exist. */
-  partialSolvePolicy: SolverPartialSolvePolicy
+  partialSolvePolicy: SolverPartialSolvePolicy;
   /** Durable authored sketch definition to solve. */
-  definition: SketchDefinition
+  definition: SketchDefinition;
   /** Explicit projected external references available to the solver. */
-  projectedReferences: ProjectedSketchReferenceRecord[]
+  projectedReferences: ProjectedSketchReferenceRecord[];
   /** Optional caller-selected region extraction for workflows that need profiles immediately. */
-  includeRegions?: boolean
+  includeRegions?: boolean;
 }
 
 /**
@@ -359,16 +361,16 @@ export interface SolveSketchRequest extends SketchSolverRequestBase {
  */
 export interface SolveSketchResponse extends SketchSolverResponseBase {
   /** Solver-owned solved status summary for the authored sketch definition. */
-  status: SolvedSketchStatus
+  status: SolvedSketchStatus;
   /** Authoritative solved geometry and per-constraint/dimension results. */
-  solvedSnapshot: SolvedSketchSnapshot
+  solvedSnapshot: SolvedSketchSnapshot;
   /** Diagnostics emitted during validation or solving. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
   /** Caller-selected region extraction result when `includeRegions` was requested. */
   regionResult?: {
-    regions: RegionRecord[]
-    diagnostics: SketchSolveDiagnostic[]
-  }
+    regions: RegionRecord[];
+    diagnostics: SketchSolveDiagnostic[];
+  };
 }
 
 /**
@@ -376,19 +378,19 @@ export interface SolveSketchResponse extends SketchSolverResponseBase {
  */
 export interface StartInteractiveSketchSolveSessionRequest extends SketchSolverRequestBase {
   /** Sketch-plane frame used to interpret authored and solved coordinates. */
-  plane: SketchPlaneFrame
+  plane: SketchPlaneFrame;
   /** Explicit tolerance policy for solve and consistency checks. */
-  tolerances: SolverTolerancePolicy
+  tolerances: SolverTolerancePolicy;
   /** Declares whether the solver may return partial results when conflicts exist. */
-  partialSolvePolicy: SolverPartialSolvePolicy
+  partialSolvePolicy: SolverPartialSolvePolicy;
   /** Durable authored sketch definition to solve. */
-  definition: SketchDefinition
+  definition: SketchDefinition;
   /** Explicit projected external references available to the solver. */
-  projectedReferences: ProjectedSketchReferenceRecord[]
+  projectedReferences: ProjectedSketchReferenceRecord[];
   /** Optional compatible snapshot used to seed mutable solve state. */
-  priorSolvedSnapshot?: SolvedSketchSnapshot | null
+  priorSolvedSnapshot?: SolvedSketchSnapshot | null;
   /** Optional solver strategy selected by the caller/runtime. */
-  strategy?: 'bfgs' | 'gradientDescent' | 'gaussNewton' | 'levenbergMarquardt'
+  strategy?: "bfgs" | "gradientDescent" | "gaussNewton" | "levenbergMarquardt";
 }
 
 /**
@@ -396,17 +398,17 @@ export interface StartInteractiveSketchSolveSessionRequest extends SketchSolverR
  */
 export interface StartInteractiveSketchSolveSessionResponse extends SketchSolverResponseBase {
   /** Active interactive session identity. */
-  sessionId: InteractiveSketchSolveSessionId
+  sessionId: InteractiveSketchSolveSessionId;
   /** Compiled solve basis used by the session. */
-  programId: CompiledSketchSolveProgramId
+  programId: CompiledSketchSolveProgramId;
   /** True when the session seeded mutable state from a compatible solved snapshot. */
-  warmStarted: boolean
+  warmStarted: boolean;
   /** Complete solved state for the starting basis. */
-  solvedSnapshot: SolvedSketchSnapshot
+  solvedSnapshot: SolvedSketchSnapshot;
   /** Solver-owned solved status summary. */
-  status: SolvedSketchStatus
+  status: SolvedSketchStatus;
   /** Diagnostics emitted while compiling or seeding the session. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -414,29 +416,34 @@ export interface StartInteractiveSketchSolveSessionResponse extends SketchSolver
  */
 export interface UpdateInteractiveSketchSolveSessionRequest extends SketchSolverRequestBase {
   /** Active interactive session identity returned by session start. */
-  sessionId: InteractiveSketchSolveSessionId
+  sessionId: InteractiveSketchSolveSessionId;
   /** Temporary drag target for this interactive frame. */
-  dragTarget: SolverDraggedSketchPointTarget
+  dragTarget: SolverDraggedSketchPointTarget;
 }
 
 /**
  * Interactive solve update accepted result.
  */
 export interface InteractiveSketchSolveAcceptedUpdate {
-  kind: 'accepted'
-  status: SolvedSketchStatus
-  solvedSnapshot: SolvedSketchSnapshot
-  diagnostics: SketchSolveDiagnostic[]
+  kind: "accepted";
+  status: SolvedSketchStatus;
+  solvedSnapshot: SolvedSketchSnapshot;
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
  * Interactive solve update blocked result.
  */
 export interface InteractiveSketchSolveBlockedUpdate {
-  kind: 'blocked'
-  reason: 'missingPoint' | 'unsatisfied' | 'nonConvergent' | 'staleSession' | 'staleRevision'
-  solvedSnapshot: SolvedSketchSnapshot | null
-  diagnostics: SketchSolveDiagnostic[]
+  kind: "blocked";
+  reason:
+    | "missingPoint"
+    | "unsatisfied"
+    | "nonConvergent"
+    | "staleSession"
+    | "staleRevision";
+  solvedSnapshot: SolvedSketchSnapshot | null;
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -444,9 +451,11 @@ export interface InteractiveSketchSolveBlockedUpdate {
  */
 export interface UpdateInteractiveSketchSolveSessionResponse extends SketchSolverResponseBase {
   /** Active interactive session identity. */
-  sessionId: InteractiveSketchSolveSessionId
+  sessionId: InteractiveSketchSolveSessionId;
   /** Frame result. Accepted frames update session state; blocked frames do not. */
-  result: InteractiveSketchSolveAcceptedUpdate | InteractiveSketchSolveBlockedUpdate
+  result:
+    | InteractiveSketchSolveAcceptedUpdate
+    | InteractiveSketchSolveBlockedUpdate;
 }
 
 /**
@@ -454,7 +463,7 @@ export interface UpdateInteractiveSketchSolveSessionResponse extends SketchSolve
  */
 export interface FinalizeInteractiveSketchSolveSessionRequest extends SketchSolverRequestBase {
   /** Active interactive session identity. */
-  sessionId: InteractiveSketchSolveSessionId
+  sessionId: InteractiveSketchSolveSessionId;
 }
 
 /**
@@ -462,13 +471,13 @@ export interface FinalizeInteractiveSketchSolveSessionRequest extends SketchSolv
  */
 export interface FinalizeInteractiveSketchSolveSessionResponse extends SketchSolverResponseBase {
   /** Finalized interactive session identity. */
-  sessionId: InteractiveSketchSolveSessionId
+  sessionId: InteractiveSketchSolveSessionId;
   /** Final accepted solved state, if the session was still active. */
-  solvedSnapshot: SolvedSketchSnapshot | null
+  solvedSnapshot: SolvedSketchSnapshot | null;
   /** Final status, if the session was still active. */
-  status: SolvedSketchStatus | null
+  status: SolvedSketchStatus | null;
   /** Diagnostics emitted while finalizing. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -476,7 +485,7 @@ export interface FinalizeInteractiveSketchSolveSessionResponse extends SketchSol
  */
 export interface DisposeInteractiveSketchSolveSessionRequest extends SketchSolverRequestBase {
   /** Active interactive session identity. */
-  sessionId: InteractiveSketchSolveSessionId
+  sessionId: InteractiveSketchSolveSessionId;
 }
 
 /**
@@ -484,11 +493,11 @@ export interface DisposeInteractiveSketchSolveSessionRequest extends SketchSolve
  */
 export interface DisposeInteractiveSketchSolveSessionResponse extends SketchSolverResponseBase {
   /** Disposed interactive session identity. */
-  sessionId: InteractiveSketchSolveSessionId
+  sessionId: InteractiveSketchSolveSessionId;
   /** True when an active session was found and disposed. */
-  disposed: boolean
+  disposed: boolean;
   /** Diagnostics emitted while disposing. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -497,11 +506,11 @@ export interface DisposeInteractiveSketchSolveSessionResponse extends SketchSolv
  */
 export interface DeriveSketchRegionsRequest extends SketchSolverRequestBase {
   /** Solved sketch snapshot that region derivation must consume. */
-  solvedSnapshot: SolvedSketchSnapshot
+  solvedSnapshot: SolvedSketchSnapshot;
   /** Authored sketch definition corresponding to `solvedSnapshot`. */
-  definition: SketchDefinition
+  definition: SketchDefinition;
   /** Explicit projected external references available to region derivation. */
-  projectedReferences: ProjectedSketchReferenceRecord[]
+  projectedReferences: ProjectedSketchReferenceRecord[];
 }
 
 /**
@@ -509,9 +518,9 @@ export interface DeriveSketchRegionsRequest extends SketchSolverRequestBase {
  */
 export interface DeriveSketchRegionsResponse extends SketchSolverResponseBase {
   /** Solver- or kernel-derived closed regions for downstream feature authoring. */
-  regions: RegionRecord[]
+  regions: RegionRecord[];
   /** Diagnostics emitted while deriving sketch regions. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -523,19 +532,19 @@ export type SolverResolvableSketchRef =
   | SketchEntityRef
   | SketchPointRef
   | RegionRef
-  | ProjectedSketchGeometryRef
+  | ProjectedSketchGeometryRef;
 
 /**
  * Machine-readable invalidation reason for sketch-local reference resolution.
  * Callers must rely on this code rather than inferring from human-readable text.
  */
 export type SolverReferenceInvalidationReason =
-  | 'missingSketch'
-  | 'missingEntity'
-  | 'missingPoint'
-  | 'missingRegion'
-  | 'missingProjectedGeometry'
-  | 'revisionMismatch'
+  | "missingSketch"
+  | "missingEntity"
+  | "missingPoint"
+  | "missingRegion"
+  | "missingProjectedGeometry"
+  | "revisionMismatch";
 
 /**
  * Explicit sketch-local reference resolution record returned by the solver.
@@ -543,13 +552,13 @@ export type SolverReferenceInvalidationReason =
  */
 export interface ResolvedSketchReferenceRecord {
   /** Resolved sketch-local target or the dead target that was requested. */
-  target: SolverResolvableSketchRef
+  target: SolverResolvableSketchRef;
   /** Human-readable label owned by the solver/kernel producer. */
-  label: string
+  label: string;
   /** Requested sketch-local target is still valid at `revisionId`. */
-  isValid: boolean
+  isValid: boolean;
   /** Machine-readable invalidation reason when `isValid` is false. */
-  invalidationReason: SolverReferenceInvalidationReason | null
+  invalidationReason: SolverReferenceInvalidationReason | null;
 }
 
 /**
@@ -557,13 +566,13 @@ export interface ResolvedSketchReferenceRecord {
  */
 export interface ResolveSketchReferenceRequest extends SketchSolverRequestBase {
   /** Sketch-local target whose validity and label should be resolved. */
-  target: SolverResolvableSketchRef
+  target: SolverResolvableSketchRef;
   /** Current solved sketch snapshot used when resolving derived regions. */
-  solvedSnapshot: SolvedSketchSnapshot
+  solvedSnapshot: SolvedSketchSnapshot;
   /** Current derived regions used when resolving `RegionRef` targets. */
-  regions: RegionRecord[]
+  regions: RegionRecord[];
   /** Current authored sketch definition used when resolving authored targets. */
-  definition: SketchDefinition
+  definition: SketchDefinition;
 }
 
 /**
@@ -571,7 +580,7 @@ export interface ResolveSketchReferenceRequest extends SketchSolverRequestBase {
  */
 export interface ResolveSketchReferenceResponse extends SketchSolverResponseBase {
   /** Explicit resolution record for the requested target. */
-  resolution: ResolvedSketchReferenceRecord
+  resolution: ResolvedSketchReferenceRecord;
   /** Diagnostics emitted while resolving the requested target. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }

@@ -2,80 +2,91 @@ import type {
   ModelingDiagnostic,
   SketchSnapshotRecord,
   WorkspaceSnapshot,
-} from '@/contracts/modeling/schema'
-import type { SketchId } from '@/contracts/shared/ids'
-import type {
-  SketchPlaneDefinition,
-} from '@/contracts/shared/sketch-plane'
+} from "@/contracts/modeling/schema";
+import type { SketchId } from "@/contracts/shared/ids";
+import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import type {
   FeatureEditorFormField,
   FeatureEditorFormSchema,
   FeatureEditorPatch,
-} from '@/core/feature-authoring/form-schema'
+} from "@/core/feature-authoring/form-schema";
 import {
   getPrimitiveRefLabel,
   planeSelectionFilter,
   primitiveRefEquals,
   type PrimitiveRef,
-} from '@/core/editor/schema'
-import { openSketchSessionFromSelection } from '@/domain/editor/sketch-session-controller'
+} from "@/core/editor/schema";
+import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 
-export type SketchPlaneSupportTarget = Extract<PrimitiveRef, { kind: 'construction' | 'face' }>
-export const SKETCH_PLANE_SUPPORT_FIELD_ID = 'sketch-plane-support' as const
+export type SketchPlaneSupportTarget = Extract<
+  PrimitiveRef,
+  { kind: "construction" | "face" }
+>;
+export const SKETCH_PLANE_SUPPORT_FIELD_ID = "sketch-plane-support" as const;
 
 export interface SketchPlaneEditSessionState {
-  sketchId: SketchId
-  sketchLabel: string
-  currentPlaneTarget: SketchPlaneSupportTarget
-  definition: SketchSnapshotRecord['sketch']['definition']
+  sketchId: SketchId;
+  sketchLabel: string;
+  currentPlaneTarget: SketchPlaneSupportTarget;
+  definition: SketchSnapshotRecord["sketch"]["definition"];
   draft: {
-    selectedPlaneTarget: SketchPlaneSupportTarget | null
-    selectedPlane: SketchPlaneDefinition | null
-  }
-  diagnostics: readonly ModelingDiagnostic[]
-  status: 'idle' | 'submitting'
+    selectedPlaneTarget: SketchPlaneSupportTarget | null;
+    selectedPlane: SketchPlaneDefinition | null;
+  };
+  diagnostics: readonly ModelingDiagnostic[];
+  status: "idle" | "submitting";
 }
 
-function isSketchPlaneSupportTarget(value: unknown): value is SketchPlaneSupportTarget {
-  return !!value
-    && typeof value === 'object'
-    && 'kind' in value
-    && (value.kind === 'construction' || value.kind === 'face')
+function isSketchPlaneSupportTarget(
+  value: unknown,
+): value is SketchPlaneSupportTarget {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "kind" in value &&
+    (value.kind === "construction" || value.kind === "face")
+  );
 }
 
-function isSketchPlaneDefinition(value: unknown): value is SketchPlaneDefinition {
-  return !!value
-    && typeof value === 'object'
-    && 'support' in value
-    && 'frame' in value
-    && 'key' in value
+function isSketchPlaneDefinition(
+  value: unknown,
+): value is SketchPlaneDefinition {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "support" in value &&
+    "frame" in value &&
+    "key" in value
+  );
 }
 
 function resolveSketchPlaneTargetPlane(
   snapshot: WorkspaceSnapshot,
   target: SketchPlaneSupportTarget,
 ): SketchPlaneDefinition | null {
-  const session = openSketchSessionFromSelection([target], snapshot)
+  const session = openSketchSessionFromSelection([target], snapshot);
   if (!session) {
-    return null
+    return null;
   }
 
-  return session.plane
+  return session.plane;
 }
 
 export function hydrateSketchPlaneEditSession(
   snapshot: WorkspaceSnapshot,
   sketchId: SketchId,
 ): SketchPlaneEditSessionState | null {
-  const sketch = snapshot.document.sketches.find((entry) => entry.sketchId === sketchId)
+  const sketch = snapshot.document.sketches.find(
+    (entry) => entry.sketchId === sketchId,
+  );
   if (!sketch) {
-    return null
+    return null;
   }
 
   if (!isSketchPlaneSupportTarget(sketch.plane.support)) {
-    return null
+    return null;
   }
-  const currentPlaneTarget = sketch.plane.support
+  const currentPlaneTarget = sketch.plane.support;
 
   return {
     sketchId: sketch.sketchId,
@@ -87,27 +98,29 @@ export function hydrateSketchPlaneEditSession(
       selectedPlane: sketch.plane,
     },
     diagnostics: [],
-    status: 'idle',
-  }
+    status: "idle",
+  };
 }
 
 export function canReassignCommittedSketchPlane(
   snapshot: WorkspaceSnapshot | null,
   sketchId: SketchId,
 ): boolean {
-  return snapshot ? hydrateSketchPlaneEditSession(snapshot, sketchId) !== null : false
+  return snapshot
+    ? hydrateSketchPlaneEditSession(snapshot, sketchId) !== null
+    : false;
 }
 
 export function patchSketchPlaneEditSession(
   session: SketchPlaneEditSessionState,
   patch: FeatureEditorPatch,
 ): SketchPlaneEditSessionState {
-  if (!('selectedPlaneTarget' in patch)) {
-    return session
+  if (!("selectedPlaneTarget" in patch)) {
+    return session;
   }
 
-  const selectedPlaneTarget = patch.selectedPlaneTarget
-  const selectedPlane = patch.selectedPlane
+  const selectedPlaneTarget = patch.selectedPlaneTarget;
+  const selectedPlane = patch.selectedPlane;
   if (selectedPlaneTarget === null) {
     return {
       ...session,
@@ -116,11 +129,14 @@ export function patchSketchPlaneEditSession(
         selectedPlaneTarget: null,
         selectedPlane: null,
       },
-    }
+    };
   }
 
-  if (!isSketchPlaneSupportTarget(selectedPlaneTarget) || !isSketchPlaneDefinition(selectedPlane)) {
-    return session
+  if (
+    !isSketchPlaneSupportTarget(selectedPlaneTarget) ||
+    !isSketchPlaneDefinition(selectedPlane)
+  ) {
+    return session;
   }
 
   return {
@@ -130,7 +146,7 @@ export function patchSketchPlaneEditSession(
       selectedPlaneTarget,
       selectedPlane,
     },
-  }
+  };
 }
 
 export function applySelectionToSketchPlaneEditSession(
@@ -139,12 +155,12 @@ export function applySelectionToSketchPlaneEditSession(
   snapshot: WorkspaceSnapshot | null,
 ): SketchPlaneEditSessionState {
   if (!snapshot || !isSketchPlaneSupportTarget(target)) {
-    return session
+    return session;
   }
 
-  const selectedPlane = resolveSketchPlaneTargetPlane(snapshot, target)
+  const selectedPlane = resolveSketchPlaneTargetPlane(snapshot, target);
   if (!selectedPlane) {
-    return session
+    return session;
   }
 
   return {
@@ -154,7 +170,7 @@ export function applySelectionToSketchPlaneEditSession(
       selectedPlaneTarget: target,
       selectedPlane,
     },
-  }
+  };
 }
 
 export function getSketchPlaneEditFormSchema(
@@ -163,44 +179,47 @@ export function getSketchPlaneEditFormSchema(
   return {
     sections: [
       {
-        id: 'support',
-        title: 'Support',
+        id: "support",
+        title: "Support",
         fields: [
           {
-            kind: 'referencePicker',
+            kind: "referencePicker",
             id: SKETCH_PLANE_SUPPORT_FIELD_ID,
-            label: 'Support plane',
-            helper: 'Retarget the committed sketch to another construction plane or planar face.',
+            label: "Support plane",
+            helper:
+              "Retarget the committed sketch to another construction plane or planar face.",
             value: session.draft.selectedPlaneTarget,
-            emptyLabel: 'Select a construction plane or planar face.',
+            emptyLabel: "Select a construction plane or planar face.",
             picker: {
-              mode: 'replace',
+              mode: "replace",
               allowsMultiple: false,
               selectionFilter: planeSelectionFilter,
-              itemLabel: 'Planar reference',
+              itemLabel: "Planar reference",
             },
-            patch: { patchKey: 'selectedPlaneTarget' },
+            patch: { patchKey: "selectedPlaneTarget" },
           },
         ],
       },
       {
-        id: 'diagnostics',
-        title: 'Diagnostics',
+        id: "diagnostics",
+        title: "Diagnostics",
         fields: [
           {
-            kind: 'diagnostics',
-            id: 'sketch-plane-diagnostics',
-            label: 'Diagnostics',
+            kind: "diagnostics",
+            id: "sketch-plane-diagnostics",
+            label: "Diagnostics",
             diagnostics: session.diagnostics,
           },
         ],
       },
     ],
-  }
+  };
 }
 
-export function getSketchPlaneEditSelectionTarget(session: SketchPlaneEditSessionState) {
-  return { kind: 'sketch', sketchId: session.sketchId } as const
+export function getSketchPlaneEditSelectionTarget(
+  session: SketchPlaneEditSessionState,
+) {
+  return { kind: "sketch", sketchId: session.sketchId } as const;
 }
 
 export function getSketchPlaneEditFormField(
@@ -208,30 +227,41 @@ export function getSketchPlaneEditFormField(
   fieldId: string,
 ): FeatureEditorFormField | null {
   for (const section of getSketchPlaneEditFormSchema(session).sections) {
-    const field = section.fields.find((entry) => entry.id === fieldId)
+    const field = section.fields.find((entry) => entry.id === fieldId);
     if (field) {
-      return field
+      return field;
     }
   }
 
-  return null
+  return null;
 }
 
-export function getSketchPlaneEditPreviewLabel(session: SketchPlaneEditSessionState) {
-  const selectedPlaneTarget = session.draft.selectedPlaneTarget
+export function getSketchPlaneEditPreviewLabel(
+  session: SketchPlaneEditSessionState,
+) {
+  const selectedPlaneTarget = session.draft.selectedPlaneTarget;
   return selectedPlaneTarget
     ? `Editing ${session.sketchLabel} on ${getPrimitiveRefLabel(selectedPlaneTarget)}`
-    : `Editing ${session.sketchLabel}`
+    : `Editing ${session.sketchLabel}`;
 }
 
-export function hasSketchPlaneEditChanges(session: SketchPlaneEditSessionState) {
-  return !!session.draft.selectedPlaneTarget
-    && !primitiveRefEquals(session.currentPlaneTarget, session.draft.selectedPlaneTarget)
+export function hasSketchPlaneEditChanges(
+  session: SketchPlaneEditSessionState,
+) {
+  return (
+    !!session.draft.selectedPlaneTarget &&
+    !primitiveRefEquals(
+      session.currentPlaneTarget,
+      session.draft.selectedPlaneTarget,
+    )
+  );
 }
 
-export function buildSketchPlaneCommitRequest(session: SketchPlaneEditSessionState) {
+export function buildSketchPlaneCommitRequest(
+  session: SketchPlaneEditSessionState,
+) {
   if (!session.draft.selectedPlaneTarget || !session.draft.selectedPlane) {
-    return null
+    return null;
   }
 
   return {
@@ -239,5 +269,5 @@ export function buildSketchPlaneCommitRequest(session: SketchPlaneEditSessionSta
     sketchLabel: session.sketchLabel,
     plane: session.draft.selectedPlane,
     definition: session.definition,
-  }
+  };
 }

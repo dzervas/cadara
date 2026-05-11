@@ -1,6 +1,4 @@
-import type {
-  DocumentId,
-} from '@/core/editor/schema'
+import type { DocumentId } from "@/core/editor/schema";
 import type {
   CommitSketchResponse,
   CreateFeatureResponse,
@@ -20,11 +18,9 @@ import type {
   SetFeatureSuppressionResponse,
   UpdateDocumentVariableResponse,
   UpdateFeatureResponse,
-} from '@/contracts/modeling/schema'
-import type { DocumentExportResult } from '@/contracts/modeling/export'
-import {
-  documentExportResultSchema,
-} from '@/contracts/modeling/export.runtime-schema'
+} from "@/contracts/modeling/schema";
+import type { DocumentExportResult } from "@/contracts/modeling/export";
+import { documentExportResultSchema } from "@/contracts/modeling/export.runtime-schema";
 import {
   commitSketchResponseSchema,
   addDocumentVariableResponseSchema,
@@ -41,7 +37,7 @@ import {
   setFeatureSuppressionResponseSchema,
   updateDocumentVariableResponseSchema,
   updateFeatureResponseSchema,
-} from '@/contracts/modeling/runtime-schema'
+} from "@/contracts/modeling/runtime-schema";
 import type {
   ModelingFeatureMutationResult,
   ModelingFeatureSuppressionResult,
@@ -56,26 +52,36 @@ import type {
   ModelingPreviewResult,
   ModelingResolvedReferenceResult,
   ModelingExportDocumentResult,
-} from './types'
-import { CONTRACT_VERSION, SNAPSHOT_SCHEMA_VERSION } from './helpers'
-import { normalizeWorkspaceSnapshot } from './normalization'
+} from "./types";
+import { CONTRACT_VERSION, SNAPSHOT_SCHEMA_VERSION } from "./helpers";
+import { normalizeWorkspaceSnapshot } from "./normalization";
 
-export function buildDocumentRequest(documentId: WorkspaceSnapshot['document']['documentId']): GetDocumentSnapshotRequest {
+export function buildDocumentRequest(
+  documentId: WorkspaceSnapshot["document"]["documentId"],
+): GetDocumentSnapshotRequest {
   return {
     contractVersion: CONTRACT_VERSION,
     documentId,
-  }
+  };
 }
 
-export function assertKernelContractVersion(contractVersion: GetDocumentSnapshotResponse['snapshot']['document']['contractVersion']) {
+export function assertKernelContractVersion(
+  contractVersion: GetDocumentSnapshotResponse["snapshot"]["document"]["contractVersion"],
+) {
   if (contractVersion !== CONTRACT_VERSION) {
-    throw new Error('Kernel contract version does not match the active modeling service.')
+    throw new Error(
+      "Kernel contract version does not match the active modeling service.",
+    );
   }
 }
 
-export function assertSnapshotSchemaVersion(schemaVersion: WorkspaceSnapshot['document']['schemaVersion']) {
+export function assertSnapshotSchemaVersion(
+  schemaVersion: WorkspaceSnapshot["document"]["schemaVersion"],
+) {
   if (schemaVersion !== SNAPSHOT_SCHEMA_VERSION) {
-    throw new Error('Snapshot schema version does not match the active modeling service.')
+    throw new Error(
+      "Snapshot schema version does not match the active modeling service.",
+    );
   }
 }
 
@@ -85,7 +91,9 @@ export function assertKernelDocumentIdMatches(
   operationLabel: string,
 ) {
   if (responseDocumentId !== expectedDocumentId) {
-    throw new Error(`${operationLabel} response document ID does not match the active document.`)
+    throw new Error(
+      `${operationLabel} response document ID does not match the active document.`,
+    );
   }
 }
 
@@ -93,61 +101,68 @@ export function validateSnapshotResponse(
   response: GetDocumentSnapshotResponse,
   expectedDocumentId: DocumentId,
 ): WorkspaceSnapshot {
-  const parsed = getDocumentSnapshotResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.snapshot.document.contractVersion)
-  assertSnapshotSchemaVersion(parsed.snapshot.document.schemaVersion)
-  assertKernelDocumentIdMatches(parsed.snapshot.document.documentId, expectedDocumentId, 'Snapshot')
-  return normalizeWorkspaceSnapshot(parsed.snapshot)
+  const parsed = getDocumentSnapshotResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.snapshot.document.contractVersion);
+  assertSnapshotSchemaVersion(parsed.snapshot.document.schemaVersion);
+  assertKernelDocumentIdMatches(
+    parsed.snapshot.document.documentId,
+    expectedDocumentId,
+    "Snapshot",
+  );
+  return normalizeWorkspaceSnapshot(parsed.snapshot);
 }
 
 export interface SafeParseIssue {
-  path: readonly (string | number | symbol)[]
-  message: string
+  path: readonly (string | number | symbol)[];
+  message: string;
 }
 
 export interface SafeParser<T> {
-  safeParse(value: unknown):
+  safeParse(
+    value: unknown,
+  ):
     | { success: true; data: T }
-    | { success: false; error: { issues: readonly SafeParseIssue[] } }
+    | { success: false; error: { issues: readonly SafeParseIssue[] } };
 }
 
 export function formatSafeParseIssues(issues: readonly SafeParseIssue[]) {
   if (issues.length === 0) {
-    return 'no issue details reported'
+    return "no issue details reported";
   }
 
   return issues
     .slice(0, 3)
     .map((issue) => {
-      const path = issue.path.length > 0 ? issue.path.map(String).join('.') : '<root>'
-      return `${path}: ${issue.message}`
+      const path =
+        issue.path.length > 0 ? issue.path.map(String).join(".") : "<root>";
+      return `${path}: ${issue.message}`;
     })
-    .join('; ')
+    .join("; ");
 }
 
 export function parseResponseWithFallback<TPrimary, TFallback>(input: {
-  operation: string
-  response: unknown
-  primarySchemaName: string
-  primarySchema: SafeParser<TPrimary>
-  fallbackSchemaName: string
-  fallbackSchema: SafeParser<TFallback>
+  operation: string;
+  response: unknown;
+  primarySchemaName: string;
+  primarySchema: SafeParser<TPrimary>;
+  fallbackSchemaName: string;
+  fallbackSchema: SafeParser<TFallback>;
 }): TPrimary | TFallback {
-  const primary = input.primarySchema.safeParse(input.response)
+  const primary = input.primarySchema.safeParse(input.response);
   if (primary.success) {
-    return primary.data
+    return primary.data;
   }
 
-  const fallback = input.fallbackSchema.safeParse(input.response)
+  const fallback = input.fallbackSchema.safeParse(input.response);
   if (fallback.success) {
-    return fallback.data
+    return fallback.data;
   }
 
   throw new Error(
-    `${input.operation} response failed runtime validation for both ${input.primarySchemaName} and ${input.fallbackSchemaName}. `
-    + `${input.primarySchemaName}: ${formatSafeParseIssues(primary.error.issues)}. `
-    + `${input.fallbackSchemaName}: ${formatSafeParseIssues(fallback.error.issues)}.`,
-  )
+    `${input.operation} response failed runtime validation for both ${input.primarySchemaName} and ${input.fallbackSchemaName}. ` +
+      `${input.primarySchemaName}: ${formatSafeParseIssues(primary.error.issues)}. ` +
+      `${input.fallbackSchemaName}: ${formatSafeParseIssues(fallback.error.issues)}.`,
+  );
 }
 
 export function mapFeatureMutationResponse(
@@ -155,15 +170,19 @@ export function mapFeatureMutationResponse(
   expectedDocumentId: DocumentId,
 ): ModelingFeatureMutationResult {
   const normalized = parseResponseWithFallback({
-    operation: 'Feature mutation',
+    operation: "Feature mutation",
     response,
-    primarySchemaName: 'CreateFeatureResponse',
+    primarySchemaName: "CreateFeatureResponse",
     primarySchema: createFeatureResponseSchema,
-    fallbackSchemaName: 'UpdateFeatureResponse',
+    fallbackSchemaName: "UpdateFeatureResponse",
     fallbackSchema: updateFeatureResponseSchema,
-  })
-  assertKernelContractVersion(normalized.contractVersion)
-  assertKernelDocumentIdMatches(normalized.documentId, expectedDocumentId, 'Feature mutation')
+  });
+  assertKernelContractVersion(normalized.contractVersion);
+  assertKernelDocumentIdMatches(
+    normalized.documentId,
+    expectedDocumentId,
+    "Feature mutation",
+  );
   return {
     revisionId: normalized.revisionId,
     featureId: normalized.featureId,
@@ -171,16 +190,20 @@ export function mapFeatureMutationResponse(
     rebuildResult: normalized.rebuildResult,
     changedTargets: normalized.changedTargets,
     diagnostics: normalized.diagnostics,
-  }
+  };
 }
 
 export function mapFeatureSuppressionResponse(
   response: SetFeatureSuppressionResponse,
   expectedDocumentId: DocumentId,
 ): ModelingFeatureSuppressionResult {
-  const parsed = setFeatureSuppressionResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Feature suppression')
+  const parsed = setFeatureSuppressionResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Feature suppression",
+  );
   return {
     revisionId: parsed.revisionId,
     featureId: parsed.featureId,
@@ -189,16 +212,20 @@ export function mapFeatureSuppressionResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapDeleteFeatureResponse(
   response: DeleteFeatureResponse,
   expectedDocumentId: DocumentId,
 ): ModelingDeleteFeatureResult {
-  const parsed = deleteFeatureResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Delete feature')
+  const parsed = deleteFeatureResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Delete feature",
+  );
   return {
     revisionId: parsed.revisionId,
     deletedFeatureId: parsed.deletedFeatureId,
@@ -206,16 +233,20 @@ export function mapDeleteFeatureResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapDeleteTargetResponse(
   response: DeleteDocumentTargetResponse,
   expectedDocumentId: DocumentId,
 ): ModelingDeleteTargetResult {
-  const parsed = deleteDocumentTargetResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Delete target')
+  const parsed = deleteDocumentTargetResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Delete target",
+  );
   return {
     revisionId: parsed.revisionId,
     deletedTarget: parsed.deletedTarget,
@@ -223,16 +254,20 @@ export function mapDeleteTargetResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapRenameBodyResponse(
   response: RenameBodyResponse,
   expectedDocumentId: DocumentId,
 ): ModelingRenameBodyResult {
-  const parsed = renameBodyResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Rename body')
+  const parsed = renameBodyResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Rename body",
+  );
   return {
     revisionId: parsed.revisionId,
     bodyId: parsed.bodyId,
@@ -240,7 +275,7 @@ export function mapRenameBodyResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapDocumentVariableResponse(
@@ -248,15 +283,19 @@ export function mapDocumentVariableResponse(
   expectedDocumentId: DocumentId,
 ): ModelingDocumentVariableMutationResult {
   const normalized = parseResponseWithFallback({
-    operation: 'Document variable mutation',
+    operation: "Document variable mutation",
     response,
-    primarySchemaName: 'AddDocumentVariableResponse',
+    primarySchemaName: "AddDocumentVariableResponse",
     primarySchema: addDocumentVariableResponseSchema,
-    fallbackSchemaName: 'UpdateDocumentVariableResponse',
+    fallbackSchemaName: "UpdateDocumentVariableResponse",
     fallbackSchema: updateDocumentVariableResponseSchema,
-  })
-  assertKernelContractVersion(normalized.contractVersion)
-  assertKernelDocumentIdMatches(normalized.documentId, expectedDocumentId, 'Document variable mutation')
+  });
+  assertKernelContractVersion(normalized.contractVersion);
+  assertKernelDocumentIdMatches(
+    normalized.documentId,
+    expectedDocumentId,
+    "Document variable mutation",
+  );
   return {
     revisionId: normalized.revisionId,
     variableId: normalized.variableId,
@@ -264,16 +303,20 @@ export function mapDocumentVariableResponse(
     rebuildResult: normalized.rebuildResult,
     changedTargets: normalized.changedTargets,
     diagnostics: normalized.diagnostics,
-  }
+  };
 }
 
 export function mapCommitSketchResponse(
   response: CommitSketchResponse,
   expectedDocumentId: DocumentId,
 ): ModelingCommitSketchResult {
-  const parsed = commitSketchResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Commit sketch')
+  const parsed = commitSketchResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Commit sketch",
+  );
   return {
     revisionId: parsed.revisionId,
     sketchId: parsed.sketchId,
@@ -281,39 +324,47 @@ export function mapCommitSketchResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapPreviewResponse(
   response: EvaluatePreviewResponse,
   expectedDocumentId: DocumentId,
 ): ModelingPreviewResult {
-  const parsed = evaluatePreviewResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Preview')
+  const parsed = evaluatePreviewResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Preview",
+  );
   return {
     revisionId: parsed.revisionId,
     previewId: parsed.previewId,
     renderables: parsed.render.records,
     freshness: parsed.freshness,
-    stale: parsed.freshness.kind === 'stale',
+    stale: parsed.freshness.kind === "stale",
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapExportDocumentResponse(
   response: DocumentExportResult,
 ): ModelingExportDocumentResult {
-  return documentExportResultSchema.parse(response)
+  return documentExportResultSchema.parse(response);
 }
 
 export function mapReorderFeatureResponse(
   response: ReorderFeatureResponse,
   expectedDocumentId: DocumentId,
 ): ModelingReorderFeatureResult {
-  const parsed = reorderFeatureResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Reorder feature')
+  const parsed = reorderFeatureResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Reorder feature",
+  );
   return {
     revisionId: parsed.revisionId,
     featureId: parsed.featureId,
@@ -322,16 +373,20 @@ export function mapReorderFeatureResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapReorderDocumentHistoryResponse(
   response: ReorderDocumentHistoryResponse,
   expectedDocumentId: DocumentId,
 ): ModelingReorderDocumentHistoryResult {
-  const parsed = reorderDocumentHistoryResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Reorder document history')
+  const parsed = reorderDocumentHistoryResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Reorder document history",
+  );
   return {
     revisionId: parsed.revisionId,
     item: parsed.item,
@@ -340,16 +395,20 @@ export function mapReorderDocumentHistoryResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapSetFeatureCursorResponse(
   response: SetFeatureCursorResponse,
   expectedDocumentId: DocumentId,
 ): ModelingSetFeatureCursorResult {
-  const parsed = setFeatureCursorResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.documentId, expectedDocumentId, 'Set feature cursor')
+  const parsed = setFeatureCursorResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Set feature cursor",
+  );
   return {
     revisionId: parsed.revisionId,
     cursor: parsed.cursor,
@@ -357,20 +416,24 @@ export function mapSetFeatureCursorResponse(
     rebuildResult: parsed.rebuildResult,
     changedTargets: parsed.changedTargets,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function mapResolvedReferenceResponse(
   response: ResolveReferenceResponse,
   expectedDocumentId: DocumentId,
 ): ModelingResolvedReferenceResult {
-  const parsed = resolveReferenceResponseSchema.parse(response)
-  assertKernelContractVersion(parsed.contractVersion)
-  assertKernelDocumentIdMatches(parsed.resolution.ownerDocumentId, expectedDocumentId, 'Resolve reference')
+  const parsed = resolveReferenceResponseSchema.parse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.resolution.ownerDocumentId,
+    expectedDocumentId,
+    "Resolve reference",
+  );
   return {
     resolution: parsed.resolution,
     diagnostics: parsed.diagnostics,
-  }
+  };
 }
 
 export function normalizeResolution(value: unknown): ResolvedReferenceRecord {
@@ -378,5 +441,5 @@ export function normalizeResolution(value: unknown): ResolvedReferenceRecord {
     contractVersion: CONTRACT_VERSION,
     resolution: value,
     diagnostics: [],
-  }).resolution
+  }).resolution;
 }

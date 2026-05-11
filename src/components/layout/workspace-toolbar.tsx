@@ -1,50 +1,76 @@
-import { forwardRef, useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
-import { ActionIcon, Paper, ScrollArea, Text, TextInput, Tooltip } from '@mantine/core'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import {
+  ActionIcon,
+  Paper,
+  ScrollArea,
+  Text,
+  TextInput,
+  Tooltip,
+} from "@mantine/core";
 
-import { WorkbenchIcon } from '@/components/ui/workbench-icon'
-import { ShortcutSettingsButton } from '@/components/shortcuts/shortcut-settings'
-import { DocumentFileMenu } from '@/components/layout/document-file-menu'
-import { ToolButton } from '@/components/layout/tool-button'
-import { ToolDropdownButton } from '@/components/layout/tool-dropdown-button'
-import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
-import { getNextToolSearchHighlightIndex } from '@/components/layout/workspace-toolbar.a11y'
+import { WorkbenchIcon } from "@/components/ui/workbench-icon";
+import { ShortcutSettingsButton } from "@/components/shortcuts/shortcut-settings";
+import { DocumentFileMenu } from "@/components/layout/document-file-menu";
+import { ToolButton } from "@/components/layout/tool-button";
+import { ToolDropdownButton } from "@/components/layout/tool-dropdown-button";
+import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
+import { getNextToolSearchHighlightIndex } from "@/components/layout/workspace-toolbar.a11y";
 import {
   getToolById,
   getToolbarSectionsForMode,
   isDropdownTool,
   type RegisteredToolDefinition,
   searchToolDefinitions,
-} from '@/core/tools/tool-registry'
+} from "@/core/tools/tool-registry";
 import {
   getActiveSketchStyleToolId,
   isSketchSvgRenderingEnabled,
   isSketchConstructionSelected,
-} from '@/domain/editor/sketch-session'
-import { isSketchStyleToolId } from '@/domain/sketch-styles/definition'
-import { useEditorState } from '@/hooks/use-editor-state'
-import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
-import type { EditorHistoryAvailability } from '@/domain/editor/state-machine'
-import { getToolbarActionIconStyle, sparkLogoClassName, toolbarActionIconClassName } from '@/theme/workbench-toolbar-styles'
+} from "@/domain/editor/sketch-session";
+import { isSketchStyleToolId } from "@/domain/sketch-styles/definition";
+import { useEditorState } from "@/hooks/use-editor-state";
+import { useWorkbenchCommandHandlers } from "@/hooks/use-workbench-command-handlers";
+import type { EditorHistoryAvailability } from "@/domain/editor/state-machine";
+import {
+  getToolbarActionIconStyle,
+  sparkLogoClassName,
+  toolbarActionIconClassName,
+} from "@/theme/workbench-toolbar-styles";
 
-const REPOSITORY_URL = 'https://github.com/dzervas/cadara'
-const DISCORD_URL = 'https://discord.gg/T2dBRp4SAQ'
-const TOOLBAR_GAP_PX = 8
-const TOOLBAR_SHADOW_GUTTER_PX = 32
-const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 32
-type VisibleToolbarSection = ReturnType<typeof getToolbarSectionsForMode>[number]
+const REPOSITORY_URL = "https://github.com/dzervas/cadara";
+const DISCORD_URL = "https://discord.gg/T2dBRp4SAQ";
+const TOOLBAR_GAP_PX = 8;
+const TOOLBAR_SHADOW_GUTTER_PX = 32;
+const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 32;
+type VisibleToolbarSection = ReturnType<
+  typeof getToolbarSectionsForMode
+>[number];
 interface ResponsiveToolbarSectionState {
-  sectionKey: string
-  primarySectionIds: readonly string[]
+  sectionKey: string;
+  primarySectionIds: readonly string[];
 }
 
 interface WorkspaceToolbarProps {
-  historyAvailability?: EditorHistoryAvailability
-  showBrowserStorageWarning?: boolean
-  onNewDocument?: () => void
-  onOpenDocument?: () => void
-  onSaveDocumentAs?: () => void
-  onReportBug?: () => void
-  onDownloadBugReportState?: () => void | Promise<void>
+  historyAvailability?: EditorHistoryAvailability;
+  showBrowserStorageWarning?: boolean;
+  onNewDocument?: () => void;
+  onOpenDocument?: () => void;
+  onSaveDocumentAs?: () => void;
+  onReportBug?: () => void;
+  onDownloadBugReportState?: () => void | Promise<void>;
 }
 
 /**
@@ -65,240 +91,292 @@ export function WorkspaceToolbar({
   onReportBug,
   onDownloadBugReportState,
 }: WorkspaceToolbarProps = {}) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchPopoverOpen, setSearchPopoverOpen] = useState(false)
-  const [highlightedSearchResultIndex, setHighlightedSearchResultIndex] = useState(-1)
-  const [responsiveSectionState, setResponsiveSectionState] = useState<ResponsiveToolbarSectionState | null>(null)
-  const searchListboxId = useId()
-  const primaryRailRef = useRef<HTMLDivElement | null>(null)
-  const searchRootRef = useRef<HTMLDivElement | null>(null)
-  const toolbarSectionElementsRef = useRef(new Map<string, HTMLDivElement>())
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchPopoverOpen, setSearchPopoverOpen] = useState(false);
+  const [highlightedSearchResultIndex, setHighlightedSearchResultIndex] =
+    useState(-1);
+  const [responsiveSectionState, setResponsiveSectionState] =
+    useState<ResponsiveToolbarSectionState | null>(null);
+  const searchListboxId = useId();
+  const primaryRailRef = useRef<HTMLDivElement | null>(null);
+  const searchRootRef = useRef<HTMLDivElement | null>(null);
+  const toolbarSectionElementsRef = useRef(new Map<string, HTMLDivElement>());
   const {
-    state: { activeCommand, activeEditSession, activeSketchPlaneEditSession, activeImportSession, history, mode, sketchSession },
-  } = useEditorState()
-  const { activateTool } = useWorkbenchCommandHandlers()
-  const visibleHistory = historyAvailability ?? history
+    state: {
+      activeCommand,
+      activeEditSession,
+      activeSketchPlaneEditSession,
+      activeImportSession,
+      history,
+      mode,
+      sketchSession,
+    },
+  } = useEditorState();
+  const { activateTool } = useWorkbenchCommandHandlers();
+  const visibleHistory = historyAvailability ?? history;
   const visibleSections = useMemo(
     () => getToolbarSectionsForMode(mode),
     [mode],
-  )
-  const visibleSectionIds = useMemo(() => visibleSections.map((section) => section.id), [visibleSections])
-  const visibleSectionKey = visibleSectionIds.join('|')
+  );
+  const visibleSectionIds = useMemo(
+    () => visibleSections.map((section) => section.id),
+    [visibleSections],
+  );
+  const visibleSectionKey = visibleSectionIds.join("|");
   const searchResults = useMemo(
     () => searchToolDefinitions(searchQuery),
     [searchQuery],
-  )
-  const clampedHighlightedSearchResultIndex = searchResults.length === 0
-    ? -1
-    : highlightedSearchResultIndex < 0 || highlightedSearchResultIndex >= searchResults.length
-      ? 0
-      : highlightedSearchResultIndex
-  const isSearchPopoverVisible = searchPopoverOpen && searchQuery.length > 0
-  const hasActiveSketchSession = sketchSession !== null
-  const canImportReferenceImage = sketchSession !== null || activeCommand?.toolId === 'sketch'
+  );
+  const clampedHighlightedSearchResultIndex =
+    searchResults.length === 0
+      ? -1
+      : highlightedSearchResultIndex < 0 ||
+          highlightedSearchResultIndex >= searchResults.length
+        ? 0
+        : highlightedSearchResultIndex;
+  const isSearchPopoverVisible = searchPopoverOpen && searchQuery.length > 0;
+  const hasActiveSketchSession = sketchSession !== null;
+  const canImportReferenceImage =
+    sketchSession !== null || activeCommand?.toolId === "sketch";
 
-  const activeSketchStyleToolId = sketchSession ? getActiveSketchStyleToolId(sketchSession) : null
-  const svgRenderingEnabled = sketchSession ? isSketchSvgRenderingEnabled(sketchSession) : false
+  const activeSketchStyleToolId = sketchSession
+    ? getActiveSketchStyleToolId(sketchSession)
+    : null;
+  const svgRenderingEnabled = sketchSession
+    ? isSketchSvgRenderingEnabled(sketchSession)
+    : false;
 
   const isToolDisabled = (tool: RegisteredToolDefinition) =>
-    (tool.id === 'undo' && !visibleHistory.canUndo)
-    || (tool.id === 'redo' && !visibleHistory.canRedo)
-    || (tool.id === 'import' && (activeEditSession !== null || activeSketchPlaneEditSession !== null || activeImportSession !== null))
-    || (tool.id === 'importImage' && !canImportReferenceImage)
-    || (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled))
+    (tool.id === "undo" && !visibleHistory.canUndo) ||
+    (tool.id === "redo" && !visibleHistory.canRedo) ||
+    (tool.id === "import" &&
+      (activeEditSession !== null ||
+        activeSketchPlaneEditSession !== null ||
+        activeImportSession !== null)) ||
+    (tool.id === "importImage" && !canImportReferenceImage) ||
+    (isSketchStyleToolId(tool.id) && (!sketchSession || !svgRenderingEnabled));
 
   const closeSearchPopover = () => {
-    setSearchPopoverOpen(false)
-  }
+    setSearchPopoverOpen(false);
+  };
 
   const triggerSearchTool = (tool: RegisteredToolDefinition) => {
     if (isToolDisabled(tool)) {
-      return
+      return;
     }
 
-    void activateTool(tool.id, { source: 'search' })
-    setSearchQuery('')
-    setSearchPopoverOpen(false)
-    setHighlightedSearchResultIndex(-1)
-  }
+    void activateTool(tool.id, { source: "search" });
+    setSearchQuery("");
+    setSearchPopoverOpen(false);
+    setHighlightedSearchResultIndex(-1);
+  };
 
   const handleDocumentPointerDown = useEffectEvent((event: PointerEvent) => {
-    const eventTarget = event.target
+    const eventTarget = event.target;
     if (!(eventTarget instanceof Node)) {
-      return
+      return;
     }
 
     if (searchRootRef.current?.contains(eventTarget)) {
-      return
+      return;
     }
 
-    closeSearchPopover()
-  })
+    closeSearchPopover();
+  });
 
   useEffect(() => {
     if (!isSearchPopoverVisible) {
-      return
+      return;
     }
 
-    document.addEventListener('pointerdown', handleDocumentPointerDown)
+    document.addEventListener("pointerdown", handleDocumentPointerDown);
     return () => {
-      document.removeEventListener('pointerdown', handleDocumentPointerDown)
-    }
-  }, [isSearchPopoverVisible])
+      document.removeEventListener("pointerdown", handleDocumentPointerDown);
+    };
+  }, [isSearchPopoverVisible]);
 
   const handleSearchInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Escape') {
+    if (event.key === "Escape") {
       if (!isSearchPopoverVisible) {
-        return
+        return;
       }
 
-      event.preventDefault()
-      closeSearchPopover()
-      return
+      event.preventDefault();
+      closeSearchPopover();
+      return;
     }
 
-    const nextIndex = getNextToolSearchHighlightIndex(clampedHighlightedSearchResultIndex, event.key, searchResults.length)
+    const nextIndex = getNextToolSearchHighlightIndex(
+      clampedHighlightedSearchResultIndex,
+      event.key,
+      searchResults.length,
+    );
     if (nextIndex !== null) {
-      event.preventDefault()
-      setSearchPopoverOpen(true)
-      setHighlightedSearchResultIndex(nextIndex)
-      return
+      event.preventDefault();
+      setSearchPopoverOpen(true);
+      setHighlightedSearchResultIndex(nextIndex);
+      return;
     }
 
-    if (event.key !== 'Enter' || !isSearchPopoverVisible) {
-      return
+    if (event.key !== "Enter" || !isSearchPopoverVisible) {
+      return;
     }
 
-    const highlightedTool = searchResults[clampedHighlightedSearchResultIndex]
+    const highlightedTool = searchResults[clampedHighlightedSearchResultIndex];
     if (!highlightedTool) {
-      return
+      return;
     }
 
-    event.preventDefault()
-    triggerSearchTool(highlightedTool)
-  }
+    event.preventDefault();
+    triggerSearchTool(highlightedTool);
+  };
 
-  const activeSearchResult = clampedHighlightedSearchResultIndex >= 0
-    ? searchResults[clampedHighlightedSearchResultIndex]
-    : null
+  const activeSearchResult =
+    clampedHighlightedSearchResultIndex >= 0
+      ? searchResults[clampedHighlightedSearchResultIndex]
+      : null;
   const activeSearchResultId = activeSearchResult
     ? `${searchListboxId}-option-${activeSearchResult.id}`
-    : undefined
+    : undefined;
   const activePrimarySectionIds = useMemo(() => {
-    const visibleIdSet = new Set<string>(visibleSectionIds)
-    const measuredPrimaryIds = responsiveSectionState?.sectionKey === visibleSectionKey
-      ? responsiveSectionState.primarySectionIds.filter((sectionId) => visibleIdSet.has(sectionId))
-      : []
-    return measuredPrimaryIds.length > 0 ? measuredPrimaryIds : visibleSectionIds
-  }, [responsiveSectionState, visibleSectionIds, visibleSectionKey])
+    const visibleIdSet = new Set<string>(visibleSectionIds);
+    const measuredPrimaryIds =
+      responsiveSectionState?.sectionKey === visibleSectionKey
+        ? responsiveSectionState.primarySectionIds.filter((sectionId) =>
+            visibleIdSet.has(sectionId),
+          )
+        : [];
+    return measuredPrimaryIds.length > 0
+      ? measuredPrimaryIds
+      : visibleSectionIds;
+  }, [responsiveSectionState, visibleSectionIds, visibleSectionKey]);
   const activePrimarySectionIdSet = useMemo(
     () => new Set(activePrimarySectionIds),
     [activePrimarySectionIds],
-  )
-  const primarySections = visibleSections.filter((section) => activePrimarySectionIdSet.has(section.id))
-  const overflowSections = visibleSections.filter((section) => !activePrimarySectionIdSet.has(section.id))
+  );
+  const primarySections = visibleSections.filter((section) =>
+    activePrimarySectionIdSet.has(section.id),
+  );
+  const overflowSections = visibleSections.filter(
+    (section) => !activePrimarySectionIdSet.has(section.id),
+  );
 
   const setToolbarSectionRef = useCallback(
     (sectionId: string) => (node: HTMLDivElement | null) => {
       if (node) {
-        toolbarSectionElementsRef.current.set(sectionId, node)
-        return
+        toolbarSectionElementsRef.current.set(sectionId, node);
+        return;
       }
-      toolbarSectionElementsRef.current.delete(sectionId)
+      toolbarSectionElementsRef.current.delete(sectionId);
     },
     [],
-  )
+  );
 
   const updateResponsiveSections = useCallback(() => {
-    const primaryRail = primaryRailRef.current
+    const primaryRail = primaryRailRef.current;
     if (!primaryRail) {
-      return
+      return;
     }
 
-    const availableWidth = primaryRail.clientWidth - TOOLBAR_SHADOW_GUTTER_PX * 2 - TOOLBAR_SEARCH_SHADOW_RESERVE_PX
+    const availableWidth =
+      primaryRail.clientWidth -
+      TOOLBAR_SHADOW_GUTTER_PX * 2 -
+      TOOLBAR_SEARCH_SHADOW_RESERVE_PX;
     if (availableWidth <= 0) {
-      return
+      return;
     }
 
     const widths = visibleSections.map((section) => ({
       section,
-      width: toolbarSectionElementsRef.current.get(section.id)?.getBoundingClientRect().width ?? 0,
-    }))
+      width:
+        toolbarSectionElementsRef.current
+          .get(section.id)
+          ?.getBoundingClientRect().width ?? 0,
+    }));
     if (widths.some(({ width }) => width <= 0)) {
-      return
+      return;
     }
 
-    const nextPrimarySectionIds: string[] = []
-    let occupiedWidth = 0
+    const nextPrimarySectionIds: string[] = [];
+    let occupiedWidth = 0;
 
     for (const { section, width } of widths) {
-      const nextWidth = occupiedWidth + (nextPrimarySectionIds.length > 0 ? TOOLBAR_GAP_PX : 0) + width
+      const nextWidth =
+        occupiedWidth +
+        (nextPrimarySectionIds.length > 0 ? TOOLBAR_GAP_PX : 0) +
+        width;
       if (nextWidth <= availableWidth || nextPrimarySectionIds.length === 0) {
-        nextPrimarySectionIds.push(section.id)
-        occupiedWidth = nextWidth
-        continue
+        nextPrimarySectionIds.push(section.id);
+        occupiedWidth = nextWidth;
+        continue;
       }
 
-      break
+      break;
     }
 
     setResponsiveSectionState((current) => {
       if (
-        current?.sectionKey === visibleSectionKey
-        && current.primarySectionIds.length === nextPrimarySectionIds.length
-        && current.primarySectionIds.every((sectionId, index) => sectionId === nextPrimarySectionIds[index])
+        current?.sectionKey === visibleSectionKey &&
+        current.primarySectionIds.length === nextPrimarySectionIds.length &&
+        current.primarySectionIds.every(
+          (sectionId, index) => sectionId === nextPrimarySectionIds[index],
+        )
       ) {
-        return current
+        return current;
       }
       return {
         sectionKey: visibleSectionKey,
         primarySectionIds: nextPrimarySectionIds,
-      }
-    })
-  }, [visibleSections, visibleSectionKey])
+      };
+    });
+  }, [visibleSections, visibleSectionKey]);
 
   useEffect(() => {
-    const primaryRail = primaryRailRef.current
+    const primaryRail = primaryRailRef.current;
     if (!primaryRail) {
-      return
+      return;
     }
 
-    let frameId = window.requestAnimationFrame(updateResponsiveSections)
+    let frameId = window.requestAnimationFrame(updateResponsiveSections);
     const resizeObserver = new ResizeObserver(() => {
-      window.cancelAnimationFrame(frameId)
-      frameId = window.requestAnimationFrame(updateResponsiveSections)
-    })
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateResponsiveSections);
+    });
 
-    resizeObserver.observe(primaryRail)
+    resizeObserver.observe(primaryRail);
     return () => {
-      window.cancelAnimationFrame(frameId)
-      resizeObserver.disconnect()
-    }
-  }, [updateResponsiveSections])
+      window.cancelAnimationFrame(frameId);
+      resizeObserver.disconnect();
+    };
+  }, [updateResponsiveSections]);
 
   const renderTool = (tool: RegisteredToolDefinition) => {
-    if (tool.id === 'sketch' && hasActiveSketchSession) {
-      return null
+    if (tool.id === "sketch" && hasActiveSketchSession) {
+      return null;
     }
 
-    if (tool.id === 'finishSketch' && !hasActiveSketchSession) {
-      return null
+    if (tool.id === "finishSketch" && !hasActiveSketchSession) {
+      return null;
     }
 
     const isActive =
-      (tool.id === 'construction' && sketchSession !== null && isSketchConstructionSelected(sketchSession)) ||
-      (tool.id === 'svgRendering' && svgRenderingEnabled) ||
+      (tool.id === "construction" &&
+        sketchSession !== null &&
+        isSketchConstructionSelected(sketchSession)) ||
+      (tool.id === "svgRendering" && svgRenderingEnabled) ||
       activeSketchStyleToolId === tool.id ||
       activeCommand?.toolId === tool.id ||
       (isDropdownTool(tool) &&
-        tool.dropdown.variantIds.some((variantId) =>
-          variantId === activeCommand?.toolId,
-        ))
+        tool.dropdown.variantIds.some(
+          (variantId) => variantId === activeCommand?.toolId,
+        ));
 
-    const disabled = isToolDisabled(tool)
+    const disabled = isToolDisabled(tool);
 
     if (isDropdownTool(tool)) {
-      const variantTools = tool.dropdown.variantIds.map((toolId) => getToolById(toolId))
+      const variantTools = tool.dropdown.variantIds.map((toolId) =>
+        getToolById(toolId),
+      );
       return (
         <ToolDropdownButton
           key={tool.id}
@@ -307,11 +385,18 @@ export function WorkspaceToolbar({
           active={isActive}
           disabled={disabled}
         />
-      )
+      );
     }
 
-    return <ToolButton key={tool.id} tool={tool} active={isActive} disabled={disabled} />
-  }
+    return (
+      <ToolButton
+        key={tool.id}
+        tool={tool}
+        active={isActive}
+        disabled={disabled}
+      />
+    );
+  };
 
   const renderSection = (section: VisibleToolbarSection) => (
     <ToolbarPill
@@ -322,19 +407,19 @@ export function WorkspaceToolbar({
     >
       {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
     </ToolbarPill>
-  )
+  );
 
   return (
     <div
       className="absolute left-4 right-4 top-3 z-30 grid gap-x-2 gap-y-2 text-[var(--workbench-shell-text)]"
       style={{
-        alignItems: 'start',
-        gridTemplateColumns: 'auto minmax(0, 1fr) auto auto',
-        pointerEvents: 'none',
+        alignItems: "start",
+        gridTemplateColumns: "auto minmax(0, 1fr) auto auto",
+        pointerEvents: "none",
       }}
       role="toolbar"
       aria-label="CAD tools"
-      data-toolbar-responsive-rows={overflowSections.length > 0 ? '2' : '1'}
+      data-toolbar-responsive-rows={overflowSections.length > 0 ? "2" : "1"}
     >
       <DocumentFileMenu
         showBrowserStorageWarning={showBrowserStorageWarning}
@@ -355,11 +440,11 @@ export function WorkspaceToolbar({
         data-toolbar-primary-rail=""
         className="flex min-w-0 items-center gap-2"
         style={{
-          boxSizing: 'border-box',
-          gridColumn: '2',
-          gridRow: '1',
-          overflowX: 'hidden',
-          overflowY: 'hidden',
+          boxSizing: "border-box",
+          gridColumn: "2",
+          gridRow: "1",
+          overflowX: "hidden",
+          overflowY: "hidden",
           paddingTop: 36,
           paddingRight: TOOLBAR_SHADOW_GUTTER_PX,
           paddingBottom: 36,
@@ -368,7 +453,7 @@ export function WorkspaceToolbar({
           marginRight: -TOOLBAR_SHADOW_GUTTER_PX,
           marginBottom: -36,
           marginLeft: -TOOLBAR_SHADOW_GUTTER_PX,
-          scrollbarWidth: 'none',
+          scrollbarWidth: "none",
         }}
       >
         {primarySections.map(renderSection)}
@@ -377,19 +462,19 @@ export function WorkspaceToolbar({
       <div
         ref={searchRootRef}
         className="relative w-[clamp(184px,22vw,260px)] shrink-0"
-        style={{ gridColumn: '3', gridRow: '1', pointerEvents: 'auto' }}
+        style={{ gridColumn: "3", gridRow: "1", pointerEvents: "auto" }}
       >
         <TextInput
           value={searchQuery}
           onChange={(event) => {
-            const nextQuery = event.target.value
-            setSearchQuery(nextQuery)
-            setSearchPopoverOpen(nextQuery.length > 0)
-            setHighlightedSearchResultIndex(nextQuery.length > 0 ? 0 : -1)
+            const nextQuery = event.target.value;
+            setSearchQuery(nextQuery);
+            setSearchPopoverOpen(nextQuery.length > 0);
+            setHighlightedSearchResultIndex(nextQuery.length > 0 ? 0 : -1);
           }}
           onFocus={() => {
             if (searchQuery.length > 0) {
-              setSearchPopoverOpen(true)
+              setSearchPopoverOpen(true);
             }
           }}
           onKeyDown={handleSearchInputKeyDown}
@@ -401,23 +486,25 @@ export function WorkspaceToolbar({
           role="combobox"
           aria-autocomplete="list"
           aria-controls={isSearchPopoverVisible ? searchListboxId : undefined}
-          aria-activedescendant={isSearchPopoverVisible ? activeSearchResultId : undefined}
+          aria-activedescendant={
+            isSearchPopoverVisible ? activeSearchResultId : undefined
+          }
           aria-expanded={isSearchPopoverVisible}
           styles={{
             input: {
               height: 42,
               borderRadius: 12,
-              backgroundColor: 'var(--workbench-glass-fill)',
-              backdropFilter: 'var(--workbench-glass-blur)',
-              WebkitBackdropFilter: 'var(--workbench-glass-blur)',
-              borderColor: 'var(--workbench-glass-border)',
+              backgroundColor: "var(--workbench-glass-fill)",
+              backdropFilter: "var(--workbench-glass-blur)",
+              WebkitBackdropFilter: "var(--workbench-glass-blur)",
+              borderColor: "var(--workbench-glass-border)",
               borderWidth: 1,
-              boxShadow: 'var(--workbench-pill-shadow)',
-              color: 'var(--workbench-shell-text)',
+              boxShadow: "var(--workbench-pill-shadow)",
+              color: "var(--workbench-shell-text)",
               fontSize: 12.5,
             },
             section: {
-              color: 'var(--workbench-shell-text-dim)',
+              color: "var(--workbench-shell-text-dim)",
             },
           }}
         />
@@ -426,19 +513,26 @@ export function WorkspaceToolbar({
             className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-full overflow-hidden"
             radius="md"
             style={{
-              backgroundColor: 'var(--workbench-glass-fill-strong)',
-              backdropFilter: 'var(--workbench-glass-blur)',
-              WebkitBackdropFilter: 'var(--workbench-glass-blur)',
-              border: '1px solid var(--workbench-glass-border)',
-              boxShadow: 'var(--workbench-panel-shadow)',
+              backgroundColor: "var(--workbench-glass-fill-strong)",
+              backdropFilter: "var(--workbench-glass-blur)",
+              WebkitBackdropFilter: "var(--workbench-glass-blur)",
+              border: "1px solid var(--workbench-glass-border)",
+              boxShadow: "var(--workbench-panel-shadow)",
             }}
           >
             {searchResults.length > 0 ? (
               <ScrollArea.Autosize mah={320} mx={4} my={4}>
-                <div id={searchListboxId} role="listbox" aria-label="Tool search results" className="grid gap-1">
+                <div
+                  id={searchListboxId}
+                  role="listbox"
+                  aria-label="Tool search results"
+                  className="grid gap-1"
+                >
                   {searchResults.map((tool, index) => {
-                    const optionId = `${searchListboxId}-option-${tool.id}`
-                    const isHighlighted = searchResults[clampedHighlightedSearchResultIndex]?.id === tool.id
+                    const optionId = `${searchListboxId}-option-${tool.id}`;
+                    const isHighlighted =
+                      searchResults[clampedHighlightedSearchResultIndex]?.id ===
+                      tool.id;
                     return (
                       <ToolButton
                         key={`search-${tool.id}`}
@@ -451,20 +545,28 @@ export function WorkspaceToolbar({
                         active={activeCommand?.toolId === tool.id}
                         selected={isHighlighted}
                         disabled={isToolDisabled(tool)}
-                        onButtonFocus={() => setHighlightedSearchResultIndex(index)}
-                        onButtonMouseEnter={() => setHighlightedSearchResultIndex(index)}
+                        onButtonFocus={() =>
+                          setHighlightedSearchResultIndex(index)
+                        }
+                        onButtonMouseEnter={() =>
+                          setHighlightedSearchResultIndex(index)
+                        }
                         onTrigger={() => {
-                          setSearchQuery('')
-                          setSearchPopoverOpen(false)
-                          setHighlightedSearchResultIndex(-1)
+                          setSearchQuery("");
+                          setSearchPopoverOpen(false);
+                          setHighlightedSearchResultIndex(-1);
                         }}
                       />
-                    )
+                    );
                   })}
                 </div>
               </ScrollArea.Autosize>
             ) : (
-              <div id={searchListboxId} role="listbox" aria-label="Tool search results">
+              <div
+                id={searchListboxId}
+                role="listbox"
+                aria-label="Tool search results"
+              >
                 <Text c="dimmed" px="sm" py="md" size="sm" role="status">
                   No tools match “{searchQuery}”.
                 </Text>
@@ -494,12 +596,14 @@ export function WorkspaceToolbar({
               onClick={onReportBug}
               className={toolbarActionIconClassName}
               style={getToolbarActionIconStyle()}
-              onContextMenu={onDownloadBugReportState
-                ? (event) => {
-                    event.preventDefault()
-                    void onDownloadBugReportState()
-                  }
-                : undefined}
+              onContextMenu={
+                onDownloadBugReportState
+                  ? (event) => {
+                      event.preventDefault();
+                      void onDownloadBugReportState();
+                    }
+                  : undefined
+              }
             >
               <WorkbenchIcon name="reportBug" className="h-4 w-4" />
             </ActionIcon>
@@ -557,12 +661,12 @@ export function WorkspaceToolbar({
           data-toolbar-overflow-rail=""
           className="flex min-w-0 items-center gap-2"
           style={{
-            boxSizing: 'border-box',
-            gridColumn: '2 / -1',
-            gridRow: '2',
-            maxWidth: '100%',
-            overflowX: 'auto',
-            overflowY: 'hidden',
+            boxSizing: "border-box",
+            gridColumn: "2 / -1",
+            gridRow: "2",
+            maxWidth: "100%",
+            overflowX: "auto",
+            overflowY: "hidden",
             paddingTop: 36,
             paddingRight: TOOLBAR_SHADOW_GUTTER_PX,
             paddingBottom: 36,
@@ -571,86 +675,92 @@ export function WorkspaceToolbar({
             marginRight: -TOOLBAR_SHADOW_GUTTER_PX,
             marginBottom: -36,
             marginLeft: -TOOLBAR_SHADOW_GUTTER_PX,
-            scrollbarWidth: 'none',
+            scrollbarWidth: "none",
           }}
         >
           {overflowSections.map(renderSection)}
         </div>
       ) : null}
     </div>
-  )
+  );
 }
 
 const pillCommonStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
+  display: "flex",
+  alignItems: "center",
   gap: 2,
   borderRadius: 12,
-  backgroundColor: 'var(--workbench-glass-fill)',
-  backdropFilter: 'var(--workbench-glass-blur)',
-  WebkitBackdropFilter: 'var(--workbench-glass-blur)',
-  border: '1px solid var(--workbench-glass-border)',
-  boxShadow: 'var(--workbench-pill-shadow)',
+  backgroundColor: "var(--workbench-glass-fill)",
+  backdropFilter: "var(--workbench-glass-blur)",
+  WebkitBackdropFilter: "var(--workbench-glass-blur)",
+  border: "1px solid var(--workbench-glass-border)",
+  boxShadow: "var(--workbench-pill-shadow)",
   flexShrink: 0,
-  pointerEvents: 'auto',
-}
+  pointerEvents: "auto",
+};
 
 const utilityPillStyle: CSSProperties = {
   ...pillCommonStyle,
-}
+};
 
 interface ToolbarPillProps {
-  sectionId?: string
-  style: CSSProperties
-  children: ReactNode
+  sectionId?: string;
+  style: CSSProperties;
+  children: ReactNode;
 }
 
 const ToolbarPill = forwardRef<HTMLDivElement, ToolbarPillProps>(
   function ToolbarPill({ sectionId, style, children }, ref) {
-    return <div ref={ref} data-toolbar-section={sectionId} style={style}>{children}</div>
+    return (
+      <div ref={ref} data-toolbar-section={sectionId} style={style}>
+        {children}
+      </div>
+    );
   },
-)
+);
 
 /**
  * The brand mark — the first of the three Spark Affordances. Identity, not ornament.
  * Doubles as the file-menu trigger: clicking it opens the document file menu, replacing
  * the older standalone file button. See DESIGN.md "Spark Affordance Rule".
  */
-const SparkLogo = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement>>(
-  function SparkLogo({ className, style, ...props }, ref) {
-    return (
-      <ActionIcon
-        ref={ref}
-        type="button"
-        aria-label="File"
-        data-workbench-file-menu=""
-        variant="filled"
-        radius={10}
-        size={36}
-        className={[sparkLogoClassName, className].filter(Boolean).join(' ')}
-        style={style}
-        {...props}
-      >
-        C
-      </ActionIcon>
-    )
-  },
-)
+const SparkLogo = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement>
+>(function SparkLogo({ className, style, ...props }, ref) {
+  return (
+    <ActionIcon
+      ref={ref}
+      type="button"
+      aria-label="File"
+      data-workbench-file-menu=""
+      variant="filled"
+      radius={10}
+      size={36}
+      className={[sparkLogoClassName, className].filter(Boolean).join(" ")}
+      style={style}
+      {...props}
+    >
+      C
+    </ActionIcon>
+  );
+});
 
 function KbdHint({ label }: { label: string }) {
   return (
     <span
       aria-hidden="true"
       style={{
-        fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+        fontFamily:
+          "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
         fontSize: 10.5,
-        padding: '2px 5px',
+        padding: "2px 5px",
         borderRadius: 4,
-        border: '1px solid var(--workbench-kbd-border)',
-        color: 'var(--workbench-shell-text-dim)',
+        border: "1px solid var(--workbench-kbd-border)",
+        color: "var(--workbench-shell-text-dim)",
       }}
     >
       {label}
     </span>
-  )
+  );
 }

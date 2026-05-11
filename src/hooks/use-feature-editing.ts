@@ -1,33 +1,33 @@
-import { useEditorState } from '@/hooks/use-editor-state'
+import { useEditorState } from "@/hooks/use-editor-state";
 
 export function useFeatureEditing() {
   const {
     state: { activeEditSession, activeCommand },
     dispatch,
-  } = useEditorState()
+  } = useEditorState();
 
   return {
     activeEditSession,
     activeCommand,
     commitFeature() {
       if (!activeEditSession || !activeCommand) {
-        return
+        return;
       }
 
       dispatch({
-        type: 'command.commitRequested',
+        type: "command.commitRequested",
         commandSessionId: activeCommand.commandSessionId,
-      })
+      });
     },
     cancelFeature() {
       if (!activeCommand) {
-        return
+        return;
       }
 
       dispatch({
-        type: 'command.cancelled',
+        type: "command.cancelled",
         commandSessionId: activeCommand.commandSessionId,
-      })
+      });
     },
-  }
+  };
 }

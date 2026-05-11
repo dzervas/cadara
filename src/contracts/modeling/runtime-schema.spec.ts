@@ -1,53 +1,66 @@
-import { test } from 'bun:test'
+import { test } from "bun:test";
 
-import { expectTrue } from '@/testing/expect.spec'
+import { expectTrue } from "@/testing/expect.spec";
 import {
   deleteDocumentTargetRequestSchema,
   deleteDocumentTargetResponseSchema,
-} from '@/contracts/modeling/runtime-schema'
+} from "@/contracts/modeling/runtime-schema";
 
-test('src/contracts/modeling/runtime-schema.spec.ts', () => {  const request = deleteDocumentTargetRequestSchema.parse({
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0001',
-    target: { kind: 'feature', featureId: 'feature_extrude-1' },
-  })
-  expectTrue(request.target.kind === 'feature', 'Generic delete requests should accept feature history targets.')
+test("src/contracts/modeling/runtime-schema.spec.ts", () => {
+  const request = deleteDocumentTargetRequestSchema.parse({
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0001",
+    target: { kind: "feature", featureId: "feature_extrude-1" },
+  });
+  expectTrue(
+    request.target.kind === "feature",
+    "Generic delete requests should accept feature history targets.",
+  );
 
   const unsupportedRequest = deleteDocumentTargetRequestSchema.parse({
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0001',
-    target: { kind: 'face', bodyId: 'body_part-1', faceId: 'face_top' },
-  })
-  expectTrue(unsupportedRequest.target.kind === 'face', 'Generic delete requests should preserve unsupported durable targets for adapter rejection.')
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0001",
+    target: { kind: "face", bodyId: "body_part-1", faceId: "face_top" },
+  });
+  expectTrue(
+    unsupportedRequest.target.kind === "face",
+    "Generic delete requests should preserve unsupported durable targets for adapter rejection.",
+  );
 
   const malformedRequest = deleteDocumentTargetRequestSchema.safeParse({
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0001',
-    target: { kind: 'feature' },
-  })
-  expectTrue(!malformedRequest.success, 'Malformed generic delete targets should fail runtime request validation.')
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0001",
+    target: { kind: "feature" },
+  });
+  expectTrue(
+    !malformedRequest.success,
+    "Malformed generic delete targets should fail runtime request validation.",
+  );
 
   const conflictResponse = deleteDocumentTargetResponseSchema.parse({
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    revisionId: 'rev_0002',
-    deletedTarget: { kind: 'body', bodyId: 'body_part-1' },
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    revisionId: "rev_0002",
+    deletedTarget: { kind: "body", bodyId: "body_part-1" },
     revisionState: {
-      kind: 'conflict',
-      expectedRevisionId: 'rev_0001',
-      actualRevisionId: 'rev_0002',
+      kind: "conflict",
+      expectedRevisionId: "rev_0001",
+      actualRevisionId: "rev_0002",
     },
     rebuildResult: {
-      kind: 'skipped',
-      reasonCode: 'revisionConflict',
+      kind: "skipped",
+      reasonCode: "revisionConflict",
       invalidatedTargets: [],
       diagnostics: [],
     },
     changedTargets: [],
     diagnostics: [],
-  })
-  expectTrue(conflictResponse.revisionState.kind === 'conflict', 'Generic delete responses should validate stale revision conflicts.')
-})
+  });
+  expectTrue(
+    conflictResponse.revisionState.kind === "conflict",
+    "Generic delete responses should validate stale revision conflicts.",
+  );
+});

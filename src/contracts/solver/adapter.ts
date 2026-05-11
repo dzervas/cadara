@@ -17,7 +17,7 @@ import type {
   UpdateInteractiveSketchSolveSessionResponse,
   ValidateSketchRequest,
   ValidateSketchResponse,
-} from '@/contracts/solver/schema'
+} from "@/contracts/solver/schema";
 
 /**
  * Dedicated sketch solver boundary.
@@ -31,54 +31,56 @@ export interface SketchSolverAdapter {
    */
   projectExternalReferences(
     request: ProjectSketchExternalReferencesRequest,
-  ): Promise<ProjectSketchExternalReferencesResponse>
+  ): Promise<ProjectSketchExternalReferencesResponse>;
   /**
    * Validates an authored sketch definition before or alongside solving.
    * Validation diagnostics must be machine-readable and must not depend on
    * human-readable messages for control flow.
    */
-  validateSketch(request: ValidateSketchRequest): Promise<ValidateSketchResponse>
+  validateSketch(
+    request: ValidateSketchRequest,
+  ): Promise<ValidateSketchResponse>;
   /**
    * Solves an authored sketch definition into authoritative solved geometry.
    * The solver owns the returned solved snapshot, statuses, and diagnostics.
    */
-  solveSketch(request: SolveSketchRequest): Promise<SolveSketchResponse>
+  solveSketch(request: SolveSketchRequest): Promise<SolveSketchResponse>;
   /**
    * Starts a warm-startable interactive solve lifecycle for drag-style edits.
    */
   startInteractiveSolveSession(
     request: StartInteractiveSketchSolveSessionRequest,
-  ): Promise<StartInteractiveSketchSolveSessionResponse>
+  ): Promise<StartInteractiveSketchSolveSessionResponse>;
   /**
    * Updates an active interactive solve session with the latest drag target.
    */
   updateInteractiveSolveSession(
     request: UpdateInteractiveSketchSolveSessionRequest,
-  ): Promise<UpdateInteractiveSketchSolveSessionResponse>
+  ): Promise<UpdateInteractiveSketchSolveSessionResponse>;
   /**
    * Finalizes the latest accepted result for an interactive solve session.
    */
   finalizeInteractiveSolveSession(
     request: FinalizeInteractiveSketchSolveSessionRequest,
-  ): Promise<FinalizeInteractiveSketchSolveSessionResponse>
+  ): Promise<FinalizeInteractiveSketchSolveSessionResponse>;
   /**
    * Disposes an interactive solve session without committing a final result.
    */
   disposeInteractiveSolveSession(
     request: DisposeInteractiveSketchSolveSessionRequest,
-  ): Promise<DisposeInteractiveSketchSolveSessionResponse>
+  ): Promise<DisposeInteractiveSketchSolveSessionResponse>;
   /**
    * Derives closed sketch regions from a solved sketch state.
    * Regions must be explicit outputs, never editor-authored durable facts.
    */
   deriveSketchRegions(
     request: DeriveSketchRegionsRequest,
-  ): Promise<DeriveSketchRegionsResponse>
+  ): Promise<DeriveSketchRegionsResponse>;
   /**
    * Resolves a sketch-local target and reports whether it is still valid.
    * Implementers must not silently remap invalid targets to surviving geometry.
    */
   resolveSketchReference(
     request: ResolveSketchReferenceRequest,
-  ): Promise<ResolveSketchReferenceResponse>
+  ): Promise<ResolveSketchReferenceResponse>;
 }

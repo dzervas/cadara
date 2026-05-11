@@ -26,12 +26,14 @@ The frontend stays on its normal development address. The debug browser is a ded
 Containerized agents can connect over CDP to the dedicated browser:
 
 ```ts
-import { chromium } from "playwright"
+import { chromium } from "playwright";
 
-const browser = await chromium.connectOverCDP(process.env.CADARA_DEV_DEBUG_BROWSER_WS_URL!)
-const context = browser.contexts()[0] ?? await browser.newContext()
-const page = context.pages()[0] ?? await context.newPage()
-await page.goto(process.env.CADARA_DEV_FRONTEND_URL!)
+const browser = await chromium.connectOverCDP(
+  process.env.CADARA_DEV_DEBUG_BROWSER_WS_URL!,
+);
+const context = browser.contexts()[0] ?? (await browser.newContext());
+const page = context.pages()[0] ?? (await context.newPage());
+await page.goto(process.env.CADARA_DEV_FRONTEND_URL!);
 ```
 
 That keeps automation on stable service names inside Compose instead of relying on host-loopback routing.

@@ -1,8 +1,8 @@
-import * as THREE from 'three'
+import * as THREE from "three";
 
 export interface ViewportCameraControls {
-  target: THREE.Vector3
-  update: () => void
-  addEventListener: (type: 'change', listener: () => void) => void
-  removeEventListener: (type: 'change', listener: () => void) => void
+  target: THREE.Vector3;
+  update: () => void;
+  addEventListener: (type: "change", listener: () => void) => void;
+  removeEventListener: (type: "change", listener: () => void) => void;
 }

@@ -3,14 +3,14 @@ import type {
   ShortcutCommandId,
   ShortcutCommandRegistry,
   ShortcutScope,
-} from '@/core/shortcuts/commands'
+} from "@/core/shortcuts/commands";
 import {
   collectShortcutBindings,
   getScopePriority,
   isCommandInActiveScopes,
   type EffectiveShortcutMap,
   type ShortcutBinding,
-} from '@/core/shortcuts/keymap'
+} from "@/core/shortcuts/keymap";
 import {
   serializeShortcut,
   shortcutFromKeyboardEvent,
@@ -18,39 +18,36 @@ import {
   shortcutsEqual,
   type KeyboardShortcutEvent,
   type ShortcutSequence,
-} from '@/core/shortcuts/shortcut-grammar'
+} from "@/core/shortcuts/shortcut-grammar";
 
 export interface ShortcutResolverEvent extends KeyboardShortcutEvent {
-  target?: EventTarget | null
-  defaultPrevented?: boolean
-  preventDefault?: () => void
+  target?: EventTarget | null;
+  defaultPrevented?: boolean;
+  preventDefault?: () => void;
 }
 
 export interface ShortcutResolverOptions {
-  activeScopes: readonly ShortcutScope[]
-  executeCommand: (command: ShortcutCommandDefinition) => void
-  isCommandEnabled?: (command: ShortcutCommandDefinition) => boolean
-  isTextEditingTarget?: (target: EventTarget | null | undefined) => boolean
-  platform?: 'mac' | 'windows' | 'linux'
+  activeScopes: readonly ShortcutScope[];
+  executeCommand: (command: ShortcutCommandDefinition) => void;
+  isCommandEnabled?: (command: ShortcutCommandDefinition) => boolean;
+  isTextEditingTarget?: (target: EventTarget | null | undefined) => boolean;
+  platform?: "mac" | "windows" | "linux";
 }
 
 export interface ShortcutResolverResult {
-  handled: boolean
-  commandId: ShortcutCommandId | null
-  pendingSequence: boolean
+  handled: boolean;
+  commandId: ShortcutCommandId | null;
+  pendingSequence: boolean;
 }
 
 export class ShortcutResolver {
-  private pendingSequence: ShortcutSequence | null = null
-  private readonly registry: ShortcutCommandRegistry
-  private readonly keymap: EffectiveShortcutMap
+  private pendingSequence: ShortcutSequence | null = null;
+  private readonly registry: ShortcutCommandRegistry;
+  private readonly keymap: EffectiveShortcutMap;
 
-  constructor(
-    registry: ShortcutCommandRegistry,
-    keymap: EffectiveShortcutMap,
-  ) {
-    this.registry = registry
-    this.keymap = keymap
+  constructor(registry: ShortcutCommandRegistry, keymap: EffectiveShortcutMap) {
+    this.registry = registry;
+    this.keymap = keymap;
   }
 
   handleKeyDown(
@@ -58,25 +55,27 @@ export class ShortcutResolver {
     options: ShortcutResolverOptions,
   ): ShortcutResolverResult {
     if (event.defaultPrevented) {
-      this.clearSequence()
-      return { handled: false, commandId: null, pendingSequence: false }
+      this.clearSequence();
+      return { handled: false, commandId: null, pendingSequence: false };
     }
 
-    const chord = shortcutFromKeyboardEvent(event, { platform: options.platform })
+    const chord = shortcutFromKeyboardEvent(event, {
+      platform: options.platform,
+    });
     const candidate = this.pendingSequence
       ? { chords: [...this.pendingSequence.chords, ...chord.chords] }
-      : chord
-    const result = this.resolveCandidate(candidate, event, options)
+      : chord;
+    const result = this.resolveCandidate(candidate, event, options);
 
     if (result.handled || result.pendingSequence) {
-      event.preventDefault?.()
+      event.preventDefault?.();
     }
 
-    return result
+    return result;
   }
 
   clearSequence() {
-    this.pendingSequence = null
+    this.pendingSequence = null;
   }
 
   private resolveCandidate(
@@ -84,67 +83,78 @@ export class ShortcutResolver {
     event: ShortcutResolverEvent,
     options: ShortcutResolverOptions,
   ): ShortcutResolverResult {
-    const matches = this.getMatchingBindings(candidate, options)
-    const prefixes = this.getPrefixBindings(candidate, options)
-      .filter((binding) => this.canUseBinding(binding, event, options))
+    const matches = this.getMatchingBindings(candidate, options);
+    const prefixes = this.getPrefixBindings(candidate, options).filter(
+      (binding) => this.canUseBinding(binding, event, options),
+    );
 
     if (matches.length > 0 && prefixes.length === 0) {
-      const binding = matches[0]!
-      const command = this.registry.get(binding.commandId)
+      const binding = matches[0]!;
+      const command = this.registry.get(binding.commandId);
 
-      this.clearSequence()
+      this.clearSequence();
 
       if (!command || !this.canExecuteCommand(command, event, options)) {
-        return { handled: false, commandId: null, pendingSequence: false }
+        return { handled: false, commandId: null, pendingSequence: false };
       }
 
-      options.executeCommand(command)
-      return { handled: true, commandId: command.id, pendingSequence: false }
+      options.executeCommand(command);
+      return { handled: true, commandId: command.id, pendingSequence: false };
     }
 
     if (prefixes.length > 0) {
-      this.pendingSequence = candidate
-      return { handled: true, commandId: null, pendingSequence: true }
+      this.pendingSequence = candidate;
+      return { handled: true, commandId: null, pendingSequence: true };
     }
 
     if (candidate.chords.length > 1) {
-      this.clearSequence()
+      this.clearSequence();
       return this.resolveCandidate(
         { chords: [candidate.chords[candidate.chords.length - 1]!] },
         event,
         options,
-      )
+      );
     }
 
-    this.clearSequence()
-    return { handled: false, commandId: null, pendingSequence: false }
+    this.clearSequence();
+    return { handled: false, commandId: null, pendingSequence: false };
   }
 
   private getMatchingBindings(
     candidate: ShortcutSequence,
-    options: Pick<ShortcutResolverOptions, 'activeScopes'>,
+    options: Pick<ShortcutResolverOptions, "activeScopes">,
   ) {
     return this.getActiveBindings(options)
       .filter((binding) => shortcutsEqual(binding.shortcut, candidate))
-      .sort((left, right) => getScopePriority(right.scope) - getScopePriority(left.scope))
+      .sort(
+        (left, right) =>
+          getScopePriority(right.scope) - getScopePriority(left.scope),
+      );
   }
 
   private getPrefixBindings(
     candidate: ShortcutSequence,
-    options: Pick<ShortcutResolverOptions, 'activeScopes'>,
+    options: Pick<ShortcutResolverOptions, "activeScopes">,
   ) {
     return this.getActiveBindings(options)
       .filter((binding) => shortcutStartsWith(binding.shortcut, candidate))
-      .sort((left, right) => getScopePriority(right.scope) - getScopePriority(left.scope))
+      .sort(
+        (left, right) =>
+          getScopePriority(right.scope) - getScopePriority(left.scope),
+      );
   }
 
   private getActiveBindings(
-    options: Pick<ShortcutResolverOptions, 'activeScopes'>,
+    options: Pick<ShortcutResolverOptions, "activeScopes">,
   ): ShortcutBinding[] {
-    return collectShortcutBindings(this.registry, this.keymap).filter((binding) => {
-      const command = this.registry.get(binding.commandId)
-      return command ? isCommandInActiveScopes(command, options.activeScopes) : false
-    })
+    return collectShortcutBindings(this.registry, this.keymap).filter(
+      (binding) => {
+        const command = this.registry.get(binding.commandId);
+        return command
+          ? isCommandInActiveScopes(command, options.activeScopes)
+          : false;
+      },
+    );
   }
 
   private canExecuteCommand(
@@ -152,11 +162,14 @@ export class ShortcutResolver {
     event: ShortcutResolverEvent,
     options: ShortcutResolverOptions,
   ) {
-    if (!command.allowTextEditingTargets && options.isTextEditingTarget?.(event.target)) {
-      return false
+    if (
+      !command.allowTextEditingTargets &&
+      options.isTextEditingTarget?.(event.target)
+    ) {
+      return false;
     }
 
-    return options.isCommandEnabled?.(command) ?? true
+    return options.isCommandEnabled?.(command) ?? true;
   }
 
   private canUseBinding(
@@ -164,8 +177,8 @@ export class ShortcutResolver {
     event: ShortcutResolverEvent,
     options: ShortcutResolverOptions,
   ) {
-    const command = this.registry.get(binding.commandId)
-    return command ? this.canExecuteCommand(command, event, options) : false
+    const command = this.registry.get(binding.commandId);
+    return command ? this.canExecuteCommand(command, event, options) : false;
   }
 }
 
@@ -173,9 +186,9 @@ export function createShortcutResolver(
   registry: ShortcutCommandRegistry,
   keymap: EffectiveShortcutMap,
 ) {
-  return new ShortcutResolver(registry, keymap)
+  return new ShortcutResolver(registry, keymap);
 }
 
 export function getShortcutSequenceKey(shortcut: ShortcutSequence) {
-  return serializeShortcut(shortcut)
+  return serializeShortcut(shortcut);
 }

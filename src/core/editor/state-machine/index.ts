@@ -71,19 +71,17 @@ export type {
   EditorEffectRuntime,
   EditorViewState,
   EditorHistoryAvailability,
-} from './types'
+} from "./types";
 
-export {
-  initialEditorState,
-} from './state-creators'
-export { createEditorEffectFailureEvent } from './error-mapping'
-export { EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES } from './utility-helpers'
-export type { EditorExtensionDependencies } from './dependencies'
-export { defaultEditorExtensionDependencies } from './dependencies'
-export { transitionEditorState } from './reducer-root'
+export { initialEditorState } from "./state-creators";
+export { createEditorEffectFailureEvent } from "./error-mapping";
+export { EDITOR_SKETCH_REFERENCE_PROJECTION_TOLERANCES } from "./utility-helpers";
+export type { EditorExtensionDependencies } from "./dependencies";
+export { defaultEditorExtensionDependencies } from "./dependencies";
+export { transitionEditorState } from "./reducer-root";
 export {
   getEditorHistoryAvailability,
   getEditorSelectionKey,
   getEditorViewState,
   hydrateFeatureSessionFromSnapshot,
-} from './selectors'
+} from "./selectors";

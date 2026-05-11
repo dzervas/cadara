@@ -1,26 +1,38 @@
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { PointerEvent as ReactPointerEvent } from "react";
 
 import {
   VIEWPORT_OVERLAY_INSET_PX,
   VIEWPORT_OVERLAY_TOP_INSET_STYLE,
-} from '@/components/cad/viewport-overlay-layout'
+} from "@/components/cad/viewport-overlay-layout";
 import {
   getSketchSpecialModeOverlayProjectionId,
   getSketchSpecialModeOverlayTone,
   getSketchSpecialModeSegmentProjectionId,
   type SketchSpecialModeFeedbackProjection,
-} from '@/components/cad/sketch-special-mode-feedback-model'
+} from "@/components/cad/sketch-special-mode-feedback-model";
 import type {
   SketchSpecialModeHandleRef,
   SketchSpecialModeViewportPresentation,
-} from '@/core/sketch-special-modes/schema'
+} from "@/core/sketch-special-modes/schema";
 
 interface SketchSpecialModeViewportFeedbackProps {
-  presentation: SketchSpecialModeViewportPresentation | null
-  projections: readonly SketchSpecialModeFeedbackProjection[]
-  onHandleDragStart?: (handle: SketchSpecialModeHandleRef, clientX: number, clientY: number) => void
-  onHandleDragMove?: (handle: SketchSpecialModeHandleRef, clientX: number, clientY: number) => void
-  onHandleDragEnd?: (handle: SketchSpecialModeHandleRef, clientX: number, clientY: number) => void
+  presentation: SketchSpecialModeViewportPresentation | null;
+  projections: readonly SketchSpecialModeFeedbackProjection[];
+  onHandleDragStart?: (
+    handle: SketchSpecialModeHandleRef,
+    clientX: number,
+    clientY: number,
+  ) => void;
+  onHandleDragMove?: (
+    handle: SketchSpecialModeHandleRef,
+    clientX: number,
+    clientY: number,
+  ) => void;
+  onHandleDragEnd?: (
+    handle: SketchSpecialModeHandleRef,
+    clientX: number,
+    clientY: number,
+  ) => void;
 }
 
 export function SketchSpecialModeViewportFeedback({
@@ -31,44 +43,57 @@ export function SketchSpecialModeViewportFeedback({
   onHandleDragEnd,
 }: SketchSpecialModeViewportFeedbackProps) {
   if (!presentation) {
-    return null
+    return null;
   }
 
-  const projectionById = new Map(projections.map((projection) => [projection.id, projection]))
-  const overlays = presentation.overlays ?? []
-  const hasStatus = (presentation.prompts?.length ?? 0) > 0 || (presentation.diagnostics?.length ?? 0) > 0
+  const projectionById = new Map(
+    projections.map((projection) => [projection.id, projection]),
+  );
+  const overlays = presentation.overlays ?? [];
+  const hasStatus =
+    (presentation.prompts?.length ?? 0) > 0 ||
+    (presentation.diagnostics?.length ?? 0) > 0;
 
   const dragCallbacks = {
-    onStart(handle: SketchSpecialModeHandleRef, event: ReactPointerEvent<SVGCircleElement>) {
-      event.preventDefault()
-      event.stopPropagation()
-      event.currentTarget.dataset.sketchSpecialHandleDragging = 'true'
-      event.currentTarget.setPointerCapture(event.pointerId)
-      onHandleDragStart?.(handle, event.clientX, event.clientY)
+    onStart(
+      handle: SketchSpecialModeHandleRef,
+      event: ReactPointerEvent<SVGCircleElement>,
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.dataset.sketchSpecialHandleDragging = "true";
+      event.currentTarget.setPointerCapture(event.pointerId);
+      onHandleDragStart?.(handle, event.clientX, event.clientY);
     },
-    onMove(handle: SketchSpecialModeHandleRef, event: ReactPointerEvent<SVGCircleElement>) {
-      if (event.currentTarget.dataset.sketchSpecialHandleDragging !== 'true') {
-        return
+    onMove(
+      handle: SketchSpecialModeHandleRef,
+      event: ReactPointerEvent<SVGCircleElement>,
+    ) {
+      if (event.currentTarget.dataset.sketchSpecialHandleDragging !== "true") {
+        return;
       }
 
-      event.preventDefault()
-      event.stopPropagation()
-      onHandleDragMove?.(handle, event.clientX, event.clientY)
+      event.preventDefault();
+      event.stopPropagation();
+      onHandleDragMove?.(handle, event.clientX, event.clientY);
     },
-    onEnd(handle: SketchSpecialModeHandleRef, event: ReactPointerEvent<SVGCircleElement>) {
-      if (event.currentTarget.dataset.sketchSpecialHandleDragging !== 'true') {
-        return
+    onEnd(
+      handle: SketchSpecialModeHandleRef,
+      event: ReactPointerEvent<SVGCircleElement>,
+    ) {
+      if (event.currentTarget.dataset.sketchSpecialHandleDragging !== "true") {
+        return;
       }
 
-      event.preventDefault()
-      event.stopPropagation()
-      onHandleDragEnd?.(handle, event.clientX, event.clientY)
-      delete event.currentTarget.dataset.sketchSpecialHandleDragging
+      event.preventDefault();
+      event.stopPropagation();
+      onHandleDragEnd?.(handle, event.clientX, event.clientY);
+      delete event.currentTarget.dataset.sketchSpecialHandleDragging;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId)
+        event.currentTarget.releasePointerCapture(event.pointerId);
       }
     },
-  }
+  };
 
   return (
     <>
@@ -99,20 +124,27 @@ export function SketchSpecialModeViewportFeedback({
         </div>
       ) : null}
       <div className="pointer-events-none absolute inset-0 z-10">
-        <svg aria-hidden="true" className="absolute inset-0 h-full w-full overflow-visible">
+        <svg
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full overflow-visible"
+        >
           {overlays.map((overlay) => {
-            if (overlay.kind !== 'segment') {
-              return null
+            if (overlay.kind !== "segment") {
+              return null;
             }
 
-            const start = projectionById.get(getSketchSpecialModeSegmentProjectionId(overlay.id, 'start'))
-            const end = projectionById.get(getSketchSpecialModeSegmentProjectionId(overlay.id, 'end'))
+            const start = projectionById.get(
+              getSketchSpecialModeSegmentProjectionId(overlay.id, "start"),
+            );
+            const end = projectionById.get(
+              getSketchSpecialModeSegmentProjectionId(overlay.id, "end"),
+            );
 
             if (!start || !end) {
-              return null
+              return null;
             }
 
-            const stroke = getToneStroke(overlay.tone ?? 'neutral')
+            const stroke = getToneStroke(overlay.tone ?? "neutral");
 
             return (
               <line
@@ -122,19 +154,21 @@ export function SketchSpecialModeViewportFeedback({
                 x2={end.x}
                 y2={end.y}
                 stroke={stroke}
-                strokeDasharray={overlay.dashed ? '4 4' : undefined}
+                strokeDasharray={overlay.dashed ? "4 4" : undefined}
                 strokeWidth="1.5"
               />
-            )
+            );
           })}
           {overlays.map((overlay) => {
-            if (overlay.kind !== 'handle') {
-              return null
+            if (overlay.kind !== "handle") {
+              return null;
             }
 
-            const projection = projectionById.get(getSketchSpecialModeOverlayProjectionId(overlay.id))
+            const projection = projectionById.get(
+              getSketchSpecialModeOverlayProjectionId(overlay.id),
+            );
             if (!projection) {
-              return null
+              return null;
             }
 
             return (
@@ -146,69 +180,101 @@ export function SketchSpecialModeViewportFeedback({
                 fill="var(--workbench-shell-overlay-strong)"
                 stroke={getToneStroke(getSketchSpecialModeOverlayTone(overlay))}
                 strokeWidth="2"
-                className={overlay.draggable ? 'pointer-events-auto cursor-grab' : 'pointer-events-none'}
-                onPointerDown={overlay.draggable ? (event) => dragCallbacks.onStart(overlay.handle, event) : undefined}
-                onPointerMove={overlay.draggable ? (event) => dragCallbacks.onMove(overlay.handle, event) : undefined}
-                onPointerUp={overlay.draggable ? (event) => dragCallbacks.onEnd(overlay.handle, event) : undefined}
-                onPointerCancel={overlay.draggable ? (event) => dragCallbacks.onEnd(overlay.handle, event) : undefined}
+                className={
+                  overlay.draggable
+                    ? "pointer-events-auto cursor-grab"
+                    : "pointer-events-none"
+                }
+                onPointerDown={
+                  overlay.draggable
+                    ? (event) => dragCallbacks.onStart(overlay.handle, event)
+                    : undefined
+                }
+                onPointerMove={
+                  overlay.draggable
+                    ? (event) => dragCallbacks.onMove(overlay.handle, event)
+                    : undefined
+                }
+                onPointerUp={
+                  overlay.draggable
+                    ? (event) => dragCallbacks.onEnd(overlay.handle, event)
+                    : undefined
+                }
+                onPointerCancel={
+                  overlay.draggable
+                    ? (event) => dragCallbacks.onEnd(overlay.handle, event)
+                    : undefined
+                }
               />
-            )
+            );
           })}
         </svg>
         {overlays.map((overlay) => {
-          if (overlay.kind !== 'badge' && overlay.kind !== 'diagnostic' && overlay.kind !== 'handle') {
-            return null
+          if (
+            overlay.kind !== "badge" &&
+            overlay.kind !== "diagnostic" &&
+            overlay.kind !== "handle"
+          ) {
+            return null;
           }
 
-          const projection = projectionById.get(getSketchSpecialModeOverlayProjectionId(overlay.id))
+          const projection = projectionById.get(
+            getSketchSpecialModeOverlayProjectionId(overlay.id),
+          );
           if (!projection) {
-            return null
+            return null;
           }
 
-          const label = overlay.kind === 'diagnostic' ? overlay.message : overlay.label
+          const label =
+            overlay.kind === "diagnostic" ? overlay.message : overlay.label;
 
           return (
             <div
               key={overlay.id}
-              className={getOverlayClassName(overlay.kind, getSketchSpecialModeOverlayTone(overlay))}
+              className={getOverlayClassName(
+                overlay.kind,
+                getSketchSpecialModeOverlayTone(overlay),
+              )}
               style={{
                 left: projection.x,
                 top: projection.y,
-                transform: 'translate(-50%, calc(-100% - 12px))',
+                transform: "translate(-50%, calc(-100% - 12px))",
               }}
             >
               {label}
             </div>
-          )
+          );
         })}
       </div>
     </>
-  )
+  );
 }
 
-function getToneStroke(tone: 'neutral' | 'success' | 'warning') {
-  if (tone === 'success') {
-    return 'var(--workbench-shell-success-text)'
+function getToneStroke(tone: "neutral" | "success" | "warning") {
+  if (tone === "success") {
+    return "var(--workbench-shell-success-text)";
   }
 
-  if (tone === 'warning') {
-    return 'var(--workbench-shell-danger-text)'
+  if (tone === "warning") {
+    return "var(--workbench-shell-danger-text)";
   }
 
-  return 'var(--workbench-shell-accent)'
+  return "var(--workbench-shell-accent)";
 }
 
 function getOverlayClassName(
-  kind: 'badge' | 'diagnostic' | 'handle',
-  tone: 'neutral' | 'success' | 'warning',
+  kind: "badge" | "diagnostic" | "handle",
+  tone: "neutral" | "success" | "warning",
 ) {
   const palette =
-    tone === 'success'
-      ? 'border-[var(--workbench-shell-success-text)] text-[var(--workbench-shell-success-text)]'
-      : tone === 'warning'
-        ? 'border-[var(--workbench-shell-danger-border)] text-[var(--workbench-shell-danger-text)]'
-        : 'border-[var(--cad-border-strong)] text-[var(--cad-foreground)]'
+    tone === "success"
+      ? "border-[var(--workbench-shell-success-text)] text-[var(--workbench-shell-success-text)]"
+      : tone === "warning"
+        ? "border-[var(--workbench-shell-danger-border)] text-[var(--workbench-shell-danger-text)]"
+        : "border-[var(--cad-border-strong)] text-[var(--cad-foreground)]";
 
-  return `pointer-events-none absolute max-w-[220px] whitespace-nowrap rounded border bg-[var(--cad-surface-overlay)] px-2 py-1 text-[11px] leading-none shadow-[var(--cad-panel-shadow)] ${palette}`
-    + (kind === 'diagnostic' ? ' font-medium' : '')
+  return (
+    `pointer-events-none absolute max-w-[220px] whitespace-nowrap rounded border bg-[var(--cad-surface-overlay)] px-2 py-1 text-[11px] leading-none shadow-[var(--cad-panel-shadow)] ${palette}` +
+    (kind === "diagnostic" ? " font-medium" : "")
+  );
 }

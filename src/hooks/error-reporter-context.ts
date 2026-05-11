@@ -1,5 +1,5 @@
-import { createContext } from 'react'
+import { createContext } from "react";
 
-import type { ErrorReporter } from '@/contracts/errors'
+import type { ErrorReporter } from "@/contracts/errors";
 
-export const ErrorReporterContext = createContext<ErrorReporter | null>(null)
+export const ErrorReporterContext = createContext<ErrorReporter | null>(null);

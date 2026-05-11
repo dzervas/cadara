@@ -1,10 +1,10 @@
-import { z } from 'zod'
+import { z } from "zod";
 
-import type { MeshExportAccuracy } from '@/contracts/export/capabilities'
+import type { MeshExportAccuracy } from "@/contracts/export/capabilities";
 import type {
   CadaraBrepGeometryAssetData,
   CadaraBrepTopologyRecord,
-} from '@/contracts/modeling/geometry-assets'
+} from "@/contracts/modeling/geometry-assets";
 import type {
   BodyId,
   CoedgeId,
@@ -14,28 +14,30 @@ import type {
   LoopId,
   RevisionId,
   VertexId,
-} from '@/contracts/shared/ids'
-import type { DurableRef } from '@/contracts/shared/references'
-import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
+} from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
+import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 
-export const OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION = 'occ-native-topology-payload/v1alpha1'
+export const OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION =
+  "occ-native-topology-payload/v1alpha1";
 
 export const OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS = [
-  'CadaraNativeTopologyProbe',
-  'CadaraBuildNativeTopologyPayload',
-  'CadaraExecuteNativeFeatureTransaction',
-  'CadaraBuildNativeExactBrepPayload',
-  'CadaraBuildNativeMeshExportPayload',
-] as const
+  "CadaraNativeTopologyProbe",
+  "CadaraBuildNativeTopologyPayload",
+  "CadaraExecuteNativeFeatureTransaction",
+  "CadaraBuildNativeExactBrepPayload",
+  "CadaraBuildNativeMeshExportPayload",
+] as const;
 
-export type OccNativeTopologyKernelEntrypoint = typeof OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS[number]
+export type OccNativeTopologyKernelEntrypoint =
+  (typeof OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS)[number];
 
 export interface OpenCascadeNativeTopologyKernelHost {
   CadaraNativeTopologyProbe?: {
-    SchemaVersion?: () => string
-    HasPre8Shim?: () => boolean
-    SummarizeShape?: (shape: unknown) => string
-  }
+    SchemaVersion?: () => string;
+    HasPre8Shim?: () => boolean;
+    SummarizeShape?: (shape: unknown) => string;
+  };
   CadaraBuildNativeTopologyPayload?: {
     BuildJson?: (
       shape: unknown,
@@ -43,8 +45,8 @@ export interface OpenCascadeNativeTopologyKernelHost {
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => string
-  }
+    ) => string;
+  };
   CadaraExecuteNativeFeatureTransaction?: {
     BuildCommittedShapePayload?: (
       shape: unknown,
@@ -52,35 +54,35 @@ export interface OpenCascadeNativeTopologyKernelHost {
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => string
+    ) => string;
     BuildBooleanCommittedShapePayload?: (
       left: unknown,
       right: unknown,
-      operation: 'join' | 'cut' | 'intersect',
+      operation: "join" | "cut" | "intersect",
       bodyId: string,
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => string
+    ) => string;
     BuildBooleanCommittedShapeTransaction?: (
       left: unknown,
       right: unknown,
-      operation: 'join' | 'cut' | 'intersect',
+      operation: "join" | "cut" | "intersect",
       bodyId: string,
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => OpenCascadeNativeFeatureTransactionResult
+    ) => OpenCascadeNativeFeatureTransactionResult;
     BuildBooleanCommittedShapeTransactionWithHistory?: (
       left: unknown,
       right: unknown,
-      operation: 'join' | 'cut' | 'intersect',
+      operation: "join" | "cut" | "intersect",
       bodyId: string,
       previousTopologyToken: string,
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => OpenCascadeNativeFeatureTransactionResult
+    ) => OpenCascadeNativeFeatureTransactionResult;
     BuildSplitCommittedShapeTransactionWithHistory?: (
       target: unknown,
       tool: unknown,
@@ -89,7 +91,7 @@ export interface OpenCascadeNativeTopologyKernelHost {
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => OpenCascadeNativeFeatureTransactionResult
+    ) => OpenCascadeNativeFeatureTransactionResult;
     BuildFilletCommittedShapeTransactionWithHistory?: (
       shape: unknown,
       edgeIdsCsv: string,
@@ -99,7 +101,7 @@ export interface OpenCascadeNativeTopologyKernelHost {
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => OpenCascadeNativeFeatureTransactionResult
+    ) => OpenCascadeNativeFeatureTransactionResult;
     BuildChamferCommittedShapeTransactionWithHistory?: (
       shape: unknown,
       edgeIdsCsv: string,
@@ -109,7 +111,7 @@ export interface OpenCascadeNativeTopologyKernelHost {
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => OpenCascadeNativeFeatureTransactionResult
+    ) => OpenCascadeNativeFeatureTransactionResult;
     BuildShellCommittedShapeTransactionWithHistory?: (
       shape: unknown,
       faceIdsCsv: string,
@@ -119,7 +121,7 @@ export interface OpenCascadeNativeTopologyKernelHost {
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => OpenCascadeNativeFeatureTransactionResult
+    ) => OpenCascadeNativeFeatureTransactionResult;
     BuildTransformCommittedShapeTransactionWithHistory?: (
       shape: unknown,
       transform: unknown,
@@ -129,40 +131,40 @@ export interface OpenCascadeNativeTopologyKernelHost {
       topologyToken: string,
       linearDeflection: number,
       angularDeflection: number,
-    ) => OpenCascadeNativeFeatureTransactionResult
-  }
+    ) => OpenCascadeNativeFeatureTransactionResult;
+  };
   CadaraBuildNativeExactBrepPayload?: {
     BuildJson?: (
       shape: unknown,
       bodyId: string,
       topologyToken: string,
-    ) => string
-  }
+    ) => string;
+  };
   CadaraBuildNativeMeshExportPayload?: {
     BuildJson?: (
       shape: unknown,
       linearDeflection: number,
       angularDeflection: number,
-    ) => string
-  }
+    ) => string;
+  };
 }
 
 export interface OpenCascadeNativeFeatureTransactionResult {
-  Shape: () => unknown
-  PayloadJson: () => string
-  HistoryJson: () => string
-  IsDone: () => boolean
+  Shape: () => unknown;
+  PayloadJson: () => string;
+  HistoryJson: () => string;
+  IsDone: () => boolean;
 }
 
 export type OccNativeTopologyKind =
-  | 'body'
-  | 'solid'
-  | 'shell'
-  | 'face'
-  | 'loop'
-  | 'coedge'
-  | 'edge'
-  | 'vertex'
+  | "body"
+  | "solid"
+  | "shell"
+  | "face"
+  | "loop"
+  | "coedge"
+  | "edge"
+  | "vertex";
 
 export type OccNativeTopologyId =
   | BodyId
@@ -172,235 +174,234 @@ export type OccNativeTopologyId =
   | LoopId
   | CoedgeId
   | EdgeId
-  | VertexId
+  | VertexId;
 
-export type OccNativeIdentitySource =
-  | 'occt7-shim'
-  | 'brepgraph'
+export type OccNativeIdentitySource = "occt7-shim" | "brepgraph";
 
 export type OccNativeBufferScalar =
-  | 'uint8'
-  | 'uint16'
-  | 'uint32'
-  | 'int32'
-  | 'float32'
-  | 'float64'
+  | "uint8"
+  | "uint16"
+  | "uint32"
+  | "int32"
+  | "float32"
+  | "float64";
 
 export interface OccNativeBufferRef {
-  bufferId: `occ_buffer_${string}`
-  scalar: OccNativeBufferScalar
-  byteOffset: number
-  byteLength: number
-  itemStride: number
+  bufferId: `occ_buffer_${string}`;
+  scalar: OccNativeBufferScalar;
+  byteOffset: number;
+  byteLength: number;
+  itemStride: number;
 }
 
 export interface OccNativeTransferableBuffer {
-  bufferId: OccNativeBufferRef['bufferId']
-  buffer: ArrayBuffer
+  bufferId: OccNativeBufferRef["bufferId"];
+  buffer: ArrayBuffer;
 }
 
 export interface OccNativeTableLayout {
-  rowCount: number
-  columns: Record<string, OccNativeBufferRef>
+  rowCount: number;
+  columns: Record<string, OccNativeBufferRef>;
 }
 
 export interface OccNativeTopologyTableLayout {
-  bodies: OccNativeTableLayout
-  solids: OccNativeTableLayout
-  shells: OccNativeTableLayout
-  faces: OccNativeTableLayout
-  loops: OccNativeTableLayout
-  coedges: OccNativeTableLayout
-  edges: OccNativeTableLayout
-  vertices: OccNativeTableLayout
+  bodies: OccNativeTableLayout;
+  solids: OccNativeTableLayout;
+  shells: OccNativeTableLayout;
+  faces: OccNativeTableLayout;
+  loops: OccNativeTableLayout;
+  coedges: OccNativeTableLayout;
+  edges: OccNativeTableLayout;
+  vertices: OccNativeTableLayout;
 }
 
 export interface OccNativeIdentityTableLayout {
-  topologyToKernelIdentity: OccNativeTableLayout
-  kernelHistorySuccessors: OccNativeTableLayout
-  publicReferenceBindings: OccNativeTableLayout
+  topologyToKernelIdentity: OccNativeTableLayout;
+  kernelHistorySuccessors: OccNativeTableLayout;
+  publicReferenceBindings: OccNativeTableLayout;
 }
 
 export interface OccNativeAdjacencyTableLayout {
-  faceLoops: OccNativeTableLayout
-  loopCoedges: OccNativeTableLayout
-  edgeVertices: OccNativeTableLayout
-  coedgeOpposites: OccNativeTableLayout
-  faceEdges: OccNativeTableLayout
-  vertexEdges: OccNativeTableLayout
+  faceLoops: OccNativeTableLayout;
+  loopCoedges: OccNativeTableLayout;
+  edgeVertices: OccNativeTableLayout;
+  coedgeOpposites: OccNativeTableLayout;
+  faceEdges: OccNativeTableLayout;
+  vertexEdges: OccNativeTableLayout;
 }
 
 export interface OccNativeMeshTableLayout {
-  positions: OccNativeBufferRef
-  normals: OccNativeBufferRef
-  triangleIndices: OccNativeBufferRef
-  triangleFaceBindings: OccNativeBufferRef
+  positions: OccNativeBufferRef;
+  normals: OccNativeBufferRef;
+  triangleIndices: OccNativeBufferRef;
+  triangleFaceBindings: OccNativeBufferRef;
 }
 
 export interface OccNativeExactBrepTableLayout {
-  topology: OccNativeTopologyTableLayout
-  curves: OccNativeTableLayout
-  surfaces: OccNativeTableLayout
-  trims: OccNativeTableLayout
-  fallbackTriangles: OccNativeMeshTableLayout | null
+  topology: OccNativeTopologyTableLayout;
+  curves: OccNativeTableLayout;
+  surfaces: OccNativeTableLayout;
+  trims: OccNativeTableLayout;
+  fallbackTriangles: OccNativeMeshTableLayout | null;
 }
 
 export interface OccNativeDiagnosticTableLayout {
-  diagnostics: OccNativeTableLayout
-  targetBindings: OccNativeTableLayout | null
+  diagnostics: OccNativeTableLayout;
+  targetBindings: OccNativeTableLayout | null;
 }
 
 export interface OccNativeTopologyRecord {
-  id: OccNativeTopologyId
-  kind: OccNativeTopologyKind
-  bodyId: BodyId
-  parentId: OccNativeTopologyId | null
-  kernelUid: string
+  id: OccNativeTopologyId;
+  kind: OccNativeTopologyKind;
+  bodyId: BodyId;
+  parentId: OccNativeTopologyId | null;
+  kernelUid: string;
 }
 
 export interface OccNativeKernelIdentityRecord {
-  topologyId: OccNativeTopologyId
-  source: OccNativeIdentitySource
-  kernelUid: string
-  publicRef: DurableRef | null
+  topologyId: OccNativeTopologyId;
+  source: OccNativeIdentitySource;
+  kernelUid: string;
+  publicRef: DurableRef | null;
 }
 
 export type OccNativeReferenceInvalidationReason =
-  | 'deleted'
-  | 'ambiguous'
-  | 'unsupported-history'
-  | 'invalid-result'
-  | 'unsafe-repair'
+  | "deleted"
+  | "ambiguous"
+  | "unsupported-history"
+  | "invalid-result"
+  | "unsafe-repair";
 
 export interface OccNativeReferenceInvalidation {
-  target: DurableRef
-  reason: OccNativeReferenceInvalidationReason
-  successors: readonly DurableRef[]
-  featureId: FeatureId | null
-  message: string
+  target: DurableRef;
+  reason: OccNativeReferenceInvalidationReason;
+  successors: readonly DurableRef[];
+  featureId: FeatureId | null;
+  message: string;
 }
 
 export interface OccNativeTopologyDiagnostic {
-  code: string
-  severity: 'info' | 'warning' | 'error'
-  message: string
-  target: DurableRef | null
-  detail: Record<string, unknown> | null
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  target: DurableRef | null;
+  detail: Record<string, unknown> | null;
 }
 
-export const OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION = 'occ-native-history-payload/v1alpha1'
+export const OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION =
+  "occ-native-history-payload/v1alpha1";
 
 export interface OccNativeFeatureTransactionHistoryPayload {
-  schemaVersion: typeof OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION
-  source: OccNativeIdentitySource
-  status: 'available' | 'unsupported'
-  operation?: string
-  bodyId?: BodyId
-  previousTopologyToken?: string
-  topologyToken?: string
-  records: readonly OccNativeFeatureTransactionHistoryRecord[]
-  diagnostics: readonly OccNativeTopologyDiagnostic[]
+  schemaVersion: typeof OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION;
+  source: OccNativeIdentitySource;
+  status: "available" | "unsupported";
+  operation?: string;
+  bodyId?: BodyId;
+  previousTopologyToken?: string;
+  topologyToken?: string;
+  records: readonly OccNativeFeatureTransactionHistoryRecord[];
+  diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
 
 export type OccNativeFeatureTransactionHistoryReason =
-  | 'unique-successor'
-  | 'ambiguous'
-  | 'deleted'
-  | 'missing'
+  | "unique-successor"
+  | "ambiguous"
+  | "deleted"
+  | "missing";
 
 export interface OccNativeFeatureTransactionHistoryRecord {
-  target: DurableRef
-  reason: OccNativeFeatureTransactionHistoryReason
-  successors: readonly DurableRef[]
+  target: DurableRef;
+  reason: OccNativeFeatureTransactionHistoryReason;
+  successors: readonly DurableRef[];
 }
 
 export interface OccNativeTopologyBodyPayload {
-  bodyId: BodyId
-  topology: readonly OccNativeTopologyRecord[]
-  identity: readonly OccNativeKernelIdentityRecord[]
-  adjacency: OccNativeAdjacencyTableLayout
-  renderMesh: OccNativeMeshTableLayout | null
-  renderMeshSummary?: OccNativeShimMeshSummary | null
-  exactBrep: OccNativeExactBrepTableLayout | null
-  invalidations: readonly OccNativeReferenceInvalidation[]
+  bodyId: BodyId;
+  topology: readonly OccNativeTopologyRecord[];
+  identity: readonly OccNativeKernelIdentityRecord[];
+  adjacency: OccNativeAdjacencyTableLayout;
+  renderMesh: OccNativeMeshTableLayout | null;
+  renderMeshSummary?: OccNativeShimMeshSummary | null;
+  exactBrep: OccNativeExactBrepTableLayout | null;
+  invalidations: readonly OccNativeReferenceInvalidation[];
 }
 
 export interface OccNativeTopologyPayload {
-  schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION
-  source: OccNativeIdentitySource
-  revisionId: RevisionId
-  lodTierId: OccTessellationTierId | null
-  bodies: readonly OccNativeTopologyBodyPayload[]
+  schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION;
+  source: OccNativeIdentitySource;
+  revisionId: RevisionId;
+  lodTierId: OccTessellationTierId | null;
+  bodies: readonly OccNativeTopologyBodyPayload[];
   tables: {
-    topology: OccNativeTopologyTableLayout
-    identity: OccNativeIdentityTableLayout
-    diagnostics: OccNativeDiagnosticTableLayout
-  }
-  buffers: readonly OccNativeTransferableBuffer[]
-  diagnostics: readonly OccNativeTopologyDiagnostic[]
+    topology: OccNativeTopologyTableLayout;
+    identity: OccNativeIdentityTableLayout;
+    diagnostics: OccNativeDiagnosticTableLayout;
+  };
+  buffers: readonly OccNativeTransferableBuffer[];
+  diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
 
 export interface OccNativeExactBrepPayload {
-  schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION
-  revisionId: RevisionId
-  target: DurableRef
-  brep: CadaraBrepGeometryAssetData
-  tables: OccNativeExactBrepTableLayout
-  buffers: readonly OccNativeTransferableBuffer[]
-  diagnostics: readonly OccNativeTopologyDiagnostic[]
+  schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION;
+  revisionId: RevisionId;
+  target: DurableRef;
+  brep: CadaraBrepGeometryAssetData;
+  tables: OccNativeExactBrepTableLayout;
+  buffers: readonly OccNativeTransferableBuffer[];
+  diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
 
 export interface OccNativeMeshExportPayload {
-  schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION
-  revisionId: RevisionId
-  target: DurableRef
-  options: MeshExportAccuracy
-  mesh: OccNativeMeshTableLayout
-  meshSummary?: OccNativeShimMeshSummary | null
-  buffers: readonly OccNativeTransferableBuffer[]
-  diagnostics: readonly OccNativeTopologyDiagnostic[]
+  schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION;
+  revisionId: RevisionId;
+  target: DurableRef;
+  options: MeshExportAccuracy;
+  mesh: OccNativeMeshTableLayout;
+  meshSummary?: OccNativeShimMeshSummary | null;
+  buffers: readonly OccNativeTransferableBuffer[];
+  diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
 
 export interface OccNativeTopologyCapabilityProbeResult {
-  kind: 'available' | 'missing'
-  requiredEntrypoints: readonly OccNativeTopologyKernelEntrypoint[]
-  missingEntrypoints: readonly OccNativeTopologyKernelEntrypoint[]
-  diagnostics: readonly OccNativeTopologyDiagnostic[]
+  kind: "available" | "missing";
+  requiredEntrypoints: readonly OccNativeTopologyKernelEntrypoint[];
+  missingEntrypoints: readonly OccNativeTopologyKernelEntrypoint[];
+  diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
 
 export interface OccNativeShimMeshSummary {
-  nodeCount: number
-  triangleCount: number
-  linearDeflection: number
-  angularDeflection: number
-  positions?: readonly (readonly [number, number, number])[]
-  triangleIndices?: readonly (readonly [number, number, number])[]
-  triangleFaceBindings?: readonly string[]
+  nodeCount: number;
+  triangleCount: number;
+  linearDeflection: number;
+  angularDeflection: number;
+  positions?: readonly (readonly [number, number, number])[];
+  triangleIndices?: readonly (readonly [number, number, number])[];
+  triangleFaceBindings?: readonly string[];
 }
 
 export interface OccNativeShimVertexPointRecord {
-  vertexId: VertexId
-  point: readonly [number, number, number]
+  vertexId: VertexId;
+  point: readonly [number, number, number];
 }
 
 export interface OccNativeShimFaceEdgeRecord {
-  faceId: FaceId
-  edgeIds: readonly EdgeId[]
+  faceId: FaceId;
+  edgeIds: readonly EdgeId[];
 }
 
 const nativeShimTopologyRecordSchema = z.object({
   id: z.string().min(1),
   kernelUid: z.string().min(1).optional(),
-  kind: z.enum(['face', 'edge', 'vertex']),
+  kind: z.enum(["face", "edge", "vertex"]),
   bodyId: z.string().min(1),
   index: z.number().int().positive(),
-})
+});
 
 const nativeShimEdgeVertexRecordSchema = z.object({
   edgeId: z.string().min(1),
   start: z.tuple([z.number(), z.number(), z.number()]),
   end: z.tuple([z.number(), z.number(), z.number()]),
-})
+});
 
 const nativeShimMeshSummarySchema = z.object({
   nodeCount: z.number().int().nonnegative(),
@@ -408,110 +409,153 @@ const nativeShimMeshSummarySchema = z.object({
   linearDeflection: z.number().nonnegative(),
   angularDeflection: z.number().nonnegative(),
   positions: z.array(z.tuple([z.number(), z.number(), z.number()])).optional(),
-  triangleIndices: z.array(z.tuple([
-    z.number().int().nonnegative(),
-    z.number().int().nonnegative(),
-    z.number().int().nonnegative(),
-  ])).optional(),
+  triangleIndices: z
+    .array(
+      z.tuple([
+        z.number().int().nonnegative(),
+        z.number().int().nonnegative(),
+        z.number().int().nonnegative(),
+      ]),
+    )
+    .optional(),
   triangleFaceBindings: z.array(z.string().min(1)).optional(),
-})
+});
 
 const nativeShimVertexPointRecordSchema = z.object({
   vertexId: z.string().min(1),
   point: z.tuple([z.number(), z.number(), z.number()]),
-})
+});
 
 const nativeShimFaceEdgeRecordSchema = z.object({
   faceId: z.string().min(1),
   edgeIds: z.array(z.string().min(1)),
-})
+});
 
-const nativeTopologyDiagnosticSchema: z.ZodType<OccNativeTopologyDiagnostic> = z.object({
-  code: z.string().min(1),
-  severity: z.enum(['info', 'warning', 'error']),
-  message: z.string().min(1),
-  target: z.custom<DurableRef>((value) =>
-    (typeof value === 'object' && value !== null && 'kind' in value) || value === null,
-  ).nullable(),
-  detail: z.record(z.string(), z.unknown()).nullable(),
-})
+const nativeTopologyDiagnosticSchema: z.ZodType<OccNativeTopologyDiagnostic> =
+  z.object({
+    code: z.string().min(1),
+    severity: z.enum(["info", "warning", "error"]),
+    message: z.string().min(1),
+    target: z
+      .custom<DurableRef>(
+        (value) =>
+          (typeof value === "object" && value !== null && "kind" in value) ||
+          value === null,
+      )
+      .nullable(),
+    detail: z.record(z.string(), z.unknown()).nullable(),
+  });
 
-const nativeFeatureTransactionHistoryPayloadSchema: z.ZodType<OccNativeFeatureTransactionHistoryPayload> = z.object({
-  schemaVersion: z.literal(OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION),
-  source: z.enum(['occt7-shim', 'brepgraph']),
-  status: z.enum(['available', 'unsupported']),
-  operation: z.string().optional(),
-  bodyId: z.string().optional() as z.ZodType<BodyId | undefined>,
-  previousTopologyToken: z.string().optional(),
-  topologyToken: z.string().optional(),
-  records: z.array(z.object({
-    target: z.custom<DurableRef>((value) => typeof value === 'object' && value !== null && 'kind' in value),
-    reason: z.enum(['unique-successor', 'ambiguous', 'deleted', 'missing']),
-    successors: z.array(z.custom<DurableRef>((value) => typeof value === 'object' && value !== null && 'kind' in value)),
-  })).optional().default([]),
-  diagnostics: z.array(nativeTopologyDiagnosticSchema).optional().default([]),
-})
+const nativeFeatureTransactionHistoryPayloadSchema: z.ZodType<OccNativeFeatureTransactionHistoryPayload> =
+  z.object({
+    schemaVersion: z.literal(
+      OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION,
+    ),
+    source: z.enum(["occt7-shim", "brepgraph"]),
+    status: z.enum(["available", "unsupported"]),
+    operation: z.string().optional(),
+    bodyId: z.string().optional() as z.ZodType<BodyId | undefined>,
+    previousTopologyToken: z.string().optional(),
+    topologyToken: z.string().optional(),
+    records: z
+      .array(
+        z.object({
+          target: z.custom<DurableRef>(
+            (value) =>
+              typeof value === "object" && value !== null && "kind" in value,
+          ),
+          reason: z.enum([
+            "unique-successor",
+            "ambiguous",
+            "deleted",
+            "missing",
+          ]),
+          successors: z.array(
+            z.custom<DurableRef>(
+              (value) =>
+                typeof value === "object" && value !== null && "kind" in value,
+            ),
+          ),
+        }),
+      )
+      .optional()
+      .default([]),
+    diagnostics: z.array(nativeTopologyDiagnosticSchema).optional().default([]),
+  });
 
 const nativeShimPayloadSchema = z.object({
   schemaVersion: z.literal(OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION),
-  source: z.literal('occt7-shim'),
+  source: z.literal("occt7-shim"),
   bodyId: z.string().min(1).optional(),
   topologyToken: z.string().min(1).optional(),
-  counts: z.object({
-    faces: z.number().int().nonnegative(),
-    edges: z.number().int().nonnegative(),
-    vertices: z.number().int().nonnegative(),
-  }).optional(),
+  counts: z
+    .object({
+      faces: z.number().int().nonnegative(),
+      edges: z.number().int().nonnegative(),
+      vertices: z.number().int().nonnegative(),
+    })
+    .optional(),
   topology: z.array(nativeShimTopologyRecordSchema).optional().default([]),
-  edgeVertices: z.array(nativeShimEdgeVertexRecordSchema).optional().default([]),
-  vertexPoints: z.array(nativeShimVertexPointRecordSchema).optional().default([]),
+  edgeVertices: z
+    .array(nativeShimEdgeVertexRecordSchema)
+    .optional()
+    .default([]),
+  vertexPoints: z
+    .array(nativeShimVertexPointRecordSchema)
+    .optional()
+    .default([]),
   faceEdges: z.array(nativeShimFaceEdgeRecordSchema).optional().default([]),
-  cadaraBrep: z.custom<CadaraBrepGeometryAssetData>((value) =>
-    typeof value === 'object'
-    && value !== null
-    && 'kind' in value
-    && value.kind === 'cadaraBrep'
-    && 'schemaVersion' in value
-    && value.schemaVersion === 'cadara-brep/v1alpha1',
-  ).optional(),
+  cadaraBrep: z
+    .custom<CadaraBrepGeometryAssetData>(
+      (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        "kind" in value &&
+        value.kind === "cadaraBrep" &&
+        "schemaVersion" in value &&
+        value.schemaVersion === "cadara-brep/v1alpha1",
+    )
+    .optional(),
   mesh: nativeShimMeshSummarySchema.optional(),
   diagnostics: z.array(nativeTopologyDiagnosticSchema).optional().default([]),
-})
+});
 
-export type OccNativeShimPayload = z.infer<typeof nativeShimPayloadSchema>
+export type OccNativeShimPayload = z.infer<typeof nativeShimPayloadSchema>;
 
-const emptyBuffer = new ArrayBuffer(0)
+const emptyBuffer = new ArrayBuffer(0);
 
 function emptyBufferRef(
   suffix: string,
   scalar: OccNativeBufferScalar,
 ): OccNativeBufferRef {
   return {
-    bufferId: `occ_buffer_empty_${suffix}` as OccNativeBufferRef['bufferId'],
+    bufferId: `occ_buffer_empty_${suffix}` as OccNativeBufferRef["bufferId"],
     scalar,
     byteOffset: 0,
     byteLength: 0,
     itemStride: 0,
-  }
+  };
 }
 
 function emptyTableLayout(rowCount = 0): OccNativeTableLayout {
   return {
     rowCount,
     columns: {},
-  }
+  };
 }
 
-function createTopologyTableLayout(counts: {
-  bodies?: number
-  solids?: number
-  shells?: number
-  faces?: number
-  loops?: number
-  coedges?: number
-  edges?: number
-  vertices?: number
-} = {}): OccNativeTopologyTableLayout {
+function createTopologyTableLayout(
+  counts: {
+    bodies?: number;
+    solids?: number;
+    shells?: number;
+    faces?: number;
+    loops?: number;
+    coedges?: number;
+    edges?: number;
+    vertices?: number;
+  } = {},
+): OccNativeTopologyTableLayout {
   return {
     bodies: emptyTableLayout(counts.bodies ?? 0),
     solids: emptyTableLayout(counts.solids ?? 0),
@@ -521,7 +565,7 @@ function createTopologyTableLayout(counts: {
     coedges: emptyTableLayout(counts.coedges ?? 0),
     edges: emptyTableLayout(counts.edges ?? 0),
     vertices: emptyTableLayout(counts.vertices ?? 0),
-  }
+  };
 }
 
 function createIdentityTableLayout(rowCount = 0): OccNativeIdentityTableLayout {
@@ -529,10 +573,12 @@ function createIdentityTableLayout(rowCount = 0): OccNativeIdentityTableLayout {
     topologyToKernelIdentity: emptyTableLayout(rowCount),
     kernelHistorySuccessors: emptyTableLayout(),
     publicReferenceBindings: emptyTableLayout(rowCount),
-  }
+  };
 }
 
-function createAdjacencyTableLayout(edgeVertexCount = 0): OccNativeAdjacencyTableLayout {
+function createAdjacencyTableLayout(
+  edgeVertexCount = 0,
+): OccNativeAdjacencyTableLayout {
   return {
     faceLoops: emptyTableLayout(),
     loopCoedges: emptyTableLayout(),
@@ -540,22 +586,22 @@ function createAdjacencyTableLayout(edgeVertexCount = 0): OccNativeAdjacencyTabl
     coedgeOpposites: emptyTableLayout(),
     faceEdges: emptyTableLayout(),
     vertexEdges: emptyTableLayout(),
-  }
+  };
 }
 
 function createMeshTableLayout(): OccNativeMeshTableLayout {
   return {
-    positions: emptyBufferRef('positions', 'float32'),
-    normals: emptyBufferRef('normals', 'float32'),
-    triangleIndices: emptyBufferRef('triangle_indices', 'uint32'),
-    triangleFaceBindings: emptyBufferRef('triangle_face_bindings', 'uint32'),
-  }
+    positions: emptyBufferRef("positions", "float32"),
+    normals: emptyBufferRef("normals", "float32"),
+    triangleIndices: emptyBufferRef("triangle_indices", "uint32"),
+    triangleFaceBindings: emptyBufferRef("triangle_face_bindings", "uint32"),
+  };
 }
 
 function transferArrayBuffer(view: ArrayBufferView): ArrayBuffer {
-  const copy = new Uint8Array(view.byteLength)
-  copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
-  return copy.buffer
+  const copy = new Uint8Array(view.byteLength);
+  copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+  return copy.buffer;
 }
 
 function createBufferRef(
@@ -563,9 +609,9 @@ function createBufferRef(
   scalar: OccNativeBufferScalar,
   view: ArrayBufferView,
   itemStride: number,
-): { ref: OccNativeBufferRef, transferable: OccNativeTransferableBuffer } {
-  const bufferId = `occ_buffer_${suffix}` as OccNativeBufferRef['bufferId']
-  const buffer = transferArrayBuffer(view)
+): { ref: OccNativeBufferRef; transferable: OccNativeTransferableBuffer } {
+  const bufferId = `occ_buffer_${suffix}` as OccNativeBufferRef["bufferId"];
+  const buffer = transferArrayBuffer(view);
 
   return {
     ref: {
@@ -579,7 +625,7 @@ function createBufferRef(
       bufferId,
       buffer,
     },
-  }
+  };
 }
 
 function packMeshSummaryBuffers(
@@ -587,114 +633,136 @@ function packMeshSummaryBuffers(
   suffix: string,
   faceIds: readonly string[] = [],
 ): {
-  layout: OccNativeMeshTableLayout
-  buffers: OccNativeTransferableBuffer[]
+  layout: OccNativeMeshTableLayout;
+  buffers: OccNativeTransferableBuffer[];
 } {
   if (!mesh) {
     return {
       layout: createMeshTableLayout(),
       buffers: [],
-    }
+    };
   }
 
-  const buffers: OccNativeTransferableBuffer[] = []
-  const positions = new Float32Array((mesh.positions?.length ?? 0) * 3)
+  const buffers: OccNativeTransferableBuffer[] = [];
+  const positions = new Float32Array((mesh.positions?.length ?? 0) * 3);
   mesh.positions?.forEach((point, index) => {
-    positions[(index * 3)] = point[0]
-    positions[(index * 3) + 1] = point[1]
-    positions[(index * 3) + 2] = point[2]
-  })
+    positions[index * 3] = point[0];
+    positions[index * 3 + 1] = point[1];
+    positions[index * 3 + 2] = point[2];
+  });
 
-  const triangleIndices = new Uint32Array((mesh.triangleIndices?.length ?? 0) * 3)
+  const triangleIndices = new Uint32Array(
+    (mesh.triangleIndices?.length ?? 0) * 3,
+  );
   mesh.triangleIndices?.forEach((triangle, index) => {
-    triangleIndices[(index * 3)] = triangle[0]
-    triangleIndices[(index * 3) + 1] = triangle[1]
-    triangleIndices[(index * 3) + 2] = triangle[2]
-  })
+    triangleIndices[index * 3] = triangle[0];
+    triangleIndices[index * 3 + 1] = triangle[1];
+    triangleIndices[index * 3 + 2] = triangle[2];
+  });
 
-  const faceIndexById = new Map(faceIds.map((faceId, index) => [faceId, index]))
-  const fallbackFaceIndexById = new Map<string, number>()
-  const triangleFaceBindings = new Uint32Array(mesh.triangleFaceBindings?.length ?? 0)
+  const faceIndexById = new Map(
+    faceIds.map((faceId, index) => [faceId, index]),
+  );
+  const fallbackFaceIndexById = new Map<string, number>();
+  const triangleFaceBindings = new Uint32Array(
+    mesh.triangleFaceBindings?.length ?? 0,
+  );
   mesh.triangleFaceBindings?.forEach((faceId, index) => {
-    const explicitIndex = faceIndexById.get(faceId)
+    const explicitIndex = faceIndexById.get(faceId);
     if (explicitIndex !== undefined) {
-      triangleFaceBindings[index] = explicitIndex
-      return
+      triangleFaceBindings[index] = explicitIndex;
+      return;
     }
 
-    const fallbackIndex = fallbackFaceIndexById.get(faceId) ?? fallbackFaceIndexById.size
-    fallbackFaceIndexById.set(faceId, fallbackIndex)
-    triangleFaceBindings[index] = fallbackIndex
-  })
+    const fallbackIndex =
+      fallbackFaceIndexById.get(faceId) ?? fallbackFaceIndexById.size;
+    fallbackFaceIndexById.set(faceId, fallbackIndex);
+    triangleFaceBindings[index] = fallbackIndex;
+  });
 
-  const packedPositions = createBufferRef(`${suffix}_positions`, 'float32', positions, 3)
-  const packedTriangleIndices = createBufferRef(`${suffix}_triangle_indices`, 'uint32', triangleIndices, 3)
+  const packedPositions = createBufferRef(
+    `${suffix}_positions`,
+    "float32",
+    positions,
+    3,
+  );
+  const packedTriangleIndices = createBufferRef(
+    `${suffix}_triangle_indices`,
+    "uint32",
+    triangleIndices,
+    3,
+  );
   const packedTriangleFaceBindings = createBufferRef(
     `${suffix}_triangle_face_bindings`,
-    'uint32',
+    "uint32",
     triangleFaceBindings,
     1,
-  )
+  );
   buffers.push(
     packedPositions.transferable,
     packedTriangleIndices.transferable,
     packedTriangleFaceBindings.transferable,
-  )
+  );
 
   return {
     layout: {
       positions: packedPositions.ref,
-      normals: emptyBufferRef(`${suffix}_normals`, 'float32'),
+      normals: emptyBufferRef(`${suffix}_normals`, "float32"),
       triangleIndices: packedTriangleIndices.ref,
       triangleFaceBindings: packedTriangleFaceBindings.ref,
     },
     buffers,
-  }
+  };
 }
 
 function createJsonTransferableBuffer(
   suffix: string,
   value: unknown,
 ): OccNativeTransferableBuffer {
-  const encoded = new TextEncoder().encode(JSON.stringify(value))
+  const encoded = new TextEncoder().encode(JSON.stringify(value));
   return {
-    bufferId: `occ_buffer_${suffix}` as OccNativeBufferRef['bufferId'],
+    bufferId: `occ_buffer_${suffix}` as OccNativeBufferRef["bufferId"],
     buffer: transferArrayBuffer(encoded),
-  }
+  };
 }
 
-function createExactBrepTableLayout(topology: OccNativeTopologyTableLayout): OccNativeExactBrepTableLayout {
+function createExactBrepTableLayout(
+  topology: OccNativeTopologyTableLayout,
+): OccNativeExactBrepTableLayout {
   return {
     topology,
     curves: emptyTableLayout(),
     surfaces: emptyTableLayout(),
     trims: emptyTableLayout(),
     fallbackTriangles: null,
-  }
+  };
 }
 
 function createExactBrepTableLayoutFromCadaraBrep(
   brep: CadaraBrepGeometryAssetData,
 ): OccNativeExactBrepTableLayout {
-  const counts = brep.bodies.reduce((nextCounts, body) => {
-    nextCounts.solids += body.topology.solids.length
-    nextCounts.shells += body.topology.shells.length
-    nextCounts.faces += body.topology.faces.length
-    nextCounts.loops += body.topology.loops.length
-    nextCounts.coedges += body.topology.coedges.length
-    nextCounts.edges += body.topology.edges.length
-    nextCounts.vertices += body.topology.vertices.length
-    return nextCounts
-  }, {
-    bodies: brep.bodies.length,
-    solids: 0,
-    shells: 0,
-    faces: 0,
-    loops: 0,
-    coedges: 0,
-    edges: 0,
-    vertices: 0,
-  })
+  const counts = brep.bodies.reduce(
+    (nextCounts, body) => {
+      nextCounts.solids += body.topology.solids.length;
+      nextCounts.shells += body.topology.shells.length;
+      nextCounts.faces += body.topology.faces.length;
+      nextCounts.loops += body.topology.loops.length;
+      nextCounts.coedges += body.topology.coedges.length;
+      nextCounts.edges += body.topology.edges.length;
+      nextCounts.vertices += body.topology.vertices.length;
+      return nextCounts;
+    },
+    {
+      bodies: brep.bodies.length,
+      solids: 0,
+      shells: 0,
+      faces: 0,
+      loops: 0,
+      coedges: 0,
+      edges: 0,
+      vertices: 0,
+    },
+  );
 
   return {
     topology: createTopologyTableLayout(counts),
@@ -702,7 +770,7 @@ function createExactBrepTableLayoutFromCadaraBrep(
     surfaces: emptyTableLayout(counts.faces),
     trims: emptyTableLayout(counts.coedges),
     fallbackTriangles: null,
-  }
+  };
 }
 
 function createEmptyCadaraBrepTopology(): CadaraBrepTopologyRecord {
@@ -714,39 +782,48 @@ function createEmptyCadaraBrepTopology(): CadaraBrepTopologyRecord {
     faces: [],
     shells: [],
     solids: [],
-  }
+  };
 }
 
 function createNativeExactBrepUnsupportedDiagnostic(
   nativePayload: OccNativeShimPayload,
   target: DurableRef,
 ): OccNativeTopologyDiagnostic | null {
-  const hasNativeTopology = nativePayload.topology.length > 0
+  const hasNativeTopology = nativePayload.topology.length > 0;
 
   if (!hasNativeTopology) {
-    return null
+    return null;
   }
 
   return createNativeTopologyDiagnostic(
-    'occ-native-exact-brep-unsupported-topology',
-    'Native exact B-rep payload lacks oriented wires, coedges, and real OCC curve/surface records required to emit valid Cadara B-rep topology.',
+    "occ-native-exact-brep-unsupported-topology",
+    "Native exact B-rep payload lacks oriented wires, coedges, and real OCC curve/surface records required to emit valid Cadara B-rep topology.",
     {
-      reason: 'missing-oriented-coedges',
-      nativeFaces: nativePayload.counts?.faces ?? nativePayload.topology.filter((entry) => entry.kind === 'face').length,
-      nativeEdges: nativePayload.counts?.edges ?? nativePayload.topology.filter((entry) => entry.kind === 'edge').length,
-      nativeVertices: nativePayload.counts?.vertices ?? nativePayload.topology.filter((entry) => entry.kind === 'vertex').length,
+      reason: "missing-oriented-coedges",
+      nativeFaces:
+        nativePayload.counts?.faces ??
+        nativePayload.topology.filter((entry) => entry.kind === "face").length,
+      nativeEdges:
+        nativePayload.counts?.edges ??
+        nativePayload.topology.filter((entry) => entry.kind === "edge").length,
+      nativeVertices:
+        nativePayload.counts?.vertices ??
+        nativePayload.topology.filter((entry) => entry.kind === "vertex")
+          .length,
       nativeFaceEdgeRecords: nativePayload.faceEdges.length,
       nativeMeshTriangles: nativePayload.mesh?.triangleCount ?? 0,
     },
     target,
-  )
+  );
 }
 
-function createDiagnosticTableLayout(rowCount = 0): OccNativeDiagnosticTableLayout {
+function createDiagnosticTableLayout(
+  rowCount = 0,
+): OccNativeDiagnosticTableLayout {
   return {
     diagnostics: emptyTableLayout(rowCount),
     targetBindings: null,
-  }
+  };
 }
 
 export function createNativeTopologyDiagnostic(
@@ -757,42 +834,42 @@ export function createNativeTopologyDiagnostic(
 ): OccNativeTopologyDiagnostic {
   return {
     code,
-    severity: 'error',
+    severity: "error",
     message,
     target,
     detail,
-  }
+  };
 }
 
 function nativeTopologyRecordToPublicRef(
   record: OccNativeTopologyRecord,
 ): DurableRef | null {
   switch (record.kind) {
-    case 'face':
+    case "face":
       return {
-        kind: 'face',
+        kind: "face",
         bodyId: record.bodyId,
         faceId: record.id as FaceId,
-      }
-    case 'edge':
+      };
+    case "edge":
       return {
-        kind: 'edge',
+        kind: "edge",
         bodyId: record.bodyId,
         edgeId: record.id as EdgeId,
-      }
-    case 'vertex':
+      };
+    case "vertex":
       return {
-        kind: 'vertex',
+        kind: "vertex",
         bodyId: record.bodyId,
         vertexId: record.id as VertexId,
-      }
-    case 'body':
+      };
+    case "body":
       return {
-        kind: 'body',
+        kind: "body",
         bodyId: record.bodyId,
-      }
+      };
     default:
-      return null
+      return null;
   }
 }
 
@@ -801,10 +878,10 @@ function createIdentityRecords(
 ): OccNativeKernelIdentityRecord[] {
   return topology.map((record) => ({
     topologyId: record.id,
-    source: 'occt7-shim',
+    source: "occt7-shim",
     kernelUid: record.kernelUid,
     publicRef: nativeTopologyRecordToPublicRef(record),
-  }))
+  }));
 }
 
 function countTopologyKinds(topology: readonly OccNativeTopologyRecord[]) {
@@ -817,38 +894,38 @@ function countTopologyKinds(topology: readonly OccNativeTopologyRecord[]) {
     coedges: 0,
     edges: 0,
     vertices: 0,
-  }
+  };
 
   for (const record of topology) {
     switch (record.kind) {
-      case 'body':
-        counts.bodies += 1
-        break
-      case 'solid':
-        counts.solids += 1
-        break
-      case 'shell':
-        counts.shells += 1
-        break
-      case 'face':
-        counts.faces += 1
-        break
-      case 'loop':
-        counts.loops += 1
-        break
-      case 'coedge':
-        counts.coedges += 1
-        break
-      case 'edge':
-        counts.edges += 1
-        break
-      case 'vertex':
-        counts.vertices += 1
-        break
+      case "body":
+        counts.bodies += 1;
+        break;
+      case "solid":
+        counts.solids += 1;
+        break;
+      case "shell":
+        counts.shells += 1;
+        break;
+      case "face":
+        counts.faces += 1;
+        break;
+      case "loop":
+        counts.loops += 1;
+        break;
+      case "coedge":
+        counts.coedges += 1;
+        break;
+      case "edge":
+        counts.edges += 1;
+        break;
+      case "vertex":
+        counts.vertices += 1;
+        break;
     }
   }
 
-  return counts
+  return counts;
 }
 
 function createBodyTopologyRecords(
@@ -858,127 +935,146 @@ function createBodyTopologyRecords(
   return [
     {
       id: bodyId,
-      kind: 'body',
+      kind: "body",
       bodyId,
       parentId: null,
       kernelUid: `occt7-shim:body:${bodyId}`,
     },
-    ...nativePayload.topology.map((record) => ({
-      id: record.id as OccNativeTopologyId,
-      kind: record.kind,
-      bodyId: record.bodyId as BodyId,
-      parentId: bodyId,
-      kernelUid: record.kernelUid ?? record.id,
-    } satisfies OccNativeTopologyRecord)),
-  ]
+    ...nativePayload.topology.map(
+      (record) =>
+        ({
+          id: record.id as OccNativeTopologyId,
+          kind: record.kind,
+          bodyId: record.bodyId as BodyId,
+          parentId: bodyId,
+          kernelUid: record.kernelUid ?? record.id,
+        }) satisfies OccNativeTopologyRecord,
+    ),
+  ];
 }
 
 export function parseNativeShimPayloadJson(json: string): OccNativeShimPayload {
-  const parsed = JSON.parse(json) as unknown
-  return nativeShimPayloadSchema.parse(parsed)
+  const parsed = JSON.parse(json) as unknown;
+  return nativeShimPayloadSchema.parse(parsed);
 }
 
-export function parseNativeFeatureTransactionHistoryJson(json: string): OccNativeFeatureTransactionHistoryPayload {
-  const parsed = JSON.parse(json) as unknown
-  return nativeFeatureTransactionHistoryPayloadSchema.parse(parsed)
+export function parseNativeFeatureTransactionHistoryJson(
+  json: string,
+): OccNativeFeatureTransactionHistoryPayload {
+  const parsed = JSON.parse(json) as unknown;
+  return nativeFeatureTransactionHistoryPayloadSchema.parse(parsed);
 }
 
 export function createOccNativeReferenceInvalidationsFromHistoryPayload(
   history: OccNativeFeatureTransactionHistoryPayload,
 ): OccNativeReferenceInvalidation[] {
-  if (history.status !== 'available') {
+  if (history.status !== "available") {
     return history.diagnostics.map((diagnostic) => ({
-      target: diagnostic.target ?? ({ kind: 'body', bodyId: (history.bodyId ?? 'body_unresolved') as BodyId }),
-      reason: 'unsupported-history',
+      target: diagnostic.target ?? {
+        kind: "body",
+        bodyId: (history.bodyId ?? "body_unresolved") as BodyId,
+      },
+      reason: "unsupported-history",
       successors: [],
       featureId: null,
       message: diagnostic.message,
-    }))
+    }));
   }
 
-  const invalidations: OccNativeReferenceInvalidation[] = []
+  const invalidations: OccNativeReferenceInvalidation[] = [];
 
   for (const record of history.records) {
     switch (record.reason) {
-      case 'unique-successor':
-        break
-      case 'ambiguous':
+      case "unique-successor":
+        break;
+      case "ambiguous":
         invalidations.push({
           target: record.target,
-          reason: 'ambiguous',
+          reason: "ambiguous",
           successors: record.successors,
           featureId: null,
-          message: 'Native topology history reported ambiguous successors.',
-        })
-        break
-      case 'deleted':
+          message: "Native topology history reported ambiguous successors.",
+        });
+        break;
+      case "deleted":
         invalidations.push({
           target: record.target,
-          reason: 'deleted',
+          reason: "deleted",
           successors: [],
           featureId: null,
-          message: 'Native topology history reported deleted topology.',
-        })
-        break
-      case 'missing':
+          message: "Native topology history reported deleted topology.",
+        });
+        break;
+      case "missing":
         invalidations.push({
           target: record.target,
-          reason: 'unsupported-history',
+          reason: "unsupported-history",
           successors: [],
           featureId: null,
-          message: 'Native topology history could not resolve a reliable successor.',
-        })
-        break
+          message:
+            "Native topology history could not resolve a reliable successor.",
+        });
+        break;
     }
   }
 
-  return invalidations
+  return invalidations;
 }
 
 export function createOccNativeTopologyPayloadFromShimPayloads(input: {
-  revisionId: RevisionId
-  lodTierId: OccTessellationTierId | null
+  revisionId: RevisionId;
+  lodTierId: OccTessellationTierId | null;
   bodies: readonly {
-    bodyId: BodyId
-    nativePayload: OccNativeShimPayload
-    invalidations?: readonly OccNativeReferenceInvalidation[]
-  }[]
-  diagnostics?: readonly OccNativeTopologyDiagnostic[]
+    bodyId: BodyId;
+    nativePayload: OccNativeShimPayload;
+    invalidations?: readonly OccNativeReferenceInvalidation[];
+  }[];
+  diagnostics?: readonly OccNativeTopologyDiagnostic[];
 }): OccNativeTopologyPayload {
-  const bodyPayloads = input.bodies.map(({ bodyId, nativePayload, invalidations = [] }) => {
-    const topology = createBodyTopologyRecords(bodyId, nativePayload)
-    const identity = createIdentityRecords(topology)
-    const topologyCounts = countTopologyKinds(topology)
-    const faceIds = topology
-      .filter((record) => record.kind === 'face')
-      .map((record) => record.id)
-    const renderMesh = packMeshSummaryBuffers(nativePayload.mesh, `${bodyId}_render_mesh`, faceIds)
+  const bodyPayloads = input.bodies.map(
+    ({ bodyId, nativePayload, invalidations = [] }) => {
+      const topology = createBodyTopologyRecords(bodyId, nativePayload);
+      const identity = createIdentityRecords(topology);
+      const topologyCounts = countTopologyKinds(topology);
+      const faceIds = topology
+        .filter((record) => record.kind === "face")
+        .map((record) => record.id);
+      const renderMesh = packMeshSummaryBuffers(
+        nativePayload.mesh,
+        `${bodyId}_render_mesh`,
+        faceIds,
+      );
 
-    return {
-      bodyId,
-      topology,
-      identity,
-      adjacency: createAdjacencyTableLayout(nativePayload.edgeVertices.length),
-      renderMesh: nativePayload.mesh ? renderMesh.layout : null,
-      renderMeshSummary: nativePayload.mesh ?? null,
-      exactBrep: null,
-      invalidations,
-      topologyCounts,
-      buffers: renderMesh.buffers,
-    }
-  })
-  const allTopology = bodyPayloads.flatMap((body) => body.topology)
+      return {
+        bodyId,
+        topology,
+        identity,
+        adjacency: createAdjacencyTableLayout(
+          nativePayload.edgeVertices.length,
+        ),
+        renderMesh: nativePayload.mesh ? renderMesh.layout : null,
+        renderMeshSummary: nativePayload.mesh ?? null,
+        exactBrep: null,
+        invalidations,
+        topologyCounts,
+        buffers: renderMesh.buffers,
+      };
+    },
+  );
+  const allTopology = bodyPayloads.flatMap((body) => body.topology);
   const allDiagnostics = [
     ...(input.diagnostics ?? []),
     ...input.bodies.flatMap(({ nativePayload }) => nativePayload.diagnostics),
-  ]
+  ];
 
   return {
     schemaVersion: OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION,
-    source: 'occt7-shim',
+    source: "occt7-shim",
     revisionId: input.revisionId,
     lodTierId: input.lodTierId,
-    bodies: bodyPayloads.map(({ topologyCounts: _topologyCounts, buffers: _buffers, ...body }) => body),
+    bodies: bodyPayloads.map(
+      ({ topologyCounts: _topologyCounts, buffers: _buffers, ...body }) => body,
+    ),
     tables: {
       topology: createTopologyTableLayout(countTopologyKinds(allTopology)),
       identity: createIdentityTableLayout(allTopology.length),
@@ -986,64 +1082,73 @@ export function createOccNativeTopologyPayloadFromShimPayloads(input: {
     },
     buffers: bodyPayloads.flatMap((body) => body.buffers),
     diagnostics: allDiagnostics,
-  }
+  };
 }
 
 export function createOccNativeExactBrepPayloadFromShimPayload(input: {
-  revisionId: RevisionId
-  target: DurableRef
-  bodyId: BodyId
-  bodyLabel: string
-  nativePayload: OccNativeShimPayload
-  diagnostics?: readonly OccNativeTopologyDiagnostic[]
+  revisionId: RevisionId;
+  target: DurableRef;
+  bodyId: BodyId;
+  bodyLabel: string;
+  nativePayload: OccNativeShimPayload;
+  diagnostics?: readonly OccNativeTopologyDiagnostic[];
 }): OccNativeExactBrepPayload {
-  const nativeBrep = input.nativePayload.cadaraBrep
+  const nativeBrep = input.nativePayload.cadaraBrep;
   const brep = nativeBrep
-    ? {
+    ? ({
         ...nativeBrep,
-        bodies: nativeBrep.bodies.map((body, index) => index === 0
-          ? {
-              ...body,
-              bodyKey: input.bodyId,
-              label: input.bodyLabel,
-            }
-          : body),
-      } satisfies CadaraBrepGeometryAssetData
-    : null
-  const unsupportedDiagnostic = createNativeExactBrepUnsupportedDiagnostic(input.nativePayload, input.target)
+        bodies: nativeBrep.bodies.map((body, index) =>
+          index === 0
+            ? {
+                ...body,
+                bodyKey: input.bodyId,
+                label: input.bodyLabel,
+              }
+            : body,
+        ),
+      } satisfies CadaraBrepGeometryAssetData)
+    : null;
+  const unsupportedDiagnostic = createNativeExactBrepUnsupportedDiagnostic(
+    input.nativePayload,
+    input.target,
+  );
   const diagnostics = [
     ...input.nativePayload.diagnostics,
     ...(!brep && unsupportedDiagnostic ? [unsupportedDiagnostic] : []),
     ...(!brep && !unsupportedDiagnostic
-      ? [createNativeTopologyDiagnostic(
-          'occ-native-exact-brep-empty',
-          'Native exact B-rep payload did not include extractable topology records.',
-          {
-            nativeTopologyRecords: input.nativePayload.topology.length,
-            nativeMeshTriangles: input.nativePayload.mesh?.triangleCount ?? 0,
-          },
-          input.target,
-        )]
+      ? [
+          createNativeTopologyDiagnostic(
+            "occ-native-exact-brep-empty",
+            "Native exact B-rep payload did not include extractable topology records.",
+            {
+              nativeTopologyRecords: input.nativePayload.topology.length,
+              nativeMeshTriangles: input.nativePayload.mesh?.triangleCount ?? 0,
+            },
+            input.target,
+          ),
+        ]
       : []),
     ...(input.diagnostics ?? []),
-  ]
+  ];
 
   return {
     schemaVersion: OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION,
     revisionId: input.revisionId,
     target: input.target,
     brep: brep ?? {
-      kind: 'cadaraBrep',
-      schemaVersion: 'cadara-brep/v1alpha1',
+      kind: "cadaraBrep",
+      schemaVersion: "cadara-brep/v1alpha1",
       source: {
-        importedFormat: 'step',
+        importedFormat: "step",
         sourceStored: false,
       },
-      bodies: [{
-        bodyKey: input.bodyId,
-        label: input.bodyLabel,
-        topology: createEmptyCadaraBrepTopology(),
-      }],
+      bodies: [
+        {
+          bodyKey: input.bodyId,
+          label: input.bodyLabel,
+          topology: createEmptyCadaraBrepTopology(),
+        },
+      ],
     },
     tables: brep
       ? createExactBrepTableLayoutFromCadaraBrep(brep)
@@ -1052,25 +1157,25 @@ export function createOccNativeExactBrepPayloadFromShimPayload(input: {
       ? [createJsonTransferableBuffer(`${input.bodyId}_exact_brep_json`, brep)]
       : [],
     diagnostics,
-  }
+  };
 }
 
 export function createOccNativeMeshExportPayloadFromShimPayload(input: {
-  revisionId: RevisionId
-  target: DurableRef
-  options: MeshExportAccuracy
-  nativePayload: OccNativeShimPayload
-  diagnostics?: readonly OccNativeTopologyDiagnostic[]
+  revisionId: RevisionId;
+  target: DurableRef;
+  options: MeshExportAccuracy;
+  nativePayload: OccNativeShimPayload;
+  diagnostics?: readonly OccNativeTopologyDiagnostic[];
 }): OccNativeMeshExportPayload {
   const mesh = packMeshSummaryBuffers(
     input.nativePayload.mesh,
-    input.target.kind === 'body'
+    input.target.kind === "body"
       ? `${input.target.bodyId}_mesh_export`
-      : 'unresolved_mesh_export',
+      : "unresolved_mesh_export",
     input.nativePayload.topology
-      .filter((record) => record.kind === 'face')
+      .filter((record) => record.kind === "face")
       .map((record) => record.id),
-  )
+  );
 
   return {
     schemaVersion: OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION,
@@ -1080,72 +1185,84 @@ export function createOccNativeMeshExportPayloadFromShimPayload(input: {
     mesh: mesh.layout,
     meshSummary: input.nativePayload.mesh ?? null,
     buffers: mesh.buffers,
-    diagnostics: [...input.nativePayload.diagnostics, ...(input.diagnostics ?? [])],
-  }
+    diagnostics: [
+      ...input.nativePayload.diagnostics,
+      ...(input.diagnostics ?? []),
+    ],
+  };
 }
 
 export function createEmptyNativeTransferableBuffer(): OccNativeTransferableBuffer {
   return {
-    bufferId: 'occ_buffer_empty' as OccNativeBufferRef['bufferId'],
+    bufferId: "occ_buffer_empty" as OccNativeBufferRef["bufferId"],
     buffer: emptyBuffer,
-  }
+  };
 }
 
 export function getOccNativeTopologyTransferList(
   result: OccNativeTopologyWorkerResultWithBuffers,
 ): Transferable[] {
-  if (result.kind !== 'nativeTopologyPayload') {
-    return []
+  if (result.kind !== "nativeTopologyPayload") {
+    return [];
   }
 
-  return result.payload.buffers.map(({ buffer }) => buffer)
+  return result.payload.buffers.map(({ buffer }) => buffer);
 }
 
-export type OccNativeTopologyWorkerResultWithBuffers = {
-  kind: 'nativeTopologyPayload'
-  payload: {
-    buffers: readonly OccNativeTransferableBuffer[]
-  }
-} | {
-  kind: 'nativeTopologyUnavailable'
-}
+export type OccNativeTopologyWorkerResultWithBuffers =
+  | {
+      kind: "nativeTopologyPayload";
+      payload: {
+        buffers: readonly OccNativeTransferableBuffer[];
+      };
+    }
+  | {
+      kind: "nativeTopologyUnavailable";
+    };
 
 export function getMissingNativeTopologyKernelEntrypoints(
-  host: Partial<Record<OccNativeTopologyKernelEntrypoint, unknown>> | OpenCascadeNativeTopologyKernelHost,
+  host:
+    | Partial<Record<OccNativeTopologyKernelEntrypoint, unknown>>
+    | OpenCascadeNativeTopologyKernelHost,
   requiredEntrypoints: readonly OccNativeTopologyKernelEntrypoint[] = OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS,
 ) {
-  return requiredEntrypoints.filter((entrypoint) => typeof host[entrypoint] !== 'function')
+  return requiredEntrypoints.filter(
+    (entrypoint) => typeof host[entrypoint] !== "function",
+  );
 }
 
 export function createMissingNativeTopologyKernelDiagnostic(
   missingEntrypoints: readonly OccNativeTopologyKernelEntrypoint[],
 ): OccNativeTopologyDiagnostic {
   return {
-    code: 'occ-native-topology-entrypoint-missing',
-    severity: 'error',
-    message: `Loaded OpenCascade build is missing native topology kernel entrypoints: ${missingEntrypoints.join(', ')}.`,
+    code: "occ-native-topology-entrypoint-missing",
+    severity: "error",
+    message: `Loaded OpenCascade build is missing native topology kernel entrypoints: ${missingEntrypoints.join(", ")}.`,
     target: null,
     detail: {
       missingEntrypoints: [...missingEntrypoints],
     },
-  }
+  };
 }
 
 export function probeNativeTopologyKernelCapabilities(
-  host: Partial<Record<OccNativeTopologyKernelEntrypoint, unknown>> | OpenCascadeNativeTopologyKernelHost,
+  host:
+    | Partial<Record<OccNativeTopologyKernelEntrypoint, unknown>>
+    | OpenCascadeNativeTopologyKernelHost,
 ): OccNativeTopologyCapabilityProbeResult {
-  const missingEntrypoints = getMissingNativeTopologyKernelEntrypoints(host)
+  const missingEntrypoints = getMissingNativeTopologyKernelEntrypoints(host);
 
   return {
-    kind: missingEntrypoints.length === 0 ? 'available' : 'missing',
+    kind: missingEntrypoints.length === 0 ? "available" : "missing",
     requiredEntrypoints: OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS,
     missingEntrypoints,
-    diagnostics: missingEntrypoints.length === 0
-      ? []
-      : [createMissingNativeTopologyKernelDiagnostic(missingEntrypoints)],
-  }
+    diagnostics:
+      missingEntrypoints.length === 0
+        ? []
+        : [createMissingNativeTopologyKernelDiagnostic(missingEntrypoints)],
+  };
 }
 
 export function createNativeTopologyUnavailableResult() {
-  return probeNativeTopologyKernelCapabilities({})
+  return probeNativeTopologyKernelCapabilities({});
 }

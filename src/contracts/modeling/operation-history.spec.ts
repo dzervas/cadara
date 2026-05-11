@@ -1,5 +1,5 @@
-import { test } from 'bun:test'
-import { expectTrue } from '@/testing/expect.spec'
+import { test } from "bun:test";
+import { expectTrue } from "@/testing/expect.spec";
 import {
   createAddDocumentVariableHistoryEntry,
   createCommitSketchHistoryEntry,
@@ -12,7 +12,7 @@ import {
   createUpdateDocumentVariableHistoryEntry,
   validateOperationHistoryPayload,
   type ModelingOperationHistoryPayload,
-} from '@/contracts/modeling/operation-history'
+} from "@/contracts/modeling/operation-history";
 import type {
   AddDocumentVariableRequest,
   CommitSketchRequest,
@@ -23,9 +23,12 @@ import type {
   ReorderFeatureRequest,
   SetFeatureSuppressionRequest,
   UpdateDocumentVariableRequest,
-} from '@/contracts/modeling/schema'
-import { EXTRUDE_FEATURE_SCHEMA_VERSION, REVOLVE_FEATURE_SCHEMA_VERSION } from '@/contracts/shared/versioning'
-import { SKETCH_SCHEMA_VERSION } from '@/contracts/sketch/schema'
+} from "@/contracts/modeling/schema";
+import {
+  EXTRUDE_FEATURE_SCHEMA_VERSION,
+  REVOLVE_FEATURE_SCHEMA_VERSION,
+} from "@/contracts/shared/versioning";
+import { SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 import {
   chamferAdvancedFeatureExample,
   combineAdvancedFeatureExample,
@@ -36,10 +39,15 @@ import {
   sweepAdvancedFeatureExample,
   thickenAdvancedFeatureExample,
   transformAdvancedFeatureExample,
-} from '@/contracts/modeling/advanced-solid'
-import { createExpressionAuthoredValue, getAuthoredLiteralValue, isExpressionAuthoredValue } from '@/contracts/modeling/authored-values'
+} from "@/contracts/modeling/advanced-solid";
+import {
+  createExpressionAuthoredValue,
+  getAuthoredLiteralValue,
+  isExpressionAuthoredValue,
+} from "@/contracts/modeling/authored-values";
 
-test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sketchDefinition = {
+test("src/contracts/modeling/operation-history.spec.ts", async () => {
+  const sketchDefinition = {
     schemaVersion: SKETCH_SCHEMA_VERSION,
     referenceIds: [],
     references: [],
@@ -51,88 +59,100 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
     constraints: [],
     dimensionIds: [],
     dimensions: [],
-  }
+  };
 
   const commitSketchRequest: CommitSketchRequest = {
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0001',
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0001",
     solverCorrelation: {
-      requestId: 'request_commit',
-      projectionRequestId: 'request_commit:project',
-      validationRequestId: 'request_commit:validate',
-      solveRequestId: 'request_commit:solve',
-      regionRequestId: 'request_commit:regions',
+      requestId: "request_commit",
+      projectionRequestId: "request_commit:project",
+      validationRequestId: "request_commit:validate",
+      solveRequestId: "request_commit:solve",
+      regionRequestId: "request_commit:regions",
     },
-    sketchId: 'sketch_profile',
-    sketchLabel: 'Profile',
+    sketchId: "sketch_profile",
+    sketchLabel: "Profile",
     plane: {
-      key: 'xy',
-      support: { kind: 'construction', constructionId: 'construction_plane-xy' },
+      key: "xy",
+      support: {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
       frame: {
         origin: [0, 0, 0],
         xAxis: [1, 0, 0],
         yAxis: [0, 1, 0],
         normal: [0, 0, 1],
-        linearUnit: 'documentLength',
-        handedness: 'rightHanded',
+        linearUnit: "documentLength",
+        handedness: "rightHanded",
       },
     },
     definition: sketchDefinition,
-  }
+  };
 
   const createFeatureRequest: CreateFeatureRequest = {
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0002',
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0002",
     definition: {
-      kind: 'extrude',
+      kind: "extrude",
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters: {
-        profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
-        startExtent: { kind: 'profilePlane' },
+        profiles: [
+          {
+            kind: "region",
+            sketchId: "sketch_profile",
+            regionId: "region_profile",
+          },
+        ],
+        startExtent: { kind: "profilePlane" },
         extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'positive', distance: 10 },
+          mode: "oneSide",
+          end: { kind: "blind", direction: "positive", distance: 10 },
         },
-        operation: 'newBody',
-        booleanScope: { kind: 'standalone' },
+        operation: "newBody",
+        booleanScope: { kind: "standalone" },
       },
     },
-  }
+  };
 
-  const createExtrudeDefinition = createFeatureRequest.definition as Extract<FeatureDefinition, { kind: 'extrude' }>
+  const createExtrudeDefinition = createFeatureRequest.definition as Extract<
+    FeatureDefinition,
+    { kind: "extrude" }
+  >;
 
   const reorderFeatureRequest: ReorderFeatureRequest = {
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0003',
-    featureId: 'feature_extrude-2',
-    beforeFeatureId: 'feature_extrude-1',
-  }
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0003",
+    featureId: "feature_extrude-2",
+    beforeFeatureId: "feature_extrude-1",
+  };
 
   const reorderDocumentHistoryRequest: ReorderDocumentHistoryRequest = {
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0004',
-    item: { kind: 'sketch', sketchId: 'sketch_profile' },
-    beforeItem: { kind: 'feature', featureId: 'feature_extrude-1' },
-  }
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0004",
+    item: { kind: "sketch", sketchId: "sketch_profile" },
+    beforeItem: { kind: "feature", featureId: "feature_extrude-1" },
+  };
 
   const deleteTargetRequest: DeleteDocumentTargetRequest = {
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0005',
-    target: { kind: 'feature', featureId: 'feature_extrude-1' },
-  }
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0005",
+    target: { kind: "feature", featureId: "feature_extrude-1" },
+  };
 
   const setFeatureSuppressionRequest: SetFeatureSuppressionRequest = {
-    contractVersion: 'modeling-contract/v1alpha1',
-    documentId: 'doc_workspace',
-    baseRevisionId: 'rev_0006',
-    featureId: 'feature_extrude-1',
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_0006",
+    featureId: "feature_extrude-1",
     suppressed: true,
-  }
+  };
 
   function createDraftSketchDefinition(sketchId: `sketch_${string}`) {
     return {
@@ -140,308 +160,414 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
       referenceIds: [],
       references: [],
       pointIds: [
-        'sketch_point_1_rect-bottom-left',
-        'sketch_point_1_rect-bottom-right',
-        'sketch_point_1_rect-top-right',
-        'sketch_point_1_rect-top-left',
+        "sketch_point_1_rect-bottom-left",
+        "sketch_point_1_rect-bottom-right",
+        "sketch_point_1_rect-top-right",
+        "sketch_point_1_rect-top-left",
       ] as const,
       points: [
         {
-          pointId: 'sketch_point_1_rect-bottom-left',
-          label: 'Rectangle 1 bottom left',
-          target: { kind: 'sketchPoint' as const, sketchId, pointId: 'sketch_point_1_rect-bottom-left' },
+          pointId: "sketch_point_1_rect-bottom-left",
+          label: "Rectangle 1 bottom left",
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId,
+            pointId: "sketch_point_1_rect-bottom-left",
+          },
           position: [-15.5, -5] as const,
           isConstruction: false,
         },
         {
-          pointId: 'sketch_point_1_rect-bottom-right',
-          label: 'Rectangle 1 bottom right',
-          target: { kind: 'sketchPoint' as const, sketchId, pointId: 'sketch_point_1_rect-bottom-right' },
+          pointId: "sketch_point_1_rect-bottom-right",
+          label: "Rectangle 1 bottom right",
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId,
+            pointId: "sketch_point_1_rect-bottom-right",
+          },
           position: [-5, -5] as const,
           isConstruction: false,
         },
         {
-          pointId: 'sketch_point_1_rect-top-right',
-          label: 'Rectangle 1 top right',
-          target: { kind: 'sketchPoint' as const, sketchId, pointId: 'sketch_point_1_rect-top-right' },
+          pointId: "sketch_point_1_rect-top-right",
+          label: "Rectangle 1 top right",
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId,
+            pointId: "sketch_point_1_rect-top-right",
+          },
           position: [-5, 4.5] as const,
           isConstruction: false,
         },
         {
-          pointId: 'sketch_point_1_rect-top-left',
-          label: 'Rectangle 1 top left',
-          target: { kind: 'sketchPoint' as const, sketchId, pointId: 'sketch_point_1_rect-top-left' },
+          pointId: "sketch_point_1_rect-top-left",
+          label: "Rectangle 1 top left",
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId,
+            pointId: "sketch_point_1_rect-top-left",
+          },
           position: [-15.5, 4.5] as const,
           isConstruction: false,
         },
       ],
       entityIds: [
-        'sketch_entity_1_rect-bottom',
-        'sketch_entity_1_rect-right',
-        'sketch_entity_1_rect-top',
-        'sketch_entity_1_rect-left',
+        "sketch_entity_1_rect-bottom",
+        "sketch_entity_1_rect-right",
+        "sketch_entity_1_rect-top",
+        "sketch_entity_1_rect-left",
       ] as const,
       entities: [
         {
-          kind: 'lineSegment' as const,
-          entityId: 'sketch_entity_1_rect-bottom',
-          label: 'Rectangle 1 bottom',
-          target: { kind: 'sketchEntity' as const, sketchId, entityId: 'sketch_entity_1_rect-bottom' },
+          kind: "lineSegment" as const,
+          entityId: "sketch_entity_1_rect-bottom",
+          label: "Rectangle 1 bottom",
+          target: {
+            kind: "sketchEntity" as const,
+            sketchId,
+            entityId: "sketch_entity_1_rect-bottom",
+          },
           isConstruction: false,
-          startPointId: 'sketch_point_1_rect-bottom-left',
-          endPointId: 'sketch_point_1_rect-bottom-right',
+          startPointId: "sketch_point_1_rect-bottom-left",
+          endPointId: "sketch_point_1_rect-bottom-right",
         },
         {
-          kind: 'lineSegment' as const,
-          entityId: 'sketch_entity_1_rect-right',
-          label: 'Rectangle 1 right',
-          target: { kind: 'sketchEntity' as const, sketchId, entityId: 'sketch_entity_1_rect-right' },
+          kind: "lineSegment" as const,
+          entityId: "sketch_entity_1_rect-right",
+          label: "Rectangle 1 right",
+          target: {
+            kind: "sketchEntity" as const,
+            sketchId,
+            entityId: "sketch_entity_1_rect-right",
+          },
           isConstruction: false,
-          startPointId: 'sketch_point_1_rect-bottom-right',
-          endPointId: 'sketch_point_1_rect-top-right',
+          startPointId: "sketch_point_1_rect-bottom-right",
+          endPointId: "sketch_point_1_rect-top-right",
         },
         {
-          kind: 'lineSegment' as const,
-          entityId: 'sketch_entity_1_rect-top',
-          label: 'Rectangle 1 top',
-          target: { kind: 'sketchEntity' as const, sketchId, entityId: 'sketch_entity_1_rect-top' },
+          kind: "lineSegment" as const,
+          entityId: "sketch_entity_1_rect-top",
+          label: "Rectangle 1 top",
+          target: {
+            kind: "sketchEntity" as const,
+            sketchId,
+            entityId: "sketch_entity_1_rect-top",
+          },
           isConstruction: false,
-          startPointId: 'sketch_point_1_rect-top-right',
-          endPointId: 'sketch_point_1_rect-top-left',
+          startPointId: "sketch_point_1_rect-top-right",
+          endPointId: "sketch_point_1_rect-top-left",
         },
         {
-          kind: 'lineSegment' as const,
-          entityId: 'sketch_entity_1_rect-left',
-          label: 'Rectangle 1 left',
-          target: { kind: 'sketchEntity' as const, sketchId, entityId: 'sketch_entity_1_rect-left' },
+          kind: "lineSegment" as const,
+          entityId: "sketch_entity_1_rect-left",
+          label: "Rectangle 1 left",
+          target: {
+            kind: "sketchEntity" as const,
+            sketchId,
+            entityId: "sketch_entity_1_rect-left",
+          },
           isConstruction: false,
-          startPointId: 'sketch_point_1_rect-top-left',
-          endPointId: 'sketch_point_1_rect-bottom-left',
+          startPointId: "sketch_point_1_rect-top-left",
+          endPointId: "sketch_point_1_rect-bottom-left",
         },
       ],
       constraintIds: [
-        'constraint_1_bottom-horizontal',
-        'constraint_1_top-horizontal',
-        'constraint_1_right-vertical',
-        'constraint_1_left-vertical',
+        "constraint_1_bottom-horizontal",
+        "constraint_1_top-horizontal",
+        "constraint_1_right-vertical",
+        "constraint_1_left-vertical",
       ] as const,
       constraints: [
         {
-          constraintId: 'constraint_1_bottom-horizontal',
-          kind: 'horizontal' as const,
-          label: 'Rectangle 1 bottom horizontal',
-          entityId: 'sketch_entity_1_rect-bottom',
+          constraintId: "constraint_1_bottom-horizontal",
+          kind: "horizontal" as const,
+          label: "Rectangle 1 bottom horizontal",
+          entityId: "sketch_entity_1_rect-bottom",
         },
         {
-          constraintId: 'constraint_1_top-horizontal',
-          kind: 'horizontal' as const,
-          label: 'Rectangle 1 top horizontal',
-          entityId: 'sketch_entity_1_rect-top',
+          constraintId: "constraint_1_top-horizontal",
+          kind: "horizontal" as const,
+          label: "Rectangle 1 top horizontal",
+          entityId: "sketch_entity_1_rect-top",
         },
         {
-          constraintId: 'constraint_1_right-vertical',
-          kind: 'vertical' as const,
-          label: 'Rectangle 1 right vertical',
-          entityId: 'sketch_entity_1_rect-right',
+          constraintId: "constraint_1_right-vertical",
+          kind: "vertical" as const,
+          label: "Rectangle 1 right vertical",
+          entityId: "sketch_entity_1_rect-right",
         },
         {
-          constraintId: 'constraint_1_left-vertical',
-          kind: 'vertical' as const,
-          label: 'Rectangle 1 left vertical',
-          entityId: 'sketch_entity_1_rect-left',
+          constraintId: "constraint_1_left-vertical",
+          kind: "vertical" as const,
+          label: "Rectangle 1 left vertical",
+          entityId: "sketch_entity_1_rect-left",
         },
       ],
-      dimensionIds: ['dimension_1_width', 'dimension_1_height'] as const,
+      dimensionIds: ["dimension_1_width", "dimension_1_height"] as const,
       dimensions: [
         {
-          dimensionId: 'dimension_1_width',
-          kind: 'distance' as const,
-          label: 'Rectangle 1 width',
-          axis: 'horizontal' as const,
-          pointIds: ['sketch_point_1_rect-bottom-left', 'sketch_point_1_rect-bottom-right'] as const,
+          dimensionId: "dimension_1_width",
+          kind: "distance" as const,
+          label: "Rectangle 1 width",
+          axis: "horizontal" as const,
+          pointIds: [
+            "sketch_point_1_rect-bottom-left",
+            "sketch_point_1_rect-bottom-right",
+          ] as const,
           value: 10.5,
         },
         {
-          dimensionId: 'dimension_1_height',
-          kind: 'distance' as const,
-          label: 'Rectangle 1 height',
-          axis: 'vertical' as const,
-          pointIds: ['sketch_point_1_rect-bottom-right', 'sketch_point_1_rect-top-right'] as const,
+          dimensionId: "dimension_1_height",
+          kind: "distance" as const,
+          label: "Rectangle 1 height",
+          axis: "vertical" as const,
+          pointIds: [
+            "sketch_point_1_rect-bottom-right",
+            "sketch_point_1_rect-top-right",
+          ] as const,
           value: 9.5,
         },
       ],
-    } satisfies CommitSketchRequest['definition']
+    } satisfies CommitSketchRequest["definition"];
   }
 
   function testValidatesRepresentativeHistory() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
-        createCommitSketchHistoryEntry(commitSketchRequest, commitSketchRequest.sketchId!),
+        createCommitSketchHistoryEntry(
+          commitSketchRequest,
+          commitSketchRequest.sketchId!,
+        ),
         createCreateFeatureHistoryEntry(createFeatureRequest),
         createDeleteTargetHistoryEntry(deleteTargetRequest),
         createReorderFeatureHistoryEntry(reorderFeatureRequest),
         createReorderDocumentHistoryEntry(reorderDocumentHistoryRequest),
         createSetFeatureSuppressionHistoryEntry(setFeatureSuppressionRequest),
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Representative sketch and feature operation history should validate.')
-    expectTrue(result.payload.entries[0]?.kind === 'commitSketch', 'Commit sketch entry kind must be preserved.')
     expectTrue(
-      !('solverCorrelation' in result.payload.entries[0]!.payload),
-      'Persisted sketch entries must omit solver request correlation metadata.',
-    )
+      result.ok,
+      "Representative sketch and feature operation history should validate.",
+    );
     expectTrue(
-      !('baseRevisionId' in result.payload.entries[1]!.payload),
-      'Persisted feature entries must omit replay-derived base revision metadata.',
-    )
-    expectTrue(result.payload.entries[2]?.kind === 'deleteTarget', 'Generic delete entry kind must be preserved.')
+      result.payload.entries[0]?.kind === "commitSketch",
+      "Commit sketch entry kind must be preserved.",
+    );
     expectTrue(
-      result.payload.entries[2]?.kind === 'deleteTarget'
-        && result.payload.entries[2].payload.target.kind === 'feature',
-      'Generic delete entries should preserve the accepted durable target.',
-    )
+      !("solverCorrelation" in result.payload.entries[0]!.payload),
+      "Persisted sketch entries must omit solver request correlation metadata.",
+    );
     expectTrue(
-      result.payload.entries[4]?.kind === 'reorderDocumentHistory'
-        && result.payload.entries[4].payload.item.kind === 'sketch'
-        && result.payload.entries[4].payload.beforeItem?.kind === 'feature',
-      'Persisted document history reorder entries must preserve mixed sketch/feature identities.',
-    )
+      !("baseRevisionId" in result.payload.entries[1]!.payload),
+      "Persisted feature entries must omit replay-derived base revision metadata.",
+    );
     expectTrue(
-      result.payload.entries[5]?.kind === 'setFeatureSuppression'
-        && result.payload.entries[5].payload.featureId === 'feature_extrude-1'
-        && result.payload.entries[5].payload.suppressed === true,
-      'Persisted feature suppression entries should preserve the requested state without transport metadata.',
-    )
+      result.payload.entries[2]?.kind === "deleteTarget",
+      "Generic delete entry kind must be preserved.",
+    );
+    expectTrue(
+      result.payload.entries[2]?.kind === "deleteTarget" &&
+        result.payload.entries[2].payload.target.kind === "feature",
+      "Generic delete entries should preserve the accepted durable target.",
+    );
+    expectTrue(
+      result.payload.entries[4]?.kind === "reorderDocumentHistory" &&
+        result.payload.entries[4].payload.item.kind === "sketch" &&
+        result.payload.entries[4].payload.beforeItem?.kind === "feature",
+      "Persisted document history reorder entries must preserve mixed sketch/feature identities.",
+    );
+    expectTrue(
+      result.payload.entries[5]?.kind === "setFeatureSuppression" &&
+        result.payload.entries[5].payload.featureId === "feature_extrude-1" &&
+        result.payload.entries[5].payload.suppressed === true,
+      "Persisted feature suppression entries should preserve the requested state without transport metadata.",
+    );
   }
 
   function testRejectsInvalidDocumentHistoryReorderEntries() {
     const missingItem = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
-      entries: [{
-        kind: 'reorderDocumentHistory',
-        payload: {
-          beforeItem: { kind: 'feature', featureId: 'feature_extrude-1' },
+      ...createEmptyOperationHistory("doc_workspace"),
+      entries: [
+        {
+          kind: "reorderDocumentHistory",
+          payload: {
+            beforeItem: { kind: "feature", featureId: "feature_extrude-1" },
+          },
         },
-      }],
-    })
+      ],
+    });
 
     const missingAnchorShape = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
-      entries: [{
-        kind: 'reorderDocumentHistory',
-        payload: {
-          item: { kind: 'sketch', sketchId: 'sketch_profile' },
-          beforeItem: { kind: 'feature' },
+      ...createEmptyOperationHistory("doc_workspace"),
+      entries: [
+        {
+          kind: "reorderDocumentHistory",
+          payload: {
+            item: { kind: "sketch", sketchId: "sketch_profile" },
+            beforeItem: { kind: "feature" },
+          },
         },
-      }],
-    })
+      ],
+    });
 
-    expectTrue(!missingItem.ok, 'Document history reorder entries missing the moved item should be rejected.')
-    expectTrue(!missingAnchorShape.ok, 'Document history reorder entries with malformed anchors should be rejected.')
+    expectTrue(
+      !missingItem.ok,
+      "Document history reorder entries missing the moved item should be rejected.",
+    );
+    expectTrue(
+      !missingAnchorShape.ok,
+      "Document history reorder entries with malformed anchors should be rejected.",
+    );
   }
 
   function testRejectsInvalidGenericDeleteEntries() {
     const result = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
-      entries: [{
-        kind: 'deleteTarget',
-        payload: { target: { kind: 'feature' } },
-      }],
-    })
+      ...createEmptyOperationHistory("doc_workspace"),
+      entries: [
+        {
+          kind: "deleteTarget",
+          payload: { target: { kind: "feature" } },
+        },
+      ],
+    });
 
-    expectTrue(!result.ok, 'Generic delete entries with malformed targets should be rejected.')
+    expectTrue(
+      !result.ok,
+      "Generic delete entries with malformed targets should be rejected.",
+    );
   }
 
   function testNormalizesCommittedCommitSketchTargets() {
-    const committedSketchId = 'sketch_committed'
-    const draftDefinition = createDraftSketchDefinition('sketch_draft')
-    const entry = createCommitSketchHistoryEntry({
-      ...commitSketchRequest,
-      sketchId: null,
-      definition: draftDefinition,
-    }, committedSketchId)
+    const committedSketchId = "sketch_committed";
+    const draftDefinition = createDraftSketchDefinition("sketch_draft");
+    const entry = createCommitSketchHistoryEntry(
+      {
+        ...commitSketchRequest,
+        sketchId: null,
+        definition: draftDefinition,
+      },
+      committedSketchId,
+    );
 
-    expectTrue(entry.kind === 'commitSketch', 'Commit sketch history entry should preserve its kind.')
-    expectTrue(entry.payload.sketchId === committedSketchId, 'Persisted commitSketch entries must store the committed sketch id.')
     expectTrue(
-      entry.payload.definition.points.every((point) => point.target.sketchId === committedSketchId),
-      'Persisted commitSketch point targets must be normalized to the committed sketch id.',
-    )
+      entry.kind === "commitSketch",
+      "Commit sketch history entry should preserve its kind.",
+    );
     expectTrue(
-      entry.payload.definition.entities.every((entity) => entity.target.sketchId === committedSketchId),
-      'Persisted commitSketch entity targets must be normalized to the committed sketch id.',
-    )
+      entry.payload.sketchId === committedSketchId,
+      "Persisted commitSketch entries must store the committed sketch id.",
+    );
+    expectTrue(
+      entry.payload.definition.points.every(
+        (point) => point.target.sketchId === committedSketchId,
+      ),
+      "Persisted commitSketch point targets must be normalized to the committed sketch id.",
+    );
+    expectTrue(
+      entry.payload.definition.entities.every(
+        (entity) => entity.target.sketchId === committedSketchId,
+      ),
+      "Persisted commitSketch entity targets must be normalized to the committed sketch id.",
+    );
   }
 
   function testCanCompactCommitSketchAuthoringOperations() {
-    const committedSketchId = 'sketch_committed'
-    const draftDefinition = createDraftSketchDefinition('sketch_draft')
-    const definitionWithOperations: CommitSketchRequest['definition'] = {
-      ...draftDefinition,
-      authoringOperations: [{
-        operationId: 'sketch_operation_1_line',
-        label: 'Line 1',
-        kind: 'line',
-        targets: {
-          created: [
-            { kind: 'point', pointId: draftDefinition.pointIds[0]! },
-            { kind: 'point', pointId: draftDefinition.pointIds[1]! },
-            { kind: 'entity', entityId: draftDefinition.entityIds[0]! },
-          ],
-        },
-        createdGraph: {
-          points: draftDefinition.points.slice(0, 2),
-          entities: draftDefinition.entities.slice(0, 1),
-        },
-      }],
-    }
-
-    const fullEntry = createCommitSketchHistoryEntry({
-      ...commitSketchRequest,
-      sketchId: null,
-      definition: definitionWithOperations,
-    }, committedSketchId)
-    const compactEntry = createCommitSketchHistoryEntry({
-      ...commitSketchRequest,
-      sketchId: null,
-      definition: definitionWithOperations,
-    }, committedSketchId, { includeAuthoringOperations: false })
-
-    expectTrue(fullEntry.kind === 'commitSketch' && fullEntry.payload.definition.authoringOperations?.length === 1, 'Full commit history should preserve authoring operations by default.')
-    expectTrue(compactEntry.kind === 'commitSketch', 'Compact commit history should preserve the commitSketch entry kind.')
-    expectTrue(compactEntry.payload.definition.authoringOperations === undefined, 'Compact commit history should omit sketch-local authoring operations.')
-    expectTrue(
-      compactEntry.payload.definition.points.every((point) => point.target.sketchId === committedSketchId)
-        && compactEntry.payload.definition.entities.every((entity) => entity.target.sketchId === committedSketchId),
-      'Compact commit history should still normalize the live sketch graph targets.',
-    )
-  }
-
-  function testCompactHistoryPreservesReferenceImageOperations() {
-    const committedSketchId = 'sketch_committed'
-    const draftDefinition = createDraftSketchDefinition('sketch_draft')
-    const definitionWithReferenceImage: CommitSketchRequest['definition'] = {
+    const committedSketchId = "sketch_committed";
+    const draftDefinition = createDraftSketchDefinition("sketch_draft");
+    const definitionWithOperations: CommitSketchRequest["definition"] = {
       ...draftDefinition,
       authoringOperations: [
         {
-          operationId: 'sketch_operation_1_reference-image',
-          label: 'Reference image 1',
-          kind: 'referenceImage',
+          operationId: "sketch_operation_1_line",
+          label: "Line 1",
+          kind: "line",
           targets: {
-            created: [{ kind: 'operation', operationId: 'sketch_operation_1_reference-image' }],
+            created: [
+              { kind: "point", pointId: draftDefinition.pointIds[0]! },
+              { kind: "point", pointId: draftDefinition.pointIds[1]! },
+              { kind: "entity", entityId: draftDefinition.entityIds[0]! },
+            ],
+          },
+          createdGraph: {
+            points: draftDefinition.points.slice(0, 2),
+            entities: draftDefinition.entities.slice(0, 1),
+          },
+        },
+      ],
+    };
+
+    const fullEntry = createCommitSketchHistoryEntry(
+      {
+        ...commitSketchRequest,
+        sketchId: null,
+        definition: definitionWithOperations,
+      },
+      committedSketchId,
+    );
+    const compactEntry = createCommitSketchHistoryEntry(
+      {
+        ...commitSketchRequest,
+        sketchId: null,
+        definition: definitionWithOperations,
+      },
+      committedSketchId,
+      { includeAuthoringOperations: false },
+    );
+
+    expectTrue(
+      fullEntry.kind === "commitSketch" &&
+        fullEntry.payload.definition.authoringOperations?.length === 1,
+      "Full commit history should preserve authoring operations by default.",
+    );
+    expectTrue(
+      compactEntry.kind === "commitSketch",
+      "Compact commit history should preserve the commitSketch entry kind.",
+    );
+    expectTrue(
+      compactEntry.payload.definition.authoringOperations === undefined,
+      "Compact commit history should omit sketch-local authoring operations.",
+    );
+    expectTrue(
+      compactEntry.payload.definition.points.every(
+        (point) => point.target.sketchId === committedSketchId,
+      ) &&
+        compactEntry.payload.definition.entities.every(
+          (entity) => entity.target.sketchId === committedSketchId,
+        ),
+      "Compact commit history should still normalize the live sketch graph targets.",
+    );
+  }
+
+  function testCompactHistoryPreservesReferenceImageOperations() {
+    const committedSketchId = "sketch_committed";
+    const draftDefinition = createDraftSketchDefinition("sketch_draft");
+    const definitionWithReferenceImage: CommitSketchRequest["definition"] = {
+      ...draftDefinition,
+      authoringOperations: [
+        {
+          operationId: "sketch_operation_1_reference-image",
+          label: "Reference image 1",
+          kind: "referenceImage",
+          targets: {
+            created: [
+              {
+                kind: "operation",
+                operationId: "sketch_operation_1_reference-image",
+              },
+            ],
           },
           ownedState: {
-            kind: 'referenceImage',
+            kind: "referenceImage",
             image: {
-              mediaType: 'image/png',
-              fileName: 'reference.png',
+              mediaType: "image/png",
+              fileName: "reference.png",
               pixelWidth: 640,
               pixelHeight: 480,
-              base64Data: 'cG5n',
+              base64Data: "cG5n",
             },
             placement: {
               center: [0, 0],
@@ -452,104 +578,133 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
           },
         },
         {
-          operationId: 'sketch_operation_2_delete',
-          label: 'Delete 2',
-          kind: 'delete',
+          operationId: "sketch_operation_2_delete",
+          label: "Delete 2",
+          kind: "delete",
           targets: {
-            removed: [{ kind: 'operation', operationId: 'sketch_operation_1_reference-image' }],
+            removed: [
+              {
+                kind: "operation",
+                operationId: "sketch_operation_1_reference-image",
+              },
+            ],
           },
         },
       ],
-    }
+    };
 
-    const compactEntry = createCommitSketchHistoryEntry({
-      ...commitSketchRequest,
-      sketchId: null,
-      definition: definitionWithReferenceImage,
-    }, committedSketchId, { includeAuthoringOperations: false })
+    const compactEntry = createCommitSketchHistoryEntry(
+      {
+        ...commitSketchRequest,
+        sketchId: null,
+        definition: definitionWithReferenceImage,
+      },
+      committedSketchId,
+      { includeAuthoringOperations: false },
+    );
 
-    expectTrue(compactEntry.kind === 'commitSketch', 'Compact commit history should preserve reference-image commit entries.')
-    expectTrue(compactEntry.payload.definition.authoringOperations?.length === 2, 'Compact commit history should retain reference-image operations and their deletes.')
     expectTrue(
-      compactEntry.payload.definition.authoringOperations?.[0]?.kind === 'referenceImage'
-        && compactEntry.payload.definition.authoringOperations?.[1]?.targets.removed?.[0]?.kind === 'operation',
-      'Compact commit history should preserve operation-owned image state and operation-target deletes.',
-    )
+      compactEntry.kind === "commitSketch",
+      "Compact commit history should preserve reference-image commit entries.",
+    );
+    expectTrue(
+      compactEntry.payload.definition.authoringOperations?.length === 2,
+      "Compact commit history should retain reference-image operations and their deletes.",
+    );
+    expectTrue(
+      compactEntry.payload.definition.authoringOperations?.[0]?.kind ===
+        "referenceImage" &&
+        compactEntry.payload.definition.authoringOperations?.[1]?.targets
+          .removed?.[0]?.kind === "operation",
+      "Compact commit history should preserve operation-owned image state and operation-target deletes.",
+    );
   }
 
   function testAcceptsLegacyDraftCommitSketchTargets() {
     const result = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         {
-          kind: 'commitSketch',
+          kind: "commitSketch",
           payload: {
             sketchId: null,
-            sketchLabel: 'Legacy Draft Sketch',
+            sketchLabel: "Legacy Draft Sketch",
             plane: commitSketchRequest.plane,
-            definition: createDraftSketchDefinition('sketch_draft'),
+            definition: createDraftSketchDefinition("sketch_draft"),
           },
         },
       ],
-    })
+    });
 
-    expectTrue(result.ok, 'Legacy commitSketch histories with draft sketch ids should remain loadable.')
+    expectTrue(
+      result.ok,
+      "Legacy commitSketch histories with draft sketch ids should remain loadable.",
+    );
   }
 
   function testRejectsUnsupportedVersion() {
     const result = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
-      schemaVersion: 'modeling-operation-history/v0',
-    })
+      ...createEmptyOperationHistory("doc_workspace"),
+      schemaVersion: "modeling-operation-history/v0",
+    });
 
-    expectTrue(!result.ok, 'Unsupported history schema versions must fail validation.')
     expectTrue(
-      !result.ok && result.reasonCode === 'unsupported-schema-version',
-      'Unsupported history schema versions must report a stable reason code.',
-    )
+      !result.ok,
+      "Unsupported history schema versions must fail validation.",
+    );
+    expectTrue(
+      !result.ok && result.reasonCode === "unsupported-schema-version",
+      "Unsupported history schema versions must report a stable reason code.",
+    );
   }
 
   function testRejectsTransportMetadataLeak() {
     const result = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         {
-          kind: 'createFeature',
+          kind: "createFeature",
           payload: {
-            baseRevisionId: 'rev_0001',
+            baseRevisionId: "rev_0001",
             definition: createFeatureRequest.definition,
           },
         },
       ],
-    })
+    });
 
-    expectTrue(!result.ok, 'Operation entries with transport metadata must fail validation.')
     expectTrue(
-      !result.ok && result.reasonCode === 'transport-field-leak',
-      'Transport metadata leaks must report a stable reason code.',
-    )
+      !result.ok,
+      "Operation entries with transport metadata must fail validation.",
+    );
+    expectTrue(
+      !result.ok && result.reasonCode === "transport-field-leak",
+      "Transport metadata leaks must report a stable reason code.",
+    );
   }
 
   function testRejectsInconsistentCommitSketchTargets() {
     const result = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         {
-          kind: 'commitSketch',
+          kind: "commitSketch",
           payload: {
             sketchId: null,
-            sketchLabel: 'Broken Sketch',
+            sketchLabel: "Broken Sketch",
             plane: commitSketchRequest.plane,
             definition: {
-              ...createDraftSketchDefinition('sketch_draft'),
+              ...createDraftSketchDefinition("sketch_draft"),
               entities: [
-                ...createDraftSketchDefinition('sketch_draft').entities.slice(0, 3),
+                ...createDraftSketchDefinition("sketch_draft").entities.slice(
+                  0,
+                  3,
+                ),
                 {
-                  ...createDraftSketchDefinition('sketch_draft').entities[3]!,
+                  ...createDraftSketchDefinition("sketch_draft").entities[3]!,
                   target: {
-                    kind: 'sketchEntity' as const,
-                    sketchId: 'sketch_other',
-                    entityId: 'sketch_entity_1_rect-left',
+                    kind: "sketchEntity" as const,
+                    sketchId: "sketch_other",
+                    entityId: "sketch_entity_1_rect-left",
                   },
                 },
               ],
@@ -557,18 +712,21 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
           },
         },
       ],
-    })
+    });
 
-    expectTrue(!result.ok, 'Inconsistent commitSketch target sketch ids must fail validation.')
     expectTrue(
-      !result.ok && result.reasonCode === 'inconsistent-commit-sketch-targets',
-      'Inconsistent commitSketch target sketch ids must report a stable reason code.',
-    )
+      !result.ok,
+      "Inconsistent commitSketch target sketch ids must fail validation.",
+    );
+    expectTrue(
+      !result.ok && result.reasonCode === "inconsistent-commit-sketch-targets",
+      "Inconsistent commitSketch target sketch ids must report a stable reason code.",
+    );
   }
 
   function testValidatesProfileCollectionFeaturePayloads() {
     const multiProfilePayload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
@@ -578,17 +736,24 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
               ...createExtrudeDefinition.parameters,
               profiles: [
                 createExtrudeDefinition.parameters.profiles[0],
-                { kind: 'region', sketchId: 'sketch_profile', regionId: 'region_inner' },
+                {
+                  kind: "region",
+                  sketchId: "sketch_profile",
+                  regionId: "region_inner",
+                },
               ],
             },
           },
         }),
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(multiProfilePayload)
+    const result = validateOperationHistoryPayload(multiProfilePayload);
 
-    expectTrue(result.ok, 'One-profile and multi-profile extrude history payloads should validate.')
+    expectTrue(
+      result.ok,
+      "One-profile and multi-profile extrude history payloads should validate.",
+    );
   }
 
   function testPreservesFeatureExpressionAuthoredValues() {
@@ -599,158 +764,231 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
         parameters: {
           ...createExtrudeDefinition.parameters,
           extent: {
-            mode: 'oneSide',
+            mode: "oneSide",
             end: {
-              kind: 'blind',
-              direction: 'positive',
-              distance: createExpressionAuthoredValue('depth + 3'),
+              kind: "blind",
+              direction: "positive",
+              distance: createExpressionAuthoredValue("depth + 3"),
             },
           },
         },
       },
-    })
+    });
 
     const result = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [entry],
-    })
+    });
 
-    expectTrue(result.ok, 'Feature expression-authored history payloads should validate.')
-    expectTrue(result.payload.entries[0]?.kind === 'createFeature', 'Feature expression history entry kind should be preserved.')
-    const definition = result.payload.entries[0].payload.definition
-    expectTrue(definition.kind === 'extrude', 'Feature expression history entry should preserve the extrude definition.')
-    const distance = definition.parameters.extent.end.kind === 'blind'
-      ? definition.parameters.extent.end.distance
-      : null
-    expectTrue(isExpressionAuthoredValue(distance), 'Feature expression history should preserve authored expression text.')
-    expectTrue(distance.valueText === 'depth + 3', 'Feature expression history should not persist resolved runtime values.')
+    expectTrue(
+      result.ok,
+      "Feature expression-authored history payloads should validate.",
+    );
+    expectTrue(
+      result.payload.entries[0]?.kind === "createFeature",
+      "Feature expression history entry kind should be preserved.",
+    );
+    const definition = result.payload.entries[0].payload.definition;
+    expectTrue(
+      definition.kind === "extrude",
+      "Feature expression history entry should preserve the extrude definition.",
+    );
+    const distance =
+      definition.parameters.extent.end.kind === "blind"
+        ? definition.parameters.extent.end.distance
+        : null;
+    expectTrue(
+      isExpressionAuthoredValue(distance),
+      "Feature expression history should preserve authored expression text.",
+    );
+    expectTrue(
+      distance.valueText === "depth + 3",
+      "Feature expression history should not persist resolved runtime values.",
+    );
   }
 
   function testRejectsLegacyAndInvalidProfileCollections() {
     const legacyPayload = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
-      entries: [{
-        kind: 'createFeature',
-        payload: {
-          definition: {
-            ...createExtrudeDefinition,
-            parameters: {
-              ...createExtrudeDefinition.parameters,
-              profiles: undefined,
-              profile: createExtrudeDefinition.parameters.profiles[0],
+      ...createEmptyOperationHistory("doc_workspace"),
+      entries: [
+        {
+          kind: "createFeature",
+          payload: {
+            definition: {
+              ...createExtrudeDefinition,
+              parameters: {
+                ...createExtrudeDefinition.parameters,
+                profiles: undefined,
+                profile: createExtrudeDefinition.parameters.profiles[0],
+              },
             },
           },
         },
-      }],
-    })
+      ],
+    });
     const emptyPayload = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
-      entries: [{
-        kind: 'createFeature',
-        payload: {
-          definition: {
-            ...createExtrudeDefinition,
-            parameters: {
-              ...createExtrudeDefinition.parameters,
-              profiles: [],
+      ...createEmptyOperationHistory("doc_workspace"),
+      entries: [
+        {
+          kind: "createFeature",
+          payload: {
+            definition: {
+              ...createExtrudeDefinition,
+              parameters: {
+                ...createExtrudeDefinition.parameters,
+                profiles: [],
+              },
             },
           },
         },
-      }],
-    })
+      ],
+    });
     const duplicatePayload = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
-      entries: [{
-        kind: 'updateFeature',
-        payload: {
-          featureId: 'feature_extrude-1',
-          definition: {
-            ...createExtrudeDefinition,
-            parameters: {
-              ...createExtrudeDefinition.parameters,
-              profiles: [
-                createExtrudeDefinition.parameters.profiles[0],
-                createExtrudeDefinition.parameters.profiles[0],
-              ],
+      ...createEmptyOperationHistory("doc_workspace"),
+      entries: [
+        {
+          kind: "updateFeature",
+          payload: {
+            featureId: "feature_extrude-1",
+            definition: {
+              ...createExtrudeDefinition,
+              parameters: {
+                ...createExtrudeDefinition.parameters,
+                profiles: [
+                  createExtrudeDefinition.parameters.profiles[0],
+                  createExtrudeDefinition.parameters.profiles[0],
+                ],
+              },
             },
           },
         },
-      }],
-    })
+      ],
+    });
 
-    expectTrue(!legacyPayload.ok && legacyPayload.reasonCode === 'legacy-profile-parameter', 'Legacy singular profile history payloads should be rejected.')
-    expectTrue(!emptyPayload.ok && emptyPayload.reasonCode === 'invalid-profile-collection', 'Empty profile collection history payloads should be rejected.')
-    expectTrue(!duplicatePayload.ok && duplicatePayload.reasonCode === 'duplicate-profile-reference', 'Duplicate profile collection history payloads should be rejected.')
+    expectTrue(
+      !legacyPayload.ok &&
+        legacyPayload.reasonCode === "legacy-profile-parameter",
+      "Legacy singular profile history payloads should be rejected.",
+    );
+    expectTrue(
+      !emptyPayload.ok &&
+        emptyPayload.reasonCode === "invalid-profile-collection",
+      "Empty profile collection history payloads should be rejected.",
+    );
+    expectTrue(
+      !duplicatePayload.ok &&
+        duplicatePayload.reasonCode === "duplicate-profile-reference",
+      "Duplicate profile collection history payloads should be rejected.",
+    );
   }
 
   function testValidatesAdvancedExtentContractsAndRejectsInvalidSymmetricModes() {
     const advancedExtrudeResult = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: {
-            kind: 'extrude',
+            kind: "extrude",
             featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
             parameters: {
-              profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
-              startExtent: { kind: 'profilePlane' },
+              profiles: [
+                {
+                  kind: "region",
+                  sketchId: "sketch_profile",
+                  regionId: "region_profile",
+                },
+              ],
+              startExtent: { kind: "profilePlane" },
               extent: {
-                mode: 'twoSide',
-                firstEnd: { kind: 'blind', direction: 'positive', distance: 10, draftAngle: 0.1 },
-                secondEnd: { kind: 'upToNext', direction: 'negative', offset: { distance: 0.5, direction: 'shorten' } },
+                mode: "twoSide",
+                firstEnd: {
+                  kind: "blind",
+                  direction: "positive",
+                  distance: 10,
+                  draftAngle: 0.1,
+                },
+                secondEnd: {
+                  kind: "upToNext",
+                  direction: "negative",
+                  offset: { distance: 0.5, direction: "shorten" },
+                },
               },
-              operation: 'newBody',
-              booleanScope: { kind: 'standalone' },
+              operation: "newBody",
+              booleanScope: { kind: "standalone" },
             },
           },
         }),
       ],
-    })
-    expectTrue(advancedExtrudeResult.ok, 'Operation history should preserve advanced two-side extrude extent contracts.')
+    });
+    expectTrue(
+      advancedExtrudeResult.ok,
+      "Operation history should preserve advanced two-side extrude extent contracts.",
+    );
 
     const invalidSymmetricExtrude = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: {
-            kind: 'extrude',
+            kind: "extrude",
             featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
             parameters: {
-              profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
-              startExtent: { kind: 'profilePlane' },
-              extent: { mode: 'symmetric', end: { kind: 'upToNext', direction: 'positive' } },
-              operation: 'newBody',
-              booleanScope: { kind: 'standalone' },
+              profiles: [
+                {
+                  kind: "region",
+                  sketchId: "sketch_profile",
+                  regionId: "region_profile",
+                },
+              ],
+              startExtent: { kind: "profilePlane" },
+              extent: {
+                mode: "symmetric",
+                end: { kind: "upToNext", direction: "positive" },
+              },
+              operation: "newBody",
+              booleanScope: { kind: "standalone" },
             },
           },
         }),
       ],
-    })
-    expectTrue(!invalidSymmetricExtrude.ok, 'Symmetric extrudes should reject non-blind/non-throughAll end conditions.')
+    });
+    expectTrue(
+      !invalidSymmetricExtrude.ok,
+      "Symmetric extrudes should reject non-blind/non-throughAll end conditions.",
+    );
 
     const invalidSymmetricRevolve = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: {
-            kind: 'revolve',
+            kind: "revolve",
             featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
             parameters: {
-              profiles: [{ kind: 'region', sketchId: 'sketch_profile', regionId: 'region_profile' }],
-              axis: { kind: 'edge', bodyId: 'body_axis', edgeId: 'edge_axis' },
+              profiles: [
+                {
+                  kind: "region",
+                  sketchId: "sketch_profile",
+                  regionId: "region_profile",
+                },
+              ],
+              axis: { kind: "edge", bodyId: "body_axis", edgeId: "edge_axis" },
               startAngle: 0,
-              extent: { mode: 'symmetric', end: { kind: 'full' } },
-              operation: 'newBody',
-              booleanScope: { kind: 'standalone' },
+              extent: { mode: "symmetric", end: { kind: "full" } },
+              operation: "newBody",
+              booleanScope: { kind: "standalone" },
             },
           },
         }),
       ],
-    })
-    expectTrue(!invalidSymmetricRevolve.ok, 'Symmetric revolve should reject full and up-to end conditions.')
+    });
+    expectTrue(
+      !invalidSymmetricRevolve.ok,
+      "Symmetric revolve should reject full and up-to end conditions.",
+    );
   }
 
   function testPreservesAdvancedParticipantsAndOperationIntent() {
@@ -758,57 +996,70 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
       ...sweepAdvancedFeatureExample,
       parameters: {
         ...sweepAdvancedFeatureExample.parameters,
-        operationIntent: 'subtract' as const,
+        operationIntent: "subtract" as const,
         participants: [
           ...sweepAdvancedFeatureExample.parameters.participants,
-          { role: 'targetBody' as const, targets: [{ kind: 'body' as const, bodyId: 'body_target' as const }] },
+          {
+            role: "targetBody" as const,
+            targets: [
+              { kind: "body" as const, bodyId: "body_target" as const },
+            ],
+          },
         ],
       },
-    }
+    };
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: sweepSubtractDefinition,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_sweep-1',
+            featureId: "feature_sweep-1",
             definition: sweepSubtractDefinition,
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Advanced solid feature history payloads should validate.')
     expectTrue(
-        result.ok &&
-        result.payload.entries[0]?.kind === 'createFeature' &&
-        result.payload.entries[0].payload.definition.kind === 'sweep' &&
-        getAuthoredLiteralValue(result.payload.entries[0].payload.definition.parameters.operationIntent) === 'subtract' &&
-        result.payload.entries[1]?.kind === 'updateFeature' &&
-        result.payload.entries[1].payload.definition.kind === 'sweep' &&
-        result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'targetBody'),
-      'Sweep operation history must preserve participant roles and operation intent across create and update entries.',
-    )
+      result.ok,
+      "Advanced solid feature history payloads should validate.",
+    );
+    expectTrue(
+      result.ok &&
+        result.payload.entries[0]?.kind === "createFeature" &&
+        result.payload.entries[0].payload.definition.kind === "sweep" &&
+        getAuthoredLiteralValue(
+          result.payload.entries[0].payload.definition.parameters
+            .operationIntent,
+        ) === "subtract" &&
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "sweep" &&
+        result.payload.entries[1].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "targetBody",
+        ),
+      "Sweep operation history must preserve participant roles and operation intent across create and update entries.",
+    );
   }
 
   function testPreservesChamferParticipantsAndDistanceOptions() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: chamferAdvancedFeatureExample,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_chamfer-1',
+            featureId: "feature_chamfer-1",
             definition: {
               ...chamferAdvancedFeatureExample,
               parameters: {
@@ -819,85 +1070,106 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Chamfer advanced solid feature history payloads should validate.')
+    expectTrue(
+      result.ok,
+      "Chamfer advanced solid feature history payloads should validate.",
+    );
     expectTrue(
       result.ok &&
-        result.payload.entries[0]?.kind === 'createFeature' &&
-        result.payload.entries[0].payload.definition.kind === 'chamfer' &&
-        result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'edge') &&
-        result.payload.entries[1]?.kind === 'updateFeature' &&
-        result.payload.entries[1].payload.definition.kind === 'chamfer' &&
-        getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.distance) === 2,
-      'Chamfer operation history must preserve edge participant roles and distance options across create and update entries.',
-    )
+        result.payload.entries[0]?.kind === "createFeature" &&
+        result.payload.entries[0].payload.definition.kind === "chamfer" &&
+        result.payload.entries[0].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "edge",
+        ) &&
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "chamfer" &&
+        getAuthoredLiteralValue(
+          result.payload.entries[1].payload.definition.parameters.options
+            ?.distance,
+        ) === 2,
+      "Chamfer operation history must preserve edge participant roles and distance options across create and update entries.",
+    );
   }
 
   function testPreservesSplitParticipantsAcrossCreateAndUpdateEntries() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: splitAdvancedFeatureExample,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_split-1',
+            featureId: "feature_split-1",
             definition: {
               ...splitAdvancedFeatureExample,
               parameters: {
                 participants: [
-                  { role: 'targetBody', targets: [{ kind: 'body', bodyId: 'body_target_next' }] },
-                  { role: 'toolBody', targets: [{ kind: 'body', bodyId: 'body_tool_next' }] },
+                  {
+                    role: "targetBody",
+                    targets: [{ kind: "body", bodyId: "body_target_next" }],
+                  },
+                  {
+                    role: "toolBody",
+                    targets: [{ kind: "body", bodyId: "body_tool_next" }],
+                  },
                 ],
               },
             },
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Split advanced solid feature history payloads should validate.')
     expectTrue(
-      result.ok
-        && result.payload.entries[0]?.kind === 'createFeature'
-        && result.payload.entries[0].payload.definition.kind === 'split'
-        && result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'toolBody')
-        && result.payload.entries[1]?.kind === 'updateFeature'
-        && result.payload.entries[1].payload.definition.kind === 'split'
-        && result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'targetBody'),
-      'Split operation history must preserve explicit targetBody and toolBody participants across create and update entries.',
-    )
+      result.ok,
+      "Split advanced solid feature history payloads should validate.",
+    );
+    expectTrue(
+      result.ok &&
+        result.payload.entries[0]?.kind === "createFeature" &&
+        result.payload.entries[0].payload.definition.kind === "split" &&
+        result.payload.entries[0].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "toolBody",
+        ) &&
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "split" &&
+        result.payload.entries[1].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "targetBody",
+        ),
+      "Split operation history must preserve explicit targetBody and toolBody participants across create and update entries.",
+    );
   }
 
   function testPreservesDeleteSolidParticipantsAcrossCreateAndUpdateEntries() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: deleteSolidAdvancedFeatureExample,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_delete-solid-1',
+            featureId: "feature_delete-solid-1",
             definition: {
               ...deleteSolidAdvancedFeatureExample,
               parameters: {
                 participants: [
                   {
-                    role: 'body',
+                    role: "body",
                     targets: [
-                      { kind: 'body', bodyId: 'body_delete_a' },
-                      { kind: 'body', bodyId: 'body_delete_b' },
+                      { kind: "body", bodyId: "body_delete_a" },
+                      { kind: "body", bodyId: "body_delete_b" },
                     ],
                   },
                 ],
@@ -906,56 +1178,86 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Delete-solid advanced solid feature history payloads should validate.')
     expectTrue(
-      result.ok
-        && result.payload.entries[0]?.kind === 'createFeature'
-        && result.payload.entries[0].payload.definition.kind === 'deleteSolid'
-        && result.payload.entries[1]?.kind === 'updateFeature'
-        && result.payload.entries[1].payload.definition.kind === 'deleteSolid'
-        && result.payload.entries[1].payload.definition.parameters.participants[0]?.targets.length === 2,
-      'Delete-solid operation history must preserve explicit body participants across create and update entries.',
-    )
+      result.ok,
+      "Delete-solid advanced solid feature history payloads should validate.",
+    );
+    expectTrue(
+      result.ok &&
+        result.payload.entries[0]?.kind === "createFeature" &&
+        result.payload.entries[0].payload.definition.kind === "deleteSolid" &&
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "deleteSolid" &&
+        result.payload.entries[1].payload.definition.parameters.participants[0]
+          ?.targets.length === 2,
+      "Delete-solid operation history must preserve explicit body participants across create and update entries.",
+    );
   }
 
   function testPreservesLoftParticipantOrderAndGuideCurves() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: loftAdvancedFeatureExample,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_loft-1',
+            featureId: "feature_loft-1",
             definition: {
               ...loftAdvancedFeatureExample,
               parameters: {
                 ...loftAdvancedFeatureExample.parameters,
                 participants: [
                   {
-                    role: 'profile',
+                    role: "profile",
                     targets: [
-                      { kind: 'face', bodyId: 'body_loft_b', faceId: 'face_loft_b' },
-                      { kind: 'region', sketchId: 'sketch_loft_a', regionId: 'region_loft_a' },
+                      {
+                        kind: "face",
+                        bodyId: "body_loft_b",
+                        faceId: "face_loft_b",
+                      },
+                      {
+                        kind: "region",
+                        sketchId: "sketch_loft_a",
+                        regionId: "region_loft_a",
+                      },
                     ],
                   },
-                  { role: 'path', targets: [{ kind: 'edge', bodyId: 'body_path', edgeId: 'edge_path' }] },
-                  { role: 'guideCurve', targets: [{ kind: 'edge', bodyId: 'body_guide', edgeId: 'edge_guide' }] },
+                  {
+                    role: "path",
+                    targets: [
+                      {
+                        kind: "edge",
+                        bodyId: "body_path",
+                        edgeId: "edge_path",
+                      },
+                    ],
+                  },
+                  {
+                    role: "guideCurve",
+                    targets: [
+                      {
+                        kind: "edge",
+                        bodyId: "body_guide",
+                        edgeId: "edge_guide",
+                      },
+                    ],
+                  },
                 ],
                 options: {
                   path: { sectionCount: 6 },
-                  guideContinuity: 'normalToGuide',
+                  guideContinuity: "normalToGuide",
                   profileConditions: {
-                    startCondition: 'normal',
+                    startCondition: "normal",
                     startMagnitude: 1,
-                    endCondition: 'tangent',
+                    endCondition: "tangent",
                     endMagnitude: 1,
                   },
                 },
@@ -964,140 +1266,183 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Loft advanced solid feature history payloads should validate.')
+    expectTrue(
+      result.ok,
+      "Loft advanced solid feature history payloads should validate.",
+    );
     expectTrue(
       result.ok &&
-        result.payload.entries[1]?.kind === 'updateFeature' &&
-        result.payload.entries[1].payload.definition.kind === 'loft' &&
-        result.payload.entries[1].payload.definition.parameters.participants[0]?.role === 'profile' &&
-        result.payload.entries[1].payload.definition.parameters.participants[0]?.targets[0]?.kind === 'face' &&
-        result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'path') &&
-        result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'guideCurve'),
-      'Loft operation history must preserve ordered profile participants, path, and guide curves across updates.',
-    )
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "loft" &&
+        result.payload.entries[1].payload.definition.parameters.participants[0]
+          ?.role === "profile" &&
+        result.payload.entries[1].payload.definition.parameters.participants[0]
+          ?.targets[0]?.kind === "face" &&
+        result.payload.entries[1].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "path",
+        ) &&
+        result.payload.entries[1].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "guideCurve",
+        ),
+      "Loft operation history must preserve ordered profile participants, path, and guide curves across updates.",
+    );
   }
 
   function testRejectsInvalidAdvancedParticipants() {
     const result = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
-      entries: [{
-        kind: 'createFeature',
-        payload: {
-          definition: {
-            ...sweepAdvancedFeatureExample,
-            parameters: {
-              ...sweepAdvancedFeatureExample.parameters,
-              participants: [{ role: 'targetBody', targets: 'body_target' }],
+      ...createEmptyOperationHistory("doc_workspace"),
+      entries: [
+        {
+          kind: "createFeature",
+          payload: {
+            definition: {
+              ...sweepAdvancedFeatureExample,
+              parameters: {
+                ...sweepAdvancedFeatureExample.parameters,
+                participants: [{ role: "targetBody", targets: "body_target" }],
+              },
             },
           },
         },
-      }],
-    })
+      ],
+    });
 
-    expectTrue(!result.ok && result.reasonCode === 'invalid-advanced-participant', 'Invalid advanced participants should report a stable reason code.')
+    expectTrue(
+      !result.ok && result.reasonCode === "invalid-advanced-participant",
+      "Invalid advanced participants should report a stable reason code.",
+    );
   }
 
   function testPreservesCombineParticipantsAndOperationIntentAcrossCreateAndUpdateEntries() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: combineAdvancedFeatureExample,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_combine-1',
+            featureId: "feature_combine-1",
             definition: {
               ...combineAdvancedFeatureExample,
               parameters: {
                 ...combineAdvancedFeatureExample.parameters,
-                operationIntent: 'intersect',
+                operationIntent: "intersect",
                 participants: [
-                  { role: 'targetBody', targets: [{ kind: 'body', bodyId: 'body_target_next' }] },
-                  { role: 'toolBody', targets: [{ kind: 'body', bodyId: 'body_tool_next' }] },
+                  {
+                    role: "targetBody",
+                    targets: [{ kind: "body", bodyId: "body_target_next" }],
+                  },
+                  {
+                    role: "toolBody",
+                    targets: [{ kind: "body", bodyId: "body_tool_next" }],
+                  },
                 ],
               },
             },
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Combine advanced solid feature history payloads should validate.')
     expectTrue(
-      result.ok
-        && result.payload.entries[0]?.kind === 'createFeature'
-        && result.payload.entries[0].payload.definition.kind === 'combine'
-        && result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'targetBody')
-        && getAuthoredLiteralValue(result.payload.entries[0].payload.definition.parameters.operationIntent) === 'subtract'
-        && result.payload.entries[1]?.kind === 'updateFeature'
-        && result.payload.entries[1].payload.definition.kind === 'combine'
-        && getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.operationIntent) === 'intersect'
-        && result.payload.entries[1].payload.definition.parameters.participants.some((participant) => participant.role === 'toolBody'),
-      'Combine operation history must preserve participant roles and operation intent across create and update entries.',
-    )
+      result.ok,
+      "Combine advanced solid feature history payloads should validate.",
+    );
+    expectTrue(
+      result.ok &&
+        result.payload.entries[0]?.kind === "createFeature" &&
+        result.payload.entries[0].payload.definition.kind === "combine" &&
+        result.payload.entries[0].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "targetBody",
+        ) &&
+        getAuthoredLiteralValue(
+          result.payload.entries[0].payload.definition.parameters
+            .operationIntent,
+        ) === "subtract" &&
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "combine" &&
+        getAuthoredLiteralValue(
+          result.payload.entries[1].payload.definition.parameters
+            .operationIntent,
+        ) === "intersect" &&
+        result.payload.entries[1].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "toolBody",
+        ),
+      "Combine operation history must preserve participant roles and operation intent across create and update entries.",
+    );
   }
 
   function testPreservesThickenParticipantsAndOptions() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: thickenAdvancedFeatureExample,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_thicken-1',
+            featureId: "feature_thicken-1",
             definition: {
               ...thickenAdvancedFeatureExample,
               parameters: {
                 ...thickenAdvancedFeatureExample.parameters,
-                options: { thickness: 2, side: 'symmetric' },
+                options: { thickness: 2, side: "symmetric" },
               },
             },
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Thicken advanced solid feature history payloads should validate.')
+    expectTrue(
+      result.ok,
+      "Thicken advanced solid feature history payloads should validate.",
+    );
     expectTrue(
       result.ok &&
-        result.payload.entries[0]?.kind === 'createFeature' &&
-        result.payload.entries[0].payload.definition.kind === 'thicken' &&
-        result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'face') &&
-        result.payload.entries[1]?.kind === 'updateFeature' &&
-        result.payload.entries[1].payload.definition.kind === 'thicken' &&
-        getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.thickness) === 2 &&
-        getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.side) === 'symmetric',
-      'Thicken operation history must preserve face participants and option payloads across updates.',
-    )
+        result.payload.entries[0]?.kind === "createFeature" &&
+        result.payload.entries[0].payload.definition.kind === "thicken" &&
+        result.payload.entries[0].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "face",
+        ) &&
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "thicken" &&
+        getAuthoredLiteralValue(
+          result.payload.entries[1].payload.definition.parameters.options
+            ?.thickness,
+        ) === 2 &&
+        getAuthoredLiteralValue(
+          result.payload.entries[1].payload.definition.parameters.options?.side,
+        ) === "symmetric",
+      "Thicken operation history must preserve face participants and option payloads across updates.",
+    );
   }
 
   function testPreservesMirrorParticipantsAndCopyOptionAcrossCreateAndUpdateEntries() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: mirrorAdvancedFeatureExample,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_mirror-1',
+            featureId: "feature_mirror-1",
             definition: {
               ...mirrorAdvancedFeatureExample,
               parameters: {
@@ -1108,35 +1453,42 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Mirror advanced solid feature history payloads should validate.')
     expectTrue(
-      result.ok
-        && result.payload.entries[0]?.kind === 'createFeature'
-        && result.payload.entries[0].payload.definition.kind === 'mirror'
-        && result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'plane')
-        && result.payload.entries[1]?.kind === 'updateFeature'
-        && result.payload.entries[1].payload.definition.kind === 'mirror'
-        && getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.copy) === false,
-      'Mirror operation history must preserve explicit plane participants and copy policy options across updates.',
-    )
+      result.ok,
+      "Mirror advanced solid feature history payloads should validate.",
+    );
+    expectTrue(
+      result.ok &&
+        result.payload.entries[0]?.kind === "createFeature" &&
+        result.payload.entries[0].payload.definition.kind === "mirror" &&
+        result.payload.entries[0].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "plane",
+        ) &&
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "mirror" &&
+        getAuthoredLiteralValue(
+          result.payload.entries[1].payload.definition.parameters.options?.copy,
+        ) === false,
+      "Mirror operation history must preserve explicit plane participants and copy policy options across updates.",
+    );
   }
 
   function testPreservesTransformParticipantsAndDistanceOptionAcrossCreateAndUpdateEntries() {
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         createCreateFeatureHistoryEntry({
           ...createFeatureRequest,
           definition: transformAdvancedFeatureExample,
         }),
         {
-          kind: 'updateFeature',
+          kind: "updateFeature",
           payload: {
-            featureId: 'feature_transform-1',
+            featureId: "feature_transform-1",
             definition: {
               ...transformAdvancedFeatureExample,
               parameters: {
@@ -1147,191 +1499,248 @@ test('src/contracts/modeling/operation-history.spec.ts', async () => {  const sk
           },
         },
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Transform advanced solid feature history payloads should validate.')
     expectTrue(
-      result.ok
-        && result.payload.entries[0]?.kind === 'createFeature'
-        && result.payload.entries[0].payload.definition.kind === 'transform'
-        && result.payload.entries[0].payload.definition.parameters.participants.some((participant) => participant.role === 'transformReference')
-        && result.payload.entries[1]?.kind === 'updateFeature'
-        && result.payload.entries[1].payload.definition.kind === 'transform'
-        && getAuthoredLiteralValue(result.payload.entries[1].payload.definition.parameters.options?.distance) === 7.5,
-      'Transform operation history must preserve explicit transform references and distance options across updates.',
-    )
+      result.ok,
+      "Transform advanced solid feature history payloads should validate.",
+    );
+    expectTrue(
+      result.ok &&
+        result.payload.entries[0]?.kind === "createFeature" &&
+        result.payload.entries[0].payload.definition.kind === "transform" &&
+        result.payload.entries[0].payload.definition.parameters.participants.some(
+          (participant) => participant.role === "transformReference",
+        ) &&
+        result.payload.entries[1]?.kind === "updateFeature" &&
+        result.payload.entries[1].payload.definition.kind === "transform" &&
+        getAuthoredLiteralValue(
+          result.payload.entries[1].payload.definition.parameters.options
+            ?.distance,
+        ) === 7.5,
+      "Transform operation history must preserve explicit transform references and distance options across updates.",
+    );
   }
 
   function testValidatesDocumentVariableHistoryWithoutRuntimeState() {
     const addVariableRequest: AddDocumentVariableRequest = {
-      contractVersion: 'modeling-contract/v1alpha1',
-      documentId: 'doc_workspace',
-      baseRevisionId: 'rev_0004',
-      name: 'width',
-      valueText: '10 + 2',
-    }
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_0004",
+      name: "width",
+      valueText: "10 + 2",
+    };
     const updateVariableRequest: UpdateDocumentVariableRequest = {
-      contractVersion: 'modeling-contract/v1alpha1',
-      documentId: 'doc_workspace',
-      baseRevisionId: 'rev_0005',
-      variableId: 'variable_width',
-      name: 'width',
-      valueText: 'width + 6',
-    }
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_0005",
+      variableId: "variable_width",
+      name: "width",
+      valueText: "width + 6",
+    };
     const payload: ModelingOperationHistoryPayload = {
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [
-        createAddDocumentVariableHistoryEntry(addVariableRequest, 'variable_width'),
+        createAddDocumentVariableHistoryEntry(
+          addVariableRequest,
+          "variable_width",
+        ),
         createUpdateDocumentVariableHistoryEntry(updateVariableRequest),
       ],
-    }
+    };
 
-    const result = validateOperationHistoryPayload(payload)
+    const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(result.ok, 'Document variable add/update history entries should validate.')
     expectTrue(
-      result.ok
-        && result.payload.entries[0]?.kind === 'addDocumentVariable'
-        && result.payload.entries[0].payload.variableId === 'variable_width'
-        && result.payload.entries[1]?.kind === 'updateDocumentVariable'
-        && result.payload.entries[1].payload.valueText === 'width + 6'
-        && !('calculatedValue' in result.payload.entries[1].payload),
-      'Document variable history should preserve stable id, name, and raw value text.',
-    )
+      result.ok,
+      "Document variable add/update history entries should validate.",
+    );
+    expectTrue(
+      result.ok &&
+        result.payload.entries[0]?.kind === "addDocumentVariable" &&
+        result.payload.entries[0].payload.variableId === "variable_width" &&
+        result.payload.entries[1]?.kind === "updateDocumentVariable" &&
+        result.payload.entries[1].payload.valueText === "width + 6" &&
+        !("calculatedValue" in result.payload.entries[1].payload),
+      "Document variable history should preserve stable id, name, and raw value text.",
+    );
 
     const invalidRuntimeStatePayload = validateOperationHistoryPayload({
       ...payload,
       entries: [
         {
-          kind: 'addDocumentVariable',
+          kind: "addDocumentVariable",
           payload: {
-            variableId: 'variable_bad',
-            name: 'bad',
-            valueText: 'not evaluated',
+            variableId: "variable_bad",
+            name: "bad",
+            valueText: "not evaluated",
             calculatedValue: 42,
           },
         },
       ],
-    })
+    });
 
-    expectTrue(!invalidRuntimeStatePayload.ok, 'Document variable history should reject persisted runtime calculation state.')
+    expectTrue(
+      !invalidRuntimeStatePayload.ok,
+      "Document variable history should reject persisted runtime calculation state.",
+    );
   }
 
   function testPreservesDerivedSketchRelationshipsInCommitHistory() {
-    const derivedCommit = createCommitSketchHistoryEntry({
-      ...commitSketchRequest,
-      definition: {
-        ...sketchDefinition,
-        pointIds: ['sketch_point_seed_a', 'sketch_point_seed_b', 'sketch_point_out_a', 'sketch_point_out_b'],
-        points: [
-          {
-            pointId: 'sketch_point_seed_a',
-            label: 'Seed A',
-            target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_seed_a' },
-            position: [0, 0],
-            isConstruction: false,
-          },
-          {
-            pointId: 'sketch_point_seed_b',
-            label: 'Seed B',
-            target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_seed_b' },
-            position: [1, 0],
-            isConstruction: false,
-          },
-          {
-            pointId: 'sketch_point_out_a',
-            label: 'Output A',
-            target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_out_a' },
-            position: [2, 0],
-            isConstruction: false,
-          },
-          {
-            pointId: 'sketch_point_out_b',
-            label: 'Output B',
-            target: { kind: 'sketchPoint', sketchId: 'sketch_profile', pointId: 'sketch_point_out_b' },
-            position: [3, 0],
-            isConstruction: false,
-          },
-        ],
-        entityIds: ['sketch_entity_seed', 'sketch_entity_output'],
-        entities: [
-          {
-            kind: 'lineSegment',
-            entityId: 'sketch_entity_seed',
-            label: 'Seed',
-            target: { kind: 'sketchEntity', sketchId: 'sketch_profile', entityId: 'sketch_entity_seed' },
-            isConstruction: false,
-            startPointId: 'sketch_point_seed_a',
-            endPointId: 'sketch_point_seed_b',
-          },
-          {
-            kind: 'lineSegment',
-            entityId: 'sketch_entity_output',
-            label: 'Output',
-            target: { kind: 'sketchEntity', sketchId: 'sketch_profile', entityId: 'sketch_entity_output' },
-            isConstruction: false,
-            startPointId: 'sketch_point_out_a',
-            endPointId: 'sketch_point_out_b',
-          },
-        ],
-        derivedRelationships: [{
-          derivationId: 'sketch_derivation_1_linear',
-          label: 'Linear pattern',
-          kind: 'linearPattern',
-          seedEntityIds: ['sketch_entity_seed'],
-          vector: [2, 0],
-          instanceCount: 2,
-          outputs: [{
-            seedEntityId: 'sketch_entity_seed',
-            outputEntityId: 'sketch_entity_output',
-            instanceIndex: 1,
-            seedPointIds: ['sketch_point_seed_a', 'sketch_point_seed_b'],
-            outputPointIds: ['sketch_point_out_a', 'sketch_point_out_b'],
-          }],
-        }],
+    const derivedCommit = createCommitSketchHistoryEntry(
+      {
+        ...commitSketchRequest,
+        definition: {
+          ...sketchDefinition,
+          pointIds: [
+            "sketch_point_seed_a",
+            "sketch_point_seed_b",
+            "sketch_point_out_a",
+            "sketch_point_out_b",
+          ],
+          points: [
+            {
+              pointId: "sketch_point_seed_a",
+              label: "Seed A",
+              target: {
+                kind: "sketchPoint",
+                sketchId: "sketch_profile",
+                pointId: "sketch_point_seed_a",
+              },
+              position: [0, 0],
+              isConstruction: false,
+            },
+            {
+              pointId: "sketch_point_seed_b",
+              label: "Seed B",
+              target: {
+                kind: "sketchPoint",
+                sketchId: "sketch_profile",
+                pointId: "sketch_point_seed_b",
+              },
+              position: [1, 0],
+              isConstruction: false,
+            },
+            {
+              pointId: "sketch_point_out_a",
+              label: "Output A",
+              target: {
+                kind: "sketchPoint",
+                sketchId: "sketch_profile",
+                pointId: "sketch_point_out_a",
+              },
+              position: [2, 0],
+              isConstruction: false,
+            },
+            {
+              pointId: "sketch_point_out_b",
+              label: "Output B",
+              target: {
+                kind: "sketchPoint",
+                sketchId: "sketch_profile",
+                pointId: "sketch_point_out_b",
+              },
+              position: [3, 0],
+              isConstruction: false,
+            },
+          ],
+          entityIds: ["sketch_entity_seed", "sketch_entity_output"],
+          entities: [
+            {
+              kind: "lineSegment",
+              entityId: "sketch_entity_seed",
+              label: "Seed",
+              target: {
+                kind: "sketchEntity",
+                sketchId: "sketch_profile",
+                entityId: "sketch_entity_seed",
+              },
+              isConstruction: false,
+              startPointId: "sketch_point_seed_a",
+              endPointId: "sketch_point_seed_b",
+            },
+            {
+              kind: "lineSegment",
+              entityId: "sketch_entity_output",
+              label: "Output",
+              target: {
+                kind: "sketchEntity",
+                sketchId: "sketch_profile",
+                entityId: "sketch_entity_output",
+              },
+              isConstruction: false,
+              startPointId: "sketch_point_out_a",
+              endPointId: "sketch_point_out_b",
+            },
+          ],
+          derivedRelationships: [
+            {
+              derivationId: "sketch_derivation_1_linear",
+              label: "Linear pattern",
+              kind: "linearPattern",
+              seedEntityIds: ["sketch_entity_seed"],
+              vector: [2, 0],
+              instanceCount: 2,
+              outputs: [
+                {
+                  seedEntityId: "sketch_entity_seed",
+                  outputEntityId: "sketch_entity_output",
+                  instanceIndex: 1,
+                  seedPointIds: ["sketch_point_seed_a", "sketch_point_seed_b"],
+                  outputPointIds: ["sketch_point_out_a", "sketch_point_out_b"],
+                },
+              ],
+            },
+          ],
+        },
       },
-    }, 'sketch_profile')
+      "sketch_profile",
+    );
 
     const result = validateOperationHistoryPayload({
-      ...createEmptyOperationHistory('doc_workspace'),
+      ...createEmptyOperationHistory("doc_workspace"),
       entries: [derivedCommit],
-    })
+    });
 
-    expectTrue(result.ok, 'Operation history should validate commitSketch entries with derived sketch relationships.')
     expectTrue(
-      result.ok
-        && result.payload.entries[0]?.kind === 'commitSketch'
-        && result.payload.entries[0].payload.definition.derivedRelationships?.[0]?.kind === 'linearPattern',
-      'Operation history should preserve durable derived sketch relationship payloads.',
-    )
+      result.ok,
+      "Operation history should validate commitSketch entries with derived sketch relationships.",
+    );
+    expectTrue(
+      result.ok &&
+        result.payload.entries[0]?.kind === "commitSketch" &&
+        result.payload.entries[0].payload.definition.derivedRelationships?.[0]
+          ?.kind === "linearPattern",
+      "Operation history should preserve durable derived sketch relationship payloads.",
+    );
   }
 
-  testValidatesRepresentativeHistory()
-  testRejectsInvalidDocumentHistoryReorderEntries()
-  testRejectsInvalidGenericDeleteEntries()
-  testNormalizesCommittedCommitSketchTargets()
-  testCanCompactCommitSketchAuthoringOperations()
-  testCompactHistoryPreservesReferenceImageOperations()
-  testAcceptsLegacyDraftCommitSketchTargets()
-  testRejectsUnsupportedVersion()
-  testRejectsTransportMetadataLeak()
-  testRejectsInconsistentCommitSketchTargets()
-  testValidatesProfileCollectionFeaturePayloads()
-  testPreservesFeatureExpressionAuthoredValues()
-  testRejectsLegacyAndInvalidProfileCollections()
-  testValidatesAdvancedExtentContractsAndRejectsInvalidSymmetricModes()
-  testPreservesAdvancedParticipantsAndOperationIntent()
-  testPreservesChamferParticipantsAndDistanceOptions()
-  testPreservesSplitParticipantsAcrossCreateAndUpdateEntries()
-  testPreservesCombineParticipantsAndOperationIntentAcrossCreateAndUpdateEntries()
-  testPreservesDeleteSolidParticipantsAcrossCreateAndUpdateEntries()
-  testPreservesLoftParticipantOrderAndGuideCurves()
-  testRejectsInvalidAdvancedParticipants()
-  testPreservesThickenParticipantsAndOptions()
-  testPreservesMirrorParticipantsAndCopyOptionAcrossCreateAndUpdateEntries()
-  testPreservesTransformParticipantsAndDistanceOptionAcrossCreateAndUpdateEntries()
-  testValidatesDocumentVariableHistoryWithoutRuntimeState()
-  testPreservesDerivedSketchRelationshipsInCommitHistory()
-})
+  testValidatesRepresentativeHistory();
+  testRejectsInvalidDocumentHistoryReorderEntries();
+  testRejectsInvalidGenericDeleteEntries();
+  testNormalizesCommittedCommitSketchTargets();
+  testCanCompactCommitSketchAuthoringOperations();
+  testCompactHistoryPreservesReferenceImageOperations();
+  testAcceptsLegacyDraftCommitSketchTargets();
+  testRejectsUnsupportedVersion();
+  testRejectsTransportMetadataLeak();
+  testRejectsInconsistentCommitSketchTargets();
+  testValidatesProfileCollectionFeaturePayloads();
+  testPreservesFeatureExpressionAuthoredValues();
+  testRejectsLegacyAndInvalidProfileCollections();
+  testValidatesAdvancedExtentContractsAndRejectsInvalidSymmetricModes();
+  testPreservesAdvancedParticipantsAndOperationIntent();
+  testPreservesChamferParticipantsAndDistanceOptions();
+  testPreservesSplitParticipantsAcrossCreateAndUpdateEntries();
+  testPreservesCombineParticipantsAndOperationIntentAcrossCreateAndUpdateEntries();
+  testPreservesDeleteSolidParticipantsAcrossCreateAndUpdateEntries();
+  testPreservesLoftParticipantOrderAndGuideCurves();
+  testRejectsInvalidAdvancedParticipants();
+  testPreservesThickenParticipantsAndOptions();
+  testPreservesMirrorParticipantsAndCopyOptionAcrossCreateAndUpdateEntries();
+  testPreservesTransformParticipantsAndDistanceOptionAcrossCreateAndUpdateEntries();
+  testValidatesDocumentVariableHistoryWithoutRuntimeState();
+  testPreservesDerivedSketchRelationshipsInCommitHistory();
+});

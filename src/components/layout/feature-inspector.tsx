@@ -1,20 +1,33 @@
-import { ActionIcon, Paper, Select, Tooltip } from '@mantine/core'
-import { useMemo, useState, type ReactNode } from 'react'
-import { Controller, type Control, type ControllerRenderProps, useForm } from 'react-hook-form'
+import { ActionIcon, Paper, Select, Tooltip } from "@mantine/core";
+import { useMemo, useState, type ReactNode } from "react";
+import {
+  Controller,
+  type Control,
+  type ControllerRenderProps,
+  useForm,
+} from "react-hook-form";
 
-import { WorkbenchIcon } from '@/components/ui/workbench-icon'
-import { Input } from '@/components/ui/input'
+import { WorkbenchIcon } from "@/components/ui/workbench-icon";
+import { Input } from "@/components/ui/input";
 import {
   SECTION_HEADER_CLASSES,
   compactActionIconStyles,
   compactInputStyles,
   compactSelectStyles,
   fieldSurfaceStyle,
-} from '@/components/ui/workbench-panel-styles'
-import type { DocumentVariableRecord, FeatureSnapshotRecord, ModelingDiagnostic } from '@/contracts/modeling/schema'
-import { getPrimitiveRefLabel, primitiveRefEquals, type PrimitiveRef } from '@/core/editor/schema'
-import { formatInspectorDiagnosticDetail } from '@/domain/modeling/diagnostic-formatting'
-import { getFeatureEditorFormSchema } from '@/domain/editor/feature-editing'
+} from "@/components/ui/workbench-panel-styles";
+import type {
+  DocumentVariableRecord,
+  FeatureSnapshotRecord,
+  ModelingDiagnostic,
+} from "@/contracts/modeling/schema";
+import {
+  getPrimitiveRefLabel,
+  primitiveRefEquals,
+  type PrimitiveRef,
+} from "@/core/editor/schema";
+import { formatInspectorDiagnosticDetail } from "@/domain/modeling/diagnostic-formatting";
+import { getFeatureEditorFormSchema } from "@/domain/editor/feature-editing";
 import {
   createFeatureEditorExpressionControlFormValue,
   createFeatureEditorLiteralControlFormValue,
@@ -27,45 +40,61 @@ import {
   type FeatureEditorExpressionField,
   type FeatureEditorExpressionPreview,
   type FeatureEditorFormValues,
-} from '@/core/feature-authoring/form-adapter'
-import { useFeatureEditorFormSync } from '@/hooks/use-feature-editor-form-sync'
+} from "@/core/feature-authoring/form-adapter";
+import { useFeatureEditorFormSync } from "@/hooks/use-feature-editor-form-sync";
 import {
   createFeatureEditorClearReferencePatch,
   createFeatureEditorRemoveReferenceItemPatch,
-} from '@/core/feature-authoring/form-events'
+} from "@/core/feature-authoring/form-events";
 import type {
   FeatureEditorFormField,
   FeatureNumericField,
-} from '@/core/feature-authoring/form-schema'
-import { useEditorState } from '@/hooks/use-editor-state'
-import { WorkbenchInspectorPanel } from '@/components/layout/workbench-inspector-panel'
-import { getVisualFormSections } from '@/components/layout/feature-inspector-sections'
+} from "@/core/feature-authoring/form-schema";
+import { useEditorState } from "@/hooks/use-editor-state";
+import { WorkbenchInspectorPanel } from "@/components/layout/workbench-inspector-panel";
+import { getVisualFormSections } from "@/components/layout/feature-inspector-sections";
 
 interface FeatureInspectorProps {
-  featureSnapshot: FeatureSnapshotRecord | null
-  onPatch: (patch: Record<string, unknown>) => void
-  onCommit: () => void
-  onCancel: () => void
+  featureSnapshot: FeatureSnapshotRecord | null;
+  onPatch: (patch: Record<string, unknown>) => void;
+  onCommit: () => void;
+  onCancel: () => void;
 }
 
-function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagnostic[] }) {
+function DiagnosticsList({
+  diagnostics,
+}: {
+  diagnostics: readonly ModelingDiagnostic[];
+}) {
   if (diagnostics.length === 0) {
     return (
       <p className="text-xs text-[var(--workbench-shell-text-muted)]">
         No diagnostics reported for the current preview.
       </p>
-    )
+    );
   }
 
   return (
     <div className="space-y-2">
       {diagnostics.map((diagnostic, index) => {
         const surface =
-          diagnostic.severity === 'error'
-            ? { bg: 'var(--workbench-shell-danger-surface)', border: 'var(--workbench-shell-danger-border)', label: 'var(--workbench-shell-danger-text)' }
-            : diagnostic.severity === 'warning'
-              ? { bg: 'var(--workbench-shell-warning-surface)', border: 'var(--workbench-shell-warning-border)', label: 'var(--workbench-shell-warning-text)' }
-              : { bg: 'var(--workbench-shell-overlay)', border: 'var(--workbench-shell-border)', label: 'var(--workbench-shell-text-dim)' }
+          diagnostic.severity === "error"
+            ? {
+                bg: "var(--workbench-shell-danger-surface)",
+                border: "var(--workbench-shell-danger-border)",
+                label: "var(--workbench-shell-danger-text)",
+              }
+            : diagnostic.severity === "warning"
+              ? {
+                  bg: "var(--workbench-shell-warning-surface)",
+                  border: "var(--workbench-shell-warning-border)",
+                  label: "var(--workbench-shell-warning-text)",
+                }
+              : {
+                  bg: "var(--workbench-shell-overlay)",
+                  border: "var(--workbench-shell-border)",
+                  label: "var(--workbench-shell-text-dim)",
+                };
 
         return (
           <div
@@ -79,69 +108,88 @@ function DiagnosticsList({ diagnostics }: { diagnostics: readonly ModelingDiagno
             >
               {diagnostic.severity}
             </p>
-            <p className="mt-1 text-sm text-[var(--workbench-shell-text)]">{diagnostic.message}</p>
+            <p className="mt-1 text-sm text-[var(--workbench-shell-text)]">
+              {diagnostic.message}
+            </p>
             {diagnostic.detail ? (
               <p className="mt-1 text-xs text-[var(--workbench-shell-text-muted)]">
                 {formatInspectorDiagnosticDetail(diagnostic)}
               </p>
             ) : null}
-            <p className="mt-1 text-xs text-[var(--workbench-shell-text-muted)]">{diagnostic.code}</p>
+            <p className="mt-1 text-xs text-[var(--workbench-shell-text-muted)]">
+              {diagnostic.code}
+            </p>
           </div>
-        )
+        );
       })}
     </div>
-  )
+  );
 }
 
-
 function renderReference(value: unknown) {
-  return value && typeof value === 'object' && 'kind' in value
+  return value && typeof value === "object" && "kind" in value
     ? getPrimitiveRefLabel(value as Parameters<typeof getPrimitiveRefLabel>[0])
-    : 'None selected'
+    : "None selected";
 }
 
 function isPrimitiveRefValue(value: unknown): value is PrimitiveRef {
-  return !!value && typeof value === 'object' && 'kind' in value
+  return !!value && typeof value === "object" && "kind" in value;
 }
-
 
 function compactFieldLabel(label: string) {
   return label
-    .replace(/\s*\(degrees\)$/i, '')
-    .replace(/\s+mode$/i, '')
-    .replace(/\s+targets$/i, '')
+    .replace(/\s*\(degrees\)$/i, "")
+    .replace(/\s+mode$/i, "")
+    .replace(/\s+targets$/i, "");
 }
 
 function getNumericUnit(field: FeatureNumericField) {
-  return field.input === 'angleDegrees' ? '°' : null
+  return field.input === "angleDegrees" ? "°" : null;
 }
 
-function FieldMessage(props: { helper?: string; error?: { message: string } | null }) {
+function FieldMessage(props: {
+  helper?: string;
+  error?: { message: string } | null;
+}) {
   if (props.error) {
-    return <p className="text-xs text-[var(--workbench-shell-danger-text)]">{props.error.message}</p>
+    return (
+      <p className="text-xs text-[var(--workbench-shell-danger-text)]">
+        {props.error.message}
+      </p>
+    );
   }
 
   return props.helper ? (
-    <p className="text-xs text-[var(--workbench-shell-text-muted)]">{props.helper}</p>
-  ) : null
+    <p className="text-xs text-[var(--workbench-shell-text-muted)]">
+      {props.helper}
+    </p>
+  ) : null;
 }
 
 function formatParticipantHelper(field: FeatureEditorFormField) {
-  const participant = field.advancedParticipant
+  const participant = field.advancedParticipant;
   if (!participant) {
-    return field.helper
+    return field.helper;
   }
 
-  const max = participant.cardinality.max === null ? '+' : `-${participant.cardinality.max}`
-  const status = participant.required ? 'Required' : 'Optional'
-  const participantStatus = `${status}; ${participant.selectedCount} selected; expected ${participant.cardinality.min}${max}.`
-  return field.helper ? `${participantStatus} ${field.helper}` : participantStatus
+  const max =
+    participant.cardinality.max === null
+      ? "+"
+      : `-${participant.cardinality.max}`;
+  const status = participant.required ? "Required" : "Optional";
+  const participantStatus = `${status}; ${participant.selectedCount} selected; expected ${participant.cardinality.min}${max}.`;
+  return field.helper
+    ? `${participantStatus} ${field.helper}`
+    : participantStatus;
 }
 
 function isProfileReferenceCollectionField(
   field: FeatureEditorFormField,
-): field is Extract<FeatureEditorFormField, { kind: 'referenceCollection' }> {
-  return field.kind === 'referenceCollection' && field.advancedParticipant?.role === 'profile'
+): field is Extract<FeatureEditorFormField, { kind: "referenceCollection" }> {
+  return (
+    field.kind === "referenceCollection" &&
+    field.advancedParticipant?.role === "profile"
+  );
 }
 
 function FunctionIcon() {
@@ -150,21 +198,21 @@ function FunctionIcon() {
       aria-hidden="true"
       className="block h-4 w-4"
       style={{
-        backgroundColor: 'currentColor',
-        maskImage: 'url(/icons/function.svg)',
-        maskRepeat: 'no-repeat',
-        maskPosition: 'center',
-        maskSize: 'contain',
+        backgroundColor: "currentColor",
+        maskImage: "url(/icons/function.svg)",
+        maskRepeat: "no-repeat",
+        maskPosition: "center",
+        maskSize: "contain",
       }}
     />
-  )
+  );
 }
 
 function ExpressionAffordance(props: {
-  fieldLabel: string
-  active: boolean
-  disabled?: boolean
-  onClick: () => void
+  fieldLabel: string;
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
 }) {
   return (
     <ActionIcon
@@ -180,18 +228,18 @@ function ExpressionAffordance(props: {
     >
       <FunctionIcon />
     </ActionIcon>
-  )
+  );
 }
 
 export function FeatureExpressionEditorControl(props: {
-  id: string
-  fieldLabel: string
-  expressionText: string
-  preview: FeatureEditorExpressionPreview
-  hasError: boolean
-  onChangeText: (nextText: string) => void
-  onAccept: () => void
-  onClear: () => void
+  id: string;
+  fieldLabel: string;
+  expressionText: string;
+  preview: FeatureEditorExpressionPreview;
+  hasError: boolean;
+  onChangeText: (nextText: string) => void;
+  onAccept: () => void;
+  onClear: () => void;
 }) {
   return (
     <div className="flex items-center gap-1">
@@ -203,9 +251,9 @@ export function FeatureExpressionEditorControl(props: {
           onBlur={props.onAccept}
           onChange={(event) => props.onChangeText(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              props.onAccept()
+            if (event.key === "Enter") {
+              event.preventDefault();
+              props.onAccept();
             }
           }}
           aria-invalid={props.hasError || undefined}
@@ -233,26 +281,26 @@ export function FeatureExpressionEditorControl(props: {
         <WorkbenchIcon name="close" className="h-4 w-4" />
       </ActionIcon>
     </div>
-  )
+  );
 }
 
-type ControllerField = ControllerRenderProps<FeatureEditorFormValues, string>
+type ControllerField = ControllerRenderProps<FeatureEditorFormValues, string>;
 
 interface ExpressionControlRenderInput {
-  id: string
-  value: string
-  disabled: boolean
-  hasError: boolean
-  onBlur: () => void
-  onLiteralChange: (nextValue: string) => void
+  id: string;
+  value: string;
+  disabled: boolean;
+  hasError: boolean;
+  onBlur: () => void;
+  onLiteralChange: (nextValue: string) => void;
 }
 
 function ExpressionFieldShell(props: {
-  control: Control<FeatureEditorFormValues>
-  field: FeatureEditorExpressionField
-  documentVariables: readonly DocumentVariableRecord[]
-  onPatch: (patch: Record<string, unknown>) => void
-  renderControl: (input: ExpressionControlRenderInput) => ReactNode
+  control: Control<FeatureEditorFormValues>;
+  field: FeatureEditorExpressionField;
+  documentVariables: readonly DocumentVariableRecord[];
+  onPatch: (patch: Record<string, unknown>) => void;
+  renderControl: (input: ExpressionControlRenderInput) => ReactNode;
 }) {
   return (
     <Controller
@@ -268,70 +316,88 @@ function ExpressionFieldShell(props: {
         />
       )}
     />
-  )
+  );
 }
 
 function ExpressionFieldShellInner(props: {
-  controllerField: ControllerField
-  documentVariables: readonly DocumentVariableRecord[]
-  field: FeatureEditorExpressionField
-  onPatch: (patch: Record<string, unknown>) => void
-  renderControl: (input: ExpressionControlRenderInput) => ReactNode
+  controllerField: ControllerField;
+  documentVariables: readonly DocumentVariableRecord[];
+  field: FeatureEditorExpressionField;
+  onPatch: (patch: Record<string, unknown>) => void;
+  renderControl: (input: ExpressionControlRenderInput) => ReactNode;
 }) {
-  const sourceState = getFeatureEditorExpressionSourceState(props.field, props.controllerField.value)
-  const activeExpression = sourceState?.source === 'expression'
-  const [editingExpression, setEditingExpression] = useState(false)
+  const sourceState = getFeatureEditorExpressionSourceState(
+    props.field,
+    props.controllerField.value,
+  );
+  const activeExpression = sourceState?.source === "expression";
+  const [editingExpression, setEditingExpression] = useState(false);
   const [expressionText, setExpressionText] = useState(() =>
-    activeExpression ? sourceState.expressionText ?? '' : getFeatureEditorControlFormValueText(props.controllerField.value),
-  )
+    activeExpression
+      ? (sourceState.expressionText ?? "")
+      : getFeatureEditorControlFormValueText(props.controllerField.value),
+  );
 
   const preview = useMemo(
-    () => previewFeatureEditorFieldExpression({
-      field: props.field,
-      expressionText,
-      variables: props.documentVariables,
-    }),
+    () =>
+      previewFeatureEditorFieldExpression({
+        field: props.field,
+        expressionText,
+        variables: props.documentVariables,
+      }),
     [expressionText, props.documentVariables, props.field],
-  )
-  const normalValue = activeExpression && preview.ok
-    ? preview.formValue
-    : getFeatureEditorControlFormValueText(props.controllerField.value)
-  const fieldError = editingExpression && !preview.ok ? { message: preview.message } : props.field.error
-  const hasError = !!fieldError
+  );
+  const normalValue =
+    activeExpression && preview.ok
+      ? preview.formValue
+      : getFeatureEditorControlFormValueText(props.controllerField.value);
+  const fieldError =
+    editingExpression && !preview.ok
+      ? { message: preview.message }
+      : props.field.error;
+  const hasError = !!fieldError;
 
   function patchLiteral(nextValue: string) {
-    const nextFormValue = createFeatureEditorLiteralControlFormValue(nextValue)
-    props.controllerField.onChange(nextFormValue)
+    const nextFormValue = createFeatureEditorLiteralControlFormValue(nextValue);
+    props.controllerField.onChange(nextFormValue);
 
-    const patch = createFeatureEditorPatchFromFormValue(props.field, nextFormValue)
+    const patch = createFeatureEditorPatchFromFormValue(
+      props.field,
+      nextFormValue,
+    );
     if (patch) {
-      props.onPatch(patch)
+      props.onPatch(patch);
     }
   }
 
   function acceptExpression() {
     if (!preview.ok) {
-      return
+      return;
     }
 
-    const trimmed = expressionText.trim()
-    const patch = createFeatureEditorPatchFromExpression(props.field, trimmed)
+    const trimmed = expressionText.trim();
+    const patch = createFeatureEditorPatchFromExpression(props.field, trimmed);
     if (!patch) {
-      return
+      return;
     }
 
-    props.controllerField.onChange(createFeatureEditorExpressionControlFormValue(preview.formValue, trimmed))
-    props.onPatch(patch)
-    setEditingExpression(false)
+    props.controllerField.onChange(
+      createFeatureEditorExpressionControlFormValue(preview.formValue, trimmed),
+    );
+    props.onPatch(patch);
+    setEditingExpression(false);
   }
 
   function clearExpression() {
-    const nextValue = preview.ok ? preview.formValue : normalValue
-    patchLiteral(nextValue)
-    setEditingExpression(false)
+    const nextValue = preview.ok ? preview.formValue : normalValue;
+    patchLiteral(nextValue);
+    setEditingExpression(false);
   }
 
-  const rowStyle = fieldSurfaceStyle({ error: fieldError }, activeExpression || editingExpression)
+  const rowStyle = fieldSurfaceStyle(
+    { error: fieldError },
+    activeExpression || editingExpression,
+  );
 
   return (
     <section className="space-y-1">
@@ -341,7 +407,9 @@ function ExpressionFieldShellInner(props: {
       >
         <label
           className="flex w-[88px] shrink-0 items-center pl-2 pr-2 text-[11px] font-medium text-[var(--workbench-shell-text-dim)]"
-          htmlFor={editingExpression ? `${props.field.id}-expression` : props.field.id}
+          htmlFor={
+            editingExpression ? `${props.field.id}-expression` : props.field.id
+          }
         >
           {compactFieldLabel(props.field.label)}
         </label>
@@ -376,8 +444,12 @@ function ExpressionFieldShellInner(props: {
               active={activeExpression}
               disabled={props.field.disabled}
               onClick={() => {
-                setExpressionText(activeExpression ? sourceState.expressionText ?? '' : normalValue)
-                setEditingExpression(true)
+                setExpressionText(
+                  activeExpression
+                    ? (sourceState.expressionText ?? "")
+                    : normalValue,
+                );
+                setEditingExpression(true);
               }}
             />
           </>
@@ -385,28 +457,31 @@ function ExpressionFieldShellInner(props: {
       </div>
 
       <div className="px-2">
-        <FieldMessage helper={formatParticipantHelper(props.field)} error={fieldError} />
+        <FieldMessage
+          helper={formatParticipantHelper(props.field)}
+          error={fieldError}
+        />
       </div>
     </section>
-  )
+  );
 }
 
 function NumericField(props: {
-  control: Control<FeatureEditorFormValues>
-  field: FeatureNumericField
-  documentVariables: readonly DocumentVariableRecord[]
-  onPatch: (patch: Record<string, unknown>) => void
+  control: Control<FeatureEditorFormValues>;
+  field: FeatureNumericField;
+  documentVariables: readonly DocumentVariableRecord[];
+  onPatch: (patch: Record<string, unknown>) => void;
 }) {
   function renderDirectionToggle() {
-    const toggle = props.field.directionToggle
+    const toggle = props.field.directionToggle;
     if (!toggle) {
-      return null
+      return null;
     }
 
-    const isForward = toggle.value === toggle.forwardValue
-    const nextValue = isForward ? toggle.reverseValue : toggle.forwardValue
-    const currentLabel = isForward ? toggle.forwardLabel : toggle.reverseLabel
-    const nextLabel = isForward ? toggle.reverseLabel : toggle.forwardLabel
+    const isForward = toggle.value === toggle.forwardValue;
+    const nextValue = isForward ? toggle.reverseValue : toggle.forwardValue;
+    const currentLabel = isForward ? toggle.forwardLabel : toggle.reverseLabel;
+    const nextLabel = isForward ? toggle.reverseLabel : toggle.forwardLabel;
 
     return (
       <Tooltip label={`Flip to ${nextLabel}`} withArrow>
@@ -424,7 +499,7 @@ function NumericField(props: {
           <WorkbenchIcon name="flipDirection" className="h-4 w-4" />
         </ActionIcon>
       </Tooltip>
-    )
+    );
   }
 
   return (
@@ -433,7 +508,14 @@ function NumericField(props: {
       field={props.field}
       documentVariables={props.documentVariables}
       onPatch={props.onPatch}
-      renderControl={({ id, value, disabled, hasError, onBlur, onLiteralChange }) => (
+      renderControl={({
+        id,
+        value,
+        disabled,
+        hasError,
+        onBlur,
+        onLiteralChange,
+      }) => (
         <div className="flex min-w-0 items-center">
           <div className="min-w-0 flex-1">
             <Input
@@ -459,14 +541,14 @@ function NumericField(props: {
         </div>
       )}
     />
-  )
+  );
 }
 
 function EnumField(props: {
-  control: Control<FeatureEditorFormValues>
-  field: Extract<FeatureEditorFormField, { kind: 'enum' }>
-  documentVariables: readonly DocumentVariableRecord[]
-  onPatch: (patch: Record<string, unknown>) => void
+  control: Control<FeatureEditorFormValues>;
+  field: Extract<FeatureEditorFormField, { kind: "enum" }>;
+  documentVariables: readonly DocumentVariableRecord[];
+  onPatch: (patch: Record<string, unknown>) => void;
 }) {
   return (
     <ExpressionFieldShell
@@ -474,7 +556,14 @@ function EnumField(props: {
       field={props.field}
       documentVariables={props.documentVariables}
       onPatch={props.onPatch}
-      renderControl={({ id, value, disabled, hasError, onBlur, onLiteralChange }) => (
+      renderControl={({
+        id,
+        value,
+        disabled,
+        hasError,
+        onBlur,
+        onLiteralChange,
+      }) => (
         <Select
           id={id}
           aria-label={props.field.label}
@@ -488,7 +577,7 @@ function EnumField(props: {
           onBlur={onBlur}
           onChange={(nextValue) => {
             if (nextValue !== null) {
-              onLiteralChange(nextValue)
+              onLiteralChange(nextValue);
             }
           }}
           allowDeselect={false}
@@ -497,37 +586,48 @@ function EnumField(props: {
         />
       )}
     />
-  )
+  );
 }
 
 function ReferenceCard(props: {
-  title: string
-  value: string
-  helper?: string
-  error?: { message: string } | null
-  isActive?: boolean
-  onActivate?: () => void
-  onClear?: () => void
-  clearDisabled?: boolean
+  title: string;
+  value: string;
+  helper?: string;
+  error?: { message: string } | null;
+  isActive?: boolean;
+  onActivate?: () => void;
+  onClear?: () => void;
+  clearDisabled?: boolean;
 }) {
-  const surfaceStyle = fieldSurfaceStyle({ error: props.error }, props.isActive)
-  const className = 'w-full rounded-[3px] px-2 py-1.5 text-left transition hover:bg-[var(--workbench-shell-overlay)]'
+  const surfaceStyle = fieldSurfaceStyle(
+    { error: props.error },
+    props.isActive,
+  );
+  const className =
+    "w-full rounded-[3px] px-2 py-1.5 text-left transition hover:bg-[var(--workbench-shell-overlay)]";
   const labelContent = (
     <div className="flex min-h-6 min-w-0 items-center gap-2">
       <p className="w-[88px] shrink-0 truncate text-[11px] font-medium text-[var(--workbench-shell-text-dim)]">
         {compactFieldLabel(props.title)}
       </p>
-      <p className={`min-w-0 flex-1 truncate text-[12.5px] ${props.error ? 'text-[var(--workbench-shell-danger-text)]' : props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--workbench-shell-text)]'}`}>
+      <p
+        className={`min-w-0 flex-1 truncate text-[12.5px] ${props.error ? "text-[var(--workbench-shell-danger-text)]" : props.isActive ? "text-[var(--mantine-color-workbench-4)]" : "text-[var(--workbench-shell-text)]"}`}
+      >
         {props.value}
       </p>
     </div>
-  )
+  );
 
   if (props.onActivate) {
     return (
       <Paper className={className} style={surfaceStyle}>
         <div className="flex items-start justify-between gap-2">
-          <button type="button" onClick={props.onActivate} className="min-w-0 flex-1 text-left" aria-pressed={props.isActive}>
+          <button
+            type="button"
+            onClick={props.onActivate}
+            className="min-w-0 flex-1 text-left"
+            aria-pressed={props.isActive}
+          >
             {labelContent}
           </button>
           {props.onClear ? (
@@ -549,7 +649,7 @@ function ReferenceCard(props: {
           <FieldMessage helper={props.helper} error={props.error} />
         </div>
       </Paper>
-    )
+    );
   }
 
   return (
@@ -575,42 +675,48 @@ function ReferenceCard(props: {
         <FieldMessage helper={props.helper} error={props.error} />
       </div>
     </Paper>
-  )
+  );
 }
 
 function ReferenceCollectionCard(props: {
-  control: Control<FeatureEditorFormValues>
-  field: Extract<FeatureEditorFormField, { kind: 'referenceCollection' }>
-  isActive: boolean
-  onActivate: () => void
-  onPatch: (patch: Record<string, unknown>) => void
+  control: Control<FeatureEditorFormValues>;
+  field: Extract<FeatureEditorFormField, { kind: "referenceCollection" }>;
+  isActive: boolean;
+  onActivate: () => void;
+  onPatch: (patch: Record<string, unknown>) => void;
 }) {
   return (
     <Controller
       control={props.control}
       name={props.field.id}
       render={({ field }) => {
-        const selected = Array.isArray(field.value) ? field.value.filter(isPrimitiveRefValue) : []
-        const hasSelection = selected.length > 0
+        const selected = Array.isArray(field.value)
+          ? field.value.filter(isPrimitiveRefValue)
+          : [];
+        const hasSelection = selected.length > 0;
 
-        function moveItem(target: PrimitiveRef, direction: 'up' | 'down') {
-          const targetIndex = selected.findIndex((entry) => primitiveRefEquals(entry, target))
+        function moveItem(target: PrimitiveRef, direction: "up" | "down") {
+          const targetIndex = selected.findIndex((entry) =>
+            primitiveRefEquals(entry, target),
+          );
           if (targetIndex < 0) {
-            return
+            return;
           }
 
-          const nextIndex = direction === 'up' ? targetIndex - 1 : targetIndex + 1
+          const nextIndex =
+            direction === "up" ? targetIndex - 1 : targetIndex + 1;
           if (nextIndex < 0 || nextIndex >= selected.length) {
-            return
+            return;
           }
 
-          const next = [...selected]
-          const [item] = next.splice(targetIndex, 1)
-          next.splice(nextIndex, 0, item!)
-          field.onChange(next)
+          const next = [...selected];
+          const [item] = next.splice(targetIndex, 1);
+          next.splice(nextIndex, 0, item!);
+          field.onChange(next);
         }
 
-        const isProfileCollection = props.field.advancedParticipant?.role === 'profile'
+        const isProfileCollection =
+          props.field.advancedParticipant?.role === "profile";
 
         if (isProfileCollection) {
           return (
@@ -621,7 +727,7 @@ function ReferenceCollectionCard(props: {
                     <div
                       key={getPrimitiveRefLabel(target)}
                       className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
-                      style={{ background: 'var(--workbench-shell-overlay)' }}
+                      style={{ background: "var(--workbench-shell-overlay)" }}
                     >
                       <span className="min-w-0 truncate text-[12px] text-[var(--workbench-shell-text)]">
                         {getPrimitiveRefLabel(target)}
@@ -629,8 +735,17 @@ function ReferenceCollectionCard(props: {
                       <ActionIcon
                         component="button"
                         onClick={() => {
-                          field.onChange(selected.filter((entry) => !primitiveRefEquals(entry, target)))
-                          props.onPatch(createFeatureEditorRemoveReferenceItemPatch(props.field, target))
+                          field.onChange(
+                            selected.filter(
+                              (entry) => !primitiveRefEquals(entry, target),
+                            ),
+                          );
+                          props.onPatch(
+                            createFeatureEditorRemoveReferenceItemPatch(
+                              props.field,
+                              target,
+                            ),
+                          );
                         }}
                         aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
                         variant="default"
@@ -658,7 +773,7 @@ function ReferenceCollectionCard(props: {
                 </div>
               ) : null}
             </div>
-          )
+          );
         }
 
         return (
@@ -674,15 +789,21 @@ function ReferenceCollectionCard(props: {
                 aria-pressed={props.isActive}
               >
                 <p className="sr-only">{props.field.label}</p>
-                <p className={`min-h-6 truncate text-[12.5px] leading-6 ${props.isActive ? 'text-[var(--mantine-color-workbench-4)]' : 'text-[var(--workbench-shell-text)]'}`}>
-                  {hasSelection ? `${selected.length} selected` : props.field.emptyLabel}
+                <p
+                  className={`min-h-6 truncate text-[12.5px] leading-6 ${props.isActive ? "text-[var(--mantine-color-workbench-4)]" : "text-[var(--workbench-shell-text)]"}`}
+                >
+                  {hasSelection
+                    ? `${selected.length} selected`
+                    : props.field.emptyLabel}
                 </p>
               </button>
               <ActionIcon
                 component="button"
                 onClick={() => {
-                  field.onChange([])
-                  props.onPatch(createFeatureEditorClearReferencePatch(props.field))
+                  field.onChange([]);
+                  props.onPatch(
+                    createFeatureEditorClearReferencePatch(props.field),
+                  );
                 }}
                 disabled={!hasSelection}
                 aria-label={`Clear ${props.field.label}`}
@@ -700,10 +821,11 @@ function ReferenceCollectionCard(props: {
                   <div
                     key={getPrimitiveRefLabel(target)}
                     className="flex min-h-7 items-center justify-between gap-2 rounded-[3px] px-2"
-                    style={{ background: 'var(--workbench-shell-overlay)' }}
+                    style={{ background: "var(--workbench-shell-overlay)" }}
                   >
                     <span className="min-w-0 truncate text-[12px] text-[var(--workbench-shell-text)]">
-                      {props.field.picker.itemLabel ?? props.field.label}: {getPrimitiveRefLabel(target)}
+                      {props.field.picker.itemLabel ?? props.field.label}:{" "}
+                      {getPrimitiveRefLabel(target)}
                     </span>
                     {props.field.picker.allowsMultiple ? (
                       <div className="flex items-center gap-1">
@@ -712,21 +834,30 @@ function ReferenceCollectionCard(props: {
                             <ActionIcon
                               component="button"
                               onClick={() => {
-                                moveItem(target, 'up')
-                                props.onPatch({ [props.field.ordering!.moveUpPatchKey]: target })
+                                moveItem(target, "up");
+                                props.onPatch({
+                                  [props.field.ordering!.moveUpPatchKey]:
+                                    target,
+                                });
                               }}
                               aria-label={`Move ${getPrimitiveRefLabel(target)} earlier`}
                               variant="default"
                               size={22}
                               styles={compactActionIconStyles()}
                             >
-                              <WorkbenchIcon name="check" className="h-3 w-3 rotate-180" />
+                              <WorkbenchIcon
+                                name="check"
+                                className="h-3 w-3 rotate-180"
+                              />
                             </ActionIcon>
                             <ActionIcon
                               component="button"
                               onClick={() => {
-                                moveItem(target, 'down')
-                                props.onPatch({ [props.field.ordering!.moveDownPatchKey]: target })
+                                moveItem(target, "down");
+                                props.onPatch({
+                                  [props.field.ordering!.moveDownPatchKey]:
+                                    target,
+                                });
                               }}
                               aria-label={`Move ${getPrimitiveRefLabel(target)} later`}
                               variant="default"
@@ -740,8 +871,17 @@ function ReferenceCollectionCard(props: {
                         <ActionIcon
                           component="button"
                           onClick={() => {
-                            field.onChange(selected.filter((entry) => !primitiveRefEquals(entry, target)))
-                            props.onPatch(createFeatureEditorRemoveReferenceItemPatch(props.field, target))
+                            field.onChange(
+                              selected.filter(
+                                (entry) => !primitiveRefEquals(entry, target),
+                              ),
+                            );
+                            props.onPatch(
+                              createFeatureEditorRemoveReferenceItemPatch(
+                                props.field,
+                                target,
+                              ),
+                            );
                           }}
                           aria-label={`Remove ${getPrimitiveRefLabel(target)}`}
                           variant="default"
@@ -765,34 +905,51 @@ function ReferenceCollectionCard(props: {
               + Pick from viewport
             </button>
             <div className="mt-1 px-1">
-              <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
+              <FieldMessage
+                helper={formatParticipantHelper(props.field)}
+                error={props.field.error}
+              />
             </div>
           </Paper>
-        )
+        );
       }}
     />
-  )
+  );
 }
 
 export function FeatureFormFieldRenderer(props: {
-  control: Control<FeatureEditorFormValues>
-  field: FeatureEditorFormField
-  documentVariables: readonly DocumentVariableRecord[]
-  activeReferencePickerFieldId: string | null
-  onReferencePickerActivate: (fieldId: string) => void
-  onPatch: (patch: Record<string, unknown>) => void
+  control: Control<FeatureEditorFormValues>;
+  field: FeatureEditorFormField;
+  documentVariables: readonly DocumentVariableRecord[];
+  activeReferencePickerFieldId: string | null;
+  onReferencePickerActivate: (fieldId: string) => void;
+  onPatch: (patch: Record<string, unknown>) => void;
 }) {
   if (props.field.hidden) {
-    return null
+    return null;
   }
 
   switch (props.field.kind) {
-    case 'numeric':
-      return <NumericField control={props.control} field={props.field} documentVariables={props.documentVariables} onPatch={props.onPatch} />
-    case 'enum':
-      return <EnumField control={props.control} field={props.field} documentVariables={props.documentVariables} onPatch={props.onPatch} />
-    case 'referencePicker': {
-      const field = props.field
+    case "numeric":
+      return (
+        <NumericField
+          control={props.control}
+          field={props.field}
+          documentVariables={props.documentVariables}
+          onPatch={props.onPatch}
+        />
+      );
+    case "enum":
+      return (
+        <EnumField
+          control={props.control}
+          field={props.field}
+          documentVariables={props.documentVariables}
+          onPatch={props.onPatch}
+        />
+      );
+    case "referencePicker": {
+      const field = props.field;
       return (
         <Controller
           control={props.control}
@@ -806,16 +963,16 @@ export function FeatureFormFieldRenderer(props: {
               isActive={props.activeReferencePickerFieldId === field.id}
               onActivate={() => props.onReferencePickerActivate(field.id)}
               onClear={() => {
-                controllerField.onChange(null)
-                props.onPatch(createFeatureEditorClearReferencePatch(field))
+                controllerField.onChange(null);
+                props.onPatch(createFeatureEditorClearReferencePatch(field));
               }}
               clearDisabled={!controllerField.value}
             />
           )}
         />
-      )
+      );
     }
-    case 'referenceCollection':
+    case "referenceCollection":
       return (
         <ReferenceCollectionCard
           control={props.control}
@@ -824,14 +981,18 @@ export function FeatureFormFieldRenderer(props: {
           onActivate={() => props.onReferencePickerActivate(props.field.id)}
           onPatch={props.onPatch}
         />
-      )
-    case 'optionGroup':
+      );
+    case "optionGroup":
       return (
-        <div className="space-y-1 rounded-[3px] px-2 py-1.5" style={{ background: 'var(--workbench-shell-overlay-soft)' }}>
-          <p className={SECTION_HEADER_CLASSES}>
-            {props.field.label}
-          </p>
-          <FieldMessage helper={formatParticipantHelper(props.field)} error={props.field.error} />
+        <div
+          className="space-y-1 rounded-[3px] px-2 py-1.5"
+          style={{ background: "var(--workbench-shell-overlay-soft)" }}
+        >
+          <p className={SECTION_HEADER_CLASSES}>{props.field.label}</p>
+          <FieldMessage
+            helper={formatParticipantHelper(props.field)}
+            error={props.field.error}
+          />
           {props.field.fields.map((field) => (
             <FeatureFormFieldRenderer
               key={field.id}
@@ -844,19 +1005,25 @@ export function FeatureFormFieldRenderer(props: {
             />
           ))}
         </div>
-      )
-    case 'discriminatedOptionGroup': {
-      const field = props.field
+      );
+    case "discriminatedOptionGroup": {
+      const field = props.field;
       const variants = field.showInactiveFields
         ? field.variants
-        : field.variants.filter((variant) => variant.value === field.discriminant.value)
+        : field.variants.filter(
+            (variant) => variant.value === field.discriminant.value,
+          );
 
       return (
-        <div className="space-y-1 rounded-[3px] px-2 py-1.5" style={{ background: 'var(--workbench-shell-overlay-soft)' }}>
-          <p className={SECTION_HEADER_CLASSES}>
-            {field.label}
-          </p>
-          <FieldMessage helper={formatParticipantHelper(field)} error={field.error} />
+        <div
+          className="space-y-1 rounded-[3px] px-2 py-1.5"
+          style={{ background: "var(--workbench-shell-overlay-soft)" }}
+        >
+          <p className={SECTION_HEADER_CLASSES}>{field.label}</p>
+          <FieldMessage
+            helper={formatParticipantHelper(field)}
+            error={field.error}
+          />
           <FeatureFormFieldRenderer
             control={props.control}
             field={field.discriminant}
@@ -868,7 +1035,9 @@ export function FeatureFormFieldRenderer(props: {
           {variants.map((variant) => (
             <div key={variant.value} className="space-y-1">
               {field.showInactiveFields ? (
-                <p className="text-[11px] text-[var(--workbench-shell-text-muted)]">{variant.label}</p>
+                <p className="text-[11px] text-[var(--workbench-shell-text-muted)]">
+                  {variant.label}
+                </p>
               ) : null}
               {variant.fields.map((field) => (
                 <FeatureFormFieldRenderer
@@ -876,7 +1045,9 @@ export function FeatureFormFieldRenderer(props: {
                   control={props.control}
                   field={field}
                   documentVariables={props.documentVariables}
-                  activeReferencePickerFieldId={props.activeReferencePickerFieldId}
+                  activeReferencePickerFieldId={
+                    props.activeReferencePickerFieldId
+                  }
                   onReferencePickerActivate={props.onReferencePickerActivate}
                   onPatch={props.onPatch}
                 />
@@ -884,20 +1055,26 @@ export function FeatureFormFieldRenderer(props: {
             </div>
           ))}
         </div>
-      )
+      );
     }
-    case 'summary':
-      return <ReferenceCard title={props.field.label} value={props.field.value} helper={props.field.helper} />
-    case 'diagnostics':
-      return <DiagnosticsList diagnostics={props.field.diagnostics} />
-    case 'custom':
+    case "summary":
+      return (
+        <ReferenceCard
+          title={props.field.label}
+          value={props.field.value}
+          helper={props.field.helper}
+        />
+      );
+    case "diagnostics":
+      return <DiagnosticsList diagnostics={props.field.diagnostics} />;
+    case "custom":
       return (
         <ReferenceCard
           title={props.field.label}
           value={`Custom renderer: ${props.field.rendererId}`}
           helper={props.field.helper}
         />
-      )
+      );
   }
 }
 
@@ -907,29 +1084,43 @@ export function FeatureInspector({
   onCommit,
   onCancel,
 }: FeatureInspectorProps) {
-  const editor = useEditorState()
-  const { activeCommand, activeEditSession, activeReferencePickerFieldId } = editor.state
-  const { dispatch } = editor
-  const activeCommandSessionId = activeCommand?.commandSessionId ?? null
-  const formSchema = activeEditSession ? getFeatureEditorFormSchema(activeEditSession) : null
-  const documentVariables = editor.state.snapshot?.document?.variables ?? []
-  const initialFormValues = formSchema ? createFeatureEditorFormValues(formSchema) : {}
-  const form = useForm<FeatureEditorFormValues>({ defaultValues: initialFormValues })
-  useFeatureEditorFormSync({ sessionKey: activeCommandSessionId, formSchema, form })
+  const editor = useEditorState();
+  const { activeCommand, activeEditSession, activeReferencePickerFieldId } =
+    editor.state;
+  const { dispatch } = editor;
+  const activeCommandSessionId = activeCommand?.commandSessionId ?? null;
+  const formSchema = activeEditSession
+    ? getFeatureEditorFormSchema(activeEditSession)
+    : null;
+  const documentVariables = editor.state.snapshot?.document?.variables ?? [];
+  const initialFormValues = formSchema
+    ? createFeatureEditorFormValues(formSchema)
+    : {};
+  const form = useForm<FeatureEditorFormValues>({
+    defaultValues: initialFormValues,
+  });
+  useFeatureEditorFormSync({
+    sessionKey: activeCommandSessionId,
+    formSchema,
+    form,
+  });
 
   if (!activeEditSession || !formSchema) {
-    return null
+    return null;
   }
 
   const title =
-    activeEditSession.mode === 'edit'
-      ? featureSnapshot?.label ?? activeEditSession.featureId ?? `Edit ${activeEditSession.featureType}`
-      : `Create ${activeEditSession.featureType[0]!.toUpperCase()}${activeEditSession.featureType.slice(1)}`
+    activeEditSession.mode === "edit"
+      ? (featureSnapshot?.label ??
+        activeEditSession.featureId ??
+        `Edit ${activeEditSession.featureType}`)
+      : `Create ${activeEditSession.featureType[0]!.toUpperCase()}${activeEditSession.featureType.slice(1)}`;
 
-  const featureIdShortCode = activeEditSession.mode === 'edit' && activeEditSession.featureId
-    ? `F${activeEditSession.featureId.slice(-2).toUpperCase()}`
-    : null
-  const visualSections = getVisualFormSections(formSchema.sections)
+  const featureIdShortCode =
+    activeEditSession.mode === "edit" && activeEditSession.featureId
+      ? `F${activeEditSession.featureId.slice(-2).toUpperCase()}`
+      : null;
+  const visualSections = getVisualFormSections(formSchema.sections);
 
   return (
     <WorkbenchInspectorPanel
@@ -941,21 +1132,26 @@ export function FeatureInspector({
       onCommit={onCommit}
     >
       {visualSections.map((section) => {
-        const profileReferenceField = section.fields.find(isProfileReferenceCollectionField)
-        const hasProfileSelection = (profileReferenceField?.value.length ?? 0) > 0
+        const profileReferenceField = section.fields.find(
+          isProfileReferenceCollectionField,
+        );
+        const hasProfileSelection =
+          (profileReferenceField?.value.length ?? 0) > 0;
 
         return (
           <section key={section.id} className="pb-1">
             <div className="flex items-center justify-between px-3 pb-1 pt-3">
-              <p className={SECTION_HEADER_CLASSES}>
-                {section.title}
-              </p>
+              <p className={SECTION_HEADER_CLASSES}>{section.title}</p>
               {profileReferenceField ? (
                 <button
                   type="button"
                   onClick={() => {
-                    form.setValue(profileReferenceField.id, [])
-                    onPatch(createFeatureEditorClearReferencePatch(profileReferenceField))
+                    form.setValue(profileReferenceField.id, []);
+                    onPatch(
+                      createFeatureEditorClearReferencePatch(
+                        profileReferenceField,
+                      ),
+                    );
                   }}
                   disabled={!hasProfileSelection}
                   aria-label={`Clear ${profileReferenceField.label}`}
@@ -977,14 +1173,16 @@ export function FeatureInspector({
                   field={field}
                   documentVariables={documentVariables}
                   activeReferencePickerFieldId={activeReferencePickerFieldId}
-                  onReferencePickerActivate={(fieldId) => dispatch({ type: 'form.referencePickerActivated', fieldId })}
+                  onReferencePickerActivate={(fieldId) =>
+                    dispatch({ type: "form.referencePickerActivated", fieldId })
+                  }
                   onPatch={onPatch}
                 />
               ))}
             </div>
           </section>
-        )
+        );
       })}
     </WorkbenchInspectorPanel>
-  )
+  );
 }

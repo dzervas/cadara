@@ -6,135 +6,157 @@ import type {
   FeatureSnapshotRecord,
   FeatureTreeNodeRecord,
   SketchSnapshotRecord,
-} from '@/contracts/modeling/schema'
-import type { DocumentHistoryItemId, FeatureId, SketchId } from '@/contracts/shared/ids'
+} from "@/contracts/modeling/schema";
+import type {
+  DocumentHistoryItemId,
+  FeatureId,
+  SketchId,
+} from "@/contracts/shared/ids";
 
 export type DocumentHistoryOrderEntry =
-  | { kind: 'sketch'; sketchId: NonNullable<DocumentHistoryItemRecord['sketchId']> }
-  | { kind: 'feature'; featureId: NonNullable<DocumentHistoryItemRecord['featureId']> }
+  | {
+      kind: "sketch";
+      sketchId: NonNullable<DocumentHistoryItemRecord["sketchId"]>;
+    }
+  | {
+      kind: "feature";
+      featureId: NonNullable<DocumentHistoryItemRecord["featureId"]>;
+    };
 
 export interface DocumentHistoryDependencyOrderViolation {
-  featureId: FeatureId
-  featureKey: string
-  dependencyKey: string
+  featureId: FeatureId;
+  featureKey: string;
+  dependencyKey: string;
 }
 
-export function getDocumentHistoryOrderEntryKey(entry: DocumentHistoryOrderEntry) {
-  return entry.kind === 'sketch'
+export function getDocumentHistoryOrderEntryKey(
+  entry: DocumentHistoryOrderEntry,
+) {
+  return entry.kind === "sketch"
     ? `sketch:${entry.sketchId}`
-    : `feature:${entry.featureId}`
+    : `feature:${entry.featureId}`;
 }
 
 export function documentHistoryOrderEntriesEqual(
   left: DocumentHistoryOrderEntry,
   right: DocumentHistoryOrderEntry,
 ) {
-  return getDocumentHistoryOrderEntryKey(left) === getDocumentHistoryOrderEntryKey(right)
+  return (
+    getDocumentHistoryOrderEntryKey(left) ===
+    getDocumentHistoryOrderEntryKey(right)
+  );
 }
 
-function createDocumentHistoryItemId(kind: DocumentHistoryItemRecord['kind'], id: string) {
-  return `document_history_item_${kind}_${id}` as DocumentHistoryItemId
+function createDocumentHistoryItemId(
+  kind: DocumentHistoryItemRecord["kind"],
+  id: string,
+) {
+  return `document_history_item_${kind}_${id}` as DocumentHistoryItemId;
 }
 
 export function createDocumentHistoryItems(input: {
-  featureTree: readonly FeatureTreeNodeRecord[]
-  features: readonly FeatureSnapshotRecord[]
-  sketches: readonly SketchSnapshotRecord[]
-  historyOrder?: readonly DocumentHistoryOrderEntry[]
+  featureTree: readonly FeatureTreeNodeRecord[];
+  features: readonly FeatureSnapshotRecord[];
+  sketches: readonly SketchSnapshotRecord[];
+  historyOrder?: readonly DocumentHistoryOrderEntry[];
 }): DocumentHistoryItemRecord[] {
-  const featuresById = new Map(input.features.map((feature) => [feature.featureId, feature]))
-  const sketchesById = new Map(input.sketches.map((sketch) => [sketch.sketchId, sketch]))
-  const seen = new Set<string>()
-  const items: DocumentHistoryItemRecord[] = []
+  const featuresById = new Map(
+    input.features.map((feature) => [feature.featureId, feature]),
+  );
+  const sketchesById = new Map(
+    input.sketches.map((sketch) => [sketch.sketchId, sketch]),
+  );
+  const seen = new Set<string>();
+  const items: DocumentHistoryItemRecord[] = [];
 
   const pushSketch = (sketch: SketchSnapshotRecord) => {
-    const key = `sketch:${sketch.sketchId}`
+    const key = `sketch:${sketch.sketchId}`;
     if (seen.has(key)) {
-      return
+      return;
     }
 
-    seen.add(key)
+    seen.add(key);
     items.push({
-      id: createDocumentHistoryItemId('sketch', sketch.sketchId),
+      id: createDocumentHistoryItemId("sketch", sketch.sketchId),
       label: sketch.label,
-      description: 'Authored sketch',
-      kind: 'sketch',
-      target: { kind: 'sketch', sketchId: sketch.sketchId },
+      description: "Authored sketch",
+      kind: "sketch",
+      target: { kind: "sketch", sketchId: sketch.sketchId },
       sketchId: sketch.sketchId,
       featureId: null,
-    })
-  }
+    });
+  };
 
   const pushFeature = (feature: FeatureSnapshotRecord) => {
-    const key = `feature:${feature.featureId}`
+    const key = `feature:${feature.featureId}`;
     if (seen.has(key)) {
-      return
+      return;
     }
 
-    seen.add(key)
+    seen.add(key);
     items.push({
-      id: createDocumentHistoryItemId('feature', feature.featureId),
+      id: createDocumentHistoryItemId("feature", feature.featureId),
       label: feature.label,
       description: `${feature.definition.kind} feature`,
-      kind: 'feature',
-      target: { kind: 'feature', featureId: feature.featureId },
+      kind: "feature",
+      target: { kind: "feature", featureId: feature.featureId },
       sketchId: null,
       featureId: feature.featureId,
       suppressed: feature.suppressed,
-    })
-  }
+    });
+  };
 
   for (const item of input.historyOrder ?? []) {
-    if (item.kind === 'sketch') {
-      const sketch = sketchesById.get(item.sketchId)
+    if (item.kind === "sketch") {
+      const sketch = sketchesById.get(item.sketchId);
       if (sketch) {
-        pushSketch(sketch)
+        pushSketch(sketch);
       }
-      continue
+      continue;
     }
 
-    const feature = featuresById.get(item.featureId)
+    const feature = featuresById.get(item.featureId);
     if (feature) {
-      pushFeature(feature)
+      pushFeature(feature);
     }
   }
 
   for (const node of input.featureTree) {
-    if (node.kind === 'sketch' && node.ownerSketchId) {
-      const sketch = sketchesById.get(node.ownerSketchId)
+    if (node.kind === "sketch" && node.ownerSketchId) {
+      const sketch = sketchesById.get(node.ownerSketchId);
       if (sketch) {
-        pushSketch(sketch)
+        pushSketch(sketch);
       }
-      continue
+      continue;
     }
 
-    if (node.kind === 'feature' && node.ownerFeatureId) {
-      const feature = featuresById.get(node.ownerFeatureId)
+    if (node.kind === "feature" && node.ownerFeatureId) {
+      const feature = featuresById.get(node.ownerFeatureId);
       if (feature) {
-        pushFeature(feature)
+        pushFeature(feature);
       }
     }
   }
 
   for (const sketch of input.sketches) {
-    pushSketch(sketch)
+    pushSketch(sketch);
   }
 
   for (const feature of input.features) {
-    pushFeature(feature)
+    pushFeature(feature);
   }
 
-  return items
+  return items;
 }
 
 export function createDocumentHistoryOrder(
   items: readonly DocumentHistoryItemRecord[],
 ): DocumentHistoryOrderEntry[] {
   return items.map((item) =>
-    item.kind === 'sketch'
-      ? { kind: 'sketch' as const, sketchId: item.sketchId }
-      : { kind: 'feature' as const, featureId: item.featureId },
-  )
+    item.kind === "sketch"
+      ? { kind: "sketch" as const, sketchId: item.sketchId }
+      : { kind: "feature" as const, featureId: item.featureId },
+  );
 }
 
 export function insertDocumentHistoryOrderEntryAfterCursor(
@@ -142,22 +164,23 @@ export function insertDocumentHistoryOrderEntryAfterCursor(
   cursor: DocumentFeatureCursor,
   entry: DocumentHistoryOrderEntry,
 ): DocumentHistoryOrderEntry[] {
-  const entryKey = entry.kind === 'sketch'
-    ? `sketch:${entry.sketchId}`
-    : `feature:${entry.featureId}`
+  const entryKey =
+    entry.kind === "sketch"
+      ? `sketch:${entry.sketchId}`
+      : `feature:${entry.featureId}`;
   const order = createDocumentHistoryOrder(items).filter((item) =>
-    item.kind === 'sketch'
+    item.kind === "sketch"
       ? `sketch:${item.sketchId}` !== entryKey
       : `feature:${item.featureId}` !== entryKey,
-  )
-  if (cursor.kind === 'empty') {
-    order.splice(0, 0, entry)
-    return order
+  );
+  if (cursor.kind === "empty") {
+    order.splice(0, 0, entry);
+    return order;
   }
 
-  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
-  order.splice(cursorIndex < 0 ? order.length : cursorIndex + 1, 0, entry)
-  return order
+  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor);
+  order.splice(cursorIndex < 0 ? order.length : cursorIndex + 1, 0, entry);
+  return order;
 }
 
 export function reorderDocumentHistoryOrder(
@@ -165,52 +188,66 @@ export function reorderDocumentHistoryOrder(
   item: DocumentHistoryOrderEntry,
   beforeItem: DocumentHistoryOrderEntry | null,
 ): DocumentHistoryOrderEntry[] | null {
-  const itemKey = getDocumentHistoryOrderEntryKey(item)
-  const beforeKey = beforeItem === null ? null : getDocumentHistoryOrderEntryKey(beforeItem)
-  const currentIndex = order.findIndex((entry) => getDocumentHistoryOrderEntryKey(entry) === itemKey)
+  const itemKey = getDocumentHistoryOrderEntryKey(item);
+  const beforeKey =
+    beforeItem === null ? null : getDocumentHistoryOrderEntryKey(beforeItem);
+  const currentIndex = order.findIndex(
+    (entry) => getDocumentHistoryOrderEntryKey(entry) === itemKey,
+  );
 
   if (currentIndex < 0) {
-    return null
+    return null;
   }
 
-  if (beforeKey !== null && !order.some((entry) => getDocumentHistoryOrderEntryKey(entry) === beforeKey)) {
-    return null
+  if (
+    beforeKey !== null &&
+    !order.some((entry) => getDocumentHistoryOrderEntryKey(entry) === beforeKey)
+  ) {
+    return null;
   }
 
-  const nextOrder = order.filter((entry) => getDocumentHistoryOrderEntryKey(entry) !== itemKey)
-  const insertIndex = beforeKey === null
-    ? nextOrder.length
-    : nextOrder.findIndex((entry) => getDocumentHistoryOrderEntryKey(entry) === beforeKey)
-  nextOrder.splice(insertIndex < 0 ? nextOrder.length : insertIndex, 0, item)
-  return nextOrder
+  const nextOrder = order.filter(
+    (entry) => getDocumentHistoryOrderEntryKey(entry) !== itemKey,
+  );
+  const insertIndex =
+    beforeKey === null
+      ? nextOrder.length
+      : nextOrder.findIndex(
+          (entry) => getDocumentHistoryOrderEntryKey(entry) === beforeKey,
+        );
+  nextOrder.splice(insertIndex < 0 ? nextOrder.length : insertIndex, 0, item);
+  return nextOrder;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function collectFeatureDefinitionDependencyKeys(value: unknown, dependencyKeys: Set<string>) {
+function collectFeatureDefinitionDependencyKeys(
+  value: unknown,
+  dependencyKeys: Set<string>,
+) {
   if (Array.isArray(value)) {
     for (const item of value) {
-      collectFeatureDefinitionDependencyKeys(item, dependencyKeys)
+      collectFeatureDefinitionDependencyKeys(item, dependencyKeys);
     }
-    return
+    return;
   }
 
   if (!isRecord(value)) {
-    return
+    return;
   }
 
-  if (typeof value.sketchId === 'string') {
-    dependencyKeys.add(`sketch:${value.sketchId}`)
+  if (typeof value.sketchId === "string") {
+    dependencyKeys.add(`sketch:${value.sketchId}`);
   }
 
-  if (typeof value.featureId === 'string') {
-    dependencyKeys.add(`feature:${value.featureId}`)
+  if (typeof value.featureId === "string") {
+    dependencyKeys.add(`feature:${value.featureId}`);
   }
 
   for (const child of Object.values(value)) {
-    collectFeatureDefinitionDependencyKeys(child, dependencyKeys)
+    collectFeatureDefinitionDependencyKeys(child, dependencyKeys);
   }
 }
 
@@ -219,65 +256,73 @@ export function findDocumentHistoryOrderDependencyViolations(
   historyOrder: readonly DocumentHistoryOrderEntry[],
 ): DocumentHistoryDependencyOrderViolation[] {
   const indexByKey = new Map(
-    historyOrder.map((entry, index) => [getDocumentHistoryOrderEntryKey(entry), index]),
-  )
-  const violations: DocumentHistoryDependencyOrderViolation[] = []
+    historyOrder.map((entry, index) => [
+      getDocumentHistoryOrderEntryKey(entry),
+      index,
+    ]),
+  );
+  const violations: DocumentHistoryDependencyOrderViolation[] = [];
 
   for (const feature of features) {
-    const featureKey = getDocumentHistoryOrderEntryKey({ kind: 'feature', featureId: feature.featureId })
-    const featureIndex = indexByKey.get(featureKey)
+    const featureKey = getDocumentHistoryOrderEntryKey({
+      kind: "feature",
+      featureId: feature.featureId,
+    });
+    const featureIndex = indexByKey.get(featureKey);
 
     if (featureIndex === undefined) {
-      continue
+      continue;
     }
 
-    const dependencyKeys = new Set<string>()
-    collectFeatureDefinitionDependencyKeys(feature.definition, dependencyKeys)
+    const dependencyKeys = new Set<string>();
+    collectFeatureDefinitionDependencyKeys(feature.definition, dependencyKeys);
 
     for (const dependencyKey of dependencyKeys) {
       if (dependencyKey === featureKey) {
-        continue
+        continue;
       }
 
-      const dependencyIndex = indexByKey.get(dependencyKey)
+      const dependencyIndex = indexByKey.get(dependencyKey);
       if (dependencyIndex !== undefined && dependencyIndex > featureIndex) {
         violations.push({
           featureId: feature.featureId,
           featureKey,
           dependencyKey,
-        })
+        });
       }
     }
   }
 
-  return violations
+  return violations;
 }
 
-export function createTailDocumentCursor(items: readonly DocumentHistoryItemRecord[]): DocumentFeatureCursor {
-  const tail = items.at(-1)
+export function createTailDocumentCursor(
+  items: readonly DocumentHistoryItemRecord[],
+): DocumentFeatureCursor {
+  const tail = items.at(-1);
 
   if (!tail) {
-    return { kind: 'empty' }
+    return { kind: "empty" };
   }
 
-  return tail.kind === 'sketch'
-    ? { kind: 'sketch', sketchId: tail.sketchId }
-    : { kind: 'feature', featureId: tail.featureId }
+  return tail.kind === "sketch"
+    ? { kind: "sketch", sketchId: tail.sketchId }
+    : { kind: "feature", featureId: tail.featureId };
 }
 
 export function getDocumentHistoryCursorIndex(
   items: readonly DocumentHistoryItemRecord[],
   cursor: DocumentFeatureCursor,
 ) {
-  if (cursor.kind === 'empty') {
-    return -1
+  if (cursor.kind === "empty") {
+    return -1;
   }
 
   return items.findIndex((item) =>
-    cursor.kind === 'sketch'
-      ? item.kind === 'sketch' && item.sketchId === cursor.sketchId
-      : item.kind === 'feature' && item.featureId === cursor.featureId,
-  )
+    cursor.kind === "sketch"
+      ? item.kind === "sketch" && item.sketchId === cursor.sketchId
+      : item.kind === "feature" && item.featureId === cursor.featureId,
+  );
 }
 
 export function getDocumentHistoryCursorForIndex(
@@ -285,17 +330,17 @@ export function getDocumentHistoryCursorForIndex(
   index: number,
 ): DocumentFeatureCursor {
   if (index < 0) {
-    return { kind: 'empty' }
+    return { kind: "empty" };
   }
 
-  const item = items[index]
+  const item = items[index];
   if (!item) {
-    return { kind: 'empty' }
+    return { kind: "empty" };
   }
 
-  return item.kind === 'sketch'
-    ? { kind: 'sketch', sketchId: item.sketchId }
-    : { kind: 'feature', featureId: item.featureId }
+  return item.kind === "sketch"
+    ? { kind: "sketch", sketchId: item.sketchId }
+    : { kind: "feature", featureId: item.featureId };
 }
 
 export function getDocumentHistoryCursorBeforeTarget(
@@ -303,44 +348,56 @@ export function getDocumentHistoryCursorBeforeTarget(
   target: DocumentHistoryOrderEntry,
 ): DocumentFeatureCursor | null {
   const targetIndex = items.findIndex((item) =>
-    target.kind === 'sketch'
-      ? item.kind === 'sketch' && item.sketchId === target.sketchId
-      : item.kind === 'feature' && item.featureId === target.featureId,
-  )
+    target.kind === "sketch"
+      ? item.kind === "sketch" && item.sketchId === target.sketchId
+      : item.kind === "feature" && item.featureId === target.featureId,
+  );
 
-  return targetIndex < 0 ? null : getDocumentHistoryCursorForIndex(items, targetIndex - 1)
+  return targetIndex < 0
+    ? null
+    : getDocumentHistoryCursorForIndex(items, targetIndex - 1);
 }
 
-export function getPreviousDocumentHistoryCursor(snapshot: WorkspaceSnapshot): DocumentFeatureCursor | null {
-  const items = snapshot.presentation.documentHistory
-  const cursor = snapshot.document.cursor
-  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
+export function getPreviousDocumentHistoryCursor(
+  snapshot: WorkspaceSnapshot,
+): DocumentFeatureCursor | null {
+  const items = snapshot.presentation.documentHistory;
+  const cursor = snapshot.document.cursor;
+  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor);
 
-  if (cursor.kind !== 'empty' && cursorIndex < 0) {
-    return null
+  if (cursor.kind !== "empty" && cursorIndex < 0) {
+    return null;
   }
 
-  return cursorIndex > -1 ? getDocumentHistoryCursorForIndex(items, cursorIndex - 1) : null
+  return cursorIndex > -1
+    ? getDocumentHistoryCursorForIndex(items, cursorIndex - 1)
+    : null;
 }
 
-export function getNextDocumentHistoryCursor(snapshot: WorkspaceSnapshot): DocumentFeatureCursor | null {
-  const items = snapshot.presentation.documentHistory
-  const cursor = snapshot.document.cursor
-  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
+export function getNextDocumentHistoryCursor(
+  snapshot: WorkspaceSnapshot,
+): DocumentFeatureCursor | null {
+  const items = snapshot.presentation.documentHistory;
+  const cursor = snapshot.document.cursor;
+  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor);
 
-  if (cursor.kind !== 'empty' && cursorIndex < 0) {
-    return null
+  if (cursor.kind !== "empty" && cursorIndex < 0) {
+    return null;
   }
 
-  const nextIndex = cursorIndex + 1
-  return nextIndex < items.length ? getDocumentHistoryCursorForIndex(items, nextIndex) : null
+  const nextIndex = cursorIndex + 1;
+  return nextIndex < items.length
+    ? getDocumentHistoryCursorForIndex(items, nextIndex)
+    : null;
 }
 
 export function isValidDocumentHistoryCursor(
   items: readonly DocumentHistoryItemRecord[],
   cursor: DocumentFeatureCursor,
 ) {
-  return cursor.kind === 'empty' || getDocumentHistoryCursorIndex(items, cursor) >= 0
+  return (
+    cursor.kind === "empty" || getDocumentHistoryCursorIndex(items, cursor) >= 0
+  );
 }
 
 export function getAppliedFeatureIdsForDocumentCursor(
@@ -349,9 +406,14 @@ export function getAppliedFeatureIdsForDocumentCursor(
 ) {
   return new Set(
     getAppliedDocumentHistoryItemsForDocumentCursor(items, cursor)
-      .filter((item): item is Extract<DocumentHistoryItemRecord, { kind: 'feature' }> => item.kind === 'feature')
+      .filter(
+        (
+          item,
+        ): item is Extract<DocumentHistoryItemRecord, { kind: "feature" }> =>
+          item.kind === "feature",
+      )
       .map((item) => item.featureId),
-  )
+  );
 }
 
 export function getAppliedSketchIdsForDocumentCursor(
@@ -360,21 +422,26 @@ export function getAppliedSketchIdsForDocumentCursor(
 ): Set<SketchId> {
   return new Set(
     getAppliedDocumentHistoryItemsForDocumentCursor(items, cursor)
-      .filter((item): item is Extract<DocumentHistoryItemRecord, { kind: 'sketch' }> => item.kind === 'sketch')
+      .filter(
+        (
+          item,
+        ): item is Extract<DocumentHistoryItemRecord, { kind: "sketch" }> =>
+          item.kind === "sketch",
+      )
       .map((item) => item.sketchId),
-  )
+  );
 }
 
 export function getAppliedDocumentHistoryItemsForDocumentCursor(
   items: readonly DocumentHistoryItemRecord[],
   cursor: DocumentFeatureCursor,
 ): DocumentHistoryItemRecord[] {
-  if (cursor.kind === 'empty') {
-    return []
+  if (cursor.kind === "empty") {
+    return [];
   }
 
-  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor)
-  return cursorIndex < 0 ? [] : items.slice(0, cursorIndex + 1)
+  const cursorIndex = getDocumentHistoryCursorIndex(items, cursor);
+  return cursorIndex < 0 ? [] : items.slice(0, cursorIndex + 1);
 }
 
 export function isDocumentHistoryTargetAppliedForCursor(
@@ -382,17 +449,26 @@ export function isDocumentHistoryTargetAppliedForCursor(
   cursor: DocumentFeatureCursor,
   target: DocumentHistoryOrderEntry,
 ) {
-  const targetKey = getDocumentHistoryOrderEntryKey(target)
-  return getAppliedDocumentHistoryItemsForDocumentCursor(items, cursor).some((item) =>
-    item.kind === 'sketch'
-      ? targetKey === getDocumentHistoryOrderEntryKey({ kind: 'sketch', sketchId: item.sketchId })
-      : targetKey === getDocumentHistoryOrderEntryKey({ kind: 'feature', featureId: item.featureId }),
-  )
+  const targetKey = getDocumentHistoryOrderEntryKey(target);
+  return getAppliedDocumentHistoryItemsForDocumentCursor(items, cursor).some(
+    (item) =>
+      item.kind === "sketch"
+        ? targetKey ===
+          getDocumentHistoryOrderEntryKey({
+            kind: "sketch",
+            sketchId: item.sketchId,
+          })
+        : targetKey ===
+          getDocumentHistoryOrderEntryKey({
+            kind: "feature",
+            featureId: item.featureId,
+          }),
+  );
 }
 
 export function getFeatureInsertionIndexForDocumentCursor(
   items: readonly DocumentHistoryItemRecord[],
   cursor: DocumentFeatureCursor,
 ) {
-  return getAppliedFeatureIdsForDocumentCursor(items, cursor).size
+  return getAppliedFeatureIdsForDocumentCursor(items, cursor).size;
 }

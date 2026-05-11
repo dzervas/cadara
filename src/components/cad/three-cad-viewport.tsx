@@ -1,46 +1,43 @@
-import { Button } from '@mantine/core'
-import { Canvas } from '@react-three/fiber'
-import { Bvh, OrbitControls } from '@react-three/drei'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import * as THREE from 'three'
+import { Button } from "@mantine/core";
+import { Canvas } from "@react-three/fiber";
+import { Bvh, OrbitControls } from "@react-three/drei";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import * as THREE from "three";
 
-import {
-  SketchViewportFeedbackLayer,
-} from '@/components/cad/sketch-viewport-feedback'
-import {
-  SketchSpecialModeViewportFeedback,
-} from '@/components/cad/sketch-special-mode-viewport-feedback'
-import {
-  SketchConstraintAnnotations,
-} from '@/components/cad/sketch-constraint-annotations'
-import {
-  shouldApplySketchDisplayStyles,
-} from '@/components/cad/sketch-display-style'
-import {
-  resolveSketchRenderingPalette,
-} from '@/components/cad/sketch-rendering-palette'
+import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-feedback";
+import { SketchSpecialModeViewportFeedback } from "@/components/cad/sketch-special-mode-viewport-feedback";
+import { SketchConstraintAnnotations } from "@/components/cad/sketch-constraint-annotations";
+import { shouldApplySketchDisplayStyles } from "@/components/cad/sketch-display-style";
+import { resolveSketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
 import {
   collectSketchViewportFeedbackAnchors,
   getAnnotationProjectionId,
   type SketchViewportFeedbackProjection,
-} from '@/components/cad/sketch-viewport-feedback-model'
+} from "@/components/cad/sketch-viewport-feedback-model";
 import {
   collectSketchSpecialModeFeedbackAnchors,
   type SketchSpecialModeFeedbackProjection,
-} from '@/components/cad/sketch-special-mode-feedback-model'
-import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
+} from "@/components/cad/sketch-special-mode-feedback-model";
+import { createDimensionAnnotationPlacementPatch } from "@/components/cad/three-cad-viewport-annotation-drag";
 import {
   requestViewCubeCameraTransition,
   resolveSketchCameraTransition,
   type SketchCameraTransitionState,
-} from '@/components/cad/three-cad-viewport-camera-transitions'
+} from "@/components/cad/three-cad-viewport-camera-transitions";
 import {
   createViewCubeScene,
   resolveViewCubePresetId,
   updateViewCubeVisibility,
-} from '@/components/cad/three-cad-viewport-view-cube'
-import { DocumentRenderableNode } from '@/components/cad/three-cad-viewport-document-nodes'
-import { SketchDisplayRenderableNode } from '@/components/cad/three-cad-viewport-sketch-nodes'
+} from "@/components/cad/three-cad-viewport-view-cube";
+import { DocumentRenderableNode } from "@/components/cad/three-cad-viewport-document-nodes";
+import { SketchDisplayRenderableNode } from "@/components/cad/three-cad-viewport-sketch-nodes";
 import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
@@ -48,8 +45,11 @@ import {
   getAnnotationHighlightTargets,
   isAnnotationTarget,
   updatePointerFromClientPoint,
-} from '@/components/cad/three-cad-viewport-pick-candidates'
-import { SectionCapLayer, SectionViewOverlay } from '@/components/cad/three-cad-viewport-section'
+} from "@/components/cad/three-cad-viewport-pick-candidates";
+import {
+  SectionCapLayer,
+  SectionViewOverlay,
+} from "@/components/cad/three-cad-viewport-section";
 import {
   BodyLodWatcher,
   FirstNonEmptyGeometryFrameSignal,
@@ -61,29 +61,33 @@ import {
   ViewportProjectionCameraController,
   ViewportProjectionSelector,
   WorkspaceSceneScaffold,
-} from '@/components/cad/three-cad-viewport-inner-components'
+} from "@/components/cad/three-cad-viewport-inner-components";
 import {
   type PrimitiveRef,
   getPrimitiveRefKey,
   primitiveRefEquals,
   selectionFilterAllowsTarget,
-} from '@/core/editor/schema'
-import { getSectionPlaneOrigin, type SectionViewSession, type Vec3 } from '@/core/section-view/session'
+} from "@/core/editor/schema";
+import {
+  getSectionPlaneOrigin,
+  type SectionViewSession,
+  type Vec3,
+} from "@/core/section-view/session";
 import type {
   SketchAnnotationDescriptor,
   SketchSessionDisplayRenderable,
-} from '@/domain/editor/sketch-session'
-import type { SketchToolPresentationSchema } from '@/core/sketch-tools/editor-schema'
+} from "@/domain/editor/sketch-session";
+import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import type {
   SketchSpecialModeHandleRef,
   SketchSpecialModeViewportPresentation,
-} from '@/core/sketch-special-modes/schema'
-import { doesSketchSpecialModeAcceptTarget } from '@/core/sketch-special-modes/presentation'
+} from "@/core/sketch-special-modes/schema";
+import { doesSketchSpecialModeAcceptTarget } from "@/core/sketch-special-modes/presentation";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
-} from '@/contracts/shared/references'
-import type { MeasurementWitness } from '@/domain/measure/measurement'
+} from "@/contracts/shared/references";
+import type { MeasurementWitness } from "@/domain/measure/measurement";
 import {
   collectBindings,
   collectRaycastPickCandidates,
@@ -91,15 +95,15 @@ import {
   isSeededDatumPlaneRenderable,
   resolveAllCandidates,
   updateWorkspaceHighlight,
-} from '@/infrastructure/viewport/render-picking'
-import { createViewportCameraTransitionController } from '@/infrastructure/viewport/viewport-camera-transition'
+} from "@/infrastructure/viewport/render-picking";
+import { createViewportCameraTransitionController } from "@/infrastructure/viewport/viewport-camera-transition";
 import {
   getViewportCanvasClickIntent,
   shouldViewportClickEventRequestConnectedSketchSelection,
   shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportStartSketchGeometryDrag,
-} from '@/domain/editor/workbench-interactions'
-import type { ViewportCameraControls } from '@/infrastructure/viewport/viewport-camera-controls'
+} from "@/domain/editor/workbench-interactions";
+import type { ViewportCameraControls } from "@/infrastructure/viewport/viewport-camera-controls";
 import {
   DEFAULT_VIEWPORT_PROJECTION_MODE,
   applyViewportRenderableFitFrame,
@@ -112,23 +116,23 @@ import {
   type ViewportCamera,
   type ViewportCameraFrame,
   type ViewportProjectionMode,
-} from '@/infrastructure/viewport/viewport-projection'
-import { computeSketchCameraFrame } from '@/infrastructure/viewport/sketch-camera-framing'
-import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
-import type { OccTessellationTierId } from '@/domain/modeling/occ/tessellation'
-import type { ViewNavigationPresetId } from '@/infrastructure/viewport/view-navigation'
+} from "@/infrastructure/viewport/viewport-projection";
+import { computeSketchCameraFrame } from "@/infrastructure/viewport/sketch-camera-framing";
+import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
+import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
+import type { ViewNavigationPresetId } from "@/infrastructure/viewport/view-navigation";
 import {
   createSectionCapRenderables,
   createSectionClippingPlane,
   getSectionRenderableBounds,
-} from '@/infrastructure/section-view/rendering'
-import { projectSketchFeedbackAnchor } from '@/core/workspace/sketch-feedback-projection'
+} from "@/infrastructure/section-view/rendering";
+import { projectSketchFeedbackAnchor } from "@/core/workspace/sketch-feedback-projection";
 import {
   mapWorldPointToWorkspaceSketch,
   type WorkspaceVec3,
-} from '@/core/workspace/sketch-plane-mapping'
-import { useEditorState } from '@/hooks/use-editor-state'
-import { useRuntimeExtensionRegistry } from '@/hooks/use-runtime-extension-registry'
+} from "@/core/workspace/sketch-plane-mapping";
+import { useEditorState } from "@/hooks/use-editor-state";
+import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
 import {
   LEGACY_VIEWPORT_HEIGHT_PX,
   LEGACY_VIEWPORT_LEFT_INSET_PX,
@@ -136,7 +140,7 @@ import {
   VIEWPORT_CANVAS_TOP_INSET_PX,
   VIEWPORT_OVERLAY_TOP_INSET_STYLE,
   VIEW_CUBE_SIZE_PX,
-} from '@/components/cad/viewport-overlay-layout'
+} from "@/components/cad/viewport-overlay-layout";
 import {
   cancelCoalescedSketchGeometryDragMove,
   createViewportInvalidationKey,
@@ -148,43 +152,66 @@ import {
   resolveSectionScreenDragOffset,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
-} from '@/components/cad/three-cad-viewport-helpers'
+} from "@/components/cad/three-cad-viewport-helpers";
 
 interface ThreeCadViewportProps {
-  activeSectionView: SectionViewSession | null
-  hoverTarget: PrimitiveRef | null
-  measurementWitnesses: readonly MeasurementWitness[]
-  renderables: ViewportRenderableRecord[]
-  sketchDisplayRenderables: SketchSessionDisplayRenderable[]
-  sketchAnnotations: SketchAnnotationDescriptor[]
-  onHover: (target: PrimitiveRef) => void
-  onSelect: (target: PrimitiveRef, cameraPosition?: Vec3) => void
-  onConnectedSketchSelect: (target: PrimitiveRef) => void
-  onDeselect: () => void
-  onAnnotationEdit: (target: Extract<PrimitiveRef, { kind: 'constraint' | 'dimension' }>) => void
-  onClearHover: () => void
-  onSketchMove: (point: readonly [number, number]) => void
-  onSketchRelease: (point: readonly [number, number], target?: PrimitiveRef | null) => void
-  onSketchGeometryDragStart: (target: PrimitiveRef, point: readonly [number, number]) => void
-  onSketchGeometryDragMove: (point: readonly [number, number]) => void
-  onSketchGeometryDragEnd: (point: readonly [number, number]) => void
-  onSpecialModeClick: (point: readonly [number, number], target?: PrimitiveRef | null) => void
-  onSpecialModeDoubleClick: (point: readonly [number, number], target?: PrimitiveRef | null) => void
-  onSpecialModeDragStart: (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) => void
-  onSpecialModeDragMove: (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) => void
-  onSpecialModeDragEnd: (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) => void
-  onSectionOffsetChange: (offset: number) => void
-  onSectionFlip: () => void
-  onSectionClear: () => void
-  onSketchToolPatch: (patch: Record<string, unknown>) => void
-  onLodTierChange: (tierId: OccTessellationTierId) => void
-  selection: PrimitiveRef[]
-  sketchToolPresentation: SketchToolPresentationSchema | null
-  specialModePresentation: SketchSpecialModeViewportPresentation | null
-  fitViewRequestId: number
-  hasNonEmptyCommittedGeometry?: boolean
-  onCanvasCreated?: () => void
-  onFirstNonEmptyGeometryFrame?: () => void
+  activeSectionView: SectionViewSession | null;
+  hoverTarget: PrimitiveRef | null;
+  measurementWitnesses: readonly MeasurementWitness[];
+  renderables: ViewportRenderableRecord[];
+  sketchDisplayRenderables: SketchSessionDisplayRenderable[];
+  sketchAnnotations: SketchAnnotationDescriptor[];
+  onHover: (target: PrimitiveRef) => void;
+  onSelect: (target: PrimitiveRef, cameraPosition?: Vec3) => void;
+  onConnectedSketchSelect: (target: PrimitiveRef) => void;
+  onDeselect: () => void;
+  onAnnotationEdit: (
+    target: Extract<PrimitiveRef, { kind: "constraint" | "dimension" }>,
+  ) => void;
+  onClearHover: () => void;
+  onSketchMove: (point: readonly [number, number]) => void;
+  onSketchRelease: (
+    point: readonly [number, number],
+    target?: PrimitiveRef | null,
+  ) => void;
+  onSketchGeometryDragStart: (
+    target: PrimitiveRef,
+    point: readonly [number, number],
+  ) => void;
+  onSketchGeometryDragMove: (point: readonly [number, number]) => void;
+  onSketchGeometryDragEnd: (point: readonly [number, number]) => void;
+  onSpecialModeClick: (
+    point: readonly [number, number],
+    target?: PrimitiveRef | null,
+  ) => void;
+  onSpecialModeDoubleClick: (
+    point: readonly [number, number],
+    target?: PrimitiveRef | null,
+  ) => void;
+  onSpecialModeDragStart: (
+    handle: SketchSpecialModeHandleRef,
+    point: readonly [number, number],
+  ) => void;
+  onSpecialModeDragMove: (
+    handle: SketchSpecialModeHandleRef,
+    point: readonly [number, number],
+  ) => void;
+  onSpecialModeDragEnd: (
+    handle: SketchSpecialModeHandleRef,
+    point: readonly [number, number],
+  ) => void;
+  onSectionOffsetChange: (offset: number) => void;
+  onSectionFlip: () => void;
+  onSectionClear: () => void;
+  onSketchToolPatch: (patch: Record<string, unknown>) => void;
+  onLodTierChange: (tierId: OccTessellationTierId) => void;
+  selection: PrimitiveRef[];
+  sketchToolPresentation: SketchToolPresentationSchema | null;
+  specialModePresentation: SketchSpecialModeViewportPresentation | null;
+  fitViewRequestId: number;
+  hasNonEmptyCommittedGeometry?: boolean;
+  onCanvasCreated?: () => void;
+  onFirstNonEmptyGeometryFrame?: () => void;
 }
 
 export function ThreeCadViewport({
@@ -223,206 +250,256 @@ export function ThreeCadViewport({
   onCanvasCreated,
   onFirstNonEmptyGeometryFrame,
 }: ThreeCadViewportProps) {
-  const { sketchSpecialModes } = useRuntimeExtensionRegistry()
-  const viewportRef = useRef<HTMLDivElement | null>(null)
-  const viewCubeRef = useRef<HTMLDivElement | null>(null)
-  const canvasElementRef = useRef<HTMLCanvasElement | null>(null)
-  const cameraRef = useRef<ViewportCamera | null>(null)
-  const controlsRef = useRef<ViewportCameraControls | null>(null)
-  const controlsInitializedRef = useRef(false)
-  const pendingProjectionFrameRef = useRef<ViewportCameraFrame | null>(null)
-  const [canvasReadyVersion, setCanvasReadyVersion] = useState(0)
-  const [controlsReadyVersion, setControlsReadyVersion] = useState(0)
-  const [projectionMode, setProjectionMode] = useState<ViewportProjectionMode>(DEFAULT_VIEWPORT_PROJECTION_MODE)
-  const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<SketchViewportFeedbackProjection[]>([])
-  const [sketchAnnotationProjections, setSketchAnnotationProjections] = useState<SketchViewportFeedbackProjection[]>([])
-  const [specialModeFeedbackProjections, setSpecialModeFeedbackProjections] = useState<SketchSpecialModeFeedbackProjection[]>([])
-  const [viewportTransitionVersion, setViewportTransitionVersion] = useState(0)
-  const raycasterRef = useRef(new THREE.Raycaster())
-  const pointerRef = useRef(new THREE.Vector2())
-  const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
-  const sketchHitPointRef = useRef(new THREE.Vector3())
-  const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null)
-  const sketchGeometryDragRef = useRef<{ target: PrimitiveRef } | null>(null)
+  const { sketchSpecialModes } = useRuntimeExtensionRegistry();
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const viewCubeRef = useRef<HTMLDivElement | null>(null);
+  const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
+  const cameraRef = useRef<ViewportCamera | null>(null);
+  const controlsRef = useRef<ViewportCameraControls | null>(null);
+  const controlsInitializedRef = useRef(false);
+  const pendingProjectionFrameRef = useRef<ViewportCameraFrame | null>(null);
+  const [canvasReadyVersion, setCanvasReadyVersion] = useState(0);
+  const [controlsReadyVersion, setControlsReadyVersion] = useState(0);
+  const [projectionMode, setProjectionMode] = useState<ViewportProjectionMode>(
+    DEFAULT_VIEWPORT_PROJECTION_MODE,
+  );
+  const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<
+    SketchViewportFeedbackProjection[]
+  >([]);
+  const [sketchAnnotationProjections, setSketchAnnotationProjections] =
+    useState<SketchViewportFeedbackProjection[]>([]);
+  const [specialModeFeedbackProjections, setSpecialModeFeedbackProjections] =
+    useState<SketchSpecialModeFeedbackProjection[]>([]);
+  const [viewportTransitionVersion, setViewportTransitionVersion] = useState(0);
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const pointerRef = useRef(new THREE.Vector2());
+  const sketchPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0));
+  const sketchHitPointRef = useRef(new THREE.Vector3());
+  const primaryPointerDownRef = useRef<{ x: number; y: number } | null>(null);
+  const sketchGeometryDragRef = useRef<{ target: PrimitiveRef } | null>(null);
   const sectionDragRef = useRef<{
-    pointerId: number
-    sectionAtDragStart: SectionViewSession
-    dragStartClientPoint: { x: number; y: number }
-  } | null>(null)
-  const sectionDragOffsetRef = useRef<number | null>(null)
-  const pendingSketchGeometryDragPointRef = useRef<readonly [number, number] | null>(null)
-  const pendingSketchGeometryDragFrameIdRef = useRef<number | null>(null)
+    pointerId: number;
+    sectionAtDragStart: SectionViewSession;
+    dragStartClientPoint: { x: number; y: number };
+  } | null>(null);
+  const sectionDragOffsetRef = useRef<number | null>(null);
+  const pendingSketchGeometryDragPointRef = useRef<
+    readonly [number, number] | null
+  >(null);
+  const pendingSketchGeometryDragFrameIdRef = useRef<number | null>(null);
   const pendingSketchGeometryDragRef = useRef<{
-    target: PrimitiveRef
-    startPoint: readonly [number, number]
-  } | null>(null)
-  const pickRootRef = useRef<THREE.Group | null>(null)
-  const bindingsRef = useRef<CollectedBindings | null>(null)
-  const bindingsSceneKeyRef = useRef<string | null>(null)
-  const hoverRef = useRef(onHover)
-  const hoverTargetRef = useRef(hoverTarget)
-  const cameraTransitionControllerRef = useRef(createViewportCameraTransitionController())
-  const projectionModeRef = useRef<ViewportProjectionMode>(DEFAULT_VIEWPORT_PROJECTION_MODE)
+    target: PrimitiveRef;
+    startPoint: readonly [number, number];
+  } | null>(null);
+  const pickRootRef = useRef<THREE.Group | null>(null);
+  const bindingsRef = useRef<CollectedBindings | null>(null);
+  const bindingsSceneKeyRef = useRef<string | null>(null);
+  const hoverRef = useRef(onHover);
+  const hoverTargetRef = useRef(hoverTarget);
+  const cameraTransitionControllerRef = useRef(
+    createViewportCameraTransitionController(),
+  );
+  const projectionModeRef = useRef<ViewportProjectionMode>(
+    DEFAULT_VIEWPORT_PROJECTION_MODE,
+  );
   const sketchCameraStateRef = useRef<SketchCameraTransitionState>({
     activeSessionToken: null,
     preSketchFrame: null,
-  })
-  const lastPickedTargetRef = useRef<PrimitiveRef | null>(null)
-  const lastFitViewRequestIdRef = useRef(fitViewRequestId)
-  const pendingFitViewRequestIdRef = useRef<number | null>(null)
-  const selectRef = useRef(onSelect)
-  const connectedSketchSelectRef = useRef(onConnectedSketchSelect)
-  const deselectRef = useRef(onDeselect)
-  const annotationEditRef = useRef(onAnnotationEdit)
-  const clearHoverRef = useRef(onClearHover)
-  const sketchMoveRef = useRef(onSketchMove)
-  const sketchReleaseRef = useRef(onSketchRelease)
-  const sketchGeometryDragStartRef = useRef(onSketchGeometryDragStart)
-  const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove)
-  const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd)
-  const specialModeClickRef = useRef(onSpecialModeClick)
-  const specialModeDoubleClickRef = useRef(onSpecialModeDoubleClick)
-  const specialModeDragStartRef = useRef(onSpecialModeDragStart)
-  const specialModeDragMoveRef = useRef(onSpecialModeDragMove)
-  const specialModeDragEndRef = useRef(onSpecialModeDragEnd)
-  const sectionOffsetChangeRef = useRef(onSectionOffsetChange)
-  const sectionFlipRef = useRef(onSectionFlip)
-  const sectionClearRef = useRef(onSectionClear)
-  const sketchToolPatchRef = useRef(onSketchToolPatch)
-  const projectSketchClientPointRef = useRef<(clientX: number, clientY: number) => readonly [number, number] | null>(() => null)
-  const lodTierChangeRef = useRef(onLodTierChange)
-  const canvasCreatedRef = useRef(onCanvasCreated)
-  const firstNonEmptyGeometryFrameRef = useRef(onFirstNonEmptyGeometryFrame)
+  });
+  const lastPickedTargetRef = useRef<PrimitiveRef | null>(null);
+  const lastFitViewRequestIdRef = useRef(fitViewRequestId);
+  const pendingFitViewRequestIdRef = useRef<number | null>(null);
+  const selectRef = useRef(onSelect);
+  const connectedSketchSelectRef = useRef(onConnectedSketchSelect);
+  const deselectRef = useRef(onDeselect);
+  const annotationEditRef = useRef(onAnnotationEdit);
+  const clearHoverRef = useRef(onClearHover);
+  const sketchMoveRef = useRef(onSketchMove);
+  const sketchReleaseRef = useRef(onSketchRelease);
+  const sketchGeometryDragStartRef = useRef(onSketchGeometryDragStart);
+  const sketchGeometryDragMoveRef = useRef(onSketchGeometryDragMove);
+  const sketchGeometryDragEndRef = useRef(onSketchGeometryDragEnd);
+  const specialModeClickRef = useRef(onSpecialModeClick);
+  const specialModeDoubleClickRef = useRef(onSpecialModeDoubleClick);
+  const specialModeDragStartRef = useRef(onSpecialModeDragStart);
+  const specialModeDragMoveRef = useRef(onSpecialModeDragMove);
+  const specialModeDragEndRef = useRef(onSpecialModeDragEnd);
+  const sectionOffsetChangeRef = useRef(onSectionOffsetChange);
+  const sectionFlipRef = useRef(onSectionFlip);
+  const sectionClearRef = useRef(onSectionClear);
+  const sketchToolPatchRef = useRef(onSketchToolPatch);
+  const projectSketchClientPointRef = useRef<
+    (clientX: number, clientY: number) => readonly [number, number] | null
+  >(() => null);
+  const lodTierChangeRef = useRef(onLodTierChange);
+  const canvasCreatedRef = useRef(onCanvasCreated);
+  const firstNonEmptyGeometryFrameRef = useRef(onFirstNonEmptyGeometryFrame);
   const {
     machineState,
     state: { mode, selectionFilter, selectionCatalog, sketchSession },
-  } = useEditorState()
-  const sketchDisplayStylesEnabled = shouldApplySketchDisplayStyles(mode, sketchSession !== null)
-  const sketchRenderingPalette = useMemo(() => resolveSketchRenderingPalette(), [])
-  const selectionRef = useRef(selection)
-  const sketchSessionRef = useRef(sketchSession)
-  const sectionViewRef = useRef(activeSectionView)
-  const renderablesRef = useRef(renderables)
-  const sketchDisplayRenderablesRef = useRef(sketchDisplayRenderables)
-  const requestCameraTransition = useCallback((
-    targetFrame: ViewportCameraFrame,
-    fromFrame?: ViewportCameraFrame,
-  ) => {
-    const camera = cameraRef.current
-    const controls = controlsRef.current
-    const transitionStartFrame = fromFrame ?? (camera && controls
-      ? captureViewportCameraFrame(camera, controls)
-      : null)
+  } = useEditorState();
+  const sketchDisplayStylesEnabled = shouldApplySketchDisplayStyles(
+    mode,
+    sketchSession !== null,
+  );
+  const sketchRenderingPalette = useMemo(
+    () => resolveSketchRenderingPalette(),
+    [],
+  );
+  const selectionRef = useRef(selection);
+  const sketchSessionRef = useRef(sketchSession);
+  const sectionViewRef = useRef(activeSectionView);
+  const renderablesRef = useRef(renderables);
+  const sketchDisplayRenderablesRef = useRef(sketchDisplayRenderables);
+  const requestCameraTransition = useCallback(
+    (targetFrame: ViewportCameraFrame, fromFrame?: ViewportCameraFrame) => {
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      const transitionStartFrame =
+        fromFrame ??
+        (camera && controls
+          ? captureViewportCameraFrame(camera, controls)
+          : null);
 
-    if (!transitionStartFrame) {
-      return
-    }
+      if (!transitionStartFrame) {
+        return;
+      }
 
-    cameraTransitionControllerRef.current.start({
-      fromFrame: transitionStartFrame,
-      toFrame: targetFrame,
-    })
-    setViewportTransitionVersion((current) => current + 1)
+      cameraTransitionControllerRef.current.start({
+        fromFrame: transitionStartFrame,
+        toFrame: targetFrame,
+      });
+      setViewportTransitionVersion((current) => current + 1);
 
-    if (projectionModeRef.current !== targetFrame.projectionMode) {
-      pendingProjectionFrameRef.current = cloneViewportCameraFrame(transitionStartFrame)
-      projectionModeRef.current = targetFrame.projectionMode
-      setProjectionMode(targetFrame.projectionMode)
-    }
-  }, [])
+      if (projectionModeRef.current !== targetFrame.projectionMode) {
+        pendingProjectionFrameRef.current =
+          cloneViewportCameraFrame(transitionStartFrame);
+        projectionModeRef.current = targetFrame.projectionMode;
+        setProjectionMode(targetFrame.projectionMode);
+      }
+    },
+    [],
+  );
   const handleControlsRef = useCallback((controls: unknown) => {
-    const nextControls = controls as ViewportCameraControls | null
+    const nextControls = controls as ViewportCameraControls | null;
 
     if (controlsRef.current !== nextControls) {
-      controlsRef.current = nextControls
-      setControlsReadyVersion((current) => current + 1)
+      controlsRef.current = nextControls;
+      setControlsReadyVersion((current) => current + 1);
     }
 
-    const camera = cameraRef.current
+    const camera = cameraRef.current;
 
     if (!nextControls || !camera) {
-      return
+      return;
     }
 
     if (pendingProjectionFrameRef.current) {
-      applyViewportCameraFrame(camera, nextControls, pendingProjectionFrameRef.current)
-      pendingProjectionFrameRef.current = null
-      return
+      applyViewportCameraFrame(
+        camera,
+        nextControls,
+        pendingProjectionFrameRef.current,
+      );
+      pendingProjectionFrameRef.current = null;
+      return;
     }
 
     if (controlsInitializedRef.current) {
-      return
+      return;
     }
 
-    applyViewportCameraFrame(camera, nextControls, getDefaultViewportCameraFrame())
-    controlsInitializedRef.current = true
-  }, [])
-  const handleProjectionModeChange = useCallback((nextMode: ViewportProjectionMode) => {
-    if (nextMode === projectionMode) {
-      return
-    }
+    applyViewportCameraFrame(
+      camera,
+      nextControls,
+      getDefaultViewportCameraFrame(),
+    );
+    controlsInitializedRef.current = true;
+  }, []);
+  const handleProjectionModeChange = useCallback(
+    (nextMode: ViewportProjectionMode) => {
+      if (nextMode === projectionMode) {
+        return;
+      }
 
-    cameraTransitionControllerRef.current.cancel()
-    if (cameraRef.current && controlsRef.current) {
-      pendingProjectionFrameRef.current = captureViewportCameraFrame(cameraRef.current, controlsRef.current)
-    }
+      cameraTransitionControllerRef.current.cancel();
+      if (cameraRef.current && controlsRef.current) {
+        pendingProjectionFrameRef.current = captureViewportCameraFrame(
+          cameraRef.current,
+          controlsRef.current,
+        );
+      }
 
-    projectionModeRef.current = nextMode
-    setProjectionMode(nextMode)
-  }, [projectionMode])
-  const scheduleSketchGeometryDragMove = useCallback((point: readonly [number, number]) => {
-    scheduleCoalescedSketchGeometryDragMove({
-      point,
-      pendingPointRef: pendingSketchGeometryDragPointRef,
-      pendingFrameIdRef: pendingSketchGeometryDragFrameIdRef,
-      requestFrame: (callback) => window.requestAnimationFrame(callback),
-      isDragActive: () => sketchGeometryDragRef.current !== null,
-      onMove: (latestPoint) => sketchGeometryDragMoveRef.current(latestPoint),
-    })
-  }, [])
+      projectionModeRef.current = nextMode;
+      setProjectionMode(nextMode);
+    },
+    [projectionMode],
+  );
+  const scheduleSketchGeometryDragMove = useCallback(
+    (point: readonly [number, number]) => {
+      scheduleCoalescedSketchGeometryDragMove({
+        point,
+        pendingPointRef: pendingSketchGeometryDragPointRef,
+        pendingFrameIdRef: pendingSketchGeometryDragFrameIdRef,
+        requestFrame: (callback) => window.requestAnimationFrame(callback),
+        isDragActive: () => sketchGeometryDragRef.current !== null,
+        onMove: (latestPoint) => sketchGeometryDragMoveRef.current(latestPoint),
+      });
+    },
+    [],
+  );
   const cancelSketchGeometryDragMove = useCallback(() => {
     cancelCoalescedSketchGeometryDragMove({
       pendingPointRef: pendingSketchGeometryDragPointRef,
       pendingFrameIdRef: pendingSketchGeometryDragFrameIdRef,
       cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
-    })
-  }, [])
+    });
+  }, []);
   const annotationHighlightTargets = useMemo(
-    () => getAnnotationHighlightTargets(sketchAnnotations, selection, hoverTarget),
+    () =>
+      getAnnotationHighlightTargets(sketchAnnotations, selection, hoverTarget),
     [hoverTarget, selection, sketchAnnotations],
-  )
-  const selectionFilterRef = useRef(selectionFilter)
-  const selectionCatalogRef = useRef(selectionCatalog)
+  );
+  const selectionFilterRef = useRef(selectionFilter);
+  const selectionCatalogRef = useRef(selectionCatalog);
   const bvhSceneKey = useMemo(
     () => createViewportBvhSceneKey(renderables, sketchDisplayRenderables),
     [renderables, sketchDisplayRenderables],
-  )
-  const bvhSceneKeyRef = useRef(bvhSceneKey)
+  );
+  const bvhSceneKeyRef = useRef(bvhSceneKey);
   const activeSectionClippingPlane = useMemo(
-    () => activeSectionView ? createSectionClippingPlane(activeSectionView) : null,
+    () =>
+      activeSectionView ? createSectionClippingPlane(activeSectionView) : null,
     [activeSectionView],
-  )
+  );
   const viewportInvalidationKey = useMemo(
-    () => createViewportInvalidationKey({
-      sceneKey: bvhSceneKey,
-      hoverTargetKey: hoverTarget ? getPrimitiveRefKey(hoverTarget) : 'none',
-      selectionKeys: selection.map(getPrimitiveRefKey),
-      sketchFeedbackKey: JSON.stringify({
-        annotations: sketchAnnotations.map((annotation) => annotation.id),
-        specialMode: specialModePresentation,
-        tool: sketchToolPresentation,
+    () =>
+      createViewportInvalidationKey({
+        sceneKey: bvhSceneKey,
+        hoverTargetKey: hoverTarget ? getPrimitiveRefKey(hoverTarget) : "none",
+        selectionKeys: selection.map(getPrimitiveRefKey),
+        sketchFeedbackKey: JSON.stringify({
+          annotations: sketchAnnotations.map((annotation) => annotation.id),
+          specialMode: specialModePresentation,
+          tool: sketchToolPresentation,
+        }),
+        measurementWitnessCount: measurementWitnesses.length,
+        sectionViewKey: activeSectionView
+          ? JSON.stringify(activeSectionView)
+          : "none",
+        clippingKey: activeSectionClippingPlane
+          ? activeSectionClippingPlane.normal.toArray().join(",") +
+            `:${activeSectionClippingPlane.constant}`
+          : "none",
+        lodKey: renderables
+          .map((entry) => `${entry.origin}:${entry.renderable.id}`)
+          .join(","),
+        projectionMode,
+        themeKey: sketchDisplayStylesEnabled
+          ? "sketch-styles"
+          : "default-styles",
+        fitViewRequestId,
+        transitionVersion: viewportTransitionVersion,
       }),
-      measurementWitnessCount: measurementWitnesses.length,
-      sectionViewKey: activeSectionView ? JSON.stringify(activeSectionView) : 'none',
-      clippingKey: activeSectionClippingPlane
-        ? activeSectionClippingPlane.normal.toArray().join(',') + `:${activeSectionClippingPlane.constant}`
-        : 'none',
-      lodKey: renderables.map((entry) => `${entry.origin}:${entry.renderable.id}`).join(','),
-      projectionMode,
-      themeKey: sketchDisplayStylesEnabled ? 'sketch-styles' : 'default-styles',
-      fitViewRequestId,
-      transitionVersion: viewportTransitionVersion,
-    }),
     [
       activeSectionClippingPlane,
       activeSectionView,
@@ -439,53 +516,55 @@ export function ThreeCadViewport({
       specialModePresentation,
       viewportTransitionVersion,
     ],
-  )
+  );
   const activeSectionCaps = useMemo(
-    () => activeSectionView
-      ? createSectionCapRenderables(
-          renderables
-            .filter((entry) => entry.renderable.geometry.kind === 'mesh')
-            .map((entry) => entry.renderable),
-          activeSectionView,
-        )
-      : [],
+    () =>
+      activeSectionView
+        ? createSectionCapRenderables(
+            renderables
+              .filter((entry) => entry.renderable.geometry.kind === "mesh")
+              .map((entry) => entry.renderable),
+            activeSectionView,
+          )
+        : [],
     [activeSectionView, renderables],
-  )
+  );
   const activeSectionBounds = useMemo(
-    () => getSectionRenderableBounds(renderables.map((entry) => entry.renderable)),
+    () =>
+      getSectionRenderableBounds(renderables.map((entry) => entry.renderable)),
     [renderables],
-  )
-  const activeSectionBoundsRef = useRef(activeSectionBounds)
+  );
+  const activeSectionBoundsRef = useRef(activeSectionBounds);
 
   useEffect(() => {
-    hoverRef.current = onHover
-    selectRef.current = onSelect
-    connectedSketchSelectRef.current = onConnectedSketchSelect
-    deselectRef.current = onDeselect
-    annotationEditRef.current = onAnnotationEdit
-    clearHoverRef.current = onClearHover
-    sketchMoveRef.current = onSketchMove
-    sketchReleaseRef.current = onSketchRelease
-    sketchGeometryDragStartRef.current = onSketchGeometryDragStart
-    sketchGeometryDragMoveRef.current = onSketchGeometryDragMove
-    sketchGeometryDragEndRef.current = onSketchGeometryDragEnd
-    specialModeClickRef.current = onSpecialModeClick
-    specialModeDoubleClickRef.current = onSpecialModeDoubleClick
-    specialModeDragStartRef.current = onSpecialModeDragStart
-    specialModeDragMoveRef.current = onSpecialModeDragMove
-    specialModeDragEndRef.current = onSpecialModeDragEnd
-    sectionOffsetChangeRef.current = onSectionOffsetChange
-    sectionFlipRef.current = onSectionFlip
-    sectionClearRef.current = onSectionClear
-    sketchToolPatchRef.current = onSketchToolPatch
-    lodTierChangeRef.current = onLodTierChange
-    canvasCreatedRef.current = onCanvasCreated
-    firstNonEmptyGeometryFrameRef.current = onFirstNonEmptyGeometryFrame
-    selectionRef.current = selection
-    sketchSessionRef.current = sketchSession
-    sectionViewRef.current = activeSectionView
-    selectionFilterRef.current = selectionFilter
-    selectionCatalogRef.current = selectionCatalog
+    hoverRef.current = onHover;
+    selectRef.current = onSelect;
+    connectedSketchSelectRef.current = onConnectedSketchSelect;
+    deselectRef.current = onDeselect;
+    annotationEditRef.current = onAnnotationEdit;
+    clearHoverRef.current = onClearHover;
+    sketchMoveRef.current = onSketchMove;
+    sketchReleaseRef.current = onSketchRelease;
+    sketchGeometryDragStartRef.current = onSketchGeometryDragStart;
+    sketchGeometryDragMoveRef.current = onSketchGeometryDragMove;
+    sketchGeometryDragEndRef.current = onSketchGeometryDragEnd;
+    specialModeClickRef.current = onSpecialModeClick;
+    specialModeDoubleClickRef.current = onSpecialModeDoubleClick;
+    specialModeDragStartRef.current = onSpecialModeDragStart;
+    specialModeDragMoveRef.current = onSpecialModeDragMove;
+    specialModeDragEndRef.current = onSpecialModeDragEnd;
+    sectionOffsetChangeRef.current = onSectionOffsetChange;
+    sectionFlipRef.current = onSectionFlip;
+    sectionClearRef.current = onSectionClear;
+    sketchToolPatchRef.current = onSketchToolPatch;
+    lodTierChangeRef.current = onLodTierChange;
+    canvasCreatedRef.current = onCanvasCreated;
+    firstNonEmptyGeometryFrameRef.current = onFirstNonEmptyGeometryFrame;
+    selectionRef.current = selection;
+    sketchSessionRef.current = sketchSession;
+    sectionViewRef.current = activeSectionView;
+    selectionFilterRef.current = selectionFilter;
+    selectionCatalogRef.current = selectionCatalog;
   }, [
     activeSectionView,
     onClearHover,
@@ -515,73 +594,83 @@ export function ThreeCadViewport({
     sketchSession,
     selectionCatalog,
     selectionFilter,
-  ])
+  ]);
 
   useLayoutEffect(() => {
-    activeSectionBoundsRef.current = activeSectionBounds
-    sectionViewRef.current = activeSectionView
-    renderablesRef.current = renderables
-    sketchDisplayRenderablesRef.current = sketchDisplayRenderables
-    bvhSceneKeyRef.current = bvhSceneKey
-  }, [activeSectionBounds, activeSectionView, bvhSceneKey, renderables, sketchDisplayRenderables])
+    activeSectionBoundsRef.current = activeSectionBounds;
+    sectionViewRef.current = activeSectionView;
+    renderablesRef.current = renderables;
+    sketchDisplayRenderablesRef.current = sketchDisplayRenderables;
+    bvhSceneKeyRef.current = bvhSceneKey;
+  }, [
+    activeSectionBounds,
+    activeSectionView,
+    bvhSceneKey,
+    renderables,
+    sketchDisplayRenderables,
+  ]);
 
   useEffect(() => {
-    projectionModeRef.current = projectionMode
-  }, [projectionMode])
+    projectionModeRef.current = projectionMode;
+  }, [projectionMode]);
 
   useEffect(() => {
     if (lastFitViewRequestIdRef.current === fitViewRequestId) {
-      return
+      return;
     }
 
-    lastFitViewRequestIdRef.current = fitViewRequestId
-    pendingFitViewRequestIdRef.current = fitViewRequestId
-  }, [fitViewRequestId])
+    lastFitViewRequestIdRef.current = fitViewRequestId;
+    pendingFitViewRequestIdRef.current = fitViewRequestId;
+  }, [fitViewRequestId]);
 
   useLayoutEffect(() => {
     if (pendingFitViewRequestIdRef.current === null) {
-      return
+      return;
     }
 
-    const camera = cameraRef.current
-    const controls = controlsRef.current
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
     if (!camera || !controls) {
-      return
+      return;
     }
 
-    cameraTransitionControllerRef.current.cancel()
+    cameraTransitionControllerRef.current.cancel();
     const applied = applyViewportRenderableFitFrame({
       camera,
       controls,
       renderables: renderables.map((entry) => entry.renderable),
-    })
+    });
 
     if (applied) {
-      pendingFitViewRequestIdRef.current = null
+      pendingFitViewRequestIdRef.current = null;
     }
-  }, [bvhSceneKey, controlsReadyVersion, renderables])
+  }, [bvhSceneKey, controlsReadyVersion, renderables]);
 
   useLayoutEffect(() => {
     if (hoverTarget === null) {
-      hoverTargetRef.current = null
+      hoverTargetRef.current = null;
     }
-  }, [hoverTarget])
+  }, [hoverTarget]);
 
   const updateSketchFeedbackProjections = useCallback(() => {
-    const camera = cameraRef.current
-    const canvasElement = canvasElementRef.current
-    const plane = sketchSession?.plane
+    const camera = cameraRef.current;
+    const canvasElement = canvasElementRef.current;
+    const plane = sketchSession?.plane;
 
     if (!camera || !canvasElement || !plane) {
-      setSketchFeedbackProjections([])
-      setSketchAnnotationProjections([])
-      setSpecialModeFeedbackProjections([])
-      return
+      setSketchFeedbackProjections([]);
+      setSketchAnnotationProjections([]);
+      setSpecialModeFeedbackProjections([]);
+      return;
     }
 
-    const rect = canvasElement.getBoundingClientRect()
-    const anchors = collectSketchViewportFeedbackAnchors(sketchToolPresentation)
-    const specialModeAnchors = collectSketchSpecialModeFeedbackAnchors(specialModePresentation)
+    const rect = canvasElement.getBoundingClientRect();
+    const anchors = collectSketchViewportFeedbackAnchors(
+      sketchToolPresentation,
+    );
+    const specialModeAnchors = collectSketchSpecialModeFeedbackAnchors(
+      specialModePresentation,
+    );
     const projections = anchors.flatMap((anchor) => {
       const screenPoint = projectSketchFeedbackAnchor({
         anchor: anchor.anchor,
@@ -591,15 +680,21 @@ export function ThreeCadViewport({
           height: rect.height,
         },
         projectWorldPoint: (point: WorkspaceVec3) => {
-          const projected = new THREE.Vector3(point[0], point[1], point[2]).project(camera)
-          return { x: projected.x, y: projected.y, z: projected.z }
+          const projected = new THREE.Vector3(
+            point[0],
+            point[1],
+            point[2],
+          ).project(camera);
+          return { x: projected.x, y: projected.y, z: projected.z };
         },
-      })
+      });
 
-      return screenPoint ? [{ id: anchor.id, x: screenPoint.x, y: screenPoint.y }] : []
-    })
+      return screenPoint
+        ? [{ id: anchor.id, x: screenPoint.x, y: screenPoint.y }]
+        : [];
+    });
 
-    setSketchFeedbackProjections(projections)
+    setSketchFeedbackProjections(projections);
     setSpecialModeFeedbackProjections(
       specialModeAnchors.flatMap((anchor) => {
         const screenPoint = projectSketchFeedbackAnchor({
@@ -610,14 +705,20 @@ export function ThreeCadViewport({
             height: rect.height,
           },
           projectWorldPoint: (point: WorkspaceVec3) => {
-            const projected = new THREE.Vector3(point[0], point[1], point[2]).project(camera)
-            return { x: projected.x, y: projected.y, z: projected.z }
+            const projected = new THREE.Vector3(
+              point[0],
+              point[1],
+              point[2],
+            ).project(camera);
+            return { x: projected.x, y: projected.y, z: projected.z };
           },
-        })
+        });
 
-        return screenPoint ? [{ id: anchor.id, x: screenPoint.x, y: screenPoint.y }] : []
+        return screenPoint
+          ? [{ id: anchor.id, x: screenPoint.x, y: screenPoint.y }]
+          : [];
       }),
-    )
+    );
     setSketchAnnotationProjections(
       sketchAnnotations.flatMap((annotation) => {
         const screenPoint = projectSketchFeedbackAnchor({
@@ -628,77 +729,98 @@ export function ThreeCadViewport({
             height: rect.height,
           },
           projectWorldPoint: (point: WorkspaceVec3) => {
-            const projected = new THREE.Vector3(point[0], point[1], point[2]).project(camera)
-            return { x: projected.x, y: projected.y, z: projected.z }
+            const projected = new THREE.Vector3(
+              point[0],
+              point[1],
+              point[2],
+            ).project(camera);
+            return { x: projected.x, y: projected.y, z: projected.z };
           },
-        })
+        });
 
         return screenPoint
-          ? [{
-              id: getAnnotationProjectionId(annotation.id),
-              x: screenPoint.x,
-              y: screenPoint.y,
-            }]
-          : []
+          ? [
+              {
+                id: getAnnotationProjectionId(annotation.id),
+                x: screenPoint.x,
+                y: screenPoint.y,
+              },
+            ]
+          : [];
       }),
-    )
-  }, [sketchAnnotations, sketchSession?.plane, sketchToolPresentation, specialModePresentation])
-  const updateSketchFeedbackProjectionsRef = useRef(updateSketchFeedbackProjections)
+    );
+  }, [
+    sketchAnnotations,
+    sketchSession?.plane,
+    sketchToolPresentation,
+    specialModePresentation,
+  ]);
+  const updateSketchFeedbackProjectionsRef = useRef(
+    updateSketchFeedbackProjections,
+  );
 
   useEffect(() => {
-    updateSketchFeedbackProjectionsRef.current = updateSketchFeedbackProjections
-  }, [updateSketchFeedbackProjections])
+    updateSketchFeedbackProjectionsRef.current =
+      updateSketchFeedbackProjections;
+  }, [updateSketchFeedbackProjections]);
 
   useEffect(() => {
-    const cubeElement = viewCubeRef.current
+    const cubeElement = viewCubeRef.current;
 
     if (!cubeElement) {
-      return
+      return;
     }
 
-    const viewCubeScene = createViewCubeScene()
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    renderer.setPixelRatio(window.devicePixelRatio)
-    renderer.setClearColor(0x000000, 0)
-    cubeElement.appendChild(renderer.domElement)
+    const viewCubeScene = createViewCubeScene();
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0x000000, 0);
+    cubeElement.appendChild(renderer.domElement);
 
-    const pointer = new THREE.Vector2()
-    const raycaster = new THREE.Raycaster()
-    let animationFrameId = 0
-    let attachedControls: ViewportCameraControls | null = null
-    let hoveredPresetId: ViewNavigationPresetId | null = null
+    const pointer = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
+    let animationFrameId = 0;
+    let attachedControls: ViewportCameraControls | null = null;
+    let hoveredPresetId: ViewNavigationPresetId | null = null;
 
     const updatePointerFromEvent = (event: PointerEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect()
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-    }
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    };
 
     const getIntersectedViewCubeObject = (event: PointerEvent) => {
-      updatePointerFromEvent(event)
-      raycaster.setFromCamera(pointer, viewCubeScene.camera)
+      updatePointerFromEvent(event);
+      raycaster.setFromCamera(pointer, viewCubeScene.camera);
 
-      return raycaster.intersectObjects(viewCubeScene.interactiveObjects, false)[0]?.object
-    }
+      return raycaster.intersectObjects(
+        viewCubeScene.interactiveObjects,
+        false,
+      )[0]?.object;
+    };
 
-    const setHoveredPreset = (nextHoveredPresetId: ViewNavigationPresetId | null) => {
+    const setHoveredPreset = (
+      nextHoveredPresetId: ViewNavigationPresetId | null,
+    ) => {
       if (hoveredPresetId === nextHoveredPresetId) {
-        return
+        return;
       }
 
-      hoveredPresetId = nextHoveredPresetId
-      requestRender()
-    }
+      hoveredPresetId = nextHoveredPresetId;
+      requestRender();
+    };
 
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button !== 0) {
-        return
+        return;
       }
 
-      const presetId = resolveViewCubePresetId(getIntersectedViewCubeObject(event))
+      const presetId = resolveViewCubePresetId(
+        getIntersectedViewCubeObject(event),
+      );
 
       if (!presetId) {
-        return
+        return;
       }
 
       requestViewCubeCameraTransition({
@@ -706,113 +828,121 @@ export function ThreeCadViewport({
         camera: cameraRef.current,
         controls: controlsRef.current,
         requestTransition: requestCameraTransition,
-      })
-    }
+      });
+    };
 
     const handlePointerMove = (event: PointerEvent) => {
-      const object = getIntersectedViewCubeObject(event)
-      const presetId = resolveViewCubePresetId(object)
+      const object = getIntersectedViewCubeObject(event);
+      const presetId = resolveViewCubePresetId(object);
 
-      renderer.domElement.style.cursor = presetId ? 'pointer' : ''
-      setHoveredPreset(presetId)
-    }
+      renderer.domElement.style.cursor = presetId ? "pointer" : "";
+      setHoveredPreset(presetId);
+    };
 
     const handlePointerLeave = () => {
-      renderer.domElement.style.cursor = ''
-      setHoveredPreset(null)
-    }
+      renderer.domElement.style.cursor = "";
+      setHoveredPreset(null);
+    };
 
     function renderCube() {
-      const viewportCamera = cameraRef.current
-      const viewportControls = controlsRef.current
+      const viewportCamera = cameraRef.current;
+      const viewportControls = controlsRef.current;
 
       if (viewportCamera && viewportControls) {
         const orbitOffset = viewportCamera.position
           .clone()
           .sub(viewportControls.target)
-          .normalize()
-        viewCubeScene.camera.position.copy(orbitOffset.multiplyScalar(4))
-        viewCubeScene.camera.up.copy(viewportCamera.up)
-        viewCubeScene.camera.lookAt(0, 0, 0)
+          .normalize();
+        viewCubeScene.camera.position.copy(orbitOffset.multiplyScalar(4));
+        viewCubeScene.camera.up.copy(viewportCamera.up);
+        viewCubeScene.camera.lookAt(0, 0, 0);
       }
 
-      updateViewCubeVisibility(viewCubeScene, hoveredPresetId)
-      renderer.render(viewCubeScene.scene, viewCubeScene.camera)
+      updateViewCubeVisibility(viewCubeScene, hoveredPresetId);
+      renderer.render(viewCubeScene.scene, viewCubeScene.camera);
     }
 
     function requestRender() {
       if (animationFrameId !== 0) {
-        return
+        return;
       }
 
       animationFrameId = window.requestAnimationFrame(() => {
-        animationFrameId = 0
-        renderCube()
-      })
+        animationFrameId = 0;
+        renderCube();
+      });
     }
 
     const resizeRenderer = () => {
-      resizeViewCubeRenderer({ cubeElement, renderer })
+      resizeViewCubeRenderer({ cubeElement, renderer });
 
       if (attachedControls) {
-        requestRender()
+        requestRender();
       }
-    }
-    const resizeObserver = new ResizeObserver(resizeRenderer)
+    };
+    const resizeObserver = new ResizeObserver(resizeRenderer);
 
     const attachControls = () => {
-      animationFrameId = 0
-      const controls = controlsRef.current
+      animationFrameId = 0;
+      const controls = controlsRef.current;
 
       if (!controls) {
-        animationFrameId = window.requestAnimationFrame(attachControls)
-        return
+        animationFrameId = window.requestAnimationFrame(attachControls);
+        return;
       }
 
-      attachedControls = controls
-      controls.addEventListener('change', requestRender)
-      requestRender()
-    }
+      attachedControls = controls;
+      controls.addEventListener("change", requestRender);
+      requestRender();
+    };
 
-    renderer.domElement.addEventListener('pointerdown', handlePointerDown)
-    renderer.domElement.addEventListener('pointermove', handlePointerMove)
-    renderer.domElement.addEventListener('pointerleave', handlePointerLeave)
-    resizeObserver.observe(cubeElement)
-    resizeRenderer()
-    animationFrameId = window.requestAnimationFrame(attachControls)
+    renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+    renderer.domElement.addEventListener("pointermove", handlePointerMove);
+    renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
+    resizeObserver.observe(cubeElement);
+    resizeRenderer();
+    animationFrameId = window.requestAnimationFrame(attachControls);
     if (controlsReadyVersion > 0) {
-      requestRender()
+      requestRender();
     }
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId)
-      resizeObserver.disconnect()
-      renderer.domElement.removeEventListener('pointerdown', handlePointerDown)
-      renderer.domElement.removeEventListener('pointermove', handlePointerMove)
-      renderer.domElement.removeEventListener('pointerleave', handlePointerLeave)
-      attachedControls?.removeEventListener('change', requestRender)
-      viewCubeScene.dispose()
-      renderer.dispose()
-      cubeElement.removeChild(renderer.domElement)
-    }
-  }, [controlsReadyVersion, requestCameraTransition])
+      window.cancelAnimationFrame(animationFrameId);
+      resizeObserver.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+      renderer.domElement.removeEventListener(
+        "pointerleave",
+        handlePointerLeave,
+      );
+      attachedControls?.removeEventListener("change", requestRender);
+      viewCubeScene.dispose();
+      renderer.dispose();
+      cubeElement.removeChild(renderer.domElement);
+    };
+  }, [controlsReadyVersion, requestCameraTransition]);
 
   useLayoutEffect(() => {
-    bindingsRef.current = collectBindings(pickRootRef.current)
-    bindingsSceneKeyRef.current = bvhSceneKey
-    const bindings = bindingsRef.current
+    bindingsRef.current = collectBindings(pickRootRef.current);
+    bindingsSceneKeyRef.current = bvhSceneKey;
+    const bindings = bindingsRef.current;
 
     if (bindings) {
-      updateWorkspaceHighlight(bindings.targetToObjects, selection, hoverTarget, annotationHighlightTargets)
+      updateWorkspaceHighlight(
+        bindings.targetToObjects,
+        selection,
+        hoverTarget,
+        annotationHighlightTargets,
+      );
     }
-  }, [annotationHighlightTargets, bvhSceneKey, hoverTarget, selection])
+  }, [annotationHighlightTargets, bvhSceneKey, hoverTarget, selection]);
 
   useEffect(() => {
-    const camera = cameraRef.current
-    const controls = controlsRef.current
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
 
     if (!camera || !controls) {
-      return
+      return;
     }
 
     const nextTransition = resolveSketchCameraTransition({
@@ -821,79 +951,106 @@ export function ThreeCadViewport({
       sketchSession,
       sketchDisplayRenderables,
       state: sketchCameraStateRef.current,
-    })
+    });
 
-    sketchCameraStateRef.current = nextTransition.state
+    sketchCameraStateRef.current = nextTransition.state;
 
     if (!nextTransition.targetFrame) {
-      return
+      return;
     }
 
-    requestCameraTransition(nextTransition.targetFrame, nextTransition.fromFrame)
-    window.requestAnimationFrame(updateSketchFeedbackProjections)
-  }, [controlsReadyVersion, requestCameraTransition, sketchDisplayRenderables, sketchSession, updateSketchFeedbackProjections])
+    requestCameraTransition(
+      nextTransition.targetFrame,
+      nextTransition.fromFrame,
+    );
+    window.requestAnimationFrame(updateSketchFeedbackProjections);
+  }, [
+    controlsReadyVersion,
+    requestCameraTransition,
+    sketchDisplayRenderables,
+    sketchSession,
+    updateSketchFeedbackProjections,
+  ]);
 
   useEffect(() => {
-    const controls = controlsRef.current
-    let animationFrameId = window.requestAnimationFrame(updateSketchFeedbackProjections)
+    const controls = controlsRef.current;
+    let animationFrameId = window.requestAnimationFrame(
+      updateSketchFeedbackProjections,
+    );
 
     const requestProjectionUpdate = () => {
-      window.cancelAnimationFrame(animationFrameId)
-      animationFrameId = window.requestAnimationFrame(updateSketchFeedbackProjections)
-    }
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(
+        updateSketchFeedbackProjections,
+      );
+    };
 
-    controls?.addEventListener('change', requestProjectionUpdate)
-    window.addEventListener('resize', requestProjectionUpdate)
+    controls?.addEventListener("change", requestProjectionUpdate);
+    window.addEventListener("resize", requestProjectionUpdate);
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId)
-      controls?.removeEventListener('change', requestProjectionUpdate)
-      window.removeEventListener('resize', requestProjectionUpdate)
-    }
-  }, [canvasReadyVersion, controlsReadyVersion, updateSketchFeedbackProjections])
+      window.cancelAnimationFrame(animationFrameId);
+      controls?.removeEventListener("change", requestProjectionUpdate);
+      window.removeEventListener("resize", requestProjectionUpdate);
+    };
+  }, [
+    canvasReadyVersion,
+    controlsReadyVersion,
+    updateSketchFeedbackProjections,
+  ]);
 
   useEffect(() => {
     if (bindingsRef.current) {
-      updateWorkspaceHighlight(bindingsRef.current.targetToObjects, selection, hoverTarget, annotationHighlightTargets)
+      updateWorkspaceHighlight(
+        bindingsRef.current.targetToObjects,
+        selection,
+        hoverTarget,
+        annotationHighlightTargets,
+      );
     }
-  }, [annotationHighlightTargets, hoverTarget, selection])
+  }, [annotationHighlightTargets, hoverTarget, selection]);
 
   useEffect(() => {
-    const viewportElement = viewportRef.current
-    const canvasElement = canvasElementRef.current
+    const viewportElement = viewportRef.current;
+    const canvasElement = canvasElementRef.current;
 
     if (!viewportElement || !canvasElement) {
-      return
+      return;
     }
 
     const getCachedBindings = () => {
       if (
-        bindingsRef.current
-        && bindingsSceneKeyRef.current === bvhSceneKeyRef.current
-        && bindingsRef.current.pickables.length > 0
+        bindingsRef.current &&
+        bindingsSceneKeyRef.current === bvhSceneKeyRef.current &&
+        bindingsRef.current.pickables.length > 0
       ) {
-        return bindingsRef.current
+        return bindingsRef.current;
       }
 
-      const bindings = collectBindings(pickRootRef.current)
-      bindingsRef.current = bindings
-      bindingsSceneKeyRef.current = bvhSceneKeyRef.current
-      return bindings
-    }
+      const bindings = collectBindings(pickRootRef.current);
+      bindingsRef.current = bindings;
+      bindingsSceneKeyRef.current = bvhSceneKeyRef.current;
+      return bindings;
+    };
 
     const pointerWithinViewCube = (clientX: number, clientY: number) => {
-      const cubeElement = viewCubeRef.current
+      const cubeElement = viewCubeRef.current;
 
       if (!cubeElement) {
-        return false
+        return false;
       }
 
-      const rect = cubeElement.getBoundingClientRect()
-      return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
-    }
+      const rect = cubeElement.getBoundingClientRect();
+      return (
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+      );
+    };
 
     const acceptsViewportTarget = (target: PrimitiveRef) => {
-      const activeSpecialModeSession = sketchSessionRef.current
+      const activeSpecialModeSession = sketchSessionRef.current;
 
       if (activeSpecialModeSession?.activeSpecialMode) {
         return doesSketchSpecialModeAcceptTarget(
@@ -902,7 +1059,7 @@ export function ThreeCadViewport({
           selectionRef.current,
           selectionCatalogRef.current,
           sketchSpecialModes,
-        )
+        );
       }
 
       return selectionFilterAllowsTarget(
@@ -910,28 +1067,38 @@ export function ThreeCadViewport({
         selectionRef.current,
         target,
         selectionCatalogRef.current,
-      )
-    }
+      );
+    };
 
     const getPickTargetFromClientPoint = (
       clientX: number,
       clientY: number,
       viewportRect: DOMRectReadOnly,
     ) => {
-      const camera = cameraRef.current
-      const bindings = getCachedBindings()
+      const camera = cameraRef.current;
+      const bindings = getCachedBindings();
 
       if (!camera || !bindings) {
-        return null
+        return null;
       }
 
-      updatePointerFromClientPoint(pointerRef.current, viewportRect, clientX, clientY)
-      raycasterRef.current.setFromCamera(pointerRef.current, camera)
-      const pickTuning = getViewportPickTuning(selectionFilterRef.current)
-      raycasterRef.current.params.Line.threshold = pickTuning.linePickThreshold
-      ;(raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = false
+      updatePointerFromClientPoint(
+        pointerRef.current,
+        viewportRect,
+        clientX,
+        clientY,
+      );
+      raycasterRef.current.setFromCamera(pointerRef.current, camera);
+      const pickTuning = getViewportPickTuning(selectionFilterRef.current);
+      raycasterRef.current.params.Line.threshold = pickTuning.linePickThreshold;
+      (
+        raycasterRef.current as THREE.Raycaster & { firstHitOnly?: boolean }
+      ).firstHitOnly = false;
 
-      const intersections = raycasterRef.current.intersectObjects(bindings.pickables, true)
+      const intersections = raycasterRef.current.intersectObjects(
+        bindings.pickables,
+        true,
+      );
       const candidates = [
         ...collectRaycastPickCandidates(intersections),
         ...collectProjectedSketchDisplayPointCandidates({
@@ -961,32 +1128,36 @@ export function ThreeCadViewport({
           acceptsTarget: acceptsViewportTarget,
           currentHoverTarget: hoverTargetRef.current,
         }),
-      ]
+      ];
 
-      return resolveAllCandidates(candidates, acceptsViewportTarget, pickTuning.resolutionOptions)
-    }
+      return resolveAllCandidates(
+        candidates,
+        acceptsViewportTarget,
+        pickTuning.resolutionOptions,
+      );
+    };
 
     const getViewportCameraPosition = (): Vec3 | null => {
-      const camera = cameraRef.current
+      const camera = cameraRef.current;
 
       return camera
         ? [camera.position.x, camera.position.y, camera.position.z]
-        : null
-    }
+        : null;
+    };
 
     const getSectionHandleHitFromClientPoint = (
       clientX: number,
       clientY: number,
       viewportRect: DOMRectReadOnly,
     ) => {
-      const activeSection = sectionViewRef.current
-      const camera = cameraRef.current
+      const activeSection = sectionViewRef.current;
+      const camera = cameraRef.current;
 
       if (!activeSection || !camera) {
-        return null
+        return null;
       }
 
-      const handlePosition = getSectionPlaneOrigin(activeSection)
+      const handlePosition = getSectionPlaneOrigin(activeSection);
       const projectedHandleCenter = projectWorldPointToViewport({
         camera,
         point: handlePosition,
@@ -994,20 +1165,22 @@ export function ThreeCadViewport({
           width: viewportRect.width,
           height: viewportRect.height,
         },
-      })
+      });
 
       if (!projectedHandleCenter) {
-        return null
+        return null;
       }
 
-      const boundsSize = activeSectionBoundsRef.current?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(24, 24, 24)
-      const planeSize = Math.max(boundsSize.length() * 0.6, 12)
-      const handleRadius = Math.max(planeSize * 0.045, 0.6)
+      const boundsSize =
+        activeSectionBoundsRef.current?.getSize(new THREE.Vector3()) ??
+        new THREE.Vector3(24, 24, 24);
+      const planeSize = Math.max(boundsSize.length() * 0.6, 12);
+      const handleRadius = Math.max(planeSize * 0.045, 0.6);
       const handleEdgePoint: Vec3 = [
         handlePosition[0] + activeSection.plane.frame.xAxis[0] * handleRadius,
         handlePosition[1] + activeSection.plane.frame.xAxis[1] * handleRadius,
         handlePosition[2] + activeSection.plane.frame.xAxis[2] * handleRadius,
-      ]
+      ];
       const projectedHandleEdge = projectWorldPointToViewport({
         camera,
         point: handleEdgePoint,
@@ -1015,73 +1188,93 @@ export function ThreeCadViewport({
           width: viewportRect.width,
           height: viewportRect.height,
         },
-      })
+      });
       const pixelRadius = projectedHandleEdge
         ? Math.hypot(
             projectedHandleEdge.x - projectedHandleCenter.x,
             projectedHandleEdge.y - projectedHandleCenter.y,
           )
-        : 0
-      const hitRadiusPx = Math.max(pixelRadius, 14)
-      const localClientX = clientX - viewportRect.left
-      const localClientY = clientY - viewportRect.top
+        : 0;
+      const hitRadiusPx = Math.max(pixelRadius, 14);
+      const localClientX = clientX - viewportRect.left;
+      const localClientY = clientY - viewportRect.top;
 
       return Math.hypot(
         projectedHandleCenter.x - localClientX,
         projectedHandleCenter.y - localClientY,
       ) <= hitRadiusPx
         ? true
-        : null
-    }
+        : null;
+    };
 
     const projectSketchPoint = (
       clientX: number,
       clientY: number,
       viewportRect: DOMRectReadOnly,
     ): readonly [number, number] | null => {
-      const camera = cameraRef.current
-      const activeSketchSession = sketchSessionRef.current
-      const controls = controlsRef.current
+      const camera = cameraRef.current;
+      const activeSketchSession = sketchSessionRef.current;
+      const controls = controlsRef.current;
 
       if (!camera || !activeSketchSession || !controls) {
-        return null
+        return null;
       }
 
-      const transitionTargetFrame = cameraTransitionControllerRef.current.getTargetFrame()
+      const transitionTargetFrame =
+        cameraTransitionControllerRef.current.getTargetFrame();
 
       if (transitionTargetFrame) {
-        applyViewportCameraFrame(camera, controls, transitionTargetFrame)
-        cameraTransitionControllerRef.current.cancel()
-        window.requestAnimationFrame(() => updateSketchFeedbackProjectionsRef.current())
+        applyViewportCameraFrame(camera, controls, transitionTargetFrame);
+        cameraTransitionControllerRef.current.cancel();
+        window.requestAnimationFrame(() =>
+          updateSketchFeedbackProjectionsRef.current(),
+        );
       }
 
-      updatePointerFromClientPoint(pointerRef.current, viewportRect, clientX, clientY)
-      raycasterRef.current.setFromCamera(pointerRef.current, camera)
+      updatePointerFromClientPoint(
+        pointerRef.current,
+        viewportRect,
+        clientX,
+        clientY,
+      );
+      raycasterRef.current.setFromCamera(pointerRef.current, camera);
 
-      const { frame } = activeSketchSession.plane
+      const { frame } = activeSketchSession.plane;
       sketchPlaneRef.current.set(
         new THREE.Vector3(frame.normal[0], frame.normal[1], frame.normal[2]),
         -(
-          frame.normal[0] * frame.origin[0]
-          + frame.normal[1] * frame.origin[1]
-          + frame.normal[2] * frame.origin[2]
+          frame.normal[0] * frame.origin[0] +
+          frame.normal[1] * frame.origin[1] +
+          frame.normal[2] * frame.origin[2]
         ),
-      )
+      );
 
-      if (!raycasterRef.current.ray.intersectPlane(sketchPlaneRef.current, sketchHitPointRef.current)) {
+      if (
+        !raycasterRef.current.ray.intersectPlane(
+          sketchPlaneRef.current,
+          sketchHitPointRef.current,
+        )
+      ) {
         const fallbackFrame = computeSketchCameraFrame({
           camera,
           plane: activeSketchSession.plane,
           renderables: sketchDisplayRenderablesRef.current,
-        })
+        });
 
-        applyViewportCameraFrame(camera, controls, fallbackFrame)
-        cameraTransitionControllerRef.current.cancel()
-        window.requestAnimationFrame(() => updateSketchFeedbackProjectionsRef.current())
-        raycasterRef.current.setFromCamera(pointerRef.current, camera)
+        applyViewportCameraFrame(camera, controls, fallbackFrame);
+        cameraTransitionControllerRef.current.cancel();
+        window.requestAnimationFrame(() =>
+          updateSketchFeedbackProjectionsRef.current(),
+        );
+        raycasterRef.current.setFromCamera(pointerRef.current, camera);
 
-        if (!raycasterRef.current.ray.intersectPlane(sketchPlaneRef.current, sketchHitPointRef.current)) {
-          return null
+        if (
+          !raycasterRef.current.ray.intersectPlane(
+            sketchPlaneRef.current,
+            sketchHitPointRef.current,
+          )
+        ) {
+          return null;
         }
       }
 
@@ -1089,22 +1282,26 @@ export function ThreeCadViewport({
         sketchHitPointRef.current.x,
         sketchHitPointRef.current.y,
         sketchHitPointRef.current.z,
-      ])
-    }
+      ]);
+    };
 
     projectSketchClientPointRef.current = (clientX, clientY) =>
-      projectSketchPoint(clientX, clientY, canvasElement.getBoundingClientRect())
+      projectSketchPoint(
+        clientX,
+        clientY,
+        canvasElement.getBoundingClientRect(),
+      );
 
     const clearHover = () => {
-      lastPickedTargetRef.current = null
+      lastPickedTargetRef.current = null;
       if (hoverTargetRef.current !== null) {
-        hoverTargetRef.current = null
-        clearHoverRef.current()
+        hoverTargetRef.current = null;
+        clearHoverRef.current();
       }
-    }
+    };
 
     const handlePointerMove = (event: PointerEvent) => {
-      const viewportRect = canvasElement.getBoundingClientRect()
+      const viewportRect = canvasElement.getBoundingClientRect();
 
       if (sectionDragRef.current !== null) {
         const offset = resolveSectionScreenDragOffset({
@@ -1115,118 +1312,147 @@ export function ThreeCadViewport({
           },
           sectionAtDragStart: sectionDragRef.current.sectionAtDragStart,
           dragStartClientPoint: {
-            x: sectionDragRef.current.dragStartClientPoint.x - viewportRect.left,
+            x:
+              sectionDragRef.current.dragStartClientPoint.x - viewportRect.left,
             y: sectionDragRef.current.dragStartClientPoint.y - viewportRect.top,
           },
           currentClientPoint: {
             x: event.clientX - viewportRect.left,
             y: event.clientY - viewportRect.top,
           },
-        })
+        });
 
         if (offset !== null && offset !== sectionDragOffsetRef.current) {
-          sectionDragOffsetRef.current = offset
-          sectionOffsetChangeRef.current(offset)
+          sectionDragOffsetRef.current = offset;
+          sectionOffsetChangeRef.current(offset);
         }
 
-        event.preventDefault()
-        event.stopPropagation()
-        return
+        event.preventDefault();
+        event.stopPropagation();
+        return;
       }
 
       if (sketchGeometryDragRef.current) {
-        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+        const point = projectSketchPoint(
+          event.clientX,
+          event.clientY,
+          viewportRect,
+        );
 
         if (point) {
-          scheduleSketchGeometryDragMove(point)
+          scheduleSketchGeometryDragMove(point);
         }
 
-        return
+        return;
       }
 
-      const pendingSketchGeometryDrag = pendingSketchGeometryDragRef.current
-      const pointerDown = primaryPointerDownRef.current
+      const pendingSketchGeometryDrag = pendingSketchGeometryDragRef.current;
+      const pointerDown = primaryPointerDownRef.current;
 
       if (pendingSketchGeometryDrag && pointerDown) {
         const dragDistance = Math.hypot(
           event.clientX - pointerDown.x,
           event.clientY - pointerDown.y,
-        )
+        );
 
         if (dragDistance > 6) {
-          const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+          const point = projectSketchPoint(
+            event.clientX,
+            event.clientY,
+            viewportRect,
+          );
 
           if (point) {
-            event.preventDefault()
-            event.stopPropagation()
-            sketchGeometryDragRef.current = { target: pendingSketchGeometryDrag.target }
-            pendingSketchGeometryDragRef.current = null
-            sketchGeometryDragStartRef.current(pendingSketchGeometryDrag.target, pendingSketchGeometryDrag.startPoint)
-            scheduleSketchGeometryDragMove(point)
+            event.preventDefault();
+            event.stopPropagation();
+            sketchGeometryDragRef.current = {
+              target: pendingSketchGeometryDrag.target,
+            };
+            pendingSketchGeometryDragRef.current = null;
+            sketchGeometryDragStartRef.current(
+              pendingSketchGeometryDrag.target,
+              pendingSketchGeometryDrag.startPoint,
+            );
+            scheduleSketchGeometryDragMove(point);
           }
 
-          return
+          return;
         }
       }
 
       if (isViewportNavigationPointerMove(event.buttons)) {
-        return
+        return;
       }
 
       if (pointerWithinViewCube(event.clientX, event.clientY)) {
-        clearHover()
-        return
+        clearHover();
+        return;
       }
 
-      const target = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
+      const target = getPickTargetFromClientPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
 
-      if (
-        target
-        && acceptsViewportTarget(target.target)
-      ) {
-        lastPickedTargetRef.current = target.target
-        if (hoverTargetRef.current === null || !primitiveRefEquals(hoverTargetRef.current, target.target)) {
-          hoverTargetRef.current = target.target
-          hoverRef.current(target.target)
+      if (target && acceptsViewportTarget(target.target)) {
+        lastPickedTargetRef.current = target.target;
+        if (
+          hoverTargetRef.current === null ||
+          !primitiveRefEquals(hoverTargetRef.current, target.target)
+        ) {
+          hoverTargetRef.current = target.target;
+          hoverRef.current(target.target);
         }
       } else {
-        clearHover()
+        clearHover();
       }
 
-      const activeSketchSession = sketchSessionRef.current
+      const activeSketchSession = sketchSessionRef.current;
 
       if (!activeSketchSession) {
-        return
+        return;
       }
 
       if (activeSketchSession.activeSpecialMode) {
-        return
+        return;
       }
 
-      const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+      const point = projectSketchPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
 
       if (point) {
-        sketchMoveRef.current(point)
+        sketchMoveRef.current(point);
       }
-    }
+    };
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button !== 0 || pointerWithinViewCube(event.clientX, event.clientY)) {
-        return
+      if (
+        event.button !== 0 ||
+        pointerWithinViewCube(event.clientX, event.clientY)
+      ) {
+        return;
       }
 
-      const viewportRect = canvasElement.getBoundingClientRect()
+      const viewportRect = canvasElement.getBoundingClientRect();
 
       primaryPointerDownRef.current = {
         x: event.clientX,
         y: event.clientY,
-      }
+      };
 
-      const sectionHandleHit = getSectionHandleHitFromClientPoint(event.clientX, event.clientY, viewportRect)
+      const sectionHandleHit = getSectionHandleHitFromClientPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
 
       if (sectionHandleHit && sectionViewRef.current) {
-        event.preventDefault()
-        event.stopPropagation()
+        event.preventDefault();
+        event.stopPropagation();
         sectionDragRef.current = {
           pointerId: event.pointerId,
           sectionAtDragStart: sectionViewRef.current,
@@ -1234,188 +1460,247 @@ export function ThreeCadViewport({
             x: event.clientX,
             y: event.clientY,
           },
-        }
-        sectionDragOffsetRef.current = sectionViewRef.current.offset
-        canvasElement.setPointerCapture(event.pointerId)
+        };
+        sectionDragOffsetRef.current = sectionViewRef.current.offset;
+        canvasElement.setPointerCapture(event.pointerId);
         if (controlsRef.current) {
-          ;(controlsRef.current as ViewportCameraControls & { enabled?: boolean }).enabled = false
+          (
+            controlsRef.current as ViewportCameraControls & {
+              enabled?: boolean;
+            }
+          ).enabled = false;
         }
-        return
+        return;
       }
 
-      const activeSketchSession = sketchSessionRef.current
+      const activeSketchSession = sketchSessionRef.current;
 
       if (
-        !activeSketchSession
-        || activeSketchSession.activeSpecialMode
-        || !shouldViewportStartSketchGeometryDrag(activeSketchSession.activeTool, activeSketchSession.status)
+        !activeSketchSession ||
+        activeSketchSession.activeSpecialMode ||
+        !shouldViewportStartSketchGeometryDrag(
+          activeSketchSession.activeTool,
+          activeSketchSession.status,
+        )
       ) {
-        return
+        return;
       }
 
-      const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
-      const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)?.target
-      const dragTarget = resolvedTarget?.kind === 'sketchPoint'
-        ? resolvedTarget
-        : lastPickedTargetRef.current?.kind === 'sketchPoint'
-          ? lastPickedTargetRef.current
-          : hoverTargetRef.current?.kind === 'sketchPoint'
-            ? hoverTargetRef.current
-            : null
+      const point = projectSketchPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
+      const resolvedTarget = getPickTargetFromClientPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      )?.target;
+      const dragTarget =
+        resolvedTarget?.kind === "sketchPoint"
+          ? resolvedTarget
+          : lastPickedTargetRef.current?.kind === "sketchPoint"
+            ? lastPickedTargetRef.current
+            : hoverTargetRef.current?.kind === "sketchPoint"
+              ? hoverTargetRef.current
+              : null;
 
       if (point && dragTarget) {
         pendingSketchGeometryDragRef.current = {
           target: dragTarget,
           startPoint: point,
-        }
+        };
       }
-    }
+    };
 
     const handlePointerUp = (event: PointerEvent) => {
       if (event.button !== 0) {
-        cancelSketchGeometryDragMove()
-        primaryPointerDownRef.current = null
-        sketchGeometryDragRef.current = null
-        pendingSketchGeometryDragRef.current = null
-        return
+        cancelSketchGeometryDragMove();
+        primaryPointerDownRef.current = null;
+        sketchGeometryDragRef.current = null;
+        pendingSketchGeometryDragRef.current = null;
+        return;
       }
 
-      const activeSketchDrag = sketchGeometryDragRef.current
-      const activeSectionDrag = sectionDragRef.current !== null
+      const activeSketchDrag = sketchGeometryDragRef.current;
+      const activeSectionDrag = sectionDragRef.current !== null;
 
       if (activeSectionDrag) {
-        const pointerId = sectionDragRef.current?.pointerId
-        sectionDragRef.current = null
-        sectionDragOffsetRef.current = null
-        if (pointerId !== undefined && canvasElement.hasPointerCapture(pointerId)) {
-          canvasElement.releasePointerCapture(pointerId)
+        const pointerId = sectionDragRef.current?.pointerId;
+        sectionDragRef.current = null;
+        sectionDragOffsetRef.current = null;
+        if (
+          pointerId !== undefined &&
+          canvasElement.hasPointerCapture(pointerId)
+        ) {
+          canvasElement.releasePointerCapture(pointerId);
         }
         if (controlsRef.current) {
-          ;(controlsRef.current as ViewportCameraControls & { enabled?: boolean }).enabled = true
+          (
+            controlsRef.current as ViewportCameraControls & {
+              enabled?: boolean;
+            }
+          ).enabled = true;
         }
-        primaryPointerDownRef.current = null
-        return
+        primaryPointerDownRef.current = null;
+        return;
       }
 
       if (activeSketchDrag) {
-        const viewportRect = canvasElement.getBoundingClientRect()
-        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+        const viewportRect = canvasElement.getBoundingClientRect();
+        const point = projectSketchPoint(
+          event.clientX,
+          event.clientY,
+          viewportRect,
+        );
 
-        cancelSketchGeometryDragMove()
+        cancelSketchGeometryDragMove();
         if (point) {
-          sketchGeometryDragEndRef.current(point)
+          sketchGeometryDragEndRef.current(point);
         }
 
-        sketchGeometryDragRef.current = null
-        primaryPointerDownRef.current = null
-        pendingSketchGeometryDragRef.current = null
-        return
+        sketchGeometryDragRef.current = null;
+        primaryPointerDownRef.current = null;
+        pendingSketchGeometryDragRef.current = null;
+        return;
       }
 
-      const pointerDown = primaryPointerDownRef.current
-      primaryPointerDownRef.current = null
+      const pointerDown = primaryPointerDownRef.current;
+      primaryPointerDownRef.current = null;
 
       if (!pointerDown) {
-        return
+        return;
       }
 
       const dragDistance = Math.hypot(
         event.clientX - pointerDown.x,
         event.clientY - pointerDown.y,
-      )
+      );
 
-      const pendingSketchGeometryDrag = pendingSketchGeometryDragRef.current
-      pendingSketchGeometryDragRef.current = null
+      const pendingSketchGeometryDrag = pendingSketchGeometryDragRef.current;
+      pendingSketchGeometryDragRef.current = null;
 
       if (pendingSketchGeometryDrag && dragDistance > 6) {
-        const viewportRect = canvasElement.getBoundingClientRect()
-        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+        const viewportRect = canvasElement.getBoundingClientRect();
+        const point = projectSketchPoint(
+          event.clientX,
+          event.clientY,
+          viewportRect,
+        );
 
         if (point) {
-          sketchGeometryDragStartRef.current(pendingSketchGeometryDrag.target, pendingSketchGeometryDrag.startPoint)
-          sketchGeometryDragEndRef.current(point)
+          sketchGeometryDragStartRef.current(
+            pendingSketchGeometryDrag.target,
+            pendingSketchGeometryDrag.startPoint,
+          );
+          sketchGeometryDragEndRef.current(point);
         }
 
-        return
+        return;
       }
 
-      const activeSketchSession = sketchSessionRef.current
+      const activeSketchSession = sketchSessionRef.current;
 
       if (dragDistance > 6 || !activeSketchSession) {
-        return
+        return;
       }
 
       if (activeSketchSession.activeSpecialMode) {
-        return
+        return;
       }
 
-      const viewportRect = canvasElement.getBoundingClientRect()
-      const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
-      const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
+      const viewportRect = canvasElement.getBoundingClientRect();
+      const point = projectSketchPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
+      const resolvedTarget = getPickTargetFromClientPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
 
       if (point) {
-        sketchReleaseRef.current(point, resolvedTarget?.target ?? null)
+        sketchReleaseRef.current(point, resolvedTarget?.target ?? null);
       }
-    }
+    };
 
     const handlePointerLeave = () => {
       if (sectionDragRef.current === null && !sketchGeometryDragRef.current) {
-        cancelSketchGeometryDragMove()
-        primaryPointerDownRef.current = null
-        pendingSketchGeometryDragRef.current = null
+        cancelSketchGeometryDragMove();
+        primaryPointerDownRef.current = null;
+        pendingSketchGeometryDragRef.current = null;
       }
-      clearHover()
-    }
+      clearHover();
+    };
 
     const handleClick = (event: MouseEvent) => {
-      if (event.button !== 0 || pointerWithinViewCube(event.clientX, event.clientY)) {
-        return
+      if (
+        event.button !== 0 ||
+        pointerWithinViewCube(event.clientX, event.clientY)
+      ) {
+        return;
       }
 
-      const eventTarget = event.target instanceof Node ? event.target : null
-      const isCanvasClick = eventTarget === canvasElement
+      const eventTarget = event.target instanceof Node ? event.target : null;
+      const isCanvasClick = eventTarget === canvasElement;
 
       if (!isCanvasClick) {
-        return
+        return;
       }
 
-      const viewportRect = canvasElement.getBoundingClientRect()
-      const sectionHandleHit = getSectionHandleHitFromClientPoint(event.clientX, event.clientY, viewportRect)
+      const viewportRect = canvasElement.getBoundingClientRect();
+      const sectionHandleHit = getSectionHandleHitFromClientPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
 
       if (sectionViewRef.current) {
         if (sectionHandleHit) {
-          return
+          return;
         }
 
-        return
+        return;
       }
 
-      const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
+      const resolvedTarget = getPickTargetFromClientPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
 
       if (sketchSessionRef.current?.activeSpecialMode) {
-        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+        const point = projectSketchPoint(
+          event.clientX,
+          event.clientY,
+          viewportRect,
+        );
 
         if (point) {
-          specialModeClickRef.current(point, resolvedTarget?.target ?? null)
+          specialModeClickRef.current(point, resolvedTarget?.target ?? null);
         }
 
-        return
+        return;
       }
 
-      if (shouldViewportClickEventRequestConnectedSketchSelection({
-        activeSketchTool: sketchSessionRef.current?.activeTool,
-        clickDetail: event.detail,
-        sketchStatus: sketchSessionRef.current?.status,
-        target: resolvedTarget?.target ?? null,
-      })) {
-        const target = resolvedTarget?.target
+      if (
+        shouldViewportClickEventRequestConnectedSketchSelection({
+          activeSketchTool: sketchSessionRef.current?.activeTool,
+          clickDetail: event.detail,
+          sketchStatus: sketchSessionRef.current?.status,
+          target: resolvedTarget?.target ?? null,
+        })
+      ) {
+        const target = resolvedTarget?.target;
 
         if (target) {
-          lastPickedTargetRef.current = target
-          connectedSketchSelectRef.current(target)
+          lastPickedTargetRef.current = target;
+          connectedSketchSelectRef.current(target);
         }
 
-        return
+        return;
       }
 
       const intent = getViewportCanvasClickIntent({
@@ -1425,113 +1710,144 @@ export function ThreeCadViewport({
           ? isSeededDatumPlaneRenderable(resolvedTarget.renderable)
           : false,
         selectionFilterKind: selectionFilterRef.current?.kind ?? null,
-      })
+      });
 
-      if (intent === 'clearSelection') {
-        deselectRef.current()
-        return
+      if (intent === "clearSelection") {
+        deselectRef.current();
+        return;
       }
 
-      if (intent === 'ignore' || !resolvedTarget) {
-        return
+      if (intent === "ignore" || !resolvedTarget) {
+        return;
       }
 
-      lastPickedTargetRef.current = resolvedTarget.target
-      selectRef.current(resolvedTarget.target, getViewportCameraPosition() ?? undefined)
-    }
+      lastPickedTargetRef.current = resolvedTarget.target;
+      selectRef.current(
+        resolvedTarget.target,
+        getViewportCameraPosition() ?? undefined,
+      );
+    };
 
     const handleDoubleClick = (event: MouseEvent) => {
-      if (event.button !== 0 || pointerWithinViewCube(event.clientX, event.clientY)) {
-        return
+      if (
+        event.button !== 0 ||
+        pointerWithinViewCube(event.clientX, event.clientY)
+      ) {
+        return;
       }
 
-      const eventTarget = event.target instanceof Node ? event.target : null
-      const isCanvasClick = eventTarget === canvasElement
+      const eventTarget = event.target instanceof Node ? event.target : null;
+      const isCanvasClick = eventTarget === canvasElement;
 
       if (!isCanvasClick) {
-        return
+        return;
       }
 
-      const viewportRect = canvasElement.getBoundingClientRect()
-      const resolvedTarget = getPickTargetFromClientPoint(event.clientX, event.clientY, viewportRect)
+      const viewportRect = canvasElement.getBoundingClientRect();
+      const resolvedTarget = getPickTargetFromClientPoint(
+        event.clientX,
+        event.clientY,
+        viewportRect,
+      );
 
       if (sketchSessionRef.current?.activeSpecialMode) {
-        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+        const point = projectSketchPoint(
+          event.clientX,
+          event.clientY,
+          viewportRect,
+        );
 
         if (point) {
-          specialModeDoubleClickRef.current(point, resolvedTarget?.target ?? null)
+          specialModeDoubleClickRef.current(
+            point,
+            resolvedTarget?.target ?? null,
+          );
         }
 
-        return
+        return;
       }
 
-      if (resolvedTarget?.target?.kind === 'sketchOperation') {
-        const point = projectSketchPoint(event.clientX, event.clientY, viewportRect)
+      if (resolvedTarget?.target?.kind === "sketchOperation") {
+        const point = projectSketchPoint(
+          event.clientX,
+          event.clientY,
+          viewportRect,
+        );
 
         if (point) {
-          specialModeDoubleClickRef.current(point, resolvedTarget.target)
+          specialModeDoubleClickRef.current(point, resolvedTarget.target);
         }
 
-        return
+        return;
       }
 
-      if (!shouldViewportDoubleClickRequestConnectedSketchSelection({
-        activeSketchTool: sketchSessionRef.current?.activeTool,
-        sketchStatus: sketchSessionRef.current?.status,
-        target: resolvedTarget?.target ?? null,
-      })) {
-        return
+      if (
+        !shouldViewportDoubleClickRequestConnectedSketchSelection({
+          activeSketchTool: sketchSessionRef.current?.activeTool,
+          sketchStatus: sketchSessionRef.current?.status,
+          target: resolvedTarget?.target ?? null,
+        })
+      ) {
+        return;
       }
 
-      const target = resolvedTarget?.target
+      const target = resolvedTarget?.target;
 
       if (!target) {
-        return
+        return;
       }
 
-      lastPickedTargetRef.current = target
-      connectedSketchSelectRef.current(target)
-    }
+      lastPickedTargetRef.current = target;
+      connectedSketchSelectRef.current(target);
+    };
 
-    const handleContextMenu = (event: Event) => event.preventDefault()
+    const handleContextMenu = (event: Event) => event.preventDefault();
 
-    canvasElement.addEventListener('pointerdown', handlePointerDown, true)
-    canvasElement.addEventListener('pointermove', handlePointerMove)
-    canvasElement.addEventListener('pointerleave', handlePointerLeave)
-    canvasElement.addEventListener('contextmenu', handleContextMenu)
-    window.addEventListener('pointerup', handlePointerUp, true)
-    window.addEventListener('click', handleClick, true)
-    window.addEventListener('dblclick', handleDoubleClick, true)
+    canvasElement.addEventListener("pointerdown", handlePointerDown, true);
+    canvasElement.addEventListener("pointermove", handlePointerMove);
+    canvasElement.addEventListener("pointerleave", handlePointerLeave);
+    canvasElement.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener("pointerup", handlePointerUp, true);
+    window.addEventListener("click", handleClick, true);
+    window.addEventListener("dblclick", handleDoubleClick, true);
 
     return () => {
-      cancelSketchGeometryDragMove()
-      projectSketchClientPointRef.current = () => null
-      if (sectionDragRef.current && canvasElement.hasPointerCapture(sectionDragRef.current.pointerId)) {
-        canvasElement.releasePointerCapture(sectionDragRef.current.pointerId)
+      cancelSketchGeometryDragMove();
+      projectSketchClientPointRef.current = () => null;
+      if (
+        sectionDragRef.current &&
+        canvasElement.hasPointerCapture(sectionDragRef.current.pointerId)
+      ) {
+        canvasElement.releasePointerCapture(sectionDragRef.current.pointerId);
       }
-      sectionDragRef.current = null
-      sectionDragOffsetRef.current = null
-      primaryPointerDownRef.current = null
-      sketchGeometryDragRef.current = null
-      pendingSketchGeometryDragRef.current = null
-      canvasElement.removeEventListener('pointerdown', handlePointerDown, true)
-      canvasElement.removeEventListener('pointermove', handlePointerMove)
-      canvasElement.removeEventListener('pointerleave', handlePointerLeave)
-      canvasElement.removeEventListener('contextmenu', handleContextMenu)
-      window.removeEventListener('pointerup', handlePointerUp, true)
-      window.removeEventListener('click', handleClick, true)
-      window.removeEventListener('dblclick', handleDoubleClick, true)
-    }
-  }, [cancelSketchGeometryDragMove, canvasReadyVersion, scheduleSketchGeometryDragMove, sketchSpecialModes])
+      sectionDragRef.current = null;
+      sectionDragOffsetRef.current = null;
+      primaryPointerDownRef.current = null;
+      sketchGeometryDragRef.current = null;
+      pendingSketchGeometryDragRef.current = null;
+      canvasElement.removeEventListener("pointerdown", handlePointerDown, true);
+      canvasElement.removeEventListener("pointermove", handlePointerMove);
+      canvasElement.removeEventListener("pointerleave", handlePointerLeave);
+      canvasElement.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("pointerup", handlePointerUp, true);
+      window.removeEventListener("click", handleClick, true);
+      window.removeEventListener("dblclick", handleDoubleClick, true);
+    };
+  }, [
+    cancelSketchGeometryDragMove,
+    canvasReadyVersion,
+    scheduleSketchGeometryDragMove,
+    sketchSpecialModes,
+  ]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
-      return
+      return;
     }
 
     window.__cadProjectToScreen = (objectId: string) => {
-      const viewportElement = viewportRef.current
-      const rect = viewportElement?.getBoundingClientRect()
+      const viewportElement = viewportRef.current;
+      const rect = viewportElement?.getBoundingClientRect();
 
       const projected = projectSceneTargetCentroidToViewport({
         root: pickRootRef.current,
@@ -1541,9 +1857,9 @@ export function ThreeCadViewport({
           width: rect?.width ?? 0,
           height: rect?.height ?? 0,
         },
-      })
+      });
       if (!projected) {
-        return null
+        return null;
       }
       // Return coordinates relative to the legacy positioning marker so e2e
       // helpers can use a single bbox source for both projected and hardcoded
@@ -1551,27 +1867,27 @@ export function ThreeCadViewport({
       return {
         x: projected.x - LEGACY_VIEWPORT_LEFT_INSET_PX,
         y: projected.y,
-      }
-    }
+      };
+    };
 
     return () => {
-      delete window.__cadProjectToScreen
-    }
-  }, [])
+      delete window.__cadProjectToScreen;
+    };
+  }, []);
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
-      return
+      return;
     }
 
     window.__cadProjectSectionHandleToScreen = () => {
-      const viewportElement = viewportRef.current
-      const section = sectionViewRef.current
-      const camera = cameraRef.current
-      const rect = viewportElement?.getBoundingClientRect()
+      const viewportElement = viewportRef.current;
+      const section = sectionViewRef.current;
+      const camera = cameraRef.current;
+      const rect = viewportElement?.getBoundingClientRect();
 
       if (!section || !camera || !rect) {
-        return null
+        return null;
       }
 
       const handle = projectWorldPointToViewport({
@@ -1581,23 +1897,26 @@ export function ThreeCadViewport({
           width: rect.width,
           height: rect.height,
         },
-      })
+      });
       const normal = projectWorldPointToViewport({
         camera,
         point: [
-          section.plane.frame.origin[0] + section.plane.frame.normal[0] * (section.offset + 1),
-          section.plane.frame.origin[1] + section.plane.frame.normal[1] * (section.offset + 1),
-          section.plane.frame.origin[2] + section.plane.frame.normal[2] * (section.offset + 1),
+          section.plane.frame.origin[0] +
+            section.plane.frame.normal[0] * (section.offset + 1),
+          section.plane.frame.origin[1] +
+            section.plane.frame.normal[1] * (section.offset + 1),
+          section.plane.frame.origin[2] +
+            section.plane.frame.normal[2] * (section.offset + 1),
         ],
         viewport: {
           width: rect.width,
           height: rect.height,
         },
-      })
+      });
 
       // Reproject to legacy positioning marker space — see `__cadProjectToScreen`.
       if (!handle) {
-        return null
+        return null;
       }
       return {
         handle: { x: handle.x - LEGACY_VIEWPORT_LEFT_INSET_PX, y: handle.y },
@@ -1605,22 +1924,22 @@ export function ThreeCadViewport({
           ? { x: normal.x - LEGACY_VIEWPORT_LEFT_INSET_PX, y: normal.y }
           : null,
         offset: section.offset,
-      }
-    }
+      };
+    };
 
     return () => {
-      delete window.__cadProjectSectionHandleToScreen
-    }
-  }, [activeSectionView])
+      delete window.__cadProjectSectionHandleToScreen;
+    };
+  }, [activeSectionView]);
 
-  const isEditorRenderIdle = machineState.kind === 'idle'
+  const isEditorRenderIdle = machineState.kind === "idle";
 
   return (
     <div
       ref={viewportRef}
       className="relative"
       style={{
-        position: 'absolute',
+        position: "absolute",
         top: VIEWPORT_CANVAS_TOP_INSET_PX,
         left: 0,
         right: 0,
@@ -1640,12 +1959,12 @@ export function ThreeCadViewport({
         data-testid="cad-viewport"
         aria-hidden="true"
         style={{
-          position: 'absolute',
+          position: "absolute",
           top: 0,
           left: LEGACY_VIEWPORT_LEFT_INSET_PX,
           width: LEGACY_VIEWPORT_WIDTH_PX,
           height: LEGACY_VIEWPORT_HEIGHT_PX,
-          pointerEvents: 'none',
+          pointerEvents: "none",
         }}
       />
       <Canvas
@@ -1655,16 +1974,21 @@ export function ThreeCadViewport({
         orthographic
         camera={{ near: 0.1, far: 1000, position: [14, -16, 28] }}
         onCreated={({ camera, gl, raycaster }) => {
-          const viewportCamera = camera instanceof THREE.OrthographicCamera || camera instanceof THREE.PerspectiveCamera
-            ? camera
-            : createViewportCamera(DEFAULT_VIEWPORT_PROJECTION_MODE, 1)
-          applyViewportCameraFrameToCamera(viewportCamera, getDefaultViewportCameraFrame())
-          cameraRef.current = viewportCamera
-          canvasElementRef.current = gl.domElement
-          canvasCreatedRef.current?.()
-          setCanvasReadyVersion((current) => current + 1)
-          gl.setClearColor(0x000000, 0)
-          raycaster.params.Line.threshold = 0.75
+          const viewportCamera =
+            camera instanceof THREE.OrthographicCamera ||
+            camera instanceof THREE.PerspectiveCamera
+              ? camera
+              : createViewportCamera(DEFAULT_VIEWPORT_PROJECTION_MODE, 1);
+          applyViewportCameraFrameToCamera(
+            viewportCamera,
+            getDefaultViewportCameraFrame(),
+          );
+          cameraRef.current = viewportCamera;
+          canvasElementRef.current = gl.domElement;
+          canvasCreatedRef.current?.();
+          setCanvasReadyVersion((current) => current + 1);
+          gl.setClearColor(0x000000, 0);
+          raycaster.params.Line.threshold = 0.75;
         }}
       >
         <ViewportProjectionCameraController
@@ -1686,7 +2010,10 @@ export function ThreeCadViewport({
           invalidationKey={viewportInvalidationKey}
         />
         <ambientLight color={0xd7dfe9} intensity={0.56} />
-        <hemisphereLight args={[0xe8edf5, 0x253447, 0.62]} position={[0, 0, 1]} />
+        <hemisphereLight
+          args={[0xe8edf5, 0x253447, 0.62]}
+          position={[0, 0, 1]}
+        />
         <directionalLight args={[0xf5eee2, 1.45]} position={[14, -16, 28]} />
         <directionalLight args={[0x91b4d8, 0.52]} position={[-12, 14, 18]} />
         <directionalLight args={[0xb6d6f5, 0.18]} position={[-14, -10, 12]} />
@@ -1765,7 +2092,7 @@ export function ThreeCadViewport({
           ref={viewCubeRef}
           data-testid="view-cube"
           className="pointer-events-auto w-full"
-          style={{ aspectRatio: '1 / 1' }}
+          style={{ aspectRatio: "1 / 1" }}
         />
         <ViewportProjectionSelector
           projectionMode={projectionMode}
@@ -1796,15 +2123,17 @@ export function ThreeCadViewport({
         projections={sketchFeedbackProjections}
         onPatch={(patch) => sketchToolPatchRef.current(patch)}
         onDragHandle={(handle, clientX, clientY) => {
-          const point = projectSketchClientPointRef.current(clientX, clientY)
+          const point = projectSketchClientPointRef.current(clientX, clientY);
           if (point) {
             sketchToolPatchRef.current({
-              intent: handle.dimensionId ? 'setDimensionAnnotationPlacement' : 'setConstraintAnnotationPlacement',
+              intent: handle.dimensionId
+                ? "setDimensionAnnotationPlacement"
+                : "setConstraintAnnotationPlacement",
               handleId: handle.id,
               handleKind: handle.kind,
               dimensionId: handle.dimensionId,
               point,
-            })
+            });
           }
         }}
       />
@@ -1812,21 +2141,21 @@ export function ThreeCadViewport({
         presentation={specialModePresentation}
         projections={specialModeFeedbackProjections}
         onHandleDragStart={(handle, clientX, clientY) => {
-          const point = projectSketchClientPointRef.current(clientX, clientY)
+          const point = projectSketchClientPointRef.current(clientX, clientY);
           if (point) {
-            specialModeDragStartRef.current(handle, point)
+            specialModeDragStartRef.current(handle, point);
           }
         }}
         onHandleDragMove={(handle, clientX, clientY) => {
-          const point = projectSketchClientPointRef.current(clientX, clientY)
+          const point = projectSketchClientPointRef.current(clientX, clientY);
           if (point) {
-            specialModeDragMoveRef.current(handle, point)
+            specialModeDragMoveRef.current(handle, point);
           }
         }}
         onHandleDragEnd={(handle, clientX, clientY) => {
-          const point = projectSketchClientPointRef.current(clientX, clientY)
+          const point = projectSketchClientPointRef.current(clientX, clientY);
           if (point) {
-            specialModeDragEndRef.current(handle, point)
+            specialModeDragEndRef.current(handle, point);
           }
         }}
       />
@@ -1834,28 +2163,32 @@ export function ThreeCadViewport({
         annotations={sketchAnnotations}
         projections={sketchAnnotationProjections}
         hoveredAnnotation={isAnnotationTarget(hoverTarget) ? hoverTarget : null}
-        selectedAnnotation={isAnnotationTarget(selection[0] ?? null)
-          ? (selection[0] as SketchConstraintRef | SketchDimensionRef)
-          : null}
+        selectedAnnotation={
+          isAnnotationTarget(selection[0] ?? null)
+            ? (selection[0] as SketchConstraintRef | SketchDimensionRef)
+            : null
+        }
         onHover={(target) => {
-          hoverTargetRef.current = target
-          hoverRef.current(target)
+          hoverTargetRef.current = target;
+          hoverRef.current(target);
         }}
         onClearHover={() => {
           if (hoverTargetRef.current !== null) {
-            hoverTargetRef.current = null
+            hoverTargetRef.current = null;
           }
-          clearHoverRef.current()
+          clearHoverRef.current();
         }}
         onSelect={(target) => selectRef.current(target)}
         onEdit={(target) => annotationEditRef.current(target)}
         onDimensionDrag={(handle, clientX, clientY) => {
-          const point = projectSketchClientPointRef.current(clientX, clientY)
+          const point = projectSketchClientPointRef.current(clientX, clientY);
           if (point) {
-            sketchToolPatchRef.current(createDimensionAnnotationPlacementPatch(handle, point))
+            sketchToolPatchRef.current(
+              createDimensionAnnotationPlacementPatch(handle, point),
+            );
           }
         }}
       />
     </div>
-  )
+  );
 }

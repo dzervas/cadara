@@ -1,26 +1,34 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useState } from "react";
 
-import type { ObjectExportModalState } from '@/domain/export/object-export-state'
+import type { ObjectExportModalState } from "@/domain/export/object-export-state";
 
 export function useWorkbenchDocumentPresentation() {
-  const [rawExplicitHiddenTargetKeys, setRawExplicitHiddenTargetKeys] = useState<Record<string, boolean>>({})
-  const [rawExplicitlyShownAutoHiddenTargetKeys, setRawExplicitlyShownAutoHiddenTargetKeys] = useState<Record<string, boolean>>({})
-  const [objectLabelOverrides, setObjectLabelOverrides] = useState<Record<string, string>>({})
-  const [invalidVariableValueMessages, setInvalidVariableValueMessages] = useState<Record<string, string>>({})
-  const [objectExportModal, setObjectExportModal] = useState<ObjectExportModalState | null>(null)
-  const [viewportFitRequestId, setViewportFitRequestId] = useState(0)
+  const [rawExplicitHiddenTargetKeys, setRawExplicitHiddenTargetKeys] =
+    useState<Record<string, boolean>>({});
+  const [
+    rawExplicitlyShownAutoHiddenTargetKeys,
+    setRawExplicitlyShownAutoHiddenTargetKeys,
+  ] = useState<Record<string, boolean>>({});
+  const [objectLabelOverrides, setObjectLabelOverrides] = useState<
+    Record<string, string>
+  >({});
+  const [invalidVariableValueMessages, setInvalidVariableValueMessages] =
+    useState<Record<string, string>>({});
+  const [objectExportModal, setObjectExportModal] =
+    useState<ObjectExportModalState | null>(null);
+  const [viewportFitRequestId, setViewportFitRequestId] = useState(0);
 
   const resetForDocumentReplacement = useCallback(() => {
-    setRawExplicitHiddenTargetKeys({})
-    setRawExplicitlyShownAutoHiddenTargetKeys({})
-    setObjectLabelOverrides({})
-    setInvalidVariableValueMessages({})
-    setObjectExportModal(null)
-  }, [])
+    setRawExplicitHiddenTargetKeys({});
+    setRawExplicitlyShownAutoHiddenTargetKeys({});
+    setObjectLabelOverrides({});
+    setInvalidVariableValueMessages({});
+    setObjectExportModal(null);
+  }, []);
 
   const requestViewportFit = useCallback(() => {
-    setViewportFitRequestId((current) => current + 1)
-  }, [])
+    setViewportFitRequestId((current) => current + 1);
+  }, []);
 
   return {
     invalidVariableValueMessages,
@@ -36,5 +44,5 @@ export function useWorkbenchDocumentPresentation() {
     setRawExplicitHiddenTargetKeys,
     setRawExplicitlyShownAutoHiddenTargetKeys,
     viewportFitRequestId,
-  }
+  };
 }

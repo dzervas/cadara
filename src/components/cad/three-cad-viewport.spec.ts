@@ -1,6 +1,6 @@
-import { test } from 'bun:test'
+import { test } from "bun:test";
 
-import { expectTrue } from '@/testing/expect.spec'
+import { expectTrue } from "@/testing/expect.spec";
 import {
   cancelCoalescedSketchGeometryDragMove,
   getViewportPickTuning,
@@ -15,106 +15,137 @@ import {
   resolveSectionScreenDragOffset,
   resizeViewCubeRenderer,
   scheduleCoalescedSketchGeometryDragMove,
-} from '@/components/cad/three-cad-viewport-helpers'
+} from "@/components/cad/three-cad-viewport-helpers";
 import {
   requestViewCubeCameraTransition,
   resolveSketchCameraTransition,
-} from '@/components/cad/three-cad-viewport-camera-transitions'
-import { createDimensionAnnotationPlacementPatch } from '@/components/cad/three-cad-viewport-annotation-drag'
-import { bindRenderableObject } from '@/infrastructure/viewport/render-picking'
-import { measureSelectionFilter } from '@/core/editor/schema'
-import type { ViewportCameraControls } from '@/infrastructure/viewport/viewport-camera-controls'
-import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
-import * as THREE from 'three'
+} from "@/components/cad/three-cad-viewport-camera-transitions";
+import { createDimensionAnnotationPlacementPatch } from "@/components/cad/three-cad-viewport-annotation-drag";
+import { bindRenderableObject } from "@/infrastructure/viewport/render-picking";
+import { measureSelectionFilter } from "@/core/editor/schema";
+import type { ViewportCameraControls } from "@/infrastructure/viewport/viewport-camera-controls";
+import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import * as THREE from "three";
 
-test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createControls(target: THREE.Vector3): ViewportCameraControls {
+test("src/components/cad/three-cad-viewport.spec.ts", () => {
+  function createControls(target: THREE.Vector3): ViewportCameraControls {
     return {
       target,
       update: () => undefined,
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
-    }
+    };
   }
 
   function testDragMovesCoalesceToLatestPoint() {
-    const pendingPointRef = { current: null as readonly [number, number] | null }
-    const pendingFrameIdRef = { current: null as number | null }
-    const frameCallbacks = new Map<number, FrameRequestCallback>()
-    const movedPoints: readonly [number, number][] = []
-    let nextFrameId = 1
+    const pendingPointRef = {
+      current: null as readonly [number, number] | null,
+    };
+    const pendingFrameIdRef = { current: null as number | null };
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    const movedPoints: readonly [number, number][] = [];
+    let nextFrameId = 1;
 
-    const schedule = (point: readonly [number, number]) => scheduleCoalescedSketchGeometryDragMove({
-      point,
-      pendingPointRef,
-      pendingFrameIdRef,
-      requestFrame: (callback) => {
-        const frameId = nextFrameId
-        nextFrameId += 1
-        frameCallbacks.set(frameId, callback)
-        return frameId
-      },
-      isDragActive: () => true,
-      onMove: (latestPoint) => movedPoints.push(latestPoint),
-    })
+    const schedule = (point: readonly [number, number]) =>
+      scheduleCoalescedSketchGeometryDragMove({
+        point,
+        pendingPointRef,
+        pendingFrameIdRef,
+        requestFrame: (callback) => {
+          const frameId = nextFrameId;
+          nextFrameId += 1;
+          frameCallbacks.set(frameId, callback);
+          return frameId;
+        },
+        isDragActive: () => true,
+        onMove: (latestPoint) => movedPoints.push(latestPoint),
+      });
 
-    schedule([1, 1])
-    schedule([2, 2])
-    schedule([3, 3])
+    schedule([1, 1]);
+    schedule([2, 2]);
+    schedule([3, 3]);
 
-    expectTrue(frameCallbacks.size === 1, 'Drag scheduler should request one frame for multiple pending moves.')
-    frameCallbacks.get(1)?.(0)
+    expectTrue(
+      frameCallbacks.size === 1,
+      "Drag scheduler should request one frame for multiple pending moves.",
+    );
+    frameCallbacks.get(1)?.(0);
 
-    expectTrue(movedPoints.length === 1, 'Drag scheduler should dispatch once per frame.')
-    expectTrue(movedPoints[0]?.[0] === 3 && movedPoints[0]?.[1] === 3, 'Drag scheduler should dispatch the latest point.')
+    expectTrue(
+      movedPoints.length === 1,
+      "Drag scheduler should dispatch once per frame.",
+    );
+    expectTrue(
+      movedPoints[0]?.[0] === 3 && movedPoints[0]?.[1] === 3,
+      "Drag scheduler should dispatch the latest point.",
+    );
   }
 
   function testDragMoveCancellationDropsPendingFrame() {
-    const pendingPointRef = { current: null as readonly [number, number] | null }
-    const pendingFrameIdRef = { current: null as number | null }
-    const frameCallbacks = new Map<number, FrameRequestCallback>()
-    const cancelledFrames: number[] = []
-    const movedPoints: readonly [number, number][] = []
+    const pendingPointRef = {
+      current: null as readonly [number, number] | null,
+    };
+    const pendingFrameIdRef = { current: null as number | null };
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    const cancelledFrames: number[] = [];
+    const movedPoints: readonly [number, number][] = [];
 
     scheduleCoalescedSketchGeometryDragMove({
       point: [4, 5],
       pendingPointRef,
       pendingFrameIdRef,
       requestFrame: (callback) => {
-        frameCallbacks.set(7, callback)
-        return 7
+        frameCallbacks.set(7, callback);
+        return 7;
       },
       isDragActive: () => true,
       onMove: (latestPoint) => movedPoints.push(latestPoint),
-    })
+    });
     cancelCoalescedSketchGeometryDragMove({
       pendingPointRef,
       pendingFrameIdRef,
       cancelFrame: (frameId) => cancelledFrames.push(frameId),
-    })
-    frameCallbacks.get(7)?.(0)
+    });
+    frameCallbacks.get(7)?.(0);
 
-    expectTrue(cancelledFrames[0] === 7, 'Drag cancellation should cancel the pending frame.')
-    expectTrue(pendingFrameIdRef.current === null, 'Drag cancellation should clear the pending frame id.')
-    expectTrue(pendingPointRef.current === null, 'Drag cancellation should clear the pending point.')
-    expectTrue(movedPoints.length === 0, 'Cancelled drag frame should not dispatch a stale move.')
+    expectTrue(
+      cancelledFrames[0] === 7,
+      "Drag cancellation should cancel the pending frame.",
+    );
+    expectTrue(
+      pendingFrameIdRef.current === null,
+      "Drag cancellation should clear the pending frame id.",
+    );
+    expectTrue(
+      pendingPointRef.current === null,
+      "Drag cancellation should clear the pending point.",
+    );
+    expectTrue(
+      movedPoints.length === 0,
+      "Cancelled drag frame should not dispatch a stale move.",
+    );
   }
 
   function testSketchBvhKeyIgnoresPositionalPolylineUpdates() {
     const renderable = {
-      id: 'renderable_sketch_line_0',
-      label: 'Line',
+      id: "renderable_sketch_line_0",
+      label: "Line",
       geometry: {
-        kind: 'polyline',
+        kind: "polyline",
         points: [
           [0, 0, 0],
           [1, 0, 0],
         ],
         isClosed: false,
       },
-      target: { kind: 'sketchEntity', sketchId: 'sketch_primary', entityId: 'sketch_entity_ab' },
-      linePattern: 'solid',
-      role: 'local',
-    } as const
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_primary",
+        entityId: "sketch_entity_ab",
+      },
+      linePattern: "solid",
+      role: "local",
+    } as const;
     const movedRenderable = {
       ...renderable,
       geometry: {
@@ -124,28 +155,30 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
           [5, 4, 0],
         ],
       },
-    } as const
+    } as const;
     const dashedRenderable = {
       ...movedRenderable,
-      linePattern: 'dashed',
-    } as const
+      linePattern: "dashed",
+    } as const;
 
     expectTrue(
-      createViewportBvhSceneKey([], [renderable]) === createViewportBvhSceneKey([], [movedRenderable]),
-      'Sketch BVH key should stay stable for positional-only polyline updates.',
-    )
+      createViewportBvhSceneKey([], [renderable]) ===
+        createViewportBvhSceneKey([], [movedRenderable]),
+      "Sketch BVH key should stay stable for positional-only polyline updates.",
+    );
     expectTrue(
-      createViewportBvhSceneKey([], [movedRenderable]) !== createViewportBvhSceneKey([], [dashedRenderable]),
-      'Sketch BVH key should change when structural line styling changes.',
-    )
+      createViewportBvhSceneKey([], [movedRenderable]) !==
+        createViewportBvhSceneKey([], [dashedRenderable]),
+      "Sketch BVH key should change when structural line styling changes.",
+    );
   }
 
   function testSketchBvhKeyDoesNotEmbedInlineImagePayloads() {
     const renderable = {
-      id: 'renderable_sketch_reference_image_0',
-      label: 'Reference image',
+      id: "renderable_sketch_reference_image_0",
+      label: "Reference image",
       geometry: {
-        kind: 'mesh',
+        kind: "mesh",
         vertexPositions: [
           [0, 0, 0],
           [1, 0, 0],
@@ -158,17 +191,25 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
           [0, 0, 1],
           [0, 0, 1],
         ],
-        triangleIndices: [[0, 1, 2], [0, 2, 3]],
+        triangleIndices: [
+          [0, 1, 2],
+          [0, 2, 3],
+        ],
       },
-      target: { kind: 'sketchOperation', sketchId: 'sketch_primary', operationId: 'sketch_operation_1_reference-image' },
-      linePattern: 'solid',
-      role: 'local',
-      semanticClass: 'sketchImage',
+      target: {
+        kind: "sketchOperation",
+        sketchId: "sketch_primary",
+        operationId: "sketch_operation_1_reference-image",
+      },
+      linePattern: "solid",
+      role: "local",
+      semanticClass: "sketchImage",
       textureFill: {
-        kind: 'inlineImage',
-        sourceKey: 'sketch_operation_1_reference-image:image/png:reference.png:640x480',
-        mediaType: 'image/png',
-        base64Data: 'cG5n',
+        kind: "inlineImage",
+        sourceKey:
+          "sketch_operation_1_reference-image:image/png:reference.png:640x480",
+        mediaType: "image/png",
+        base64Data: "cG5n",
         uvCoordinates: [
           [0, 1],
           [1, 1],
@@ -177,123 +218,160 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
         ],
         opacity: 0.55,
       },
-    } as const
+    } as const;
     const changedPayloadRenderable = {
       ...renderable,
       textureFill: {
         ...renderable.textureFill,
-        base64Data: 'dXBkYXRlZA==',
+        base64Data: "dXBkYXRlZA==",
       },
-    } as const
+    } as const;
 
     expectTrue(
-      createViewportBvhSceneKey([], [renderable]) === createViewportBvhSceneKey([], [changedPayloadRenderable]),
-      'Sketch BVH keys should stay independent from inline image payload bytes.',
-    )
+      createViewportBvhSceneKey([], [renderable]) ===
+        createViewportBvhSceneKey([], [changedPayloadRenderable]),
+      "Sketch BVH keys should stay independent from inline image payload bytes.",
+    );
   }
 
   function testProjectionBridgeResolvesKnownTarget() {
-    const root = new THREE.Group()
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100)
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial())
+    const root = new THREE.Group();
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 2),
+      new THREE.MeshBasicMaterial(),
+    );
 
-    camera.position.set(0, 0, 10)
-    camera.lookAt(0, 0, 0)
-    camera.updateProjectionMatrix()
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
     bindRenderableObject(
       mesh,
       null,
-      { kind: 'body', bodyId: 'body_feature_extrude-1' },
-      'bodyFace',
-      'document',
-    )
-    root.add(mesh)
+      { kind: "body", bodyId: "body_feature_extrude-1" },
+      "bodyFace",
+      "document",
+    );
+    root.add(mesh);
 
     const point = projectSceneTargetCentroidToViewport({
       root,
       camera,
-      objectId: 'body_feature_extrude-1',
+      objectId: "body_feature_extrude-1",
       viewport: { width: 200, height: 100 },
-    })
+    });
     const missingPoint = projectSceneTargetCentroidToViewport({
       root,
       camera,
-      objectId: 'missing-target',
+      objectId: "missing-target",
       viewport: { width: 200, height: 100 },
-    })
+    });
 
-    expectTrue(point !== null, 'Projection bridge should return coordinates for a known target.')
-    expectTrue(Math.abs(point.x - 100) < 0.001, 'Projected target should be centered horizontally.')
-    expectTrue(Math.abs(point.y - 50) < 0.001, 'Projected target should be centered vertically.')
-    expectTrue(missingPoint === null, 'Projection bridge should return null for unknown targets.')
+    expectTrue(
+      point !== null,
+      "Projection bridge should return coordinates for a known target.",
+    );
+    expectTrue(
+      Math.abs(point.x - 100) < 0.001,
+      "Projected target should be centered horizontally.",
+    );
+    expectTrue(
+      Math.abs(point.y - 50) < 0.001,
+      "Projected target should be centered vertically.",
+    );
+    expectTrue(
+      missingPoint === null,
+      "Projection bridge should return null for unknown targets.",
+    );
 
-    mesh.geometry.dispose()
+    mesh.geometry.dispose();
     if (mesh.material instanceof THREE.Material) {
-      mesh.material.dispose()
+      mesh.material.dispose();
     }
   }
 
   function testWorldPointProjectionMapsViewportCoordinates() {
-    const camera = new THREE.PerspectiveCamera(45, 2, 0.1, 100)
-    camera.position.set(0, 0, 10)
-    camera.lookAt(0, 0, 0)
-    camera.updateProjectionMatrix()
+    const camera = new THREE.PerspectiveCamera(45, 2, 0.1, 100);
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
 
     const centeredPoint = projectWorldPointToViewport({
       camera,
       point: [0, 0, 0],
       viewport: { width: 240, height: 120 },
-    })
+    });
     const offsetPoint = projectWorldPointToViewport({
       camera,
       point: [1, 0, 0],
       viewport: { width: 240, height: 120 },
-    })
+    });
     const hiddenPoint = projectWorldPointToViewport({
       camera,
       point: [0, 0, 20],
       viewport: { width: 240, height: 120 },
-    })
+    });
 
-    expectTrue(centeredPoint !== null, 'World-point projection should resolve visible points.')
-    expectTrue(Math.abs(centeredPoint.x - 120) < 0.001, 'Projection should center the world origin horizontally.')
-    expectTrue(Math.abs(centeredPoint.y - 60) < 0.001, 'Projection should center the world origin vertically.')
-    expectTrue(offsetPoint !== null && offsetPoint.x > centeredPoint.x, 'Projection should preserve horizontal ordering for visible points.')
-    expectTrue(hiddenPoint === null, 'Projection should reject points that fall behind the active camera.')
+    expectTrue(
+      centeredPoint !== null,
+      "World-point projection should resolve visible points.",
+    );
+    expectTrue(
+      Math.abs(centeredPoint.x - 120) < 0.001,
+      "Projection should center the world origin horizontally.",
+    );
+    expectTrue(
+      Math.abs(centeredPoint.y - 60) < 0.001,
+      "Projection should center the world origin vertically.",
+    );
+    expectTrue(
+      offsetPoint !== null && offsetPoint.x > centeredPoint.x,
+      "Projection should preserve horizontal ordering for visible points.",
+    );
+    expectTrue(
+      hiddenPoint === null,
+      "Projection should reject points that fall behind the active camera.",
+    );
   }
 
   function testSectionScreenDragOffsetTracksProjectedNormalMotion() {
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100)
-    camera.position.set(8, -10, 6)
-    camera.lookAt(0, 0, 0)
-    camera.updateProjectionMatrix()
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    camera.position.set(8, -10, 6);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
 
     const section = {
-      seed: { kind: 'construction', constructionId: 'construction_plane-xy' },
-      plane: createStandardPlaneDefinition('xy'),
+      seed: { kind: "construction", constructionId: "construction_plane-xy" },
+      plane: createStandardPlaneDefinition("xy"),
       offset: 0,
-      retainedSide: 'positive',
-    } as const
+      retainedSide: "positive",
+    } as const;
 
     const center = projectWorldPointToViewport({
       camera,
       point: [0, 0, 0],
       viewport: { width: 200, height: 200 },
-    })
+    });
     const normalPoint = projectWorldPointToViewport({
       camera,
       point: [0, 0, 1],
       viewport: { width: 200, height: 200 },
-    })
+    });
 
-    expectTrue(center !== null && normalPoint !== null, 'Section drag projection should be testable with visible handle points.')
+    expectTrue(
+      center !== null && normalPoint !== null,
+      "Section drag projection should be testable with visible handle points.",
+    );
 
     const axisDelta = {
       x: normalPoint.x - center.x,
       y: normalPoint.y - center.y,
-    }
-    const axisLength = Math.hypot(axisDelta.x, axisDelta.y)
-    const axisUnit = { x: axisDelta.x / axisLength, y: axisDelta.y / axisLength }
+    };
+    const axisLength = Math.hypot(axisDelta.x, axisDelta.y);
+    const axisUnit = {
+      x: axisDelta.x / axisLength,
+      y: axisDelta.y / axisLength,
+    };
     const offset = resolveSectionScreenDragOffset({
       camera,
       viewport: { width: 200, height: 200 },
@@ -303,284 +381,367 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
         x: center.x + axisUnit.x * axisLength * 2,
         y: center.y + axisUnit.y * axisLength * 2,
       },
-    })
+    });
 
-    expectTrue(offset !== null, 'Section drag projection should resolve a numeric offset for visible axis motion.')
-    expectTrue(Math.abs(offset - 2) < 0.05, 'Section drag projection should convert two projected world units into offset motion along the section normal.')
+    expectTrue(
+      offset !== null,
+      "Section drag projection should resolve a numeric offset for visible axis motion.",
+    );
+    expectTrue(
+      Math.abs(offset - 2) < 0.05,
+      "Section drag projection should convert two projected world units into offset motion along the section normal.",
+    );
   }
 
   function testSectionScreenDragOffsetFallsBackWhenNormalProjectsToPoint() {
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100)
-    camera.position.set(0, 0, 10)
-    camera.lookAt(0, 0, 0)
-    camera.updateProjectionMatrix()
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
 
     const offset = resolveSectionScreenDragOffset({
       camera,
       viewport: { width: 200, height: 200 },
       sectionAtDragStart: {
-        seed: { kind: 'construction', constructionId: 'construction_plane-xy' },
-        plane: createStandardPlaneDefinition('xy'),
+        seed: { kind: "construction", constructionId: "construction_plane-xy" },
+        plane: createStandardPlaneDefinition("xy"),
         offset: 0,
-        retainedSide: 'positive',
+        retainedSide: "positive",
       },
       dragStartClientPoint: { x: 100, y: 100 },
       currentClientPoint: { x: 100, y: 80 },
-    })
+    });
 
-    expectTrue(offset !== null, 'Section drag projection should still resolve an offset when the section normal is view-aligned.')
-    expectTrue(Math.abs(offset) > 0.001, 'Section drag projection fallback should produce visible motion for aligned views.')
+    expectTrue(
+      offset !== null,
+      "Section drag projection should still resolve an offset when the section normal is view-aligned.",
+    );
+    expectTrue(
+      Math.abs(offset) > 0.001,
+      "Section drag projection fallback should produce visible motion for aligned views.",
+    );
   }
 
   function testRenderIdleTrackerRequiresStableIdleFrames() {
-    const tracker = createRenderIdleTracker({ requiredStableFrames: 2, maxStableDelta: 0.05 })
+    const tracker = createRenderIdleTracker({
+      requiredStableFrames: 2,
+      maxStableDelta: 0.05,
+    });
     const active = tracker.update({
       delta: 0.016,
       isEditorIdle: false,
-      sceneKey: 'scene-a',
-    })
+      sceneKey: "scene-a",
+    });
     const firstIdle = tracker.update({
       delta: 0.016,
       isEditorIdle: true,
-      sceneKey: 'scene-a',
-    })
+      sceneKey: "scene-a",
+    });
     const secondIdle = tracker.update({
       delta: 0.016,
       isEditorIdle: true,
-      sceneKey: 'scene-a',
-    })
+      sceneKey: "scene-a",
+    });
     const sceneChanged = tracker.update({
       delta: 0.016,
       isEditorIdle: true,
-      sceneKey: 'scene-b',
-    })
+      sceneKey: "scene-b",
+    });
 
-    expectTrue(active === false, 'Render idle should stay false while the editor is active.')
-    expectTrue(firstIdle === false, 'Render idle should require consecutive stable frames.')
-    expectTrue(secondIdle === true, 'Render idle should become true after enough stable idle frames.')
-    expectTrue(sceneChanged === false, 'Render idle should clear when the scene changes.')
+    expectTrue(
+      active === false,
+      "Render idle should stay false while the editor is active.",
+    );
+    expectTrue(
+      firstIdle === false,
+      "Render idle should require consecutive stable frames.",
+    );
+    expectTrue(
+      secondIdle === true,
+      "Render idle should become true after enough stable idle frames.",
+    );
+    expectTrue(
+      sceneChanged === false,
+      "Render idle should clear when the scene changes.",
+    );
   }
 
   function testViewportInvalidationKeyTracksVisibleAuthoringInputs() {
     const base = {
-      sceneKey: 'scene-a',
-      hoverTargetKey: 'none',
+      sceneKey: "scene-a",
+      hoverTargetKey: "none",
       selectionKeys: [],
-      sketchFeedbackKey: 'tool-a',
+      sketchFeedbackKey: "tool-a",
       measurementWitnessCount: 0,
-      sectionViewKey: 'none',
-      clippingKey: 'none',
-      lodKey: 'lod-a',
-      projectionMode: 'orthographic',
-      themeKey: 'default',
+      sectionViewKey: "none",
+      clippingKey: "none",
+      lodKey: "lod-a",
+      projectionMode: "orthographic",
+      themeKey: "default",
       fitViewRequestId: 1,
       transitionVersion: 1,
-    }
+    };
 
-    const initial = createViewportInvalidationKey(base)
+    const initial = createViewportInvalidationKey(base);
 
     expectTrue(
-      createViewportInvalidationKey({ ...base, sceneKey: 'scene-b' }) !== initial,
-      'Renderable changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({ ...base, sceneKey: "scene-b" }) !==
+        initial,
+      "Renderable changes should invalidate the demand-rendered viewport.",
+    );
     expectTrue(
-      createViewportInvalidationKey({ ...base, hoverTargetKey: 'sketch:point-a' }) !== initial,
-      'Hover changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({
+        ...base,
+        hoverTargetKey: "sketch:point-a",
+      }) !== initial,
+      "Hover changes should invalidate the demand-rendered viewport.",
+    );
     expectTrue(
-      createViewportInvalidationKey({ ...base, selectionKeys: ['body:a'] }) !== initial,
-      'Selection changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({ ...base, selectionKeys: ["body:a"] }) !==
+        initial,
+      "Selection changes should invalidate the demand-rendered viewport.",
+    );
     expectTrue(
-      createViewportInvalidationKey({ ...base, sketchFeedbackKey: 'tool-b' }) !== initial,
-      'Sketch preview feedback changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({
+        ...base,
+        sketchFeedbackKey: "tool-b",
+      }) !== initial,
+      "Sketch preview feedback changes should invalidate the demand-rendered viewport.",
+    );
     expectTrue(
-      createViewportInvalidationKey({ ...base, transitionVersion: 2 }) !== initial,
-      'Camera transition requests should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({ ...base, transitionVersion: 2 }) !==
+        initial,
+      "Camera transition requests should invalidate the demand-rendered viewport.",
+    );
   }
 
   function testViewportInvalidationKeyTracksPresentationInputs() {
     const base = {
-      sceneKey: 'scene-a',
-      hoverTargetKey: 'none',
+      sceneKey: "scene-a",
+      hoverTargetKey: "none",
       selectionKeys: [],
-      sketchFeedbackKey: 'tool-a',
+      sketchFeedbackKey: "tool-a",
       measurementWitnessCount: 0,
-      sectionViewKey: 'none',
-      clippingKey: 'none',
-      lodKey: 'lod-a',
-      projectionMode: 'orthographic',
-      themeKey: 'default',
+      sectionViewKey: "none",
+      clippingKey: "none",
+      lodKey: "lod-a",
+      projectionMode: "orthographic",
+      themeKey: "default",
       fitViewRequestId: 1,
       transitionVersion: 1,
-    }
+    };
 
-    const initial = createViewportInvalidationKey(base)
+    const initial = createViewportInvalidationKey(base);
 
     expectTrue(
-      createViewportInvalidationKey({ ...base, sectionViewKey: 'section-a' }) !== initial,
-      'Section view changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({
+        ...base,
+        sectionViewKey: "section-a",
+      }) !== initial,
+      "Section view changes should invalidate the demand-rendered viewport.",
+    );
     expectTrue(
-      createViewportInvalidationKey({ ...base, clippingKey: '0,0,1:4' }) !== initial,
-      'Clipping changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({ ...base, clippingKey: "0,0,1:4" }) !==
+        initial,
+      "Clipping changes should invalidate the demand-rendered viewport.",
+    );
     expectTrue(
-      createViewportInvalidationKey({ ...base, lodKey: 'lod-b' }) !== initial,
-      'LOD changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({ ...base, lodKey: "lod-b" }) !== initial,
+      "LOD changes should invalidate the demand-rendered viewport.",
+    );
     expectTrue(
-      createViewportInvalidationKey({ ...base, projectionMode: 'perspective' }) !== initial,
-      'Projection changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({
+        ...base,
+        projectionMode: "perspective",
+      }) !== initial,
+      "Projection changes should invalidate the demand-rendered viewport.",
+    );
     expectTrue(
-      createViewportInvalidationKey({ ...base, themeKey: 'styled' }) !== initial,
-      'Theme and material changes should invalidate the demand-rendered viewport.',
-    )
+      createViewportInvalidationKey({ ...base, themeKey: "styled" }) !==
+        initial,
+      "Theme and material changes should invalidate the demand-rendered viewport.",
+    );
   }
 
   function testViewCubeResizeUpdatesCanvasCssSize() {
-    const setSizeCalls: Array<{ width: number, height: number, updateStyle?: boolean }> = []
+    const setSizeCalls: Array<{
+      width: number;
+      height: number;
+      updateStyle?: boolean;
+    }> = [];
     const cubeSize = resizeViewCubeRenderer({
       cubeElement: { clientWidth: 120, clientHeight: 96 },
       renderer: {
         setSize: (width, height, updateStyle) => {
-          setSizeCalls.push({ width, height, updateStyle })
+          setSizeCalls.push({ width, height, updateStyle });
         },
       },
-    })
+    });
 
-    expectTrue(cubeSize === 96, 'View cube renderer should fit within the smaller cube container dimension.')
-    expectTrue(setSizeCalls.length === 1, 'View cube resize should issue one renderer size update.')
-    expectTrue(setSizeCalls[0]?.width === 96, 'View cube renderer width should match the computed CSS size.')
-    expectTrue(setSizeCalls[0]?.height === 96, 'View cube renderer height should match the computed CSS size.')
+    expectTrue(
+      cubeSize === 96,
+      "View cube renderer should fit within the smaller cube container dimension.",
+    );
+    expectTrue(
+      setSizeCalls.length === 1,
+      "View cube resize should issue one renderer size update.",
+    );
+    expectTrue(
+      setSizeCalls[0]?.width === 96,
+      "View cube renderer width should match the computed CSS size.",
+    );
+    expectTrue(
+      setSizeCalls[0]?.height === 96,
+      "View cube renderer height should match the computed CSS size.",
+    );
     expectTrue(
       setSizeCalls[0]?.updateStyle === true,
-      'View cube renderer should update canvas CSS size so devicePixelRatio does not enlarge the visible overlay.',
-    )
+      "View cube renderer should update canvas CSS size so devicePixelRatio does not enlarge the visible overlay.",
+    );
   }
 
   function testWorkspaceScaffoldWiresDoNotWriteDepth() {
-    const grid = configureWorkspaceScaffoldWireObject(new THREE.GridHelper(10, 10))
-    const axes = configureWorkspaceScaffoldWireObject(new THREE.AxesHelper(4))
+    const grid = configureWorkspaceScaffoldWireObject(
+      new THREE.GridHelper(10, 10),
+    );
+    const axes = configureWorkspaceScaffoldWireObject(new THREE.AxesHelper(4));
     const materials = [
       ...(Array.isArray(grid.material) ? grid.material : [grid.material]),
       ...(Array.isArray(axes.material) ? axes.material : [axes.material]),
-    ]
+    ];
 
-    expectTrue(grid.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER, 'Grid should render before model and sketch wires.')
-    expectTrue(axes.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER, 'Axes should render before model and sketch wires.')
+    expectTrue(
+      grid.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER,
+      "Grid should render before model and sketch wires.",
+    );
+    expectTrue(
+      axes.renderOrder === WORKSPACE_SCAFFOLD_RENDER_ORDER,
+      "Axes should render before model and sketch wires.",
+    );
     expectTrue(
       materials.every((material) => material.depthTest && !material.depthWrite),
-      'Scaffold wire materials should depth-test without writing depth.',
-    )
+      "Scaffold wire materials should depth-test without writing depth.",
+    );
 
-    grid.geometry.dispose()
-    axes.geometry.dispose()
-    materials.forEach((material) => material.dispose())
+    grid.geometry.dispose();
+    axes.geometry.dispose();
+    materials.forEach((material) => material.dispose());
   }
 
   function testMeasurePickTuningTightensWirePassThroughTolerance() {
-    const defaultTuning = getViewportPickTuning(null)
-    const measureTuning = getViewportPickTuning(measureSelectionFilter)
+    const defaultTuning = getViewportPickTuning(null);
+    const measureTuning = getViewportPickTuning(measureSelectionFilter);
 
     expectTrue(
       defaultTuning.linePickThreshold > measureTuning.linePickThreshold,
-      'Measure picking should reduce the line threshold to avoid selecting hidden wires through faces.',
-    )
+      "Measure picking should reduce the line threshold to avoid selecting hidden wires through faces.",
+    );
     expectTrue(
-      (measureTuning.resolutionOptions.wireOcclusionTolerance ?? Number.POSITIVE_INFINITY) < Number.POSITIVE_INFINITY,
-      'Measure picking should install an explicit wire occlusion tolerance override.',
-    )
+      (measureTuning.resolutionOptions.wireOcclusionTolerance ??
+        Number.POSITIVE_INFINITY) < Number.POSITIVE_INFINITY,
+      "Measure picking should install an explicit wire occlusion tolerance override.",
+    );
     expectTrue(
-      (measureTuning.resolutionOptions.wireOcclusionTolerance ?? 0)
-        < (defaultTuning.resolutionOptions.wireOcclusionTolerance ?? Number.POSITIVE_INFINITY),
-      'Measure picking should use a tighter face-over-wire occlusion tolerance than the default picker.',
-    )
+      (measureTuning.resolutionOptions.wireOcclusionTolerance ?? 0) <
+        (defaultTuning.resolutionOptions.wireOcclusionTolerance ??
+          Number.POSITIVE_INFINITY),
+      "Measure picking should use a tighter face-over-wire occlusion tolerance than the default picker.",
+    );
   }
 
   function testNavigationPointerMoveDetectionIgnoresPrimaryDrawingGestures() {
     expectTrue(
       isViewportNavigationPointerMove(0) === false,
-      'Hover moves without pressed buttons should stay available to sketch preview interactions.',
-    )
+      "Hover moves without pressed buttons should stay available to sketch preview interactions.",
+    );
     expectTrue(
       isViewportNavigationPointerMove(1) === false,
-      'Primary-button moves should stay available so sketch drawing and dragging can continue.',
-    )
+      "Primary-button moves should stay available so sketch drawing and dragging can continue.",
+    );
     expectTrue(
       isViewportNavigationPointerMove(2),
-      'Secondary-button moves should be treated as viewport navigation so sketch projection does not reframe the camera mid-rotate.',
-    )
+      "Secondary-button moves should be treated as viewport navigation so sketch projection does not reframe the camera mid-rotate.",
+    );
     expectTrue(
       isViewportNavigationPointerMove(4),
-      'Auxiliary-button moves should be treated as viewport navigation so panning bypasses sketch hover work.',
-    )
+      "Auxiliary-button moves should be treated as viewport navigation so panning bypasses sketch hover work.",
+    );
   }
 
   function testDimensionAnnotationDragPatchTargetsDurablePlacement() {
     const patch = createDimensionAnnotationPlacementPatch(
-      { id: 'dimension_1-annotation-drag', dimensionId: 'dimension_1' },
+      { id: "dimension_1-annotation-drag", dimensionId: "dimension_1" },
       [8, 3],
-    )
+    );
 
     expectTrue(
-      patch.intent === 'setDimensionAnnotationPlacement'
-        && patch.handleId === 'dimension_1-annotation-drag'
-        && patch.dimensionId === 'dimension_1'
-        && patch.point[0] === 8
-        && patch.point[1] === 3,
-      'Dimension annotation drags should route through the committed dimension placement patch path.',
-    )
+      patch.intent === "setDimensionAnnotationPlacement" &&
+        patch.handleId === "dimension_1-annotation-drag" &&
+        patch.dimensionId === "dimension_1" &&
+        patch.point[0] === 8 &&
+        patch.point[1] === 3,
+      "Dimension annotation drags should route through the committed dimension placement patch path.",
+    );
   }
 
   function testViewCubeRequestsAnimatedTransition() {
-    const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000)
-    camera.position.set(12, -12, 12)
-    const controls = createControls(new THREE.Vector3(1, 2, 3))
-    const requests: Array<{ fromFrameProjectionMode: string, targetFrameProjectionMode: string }> = []
+    const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000);
+    camera.position.set(12, -12, 12);
+    const controls = createControls(new THREE.Vector3(1, 2, 3));
+    const requests: Array<{
+      fromFrameProjectionMode: string;
+      targetFrameProjectionMode: string;
+    }> = [];
 
     const result = requestViewCubeCameraTransition({
-      presetId: 'front',
+      presetId: "front",
       camera,
       controls,
       requestTransition: (targetFrame, fromFrame) => {
         requests.push({
-          fromFrameProjectionMode: fromFrame?.projectionMode ?? 'unknown',
+          fromFrameProjectionMode: fromFrame?.projectionMode ?? "unknown",
           targetFrameProjectionMode: targetFrame.projectionMode,
-        })
+        });
       },
-    })
+    });
 
-    expectTrue(result !== null, 'View cube clicks should produce a camera transition request when the viewport is ready.')
-    expectTrue(requests.length === 1, 'View cube navigation should request one shared animated transition.')
     expectTrue(
-      requests[0]?.fromFrameProjectionMode === 'orthographic' && requests[0]?.targetFrameProjectionMode === 'orthographic',
-      'View cube navigation should preserve the active projection when requesting the transition.',
-    )
+      result !== null,
+      "View cube clicks should produce a camera transition request when the viewport is ready.",
+    );
+    expectTrue(
+      requests.length === 1,
+      "View cube navigation should request one shared animated transition.",
+    );
+    expectTrue(
+      requests[0]?.fromFrameProjectionMode === "orthographic" &&
+        requests[0]?.targetFrameProjectionMode === "orthographic",
+      "View cube navigation should preserve the active projection when requesting the transition.",
+    );
   }
 
   function testSketchEntryRequestsAnimatedFraming() {
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
-    camera.position.set(14, -16, 28)
-    const controls = createControls(new THREE.Vector3(0, 0, 4))
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+    camera.position.set(14, -16, 28);
+    const controls = createControls(new THREE.Vector3(0, 0, 4));
     const sketchSession = {
-      sketchId: 'sketch_1',
+      sketchId: "sketch_1",
       plane: {
-        support: { kind: 'construction', constructionId: 'construction_plane-xy' },
-        key: 'xy',
+        support: {
+          kind: "construction",
+          constructionId: "construction_plane-xy",
+        },
+        key: "xy",
         frame: {
           origin: [0, 0, 0],
           xAxis: [1, 0, 0],
           yAxis: [0, 1, 0],
           normal: [0, 0, 1],
-          linearUnit: 'documentLength',
-          handedness: 'rightHanded',
+          linearUnit: "documentLength",
+          handedness: "rightHanded",
         },
       },
-    } as Parameters<typeof resolveSketchCameraTransition>[0]['sketchSession']
+    } as Parameters<typeof resolveSketchCameraTransition>[0]["sketchSession"];
 
     const resolution = resolveSketchCameraTransition({
       camera,
@@ -591,17 +752,26 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
         activeSessionToken: null,
         preSketchFrame: null,
       },
-    })
+    });
 
-    expectTrue(resolution.targetFrame !== null, 'Entering sketch mode should request a transition into the sketch frame.')
-    expectTrue(resolution.fromFrame?.projectionMode === 'perspective', 'Sketch entry should capture the pre-entry camera pose.')
-    expectTrue(resolution.state.activeSessionToken !== null, 'Sketch entry should scope the saved camera pose to the active session token.')
+    expectTrue(
+      resolution.targetFrame !== null,
+      "Entering sketch mode should request a transition into the sketch frame.",
+    );
+    expectTrue(
+      resolution.fromFrame?.projectionMode === "perspective",
+      "Sketch entry should capture the pre-entry camera pose.",
+    );
+    expectTrue(
+      resolution.state.activeSessionToken !== null,
+      "Sketch entry should scope the saved camera pose to the active session token.",
+    );
   }
 
   function testSketchExitRequestsRestoreTransition() {
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
-    camera.position.set(8, 8, 8)
-    const controls = createControls(new THREE.Vector3(0, 0, 0))
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+    camera.position.set(8, 8, 8);
+    const controls = createControls(new THREE.Vector3(0, 0, 0));
 
     const resolution = resolveSketchCameraTransition({
       camera,
@@ -609,44 +779,51 @@ test('src/components/cad/three-cad-viewport.spec.ts', () => {  function createCo
       sketchSession: null,
       sketchDisplayRenderables: [],
       state: {
-        activeSessionToken: 'sketch_1:construction:construction_plane-xy:0,0,0',
+        activeSessionToken: "sketch_1:construction:construction_plane-xy:0,0,0",
         preSketchFrame: {
-          projectionMode: 'orthographic',
+          projectionMode: "orthographic",
           position: new THREE.Vector3(20, -20, 20),
           target: new THREE.Vector3(0, 0, 4),
           up: new THREE.Vector3(0, 0, 1),
-          cameraDistance: Math.sqrt((20 ** 2) * 3),
+          cameraDistance: Math.sqrt(20 ** 2 * 3),
           perspectiveDistance: 18,
           orthographicZoom: 1.4,
         },
       },
-    })
+    });
 
-    expectTrue(resolution.targetFrame?.projectionMode === 'orthographic', 'Sketch exit should restore the captured pre-entry projection.')
-    expectTrue(resolution.fromFrame?.projectionMode === 'perspective', 'Sketch exit should animate back from the current sketch camera pose.')
     expectTrue(
-      resolution.state.activeSessionToken === null && resolution.state.preSketchFrame === null,
-      'Sketch exit should clear the active session-scoped camera snapshot after requesting restoration.',
-    )
+      resolution.targetFrame?.projectionMode === "orthographic",
+      "Sketch exit should restore the captured pre-entry projection.",
+    );
+    expectTrue(
+      resolution.fromFrame?.projectionMode === "perspective",
+      "Sketch exit should animate back from the current sketch camera pose.",
+    );
+    expectTrue(
+      resolution.state.activeSessionToken === null &&
+        resolution.state.preSketchFrame === null,
+      "Sketch exit should clear the active session-scoped camera snapshot after requesting restoration.",
+    );
   }
 
-  testDragMovesCoalesceToLatestPoint()
-  testDragMoveCancellationDropsPendingFrame()
-  testSketchBvhKeyIgnoresPositionalPolylineUpdates()
-  testSketchBvhKeyDoesNotEmbedInlineImagePayloads()
-  testProjectionBridgeResolvesKnownTarget()
-  testWorldPointProjectionMapsViewportCoordinates()
-  testSectionScreenDragOffsetTracksProjectedNormalMotion()
-  testSectionScreenDragOffsetFallsBackWhenNormalProjectsToPoint()
-  testRenderIdleTrackerRequiresStableIdleFrames()
-  testViewportInvalidationKeyTracksVisibleAuthoringInputs()
-  testViewportInvalidationKeyTracksPresentationInputs()
-  testViewCubeResizeUpdatesCanvasCssSize()
-  testWorkspaceScaffoldWiresDoNotWriteDepth()
-  testMeasurePickTuningTightensWirePassThroughTolerance()
-  testNavigationPointerMoveDetectionIgnoresPrimaryDrawingGestures()
-  testDimensionAnnotationDragPatchTargetsDurablePlacement()
-  testViewCubeRequestsAnimatedTransition()
-  testSketchEntryRequestsAnimatedFraming()
-  testSketchExitRequestsRestoreTransition()
-})
+  testDragMovesCoalesceToLatestPoint();
+  testDragMoveCancellationDropsPendingFrame();
+  testSketchBvhKeyIgnoresPositionalPolylineUpdates();
+  testSketchBvhKeyDoesNotEmbedInlineImagePayloads();
+  testProjectionBridgeResolvesKnownTarget();
+  testWorldPointProjectionMapsViewportCoordinates();
+  testSectionScreenDragOffsetTracksProjectedNormalMotion();
+  testSectionScreenDragOffsetFallsBackWhenNormalProjectsToPoint();
+  testRenderIdleTrackerRequiresStableIdleFrames();
+  testViewportInvalidationKeyTracksVisibleAuthoringInputs();
+  testViewportInvalidationKeyTracksPresentationInputs();
+  testViewCubeResizeUpdatesCanvasCssSize();
+  testWorkspaceScaffoldWiresDoNotWriteDepth();
+  testMeasurePickTuningTightensWirePassThroughTolerance();
+  testNavigationPointerMoveDetectionIgnoresPrimaryDrawingGestures();
+  testDimensionAnnotationDragPatchTargetsDurablePlacement();
+  testViewCubeRequestsAnimatedTransition();
+  testSketchEntryRequestsAnimatedFraming();
+  testSketchExitRequestsRestoreTransition();
+});

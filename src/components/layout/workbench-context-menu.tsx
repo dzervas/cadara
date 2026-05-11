@@ -1,4 +1,4 @@
-import { Menu, type MantineColor } from '@mantine/core'
+import { Menu, type MantineColor } from "@mantine/core";
 import {
   cloneElement,
   isValidElement,
@@ -9,48 +9,48 @@ import {
   type PointerEvent,
   type ReactElement,
   type ReactNode,
-} from 'react'
-import { createPortal } from 'react-dom'
+} from "react";
+import { createPortal } from "react-dom";
 
-import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
-import type { ShortcutCommandId } from '@/core/shortcuts/commands'
+import { ShortcutHint } from "@/components/shortcuts/shortcut-hint";
+import type { ShortcutCommandId } from "@/core/shortcuts/commands";
 
 export type WorkbenchContextMenuEntry =
   | {
-      kind: 'item'
-      id: string
-      label: string
-      commandId?: ShortcutCommandId
-      icon?: ReactNode
-      disabled?: boolean
-      danger?: boolean
-      onSelect: () => void
+      kind: "item";
+      id: string;
+      label: string;
+      commandId?: ShortcutCommandId;
+      icon?: ReactNode;
+      disabled?: boolean;
+      danger?: boolean;
+      onSelect: () => void;
     }
   | {
-      kind: 'divider'
-      id: string
-    }
+      kind: "divider";
+      id: string;
+    };
 
 interface WorkbenchContextMenuProps {
-  children: ReactElement
-  defaultOpened?: boolean
-  items: WorkbenchContextMenuEntry[]
-  label: string
-  withinPortal?: boolean
+  children: ReactElement;
+  defaultOpened?: boolean;
+  items: WorkbenchContextMenuEntry[];
+  label: string;
+  withinPortal?: boolean;
 }
 
 interface MenuAnchor {
-  x: number
-  y: number
+  x: number;
+  y: number;
 }
 
 function getKeyboardAnchor(element: HTMLElement): MenuAnchor {
-  const rect = element.getBoundingClientRect()
+  const rect = element.getBoundingClientRect();
 
   return {
     x: rect.left + Math.min(rect.width, 24),
     y: rect.top + Math.min(rect.height, 24),
-  }
+  };
 }
 
 export function WorkbenchContextMenu({
@@ -60,86 +60,89 @@ export function WorkbenchContextMenu({
   label,
   withinPortal = true,
 }: WorkbenchContextMenuProps) {
-  const menuId = useId()
-  const [opened, setOpened] = useState(defaultOpened)
-  const [anchor, setAnchor] = useState<MenuAnchor>({ x: 0, y: 0 })
-  const hasItems = items.some((item) => item.kind === 'item')
+  const menuId = useId();
+  const [opened, setOpened] = useState(defaultOpened);
+  const [anchor, setAnchor] = useState<MenuAnchor>({ x: 0, y: 0 });
+  const hasItems = items.some((item) => item.kind === "item");
 
   if (!isValidElement(children)) {
-    return children
+    return children;
   }
 
   const child = children as ReactElement<{
-    'aria-haspopup'?: string
-    'aria-controls'?: string
-    onContextMenu?: (event: MouseEvent<HTMLElement>) => void
-    onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void
-    onPointerDown?: (event: PointerEvent<HTMLElement>) => void
-    ref?: (element: HTMLElement | null) => void
-  }>
+    "aria-haspopup"?: string;
+    "aria-controls"?: string;
+    onContextMenu?: (event: MouseEvent<HTMLElement>) => void;
+    onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
+    onPointerDown?: (event: PointerEvent<HTMLElement>) => void;
+    ref?: (element: HTMLElement | null) => void;
+  }>;
 
   const setTargetRef = (element: HTMLElement | null) => {
-    const { ref } = child.props
-    if (typeof ref === 'function') {
-      ref(element)
+    const { ref } = child.props;
+    if (typeof ref === "function") {
+      ref(element);
     }
-  }
+  };
 
   const openAt = (nextAnchor: MenuAnchor) => {
     if (!hasItems) {
-      return
+      return;
     }
 
-    setAnchor(nextAnchor)
-    setOpened(true)
-  }
+    setAnchor(nextAnchor);
+    setOpened(true);
+  };
 
   const handleContextMenu = (event: MouseEvent<HTMLElement>) => {
-    child.props.onContextMenu?.(event)
+    child.props.onContextMenu?.(event);
 
     if (event.defaultPrevented) {
-      return
+      return;
     }
 
-    event.preventDefault()
-    openAt({ x: event.clientX, y: event.clientY })
-  }
+    event.preventDefault();
+    openAt({ x: event.clientX, y: event.clientY });
+  };
 
   const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
-    child.props.onPointerDown?.(event)
+    child.props.onPointerDown?.(event);
 
     if (event.defaultPrevented || event.button !== 2) {
-      return
+      return;
     }
 
-    event.preventDefault()
-    openAt({ x: event.clientX, y: event.clientY })
-  }
+    event.preventDefault();
+    openAt({ x: event.clientX, y: event.clientY });
+  };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    child.props.onKeyDown?.(event)
+    child.props.onKeyDown?.(event);
 
     if (event.defaultPrevented) {
-      return
+      return;
     }
 
-    if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) {
-      return
+    if (
+      event.key !== "ContextMenu" &&
+      !(event.shiftKey && event.key === "F10")
+    ) {
+      return;
     }
 
-    event.preventDefault()
-    const element = event.currentTarget
-    openAt(getKeyboardAnchor(element))
-  }
+    event.preventDefault();
+    const element = event.currentTarget;
+    openAt(getKeyboardAnchor(element));
+  };
 
   const trigger = cloneElement(child, {
     ref: setTargetRef,
     onContextMenu: handleContextMenu,
     onKeyDown: handleKeyDown,
     onPointerDown: handlePointerDown,
-    'aria-haspopup': 'menu',
-    'aria-controls': opened ? menuId : undefined,
-  })
+    "aria-haspopup": "menu",
+    "aria-controls": opened ? menuId : undefined,
+  });
 
   return (
     <>
@@ -154,47 +157,49 @@ export function WorkbenchContextMenu({
         withinPortal={withinPortal}
         width={190}
       >
-        {typeof document !== 'undefined'
-          ? createPortal(
-              <Menu.Target>
-                <div
-                  aria-hidden="true"
-                  style={{
-                    position: 'fixed',
-                    left: anchor.x,
-                    top: anchor.y,
-                    display: 'block',
-                    width: 1,
-                    height: 1,
-                    pointerEvents: 'none',
-                  }}
-                />
-              </Menu.Target>,
-              document.body,
-            )
-          : (
-              <Menu.Target>
-                <div
-                  aria-hidden="true"
-                  style={{
-                    position: 'fixed',
-                    left: anchor.x,
-                    top: anchor.y,
-                    display: 'block',
-                    width: 1,
-                    height: 1,
-                    pointerEvents: 'none',
-                  }}
-                />
-              </Menu.Target>
-            )}
+        {typeof document !== "undefined" ? (
+          createPortal(
+            <Menu.Target>
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "fixed",
+                  left: anchor.x,
+                  top: anchor.y,
+                  display: "block",
+                  width: 1,
+                  height: 1,
+                  pointerEvents: "none",
+                }}
+              />
+            </Menu.Target>,
+            document.body,
+          )
+        ) : (
+          <Menu.Target>
+            <div
+              aria-hidden="true"
+              style={{
+                position: "fixed",
+                left: anchor.x,
+                top: anchor.y,
+                display: "block",
+                width: 1,
+                height: 1,
+                pointerEvents: "none",
+              }}
+            />
+          </Menu.Target>
+        )}
         <Menu.Dropdown id={menuId} aria-label={label}>
           {items.map((item) => {
-            if (item.kind === 'divider') {
-              return <Menu.Divider key={item.id} />
+            if (item.kind === "divider") {
+              return <Menu.Divider key={item.id} />;
             }
 
-            const color: MantineColor | undefined = item.danger ? 'red' : undefined
+            const color: MantineColor | undefined = item.danger
+              ? "red"
+              : undefined;
 
             return (
               <Menu.Item
@@ -204,21 +209,23 @@ export function WorkbenchContextMenu({
                 disabled={item.disabled}
                 onClick={() => {
                   if (item.disabled) {
-                    return
+                    return;
                   }
 
-                  item.onSelect()
+                  item.onSelect();
                 }}
               >
                 <span className="flex min-w-0 items-center justify-between gap-4">
                   <span className="truncate">{item.label}</span>
-                  {item.commandId ? <ShortcutHint commandId={item.commandId} /> : null}
+                  {item.commandId ? (
+                    <ShortcutHint commandId={item.commandId} />
+                  ) : null}
                 </span>
               </Menu.Item>
-            )
+            );
           })}
         </Menu.Dropdown>
       </Menu>
     </>
-  )
+  );
 }

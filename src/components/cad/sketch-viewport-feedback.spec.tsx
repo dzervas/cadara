@@ -1,222 +1,310 @@
-import { test } from 'bun:test'
-import { expectTrue } from '@/testing/expect.spec'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { test } from "bun:test";
+import { expectTrue } from "@/testing/expect.spec";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { SketchViewportFeedbackLayer } from '@/components/cad/sketch-viewport-feedback'
-import type { SketchToolPresentationSchema } from '@/core/sketch-tools/editor-schema'
+import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-feedback";
+import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 
-test('src/components/cad/sketch-viewport-feedback.spec.tsx', () => {  const schema: SketchToolPresentationSchema = {
+test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
+  const schema: SketchToolPresentationSchema = {
     prompts: [],
     overlays: [
       {
-        id: 'rectangle-width-overlay',
-        kind: 'measurement',
-        label: 'Width',
+        id: "rectangle-width-overlay",
+        kind: "measurement",
+        label: "Width",
         value: 4,
-        unit: 'mm',
-        anchor: { kind: 'sketchPoint', point: [2, 0] },
+        unit: "mm",
+        anchor: { kind: "sketchPoint", point: [2, 0] },
       },
       {
-        id: 'distance-preview',
-        kind: 'dimensionLine',
-        label: 'Horizontal 12.00 mm',
-        referenceKind: 'horizontal',
+        id: "distance-preview",
+        kind: "dimensionLine",
+        label: "Horizontal 12.00 mm",
+        referenceKind: "horizontal",
         start: [0, 2],
         end: [4, 2],
         value: 12,
-        unit: 'mm',
-        dragHandle: { id: 'distance-preview-drag', kind: 'dimensionLine' },
-        labelAnchor: { kind: 'sketchPoint', point: [2, 2] },
+        unit: "mm",
+        dragHandle: { id: "distance-preview-drag", kind: "dimensionLine" },
+        labelAnchor: { kind: "sketchPoint", point: [2, 2] },
         extensionLines: [
-          { id: 'distance-preview-extension-a', label: 'Extension', start: [0, 0], end: [0, 2] },
-          { id: 'distance-preview-extension-b', label: 'Extension', start: [4, 0], end: [4, 2] },
+          {
+            id: "distance-preview-extension-a",
+            label: "Extension",
+            start: [0, 0],
+            end: [0, 2],
+          },
+          {
+            id: "distance-preview-extension-b",
+            label: "Extension",
+            start: [4, 0],
+            end: [4, 2],
+          },
         ],
       },
       {
-        id: 'committed-width-overlay',
-        kind: 'dimensionLine',
-        label: 'Rectangle 1 width',
-        referenceKind: 'horizontal',
+        id: "committed-width-overlay",
+        kind: "dimensionLine",
+        label: "Rectangle 1 width",
+        referenceKind: "horizontal",
         start: [0, 3],
         end: [4, 3],
         value: 4,
-        unit: 'mm',
-        labelAnchor: { kind: 'sketchPoint', point: [2, 3] },
+        unit: "mm",
+        labelAnchor: { kind: "sketchPoint", point: [2, 3] },
       },
       {
-        id: 'parallel-angle-preview',
-        kind: 'angleArc',
-        label: 'Angle preview',
+        id: "parallel-angle-preview",
+        kind: "angleArc",
+        label: "Angle preview",
         center: [0, 0],
         start: [1, 0],
         end: [0, 1],
         radius: 1,
-        side: 'major',
-        labelAnchor: { kind: 'sketchPoint', point: [0.5, 0.5] },
-        dragHandle: { id: 'parallel-angle-preview-drag', kind: 'angleArc' },
+        side: "major",
+        labelAnchor: { kind: "sketchPoint", point: [0.5, 0.5] },
+        dragHandle: { id: "parallel-angle-preview-drag", kind: "angleArc" },
         witnessLines: [
           {
-            id: 'parallel-angle-preview-witness-a',
-            label: 'Witness',
+            id: "parallel-angle-preview-witness-a",
+            label: "Witness",
             start: [0.5, 0],
             end: [1, 0],
           },
           {
-            id: 'parallel-angle-preview-witness-b',
-            label: 'Witness',
+            id: "parallel-angle-preview-witness-b",
+            label: "Witness",
             start: [0, 0.5],
             end: [0, 1],
           },
         ],
       },
       {
-        id: 'committed-angle-overlay',
-        kind: 'angleArc',
-        label: 'Angle dimension',
+        id: "committed-angle-overlay",
+        kind: "angleArc",
+        label: "Angle dimension",
         center: [0, 0],
         start: [1.5, 0],
         end: [0, 1.5],
         radius: 1.5,
-        side: 'minor',
-        labelAnchor: { kind: 'sketchPoint', point: [0.75, 0.75] },
+        side: "minor",
+        labelAnchor: { kind: "sketchPoint", point: [0.75, 0.75] },
         witnessLines: [
           {
-            id: 'committed-angle-overlay-witness-a',
-            label: 'Witness',
+            id: "committed-angle-overlay-witness-a",
+            label: "Witness",
             start: [1, 0],
             end: [1.5, 0],
           },
         ],
       },
       {
-        id: 'rectangle-start-anchor',
-        kind: 'anchor',
-        label: 'First corner',
+        id: "rectangle-start-anchor",
+        kind: "anchor",
+        label: "First corner",
         point: [0, 0],
       },
       {
-        id: 'rectangle-completion-cue',
-        kind: 'completionCue',
-        label: 'Place corner',
+        id: "rectangle-completion-cue",
+        kind: "completionCue",
+        label: "Place corner",
         point: [4, 3],
         ready: true,
       },
       {
-        id: 'active-snap',
-        kind: 'snapIndicator',
-        label: 'Midpoint',
+        id: "active-snap",
+        kind: "snapIndicator",
+        label: "Midpoint",
         point: [2, 0],
-        candidateKind: 'midpoint',
-        glyphKind: 'midpoint',
+        candidateKind: "midpoint",
+        glyphKind: "midpoint",
       },
     ],
     floatingInput: {
-      id: 'distance-value-input',
-      label: 'Distance',
+      id: "distance-value-input",
+      label: "Distance",
       value: 12,
-      unit: 'mm',
-      confirmLabel: 'Commit',
-      cancelLabel: 'Cancel',
-      anchor: { kind: 'sketchPoint', point: [4, 0] },
-      submitAction: { type: 'patch', patch: { intent: 'commitConstraintValue' } },
-      cancelAction: { type: 'patch', patch: { intent: 'cancelConstraintValue' } },
+      unit: "mm",
+      confirmLabel: "Commit",
+      cancelLabel: "Cancel",
+      anchor: { kind: "sketchPoint", point: [4, 0] },
+      submitAction: {
+        type: "patch",
+        patch: { intent: "commitConstraintValue" },
+      },
+      cancelAction: {
+        type: "patch",
+        patch: { intent: "cancelConstraintValue" },
+      },
     },
-  }
+  };
 
   const markup = renderToStaticMarkup(
     <SketchViewportFeedbackLayer
       schema={schema}
       projections={[
-        { id: 'overlay:rectangle-width-overlay', x: 120, y: 80 },
-        { id: 'overlay:distance-preview', x: 140, y: 70 },
-        { id: 'overlay-geometry:distance-preview:start', x: 100, y: 100 },
-        { id: 'overlay-geometry:distance-preview:end', x: 180, y: 100 },
-        { id: 'overlay-geometry:distance-preview-extension-a:start', x: 100, y: 140 },
-        { id: 'overlay-geometry:distance-preview-extension-a:end', x: 100, y: 100 },
-        { id: 'overlay-geometry:distance-preview-extension-b:start', x: 180, y: 140 },
-        { id: 'overlay-geometry:distance-preview-extension-b:end', x: 180, y: 100 },
-        { id: 'overlay:committed-width-overlay', x: 140, y: 40 },
-        { id: 'overlay-geometry:committed-width-overlay:start', x: 100, y: 60 },
-        { id: 'overlay-geometry:committed-width-overlay:end', x: 180, y: 60 },
-        { id: 'overlay:parallel-angle-preview', x: 160, y: 60 },
-        { id: 'overlay-geometry:parallel-angle-preview:center', x: 200, y: 120 },
-        { id: 'overlay-geometry:parallel-angle-preview:start', x: 240, y: 120 },
-        { id: 'overlay-geometry:parallel-angle-preview:end', x: 200, y: 80 },
-        { id: 'overlay-geometry:parallel-angle-preview-witness-a:start', x: 220, y: 120 },
-        { id: 'overlay-geometry:parallel-angle-preview-witness-a:end', x: 240, y: 120 },
-        { id: 'overlay-geometry:parallel-angle-preview-witness-b:start', x: 200, y: 100 },
-        { id: 'overlay-geometry:parallel-angle-preview-witness-b:end', x: 200, y: 80 },
-        { id: 'overlay:committed-angle-overlay', x: 190, y: 70 },
-        { id: 'overlay-geometry:committed-angle-overlay:center', x: 200, y: 120 },
-        { id: 'overlay-geometry:committed-angle-overlay:start', x: 260, y: 120 },
-        { id: 'overlay-geometry:committed-angle-overlay:end', x: 200, y: 60 },
-        { id: 'overlay-geometry:committed-angle-overlay-witness-a:start', x: 240, y: 120 },
-        { id: 'overlay-geometry:committed-angle-overlay-witness-a:end', x: 260, y: 120 },
-        { id: 'overlay:rectangle-start-anchor', x: 100, y: 140 },
-        { id: 'overlay:rectangle-completion-cue', x: 200, y: 60 },
-        { id: 'overlay:active-snap', x: 140, y: 100 },
-        { id: 'floating-input:distance-value-input', x: 180, y: 90 },
+        { id: "overlay:rectangle-width-overlay", x: 120, y: 80 },
+        { id: "overlay:distance-preview", x: 140, y: 70 },
+        { id: "overlay-geometry:distance-preview:start", x: 100, y: 100 },
+        { id: "overlay-geometry:distance-preview:end", x: 180, y: 100 },
+        {
+          id: "overlay-geometry:distance-preview-extension-a:start",
+          x: 100,
+          y: 140,
+        },
+        {
+          id: "overlay-geometry:distance-preview-extension-a:end",
+          x: 100,
+          y: 100,
+        },
+        {
+          id: "overlay-geometry:distance-preview-extension-b:start",
+          x: 180,
+          y: 140,
+        },
+        {
+          id: "overlay-geometry:distance-preview-extension-b:end",
+          x: 180,
+          y: 100,
+        },
+        { id: "overlay:committed-width-overlay", x: 140, y: 40 },
+        { id: "overlay-geometry:committed-width-overlay:start", x: 100, y: 60 },
+        { id: "overlay-geometry:committed-width-overlay:end", x: 180, y: 60 },
+        { id: "overlay:parallel-angle-preview", x: 160, y: 60 },
+        {
+          id: "overlay-geometry:parallel-angle-preview:center",
+          x: 200,
+          y: 120,
+        },
+        { id: "overlay-geometry:parallel-angle-preview:start", x: 240, y: 120 },
+        { id: "overlay-geometry:parallel-angle-preview:end", x: 200, y: 80 },
+        {
+          id: "overlay-geometry:parallel-angle-preview-witness-a:start",
+          x: 220,
+          y: 120,
+        },
+        {
+          id: "overlay-geometry:parallel-angle-preview-witness-a:end",
+          x: 240,
+          y: 120,
+        },
+        {
+          id: "overlay-geometry:parallel-angle-preview-witness-b:start",
+          x: 200,
+          y: 100,
+        },
+        {
+          id: "overlay-geometry:parallel-angle-preview-witness-b:end",
+          x: 200,
+          y: 80,
+        },
+        { id: "overlay:committed-angle-overlay", x: 190, y: 70 },
+        {
+          id: "overlay-geometry:committed-angle-overlay:center",
+          x: 200,
+          y: 120,
+        },
+        {
+          id: "overlay-geometry:committed-angle-overlay:start",
+          x: 260,
+          y: 120,
+        },
+        { id: "overlay-geometry:committed-angle-overlay:end", x: 200, y: 60 },
+        {
+          id: "overlay-geometry:committed-angle-overlay-witness-a:start",
+          x: 240,
+          y: 120,
+        },
+        {
+          id: "overlay-geometry:committed-angle-overlay-witness-a:end",
+          x: 260,
+          y: 120,
+        },
+        { id: "overlay:rectangle-start-anchor", x: 100, y: 140 },
+        { id: "overlay:rectangle-completion-cue", x: 200, y: 60 },
+        { id: "overlay:active-snap", x: 140, y: 100 },
+        { id: "floating-input:distance-value-input", x: 180, y: 90 },
       ]}
       onPatch={() => undefined}
     />,
-  )
+  );
 
   expectTrue(
     markup.includes('data-sketch-viewport-overlay="measurement"'),
-    'Viewport feedback should render measurement overlays from generic descriptors.',
-  )
-  expectTrue(markup.includes('Width') && markup.includes('4.00 mm'), 'Viewport feedback should render anchored measurement text.')
+    "Viewport feedback should render measurement overlays from generic descriptors.",
+  );
   expectTrue(
-    markup.includes('left:120px') && markup.includes('top:80px'),
-    'Viewport feedback should place measurement labels at projected screen positions.',
-  )
+    markup.includes("Width") && markup.includes("4.00 mm"),
+    "Viewport feedback should render anchored measurement text.",
+  );
   expectTrue(
-    markup.includes('pointer-events-none absolute'),
-    'Viewport feedback should keep transient overlay labels non-interactive so canvas clicks pass through.',
-  )
+    markup.includes("left:120px") && markup.includes("top:80px"),
+    "Viewport feedback should place measurement labels at projected screen positions.",
+  );
   expectTrue(
-    markup.includes('data-sketch-viewport-floating-input="distance-value-input"'),
-    'Viewport feedback should render floating numeric input from projected anchors.',
-  )
-  expectTrue(markup.includes('Distance') && markup.includes('Commit'), 'Viewport feedback should preserve numeric input controls.')
+    markup.includes("pointer-events-none absolute"),
+    "Viewport feedback should keep transient overlay labels non-interactive so canvas clicks pass through.",
+  );
   expectTrue(
-    markup.includes('data-sketch-viewport-geometry="dimensionLine"') && markup.includes('x1="100"'),
-    'Viewport feedback should render dimension preview line geometry from projected endpoints.',
-  )
+    markup.includes(
+      'data-sketch-viewport-floating-input="distance-value-input"',
+    ),
+    "Viewport feedback should render floating numeric input from projected anchors.",
+  );
   expectTrue(
-    markup.includes('data-sketch-viewport-geometry="angleArc"')
-      && markup.includes('data-sketch-viewport-arc-side="major"')
-      && markup.includes('L 200 80')
-      && !markup.includes('A 40 40'),
-    'Viewport feedback should render major angle arcs as centered sampled paths from projected line references.',
-  )
+    markup.includes("Distance") && markup.includes("Commit"),
+    "Viewport feedback should preserve numeric input controls.",
+  );
   expectTrue(
-    markup.includes('data-sketch-viewport-drag-handle="distance-preview-drag"')
-      && markup.includes('data-sketch-viewport-drag-handle="parallel-angle-preview-drag"'),
-    'Viewport feedback should expose declared dimension preview geometry as draggable handles.',
-  )
+    markup.includes('data-sketch-viewport-geometry="dimensionLine"') &&
+      markup.includes('x1="100"'),
+    "Viewport feedback should render dimension preview line geometry from projected endpoints.",
+  );
   expectTrue(
-    !markup.includes('Rectangle 1 width'),
-    'Committed dimension overlays should leave visible text to the draggable annotation chip.',
-  )
+    markup.includes('data-sketch-viewport-geometry="angleArc"') &&
+      markup.includes('data-sketch-viewport-arc-side="major"') &&
+      markup.includes("L 200 80") &&
+      !markup.includes("A 40 40"),
+    "Viewport feedback should render major angle arcs as centered sampled paths from projected line references.",
+  );
   expectTrue(
-    markup.includes('data-sketch-viewport-angle-witness="parallel-angle-preview-witness-a"')
-      && markup.includes('data-sketch-viewport-angle-witness="parallel-angle-preview-witness-b"')
-      && markup.includes('stroke-dasharray="4 4"'),
-    'Viewport feedback should render dashed angular witness lines when the overlay declares them.',
-  )
+    markup.includes(
+      'data-sketch-viewport-drag-handle="distance-preview-drag"',
+    ) &&
+      markup.includes(
+        'data-sketch-viewport-drag-handle="parallel-angle-preview-drag"',
+      ),
+    "Viewport feedback should expose declared dimension preview geometry as draggable handles.",
+  );
   expectTrue(
-    markup.includes('data-sketch-viewport-angle-witness="committed-angle-overlay-witness-a"'),
-    'Viewport feedback should render angular witness lines for committed angle arcs without preview drag handles.',
-  )
+    !markup.includes("Rectangle 1 width"),
+    "Committed dimension overlays should leave visible text to the draggable annotation chip.",
+  );
   expectTrue(
-    !markup.includes('First corner') && !markup.includes('Place corner'),
-    'Viewport feedback should suppress non-dimensional anchor and completion tooltips.',
-  )
+    markup.includes(
+      'data-sketch-viewport-angle-witness="parallel-angle-preview-witness-a"',
+    ) &&
+      markup.includes(
+        'data-sketch-viewport-angle-witness="parallel-angle-preview-witness-b"',
+      ) &&
+      markup.includes('stroke-dasharray="4 4"'),
+    "Viewport feedback should render dashed angular witness lines when the overlay declares them.",
+  );
   expectTrue(
-    markup.includes('data-sketch-viewport-geometry="snapIndicator"')
-      && markup.includes('data-sketch-snap-kind="midpoint"')
-      && markup.includes('Midpoint'),
-    'Viewport feedback should render transient snap indicators and labels.',
-  )
-})
+    markup.includes(
+      'data-sketch-viewport-angle-witness="committed-angle-overlay-witness-a"',
+    ),
+    "Viewport feedback should render angular witness lines for committed angle arcs without preview drag handles.",
+  );
+  expectTrue(
+    !markup.includes("First corner") && !markup.includes("Place corner"),
+    "Viewport feedback should suppress non-dimensional anchor and completion tooltips.",
+  );
+  expectTrue(
+    markup.includes('data-sketch-viewport-geometry="snapIndicator"') &&
+      markup.includes('data-sketch-snap-kind="midpoint"') &&
+      markup.includes("Midpoint"),
+    "Viewport feedback should render transient snap indicators and labels.",
+  );
+});

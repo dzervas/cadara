@@ -1,50 +1,47 @@
-import { Component, type ErrorInfo, type PropsWithChildren } from 'react'
+import { Component, type ErrorInfo, type PropsWithChildren } from "react";
 
-import {
-  normalizeUnknownError,
-  type ErrorReporter,
-} from '@/contracts/errors'
-import { useErrorReporter } from '@/hooks/use-error-reporter'
+import { normalizeUnknownError, type ErrorReporter } from "@/contracts/errors";
+import { useErrorReporter } from "@/hooks/use-error-reporter";
 
 interface ReportedErrorBoundaryState {
-  message: string | null
+  message: string | null;
 }
 
 interface ReportedErrorBoundaryInnerProps extends PropsWithChildren {
-  reporter: ErrorReporter
+  reporter: ErrorReporter;
 }
 
 class ReportedErrorBoundaryInner extends Component<
   ReportedErrorBoundaryInnerProps,
   ReportedErrorBoundaryState
 > {
-  state: ReportedErrorBoundaryState = { message: null }
+  state: ReportedErrorBoundaryState = { message: null };
 
   static getDerivedStateFromError(error: unknown): ReportedErrorBoundaryState {
     return {
       message: normalizeUnknownError(error, {
-        code: 'render/crash',
-        fallbackMessage: 'The workbench view crashed.',
+        code: "render/crash",
+        fallbackMessage: "The workbench view crashed.",
       }).message,
-    }
+    };
   }
 
   componentDidCatch(error: unknown, errorInfo: ErrorInfo) {
     const appError = normalizeUnknownError(error, {
-      code: 'render/crash',
-      severity: 'fatal',
-      fallbackMessage: 'The workbench view crashed.',
+      code: "render/crash",
+      severity: "fatal",
+      fallbackMessage: "The workbench view crashed.",
       context: [
-        { key: 'componentStack', value: errorInfo.componentStack || null },
+        { key: "componentStack", value: errorInfo.componentStack || null },
       ],
       recoverable: false,
-    })
+    });
 
     this.props.reporter.report(appError, {
-      source: 'react-error-boundary',
-      visibility: 'user',
+      source: "react-error-boundary",
+      visibility: "user",
       dedupeKey: `render:${appError.message}`,
-    })
+    });
   }
 
   render() {
@@ -56,22 +53,24 @@ class ReportedErrorBoundaryInner extends Component<
             className="mt-16 max-w-md rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-4 shadow-[var(--cad-panel-shadow)]"
           >
             <div className="text-sm font-semibold">Workbench view crashed</div>
-            <div className="mt-2 text-xs text-[var(--cad-muted-foreground)]">{this.state.message}</div>
+            <div className="mt-2 text-xs text-[var(--cad-muted-foreground)]">
+              {this.state.message}
+            </div>
           </div>
         </div>
-      )
+      );
     }
 
-    return this.props.children
+    return this.props.children;
   }
 }
 
 export function ReportedErrorBoundary({ children }: PropsWithChildren) {
-  const reporter = useErrorReporter()
+  const reporter = useErrorReporter();
 
   return (
     <ReportedErrorBoundaryInner reporter={reporter}>
       {children}
     </ReportedErrorBoundaryInner>
-  )
+  );
 }

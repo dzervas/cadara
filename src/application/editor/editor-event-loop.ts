@@ -2,7 +2,7 @@ import {
   createConsoleErrorReporter,
   normalizeUnknownError,
   type ErrorReporter,
-} from '@/contracts/errors'
+} from "@/contracts/errors";
 import {
   createEditorEffectFailureEvent,
   defaultEditorExtensionDependencies,
@@ -13,51 +13,57 @@ import {
   type EditorEffectRuntime,
   type EditorEvent,
   type EditorState,
-} from '@/core/editor/state-machine'
+} from "@/core/editor/state-machine";
 import {
   createEffectCompletedTraceEntry,
   createEffectFailedTraceEntry,
   createEffectStartedTraceEntry,
   createEventDispatchedTraceEntry,
   type EditorEventLoopTraceListener,
-} from './editor-debug-trace'
-import { runEditorEffect } from './effect-registry'
+} from "./editor-debug-trace";
+import { runEditorEffect } from "./effect-registry";
 
-export type EditorEventLoopListener = (state: EditorState) => void
+export type EditorEventLoopListener = (state: EditorState) => void;
 
 export class EditorEventLoop {
-  private readonly runtime: EditorEffectRuntime
-  private readonly dependencies: EditorExtensionDependencies
-  private readonly errorReporter: ErrorReporter
-  private readonly executeEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>
-  private state: EditorState = initialEditorState
-  private readonly effectQueue: EditorEffect[] = []
-  private readonly listeners = new Set<EditorEventLoopListener>()
-  private readonly traceListeners = new Set<EditorEventLoopTraceListener>()
-  private processing = false
-  private running = false
-  private runToken = 0
-  private traceSequence = 0
+  private readonly runtime: EditorEffectRuntime;
+  private readonly dependencies: EditorExtensionDependencies;
+  private readonly errorReporter: ErrorReporter;
+  private readonly executeEffect: (
+    effect: EditorEffect,
+    runtime: EditorEffectRuntime,
+  ) => Promise<EditorEvent>;
+  private state: EditorState = initialEditorState;
+  private readonly effectQueue: EditorEffect[] = [];
+  private readonly listeners = new Set<EditorEventLoopListener>();
+  private readonly traceListeners = new Set<EditorEventLoopTraceListener>();
+  private processing = false;
+  private running = false;
+  private runToken = 0;
+  private traceSequence = 0;
 
   constructor(
     runtime: EditorEffectRuntime,
     dependencies: EditorExtensionDependencies,
     errorReporter: ErrorReporter,
-    executeEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent>,
+    executeEffect: (
+      effect: EditorEffect,
+      runtime: EditorEffectRuntime,
+    ) => Promise<EditorEvent>,
   ) {
-    this.runtime = runtime
-    this.dependencies = dependencies
-    this.errorReporter = errorReporter
-    this.executeEffect = executeEffect
+    this.runtime = runtime;
+    this.dependencies = dependencies;
+    this.errorReporter = errorReporter;
+    this.executeEffect = executeEffect;
   }
 
   dispatch(event: EditorEvent) {
     if (!this.running) {
-      return
+      return;
     }
 
-    const result = transitionEditorState(this.state, event, this.dependencies)
-    this.applyTransitionResult(result)
+    const result = transitionEditorState(this.state, event, this.dependencies);
+    this.applyTransitionResult(result);
     this.emitTrace(
       createEventDispatchedTraceEntry({
         sequence: this.nextTraceSequence(),
@@ -65,86 +71,88 @@ export class EditorEventLoop {
         state: this.state,
         emittedEffects: result.effects,
       }),
-    )
-    this.scheduleDrain()
+    );
+    this.scheduleDrain();
   }
 
   subscribe(listener: EditorEventLoopListener) {
-    this.listeners.add(listener)
+    this.listeners.add(listener);
 
     return {
       unsubscribe: () => {
-        this.listeners.delete(listener)
+        this.listeners.delete(listener);
       },
-    }
+    };
   }
 
   subscribeToTrace(listener: EditorEventLoopTraceListener) {
-    this.traceListeners.add(listener)
+    this.traceListeners.add(listener);
 
     return {
       unsubscribe: () => {
-        this.traceListeners.delete(listener)
+        this.traceListeners.delete(listener);
       },
-    }
+    };
   }
 
   getState() {
-    return this.state
+    return this.state;
   }
 
   start() {
     if (this.running) {
-      return
+      return;
     }
 
-    this.running = true
-    this.runToken += 1
-    this.dispatch({ type: 'session.started' })
+    this.running = true;
+    this.runToken += 1;
+    this.dispatch({ type: "session.started" });
   }
 
   stop() {
     if (!this.running && !this.processing && this.effectQueue.length === 0) {
-      return
+      return;
     }
 
-    this.running = false
-    this.runToken += 1
-    this.effectQueue.length = 0
+    this.running = false;
+    this.runToken += 1;
+    this.effectQueue.length = 0;
   }
 
-  private applyTransitionResult(result: ReturnType<typeof transitionEditorState>) {
-    this.state = result.state
+  private applyTransitionResult(
+    result: ReturnType<typeof transitionEditorState>,
+  ) {
+    this.state = result.state;
     if (result.effects.length > 0) {
-      this.effectQueue.push(...result.effects)
+      this.effectQueue.push(...result.effects);
     }
 
     for (const listener of this.listeners) {
-      listener(this.state)
+      listener(this.state);
     }
   }
 
   private scheduleDrain() {
     if (this.processing || !this.running || this.effectQueue.length === 0) {
-      return
+      return;
     }
 
-    void this.drainEffects(this.runToken)
+    void this.drainEffects(this.runToken);
   }
 
   private async drainEffects(runToken: number) {
     if (this.processing || !this.running || runToken !== this.runToken) {
-      return
+      return;
     }
 
-    this.processing = true
+    this.processing = true;
 
     try {
       while (this.running && runToken === this.runToken) {
-        const effect = this.effectQueue.shift()
+        const effect = this.effectQueue.shift();
 
         if (!effect) {
-          break
+          break;
         }
 
         this.emitTrace(
@@ -153,17 +161,21 @@ export class EditorEventLoop {
             effect,
             queueDepthAfterStart: this.effectQueue.length,
           }),
-        )
+        );
 
         try {
-          const effectEvent = await this.executeEffect(effect, this.runtime)
+          const effectEvent = await this.executeEffect(effect, this.runtime);
 
           if (!this.running || runToken !== this.runToken) {
-            break
+            break;
           }
 
-          const result = transitionEditorState(this.state, effectEvent, this.dependencies)
-          this.applyTransitionResult(result)
+          const result = transitionEditorState(
+            this.state,
+            effectEvent,
+            this.dependencies,
+          );
+          this.applyTransitionResult(result);
           this.emitTrace(
             createEffectCompletedTraceEntry({
               sequence: this.nextTraceSequence(),
@@ -172,35 +184,39 @@ export class EditorEventLoop {
               state: this.state,
               emittedEffects: result.effects,
             }),
-          )
+          );
         } catch (error: unknown) {
           if (!this.running || runToken !== this.runToken) {
-            break
+            break;
           }
 
           const appError = normalizeUnknownError(error, {
-            code: 'editor/invocation-failed',
-            fallbackMessage: 'Editor runtime invocation failed.',
+            code: "editor/invocation-failed",
+            fallbackMessage: "Editor runtime invocation failed.",
             context: [
-              { key: 'operation', value: effect.type },
-              { key: 'requestId', value: effect.requestId },
+              { key: "operation", value: effect.type },
+              { key: "requestId", value: effect.requestId },
             ],
             requestId: effect.requestId,
-          })
+          });
 
           this.errorReporter.report(appError, {
-            source: 'editor-runtime',
-            visibility: 'user',
+            source: "editor-runtime",
+            visibility: "user",
             dedupeKey: `${effect.type}:${appError.requestId ?? appError.message}`,
-          })
+          });
 
           const failureEvent = createEditorEffectFailureEvent(
             effect,
             appError,
-            'Editor runtime invocation failed.',
-          )
-          const result = transitionEditorState(this.state, failureEvent, this.dependencies)
-          this.applyTransitionResult(result)
+            "Editor runtime invocation failed.",
+          );
+          const result = transitionEditorState(
+            this.state,
+            failureEvent,
+            this.dependencies,
+          );
+          this.applyTransitionResult(result);
           this.emitTrace(
             createEffectFailedTraceEntry({
               sequence: this.nextTraceSequence(),
@@ -210,20 +226,20 @@ export class EditorEventLoop {
               state: this.state,
               emittedEffects: result.effects,
             }),
-          )
+          );
         }
       }
     } finally {
-      this.processing = false
+      this.processing = false;
       if (this.running && this.effectQueue.length > 0) {
-        this.scheduleDrain()
+        this.scheduleDrain();
       }
     }
   }
 
   private nextTraceSequence() {
-    this.traceSequence += 1
-    return this.traceSequence
+    this.traceSequence += 1;
+    return this.traceSequence;
   }
 
   private emitTrace(
@@ -235,24 +251,24 @@ export class EditorEventLoop {
     >,
   ) {
     if (this.traceListeners.size === 0) {
-      return
+      return;
     }
 
     for (const listener of this.traceListeners) {
       try {
-        listener(entry)
+        listener(entry);
       } catch (error: unknown) {
         const appError = normalizeUnknownError(error, {
-          code: 'app/unknown',
-          fallbackMessage: 'Editor debug trace listener failed.',
-          context: [{ key: 'traceKind', value: entry.kind }],
-        })
+          code: "app/unknown",
+          fallbackMessage: "Editor debug trace listener failed.",
+          context: [{ key: "traceKind", value: entry.kind }],
+        });
 
         this.errorReporter.report(appError, {
-          source: 'editor-runtime',
-          visibility: 'developer',
+          source: "editor-runtime",
+          visibility: "developer",
           dedupeKey: `debug-trace:${entry.kind}:${appError.message}`,
-        })
+        });
       }
     }
   }
@@ -261,8 +277,16 @@ export class EditorEventLoop {
 export function createEditorEventLoop(
   runtime: EditorEffectRuntime,
   errorReporter: ErrorReporter = createConsoleErrorReporter(),
-  executeEffect: (effect: EditorEffect, runtime: EditorEffectRuntime) => Promise<EditorEvent> = runEditorEffect,
+  executeEffect: (
+    effect: EditorEffect,
+    runtime: EditorEffectRuntime,
+  ) => Promise<EditorEvent> = runEditorEffect,
   dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
 ) {
-  return new EditorEventLoop(runtime, dependencies, errorReporter, executeEffect)
+  return new EditorEventLoop(
+    runtime,
+    dependencies,
+    errorReporter,
+    executeEffect,
+  );
 }

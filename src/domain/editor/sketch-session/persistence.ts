@@ -2,9 +2,9 @@ import type {
   PersistedSketchDraftSession,
   PersistedSketchHistoryCursor,
   PersistedSketchHistoryOperation,
-} from '@/contracts/modeling/durable-history'
-import type { SketchSessionState } from './types'
-import { updateSketchReferenceProjection } from './references'
+} from "@/contracts/modeling/durable-history";
+import type { SketchSessionState } from "./types";
+import { updateSketchReferenceProjection } from "./references";
 
 export function persistSketchDraftSession(
   session: SketchSessionState,
@@ -16,10 +16,11 @@ export function persistSketchDraftSession(
     definition: session.definition,
     fullDefinition: session.fullDefinition,
     historyCursor: session.historyCursor as PersistedSketchHistoryCursor,
-    historyOperations: session.historyOperations as PersistedSketchHistoryOperation[],
+    historyOperations:
+      session.historyOperations as PersistedSketchHistoryOperation[],
     sequence: session.sequence,
     commitRequest: session.commitRequest,
-  }
+  };
 }
 
 export function restorePersistedSketchDraftSession(
@@ -37,7 +38,7 @@ export function restorePersistedSketchDraftSession(
     historyCursor: structuredClone(session.historyCursor),
     historyOperations: structuredClone(session.historyOperations),
     activeTool: null,
-    status: 'idle',
+    status: "idle",
     constructionTargetPicking: false,
     referenceTargetPicking: false,
     constructionModifierActive: false,
@@ -62,8 +63,7 @@ export function restorePersistedSketchDraftSession(
     projectionDiagnostics: [],
     commitRequest: structuredClone(session.commitRequest),
     validationMessage: null,
-  }
+  };
 
-  return updateSketchReferenceProjection(restored, [], [])
+  return updateSketchReferenceProjection(restored, [], []);
 }
-

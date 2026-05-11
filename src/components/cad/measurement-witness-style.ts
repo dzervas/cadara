@@ -1,19 +1,19 @@
 export interface MeasurementWitnessLineStyle {
-  color: number
-  opacity: number
-  lineWidth: number
+  color: number;
+  opacity: number;
+  lineWidth: number;
 }
 
 export interface MeasurementWitnessMarkerStyle {
-  color: number
-  opacity: number
-  scale: number
+  color: number;
+  opacity: number;
+  scale: number;
 }
 
 export interface MeasurementWitnessStyleConfig {
-  core: MeasurementWitnessLineStyle
-  halo: MeasurementWitnessLineStyle
-  marker: MeasurementWitnessMarkerStyle
+  core: MeasurementWitnessLineStyle;
+  halo: MeasurementWitnessLineStyle;
+  marker: MeasurementWitnessMarkerStyle;
 }
 
 export function getMeasurementWitnessStyleConfig(): MeasurementWitnessStyleConfig {
@@ -33,5 +33,5 @@ export function getMeasurementWitnessStyleConfig(): MeasurementWitnessStyleConfi
       opacity: 0.92,
       scale: 1.6,
     },
-  }
+  };
 }

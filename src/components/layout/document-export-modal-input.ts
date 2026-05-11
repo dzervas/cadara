@@ -1,5 +1,5 @@
-import type { ModelingExportDocumentInput } from '@/domain/modeling/modeling-service'
-import type { ObjectExportModalState } from '@/domain/export/object-export-state'
+import type { ModelingExportDocumentInput } from "@/domain/modeling/modeling-service";
+import type { ObjectExportModalState } from "@/domain/export/object-export-state";
 
 export function buildDocumentExportModalInput(
   target: ObjectExportModalState,
@@ -12,5 +12,5 @@ export function buildDocumentExportModalInput(
     targetLabel: target.label,
     format,
     options,
-  }
+  };
 }

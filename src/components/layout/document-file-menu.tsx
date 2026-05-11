@@ -1,48 +1,60 @@
-import { useRef, type ChangeEvent, type ReactElement } from 'react'
-import { ActionIcon, Button, Group, Menu, Modal, Stack, Text, Tooltip } from '@mantine/core'
+import { useRef, type ChangeEvent, type ReactElement } from "react";
+import {
+  ActionIcon,
+  Button,
+  Group,
+  Menu,
+  Modal,
+  Stack,
+  Text,
+  Tooltip,
+} from "@mantine/core";
 
 import {
   DOCUMENT_FILE_MENU_ITEMS,
   getDocumentFileMenuCommand,
   type DocumentFileMenuItemId,
-} from '@/components/layout/document-file-menu-model'
-import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
-import { WorkbenchIcon, type WorkbenchIconName } from '@/components/ui/workbench-icon'
+} from "@/components/layout/document-file-menu-model";
+import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
+import {
+  WorkbenchIcon,
+  type WorkbenchIconName,
+} from "@/components/ui/workbench-icon";
 
 export const OPEN_COPY_DOCUMENT_DESCRIPTION =
-  'Choose a .cadara file; CADara opens it in a new tab, and future changes stay in browser storage until you save again.'
+  "Choose a .cadara file; CADara opens it in a new tab, and future changes stay in browser storage until you save again.";
 export const OPEN_LINKED_DOCUMENT_DESCRIPTION =
-  'Choose a .cadara file; CADara opens it in a new tab and keeps future changes saving to that same file on your computer.'
+  "Choose a .cadara file; CADara opens it in a new tab and keeps future changes saving to that same file on your computer.";
 export const DOWNLOAD_COPY_DOCUMENT_DESCRIPTION =
-  'CADara downloads a portable .cadara file; future changes stay in browser storage until you save again.'
+  "CADara downloads a portable .cadara file; future changes stay in browser storage until you save again.";
 export const SAVE_LINKED_DOCUMENT_DESCRIPTION =
-  'Choose where to save; CADara writes this document there and keeps future changes saving to that same file on your computer.'
+  "Choose where to save; CADara writes this document there and keeps future changes saving to that same file on your computer.";
 export const BROWSER_STORAGE_WARNING_TOOLTIP =
-  "The data are currently saved within the browser, which might result in data loss. Please use the local file functionality to make sure that all changes are saved on your computer's disk so you can back them up"
+  "The data are currently saved within the browser, which might result in data loss. Please use the local file functionality to make sure that all changes are saved on your computer's disk so you can back them up";
 
 function BrowserStorageWarningTooltipLabel() {
   return (
     <span className="block max-w-64 whitespace-normal break-words text-xs leading-relaxed text-[var(--workbench-tooltip-description)]">
       {BROWSER_STORAGE_WARNING_TOOLTIP}
     </span>
-  )
+  );
 }
 
 interface DocumentFileMenuHandlers {
-  onNewDocument: () => void
-  onOpenDocument: () => void
-  onSaveDocumentAs: () => void
+  onNewDocument: () => void;
+  onOpenDocument: () => void;
+  onSaveDocumentAs: () => void;
 }
 
 interface DocumentFileMenuProps extends DocumentFileMenuHandlers {
-  defaultOpened?: boolean
-  showBrowserStorageWarning?: boolean
+  defaultOpened?: boolean;
+  showBrowserStorageWarning?: boolean;
   /**
    * Custom Menu.Target trigger. When provided, the file menu opens from this element
    * instead of the default file ActionIcon. Used by the floating toolbar to attach the
    * file menu to the spark-orange logo.
    */
-  trigger?: ReactElement
+  trigger?: ReactElement;
 }
 
 export function DocumentFileMenu({
@@ -55,17 +67,17 @@ export function DocumentFileMenu({
 }: DocumentFileMenuProps) {
   const handleMenuItemSelect = (itemId: DocumentFileMenuItemId) => {
     switch (getDocumentFileMenuCommand(itemId)) {
-      case 'newDocument':
-        onNewDocument()
-        return
-      case 'openDocument':
-        onOpenDocument()
-        return
-      case 'saveDocumentAs':
-        onSaveDocumentAs()
-        return
+      case "newDocument":
+        onNewDocument();
+        return;
+      case "openDocument":
+        onOpenDocument();
+        return;
+      case "saveDocumentAs":
+        onSaveDocumentAs();
+        return;
     }
-  }
+  };
 
   return (
     <>
@@ -102,15 +114,17 @@ export function DocumentFileMenu({
           <Menu.Dropdown
             aria-label="Document file menu"
             style={{
-              backgroundColor: 'var(--workbench-shell-overlay-strong)',
-              borderColor: 'var(--workbench-shell-border)',
-              boxShadow: 'var(--workbench-panel-shadow)',
+              backgroundColor: "var(--workbench-shell-overlay-strong)",
+              borderColor: "var(--workbench-shell-border)",
+              boxShadow: "var(--workbench-panel-shadow)",
             }}
           >
             {DOCUMENT_FILE_MENU_ITEMS.map((item) => (
               <Menu.Item
                 key={item.id}
-                leftSection={<WorkbenchIcon name={item.icon} className="h-4 w-4" />}
+                leftSection={
+                  <WorkbenchIcon name={item.icon} className="h-4 w-4" />
+                }
                 onClick={() => handleMenuItemSelect(item.id)}
               >
                 {item.label}
@@ -126,8 +140,8 @@ export function DocumentFileMenu({
               className="flex h-6 w-6 items-center justify-center rounded text-[var(--workbench-shell-warning-text)]"
               data-workbench-browser-storage-warning
               style={{
-                backgroundColor: 'var(--workbench-shell-warning-surface)',
-                border: '1px solid var(--workbench-shell-warning-border)',
+                backgroundColor: "var(--workbench-shell-warning-surface)",
+                border: "1px solid var(--workbench-shell-warning-border)",
               }}
             >
               <WorkbenchIcon name="warning" className="h-3.5 w-3.5" />
@@ -136,15 +150,15 @@ export function DocumentFileMenu({
         ) : null}
       </div>
     </>
-  )
+  );
 }
 
 interface OpenDocumentModalProps {
-  opened: boolean
-  withinPortal?: boolean
-  onClose: () => void
-  onOpenCopy: (file: File) => void
-  onOpenLinked: () => void
+  opened: boolean;
+  withinPortal?: boolean;
+  onClose: () => void;
+  onOpenCopy: (file: File) => void;
+  onOpenLinked: () => void;
 }
 
 export function OpenDocumentModal({
@@ -154,19 +168,19 @@ export function OpenDocumentModal({
   onOpenCopy,
   onOpenLinked,
 }: OpenDocumentModalProps) {
-  const importInputRef = useRef<HTMLInputElement | null>(null)
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const openImportPicker = () => {
-    importInputRef.current?.click()
-  }
+    importInputRef.current?.click();
+  };
 
   const handleImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
 
     if (file) {
-      onOpenCopy(file)
+      onOpenCopy(file);
     }
-  }
+  };
 
   return (
     <Modal
@@ -200,15 +214,15 @@ export function OpenDocumentModal({
         onChange={handleImportFileChange}
       />
     </Modal>
-  )
+  );
 }
 
 interface SaveAsDocumentModalProps {
-  opened: boolean
-  withinPortal?: boolean
-  onClose: () => void
-  onDownloadCopy: () => void
-  onSaveLinked: () => void
+  opened: boolean;
+  withinPortal?: boolean;
+  onClose: () => void;
+  onDownloadCopy: () => void;
+  onSaveLinked: () => void;
 }
 
 export function SaveAsDocumentModal({
@@ -242,14 +256,14 @@ export function SaveAsDocumentModal({
         />
       </Stack>
     </Modal>
-  )
+  );
 }
 
 interface DocumentChoiceButtonProps {
-  label: string
-  description: string
-  icon: WorkbenchIconName
-  onClick: () => void
+  label: string;
+  description: string;
+  icon: WorkbenchIconName;
+  onClick: () => void;
 }
 
 function DocumentChoiceButton({
@@ -270,25 +284,30 @@ function DocumentChoiceButton({
       onClick={onClick}
       styles={{
         inner: {
-          justifyContent: 'flex-start',
-          width: '100%',
+          justifyContent: "flex-start",
+          width: "100%",
         },
         label: {
           minWidth: 0,
-          overflow: 'visible',
-          textOverflow: 'clip',
-          whiteSpace: 'normal',
-          width: '100%',
+          overflow: "visible",
+          textOverflow: "clip",
+          whiteSpace: "normal",
+          width: "100%",
         },
         root: {
-          textAlign: 'left',
+          textAlign: "left",
         },
       }}
     >
       <Group gap="sm" wrap="nowrap" align="flex-start">
         <WorkbenchIcon name={icon} className="mt-0.5 h-4 w-4 shrink-0" />
         <span className="grid min-w-0 flex-1 gap-1 text-left">
-          <Text component="span" size="sm" fw={600} c="var(--workbench-shell-text)">
+          <Text
+            component="span"
+            size="sm"
+            fw={600}
+            c="var(--workbench-shell-text)"
+          >
             {label}
           </Text>
           <Text
@@ -302,5 +321,5 @@ function DocumentChoiceButton({
         </span>
       </Group>
     </Button>
-  )
+  );
 }

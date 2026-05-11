@@ -1,0 +1,8 @@
+dist
+build
+coverage
+node_modules
+occ-native-shims
+.claude
+.codex
+openspec

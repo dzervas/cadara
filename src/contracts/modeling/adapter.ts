@@ -1,10 +1,10 @@
-import type { ExportCapabilities } from '@/contracts/export/capabilities'
-import type { DocumentExportDiagnostic } from '@/contracts/modeling/export'
-import type { RevisionId } from '@/contracts/shared/ids'
+import type { ExportCapabilities } from "@/contracts/export/capabilities";
+import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
+import type { RevisionId } from "@/contracts/shared/ids";
 import type {
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
-} from '@/contracts/solver/schema'
+} from "@/contracts/solver/schema";
 import type {
   CommitSketchRequest,
   CommitSketchResponse,
@@ -37,12 +37,12 @@ import type {
   UpdateFeatureRequest,
   UpdateFeatureResponse,
   ModelingDiagnostic,
-} from '@/contracts/modeling/schema'
-import type { AuthoredModelDocument as AuthoredDocument } from '@/contracts/modeling/authored-document'
-import type { GeometryAssetHash } from '@/contracts/modeling/geometry-assets'
+} from "@/contracts/modeling/schema";
+import type { AuthoredModelDocument as AuthoredDocument } from "@/contracts/modeling/authored-document";
+import type { GeometryAssetHash } from "@/contracts/modeling/geometry-assets";
 
 export interface GeometryAssetResolver {
-  getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>
+  getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>;
 }
 
 /**
@@ -53,55 +53,79 @@ export interface GeometryAssetResolver {
  */
 export interface ModelingKernelAdapter {
   /** Updates the requested viewport snapshot tessellation tier when supported. */
-  setSnapshotLodTier?(tierId: 'startup' | 'normal' | 'fine'): boolean
+  setSnapshotLodTier?(tierId: "startup" | "normal" | "fine"): boolean;
   /** Rehydrates kernel runtime state from a repository-authored document when supported. */
   restoreAuthoredModelDocument?(
     document: AuthoredDocument,
     diagnostics?: readonly ModelingDiagnostic[],
     assetResolver?: GeometryAssetResolver,
-  ): Promise<void>
+  ): Promise<void>;
   /** Rebuilds an authored document for validation without requiring a viewport snapshot. */
   validateAuthoredModelDocument?(
     document: AuthoredDocument,
     diagnostics?: readonly ModelingDiagnostic[],
     assetResolver?: GeometryAssetResolver,
-  ): Promise<void>
+  ): Promise<void>;
   /** Exports the complete authored document state, including history after the active cursor. */
-  exportAuthoredModelDocument?(documentId: AuthoredDocument['documentId']): Promise<AuthoredDocument>
+  exportAuthoredModelDocument?(
+    documentId: AuthoredDocument["documentId"],
+  ): Promise<AuthoredDocument>;
   /** Returns the authoritative typed snapshot for the requested document. */
-  getDocumentSnapshot(request: GetDocumentSnapshotRequest): Promise<GetDocumentSnapshotResponse>
+  getDocumentSnapshot(
+    request: GetDocumentSnapshotRequest,
+  ): Promise<GetDocumentSnapshotResponse>;
   /** Commits a durable sketch definition against an explicit base revision. */
-  commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse>
+  commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse>;
   /** Projects active-sketch external references against the requested document revision. */
   projectSketchExternalReferences(
     request: ProjectSketchExternalReferencesRequest,
-  ): Promise<ProjectSketchExternalReferencesResponse>
+  ): Promise<ProjectSketchExternalReferencesResponse>;
   /** Creates a new durable feature or rejects the submitted definition explicitly. */
-  createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse>
+  createFeature(request: CreateFeatureRequest): Promise<CreateFeatureResponse>;
   /** Updates an existing durable feature or rejects the submitted definition explicitly. */
-  updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse>
+  updateFeature(request: UpdateFeatureRequest): Promise<UpdateFeatureResponse>;
   /** Mutates authored replay suppression state for one committed feature. */
-  setFeatureSuppression(request: SetFeatureSuppressionRequest): Promise<SetFeatureSuppressionResponse>
+  setFeatureSuppression(
+    request: SetFeatureSuppressionRequest,
+  ): Promise<SetFeatureSuppressionResponse>;
   /** Deletes an existing durable feature from the document. */
-  deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse>
+  deleteFeature(request: DeleteFeatureRequest): Promise<DeleteFeatureResponse>;
   /** Deletes a supported durable document history or object target from the document. */
-  deleteTarget(request: DeleteDocumentTargetRequest): Promise<DeleteDocumentTargetResponse>
+  deleteTarget(
+    request: DeleteDocumentTargetRequest,
+  ): Promise<DeleteDocumentTargetResponse>;
   /** Renames an existing durable body without changing its topology. */
-  renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>
+  renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>;
   /** Reorders an existing durable feature within the document feature list. */
-  reorderFeature(request: ReorderFeatureRequest): Promise<ReorderFeatureResponse>
+  reorderFeature(
+    request: ReorderFeatureRequest,
+  ): Promise<ReorderFeatureResponse>;
   /** Reorders an existing durable sketch or feature within authored document history. */
-  reorderDocumentHistory(request: ReorderDocumentHistoryRequest): Promise<ReorderDocumentHistoryResponse>
+  reorderDocumentHistory(
+    request: ReorderDocumentHistoryRequest,
+  ): Promise<ReorderDocumentHistoryResponse>;
   /** Moves the document feature cursor without deleting durable feature records. */
-  setFeatureCursor(request: SetFeatureCursorRequest): Promise<SetFeatureCursorResponse>
+  setFeatureCursor(
+    request: SetFeatureCursorRequest,
+  ): Promise<SetFeatureCursorResponse>;
   /** Adds a durable document variable record after validating its raw expression text. */
-  addDocumentVariable(request: AddDocumentVariableRequest): Promise<AddDocumentVariableResponse>
+  addDocumentVariable(
+    request: AddDocumentVariableRequest,
+  ): Promise<AddDocumentVariableResponse>;
   /** Updates a durable document variable record after validating its raw expression text. */
-  updateDocumentVariable(request: UpdateDocumentVariableRequest): Promise<UpdateDocumentVariableResponse>
+  updateDocumentVariable(
+    request: UpdateDocumentVariableRequest,
+  ): Promise<UpdateDocumentVariableResponse>;
   /** Evaluates a transient preview for a typed feature definition. */
-  evaluatePreview(request: EvaluatePreviewRequest): Promise<EvaluatePreviewResponse>
+  evaluatePreview(
+    request: EvaluatePreviewRequest,
+  ): Promise<EvaluatePreviewResponse>;
   /** Returns capabilities for exporting document geometry at the requested revision. */
-  getExportCapabilities(baseRevisionId: RevisionId): Promise<ExportCapabilities | DocumentExportDiagnostic>
+  getExportCapabilities(
+    baseRevisionId: RevisionId,
+  ): Promise<ExportCapabilities | DocumentExportDiagnostic>;
   /** Resolves one durable reference without silently remapping invalid targets. */
-  resolveReference(request: ResolveReferenceRequest): Promise<ResolveReferenceResponse>
+  resolveReference(
+    request: ResolveReferenceRequest,
+  ): Promise<ResolveReferenceResponse>;
 }

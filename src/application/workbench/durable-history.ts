@@ -1,93 +1,99 @@
 import type {
   DurableHistoryAvailability,
   PersistedSketchDraftSession,
-} from '@/contracts/modeling/durable-history'
-import type { DocumentId } from '@/contracts/shared/ids'
-import type { WorkspaceSnapshot } from '@/contracts/modeling/schema'
-import type { SketchSessionState } from '@/domain/editor/sketch-session'
-import { persistSketchDraftSession, restorePersistedSketchDraftSession } from '@/domain/editor/sketch-session/persistence'
-import type { ModelingService } from '@/domain/modeling/modeling-service'
+} from "@/contracts/modeling/durable-history";
+import type { DocumentId } from "@/contracts/shared/ids";
+import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import {
+  persistSketchDraftSession,
+  restorePersistedSketchDraftSession,
+} from "@/domain/editor/sketch-session/persistence";
+import type { ModelingService } from "@/domain/modeling/modeling-service";
 import type {
   DocumentRepository,
   DocumentRepositoryMetadata,
-} from '@/domain/modeling/document-repository'
+} from "@/domain/modeling/document-repository";
 
-export type DurableHistoryContext = 'document' | 'sketch'
+export type DurableHistoryContext = "document" | "sketch";
 
 export type DurableHistoryActionResult =
   | {
-      context: 'document'
-      snapshot: WorkspaceSnapshot
-      availability: DurableHistoryAvailability
+      context: "document";
+      snapshot: WorkspaceSnapshot;
+      availability: DurableHistoryAvailability;
     }
   | {
-      context: 'sketch'
-      session: SketchSessionState
-      availability: DurableHistoryAvailability
-    }
+      context: "sketch";
+      session: SketchSessionState;
+      availability: DurableHistoryAvailability;
+    };
 
 export interface DurableHistoryService {
   getAvailability(input: {
-    documentId: DocumentId
-    sketchSession: SketchSessionState | null
-  }): Promise<DurableHistoryAvailability>
+    documentId: DocumentId;
+    sketchSession: SketchSessionState | null;
+  }): Promise<DurableHistoryAvailability>;
   undo(input: {
-    documentId: DocumentId
-    sketchSession: SketchSessionState | null
-  }): Promise<DurableHistoryActionResult | null>
+    documentId: DocumentId;
+    sketchSession: SketchSessionState | null;
+  }): Promise<DurableHistoryActionResult | null>;
   redo(input: {
-    documentId: DocumentId
-    sketchSession: SketchSessionState | null
-  }): Promise<DurableHistoryActionResult | null>
+    documentId: DocumentId;
+    sketchSession: SketchSessionState | null;
+  }): Promise<DurableHistoryActionResult | null>;
   restoreSketchDraft(input: {
-    documentId: DocumentId
-    session: SketchSessionState
-  }): Promise<SketchSessionState | null>
+    documentId: DocumentId;
+    session: SketchSessionState;
+  }): Promise<SketchSessionState | null>;
   syncSketchDraft(input: {
-    documentId: DocumentId
-    session: SketchSessionState
-  }): Promise<DurableHistoryAvailability>
+    documentId: DocumentId;
+    session: SketchSessionState;
+  }): Promise<DurableHistoryAvailability>;
   clearSketchDraft(input: {
-    documentId: DocumentId
-    draftKey: string
-  }): Promise<void>
-  getSketchDraftKey(session: SketchSessionState): string
+    documentId: DocumentId;
+    draftKey: string;
+  }): Promise<void>;
+  getSketchDraftKey(session: SketchSessionState): string;
 }
 
 export function createDurableHistoryService(input: {
-  documentRepository: DocumentRepository | null
-  modelingService: ModelingService
+  documentRepository: DocumentRepository | null;
+  modelingService: ModelingService;
 }): DurableHistoryService {
-  const { documentRepository, modelingService } = input
-  const draftAvailabilityCache = new Map<string, {
-    sessionHash: string
-    availability: DurableHistoryAvailability
-  }>()
+  const { documentRepository, modelingService } = input;
+  const draftAvailabilityCache = new Map<
+    string,
+    {
+      sessionHash: string;
+      availability: DurableHistoryAvailability;
+    }
+  >();
 
   function getSketchDraftKey(session: SketchSessionState) {
     if (session.sketchId) {
-      return `sketch:${session.sketchId}`
+      return `sketch:${session.sketchId}`;
     }
 
-    const support = session.plane.support
+    const support = session.plane.support;
     switch (support.kind) {
-      case 'construction':
-        return `new-sketch:construction:${support.constructionId}`
-      case 'face':
-        return `new-sketch:face:${support.faceId}`
+      case "construction":
+        return `new-sketch:construction:${support.constructionId}`;
+      case "face":
+        return `new-sketch:face:${support.faceId}`;
     }
   }
 
   function createDraftCacheKey(documentId: DocumentId, draftKey: string) {
-    return `${documentId}:${draftKey}`
+    return `${documentId}:${draftKey}`;
   }
 
   function getPersistedSessionHash(session: PersistedSketchDraftSession) {
-    return `${session.sketchId}:${session.sequence}:${session.historyCursor.kind === 'item' ? session.historyCursor.itemId : 'empty'}`
+    return `${session.sketchId}:${session.sequence}:${session.historyCursor.kind === "item" ? session.historyCursor.itemId : "empty"}`;
   }
 
   function getSketchSessionHash(session: SketchSessionState) {
-    return `${session.sketchId}:${session.sequence}:${session.historyCursor.kind === 'item' ? session.historyCursor.itemId : 'empty'}`
+    return `${session.sketchId}:${session.sequence}:${session.historyCursor.kind === "item" ? session.historyCursor.itemId : "empty"}`;
   }
 
   function setDraftAvailability(
@@ -99,61 +105,87 @@ export function createDurableHistoryService(input: {
     draftAvailabilityCache.set(createDraftCacheKey(documentId, draftKey), {
       sessionHash,
       availability,
-    })
+    });
   }
 
   function clearDraftAvailability(documentId: DocumentId, draftKey: string) {
-    draftAvailabilityCache.delete(createDraftCacheKey(documentId, draftKey))
+    draftAvailabilityCache.delete(createDraftCacheKey(documentId, draftKey));
   }
 
-  function sameRepositoryHeads(left: readonly string[], right: readonly string[]) {
-    return left.length === right.length
-      && [...left].sort().every((head, index) => head === [...right].sort()[index])
+  function sameRepositoryHeads(
+    left: readonly string[],
+    right: readonly string[],
+  ) {
+    return (
+      left.length === right.length &&
+      [...left].sort().every((head, index) => head === [...right].sort()[index])
+    );
   }
 
   function repositoryChangeMatches(
-    event: Parameters<ModelingService['subscribeToDocumentChanges']>[0] extends (event: infer TEvent) => void ? TEvent : never,
-    metadata: Pick<DocumentRepositoryMetadata, 'documentId' | 'heads' | 'source'>,
+    event: Parameters<
+      ModelingService["subscribeToDocumentChanges"]
+    >[0] extends (event: infer TEvent) => void
+      ? TEvent
+      : never,
+    metadata: Pick<
+      DocumentRepositoryMetadata,
+      "documentId" | "heads" | "source"
+    >,
   ) {
-    return event.documentId === metadata.documentId
-      && event.metadata.source === metadata.source
-      && sameRepositoryHeads(event.metadata.heads, metadata.heads)
+    return (
+      event.documentId === metadata.documentId &&
+      event.metadata.source === metadata.source &&
+      sameRepositoryHeads(event.metadata.heads, metadata.heads)
+    );
   }
 
   function createRepositoryChangeWaiter(documentId: DocumentId) {
-    type DocumentChangeEvent = Parameters<ModelingService['subscribeToDocumentChanges']>[0] extends (event: infer TEvent) => void
+    type DocumentChangeEvent = Parameters<
+      ModelingService["subscribeToDocumentChanges"]
+    >[0] extends (event: infer TEvent) => void
       ? TEvent
-      : never
+      : never;
 
-    const seenEvents: DocumentChangeEvent[] = []
+    const seenEvents: DocumentChangeEvent[] = [];
     const pendingWaits = new Set<{
-      metadata: Pick<DocumentRepositoryMetadata, 'documentId' | 'heads' | 'source'>
-      resolve: () => void
-      reject: (error: Error) => void
-      timeoutId: ReturnType<typeof setTimeout>
-    }>()
+      metadata: Pick<
+        DocumentRepositoryMetadata,
+        "documentId" | "heads" | "source"
+      >;
+      resolve: () => void;
+      reject: (error: Error) => void;
+      timeoutId: ReturnType<typeof setTimeout>;
+    }>();
 
     const unsubscribe = modelingService.subscribeToDocumentChanges((event) => {
       if (event.documentId !== documentId) {
-        return
+        return;
       }
 
-      seenEvents.push(event)
+      seenEvents.push(event);
       for (const pending of pendingWaits) {
         if (!repositoryChangeMatches(event, pending.metadata)) {
-          continue
+          continue;
         }
 
-        clearTimeout(pending.timeoutId)
-        pendingWaits.delete(pending)
-        pending.resolve()
+        clearTimeout(pending.timeoutId);
+        pendingWaits.delete(pending);
+        pending.resolve();
       }
-    })
+    });
 
     return {
-      waitFor(metadata: Pick<DocumentRepositoryMetadata, 'documentId' | 'heads' | 'source'>) {
-        if (seenEvents.some((event) => repositoryChangeMatches(event, metadata))) {
-          return Promise.resolve()
+      waitFor(
+        metadata: Pick<
+          DocumentRepositoryMetadata,
+          "documentId" | "heads" | "source"
+        >,
+      ) {
+        if (
+          seenEvents.some((event) => repositoryChangeMatches(event, metadata))
+        ) {
+          return Promise.resolve();
         }
 
         return new Promise<void>((resolve, reject) => {
@@ -162,121 +194,128 @@ export function createDurableHistoryService(input: {
             resolve,
             reject,
             timeoutId: setTimeout(() => {
-              pendingWaits.delete(pending)
-              reject(new Error(`Timed out waiting for repository ${metadata.source} synchronization.`))
+              pendingWaits.delete(pending);
+              reject(
+                new Error(
+                  `Timed out waiting for repository ${metadata.source} synchronization.`,
+                ),
+              );
             }, 2_000),
-          }
-          pendingWaits.add(pending)
-        })
+          };
+          pendingWaits.add(pending);
+        });
       },
       dispose() {
-        unsubscribe()
+        unsubscribe();
         for (const pending of pendingWaits) {
-          clearTimeout(pending.timeoutId)
+          clearTimeout(pending.timeoutId);
         }
-        pendingWaits.clear()
+        pendingWaits.clear();
       },
-    }
+    };
   }
 
   async function getAvailability({
     documentId,
     sketchSession,
   }: {
-    documentId: DocumentId
-    sketchSession: SketchSessionState | null
+    documentId: DocumentId;
+    sketchSession: SketchSessionState | null;
   }) {
     if (!documentRepository) {
-      return { canUndo: false, canRedo: false }
+      return { canUndo: false, canRedo: false };
     }
 
     if (sketchSession) {
-      const draftKey = getSketchDraftKey(sketchSession)
-      const sessionHash = getSketchSessionHash(sketchSession)
-      const cached = draftAvailabilityCache.get(createDraftCacheKey(documentId, draftKey))
+      const draftKey = getSketchDraftKey(sketchSession);
+      const sessionHash = getSketchSessionHash(sketchSession);
+      const cached = draftAvailabilityCache.get(
+        createDraftCacheKey(documentId, draftKey),
+      );
       if (cached) {
         if (cached.sessionHash === sessionHash) {
-          return cached.availability
+          return cached.availability;
         }
 
         return {
           canUndo: true,
           canRedo: false,
-        }
+        };
       }
 
       const result = await documentRepository.getSketchDraftHistory(
         documentId,
         draftKey,
-      )
+      );
       if (result.session) {
         setDraftAvailability(
           documentId,
           draftKey,
           getPersistedSessionHash(result.session),
           result.availability,
-        )
+        );
       }
-      return result.availability
+      return result.availability;
     }
 
-    await modelingService.waitForPersistence()
-    return documentRepository.getDurableHistoryAvailability(documentId)
+    await modelingService.waitForPersistence();
+    return documentRepository.getDurableHistoryAvailability(documentId);
   }
 
   async function undo({
     documentId,
     sketchSession,
   }: {
-    documentId: DocumentId
-    sketchSession: SketchSessionState | null
+    documentId: DocumentId;
+    sketchSession: SketchSessionState | null;
   }): Promise<DurableHistoryActionResult | null> {
     if (!documentRepository) {
-      return null
+      return null;
     }
 
     if (sketchSession) {
-      const draftKey = getSketchDraftKey(sketchSession)
+      const draftKey = getSketchDraftKey(sketchSession);
       const result = await documentRepository.undoSketchDraftHistory(
         documentId,
         draftKey,
-      )
+      );
       if (result.session) {
         setDraftAvailability(
           documentId,
           draftKey,
           getPersistedSessionHash(result.session),
           result.availability,
-        )
+        );
       } else {
-        clearDraftAvailability(documentId, draftKey)
+        clearDraftAvailability(documentId, draftKey);
       }
       return result.session
         ? {
-            context: 'sketch',
+            context: "sketch",
             session: restorePersistedSketchDraftSession(result.session),
             availability: result.availability,
           }
-        : null
+        : null;
     }
 
-    await modelingService.waitForPersistence()
-    const repositoryChangeWaiter = createRepositoryChangeWaiter(documentId)
+    await modelingService.waitForPersistence();
+    const repositoryChangeWaiter = createRepositoryChangeWaiter(documentId);
     try {
-      const result = await documentRepository.undoDurableHistory(documentId)
+      const result = await documentRepository.undoDurableHistory(documentId);
       if (!result?.ok) {
-        return null
+        return null;
       }
 
-      await repositoryChangeWaiter.waitFor(result.metadata)
+      await repositoryChangeWaiter.waitFor(result.metadata);
 
       return {
-        context: 'document',
+        context: "document",
         snapshot: await modelingService.getCurrentDocumentSnapshot(),
-        availability: await documentRepository.getDurableHistoryAvailability(documentId),
-      }
+        availability:
+          await documentRepository.getDurableHistoryAvailability(documentId),
+      };
     } finally {
-      repositoryChangeWaiter.dispose()
+      repositoryChangeWaiter.dispose();
     }
   }
 
@@ -284,55 +323,56 @@ export function createDurableHistoryService(input: {
     documentId,
     sketchSession,
   }: {
-    documentId: DocumentId
-    sketchSession: SketchSessionState | null
+    documentId: DocumentId;
+    sketchSession: SketchSessionState | null;
   }): Promise<DurableHistoryActionResult | null> {
     if (!documentRepository) {
-      return null
+      return null;
     }
 
     if (sketchSession) {
-      const draftKey = getSketchDraftKey(sketchSession)
+      const draftKey = getSketchDraftKey(sketchSession);
       const result = await documentRepository.redoSketchDraftHistory(
         documentId,
         draftKey,
-      )
+      );
       if (result.session) {
         setDraftAvailability(
           documentId,
           draftKey,
           getPersistedSessionHash(result.session),
           result.availability,
-        )
+        );
       } else {
-        clearDraftAvailability(documentId, draftKey)
+        clearDraftAvailability(documentId, draftKey);
       }
       return result.session
         ? {
-            context: 'sketch',
+            context: "sketch",
             session: restorePersistedSketchDraftSession(result.session),
             availability: result.availability,
           }
-        : null
+        : null;
     }
 
-    await modelingService.waitForPersistence()
-    const repositoryChangeWaiter = createRepositoryChangeWaiter(documentId)
+    await modelingService.waitForPersistence();
+    const repositoryChangeWaiter = createRepositoryChangeWaiter(documentId);
     try {
-      const result = await documentRepository.redoDurableHistory(documentId)
+      const result = await documentRepository.redoDurableHistory(documentId);
       if (!result?.ok) {
-        return null
+        return null;
       }
 
-      await repositoryChangeWaiter.waitFor(result.metadata)
+      await repositoryChangeWaiter.waitFor(result.metadata);
 
       return {
-        context: 'document',
+        context: "document",
         snapshot: await modelingService.getCurrentDocumentSnapshot(),
-        availability: await documentRepository.getDurableHistoryAvailability(documentId),
-      }
+        availability:
+          await documentRepository.getDurableHistoryAvailability(documentId),
+      };
     } finally {
-      repositoryChangeWaiter.dispose()
+      repositoryChangeWaiter.dispose();
     }
   }
 
@@ -340,71 +380,75 @@ export function createDurableHistoryService(input: {
     documentId,
     session,
   }: {
-    documentId: DocumentId
-    session: SketchSessionState
+    documentId: DocumentId;
+    session: SketchSessionState;
   }) {
     if (!documentRepository) {
-      return null
+      return null;
     }
 
-    const draftKey = getSketchDraftKey(session)
+    const draftKey = getSketchDraftKey(session);
     const result = await documentRepository.getSketchDraftHistory(
       documentId,
       draftKey,
-    )
+    );
     if (result.session) {
       setDraftAvailability(
         documentId,
         draftKey,
         getPersistedSessionHash(result.session),
         result.availability,
-      )
+      );
     } else {
-      clearDraftAvailability(documentId, draftKey)
+      clearDraftAvailability(documentId, draftKey);
     }
-    return result.session ? restorePersistedSketchDraftSession(result.session) : null
+    return result.session
+      ? restorePersistedSketchDraftSession(result.session)
+      : null;
   }
 
   async function syncSketchDraft({
     documentId,
     session,
   }: {
-    documentId: DocumentId
-    session: SketchSessionState
+    documentId: DocumentId;
+    session: SketchSessionState;
   }) {
     if (!documentRepository) {
-      return { canUndo: false, canRedo: false }
+      return { canUndo: false, canRedo: false };
     }
 
-    const draftKey = getSketchDraftKey(session)
-    const persistedSession = persistSketchDraftSession(session)
-    const sessionHash = getPersistedSessionHash(persistedSession)
-    const cached = draftAvailabilityCache.get(createDraftCacheKey(documentId, draftKey))
+    const draftKey = getSketchDraftKey(session);
+    const persistedSession = persistSketchDraftSession(session);
+    const sessionHash = getPersistedSessionHash(persistedSession);
+    const cached = draftAvailabilityCache.get(
+      createDraftCacheKey(documentId, draftKey),
+    );
     if (cached && cached.sessionHash !== sessionHash) {
       setDraftAvailability(documentId, draftKey, sessionHash, {
         canUndo: true,
         canRedo: false,
-      })
+      });
     }
 
     const availability = await documentRepository.saveSketchDraftHistory(
       documentId,
       draftKey,
       persistedSession,
-    )
-    setDraftAvailability(documentId, draftKey, sessionHash, availability)
-    return availability
+    );
+    setDraftAvailability(documentId, draftKey, sessionHash, availability);
+    return availability;
   }
 
   async function clearSketchDraft({
     documentId,
     draftKey,
   }: {
-    documentId: DocumentId
-    draftKey: string
+    documentId: DocumentId;
+    draftKey: string;
   }) {
-    clearDraftAvailability(documentId, draftKey)
-    await documentRepository?.clearSketchDraftHistory(documentId, draftKey)
+    clearDraftAvailability(documentId, draftKey);
+    await documentRepository?.clearSketchDraftHistory(documentId, draftKey);
   }
 
   return {
@@ -415,5 +459,5 @@ export function createDurableHistoryService(input: {
     syncSketchDraft,
     clearSketchDraft,
     getSketchDraftKey,
-  }
+  };
 }

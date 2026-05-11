@@ -1,15 +1,17 @@
-import type { ReactNode } from 'react'
+import type { ReactNode } from "react";
 
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
   VIEWPORT_FLOATING_PANEL_TOP_STYLE,
-} from '@/components/cad/viewport-overlay-layout'
+} from "@/components/cad/viewport-overlay-layout";
 
 interface WorkbenchInspectorOverlayProps {
-  children: ReactNode
+  children: ReactNode;
 }
 
-export function WorkbenchInspectorOverlay({ children }: WorkbenchInspectorOverlayProps) {
+export function WorkbenchInspectorOverlay({
+  children,
+}: WorkbenchInspectorOverlayProps) {
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
       <div
@@ -22,5 +24,5 @@ export function WorkbenchInspectorOverlay({ children }: WorkbenchInspectorOverla
         {children}
       </div>
     </div>
-  )
+  );
 }

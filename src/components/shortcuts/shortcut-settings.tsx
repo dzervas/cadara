@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ActionIcon, Button, Group, Modal, ScrollArea, Table, Text } from '@mantine/core'
+import { useEffect, useMemo, useState } from "react";
+import {
+  ActionIcon,
+  Button,
+  Group,
+  Modal,
+  ScrollArea,
+  Table,
+  Text,
+} from "@mantine/core";
 
-import { WorkbenchIcon } from '@/components/ui/workbench-icon'
-import { getRecordedShortcutStep } from '@/components/shortcuts/shortcut-recording'
+import { WorkbenchIcon } from "@/components/ui/workbench-icon";
+import { getRecordedShortcutStep } from "@/components/shortcuts/shortcut-recording";
 import {
   appendShortcutRecordingStep,
   cancelShortcutRecording,
@@ -12,14 +20,17 @@ import {
   getShortcutSettingsDisplayLabel,
   setShortcutConflictState,
   startShortcutRecording,
-} from '@/components/shortcuts/shortcut-settings-model'
-import type { ShortcutCommandId } from '@/core/shortcuts/commands'
-import { createShortcutReferenceGroups } from '@/core/shortcuts/reference'
-import { useShortcuts } from '@/hooks/use-shortcuts'
-import { getToolbarActionIconStyle, toolbarActionIconClassName } from '@/theme/workbench-toolbar-styles'
+} from "@/components/shortcuts/shortcut-settings-model";
+import type { ShortcutCommandId } from "@/core/shortcuts/commands";
+import { createShortcutReferenceGroups } from "@/core/shortcuts/reference";
+import { useShortcuts } from "@/hooks/use-shortcuts";
+import {
+  getToolbarActionIconStyle,
+  toolbarActionIconClassName,
+} from "@/theme/workbench-toolbar-styles";
 
 export function ShortcutSettingsButton() {
-  const [opened, setOpened] = useState(false)
+  const [opened, setOpened] = useState(false);
 
   return (
     <>
@@ -44,59 +55,73 @@ export function ShortcutSettingsButton() {
         <ShortcutSettings />
       </Modal>
     </>
-  )
+  );
 }
 
 export function ShortcutSettings() {
-  const shortcuts = useShortcuts()
-  const [settingsState, setSettingsState] = useState(createInitialShortcutSettingsState)
-  const { conflictMessage, recordingCommandId, recordingSteps } = settingsState
+  const shortcuts = useShortcuts();
+  const [settingsState, setSettingsState] = useState(
+    createInitialShortcutSettingsState,
+  );
+  const { conflictMessage, recordingCommandId, recordingSteps } = settingsState;
   const groups = useMemo(
-    () => createShortcutReferenceGroups(shortcuts.registry, shortcuts.effectiveKeymap),
+    () =>
+      createShortcutReferenceGroups(
+        shortcuts.registry,
+        shortcuts.effectiveKeymap,
+      ),
     [shortcuts.effectiveKeymap, shortcuts.registry],
-  )
+  );
 
   useEffect(() => {
-    if (!recordingCommandId || typeof window === 'undefined') {
-      return
+    if (!recordingCommandId || typeof window === "undefined") {
+      return;
     }
 
     const handleRecordingKeyDown = (event: KeyboardEvent) => {
-      event.preventDefault()
-      event.stopPropagation()
+      event.preventDefault();
+      event.stopPropagation();
 
-      const step = getRecordedShortcutStep(event)
+      const step = getRecordedShortcutStep(event);
       if (!step) {
-        return
+        return;
       }
 
-      setSettingsState((current) => appendShortcutRecordingStep(current, step))
-    }
+      setSettingsState((current) => appendShortcutRecordingStep(current, step));
+    };
 
-    window.addEventListener('keydown', handleRecordingKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', handleRecordingKeyDown, { capture: true })
-  }, [recordingCommandId])
+    window.addEventListener("keydown", handleRecordingKeyDown, {
+      capture: true,
+    });
+    return () =>
+      window.removeEventListener("keydown", handleRecordingKeyDown, {
+        capture: true,
+      });
+  }, [recordingCommandId]);
 
   const finishRecording = (commandId: ShortcutCommandId) => {
-    const shortcut = getPendingRecordedShortcut(settingsState)
+    const shortcut = getPendingRecordedShortcut(settingsState);
     if (!shortcut) {
-      return
+      return;
     }
 
-    const conflicts = shortcuts.setCommandShortcuts(commandId, [shortcut])
-    setSettingsState((current) => completeShortcutRecording(current, conflicts))
-  }
+    const conflicts = shortcuts.setCommandShortcuts(commandId, [shortcut]);
+    setSettingsState((current) =>
+      completeShortcutRecording(current, conflicts),
+    );
+  };
 
   return (
-    <div
-      className="flex min-h-0 flex-col gap-3"
-      data-shortcut-settings
-    >
+    <div className="flex min-h-0 flex-col gap-3" data-shortcut-settings>
       <Group justify="space-between" gap="sm">
         <Text size="sm" c="dimmed">
           {shortcuts.commands.length} commands
         </Text>
-        <Button size="xs" variant="subtle" onClick={shortcuts.resetAllShortcuts}>
+        <Button
+          size="xs"
+          variant="subtle"
+          onClick={shortcuts.resetAllShortcuts}
+        >
           Reset all
         </Button>
       </Group>
@@ -107,17 +132,31 @@ export function ShortcutSettings() {
       ) : null}
       <ScrollArea.Autosize mah={520}>
         {groups.map((group) => (
-          <section key={group.category} className="mb-5" data-shortcut-reference-group={group.category}>
-            <Text size="11px" fw={600} tt="uppercase" c="var(--workbench-shell-text-dim)" mb={6} style={{ letterSpacing: '0.20em' }}>
+          <section
+            key={group.category}
+            className="mb-5"
+            data-shortcut-reference-group={group.category}
+          >
+            <Text
+              size="11px"
+              fw={600}
+              tt="uppercase"
+              c="var(--workbench-shell-text-dim)"
+              mb={6}
+              style={{ letterSpacing: "0.20em" }}
+            >
               {group.category}
             </Text>
             <Table verticalSpacing={6} horizontalSpacing="sm">
               <Table.Tbody>
                 {group.commands.map(({ command, shortcutLabel }) => {
-                  const isRecording = recordingCommandId === command.id
+                  const isRecording = recordingCommandId === command.id;
 
                   return (
-                    <Table.Tr key={command.id} data-shortcut-command={command.id}>
+                    <Table.Tr
+                      key={command.id}
+                      data-shortcut-command={command.id}
+                    >
                       <Table.Td>
                         <Text size="sm">{command.label}</Text>
                       </Table.Td>
@@ -126,7 +165,7 @@ export function ShortcutSettings() {
                           component="span"
                           size="sm"
                           ff="monospace"
-                          c={shortcutLabel ? undefined : 'dimmed'}
+                          c={shortcutLabel ? undefined : "dimmed"}
                           data-shortcut-current={command.id}
                         >
                           {getShortcutSettingsDisplayLabel({
@@ -150,7 +189,9 @@ export function ShortcutSettings() {
                               <Button
                                 size="compact-xs"
                                 variant="subtle"
-                                onClick={() => setSettingsState(cancelShortcutRecording())}
+                                onClick={() =>
+                                  setSettingsState(cancelShortcutRecording())
+                                }
                               >
                                 Cancel
                               </Button>
@@ -159,7 +200,11 @@ export function ShortcutSettings() {
                             <Button
                               size="compact-xs"
                               variant="subtle"
-                              onClick={() => setSettingsState((current) => startShortcutRecording(current, command.id))}
+                              onClick={() =>
+                                setSettingsState((current) =>
+                                  startShortcutRecording(current, command.id),
+                                )
+                              }
                             >
                               Record
                             </Button>
@@ -167,7 +212,9 @@ export function ShortcutSettings() {
                           <Button
                             size="compact-xs"
                             variant="subtle"
-                            onClick={() => shortcuts.disableCommandShortcuts(command.id)}
+                            onClick={() =>
+                              shortcuts.disableCommandShortcuts(command.id)
+                            }
                           >
                             Disable
                           </Button>
@@ -175,8 +222,12 @@ export function ShortcutSettings() {
                             size="compact-xs"
                             variant="subtle"
                             onClick={() => {
-                              const conflicts = shortcuts.resetCommandShortcuts(command.id)
-                              setSettingsState((current) => setShortcutConflictState(current, conflicts))
+                              const conflicts = shortcuts.resetCommandShortcuts(
+                                command.id,
+                              );
+                              setSettingsState((current) =>
+                                setShortcutConflictState(current, conflicts),
+                              );
                             }}
                           >
                             Reset
@@ -184,7 +235,7 @@ export function ShortcutSettings() {
                         </Group>
                       </Table.Td>
                     </Table.Tr>
-                  )
+                  );
                 })}
               </Table.Tbody>
             </Table>
@@ -192,5 +243,5 @@ export function ShortcutSettings() {
         ))}
       </ScrollArea.Autosize>
     </div>
-  )
+  );
 }

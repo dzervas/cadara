@@ -1,122 +1,144 @@
-import type { RenderableEntityRecord } from '@/contracts/render/schema'
-import type { SketchSnapshotRecord } from '@/contracts/modeling/schema'
-import type { SketchSessionState } from '@/domain/editor/sketch-session'
+import type { RenderableEntityRecord } from "@/contracts/render/schema";
+import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
+import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import {
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
-} from '@/domain/editor/sketch-session'
-import { mergeSketchRenderables, type MergedSketchRenderables } from '@/domain/editor/sketch-session-controller'
-import { getPrimitiveRefKey } from '@/core/editor/schema'
-import type { PrimitiveRef } from '@/core/editor/schema'
-import type { ViewportRenderableRecord } from '@/core/workspace/viewport-renderables'
+} from "@/domain/editor/sketch-session";
+import {
+  mergeSketchRenderables,
+  type MergedSketchRenderables,
+} from "@/domain/editor/sketch-session-controller";
+import { getPrimitiveRefKey } from "@/core/editor/schema";
+import type { PrimitiveRef } from "@/core/editor/schema";
+import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
 export interface ComposeViewportRenderablesInput {
-  snapshotRenderables: RenderableEntityRecord[]
-  snapshotSketches?: readonly SketchSnapshotRecord[]
-  previewRenderables: RenderableEntityRecord[] | null
-  sketchSession: SketchSessionState | null
-  hiddenTargetKeys: Record<string, boolean>
+  snapshotRenderables: RenderableEntityRecord[];
+  snapshotSketches?: readonly SketchSnapshotRecord[];
+  previewRenderables: RenderableEntityRecord[] | null;
+  sketchSession: SketchSessionState | null;
+  hiddenTargetKeys: Record<string, boolean>;
 }
 
 export interface ComposedViewportRenderables extends MergedSketchRenderables {
-  documentRenderables: ViewportRenderableRecord[]
+  documentRenderables: ViewportRenderableRecord[];
 }
 
 export function getHiddenTargetKeyForTarget(
   target: PrimitiveRef,
   hiddenTargetKeys: Record<string, boolean>,
 ) {
-  const targetKey = getPrimitiveRefKey(target)
+  const targetKey = getPrimitiveRefKey(target);
 
   if (hiddenTargetKeys[targetKey]) {
-    return targetKey
+    return targetKey;
   }
 
   if (
-    target.kind === 'face'
-    || target.kind === 'edge'
-    || target.kind === 'vertex'
-    || target.kind === 'loop'
+    target.kind === "face" ||
+    target.kind === "edge" ||
+    target.kind === "vertex" ||
+    target.kind === "loop"
   ) {
-    const bodyKey = getPrimitiveRefKey({ kind: 'body', bodyId: target.bodyId })
-    return hiddenTargetKeys[bodyKey] ? bodyKey : null
+    const bodyKey = getPrimitiveRefKey({ kind: "body", bodyId: target.bodyId });
+    return hiddenTargetKeys[bodyKey] ? bodyKey : null;
   }
 
   if (
-    target.kind === 'sketchEntity'
-    || target.kind === 'sketchPoint'
-    || target.kind === 'constraint'
-    || target.kind === 'dimension'
-    || target.kind === 'region'
+    target.kind === "sketchEntity" ||
+    target.kind === "sketchPoint" ||
+    target.kind === "constraint" ||
+    target.kind === "dimension" ||
+    target.kind === "region"
   ) {
-    const sketchKey = getPrimitiveRefKey({ kind: 'sketch', sketchId: target.sketchId })
-    return hiddenTargetKeys[sketchKey] ? sketchKey : null
+    const sketchKey = getPrimitiveRefKey({
+      kind: "sketch",
+      sketchId: target.sketchId,
+    });
+    return hiddenTargetKeys[sketchKey] ? sketchKey : null;
   }
 
-  return null
+  return null;
 }
 
 export function isTargetHidden(
   target: PrimitiveRef,
   hiddenTargetKeys: Record<string, boolean>,
 ) {
-  return getHiddenTargetKeyForTarget(target, hiddenTargetKeys) !== null
+  return getHiddenTargetKeyForTarget(target, hiddenTargetKeys) !== null;
 }
 
 export function composeViewportRenderables(
   input: ComposeViewportRenderablesInput,
 ): ComposedViewportRenderables {
-  const sketchConstraintDisplayById = createCommittedSketchConstraintDisplayLookup(input.snapshotSketches ?? [])
+  const sketchConstraintDisplayById =
+    createCommittedSketchConstraintDisplayLookup(input.snapshotSketches ?? []);
   const layeredRenderables = [
     ...input.snapshotRenderables.map((renderable) => ({
-      origin: 'document' as const,
+      origin: "document" as const,
       renderable,
-      sketchConstraintDisplay: getCommittedSketchConstraintDisplay(renderable, sketchConstraintDisplayById),
+      sketchConstraintDisplay: getCommittedSketchConstraintDisplay(
+        renderable,
+        sketchConstraintDisplayById,
+      ),
     })),
     ...(input.previewRenderables ?? []).map((renderable) => ({
-      origin: 'preview' as const,
+      origin: "preview" as const,
       renderable,
     })),
-  ].filter(({ renderable }) => !isTargetHidden(renderable.binding.target, input.hiddenTargetKeys))
+  ].filter(
+    ({ renderable }) =>
+      !isTargetHidden(renderable.binding.target, input.hiddenTargetKeys),
+  );
 
   const mergedRenderables = mergeSketchRenderables(
     layeredRenderables,
     input.sketchSession,
-  )
+  );
 
   return {
     ...mergedRenderables,
     documentRenderables: mergedRenderables.documentRenderables,
-  }
+  };
 }
 
-function createCommittedSketchConstraintDisplayLookup(sketches: readonly SketchSnapshotRecord[]) {
+function createCommittedSketchConstraintDisplayLookup(
+  sketches: readonly SketchSnapshotRecord[],
+) {
   return new Map(
-    sketches.map((sketch) => [
-      sketch.sketchId,
-      getSketchConstraintDisplaySummary({
-        sketchId: sketch.sketchId,
-        definition: sketch.sketch.definition,
-        solvedSnapshot: sketch.sketch.solvedSnapshot,
-      }),
-    ] as const),
-  )
+    sketches.map(
+      (sketch) =>
+        [
+          sketch.sketchId,
+          getSketchConstraintDisplaySummary({
+            sketchId: sketch.sketchId,
+            definition: sketch.sketch.definition,
+            solvedSnapshot: sketch.sketch.solvedSnapshot,
+          }),
+        ] as const,
+    ),
+  );
 }
 
 function getCommittedSketchConstraintDisplay(
   renderable: RenderableEntityRecord,
-  displayBySketchId: ReturnType<typeof createCommittedSketchConstraintDisplayLookup>,
+  displayBySketchId: ReturnType<
+    typeof createCommittedSketchConstraintDisplayLookup
+  >,
 ) {
-  const target = renderable.binding.target
+  const target = renderable.binding.target;
 
   if (
-    target.kind !== 'sketchEntity'
-    && target.kind !== 'sketchPoint'
-    && target.kind !== 'region'
+    target.kind !== "sketchEntity" &&
+    target.kind !== "sketchPoint" &&
+    target.kind !== "region"
   ) {
-    return undefined
+    return undefined;
   }
 
-  const summary = displayBySketchId.get(target.sketchId)
-  return summary ? getSketchConstraintDisplayForTarget(target, summary) : undefined
+  const summary = displayBySketchId.get(target.sketchId);
+  return summary
+    ? getSketchConstraintDisplayForTarget(target, summary)
+    : undefined;
 }

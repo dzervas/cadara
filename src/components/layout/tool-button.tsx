@@ -1,26 +1,35 @@
-import { ActionIcon, Paper, Text, Tooltip, UnstyledButton } from '@mantine/core'
+import {
+  ActionIcon,
+  Paper,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from "@mantine/core";
 
-import { ToolbarToolIcon } from '@/components/layout/toolbar-tool-icon'
-import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
-import { ShortcutHint } from '@/components/shortcuts/shortcut-hint'
-import { getToolbarToolCommandId } from '@/core/shortcuts/commands'
-import type { RegisteredToolDefinition } from '@/core/tools/tool-registry'
-import { useWorkbenchCommandHandlers } from '@/hooks/use-workbench-command-handlers'
-import { getToolbarActionIconStyle, toolbarActionIconClassName } from '@/theme/workbench-toolbar-styles'
+import { ToolbarToolIcon } from "@/components/layout/toolbar-tool-icon";
+import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
+import { ShortcutHint } from "@/components/shortcuts/shortcut-hint";
+import { getToolbarToolCommandId } from "@/core/shortcuts/commands";
+import type { RegisteredToolDefinition } from "@/core/tools/tool-registry";
+import { useWorkbenchCommandHandlers } from "@/hooks/use-workbench-command-handlers";
+import {
+  getToolbarActionIconStyle,
+  toolbarActionIconClassName,
+} from "@/theme/workbench-toolbar-styles";
 
 interface ToolButtonProps {
-  tool: RegisteredToolDefinition
-  inline?: boolean
-  onTrigger?: () => void
-  active?: boolean
-  disabled?: boolean
-  selected?: boolean
-  buttonId?: string
-  buttonRole?: string
-  buttonTabIndex?: number
-  ariaSelected?: boolean
-  onButtonFocus?: () => void
-  onButtonMouseEnter?: () => void
+  tool: RegisteredToolDefinition;
+  inline?: boolean;
+  onTrigger?: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  selected?: boolean;
+  buttonId?: string;
+  buttonRole?: string;
+  buttonTabIndex?: number;
+  ariaSelected?: boolean;
+  onButtonFocus?: () => void;
+  onButtonMouseEnter?: () => void;
 }
 
 export function ToolButton({
@@ -37,50 +46,48 @@ export function ToolButton({
   onButtonFocus,
   onButtonMouseEnter,
 }: ToolButtonProps) {
-  const { activateTool } = useWorkbenchCommandHandlers()
-  const commandId = getToolbarToolCommandId(tool.id)
-  const isSuccessAction = tool.id === 'finishSketch'
-  const isEmphasized = active || isSuccessAction || selected
+  const { activateTool } = useWorkbenchCommandHandlers();
+  const commandId = getToolbarToolCommandId(tool.id);
+  const isSuccessAction = tool.id === "finishSketch";
+  const isEmphasized = active || isSuccessAction || selected;
   const emphasisBackground = isSuccessAction
-    ? 'var(--workbench-shell-success-surface)'
+    ? "var(--workbench-shell-success-surface)"
     : isEmphasized
-      ? 'var(--workbench-shell-accent-surface)'
-      : 'transparent'
+      ? "var(--workbench-shell-accent-surface)"
+      : "transparent";
   const emphasisBorder = isSuccessAction
-    ? 'var(--workbench-shell-success-border)'
+    ? "var(--workbench-shell-success-border)"
     : isEmphasized
-      ? 'var(--workbench-shell-accent)'
-      : 'transparent'
+      ? "var(--workbench-shell-accent)"
+      : "transparent";
   const emphasisColor = isSuccessAction
-    ? 'var(--workbench-shell-success-text)'
+    ? "var(--workbench-shell-success-text)"
     : selected
-      ? 'var(--workbench-shell-accent)'
-      : 'var(--workbench-shell-text)'
+      ? "var(--workbench-shell-accent)"
+      : "var(--workbench-shell-text)";
   const controlBackground = disabled
-    ? 'var(--workbench-shell-control-surface)'
-    : emphasisBackground
-  const controlBorder = isEmphasized
-    ? emphasisBorder
-    : 'transparent'
+    ? "var(--workbench-shell-control-surface)"
+    : emphasisBackground;
+  const controlBorder = isEmphasized ? emphasisBorder : "transparent";
   const controlColor = disabled
-    ? 'var(--workbench-shell-text-dim)'
-    : emphasisColor
+    ? "var(--workbench-shell-text-dim)"
+    : emphasisColor;
   const mutedTextColor = disabled
-    ? 'var(--workbench-shell-text-dim)'
+    ? "var(--workbench-shell-text-dim)"
     : isSuccessAction
-      ? 'var(--workbench-shell-success-text)'
-      : 'var(--workbench-shell-text-muted)'
+      ? "var(--workbench-shell-success-text)"
+      : "var(--workbench-shell-text-muted)";
 
   const handleClick = () => {
     if (disabled) {
-      return
+      return;
     }
 
     void activateTool(tool.id, {
-      source: inline ? 'search' : 'toolbar',
-    })
-    onTrigger?.()
-  }
+      source: inline ? "search" : "toolbar",
+    });
+    onTrigger?.();
+  };
 
   const content = inline ? (
     <UnstyledButton
@@ -98,7 +105,7 @@ export function ToolButton({
       data-disabled={disabled || undefined}
       onFocus={onButtonFocus}
       onMouseEnter={onButtonMouseEnter}
-      style={{ display: 'block', width: '100%', minWidth: 0, maxWidth: '100%' }}
+      style={{ display: "block", width: "100%", minWidth: 0, maxWidth: "100%" }}
     >
       <Paper
         radius="md"
@@ -106,20 +113,23 @@ export function ToolButton({
         py={10}
         withBorder
         style={{
-          width: '100%',
+          width: "100%",
           minWidth: 0,
-          maxWidth: '100%',
-          boxSizing: 'border-box',
-          overflow: 'hidden',
+          maxWidth: "100%",
+          boxSizing: "border-box",
+          overflow: "hidden",
           backgroundColor: controlBackground,
           borderColor: disabled
-            ? 'var(--workbench-shell-border)'
+            ? "var(--workbench-shell-border)"
             : isEmphasized
               ? emphasisBorder
-              : 'var(--workbench-glass-border)',
+              : "var(--workbench-glass-border)",
           opacity: disabled ? 0.52 : 1,
-          boxShadow: isEmphasized ? 'var(--workbench-shell-inner-highlight)' : undefined,
-          transition: 'background-color 160ms ease-out, border-color 160ms ease-out, box-shadow 160ms ease-out',
+          boxShadow: isEmphasized
+            ? "var(--workbench-shell-inner-highlight)"
+            : undefined,
+          transition:
+            "background-color 160ms ease-out, border-color 160ms ease-out, box-shadow 160ms ease-out",
         }}
       >
         <div className="flex min-w-0 items-center gap-3">
@@ -128,8 +138,8 @@ export function ToolButton({
             withBorder
             p={8}
             style={{
-              backgroundColor: 'var(--workbench-shell-control-surface)',
-              borderColor: 'var(--workbench-shell-border)',
+              backgroundColor: "var(--workbench-shell-control-surface)",
+              borderColor: "var(--workbench-shell-border)",
               color: controlColor,
             }}
           >
@@ -137,16 +147,17 @@ export function ToolButton({
           </Paper>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center justify-between gap-3">
-              <Text size="sm" fw={500} truncate="end" style={{ color: controlColor }}>
+              <Text
+                size="sm"
+                fw={500}
+                truncate="end"
+                style={{ color: controlColor }}
+              >
                 {tool.name}
               </Text>
               <ShortcutHint commandId={commandId} />
             </div>
-            <Text
-              size="xs"
-              truncate="end"
-              style={{ color: mutedTextColor }}
-            >
+            <Text size="xs" truncate="end" style={{ color: mutedTextColor }}>
               {tool.tooltip}
             </Text>
           </div>
@@ -157,7 +168,7 @@ export function ToolButton({
     <ActionIcon
       type="button"
       onClick={handleClick}
-      variant={active ? 'light' : 'subtle'}
+      variant={active ? "light" : "subtle"}
       color="workbench"
       aria-label={tool.name}
       aria-pressed={active}
@@ -168,25 +179,36 @@ export function ToolButton({
       data-disabled={disabled || undefined}
       className={toolbarActionIconClassName}
       style={{
-        ...getToolbarActionIconStyle({ active: isEmphasized, success: isSuccessAction }),
-        '--workbench-toolbar-action-bg': controlBackground,
-        '--workbench-toolbar-action-border': controlBorder,
-        '--workbench-toolbar-action-color': controlColor,
-        cursor: disabled ? 'not-allowed' : undefined,
+        ...getToolbarActionIconStyle({
+          active: isEmphasized,
+          success: isSuccessAction,
+        }),
+        "--workbench-toolbar-action-bg": controlBackground,
+        "--workbench-toolbar-action-border": controlBorder,
+        "--workbench-toolbar-action-color": controlColor,
+        cursor: disabled ? "not-allowed" : undefined,
         opacity: disabled ? 0.46 : 1,
       }}
     >
       <ToolbarToolIcon icon={tool.icon} />
     </ActionIcon>
-  )
+  );
 
   if (inline) {
-    return content
+    return content;
   }
 
   return (
-    <Tooltip label={<ToolbarTooltipContent title={tool.name} description={tool.tooltip} commandId={commandId} />}>
+    <Tooltip
+      label={
+        <ToolbarTooltipContent
+          title={tool.name}
+          description={tool.tooltip}
+          commandId={commandId}
+        />
+      }
+    >
       {content}
     </Tooltip>
-  )
+  );
 }

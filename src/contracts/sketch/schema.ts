@@ -10,8 +10,8 @@ import type {
   SketchId,
   SketchPointId,
   SketchStyleId,
-} from '@/contracts/shared/ids'
-import type { OwnershipRecord } from '@/contracts/shared/diagnostics'
+} from "@/contracts/shared/ids";
+import type { OwnershipRecord } from "@/contracts/shared/diagnostics";
 import type {
   ConstructionRef,
   EdgeRef,
@@ -22,195 +22,200 @@ import type {
   SketchPointRef,
   SketchRef,
   VertexRef,
-} from '@/contracts/shared/references'
-import type { SketchPlaneSupportRef } from '@/contracts/shared/sketch-plane'
-import type { ReferenceImageOperationState } from '@/contracts/reference-image/schema'
+} from "@/contracts/shared/references";
+import type { SketchPlaneSupportRef } from "@/contracts/shared/sketch-plane";
+import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
 
 /**
  * Declarative sketch-space point coordinates expressed in sketch plane units.
  * The sketch definition owns this tuple; callers must not infer world-space axes.
  */
-export type SketchPoint2D = readonly [number, number]
+export type SketchPoint2D = readonly [number, number];
 
 /**
  * Versioned schema identifier for authored sketch payloads.
  */
-export type SketchSchemaVersion = 'sketch-definition/v1alpha1'
+export type SketchSchemaVersion = "sketch-definition/v1alpha1";
 
 /**
  * Versioned schema identifier for solved sketch payloads.
  */
-export type SolvedSketchSchemaVersion = 'solved-sketch/v1alpha1'
+export type SolvedSketchSchemaVersion = "solved-sketch/v1alpha1";
 
 /**
  * Current authored sketch schema version literal.
  */
-export const SKETCH_SCHEMA_VERSION: SketchSchemaVersion = 'sketch-definition/v1alpha1'
+export const SKETCH_SCHEMA_VERSION: SketchSchemaVersion =
+  "sketch-definition/v1alpha1";
 
 /**
  * Current solved sketch schema version literal.
  */
-export const SOLVED_SKETCH_SCHEMA_VERSION: SolvedSketchSchemaVersion = 'solved-sketch/v1alpha1'
+export const SOLVED_SKETCH_SCHEMA_VERSION: SolvedSketchSchemaVersion =
+  "solved-sketch/v1alpha1";
 
-export type SketchFillMode = 'none' | 'solid' | 'gradient'
-export type SketchStrokeCap = 'butt' | 'round' | 'square'
-export type SketchStrokeJoin = 'miter' | 'round' | 'bevel'
+export type SketchFillMode = "none" | "solid" | "gradient";
+export type SketchStrokeCap = "butt" | "round" | "square";
+export type SketchStrokeJoin = "miter" | "round" | "bevel";
 
-export type SketchDerivedTransformKind = 'mirror' | 'linearPattern' | 'circularPattern' | 'transform'
+export type SketchDerivedTransformKind =
+  | "mirror"
+  | "linearPattern"
+  | "circularPattern"
+  | "transform";
 export type SketchAuthoringOperationKind =
-  | 'referenceImage'
-  | 'point'
-  | 'line'
-  | 'midpointLine'
-  | 'rectangle'
-  | 'centerPointRectangle'
-  | 'alignedRectangle'
-  | 'circle'
-  | 'threePointCircle'
-  | 'centerPointArc'
-  | 'threePointArc'
-  | 'tangentArc'
-  | 'ellipse'
-  | 'ellipticalArc'
-  | 'conic'
-  | 'bezierCurve'
-  | 'inscribedPolygon'
-  | 'circumscribedPolygon'
-  | 'spline'
-  | 'controlPointSpline'
-  | 'profileText'
-  | 'constraint'
-  | 'dimension'
-  | 'construction'
-  | 'reference'
-  | 'delete'
-  | 'edit'
-  | 'derived'
-  | 'operation'
+  | "referenceImage"
+  | "point"
+  | "line"
+  | "midpointLine"
+  | "rectangle"
+  | "centerPointRectangle"
+  | "alignedRectangle"
+  | "circle"
+  | "threePointCircle"
+  | "centerPointArc"
+  | "threePointArc"
+  | "tangentArc"
+  | "ellipse"
+  | "ellipticalArc"
+  | "conic"
+  | "bezierCurve"
+  | "inscribedPolygon"
+  | "circumscribedPolygon"
+  | "spline"
+  | "controlPointSpline"
+  | "profileText"
+  | "constraint"
+  | "dimension"
+  | "construction"
+  | "reference"
+  | "delete"
+  | "edit"
+  | "derived"
+  | "operation";
 
 export type SketchAuthoringOperationMemberRef =
-  | { kind: 'point'; pointId: SketchPointId }
-  | { kind: 'entity'; entityId: SketchEntityId }
-  | { kind: 'operation'; operationId: SketchAuthoringOperationId }
-  | { kind: 'constraint'; constraintId: ConstraintId }
-  | { kind: 'dimension'; dimensionId: DimensionId }
-  | { kind: 'style'; styleId: SketchStyleId }
-  | { kind: 'derivation'; derivationId: string }
+  | { kind: "point"; pointId: SketchPointId }
+  | { kind: "entity"; entityId: SketchEntityId }
+  | { kind: "operation"; operationId: SketchAuthoringOperationId }
+  | { kind: "constraint"; constraintId: ConstraintId }
+  | { kind: "dimension"; dimensionId: DimensionId }
+  | { kind: "style"; styleId: SketchStyleId }
+  | { kind: "derivation"; derivationId: string };
 
-export type SketchAuthoringOperationOwnedState =
-  | ReferenceImageOperationState
+export type SketchAuthoringOperationOwnedState = ReferenceImageOperationState;
 
 export interface SketchAuthoringOperationGraphSnapshot {
-  points?: readonly SketchPointDefinition[]
-  entities?: readonly SketchEntityDefinition[]
-  constraints?: readonly ConstraintDefinition[]
-  dimensions?: readonly DimensionDefinition[]
-  styles?: readonly SketchStyleRecord[]
-  derivedRelationships?: readonly SketchDerivationDefinition[]
+  points?: readonly SketchPointDefinition[];
+  entities?: readonly SketchEntityDefinition[];
+  constraints?: readonly ConstraintDefinition[];
+  dimensions?: readonly DimensionDefinition[];
+  styles?: readonly SketchStyleRecord[];
+  derivedRelationships?: readonly SketchDerivationDefinition[];
 }
 
 export interface SketchAuthoringOperationTargets {
-  created?: readonly SketchAuthoringOperationMemberRef[]
-  removed?: readonly SketchAuthoringOperationMemberRef[]
-  edited?: readonly SketchAuthoringOperationMemberRef[]
+  created?: readonly SketchAuthoringOperationMemberRef[];
+  removed?: readonly SketchAuthoringOperationMemberRef[];
+  edited?: readonly SketchAuthoringOperationMemberRef[];
 }
 
 interface SketchAuthoringOperationBase {
   /** Durable sketch-local operation identity used by sketch history cursors. */
-  operationId: SketchAuthoringOperationId
+  operationId: SketchAuthoringOperationId;
   /** Human-readable row label shown in sketch-local history. */
-  label: string
+  label: string;
   /** Typed references to graph members affected by this operation. */
-  targets: SketchAuthoringOperationTargets
+  targets: SketchAuthoringOperationTargets;
   /** Metadata-only records needed to rebuild sketch-local cursor states. */
-  createdGraph?: SketchAuthoringOperationGraphSnapshot
+  createdGraph?: SketchAuthoringOperationGraphSnapshot;
   /** Metadata-only records removed by delete operations. */
-  removedGraph?: SketchAuthoringOperationGraphSnapshot
+  removedGraph?: SketchAuthoringOperationGraphSnapshot;
 }
 
 export type SketchAuthoringOperation =
   | (SketchAuthoringOperationBase & {
       /** User intent or fallback operation category. */
-      kind: 'referenceImage'
+      kind: "referenceImage";
       /** Explicit operation-local state owned outside the flat sketch graph. */
-      ownedState: SketchAuthoringOperationOwnedState
+      ownedState: SketchAuthoringOperationOwnedState;
     })
   | (SketchAuthoringOperationBase & {
       /** Edit rows may carry operation-owned state updates for existing targets. */
-      kind: 'edit'
+      kind: "edit";
       /** Optional replacement state for edited operation-owned records. */
-      ownedState?: SketchAuthoringOperationOwnedState
+      ownedState?: SketchAuthoringOperationOwnedState;
     })
   | (SketchAuthoringOperationBase & {
       /** User intent or fallback operation category. */
-      kind: Exclude<SketchAuthoringOperationKind, 'referenceImage' | 'edit'>
-      ownedState?: never
-    })
+      kind: Exclude<SketchAuthoringOperationKind, "referenceImage" | "edit">;
+      ownedState?: never;
+    });
 
 export interface SketchDerivedEntityOutput {
   /** Seed entity driving this derived output. */
-  seedEntityId: SketchEntityId
+  seedEntityId: SketchEntityId;
   /** Stable derived entity that remains selectable and renderable. */
-  outputEntityId: SketchEntityId
+  outputEntityId: SketchEntityId;
   /** Pattern or transform instance index; seed geometry is instance 0. */
-  instanceIndex: number
+  instanceIndex: number;
   /** Seed points used by `seedEntityId` in entity-defining order. */
-  seedPointIds: readonly SketchPointId[]
+  seedPointIds: readonly SketchPointId[];
   /** Stable derived output points corresponding to `seedPointIds`. */
-  outputPointIds: readonly SketchPointId[]
+  outputPointIds: readonly SketchPointId[];
 }
 
 interface SketchDerivationDefinitionBase {
   /** Durable relationship identity scoped to the containing sketch definition. */
-  derivationId: string
+  derivationId: string;
   /** Human-readable relationship label. */
-  label: string
+  label: string;
   /** Seed entities selected by the user. */
-  seedEntityIds: readonly SketchEntityId[]
+  seedEntityIds: readonly SketchEntityId[];
   /** Stable output entity and point mapping produced by this relationship. */
-  outputs: readonly SketchDerivedEntityOutput[]
+  outputs: readonly SketchDerivedEntityOutput[];
 }
 
 export type SketchDerivationDefinition =
   | (SketchDerivationDefinitionBase & {
-      kind: 'mirror'
+      kind: "mirror";
       mirrorReference: {
-        kind: 'lineEntity'
-        entityId: SketchEntityId
-      }
+        kind: "lineEntity";
+        entityId: SketchEntityId;
+      };
     })
   | (SketchDerivationDefinitionBase & {
-      kind: 'linearPattern'
-      vector: SketchPoint2D
-      instanceCount: number
+      kind: "linearPattern";
+      vector: SketchPoint2D;
+      instanceCount: number;
     })
   | (SketchDerivationDefinitionBase & {
-      kind: 'circularPattern'
-      center: SketchPoint2D
-      angleRadians: number
-      instanceCount: number
+      kind: "circularPattern";
+      center: SketchPoint2D;
+      angleRadians: number;
+      instanceCount: number;
     })
   | (SketchDerivationDefinitionBase & {
-      kind: 'transform'
-      origin: SketchPoint2D
-      translation: SketchPoint2D
-      rotationRadians: number
-      scale: number
-    })
+      kind: "transform";
+      origin: SketchPoint2D;
+      translation: SketchPoint2D;
+      rotationRadians: number;
+      scale: number;
+    });
 
 export interface SketchStyleDefinition {
-  fillMode?: SketchFillMode
-  fillColor?: string
-  gradientStartColor?: string
-  gradientEndColor?: string
-  strokeEnabled?: boolean
-  strokeColor?: string
-  strokeWidth?: number
-  strokeCap?: SketchStrokeCap
-  strokeJoin?: SketchStrokeJoin
-  strokeMiterLimit?: number
-  strokeDashSize?: number
-  strokeGapSize?: number
+  fillMode?: SketchFillMode;
+  fillColor?: string;
+  gradientStartColor?: string;
+  gradientEndColor?: string;
+  strokeEnabled?: boolean;
+  strokeColor?: string;
+  strokeWidth?: number;
+  strokeCap?: SketchStrokeCap;
+  strokeJoin?: SketchStrokeJoin;
+  strokeMiterLimit?: number;
+  strokeDashSize?: number;
+  strokeGapSize?: number;
 }
 
 /**
@@ -220,17 +225,17 @@ export interface SketchStyleDefinition {
  */
 export interface SketchPointDefinition {
   /** Durable authored point identity within the containing sketch definition. */
-  pointId: SketchPointId
+  pointId: SketchPointId;
   /** Human-readable label owned by the producer of the sketch definition. */
-  label: string
+  label: string;
   /** Durable target that must resolve to the same sketch as the containing record. */
-  target: SketchPointRef
+  target: SketchPointRef;
   /** Authored point coordinates in sketch-plane units relative to the parent sketch plane frame. */
-  position: SketchPoint2D
+  position: SketchPoint2D;
   /** True when the point is construction-only and should not participate in profile/region extraction. */
-  isConstruction: boolean
+  isConstruction: boolean;
   /** Optional local style authored directly in the sketch session. */
-  style?: SketchStyleDefinition
+  style?: SketchStyleDefinition;
 }
 
 /**
@@ -239,296 +244,296 @@ export interface SketchPointDefinition {
  */
 export type SketchEntityDefinition =
   | {
-      kind: 'lineSegment'
+      kind: "lineSegment";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Start endpoint reference. Must exist in `SketchDefinition.pointIds`. */
-      startPointId: SketchPointId
+      startPointId: SketchPointId;
       /** End endpoint reference. Must exist in `SketchDefinition.pointIds`. */
-      endPointId: SketchPointId
+      endPointId: SketchPointId;
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'point'
+      kind: "point";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the point is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Referenced point record represented by this point entity. */
-      pointId: SketchPointId
+      pointId: SketchPointId;
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'circle'
+      kind: "circle";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Center-point reference. Must exist in `SketchDefinition.pointIds`. */
-      centerPointId: SketchPointId
+      centerPointId: SketchPointId;
       /** Authored radius in sketch-plane units. Must be greater than zero. */
-      radius: number
+      radius: number;
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'arc'
+      kind: "arc";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Arc center-point reference. Must exist in `SketchDefinition.pointIds`. */
-      centerPointId: SketchPointId
+      centerPointId: SketchPointId;
       /** Arc start-point reference. Must exist in `SketchDefinition.pointIds`. */
-      startPointId: SketchPointId
+      startPointId: SketchPointId;
       /** Arc end-point reference. Must exist in `SketchDefinition.pointIds`. */
-      endPointId: SketchPointId
+      endPointId: SketchPointId;
       /** Sweep direction from start to end around `centerPointId`. */
-      sweepDirection: 'clockwise' | 'counterClockwise'
+      sweepDirection: "clockwise" | "counterClockwise";
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'spline'
+      kind: "spline";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Fit/control points defining this first-version spline curve. */
-      fitPointIds: readonly SketchPointId[]
+      fitPointIds: readonly SketchPointId[];
       /** Polynomial degree for this explicit spline representation. */
-      degree: 2 | 3
+      degree: 2 | 3;
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'ellipse'
+      kind: "ellipse";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Ellipse center-point reference. Must exist in `SketchDefinition.pointIds`. */
-      centerPointId: SketchPointId
+      centerPointId: SketchPointId;
       /** Endpoint of the major-axis radius vector. Must exist in `SketchDefinition.pointIds`. */
-      majorAxisPointId: SketchPointId
+      majorAxisPointId: SketchPointId;
       /** Authored minor radius in sketch-plane units. Must be greater than zero. */
-      minorRadius: number
+      minorRadius: number;
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'ellipticalArc'
+      kind: "ellipticalArc";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Ellipse center-point reference. Must exist in `SketchDefinition.pointIds`. */
-      centerPointId: SketchPointId
+      centerPointId: SketchPointId;
       /** Endpoint of the major-axis radius vector. Must exist in `SketchDefinition.pointIds`. */
-      majorAxisPointId: SketchPointId
+      majorAxisPointId: SketchPointId;
       /** Arc start-point reference. Must exist in `SketchDefinition.pointIds`. */
-      startPointId: SketchPointId
+      startPointId: SketchPointId;
       /** Arc end-point reference. Must exist in `SketchDefinition.pointIds`. */
-      endPointId: SketchPointId
+      endPointId: SketchPointId;
       /** Authored minor radius in sketch-plane units. Must be greater than zero. */
-      minorRadius: number
+      minorRadius: number;
       /** Sweep direction from start to end around `centerPointId`. */
-      sweepDirection: 'clockwise' | 'counterClockwise'
+      sweepDirection: "clockwise" | "counterClockwise";
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'conic'
+      kind: "conic";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Conic start-point reference. Must exist in `SketchDefinition.pointIds`. */
-      startPointId: SketchPointId
+      startPointId: SketchPointId;
       /** Conic control-point reference. Must exist in `SketchDefinition.pointIds`. */
-      controlPointId: SketchPointId
+      controlPointId: SketchPointId;
       /** Conic end-point reference. Must exist in `SketchDefinition.pointIds`. */
-      endPointId: SketchPointId
+      endPointId: SketchPointId;
       /** Positive conic weight/rho preserving the authored conic family. */
-      rho: number
+      rho: number;
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'bezierCurve'
+      kind: "bezierCurve";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Ordered Bezier control points. Quadratic curves use 3 points; cubic curves use 4. */
-      controlPointIds: readonly SketchPointId[]
+      controlPointIds: readonly SketchPointId[];
       /** Polynomial degree for this Bezier representation. */
-      degree: 2 | 3
+      degree: 2 | 3;
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
+      style?: SketchStyleDefinition;
     }
   | {
-      kind: 'profileText'
+      kind: "profileText";
       /** Durable authored entity identity within the containing sketch definition. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Durable target that must resolve to the same sketch as the containing record. */
-      target: SketchEntityRef
+      target: SketchEntityRef;
       /** True when the text is construction-only and should not generate derived regions. */
-      isConstruction: boolean
+      isConstruction: boolean;
       /** Text baseline anchor. Must exist in `SketchDefinition.pointIds`. */
-      anchorPointId: SketchPointId
+      anchorPointId: SketchPointId;
       /** Authored text content. Must contain at least one non-whitespace character. */
-      text: string
+      text: string;
       /** Text cap-height in sketch-plane units. Must be greater than zero. */
-      height: number
+      height: number;
       /** Baseline rotation in sketch-plane radians. */
-      rotationRadians: number
+      rotationRadians: number;
       /** Horizontal placement of the generated outline relative to `anchorPointId`. */
-      horizontalAlign: 'left' | 'center' | 'right'
+      horizontalAlign: "left" | "center" | "right";
       /** Vertical placement of the generated outline relative to `anchorPointId`. */
-      verticalAlign: 'baseline' | 'middle' | 'top' | 'bottom'
+      verticalAlign: "baseline" | "middle" | "top" | "bottom";
       /** Optional local style authored directly in the sketch session. */
-      style?: SketchStyleDefinition
-    }
+      style?: SketchStyleDefinition;
+    };
 
 export type LocalSketchPointConstraintOperand = {
-  kind: 'localPoint'
-  pointId: SketchPointId
-}
+  kind: "localPoint";
+  pointId: SketchPointId;
+};
 
 export type LocalSketchEntityConstraintOperand = {
-  kind: 'localEntity'
-  entityId: SketchEntityId
-}
+  kind: "localEntity";
+  entityId: SketchEntityId;
+};
 
-export type SketchDatumOperandKind = 'origin' | 'xAxis' | 'yAxis'
+export type SketchDatumOperandKind = "origin" | "xAxis" | "yAxis";
 
 export type SketchDatumConstraintOperand = {
-  kind: 'sketchDatum'
-  datum: SketchDatumOperandKind
-}
+  kind: "sketchDatum";
+  datum: SketchDatumOperandKind;
+};
 
 export type ProjectedSketchGeometryConstraintOperand = {
-  kind: 'projectedGeometry'
+  kind: "projectedGeometry";
   reference: ProjectedSketchGeometryRef & {
-    kind: NonNullable<ProjectedSketchGeometryRef['kind']>
-  }
-}
+    kind: NonNullable<ProjectedSketchGeometryRef["kind"]>;
+  };
+};
 
 export type SketchPointConstraintOperand =
   | LocalSketchPointConstraintOperand
   | SketchDatumConstraintOperand
-  | ProjectedSketchGeometryConstraintOperand
+  | ProjectedSketchGeometryConstraintOperand;
 
 export type SketchCurveConstraintOperand =
   | LocalSketchEntityConstraintOperand
   | SketchDatumConstraintOperand
-  | ProjectedSketchGeometryConstraintOperand
+  | ProjectedSketchGeometryConstraintOperand;
 
 export type ReadOnlySketchPointConstraintOperand =
   | SketchDatumConstraintOperand
-  | ProjectedSketchGeometryConstraintOperand
+  | ProjectedSketchGeometryConstraintOperand;
 
 export type ReadOnlySketchCurveConstraintOperand =
   | SketchDatumConstraintOperand
-  | ProjectedSketchGeometryConstraintOperand
+  | ProjectedSketchGeometryConstraintOperand;
 
 export type LocalCollinearTargetOperand =
   | LocalSketchPointConstraintOperand
-  | LocalSketchEntityConstraintOperand
+  | LocalSketchEntityConstraintOperand;
 
 export type DimensionLineAnnotationPlacement = {
-  kind: 'dimensionLine'
-  offset: number
-  angleRadians?: number
-}
+  kind: "dimensionLine";
+  offset: number;
+  angleRadians?: number;
+};
 
 export type DimensionAngleAnnotationPlacement = {
-  kind: 'angleArc'
-  radius: number
-  side: 'minor' | 'major'
-}
+  kind: "angleArc";
+  radius: number;
+  side: "minor" | "major";
+};
 
 export type DimensionAnnotationPlacement =
   | DimensionLineAnnotationPlacement
-  | DimensionAngleAnnotationPlacement
+  | DimensionAngleAnnotationPlacement;
 
 /**
  * Authorable fill payload for sketch styles.
  */
 export type SketchStyleFill =
-  | { kind: 'none' }
+  | { kind: "none" }
   | {
-      kind: 'solid'
-      color: string
-      opacity: number
+      kind: "solid";
+      color: string;
+      opacity: number;
     }
   | {
-      kind: 'gradient'
+      kind: "gradient";
       gradient: {
-        kind: 'linear'
-        angleRadians: number
-        startColor: string
-        startOpacity: number
-        endColor: string
-        endOpacity: number
-      }
-    }
+        kind: "linear";
+        angleRadians: number;
+        startColor: string;
+        startOpacity: number;
+        endColor: string;
+        endOpacity: number;
+      };
+    };
 
 /**
  * Authorable stroke payload for sketch styles.
  */
 export interface SketchStyleStroke {
-  color: string
-  opacity: number
-  width: number
-  lineCap: 'butt' | 'round' | 'square'
-  lineJoin: 'miter' | 'round' | 'bevel'
-  miterLimit: number
-  dashSize?: number
-  gapSize?: number
+  color: string;
+  opacity: number;
+  width: number;
+  lineCap: "butt" | "round" | "square";
+  lineJoin: "miter" | "round" | "bevel";
+  miterLimit: number;
+  dashSize?: number;
+  gapSize?: number;
 }
 
 /**
@@ -536,17 +541,17 @@ export interface SketchStyleStroke {
  */
 export interface SketchStyleRecord {
   /** Durable authored style identity within the containing sketch definition. */
-  styleId: SketchStyleId
+  styleId: SketchStyleId;
   /** Human-readable label owned by the producer of the sketch definition. */
-  label: string
+  label: string;
   /** Stable style target in the containing sketch payload. */
   target:
-    | { kind: 'entity'; entityId: SketchEntityId }
-    | { kind: 'region'; regionId: RegionId }
+    | { kind: "entity"; entityId: SketchEntityId }
+    | { kind: "region"; regionId: RegionId };
   /** Authored fill model for the style target. */
-  fill: SketchStyleFill
+  fill: SketchStyleFill;
   /** Authored stroke model for the style target. */
-  stroke: SketchStyleStroke
+  stroke: SketchStyleStroke;
 }
 
 /**
@@ -555,247 +560,247 @@ export interface SketchStyleRecord {
  */
 export type ConstraintDefinition =
   | {
-      constraintId: ConstraintId
-      kind: 'coincident'
+      constraintId: ConstraintId;
+      kind: "coincident";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two distinct point references that the solver must force to the same solved position. */
-      pointIds: readonly [SketchPointId, SketchPointId]
+      pointIds: readonly [SketchPointId, SketchPointId];
     }
   | {
-      constraintId: ConstraintId
-      kind: 'horizontal'
+      constraintId: ConstraintId;
+      kind: "horizontal";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Constrained line entity. Must exist in `SketchDefinition.entityIds`. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'coincidentProjectedPoint'
+      constraintId: ConstraintId;
+      kind: "coincidentProjectedPoint";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable point participating in the coincident relationship. */
-      point: LocalSketchPointConstraintOperand
+      point: LocalSketchPointConstraintOperand;
       /** Read-only projected or datum point target. */
-      projectedPoint: ReadOnlySketchPointConstraintOperand
+      projectedPoint: ReadOnlySketchPointConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'pointOnProjectedCurve'
+      constraintId: ConstraintId;
+      kind: "pointOnProjectedCurve";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable point constrained onto the projected curve. */
-      point: LocalSketchPointConstraintOperand
+      point: LocalSketchPointConstraintOperand;
       /** Read-only projected curve or sketch datum axis target. */
-      projectedCurve: ReadOnlySketchCurveConstraintOperand
+      projectedCurve: ReadOnlySketchCurveConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'midpoint'
+      constraintId: ConstraintId;
+      kind: "midpoint";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable point constrained to the midpoint. */
-      point: LocalSketchPointConstraintOperand
+      point: LocalSketchPointConstraintOperand;
       /** Local editable line whose solved midpoint is targeted. */
-      line: LocalSketchEntityConstraintOperand
+      line: LocalSketchEntityConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'midpointProjectedLine'
+      constraintId: ConstraintId;
+      kind: "midpointProjectedLine";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable point constrained to the projected midpoint. */
-      point: LocalSketchPointConstraintOperand
+      point: LocalSketchPointConstraintOperand;
       /** Read-only projected line or sketch datum axis whose midpoint is targeted. */
-      projectedLine: ReadOnlySketchCurveConstraintOperand
+      projectedLine: ReadOnlySketchCurveConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'pointOnCurve'
+      constraintId: ConstraintId;
+      kind: "pointOnCurve";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable point constrained onto the local curve. */
-      point: LocalSketchPointConstraintOperand
+      point: LocalSketchPointConstraintOperand;
       /** Local editable line, circle, or arc target. */
-      curve: LocalSketchEntityConstraintOperand
+      curve: LocalSketchEntityConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'collinear'
+      constraintId: ConstraintId;
+      kind: "collinear";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable point or line constrained to the reference line. */
-      target: LocalCollinearTargetOperand
+      target: LocalCollinearTargetOperand;
       /** Local editable line defining the reference infinite geometry. */
-      line: LocalSketchEntityConstraintOperand
+      line: LocalSketchEntityConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'collinearProjectedLine'
+      constraintId: ConstraintId;
+      kind: "collinearProjectedLine";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable point or line constrained to the read-only reference line. */
-      target: LocalCollinearTargetOperand
+      target: LocalCollinearTargetOperand;
       /** Read-only projected line or sketch datum axis defining the reference infinite geometry. */
-      projectedLine: ReadOnlySketchCurveConstraintOperand
+      projectedLine: ReadOnlySketchCurveConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'parallelProjectedLine'
+      constraintId: ConstraintId;
+      kind: "parallelProjectedLine";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable line entity. */
-      line: LocalSketchEntityConstraintOperand
+      line: LocalSketchEntityConstraintOperand;
       /** Read-only projected line or sketch datum axis target. */
-      projectedLine: ReadOnlySketchCurveConstraintOperand
+      projectedLine: ReadOnlySketchCurveConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'perpendicularProjectedLine'
+      constraintId: ConstraintId;
+      kind: "perpendicularProjectedLine";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable line entity. */
-      line: LocalSketchEntityConstraintOperand
+      line: LocalSketchEntityConstraintOperand;
       /** Read-only projected line or sketch datum axis target. */
-      projectedLine: ReadOnlySketchCurveConstraintOperand
+      projectedLine: ReadOnlySketchCurveConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'tangentProjectedCurve'
+      constraintId: ConstraintId;
+      kind: "tangentProjectedCurve";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable curve entity. */
-      curve: LocalSketchEntityConstraintOperand
+      curve: LocalSketchEntityConstraintOperand;
       /** Read-only projected circle or arc target. */
-      projectedCurve: ProjectedSketchGeometryConstraintOperand
+      projectedCurve: ProjectedSketchGeometryConstraintOperand;
       /** Tangency side for closed-curve relationships. */
-      relation: 'external' | 'internal'
+      relation: "external" | "internal";
     }
   | {
-      constraintId: ConstraintId
-      kind: 'tangent'
+      constraintId: ConstraintId;
+      kind: "tangent";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two local editable curve entities that must solve tangent. */
-      entityIds: readonly [SketchEntityId, SketchEntityId]
+      entityIds: readonly [SketchEntityId, SketchEntityId];
       /** Tangency side for closed-curve relationships. */
-      relation: 'external' | 'internal'
+      relation: "external" | "internal";
     }
   | {
-      constraintId: ConstraintId
-      kind: 'concentric'
+      constraintId: ConstraintId;
+      kind: "concentric";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two local editable circle or arc entities whose centers must coincide. */
-      entityIds: readonly [SketchEntityId, SketchEntityId]
+      entityIds: readonly [SketchEntityId, SketchEntityId];
     }
   | {
-      constraintId: ConstraintId
-      kind: 'concentricProjectedCurve'
+      constraintId: ConstraintId;
+      kind: "concentricProjectedCurve";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable circle or arc entity. */
-      curve: LocalSketchEntityConstraintOperand
+      curve: LocalSketchEntityConstraintOperand;
       /** Read-only projected circle or arc target. */
-      projectedCurve: ProjectedSketchGeometryConstraintOperand
+      projectedCurve: ProjectedSketchGeometryConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'normal'
+      constraintId: ConstraintId;
+      kind: "normal";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable line entity. */
-      line: LocalSketchEntityConstraintOperand
+      line: LocalSketchEntityConstraintOperand;
       /** Local editable circle or arc target. */
-      curve: LocalSketchEntityConstraintOperand
+      curve: LocalSketchEntityConstraintOperand;
       /** Local editable contact point constrained onto the curve. */
-      point: LocalSketchPointConstraintOperand
+      point: LocalSketchPointConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'normalProjectedCurve'
+      constraintId: ConstraintId;
+      kind: "normalProjectedCurve";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Local editable line entity. */
-      line: LocalSketchEntityConstraintOperand
+      line: LocalSketchEntityConstraintOperand;
       /** Read-only projected circle or arc target. */
-      projectedCurve: ProjectedSketchGeometryConstraintOperand
+      projectedCurve: ProjectedSketchGeometryConstraintOperand;
       /** Local editable contact point constrained onto the projected curve. */
-      point: LocalSketchPointConstraintOperand
+      point: LocalSketchPointConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'symmetric'
+      constraintId: ConstraintId;
+      kind: "symmetric";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two local editable points mirrored about the axis. */
-      pointIds: readonly [SketchPointId, SketchPointId]
+      pointIds: readonly [SketchPointId, SketchPointId];
       /** Local editable line used as the symmetry axis. */
-      axis: LocalSketchEntityConstraintOperand
+      axis: LocalSketchEntityConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'symmetricProjectedLine'
+      constraintId: ConstraintId;
+      kind: "symmetricProjectedLine";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two local editable points mirrored about the projected axis. */
-      pointIds: readonly [SketchPointId, SketchPointId]
+      pointIds: readonly [SketchPointId, SketchPointId];
       /** Read-only projected line or sketch datum axis used as the symmetry axis. */
-      projectedLine: ReadOnlySketchCurveConstraintOperand
+      projectedLine: ReadOnlySketchCurveConstraintOperand;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'fixPoint'
+      constraintId: ConstraintId;
+      kind: "fixPoint";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Constrained point. Must exist in `SketchDefinition.pointIds`. */
-      pointId: SketchPointId
+      pointId: SketchPointId;
       /** Requested solved position in sketch-plane units. */
-      position: SketchPoint2D
+      position: SketchPoint2D;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'angle'
+      constraintId: ConstraintId;
+      kind: "angle";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Ordered point references `[point1, point2, middlePoint]`. */
-      pointIds: readonly [SketchPointId, SketchPointId, SketchPointId]
+      pointIds: readonly [SketchPointId, SketchPointId, SketchPointId];
       /** Requested enclosed angle in radians. */
-      valueRadians: number
+      valueRadians: number;
     }
   | {
-      constraintId: ConstraintId
-      kind: 'parallel'
+      constraintId: ConstraintId;
+      kind: "parallel";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two line entities that must solve parallel. */
-      entityIds: readonly [SketchEntityId, SketchEntityId]
+      entityIds: readonly [SketchEntityId, SketchEntityId];
     }
   | {
-      constraintId: ConstraintId
-      kind: 'perpendicular'
+      constraintId: ConstraintId;
+      kind: "perpendicular";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two line entities that must solve perpendicular. */
-      entityIds: readonly [SketchEntityId, SketchEntityId]
+      entityIds: readonly [SketchEntityId, SketchEntityId];
     }
   | {
-      constraintId: ConstraintId
-      kind: 'equalLength'
+      constraintId: ConstraintId;
+      kind: "equalLength";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two line entities whose solved lengths must match. */
-      entityIds: readonly [SketchEntityId, SketchEntityId]
+      entityIds: readonly [SketchEntityId, SketchEntityId];
     }
   | {
-      constraintId: ConstraintId
-      kind: 'vertical'
+      constraintId: ConstraintId;
+      kind: "vertical";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Constrained line entity. Must exist in `SketchDefinition.entityIds`. */
-      entityId: SketchEntityId
-    }
+      entityId: SketchEntityId;
+    };
 
 /**
  * Durable authored dimension definition.
@@ -803,153 +808,159 @@ export type ConstraintDefinition =
  */
 export type DimensionDefinition =
   | {
-      dimensionId: DimensionId
-      kind: 'distance'
+      dimensionId: DimensionId;
+      kind: "distance";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Axis interpretation for `value` within the sketch-plane frame. */
-      axis: 'aligned' | 'horizontal' | 'vertical'
+      axis: "aligned" | "horizontal" | "vertical";
       /** Two referenced points whose solved separation must match `value`. */
-      pointIds: readonly [SketchPointId, SketchPointId]
+      pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested dimension value in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'pointDatumDistance'
+      dimensionId: DimensionId;
+      kind: "pointDatumDistance";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Axis interpretation for `value` within the sketch-plane frame. */
-      axis: 'aligned' | 'horizontal' | 'vertical'
+      axis: "aligned" | "horizontal" | "vertical";
       /** Local editable point referenced by the dimension. */
-      point: LocalSketchPointConstraintOperand
+      point: LocalSketchPointConstraintOperand;
       /** Sketch origin datum referenced by the dimension. */
-      datum: SketchDatumConstraintOperand
+      datum: SketchDatumConstraintOperand;
       /** Requested dimension value in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'circleRadius'
+      dimensionId: DimensionId;
+      kind: "circleRadius";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Referenced circle entity whose solved radius must match `value`. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Requested radius value in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'diameter'
+      dimensionId: DimensionId;
+      kind: "diameter";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Referenced circle or arc entity whose solved diameter must match `value`. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Requested diameter value in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'lineLength'
+      dimensionId: DimensionId;
+      kind: "lineLength";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Referenced local line segment whose solved endpoint separation must match `value`. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Requested line length in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'lineDistance'
+      dimensionId: DimensionId;
+      kind: "lineDistance";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two sketch-space line references whose perpendicular separation must match `value`. */
-      lines: readonly [SketchCurveConstraintOperand, SketchCurveConstraintOperand]
+      lines: readonly [
+        SketchCurveConstraintOperand,
+        SketchCurveConstraintOperand,
+      ];
       /** Requested perpendicular distance in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'linePointDistance'
+      dimensionId: DimensionId;
+      kind: "linePointDistance";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Sketch-space line reference. */
-      line: SketchCurveConstraintOperand
+      line: SketchCurveConstraintOperand;
       /** Sketch-space point reference. */
-      point: SketchPointConstraintOperand
+      point: SketchPointConstraintOperand;
       /** Requested perpendicular distance in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'lineAngle'
+      dimensionId: DimensionId;
+      kind: "lineAngle";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two non-parallel sketch-space line references whose enclosed angle must match `valueRadians`. */
-      lines: readonly [SketchCurveConstraintOperand, SketchCurveConstraintOperand]
+      lines: readonly [
+        SketchCurveConstraintOperand,
+        SketchCurveConstraintOperand,
+      ];
       /** Requested enclosed angle in radians. */
-      valueRadians: number
+      valueRadians: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionAngleAnnotationPlacement
+      annotationPlacement?: DimensionAngleAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'horizontalDistance'
+      dimensionId: DimensionId;
+      kind: "horizontalDistance";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two referenced points whose solved horizontal separation must match `value`. */
-      pointIds: readonly [SketchPointId, SketchPointId]
+      pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested signed horizontal distance in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'verticalDistance'
+      dimensionId: DimensionId;
+      kind: "verticalDistance";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Two referenced points whose solved vertical separation must match `value`. */
-      pointIds: readonly [SketchPointId, SketchPointId]
+      pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested signed vertical distance in sketch-plane units. */
-      value: number
+      value: number;
       /** Optional persisted sketch-plane annotation placement. */
-      annotationPlacement?: DimensionLineAnnotationPlacement
+      annotationPlacement?: DimensionLineAnnotationPlacement;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'arcStartPointCoincident'
+      dimensionId: DimensionId;
+      kind: "arcStartPointCoincident";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Referenced arc entity. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Referenced authored point that must coincide with the solved arc start point. */
-      pointId: SketchPointId
+      pointId: SketchPointId;
     }
   | {
-      dimensionId: DimensionId
-      kind: 'arcEndPointCoincident'
+      dimensionId: DimensionId;
+      kind: "arcEndPointCoincident";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** Referenced arc entity. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Referenced authored point that must coincide with the solved arc end point. */
-      pointId: SketchPointId
-    }
+      pointId: SketchPointId;
+    };
 
 /**
  * Durable authored external sketch reference definition.
@@ -958,50 +969,50 @@ export type DimensionDefinition =
 export type SketchReferenceDefinition =
   | {
       /** Durable authored reference identity within the containing sketch definition. */
-      referenceId: ReferenceId
-      kind: 'constructionPlane'
+      referenceId: ReferenceId;
+      kind: "constructionPlane";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** External construction plane driving the sketch reference frame or derived projections. */
-      source: ConstructionRef
+      source: ConstructionRef;
       /** Declared projection mode into sketch-space coordinates. */
-      projectionMode: 'coplanar'
+      projectionMode: "coplanar";
     }
   | {
       /** Durable authored reference identity within the containing sketch definition. */
-      referenceId: ReferenceId
-      kind: 'modelReference'
+      referenceId: ReferenceId;
+      kind: "modelReference";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** External model reference projected into sketch space for solving. */
-      source: FaceRef | EdgeRef | VertexRef
+      source: FaceRef | EdgeRef | VertexRef;
       /** Declared projection mode into sketch-space coordinates. */
-      projectionMode: 'projectAlongPlaneNormal' | 'useExistingCoplanarGeometry'
+      projectionMode: "projectAlongPlaneNormal" | "useExistingCoplanarGeometry";
     }
   | {
       /** Durable authored reference identity within the containing sketch definition. */
-      referenceId: ReferenceId
-      kind: 'sketchReference'
+      referenceId: ReferenceId;
+      kind: "sketchReference";
       /** Human-readable label owned by the producer of the sketch definition. */
-      label: string
+      label: string;
       /** External sketch-owned geometry projected into this sketch space. */
-      source: SketchEntityRef | SketchPointRef | SketchRef
+      source: SketchEntityRef | SketchPointRef | SketchRef;
       /** Declared projection mode into sketch-space coordinates. */
-      projectionMode: 'useExistingCoplanarGeometry'
+      projectionMode: "useExistingCoplanarGeometry";
     }
   | {
       /** Runtime-only reference identity synthesized for display/solving within the active sketch session. */
-      referenceId: ReferenceId
-      kind: 'referenceImageAnchor'
+      referenceId: ReferenceId;
+      kind: "referenceImageAnchor";
       /** Human-readable label synthesized from the owning reference-image operation and anchor. */
-      label: string
+      label: string;
       /** Owning reference-image operation exporting this fixed anchor. Runtime-only; never persisted. */
-      source: SketchOperationRef
+      source: SketchOperationRef;
       /** Stable calibration anchor identity within the owning operation. */
-      anchorId: string
+      anchorId: string;
       /** Declared projection mode into sketch-space coordinates. */
-      projectionMode: 'referenceImageAnchor'
-    }
+      projectionMode: "referenceImageAnchor";
+    };
 
 /**
  * Durable authored sketch graph submitted to the solver/kernel boundary.
@@ -1009,37 +1020,37 @@ export type SketchReferenceDefinition =
  */
 export interface SketchDefinition {
   /** Schema version for the authored sketch definition payload. */
-  schemaVersion: SketchSchemaVersion
+  schemaVersion: SketchSchemaVersion;
   /** Canonical authored external-reference order. Each ID must be unique and appear exactly once in `references`. */
-  referenceIds: ReferenceId[]
+  referenceIds: ReferenceId[];
   /** Authored external references consumed by the solver alongside the local sketch graph. */
-  references: SketchReferenceDefinition[]
+  references: SketchReferenceDefinition[];
   /** Canonical authored point order. Each ID must be unique and appear exactly once in `points`. */
-  pointIds: SketchPointId[]
+  pointIds: SketchPointId[];
   /** Authored sketch points owned by the containing sketch definition. */
-  points: SketchPointDefinition[]
+  points: SketchPointDefinition[];
   /** Canonical authored entity order. Each ID must be unique and appear exactly once in `entities`. */
-  entityIds: SketchEntityId[]
+  entityIds: SketchEntityId[];
   /** Authored sketch entities owned by the containing sketch definition. */
-  entities: SketchEntityDefinition[]
+  entities: SketchEntityDefinition[];
   /** Canonical authored constraint order. Each ID must be unique and appear exactly once in `constraints`. */
-  constraintIds: ConstraintId[]
+  constraintIds: ConstraintId[];
   /** Authored geometric constraints owned by the containing sketch definition. */
-  constraints: ConstraintDefinition[]
+  constraints: ConstraintDefinition[];
   /** Canonical authored dimension order. Each ID must be unique and appear exactly once in `dimensions`. */
-  dimensionIds: DimensionId[]
+  dimensionIds: DimensionId[];
   /** Authored dimensions owned by the containing sketch definition. */
-  dimensions: DimensionDefinition[]
+  dimensions: DimensionDefinition[];
   /** Canonical authored style order. Each ID must be unique and appear exactly once in `styles`. */
-  styleIds?: SketchStyleId[]
+  styleIds?: SketchStyleId[];
   /** Authored visual styles scoped to sketch entities and optional derived regions. */
-  styles?: SketchStyleRecord[]
+  styles?: SketchStyleRecord[];
   /** Enables authored SVG fill/stroke rendering for this sketch. Missing values default to enabled. */
-  svgRenderingEnabled?: boolean
+  svgRenderingEnabled?: boolean;
   /** Durable sketch-local mirror, pattern, and transform relationships. */
-  derivedRelationships?: SketchDerivationDefinition[]
+  derivedRelationships?: SketchDerivationDefinition[];
   /** Ordered durable metadata describing accepted sketch authoring intent. */
-  authoringOperations?: SketchAuthoringOperation[]
+  authoringOperations?: SketchAuthoringOperation[];
 }
 
 /**
@@ -1060,34 +1071,38 @@ export const SKETCH_DEFINITION_INVARIANTS = {
   regionsAreDerivedOnly: true,
   /** Derived transform outputs must keep their authored relationship instead of becoming detached copies. */
   derivedTransformOutputsRetainRelationship: true,
-} as const
+} as const;
 
 /**
  * Solver-owned solved point position for an authored sketch point.
  */
 export interface SolvedSketchPointRecord {
   /** Authored point identity being reported in solved space. */
-  pointId: SketchPointId
+  pointId: SketchPointId;
   /** Durable point target owned by the same sketch as the containing solved snapshot. */
-  target: SketchPointRef
+  target: SketchPointRef;
   /** Solver-computed point coordinates in sketch-plane units. */
-  solvedPosition: SketchPoint2D
+  solvedPosition: SketchPoint2D;
 }
 
 /**
  * Solver-owned solve validity for one sketch evaluation.
  */
-export type SolvedSketchSolveState = 'notEvaluated' | 'solved' | 'partiallySolved' | 'failed'
+export type SolvedSketchSolveState =
+  | "notEvaluated"
+  | "solved"
+  | "partiallySolved"
+  | "failed";
 
 /**
  * Solver-owned constrainedness classification for one sketch evaluation.
  */
 export type SolvedSketchConstraintState =
-  | 'unknown'
-  | 'underConstrained'
-  | 'wellConstrained'
-  | 'overConstrained'
-  | 'inconsistent'
+  | "unknown"
+  | "underConstrained"
+  | "wellConstrained"
+  | "overConstrained"
+  | "inconsistent";
 
 /**
  * Solver-owned solved sketch status summary.
@@ -1096,9 +1111,9 @@ export type SolvedSketchConstraintState =
  */
 export interface SolvedSketchStatus {
   /** Whether the solver produced a usable solved state for this evaluation. */
-  solveState: SolvedSketchSolveState
+  solveState: SolvedSketchSolveState;
   /** Constraint-system classification for the evaluated sketch graph. */
-  constraintState: SolvedSketchConstraintState
+  constraintState: SolvedSketchConstraintState;
 }
 
 /**
@@ -1108,137 +1123,137 @@ export interface SolvedSketchStatus {
 export type SolvedSketchEntityGeometryRecord =
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved point-entity geometry. */
-      kind: 'point'
+      kind: "point";
       /** Solver-computed point position in sketch-plane units. */
-      solvedPosition: SketchPoint2D
+      solvedPosition: SketchPoint2D;
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved line-segment geometry. */
-      kind: 'lineSegment'
+      kind: "lineSegment";
       /** Solver-computed start point in sketch-plane units. */
-      startPosition: SketchPoint2D
+      startPosition: SketchPoint2D;
       /** Solver-computed end point in sketch-plane units. */
-      endPosition: SketchPoint2D
+      endPosition: SketchPoint2D;
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved circle geometry. */
-      kind: 'circle'
+      kind: "circle";
       /** Solver-computed center point in sketch-plane units. */
-      centerPosition: SketchPoint2D
+      centerPosition: SketchPoint2D;
       /** Solver-computed radius in sketch-plane units. */
-      solvedRadius: number
+      solvedRadius: number;
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved arc geometry. */
-      kind: 'arc'
+      kind: "arc";
       /** Solver-computed arc center in sketch-plane units. */
-      centerPosition: SketchPoint2D
+      centerPosition: SketchPoint2D;
       /** Solver-computed arc start point in sketch-plane units. */
-      startPosition: SketchPoint2D
+      startPosition: SketchPoint2D;
       /** Solver-computed arc end point in sketch-plane units. */
-      endPosition: SketchPoint2D
+      endPosition: SketchPoint2D;
       /** Solver-computed sweep direction from start to end. */
-      sweepDirection: 'clockwise' | 'counterClockwise'
+      sweepDirection: "clockwise" | "counterClockwise";
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved spline geometry. */
-      kind: 'spline'
+      kind: "spline";
       /** Solver-computed fit/control points in sketch-plane units. */
-      fitPoints: readonly SketchPoint2D[]
+      fitPoints: readonly SketchPoint2D[];
       /** Polynomial degree reported for the solved spline representation. */
-      degree: 2 | 3
+      degree: 2 | 3;
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved ellipse geometry. */
-      kind: 'ellipse'
+      kind: "ellipse";
       /** Solver-computed center point in sketch-plane units. */
-      centerPosition: SketchPoint2D
+      centerPosition: SketchPoint2D;
       /** Solver-computed endpoint of the major-axis radius vector. */
-      majorAxisEndpointPosition: SketchPoint2D
+      majorAxisEndpointPosition: SketchPoint2D;
       /** Solver-computed minor radius in sketch-plane units. */
-      minorRadius: number
+      minorRadius: number;
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved elliptical arc geometry. */
-      kind: 'ellipticalArc'
+      kind: "ellipticalArc";
       /** Solver-computed center point in sketch-plane units. */
-      centerPosition: SketchPoint2D
+      centerPosition: SketchPoint2D;
       /** Solver-computed endpoint of the major-axis radius vector. */
-      majorAxisEndpointPosition: SketchPoint2D
+      majorAxisEndpointPosition: SketchPoint2D;
       /** Solver-computed arc start point in sketch-plane units. */
-      startPosition: SketchPoint2D
+      startPosition: SketchPoint2D;
       /** Solver-computed arc end point in sketch-plane units. */
-      endPosition: SketchPoint2D
+      endPosition: SketchPoint2D;
       /** Solver-computed minor radius in sketch-plane units. */
-      minorRadius: number
+      minorRadius: number;
       /** Solver-computed sweep direction from start to end. */
-      sweepDirection: 'clockwise' | 'counterClockwise'
+      sweepDirection: "clockwise" | "counterClockwise";
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved conic geometry. */
-      kind: 'conic'
+      kind: "conic";
       /** Solver-computed start point in sketch-plane units. */
-      startPosition: SketchPoint2D
+      startPosition: SketchPoint2D;
       /** Solver-computed control point in sketch-plane units. */
-      controlPosition: SketchPoint2D
+      controlPosition: SketchPoint2D;
       /** Solver-computed end point in sketch-plane units. */
-      endPosition: SketchPoint2D
+      endPosition: SketchPoint2D;
       /** Positive conic weight/rho preserving the authored conic family. */
-      rho: number
+      rho: number;
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved Bezier geometry. */
-      kind: 'bezierCurve'
+      kind: "bezierCurve";
       /** Solver-computed Bezier control points in sketch-plane units. */
-      controlPoints: readonly SketchPoint2D[]
+      controlPoints: readonly SketchPoint2D[];
       /** Polynomial degree reported for this Bezier representation. */
-      degree: 2 | 3
+      degree: 2 | 3;
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */
-      entityId: SketchEntityId
+      entityId: SketchEntityId;
       /** Stable discriminant for solved profile text geometry. */
-      kind: 'profileText'
+      kind: "profileText";
       /** Solver-computed text anchor in sketch-plane units. */
-      anchorPosition: SketchPoint2D
+      anchorPosition: SketchPoint2D;
       /** Authored text content preserved for deterministic outline generation. */
-      text: string
+      text: string;
       /** Text cap-height in sketch-plane units. */
-      height: number
+      height: number;
       /** Baseline rotation in sketch-plane radians. */
-      rotationRadians: number
+      rotationRadians: number;
       /** Horizontal placement of the generated outline relative to `anchorPosition`. */
-      horizontalAlign: 'left' | 'center' | 'right'
+      horizontalAlign: "left" | "center" | "right";
       /** Vertical placement of the generated outline relative to `anchorPosition`. */
-      verticalAlign: 'baseline' | 'middle' | 'top' | 'bottom'
-    }
+      verticalAlign: "baseline" | "middle" | "top" | "bottom";
+    };
 
 /**
  * Solver-owned per-constraint status payload.
  */
 export interface ConstraintStatusRecord {
   /** Authored constraint identity being reported. */
-  constraintId: ConstraintId
+  constraintId: ConstraintId;
   /** Machine-readable evaluation result for the authored constraint. */
-  status: 'satisfied' | 'unsatisfied' | 'conflicting'
+  status: "satisfied" | "unsatisfied" | "conflicting";
 }
 
 /**
@@ -1246,11 +1261,11 @@ export interface ConstraintStatusRecord {
  */
 export interface DimensionStatusRecord {
   /** Authored dimension identity being reported. */
-  dimensionId: DimensionId
+  dimensionId: DimensionId;
   /** Machine-readable evaluation result for the authored dimension. */
-  status: 'driving' | 'driven' | 'unsatisfied'
+  status: "driving" | "driven" | "unsatisfied";
   /** Solver-computed value in sketch-plane units when available. */
-  solvedValue: number | null
+  solvedValue: number | null;
 }
 
 /**
@@ -1258,19 +1273,19 @@ export interface DimensionStatusRecord {
  */
 export interface SketchSolveDiagnostic {
   /** Stable diagnostic code for programmatic handling. */
-  code: string
+  code: string;
   /** Severity emitted by the solver/kernel producer. */
-  severity: 'info' | 'warning' | 'error'
+  severity: "info" | "warning" | "error";
   /** Human-readable diagnostic summary. */
-  message: string
+  message: string;
   /** Precise authored or derived target implicated by the diagnostic, when known. */
   target:
-    | { kind: 'entity'; entityId: SketchEntityId }
-    | { kind: 'point'; pointId: SketchPointId }
-    | { kind: 'constraint'; constraintId: ConstraintId }
-    | { kind: 'dimension'; dimensionId: DimensionId }
-    | { kind: 'region'; regionId: RegionId }
-    | null
+    | { kind: "entity"; entityId: SketchEntityId }
+    | { kind: "point"; pointId: SketchPointId }
+    | { kind: "constraint"; constraintId: ConstraintId }
+    | { kind: "dimension"; dimensionId: DimensionId }
+    | { kind: "region"; regionId: RegionId }
+    | null;
 }
 
 /**
@@ -1278,11 +1293,16 @@ export interface SketchSolveDiagnostic {
  */
 export interface ProjectedSketchGeometryRef {
   /** Optional selection/runtime discriminant for editor-facing projected targets. */
-  kind?: 'projectedPoint' | 'projectedLineSegment' | 'projectedCircle' | 'projectedArc' | 'projectedSpline'
+  kind?:
+    | "projectedPoint"
+    | "projectedLineSegment"
+    | "projectedCircle"
+    | "projectedArc"
+    | "projectedSpline";
   /** Authored external reference that produced the projected geometry. */
-  referenceId: ReferenceId
+  referenceId: ReferenceId;
   /** Stable projected geometry identity scoped to `referenceId`. */
-  geometryId: ProjectedGeometryId
+  geometryId: ProjectedGeometryId;
 }
 
 /**
@@ -1291,14 +1311,14 @@ export interface ProjectedSketchGeometryRef {
 export interface RegionBoundarySegmentRecord {
   /** Boundary entity or projected geometry used for this loop segment. */
   source:
-    | { kind: 'entity'; entityId: SketchEntityId }
-    | { kind: 'projectedGeometry'; reference: ProjectedSketchGeometryRef }
+    | { kind: "entity"; entityId: SketchEntityId }
+    | { kind: "projectedGeometry"; reference: ProjectedSketchGeometryRef };
   /** Boundary start point when the segment starts at an authored point. */
-  startPointId: SketchPointId | null
+  startPointId: SketchPointId | null;
   /** Boundary end point when the segment ends at an authored point. */
-  endPointId: SketchPointId | null
+  endPointId: SketchPointId | null;
   /** Traversal direction relative to the source geometry's live-derived orientation. */
-  traversalDirection?: 'forward' | 'reverse'
+  traversalDirection?: "forward" | "reverse";
 }
 
 /**
@@ -1306,17 +1326,17 @@ export interface RegionBoundarySegmentRecord {
  */
 export interface RegionLoopRecord {
   /** Durable derived loop identity scoped to one region. */
-  loopId: RegionLoopId
+  loopId: RegionLoopId;
   /** Declares whether this loop bounds material or a void within the region. */
-  role: 'outer' | 'inner'
+  role: "outer" | "inner";
   /** Traversal orientation of the loop in sketch-plane coordinates. */
-  orientation: 'clockwise' | 'counterClockwise'
+  orientation: "clockwise" | "counterClockwise";
   /** Ordered boundary segments around the loop perimeter. */
-  segments: RegionBoundarySegmentRecord[]
+  segments: RegionBoundarySegmentRecord[];
   /** Ordered authored boundary points visited by the loop when available. */
-  boundaryPointIds: SketchPointId[]
+  boundaryPointIds: SketchPointId[];
   /** False when the producer is reporting an incomplete loop candidate. */
-  isClosed: boolean
+  isClosed: boolean;
 }
 
 /**
@@ -1325,19 +1345,19 @@ export interface RegionLoopRecord {
  */
 export interface SolvedSketchSnapshot {
   /** Schema version for the solved sketch payload. */
-  schemaVersion: SolvedSketchSchemaVersion
+  schemaVersion: SolvedSketchSchemaVersion;
   /** Solver-owned constraint-status summary for the containing sketch. */
-  status: SolvedSketchStatus
+  status: SolvedSketchStatus;
   /** Solver-computed geometry per authored entity when available. */
-  solvedEntities: SolvedSketchEntityGeometryRecord[]
+  solvedEntities: SolvedSketchEntityGeometryRecord[];
   /** Solver-computed point positions for authored points that remain valid in this solution. */
-  solvedPoints: SolvedSketchPointRecord[]
+  solvedPoints: SolvedSketchPointRecord[];
   /** Solver-computed status per authored constraint. */
-  constraintStatuses: ConstraintStatusRecord[]
+  constraintStatuses: ConstraintStatusRecord[];
   /** Solver-computed status/value per authored dimension. */
-  dimensionStatuses: DimensionStatusRecord[]
+  dimensionStatuses: DimensionStatusRecord[];
   /** Solver/kernel diagnostics for the current solved sketch state. */
-  diagnostics: SketchSolveDiagnostic[]
+  diagnostics: SketchSolveDiagnostic[];
 }
 
 /**
@@ -1346,17 +1366,17 @@ export interface SolvedSketchSnapshot {
  */
 export interface RegionRecord extends OwnershipRecord {
   /** Durable derived region identity owned by the solver/kernel layer. */
-  regionId: RegionId
+  regionId: RegionId;
   /** Human-readable label owned by the solver/kernel producer. */
-  label: string
+  label: string;
   /** Durable region reference for downstream feature authoring. */
-  target: RegionRef
+  target: RegionRef;
   /** Owning sketch from which the region was derived. */
-  sourceSketch: SketchRef
+  sourceSketch: SketchRef;
   /** Ordered boundary loops that define the region, including interior voids. */
-  loops: RegionLoopRecord[]
+  loops: RegionLoopRecord[];
   /** False when the producer is reporting an incomplete or invalid derived region candidate. */
-  isClosed: boolean
+  isClosed: boolean;
 }
 
 /**
@@ -1365,17 +1385,17 @@ export interface RegionRecord extends OwnershipRecord {
  */
 export interface SketchRecord extends OwnershipRecord {
   /** Durable sketch identity owned by the modeling layer. */
-  sketchId: SketchId
+  sketchId: SketchId;
   /** Human-readable sketch label owned by the modeling layer. */
-  label: string
+  label: string;
   /** Explicit planar support from which the sketch coordinate system is derived. */
-  planeSupport: SketchPlaneSupportRef
+  planeSupport: SketchPlaneSupportRef;
   /** Durable authored sketch graph submitted for solving and downstream feature use. */
-  definition: SketchDefinition
+  definition: SketchDefinition;
   /** Solver-owned solved state corresponding to `definition` at the current revision. */
-  solvedSnapshot: SolvedSketchSnapshot
+  solvedSnapshot: SolvedSketchSnapshot;
   /** Solver-owned live projection data for the current revision; never authored sketch geometry. */
-  projectedReferences?: import('@/contracts/solver/schema').ProjectedSketchReferenceRecord[]
+  projectedReferences?: import("@/contracts/solver/schema").ProjectedSketchReferenceRecord[];
   /** Derived regions owned by the solver/kernel layer for the current solved sketch state. */
-  regions: RegionRecord[]
+  regions: RegionRecord[];
 }

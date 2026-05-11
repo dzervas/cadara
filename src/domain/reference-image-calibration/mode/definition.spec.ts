@@ -1,51 +1,56 @@
-import { test } from 'bun:test'
+import { test } from "bun:test";
 
-import { expectTrue } from '@/testing/expect.spec'
+import { expectTrue } from "@/testing/expect.spec";
 import {
   initialEditorState,
   transitionEditorState,
   type SketchEditorState,
-} from '@/domain/editor/state-machine'
+} from "@/domain/editor/state-machine";
 import {
   appendReferenceImageOperations,
   createNewSketchSession,
   getSketchSessionPreviewLabel,
-} from '@/domain/editor/sketch-session'
-import { createStandardPlaneDefinition } from '@/domain/modeling/opencascade-kernel-seed'
-import { REFERENCE_IMAGE_CALIBRATION_MODE_ID, type ReferenceImageCalibrationModeState } from '@/domain/reference-image-calibration/mode/shared'
-import { createReferenceImageOperation } from '@/domain/reference-image/operations'
+} from "@/domain/editor/sketch-session";
+import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  REFERENCE_IMAGE_CALIBRATION_MODE_ID,
+  type ReferenceImageCalibrationModeState,
+} from "@/domain/reference-image-calibration/mode/shared";
+import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 
 function createEditingSketchState(): SketchEditorState {
   const session = appendReferenceImageOperations(
-    createNewSketchSession(createStandardPlaneDefinition('xy')),
-    [createReferenceImageOperation({
-      sequence: 1,
-      sketchId: 'sketch_draft',
-      payload: {
-        mediaType: 'image/png',
-        fileName: 'fixture.png',
-        pixelWidth: 400,
-        pixelHeight: 200,
-        base64Data: 'cG5n',
-      },
-    })],
-  )
+    createNewSketchSession(createStandardPlaneDefinition("xy")),
+    [
+      createReferenceImageOperation({
+        sequence: 1,
+        sketchId: "sketch_draft",
+        payload: {
+          mediaType: "image/png",
+          fileName: "fixture.png",
+          pixelWidth: 400,
+          pixelHeight: 200,
+          base64Data: "cG5n",
+        },
+      }),
+    ],
+  );
 
   return {
     ...initialEditorState,
-    kind: 'editingSketch',
-    mode: 'sketch',
+    kind: "editingSketch",
+    mode: "sketch",
     document: {
-      documentId: 'doc_fixture',
-      revisionId: 'rev_fixture',
+      documentId: "doc_fixture",
+      revisionId: "rev_fixture",
     },
     command: {
-      commandSessionId: 'command_sketch-fixture',
-      toolId: 'sketch',
-      phase: 'editing',
+      commandSessionId: "command_sketch-fixture",
+      toolId: "sketch",
+      phase: "editing",
     },
     preview: {
-      kind: 'sketch',
+      kind: "sketch",
       label: getSketchSessionPreviewLabel(session),
       target: session.planeTarget,
     },
@@ -53,180 +58,241 @@ function createEditingSketchState(): SketchEditorState {
     pendingCommitRequestId: null,
     pendingProjectionRequestId: null,
     pendingImportRequestId: null,
-  }
+  };
 }
 
 function getOperationTarget(state: SketchEditorState) {
-  const operationId = state.session.definition.authoringOperations?.[0]?.operationId
+  const operationId =
+    state.session.definition.authoringOperations?.[0]?.operationId;
   if (!operationId) {
-    throw new Error('Expected reference-image operation fixture.')
+    throw new Error("Expected reference-image operation fixture.");
   }
 
   return {
-    kind: 'sketchOperation' as const,
-    sketchId: 'sketch_draft',
+    kind: "sketchOperation" as const,
+    sketchId: "sketch_draft",
     operationId,
-  }
+  };
 }
 
 function getModeState(state: SketchEditorState) {
-  const modeState = state.session.activeSpecialMode?.state as ReferenceImageCalibrationModeState | undefined
+  const modeState = state.session.activeSpecialMode?.state as
+    | ReferenceImageCalibrationModeState
+    | undefined;
   if (!modeState) {
-    throw new Error('Expected active calibration mode state.')
+    throw new Error("Expected active calibration mode state.");
   }
 
-  return modeState
+  return modeState;
 }
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts only places anchors on the active image', () => {  const baseState = createEditingSketchState()
-  const operationTarget = getOperationTarget(baseState)
+test("src/domain/reference-image-calibration/mode/definition.spec.ts only places anchors on the active image", () => {
+  const baseState = createEditingSketchState();
+  const operationTarget = getOperationTarget(baseState);
 
   const entered = transitionEditorState(baseState, {
-    type: 'sketch.specialModeEntered',
+    type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  })
+  });
   const armed = transitionEditorState(entered.state, {
-    type: 'sketch.specialModePanelActionInvoked',
+    type: "sketch.specialModePanelActionInvoked",
     action: {
-      kind: 'invoke',
-      actionId: 'add-anchor',
+      kind: "invoke",
+      actionId: "add-anchor",
     },
-  })
+  });
 
   const outsideBounds = transitionEditorState(armed.state, {
-    type: 'sketch.specialModeClickRequested',
+    type: "sketch.specialModeClickRequested",
     point: [200, 200],
     target: operationTarget,
-  })
+  });
   expectTrue(
-    getModeState(outsideBounds.state).draftState.calibration.anchors.length === 0,
-    'Clicking outside the image bounds should not create a calibration anchor.',
-  )
+    getModeState(outsideBounds.state).draftState.calibration.anchors.length ===
+      0,
+    "Clicking outside the image bounds should not create a calibration anchor.",
+  );
 
   const placed = transitionEditorState(outsideBounds.state, {
-    type: 'sketch.specialModeClickRequested',
+    type: "sketch.specialModeClickRequested",
     point: [0, 0],
     target: operationTarget,
-  })
-  const modeState = getModeState(placed.state)
-  expectTrue(modeState.draftState.calibration.anchors.length === 1, 'Clicking the active image within bounds should create a calibration anchor.')
-  expectTrue(modeState.draftPoints.length === 1, 'Creating an anchor should stage a bound construction point for commit.')
-  expectTrue(modeState.draftState.calibration.anchors[0]?.pointId === modeState.draftPoints[0]?.pointId, 'The authored anchor should bind to the staged sketch point.')
-})
+  });
+  const modeState = getModeState(placed.state);
+  expectTrue(
+    modeState.draftState.calibration.anchors.length === 1,
+    "Clicking the active image within bounds should create a calibration anchor.",
+  );
+  expectTrue(
+    modeState.draftPoints.length === 1,
+    "Creating an anchor should stage a bound construction point for commit.",
+  );
+  expectTrue(
+    modeState.draftState.calibration.anchors[0]?.pointId ===
+      modeState.draftPoints[0]?.pointId,
+    "The authored anchor should bind to the staged sketch point.",
+  );
+});
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts lists authored anchors in the panel and removes the selected one', () => {  const operationTarget = getOperationTarget(createEditingSketchState())
+test("src/domain/reference-image-calibration/mode/definition.spec.ts lists authored anchors in the panel and removes the selected one", () => {
+  const operationTarget = getOperationTarget(createEditingSketchState());
   let state = transitionEditorState(createEditingSketchState(), {
-    type: 'sketch.specialModeEntered',
+    type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  }).state
+  }).state;
 
-  for (const point of [[-40, 0], [40, 0]] as const) {
+  for (const point of [
+    [-40, 0],
+    [40, 0],
+  ] as const) {
     state = transitionEditorState(state, {
-      type: 'sketch.specialModePanelActionInvoked',
-      action: { kind: 'invoke', actionId: 'add-anchor' },
-    }).state
+      type: "sketch.specialModePanelActionInvoked",
+      action: { kind: "invoke", actionId: "add-anchor" },
+    }).state;
     state = transitionEditorState(state, {
-      type: 'sketch.specialModeClickRequested',
+      type: "sketch.specialModeClickRequested",
       point,
       target: operationTarget,
-    }).state
+    }).state;
   }
 
-  const modeState = getModeState(state)
-  const anchorIds = modeState.draftState.calibration.anchors.map((anchor) => anchor.anchorId)
+  const modeState = getModeState(state);
+  const anchorIds = modeState.draftState.calibration.anchors.map(
+    (anchor) => anchor.anchorId,
+  );
   const panel = state.session.activeSpecialMode
     ? state.session.activeSpecialMode
-    : null
-  expectTrue(anchorIds.length === 2, 'Fixture should create two bound anchors.')
-  expectTrue(panel !== null, 'Calibration mode should remain active while editing anchors.')
+    : null;
+  expectTrue(
+    anchorIds.length === 2,
+    "Fixture should create two bound anchors.",
+  );
+  expectTrue(
+    panel !== null,
+    "Calibration mode should remain active while editing anchors.",
+  );
 
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
+    type: "sketch.specialModePanelActionInvoked",
     action: {
-      kind: 'patch',
+      kind: "patch",
       patch: {
-        field: 'selectedAnchorId',
+        field: "selectedAnchorId",
         value: anchorIds[0]!,
       },
     },
-  }).state
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: { kind: 'invoke', actionId: 'remove-anchor' },
-  }).state
+    type: "sketch.specialModePanelActionInvoked",
+    action: { kind: "invoke", actionId: "remove-anchor" },
+  }).state;
 
-  const remainingAnchors = getModeState(state).draftState.calibration.anchors
-  expectTrue(remainingAnchors.length === 1, 'Removing a panel-selected anchor should update the authored anchor list.')
-  expectTrue(remainingAnchors[0]?.anchorId === anchorIds[1], 'Removing a panel-selected anchor should remove the chosen anchor instead of a different one.')
-})
+  const remainingAnchors = getModeState(state).draftState.calibration.anchors;
+  expectTrue(
+    remainingAnchors.length === 1,
+    "Removing a panel-selected anchor should update the authored anchor list.",
+  );
+  expectTrue(
+    remainingAnchors[0]?.anchorId === anchorIds[1],
+    "Removing a panel-selected anchor should remove the chosen anchor instead of a different one.",
+  );
+});
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts allocates a fresh anchor id after removing an earlier anchor', () => {  const operationTarget = getOperationTarget(createEditingSketchState())
+test("src/domain/reference-image-calibration/mode/definition.spec.ts allocates a fresh anchor id after removing an earlier anchor", () => {
+  const operationTarget = getOperationTarget(createEditingSketchState());
   let state = transitionEditorState(createEditingSketchState(), {
-    type: 'sketch.specialModeEntered',
+    type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  }).state
+  }).state;
 
-  for (const point of [[-40, 0], [40, 0]] as const) {
+  for (const point of [
+    [-40, 0],
+    [40, 0],
+  ] as const) {
     state = transitionEditorState(state, {
-      type: 'sketch.specialModePanelActionInvoked',
-      action: { kind: 'invoke', actionId: 'add-anchor' },
-    }).state
+      type: "sketch.specialModePanelActionInvoked",
+      action: { kind: "invoke", actionId: "add-anchor" },
+    }).state;
     state = transitionEditorState(state, {
-      type: 'sketch.specialModeClickRequested',
+      type: "sketch.specialModeClickRequested",
       point,
       target: operationTarget,
-    }).state
+    }).state;
   }
 
-  const originalAnchorIds = getModeState(state).draftState.calibration.anchors.map((anchor) => anchor.anchorId)
+  const originalAnchorIds = getModeState(
+    state,
+  ).draftState.calibration.anchors.map((anchor) => anchor.anchorId);
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
+    type: "sketch.specialModePanelActionInvoked",
     action: {
-      kind: 'patch',
+      kind: "patch",
       patch: {
-        field: 'selectedAnchorId',
+        field: "selectedAnchorId",
         value: originalAnchorIds[0]!,
       },
     },
-  }).state
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: { kind: 'invoke', actionId: 'remove-anchor' },
-  }).state
+    type: "sketch.specialModePanelActionInvoked",
+    action: { kind: "invoke", actionId: "remove-anchor" },
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: { kind: 'invoke', actionId: 'add-anchor' },
-  }).state
+    type: "sketch.specialModePanelActionInvoked",
+    action: { kind: "invoke", actionId: "add-anchor" },
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModeClickRequested',
+    type: "sketch.specialModeClickRequested",
     point: [0, 20],
     target: operationTarget,
-  }).state
+  }).state;
 
-  const nextAnchorIds = getModeState(state).draftState.calibration.anchors.map((anchor) => anchor.anchorId)
-  expectTrue(nextAnchorIds.length === 2, 'The replacement fixture should still contain two anchors after remove-and-add.')
-  expectTrue(new Set(nextAnchorIds).size === nextAnchorIds.length, 'Remove-and-add should not reuse an anchor id that is still present.')
-  expectTrue(nextAnchorIds.includes(originalAnchorIds[1]!), 'Remove-and-add should preserve the untouched anchor id.')
-  expectTrue(!nextAnchorIds.includes(originalAnchorIds[0]!), 'Remove-and-add should not resurrect the removed anchor id when a newer anchor already exists.')
-})
+  const nextAnchorIds = getModeState(state).draftState.calibration.anchors.map(
+    (anchor) => anchor.anchorId,
+  );
+  expectTrue(
+    nextAnchorIds.length === 2,
+    "The replacement fixture should still contain two anchors after remove-and-add.",
+  );
+  expectTrue(
+    new Set(nextAnchorIds).size === nextAnchorIds.length,
+    "Remove-and-add should not reuse an anchor id that is still present.",
+  );
+  expectTrue(
+    nextAnchorIds.includes(originalAnchorIds[1]!),
+    "Remove-and-add should preserve the untouched anchor id.",
+  );
+  expectTrue(
+    !nextAnchorIds.includes(originalAnchorIds[0]!),
+    "Remove-and-add should not resurrect the removed anchor id when a newer anchor already exists.",
+  );
+});
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a selected anchor to an existing sketch point', () => {  const baseState = createEditingSketchState()
+test("src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a selected anchor to an existing sketch point", () => {
+  const baseState = createEditingSketchState();
   const stateWithPoint: SketchEditorState = {
     ...baseState,
     session: {
       ...baseState.session,
       definition: {
         ...baseState.session.definition,
-        pointIds: [...baseState.session.definition.pointIds, 'sketch_point_anchor'],
+        pointIds: [
+          ...baseState.session.definition.pointIds,
+          "sketch_point_anchor",
+        ],
         points: [
           ...baseState.session.definition.points,
           {
-            pointId: 'sketch_point_anchor',
-            label: 'Existing anchor',
-            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_anchor' },
+            pointId: "sketch_point_anchor",
+            label: "Existing anchor",
+            target: {
+              kind: "sketchPoint",
+              sketchId: "sketch_draft",
+              pointId: "sketch_point_anchor",
+            },
             position: [30, 0],
             isConstruction: true,
           },
@@ -234,82 +300,104 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a s
       },
       fullDefinition: {
         ...baseState.session.fullDefinition,
-        pointIds: [...baseState.session.fullDefinition.pointIds, 'sketch_point_anchor'],
+        pointIds: [
+          ...baseState.session.fullDefinition.pointIds,
+          "sketch_point_anchor",
+        ],
         points: [
           ...baseState.session.fullDefinition.points,
           {
-            pointId: 'sketch_point_anchor',
-            label: 'Existing anchor',
-            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_anchor' },
+            pointId: "sketch_point_anchor",
+            label: "Existing anchor",
+            target: {
+              kind: "sketchPoint",
+              sketchId: "sketch_draft",
+              pointId: "sketch_point_anchor",
+            },
             position: [30, 0],
             isConstruction: true,
           },
         ],
       },
     },
-  }
+  };
 
-  const operationTarget = getOperationTarget(stateWithPoint)
+  const operationTarget = getOperationTarget(stateWithPoint);
   let state = transitionEditorState(stateWithPoint, {
-    type: 'sketch.specialModeEntered',
+    type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  }).state
+  }).state;
 
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: { kind: 'invoke', actionId: 'add-anchor' },
-  }).state
+    type: "sketch.specialModePanelActionInvoked",
+    action: { kind: "invoke", actionId: "add-anchor" },
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModeClickRequested',
+    type: "sketch.specialModeClickRequested",
     point: [0, 0],
     target: operationTarget,
-  }).state
+  }).state;
 
-  const initialBinding = getModeState(state).draftState.calibration.anchors[0]?.pointId
+  const initialBinding =
+    getModeState(state).draftState.calibration.anchors[0]?.pointId;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
+    type: "sketch.specialModePanelActionInvoked",
     action: {
-      kind: 'patch',
+      kind: "patch",
       patch: {
-        field: 'selectedAnchorId',
+        field: "selectedAnchorId",
         value: getModeState(state).draftState.calibration.anchors[0]?.anchorId,
       },
     },
-  }).state
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: { kind: 'invoke', actionId: 'rebind-anchor' },
-  }).state
+    type: "sketch.specialModePanelActionInvoked",
+    action: { kind: "invoke", actionId: "rebind-anchor" },
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModeClickRequested',
+    type: "sketch.specialModeClickRequested",
     point: [30, 0],
     target: {
-      kind: 'sketchPoint',
-      sketchId: 'sketch_draft',
-      pointId: 'sketch_point_anchor',
+      kind: "sketchPoint",
+      sketchId: "sketch_draft",
+      pointId: "sketch_point_anchor",
     },
-  }).state
+  }).state;
 
-  const reboundAnchor = getModeState(state).draftState.calibration.anchors[0]
-  expectTrue(reboundAnchor?.pointId === 'sketch_point_anchor', 'Rebinding should target the explicitly selected sketch point.')
-  expectTrue(reboundAnchor?.pointId !== initialBinding, 'Rebinding should replace the previous construction-point binding.')
-})
+  const reboundAnchor = getModeState(state).draftState.calibration.anchors[0];
+  expectTrue(
+    reboundAnchor?.pointId === "sketch_point_anchor",
+    "Rebinding should target the explicitly selected sketch point.",
+  );
+  expectTrue(
+    reboundAnchor?.pointId !== initialBinding,
+    "Rebinding should replace the previous construction-point binding.",
+  );
+});
 
-test('src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode prioritizes the clicked sketch point over anchor hit-testing', () => {  const baseState = createEditingSketchState()
+test("src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode prioritizes the clicked sketch point over anchor hit-testing", () => {
+  const baseState = createEditingSketchState();
   const stateWithOverlappingPoint: SketchEditorState = {
     ...baseState,
     session: {
       ...baseState.session,
       definition: {
         ...baseState.session.definition,
-        pointIds: [...baseState.session.definition.pointIds, 'sketch_point_overlap'],
+        pointIds: [
+          ...baseState.session.definition.pointIds,
+          "sketch_point_overlap",
+        ],
         points: [
           ...baseState.session.definition.points,
           {
-            pointId: 'sketch_point_overlap',
-            label: 'Overlap point',
-            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_overlap' },
+            pointId: "sketch_point_overlap",
+            label: "Overlap point",
+            target: {
+              kind: "sketchPoint",
+              sketchId: "sketch_draft",
+              pointId: "sketch_point_overlap",
+            },
             position: [0, 0],
             isConstruction: true,
           },
@@ -317,61 +405,71 @@ test('src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode
       },
       fullDefinition: {
         ...baseState.session.fullDefinition,
-        pointIds: [...baseState.session.fullDefinition.pointIds, 'sketch_point_overlap'],
+        pointIds: [
+          ...baseState.session.fullDefinition.pointIds,
+          "sketch_point_overlap",
+        ],
         points: [
           ...baseState.session.fullDefinition.points,
           {
-            pointId: 'sketch_point_overlap',
-            label: 'Overlap point',
-            target: { kind: 'sketchPoint', sketchId: 'sketch_draft', pointId: 'sketch_point_overlap' },
+            pointId: "sketch_point_overlap",
+            label: "Overlap point",
+            target: {
+              kind: "sketchPoint",
+              sketchId: "sketch_draft",
+              pointId: "sketch_point_overlap",
+            },
             position: [0, 0],
             isConstruction: true,
           },
         ],
       },
     },
-  }
+  };
 
-  const operationTarget = getOperationTarget(stateWithOverlappingPoint)
+  const operationTarget = getOperationTarget(stateWithOverlappingPoint);
   let state = transitionEditorState(stateWithOverlappingPoint, {
-    type: 'sketch.specialModeEntered',
+    type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  }).state
+  }).state;
 
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: { kind: 'invoke', actionId: 'add-anchor' },
-  }).state
+    type: "sketch.specialModePanelActionInvoked",
+    action: { kind: "invoke", actionId: "add-anchor" },
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModeClickRequested',
+    type: "sketch.specialModeClickRequested",
     point: [0, 0],
     target: operationTarget,
-  }).state
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
+    type: "sketch.specialModePanelActionInvoked",
     action: {
-      kind: 'patch',
+      kind: "patch",
       patch: {
-        field: 'selectedAnchorId',
+        field: "selectedAnchorId",
         value: getModeState(state).draftState.calibration.anchors[0]?.anchorId,
       },
     },
-  }).state
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModePanelActionInvoked',
-    action: { kind: 'invoke', actionId: 'rebind-anchor' },
-  }).state
+    type: "sketch.specialModePanelActionInvoked",
+    action: { kind: "invoke", actionId: "rebind-anchor" },
+  }).state;
   state = transitionEditorState(state, {
-    type: 'sketch.specialModeClickRequested',
+    type: "sketch.specialModeClickRequested",
     point: [0, 0],
     target: {
-      kind: 'sketchPoint',
-      sketchId: 'sketch_draft',
-      pointId: 'sketch_point_overlap',
+      kind: "sketchPoint",
+      sketchId: "sketch_draft",
+      pointId: "sketch_point_overlap",
     },
-  }).state
+  }).state;
 
-  const reboundAnchor = getModeState(state).draftState.calibration.anchors[0]
-  expectTrue(reboundAnchor?.pointId === 'sketch_point_overlap', 'Rebind mode should honor the clicked sketch point even when it overlaps the anchor handle.')
-})
+  const reboundAnchor = getModeState(state).draftState.calibration.anchors[0];
+  expectTrue(
+    reboundAnchor?.pointId === "sketch_point_overlap",
+    "Rebind mode should honor the clicked sketch point even when it overlaps the anchor handle.",
+  );
+});

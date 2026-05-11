@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
-import * as THREE from 'three'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
 
 import {
   getActiveSketchMarkerWorldRadii,
@@ -15,32 +15,54 @@ import {
   shouldUseSketchStrokeMeshGeometry,
   shouldDepthTestSketchDisplayMarker,
   updateSketchGradientMaterialFrame,
-} from '@/components/cad/sketch-display-style'
-import type { SketchRenderingPalette } from '@/components/cad/sketch-rendering-palette'
-import { createReferenceImageDataUrl } from '@/domain/reference-image/rendering'
-import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
+} from "@/components/cad/sketch-display-style";
+import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
+import { createReferenceImageDataUrl } from "@/domain/reference-image/rendering";
+import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
 import {
   MARKER_SPHERE_GEOMETRY,
   applyWireMaterialDepthPolicy,
   bindRenderableObject,
   createMarkerPickProxy,
   excludeRenderableObjectFromRaycastPicking,
-} from '@/infrastructure/viewport/render-picking'
+} from "@/infrastructure/viewport/render-picking";
 
 interface SketchDisplayRenderableNodeProps {
-  renderable: SketchSessionDisplayRenderable
-  applyStyles: boolean
-  palette: SketchRenderingPalette
+  renderable: SketchSessionDisplayRenderable;
+  applyStyles: boolean;
+  palette: SketchRenderingPalette;
 }
 
-export function SketchDisplayRenderableNode({ renderable, applyStyles, palette }: SketchDisplayRenderableNodeProps) {
+export function SketchDisplayRenderableNode({
+  renderable,
+  applyStyles,
+  palette,
+}: SketchDisplayRenderableNodeProps) {
   switch (renderable.geometry.kind) {
-    case 'mesh':
-      return <SketchDisplayMeshNode renderable={renderable} applyStyles={applyStyles} palette={palette} />
-    case 'polyline':
-      return <SketchDisplayPolylineNode renderable={renderable} applyStyles={applyStyles} palette={palette} />
-    case 'marker':
-      return <SketchDisplayMarkerNode renderable={renderable} applyStyles={applyStyles} palette={palette} />
+    case "mesh":
+      return (
+        <SketchDisplayMeshNode
+          renderable={renderable}
+          applyStyles={applyStyles}
+          palette={palette}
+        />
+      );
+    case "polyline":
+      return (
+        <SketchDisplayPolylineNode
+          renderable={renderable}
+          applyStyles={applyStyles}
+          palette={palette}
+        />
+      );
+    case "marker":
+      return (
+        <SketchDisplayMarkerNode
+          renderable={renderable}
+          applyStyles={applyStyles}
+          palette={palette}
+        />
+      );
   }
 }
 
@@ -49,53 +71,57 @@ export function SketchDisplayMeshNode({
   applyStyles,
   palette,
 }: {
-  renderable: SketchSessionDisplayRenderable
-  applyStyles: boolean
-  palette: SketchRenderingPalette
+  renderable: SketchSessionDisplayRenderable;
+  applyStyles: boolean;
+  palette: SketchRenderingPalette;
 }) {
-  const geometryData = renderable.geometry.kind === 'mesh' ? renderable.geometry : null
+  const geometryData =
+    renderable.geometry.kind === "mesh" ? renderable.geometry : null;
   const textureUrl = useMemo(() => {
     if (!renderable.textureFill) {
-      return null
+      return null;
     }
 
     return createReferenceImageDataUrl({
       mediaType: renderable.textureFill.mediaType,
       base64Data: renderable.textureFill.base64Data,
-    })
-  }, [renderable.textureFill])
-  const texture = useImageTexture(textureUrl)
+    });
+  }, [renderable.textureFill]);
+  const texture = useImageTexture(textureUrl);
   const geometry = useMemo(() => {
     if (!geometryData) {
-      throw new Error('Display renderable is missing mesh geometry.')
+      throw new Error("Display renderable is missing mesh geometry.");
     }
 
-    const nextGeometry = new THREE.BufferGeometry()
+    const nextGeometry = new THREE.BufferGeometry();
     nextGeometry.setAttribute(
-      'position',
+      "position",
       new THREE.Float32BufferAttribute(geometryData.vertexPositions.flat(), 3),
-    )
-    nextGeometry.setIndex(geometryData.triangleIndices.flat())
+    );
+    nextGeometry.setIndex(geometryData.triangleIndices.flat());
     if (geometryData.vertexNormals) {
       nextGeometry.setAttribute(
-        'normal',
+        "normal",
         new THREE.Float32BufferAttribute(geometryData.vertexNormals.flat(), 3),
-      )
+      );
     } else {
-      nextGeometry.computeVertexNormals()
+      nextGeometry.computeVertexNormals();
     }
     if (renderable.textureFill) {
       nextGeometry.setAttribute(
-        'uv',
-        new THREE.Float32BufferAttribute(renderable.textureFill.uvCoordinates.flat(), 2),
-      )
+        "uv",
+        new THREE.Float32BufferAttribute(
+          renderable.textureFill.uvCoordinates.flat(),
+          2,
+        ),
+      );
     }
-    return nextGeometry
-  }, [geometryData, renderable.textureFill])
+    return nextGeometry;
+  }, [geometryData, renderable.textureFill]);
   const materialConfig = useMemo(
     () => getSketchDisplayMeshMaterialConfig(renderable, applyStyles, palette),
     [applyStyles, palette, renderable],
-  )
+  );
   const material = useMemo(() => {
     const nextMaterial = renderable.textureFill
       ? new THREE.MeshBasicMaterial({
@@ -108,7 +134,7 @@ export function SketchDisplayMeshNode({
           polygonOffsetFactor: -1,
           polygonOffsetUnits: -1,
         })
-      : materialConfig.fill.kind === 'linearGradient'
+      : materialConfig.fill.kind === "linearGradient"
         ? buildSketchGradientMeshMaterial(materialConfig)
         : new THREE.MeshBasicMaterial({
             color: materialConfig.color,
@@ -118,16 +144,16 @@ export function SketchDisplayMeshNode({
             polygonOffset: materialConfig.polygonOffset,
             polygonOffsetFactor: materialConfig.polygonOffsetFactor,
             polygonOffsetUnits: materialConfig.polygonOffsetUnits,
-          })
-    nextMaterial.depthWrite = false
-    return nextMaterial
-  }, [materialConfig, renderable.textureFill, texture])
+          });
+    nextMaterial.depthWrite = false;
+    return nextMaterial;
+  }, [materialConfig, renderable.textureFill, texture]);
 
   useLayoutEffect(() => {
-    updateSketchGradientMaterialFrame(material, geometry, materialConfig)
-  }, [geometry, material, materialConfig])
-  useEffect(() => () => geometry.dispose(), [geometry])
-  useEffect(() => () => material.dispose(), [material])
+    updateSketchGradientMaterialFrame(material, geometry, materialConfig);
+  }, [geometry, material, materialConfig]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(() => () => material.dispose(), [material]);
   return (
     <mesh
       ref={(value) => {
@@ -136,83 +162,98 @@ export function SketchDisplayMeshNode({
             value,
             null,
             renderable.target,
-            renderable.semanticClass ?? (renderable.role === 'reference' ? 'sketchReference' : 'sketchCurve'),
-            'document',
-          )
+            renderable.semanticClass ??
+              (renderable.role === "reference"
+                ? "sketchReference"
+                : "sketchCurve"),
+            "document",
+          );
         }
       }}
       geometry={geometry}
       material={material}
       renderOrder={renderable.textureFill ? 1 : 0}
     />
-  )
+  );
 }
 
 function useImageTexture(url: string | null) {
-  const [texture, setTexture] = useState<{ url: string, texture: THREE.Texture } | null>(null)
+  const [texture, setTexture] = useState<{
+    url: string;
+    texture: THREE.Texture;
+  } | null>(null);
 
   useEffect(() => {
     if (!url) {
-      return
+      return;
     }
 
-    let cancelled = false
-    let loadedTexture: THREE.Texture | null = null
-    const loader = new THREE.TextureLoader()
+    let cancelled = false;
+    let loadedTexture: THREE.Texture | null = null;
+    const loader = new THREE.TextureLoader();
     loader.load(
       url,
       (loaded) => {
         if (cancelled) {
-          loaded.dispose()
-          return
+          loaded.dispose();
+          return;
         }
 
-        loaded.colorSpace = THREE.SRGBColorSpace
-        loaded.needsUpdate = true
-        loadedTexture = loaded
+        loaded.colorSpace = THREE.SRGBColorSpace;
+        loaded.needsUpdate = true;
+        loadedTexture = loaded;
         setTexture((current) => {
-          current?.texture.dispose()
-          return { url, texture: loaded }
-        })
+          current?.texture.dispose();
+          return { url, texture: loaded };
+        });
       },
       undefined,
       (error) => {
         if (cancelled) {
-          return
+          return;
         }
 
-        console.error('Failed to load reference-image texture.', error)
+        console.error("Failed to load reference-image texture.", error);
       },
-    )
+    );
 
     return () => {
-      cancelled = true
-      loadedTexture?.dispose()
-    }
-  }, [url])
+      cancelled = true;
+      loadedTexture?.dispose();
+    };
+  }, [url]);
 
-  return texture?.url === url ? texture.texture : null
+  return texture?.url === url ? texture.texture : null;
 }
 
 function updatePolylineGeometryBuffer(
   geometry: THREE.BufferGeometry,
-  geometryData: Extract<SketchSessionDisplayRenderable['geometry'], { kind: 'polyline' }>,
+  geometryData: Extract<
+    SketchSessionDisplayRenderable["geometry"],
+    { kind: "polyline" }
+  >,
 ) {
-  const points = geometryData.isClosed && geometryData.points.length > 0
-    ? [...geometryData.points, geometryData.points[0]!]
-    : geometryData.points
-  let position = geometry.getAttribute('position') as THREE.BufferAttribute | undefined
+  const points =
+    geometryData.isClosed && geometryData.points.length > 0
+      ? [...geometryData.points, geometryData.points[0]!]
+      : geometryData.points;
+  let position = geometry.getAttribute("position") as
+    | THREE.BufferAttribute
+    | undefined;
 
   if (!position || position.count !== points.length) {
-    position = new THREE.BufferAttribute(new Float32Array(points.length * 3), 3)
-    geometry.setAttribute('position', position)
+    position = new THREE.BufferAttribute(
+      new Float32Array(points.length * 3),
+      3,
+    );
+    geometry.setAttribute("position", position);
   }
 
   points.forEach((point, index) => {
-    position.setXYZ(index, point[0], point[1], point[2])
-  })
-  position.needsUpdate = true
-  geometry.computeBoundingSphere()
+    position.setXYZ(index, point[0], point[1], point[2]);
+  });
+  position.needsUpdate = true;
+  geometry.computeBoundingSphere();
 }
 
 export function SketchDisplayPolylineNode({
@@ -220,53 +261,64 @@ export function SketchDisplayPolylineNode({
   applyStyles,
   palette,
 }: {
-  renderable: SketchSessionDisplayRenderable
-  applyStyles: boolean
-  palette: SketchRenderingPalette
+  renderable: SketchSessionDisplayRenderable;
+  applyStyles: boolean;
+  palette: SketchRenderingPalette;
 }) {
-  const geometryData = renderable.geometry.kind === 'polyline' ? renderable.geometry : null
+  const geometryData =
+    renderable.geometry.kind === "polyline" ? renderable.geometry : null;
   if (!geometryData) {
-    throw new Error(`Display renderable ${renderable.id} is missing polyline geometry.`)
+    throw new Error(
+      `Display renderable ${renderable.id} is missing polyline geometry.`,
+    );
   }
 
-  const geometry = useMemo(() => new THREE.BufferGeometry(), [])
+  const geometry = useMemo(() => new THREE.BufferGeometry(), []);
   const materialConfig = useMemo(
-    () => getSketchDisplayPolylineMaterialConfig(renderable, applyStyles, palette),
+    () =>
+      getSketchDisplayPolylineMaterialConfig(renderable, applyStyles, palette),
     [applyStyles, palette, renderable],
-  )
-  const useStrokeMesh = shouldUseSketchStrokeMeshGeometry(renderable, materialConfig, applyStyles)
+  );
+  const useStrokeMesh = shouldUseSketchStrokeMeshGeometry(
+    renderable,
+    materialConfig,
+    applyStyles,
+  );
   const strokeGeometryMaterialConfig = useMemo(
-    () => getActiveSketchPolylineStrokeGeometryConfig(renderable, materialConfig, applyStyles),
+    () =>
+      getActiveSketchPolylineStrokeGeometryConfig(
+        renderable,
+        materialConfig,
+        applyStyles,
+      ),
     [applyStyles, materialConfig, renderable],
-  )
+  );
   const strokeGeometryStaticToken = useMemo(
-    () => createStrokeGeometryStaticToken(geometryData, strokeGeometryMaterialConfig),
+    () =>
+      createStrokeGeometryStaticToken(
+        geometryData,
+        strokeGeometryMaterialConfig,
+      ),
     [geometryData, strokeGeometryMaterialConfig],
-  )
-  const {
-    color,
-    dashSize,
-    gapSize,
-    linePattern,
-    lineWidth,
-    opacity,
-  } = materialConfig
-  const { camera, size } = useThree()
-  const strokeGeometryTokenRef = useRef<string | null>(null)
-  const material = useMemo(
-    () => {
-      if (useStrokeMesh) {
-        const nextMaterial = new THREE.MeshBasicMaterial({
-          color,
-          transparent: true,
-          opacity,
-          side: THREE.DoubleSide,
-        })
-        nextMaterial.depthWrite = false
-        return nextMaterial
-      }
+  );
+  const { color, dashSize, gapSize, linePattern, lineWidth, opacity } =
+    materialConfig;
+  const { camera, size } = useThree();
+  const strokeGeometryTokenRef = useRef<string | null>(null);
+  const material = useMemo(() => {
+    if (useStrokeMesh) {
+      const nextMaterial = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        side: THREE.DoubleSide,
+      });
+      nextMaterial.depthWrite = false;
+      return nextMaterial;
+    }
 
-      return applyWireMaterialDepthPolicy(linePattern === 'dashed'
+    return applyWireMaterialDepthPolicy(
+      linePattern === "dashed"
         ? new THREE.LineDashedMaterial({
             color,
             transparent: true,
@@ -280,61 +332,93 @@ export function SketchDisplayPolylineNode({
             transparent: true,
             opacity,
             linewidth: lineWidth,
-          }))
-    },
-    [color, dashSize, gapSize, linePattern, lineWidth, opacity, useStrokeMesh],
-  )
+          }),
+    );
+  }, [
+    color,
+    dashSize,
+    gapSize,
+    linePattern,
+    lineWidth,
+    opacity,
+    useStrokeMesh,
+  ]);
   const line = useMemo(() => {
     const nextLine = useStrokeMesh
       ? new THREE.Mesh(geometry, material)
-      : new THREE.Line(geometry, material)
-    nextLine.renderOrder = 3
+      : new THREE.Line(geometry, material);
+    nextLine.renderOrder = 3;
 
     if (renderable.target) {
       bindRenderableObject(
         nextLine,
         null,
         renderable.target,
-        renderable.role === 'reference' ? 'sketchReference' : 'sketchCurve',
-        'document',
-      )
-      excludeRenderableObjectFromRaycastPicking(nextLine)
+        renderable.role === "reference" ? "sketchReference" : "sketchCurve",
+        "document",
+      );
+      excludeRenderableObjectFromRaycastPicking(nextLine);
     }
 
-    return nextLine
-  }, [geometry, material, renderable.role, renderable.target, useStrokeMesh])
+    return nextLine;
+  }, [geometry, material, renderable.role, renderable.target, useStrokeMesh]);
 
   useLayoutEffect(() => {
     if (useStrokeMesh) {
-      const worldUnitsPerPixel = getSketchFeedbackWorldUnitsPerPixel(camera, size.height, geometryData.points)
+      const worldUnitsPerPixel = getSketchFeedbackWorldUnitsPerPixel(
+        camera,
+        size.height,
+        geometryData.points,
+      );
       updatePolylineStrokeGeometryBuffer(
         geometry,
         geometryData,
         strokeGeometryMaterialConfig,
         worldUnitsPerPixel,
         renderable.sketchPlaneFrame,
-      )
-      strokeGeometryTokenRef.current = createStrokeGeometryToken(strokeGeometryStaticToken, worldUnitsPerPixel)
-      return
+      );
+      strokeGeometryTokenRef.current = createStrokeGeometryToken(
+        strokeGeometryStaticToken,
+        worldUnitsPerPixel,
+      );
+      return;
     }
 
-    strokeGeometryTokenRef.current = null
-    updatePolylineGeometryBuffer(geometry, geometryData)
+    strokeGeometryTokenRef.current = null;
+    updatePolylineGeometryBuffer(geometry, geometryData);
 
-    if (linePattern === 'dashed' && line instanceof THREE.Line) {
-      line.computeLineDistances()
+    if (linePattern === "dashed" && line instanceof THREE.Line) {
+      line.computeLineDistances();
     }
-  }, [camera, geometry, geometryData, line, linePattern, renderable.sketchPlaneFrame, size.height, strokeGeometryMaterialConfig, strokeGeometryStaticToken, useStrokeMesh])
+  }, [
+    camera,
+    geometry,
+    geometryData,
+    line,
+    linePattern,
+    renderable.sketchPlaneFrame,
+    size.height,
+    strokeGeometryMaterialConfig,
+    strokeGeometryStaticToken,
+    useStrokeMesh,
+  ]);
 
   useFrame(({ camera: frameCamera, size: frameSize }) => {
     if (!useStrokeMesh) {
-      return
+      return;
     }
 
-    const worldUnitsPerPixel = getSketchFeedbackWorldUnitsPerPixel(frameCamera, frameSize.height, geometryData.points)
-    const token = createStrokeGeometryToken(strokeGeometryStaticToken, worldUnitsPerPixel)
+    const worldUnitsPerPixel = getSketchFeedbackWorldUnitsPerPixel(
+      frameCamera,
+      frameSize.height,
+      geometryData.points,
+    );
+    const token = createStrokeGeometryToken(
+      strokeGeometryStaticToken,
+      worldUnitsPerPixel,
+    );
     if (token === strokeGeometryTokenRef.current) {
-      return
+      return;
     }
 
     updatePolylineStrokeGeometryBuffer(
@@ -343,26 +427,29 @@ export function SketchDisplayPolylineNode({
       strokeGeometryMaterialConfig,
       worldUnitsPerPixel,
       renderable.sketchPlaneFrame,
-    )
-    strokeGeometryTokenRef.current = token
-  })
+    );
+    strokeGeometryTokenRef.current = token;
+  });
 
   useEffect(() => {
     return () => {
-      geometry.dispose()
-    }
-  }, [geometry])
-  useEffect(() => () => material.dispose(), [material])
+      geometry.dispose();
+    };
+  }, [geometry]);
+  useEffect(() => () => material.dispose(), [material]);
 
-  return <primitive object={line} />
+  return <primitive object={line} />;
 }
 
 function updatePolylineStrokeGeometryBuffer(
   geometry: THREE.BufferGeometry,
-  geometryData: Extract<SketchSessionDisplayRenderable['geometry'], { kind: 'polyline' }>,
+  geometryData: Extract<
+    SketchSessionDisplayRenderable["geometry"],
+    { kind: "polyline" }
+  >,
   materialConfig: ReturnType<typeof getSketchDisplayPolylineMaterialConfig>,
   worldUnitsPerPixel: number,
-  sketchPlaneFrame: SketchSessionDisplayRenderable['sketchPlaneFrame'],
+  sketchPlaneFrame: SketchSessionDisplayRenderable["sketchPlaneFrame"],
 ) {
   const nextGeometry = buildSketchPolylineStrokeGeometry({
     points: geometryData.points,
@@ -370,15 +457,18 @@ function updatePolylineStrokeGeometryBuffer(
     materialConfig,
     worldUnitsPerPixel,
     sketchPlaneFrame,
-  })
-  geometry.dispose()
-  geometry.copy(nextGeometry)
-  nextGeometry.dispose()
-  geometry.computeBoundingSphere()
+  });
+  geometry.dispose();
+  geometry.copy(nextGeometry);
+  nextGeometry.dispose();
+  geometry.computeBoundingSphere();
 }
 
 function createStrokeGeometryStaticToken(
-  geometryData: Extract<SketchSessionDisplayRenderable['geometry'], { kind: 'polyline' }>,
+  geometryData: Extract<
+    SketchSessionDisplayRenderable["geometry"],
+    { kind: "polyline" }
+  >,
   materialConfig: ReturnType<typeof getSketchDisplayPolylineMaterialConfig>,
 ) {
   return JSON.stringify({
@@ -391,19 +481,22 @@ function createStrokeGeometryStaticToken(
     pattern: materialConfig.linePattern,
     dashSize: materialConfig.dashSize,
     gapSize: materialConfig.gapSize,
-  })
+  });
 }
 
-function createStrokeGeometryToken(staticToken: string, worldUnitsPerPixel: number) {
-  return `${staticToken}:${getStrokeScaleToken(worldUnitsPerPixel)}`
+function createStrokeGeometryToken(
+  staticToken: string,
+  worldUnitsPerPixel: number,
+) {
+  return `${staticToken}:${getStrokeScaleToken(worldUnitsPerPixel)}`;
 }
 
 function getStrokeScaleToken(worldUnitsPerPixel: number) {
   if (!Number.isFinite(worldUnitsPerPixel) || worldUnitsPerPixel <= 0) {
-    return '1'
+    return "1";
   }
 
-  return String(Math.round(Math.log2(worldUnitsPerPixel) * 48))
+  return String(Math.round(Math.log2(worldUnitsPerPixel) * 48));
 }
 
 export function SketchDisplayMarkerNode({
@@ -411,47 +504,67 @@ export function SketchDisplayMarkerNode({
   applyStyles,
   palette,
 }: {
-  renderable: SketchSessionDisplayRenderable
-  applyStyles: boolean
-  palette: SketchRenderingPalette
+  renderable: SketchSessionDisplayRenderable;
+  applyStyles: boolean;
+  palette: SketchRenderingPalette;
 }) {
-  const geometryData = renderable.geometry.kind === 'marker' ? renderable.geometry : null
+  const geometryData =
+    renderable.geometry.kind === "marker" ? renderable.geometry : null;
   if (!geometryData) {
-    throw new Error('Display renderable is missing marker geometry.')
+    throw new Error("Display renderable is missing marker geometry.");
   }
 
   const materialConfig = useMemo(
-    () => getSketchDisplayMarkerMaterialConfig(renderable, applyStyles, palette),
+    () =>
+      getSketchDisplayMarkerMaterialConfig(renderable, applyStyles, palette),
     [applyStyles, palette, renderable],
-  )
-  const material = useMemo(() => new THREE.MeshBasicMaterial({
-    ...materialConfig,
-    depthTest: shouldDepthTestSketchDisplayMarker(renderable),
-    depthWrite: false,
-  }), [materialConfig, renderable])
-  const { camera, size } = useThree()
-  const visibleMeshRef = useRef<THREE.Mesh | null>(null)
+  );
+  const material = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        ...materialConfig,
+        depthTest: shouldDepthTestSketchDisplayMarker(renderable),
+        depthWrite: false,
+      }),
+    [materialConfig, renderable],
+  );
+  const { camera, size } = useThree();
+  const visibleMeshRef = useRef<THREE.Mesh | null>(null);
   const pickProxy = useMemo(() => {
-    const proxy = createMarkerPickProxy([0, 0, 0], geometryData.displayRadius)
-    proxy.userData.highlightExcluded = true
-    return proxy
-  }, [geometryData.displayRadius])
-  const initialRadii = getActiveSketchMarkerWorldRadii(renderable, camera, size.height)
+    const proxy = createMarkerPickProxy([0, 0, 0], geometryData.displayRadius);
+    proxy.userData.highlightExcluded = true;
+    return proxy;
+  }, [geometryData.displayRadius]);
+  const initialRadii = getActiveSketchMarkerWorldRadii(
+    renderable,
+    camera,
+    size.height,
+  );
 
   useLayoutEffect(() => {
-    pickProxy.position.set(geometryData.position[0], geometryData.position[1], geometryData.position[2])
-    updateActiveSketchMarkerScales(visibleMeshRef.current, pickProxy, renderable, camera, size.height)
-  }, [camera, geometryData.position, pickProxy, renderable, size.height])
+    pickProxy.position.set(
+      geometryData.position[0],
+      geometryData.position[1],
+      geometryData.position[2],
+    );
+    updateActiveSketchMarkerScales(
+      visibleMeshRef.current,
+      pickProxy,
+      renderable,
+      camera,
+      size.height,
+    );
+  }, [camera, geometryData.position, pickProxy, renderable, size.height]);
 
-  useEffect(() => () => material.dispose(), [material])
+  useEffect(() => () => material.dispose(), [material]);
   useEffect(() => {
-    const mesh = pickProxy
+    const mesh = pickProxy;
     return () => {
       if (mesh.material instanceof THREE.Material) {
-        mesh.material.dispose()
+        mesh.material.dispose();
       }
-    }
-  }, [pickProxy])
+    };
+  }, [pickProxy]);
   return (
     <group
       ref={(value) => {
@@ -460,9 +573,9 @@ export function SketchDisplayMarkerNode({
             value,
             null,
             renderable.target,
-            renderable.role === 'reference' ? 'sketchReference' : 'sketchPoint',
-            'document',
-          )
+            renderable.role === "reference" ? "sketchReference" : "sketchPoint",
+            "document",
+          );
         }
       }}
     >
@@ -476,7 +589,7 @@ export function SketchDisplayMarkerNode({
       />
       <primitive object={pickProxy} />
     </group>
-  )
+  );
 }
 
 function updateActiveSketchMarkerScales(
@@ -486,7 +599,11 @@ function updateActiveSketchMarkerScales(
   camera: THREE.Camera,
   viewportHeight: number,
 ) {
-  const radii = getActiveSketchMarkerWorldRadii(renderable, camera, viewportHeight)
-  visibleMesh?.scale.setScalar(radii.visibleRadius)
-  pickProxy.scale.setScalar(radii.pickRadius)
+  const radii = getActiveSketchMarkerWorldRadii(
+    renderable,
+    camera,
+    viewportHeight,
+  );
+  visibleMesh?.scale.setScalar(radii.visibleRadius);
+  pickProxy.scale.setScalar(radii.pickRadius);
 }

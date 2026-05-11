@@ -1,4 +1,4 @@
-import { TextInput, type TextInputProps } from '@mantine/core'
+import { TextInput, type TextInputProps } from "@mantine/core";
 
 export function Input({ className, ...props }: TextInputProps) {
   return (
@@ -6,12 +6,12 @@ export function Input({ className, ...props }: TextInputProps) {
       classNames={{ input: className }}
       styles={{
         input: {
-          backgroundColor: 'var(--workbench-shell-control-surface)',
-          borderColor: 'var(--workbench-shell-border)',
-          color: 'var(--workbench-shell-text)',
+          backgroundColor: "var(--workbench-shell-control-surface)",
+          borderColor: "var(--workbench-shell-border)",
+          color: "var(--workbench-shell-text)",
         },
       }}
       {...props}
     />
-  )
+  );
 }

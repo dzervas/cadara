@@ -1,57 +1,64 @@
-import { NumberInput, Paper, Select, Switch, TextInput } from '@mantine/core'
+import { NumberInput, Paper, Select, Switch, TextInput } from "@mantine/core";
 
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
   VIEWPORT_FLOATING_PANEL_TOP_STYLE,
-} from '@/components/cad/viewport-overlay-layout'
-import type { SketchToolPresentationSchema } from '@/core/sketch-tools/editor-schema'
+} from "@/components/cad/viewport-overlay-layout";
+import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import {
   SECTION_HEADER_CLASSES,
   compactInputStyles,
   compactSelectStyles,
   fieldSurfaceStyle,
-} from '@/components/ui/workbench-panel-styles'
+} from "@/components/ui/workbench-panel-styles";
 
-type SketchToolControl = NonNullable<SketchToolPresentationSchema['controls']>[number]
+type SketchToolControl = NonNullable<
+  SketchToolPresentationSchema["controls"]
+>[number];
 
 interface SketchToolPanelProps {
-  schema: SketchToolPresentationSchema | null
-  onPatch: (patch: Record<string, unknown>) => void
+  schema: SketchToolPresentationSchema | null;
+  onPatch: (patch: Record<string, unknown>) => void;
 }
 
 function formatNumber(value: number | null) {
-  return value === null ? 'n/a' : value.toFixed(2)
+  return value === null ? "n/a" : value.toFixed(2);
 }
 
 export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
   if (!schema) {
-    return null
+    return null;
   }
 
-  const validation = schema.validation ?? []
-  const controls = schema.controls ?? []
+  const validation = schema.validation ?? [];
+  const controls = schema.controls ?? [];
   const controlGroups = schema.controlGroups?.length
     ? schema.controlGroups
     : controls.length > 0
-      ? [{ id: 'sketch-tool-controls', label: 'Controls', controls }]
-      : []
-  const measurements = schema.measurements ?? []
-  const hints = schema.completionHints ?? []
-  const hasViewportDrawingFeedback = !schema.selectionGuide && (schema.overlays ?? []).some(
-    (overlay) => overlay.kind === 'measurement' || overlay.kind === 'completionCue',
-  )
-  const hasPanelContent = schema.prompts.length > 0
-    || validation.length > 0
-    || controlGroups.length > 0
-    || measurements.length > 0
-    || hints.length > 0
-    || Boolean(schema.selectionGuide)
+      ? [{ id: "sketch-tool-controls", label: "Controls", controls }]
+      : [];
+  const measurements = schema.measurements ?? [];
+  const hints = schema.completionHints ?? [];
+  const hasViewportDrawingFeedback =
+    !schema.selectionGuide &&
+    (schema.overlays ?? []).some(
+      (overlay) =>
+        overlay.kind === "measurement" || overlay.kind === "completionCue",
+    );
+  const hasPanelContent =
+    schema.prompts.length > 0 ||
+    validation.length > 0 ||
+    controlGroups.length > 0 ||
+    measurements.length > 0 ||
+    hints.length > 0 ||
+    Boolean(schema.selectionGuide);
 
   if (hasViewportDrawingFeedback || !hasPanelContent) {
-    return null
+    return null;
   }
 
-  const pointerEventsClassName = controlGroups.length > 0 ? 'pointer-events-auto' : 'pointer-events-none'
+  const pointerEventsClassName =
+    controlGroups.length > 0 ? "pointer-events-auto" : "pointer-events-none";
 
   return (
     <Paper
@@ -60,37 +67,49 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
       style={{
         left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
         top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
-        background: 'var(--workbench-shell-surface-panel-elev)',
-        boxShadow: 'var(--workbench-shell-elevation-md)',
+        background: "var(--workbench-shell-surface-panel-elev)",
+        boxShadow: "var(--workbench-shell-elevation-md)",
       }}
     >
       <div className="grid gap-2 p-3">
         {schema.prompts.map((prompt) => (
-          <div key={prompt.id} className="text-sm font-medium text-[var(--workbench-shell-text)]">
+          <div
+            key={prompt.id}
+            className="text-sm font-medium text-[var(--workbench-shell-text)]"
+          >
             {prompt.text}
           </div>
         ))}
         {schema.cursor ? (
           <div className="text-[var(--workbench-shell-text-muted)]">
-            Cursor: <span className="text-[var(--workbench-shell-text)]">{schema.cursor.label}</span>
+            Cursor:{" "}
+            <span className="text-[var(--workbench-shell-text)]">
+              {schema.cursor.label}
+            </span>
           </div>
         ) : null}
         {schema.steps?.map((step) => (
           <div key={step.id}>
-            Step: <span className="text-[var(--workbench-shell-text)]">{step.label}</span>
+            Step:{" "}
+            <span className="text-[var(--workbench-shell-text)]">
+              {step.label}
+            </span>
           </div>
         ))}
         {schema.selectionGuide ? (
           <div
             className="rounded-[3px] px-2 py-1"
             style={{
-              background: 'var(--workbench-shell-overlay-soft)',
-              boxShadow: '0 0 0 1px var(--workbench-shell-border)',
+              background: "var(--workbench-shell-overlay-soft)",
+              boxShadow: "0 0 0 1px var(--workbench-shell-border)",
             }}
           >
-            <div className="text-[var(--workbench-shell-text)]">{schema.selectionGuide.label}</div>
+            <div className="text-[var(--workbench-shell-text)]">
+              {schema.selectionGuide.label}
+            </div>
             <div className="mt-1">
-              Targets: {schema.selectionGuide.selectedCount}/{schema.selectionGuide.requiredCount}
+              Targets: {schema.selectionGuide.selectedCount}/
+              {schema.selectionGuide.requiredCount}
             </div>
             {schema.selectionGuide.hoverLabel ? (
               <div>Hover: {schema.selectionGuide.hoverLabel}</div>
@@ -102,9 +121,9 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
             key={message.id}
             className="rounded-[3px] px-2 py-1"
             style={{
-              background: 'var(--workbench-shell-danger-surface)',
-              boxShadow: '0 0 0 1px var(--workbench-shell-danger-border)',
-              color: 'var(--workbench-shell-danger-text)',
+              background: "var(--workbench-shell-danger-surface)",
+              boxShadow: "0 0 0 1px var(--workbench-shell-danger-border)",
+              color: "var(--workbench-shell-danger-text)",
             }}
           >
             {message.message}
@@ -116,7 +135,11 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
               <div key={group.id} className="grid gap-0.5">
                 <p className={SECTION_HEADER_CLASSES}>{group.label}</p>
                 {group.controls.map((control) => (
-                  <SketchToolControlField key={control.id} control={control} onPatch={onPatch} />
+                  <SketchToolControlField
+                    key={control.id}
+                    control={control}
+                    onPatch={onPatch}
+                  />
                 ))}
               </div>
             ))}
@@ -128,7 +151,7 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
               <div key={measurement.id}>
                 <div>{measurement.label}</div>
                 <div className="text-[var(--workbench-shell-text)]">
-                  {formatNumber(measurement.value)} {measurement.unit ?? ''}
+                  {formatNumber(measurement.value)} {measurement.unit ?? ""}
                 </div>
               </div>
             ))}
@@ -137,24 +160,28 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
         {hints.map((hint) => (
           <div
             key={hint.id}
-            style={{ color: hint.ready ? 'var(--workbench-shell-success-text)' : 'var(--workbench-shell-text-muted)' }}
+            style={{
+              color: hint.ready
+                ? "var(--workbench-shell-success-text)"
+                : "var(--workbench-shell-text-muted)",
+            }}
           >
             {hint.text}
           </div>
         ))}
       </div>
     </Paper>
-  )
+  );
 }
 
 function SketchToolControlField({
   control,
   onPatch,
 }: {
-  control: SketchToolControl
-  onPatch: (patch: Record<string, unknown>) => void
+  control: SketchToolControl;
+  onPatch: (patch: Record<string, unknown>) => void;
 }) {
-  const rowStyle = fieldSurfaceStyle({})
+  const rowStyle = fieldSurfaceStyle({});
 
   return (
     <div
@@ -168,7 +195,7 @@ function SketchToolControlField({
         {control.label}
       </label>
       <div className="min-w-0 flex-1">
-        {control.kind === 'text' ? (
+        {control.kind === "text" ? (
           <TextInput
             id={control.id}
             disabled={control.disabled}
@@ -177,36 +204,45 @@ function SketchToolControlField({
             size="xs"
             styles={compactInputStyles({ disabled: control.disabled })}
             onChange={(event) => {
-              onPatch({ ...control.action.patch, value: event.currentTarget.value })
+              onPatch({
+                ...control.action.patch,
+                value: event.currentTarget.value,
+              });
             }}
           />
-        ) : control.kind === 'numeric' ? (
+        ) : control.kind === "numeric" ? (
           <NumberInput
             id={control.id}
             disabled={control.disabled}
-            value={control.value ?? ''}
+            value={control.value ?? ""}
             size="xs"
             styles={compactInputStyles({ disabled: control.disabled })}
             onChange={(nextValue) => {
-              const resolved = typeof nextValue === 'number' && !Number.isNaN(nextValue) ? nextValue : null
-              onPatch({ ...control.action.patch, value: resolved })
+              const resolved =
+                typeof nextValue === "number" && !Number.isNaN(nextValue)
+                  ? nextValue
+                  : null;
+              onPatch({ ...control.action.patch, value: resolved });
             }}
           />
-        ) : control.kind === 'option' ? (
+        ) : control.kind === "option" ? (
           <Select
             id={control.id}
             disabled={control.disabled}
-            value={control.value ?? ''}
-            data={control.options.map((option) => ({ value: option.value, label: option.label }))}
+            value={control.value ?? ""}
+            data={control.options.map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
             allowDeselect={false}
             comboboxProps={{ withinPortal: true }}
             size="xs"
             styles={compactSelectStyles({ disabled: control.disabled })}
             onChange={(value) => {
-              onPatch({ ...control.action.patch, value })
+              onPatch({ ...control.action.patch, value });
             }}
           />
-        ) : control.kind === 'toggle' ? (
+        ) : control.kind === "toggle" ? (
           <div className="flex items-center pl-1">
             <Switch
               id={control.id}
@@ -215,7 +251,10 @@ function SketchToolControlField({
               size="xs"
               color="workbench"
               onChange={(event) => {
-                onPatch({ ...control.action.patch, value: event.currentTarget.checked })
+                onPatch({
+                  ...control.action.patch,
+                  value: event.currentTarget.checked,
+                });
               }}
             />
           </div>
@@ -228,11 +267,14 @@ function SketchToolControlField({
             type="color"
             value={control.value}
             onChange={(event) => {
-              onPatch({ ...control.action.patch, value: event.currentTarget.value })
+              onPatch({
+                ...control.action.patch,
+                value: event.currentTarget.value,
+              });
             }}
           />
         )}
       </div>
     </div>
-  )
+  );
 }

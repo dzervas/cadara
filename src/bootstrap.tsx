@@ -11,27 +11,32 @@ import "@mantine/core/styles.css";
 import "./index.css";
 import App from "./App.tsx";
 import {
-	createSentryPerformanceTelemetry,
-	shouldEnablePerformanceTelemetry,
+  createSentryPerformanceTelemetry,
+  shouldEnablePerformanceTelemetry,
 } from "@/contracts/errors/sentry-client";
 import { startBrowserOccWarmup } from "@/infrastructure/occ/browser-kernel-runtime";
-import { workbenchCssVariablesResolver, workbenchTheme } from "@/theme/workbench-theme";
+import {
+  workbenchCssVariablesResolver,
+  workbenchTheme,
+} from "@/theme/workbench-theme";
 
-startBrowserOccWarmup(createSentryPerformanceTelemetry({
-	enabled: shouldEnablePerformanceTelemetry({
-		isProduction: import.meta.env.PROD,
-		search: typeof window === "undefined" ? null : window.location.search,
-	}),
-}));
+startBrowserOccWarmup(
+  createSentryPerformanceTelemetry({
+    enabled: shouldEnablePerformanceTelemetry({
+      isProduction: import.meta.env.PROD,
+      search: typeof window === "undefined" ? null : window.location.search,
+    }),
+  }),
+);
 
 createRoot(document.getElementById("root")!).render(
-	<StrictMode>
-		<MantineProvider
-			theme={workbenchTheme}
-			defaultColorScheme="dark"
-			cssVariablesResolver={workbenchCssVariablesResolver}
-		>
-			<App />
-		</MantineProvider>
-	</StrictMode>,
+  <StrictMode>
+    <MantineProvider
+      theme={workbenchTheme}
+      defaultColorScheme="dark"
+      cssVariablesResolver={workbenchCssVariablesResolver}
+    >
+      <App />
+    </MantineProvider>
+  </StrictMode>,
 );

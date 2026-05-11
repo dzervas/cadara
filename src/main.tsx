@@ -1,2 +1,2 @@
-import './sentry-startup'
-import './bootstrap'
+import "./sentry-startup";
+import "./bootstrap";

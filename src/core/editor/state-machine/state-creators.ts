@@ -1,5 +1,5 @@
-import type { ToolbarMode } from '@/core/tools/schema'
-import type { SectionViewSession } from '@/core/section-view/session'
+import type { ToolbarMode } from "@/core/tools/schema";
+import type { SectionViewSession } from "@/core/section-view/session";
 import {
   defaultSelectionFilter,
   getDefaultSelectionFilterForMode,
@@ -8,29 +8,29 @@ import {
   type CommandPreview,
   type PrimitiveRef,
   type SelectionFilter,
-} from '@/core/editor/schema'
+} from "@/core/editor/schema";
 import {
   getSelectionFilterForFeatureType,
   type FeatureEditSessionState,
-} from '@/domain/editor/feature-editing'
+} from "@/domain/editor/feature-editing";
 import {
   getSketchSessionPreviewLabel,
   updateSketchReferenceProjection,
   type SketchSessionState,
-} from '@/domain/editor/sketch-session'
+} from "@/domain/editor/sketch-session";
 import {
   SKETCH_PLANE_SUPPORT_FIELD_ID,
   type SketchPlaneEditSessionState,
-} from '@/domain/editor/sketch-plane-editing'
-import type { EditorExtensionDependencies } from './dependencies'
-import { getDefaultImportSelectionField } from './form-traversal'
-import { advanceCursorPhase } from './cursor-lifecycle'
+} from "@/domain/editor/sketch-plane-editing";
+import type { EditorExtensionDependencies } from "./dependencies";
+import { getDefaultImportSelectionField } from "./form-traversal";
+import { advanceCursorPhase } from "./cursor-lifecycle";
 import {
   createFeatureSelectionPreview,
   createImportSelectionPreview,
   createSelectionPreviewForSelection,
-} from './selection-helpers'
-import { nextCommandSessionId, nextRequestId } from './utility-helpers'
+} from "./selection-helpers";
+import { nextCommandSessionId, nextRequestId } from "./utility-helpers";
 import type {
   EditorActiveCommand,
   EditorState,
@@ -43,12 +43,12 @@ import type {
   SelectionCommandEditorState,
   SketchEditorState,
   SketchPlaneEditorState,
-} from './types'
+} from "./types";
 
 function createInitialState(): EditorState {
   return {
-    kind: 'idle',
-    mode: 'part',
+    kind: "idle",
+    mode: "part",
     document: {
       documentId: null,
       revisionId: null,
@@ -65,42 +65,51 @@ function createInitialState(): EditorState {
     pendingSnapshotRequestId: null,
     pendingHistoryCursorRequestId: null,
     editSessionCursorContext: null,
-  }
+  };
 }
 
-export const initialEditorState = createInitialState()
+export const initialEditorState = createInitialState();
 
-export function previewEquals(left: CommandPreview | null, right: CommandPreview | null) {
+export function previewEquals(
+  left: CommandPreview | null,
+  right: CommandPreview | null,
+) {
   if (left === right) {
-    return true
+    return true;
   }
 
   if (!left || !right) {
-    return left === right
+    return left === right;
   }
 
   const targetsMatch =
     left.target === null || right.target === null
       ? left.target === right.target
-      : primitiveRefEquals(left.target, right.target)
+      : primitiveRefEquals(left.target, right.target);
 
-  return left.kind === right.kind && left.label === right.label && targetsMatch
+  return left.kind === right.kind && left.label === right.label && targetsMatch;
 }
 
-export function withPreview<TState extends EditorState>(state: TState, preview: CommandPreview | null): TState {
+export function withPreview<TState extends EditorState>(
+  state: TState,
+  preview: CommandPreview | null,
+): TState {
   if (previewEquals(state.preview, preview)) {
-    return state
+    return state;
   }
 
   return {
     ...state,
     preview,
-  }
+  };
 }
 
-export function toIdleState(state: EditorState, mode: ToolbarMode): IdleEditorState {
+export function toIdleState(
+  state: EditorState,
+  mode: ToolbarMode,
+): IdleEditorState {
   return {
-    kind: 'idle',
+    kind: "idle",
     mode,
     document: state.document,
     snapshot: state.snapshot,
@@ -115,18 +124,18 @@ export function toIdleState(state: EditorState, mode: ToolbarMode): IdleEditorSt
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
     editSessionCursorContext: state.editSessionCursorContext,
-  }
+  };
 }
 
 export function createCommandState(
   state: EditorState,
-  toolId: EditorActiveCommand['toolId'],
+  toolId: EditorActiveCommand["toolId"],
   mode: ToolbarMode,
   selectionFilter: SelectionFilter,
   preview: CommandPreview | null,
 ): SelectionCommandEditorState {
   return {
-    kind: 'selectionCommand',
+    kind: "selectionCommand",
     mode,
     document: state.document,
     snapshot: state.snapshot,
@@ -145,9 +154,9 @@ export function createCommandState(
     command: {
       commandSessionId: nextCommandSessionId(state, toolId),
       toolId,
-      phase: 'armed',
+      phase: "armed",
     },
-  }
+  };
 }
 
 export function withActivationSelection<TState extends EditorState>(
@@ -158,7 +167,7 @@ export function withActivationSelection<TState extends EditorState>(
     ...state,
     selection: [...selection],
     hoverTarget: selection[selection.length - 1] ?? null,
-  }
+  };
 }
 
 export function createFeatureEditingState(
@@ -167,7 +176,7 @@ export function createFeatureEditingState(
   session: FeatureEditSessionState,
 ): FeatureEditorState {
   return {
-    kind: 'editingFeature',
+    kind: "editingFeature",
     mode: state.mode,
     document: state.document,
     snapshot: state.snapshot,
@@ -181,19 +190,18 @@ export function createFeatureEditingState(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
-    editSessionCursorContext:
-      state.editSessionCursorContext
-        ? advanceCursorPhase(state.editSessionCursorContext, 'sessionOpened')
-        : null,
+    editSessionCursorContext: state.editSessionCursorContext
+      ? advanceCursorPhase(state.editSessionCursorContext, "sessionOpened")
+      : null,
     command: {
       ...command,
-      phase: 'editing',
+      phase: "editing",
     },
     session,
     activeReferencePickerFieldId: null,
     pendingPreviewRequestId: null,
     pendingCommitRequestId: null,
-  }
+  };
 }
 
 export function createSketchPlaneEditingState(
@@ -201,8 +209,8 @@ export function createSketchPlaneEditingState(
   session: SketchPlaneEditSessionState,
 ): SketchPlaneEditorState {
   return {
-    kind: 'editingSketchPlane',
-    mode: 'part',
+    kind: "editingSketchPlane",
+    mode: "part",
     document: state.document,
     snapshot: state.snapshot,
     previewRenderables: null,
@@ -215,18 +223,17 @@ export function createSketchPlaneEditingState(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
-    editSessionCursorContext:
-      state.editSessionCursorContext
-        ? advanceCursorPhase(state.editSessionCursorContext, 'sessionOpened')
-        : null,
+    editSessionCursorContext: state.editSessionCursorContext
+      ? advanceCursorPhase(state.editSessionCursorContext, "sessionOpened")
+      : null,
     command: {
       ...state.command,
-      phase: 'collecting',
+      phase: "collecting",
     },
     session,
     activeReferencePickerFieldId: SKETCH_PLANE_SUPPORT_FIELD_ID,
     pendingCommitRequestId: null,
-  }
+  };
 }
 
 export function createImportingState(
@@ -234,12 +241,14 @@ export function createImportingState(
   session: ImportSessionState,
   dependencies: EditorExtensionDependencies,
 ): ImportEditorState {
-  const defaultReferenceField = getDefaultImportSelectionField(session)
-  const selectionFilter = defaultReferenceField?.picker.selectionFilter ?? getDefaultSelectionFilterForMode('part')
+  const defaultReferenceField = getDefaultImportSelectionField(session);
+  const selectionFilter =
+    defaultReferenceField?.picker.selectionFilter ??
+    getDefaultSelectionFilterForMode("part");
 
   return {
-    kind: 'importing',
-    mode: 'part',
+    kind: "importing",
+    mode: "part",
     document: state.document,
     snapshot: state.snapshot,
     previewRenderables: state.previewRenderables,
@@ -256,13 +265,13 @@ export function createImportingState(
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
     editSessionCursorContext: null,
     command: {
-      commandSessionId: nextCommandSessionId(state, 'import'),
-      toolId: 'import',
-      phase: defaultReferenceField ? 'collecting' : 'editing',
+      commandSessionId: nextCommandSessionId(state, "import"),
+      toolId: "import",
+      phase: defaultReferenceField ? "collecting" : "editing",
     },
     session,
     activeReferencePickerFieldId: defaultReferenceField?.id ?? null,
-  }
+  };
 }
 
 export function createSectionViewEditingState(
@@ -270,8 +279,8 @@ export function createSectionViewEditingState(
   section: SectionViewSession,
 ): SectionViewEditorState {
   return {
-    kind: 'inspectingSection',
-    mode: 'part',
+    kind: "inspectingSection",
+    mode: "part",
     document: state.document,
     snapshot: state.snapshot,
     previewRenderables: null,
@@ -280,8 +289,8 @@ export function createSectionViewEditingState(
     selectionFilter: state.selectionFilter,
     selectionCatalog: state.selectionCatalog,
     preview: {
-      kind: 'selection',
-      label: 'Section view active',
+      kind: "selection",
+      label: "Section view active",
       target: section.seed,
     },
     nextCommandSequence: state.nextCommandSequence,
@@ -291,10 +300,10 @@ export function createSectionViewEditingState(
     editSessionCursorContext: null,
     command: {
       ...state.command,
-      phase: 'editing',
+      phase: "editing",
     },
     section,
-  }
+  };
 }
 
 export function enterSketchEditing(
@@ -302,20 +311,20 @@ export function enterSketchEditing(
   session: SketchSessionState,
 ): EditorTransitionResult {
   const nextState: SketchEditorState = {
-    kind: 'editingSketch',
-    mode: 'sketch',
+    kind: "editingSketch",
+    mode: "sketch",
     document: state.document,
     snapshot: state.snapshot,
     previewRenderables: null,
     selection:
       session.sketchId === null
         ? [session.planeTarget]
-        : [{ kind: 'sketch', sketchId: session.sketchId }],
+        : [{ kind: "sketch", sketchId: session.sketchId }],
     hoverTarget: null,
-    selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+    selectionFilter: getDefaultSelectionFilterForMode("sketch"),
     selectionCatalog: state.selectionCatalog,
     preview: {
-      kind: 'sketch',
+      kind: "sketch",
       label: getSketchSessionPreviewLabel(session),
       target: session.planeTarget,
     },
@@ -323,24 +332,23 @@ export function enterSketchEditing(
     nextRequestSequence: state.nextRequestSequence,
     pendingSnapshotRequestId: state.pendingSnapshotRequestId,
     pendingHistoryCursorRequestId: state.pendingHistoryCursorRequestId,
-    editSessionCursorContext:
-      state.editSessionCursorContext
-        ? advanceCursorPhase(state.editSessionCursorContext, 'sessionOpened')
-        : null,
+    editSessionCursorContext: state.editSessionCursorContext
+      ? advanceCursorPhase(state.editSessionCursorContext, "sessionOpened")
+      : null,
     command: {
       ...state.command,
-      phase: 'editing',
+      phase: "editing",
     },
     session,
     pendingCommitRequestId: null,
     pendingProjectionRequestId: null,
     pendingImportRequestId: null,
-  }
+  };
 
   if (
-    session.definition.references.length === 0
-    || state.document.documentId === null
-    || state.document.revisionId === null
+    session.definition.references.length === 0 ||
+    state.document.documentId === null ||
+    state.document.revisionId === null
   ) {
     return {
       state: {
@@ -349,10 +357,10 @@ export function enterSketchEditing(
         pendingProjectionRequestId: null,
       },
       effects: [],
-    }
+    };
   }
 
-  const requestId = nextRequestId(state, 'sketch-reference-projection')
+  const requestId = nextRequestId(state, "sketch-reference-projection");
 
   return {
     state: {
@@ -363,7 +371,7 @@ export function enterSketchEditing(
     },
     effects: [
       {
-        type: 'sketch.projectReferences',
+        type: "sketch.projectReferences",
         requestId,
         commandSessionId: state.command.commandSessionId,
         documentId: state.document.documentId,
@@ -371,5 +379,5 @@ export function enterSketchEditing(
         session,
       },
     ],
-  }
+  };
 }

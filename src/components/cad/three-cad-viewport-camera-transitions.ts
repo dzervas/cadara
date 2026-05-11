@@ -1,68 +1,71 @@
-import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
-import type { SketchSessionDisplayRenderable } from '@/domain/editor/sketch-session'
-import type { ViewportCameraControls } from '@/infrastructure/viewport/viewport-camera-controls'
-import { computeSketchCameraFrame } from '@/infrastructure/viewport/sketch-camera-framing'
+import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
+import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
+import type { ViewportCameraControls } from "@/infrastructure/viewport/viewport-camera-controls";
+import { computeSketchCameraFrame } from "@/infrastructure/viewport/sketch-camera-framing";
 import {
   captureViewportCameraFrame,
   cloneViewportCameraFrame,
   type ViewportCamera,
   type ViewportCameraFrame,
-} from '@/infrastructure/viewport/viewport-projection'
+} from "@/infrastructure/viewport/viewport-projection";
 import {
   createViewNavigationCameraFrame,
   getViewNavigationDirection,
   type ViewNavigationPresetId,
-} from '@/infrastructure/viewport/view-navigation'
+} from "@/infrastructure/viewport/view-navigation";
 
 export interface ViewportSketchCameraSession {
-  sketchId: string | null
-  plane: SketchPlaneDefinition
+  sketchId: string | null;
+  plane: SketchPlaneDefinition;
 }
 
 export interface SketchCameraTransitionState {
-  activeSessionToken: string | null
-  preSketchFrame: ViewportCameraFrame | null
+  activeSessionToken: string | null;
+  preSketchFrame: ViewportCameraFrame | null;
 }
 
 interface SketchCameraTransitionResolution {
-  fromFrame?: ViewportCameraFrame
-  state: SketchCameraTransitionState
-  targetFrame: ViewportCameraFrame | null
+  fromFrame?: ViewportCameraFrame;
+  state: SketchCameraTransitionState;
+  targetFrame: ViewportCameraFrame | null;
 }
 
 export function requestViewCubeCameraTransition(input: {
-  presetId: ViewNavigationPresetId
-  camera: ViewportCamera | null
-  controls: ViewportCameraControls | null
-  requestTransition: (targetFrame: ViewportCameraFrame, fromFrame?: ViewportCameraFrame) => void
+  presetId: ViewNavigationPresetId;
+  camera: ViewportCamera | null;
+  controls: ViewportCameraControls | null;
+  requestTransition: (
+    targetFrame: ViewportCameraFrame,
+    fromFrame?: ViewportCameraFrame,
+  ) => void;
 }) {
-  const { camera, controls, presetId, requestTransition } = input
+  const { camera, controls, presetId, requestTransition } = input;
 
   if (!camera || !controls) {
-    return null
+    return null;
   }
 
-  const fromFrame = captureViewportCameraFrame(camera, controls)
+  const fromFrame = captureViewportCameraFrame(camera, controls);
   const targetFrame = createViewNavigationCameraFrame({
     camera,
     controls,
     direction: getViewNavigationDirection(presetId),
-  })
+  });
 
-  requestTransition(targetFrame, fromFrame)
+  requestTransition(targetFrame, fromFrame);
 
   return {
     fromFrame,
     targetFrame,
-  }
+  };
 }
 
 export function resolveSketchCameraTransition(input: {
-  camera: ViewportCamera
-  controls: ViewportCameraControls
-  sketchSession: ViewportSketchCameraSession | null
-  sketchDisplayRenderables: SketchSessionDisplayRenderable[]
-  state: SketchCameraTransitionState
+  camera: ViewportCamera;
+  controls: ViewportCameraControls;
+  sketchSession: ViewportSketchCameraSession | null;
+  sketchDisplayRenderables: SketchSessionDisplayRenderable[];
+  state: SketchCameraTransitionState;
 }): SketchCameraTransitionResolution {
   if (!input.sketchSession) {
     if (!input.state.preSketchFrame) {
@@ -72,7 +75,7 @@ export function resolveSketchCameraTransition(input: {
           preSketchFrame: null,
         },
         targetFrame: null,
-      }
+      };
     }
 
     return {
@@ -82,18 +85,18 @@ export function resolveSketchCameraTransition(input: {
         preSketchFrame: null,
       },
       targetFrame: cloneViewportCameraFrame(input.state.preSketchFrame),
-    }
+    };
   }
 
-  const nextToken = getSketchSessionCameraToken(input.sketchSession)
+  const nextToken = getSketchSessionCameraToken(input.sketchSession);
   if (input.state.activeSessionToken === nextToken) {
     return {
       state: input.state,
       targetFrame: null,
-    }
+    };
   }
 
-  const fromFrame = captureViewportCameraFrame(input.camera, input.controls)
+  const fromFrame = captureViewportCameraFrame(input.camera, input.controls);
 
   return {
     fromFrame,
@@ -106,15 +109,16 @@ export function resolveSketchCameraTransition(input: {
       plane: input.sketchSession.plane,
       renderables: input.sketchDisplayRenderables,
     }),
-  }
+  };
 }
 
 function getSketchSessionCameraToken(session: ViewportSketchCameraSession) {
-  const support = session.plane.support
-  const supportToken = support.kind === 'construction'
-    ? support.constructionId
-    : `${support.bodyId}:${support.faceId}`
-  const origin = session.plane.frame.origin.join(',')
+  const support = session.plane.support;
+  const supportToken =
+    support.kind === "construction"
+      ? support.constructionId
+      : `${support.bodyId}:${support.faceId}`;
+  const origin = session.plane.frame.origin.join(",");
 
-  return `${session.sketchId ?? 'draft'}:${support.kind}:${supportToken}:${origin}`
+  return `${session.sketchId ?? "draft"}:${support.kind}:${supportToken}:${origin}`;
 }

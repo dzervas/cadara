@@ -1,7 +1,7 @@
-import type React from 'react'
+import type React from "react";
 
 export const SECTION_HEADER_CLASSES =
-  'text-[11px] font-semibold uppercase tracking-[0.20em] text-[var(--workbench-shell-text-dim)]'
+  "text-[11px] font-semibold uppercase tracking-[0.20em] text-[var(--workbench-shell-text-dim)]";
 
 export function fieldSurfaceStyle(
   field: { error?: { message: string } | null },
@@ -9,78 +9,86 @@ export function fieldSurfaceStyle(
 ): React.CSSProperties {
   if (field.error) {
     return {
-      background: 'var(--workbench-shell-danger-surface)',
-      boxShadow: '0 0 0 1px var(--workbench-shell-danger-border)',
-      color: 'var(--workbench-shell-danger-text)',
-    }
+      background: "var(--workbench-shell-danger-surface)",
+      boxShadow: "0 0 0 1px var(--workbench-shell-danger-border)",
+      color: "var(--workbench-shell-danger-text)",
+    };
   }
 
   if (isActive) {
     return {
-      background: 'var(--workbench-shell-overlay-strong)',
-      boxShadow: '0 0 0 1px var(--workbench-shell-accent)',
-      color: 'var(--mantine-color-workbench-4)',
-    }
+      background: "var(--workbench-shell-overlay-strong)",
+      boxShadow: "0 0 0 1px var(--workbench-shell-accent)",
+      color: "var(--mantine-color-workbench-4)",
+    };
   }
 
   return {
-    background: 'var(--workbench-shell-overlay-soft)',
-    color: 'var(--workbench-shell-text)',
-  }
+    background: "var(--workbench-shell-overlay-soft)",
+    color: "var(--workbench-shell-text)",
+  };
 }
 
-export function compactInputStyles(input: { hasError?: boolean; disabled?: boolean } = {}) {
+export function compactInputStyles(
+  input: { hasError?: boolean; disabled?: boolean } = {},
+) {
   return {
     input: {
-      backgroundColor: 'transparent',
+      backgroundColor: "transparent",
       border: 0,
-      color: input.disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text)',
-      fontFamily: 'var(--mantine-font-family-monospace)',
+      color: input.disabled
+        ? "var(--workbench-shell-text-dim)"
+        : "var(--workbench-shell-text)",
+      fontFamily: "var(--mantine-font-family-monospace)",
       fontSize: 12.5,
       height: 28,
       minHeight: 28,
       paddingInline: 4,
     },
-  }
+  };
 }
 
-export function compactActionIconStyles(input: { active?: boolean; danger?: boolean } = {}) {
+export function compactActionIconStyles(
+  input: { active?: boolean; danger?: boolean } = {},
+) {
   return {
     root: {
-      backgroundColor: 'transparent',
+      backgroundColor: "transparent",
       border: 0,
       color: input.danger
-        ? 'var(--workbench-shell-danger-text)'
+        ? "var(--workbench-shell-danger-text)"
         : input.active
-          ? 'var(--workbench-shell-accent)'
-          : 'var(--workbench-shell-text-muted)',
-      flex: '0 0 auto',
+          ? "var(--workbench-shell-accent)"
+          : "var(--workbench-shell-text-muted)",
+      flex: "0 0 auto",
       opacity: input.active ? 1 : 0.72,
     },
-  }
+  };
 }
 
 export function compactSelectStyles(input: { disabled?: boolean } = {}) {
   return {
     input: {
-      backgroundColor: 'transparent',
+      backgroundColor: "transparent",
       border: 0,
-      color: input.disabled ? 'var(--workbench-shell-text-dim)' : 'var(--workbench-shell-text)',
+      color: input.disabled
+        ? "var(--workbench-shell-text-dim)"
+        : "var(--workbench-shell-text)",
       fontSize: 12.5,
       height: 28,
       minHeight: 28,
       paddingLeft: 4,
     },
     section: {
-      color: 'var(--workbench-shell-text-muted)',
+      color: "var(--workbench-shell-text-muted)",
     },
     dropdown: {
-      backgroundColor: 'var(--workbench-shell-overlay-strong)',
-      border: 'none',
-      boxShadow: 'var(--workbench-shell-elevation-md)',
+      backgroundColor: "var(--workbench-shell-overlay-strong)",
+      border: "none",
+      boxShadow: "var(--workbench-shell-elevation-md)",
     },
     option: {
-      color: 'var(--workbench-shell-text)',
+      color: "var(--workbench-shell-text)",
     },
-  }
+  };
 }

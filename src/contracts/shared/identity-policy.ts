@@ -20,4 +20,4 @@
  * - if applicable, every durable reference must also resolve to owning feature,
  *   sketch, and body
  */
-export const IDENTITY_POLICY_VERSION = 'identity-policy/v1alpha1' as const
+export const IDENTITY_POLICY_VERSION = "identity-policy/v1alpha1" as const;

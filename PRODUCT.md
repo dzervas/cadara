@@ -37,7 +37,7 @@ The interface should look like it was made in 2026, not retrofitted from 2005. D
 
 - **SolidWorks** — frozen-in-2005 chrome, baroque dialog stacks, every feature has a different visual language.
 - **FreeCAD** — inconsistent enough to feel broken; default Qt look reads as unfinished open-source. CADara is open-source; it must not look open-source in the bad way.
-- **Rhino** — feels like an IDE, not a creative tool. Too many panels, too much state, hostile to anyone who isn't already an expert in *Rhino specifically*.
+- **Rhino** — feels like an IDE, not a creative tool. Too many panels, too much state, hostile to anyone who isn't already an expert in _Rhino specifically_.
 - **TinkerCAD** — kid-centered. Playful illustrations, oversized friendly buttons, "let's design a robot!" copy. CADara users are adults making real things.
 - **Generic SaaS dashboard cliché** — cards-and-charts, hero metrics, gradient accents. CADara is a tool, not a dashboard.
 - **"Look, we run in the browser!" tells** — cute illustrations announcing the web-app-ness, intro tours, marketing-ish empty states. Browser-native should be invisible.

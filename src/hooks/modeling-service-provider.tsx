@@ -5,16 +5,18 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { ModelingServiceContext } from "@/hooks/modeling-service-context";
 
 interface ModelingServiceProviderProps extends PropsWithChildren {
-	modelingService: ModelingService;
+  modelingService: ModelingService;
 }
 
 export function ModelingServiceProvider({
-	modelingService,
-	children,
+  modelingService,
+  children,
 }: ModelingServiceProviderProps) {
-	const value = useMemo(() => ({ modelingService }), [modelingService]);
+  const value = useMemo(() => ({ modelingService }), [modelingService]);
 
-	return (
-		<ModelingServiceContext.Provider value={value}>{children}</ModelingServiceContext.Provider>
-	);
+  return (
+    <ModelingServiceContext.Provider value={value}>
+      {children}
+    </ModelingServiceContext.Provider>
+  );
 }

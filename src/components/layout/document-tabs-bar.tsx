@@ -1,14 +1,28 @@
-import { forwardRef, useCallback, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ForwardedRef, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
-import { Tooltip } from '@mantine/core'
+import {
+  forwardRef,
+  useCallback,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+  type ForwardedRef,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
+import { Tooltip } from "@mantine/core";
 
-import { ToolbarTooltipContent } from '@/components/layout/toolbar-tooltip-content'
-import type { DocumentId } from '@/contracts/shared/ids'
+import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
+import type { DocumentId } from "@/contracts/shared/ids";
 import {
   workbenchTabsStorageDescriptor,
   type WorkbenchTab,
   type WorkbenchTabsState,
   type WorkbenchTabStorageKind,
-} from '@/domain/workspace/workbench-tabs'
+} from "@/domain/workspace/workbench-tabs";
 
 /**
  * Document tab strip anchored at the bottom of the viewport. The strip itself does not float;
@@ -23,15 +37,15 @@ import {
  *     / cloud) rather than dirty state, because CADara saves automatically.
  */
 export interface DocumentTabsBarProps {
-  state: WorkbenchTabsState
+  state: WorkbenchTabsState;
   /** Document currently mid-recompute. The active hairline becomes a sweep while present. */
-  pendingDocumentId?: DocumentId | null
+  pendingDocumentId?: DocumentId | null;
   /** Document whose last activation failed. The active hairline turns red. */
-  errorDocumentId?: DocumentId | null
-  onActivate: (documentId: DocumentId) => void
-  onClose: (documentId: DocumentId) => void
-  onReorder: (documentId: DocumentId, toIndex: number) => void
-  onRename: (documentId: DocumentId, title: string) => void
+  errorDocumentId?: DocumentId | null;
+  onActivate: (documentId: DocumentId) => void;
+  onClose: (documentId: DocumentId) => void;
+  onReorder: (documentId: DocumentId, toIndex: number) => void;
+  onRename: (documentId: DocumentId, title: string) => void;
 }
 
 /**
@@ -41,26 +55,26 @@ export interface DocumentTabsBarProps {
  * setState from a useEffect or threading a one-shot token. The handle keeps the seam local.
  */
 export interface DocumentTabsBarHandle {
-  requestRename(documentId: DocumentId): void
+  requestRename(documentId: DocumentId): void;
 }
 
-const TAB_HEIGHT_PX = 36
-const TAB_MIN_WIDTH_PX = 96
-const TAB_MAX_WIDTH_PX = 200
-const DRAG_THRESHOLD_PX = 4
-const TAB_GAP_PX = 18
-const STRIP_PADDING_X_PX = 16
+const TAB_HEIGHT_PX = 36;
+const TAB_MIN_WIDTH_PX = 96;
+const TAB_MAX_WIDTH_PX = 200;
+const DRAG_THRESHOLD_PX = 4;
+const TAB_GAP_PX = 18;
+const STRIP_PADDING_X_PX = 16;
 
 const stripStyle: CSSProperties = {
   height: TAB_HEIGHT_PX,
   paddingInline: STRIP_PADDING_X_PX,
   gap: TAB_GAP_PX,
-  alignItems: 'stretch',
-  backgroundColor: 'var(--workbench-shell-overlay-strong)',
-  boxShadow: 'var(--workbench-shell-elevation-tabs)',
-}
+  alignItems: "stretch",
+  backgroundColor: "var(--workbench-shell-overlay-strong)",
+  boxShadow: "var(--workbench-shell-elevation-tabs)",
+};
 
-export const DocumentTabsBar = forwardRef(DocumentTabsBarComponent)
+export const DocumentTabsBar = forwardRef(DocumentTabsBarComponent);
 
 function DocumentTabsBarComponent(
   {
@@ -74,85 +88,87 @@ function DocumentTabsBarComponent(
   }: DocumentTabsBarProps,
   ref: ForwardedRef<DocumentTabsBarHandle>,
 ) {
-  const tablistId = useId()
-  const [draggingId, setDraggingId] = useState<DocumentId | null>(null)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
-  const [editingId, setEditingId] = useState<DocumentId | null>(null)
-  const dragStartXRef = useRef(0)
+  const tablistId = useId();
+  const [draggingId, setDraggingId] = useState<DocumentId | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<DocumentId | null>(null);
+  const dragStartXRef = useRef(0);
 
   const beginRename = useCallback((documentId: DocumentId) => {
-    setEditingId(documentId)
-  }, [])
+    setEditingId(documentId);
+  }, []);
 
   useImperativeHandle(
     ref,
     () => ({
       requestRename: (documentId: DocumentId) => {
-        setEditingId(documentId)
+        setEditingId(documentId);
       },
     }),
     [],
-  )
+  );
 
   const commitRename = useCallback(
     (documentId: DocumentId, value: string) => {
-      const trimmed = value.trim()
+      const trimmed = value.trim();
       if (trimmed.length > 0) {
-        const previous = state.tabs.find((tab) => tab.documentId === documentId)?.title
+        const previous = state.tabs.find(
+          (tab) => tab.documentId === documentId,
+        )?.title;
         if (trimmed !== previous) {
-          onRename(documentId, trimmed)
+          onRename(documentId, trimmed);
         }
       }
-      setEditingId(null)
+      setEditingId(null);
     },
     [onRename, state.tabs],
-  )
+  );
 
   const cancelRename = useCallback(() => {
-    setEditingId(null)
-  }, [])
+    setEditingId(null);
+  }, []);
 
   const handleDragStart = useCallback(
     (event: DragEvent<HTMLButtonElement>, documentId: DocumentId) => {
-      event.dataTransfer.effectAllowed = 'move'
-      event.dataTransfer.setData('text/plain', documentId)
-      dragStartXRef.current = event.clientX
-      setDraggingId(documentId)
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", documentId);
+      dragStartXRef.current = event.clientX;
+      setDraggingId(documentId);
     },
     [],
-  )
+  );
 
   const handleDragOver = useCallback(
     (event: DragEvent<HTMLDivElement>, index: number) => {
       if (draggingId === null) {
-        return
+        return;
       }
       if (Math.abs(event.clientX - dragStartXRef.current) < DRAG_THRESHOLD_PX) {
-        return
+        return;
       }
-      event.preventDefault()
-      event.dataTransfer.dropEffect = 'move'
-      setDragOverIndex(index)
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDragOverIndex(index);
     },
     [draggingId],
-  )
+  );
 
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>, index: number) => {
-      event.preventDefault()
+      event.preventDefault();
       if (draggingId !== null) {
-        onReorder(draggingId, index)
+        onReorder(draggingId, index);
       }
-      setDraggingId(null)
-      setDragOverIndex(null)
+      setDraggingId(null);
+      setDragOverIndex(null);
     },
     [draggingId, onReorder],
-  )
+  );
 
   const handleDragEnd = useCallback(() => {
-    setDraggingId(null)
-    setDragOverIndex(null)
-  }, [])
+    setDraggingId(null);
+    setDragOverIndex(null);
+  }, []);
 
   return (
     <nav
@@ -164,11 +180,12 @@ function DocumentTabsBarComponent(
       style={stripStyle}
     >
       {state.tabs.map((tab, index) => {
-        const isActive = tab.documentId === state.activeDocumentId
-        const isPending = pendingDocumentId === tab.documentId
-        const hasError = errorDocumentId === tab.documentId
-        const isDragging = draggingId === tab.documentId
-        const isDropTarget = dragOverIndex === index && draggingId !== null && !isDragging
+        const isActive = tab.documentId === state.activeDocumentId;
+        const isPending = pendingDocumentId === tab.documentId;
+        const hasError = errorDocumentId === tab.documentId;
+        const isDragging = draggingId === tab.documentId;
+        const isDropTarget =
+          dragOverIndex === index && draggingId !== null && !isDragging;
 
         return (
           <div
@@ -177,12 +194,12 @@ function DocumentTabsBarComponent(
             onDrop={(event) => handleDrop(event, index)}
             className="relative flex shrink-0"
             style={{
-              transform: isDropTarget ? 'translateX(8px)' : undefined,
-              transition: 'transform 160ms cubic-bezier(0.25, 1, 0.5, 1)',
+              transform: isDropTarget ? "translateX(8px)" : undefined,
+              transition: "transform 160ms cubic-bezier(0.25, 1, 0.5, 1)",
             }}
             data-document-tab-slot
-            data-active={isActive ? 'true' : undefined}
-            data-pending={isPending ? 'true' : undefined}
+            data-active={isActive ? "true" : undefined}
+            data-pending={isPending ? "true" : undefined}
           >
             <DocumentTabButton
               tab={tab}
@@ -202,28 +219,31 @@ function DocumentTabsBarComponent(
               onCancelRename={cancelRename}
             />
           </div>
-        )
+        );
       })}
     </nav>
-  )
+  );
 }
 
 interface DocumentTabButtonProps {
-  tab: WorkbenchTab
-  index: number
-  total: number
-  isActive: boolean
-  isPending: boolean
-  hasError: boolean
-  isDragging: boolean
-  isEditing: boolean
-  onActivate: (documentId: DocumentId) => void
-  onClose: (documentId: DocumentId) => void
-  onDragStart: (event: DragEvent<HTMLButtonElement>, documentId: DocumentId) => void
-  onDragEnd: () => void
-  onBeginRename: (documentId: DocumentId) => void
-  onCommitRename: (documentId: DocumentId, title: string) => void
-  onCancelRename: () => void
+  tab: WorkbenchTab;
+  index: number;
+  total: number;
+  isActive: boolean;
+  isPending: boolean;
+  hasError: boolean;
+  isDragging: boolean;
+  isEditing: boolean;
+  onActivate: (documentId: DocumentId) => void;
+  onClose: (documentId: DocumentId) => void;
+  onDragStart: (
+    event: DragEvent<HTMLButtonElement>,
+    documentId: DocumentId,
+  ) => void;
+  onDragEnd: () => void;
+  onBeginRename: (documentId: DocumentId) => void;
+  onCommitRename: (documentId: DocumentId, title: string) => void;
+  onCancelRename: () => void;
 }
 
 function DocumentTabButton({
@@ -243,57 +263,60 @@ function DocumentTabButton({
   onCommitRename,
   onCancelRename,
 }: DocumentTabButtonProps) {
-  const [isHover, setIsHover] = useState(false)
-  const closeOnly = total <= 1
-  const showClose = !closeOnly && (isHover || isActive)
-  const tooltipDescription = workbenchTabsStorageDescriptor(tab.storageKind, tab.storageDescriptor)
-  const tooltipTitle = tab.title
+  const [isHover, setIsHover] = useState(false);
+  const closeOnly = total <= 1;
+  const showClose = !closeOnly && (isHover || isActive);
+  const tooltipDescription = workbenchTabsStorageDescriptor(
+    tab.storageKind,
+    tab.storageDescriptor,
+  );
+  const tooltipTitle = tab.title;
 
   const handleClick = useCallback(() => {
     if (isEditing) {
-      return
+      return;
     }
     if (!isActive) {
-      onActivate(tab.documentId)
+      onActivate(tab.documentId);
     }
-  }, [isActive, isEditing, onActivate, tab.documentId])
+  }, [isActive, isEditing, onActivate, tab.documentId]);
 
   const handleTitleDoubleClick = useCallback(
     (event: MouseEvent<HTMLSpanElement>) => {
-      event.stopPropagation()
-      event.preventDefault()
+      event.stopPropagation();
+      event.preventDefault();
       if (!isActive) {
-        onActivate(tab.documentId)
+        onActivate(tab.documentId);
       }
-      onBeginRename(tab.documentId)
+      onBeginRename(tab.documentId);
     },
     [isActive, onActivate, onBeginRename, tab.documentId],
-  )
+  );
 
   const handleAuxClick = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
       // Middle-click closes
       if (event.button === 1 && !closeOnly) {
-        event.preventDefault()
-        onClose(tab.documentId)
+        event.preventDefault();
+        onClose(tab.documentId);
       }
     },
     [closeOnly, onClose, tab.documentId],
-  )
+  );
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLButtonElement>) => {
       // Closing via keyboard mirrors macOS / browsers: hit the close button itself
       // for now. Cmd/Ctrl+W lives at the workbench shortcut layer.
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault()
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
         if (!isActive) {
-          onActivate(tab.documentId)
+          onActivate(tab.documentId);
         }
       }
     },
     [isActive, onActivate, tab.documentId],
-  )
+  );
 
   const tabStyle: CSSProperties = {
     height: TAB_HEIGHT_PX,
@@ -301,16 +324,24 @@ function DocumentTabButton({
     maxWidth: TAB_MAX_WIDTH_PX,
     paddingInline: 4,
     gap: 8,
-    color: isActive ? 'var(--workbench-shell-text)' : 'var(--workbench-shell-text-dim)',
+    color: isActive
+      ? "var(--workbench-shell-text)"
+      : "var(--workbench-shell-text-dim)",
     fontWeight: isActive ? 500 : 500,
-    cursor: isActive ? 'default' : 'pointer',
+    cursor: isActive ? "default" : "pointer",
     opacity: isDragging ? 0.55 : 1,
-    transition: 'color 120ms cubic-bezier(0.25, 1, 0.5, 1), opacity 120ms cubic-bezier(0.25, 1, 0.5, 1)',
-  }
+    transition:
+      "color 120ms cubic-bezier(0.25, 1, 0.5, 1), opacity 120ms cubic-bezier(0.25, 1, 0.5, 1)",
+  };
 
   return (
     <Tooltip
-      label={<ToolbarTooltipContent title={tooltipTitle} description={tooltipDescription} />}
+      label={
+        <ToolbarTooltipContent
+          title={tooltipTitle}
+          description={tooltipDescription}
+        />
+      }
       position="top"
       offset={6}
       disabled={isEditing}
@@ -338,7 +369,10 @@ function DocumentTabButton({
         className="relative flex items-center gap-2 text-[13px] outline-none"
         style={tabStyle}
       >
-        <span className="relative inline-flex h-[14px] w-[14px] shrink-0 items-center justify-center" aria-hidden="true">
+        <span
+          className="relative inline-flex h-[14px] w-[14px] shrink-0 items-center justify-center"
+          aria-hidden="true"
+        >
           <StorageGlyph kind={tab.storageKind} active={isActive || isHover} />
         </span>
         {isEditing ? (
@@ -350,7 +384,7 @@ function DocumentTabButton({
         ) : (
           <span
             className="min-w-0 flex-1 truncate text-left"
-            style={{ letterSpacing: '-0.005em' }}
+            style={{ letterSpacing: "-0.005em" }}
             onDoubleClick={handleTitleDoubleClick}
             data-document-tab-title
           >
@@ -363,34 +397,44 @@ function DocumentTabButton({
             aria-label={`Close ${tab.title}`}
             tabIndex={-1}
             onPointerDown={(event: PointerEvent<HTMLSpanElement>) => {
-              event.stopPropagation()
-              event.preventDefault()
-              onClose(tab.documentId)
+              event.stopPropagation();
+              event.preventDefault();
+              onClose(tab.documentId);
             }}
             className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[3px]"
             style={{
-              color: 'var(--workbench-shell-text-muted)',
-              transition: 'background-color 120ms cubic-bezier(0.25, 1, 0.5, 1)',
+              color: "var(--workbench-shell-text-muted)",
+              transition:
+                "background-color 120ms cubic-bezier(0.25, 1, 0.5, 1)",
             }}
             data-document-tab-close
             onMouseEnter={(event) => {
-              event.currentTarget.style.backgroundColor = 'var(--workbench-shell-control-surface)'
-              event.currentTarget.style.color = 'var(--workbench-shell-text)'
+              event.currentTarget.style.backgroundColor =
+                "var(--workbench-shell-control-surface)";
+              event.currentTarget.style.color = "var(--workbench-shell-text)";
             }}
             onMouseLeave={(event) => {
-              event.currentTarget.style.backgroundColor = 'transparent'
-              event.currentTarget.style.color = 'var(--workbench-shell-text-muted)'
+              event.currentTarget.style.backgroundColor = "transparent";
+              event.currentTarget.style.color =
+                "var(--workbench-shell-text-muted)";
             }}
           >
             <CloseGlyph />
           </span>
         ) : (
-          <span aria-hidden="true" className="inline-flex h-[18px] w-[18px] shrink-0" />
+          <span
+            aria-hidden="true"
+            className="inline-flex h-[18px] w-[18px] shrink-0"
+          />
         )}
-        <ActiveOrPendingHairline isActive={isActive} isPending={isPending} hasError={hasError} />
+        <ActiveOrPendingHairline
+          isActive={isActive}
+          isPending={isPending}
+          hasError={hasError}
+        />
       </button>
     </Tooltip>
-  )
+  );
 }
 
 /**
@@ -405,12 +449,12 @@ function ActiveOrPendingHairline({
   isPending,
   hasError,
 }: {
-  isActive: boolean
-  isPending: boolean
-  hasError: boolean
+  isActive: boolean;
+  isPending: boolean;
+  hasError: boolean;
 }) {
   if (!isActive && !isPending) {
-    return null
+    return null;
   }
 
   if (isPending) {
@@ -424,65 +468,99 @@ function ActiveOrPendingHairline({
         <span
           className="absolute inset-y-0 w-[36%]"
           style={{
-            backgroundColor: 'var(--workbench-shell-accent)',
-            animation: 'workbench-tab-loading-sweep 1100ms cubic-bezier(0.25, 1, 0.5, 1) infinite',
+            backgroundColor: "var(--workbench-shell-accent)",
+            animation:
+              "workbench-tab-loading-sweep 1100ms cubic-bezier(0.25, 1, 0.5, 1) infinite",
           }}
         />
       </span>
-    )
+    );
   }
 
   return (
     <span
       aria-hidden="true"
-      data-tab-hairline={hasError ? 'error' : 'active'}
+      data-tab-hairline={hasError ? "error" : "active"}
       className="pointer-events-none absolute -bottom-px left-[-6px] right-[-6px] h-[2px]"
       style={{
         backgroundColor: hasError
-          ? 'var(--workbench-shell-danger-border)'
-          : 'var(--workbench-shell-text-muted)',
+          ? "var(--workbench-shell-danger-border)"
+          : "var(--workbench-shell-text-muted)",
         borderTopLeftRadius: 1,
         borderTopRightRadius: 1,
       }}
     />
-  )
+  );
 }
 
-function StorageGlyph({ kind, active }: { kind: WorkbenchTabStorageKind; active: boolean }) {
+function StorageGlyph({
+  kind,
+  active,
+}: {
+  kind: WorkbenchTabStorageKind;
+  active: boolean;
+}) {
   // Active tabs render their storage glyph in spark-orange — the third Spark Affordance
   // (see DESIGN.md). Inactive tabs stay graphite.
-  const tone = active ? 'var(--workbench-spark-accent)' : 'var(--workbench-shell-text-dim)'
+  const tone = active
+    ? "var(--workbench-spark-accent)"
+    : "var(--workbench-shell-text-dim)";
 
   switch (kind) {
-    case 'browser':
+    case "browser":
       // 6px filled circle: the document only lives in this browser's IndexedDB.
       return (
-        <svg viewBox="0 0 14 14" width="14" height="14" data-storage-glyph="browser">
+        <svg
+          viewBox="0 0 14 14"
+          width="14"
+          height="14"
+          data-storage-glyph="browser"
+        >
           <circle cx="7" cy="7" r="3" fill={tone} />
         </svg>
-      )
-    case 'filesystem':
+      );
+    case "filesystem":
       // Tiny linked-file: a document with a chain link, communicating "synced to disk".
       return (
-        <svg viewBox="0 0 14 14" width="14" height="14" data-storage-glyph="filesystem" fill="none" stroke={tone} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          viewBox="0 0 14 14"
+          width="14"
+          height="14"
+          data-storage-glyph="filesystem"
+          fill="none"
+          stroke={tone}
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M3 2.4h5.2L11 5v5.2a1.4 1.4 0 0 1-1.4 1.4H3a1.4 1.4 0 0 1-1.4-1.4V3.8A1.4 1.4 0 0 1 3 2.4Z" />
           <path d="M8 2.6V5h2.6" />
           <path d="M5.2 8.6h3.6" />
         </svg>
-      )
-    case 'cloud':
+      );
+    case "cloud":
       return (
-        <svg viewBox="0 0 14 14" width="14" height="14" data-storage-glyph="cloud" fill="none" stroke={tone} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          viewBox="0 0 14 14"
+          width="14"
+          height="14"
+          data-storage-glyph="cloud"
+          fill="none"
+          stroke={tone}
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M4 10.4h6.2a2.6 2.6 0 0 0 .3-5.18 3.4 3.4 0 0 0-6.55-.84A2.6 2.6 0 0 0 4 10.4Z" />
         </svg>
-      )
+      );
   }
 }
 
 interface DocumentTabTitleEditorProps {
-  initialValue: string
-  onCommit: (value: string) => void
-  onCancel: () => void
+  initialValue: string;
+  onCommit: (value: string) => void;
+  onCancel: () => void;
 }
 
 /**
@@ -496,18 +574,22 @@ interface DocumentTabTitleEditorProps {
  *     pointer events stop bubbling so dragging the title text doesn't initiate a tab drag,
  *     and Enter/Space don't re-trigger the tab's keyboard activate handler.
  */
-function DocumentTabTitleEditor({ initialValue, onCommit, onCancel }: DocumentTabTitleEditorProps) {
-  const [value, setValue] = useState(initialValue)
-  const inputRef = useRef<HTMLInputElement | null>(null)
+function DocumentTabTitleEditor({
+  initialValue,
+  onCommit,
+  onCancel,
+}: DocumentTabTitleEditorProps) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useLayoutEffect(() => {
-    const input = inputRef.current
+    const input = inputRef.current;
     if (!input) {
-      return
+      return;
     }
-    input.focus()
-    input.select()
-  }, [])
+    input.focus();
+    input.select();
+  }, []);
 
   return (
     <input
@@ -517,15 +599,15 @@ function DocumentTabTitleEditor({ initialValue, onCommit, onCancel }: DocumentTa
       maxLength={256}
       onChange={(event) => setValue(event.currentTarget.value)}
       onKeyDown={(event) => {
-        event.stopPropagation()
-        if (event.key === 'Enter') {
-          event.preventDefault()
-          onCommit(value)
-          return
+        event.stopPropagation();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onCommit(value);
+          return;
         }
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          onCancel()
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onCancel();
         }
       }}
       onBlur={() => onCommit(value)}
@@ -537,20 +619,25 @@ function DocumentTabTitleEditor({ initialValue, onCommit, onCancel }: DocumentTa
       aria-label="Rename document"
       className="min-w-0 flex-1 bg-transparent text-left outline-none"
       style={{
-        color: 'var(--workbench-shell-text)',
+        color: "var(--workbench-shell-text)",
         fontWeight: 500,
-        letterSpacing: '-0.005em',
-        boxShadow: 'inset 0 -1px 0 0 var(--workbench-shell-text-muted)',
-        padding: '0 1px',
+        letterSpacing: "-0.005em",
+        boxShadow: "inset 0 -1px 0 0 var(--workbench-shell-text-muted)",
+        padding: "0 1px",
       }}
     />
-  )
+  );
 }
 
 function CloseGlyph() {
   return (
     <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
-      <path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M2 2 L8 8 M8 2 L2 8"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
     </svg>
-  )
+  );
 }

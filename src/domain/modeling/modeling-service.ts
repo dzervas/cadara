@@ -6,7 +6,7 @@ export {
   createModelingService,
   createSketchSolverService,
   modelingRuntimeValidators,
-} from './modeling-service/index'
+} from "./modeling-service/index";
 
 export type {
   ModelingService,
@@ -44,4 +44,4 @@ export type {
   ModelingProjectSketchExternalReferencesInput,
   ModelingPreviewResult,
   ModelingResolvedReferenceResult,
-} from './modeling-service/index'
+} from "./modeling-service/index";

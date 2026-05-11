@@ -1,12 +1,15 @@
-import type { GeometryAssetHash, GeometryAssetRecord } from '@/contracts/modeling/geometry-assets'
+import type {
+  GeometryAssetHash,
+  GeometryAssetRecord,
+} from "@/contracts/modeling/geometry-assets";
 import type {
   DurableHistoryAvailability,
   PersistedSketchDraftSession,
-} from '@/contracts/modeling/durable-history'
-import type { DocumentId } from '@/contracts/shared/ids'
-import type { DocumentRepositoryUrlStore } from '@/infrastructure/persistence/document-repository-url-store'
-import type { DocumentSyncWorkerClient } from '@/infrastructure/workers/document-sync-worker-client'
-import type { LocalFileBindingMetadata } from '@/domain/modeling/local-file-binding-store'
+} from "@/contracts/modeling/durable-history";
+import type { DocumentId } from "@/contracts/shared/ids";
+import type { DocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
+import type { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
+import type { LocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
 import type {
   DocumentRepository,
   DocumentRepositoryChangeEvent,
@@ -17,130 +20,157 @@ import type {
   LocalFileBindingResult,
   LocalFileSyncDocumentRepository,
   GeometryAssetDocumentRepository,
-} from '@/domain/modeling/document-repository'
-import type { DocumentSyncWriteStatus } from '@/domain/modeling/document-sync-worker-protocol'
-import type { LocalFileSystemFileHandle } from '@/lib/local-file-system-access'
+} from "@/domain/modeling/document-repository";
+import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
+import type { LocalFileSystemFileHandle } from "@/lib/local-file-system-access";
 
 export interface WorkerBackedDocumentRepositoryOptions {
-  client: DocumentSyncWorkerClient
-  urlStore?: DocumentRepositoryUrlStore | null
+  client: DocumentSyncWorkerClient;
+  urlStore?: DocumentRepositoryUrlStore | null;
 }
 
-export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepository, GeometryAssetDocumentRepository {
-  private readonly client: DocumentSyncWorkerClient
-  private readonly urlStore: DocumentRepositoryUrlStore | null
-  private readonly statuses = new Map<DocumentId, DocumentRepositoryRestoreStatus>()
-  private readonly metadata = new Map<DocumentId, DocumentRepositoryMetadata>()
+export class WorkerBackedDocumentRepository
+  implements LocalFileSyncDocumentRepository, GeometryAssetDocumentRepository
+{
+  private readonly client: DocumentSyncWorkerClient;
+  private readonly urlStore: DocumentRepositoryUrlStore | null;
+  private readonly statuses = new Map<
+    DocumentId,
+    DocumentRepositoryRestoreStatus
+  >();
+  private readonly metadata = new Map<DocumentId, DocumentRepositoryMetadata>();
 
   constructor(options: WorkerBackedDocumentRepositoryOptions) {
-    this.client = options.client
-    this.urlStore = options.urlStore ?? null
+    this.client = options.client;
+    this.urlStore = options.urlStore ?? null;
   }
 
-  async load(input: Parameters<DocumentRepository['load']>[0]): Promise<DocumentRepositoryLoadResult> {
+  async load(
+    input: Parameters<DocumentRepository["load"]>[0],
+  ): Promise<DocumentRepositoryLoadResult> {
     const result = await this.client.load({
       ...input,
       storageKey: this.urlStore?.get(input.documentId) ?? null,
-    })
+    });
     if (!result.ok) {
-      this.statuses.set(input.documentId, result.status)
-      return result
+      this.statuses.set(input.documentId, result.status);
+      return result;
     }
 
-    return this.normalizeResult(result)
+    return this.normalizeResult(result);
   }
 
-  async mutate(input: Parameters<DocumentRepository['mutate']>[0]): Promise<DocumentRepositoryMutationResult> {
-    const result = await this.client.mutate(input)
+  async mutate(
+    input: Parameters<DocumentRepository["mutate"]>[0],
+  ): Promise<DocumentRepositoryMutationResult> {
+    const result = await this.client.mutate(input);
     if (!result.ok) {
-      this.statuses.set(input.documentId, result.status)
-      return result
+      this.statuses.set(input.documentId, result.status);
+      return result;
     }
 
-    return this.normalizeResult(result)
+    return this.normalizeResult(result);
   }
 
   getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null> {
-    return this.client.getGeometryAssetBytes({ hash })
+    return this.client.getGeometryAssetBytes({ hash });
   }
 
-  getGeometryAssetRecord(asset: GeometryAssetRecord): Promise<Uint8Array | null> {
-    return this.client.getGeometryAssetRecord({ asset })
+  getGeometryAssetRecord(
+    asset: GeometryAssetRecord,
+  ): Promise<Uint8Array | null> {
+    return this.client.getGeometryAssetRecord({ asset });
   }
 
   subscribe(
     documentId: DocumentId,
     listener: (event: DocumentRepositoryChangeEvent) => void,
   ) {
-    let disposed = false
-    let unsubscribeWorker: (() => void) | null = null
+    let disposed = false;
+    let unsubscribeWorker: (() => void) | null = null;
 
-    void this.client.subscribe(documentId, (event) => {
-      void this.normalizeEvent(event).then((normalized) => {
-        if (!disposed) {
-          listener(normalized)
-        }
+    void this.client
+      .subscribe(documentId, (event) => {
+        void this.normalizeEvent(event).then((normalized) => {
+          if (!disposed) {
+            listener(normalized);
+          }
+        });
       })
-    }).then((unsubscribe) => {
-      if (disposed) {
-        unsubscribe()
-        return
-      }
-      unsubscribeWorker = unsubscribe
-    })
+      .then((unsubscribe) => {
+        if (disposed) {
+          unsubscribe();
+          return;
+        }
+        unsubscribeWorker = unsubscribe;
+      });
 
     return () => {
-      disposed = true
-      unsubscribeWorker?.()
-    }
+      disposed = true;
+      unsubscribeWorker?.();
+    };
   }
 
-  async reset(documentId: DocumentId): Promise<DocumentRepositoryRestoreStatus> {
-    const status = await this.client.reset({ documentId })
-    this.urlStore?.delete(documentId)
-    this.statuses.set(documentId, status)
-    this.metadata.set(documentId, { documentId, heads: [], source: 'reset' })
-    return status
+  async reset(
+    documentId: DocumentId,
+  ): Promise<DocumentRepositoryRestoreStatus> {
+    const status = await this.client.reset({ documentId });
+    this.urlStore?.delete(documentId);
+    this.statuses.set(documentId, status);
+    this.metadata.set(documentId, { documentId, heads: [], source: "reset" });
+    return status;
   }
 
   getRestoreStatus(documentId: DocumentId): DocumentRepositoryRestoreStatus {
-    return this.statuses.get(documentId) ?? { kind: 'pending', documentId }
+    return this.statuses.get(documentId) ?? { kind: "pending", documentId };
   }
 
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata {
-    return this.metadata.get(documentId) ?? { documentId, heads: [], source: 'restore' }
+    return (
+      this.metadata.get(documentId) ?? {
+        documentId,
+        heads: [],
+        source: "restore",
+      }
+    );
   }
 
-  getDurableHistoryAvailability(documentId: DocumentId): Promise<DurableHistoryAvailability> {
-    return this.client.getDurableHistoryAvailability({ documentId })
+  getDurableHistoryAvailability(
+    documentId: DocumentId,
+  ): Promise<DurableHistoryAvailability> {
+    return this.client.getDurableHistoryAvailability({ documentId });
   }
 
-  async undoDurableHistory(documentId: DocumentId): Promise<DocumentRepositoryMutationResult | null> {
-    const result = await this.client.undoDurableHistory({ documentId })
+  async undoDurableHistory(
+    documentId: DocumentId,
+  ): Promise<DocumentRepositoryMutationResult | null> {
+    const result = await this.client.undoDurableHistory({ documentId });
     if (!result?.ok) {
       if (result) {
-        this.statuses.set(documentId, result.status)
+        this.statuses.set(documentId, result.status);
       }
-      return result
+      return result;
     }
 
-    return this.normalizeResult(result)
+    return this.normalizeResult(result);
   }
 
-  async redoDurableHistory(documentId: DocumentId): Promise<DocumentRepositoryMutationResult | null> {
-    const result = await this.client.redoDurableHistory({ documentId })
+  async redoDurableHistory(
+    documentId: DocumentId,
+  ): Promise<DocumentRepositoryMutationResult | null> {
+    const result = await this.client.redoDurableHistory({ documentId });
     if (!result?.ok) {
       if (result) {
-        this.statuses.set(documentId, result.status)
+        this.statuses.set(documentId, result.status);
       }
-      return result
+      return result;
     }
 
-    return this.normalizeResult(result)
+    return this.normalizeResult(result);
   }
 
   getSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    return this.client.getSketchDraftHistory({ documentId, draftKey })
+    return this.client.getSketchDraftHistory({ documentId, draftKey });
   }
 
   saveSketchDraftHistory(
@@ -148,63 +178,77 @@ export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepo
     draftKey: string,
     session: PersistedSketchDraftSession,
   ) {
-    return this.client.saveSketchDraftHistory({ documentId, draftKey, session })
+    return this.client.saveSketchDraftHistory({
+      documentId,
+      draftKey,
+      session,
+    });
   }
 
   undoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    return this.client.undoSketchDraftHistory({ documentId, draftKey })
+    return this.client.undoSketchDraftHistory({ documentId, draftKey });
   }
 
   redoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    return this.client.redoSketchDraftHistory({ documentId, draftKey })
+    return this.client.redoSketchDraftHistory({ documentId, draftKey });
   }
 
   clearSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    return this.client.clearSketchDraftHistory({ documentId, draftKey })
+    return this.client.clearSketchDraftHistory({ documentId, draftKey });
   }
 
   async bindLocalFile(input: {
-    documentId: DocumentId
-    handle: LocalFileSystemFileHandle
-    metadata: LocalFileBindingMetadata
+    documentId: DocumentId;
+    handle: LocalFileSystemFileHandle;
+    metadata: LocalFileBindingMetadata;
   }): Promise<LocalFileBindingResult> {
     try {
       return {
         ok: true,
         metadata: await this.client.bindFileHandle(input),
-      }
+      };
     } catch (error: unknown) {
       return {
         ok: false,
-        message: error instanceof Error ? error.message : 'Local file sync target could not be bound.',
-      }
+        message:
+          error instanceof Error
+            ? error.message
+            : "Local file sync target could not be bound.",
+      };
     }
   }
 
   async restoreLocalFileBinding(documentId: DocumentId) {
-    const record = await this.client.restoreBinding({ documentId })
-    return record?.metadata ?? null
+    const record = await this.client.restoreBinding({ documentId });
+    return record?.metadata ?? null;
   }
 
-  getLocalFileSyncStatus(documentId: DocumentId): Promise<DocumentSyncWriteStatus> {
-    return this.client.getWriteStatus({ documentId })
+  getLocalFileSyncStatus(
+    documentId: DocumentId,
+  ): Promise<DocumentSyncWriteStatus> {
+    return this.client.getWriteStatus({ documentId });
   }
 
-  subscribeToLocalFileSyncStatus(listener: (status: DocumentSyncWriteStatus) => void) {
-    return this.client.subscribeToWriteStatus(listener)
+  subscribeToLocalFileSyncStatus(
+    listener: (status: DocumentSyncWriteStatus) => void,
+  ) {
+    return this.client.subscribeToWriteStatus(listener);
   }
 
-  private async normalizeResult<T extends Extract<DocumentRepositoryLoadResult | DocumentRepositoryMutationResult, { ok: true }>>(
-    result: T,
-  ): Promise<T> {
+  private async normalizeResult<
+    T extends Extract<
+      DocumentRepositoryLoadResult | DocumentRepositoryMutationResult,
+      { ok: true }
+    >,
+  >(result: T): Promise<T> {
     const normalized = await this.client.normalize({
       document: result.document,
       metadata: result.metadata,
-    })
-    const metadata = normalized.metadata
-    this.persistMetadata(metadata)
-    this.statuses.set(result.status.documentId, result.status)
-    this.metadata.set(metadata.documentId, metadata)
+    });
+    const metadata = normalized.metadata;
+    this.persistMetadata(metadata);
+    this.statuses.set(result.status.documentId, result.status);
+    this.metadata.set(metadata.documentId, metadata);
 
     return {
       ...result,
@@ -212,17 +256,19 @@ export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepo
       diagnostics: [...(result.diagnostics ?? []), ...normalized.diagnostics],
       assetAvailability: result.assetAvailability,
       metadata,
-    }
+    };
   }
 
-  private async normalizeEvent(event: DocumentRepositoryChangeEvent): Promise<DocumentRepositoryChangeEvent> {
+  private async normalizeEvent(
+    event: DocumentRepositoryChangeEvent,
+  ): Promise<DocumentRepositoryChangeEvent> {
     const normalized = await this.client.normalize({
       document: event.document,
       metadata: event.metadata,
-    })
-    this.persistMetadata(normalized.metadata)
-    this.statuses.set(event.status.documentId, event.status)
-    this.metadata.set(normalized.metadata.documentId, normalized.metadata)
+    });
+    this.persistMetadata(normalized.metadata);
+    this.statuses.set(event.status.documentId, event.status);
+    this.metadata.set(normalized.metadata.documentId, normalized.metadata);
 
     return {
       ...event,
@@ -230,19 +276,21 @@ export class WorkerBackedDocumentRepository implements LocalFileSyncDocumentRepo
       diagnostics: [...(event.diagnostics ?? []), ...normalized.diagnostics],
       assetAvailability: event.assetAvailability,
       metadata: normalized.metadata,
-    }
+    };
   }
 
   private persistMetadata(metadata: DocumentRepositoryMetadata) {
     if (metadata.storageKey) {
       this.urlStore?.set(
         metadata.documentId,
-        metadata.storageKey as Parameters<DocumentRepositoryUrlStore['set']>[1],
-      )
+        metadata.storageKey as Parameters<DocumentRepositoryUrlStore["set"]>[1],
+      );
     }
   }
 }
 
-export function createWorkerBackedDocumentRepository(options: WorkerBackedDocumentRepositoryOptions) {
-  return new WorkerBackedDocumentRepository(options)
+export function createWorkerBackedDocumentRepository(
+  options: WorkerBackedDocumentRepositoryOptions,
+) {
+  return new WorkerBackedDocumentRepository(options);
 }

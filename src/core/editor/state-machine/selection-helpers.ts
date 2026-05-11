@@ -2,7 +2,7 @@ import {
   getFeaturePrimarySelectionTarget,
   getFeatureSessionPreviewLabel,
   type FeatureEditSessionState,
-} from '@/domain/editor/feature-editing'
+} from "@/domain/editor/feature-editing";
 import {
   primitiveRefEquals,
   resolveSelectionCandidate,
@@ -10,9 +10,9 @@ import {
   type PrimitiveRef,
   type SelectionFilter,
   type SelectionTargetCatalog,
-} from '@/core/editor/schema'
-import type { EditorExtensionDependencies } from './dependencies'
-import type { EditorState, ImportSessionState } from './types'
+} from "@/core/editor/schema";
+import type { EditorExtensionDependencies } from "./dependencies";
+import type { EditorState, ImportSessionState } from "./types";
 
 export function adoptOrderedSelection(
   currentSelection: readonly PrimitiveRef[],
@@ -21,31 +21,35 @@ export function adoptOrderedSelection(
     target: PrimitiveRef,
   ) => PrimitiveRef[] | null,
 ): PrimitiveRef[] {
-  const adoptedSelection: PrimitiveRef[] = []
+  const adoptedSelection: PrimitiveRef[] = [];
 
   for (const target of currentSelection) {
-    const nextSelection = tryAppend(adoptedSelection, target)
+    const nextSelection = tryAppend(adoptedSelection, target);
 
-    if (!nextSelection || nextSelection.length !== adoptedSelection.length + 1) {
-      return []
+    if (
+      !nextSelection ||
+      nextSelection.length !== adoptedSelection.length + 1
+    ) {
+      return [];
     }
 
     if (
-      adoptedSelection.some((selectedTarget, index) =>
-        !primitiveRefEquals(selectedTarget, nextSelection[index]!),
+      adoptedSelection.some(
+        (selectedTarget, index) =>
+          !primitiveRefEquals(selectedTarget, nextSelection[index]!),
       )
     ) {
-      return []
+      return [];
     }
 
     if (!primitiveRefEquals(nextSelection[adoptedSelection.length]!, target)) {
-      return []
+      return [];
     }
 
-    adoptedSelection.push(target)
+    adoptedSelection.push(target);
   }
 
-  return adoptedSelection
+  return adoptedSelection;
 }
 
 export function adoptSelectionForFilter(
@@ -53,23 +57,23 @@ export function adoptSelectionForFilter(
   selectionFilter: SelectionFilter | null,
   selectionCatalog: SelectionTargetCatalog | null,
 ): PrimitiveRef[] {
-  return adoptOrderedSelection(
-    currentSelection,
-    (adoptedSelection, target) => {
-      const candidate = resolveSelectionCandidate(
-        selectionFilter,
-        [...adoptedSelection],
-        target,
-        selectionCatalog,
-      )
+  return adoptOrderedSelection(currentSelection, (adoptedSelection, target) => {
+    const candidate = resolveSelectionCandidate(
+      selectionFilter,
+      [...adoptedSelection],
+      target,
+      selectionCatalog,
+    );
 
-      return candidate.accepted ? candidate.nextSelection : null
-    },
-  )
+    return candidate.accepted ? candidate.nextSelection : null;
+  });
 }
 
-export function createSelectionPreview(state: EditorState, filter: SelectionFilter | null): CommandPreview | null {
-  return createSelectionPreviewForSelection(state.selection, filter)
+export function createSelectionPreview(
+  state: EditorState,
+  filter: SelectionFilter | null,
+): CommandPreview | null {
+  return createSelectionPreviewForSelection(state.selection, filter);
 }
 
 export function createSelectionPreviewForSelection(
@@ -77,37 +81,37 @@ export function createSelectionPreviewForSelection(
   filter: SelectionFilter | null,
 ): CommandPreview | null {
   if (!filter) {
-    return null
+    return null;
   }
 
   return {
-    kind: 'selection',
+    kind: "selection",
     label: `Awaiting ${filter.label.toLowerCase()}`,
     target: selection[0] ?? null,
-  }
+  };
 }
 
 export function createFeatureSelectionPreview(
   session: FeatureEditSessionState,
-  prefix = 'Draft',
+  prefix = "Draft",
 ): CommandPreview {
   return {
-    kind: 'selection',
+    kind: "selection",
     label: getFeatureSessionPreviewLabel(session, prefix),
     target: getFeaturePrimarySelectionTarget(session),
-  }
+  };
 }
 
 export function createImportSelectionPreview(
   session: ImportSessionState,
   dependencies: EditorExtensionDependencies,
-  prefix = 'Import',
+  prefix = "Import",
 ): CommandPreview {
-  const provider = dependencies.importProviders.getById(session.providerId)
+  const provider = dependencies.importProviders.getById(session.providerId);
 
   return {
-    kind: 'selection',
+    kind: "selection",
     label: provider ? `${prefix} ${provider.label}` : `${prefix} session`,
     target: null,
-  }
+  };
 }

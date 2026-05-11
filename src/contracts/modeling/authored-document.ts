@@ -5,69 +5,77 @@ import type {
   KernelDocumentSnapshot,
   SketchSnapshotRecord,
   WorkspaceSnapshot,
-} from '@/contracts/modeling/schema'
-import type { BodyId, DocumentId, FeatureId, RevisionId, SketchId } from '@/contracts/shared/ids'
-import type { GeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
-import { createEmptyGeometryAssetManifest } from '@/contracts/modeling/geometry-assets'
-import type { EmbeddedBinaryAssetRecord } from '@/contracts/modeling/embedded-binary-assets'
+} from "@/contracts/modeling/schema";
+import type {
+  BodyId,
+  DocumentId,
+  FeatureId,
+  RevisionId,
+  SketchId,
+} from "@/contracts/shared/ids";
+import type { GeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
+import { createEmptyGeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
+import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
 import {
   AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   CONTRACT_VERSION,
   type AuthoredModelDocumentSchemaVersion,
   type ContractVersion,
-} from '@/contracts/shared/versioning'
+} from "@/contracts/shared/versioning";
 
 export interface AuthoredSketchRecord {
-  sketchId: SketchId
-  label: string
-  plane: SketchSnapshotRecord['plane']
-  definition: SketchSnapshotRecord['sketch']['definition']
+  sketchId: SketchId;
+  label: string;
+  plane: SketchSnapshotRecord["plane"];
+  definition: SketchSnapshotRecord["sketch"]["definition"];
 }
 
 export interface AuthoredFeatureRecord {
-  featureId: FeatureId
-  label: string
-  suppressed: boolean
-  definition: FeatureDefinition
+  featureId: FeatureId;
+  label: string;
+  suppressed: boolean;
+  definition: FeatureDefinition;
 }
 
 export interface AuthoredBodyLabelRecord {
-  bodyId: BodyId
-  label: string
+  bodyId: BodyId;
+  label: string;
 }
 
 export type AuthoredDocumentHistoryOrderEntry =
-  | { kind: 'sketch'; sketchId: SketchId }
-  | { kind: 'feature'; featureId: FeatureId }
+  | { kind: "sketch"; sketchId: SketchId }
+  | { kind: "feature"; featureId: FeatureId };
 
 export interface AuthoredModelDocument {
-  contractVersion: ContractVersion
-  schemaVersion: AuthoredModelDocumentSchemaVersion
-  documentId: DocumentId
-  name: string
-  revisionId: RevisionId
-  settings: KernelDocumentSnapshot['settings']
-  variables: DocumentVariableRecord[]
-  sketches: AuthoredSketchRecord[]
-  features: AuthoredFeatureRecord[]
-  featureOrder: FeatureId[]
-  historyOrder: AuthoredDocumentHistoryOrderEntry[]
-  cursor: DocumentFeatureCursor
-  bodyLabels: AuthoredBodyLabelRecord[]
-  assets: GeometryAssetManifest
-  embeddedBinaryAssets: EmbeddedBinaryAssetRecord[]
+  contractVersion: ContractVersion;
+  schemaVersion: AuthoredModelDocumentSchemaVersion;
+  documentId: DocumentId;
+  name: string;
+  revisionId: RevisionId;
+  settings: KernelDocumentSnapshot["settings"];
+  variables: DocumentVariableRecord[];
+  sketches: AuthoredSketchRecord[];
+  features: AuthoredFeatureRecord[];
+  featureOrder: FeatureId[];
+  historyOrder: AuthoredDocumentHistoryOrderEntry[];
+  cursor: DocumentFeatureCursor;
+  bodyLabels: AuthoredBodyLabelRecord[];
+  assets: GeometryAssetManifest;
+  embeddedBinaryAssets: EmbeddedBinaryAssetRecord[];
 }
 
 export interface AuthoredModelDocumentDiagnostic {
-  reasonCode: string
-  message: string
+  reasonCode: string;
+  message: string;
 }
 
 export type AuthoredModelDocumentMigrationResult =
   | { ok: true; document: AuthoredModelDocument; migrated: boolean }
-  | { ok: false; diagnostic: AuthoredModelDocumentDiagnostic }
+  | { ok: false; diagnostic: AuthoredModelDocumentDiagnostic };
 
-export function createAuthoredModelDocumentFromSnapshot(snapshot: WorkspaceSnapshot): AuthoredModelDocument {
+export function createAuthoredModelDocumentFromSnapshot(
+  snapshot: WorkspaceSnapshot,
+): AuthoredModelDocument {
   return {
     contractVersion: CONTRACT_VERSION,
     schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
@@ -88,11 +96,13 @@ export function createAuthoredModelDocumentFromSnapshot(snapshot: WorkspaceSnaps
       suppressed: feature.suppressed,
       definition: structuredClone(feature.definition),
     })),
-    featureOrder: snapshot.document.features.map((feature) => feature.featureId),
+    featureOrder: snapshot.document.features.map(
+      (feature) => feature.featureId,
+    ),
     historyOrder: snapshot.presentation.documentHistory.map((item) =>
-      item.kind === 'sketch'
-        ? { kind: 'sketch' as const, sketchId: item.sketchId }
-        : { kind: 'feature' as const, featureId: item.featureId },
+      item.kind === "sketch"
+        ? { kind: "sketch" as const, sketchId: item.sketchId }
+        : { kind: "feature" as const, featureId: item.featureId },
     ),
     cursor: structuredClone(snapshot.document.cursor),
     bodyLabels: snapshot.document.bodies.map((body) => ({
@@ -101,5 +111,5 @@ export function createAuthoredModelDocumentFromSnapshot(snapshot: WorkspaceSnaps
     })),
     assets: createEmptyGeometryAssetManifest(),
     embeddedBinaryAssets: [],
-  }
+  };
 }

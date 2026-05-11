@@ -1,243 +1,318 @@
-import { expect, test } from '@playwright/test'
-import type { Page } from '@playwright/test'
-import { SketchWorkbenchHarness } from './helpers/sketch-workbench'
+import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
-const MODELING_OPERATION_HISTORY_STORAGE_KEY = 'cad.modeling.operationHistory.doc_workspace.v1'
+const MODELING_OPERATION_HISTORY_STORAGE_KEY =
+  "cad.modeling.operationHistory.doc_workspace.v1";
 
-test.setTimeout(60_000)
-test.use({ viewport: { width: 1440, height: 960 } })
+test.setTimeout(60_000);
+test.use({ viewport: { width: 1440, height: 960 } });
 
-test('dragging an active sketch vertex updates the committed sketch definition', async ({ page }) => {
-  const workbench = new SketchWorkbenchHarness(page)
+test("dragging an active sketch vertex updates the committed sketch definition", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
 
-  await workbench.open()
-  await workbench.activateTool('Start a new sketch.')
-  await page.getByRole('button', { name: /Top Plane/ }).first().click()
-  await workbench.expectSketchSessionActive()
-  await workbench.activateTool('Create line geometry.')
+  await workbench.open();
+  await workbench.activateTool("Start a new sketch.");
+  await page
+    .getByRole("button", { name: /Top Plane/ })
+    .first()
+    .click();
+  await workbench.expectSketchSessionActive();
+  await workbench.activateTool("Create line geometry.");
 
-  const canvas = page.locator('main canvas').first()
-  await canvas.click({ position: { x: 360, y: 260 }, force: true })
-  await canvas.click({ position: { x: 420, y: 320 }, force: true })
-  await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toContain('1 entities staged')
+  const canvas = page.locator("main canvas").first();
+  await canvas.click({ position: { x: 360, y: 260 }, force: true });
+  await canvas.click({ position: { x: 420, y: 320 }, force: true });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("1 entities staged");
 
-  const box = await canvas.boundingBox()
+  const box = await canvas.boundingBox();
   if (!box) {
-    throw new Error('Viewport canvas is not visible.')
+    throw new Error("Viewport canvas is not visible.");
   }
 
-  await page.mouse.move(box.x + 360, box.y + 260)
-  await page.mouse.down()
-  await page.mouse.move(box.x + 500, box.y + 260, { steps: 8 })
-  await page.mouse.up()
+  await page.mouse.move(box.x + 360, box.y + 260);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 500, box.y + 260, { steps: 8 });
+  await page.mouse.up();
 
-  await workbench.activateTool('Exit the active sketch.')
-  await workbench.expectMachine('idle')
+  await workbench.activateTool("Exit the active sketch.");
+  await workbench.expectMachine("idle");
 
   const pointPositions = await page.evaluate((storageKey) => {
-    const serialized = window.localStorage.getItem(storageKey)
+    const serialized = window.localStorage.getItem(storageKey);
     if (!serialized) {
-      return []
+      return [];
     }
 
     const payload = JSON.parse(serialized) as {
       entries?: Array<{
-        kind: string
+        kind: string;
         payload?: {
           definition?: {
-            points?: Array<{ position: readonly [number, number] }>
-          }
-        }
-      }>
-    }
+            points?: Array<{ position: readonly [number, number] }>;
+          };
+        };
+      }>;
+    };
 
-    return payload.entries?.filter((entry) => entry.kind === 'commitSketch').at(-1)?.payload?.definition?.points
-      ?.map((point) => point.position) ?? []
-  }, MODELING_OPERATION_HISTORY_STORAGE_KEY)
+    return (
+      payload.entries
+        ?.filter((entry) => entry.kind === "commitSketch")
+        .at(-1)
+        ?.payload?.definition?.points?.map((point) => point.position) ?? []
+    );
+  }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
 
-  expect(pointPositions.length).toBeGreaterThanOrEqual(2)
-  expect(pointPositions[0]![0]).toBeGreaterThan(pointPositions[1]![0])
-})
+  expect(pointPositions.length).toBeGreaterThanOrEqual(2);
+  expect(pointPositions[0]![0]).toBeGreaterThan(pointPositions[1]![0]);
+});
 
-test('active sketch curve picking selects semantic curves without pixel-perfect clicks', async ({ page }) => {
-  const workbench = new SketchWorkbenchHarness(page)
+test("active sketch curve picking selects semantic curves without pixel-perfect clicks", async ({
+  page,
+}) => {
+  const workbench = new SketchWorkbenchHarness(page);
 
-  await workbench.open()
-  await workbench.activateTool('Start a new sketch.')
-  await page.getByRole('button', { name: /Top Plane/ }).first().click()
-  await workbench.expectSketchSessionActive()
+  await workbench.open();
+  await workbench.activateTool("Start a new sketch.");
+  await page
+    .getByRole("button", { name: /Top Plane/ })
+    .first()
+    .click();
+  await workbench.expectSketchSessionActive();
 
-  await workbench.activateTool('Create line geometry.')
-  await workbench.clickViewportAt({ x: 320, y: 260 })
-  await workbench.clickViewportAt({ x: 420, y: 260 })
+  await workbench.activateTool("Create line geometry.");
+  await workbench.clickViewportAt({ x: 320, y: 260 });
+  await workbench.clickViewportAt({ x: 420, y: 260 });
 
-  await workbench.activateTool('Create circular geometry.')
-  await workbench.clickViewportAt({ x: 560, y: 260 })
-  await workbench.clickViewportAt({ x: 680, y: 260 })
+  await workbench.activateTool("Create circular geometry.");
+  await workbench.clickViewportAt({ x: 560, y: 260 });
+  await workbench.clickViewportAt({ x: 680, y: 260 });
 
-  await workbench.activateTool('Create spline geometry.')
-  await workbench.clickViewportAt({ x: 280, y: 520 })
-  await workbench.clickViewportAt({ x: 420, y: 360 })
-  await workbench.clickViewportAt({ x: 560, y: 520 })
+  await workbench.activateTool("Create spline geometry.");
+  await workbench.clickViewportAt({ x: 280, y: 520 });
+  await workbench.clickViewportAt({ x: 420, y: 360 });
+  await workbench.clickViewportAt({ x: 560, y: 520 });
 
-  await workbench.activateTool('Toggle sketch geometry construction-only or mark new sketch geometry as construction.')
-  await workbench.activateTool('Create line geometry.')
-  await workbench.clickViewportAt({ x: 520, y: 460 })
-  await workbench.clickViewportAt({ x: 620, y: 460 })
-  await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toContain('4 entities staged')
+  await workbench.activateTool(
+    "Toggle sketch geometry construction-only or mark new sketch geometry as construction.",
+  );
+  await workbench.activateTool("Create line geometry.");
+  await workbench.clickViewportAt({ x: 520, y: 460 });
+  await workbench.clickViewportAt({ x: 620, y: 460 });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("4 entities staged");
 
-  await page.keyboard.press('Escape')
+  await page.keyboard.press("Escape");
 
-  await workbench.clickViewportAt({ x: 370, y: 268 })
-  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe('sketch_draft.sketch_entity_1_line')
+  await workbench.clickViewportAt({ x: 370, y: 268 });
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+    .toBe("sketch_draft.sketch_entity_1_line");
 
-  await workbench.clickViewportAt({ x: 688, y: 260 })
-  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe('sketch_draft.sketch_entity_2_circle')
+  await workbench.clickViewportAt({ x: 688, y: 260 });
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+    .toBe("sketch_draft.sketch_entity_2_circle");
 
-  await workbench.clickViewportAt({ x: 420, y: 440 })
-  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe('sketch_draft.sketch_entity_3_spline')
+  await workbench.clickViewportAt({ x: 420, y: 440 });
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+    .toBe("sketch_draft.sketch_entity_3_spline");
 
-  await workbench.clickViewportAt({ x: 570, y: 468 })
-  await expect.poll(() => workbench.currentEditorSelection(), { timeout: 10_000 }).toBe('sketch_draft.sketch_entity_4_line')
-})
+  await workbench.clickViewportAt({ x: 570, y: 468 });
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+    .toBe("sketch_draft.sketch_entity_4_line");
+});
 
-test('repository-backed sketch commit stays responsive and survives immediate refresh without file system access', async ({
+test("repository-backed sketch commit stays responsive and survives immediate refresh without file system access", async ({
   page,
 }, testInfo) => {
-  const workbench = new SketchWorkbenchHarness(page)
-  const repositoryName = `sketch-refresh-${testInfo.workerIndex}-${Date.now()}`
-  const repositoryPath = `/?cadRepositoryDbName=${repositoryName}`
+  const workbench = new SketchWorkbenchHarness(page);
+  const repositoryName = `sketch-refresh-${testInfo.workerIndex}-${Date.now()}`;
+  const repositoryPath = `/?cadRepositoryDbName=${repositoryName}`;
 
-  await installRepositoryDelayAndNoFileSystemAccess(page)
-  await workbench.openWithRepository(repositoryPath)
+  await installRepositoryDelayAndNoFileSystemAccess(page);
+  await workbench.openWithRepository(repositoryPath);
   await page.evaluate(() => {
-    window.__cadDelayDocumentSyncMutations = true
-  })
+    window.__cadDelayDocumentSyncMutations = true;
+  });
 
-  await workbench.activateTool('Start a new sketch.')
-  await page.getByRole('button', { name: /Top Plane/ }).first().click()
-  await workbench.expectSketchSessionActive()
-  await workbench.activateTool('Create line geometry.')
+  await workbench.activateTool("Start a new sketch.");
+  await page
+    .getByRole("button", { name: /Top Plane/ })
+    .first()
+    .click();
+  await workbench.expectSketchSessionActive();
+  await workbench.activateTool("Create line geometry.");
 
-  const canvas = page.locator('main canvas').first()
-  await canvas.click({ position: { x: 360, y: 260 }, force: true })
-  await canvas.click({ position: { x: 440, y: 320 }, force: true })
-  await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toContain('1 entities staged')
+  const canvas = page.locator("main canvas").first();
+  await canvas.click({ position: { x: 360, y: 260 }, force: true });
+  await canvas.click({ position: { x: 440, y: 320 }, force: true });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toContain("1 entities staged");
 
-  await workbench.activateTool('Exit the active sketch.')
-  await workbench.expectMachine('idle')
-  await expect.poll(() => page.evaluate(() => window.__cadDelayedDocumentSyncMutations?.length ?? 0), {
-    timeout: 10_000,
-  }).toBeGreaterThan(0)
-  await expect(page.getByRole('button', { name: 'Select Sketch Draft. Double-click to reopen.' })).toBeVisible({
+  await workbench.activateTool("Exit the active sketch.");
+  await workbench.expectMachine("idle");
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => window.__cadDelayedDocumentSyncMutations?.length ?? 0,
+        ),
+      {
+        timeout: 10_000,
+      },
+    )
+    .toBeGreaterThan(0);
+  await expect(
+    page.getByRole("button", {
+      name: "Select Sketch Draft. Double-click to reopen.",
+    }),
+  ).toBeVisible({
     timeout: 30_000,
-  })
+  });
 
   const persistedSketch = await page.evaluate((storageKey) => {
-    const serialized = window.__cadLastOperationHistoryPayload ?? window.localStorage.getItem(storageKey)
+    const serialized =
+      window.__cadLastOperationHistoryPayload ??
+      window.localStorage.getItem(storageKey);
     if (!serialized) {
-      return null
+      return null;
     }
 
     const payload = JSON.parse(serialized) as {
       entries?: Array<{
-        kind: string
+        kind: string;
         payload?: {
           definition?: {
-            authoringOperations?: unknown[]
-            entities?: unknown[]
-          }
-        }
-      }>
-    }
-    const commitSketch = payload.entries?.filter((entry) => entry.kind === 'commitSketch').at(-1)
+            authoringOperations?: unknown[];
+            entities?: unknown[];
+          };
+        };
+      }>;
+    };
+    const commitSketch = payload.entries
+      ?.filter((entry) => entry.kind === "commitSketch")
+      .at(-1);
 
     return {
-      authoringOperationCount: commitSketch?.payload?.definition?.authoringOperations?.length ?? 0,
+      authoringOperationCount:
+        commitSketch?.payload?.definition?.authoringOperations?.length ?? 0,
       entityCount: commitSketch?.payload?.definition?.entities?.length ?? 0,
-    }
-  }, MODELING_OPERATION_HISTORY_STORAGE_KEY)
+    };
+  }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
 
-  expect(persistedSketch?.entityCount).toBeGreaterThanOrEqual(1)
-  expect(persistedSketch?.authoringOperationCount).toBe(0)
+  expect(persistedSketch?.entityCount).toBeGreaterThanOrEqual(1);
+  expect(persistedSketch?.authoringOperationCount).toBe(0);
 
   await page.evaluate(() => {
-    window.__cadDelayDocumentSyncMutations = false
-  })
-  await workbench.reloadPreservingRepositoryStorage(repositoryPath)
+    window.__cadDelayDocumentSyncMutations = false;
+  });
+  await workbench.reloadPreservingRepositoryStorage(repositoryPath);
 
-  await expect(page.getByText('History restore failed')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Select Sketch Draft. Double-click to reopen.' })).toBeVisible({
+  await expect(page.getByText("History restore failed")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", {
+      name: "Select Sketch Draft. Double-click to reopen.",
+    }),
+  ).toBeVisible({
     timeout: 30_000,
-  })
-  await expect.poll(() => workbench.currentSketchSession(), { timeout: 10_000 }).toBe('none')
-})
+  });
+  await expect
+    .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
+    .toBe("none");
+});
 
 async function installRepositoryDelayAndNoFileSystemAccess(page: Page) {
   await page.addInitScript((storageKey) => {
     type DelayedMutation = {
-      message: unknown
-      transfer?: Transferable[]
-      worker: Worker
-    }
+      message: unknown;
+      transfer?: Transferable[];
+      worker: Worker;
+    };
     type TestWindow = typeof window & {
-      __cadDelayDocumentSyncMutations?: boolean
-      __cadDelayedDocumentSyncMutations?: DelayedMutation[]
-      __cadLastOperationHistoryPayload?: string | null
-      __cadReleaseDelayedDocumentSyncMutations?: () => void
-    }
+      __cadDelayDocumentSyncMutations?: boolean;
+      __cadDelayedDocumentSyncMutations?: DelayedMutation[];
+      __cadLastOperationHistoryPayload?: string | null;
+      __cadReleaseDelayedDocumentSyncMutations?: () => void;
+    };
 
-    const testWindow = window as TestWindow
-    Object.defineProperty(window, 'showOpenFilePicker', { configurable: true, value: undefined })
-    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined })
-    Object.defineProperty(window, 'showDirectoryPicker', { configurable: true, value: undefined })
+    const testWindow = window as TestWindow;
+    Object.defineProperty(window, "showOpenFilePicker", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(window, "showSaveFilePicker", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(window, "showDirectoryPicker", {
+      configurable: true,
+      value: undefined,
+    });
 
-    const nativeSetItem = Storage.prototype.setItem
-    Storage.prototype.setItem = function setItem(this: Storage, key: string, value: string) {
+    const nativeSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
       if (key === storageKey) {
-        testWindow.__cadLastOperationHistoryPayload = value
+        testWindow.__cadLastOperationHistoryPayload = value;
       }
 
-      return nativeSetItem.call(this, key, value)
-    }
+      return nativeSetItem.call(this, key, value);
+    };
 
-    testWindow.__cadDelayedDocumentSyncMutations = []
-    const NativeWorker = window.Worker
+    testWindow.__cadDelayedDocumentSyncMutations = [];
+    const NativeWorker = window.Worker;
 
     class DelayedDocumentSyncWorker extends NativeWorker {
       postMessage(message: unknown, transfer?: Transferable[]) {
         if (
-          testWindow.__cadDelayDocumentSyncMutations
-          && typeof message === 'object'
-          && message !== null
-          && (message as { kind?: unknown }).kind === 'mutate'
+          testWindow.__cadDelayDocumentSyncMutations &&
+          typeof message === "object" &&
+          message !== null &&
+          (message as { kind?: unknown }).kind === "mutate"
         ) {
-          testWindow.__cadDelayedDocumentSyncMutations?.push({ message, transfer, worker: this })
-          return
+          testWindow.__cadDelayedDocumentSyncMutations?.push({
+            message,
+            transfer,
+            worker: this,
+          });
+          return;
         }
 
         if (transfer) {
-          super.postMessage(message, transfer)
-          return
+          super.postMessage(message, transfer);
+          return;
         }
 
-        super.postMessage(message)
+        super.postMessage(message);
       }
     }
 
-    window.Worker = DelayedDocumentSyncWorker
+    window.Worker = DelayedDocumentSyncWorker;
 
     testWindow.__cadReleaseDelayedDocumentSyncMutations = () => {
-      const delayed = testWindow.__cadDelayedDocumentSyncMutations?.splice(0) ?? []
+      const delayed =
+        testWindow.__cadDelayedDocumentSyncMutations?.splice(0) ?? [];
 
       for (const item of delayed) {
         if (item.transfer) {
-          item.worker.postMessage(item.message, item.transfer)
-          continue
+          item.worker.postMessage(item.message, item.transfer);
+          continue;
         }
 
-        item.worker.postMessage(item.message)
+        item.worker.postMessage(item.message);
       }
-    }
-  }, MODELING_OPERATION_HISTORY_STORAGE_KEY)
+    };
+  }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
 }

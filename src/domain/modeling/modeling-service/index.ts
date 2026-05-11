@@ -34,7 +34,7 @@ export type {
   ModelingProjectSketchExternalReferencesInput,
   ModelingPreviewResult,
   ModelingResolvedReferenceResult,
-} from './types'
+} from "./types";
 
-export { createModelingService, modelingRuntimeValidators } from './service'
-export { createSketchSolverService } from './sketch-solver'
+export { createModelingService, modelingRuntimeValidators } from "./service";
+export { createSketchSolverService } from "./sketch-solver";

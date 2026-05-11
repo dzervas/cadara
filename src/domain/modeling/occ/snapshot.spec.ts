@@ -1,16 +1,16 @@
-import { test } from 'bun:test'
-import { expectTrue } from '@/testing/expect.spec'
-import type { ModelingKernelAdapter } from '@/contracts/modeling/adapter'
+import { test } from "bun:test";
+import { expectTrue } from "@/testing/expect.spec";
+import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import {
   createModelingService,
   type ModelingService,
-} from '@/domain/modeling/modeling-service'
+} from "@/domain/modeling/modeling-service";
 import type {
   ConstructionSnapshotRecord,
   FeatureDefinition,
   GetDocumentSnapshotResponse,
   SketchSnapshotRecord,
-} from '@/contracts/modeling/schema'
+} from "@/contracts/modeling/schema";
 import type {
   BodyId,
   FeatureId,
@@ -19,52 +19,51 @@ import type {
   SketchEntityId,
   SketchId,
   SketchPointId,
-} from '@/contracts/shared/ids'
-import type { SketchPlaneDefinition } from '@/contracts/shared/sketch-plane'
+} from "@/contracts/shared/ids";
+import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   FILLET_FEATURE_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
-} from '@/contracts/shared/versioning'
+} from "@/contracts/shared/versioning";
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   SKETCH_SCHEMA_VERSION,
   type RegionRecord,
   type SketchDefinition,
   type SketchRecord,
-} from '@/contracts/sketch/schema'
-import { deriveSketchRegionsCore } from '@/contracts/sketch/region-extraction'
-import {
-  buildOccWorkspaceSnapshot,
-} from '@/domain/modeling/occ/snapshot'
-import { getAutoHiddenSketchTargetKeys } from '@/domain/editor/visibility'
+} from "@/contracts/sketch/schema";
+import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
+import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
+import { getAutoHiddenSketchTargetKeys } from "@/domain/editor/visibility";
 import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
-} from '@/domain/modeling/occ/authoring-state'
-import { getDefaultOpenCascadeInstance } from '@/domain/modeling/occ/runtime'
-import { extractPlanarFaceData, toGpPnt } from '@/domain/modeling/occ/planes'
-import { trackNewSolidBody } from '@/domain/modeling/occ/topology'
+} from "@/domain/modeling/occ/authoring-state";
+import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { extractPlanarFaceData, toGpPnt } from "@/domain/modeling/occ/planes";
+import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
   OCC_KERNEL_SETTINGS,
   createStandardPlaneDefinition,
-} from '@/domain/modeling/opencascade-kernel-seed'
+} from "@/domain/modeling/opencascade-kernel-seed";
 
-test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId(name: string) {
-    return `sketch_point_${name}` as SketchPointId
+test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
+  function pointId(name: string) {
+    return `sketch_point_${name}` as SketchPointId;
   }
 
   function entityId(name: string) {
-    return `sketch_entity_${name}` as SketchEntityId
+    return `sketch_entity_${name}` as SketchEntityId;
   }
 
   function createSketchDefinition(
     sketchId: SketchId,
     points: Array<{ id: SketchPointId; position: readonly [number, number] }>,
-    entities: SketchDefinition['entities'],
+    entities: SketchDefinition["entities"],
   ): SketchDefinition {
     return {
       schemaVersion: SKETCH_SCHEMA_VERSION,
@@ -74,7 +73,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       points: points.map((point) => ({
         pointId: point.id,
         label: point.id,
-        target: { kind: 'sketchPoint', sketchId, pointId: point.id },
+        target: { kind: "sketchPoint", sketchId, pointId: point.id },
         position: point.position,
         isConstruction: false,
       })),
@@ -84,14 +83,14 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       constraints: [],
       dimensionIds: [],
       dimensions: [],
-    }
+    };
   }
 
   function createSketchRecord(
     sketchId: SketchId,
     plane: SketchPlaneDefinition,
     definition: SketchDefinition,
-    solvedEntities: SketchRecord['solvedSnapshot']['solvedEntities'],
+    solvedEntities: SketchRecord["solvedSnapshot"]["solvedEntities"],
     regions: RegionRecord[],
   ): SketchSnapshotRecord {
     const sketch: SketchRecord = {
@@ -107,8 +106,8 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       solvedSnapshot: {
         schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
         status: {
-          solveState: 'solved',
-          constraintState: 'wellConstrained',
+          solveState: "solved",
+          constraintState: "wellConstrained",
         },
         solvedEntities,
         solvedPoints: [],
@@ -117,7 +116,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
         diagnostics: [],
       },
       regions,
-    }
+    };
 
     return {
       ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
@@ -131,67 +130,95 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       planeTarget: plane.support,
       planeKey: plane.key,
       sketch,
-    }
+    };
   }
 
   function createRectangleSketch(
     sketchId: SketchId,
     plane: SketchPlaneDefinition,
     options: {
-      origin?: readonly [number, number]
-      width?: number
-      height?: number
+      origin?: readonly [number, number];
+      width?: number;
+      height?: number;
     } = {},
   ) {
-    const origin = options.origin ?? [0, 0]
-    const width = options.width ?? 4
-    const height = options.height ?? 3
+    const origin = options.origin ?? [0, 0];
+    const width = options.width ?? 4;
+    const height = options.height ?? 3;
     const points = [
-      { id: pointId(`${sketchId}_bottom_left`), position: [origin[0], origin[1]] as const },
-      { id: pointId(`${sketchId}_bottom_right`), position: [origin[0] + width, origin[1]] as const },
-      { id: pointId(`${sketchId}_top_right`), position: [origin[0] + width, origin[1] + height] as const },
-      { id: pointId(`${sketchId}_top_left`), position: [origin[0], origin[1] + height] as const },
-    ]
+      {
+        id: pointId(`${sketchId}_bottom_left`),
+        position: [origin[0], origin[1]] as const,
+      },
+      {
+        id: pointId(`${sketchId}_bottom_right`),
+        position: [origin[0] + width, origin[1]] as const,
+      },
+      {
+        id: pointId(`${sketchId}_top_right`),
+        position: [origin[0] + width, origin[1] + height] as const,
+      },
+      {
+        id: pointId(`${sketchId}_top_left`),
+        position: [origin[0], origin[1] + height] as const,
+      },
+    ];
     const entities = [
       {
-        kind: 'lineSegment' as const,
+        kind: "lineSegment" as const,
         entityId: entityId(`${sketchId}_bottom`),
-        label: 'bottom',
-        target: { kind: 'sketchEntity' as const, sketchId, entityId: entityId(`${sketchId}_bottom`) },
+        label: "bottom",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId,
+          entityId: entityId(`${sketchId}_bottom`),
+        },
         isConstruction: false,
         startPointId: points[0]!.id,
         endPointId: points[1]!.id,
       },
       {
-        kind: 'lineSegment' as const,
+        kind: "lineSegment" as const,
         entityId: entityId(`${sketchId}_right`),
-        label: 'right',
-        target: { kind: 'sketchEntity' as const, sketchId, entityId: entityId(`${sketchId}_right`) },
+        label: "right",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId,
+          entityId: entityId(`${sketchId}_right`),
+        },
         isConstruction: false,
         startPointId: points[1]!.id,
         endPointId: points[2]!.id,
       },
       {
-        kind: 'lineSegment' as const,
+        kind: "lineSegment" as const,
         entityId: entityId(`${sketchId}_top`),
-        label: 'top',
-        target: { kind: 'sketchEntity' as const, sketchId, entityId: entityId(`${sketchId}_top`) },
+        label: "top",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId,
+          entityId: entityId(`${sketchId}_top`),
+        },
         isConstruction: false,
         startPointId: points[2]!.id,
         endPointId: points[3]!.id,
       },
       {
-        kind: 'lineSegment' as const,
+        kind: "lineSegment" as const,
         entityId: entityId(`${sketchId}_left`),
-        label: 'left',
-        target: { kind: 'sketchEntity' as const, sketchId, entityId: entityId(`${sketchId}_left`) },
+        label: "left",
+        target: {
+          kind: "sketchEntity" as const,
+          sketchId,
+          entityId: entityId(`${sketchId}_left`),
+        },
         isConstruction: false,
         startPointId: points[3]!.id,
         endPointId: points[0]!.id,
       },
-    ]
-    const definition = createSketchDefinition(sketchId, points, entities)
-    const regionId = `region_${sketchId}_outer` as const
+    ];
+    const definition = createSketchDefinition(sketchId, points, entities);
+    const regionId = `region_${sketchId}_outer` as const;
     const region: RegionRecord = {
       ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
       ownerRevisionId: OCC_KERNEL_INITIAL_REVISION_ID,
@@ -200,15 +227,15 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       ownerBodyId: null,
       regionId,
       label: regionId,
-      target: { kind: 'region', sketchId, regionId },
-      sourceSketch: { kind: 'sketch', sketchId },
+      target: { kind: "region", sketchId, regionId },
+      sourceSketch: { kind: "sketch", sketchId },
       loops: [
         {
           loopId: `region_loop_${sketchId}_outer` as const,
-          role: 'outer',
-          orientation: 'counterClockwise',
+          role: "outer",
+          orientation: "counterClockwise",
           segments: entities.map((entity, index) => ({
-            source: { kind: 'entity' as const, entityId: entity.entityId },
+            source: { kind: "entity" as const, entityId: entity.entityId },
             startPointId: points[index]!.id,
             endPointId: points[(index + 1) % points.length]!.id,
           })),
@@ -217,7 +244,7 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
         },
       ],
       isClosed: true,
-    }
+    };
 
     return {
       sketch: createSketchRecord(
@@ -226,25 +253,25 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
         definition,
         [
           {
-            kind: 'lineSegment',
+            kind: "lineSegment",
             entityId: entities[0]!.entityId,
             startPosition: points[0]!.position,
             endPosition: points[1]!.position,
           },
           {
-            kind: 'lineSegment',
+            kind: "lineSegment",
             entityId: entities[1]!.entityId,
             startPosition: points[1]!.position,
             endPosition: points[2]!.position,
           },
           {
-            kind: 'lineSegment',
+            kind: "lineSegment",
             entityId: entities[2]!.entityId,
             startPosition: points[2]!.position,
             endPosition: points[3]!.position,
           },
           {
-            kind: 'lineSegment',
+            kind: "lineSegment",
             entityId: entities[3]!.entityId,
             startPosition: points[3]!.position,
             endPosition: points[0]!.position,
@@ -253,16 +280,18 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
         [region],
       ),
       region,
-    }
+    };
   }
 
-  function createConstructionSnapshot(constructionId: ConstructionSnapshotRecord['constructionId']): ConstructionSnapshotRecord {
+  function createConstructionSnapshot(
+    constructionId: ConstructionSnapshotRecord["constructionId"],
+  ): ConstructionSnapshotRecord {
     const standardKey =
-      constructionId === 'construction_plane-xy'
-        ? 'xy'
-        : constructionId === 'construction_plane-yz'
-          ? 'yz'
-          : 'xz'
+      constructionId === "construction_plane-xy"
+        ? "xy"
+        : constructionId === "construction_plane-yz"
+          ? "yz"
+          : "xz";
 
     return {
       ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
@@ -272,311 +301,404 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       ownerBodyId: null,
       constructionId,
       label: constructionId,
-      constructionType: 'plane',
+      constructionType: "plane",
       plane: createStandardPlaneDefinition(standardKey),
-      target: { kind: 'construction', constructionId },
-    }
+      target: { kind: "construction", constructionId },
+    };
   }
 
-  async function createBoxBody(options: {
-    bodyId?: BodyId
-    width?: number
-    depth?: number
-    height?: number
-  } = {}) {
-    const oc = await getDefaultOpenCascadeInstance()
+  async function createBoxBody(
+    options: {
+      bodyId?: BodyId;
+      width?: number;
+      depth?: number;
+      height?: number;
+    } = {},
+  ) {
+    const oc = await getDefaultOpenCascadeInstance();
     const box = new oc.BRepPrimAPI_MakeBox_3(
       toGpPnt(oc, [0, 0, 0]),
       options.width ?? 10,
       options.depth ?? 8,
       options.height ?? 6,
-    )
-    box.Build(new oc.Message_ProgressRange_1())
-    expectTrue(box.IsDone(), 'Expected OCC box builder to succeed for phase 6 snapshot tests.')
+    );
+    box.Build(new oc.Message_ProgressRange_1());
+    expectTrue(
+      box.IsDone(),
+      "Expected OCC box builder to succeed for phase 6 snapshot tests.",
+    );
 
     return trackNewSolidBody(oc, {
-      bodyId: options.bodyId ?? 'body_phase6_seed',
-      label: 'Seed Body',
-      ownerFeatureId: 'feature_seed',
+      bodyId: options.bodyId ?? "body_phase6_seed",
+      label: "Seed Body",
+      ownerFeatureId: "feature_seed",
       shape: box.Shape(),
-    })
+    });
   }
 
   function findPlanarFaceByAxis(
     oc: Awaited<ReturnType<typeof getDefaultOpenCascadeInstance>>,
-    body: NonNullable<ReturnType<typeof rebuildOccAuthoringState>['bodies'][number]>,
-    axis: 'x' | 'y' | 'z',
+    body: NonNullable<
+      ReturnType<typeof rebuildOccAuthoringState>["bodies"][number]
+    >,
+    axis: "x" | "y" | "z",
     coordinate: number,
   ) {
-    const axisIndex = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+    const axisIndex = axis === "x" ? 0 : axis === "y" ? 1 : 2;
     const faceId = body.topology.faceIds.find((candidate) => {
-      const face = body.facesById.get(candidate)
+      const face = body.facesById.get(candidate);
       if (!face) {
-        return false
+        return false;
       }
 
-      const plane = extractPlanarFaceData(oc, face)
-      return Math.abs(Math.abs(plane.frame.normal[axisIndex] ?? 0) - 1) < 0.001
-        && Math.abs(plane.frame.origin[axisIndex] - coordinate) < 0.001
-    })
+      const plane = extractPlanarFaceData(oc, face);
+      return (
+        Math.abs(Math.abs(plane.frame.normal[axisIndex] ?? 0) - 1) < 0.001 &&
+        Math.abs(plane.frame.origin[axisIndex] - coordinate) < 0.001
+      );
+    });
 
-    expectTrue(faceId, `Expected body ${body.bodyId} to expose a planar face at ${axis}=${coordinate}.`)
-    return faceId
+    expectTrue(
+      faceId,
+      `Expected body ${body.bodyId} to expose a planar face at ${axis}=${coordinate}.`,
+    );
+    return faceId;
   }
 
-  function createSnapshotAdapter(snapshot: GetDocumentSnapshotResponse['snapshot']): ModelingKernelAdapter {
+  function createSnapshotAdapter(
+    snapshot: GetDocumentSnapshotResponse["snapshot"],
+  ): ModelingKernelAdapter {
     return {
       async getDocumentSnapshot() {
         return {
           contractVersion: snapshot.document.contractVersion,
           snapshot,
-        }
+        };
       },
       async commitSketch() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async createFeature() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async updateFeature() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async deleteFeature() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async deleteTarget() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async renameBody() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async reorderFeature() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async setFeatureCursor() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async addDocumentVariable() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async updateDocumentVariable() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async evaluatePreview() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
       async resolveReference() {
-        throw new Error('Not implemented in phase 6 snapshot test adapter.')
+        throw new Error("Not implemented in phase 6 snapshot test adapter.");
       },
-    }
+    };
   }
 
-  function createModelingSnapshotValidator(snapshot: GetDocumentSnapshotResponse['snapshot']): ModelingService {
+  function createModelingSnapshotValidator(
+    snapshot: GetDocumentSnapshotResponse["snapshot"],
+  ): ModelingService {
     return createModelingService(createSnapshotAdapter(snapshot), {
       currentDocumentId: OCC_KERNEL_DOCUMENT_ID,
-    })
+    });
   }
 
   async function testWorkspaceSnapshotBuildsContractValidRenderExport() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase6_snapshot' as SketchId, plane)
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase6_snapshot" as SketchId,
+      plane,
+    );
     const initialState = createOccAuthoringState(oc, {
       sketches: [sketch],
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
-    })
+    });
     const features: readonly {
-      featureId: FeatureId
-      suppressed: boolean
-      definition: FeatureDefinition
+      featureId: FeatureId;
+      suppressed: boolean;
+      definition: FeatureDefinition;
     }[] = [
       {
-        featureId: 'feature_phase6_plane' as FeatureId,
+        featureId: "feature_phase6_plane" as FeatureId,
         suppressed: false,
         definition: {
-          kind: 'plane',
+          kind: "plane",
           featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            mode: 'coplanar',
+            mode: "coplanar",
             reference: {
               target: {
-                kind: 'construction',
-                constructionId: 'construction_plane-xy',
+                kind: "construction",
+                constructionId: "construction_plane-xy",
               },
             },
           },
         },
       },
       {
-        featureId: 'feature_phase6_extrude' as FeatureId,
+        featureId: "feature_phase6_extrude" as FeatureId,
         suppressed: false,
         definition: {
-          kind: 'extrude',
+          kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            profiles: [{
-              kind: 'region',
-              sketchId: sketch.sketchId,
-              regionId: region.regionId,
-            }],
-            startExtent: { kind: 'profilePlane' },
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
             extent: {
-              mode: 'oneSide',
-              end: { kind: 'blind', direction: 'positive', distance: 6 },
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 6 },
             },
-            operation: 'newBody',
-            booleanScope: { kind: 'standalone' },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
           },
         },
       },
-    ]
-    const rebuilt = rebuildOccAuthoringState(initialState, features)
-    const snapshot = buildOccWorkspaceSnapshot(rebuilt)
-    const validator = createModelingSnapshotValidator(snapshot)
-    const normalized = await validator.getCurrentDocumentSnapshot()
-
-    expectTrue(normalized.document.documentId === OCC_KERNEL_DOCUMENT_ID, 'Phase 6 workspace snapshot must preserve the document ID.')
-    expectTrue(normalized.document.render.records.length > 0, 'Phase 6 workspace snapshot must export render records.')
-    expectTrue(normalized.document.featureTree.length >= 5, 'Phase 6 workspace snapshot must populate the feature tree.')
-    expectTrue(normalized.document.objects.length >= 4, 'Phase 6 workspace snapshot must populate the object tree.')
-    expectTrue(normalized.document.features.length === 2, 'Phase 6 workspace snapshot must include every rebuilt feature.')
-    expectTrue(normalized.document.bodies.length === 1, 'Phase 6 workspace snapshot must include rebuilt body snapshots.')
-
-    const planarFaceEntity = normalized.document.entities.find((entry) =>
-      entry.target.kind === 'face' && entry.selectionSemantics.includes('planarFace'),
-    )
-    expectTrue(planarFaceEntity, 'Phase 6 snapshot entities must expose planar-face selection semantics.')
-    expectTrue(
-      planarFaceEntity.selectionSemantics.includes('planarReference'),
-      'Planar face entities must also advertise planar-reference semantics.',
-    )
-
-    const constructionEntity = normalized.document.entities.find((entry) =>
-      entry.target.kind === 'construction' && entry.selectionSemantics.includes('constructionPlane'),
-    )
-    expectTrue(constructionEntity, 'Phase 6 snapshot entities must expose construction-plane semantics.')
-    expectTrue(
-      constructionEntity.selectionSemantics.includes('planarReference'),
-      'Construction entities must also advertise planar-reference semantics.',
-    )
+    ];
+    const rebuilt = rebuildOccAuthoringState(initialState, features);
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt);
+    const validator = createModelingSnapshotValidator(snapshot);
+    const normalized = await validator.getCurrentDocumentSnapshot();
 
     expectTrue(
-      normalized.document.render.records.some((record) =>
-        record.binding.topology === 'face' && record.binding.semanticClass === 'planarFace',
-      ),
-      'Phase 6 render export must include planar-face mesh bindings.',
-    )
+      normalized.document.documentId === OCC_KERNEL_DOCUMENT_ID,
+      "Phase 6 workspace snapshot must preserve the document ID.",
+    );
     expectTrue(
-      normalized.document.render.records.some((record) =>
-        record.binding.topology === 'edge' && record.binding.semanticClass === 'featureEdge',
-      ),
-      'Phase 6 render export must include edge polyline bindings.',
-    )
+      normalized.document.render.records.length > 0,
+      "Phase 6 workspace snapshot must export render records.",
+    );
     expectTrue(
-      normalized.document.render.records.some((record) =>
-        record.binding.topology === 'vertex' && record.binding.semanticClass === 'featureVertex',
-      ),
-      'Phase 6 render export must include vertex marker bindings.',
-    )
+      normalized.document.featureTree.length >= 5,
+      "Phase 6 workspace snapshot must populate the feature tree.",
+    );
     expectTrue(
-      normalized.document.render.records.some((record) =>
-        record.binding.topology === null && record.binding.semanticClass === 'construction',
-      ),
-      'Phase 6 render export must include construction render bindings.',
-    )
+      normalized.document.objects.length >= 4,
+      "Phase 6 workspace snapshot must populate the object tree.",
+    );
     expectTrue(
-      normalized.document.render.records.some((record) =>
-        record.binding.topology === null
-        && record.binding.semanticClass === 'construction'
-        && record.geometry.kind === 'mesh',
-      ),
-      'Phase 6 render export must expose filled construction-plane surfaces for viewport picking.',
-    )
+      normalized.document.features.length === 2,
+      "Phase 6 workspace snapshot must include every rebuilt feature.",
+    );
     expectTrue(
-      normalized.document.render.records.some((record) =>
-        record.binding.topology === null
-        && record.binding.semanticClass === 'region'
-        && record.binding.target.kind === 'region'
-        && record.geometry.kind === 'mesh',
+      normalized.document.bodies.length === 1,
+      "Phase 6 workspace snapshot must include rebuilt body snapshots.",
+    );
+
+    const planarFaceEntity = normalized.document.entities.find(
+      (entry) =>
+        entry.target.kind === "face" &&
+        entry.selectionSemantics.includes("planarFace"),
+    );
+    expectTrue(
+      planarFaceEntity,
+      "Phase 6 snapshot entities must expose planar-face selection semantics.",
+    );
+    expectTrue(
+      planarFaceEntity.selectionSemantics.includes("planarReference"),
+      "Planar face entities must also advertise planar-reference semantics.",
+    );
+
+    const constructionEntity = normalized.document.entities.find(
+      (entry) =>
+        entry.target.kind === "construction" &&
+        entry.selectionSemantics.includes("constructionPlane"),
+    );
+    expectTrue(
+      constructionEntity,
+      "Phase 6 snapshot entities must expose construction-plane semantics.",
+    );
+    expectTrue(
+      constructionEntity.selectionSemantics.includes("planarReference"),
+      "Construction entities must also advertise planar-reference semantics.",
+    );
+
+    expectTrue(
+      normalized.document.render.records.some(
+        (record) =>
+          record.binding.topology === "face" &&
+          record.binding.semanticClass === "planarFace",
       ),
-      'Phase 6 render export must expose filled sketch-region surfaces for viewport profile picking.',
-    )
+      "Phase 6 render export must include planar-face mesh bindings.",
+    );
+    expectTrue(
+      normalized.document.render.records.some(
+        (record) =>
+          record.binding.topology === "edge" &&
+          record.binding.semanticClass === "featureEdge",
+      ),
+      "Phase 6 render export must include edge polyline bindings.",
+    );
+    expectTrue(
+      normalized.document.render.records.some(
+        (record) =>
+          record.binding.topology === "vertex" &&
+          record.binding.semanticClass === "featureVertex",
+      ),
+      "Phase 6 render export must include vertex marker bindings.",
+    );
+    expectTrue(
+      normalized.document.render.records.some(
+        (record) =>
+          record.binding.topology === null &&
+          record.binding.semanticClass === "construction",
+      ),
+      "Phase 6 render export must include construction render bindings.",
+    );
+    expectTrue(
+      normalized.document.render.records.some(
+        (record) =>
+          record.binding.topology === null &&
+          record.binding.semanticClass === "construction" &&
+          record.geometry.kind === "mesh",
+      ),
+      "Phase 6 render export must expose filled construction-plane surfaces for viewport picking.",
+    );
+    expectTrue(
+      normalized.document.render.records.some(
+        (record) =>
+          record.binding.topology === null &&
+          record.binding.semanticClass === "region" &&
+          record.binding.target.kind === "region" &&
+          record.geometry.kind === "mesh",
+      ),
+      "Phase 6 render export must expose filled sketch-region surfaces for viewport profile picking.",
+    );
     const yzConstruction = normalized.document.constructions.find(
-      (construction) => construction.constructionId === 'construction_plane-yz',
-    )
-    expectTrue(yzConstruction, 'Phase 6 snapshot must include the standard YZ construction plane.')
+      (construction) => construction.constructionId === "construction_plane-yz",
+    );
     expectTrue(
-      yzConstruction.plane.key === 'yz' && yzConstruction.plane.frame.normal[0] === 1,
-      'Construction snapshots must carry explicit plane definitions for non-XY sketch entry.',
-    )
+      yzConstruction,
+      "Phase 6 snapshot must include the standard YZ construction plane.",
+    );
     expectTrue(
-      normalized.document.render.records.some((record) =>
-        record.binding.topology === null && record.binding.semanticClass === 'sketchCurve',
+      yzConstruction.plane.key === "yz" &&
+        yzConstruction.plane.frame.normal[0] === 1,
+      "Construction snapshots must carry explicit plane definitions for non-XY sketch entry.",
+    );
+    expectTrue(
+      normalized.document.render.records.some(
+        (record) =>
+          record.binding.topology === null &&
+          record.binding.semanticClass === "sketchCurve",
       ),
-      'Phase 6 render export must include sketch-curve render bindings.',
-    )
+      "Phase 6 render export must include sketch-curve render bindings.",
+    );
     expectTrue(
-      normalized.document.render.records.some((record) =>
-        record.binding.topology === null && record.binding.semanticClass === 'sketchPoint',
+      normalized.document.render.records.some(
+        (record) =>
+          record.binding.topology === null &&
+          record.binding.semanticClass === "sketchPoint",
       ),
-      'Phase 6 render export must include sketch-point render bindings.',
-    )
+      "Phase 6 render export must include sketch-point render bindings.",
+    );
   }
 
   async function testSketchOwnedProfilesMarkConsumedSketchOwnership() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase6_consumed_region' as SketchId, plane)
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase6_consumed_region" as SketchId,
+      plane,
+    );
     const rebuilt = rebuildOccAuthoringState(
       createOccAuthoringState(oc, {
         sketches: [sketch],
         modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
       }),
-      [{
-        featureId: 'feature_phase6_region_consumer' as FeatureId,
-        suppressed: false,
-        definition: {
-          kind: 'extrude',
-          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-          parameters: {
-            profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-            startExtent: { kind: 'profilePlane' },
-            extent: {
-              mode: 'oneSide',
-              end: { kind: 'blind', direction: 'positive', distance: 5 },
+      [
+        {
+          featureId: "feature_phase6_region_consumer" as FeatureId,
+          suppressed: false,
+          definition: {
+            kind: "extrude",
+            featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              profiles: [
+                {
+                  kind: "region",
+                  sketchId: sketch.sketchId,
+                  regionId: region.regionId,
+                },
+              ],
+              startExtent: { kind: "profilePlane" },
+              extent: {
+                mode: "oneSide",
+                end: { kind: "blind", direction: "positive", distance: 5 },
+              },
+              operation: "newBody",
+              booleanScope: { kind: "standalone" },
             },
-            operation: 'newBody',
-            booleanScope: { kind: 'standalone' },
           },
         },
-      }],
-    )
-    const snapshot = buildOccWorkspaceSnapshot(rebuilt)
-    const sketchKey = `sketch:${sketch.sketchId}`
+      ],
+    );
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt);
+    const sketchKey = `sketch:${sketch.sketchId}`;
     const sketchEntity = snapshot.presentation.entities.find(
-      (entity) => entity.target.kind === 'sketch' && entity.target.sketchId === sketch.sketchId,
-    )
-    const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot)
+      (entity) =>
+        entity.target.kind === "sketch" &&
+        entity.target.sketchId === sketch.sketchId,
+    );
+    const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot);
 
-    expectTrue(sketchEntity, 'Region-consumer coverage must expose the committed sketch entity row.')
     expectTrue(
-      sketchEntity.consumedByFeatureIds.includes('feature_phase6_region_consumer' as FeatureId),
-      'Sketch-owned region profiles should mark the owning sketch as consumed.',
-    )
+      sketchEntity,
+      "Region-consumer coverage must expose the committed sketch entity row.",
+    );
+    expectTrue(
+      sketchEntity.consumedByFeatureIds.includes(
+        "feature_phase6_region_consumer" as FeatureId,
+      ),
+      "Sketch-owned region profiles should mark the owning sketch as consumed.",
+    );
     expectTrue(
       autoHiddenSketchTargetKeys[sketchKey] === true,
-      'Derived auto-hide should treat sketch-owned consumed profiles as consumed sketch rows.',
-    )
+      "Derived auto-hide should treat sketch-owned consumed profiles as consumed sketch rows.",
+    );
   }
 
   async function testPlanarFaceProfilesDoNotInventConsumedSketchOwnership() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch } = createRectangleSketch('sketch_phase6_face_profile' as SketchId, plane)
-    const body = await createBoxBody({ bodyId: 'body_phase6_face_profile' as BodyId })
-    const faceId = body.topology.faceIds[0]
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch } = createRectangleSketch(
+      "sketch_phase6_face_profile" as SketchId,
+      plane,
+    );
+    const body = await createBoxBody({
+      bodyId: "body_phase6_face_profile" as BodyId,
+    });
+    const faceId = body.topology.faceIds[0];
 
-    expectTrue(faceId, 'Planar-face profile coverage requires at least one body face.')
+    expectTrue(
+      faceId,
+      "Planar-face profile coverage requires at least one body face.",
+    );
 
     const rebuilt = rebuildOccAuthoringState(
       createOccAuthoringState(oc, {
@@ -584,98 +706,142 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
         bodies: [body],
         modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
       }),
-      [{
-        featureId: 'feature_phase6_face_consumer' as FeatureId,
-        suppressed: false,
-        definition: {
-          kind: 'extrude',
-          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-          parameters: {
-            profiles: [{ kind: 'face', bodyId: body.bodyId, faceId }],
-            startExtent: { kind: 'profilePlane' },
-            extent: {
-              mode: 'oneSide',
-              end: { kind: 'blind', direction: 'positive', distance: 4 },
+      [
+        {
+          featureId: "feature_phase6_face_consumer" as FeatureId,
+          suppressed: false,
+          definition: {
+            kind: "extrude",
+            featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              profiles: [{ kind: "face", bodyId: body.bodyId, faceId }],
+              startExtent: { kind: "profilePlane" },
+              extent: {
+                mode: "oneSide",
+                end: { kind: "blind", direction: "positive", distance: 4 },
+              },
+              operation: "newBody",
+              booleanScope: { kind: "standalone" },
             },
-            operation: 'newBody',
-            booleanScope: { kind: 'standalone' },
           },
         },
-      }],
-    )
-    const snapshot = buildOccWorkspaceSnapshot(rebuilt)
+      ],
+    );
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt);
     const sketchEntity = snapshot.presentation.entities.find(
-      (entity) => entity.target.kind === 'sketch' && entity.target.sketchId === sketch.sketchId,
-    )
-    const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot)
+      (entity) =>
+        entity.target.kind === "sketch" &&
+        entity.target.sketchId === sketch.sketchId,
+    );
+    const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot);
 
-    expectTrue(sketchEntity, 'Planar-face profile coverage must keep the unrelated sketch entity available.')
+    expectTrue(
+      sketchEntity,
+      "Planar-face profile coverage must keep the unrelated sketch entity available.",
+    );
     expectTrue(
       sketchEntity.consumedByFeatureIds.length === 0,
-      'Planar-face-only profiles should not mark unrelated committed sketches as consumed.',
-    )
+      "Planar-face-only profiles should not mark unrelated committed sketches as consumed.",
+    );
     expectTrue(
       autoHiddenSketchTargetKeys[`sketch:${sketch.sketchId}`] !== true,
-      'Planar-face-only profiles should not derive auto-hidden sketch rows.',
-    )
+      "Planar-face-only profiles should not derive auto-hidden sketch rows.",
+    );
   }
 
   async function testShellSnapshotEntitiesExposeContributorAncestry() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase6_shell_contributors' as SketchId, plane, {
-      width: 10,
-      height: 8,
-    })
-    const extrudeFeatureId = 'feature_phase6_shell_extrude' as FeatureId
-    const shellFeatureId = 'feature_phase6_shell' as FeatureId
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase6_shell_contributors" as SketchId,
+      plane,
+      {
+        width: 10,
+        height: 8,
+      },
+    );
+    const extrudeFeatureId = "feature_phase6_shell_extrude" as FeatureId;
+    const shellFeatureId = "feature_phase6_shell" as FeatureId;
     const extrudeDefinition: FeatureDefinition = {
-      kind: 'extrude',
+      kind: "extrude",
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters: {
-        profiles: [{ kind: 'region', sketchId: sketch.sketchId, regionId: region.regionId }],
-        startExtent: { kind: 'profilePlane' },
+        profiles: [
+          {
+            kind: "region",
+            sketchId: sketch.sketchId,
+            regionId: region.regionId,
+          },
+        ],
+        startExtent: { kind: "profilePlane" },
         extent: {
-          mode: 'oneSide',
-          end: { kind: 'blind', direction: 'positive', distance: 6 },
+          mode: "oneSide",
+          end: { kind: "blind", direction: "positive", distance: 6 },
         },
-        operation: 'newBody',
-        booleanScope: { kind: 'standalone' },
+        operation: "newBody",
+        booleanScope: { kind: "standalone" },
       },
-    }
+    };
     const initialState = createOccAuthoringState(oc, {
       sketches: [sketch],
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
-    })
-    const extrudeState = rebuildOccAuthoringState(initialState, [{ featureId: extrudeFeatureId, suppressed: false, definition: extrudeDefinition }])
-    const extrudeBody = extrudeState.bodies[0]
+    });
+    const extrudeState = rebuildOccAuthoringState(initialState, [
+      {
+        featureId: extrudeFeatureId,
+        suppressed: false,
+        definition: extrudeDefinition,
+      },
+    ]);
+    const extrudeBody = extrudeState.bodies[0];
 
-    expectTrue(extrudeBody, 'Shell contributor coverage requires the extrude body to exist.')
+    expectTrue(
+      extrudeBody,
+      "Shell contributor coverage requires the extrude body to exist.",
+    );
 
-    const removableFaceId = findPlanarFaceByAxis(oc, extrudeBody, 'z', 6)
+    const removableFaceId = findPlanarFaceByAxis(oc, extrudeBody, "z", 6);
     const shellDefinition: FeatureDefinition = {
-      kind: 'shell',
+      kind: "shell",
       featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
       parameters: {
-        bodyTarget: { kind: 'body', bodyId: extrudeBody.bodyId },
-        faceTargets: [{ kind: 'face', bodyId: extrudeBody.bodyId, faceId: removableFaceId }],
+        bodyTarget: { kind: "body", bodyId: extrudeBody.bodyId },
+        faceTargets: [
+          { kind: "face", bodyId: extrudeBody.bodyId, faceId: removableFaceId },
+        ],
         thickness: 1,
-        operation: 'newBody',
-        booleanScope: { kind: 'standalone' },
+        operation: "newBody",
+        booleanScope: { kind: "standalone" },
       },
-    }
+    };
     const authoredFeatures = [
-      { featureId: extrudeFeatureId, suppressed: false, definition: extrudeDefinition },
-      { featureId: shellFeatureId, suppressed: false, definition: shellDefinition },
-    ] as const
-    const shelledState = rebuildOccAuthoringState(initialState, authoredFeatures)
-    const shelledBody = shelledState.bodies.find((body) => body.ownerFeatureId === shellFeatureId)
+      {
+        featureId: extrudeFeatureId,
+        suppressed: false,
+        definition: extrudeDefinition,
+      },
+      {
+        featureId: shellFeatureId,
+        suppressed: false,
+        definition: shellDefinition,
+      },
+    ] as const;
+    const shelledState = rebuildOccAuthoringState(
+      initialState,
+      authoredFeatures,
+    );
+    const shelledBody = shelledState.bodies.find(
+      (body) => body.ownerFeatureId === shellFeatureId,
+    );
 
-    expectTrue(shelledBody, 'Shelled contributor coverage requires the replacement body to exist.')
+    expectTrue(
+      shelledBody,
+      "Shelled contributor coverage requires the replacement body to exist.",
+    );
 
-    const preservedBackFaceId = findPlanarFaceByAxis(oc, shelledBody, 'y', 8)
-    const innerBackFaceId = findPlanarFaceByAxis(oc, shelledBody, 'y', 7)
-    const snapshot = buildOccWorkspaceSnapshot(shelledState)
+    const preservedBackFaceId = findPlanarFaceByAxis(oc, shelledBody, "y", 8);
+    const innerBackFaceId = findPlanarFaceByAxis(oc, shelledBody, "y", 7);
+    const snapshot = buildOccWorkspaceSnapshot(shelledState);
     const reloadedSnapshot = buildOccWorkspaceSnapshot(
       rebuildOccAuthoringState(
         createOccAuthoringState(oc, {
@@ -684,160 +850,232 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
         }),
         authoredFeatures,
       ),
-    )
-    const findFaceEntity = (currentSnapshot: typeof snapshot, faceId: string) => currentSnapshot.presentation.entities.find((entity) =>
-      entity.target.kind === 'face' && entity.target.bodyId === shelledBody.bodyId && entity.target.faceId === faceId,
-    )
-    const preservedBackFace = findFaceEntity(snapshot, preservedBackFaceId)
-    const innerBackFace = findFaceEntity(snapshot, innerBackFaceId)
-    const reloadedPreservedBackFace = findFaceEntity(reloadedSnapshot, preservedBackFaceId)
-    const reloadedInnerBackFace = findFaceEntity(reloadedSnapshot, innerBackFaceId)
+    );
+    const findFaceEntity = (currentSnapshot: typeof snapshot, faceId: string) =>
+      currentSnapshot.presentation.entities.find(
+        (entity) =>
+          entity.target.kind === "face" &&
+          entity.target.bodyId === shelledBody.bodyId &&
+          entity.target.faceId === faceId,
+      );
+    const preservedBackFace = findFaceEntity(snapshot, preservedBackFaceId);
+    const innerBackFace = findFaceEntity(snapshot, innerBackFaceId);
+    const reloadedPreservedBackFace = findFaceEntity(
+      reloadedSnapshot,
+      preservedBackFaceId,
+    );
+    const reloadedInnerBackFace = findFaceEntity(
+      reloadedSnapshot,
+      innerBackFaceId,
+    );
 
-    expectTrue(preservedBackFace, 'Shelled snapshots must expose the preserved back face entity.')
-    expectTrue(innerBackFace, 'Shelled snapshots must expose the inner shell face entity.')
     expectTrue(
-      preservedBackFace.contributingFeatureIds.join('|') === extrudeFeatureId,
-      'Preserved back faces should keep only the original extrude contributor ancestry.',
-    )
+      preservedBackFace,
+      "Shelled snapshots must expose the preserved back face entity.",
+    );
     expectTrue(
-      innerBackFace.contributingFeatureIds.join('|') === `${extrudeFeatureId}|${shellFeatureId}`,
-      'Inner shell faces should expose authored-order extrude and shell contributor ancestry.',
-    )
+      innerBackFace,
+      "Shelled snapshots must expose the inner shell face entity.",
+    );
     expectTrue(
-      reloadedPreservedBackFace?.contributingFeatureIds.join('|') === preservedBackFace.contributingFeatureIds.join('|'),
-      'Reloaded snapshots should preserve contributor ancestry for preserved shell topology.',
-    )
+      preservedBackFace.contributingFeatureIds.join("|") === extrudeFeatureId,
+      "Preserved back faces should keep only the original extrude contributor ancestry.",
+    );
     expectTrue(
-      reloadedInnerBackFace?.contributingFeatureIds.join('|') === innerBackFace.contributingFeatureIds.join('|'),
-      'Reloaded snapshots should preserve contributor ancestry for inner shell topology.',
-    )
+      innerBackFace.contributingFeatureIds.join("|") ===
+        `${extrudeFeatureId}|${shellFeatureId}`,
+      "Inner shell faces should expose authored-order extrude and shell contributor ancestry.",
+    );
+    expectTrue(
+      reloadedPreservedBackFace?.contributingFeatureIds.join("|") ===
+        preservedBackFace.contributingFeatureIds.join("|"),
+      "Reloaded snapshots should preserve contributor ancestry for preserved shell topology.",
+    );
+    expectTrue(
+      reloadedInnerBackFace?.contributingFeatureIds.join("|") ===
+        innerBackFace.contributingFeatureIds.join("|"),
+      "Reloaded snapshots should preserve contributor ancestry for inner shell topology.",
+    );
   }
 
   async function testConstructionSketchGeometryIsOmittedFromDocumentRenderExport() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const sketchId = 'sketch_phase6_construction_render' as SketchId
-    const { sketch } = createRectangleSketch(sketchId, plane)
-    const constructionEntityId = sketch.sketch.definition.entities[0]!.entityId
-    const constructionPointId = sketch.sketch.definition.points[0]!.pointId
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const sketchId = "sketch_phase6_construction_render" as SketchId;
+    const { sketch } = createRectangleSketch(sketchId, plane);
+    const constructionEntityId = sketch.sketch.definition.entities[0]!.entityId;
+    const constructionPointId = sketch.sketch.definition.points[0]!.pointId;
     const definition: SketchDefinition = {
       ...sketch.sketch.definition,
       points: sketch.sketch.definition.points.map((point) =>
-        point.pointId === constructionPointId ? { ...point, isConstruction: true } : point,
+        point.pointId === constructionPointId
+          ? { ...point, isConstruction: true }
+          : point,
       ),
       entities: sketch.sketch.definition.entities.map((entity) =>
-        entity.entityId === constructionEntityId ? { ...entity, isConstruction: true } : entity,
+        entity.entityId === constructionEntityId
+          ? { ...entity, isConstruction: true }
+          : entity,
       ),
-    }
+    };
     const constructionSketch: SketchSnapshotRecord = {
       ...sketch,
       sketch: {
         ...sketch.sketch,
         definition,
       },
-    }
+    };
     const initialState = createOccAuthoringState(oc, {
       sketches: [constructionSketch],
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
-    })
-    const originalWarn = console.warn
-    console.warn = () => {}
-    let snapshot: ReturnType<typeof buildOccWorkspaceSnapshot>
+    });
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    let snapshot: ReturnType<typeof buildOccWorkspaceSnapshot>;
     try {
-      snapshot = buildOccWorkspaceSnapshot(initialState)
+      snapshot = buildOccWorkspaceSnapshot(initialState);
     } finally {
-      console.warn = originalWarn
+      console.warn = originalWarn;
     }
 
     expectTrue(
-      !snapshot.document.render.records.some((record) =>
-        record.binding.target.kind === 'sketchEntity'
-        && record.binding.target.entityId === constructionEntityId,
+      !snapshot.document.render.records.some(
+        (record) =>
+          record.binding.target.kind === "sketchEntity" &&
+          record.binding.target.entityId === constructionEntityId,
       ),
-      'Document render export should omit construction sketch curves outside active sketch editing.',
-    )
+      "Document render export should omit construction sketch curves outside active sketch editing.",
+    );
     expectTrue(
-      !snapshot.document.render.records.some((record) =>
-        record.binding.target.kind === 'sketchPoint'
-        && record.binding.target.pointId === constructionPointId,
+      !snapshot.document.render.records.some(
+        (record) =>
+          record.binding.target.kind === "sketchPoint" &&
+          record.binding.target.pointId === constructionPointId,
       ),
-      'Document render export should omit construction sketch points outside active sketch editing.',
-    )
+      "Document render export should omit construction sketch points outside active sketch editing.",
+    );
     expectTrue(
-      snapshot.document.render.records.some((record) =>
-        record.binding.target.kind === 'sketchEntity'
-        && record.binding.target.entityId === sketch.sketch.definition.entities[1]!.entityId,
+      snapshot.document.render.records.some(
+        (record) =>
+          record.binding.target.kind === "sketchEntity" &&
+          record.binding.target.entityId ===
+            sketch.sketch.definition.entities[1]!.entityId,
       ),
-      'Normal sketch curves should remain visible in the document render export.',
-    )
+      "Normal sketch curves should remain visible in the document render export.",
+    );
   }
 
   async function testNestedSketchRegionsExportSeparateMeshes() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const sketchId = 'sketch_phase6_nested_regions' as SketchId
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const sketchId = "sketch_phase6_nested_regions" as SketchId;
     const points = [
       { id: pointId(`${sketchId}_bottom_left`), position: [0, 0] as const },
       { id: pointId(`${sketchId}_bottom_right`), position: [6, 0] as const },
       { id: pointId(`${sketchId}_top_right`), position: [6, 6] as const },
       { id: pointId(`${sketchId}_top_left`), position: [0, 6] as const },
       { id: pointId(`${sketchId}_circle_center`), position: [3, 3] as const },
-    ]
-    const entities: SketchDefinition['entities'] = [
+    ];
+    const entities: SketchDefinition["entities"] = [
       {
-        kind: 'lineSegment',
+        kind: "lineSegment",
         entityId: entityId(`${sketchId}_bottom`),
-        label: 'bottom',
-        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_bottom`) },
+        label: "bottom",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId(`${sketchId}_bottom`),
+        },
         isConstruction: false,
         startPointId: points[0]!.id,
         endPointId: points[1]!.id,
       },
       {
-        kind: 'lineSegment',
+        kind: "lineSegment",
         entityId: entityId(`${sketchId}_right`),
-        label: 'right',
-        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_right`) },
+        label: "right",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId(`${sketchId}_right`),
+        },
         isConstruction: false,
         startPointId: points[1]!.id,
         endPointId: points[2]!.id,
       },
       {
-        kind: 'lineSegment',
+        kind: "lineSegment",
         entityId: entityId(`${sketchId}_top`),
-        label: 'top',
-        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_top`) },
+        label: "top",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId(`${sketchId}_top`),
+        },
         isConstruction: false,
         startPointId: points[2]!.id,
         endPointId: points[3]!.id,
       },
       {
-        kind: 'lineSegment',
+        kind: "lineSegment",
         entityId: entityId(`${sketchId}_left`),
-        label: 'left',
-        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_left`) },
+        label: "left",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId(`${sketchId}_left`),
+        },
         isConstruction: false,
         startPointId: points[3]!.id,
         endPointId: points[0]!.id,
       },
       {
-        kind: 'circle',
+        kind: "circle",
         entityId: entityId(`${sketchId}_circle`),
-        label: 'circle',
-        target: { kind: 'sketchEntity', sketchId, entityId: entityId(`${sketchId}_circle`) },
+        label: "circle",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId(`${sketchId}_circle`),
+        },
         isConstruction: false,
         centerPointId: points[4]!.id,
         radius: 1,
       },
-    ]
-    const definition = createSketchDefinition(sketchId, points, entities)
-    const solvedEntities: SketchRecord['solvedSnapshot']['solvedEntities'] = [
-      { kind: 'lineSegment', entityId: entities[0]!.entityId, startPosition: [0, 0], endPosition: [6, 0] },
-      { kind: 'lineSegment', entityId: entities[1]!.entityId, startPosition: [6, 0], endPosition: [6, 6] },
-      { kind: 'lineSegment', entityId: entities[2]!.entityId, startPosition: [6, 6], endPosition: [0, 6] },
-      { kind: 'lineSegment', entityId: entities[3]!.entityId, startPosition: [0, 6], endPosition: [0, 0] },
-      { kind: 'circle', entityId: entities[4]!.entityId, centerPosition: [3, 3], solvedRadius: 1 },
-    ]
+    ];
+    const definition = createSketchDefinition(sketchId, points, entities);
+    const solvedEntities: SketchRecord["solvedSnapshot"]["solvedEntities"] = [
+      {
+        kind: "lineSegment",
+        entityId: entities[0]!.entityId,
+        startPosition: [0, 0],
+        endPosition: [6, 0],
+      },
+      {
+        kind: "lineSegment",
+        entityId: entities[1]!.entityId,
+        startPosition: [6, 0],
+        endPosition: [6, 6],
+      },
+      {
+        kind: "lineSegment",
+        entityId: entities[2]!.entityId,
+        startPosition: [6, 6],
+        endPosition: [0, 6],
+      },
+      {
+        kind: "lineSegment",
+        entityId: entities[3]!.entityId,
+        startPosition: [0, 6],
+        endPosition: [0, 0],
+      },
+      {
+        kind: "circle",
+        entityId: entities[4]!.entityId,
+        centerPosition: [3, 3],
+        solvedRadius: 1,
+      },
+    ];
     const derived = deriveSketchRegionsCore({
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
@@ -845,120 +1083,159 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       definition,
       solvedSnapshot: {
         schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
-        status: { solveState: 'solved', constraintState: 'wellConstrained' },
+        status: { solveState: "solved", constraintState: "wellConstrained" },
         solvedEntities,
         solvedPoints: [],
         constraintStatuses: [],
         dimensionStatuses: [],
         diagnostics: [],
       },
-    })
+    });
 
     const state = createOccAuthoringState(oc, {
-      sketches: [createSketchRecord(sketchId, plane, definition, solvedEntities, derived.regions)],
+      sketches: [
+        createSketchRecord(
+          sketchId,
+          plane,
+          definition,
+          solvedEntities,
+          derived.regions,
+        ),
+      ],
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
-    })
-    const snapshot = buildOccWorkspaceSnapshot(state)
-    const regionMeshes = snapshot.document.render.records.filter((record) =>
-      record.binding.semanticClass === 'region'
-      && record.binding.target.kind === 'region'
-      && record.geometry.kind === 'mesh',
-    )
+    });
+    const snapshot = buildOccWorkspaceSnapshot(state);
+    const regionMeshes = snapshot.document.render.records.filter(
+      (record) =>
+        record.binding.semanticClass === "region" &&
+        record.binding.target.kind === "region" &&
+        record.geometry.kind === "mesh",
+    );
 
-    expectTrue(derived.regions.length === 1, 'Nested square/circle sketch should derive one even-parity bounded profile cell.')
-    expectTrue(regionMeshes.length === 1, 'Render export must include one pickable mesh per bounded sketch region.')
+    expectTrue(
+      derived.regions.length === 1,
+      "Nested square/circle sketch should derive one even-parity bounded profile cell.",
+    );
+    expectTrue(
+      regionMeshes.length === 1,
+      "Render export must include one pickable mesh per bounded sketch region.",
+    );
     expectTrue(
       derived.regions.every((region) =>
-        regionMeshes.some((record) =>
-          record.binding.target.kind === 'region'
-          && record.binding.target.regionId === region.regionId,
+        regionMeshes.some(
+          (record) =>
+            record.binding.target.kind === "region" &&
+            record.binding.target.regionId === region.regionId,
         ),
       ),
-      'Every derived bounded region should have a matching render mesh.',
-    )
+      "Every derived bounded region should have a matching render mesh.",
+    );
   }
 
   async function testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology() {
-    const oc = await getDefaultOpenCascadeInstance()
+    const oc = await getDefaultOpenCascadeInstance();
     const baseBody = await createBoxBody({
-      bodyId: 'body_phase6_join_refine_seed' as BodyId,
+      bodyId: "body_phase6_join_refine_seed" as BodyId,
       width: 4,
       depth: 3,
       height: 5,
-    })
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase6_join_refine' as SketchId, plane)
+    });
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase6_join_refine" as SketchId,
+      plane,
+    );
     const initialState = createOccAuthoringState(oc, {
       bodies: [baseBody],
       sketches: [sketch],
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
-    })
+    });
     const rebuilt = rebuildOccAuthoringState(initialState, [
       {
-        featureId: 'feature_phase6_join_refine' as FeatureId,
+        featureId: "feature_phase6_join_refine" as FeatureId,
         suppressed: false,
         definition: {
-          kind: 'extrude',
+          kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            profiles: [{
-              kind: 'region',
-              sketchId: sketch.sketchId,
-              regionId: region.regionId,
-            }],
-            startExtent: { kind: 'profilePlane' },
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
             extent: {
-              mode: 'oneSide',
-              end: { kind: 'blind', direction: 'positive', distance: 8 },
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 8 },
             },
-            operation: 'join',
-            booleanScope: { kind: 'targetBody', bodyId: baseBody.bodyId },
+            operation: "join",
+            booleanScope: { kind: "targetBody", bodyId: baseBody.bodyId },
           },
         },
       },
-    ])
-    const snapshot = buildOccWorkspaceSnapshot(rebuilt)
-    const bodyRecords = snapshot.document.render.records.filter((record) =>
-      record.ownerBodyId === baseBody.bodyId,
-    )
-    const faceRecords = bodyRecords.filter((record) =>
-      record.binding.topology === 'face' && record.binding.semanticClass === 'planarFace',
-    )
-    const edgeRecords = bodyRecords.filter((record) =>
-      record.binding.topology === 'edge' && record.binding.semanticClass === 'featureEdge',
-    )
-    const vertexRecords = bodyRecords.filter((record) =>
-      record.binding.topology === 'vertex' && record.binding.semanticClass === 'featureVertex',
-    )
+    ]);
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt);
+    const bodyRecords = snapshot.document.render.records.filter(
+      (record) => record.ownerBodyId === baseBody.bodyId,
+    );
+    const faceRecords = bodyRecords.filter(
+      (record) =>
+        record.binding.topology === "face" &&
+        record.binding.semanticClass === "planarFace",
+    );
+    const edgeRecords = bodyRecords.filter(
+      (record) =>
+        record.binding.topology === "edge" &&
+        record.binding.semanticClass === "featureEdge",
+    );
+    const vertexRecords = bodyRecords.filter(
+      (record) =>
+        record.binding.topology === "vertex" &&
+        record.binding.semanticClass === "featureVertex",
+    );
 
-    expectTrue(faceRecords.length === 6, `Joined extrude snapshot should render six prism faces, got ${faceRecords.length}.`)
-    expectTrue(edgeRecords.length === 12, `Joined extrude snapshot should not render middle seam edges, got ${edgeRecords.length}.`)
-    expectTrue(vertexRecords.length === 8, `Joined extrude snapshot should not render middle seam vertices, got ${vertexRecords.length}.`)
+    expectTrue(
+      faceRecords.length === 6,
+      `Joined extrude snapshot should render six prism faces, got ${faceRecords.length}.`,
+    );
+    expectTrue(
+      edgeRecords.length === 12,
+      `Joined extrude snapshot should not render middle seam edges, got ${edgeRecords.length}.`,
+    );
+    expectTrue(
+      vertexRecords.length === 8,
+      `Joined extrude snapshot should not render middle seam vertices, got ${vertexRecords.length}.`,
+    );
   }
 
   async function testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const baseBody = await createBoxBody()
+    const oc = await getDefaultOpenCascadeInstance();
+    const baseBody = await createBoxBody();
     const initialState = createOccAuthoringState(oc, {
       bodies: [baseBody],
-      constructions: [createConstructionSnapshot('construction_plane-xy')],
+      constructions: [createConstructionSnapshot("construction_plane-xy")],
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
-    })
-    const targetEdgeId = baseBody.topology.edgeIds[0]
-    expectTrue(targetEdgeId, 'Expected the seeded box body to expose at least one durable edge.')
+    });
+    const targetEdgeId = baseBody.topology.edgeIds[0];
+    expectTrue(
+      targetEdgeId,
+      "Expected the seeded box body to expose at least one durable edge.",
+    );
 
     const rebuilt = rebuildOccAuthoringState(initialState, [
       {
-        featureId: 'feature_phase6_fillet' as FeatureId,
+        featureId: "feature_phase6_fillet" as FeatureId,
         suppressed: false,
         definition: {
-          kind: 'fillet',
+          kind: "fillet",
           featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
           parameters: {
             radius: 0.5,
             edgeTargets: [
               {
-                kind: 'edge',
+                kind: "edge",
                 bodyId: baseBody.bodyId,
                 edgeId: targetEdgeId,
               },
@@ -966,104 +1243,130 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
           },
         },
       },
-    ])
-    const snapshot = buildOccWorkspaceSnapshot(rebuilt)
-    const invalidatedEdge = snapshot.document.references.find((reference) =>
-      reference.target.kind === 'edge'
-      && reference.target.bodyId === baseBody.bodyId
-      && reference.target.edgeId === targetEdgeId
-      && reference.invalidation !== null,
-    )
+    ]);
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt);
+    const invalidatedEdge = snapshot.document.references.find(
+      (reference) =>
+        reference.target.kind === "edge" &&
+        reference.target.bodyId === baseBody.bodyId &&
+        reference.target.edgeId === targetEdgeId &&
+        reference.invalidation !== null,
+    );
 
-    expectTrue(invalidatedEdge, 'Phase 6 snapshot references must preserve invalidated durable topology targets.')
     expectTrue(
-      !snapshot.document.diagnostics.some((diagnostic) =>
-        diagnostic.code === 'occ-invalid-reference'
-        && diagnostic.detail?.kind === 'invalidReference',
+      invalidatedEdge,
+      "Phase 6 snapshot references must preserve invalidated durable topology targets.",
+    );
+    expectTrue(
+      !snapshot.document.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "occ-invalid-reference" &&
+          diagnostic.detail?.kind === "invalidReference",
       ),
-      'Phase 6 snapshot diagnostics must not surface historical invalidated references after a successful rebuild.',
-    )
+      "Phase 6 snapshot diagnostics must not surface historical invalidated references after a successful rebuild.",
+    );
   }
 
   async function testOccSnapshotSurfacesSketchNavigationAndHistory() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch } = createRectangleSketch('sketch_phase6_history' as SketchId, plane)
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch } = createRectangleSketch(
+      "sketch_phase6_history" as SketchId,
+      plane,
+    );
     const state = createOccAuthoringState(oc, {
       sketches: [sketch],
-    })
-    const snapshot = buildOccWorkspaceSnapshot(state)
+    });
+    const snapshot = buildOccWorkspaceSnapshot(state);
 
     expectTrue(
-      snapshot.presentation.objects.some((item) =>
-        item.kind === 'sketch'
-        && item.target.kind === 'sketch'
-        && item.target.sketchId === sketch.sketchId,
+      snapshot.presentation.objects.some(
+        (item) =>
+          item.kind === "sketch" &&
+          item.target.kind === "sketch" &&
+          item.target.sketchId === sketch.sketchId,
       ),
-      'OCC snapshot object navigation must include committed sketch rows.',
-    )
+      "OCC snapshot object navigation must include committed sketch rows.",
+    );
     expectTrue(
-      snapshot.presentation.documentHistory.some((item) =>
-        item.kind === 'sketch'
-        && item.target.kind === 'sketch'
-        && item.target.sketchId === sketch.sketchId,
+      snapshot.presentation.documentHistory.some(
+        (item) =>
+          item.kind === "sketch" &&
+          item.target.kind === "sketch" &&
+          item.target.sketchId === sketch.sketchId,
       ),
-      'OCC snapshot document history must include committed sketch items.',
-    )
+      "OCC snapshot document history must include committed sketch items.",
+    );
   }
 
   async function testRegionRenderFailuresWarnAndSkipOnlyBadRegion() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const { sketch, region } = createRectangleSketch('sketch_phase6_bad_region' as SketchId, plane)
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_phase6_bad_region" as SketchId,
+      plane,
+    );
     sketch.sketch.solvedSnapshot = {
       ...sketch.sketch.solvedSnapshot,
       solvedEntities: [],
-    }
+    };
     const state = createOccAuthoringState(oc, {
       sketches: [sketch],
-    })
-    const warnings: string[] = []
-    const originalWarn = console.warn
+    });
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
     console.warn = (...args: unknown[]) => {
-      warnings.push(args.map((arg) => String(arg)).join(' '))
-    }
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
     try {
-      const snapshot = buildOccWorkspaceSnapshot(state)
+      const snapshot = buildOccWorkspaceSnapshot(state);
       expectTrue(
-        !snapshot.document.render.records.some((record) =>
-          record.binding.semanticClass === 'region' && record.binding.target.kind === 'region' && record.binding.target.regionId === region.regionId,
+        !snapshot.document.render.records.some(
+          (record) =>
+            record.binding.semanticClass === "region" &&
+            record.binding.target.kind === "region" &&
+            record.binding.target.regionId === region.regionId,
         ),
-        'Bad region profiles should be skipped from render export.',
-      )
+        "Bad region profiles should be skipped from render export.",
+      );
     } finally {
-      console.warn = originalWarn
+      console.warn = originalWarn;
     }
 
     expectTrue(
-      warnings.some((warning) => warning.includes(String(region.regionId)) && warning.includes('failed to build profile face')),
-      'Skipped region profile render failures should be surfaced as console warnings.',
-    )
+      warnings.some(
+        (warning) =>
+          warning.includes(String(region.regionId)) &&
+          warning.includes("failed to build profile face"),
+      ),
+      "Skipped region profile render failures should be surfaced as console warnings.",
+    );
   }
 
   async function testProjectedRegionContractGapSkipsRegionRenderWithoutWarning() {
-    const oc = await getDefaultOpenCascadeInstance()
-    const plane = createStandardPlaneDefinition('xy')
-    const sketchId = 'sketch_phase6_projected_region_gap' as SketchId
-    const referenceId = 'ref_phase6_projected_region_gap' as ReferenceId
-    const geometryId = 'projected_geometry_phase6_projected_region_gap' as ProjectedGeometryId
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const sketchId = "sketch_phase6_projected_region_gap" as SketchId;
+    const referenceId = "ref_phase6_projected_region_gap" as ReferenceId;
+    const geometryId =
+      "projected_geometry_phase6_projected_region_gap" as ProjectedGeometryId;
     const definition: SketchDefinition = {
       ...createSketchDefinition(sketchId, [], []),
       referenceIds: [referenceId],
-      references: [{
-        referenceId,
-        kind: 'constructionPlane',
-        label: 'Projected region source',
-        source: { kind: 'construction', constructionId: 'construction_plane-xy' },
-        projectionMode: 'coplanar',
-      }],
-    }
-    const regionId = 'region_phase6_projected_region_gap' as const
+      references: [
+        {
+          referenceId,
+          kind: "constructionPlane",
+          label: "Projected region source",
+          source: {
+            kind: "construction",
+            constructionId: "construction_plane-xy",
+          },
+          projectionMode: "coplanar",
+        },
+      ],
+    };
+    const regionId = "region_phase6_projected_region_gap" as const;
     const region: RegionRecord = {
       ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
       ownerRevisionId: OCC_KERNEL_INITIAL_REVISION_ID,
@@ -1072,56 +1375,73 @@ test('src/domain/modeling/occ/snapshot.spec.ts', async () => {  function pointId
       ownerBodyId: null,
       regionId,
       label: regionId,
-      target: { kind: 'region', sketchId, regionId },
-      sourceSketch: { kind: 'sketch', sketchId },
-      loops: [{
-        loopId: 'region_loop_phase6_projected_region_gap' as const,
-        role: 'outer',
-        orientation: 'counterClockwise',
-        segments: [{
-          source: { kind: 'projectedGeometry', reference: { kind: 'projectedLineSegment', referenceId, geometryId } },
-          startPointId: null,
-          endPointId: null,
-        }],
-        boundaryPointIds: [],
-        isClosed: true,
-      }],
+      target: { kind: "region", sketchId, regionId },
+      sourceSketch: { kind: "sketch", sketchId },
+      loops: [
+        {
+          loopId: "region_loop_phase6_projected_region_gap" as const,
+          role: "outer",
+          orientation: "counterClockwise",
+          segments: [
+            {
+              source: {
+                kind: "projectedGeometry",
+                reference: {
+                  kind: "projectedLineSegment",
+                  referenceId,
+                  geometryId,
+                },
+              },
+              startPointId: null,
+              endPointId: null,
+            },
+          ],
+          boundaryPointIds: [],
+          isClosed: true,
+        },
+      ],
       isClosed: true,
-    }
+    };
     const state = createOccAuthoringState(oc, {
       sketches: [createSketchRecord(sketchId, plane, definition, [], [region])],
-    })
-    const warnings: string[] = []
-    const originalWarn = console.warn
+    });
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
     console.warn = (...args: unknown[]) => {
-      warnings.push(args.map((arg) => String(arg)).join(' '))
-    }
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
     try {
-      const snapshot = buildOccWorkspaceSnapshot(state)
+      const snapshot = buildOccWorkspaceSnapshot(state);
       expectTrue(
-        !snapshot.document.render.records.some((record) =>
-          record.binding.semanticClass === 'region' && record.binding.target.kind === 'region' && record.binding.target.regionId === region.regionId,
+        !snapshot.document.render.records.some(
+          (record) =>
+            record.binding.semanticClass === "region" &&
+            record.binding.target.kind === "region" &&
+            record.binding.target.regionId === region.regionId,
         ),
-        'Projected-region contract gaps should skip unsupported region render records.',
-      )
+        "Projected-region contract gaps should skip unsupported region render records.",
+      );
     } finally {
-      console.warn = originalWarn
+      console.warn = originalWarn;
     }
 
-    expectTrue(warnings.length === 0, 'Projected-region contract gaps should not be logged as snapshot render warnings.')
+    expectTrue(
+      warnings.length === 0,
+      "Projected-region contract gaps should not be logged as snapshot render warnings.",
+    );
   }
 
-  await testWorkspaceSnapshotBuildsContractValidRenderExport()
-  await testSketchOwnedProfilesMarkConsumedSketchOwnership()
-  await testPlanarFaceProfilesDoNotInventConsumedSketchOwnership()
-  await testShellSnapshotEntitiesExposeContributorAncestry()
-  await testConstructionSketchGeometryIsOmittedFromDocumentRenderExport()
-  await testNestedSketchRegionsExportSeparateMeshes()
-  await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology()
-  await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics()
-  await testOccSnapshotSurfacesSketchNavigationAndHistory()
-  await testRegionRenderFailuresWarnAndSkipOnlyBadRegion()
-  await testProjectedRegionContractGapSkipsRegionRenderWithoutWarning()
+  await testWorkspaceSnapshotBuildsContractValidRenderExport();
+  await testSketchOwnedProfilesMarkConsumedSketchOwnership();
+  await testPlanarFaceProfilesDoNotInventConsumedSketchOwnership();
+  await testShellSnapshotEntitiesExposeContributorAncestry();
+  await testConstructionSketchGeometryIsOmittedFromDocumentRenderExport();
+  await testNestedSketchRegionsExportSeparateMeshes();
+  await testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology();
+  await testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics();
+  await testOccSnapshotSurfacesSketchNavigationAndHistory();
+  await testRegionRenderFailuresWarnAndSkipOnlyBadRegion();
+  await testProjectedRegionContractGapSkipsRegionRenderWithoutWarning();
 
-  console.log('OCC phase 6 snapshot/export tests passed.')
-})
+  console.log("OCC phase 6 snapshot/export tests passed.");
+});

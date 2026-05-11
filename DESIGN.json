@@ -156,22 +156,64 @@
       }
     },
     "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "Top-level identity moments. Rare in this shell. 20px is the largest text on screen by intent." },
-      "headline": { "displayName": "Headline", "purpose": "Section titles inside dense panels — feature inspector headings, modal titles." },
-      "title": { "displayName": "Title", "purpose": "Tool button labels, item names in trees, variable names. The dominant text register." },
-      "body": { "displayName": "Body", "purpose": "Tooltip descriptions, helper text, diagnostic messages." },
-      "label": { "displayName": "Section Label", "purpose": "Uppercase tracked sidebar headers — PARTS & OBJECTS, VARIABLES, DOCUMENT DIAGNOSTICS." },
-      "mono": { "displayName": "Mono Numeric", "purpose": "Variable expressions, evaluated values, dimension readouts, units. Anything where 1 and l must differ." }
+      "display": {
+        "displayName": "Display",
+        "purpose": "Top-level identity moments. Rare in this shell. 20px is the largest text on screen by intent."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section titles inside dense panels — feature inspector headings, modal titles."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Tool button labels, item names in trees, variable names. The dominant text register."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Tooltip descriptions, helper text, diagnostic messages."
+      },
+      "label": {
+        "displayName": "Section Label",
+        "purpose": "Uppercase tracked sidebar headers — PARTS & OBJECTS, VARIABLES, DOCUMENT DIAGNOSTICS."
+      },
+      "mono": {
+        "displayName": "Mono Numeric",
+        "purpose": "Variable expressions, evaluated values, dimension readouts, units. Anything where 1 and l must differ."
+      }
     },
     "shadows": [
-      { "name": "toolbar", "value": "0 4px 16px rgba(0, 0, 0, 0.25)", "purpose": "Lightest structural shadow. Sits under the top toolbar." },
-      { "name": "sidebar", "value": "4px 0 20px rgba(0, 0, 0, 0.2)", "purpose": "Horizontal-only shadow under the left sidebar — depth runs into the viewport, not down." },
-      { "name": "elevation-md", "value": "0 12px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.04)", "purpose": "Standard elevation for menu dropdowns and the toolbar search palette." },
-      { "name": "timeline", "value": "0 14px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.05)", "purpose": "Feature-history scrubber bar. Slightly stronger lift to communicate draggable timeline." },
-      { "name": "panel", "value": "0 20px 50px rgba(0, 0, 0, 0.38), 0 1px 0 rgba(255, 255, 255, 0.04) inset", "purpose": "Deepest shadow. Reserved for floating panels, modals, and heaviest overlays." }
+      {
+        "name": "toolbar",
+        "value": "0 4px 16px rgba(0, 0, 0, 0.25)",
+        "purpose": "Lightest structural shadow. Sits under the top toolbar."
+      },
+      {
+        "name": "sidebar",
+        "value": "4px 0 20px rgba(0, 0, 0, 0.2)",
+        "purpose": "Horizontal-only shadow under the left sidebar — depth runs into the viewport, not down."
+      },
+      {
+        "name": "elevation-md",
+        "value": "0 12px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.04)",
+        "purpose": "Standard elevation for menu dropdowns and the toolbar search palette."
+      },
+      {
+        "name": "timeline",
+        "value": "0 14px 40px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.05)",
+        "purpose": "Feature-history scrubber bar. Slightly stronger lift to communicate draggable timeline."
+      },
+      {
+        "name": "panel",
+        "value": "0 20px 50px rgba(0, 0, 0, 0.38), 0 1px 0 rgba(255, 255, 255, 0.04) inset",
+        "purpose": "Deepest shadow. Reserved for floating panels, modals, and heaviest overlays."
+      }
     ],
     "motion": [
-      { "name": "tool-state", "value": "background-color 160ms ease, border-color 160ms ease, opacity 160ms ease", "purpose": "Default tool button state transition. Color/opacity only — never animate layout." }
+      {
+        "name": "tool-state",
+        "value": "background-color 160ms ease, border-color 160ms ease, opacity 160ms ease",
+        "purpose": "Default tool button state transition. Color/opacity only — never animate layout."
+      }
     ],
     "breakpoints": []
   },
@@ -283,17 +325,61 @@
       "Soft layered shadows with a 1px inset top highlight, not glassmorphism, not flat-by-decree."
     ],
     "rules": [
-      { "name": "The Quiet Chrome Rule", "section": "colors", "body": "The shell is monochromatic. No saturated color belongs in the toolbar, sidebar, or panel chrome unless it is communicating a status the user must see. If a designer reaches for a brand color to make something feel 'more designed,' they have already failed the rule." },
-      { "name": "The Geometry-Owns-Color Rule", "section": "colors", "body": "Saturated hues live where the part lives. Spark Orange is for geometry the user has selected, Pin Amber is for sketch references the user has placed, Mantine reds and yellows are for problems the user has caused. The shell stays out of the way." },
-      { "name": "The Brand-Color-Is-Grey Rule", "section": "colors", "body": "The Mantine primaryColor is workbench and primaryShade is 4 — Workshop Steel. This is intentional. There is no purple, no electric blue, no neon. If a future feature needs a primary tint, it pulls from the graphite scale, not from a chromatic palette." },
-      { "name": "The Tracked Caps Rule", "section": "typography", "body": "Uppercase is used for sidebar section headers and for diagnostic severity tags — never for body copy, never for buttons, never for marketing-style emphasis. Tracking is 0.20em. Anything tighter reads as default uppercase and breaks the register." },
-      { "name": "The Mono-For-Numbers Rule", "section": "typography", "body": "Any field a user might compare against another field — a length, a constraint value, a coordinate, a variable result — is monospaced. The eye scans columns of 12.5 and 12.500001 and immediately sees the difference. Sans-serif numbers hide that difference." },
-      { "name": "The No-Display-Hero Rule", "section": "typography", "body": "There are no oversized hero headlines. The largest text on screen is 20px. PRODUCT.md is explicit: oversized friendly buttons are an anti-reference. Restraint at the top of the scale is the point." },
-      { "name": "The Inner Highlight Rule", "section": "elevation", "body": "Every elevated surface carries 0 1px 0 rgba(255,255,255,0.04) (or 0.05) on the top edge. It is barely visible and that is the point — it gives the surface a sculpted lip that sells the depth without adding chrome. If a new surface skips this, it will read as flat-in-a-bad-way against the rest of the shell." },
-      { "name": "The No-Glass Rule", "section": "elevation", "body": "No backdrop-filter: blur(...) in the chrome. Surfaces are opaque or use color-mix(... transparent) for tonal layering, never optical blur. PRODUCT.md says it directly: glassmorphism reads as 2014, and it is forbidden." },
-      { "name": "The Visible Tool Rule", "section": "components", "body": "Every tool the operator might need is on the toolbar at all times. There are no advanced overflow menus that hide capability. Dropdown variant families exist (e.g., pattern variants), but their parent is always present. Discoverability beats minimalism in a CAD app where missing a tool costs minutes of hunting." },
-      { "name": "The 320px-Inspector Rule", "section": "components", "body": "The inspector / sidebar width is 320px. Components inside it are designed to fit that width without horizontal scroll. If a future panel needs more, the right answer is to refactor the panel, not widen the shell." },
-      { "name": "The No-Round-On-Shell Rule", "section": "components", "body": "The toolbar Paper and the sidebar Paper are radius={0}. Rounding is for components inside the shell, not the shell itself. The window-edge feel comes from sharp shell corners + soft component corners." }
+      {
+        "name": "The Quiet Chrome Rule",
+        "section": "colors",
+        "body": "The shell is monochromatic. No saturated color belongs in the toolbar, sidebar, or panel chrome unless it is communicating a status the user must see. If a designer reaches for a brand color to make something feel 'more designed,' they have already failed the rule."
+      },
+      {
+        "name": "The Geometry-Owns-Color Rule",
+        "section": "colors",
+        "body": "Saturated hues live where the part lives. Spark Orange is for geometry the user has selected, Pin Amber is for sketch references the user has placed, Mantine reds and yellows are for problems the user has caused. The shell stays out of the way."
+      },
+      {
+        "name": "The Brand-Color-Is-Grey Rule",
+        "section": "colors",
+        "body": "The Mantine primaryColor is workbench and primaryShade is 4 — Workshop Steel. This is intentional. There is no purple, no electric blue, no neon. If a future feature needs a primary tint, it pulls from the graphite scale, not from a chromatic palette."
+      },
+      {
+        "name": "The Tracked Caps Rule",
+        "section": "typography",
+        "body": "Uppercase is used for sidebar section headers and for diagnostic severity tags — never for body copy, never for buttons, never for marketing-style emphasis. Tracking is 0.20em. Anything tighter reads as default uppercase and breaks the register."
+      },
+      {
+        "name": "The Mono-For-Numbers Rule",
+        "section": "typography",
+        "body": "Any field a user might compare against another field — a length, a constraint value, a coordinate, a variable result — is monospaced. The eye scans columns of 12.5 and 12.500001 and immediately sees the difference. Sans-serif numbers hide that difference."
+      },
+      {
+        "name": "The No-Display-Hero Rule",
+        "section": "typography",
+        "body": "There are no oversized hero headlines. The largest text on screen is 20px. PRODUCT.md is explicit: oversized friendly buttons are an anti-reference. Restraint at the top of the scale is the point."
+      },
+      {
+        "name": "The Inner Highlight Rule",
+        "section": "elevation",
+        "body": "Every elevated surface carries 0 1px 0 rgba(255,255,255,0.04) (or 0.05) on the top edge. It is barely visible and that is the point — it gives the surface a sculpted lip that sells the depth without adding chrome. If a new surface skips this, it will read as flat-in-a-bad-way against the rest of the shell."
+      },
+      {
+        "name": "The No-Glass Rule",
+        "section": "elevation",
+        "body": "No backdrop-filter: blur(...) in the chrome. Surfaces are opaque or use color-mix(... transparent) for tonal layering, never optical blur. PRODUCT.md says it directly: glassmorphism reads as 2014, and it is forbidden."
+      },
+      {
+        "name": "The Visible Tool Rule",
+        "section": "components",
+        "body": "Every tool the operator might need is on the toolbar at all times. There are no advanced overflow menus that hide capability. Dropdown variant families exist (e.g., pattern variants), but their parent is always present. Discoverability beats minimalism in a CAD app where missing a tool costs minutes of hunting."
+      },
+      {
+        "name": "The 320px-Inspector Rule",
+        "section": "components",
+        "body": "The inspector / sidebar width is 320px. Components inside it are designed to fit that width without horizontal scroll. If a future panel needs more, the right answer is to refactor the panel, not widen the shell."
+      },
+      {
+        "name": "The No-Round-On-Shell Rule",
+        "section": "components",
+        "body": "The toolbar Paper and the sidebar Paper are radius={0}. Rounding is for components inside the shell, not the shell itself. The window-edge feel comes from sharp shell corners + soft component corners."
+      }
     ],
     "dos": [
       "Do keep saturated color confined to the viewport, sketch overlays, and status states. New chrome is graphite-on-graphite or it is rejected.",

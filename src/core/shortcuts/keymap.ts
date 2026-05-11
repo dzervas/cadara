@@ -3,7 +3,7 @@ import type {
   ShortcutCommandId,
   ShortcutCommandRegistry,
   ShortcutScope,
-} from '@/core/shortcuts/commands'
+} from "@/core/shortcuts/commands";
 import {
   normalizeShortcut,
   parseShortcut,
@@ -11,40 +11,45 @@ import {
   shortcutStartsWith,
   shortcutsEqual,
   type ShortcutSequence,
-} from '@/core/shortcuts/shortcut-grammar'
+} from "@/core/shortcuts/shortcut-grammar";
 
 export interface ShortcutBinding {
-  commandId: ShortcutCommandId
-  scope: ShortcutScope
-  shortcut: ShortcutSequence
-  source: 'default' | 'profile'
+  commandId: ShortcutCommandId;
+  scope: ShortcutScope;
+  shortcut: ShortcutSequence;
+  source: "default" | "profile";
 }
 
-export type EffectiveShortcutMap = ReadonlyMap<ShortcutCommandId, readonly ShortcutSequence[]>
+export type EffectiveShortcutMap = ReadonlyMap<
+  ShortcutCommandId,
+  readonly ShortcutSequence[]
+>;
 
 export interface ShortcutProfileOverride {
-  shortcuts: readonly string[]
+  shortcuts: readonly string[];
 }
 
-export type ShortcutProfileOverrides = Partial<Record<ShortcutCommandId, ShortcutProfileOverride>>
+export type ShortcutProfileOverrides = Partial<
+  Record<ShortcutCommandId, ShortcutProfileOverride>
+>;
 
-export type ShortcutConflictKind = 'duplicate' | 'prefix'
+export type ShortcutConflictKind = "duplicate" | "prefix";
 
 export interface ShortcutConflict {
-  kind: ShortcutConflictKind
-  shortcut: string
-  commandIds: readonly ShortcutCommandId[]
-  scopes: readonly ShortcutScope[]
+  kind: ShortcutConflictKind;
+  shortcut: string;
+  commandIds: readonly ShortcutCommandId[];
+  scopes: readonly ShortcutScope[];
 }
 
 const scopePriority: Record<ShortcutScope, number> = {
   global: 0,
   part: 10,
   sketch: 10,
-  'focused-panel': 20,
-  'active-tool': 30,
+  "focused-panel": 20,
+  "active-tool": 30,
   modal: 40,
-}
+};
 
 export function createDefaultKeymap(
   registry: ShortcutCommandRegistry,
@@ -54,7 +59,7 @@ export function createDefaultKeymap(
       command.id,
       parseShortcutList(command.defaultShortcuts),
     ]),
-  )
+  );
 }
 
 export function createEffectiveKeymap(
@@ -63,105 +68,120 @@ export function createEffectiveKeymap(
 ): EffectiveShortcutMap {
   return new Map(
     [...registry.values()].map((command) => {
-      const override = overrides[command.id]
-      const shortcuts = override ? override.shortcuts : command.defaultShortcuts
+      const override = overrides[command.id];
+      const shortcuts = override
+        ? override.shortcuts
+        : command.defaultShortcuts;
 
-      return [
-        command.id,
-        parseShortcutList(shortcuts),
-      ]
+      return [command.id, parseShortcutList(shortcuts)];
     }),
-  )
+  );
 }
 
 export function getPrimaryShortcut(
   keymap: EffectiveShortcutMap,
   commandId: ShortcutCommandId,
 ) {
-  return keymap.get(commandId)?.[0] ?? null
+  return keymap.get(commandId)?.[0] ?? null;
 }
 
 export function collectShortcutBindings(
   registry: ShortcutCommandRegistry,
   keymap: EffectiveShortcutMap,
 ) {
-  const bindings: ShortcutBinding[] = []
+  const bindings: ShortcutBinding[] = [];
 
   for (const command of registry.values()) {
-    const shortcuts = keymap.get(command.id) ?? []
+    const shortcuts = keymap.get(command.id) ?? [];
     for (const shortcut of shortcuts) {
       bindings.push({
         commandId: command.id,
         scope: command.scope,
         shortcut,
-        source: command.defaultShortcuts.some((defaultShortcut) => normalizeShortcut(defaultShortcut) === serializeShortcut(shortcut))
-          ? 'default'
-          : 'profile',
-      })
+        source: command.defaultShortcuts.some(
+          (defaultShortcut) =>
+            normalizeShortcut(defaultShortcut) === serializeShortcut(shortcut),
+        )
+          ? "default"
+          : "profile",
+      });
     }
   }
 
-  return bindings
+  return bindings;
 }
 
 export function detectShortcutConflicts(
   registry: ShortcutCommandRegistry,
   keymap: EffectiveShortcutMap,
 ) {
-  const bindings = collectShortcutBindings(registry, keymap)
-  const conflicts: ShortcutConflict[] = []
+  const bindings = collectShortcutBindings(registry, keymap);
+  const conflicts: ShortcutConflict[] = [];
 
   for (let index = 0; index < bindings.length; index += 1) {
-    const left = bindings[index]!
+    const left = bindings[index]!;
 
-    for (let otherIndex = index + 1; otherIndex < bindings.length; otherIndex += 1) {
-      const right = bindings[otherIndex]!
+    for (
+      let otherIndex = index + 1;
+      otherIndex < bindings.length;
+      otherIndex += 1
+    ) {
+      const right = bindings[otherIndex]!;
 
       if (!scopesOverlap(left.scope, right.scope)) {
-        continue
+        continue;
       }
 
       if (shortcutsEqual(left.shortcut, right.shortcut)) {
         conflicts.push({
-          kind: 'duplicate',
+          kind: "duplicate",
           shortcut: serializeShortcut(left.shortcut),
           commandIds: [left.commandId, right.commandId],
           scopes: [left.scope, right.scope],
-        })
-        continue
+        });
+        continue;
       }
 
-      if (shortcutStartsWith(left.shortcut, right.shortcut) || shortcutStartsWith(right.shortcut, left.shortcut)) {
+      if (
+        shortcutStartsWith(left.shortcut, right.shortcut) ||
+        shortcutStartsWith(right.shortcut, left.shortcut)
+      ) {
         conflicts.push({
-          kind: 'prefix',
+          kind: "prefix",
           shortcut: shortcutStartsWith(left.shortcut, right.shortcut)
             ? serializeShortcut(right.shortcut)
             : serializeShortcut(left.shortcut),
           commandIds: [left.commandId, right.commandId],
           scopes: [left.scope, right.scope],
-        })
+        });
       }
     }
   }
 
-  return conflicts
+  return conflicts;
 }
 
 export function scopesOverlap(left: ShortcutScope, right: ShortcutScope) {
-  return left === right || left === 'global' || right === 'global' || left === 'modal' || right === 'modal'
+  return (
+    left === right ||
+    left === "global" ||
+    right === "global" ||
+    left === "modal" ||
+    right === "modal"
+  );
 }
 
 export function getScopePriority(scope: ShortcutScope) {
-  return scopePriority[scope]
+  return scopePriority[scope];
 }
 
 export function isCommandInActiveScopes(
   command: ShortcutCommandDefinition,
   activeScopes: readonly ShortcutScope[],
 ) {
-  return command.scope === 'global' || activeScopes.includes(command.scope)
+  return command.scope === "global" || activeScopes.includes(command.scope);
 }
 
 function parseShortcutList(shortcuts: readonly string[]) {
-  return shortcuts.map(parseShortcut)
+  return shortcuts.map(parseShortcut);
 }

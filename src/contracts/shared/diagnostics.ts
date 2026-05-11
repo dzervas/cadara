@@ -1,4 +1,10 @@
-import type { BodyId, DocumentId, FeatureId, RevisionId, SketchId } from '@/contracts/shared/ids'
+import type {
+  BodyId,
+  DocumentId,
+  FeatureId,
+  RevisionId,
+  SketchId,
+} from "@/contracts/shared/ids";
 
 /**
  * Ownership metadata attached to durable references and snapshot records.
@@ -7,13 +13,13 @@ import type { BodyId, DocumentId, FeatureId, RevisionId, SketchId } from '@/cont
  */
 export interface OwnershipRecord {
   /** Durable document that owns the enclosing record. */
-  ownerDocumentId: DocumentId
+  ownerDocumentId: DocumentId;
   /** Revision in which the ownership mapping was evaluated. */
-  ownerRevisionId: RevisionId
+  ownerRevisionId: RevisionId;
   /** Owning feature when the record is feature-authored; otherwise null. */
-  ownerFeatureId: FeatureId | null
+  ownerFeatureId: FeatureId | null;
   /** Owning sketch when the record belongs to a sketch domain object; otherwise null. */
-  ownerSketchId: SketchId | null
+  ownerSketchId: SketchId | null;
   /** Owning body when the record belongs to body topology; otherwise null. */
-  ownerBodyId: BodyId | null
+  ownerBodyId: BodyId | null;
 }

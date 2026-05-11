@@ -1,5 +1,5 @@
-import { createImportProviderRegistry } from '@/domain/import/provider-registry'
+import { createImportProviderRegistry } from "@/domain/import/provider-registry";
 
 export function createBuiltinImportProviderRegistry() {
-  return createImportProviderRegistry([])
+  return createImportProviderRegistry([]);
 }

@@ -2,66 +2,68 @@ import {
   getFeatureEditorFormField,
   patchFeatureEditSession,
   getSelectionFilterForFeatureType,
-} from '@/domain/editor/feature-editing'
+} from "@/domain/editor/feature-editing";
 import {
   getSketchPlaneEditFormField,
   getSketchPlaneEditPreviewLabel,
   getSketchPlaneEditSelectionTarget,
-} from '@/domain/editor/sketch-plane-editing'
-import {
-  getDefaultSelectionFilterForMode,
-} from '@/core/editor/schema'
-import type {
-  EditorEvent,
-  EditorTransitionResult,
-  EditorState,
-} from './types'
-import type { EditorExtensionDependencies } from './dependencies'
+} from "@/domain/editor/sketch-plane-editing";
+import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
+import type { EditorEvent, EditorTransitionResult, EditorState } from "./types";
+import type { EditorExtensionDependencies } from "./dependencies";
 import {
   createFeatureSelectionPreview,
   createImportSelectionPreview,
   createSelectionPreview,
-} from './selection-helpers'
-import { emitFeaturePreview } from './effect-emitters'
-import { getImportSessionFormField } from './form-traversal'
+} from "./selection-helpers";
+import { emitFeaturePreview } from "./effect-emitters";
+import { getImportSessionFormField } from "./form-traversal";
 
 export function handleFormFeaturePatched(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'form.featurePatched' }>,
+  event: Extract<EditorEvent, { type: "form.featurePatched" }>,
 ): EditorTransitionResult {
-  if (state.kind !== 'editingFeature') {
-    return { state, effects: [] }
+  if (state.kind !== "editingFeature") {
+    return { state, effects: [] };
   }
 
   const nextSession = {
     ...patchFeatureEditSession(state.session, event.patch),
-    status: 'idle' as const,
-  }
+    status: "idle" as const,
+  };
 
   return emitFeaturePreview({
     ...state,
     session: nextSession,
     pendingPreviewRequestId: null,
     preview: createFeatureSelectionPreview(nextSession),
-  })
+  });
 }
 
 export function handleFormReferencePickerActivated(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'form.referencePickerActivated' }>,
+  event: Extract<EditorEvent, { type: "form.referencePickerActivated" }>,
 ): EditorTransitionResult {
-  if (state.kind !== 'editingFeature' && state.kind !== 'editingSketchPlane' && state.kind !== 'importing') {
-    return { state, effects: [] }
+  if (
+    state.kind !== "editingFeature" &&
+    state.kind !== "editingSketchPlane" &&
+    state.kind !== "importing"
+  ) {
+    return { state, effects: [] };
   }
 
-  const field = state.kind === 'editingFeature'
-    ? getFeatureEditorFormField(state.session, event.fieldId)
-    : state.kind === 'editingSketchPlane'
-      ? getSketchPlaneEditFormField(state.session, event.fieldId)
-    : getImportSessionFormField(state.session, event.fieldId)
+  const field =
+    state.kind === "editingFeature"
+      ? getFeatureEditorFormField(state.session, event.fieldId)
+      : state.kind === "editingSketchPlane"
+        ? getSketchPlaneEditFormField(state.session, event.fieldId)
+        : getImportSessionFormField(state.session, event.fieldId);
 
-  if (field?.kind !== 'referencePicker' && field?.kind !== 'referenceCollection') {
-    return { state, effects: [] }
+  if (
+    field?.kind !== "referencePicker" &&
+    field?.kind !== "referenceCollection"
+  ) {
+    return { state, effects: [] };
   }
 
   return {
@@ -71,14 +73,17 @@ export function handleFormReferencePickerActivated(
       selection: [],
       hoverTarget: null,
       selectionFilter: field.picker.selectionFilter,
-      preview: createSelectionPreview({ ...state, selection: [] }, field.picker.selectionFilter),
+      preview: createSelectionPreview(
+        { ...state, selection: [] },
+        field.picker.selectionFilter,
+      ),
       command: {
         ...state.command,
-        phase: 'collecting',
+        phase: "collecting",
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleFormReferencePickerCancelled(
@@ -86,15 +91,18 @@ export function handleFormReferencePickerCancelled(
   dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (
-    (state.kind !== 'editingFeature' && state.kind !== 'editingSketchPlane' && state.kind !== 'importing')
-    || !state.activeReferencePickerFieldId
+    (state.kind !== "editingFeature" &&
+      state.kind !== "editingSketchPlane" &&
+      state.kind !== "importing") ||
+    !state.activeReferencePickerFieldId
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
-  const sketchPlaneTarget = state.kind === 'editingSketchPlane'
-    ? getSketchPlaneEditSelectionTarget(state.session)
-    : null
+  const sketchPlaneTarget =
+    state.kind === "editingSketchPlane"
+      ? getSketchPlaneEditSelectionTarget(state.session)
+      : null;
 
   return {
     state: {
@@ -103,26 +111,26 @@ export function handleFormReferencePickerCancelled(
       selection: sketchPlaneTarget ? [sketchPlaneTarget] : [],
       hoverTarget: sketchPlaneTarget,
       selectionFilter:
-        state.kind === 'editingFeature'
+        state.kind === "editingFeature"
           ? getSelectionFilterForFeatureType(state.session.featureType)
-          : state.kind === 'editingSketchPlane'
-            ? getDefaultSelectionFilterForMode('part')
-          : getDefaultSelectionFilterForMode('part'),
+          : state.kind === "editingSketchPlane"
+            ? getDefaultSelectionFilterForMode("part")
+            : getDefaultSelectionFilterForMode("part"),
       preview:
-        state.kind === 'editingFeature'
+        state.kind === "editingFeature"
           ? createFeatureSelectionPreview(state.session)
-          : state.kind === 'editingSketchPlane'
+          : state.kind === "editingSketchPlane"
             ? {
-                kind: 'selection',
+                kind: "selection",
                 label: getSketchPlaneEditPreviewLabel(state.session),
                 target: sketchPlaneTarget,
               }
-          : createImportSelectionPreview(state.session, dependencies),
+            : createImportSelectionPreview(state.session, dependencies),
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
     },
     effects: [],
-  }
+  };
 }

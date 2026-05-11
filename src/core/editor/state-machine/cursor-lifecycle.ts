@@ -1,18 +1,18 @@
-import type { EditSessionCursorContext } from './types'
+import type { EditSessionCursorContext } from "./types";
 
 export type CursorLifecycleTrigger =
-  | 'snapshotRefreshed'
-  | 'sessionOpened'
-  | 'commitCompleted'
-  | 'restoreStarted'
+  | "snapshotRefreshed"
+  | "sessionOpened"
+  | "commitCompleted"
+  | "restoreStarted";
 
 export type CursorPhaseAction =
-  | 'openSketchSession'
-  | 'hydrateFeature'
-  | 'openSketchPlaneEdit'
-  | 'restore'
-  | 'complete'
-  | null
+  | "openSketchSession"
+  | "hydrateFeature"
+  | "openSketchPlaneEdit"
+  | "restore"
+  | "complete"
+  | null;
 
 /**
  * Returns the follow-up action to run after the current phase completes.
@@ -25,40 +25,40 @@ export function advanceCursorPhase(
   trigger: CursorLifecycleTrigger,
 ): EditSessionCursorContext | null {
   switch (trigger) {
-    case 'snapshotRefreshed':
-      if (context.phase === 'rollingBack') {
+    case "snapshotRefreshed":
+      if (context.phase === "rollingBack") {
         return {
           ...context,
-          phase: 'opening',
-        }
+          phase: "opening",
+        };
       }
 
-      if (context.phase === 'restoring') {
-        return null
+      if (context.phase === "restoring") {
+        return null;
       }
 
-      return context
-    case 'sessionOpened':
-      return context.phase === 'opening'
+      return context;
+    case "sessionOpened":
+      return context.phase === "opening"
         ? {
-          ...context,
-          phase: 'active',
-        }
-        : context
-    case 'commitCompleted':
-      return context.phase === 'active'
+            ...context,
+            phase: "active",
+          }
+        : context;
+    case "commitCompleted":
+      return context.phase === "active"
         ? {
-          ...context,
-          phase: 'restorePending',
-        }
-        : context
-    case 'restoreStarted':
-      return context.phase === 'restorePending'
+            ...context,
+            phase: "restorePending",
+          }
+        : context;
+    case "restoreStarted":
+      return context.phase === "restorePending"
         ? {
-          ...context,
-          phase: 'restoring',
-        }
-        : context
+            ...context,
+            phase: "restoring",
+          }
+        : context;
   }
 }
 
@@ -66,22 +66,22 @@ export function getCursorPhaseAction(
   context: EditSessionCursorContext,
 ): CursorPhaseAction {
   switch (context.phase) {
-    case 'rollingBack':
-      if (context.sessionKind === 'sketchAuthoring') {
-        return 'openSketchSession'
+    case "rollingBack":
+      if (context.sessionKind === "sketchAuthoring") {
+        return "openSketchSession";
       }
 
-      if (context.sessionKind === 'sketchPlaneEdit') {
-        return 'openSketchPlaneEdit'
+      if (context.sessionKind === "sketchPlaneEdit") {
+        return "openSketchPlaneEdit";
       }
 
-      return 'hydrateFeature'
-    case 'restorePending':
-      return 'restore'
-    case 'restoring':
-      return 'complete'
-    case 'opening':
-    case 'active':
-      return null
+      return "hydrateFeature";
+    case "restorePending":
+      return "restore";
+    case "restoring":
+      return "complete";
+    case "opening":
+    case "active":
+      return null;
   }
 }

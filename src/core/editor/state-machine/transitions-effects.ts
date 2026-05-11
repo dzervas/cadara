@@ -1,35 +1,29 @@
-import {
-  getDefaultSelectionFilterForMode,
-} from '@/core/editor/schema'
-import {
-  getFeaturePrimarySelectionTarget,
-} from '@/domain/editor/feature-editing'
+import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
+import { getFeaturePrimarySelectionTarget } from "@/domain/editor/feature-editing";
 import {
   applyFeatureBooleanTargetPreselection,
   classifyPreviewBooleanTarget,
   featurePreviewSupportsAutomaticBooleanTargetPreselection,
-} from '@/domain/editor/feature-boolean-target-preselection'
+} from "@/domain/editor/feature-boolean-target-preselection";
 import {
   getSketchSessionPreviewLabel,
   updateSketchReferenceProjection,
-} from '@/domain/editor/sketch-session'
-import {
-  getSketchPlaneEditSelectionTarget,
-} from '@/domain/editor/sketch-plane-editing'
+} from "@/domain/editor/sketch-session";
+import { getSketchPlaneEditSelectionTarget } from "@/domain/editor/sketch-plane-editing";
 import {
   applySketchSpecialModeEffectResult,
   getSketchSpecialModeSelectionFilter,
-} from '@/core/sketch-special-modes/presentation'
-import { isFeatureScopedModelingDiagnostic } from '@/contracts/modeling/diagnostics'
-import type { SketchId } from '@/contracts/shared/ids'
+} from "@/core/sketch-special-modes/presentation";
+import { isFeatureScopedModelingDiagnostic } from "@/contracts/modeling/diagnostics";
+import type { SketchId } from "@/contracts/shared/ids";
 import type {
   EditorEvent,
   EditorTransitionResult,
   EditorState,
   SketchEditorState,
-} from './types'
-import type { EditorExtensionDependencies } from './dependencies'
-import { advanceCursorPhase } from './cursor-lifecycle'
+} from "./types";
+import type { EditorExtensionDependencies } from "./dependencies";
+import { advanceCursorPhase } from "./cursor-lifecycle";
 import {
   continueAfterSnapshotRefresh,
   eventMatchesDocument,
@@ -37,54 +31,54 @@ import {
   isRefreshableDocumentCursorConflict,
   updateStateDocument,
   updateStateDocumentSnapshot,
-} from './document-helpers'
+} from "./document-helpers";
 import {
   createPreviewFailedDiagnostics,
   getDurableDiagnosticTarget,
-} from './error-mapping'
+} from "./error-mapping";
 import {
   emitFeaturePreview,
   emitSketchReferenceProjection,
   emitSnapshotFetch,
-} from './effect-emitters'
+} from "./effect-emitters";
 import {
   createFeatureEditingState,
   enterSketchEditing,
   toIdleState,
   withPreview,
-} from './state-creators'
-import { isFeatureTool } from './utility-helpers'
+} from "./state-creators";
+import { isFeatureTool } from "./utility-helpers";
 
 export function handleEffectDocumentCursorMoved(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.documentCursorMoved' }>,
+  event: Extract<EditorEvent, { type: "effect.documentCursorMoved" }>,
 ): EditorTransitionResult {
   if (
     state.pendingHistoryCursorRequestId !== event.requestId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   if (!event.accepted) {
     const message =
       event.diagnostics[0]?.message ??
-      `Document history cursor move rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`
+      `Document history cursor move rejected due to revision conflict (${event.actualRevisionId ?? "unknown"}).`;
     const nextState = withPreview(
       {
         ...state,
         pendingHistoryCursorRequestId: null,
       },
       {
-        kind: 'selection',
+        kind: "selection",
         label: message,
         target: state.selection[0] ?? null,
       },
-    )
+    );
 
     return isRefreshableDocumentCursorConflict(event)
       ? emitSnapshotFetch(nextState, null)
-      : { state: nextState, effects: [] }
+      : { state: nextState, effects: [] };
   }
 
   const nextState = {
@@ -95,24 +89,26 @@ export function handleEffectDocumentCursorMoved(
     },
     pendingHistoryCursorRequestId: null,
     preview: null,
-  } satisfies EditorState
+  } satisfies EditorState;
 
   if (!event.snapshot) {
-    return emitSnapshotFetch(nextState, null)
+    return emitSnapshotFetch(nextState, null);
   }
 
-  return continueAfterSnapshotRefresh(updateStateDocumentSnapshot(nextState, event.snapshot))
+  return continueAfterSnapshotRefresh(
+    updateStateDocumentSnapshot(nextState, event.snapshot),
+  );
 }
 
 export function handleEffectDocumentCursorMoveFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.documentCursorMoveFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.documentCursorMoveFailed" }>,
 ): EditorTransitionResult {
   if (
     state.pendingHistoryCursorRequestId !== event.requestId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -122,35 +118,37 @@ export function handleEffectDocumentCursorMoveFailed(
         pendingHistoryCursorRequestId: null,
       },
       {
-        kind: 'selection',
+        kind: "selection",
         label: event.message,
         target: state.selection[0] ?? null,
       },
     ),
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSnapshotLoaded(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.snapshotLoaded' }>,
+  event: Extract<EditorEvent, { type: "effect.snapshotLoaded" }>,
 ): EditorTransitionResult {
   if (state.pendingSnapshotRequestId !== event.payload.requestId) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
-  return continueAfterSnapshotRefresh(updateStateDocument(state, event.payload))
+  return continueAfterSnapshotRefresh(
+    updateStateDocument(state, event.payload),
+  );
 }
 
 export function handleEffectSnapshotFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.snapshotFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.snapshotFailed" }>,
 ): EditorTransitionResult {
   if (
     state.pendingSnapshotRequestId !== event.requestId ||
     !eventMatchesOptionalDocument(state, event.documentId, event.revisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -160,44 +158,44 @@ export function handleEffectSnapshotFailed(
         pendingSnapshotRequestId: null,
       },
       {
-        kind: 'selection',
+        kind: "selection",
         label: event.error,
         target: state.selection[0] ?? null,
       },
     ),
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSketchSessionOpened(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchSessionOpened' }>,
+  event: Extract<EditorEvent, { type: "effect.sketchSessionOpened" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'selectionCommand' ||
-    state.command.toolId !== 'sketch' ||
+    state.kind !== "selectionCommand" ||
+    state.command.toolId !== "sketch" ||
     state.pendingRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     !eventMatchesDocument(state, event.documentId, event.revisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
-  return enterSketchEditing(state, event.session)
+  return enterSketchEditing(state, event.session);
 }
 
 export function handleEffectSketchSessionOpenFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchSessionOpenFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.sketchSessionOpenFailed" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'selectionCommand' ||
-    state.command.toolId !== 'sketch' ||
+    state.kind !== "selectionCommand" ||
+    state.command.toolId !== "sketch" ||
     state.pendingRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     !eventMatchesDocument(state, event.documentId, event.revisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -207,31 +205,31 @@ export function handleEffectSketchSessionOpenFailed(
         pendingRequestId: null,
         command: {
           ...state.command,
-          phase: 'armed',
+          phase: "armed",
         },
       },
       {
-        kind: 'selection',
+        kind: "selection",
         label: event.message,
         target: state.selection[0] ?? null,
       },
     ),
     effects: [],
-  }
+  };
 }
 
 export function handleEffectFeatureSessionHydrated(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.featureSessionHydrated' }>,
+  event: Extract<EditorEvent, { type: "effect.featureSessionHydrated" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'selectionCommand' ||
+    state.kind !== "selectionCommand" ||
     !isFeatureTool(state.command.toolId) ||
     state.pendingRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     !eventMatchesDocument(state, event.documentId, event.revisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return emitFeaturePreview(
@@ -243,21 +241,21 @@ export function handleEffectFeatureSessionHydrated(
       state.command,
       event.session,
     ),
-  )
+  );
 }
 
 export function handleEffectFeatureSessionHydrationFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.featureSessionHydrationFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.featureSessionHydrationFailed" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'selectionCommand' ||
+    state.kind !== "selectionCommand" ||
     !isFeatureTool(state.command.toolId) ||
     state.pendingRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     !eventMatchesDocument(state, event.documentId, event.revisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -267,44 +265,48 @@ export function handleEffectFeatureSessionHydrationFailed(
         pendingRequestId: null,
       },
       {
-        kind: 'selection',
+        kind: "selection",
         label: event.message,
         target: state.selection[0] ?? null,
       },
     ),
     effects: [],
-  }
+  };
 }
 
 export function handleEffectFeaturePreviewCompleted(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.featurePreviewCompleted' }>,
+  event: Extract<EditorEvent, { type: "effect.featurePreviewCompleted" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingFeature' ||
+    state.kind !== "editingFeature" ||
     state.pendingPreviewRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     state.document.revisionId !== event.baseRevisionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
-  const previewRenderables = event.stale ? null : event.renderables
+  const previewRenderables = event.stale ? null : event.renderables;
   const session =
-    previewRenderables
-    && state.snapshot
-    && featurePreviewSupportsAutomaticBooleanTargetPreselection(state.session.featureType)
-    ? applyFeatureBooleanTargetPreselection(
-        state.session,
-        classifyPreviewBooleanTarget({
-          previewRenderables,
-          bodyRenderables: state.snapshot.document.render.records,
-          candidateBodyIds: state.snapshot.document.bodies.map((body) => body.bodyId),
-          settings: state.snapshot.document.settings,
-        }),
-      )
-    : state.session
+    previewRenderables &&
+    state.snapshot &&
+    featurePreviewSupportsAutomaticBooleanTargetPreselection(
+      state.session.featureType,
+    )
+      ? applyFeatureBooleanTargetPreselection(
+          state.session,
+          classifyPreviewBooleanTarget({
+            previewRenderables,
+            bodyRenderables: state.snapshot.document.render.records,
+            candidateBodyIds: state.snapshot.document.bodies.map(
+              (body) => body.bodyId,
+            ),
+            settings: state.snapshot.document.settings,
+          }),
+        )
+      : state.session;
 
   return {
     state: {
@@ -313,31 +315,31 @@ export function handleEffectFeaturePreviewCompleted(
       previewRenderables,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       session: {
         ...session,
-        status: event.stale ? 'idle' : 'previewReady',
+        status: event.stale ? "idle" : "previewReady",
         diagnostics: event.diagnostics,
         lastPreviewRevisionId: event.revisionId,
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectFeaturePreviewFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.featurePreviewFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.featurePreviewFailed" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingFeature' ||
+    state.kind !== "editingFeature" ||
     state.pendingPreviewRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     state.document.revisionId !== event.baseRevisionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -347,11 +349,11 @@ export function handleEffectFeaturePreviewFailed(
       previewRenderables: null,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       session: {
         ...state.session,
-        status: 'idle',
+        status: "idle",
         diagnostics: createPreviewFailedDiagnostics(
           event.message,
           getFeaturePrimarySelectionTarget(state.session),
@@ -359,21 +361,21 @@ export function handleEffectFeaturePreviewFailed(
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectFeatureCommitted(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.featureCommitted' }>,
+  event: Extract<EditorEvent, { type: "effect.featureCommitted" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingFeature' ||
+    state.kind !== "editingFeature" ||
     state.pendingCommitRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     state.document.revisionId !== event.baseRevisionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   if (!event.accepted) {
@@ -384,17 +386,18 @@ export function handleEffectFeatureCommitted(
         previewRenderables: null,
         command: {
           ...state.command,
-          phase: 'editing',
+          phase: "editing",
         },
         session: {
           ...state.session,
-          status: 'idle',
+          status: "idle",
           diagnostics: event.diagnostics,
-          lastPreviewRevisionId: event.actualRevisionId ?? state.session.lastPreviewRevisionId,
+          lastPreviewRevisionId:
+            event.actualRevisionId ?? state.session.lastPreviewRevisionId,
         },
       },
       effects: [],
-    }
+    };
   }
 
   {
@@ -406,60 +409,64 @@ export function handleEffectFeatureCommitted(
           revisionId: event.revisionId,
         },
       },
-      'part',
-    )
+      "part",
+    );
 
-    if (state.editSessionCursorContext?.phase === 'active') {
+    if (state.editSessionCursorContext?.phase === "active") {
       return emitSnapshotFetch(
         {
           ...idleState,
-          editSessionCursorContext: advanceCursorPhase(state.editSessionCursorContext, 'commitCompleted'),
+          editSessionCursorContext: advanceCursorPhase(
+            state.editSessionCursorContext,
+            "commitCompleted",
+          ),
         },
         state.command.commandSessionId,
         {
-          preserveRenderRecordsOnFeatureDiagnostics: event.diagnostics.some((diagnostic) =>
-            diagnostic.severity === 'error' && isFeatureScopedModelingDiagnostic(diagnostic),
+          preserveRenderRecordsOnFeatureDiagnostics: event.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.severity === "error" &&
+              isFeatureScopedModelingDiagnostic(diagnostic),
           ),
         },
-      )
+      );
     }
 
     const refresh = emitSnapshotFetch(
-      withPreview(
-        idleState,
-        {
-          kind: 'selection',
-          label: `Committed feature ${event.featureId}`,
-          target: { kind: 'feature', featureId: event.featureId },
-        },
-      ),
+      withPreview(idleState, {
+        kind: "selection",
+        label: `Committed feature ${event.featureId}`,
+        target: { kind: "feature", featureId: event.featureId },
+      }),
       state.command.commandSessionId,
       {
-        preserveRenderRecordsOnFeatureDiagnostics: event.diagnostics.some((diagnostic) =>
-          diagnostic.severity === 'error' && isFeatureScopedModelingDiagnostic(diagnostic),
+        preserveRenderRecordsOnFeatureDiagnostics: event.diagnostics.some(
+          (diagnostic) =>
+            diagnostic.severity === "error" &&
+            isFeatureScopedModelingDiagnostic(diagnostic),
         ),
       },
-    )
+    );
 
     return {
       state: refresh.state,
       effects: refresh.effects,
-    }
+    };
   }
 }
 
 export function handleEffectFeatureCommitFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.featureCommitFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.featureCommitFailed" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingFeature' ||
+    state.kind !== "editingFeature" ||
     state.pendingCommitRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     state.document.revisionId !== event.baseRevisionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -469,44 +476,46 @@ export function handleEffectFeatureCommitFailed(
       previewRenderables: null,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
-        session: {
-          ...state.session,
-          status: 'idle',
-          diagnostics: [
-            {
-              code: 'feature-commit-failed',
-              severity: 'error',
-              message: event.message,
-              target: getDurableDiagnosticTarget(getFeaturePrimarySelectionTarget(state.session)),
-              detail: null,
-            },
-          ],
+      session: {
+        ...state.session,
+        status: "idle",
+        diagnostics: [
+          {
+            code: "feature-commit-failed",
+            severity: "error",
+            message: event.message,
+            target: getDurableDiagnosticTarget(
+              getFeaturePrimarySelectionTarget(state.session),
+            ),
+            detail: null,
+          },
+        ],
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSketchCommitted(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchCommitted' }>,
+  event: Extract<EditorEvent, { type: "effect.sketchCommitted" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketch' ||
+    state.kind !== "editingSketch" ||
     state.pendingCommitRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     state.document.revisionId !== event.baseRevisionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   if (!event.accepted) {
     const message =
       event.diagnostics[0]?.message ??
-      `Sketch commit rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`
+      `Sketch commit rejected due to revision conflict (${event.actualRevisionId ?? "unknown"}).`;
     const nextState: SketchEditorState = {
       ...state,
       document: event.actualRevisionId
@@ -518,10 +527,10 @@ export function handleEffectSketchCommitted(
       pendingCommitRequestId: null,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       preview: {
-        kind: 'sketch',
+        kind: "sketch",
         label: message,
         target: state.session.planeTarget,
       },
@@ -529,11 +538,11 @@ export function handleEffectSketchCommitted(
         ...state.session,
         validationMessage: message,
       },
-    }
+    };
 
     return event.actualRevisionId
       ? emitSnapshotFetch(nextState, state.command.commandSessionId)
-      : { state: nextState, effects: [] }
+      : { state: nextState, effects: [] };
   }
 
   {
@@ -545,40 +554,46 @@ export function handleEffectSketchCommitted(
           revisionId: event.revisionId,
         },
       },
-      'part',
-    )
+      "part",
+    );
 
-    if (state.editSessionCursorContext?.phase === 'active') {
+    if (state.editSessionCursorContext?.phase === "active") {
       return emitSnapshotFetch(
         {
           ...idleState,
-          editSessionCursorContext: advanceCursorPhase(state.editSessionCursorContext, 'commitCompleted'),
+          editSessionCursorContext: advanceCursorPhase(
+            state.editSessionCursorContext,
+            "commitCompleted",
+          ),
         },
         state.command.commandSessionId,
-      )
+      );
     }
 
-    const refresh = emitSnapshotFetch(idleState, state.command.commandSessionId)
+    const refresh = emitSnapshotFetch(
+      idleState,
+      state.command.commandSessionId,
+    );
 
     return {
       state: refresh.state,
       effects: refresh.effects,
-    }
+    };
   }
 }
 
 export function handleEffectSketchCommitFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchCommitFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.sketchCommitFailed" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketch' ||
+    state.kind !== "editingSketch" ||
     state.pendingCommitRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     state.document.revisionId !== event.baseRevisionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -587,10 +602,10 @@ export function handleEffectSketchCommitFailed(
       pendingCommitRequestId: null,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       preview: {
-        kind: 'sketch',
+        kind: "sketch",
         label: event.message,
         target: state.session.planeTarget,
       },
@@ -600,27 +615,27 @@ export function handleEffectSketchCommitFailed(
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSketchPlaneCommitted(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchPlaneCommitted' }>,
+  event: Extract<EditorEvent, { type: "effect.sketchPlaneCommitted" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketchPlane' ||
+    state.kind !== "editingSketchPlane" ||
     state.pendingCommitRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     state.document.revisionId !== event.baseRevisionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   if (!event.accepted) {
     const message =
-      event.diagnostics[0]?.message
-      ?? `Sketch plane change rejected due to revision conflict (${event.actualRevisionId ?? 'unknown'}).`
+      event.diagnostics[0]?.message ??
+      `Sketch plane change rejected due to revision conflict (${event.actualRevisionId ?? "unknown"}).`;
     const nextState = {
       ...state,
       document: event.actualRevisionId
@@ -632,23 +647,23 @@ export function handleEffectSketchPlaneCommitted(
       pendingCommitRequestId: null,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       preview: {
-        kind: 'selection' as const,
+        kind: "selection" as const,
         label: message,
         target: getSketchPlaneEditSelectionTarget(state.session),
       },
       session: {
         ...state.session,
-        status: 'idle' as const,
+        status: "idle" as const,
         diagnostics: event.diagnostics,
       },
-    } satisfies EditorState
+    } satisfies EditorState;
 
     return event.actualRevisionId
       ? emitSnapshotFetch(nextState, state.command.commandSessionId)
-      : { state: nextState, effects: [] }
+      : { state: nextState, effects: [] };
   }
 
   const idleState = toIdleState(
@@ -659,41 +674,44 @@ export function handleEffectSketchPlaneCommitted(
         revisionId: event.revisionId,
       },
     },
-    'part',
-  )
+    "part",
+  );
 
-  if (state.editSessionCursorContext?.phase === 'active') {
+  if (state.editSessionCursorContext?.phase === "active") {
     return emitSnapshotFetch(
       {
         ...idleState,
-        editSessionCursorContext: advanceCursorPhase(state.editSessionCursorContext, 'commitCompleted'),
+        editSessionCursorContext: advanceCursorPhase(
+          state.editSessionCursorContext,
+          "commitCompleted",
+        ),
       },
       state.command.commandSessionId,
-    )
+    );
   }
 
   return emitSnapshotFetch(
     withPreview(idleState, {
-      kind: 'selection',
+      kind: "selection",
       label: `Updated sketch plane for ${state.session.sketchLabel}`,
       target: getSketchPlaneEditSelectionTarget(state.session),
     }),
     state.command.commandSessionId,
-  )
+  );
 }
 
 export function handleEffectSketchPlaneCommitFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchPlaneCommitFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.sketchPlaneCommitFailed" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketchPlane' ||
+    state.kind !== "editingSketchPlane" ||
     state.pendingCommitRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     state.document.revisionId !== event.baseRevisionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -702,49 +720,51 @@ export function handleEffectSketchPlaneCommitFailed(
       pendingCommitRequestId: null,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       preview: {
-        kind: 'selection',
+        kind: "selection",
         label: event.message,
         target: getSketchPlaneEditSelectionTarget(state.session),
       },
       session: {
         ...state.session,
-        status: 'idle',
+        status: "idle",
         diagnostics: [
           {
-            code: 'sketch-plane-commit-failed',
-            severity: 'error',
+            code: "sketch-plane-commit-failed",
+            severity: "error",
             message: event.message,
-            target: getDurableDiagnosticTarget(getSketchPlaneEditSelectionTarget(state.session)),
+            target: getDurableDiagnosticTarget(
+              getSketchPlaneEditSelectionTarget(state.session),
+            ),
             detail: null,
           },
         ],
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSketchReferencesProjected(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchReferencesProjected' }>,
+  event: Extract<EditorEvent, { type: "effect.sketchReferencesProjected" }>,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketch' ||
+    state.kind !== "editingSketch" ||
     state.pendingProjectionRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   const session = updateSketchReferenceProjection(
     state.session,
     event.projectedReferences,
     event.diagnostics,
-  )
+  );
 
   return {
     state: {
@@ -752,26 +772,29 @@ export function handleEffectSketchReferencesProjected(
       pendingProjectionRequestId: null,
       session,
       preview: {
-        kind: 'sketch',
+        kind: "sketch",
         label: getSketchSessionPreviewLabel(session),
         target: session.planeTarget,
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSketchReferenceProjectionFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchReferenceProjectionFailed' }>,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchReferenceProjectionFailed" }
+  >,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketch' ||
+    state.kind !== "editingSketch" ||
     state.pendingProjectionRequestId !== event.requestId ||
     state.command.commandSessionId !== event.commandSessionId ||
     !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -779,7 +802,7 @@ export function handleEffectSketchReferenceProjectionFailed(
       ...state,
       pendingProjectionRequestId: null,
       preview: {
-        kind: 'sketch',
+        kind: "sketch",
         label: event.message,
         target: state.session.planeTarget,
       },
@@ -789,39 +812,47 @@ export function handleEffectSketchReferenceProjectionFailed(
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSketchReferenceImageImportCompleted(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchReferenceImageImportCompleted' }>,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchReferenceImageImportCompleted" }
+  >,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketch'
-    || state.pendingImportRequestId !== event.requestId
-    || state.command.commandSessionId !== event.commandSessionId
-    || !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+    state.kind !== "editingSketch" ||
+    state.pendingImportRequestId !== event.requestId ||
+    state.command.commandSessionId !== event.commandSessionId ||
+    !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
-  if (event.status === 'cancelled' || !event.snapshot || !event.selectionCatalog || !event.session) {
+  if (
+    event.status === "cancelled" ||
+    !event.snapshot ||
+    !event.selectionCatalog ||
+    !event.session
+  ) {
     return {
       state: {
         ...state,
         pendingImportRequestId: null,
         command: {
           ...state.command,
-          phase: 'editing',
+          phase: "editing",
         },
         preview: {
-          kind: 'sketch',
+          kind: "sketch",
           label: getSketchSessionPreviewLabel(state.session),
           target: state.session.planeTarget,
         },
       },
       effects: [],
-    }
+    };
   }
 
   return emitSketchReferenceProjection(
@@ -833,33 +864,41 @@ export function handleEffectSketchReferenceImageImportCompleted(
       },
       snapshot: event.snapshot,
       selectionCatalog: event.selectionCatalog,
-      selection: [{ kind: 'sketch', sketchId: event.session.sketchId ?? ('sketch_draft' as SketchId) }],
+      selection: [
+        {
+          kind: "sketch",
+          sketchId: event.session.sketchId ?? ("sketch_draft" as SketchId),
+        },
+      ],
       hoverTarget: null,
-      selectionFilter: getDefaultSelectionFilterForMode('sketch'),
+      selectionFilter: getDefaultSelectionFilterForMode("sketch"),
       previewRenderables: null,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       session: event.session,
       pendingProjectionRequestId: null,
       pendingImportRequestId: null,
     },
     event.session,
-  )
+  );
 }
 
 export function handleEffectSketchReferenceImageImportFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchReferenceImageImportFailed' }>,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchReferenceImageImportFailed" }
+  >,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketch'
-    || state.pendingImportRequestId !== event.requestId
-    || state.command.commandSessionId !== event.commandSessionId
-    || !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
+    state.kind !== "editingSketch" ||
+    state.pendingImportRequestId !== event.requestId ||
+    state.command.commandSessionId !== event.commandSessionId ||
+    !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   return {
@@ -868,10 +907,10 @@ export function handleEffectSketchReferenceImageImportFailed(
       pendingImportRequestId: null,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       preview: {
-        kind: 'sketch',
+        kind: "sketch",
         label: event.message,
         target: state.session.planeTarget,
       },
@@ -881,21 +920,25 @@ export function handleEffectSketchReferenceImageImportFailed(
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSketchSpecialModeEffectCompleted(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchSpecialModeEffectCompleted' }>,
+  event: Extract<
+    EditorEvent,
+    { type: "effect.sketchSpecialModeEffectCompleted" }
+  >,
   dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketch'
-    || state.command.commandSessionId !== event.commandSessionId
-    || !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
-    || state.session.activeSpecialMode?.pendingEffect?.requestId !== event.requestId
+    state.kind !== "editingSketch" ||
+    state.command.commandSessionId !== event.commandSessionId ||
+    !eventMatchesDocument(state, event.documentId, event.baseRevisionId) ||
+    state.session.activeSpecialMode?.pendingEffect?.requestId !==
+      event.requestId
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   const session = applySketchSpecialModeEffectResult({
@@ -904,7 +947,7 @@ export function handleEffectSketchSpecialModeEffectCompleted(
     effectId: event.effectId,
     payload: event.payload,
     registry: dependencies.sketchSpecialModes,
-  })
+  });
 
   return {
     state: {
@@ -912,30 +955,31 @@ export function handleEffectSketchSpecialModeEffectCompleted(
       session,
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       preview: {
-        kind: 'sketch',
+        kind: "sketch",
         label: getSketchSessionPreviewLabel(session),
         target: session.planeTarget,
       },
     },
     effects: [],
-  }
+  };
 }
 
 export function handleEffectSketchSpecialModeEffectFailed(
   state: EditorState,
-  event: Extract<EditorEvent, { type: 'effect.sketchSpecialModeEffectFailed' }>,
+  event: Extract<EditorEvent, { type: "effect.sketchSpecialModeEffectFailed" }>,
   dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   if (
-    state.kind !== 'editingSketch'
-    || state.command.commandSessionId !== event.commandSessionId
-    || !eventMatchesDocument(state, event.documentId, event.baseRevisionId)
-    || state.session.activeSpecialMode?.pendingEffect?.requestId !== event.requestId
+    state.kind !== "editingSketch" ||
+    state.command.commandSessionId !== event.commandSessionId ||
+    !eventMatchesDocument(state, event.documentId, event.baseRevisionId) ||
+    state.session.activeSpecialMode?.pendingEffect?.requestId !==
+      event.requestId
   ) {
-    return { state, effects: [] }
+    return { state, effects: [] };
   }
 
   const session = {
@@ -947,25 +991,27 @@ export function handleEffectSketchSpecialModeEffectFailed(
           pendingEffect: null,
         }
       : null,
-  }
+  };
 
   return {
     state: {
       ...state,
       session,
       selectionFilter:
-        getSketchSpecialModeSelectionFilter(session, dependencies.sketchSpecialModes)
-        ?? getDefaultSelectionFilterForMode('sketch'),
+        getSketchSpecialModeSelectionFilter(
+          session,
+          dependencies.sketchSpecialModes,
+        ) ?? getDefaultSelectionFilterForMode("sketch"),
       command: {
         ...state.command,
-        phase: 'editing',
+        phase: "editing",
       },
       preview: {
-        kind: 'sketch',
+        kind: "sketch",
         label: event.message,
         target: state.session.planeTarget,
       },
     },
     effects: [],
-  }
+  };
 }

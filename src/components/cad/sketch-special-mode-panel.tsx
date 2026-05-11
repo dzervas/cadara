@@ -1,4 +1,4 @@
-import type { ChangeEvent } from 'react'
+import type { ChangeEvent } from "react";
 
 import {
   Alert,
@@ -12,28 +12,28 @@ import {
   Switch,
   Text,
   TextInput,
-} from '@mantine/core'
+} from "@mantine/core";
 
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
   VIEWPORT_FLOATING_PANEL_TOP_STYLE,
-} from '@/components/cad/viewport-overlay-layout'
+} from "@/components/cad/viewport-overlay-layout";
 import type {
   SketchSpecialModePanelAction,
   SketchSpecialModePanelButton,
   SketchSpecialModePanelField,
   SketchSpecialModePanelSchema,
-} from '@/core/sketch-special-modes/schema'
+} from "@/core/sketch-special-modes/schema";
 import {
   SECTION_HEADER_CLASSES,
   compactInputStyles,
   compactSelectStyles,
   fieldSurfaceStyle,
-} from '@/components/ui/workbench-panel-styles'
+} from "@/components/ui/workbench-panel-styles";
 
 interface SketchSpecialModePanelProps {
-  schema: SketchSpecialModePanelSchema | null
-  onAction: (action: SketchSpecialModePanelAction) => void
+  schema: SketchSpecialModePanelSchema | null;
+  onAction: (action: SketchSpecialModePanelAction) => void;
 }
 
 export function SketchSpecialModePanel({
@@ -41,7 +41,7 @@ export function SketchSpecialModePanel({
   onAction,
 }: SketchSpecialModePanelProps) {
   if (!schema) {
-    return null
+    return null;
   }
 
   return (
@@ -51,8 +51,8 @@ export function SketchSpecialModePanel({
       style={{
         left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
         top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
-        background: 'var(--workbench-shell-surface-panel-elev)',
-        boxShadow: 'var(--workbench-shell-elevation-md)',
+        background: "var(--workbench-shell-surface-panel-elev)",
+        boxShadow: "var(--workbench-shell-elevation-md)",
       }}
     >
       <header className="px-3 pb-2.5 pt-3">
@@ -77,14 +77,20 @@ export function SketchSpecialModePanel({
                 <Alert
                   key={prompt.id}
                   variant="light"
-                  color={prompt.tone === 'success' ? 'teal' : prompt.tone === 'warning' ? 'yellow' : 'gray'}
+                  color={
+                    prompt.tone === "success"
+                      ? "teal"
+                      : prompt.tone === "warning"
+                        ? "yellow"
+                        : "gray"
+                  }
                   styles={{
                     root: {
-                      background: 'var(--workbench-shell-overlay-soft)',
-                      border: '1px solid var(--workbench-shell-border)',
+                      background: "var(--workbench-shell-overlay-soft)",
+                      border: "1px solid var(--workbench-shell-border)",
                     },
                     body: {
-                      color: 'var(--workbench-shell-text)',
+                      color: "var(--workbench-shell-text)",
                     },
                   }}
                 >
@@ -104,8 +110,8 @@ export function SketchSpecialModePanel({
               <div
                 className="rounded-[6px] px-3 py-3"
                 style={{
-                  background: 'var(--workbench-shell-overlay-soft)',
-                  border: '1px solid var(--workbench-shell-border)',
+                  background: "var(--workbench-shell-overlay-soft)",
+                  border: "1px solid var(--workbench-shell-border)",
                 }}
               >
                 <Stack gap="sm">
@@ -115,29 +121,39 @@ export function SketchSpecialModePanel({
                     </Text>
                   ) : null}
                   {section.fields?.map((field) => (
-                    <SpecialModePanelField key={field.id} field={field} onAction={onAction} />
+                    <SpecialModePanelField
+                      key={field.id}
+                      field={field}
+                      onAction={onAction}
+                    />
                   ))}
                   {section.diagnostics?.map((diagnostic) => (
                     <Alert
                       key={diagnostic.id}
                       variant="light"
-                      color={diagnostic.severity === 'error' ? 'red' : diagnostic.severity === 'warning' ? 'yellow' : 'blue'}
+                      color={
+                        diagnostic.severity === "error"
+                          ? "red"
+                          : diagnostic.severity === "warning"
+                            ? "yellow"
+                            : "blue"
+                      }
                       styles={{
                         root: {
                           background:
-                            diagnostic.severity === 'error'
-                              ? 'var(--workbench-shell-danger-surface)'
-                              : 'var(--workbench-shell-overlay)',
+                            diagnostic.severity === "error"
+                              ? "var(--workbench-shell-danger-surface)"
+                              : "var(--workbench-shell-overlay)",
                           border:
-                            diagnostic.severity === 'error'
-                              ? '1px solid var(--workbench-shell-danger-border)'
-                              : '1px solid var(--workbench-shell-border)',
+                            diagnostic.severity === "error"
+                              ? "1px solid var(--workbench-shell-danger-border)"
+                              : "1px solid var(--workbench-shell-border)",
                         },
                         body: {
                           color:
-                            diagnostic.severity === 'error'
-                              ? 'var(--workbench-shell-danger-text)'
-                              : 'var(--workbench-shell-text)',
+                            diagnostic.severity === "error"
+                              ? "var(--workbench-shell-danger-text)"
+                              : "var(--workbench-shell-text)",
                         },
                       }}
                     >
@@ -147,7 +163,11 @@ export function SketchSpecialModePanel({
                   {section.buttons && section.buttons.length > 0 ? (
                     <Group gap="xs" justify="flex-start">
                       {section.buttons.map((button) => (
-                        <PanelButton key={button.id} button={button} onAction={onAction} />
+                        <PanelButton
+                          key={button.id}
+                          button={button}
+                          onAction={onAction}
+                        />
                       ))}
                     </Group>
                   ) : null}
@@ -163,26 +183,31 @@ export function SketchSpecialModePanel({
           <div className="border-t border-[var(--workbench-shell-border)]" />
           <footer className="flex items-center justify-end gap-2 px-3 py-2.5">
             {schema.footerButtons.map((button) => (
-              <PanelButton key={button.id} button={button} onAction={onAction} />
+              <PanelButton
+                key={button.id}
+                button={button}
+                onAction={onAction}
+              />
             ))}
           </footer>
         </>
       ) : null}
     </Paper>
-  )
+  );
 }
 
 function SpecialModePanelField({
   field,
   onAction,
 }: {
-  field: SketchSpecialModePanelField
-  onAction: (action: SketchSpecialModePanelAction) => void
+  field: SketchSpecialModePanelField;
+  onAction: (action: SketchSpecialModePanelAction) => void;
 }) {
-  const fieldError = 'error' in field && field.error ? { message: field.error } : null
-  const rowStyle = fieldSurfaceStyle({ error: fieldError })
+  const fieldError =
+    "error" in field && field.error ? { message: field.error } : null;
+  const rowStyle = fieldSurfaceStyle({ error: fieldError });
 
-  if (field.kind === 'text') {
+  if (field.kind === "text") {
     return (
       <div
         className="flex min-h-7 items-stretch rounded-[3px] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
@@ -204,17 +229,20 @@ function SpecialModePanelField({
             styles={compactInputStyles({ disabled: field.disabled })}
             onChange={(event) => {
               onAction({
-                kind: 'patch',
-                patch: { ...field.action.patch, value: event.currentTarget.value },
-              })
+                kind: "patch",
+                patch: {
+                  ...field.action.patch,
+                  value: event.currentTarget.value,
+                },
+              });
             }}
           />
         </div>
       </div>
-    )
+    );
   }
 
-  if (field.kind === 'numeric') {
+  if (field.kind === "numeric") {
     return (
       <div
         className="flex min-h-7 items-stretch rounded-[3px] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
@@ -225,31 +253,38 @@ function SpecialModePanelField({
           htmlFor={field.id}
         >
           {field.label}
-          {field.unit ? <span className="ml-1 font-mono text-[10px] opacity-60">{field.unit}</span> : null}
+          {field.unit ? (
+            <span className="ml-1 font-mono text-[10px] opacity-60">
+              {field.unit}
+            </span>
+          ) : null}
         </label>
         <div className="min-w-0 flex-1">
           <NumberInput
             id={field.id}
-            value={field.value ?? ''}
+            value={field.value ?? ""}
             disabled={field.disabled}
             size="xs"
             styles={compactInputStyles({ disabled: field.disabled })}
             onChange={(nextValue) => {
               onAction({
-                kind: 'patch',
+                kind: "patch",
                 patch: {
                   ...field.action.patch,
-                  value: typeof nextValue === 'number' && !Number.isNaN(nextValue) ? nextValue : null,
+                  value:
+                    typeof nextValue === "number" && !Number.isNaN(nextValue)
+                      ? nextValue
+                      : null,
                 },
-              })
+              });
             }}
           />
         </div>
       </div>
-    )
+    );
   }
 
-  if (field.kind === 'toggle') {
+  if (field.kind === "toggle") {
     return (
       <div
         className="flex min-h-7 items-center rounded-[3px] px-2 transition-colors hover:bg-[var(--workbench-shell-overlay)]"
@@ -264,22 +299,25 @@ function SpecialModePanelField({
           color="teal"
           styles={{
             label: {
-              color: 'var(--workbench-shell-text)',
-              fontSize: '12px',
+              color: "var(--workbench-shell-text)",
+              fontSize: "12px",
             },
           }}
           onChange={(event: ChangeEvent<HTMLInputElement>) => {
             onAction({
-              kind: 'patch',
-              patch: { ...field.action.patch, value: event.currentTarget.checked },
-            })
+              kind: "patch",
+              patch: {
+                ...field.action.patch,
+                value: event.currentTarget.checked,
+              },
+            });
           }}
         />
       </div>
-    )
+    );
   }
 
-  if (field.kind === 'option') {
+  if (field.kind === "option") {
     return (
       <div
         className="flex min-h-7 items-stretch rounded-[3px] transition-colors hover:bg-[var(--workbench-shell-overlay)]"
@@ -295,7 +333,10 @@ function SpecialModePanelField({
           <Select
             id={field.id}
             value={field.value}
-            data={field.options.map((option) => ({ value: option.value, label: option.label }))}
+            data={field.options.map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
             disabled={field.disabled}
             allowDeselect={false}
             comboboxProps={{ withinPortal: true }}
@@ -303,14 +344,14 @@ function SpecialModePanelField({
             styles={compactSelectStyles({ disabled: field.disabled })}
             onChange={(value) => {
               onAction({
-                kind: 'patch',
+                kind: "patch",
                 patch: { ...field.action.patch, value },
-              })
+              });
             }}
           />
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -320,9 +361,9 @@ function SpecialModePanelField({
         block
         className="rounded-[6px] px-2 py-2 text-[12px]"
         style={{
-          background: 'var(--workbench-shell-overlay-strong)',
-          border: '1px solid var(--workbench-shell-border)',
-          color: 'var(--mantine-color-dark-0)',
+          background: "var(--workbench-shell-overlay-strong)",
+          border: "1px solid var(--workbench-shell-border)",
+          color: "var(--mantine-color-dark-0)",
         }}
       >
         {field.value}
@@ -333,40 +374,52 @@ function SpecialModePanelField({
         </Text>
       ) : null}
     </div>
-  )
+  );
 }
 
 function PanelButton({
   button,
   onAction,
 }: {
-  button: SketchSpecialModePanelButton
-  onAction: (action: SketchSpecialModePanelAction) => void
+  button: SketchSpecialModePanelButton;
+  onAction: (action: SketchSpecialModePanelAction) => void;
 }) {
   return (
     <Button
       type="button"
       size="xs"
       disabled={button.disabled}
-      variant={button.tone === 'primary' ? 'filled' : button.tone === 'danger' ? 'light' : 'subtle'}
-      color={button.tone === 'primary' ? 'teal' : button.tone === 'danger' ? 'red' : 'gray'}
+      variant={
+        button.tone === "primary"
+          ? "filled"
+          : button.tone === "danger"
+            ? "light"
+            : "subtle"
+      }
+      color={
+        button.tone === "primary"
+          ? "teal"
+          : button.tone === "danger"
+            ? "red"
+            : "gray"
+      }
       styles={{
         root: {
           backgroundColor:
-            button.tone === 'primary'
-              ? 'var(--workbench-shell-accent)'
+            button.tone === "primary"
+              ? "var(--workbench-shell-accent)"
               : undefined,
           color:
-            button.tone === 'primary'
-              ? 'var(--mantine-color-dark-9)'
-              : button.tone === 'danger'
-                ? 'var(--workbench-shell-danger-text)'
-                : 'var(--workbench-shell-text-muted)',
+            button.tone === "primary"
+              ? "var(--mantine-color-dark-9)"
+              : button.tone === "danger"
+                ? "var(--workbench-shell-danger-text)"
+                : "var(--workbench-shell-text-muted)",
         },
       }}
       onClick={() => onAction(button.action)}
     >
       {button.label}
     </Button>
-  )
+  );
 }

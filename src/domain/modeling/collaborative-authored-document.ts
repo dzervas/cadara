@@ -1,32 +1,48 @@
-import type { AuthoredModelDocument } from '@/contracts/modeling/authored-document'
-import type { ModelingDiagnostic } from '@/contracts/modeling/schema'
-import type { DurableRef } from '@/contracts/shared/references'
-import { evaluateDocumentVariableExpressions } from '@/domain/modeling/document-variable-expressions'
+import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
+import type { DurableRef } from "@/contracts/shared/references";
+import { evaluateDocumentVariableExpressions } from "@/domain/modeling/document-variable-expressions";
 
 export const COLLABORATIVE_MERGE_DIAGNOSTIC_CODES = {
-  invalidFeatureOrder: 'merge-invalid-feature-order',
-  invalidHistoryOrder: 'merge-invalid-history-order',
-  missingCursorTarget: 'merge-missing-cursor-target',
-  invalidDurableReference: 'merge-invalid-durable-reference',
-  unresolvedVariableCycle: 'merge-unresolved-variable-cycle',
-  concurrentVariableConflict: 'merge-concurrent-variable-conflict',
-  concurrentLabelConflict: 'merge-concurrent-label-conflict',
-} as const
+  invalidFeatureOrder: "merge-invalid-feature-order",
+  invalidHistoryOrder: "merge-invalid-history-order",
+  missingCursorTarget: "merge-missing-cursor-target",
+  invalidDurableReference: "merge-invalid-durable-reference",
+  unresolvedVariableCycle: "merge-unresolved-variable-cycle",
+  concurrentVariableConflict: "merge-concurrent-variable-conflict",
+  concurrentLabelConflict: "merge-concurrent-label-conflict",
+} as const;
 
-export function normalizeCollaborativeAuthoredModelDocument(document: AuthoredModelDocument): {
-  document: AuthoredModelDocument
-  diagnostics: ModelingDiagnostic[]
+export function normalizeCollaborativeAuthoredModelDocument(
+  document: AuthoredModelDocument,
+): {
+  document: AuthoredModelDocument;
+  diagnostics: ModelingDiagnostic[];
 } {
-  const diagnostics: ModelingDiagnostic[] = []
-  const featureIds = new Set(document.features.map((feature) => feature.featureId))
-  const sketchIds = new Set(document.sketches.map((sketch) => sketch.sketchId))
-  const bodyIds = new Set(document.bodyLabels.map((label) => label.bodyId))
-  const featureOrder = normalizeFeatureOrder(document, featureIds, diagnostics)
-  const historyOrder = normalizeHistoryOrder(document, featureIds, sketchIds, diagnostics)
-  const cursor = normalizeCursor(document, featureIds, sketchIds, diagnostics)
+  const diagnostics: ModelingDiagnostic[] = [];
+  const featureIds = new Set(
+    document.features.map((feature) => feature.featureId),
+  );
+  const sketchIds = new Set(document.sketches.map((sketch) => sketch.sketchId));
+  const bodyIds = new Set(document.bodyLabels.map((label) => label.bodyId));
+  const featureOrder = normalizeFeatureOrder(document, featureIds, diagnostics);
+  const historyOrder = normalizeHistoryOrder(
+    document,
+    featureIds,
+    sketchIds,
+    diagnostics,
+  );
+  const cursor = normalizeCursor(document, featureIds, sketchIds, diagnostics);
 
-  diagnostics.push(...collectScalarDiagnostics(document))
-  diagnostics.push(...collectInvalidReferenceDiagnostics(document, featureIds, sketchIds, bodyIds))
+  diagnostics.push(...collectScalarDiagnostics(document));
+  diagnostics.push(
+    ...collectInvalidReferenceDiagnostics(
+      document,
+      featureIds,
+      sketchIds,
+      bodyIds,
+    ),
+  );
 
   return {
     document: {
@@ -36,220 +52,272 @@ export function normalizeCollaborativeAuthoredModelDocument(document: AuthoredMo
       cursor,
     },
     diagnostics,
-  }
+  };
 }
 
 function normalizeHistoryOrder(
   document: AuthoredModelDocument,
-  featureIds: ReadonlySet<AuthoredModelDocument['features'][number]['featureId']>,
-  sketchIds: ReadonlySet<AuthoredModelDocument['sketches'][number]['sketchId']>,
+  featureIds: ReadonlySet<
+    AuthoredModelDocument["features"][number]["featureId"]
+  >,
+  sketchIds: ReadonlySet<AuthoredModelDocument["sketches"][number]["sketchId"]>,
   diagnostics: ModelingDiagnostic[],
 ) {
-  const seen = new Set<string>()
+  const seen = new Set<string>();
   const legacyOrder = [
-    ...document.sketches.map((sketch) => ({ kind: 'sketch' as const, sketchId: sketch.sketchId })),
-    ...document.featureOrder.map((featureId) => ({ kind: 'feature' as const, featureId })),
-  ]
-  const sourceOrder = document.historyOrder ?? legacyOrder
+    ...document.sketches.map((sketch) => ({
+      kind: "sketch" as const,
+      sketchId: sketch.sketchId,
+    })),
+    ...document.featureOrder.map((featureId) => ({
+      kind: "feature" as const,
+      featureId,
+    })),
+  ];
+  const sourceOrder = document.historyOrder ?? legacyOrder;
   const normalized = sourceOrder.filter((item) => {
-    const exists = item.kind === 'sketch' ? sketchIds.has(item.sketchId) : featureIds.has(item.featureId)
-    const key = item.kind === 'sketch' ? `sketch:${item.sketchId}` : `feature:${item.featureId}`
+    const exists =
+      item.kind === "sketch"
+        ? sketchIds.has(item.sketchId)
+        : featureIds.has(item.featureId);
+    const key =
+      item.kind === "sketch"
+        ? `sketch:${item.sketchId}`
+        : `feature:${item.featureId}`;
     if (!exists || seen.has(key)) {
-      diagnostics.push(createMergeDiagnostic(
-        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidHistoryOrder,
-        `Merged history order contained invalid or duplicate ${item.kind}.`,
-        item.kind === 'sketch'
-          ? { kind: 'sketch', sketchId: item.sketchId }
-          : { kind: 'feature', featureId: item.featureId },
-      ))
-      return false
+      diagnostics.push(
+        createMergeDiagnostic(
+          COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidHistoryOrder,
+          `Merged history order contained invalid or duplicate ${item.kind}.`,
+          item.kind === "sketch"
+            ? { kind: "sketch", sketchId: item.sketchId }
+            : { kind: "feature", featureId: item.featureId },
+        ),
+      );
+      return false;
     }
 
-    seen.add(key)
-    return true
-  })
+    seen.add(key);
+    return true;
+  });
 
   const missingSketches = [...sketchIds]
     .filter((sketchId) => !seen.has(`sketch:${sketchId}`))
     .sort()
-    .map((sketchId) => ({ kind: 'sketch' as const, sketchId }))
+    .map((sketchId) => ({ kind: "sketch" as const, sketchId }));
   const missingFeatures = [...featureIds]
     .filter((featureId) => !seen.has(`feature:${featureId}`))
     .sort()
-    .map((featureId) => ({ kind: 'feature' as const, featureId }))
+    .map((featureId) => ({ kind: "feature" as const, featureId }));
 
   if (missingSketches.length + missingFeatures.length > 0) {
-    diagnostics.push(createMergeDiagnostic(
-      COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidHistoryOrder,
-      'Merged history order omitted authored sketches or features; appended deterministically by durable ID.',
-      null,
-    ))
+    diagnostics.push(
+      createMergeDiagnostic(
+        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidHistoryOrder,
+        "Merged history order omitted authored sketches or features; appended deterministically by durable ID.",
+        null,
+      ),
+    );
   }
 
-  return [...normalized, ...missingSketches, ...missingFeatures]
+  return [...normalized, ...missingSketches, ...missingFeatures];
 }
 
 function normalizeFeatureOrder(
   document: AuthoredModelDocument,
-  featureIds: ReadonlySet<AuthoredModelDocument['features'][number]['featureId']>,
+  featureIds: ReadonlySet<
+    AuthoredModelDocument["features"][number]["featureId"]
+  >,
   diagnostics: ModelingDiagnostic[],
 ) {
-  const seen = new Set<string>()
+  const seen = new Set<string>();
   const normalized = document.featureOrder.filter((featureId) => {
     if (!featureIds.has(featureId) || seen.has(featureId)) {
-      diagnostics.push(createMergeDiagnostic(
-        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidFeatureOrder,
-        `Merged feature order contained invalid or duplicate feature ${featureId}.`,
-        { kind: 'feature', featureId },
-      ))
-      return false
+      diagnostics.push(
+        createMergeDiagnostic(
+          COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidFeatureOrder,
+          `Merged feature order contained invalid or duplicate feature ${featureId}.`,
+          { kind: "feature", featureId },
+        ),
+      );
+      return false;
     }
 
-    seen.add(featureId)
-    return true
-  })
-  const missingFeatureIds = [...featureIds].filter((featureId) => !seen.has(featureId)).sort()
+    seen.add(featureId);
+    return true;
+  });
+  const missingFeatureIds = [...featureIds]
+    .filter((featureId) => !seen.has(featureId))
+    .sort();
   if (missingFeatureIds.length > 0) {
-    diagnostics.push(createMergeDiagnostic(
-      COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidFeatureOrder,
-      `Merged feature order omitted ${missingFeatureIds.join(', ')}; appended deterministically by durable ID.`,
-      null,
-    ))
+    diagnostics.push(
+      createMergeDiagnostic(
+        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidFeatureOrder,
+        `Merged feature order omitted ${missingFeatureIds.join(", ")}; appended deterministically by durable ID.`,
+        null,
+      ),
+    );
   }
 
-  return [...normalized, ...missingFeatureIds]
+  return [...normalized, ...missingFeatureIds];
 }
 
 function normalizeCursor(
   document: AuthoredModelDocument,
-  featureIds: ReadonlySet<AuthoredModelDocument['features'][number]['featureId']>,
-  sketchIds: ReadonlySet<AuthoredModelDocument['sketches'][number]['sketchId']>,
+  featureIds: ReadonlySet<
+    AuthoredModelDocument["features"][number]["featureId"]
+  >,
+  sketchIds: ReadonlySet<AuthoredModelDocument["sketches"][number]["sketchId"]>,
   diagnostics: ModelingDiagnostic[],
-): AuthoredModelDocument['cursor'] {
-  if (document.cursor.kind === 'feature' && !featureIds.has(document.cursor.featureId)) {
-    diagnostics.push(createMergeDiagnostic(
-      COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.missingCursorTarget,
-      `Merged feature cursor referenced missing feature ${document.cursor.featureId}.`,
-      { kind: 'feature', featureId: document.cursor.featureId },
-    ))
-    return { kind: 'empty' }
+): AuthoredModelDocument["cursor"] {
+  if (
+    document.cursor.kind === "feature" &&
+    !featureIds.has(document.cursor.featureId)
+  ) {
+    diagnostics.push(
+      createMergeDiagnostic(
+        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.missingCursorTarget,
+        `Merged feature cursor referenced missing feature ${document.cursor.featureId}.`,
+        { kind: "feature", featureId: document.cursor.featureId },
+      ),
+    );
+    return { kind: "empty" };
   }
 
-  if (document.cursor.kind === 'sketch' && !sketchIds.has(document.cursor.sketchId)) {
-    diagnostics.push(createMergeDiagnostic(
-      COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.missingCursorTarget,
-      `Merged feature cursor referenced missing sketch ${document.cursor.sketchId}.`,
-      { kind: 'sketch', sketchId: document.cursor.sketchId },
-    ))
-    return { kind: 'empty' }
+  if (
+    document.cursor.kind === "sketch" &&
+    !sketchIds.has(document.cursor.sketchId)
+  ) {
+    diagnostics.push(
+      createMergeDiagnostic(
+        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.missingCursorTarget,
+        `Merged feature cursor referenced missing sketch ${document.cursor.sketchId}.`,
+        { kind: "sketch", sketchId: document.cursor.sketchId },
+      ),
+    );
+    return { kind: "empty" };
   }
 
-  return structuredClone(document.cursor)
+  return structuredClone(document.cursor);
 }
 
 function collectScalarDiagnostics(document: AuthoredModelDocument) {
-  const diagnostics: ModelingDiagnostic[] = []
-  const variableEvaluation = evaluateDocumentVariableExpressions(document.variables)
+  const diagnostics: ModelingDiagnostic[] = [];
+  const variableEvaluation = evaluateDocumentVariableExpressions(
+    document.variables,
+  );
   if (!variableEvaluation.ok) {
-    diagnostics.push(...variableEvaluation.diagnostics.map((diagnostic) =>
-      createMergeDiagnostic(
-        diagnostic.code === 'document-variable-cycle'
-          ? COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.unresolvedVariableCycle
-          : COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.concurrentVariableConflict,
-        diagnostic.message,
-        null,
+    diagnostics.push(
+      ...variableEvaluation.diagnostics.map((diagnostic) =>
+        createMergeDiagnostic(
+          diagnostic.code === "document-variable-cycle"
+            ? COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.unresolvedVariableCycle
+            : COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.concurrentVariableConflict,
+          diagnostic.message,
+          null,
+        ),
       ),
-    ))
+    );
   }
 
-  const labelsByFeature = new Map<string, string>()
+  const labelsByFeature = new Map<string, string>();
   for (const feature of document.features) {
-    const existing = labelsByFeature.get(feature.label)
+    const existing = labelsByFeature.get(feature.label);
     if (existing && existing !== feature.featureId) {
-      diagnostics.push(createMergeDiagnostic(
-        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.concurrentLabelConflict,
-        `Merged feature label "${feature.label}" is shared by ${existing} and ${feature.featureId}.`,
-        { kind: 'feature', featureId: feature.featureId },
-      ))
+      diagnostics.push(
+        createMergeDiagnostic(
+          COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.concurrentLabelConflict,
+          `Merged feature label "${feature.label}" is shared by ${existing} and ${feature.featureId}.`,
+          { kind: "feature", featureId: feature.featureId },
+        ),
+      );
     }
-    labelsByFeature.set(feature.label, feature.featureId)
+    labelsByFeature.set(feature.label, feature.featureId);
   }
 
-  return diagnostics
+  return diagnostics;
 }
 
 function collectInvalidReferenceDiagnostics(
   document: AuthoredModelDocument,
-  featureIds: ReadonlySet<AuthoredModelDocument['features'][number]['featureId']>,
-  sketchIds: ReadonlySet<AuthoredModelDocument['sketches'][number]['sketchId']>,
-  bodyIds: ReadonlySet<AuthoredModelDocument['bodyLabels'][number]['bodyId']>,
+  featureIds: ReadonlySet<
+    AuthoredModelDocument["features"][number]["featureId"]
+  >,
+  sketchIds: ReadonlySet<AuthoredModelDocument["sketches"][number]["sketchId"]>,
+  bodyIds: ReadonlySet<AuthoredModelDocument["bodyLabels"][number]["bodyId"]>,
 ) {
-  const diagnostics: ModelingDiagnostic[] = []
+  const diagnostics: ModelingDiagnostic[] = [];
   for (const feature of document.features) {
     for (const target of collectPrimitiveRefs(feature.definition)) {
       if (!primitiveRefExists(target, featureIds, sketchIds, bodyIds)) {
-        diagnostics.push(createMergeDiagnostic(
-          COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidDurableReference,
-          `Merged feature ${feature.featureId} references missing ${target.kind}.`,
-          target,
-        ))
+        diagnostics.push(
+          createMergeDiagnostic(
+            COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidDurableReference,
+            `Merged feature ${feature.featureId} references missing ${target.kind}.`,
+            target,
+          ),
+        );
       }
     }
   }
 
-  return diagnostics
+  return diagnostics;
 }
 
 function collectPrimitiveRefs(value: unknown): DurableRef[] {
   if (!isRecord(value)) {
     if (Array.isArray(value)) {
-      return value.flatMap((entry) => collectPrimitiveRefs(entry))
+      return value.flatMap((entry) => collectPrimitiveRefs(entry));
     }
-    return []
+    return [];
   }
 
-  const refs = isPrimitiveRef(value) ? [value] : []
+  const refs = isPrimitiveRef(value) ? [value] : [];
   return [
     ...refs,
     ...Object.values(value).flatMap((entry) => collectPrimitiveRefs(entry)),
-  ]
+  ];
 }
 
 function primitiveRefExists(
   target: DurableRef,
-  featureIds: ReadonlySet<AuthoredModelDocument['features'][number]['featureId']>,
-  sketchIds: ReadonlySet<AuthoredModelDocument['sketches'][number]['sketchId']>,
-  bodyIds: ReadonlySet<AuthoredModelDocument['bodyLabels'][number]['bodyId']>,
+  featureIds: ReadonlySet<
+    AuthoredModelDocument["features"][number]["featureId"]
+  >,
+  sketchIds: ReadonlySet<AuthoredModelDocument["sketches"][number]["sketchId"]>,
+  bodyIds: ReadonlySet<AuthoredModelDocument["bodyLabels"][number]["bodyId"]>,
 ) {
   switch (target.kind) {
-    case 'feature':
-      return featureIds.has(target.featureId)
-    case 'sketch':
-    case 'sketchEntity':
-    case 'sketchPoint':
-    case 'constraint':
-    case 'dimension':
-    case 'region':
-      return sketchIds.has(target.sketchId)
-    case 'body':
-    case 'face':
-    case 'edge':
-    case 'vertex':
-    case 'loop':
-      return bodyIds.has(target.bodyId)
+    case "feature":
+      return featureIds.has(target.featureId);
+    case "sketch":
+    case "sketchEntity":
+    case "sketchPoint":
+    case "constraint":
+    case "dimension":
+    case "region":
+      return sketchIds.has(target.sketchId);
+    case "body":
+    case "face":
+    case "edge":
+    case "vertex":
+    case "loop":
+      return bodyIds.has(target.bodyId);
     default:
-      return true
+      return true;
   }
 }
 
-function isPrimitiveRef(value: Record<string, unknown>): value is Record<string, unknown> & DurableRef {
-  return typeof value.kind === 'string'
-    && (
-      ('featureId' in value && typeof value.featureId === 'string')
-      || ('sketchId' in value && typeof value.sketchId === 'string')
-      || ('bodyId' in value && typeof value.bodyId === 'string')
-      || ('constructionId' in value && typeof value.constructionId === 'string')
-    )
+function isPrimitiveRef(
+  value: Record<string, unknown>,
+): value is Record<string, unknown> & DurableRef {
+  return (
+    typeof value.kind === "string" &&
+    (("featureId" in value && typeof value.featureId === "string") ||
+      ("sketchId" in value && typeof value.sketchId === "string") ||
+      ("bodyId" in value && typeof value.bodyId === "string") ||
+      ("constructionId" in value && typeof value.constructionId === "string"))
+  );
 }
 
 function createMergeDiagnostic(
@@ -259,13 +327,13 @@ function createMergeDiagnostic(
 ): ModelingDiagnostic {
   return {
     code,
-    severity: 'error',
+    severity: "error",
     message,
     target,
     detail: null,
-  }
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+  return typeof value === "object" && value !== null;
 }
