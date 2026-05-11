@@ -22,13 +22,6 @@ test("src/contracts/modeling/document-variables.spec.ts", async () => {
         },
       ],
     },
-    variables: [
-      {
-        variableId: "variable_width" as const,
-        name: "width",
-        valueText: "10 + 2",
-      },
-    ],
   };
 
   const parsed = parseWorkspaceSnapshot(snapshot);

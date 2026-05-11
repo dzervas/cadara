@@ -1,125 +1,273 @@
-import { z } from "zod";
+import typia from "typia";
 
-import {
-  literalVersionSchema,
-  stringSchema,
-} from "@/contracts/shared/runtime-schema";
 import type { ImportBinding } from "@/contracts/import/binding";
 import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
 import type {
   ImportSource,
-  ImportSourceFingerprint,
   ResolvedImportSource,
 } from "@/contracts/import/source";
 import {
-  IMPORT_CONTRACT_SCHEMA_VERSION,
-  type ImportContractSchemaVersion,
-} from "@/contracts/shared/versioning";
+  ContractValidationError,
+  validateContract,
+  type ContractValidationIssue,
+  type ContractValidationResult,
+} from "@/contracts/shared/validation";
 
-const importContractSchemaVersionSchema =
-  literalVersionSchema<ImportContractSchemaVersion>(
-    IMPORT_CONTRACT_SCHEMA_VERSION,
-    "schemaVersion",
-    "Unsupported import contract schema version",
+const importSourceValidator = typia.createValidateEquals<ImportSource>();
+const resolvedImportSourceValidator =
+  typia.createValidateEquals<ResolvedImportSource>();
+const importBindingValidator = typia.createValidateEquals<ImportBinding>();
+const importDiagnosticValidator = typia.createValidateEquals<ImportDiagnostic>();
+
+function invariantIssue(
+  path: string,
+  expected: string,
+  value: unknown,
+  message: string,
+): ContractValidationIssue {
+  return { path, expected, value, message };
+}
+
+function isNonEmptyString(value: string) {
+  return value.trim().length > 0;
+}
+
+function validateNonEmptyString(
+  value: string | undefined,
+  path: string,
+  label: string,
+  optional = false,
+): ContractValidationIssue[] {
+  if (value === undefined && optional) {
+    return [];
+  }
+
+  return value !== undefined && isNonEmptyString(value)
+    ? []
+    : [
+        invariantIssue(
+          path,
+          "non-empty string",
+          value,
+          `${label} must be a non-empty string.`,
+        ),
+      ];
+}
+
+function validateImportUrl(url: string, path: string): ContractValidationIssue[] {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch (error) {
+    return [
+      invariantIssue(
+        path,
+        "http(s) URL",
+        url,
+        error instanceof Error && error.message.trim()
+          ? `Import URL is invalid: ${error.message}`
+          : "Import URL must be a valid http or https URL.",
+      ),
+    ];
+  }
+
+  if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+    return [];
+  }
+
+  return [
+    invariantIssue(
+      path,
+      "http(s) URL",
+      url,
+      "Import URL must be a valid http or https URL.",
+    ),
+  ];
+}
+
+function composeInvariantResult<T>(
+  result: ContractValidationResult<T>,
+  validateInvariants: (data: T) => ContractValidationIssue[],
+): ContractValidationResult<T> {
+  if (!result.success) {
+    return result;
+  }
+
+  const issues = validateInvariants(result.data);
+  return issues.length === 0
+    ? result
+    : { success: false, data: result.data, issues };
+}
+
+function requireWithInvariants<T>(
+  validator: (value: unknown) => ContractValidationResult<T>,
+  value: unknown,
+  label: string,
+): T {
+  const result = validator(value);
+  if (result.success) {
+    return result.data;
+  }
+
+  const firstIssue = result.issues[0];
+  throw new ContractValidationError(
+    firstIssue?.message ?? `${label} validation failed.`,
+    value,
+    result.issues,
   );
+}
 
-export const importSourceFingerprintSchema = z
-  .string()
-  .regex(
-    /^sha256:[a-f0-9]{64}$/,
-    "Import source fingerprint must be a sha256:<hex> content hash.",
-  )
-  .transform((value) => value as ImportSourceFingerprint);
+export function validateImportSourceInvariants(
+  source: ImportSource,
+  path = "source",
+): ContractValidationIssue[] {
+  switch (source.kind) {
+    case "localFile":
+      return [
+        ...validateNonEmptyString(source.fileName, `${path}.fileName`, "Local import file name"),
+        ...validateNonEmptyString(
+          source.pathHint,
+          `${path}.pathHint`,
+          "Local import path hint",
+          true,
+        ),
+      ];
+    case "url":
+      return validateImportUrl(source.url, `${path}.url`);
+    case "cloudObject":
+      return [
+        ...validateNonEmptyString(source.service, `${path}.service`, "Cloud import service"),
+        ...validateNonEmptyString(source.objectId, `${path}.objectId`, "Cloud import object id"),
+        ...validateNonEmptyString(
+          source.versionId,
+          `${path}.versionId`,
+          "Cloud import version id",
+          true,
+        ),
+      ];
+  }
+}
 
-const localFileImportSourceSchema = z
-  .object({
-    kind: z.literal("localFile"),
-    fileName: stringSchema.min(1),
-    pathHint: stringSchema.min(1).optional(),
-  })
-  .strict();
+export function validateResolvedImportSourceInvariants(
+  source: ResolvedImportSource,
+  path = "source",
+): ContractValidationIssue[] {
+  return [
+    ...validateNonEmptyString(source.name, `${path}.name`, "Resolved import source name"),
+    ...validateNonEmptyString(
+      source.mediaType ?? undefined,
+      `${path}.mediaType`,
+      "Resolved import source media type",
+      source.mediaType === null,
+    ),
+    ...validateImportSourceInvariants(source.origin, `${path}.origin`),
+  ];
+}
 
-const urlImportSourceSchema = z
-  .object({
-    kind: z.literal("url"),
-    url: z.string().url("Import source URL must be a valid absolute URL."),
-  })
-  .strict();
+export function validateImportBindingInvariants(
+  binding: ImportBinding,
+  path = "binding",
+): ContractValidationIssue[] {
+  switch (binding.kind) {
+    case "localFile":
+      return [
+        ...validateNonEmptyString(binding.fileName, `${path}.fileName`, "Local import binding file name"),
+        ...validateNonEmptyString(
+          binding.pathHint,
+          `${path}.pathHint`,
+          "Local import binding path hint",
+          true,
+        ),
+      ];
+    case "url":
+      return validateImportUrl(binding.url, `${path}.url`);
+    case "cloudObject":
+      return [
+        ...validateNonEmptyString(binding.service, `${path}.service`, "Cloud import binding service"),
+        ...validateNonEmptyString(binding.objectId, `${path}.objectId`, "Cloud import binding object id"),
+        ...validateNonEmptyString(
+          binding.versionId,
+          `${path}.versionId`,
+          "Cloud import binding version id",
+          true,
+        ),
+      ];
+  }
+}
 
-const cloudObjectImportSourceSchema = z
-  .object({
-    kind: z.literal("cloudObject"),
-    service: stringSchema.min(1),
-    objectId: stringSchema.min(1),
-    versionId: stringSchema.min(1).optional(),
-  })
-  .strict();
+export function validateImportDiagnosticInvariants(
+  diagnostic: ImportDiagnostic,
+  path = "diagnostic",
+): ContractValidationIssue[] {
+  return [
+    ...validateNonEmptyString(diagnostic.message, `${path}.message`, "Import diagnostic message"),
+    ...validateNonEmptyString(
+      diagnostic.code,
+      `${path}.code`,
+      "Import diagnostic code",
+      true,
+    ),
+  ];
+}
 
-export const importSourceSchema = z
-  .discriminatedUnion("kind", [
-    localFileImportSourceSchema,
-    urlImportSourceSchema,
-    cloudObjectImportSourceSchema,
-  ])
-  .transform((value) => value as ImportSource);
+export function validateImportSource(
+  value: unknown,
+): ContractValidationResult<ImportSource> {
+  return composeInvariantResult(
+    validateContract(importSourceValidator, value),
+    validateImportSourceInvariants,
+  );
+}
 
-export const resolvedImportSourceSchema = z
-  .object({
-    name: stringSchema.min(1),
-    origin: importSourceSchema,
-    mediaType: stringSchema.min(1).nullable(),
-    bytes: z.instanceof(Uint8Array),
-    fingerprint: importSourceFingerprintSchema,
-  })
-  .strict()
-  .transform((value) => value as ResolvedImportSource);
+export function requireImportSource(value: unknown): ImportSource {
+  return requireWithInvariants(validateImportSource, value, "Import source");
+}
 
-const importRefreshPolicySchema = z.literal("manual");
+export function validateResolvedImportSource(
+  value: unknown,
+): ContractValidationResult<ResolvedImportSource> {
+  return composeInvariantResult(
+    validateContract(resolvedImportSourceValidator, value),
+    validateResolvedImportSourceInvariants,
+  );
+}
 
-export const importBindingSchema = z
-  .discriminatedUnion("kind", [
-    z
-      .object({
-        schemaVersion: importContractSchemaVersionSchema,
-        kind: z.literal("localFile"),
-        fileName: stringSchema.min(1),
-        pathHint: stringSchema.min(1).optional(),
-        fingerprint: importSourceFingerprintSchema,
-        refreshPolicy: importRefreshPolicySchema,
-      })
-      .strict(),
-    z
-      .object({
-        schemaVersion: importContractSchemaVersionSchema,
-        kind: z.literal("url"),
-        url: z.string().url("Import binding URL must be a valid absolute URL."),
-        fingerprint: importSourceFingerprintSchema,
-        refreshPolicy: importRefreshPolicySchema,
-      })
-      .strict(),
-    z
-      .object({
-        schemaVersion: importContractSchemaVersionSchema,
-        kind: z.literal("cloudObject"),
-        service: stringSchema.min(1),
-        objectId: stringSchema.min(1),
-        versionId: stringSchema.min(1).optional(),
-        fingerprint: importSourceFingerprintSchema,
-        refreshPolicy: importRefreshPolicySchema,
-      })
-      .strict(),
-  ])
-  .transform((value) => value as ImportBinding);
+export function requireResolvedImportSource(
+  value: unknown,
+): ResolvedImportSource {
+  return requireWithInvariants(
+    validateResolvedImportSource,
+    value,
+    "Resolved import source",
+  );
+}
 
-export const importDiagnosticSchema = z
-  .object({
-    severity: z.union([
-      z.literal("info"),
-      z.literal("warning"),
-      z.literal("error"),
-    ]),
-    message: stringSchema.min(1),
-    code: stringSchema.min(1).optional(),
-  })
-  .strict()
-  .transform((value) => value as ImportDiagnostic);
+export function validateImportBinding(
+  value: unknown,
+): ContractValidationResult<ImportBinding> {
+  return composeInvariantResult(
+    validateContract(importBindingValidator, value),
+    validateImportBindingInvariants,
+  );
+}
+
+export function requireImportBinding(value: unknown): ImportBinding {
+  return requireWithInvariants(validateImportBinding, value, "Import binding");
+}
+
+export function validateImportDiagnostic(
+  value: unknown,
+): ContractValidationResult<ImportDiagnostic> {
+  return composeInvariantResult(
+    validateContract(importDiagnosticValidator, value),
+    validateImportDiagnosticInvariants,
+  );
+}
+
+export function requireImportDiagnostic(value: unknown): ImportDiagnostic {
+  return requireWithInvariants(
+    validateImportDiagnostic,
+    value,
+    "Import diagnostic",
+  );
+}

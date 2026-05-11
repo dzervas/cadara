@@ -1,11 +1,10 @@
 import { test } from "bun:test";
 import { expectTrue } from "@/testing/expect.spec";
-import { z } from "zod";
 
 import {
   appErrorFromModelingDiagnostic,
   appErrorFromModelingResult,
-  appErrorFromZodError,
+  appErrorFromValidationIssues,
   appErrorToModelingDiagnostic,
   createAppError,
   createConsoleErrorReporter,
@@ -68,20 +67,23 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     "Malformed marked objects should still be retained as causes.",
   );
 
-  const zodResult = z
-    .object({ width: z.number() })
-    .safeParse({ width: "wide" });
-  expectTrue(!zodResult.success, "Fixture should produce a zod error.");
-  const zodError = appErrorFromZodError(zodResult.error, {
+  const validationError = appErrorFromValidationIssues([
+    {
+      path: "width",
+      expected: "number",
+      value: "wide",
+      message: "width must be a number.",
+    },
+  ], {
     operation: "Parse dimensions",
   });
   expectTrue(
-    zodError.code === "app/validation-failed",
-    "Zod failures should get validation codes.",
+    validationError.code === "app/validation-failed",
+    "Validation failures should get validation codes.",
   );
   expectTrue(
-    zodError.message.length > 0,
-    "Zod failures should expose a human message.",
+    validationError.message.length > 0,
+    "Validation failures should expose a human message.",
   );
 
   const diagnosticError = appErrorFromModelingDiagnostic(

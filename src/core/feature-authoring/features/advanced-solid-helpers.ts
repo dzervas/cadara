@@ -68,7 +68,7 @@ export function validateAdvancedSolidDraft(input: {
         operationIntent: authoredDefinitionValue(
           input.operationIntent,
           "create",
-        ) as AdvancedSolidOperationIntent,
+        ),
         participants: input.participants,
         ...(Object.keys(input.options).length > 0
           ? { options: input.options }

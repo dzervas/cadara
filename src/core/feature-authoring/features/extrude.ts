@@ -4,7 +4,10 @@ import type {
   LinearExtentDirection,
   UpToOffsetDirection,
 } from "@/contracts/modeling/schema";
-import type { FeatureAuthoringDefinition } from "@/core/feature-authoring/definition";
+import type {
+  ExtrudeFeatureEndConditionDraft,
+  FeatureAuthoringDefinition,
+} from "@/core/feature-authoring/definition";
 import { getExtrudeFeatureExtent } from "@/contracts/modeling/feature-extents";
 import {
   getBooleanScopeBodyTargets,
@@ -35,14 +38,14 @@ import {
 } from "@/core/feature-authoring/features/shared";
 import type { FeatureEditorFormField } from "@/core/feature-authoring/form-schema";
 
-const DEFAULT_FIRST_END: ExtrudeEndCondition = {
+const DEFAULT_FIRST_END: ExtrudeFeatureEndConditionDraft = {
   kind: "blind",
   direction: "positive",
   distance: 5,
   draftAngle: 0,
 };
 
-const DEFAULT_SECOND_END: ExtrudeEndCondition = {
+const DEFAULT_SECOND_END: ExtrudeFeatureEndConditionDraft = {
   kind: "blind",
   direction: "negative",
   distance: 5,
@@ -78,7 +81,7 @@ function isOffsetDirection(value: unknown): value is UpToOffsetDirection {
 
 function ensureEndSupportsMode(
   mode: "oneSide" | "symmetric" | "twoSide",
-  end: ExtrudeEndCondition,
+  end: ExtrudeFeatureEndConditionDraft,
 ) {
   return mode === "symmetric" &&
     end.kind !== "blind" &&
@@ -108,10 +111,10 @@ function coerceTargetForEnd(kind: ExtrudeEndCondition["kind"], value: unknown) {
 }
 
 function patchEnd(
-  end: ExtrudeEndCondition,
+  end: ExtrudeFeatureEndConditionDraft,
   patch: Record<string, unknown>,
   prefix: "first" | "second",
-): ExtrudeEndCondition {
+): ExtrudeFeatureEndConditionDraft {
   const conditionKey =
     prefix === "first" ? "endCondition" : "secondEndCondition";
   const directionKey = prefix === "first" ? "direction" : "secondDirection";
@@ -211,7 +214,7 @@ function patchEnd(
   };
 }
 
-function endHasRequiredTarget(end: ExtrudeEndCondition) {
+function endHasRequiredTarget(end: ExtrudeFeatureEndConditionDraft) {
   if (end.kind === "upToFace") {
     return end.target.bodyId.length > 0 && end.target.faceId.length > 0;
   }
@@ -224,7 +227,7 @@ function endHasRequiredTarget(end: ExtrudeEndCondition) {
   return true;
 }
 
-function endHasValidScalars(end: ExtrudeEndCondition) {
+function endHasValidScalars(end: ExtrudeFeatureEndConditionDraft) {
   return (
     (end.kind !== "blind" || isPositiveAuthoredNumber(end.distance)) &&
     (!("draftAngle" in end) ||
@@ -236,7 +239,7 @@ function endHasValidScalars(end: ExtrudeEndCondition) {
   );
 }
 
-function definitionEnd(end: ExtrudeEndCondition): ExtrudeEndCondition {
+function definitionEnd(end: ExtrudeFeatureEndConditionDraft): ExtrudeEndCondition {
   switch (end.kind) {
     case "blind":
       return {
@@ -287,7 +290,7 @@ function endConditionLabel(kind: ExtrudeEndCondition["kind"]) {
 
 function endFields(
   prefix: "first" | "second",
-  end: ExtrudeEndCondition,
+  end: ExtrudeFeatureEndConditionDraft,
 ): FeatureEditorFormField[] {
   const idPrefix = prefix === "first" ? "extrude" : "extrude-second";
   const labelPrefix = prefix === "first" ? "" : "Second ";
@@ -680,10 +683,7 @@ export const extrudeAuthoringDefinition = {
             ],
             startExtent: { kind: "profilePlane" },
             extent,
-            operation: authoredDefinitionValue(
-              draft.operation,
-              operation,
-            ) as typeof operation,
+            operation: authoredDefinitionValue(draft.operation, operation),
             booleanScope: draft.booleanScope,
           },
         }

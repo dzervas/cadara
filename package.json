@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "author": "Dimitris Zervas <dzervas@dzervas.gr>",
   "license": "AGPL-3.0-or-later",
+  "type": "module",
   "files": [
     "dist",
     "README.md",
@@ -36,6 +37,7 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
     "@sentry/browser": "^10.51.0",
+    "@typia/unplugin": "^12.1.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "fflate": "^0.8.2",
@@ -47,7 +49,7 @@
     "react-hook-form": "^7.74.0",
     "tailwind-merge": "^3.5.0",
     "three": "^0.183.2",
-    "zod": "^4.3.6"
+    "typia": "^12.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

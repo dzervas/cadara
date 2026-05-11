@@ -1,4 +1,7 @@
+preload = ["./typia-preload.ts"]
+
 [test]
+preload = ["./typia-preload.ts"]
 coveragePathIgnorePatterns = [
   "**/*.spec.ts",
   "**/*.test.ts",

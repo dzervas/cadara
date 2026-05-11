@@ -10,9 +10,9 @@ import {
   createReorderFeatureHistoryEntry,
   createSetFeatureSuppressionHistoryEntry,
   createUpdateDocumentVariableHistoryEntry,
-  validateOperationHistoryPayload,
   type ModelingOperationHistoryPayload,
 } from "@/contracts/modeling/operation-history";
+import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import type {
   AddDocumentVariableRequest,
   CommitSketchRequest,
@@ -42,6 +42,7 @@ import {
 } from "@/contracts/modeling/advanced-solid";
 import {
   createExpressionAuthoredValue,
+  createLiteralAuthoredValue,
   getAuthoredLiteralValue,
   isExpressionAuthoredValue,
 } from "@/contracts/modeling/authored-values";
@@ -110,9 +111,13 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 10 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: createLiteralAuthoredValue(10),
+          },
         },
-        operation: "newBody",
+        operation: createLiteralAuthoredValue("newBody"),
         booleanScope: { kind: "standalone" },
       },
     },
@@ -905,16 +910,19 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
                 firstEnd: {
                   kind: "blind",
                   direction: "positive",
-                  distance: 10,
-                  draftAngle: 0.1,
+                  distance: createLiteralAuthoredValue(10),
+                  draftAngle: createLiteralAuthoredValue(0.1),
                 },
                 secondEnd: {
                   kind: "upToNext",
                   direction: "negative",
-                  offset: { distance: 0.5, direction: "shorten" },
+                  offset: {
+                    distance: createLiteralAuthoredValue(0.5),
+                    direction: "shorten",
+                  },
                 },
               },
-              operation: "newBody",
+              operation: createLiteralAuthoredValue("newBody"),
               booleanScope: { kind: "standalone" },
             },
           },
@@ -947,7 +955,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
                 mode: "symmetric",
                 end: { kind: "upToNext", direction: "positive" },
               },
-              operation: "newBody",
+              operation: createLiteralAuthoredValue("newBody"),
               booleanScope: { kind: "standalone" },
             },
           },
@@ -976,9 +984,9 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
                 },
               ],
               axis: { kind: "edge", bodyId: "body_axis", edgeId: "edge_axis" },
-              startAngle: 0,
+              startAngle: createLiteralAuthoredValue(0),
               extent: { mode: "symmetric", end: { kind: "full" } },
-              operation: "newBody",
+              operation: createLiteralAuthoredValue("newBody"),
               booleanScope: { kind: "standalone" },
             },
           },
@@ -996,7 +1004,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ...sweepAdvancedFeatureExample,
       parameters: {
         ...sweepAdvancedFeatureExample.parameters,
-        operationIntent: "subtract" as const,
+        operationIntent: createLiteralAuthoredValue("subtract"),
         participants: [
           ...sweepAdvancedFeatureExample.parameters.participants,
           {
@@ -1333,7 +1341,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
               ...combineAdvancedFeatureExample,
               parameters: {
                 ...combineAdvancedFeatureExample.parameters,
-                operationIntent: "intersect",
+                operationIntent: createLiteralAuthoredValue("intersect"),
                 participants: [
                   {
                     role: "targetBody",

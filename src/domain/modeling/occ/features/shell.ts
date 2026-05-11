@@ -1,4 +1,5 @@
 import type { ShellFeatureParameters } from "@/contracts/modeling/schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { OccReferenceInvalidationRecord } from "@/domain/modeling/occ/topology";
 import {
@@ -27,7 +28,8 @@ function buildShellFeatureShape(
   context: OccFeatureExecutionContext,
   parameters: ShellFeatureParameters,
 ) {
-  if (parameters.thickness <= 0) {
+  const resolvedThickness = getAuthoredLiteralValue(parameters.thickness);
+  if (resolvedThickness === null || resolvedThickness <= 0) {
     throw new Error("Shell thickness must be positive.");
   }
 
@@ -50,8 +52,8 @@ function buildShellFeatureShape(
 
   const signedThickness =
     parameters.direction === "outside"
-      ? parameters.thickness
-      : -parameters.thickness;
+      ? resolvedThickness
+      : -resolvedThickness;
   const shell = new context.oc.BRepOffsetAPI_MakeThickSolid();
   shell.MakeThickSolidByJoin(
     sourceBody.shape,
@@ -82,7 +84,8 @@ function buildNativeShellFeatureShape(
   context: OccFeatureExecutionContext,
   parameters: ShellFeatureParameters,
 ) {
-  if (parameters.thickness <= 0) {
+  const resolvedThickness = getAuthoredLiteralValue(parameters.thickness);
+  if (resolvedThickness === null || resolvedThickness <= 0) {
     throw new Error("Shell thickness must be positive.");
   }
 
@@ -112,8 +115,8 @@ function buildNativeShellFeatureShape(
 
   const signedThickness =
     parameters.direction === "outside"
-      ? parameters.thickness
-      : -parameters.thickness;
+      ? resolvedThickness
+      : -resolvedThickness;
   const transaction = builder(
     sourceBody.shape,
     serializeNativeFaceTargets(parameters.faceTargets),
@@ -140,14 +143,18 @@ export function executeShellFeature(
   ownerFeatureId: FeatureId,
   parameters: ShellFeatureParameters,
 ): OccFeatureExecutionResult {
-  if (parameters.operation !== "newBody") {
+  const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
+  if (!resolvedOperation) {
+    throw new Error("Shell operation must be a resolved literal value.");
+  }
+  if (resolvedOperation !== "newBody") {
     const shellResult =
       buildNativeShellFeatureShape(context, parameters) ??
       buildShellFeatureShape(context, parameters);
     const result = applyBooleanPolicy(
       context,
       ownerFeatureId,
-      parameters.operation,
+      resolvedOperation,
       parameters.booleanScope,
       shellResult.shape,
     );

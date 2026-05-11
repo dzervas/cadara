@@ -1,4 +1,4 @@
-import { z } from "zod";
+import typia from "typia";
 
 import type {
   SketchPlaneDefinition,
@@ -6,32 +6,50 @@ import type {
   SketchPlaneSupportRef,
 } from "@/contracts/shared/sketch-plane";
 import {
-  constructionRefSchema,
-  faceRefSchema,
-} from "@/contracts/shared/references.runtime-schema";
-import { point3dSchema } from "@/contracts/shared/runtime-schema";
+  requireContract,
+  validateContract,
+  type ContractValidationResult,
+} from "@/contracts/shared/validation";
 
-export const sketchPlaneFrameSchema = z
-  .object({
-    origin: point3dSchema,
-    xAxis: point3dSchema,
-    yAxis: point3dSchema,
-    normal: point3dSchema,
-    linearUnit: z.literal("documentLength"),
-    handedness: z.literal("rightHanded"),
-  })
-  .transform((value) => value as SketchPlaneFrame);
+const sketchPlaneFrameValidator =
+  typia.createValidateEquals<SketchPlaneFrame>();
+const sketchPlaneSupportRefValidator =
+  typia.createValidateEquals<SketchPlaneSupportRef>();
+const sketchPlaneDefinitionValidator =
+  typia.createValidateEquals<SketchPlaneDefinition>();
 
-export const sketchPlaneSupportRefSchema = z
-  .union([constructionRefSchema, faceRefSchema])
-  .transform((value) => value as SketchPlaneSupportRef);
+export function validateSketchPlaneFrame(
+  value: unknown,
+): ContractValidationResult<SketchPlaneFrame> {
+  return validateContract(sketchPlaneFrameValidator, value);
+}
 
-export const sketchPlaneDefinitionSchema = z
-  .object({
-    support: sketchPlaneSupportRefSchema,
-    frame: sketchPlaneFrameSchema,
-    key: z
-      .union([z.literal("xy"), z.literal("yz"), z.literal("xz")])
-      .nullable(),
-  })
-  .transform((value) => value as SketchPlaneDefinition);
+export function requireSketchPlaneFrame(value: unknown): SketchPlaneFrame {
+  return requireContract(
+    sketchPlaneFrameValidator,
+    value,
+    "Sketch plane frame",
+  );
+}
+
+export function validateSketchPlaneSupportRef(
+  value: unknown,
+): ContractValidationResult<SketchPlaneSupportRef> {
+  return validateContract(sketchPlaneSupportRefValidator, value);
+}
+
+export function validateSketchPlaneDefinition(
+  value: unknown,
+): ContractValidationResult<SketchPlaneDefinition> {
+  return validateContract(sketchPlaneDefinitionValidator, value);
+}
+
+export function requireSketchPlaneDefinition(
+  value: unknown,
+): SketchPlaneDefinition {
+  return requireContract(
+    sketchPlaneDefinitionValidator,
+    value,
+    "Sketch plane definition",
+  );
+}

@@ -4,15 +4,17 @@ import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition, SketchRecord } from "@/contracts/sketch/schema";
 import { SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 import {
-  sketchDefinitionSchema,
-  solvedSketchSnapshotSchema,
+  requireSketchDefinition,
+  requireSolvedSketchSnapshot,
+  validateSketchDefinition,
+  validateSolvedSketchSnapshot,
 } from "@/contracts/sketch/runtime-schema";
 import {
   solveSketchDefinitionCore,
   validateSketchDefinitionCore,
 } from "@/contracts/sketch/solver-core";
 import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
-import { validateOperationHistoryPayload } from "@/contracts/modeling/operation-history";
+import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import {
   CONTRACT_VERSION,
   OPERATION_HISTORY_SCHEMA_VERSION,
@@ -175,13 +177,13 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     styles: [],
   };
 
-  const parsed = sketchDefinitionSchema.safeParse(definition);
+  const parsed = validateSketchDefinition(definition);
   expectTrue(
     parsed.success,
     "Runtime schema should accept advanced sketch entity payloads.",
   );
 
-  const invalid = sketchDefinitionSchema.safeParse({
+  const invalid = validateSketchDefinition({
     ...definition,
     entities: [
       {
@@ -194,6 +196,58 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     !invalid.success,
     "Runtime schema should reject invalid advanced entity payloads.",
   );
+
+  const invalidCircle = validateSketchDefinition({
+    ...definition,
+    entities: [
+      {
+        kind: "circle",
+        entityId: "sketch_entity_ellipse",
+        label: "Circle",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: "sketch_entity_ellipse",
+        },
+        isConstruction: false,
+        centerPointId: "sketch_point_center",
+        radius: 0,
+      },
+    ],
+  });
+  expectTrue(
+    !invalidCircle.success,
+    "Runtime schema should reject circle entities with non-positive radius.",
+  );
+  try {
+    requireSketchDefinition({
+      ...definition,
+      entities: [
+        {
+          kind: "circle",
+          entityId: "sketch_entity_ellipse",
+          label: "Circle",
+          target: {
+            kind: "sketchEntity",
+            sketchId,
+            entityId: "sketch_entity_ellipse",
+          },
+          isConstruction: false,
+          centerPointId: "sketch_point_center",
+          radius: 0,
+        },
+      ],
+    });
+    expectTrue(
+      false,
+      "Required sketch definition validation should reject non-positive circle radius.",
+    );
+  } catch (error) {
+    expectTrue(
+      error instanceof Error,
+      "Required sketch definition validation should throw for non-positive circle radius.",
+    );
+  }
 
   const validation = validateSketchDefinitionCore({ definition, tolerances });
   expectTrue(
@@ -230,9 +284,46 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     "Solved snapshot should preserve profile text geometry.",
   );
   expectTrue(
-    solvedSketchSnapshotSchema.safeParse(solved.solvedSnapshot).success,
+    validateSolvedSketchSnapshot(solved.solvedSnapshot).success,
     "Solved snapshot runtime schema should validate advanced entities.",
   );
+  const invalidSolvedCircle = validateSolvedSketchSnapshot({
+    ...solved.solvedSnapshot,
+    solvedEntities: [
+      {
+        entityId: "sketch_entity_circle",
+        kind: "circle",
+        centerPosition: [0, 0],
+        solvedRadius: 0,
+      },
+    ],
+  });
+  expectTrue(
+    !invalidSolvedCircle.success,
+    "Solved snapshot runtime schema should reject non-positive solved circle radius.",
+  );
+  try {
+    requireSolvedSketchSnapshot({
+      ...solved.solvedSnapshot,
+      solvedEntities: [
+        {
+          entityId: "sketch_entity_circle",
+          kind: "circle",
+          centerPosition: [0, 0],
+          solvedRadius: 0,
+        },
+      ],
+    });
+    expectTrue(
+      false,
+      "Required solved snapshot validation should reject non-positive solved circle radius.",
+    );
+  } catch (error) {
+    expectTrue(
+      error instanceof Error,
+      "Required solved snapshot validation should throw for non-positive solved circle radius.",
+    );
+  }
 
   const unsupportedConstraintValidation = validateSketchDefinitionCore({
     definition: {
@@ -344,8 +435,6 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
           sketchId,
           sketchLabel: "Advanced",
           plane,
-          planeTarget: plane.support,
-          planeKey: plane.key,
           definition,
         },
       },

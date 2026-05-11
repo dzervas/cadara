@@ -3,7 +3,6 @@ import {
   SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   type AdvancedFeatureValidationDiagnostic,
   type AdvancedParticipantRole,
-  type AdvancedSolidOperationIntent,
   type SweepAdvancedOptions,
   type SweepProfileControl,
 } from "@/contracts/modeling/advanced-solid";
@@ -554,7 +553,7 @@ export const sweepAuthoringDefinition = {
             operationIntent: authoredDefinitionValue(
               draft.operationIntent,
               "create",
-            ) as AdvancedSolidOperationIntent,
+            ),
             participants: buildSweepParticipants(draft),
             options: buildSweepOptions(draft),
           },

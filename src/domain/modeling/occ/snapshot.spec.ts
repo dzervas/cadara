@@ -127,8 +127,6 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       sketchId,
       label: sketchId,
       plane,
-      planeTarget: plane.support,
-      planeKey: plane.key,
       sketch,
     };
   }
@@ -472,9 +470,13 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 6 },
+              end: {
+                kind: "blind",
+                direction: "positive",
+                distance: { source: "literal", value: 6 },
+              },
             },
-            operation: "newBody",
+            operation: { source: "literal", value: "newBody" },
             booleanScope: { kind: "standalone" },
           },
         },
@@ -649,9 +651,13 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
               startExtent: { kind: "profilePlane" },
               extent: {
                 mode: "oneSide",
-                end: { kind: "blind", direction: "positive", distance: 5 },
+                end: {
+                  kind: "blind",
+                  direction: "positive",
+                  distance: { source: "literal", value: 5 },
+                },
               },
-              operation: "newBody",
+              operation: { source: "literal", value: "newBody" },
               booleanScope: { kind: "standalone" },
             },
           },
@@ -718,9 +724,13 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
               startExtent: { kind: "profilePlane" },
               extent: {
                 mode: "oneSide",
-                end: { kind: "blind", direction: "positive", distance: 4 },
+                end: {
+                  kind: "blind",
+                  direction: "positive",
+                  distance: { source: "literal", value: 4 },
+                },
               },
-              operation: "newBody",
+              operation: { source: "literal", value: "newBody" },
               booleanScope: { kind: "standalone" },
             },
           },
@@ -776,9 +786,13 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 6 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: { source: "literal", value: 6 },
+          },
         },
-        operation: "newBody",
+        operation: { source: "literal", value: "newBody" },
         booleanScope: { kind: "standalone" },
       },
     };
@@ -809,8 +823,8 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         faceTargets: [
           { kind: "face", bodyId: extrudeBody.bodyId, faceId: removableFaceId },
         ],
-        thickness: 1,
-        operation: "newBody",
+        thickness: { source: "literal", value: 1 },
+        operation: { source: "literal", value: "newBody" },
         booleanScope: { kind: "standalone" },
       },
     };
@@ -1168,9 +1182,13 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 8 },
+              end: {
+                kind: "blind",
+                direction: "positive",
+                distance: { source: "literal", value: 8 },
+              },
             },
-            operation: "join",
+            operation: { source: "literal", value: "join" },
             booleanScope: { kind: "targetBody", bodyId: baseBody.bodyId },
           },
         },
@@ -1229,10 +1247,10 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         featureId: "feature_phase6_fillet" as FeatureId,
         suppressed: false,
         definition: {
-          kind: "fillet",
-          featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
-          parameters: {
-            radius: 0.5,
+        kind: "fillet",
+        featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
+        parameters: {
+            radius: { source: "literal", value: 0.5 },
             edgeTargets: [
               {
                 kind: "edge",

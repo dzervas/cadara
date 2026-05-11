@@ -1,7 +1,10 @@
 import { test } from "bun:test";
 
 import { expectTrue } from "@/testing/expect.spec";
-import { featureDefinitionSchema } from "@/contracts/modeling/runtime-schema";
+import {
+  requireFeatureDefinition,
+  validateFeatureDefinition,
+} from "@/contracts/modeling/runtime-schema";
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import {
   getAuthoredLiteralValue,
@@ -24,14 +27,18 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       startExtent: { kind: "profilePlane" },
       extent: {
         mode: "oneSide",
-        end: { kind: "blind", direction: "positive", distance: 12 },
+        end: {
+          kind: "blind",
+          direction: "positive",
+          distance: { source: "literal", value: 12 },
+        },
       },
-      operation: "newBody",
+      operation: { source: "literal", value: "newBody" },
       booleanScope: { kind: "standalone" },
     },
   };
 
-  const parsedExtrude = featureDefinitionSchema.parse(baseExtrude);
+  const parsedExtrude = requireFeatureDefinition(baseExtrude);
   expectTrue(
     parsedExtrude.kind === "extrude" &&
       getAuthoredLiteralValue(
@@ -42,7 +49,26 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
     "Runtime validation should preserve literal authored wrappers on canonical extrude extents.",
   );
 
-  const expression = featureDefinitionSchema.parse({
+  const rawLiteral = validateFeatureDefinition({
+    ...baseExtrude,
+    parameters: {
+      ...baseExtrude.parameters,
+      extent: {
+        mode: "oneSide",
+        end: {
+          kind: "blind",
+          direction: "positive",
+          distance: 12,
+        },
+      },
+    },
+  });
+  expectTrue(
+    !rawLiteral.success,
+    "Runtime validation should reject legacy raw literals on authored-value fields.",
+  );
+
+  const expression = requireFeatureDefinition({
     ...baseExtrude,
     parameters: {
       ...baseExtrude.parameters,
@@ -64,7 +90,26 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
     "Runtime validation should accept expression-authored wrappers on expression-capable fields.",
   );
 
-  const invalidLiteral = featureDefinitionSchema.safeParse({
+  const blankExpression = validateFeatureDefinition({
+    ...baseExtrude,
+    parameters: {
+      ...baseExtrude.parameters,
+      extent: {
+        mode: "oneSide",
+        end: {
+          kind: "blind",
+          direction: "positive",
+          distance: { source: "expression", valueText: "   " },
+        },
+      },
+    },
+  });
+  expectTrue(
+    !blankExpression.success,
+    "Runtime validation should reject expression-authored wrappers without usable expression text.",
+  );
+
+  const invalidLiteral = validateFeatureDefinition({
     ...baseExtrude,
     parameters: {
       ...baseExtrude.parameters,
@@ -83,7 +128,7 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
     "Runtime validation should reject literal wrappers with the wrong value type.",
   );
 
-  const referenceExpression = featureDefinitionSchema.safeParse({
+  const referenceExpression = validateFeatureDefinition({
     ...baseExtrude,
     parameters: {
       ...baseExtrude.parameters,
@@ -95,11 +140,11 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
     "Runtime validation should reject expression wrappers on reference fields.",
   );
 
-  const advancedOptionExpression = featureDefinitionSchema.parse({
+  const advancedOptionExpression = requireFeatureDefinition({
     kind: "loft",
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
-      operationIntent: "create",
+      operationIntent: { source: "literal", value: "create" },
       participants: [
         {
           role: "profile",
@@ -129,11 +174,11 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
     "Runtime validation should preserve expression-authored positive integer advanced options.",
   );
 
-  const sweepAdvancedOptions = featureDefinitionSchema.parse({
+  const sweepAdvancedOptions = requireFeatureDefinition({
     kind: "sweep",
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
-      operationIntent: "create",
+      operationIntent: { source: "literal", value: "create" },
       participants: [
         {
           role: "profile",
@@ -147,7 +192,10 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
         },
       ],
       options: {
-        profileControl: "lockProfileDirection",
+        profileControl: {
+          source: "literal",
+          value: "lockProfileDirection",
+        },
         twist: { type: "turns", turns: { source: "literal", value: 1.5 } },
         endScale: { source: "literal", value: 1.25 },
       },
@@ -163,11 +211,11 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
     "Runtime validation should preserve only the active sweep twist variant.",
   );
 
-  const advancedReferenceExpression = featureDefinitionSchema.safeParse({
+  const advancedReferenceExpression = validateFeatureDefinition({
     kind: "loft",
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
-      operationIntent: "create",
+      operationIntent: { source: "literal", value: "create" },
       participants: [
         {
           role: "profile",

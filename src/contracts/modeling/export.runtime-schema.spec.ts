@@ -2,7 +2,7 @@ import { test } from "bun:test";
 
 import { expectTrue } from "@/testing/expect.spec";
 import {
-  documentExportRequestSchema,
+  requireDocumentExportRequest,
   getDefaultCadaraExportOptions,
 } from "@/contracts/modeling/export.runtime-schema";
 import { stlExportProvider } from "@/domain/export/providers/stl-export-provider";
@@ -41,7 +41,7 @@ test("src/contracts/modeling/export.runtime-schema.spec.ts", () => {
     "cadara export should default to readable JSON.",
   );
 
-  const parsedStep = documentExportRequestSchema.parse({
+  const parsedStep = requireDocumentExportRequest({
     contractVersion: "modeling-contract/v1alpha1",
     documentId: "doc_workspace",
     baseRevisionId: "rev_0001",

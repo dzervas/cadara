@@ -12,6 +12,7 @@ import type {
   OccWorkerRequest,
   OccWorkerResponse,
 } from "@/domain/modeling/occ/worker-protocol";
+import { normalizeOccWorkerFailure } from "@/domain/modeling/occ/worker-protocol";
 
 class FakeOccWorker implements OccWorkerLike {
   private listener: ((event: MessageEvent<OccWorkerResponse>) => void) | null =
@@ -56,6 +57,10 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     expectTrue(
       request?.kind === "invoke",
       "Warmup should post an invoke request to the OCC worker.",
+    );
+    expectTrue(
+      request.requestId.startsWith("request_occ_warmup_"),
+      "Worker request ids should satisfy the shared RequestId contract.",
     );
     expectTrue(
       request.operation.kind === "warmup",
@@ -215,8 +220,21 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     await promise;
   }
 
+  function testWorkerFailureNormalizerPreservesValidationMessages() {
+    const failure = normalizeOccWorkerFailure(
+      "request_occ_worker_invalid",
+      "requestId must be a RequestId.",
+    );
+
+    expectTrue(
+      failure.error.message === "requestId must be a RequestId.",
+      "OCC worker failure normalization should preserve validation strings.",
+    );
+  }
+
   await testWarmupInvokesWorkerOperation();
   await testSnapshotResponsesAreUnpacked();
   await testWarmupFailuresSurfaceToCaller();
   await testExportCapabilitiesCreateCloneSafeWorkerRequests();
+  testWorkerFailureNormalizerPreservesValidationMessages();
 });

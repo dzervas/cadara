@@ -328,7 +328,6 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
       },
       featureTree: [],
       objects: [],
-      documentHistory: [],
       features,
       cursor: { kind: "empty" as const },
       sketches,
@@ -345,27 +344,6 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     };
 
     return {
-      contractVersion: CONTRACT_VERSION,
-      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      documentId: "doc_workspace",
-      revisionId,
-      settings: document.settings,
-      capabilities: document.capabilities,
-      featureTree: [],
-      objects: [],
-      features,
-      cursor: { kind: "empty" },
-      sketches,
-      bodies: [],
-      constructions: [],
-      variables: [],
-      entities: [],
-      references: [],
-      diagnostics: [],
-      render: {
-        schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
-        records: [],
-      },
       document,
       presentation: {
         featureTree: [],
@@ -373,6 +351,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
         documentHistory: [],
         entities: [],
       },
+      provenance: null,
     };
   }
 

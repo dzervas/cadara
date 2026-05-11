@@ -4,10 +4,8 @@ import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
 } from "@/contracts/modeling/authored-document";
-import {
-  validateOperationHistoryPayload,
-  type ModelingOperationHistoryPayload,
-} from "@/contracts/modeling/operation-history";
+import type { ModelingOperationHistoryPayload } from "@/contracts/modeling/operation-history";
+import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import type {
   WorkspaceSnapshot,
   ModelingDiagnostic,

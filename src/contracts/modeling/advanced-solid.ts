@@ -1,9 +1,11 @@
 import type { BodyId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import {
+  createLiteralAuthoredValue,
   getAuthoredLiteralValue,
   isExpressionAuthoredValue,
   validateFeatureValueKind,
+  type AuthoredValue,
   type FeatureValueKindDescriptor,
   type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
@@ -129,7 +131,7 @@ export interface AdvancedParticipantValue {
 
 export interface AdvancedSolidFeatureParameters {
   participants: readonly AdvancedParticipantValue[];
-  operationIntent?: AdvancedSolidOperationIntent;
+  operationIntent?: AuthoredValue<AdvancedSolidOperationIntent>;
   options?: Record<string, unknown>;
 }
 
@@ -844,7 +846,7 @@ export const sweepAdvancedFeatureExample = {
   kind: "sweep",
   featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   parameters: {
-    operationIntent: "create",
+    operationIntent: createLiteralAuthoredValue("create"),
     participants: [
       {
         role: "profile",
@@ -868,7 +870,7 @@ export const loftAdvancedFeatureExample = {
   kind: "loft",
   featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   parameters: {
-    operationIntent: "create",
+    operationIntent: createLiteralAuthoredValue("create"),
     participants: [
       {
         role: "profile",
@@ -931,7 +933,7 @@ export const thickenAdvancedFeatureExample = {
   kind: "thicken",
   featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   parameters: {
-    operationIntent: "create",
+    operationIntent: createLiteralAuthoredValue("create"),
     participants: [
       {
         role: "face",
@@ -963,7 +965,7 @@ export const combineAdvancedFeatureExample = {
   kind: "combine",
   featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   parameters: {
-    operationIntent: "subtract",
+    operationIntent: createLiteralAuthoredValue("subtract"),
     participants: [
       {
         role: "targetBody",

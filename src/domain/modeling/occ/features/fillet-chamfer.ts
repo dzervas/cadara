@@ -1,4 +1,5 @@
 import type { FilletFeatureParameters } from "@/contracts/modeling/schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -105,7 +106,8 @@ export function executeFilletFeature(
   ownerFeatureId: FeatureId,
   parameters: FilletFeatureParameters,
 ): OccFeatureExecutionResult {
-  if (parameters.radius <= 0) {
+  const resolvedRadius = getAuthoredLiteralValue(parameters.radius);
+  if (resolvedRadius === null || resolvedRadius <= 0) {
     throw new Error("Fillet radius must be positive.");
   }
 
@@ -137,7 +139,7 @@ export function executeFilletFeature(
         context,
         body,
         targets,
-        parameters.radius,
+        resolvedRadius,
         ownerFeatureId,
       ) ??
       (() => {
@@ -147,7 +149,7 @@ export function executeFilletFeature(
         );
 
         for (const target of targets) {
-          fillet.Add_2(parameters.radius, requireEdge(body, target.edgeId));
+          fillet.Add_2(resolvedRadius, requireEdge(body, target.edgeId));
         }
 
         fillet.Build(new context.oc.Message_ProgressRange_1());
@@ -269,7 +271,7 @@ export function executeChamferFeature(
 ): OccFeatureExecutionResult {
   if (
     definition.parameters.operationIntent !== undefined &&
-    definition.parameters.operationIntent !== "create"
+    getAuthoredLiteralValue(definition.parameters.operationIntent) !== "create"
   ) {
     throw new Error(
       "advanced-feature-unsupported-kernel-case: OCC chamfer does not support boolean operation intents.",

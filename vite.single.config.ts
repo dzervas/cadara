@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import UnpluginTypia from "@typia/unplugin/vite";
 import { defineConfig, type Plugin } from "vite";
 
 import { createBuildMetadataPlugin } from "./build-metadata";
@@ -156,8 +157,14 @@ function cadaraSingleHtmlPlugin(): Plugin {
 
 export default defineConfig({
   publicDir: false,
+  worker: {
+    plugins: () => [
+      UnpluginTypia({ tsconfig: path.resolve(rootDir, "tsconfig.app.json") }),
+    ],
+  },
   plugins: [
     createBuildMetadataPlugin(rootDir),
+    UnpluginTypia({ tsconfig: path.resolve(rootDir, "tsconfig.app.json") }),
     react(),
     tailwindcss(),
     cadaraSingleHtmlPlugin(),

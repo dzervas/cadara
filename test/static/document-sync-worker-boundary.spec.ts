@@ -8,7 +8,6 @@ test("test/static/document-sync-worker-boundary.spec.ts", () => {
     join(process.cwd(), "src/domain/modeling/modeling-service.ts"),
     "utf8",
   );
-  const appSource = readFileSync(join(process.cwd(), "src/App.tsx"), "utf8");
   const workerSource = readFileSync(
     join(process.cwd(), "src/infrastructure/workers/document-sync.worker.ts"),
     "utf8",

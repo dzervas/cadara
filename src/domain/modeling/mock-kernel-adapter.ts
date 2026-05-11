@@ -61,7 +61,7 @@ import type {
 import type { DocumentExportDiagnostic as ExportDiagnostic } from "@/contracts/modeling/export";
 import { buildSketchVectorExportModelFromSnapshot } from "@/domain/export/sketch-vector-export-model";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
-import { modelingDocumentRequestEnvelopeSchema } from "@/contracts/modeling/runtime-schema";
+import { validateModelingDocumentRequestEnvelope } from "@/contracts/modeling/runtime-schema";
 import type {
   CommitSketchRequest,
   CommitSketchResponse,
@@ -98,6 +98,7 @@ import type {
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
 } from "@/contracts/modeling/schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument as RepositoryAuthoredModelDocument,
@@ -331,10 +332,10 @@ function assertSupportedModelingRequest(request: {
   contractVersion: string;
   documentId: string;
 }) {
-  const parsed = modelingDocumentRequestEnvelopeSchema.safeParse(request);
+  const parsed = validateModelingDocumentRequestEnvelope(request);
   if (!parsed.success) {
     throw new Error(
-      parsed.error.issues[0]?.message ?? "Invalid modeling request envelope.",
+      parsed.issues[0]?.message ?? "Invalid modeling request envelope.",
     );
   }
 
@@ -429,8 +430,28 @@ function normalizeSketchDefinitionForSketchId(
         }
       : undefined;
 
+  const authoringOperations = definition.authoringOperations?.map(
+    (operation) => {
+      const { createdGraph, removedGraph, ...rest } = operation;
+      const normalizedCreatedGraph = normalizeOperationGraph(createdGraph);
+      const normalizedRemovedGraph = normalizeOperationGraph(removedGraph);
+
+      return {
+        ...rest,
+        ...(normalizedCreatedGraph
+          ? { createdGraph: normalizedCreatedGraph }
+          : {}),
+        ...(normalizedRemovedGraph
+          ? { removedGraph: normalizedRemovedGraph }
+          : {}),
+      };
+    },
+  );
+  const definitionWithoutOps = { ...definition };
+  delete definitionWithoutOps.authoringOperations;
+
   return {
-    ...definition,
+    ...definitionWithoutOps,
     points: definition.points.map((point) => ({
       ...point,
       target: {
@@ -445,21 +466,7 @@ function normalizeSketchDefinitionForSketchId(
         sketchId,
       },
     })),
-    authoringOperations: definition.authoringOperations?.map((operation) => {
-      const { createdGraph, removedGraph, ...rest } = operation;
-      const normalizedCreatedGraph = normalizeOperationGraph(createdGraph);
-      const normalizedRemovedGraph = normalizeOperationGraph(removedGraph);
-
-      return {
-        ...rest,
-        ...(normalizedCreatedGraph
-          ? { createdGraph: normalizedCreatedGraph }
-          : {}),
-        ...(normalizedRemovedGraph
-          ? { removedGraph: normalizedRemovedGraph }
-          : {}),
-      };
-    }),
+    ...(authoringOperations ? { authoringOperations } : {}),
   };
 }
 
@@ -1054,7 +1061,9 @@ function validateFeatureDefinitionAgainstSnapshot(
       const extent = getExtrudeFeatureExtent(definition.parameters);
       const firstEnd = extent.mode === "twoSide" ? extent.firstEnd : extent.end;
       const distance =
-        firstEnd.kind === "blind" ? (firstEnd.distance as number) : 1;
+        firstEnd.kind === "blind"
+          ? (getAuthoredLiteralValue(firstEnd.distance) ?? 1)
+          : 1;
       const firstProfile = definition.parameters.profiles[0];
 
       if (distance <= 0) {
@@ -1123,9 +1132,10 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       return { accepted: true as const, diagnostics: [] };
     }
-    case "fillet":
+    case "fillet": {
+      const resolvedFilletRadius = getAuthoredLiteralValue(definition.parameters.radius);
       if (
-        definition.parameters.radius <= 0 ||
+        resolvedFilletRadius === null || resolvedFilletRadius <= 0 ||
         definition.parameters.edgeTargets.length === 0
       ) {
         return {
@@ -1164,6 +1174,7 @@ function validateFeatureDefinitionAgainstSnapshot(
       }
 
       return { accepted: true as const, diagnostics: [] };
+    }
     case "plane":
       if (
         (definition.parameters.reference.target.kind === "construction" &&
@@ -1340,7 +1351,8 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       if (
         definition.parameters.operationIntent !== undefined &&
-        definition.parameters.operationIntent !== "create"
+        getAuthoredLiteralValue(definition.parameters.operationIntent) !==
+          "create"
       ) {
         if (
           targetBodyTargets.length === 0 ||
@@ -1532,7 +1544,8 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       if (
         definition.parameters.operationIntent !== undefined &&
-        definition.parameters.operationIntent !== "create"
+        getAuthoredLiteralValue(definition.parameters.operationIntent) !==
+          "create"
       ) {
         if (
           targetBodyTargets.length === 0 ||
@@ -1623,7 +1636,8 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       if (
         definition.parameters.operationIntent !== undefined &&
-        definition.parameters.operationIntent !== "create"
+        getAuthoredLiteralValue(definition.parameters.operationIntent) !==
+          "create"
       ) {
         return {
           accepted: false as const,
@@ -1714,7 +1728,8 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       if (
         definition.parameters.operationIntent !== undefined &&
-        definition.parameters.operationIntent !== "create"
+        getAuthoredLiteralValue(definition.parameters.operationIntent) !==
+          "create"
       ) {
         if (
           targetBodyTargets.length === 0 ||
@@ -1751,7 +1766,9 @@ function validateFeatureDefinitionAgainstSnapshot(
         getAdvancedParticipant(definition, "targetBody")?.targets ?? [];
       const toolBodyTargets =
         getAdvancedParticipant(definition, "toolBody")?.targets ?? [];
-      const intent = definition.parameters.operationIntent;
+      const intent = getAuthoredLiteralValue(
+        definition.parameters.operationIntent,
+      );
 
       if (intent !== "add" && intent !== "subtract" && intent !== "intersect") {
         return {
@@ -2974,10 +2991,10 @@ async function buildSnapshot(
             end: {
               kind: "blind",
               direction: "positive",
-              distance: 12,
+              distance: { source: "literal", value: 12 },
             },
           },
-          operation: "newBody",
+          operation: { source: "literal", value: "newBody" },
           booleanScope: {
             kind: "standalone",
           },
@@ -3002,7 +3019,7 @@ async function buildSnapshot(
         kind: "fillet",
         featureTypeVersion: "feature-type/fillet/v1alpha1",
         parameters: {
-          radius: 1.5,
+          radius: { source: "literal", value: 1.5 },
           edgeTargets: [
             { kind: "edge", bodyId: "body_part-1", edgeId: "edge_outer-0" },
           ],
@@ -3711,7 +3728,7 @@ function applyMockCombineSnapshotMutation(
   const toolBodyIdSet = new Set(toolBodyIds);
   const operation =
     definition.kind === "combine"
-      ? definition.parameters.operationIntent
+      ? getAuthoredLiteralValue(definition.parameters.operationIntent)
       : null;
 
   snapshot.document.bodies = snapshot.document.bodies

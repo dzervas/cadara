@@ -11,6 +11,7 @@ import { createMemoryDocumentRepository } from "@/domain/modeling/memory-documen
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { AppResultAsync } from "@/contracts/errors";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
@@ -217,9 +218,9 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
       restoredExtrude?.definition.kind === "extrude" &&
         restoredExtrude.definition.parameters.extent.mode === "oneSide" &&
         restoredExtrude.definition.parameters.extent.end.kind === "blind" &&
-        JSON.stringify(
+        getAuthoredLiteralValue(
           restoredExtrude.definition.parameters.extent.end.distance,
-        ) === JSON.stringify(initialDistance),
+        ) === getAuthoredLiteralValue(initialDistance),
       "Immediate undo after an extrude update should restore the prior extrude extent distance.",
     );
   }

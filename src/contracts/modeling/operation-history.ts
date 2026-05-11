@@ -19,7 +19,6 @@ import {
   type ContractVersion,
   type OperationHistorySchemaVersion,
 } from "@/contracts/shared/versioning";
-import { parseOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import { normalizeFeatureDefinitionAuthoredValues } from "@/contracts/modeling/feature-authored-values";
 
 export type PersistedCommitSketchPayload = Omit<
@@ -199,9 +198,16 @@ function normalizeCommitSketchDefinitionForSketchId(
   const compactAuthoringOperations = definition.authoringOperations
     ?.filter(shouldPersistCompactAuthoringOperation)
     .map(normalizeAuthoringOperation);
+  const authoringOperations = includeAuthoringOperations
+    ? definition.authoringOperations?.map(normalizeAuthoringOperation)
+    : compactAuthoringOperations && compactAuthoringOperations.length > 0
+      ? compactAuthoringOperations
+      : undefined;
+  const definitionWithoutOps = { ...definition };
+  delete definitionWithoutOps.authoringOperations;
 
   return {
-    ...definition,
+    ...definitionWithoutOps,
     points: definition.points.map((point) => ({
       ...point,
       target: {
@@ -216,11 +222,7 @@ function normalizeCommitSketchDefinitionForSketchId(
         sketchId,
       },
     })),
-    authoringOperations: includeAuthoringOperations
-      ? definition.authoringOperations?.map(normalizeAuthoringOperation)
-      : compactAuthoringOperations && compactAuthoringOperations.length > 0
-        ? compactAuthoringOperations
-        : undefined,
+    ...(authoringOperations ? { authoringOperations } : {}),
   };
 }
 
@@ -375,10 +377,4 @@ export function createUpdateDocumentVariableHistoryEntry(
       valueText: payload.valueText,
     },
   };
-}
-
-export function validateOperationHistoryPayload(
-  value: unknown,
-): OperationHistoryValidationResult {
-  return parseOperationHistoryPayload(value);
 }
