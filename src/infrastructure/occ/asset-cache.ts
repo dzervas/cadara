@@ -1,3 +1,4 @@
+// TODO: Use the wasm package hash instead or derive the version from package.json
 const OPENCASCADE_PACKAGE_VERSION = "2.0.0-beta.b5ff984";
 
 export const OCC_ASSET_CACHE_NAME = `cadara-occ-assets-opencascade-${OPENCASCADE_PACKAGE_VERSION}`;
@@ -17,6 +18,7 @@ export function isOpenCascadeAssetUrl(value: string) {
   } catch {
     pathname = value;
   }
+  console.log(pathname);
 
   return /cadara-occ\.(?:js|wasm)$/.test(pathname);
 }

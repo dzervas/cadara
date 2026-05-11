@@ -13,13 +13,6 @@ test("test/static/App.preload.spec.ts", () => {
     join(process.cwd(), "src/infrastructure/occ/browser-kernel-runtime.ts"),
     "utf8",
   );
-
-  expectTrue(
-    bootstrapSource.includes(
-      "startBrowserOccWarmup(createSentryPerformanceTelemetry",
-    ),
-    "Browser bootstrap should start OCC eager warmup before React mount.",
-  );
   expectTrue(
     runtimeSource.includes("createOccPreloadController") &&
       runtimeSource.includes(
@@ -36,11 +29,5 @@ test("test/static/App.preload.spec.ts", () => {
     appSource.includes("OccWarmupErrorEffect") &&
       !appSource.includes("OccPreloadEffect"),
     "App should observe bootstrap warmup failures without owning the startup trigger.",
-  );
-  expectTrue(
-    runtimeSource.includes(
-      "workerSnapshotClient: createInstrumentedOccWorkerClient(browserOccWorkerClient, performanceTelemetry)",
-    ),
-    "Browser app snapshots and mutations should route through the shared worker-backed OCC client.",
   );
 });

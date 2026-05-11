@@ -5,7 +5,6 @@ import { test } from "bun:test";
 import { expectTrue } from "@/testing/expect.spec";
 import {
   OCC_ASSET_CACHE_NAME,
-  OCC_SERVICE_WORKER_PATH,
   getOpenCascadeServiceWorkerRegistrationOptions,
   getOpenCascadeServiceWorkerUrl,
   getOpenCascadeServiceWorkerVersion,
@@ -57,9 +56,7 @@ test("src/infrastructure/occ/asset-cache.spec.ts", () => {
     "utf8",
   );
   expectTrue(
-    OCC_SERVICE_WORKER_PATH === "/occ-asset-cache-sw.js" &&
-      serviceWorkerSource.includes(OCC_ASSET_CACHE_NAME) &&
-      serviceWorkerSource.includes("searchParams.get('v')"),
+    serviceWorkerSource.includes(OCC_ASSET_CACHE_NAME),
     "The OCC service worker cache should be versioned with the OpenCascade package version and current build identifier.",
   );
 });

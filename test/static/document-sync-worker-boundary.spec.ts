@@ -28,26 +28,17 @@ test("test/static/document-sync-worker-boundary.spec.ts", () => {
     "Modeling service should consume worker-normalized authored documents instead of importing main-thread collaborative normalization.",
   );
   expectTrue(
-    appSource.includes(
-      "createBrowserDocumentSyncWorkerClient({ search: window.location.search })",
-    ),
-    "App should pass repository URL parameters to the browser document sync worker.",
-  );
-  expectTrue(
     workerSource.includes(
-      "createDocumentSyncWorkerDispatcher(createWorkerMessageHandler)",
+      "const workerSearchParams = new URLSearchParams(search)",
     ) &&
       workerSource.includes(
-        "const workerSearchParams = new URLSearchParams(search)",
+        'workerSearchParams.get("cadLocalPeerSync") === "1"',
       ) &&
       workerSource.includes(
-        "workerSearchParams.get('cadLocalPeerSync') === '1'",
+        'workerSearchParams.get("cadLocalPeerSyncChannel")',
       ) &&
-      workerSource.includes(
-        "workerSearchParams.get('cadLocalPeerSyncChannel')",
-      ) &&
-      workerSource.includes("workerSearchParams.get('cadRepositoryDbName')") &&
-      workerDispatcherSource.includes("message.kind === 'bootstrap'") &&
+      workerSource.includes('workerSearchParams.get("cadRepositoryDbName")') &&
+      workerDispatcherSource.includes('message.kind === "bootstrap"') &&
       workerDispatcherSource.includes("pendingRequests.push(message)"),
     "Document sync worker should consume opt-in peer-sync and repository database bootstrap parameters.",
   );

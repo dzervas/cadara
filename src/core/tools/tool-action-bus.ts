@@ -15,6 +15,7 @@ type GroupHandler<TGroupId extends ToolGroupId> = (
 ) => void;
 
 // An abstract class that allows subscribing to tool and group of tools events, as well as triggering them.
+// TODO: Most of it is dead so maybe rename it or merge it with something else
 export class ToolActionBus {
   private readonly toolHandlers = new Map<ToolId, Set<ToolHandler<ToolId>>>();
   private readonly groupHandlers = new Map<
@@ -22,6 +23,7 @@ export class ToolActionBus {
     Set<GroupHandler<ToolGroupId>>
   >();
 
+  // TODO: This is dead
   subscribeToTool<TToolId extends ToolId>(
     toolId: TToolId,
     handler: ToolHandler<TToolId>,
@@ -39,6 +41,7 @@ export class ToolActionBus {
     };
   }
 
+  // TODO: This is dead
   subscribeToGroup<TGroupId extends ToolGroupId>(
     groupId: TGroupId,
     handler: GroupHandler<TGroupId>,

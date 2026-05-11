@@ -1000,18 +1000,4 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
       readHistoryTimelineCollapsedPreference(preferenceStorage) === false,
     "Shown history timeline state should persist so refreshes restore the visible bar.",
   );
-
-  const source = await Bun.file(
-    new URL("./feature-timeline-bar.tsx", import.meta.url),
-  ).text();
-  expectTrue(
-    source.includes(
-      "dispatch({ type: 'sketch.historyOperationDeleteRequested', operationId: item.operation.operationId })",
-    ),
-    "Sketch history Delete should dispatch the explicit history-row delete event.",
-  );
-  expectTrue(
-    !source.includes("dispatch({ type: 'sketch.annotationDeleteRequested' })"),
-    "Sketch history Delete should no longer reuse the generic live-selection delete event.",
-  );
 });

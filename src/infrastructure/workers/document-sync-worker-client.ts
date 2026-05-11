@@ -59,152 +59,140 @@ export class DocumentSyncWorkerClient {
     this.worker.addEventListener("message", this.handleMessage);
   }
 
-  load(
+  async load(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "load" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request("load", "loaded", input).then(
-      (message) =>
-        (message as Extract<DocumentSyncWorkerResponse, { kind: "loaded" }>)
-          .result,
-    );
+    const message = await this.request("load", "loaded", input);
+    return (message as Extract<DocumentSyncWorkerResponse, { kind: "loaded" }>)
+      .result;
   }
 
-  mutate(
+  async mutate(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "mutate" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request("mutate", "mutated", input).then(
-      (message) =>
-        (message as Extract<DocumentSyncWorkerResponse, { kind: "mutated" }>)
-          .result,
-    );
+    const message = await this.request("mutate", "mutated", input);
+    return (message as Extract<DocumentSyncWorkerResponse, { kind: "mutated" }>)
+      .result;
   }
 
-  getGeometryAssetBytes(
+  async getGeometryAssetBytes(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "getGeometryAssetBytes" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "getGeometryAssetBytes",
       "geometryAssetBytes",
       input,
-    ).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "geometryAssetBytes" }
-          >
-        ).bytes,
     );
+    return (
+      message as Extract<
+        DocumentSyncWorkerResponse,
+        { kind: "geometryAssetBytes" }
+      >
+    ).bytes;
   }
 
-  getGeometryAssetRecord(
+  async getGeometryAssetRecord(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "getGeometryAssetRecord" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "getGeometryAssetRecord",
       "geometryAssetRecord",
       input,
-    ).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "geometryAssetRecord" }
-          >
-        ).bytes,
     );
+    return (
+      message as Extract<
+        DocumentSyncWorkerResponse,
+        { kind: "geometryAssetRecord" }
+      >
+    ).bytes;
   }
 
-  reset(
+  async reset(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "reset" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request("reset", "reset", input).then(
-      (message) =>
-        (message as Extract<DocumentSyncWorkerResponse, { kind: "reset" }>)
-          .status,
-    );
+    const message = await this.request("reset", "reset", input);
+    return (message as Extract<DocumentSyncWorkerResponse, { kind: "reset" }>)
+      .status;
   }
 
-  normalize(
+  async normalize(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "normalize" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request("normalize", "normalized", input).then(
-      (message) =>
-        (message as Extract<DocumentSyncWorkerResponse, { kind: "normalized" }>)
-          .result,
-    );
+    const message = await this.request("normalize", "normalized", input);
+    return (
+      message as Extract<DocumentSyncWorkerResponse, { kind: "normalized" }>
+    ).result;
   }
 
-  restoreBinding(
+  async restoreBinding(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "restoreBinding" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request("restoreBinding", "bindingRestored", input).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "bindingRestored" }
-          >
-        ).record,
+    const message = await this.request(
+      "restoreBinding",
+      "bindingRestored",
+      input,
     );
+    return (
+      message as Extract<
+        DocumentSyncWorkerResponse,
+        { kind: "bindingRestored" }
+      >
+    ).record;
   }
 
-  bindFileHandle(
+  async bindFileHandle(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "bindFileHandle" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request("bindFileHandle", "fileHandleBound", input).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "fileHandleBound" }
-          >
-        ).metadata,
+    const message = await this.request(
+      "bindFileHandle",
+      "fileHandleBound",
+      input,
     );
+    return (
+      message as Extract<
+        DocumentSyncWorkerResponse,
+        { kind: "fileHandleBound" }
+      >
+    ).metadata;
   }
 
-  getWriteStatus(
+  async getWriteStatus(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "getWriteStatus" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request("getWriteStatus", "writeStatus", input).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "writeStatus" }
-          >
-        ).status,
-    );
+    const message = await this.request("getWriteStatus", "writeStatus", input);
+    return (
+      message as Extract<DocumentSyncWorkerResponse, { kind: "writeStatus" }>
+    ).status;
   }
 
-  getDurableHistoryAvailability(
+  async getDurableHistoryAvailability(
     input: Omit<
       Extract<
         DocumentSyncWorkerRequest,
@@ -213,74 +201,69 @@ export class DocumentSyncWorkerClient {
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "getDurableHistoryAvailability",
       "durableHistoryAvailability",
       input,
-    ).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "durableHistoryAvailability" }
-          >
-        ).availability,
     );
+    return (
+      message as Extract<
+        DocumentSyncWorkerResponse,
+        { kind: "durableHistoryAvailability" }
+      >
+    ).availability;
   }
 
-  undoDurableHistory(
+  async undoDurableHistory(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "undoDurableHistory" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "undoDurableHistory",
       "durableHistoryMutated",
       input,
-    ).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "durableHistoryMutated" }
-          >
-        ).result,
     );
+    return (
+      message as Extract<
+        DocumentSyncWorkerResponse,
+        { kind: "durableHistoryMutated" }
+      >
+    ).result;
   }
 
-  redoDurableHistory(
+  async redoDurableHistory(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "redoDurableHistory" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "redoDurableHistory",
       "durableHistoryMutated",
       input,
-    ).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "durableHistoryMutated" }
-          >
-        ).result,
     );
+    return (
+      message as Extract<
+        DocumentSyncWorkerResponse,
+        { kind: "durableHistoryMutated" }
+      >
+    ).result;
   }
 
-  getSketchDraftHistory(
+  async getSketchDraftHistory(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "getSketchDraftHistory" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "getSketchDraftHistory",
       "sketchDraftHistory",
       input,
-    ).then((message) => ({
+    );
+    return {
       session: (
         message as Extract<
           DocumentSyncWorkerResponse,
@@ -293,41 +276,40 @@ export class DocumentSyncWorkerClient {
           { kind: "sketchDraftHistory" }
         >
       ).availability,
-    }));
+    };
   }
 
-  saveSketchDraftHistory(
+  async saveSketchDraftHistory(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "saveSketchDraftHistory" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "saveSketchDraftHistory",
       "sketchDraftHistorySaved",
       input,
-    ).then(
-      (message) =>
-        (
-          message as Extract<
-            DocumentSyncWorkerResponse,
-            { kind: "sketchDraftHistorySaved" }
-          >
-        ).availability,
     );
+    return (
+      message as Extract<
+        DocumentSyncWorkerResponse,
+        { kind: "sketchDraftHistorySaved" }
+      >
+    ).availability;
   }
 
-  undoSketchDraftHistory(
+  async undoSketchDraftHistory(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "undoSketchDraftHistory" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "undoSketchDraftHistory",
       "sketchDraftHistory",
       input,
-    ).then((message) => ({
+    );
+    return {
       session: (
         message as Extract<
           DocumentSyncWorkerResponse,
@@ -340,20 +322,21 @@ export class DocumentSyncWorkerClient {
           { kind: "sketchDraftHistory" }
         >
       ).availability,
-    }));
+    };
   }
 
-  redoSketchDraftHistory(
+  async redoSketchDraftHistory(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "redoSketchDraftHistory" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    const message = await this.request(
       "redoSketchDraftHistory",
       "sketchDraftHistory",
       input,
-    ).then((message) => ({
+    );
+    return {
       session: (
         message as Extract<
           DocumentSyncWorkerResponse,
@@ -366,20 +349,21 @@ export class DocumentSyncWorkerClient {
           { kind: "sketchDraftHistory" }
         >
       ).availability,
-    }));
+    };
   }
 
-  clearSketchDraftHistory(
+  async clearSketchDraftHistory(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "clearSketchDraftHistory" }>,
       "kind" | "requestId"
     >,
   ) {
-    return this.request(
+    await this.request(
       "clearSketchDraftHistory",
       "sketchDraftHistoryCleared",
       input,
-    ).then(() => undefined);
+    );
+    return undefined;
   }
 
   async subscribe(
@@ -439,6 +423,7 @@ export class DocumentSyncWorkerClient {
     this.worker.terminate?.();
   }
 
+  // TODO: This feels wrong - custom dispatcher if/else per kind which is split across functions
   private request<TKind extends DocumentSyncWorkerRequest["kind"]>(
     kind: TKind,
     expectedKind: DocumentSyncWorkerResponse["kind"],

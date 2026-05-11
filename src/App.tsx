@@ -45,6 +45,7 @@ function App() {
           }),
     [],
   );
+
   const documentSyncWorkerDisposeTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -87,6 +88,7 @@ function App() {
   );
 }
 
+// TODO: OCC init stuff shouldn't be here
 function OccAssetCacheEffect() {
   const errorReporter = useErrorReporter();
 
