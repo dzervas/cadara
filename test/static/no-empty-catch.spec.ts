@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
-import { test } from "bun:test";
+import { test } from "vitest";
 import ts from "typescript";
 
 const scannedDirectories = ["src", "e2e", "scripts"];

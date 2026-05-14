@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";

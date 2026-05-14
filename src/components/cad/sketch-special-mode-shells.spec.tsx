@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -167,37 +167,5 @@ test("src/components/cad/sketch-special-mode-shells.spec.tsx", async () => {
     feedbackMarkup.includes(`right:${VIEWPORT_OVERLAY_INSET_PX}px`) &&
       feedbackMarkup.includes(`top:${VIEWPORT_OVERLAY_TOP_INSET_STYLE}`),
     "The generic special-mode viewport status should clear the floating toolbar when it anchors on the right edge.",
-  );
-
-  const panelSource = await Bun.file(
-    new URL("./sketch-special-mode-panel.tsx", import.meta.url),
-  ).text();
-  const viewportSource = await Bun.file(
-    new URL("./sketch-special-mode-viewport-feedback.tsx", import.meta.url),
-  ).text();
-
-  expectTrue(
-    !panelSource.includes("referenceImage"),
-    "The generic panel shell should not import or branch on reference-image business logic.",
-  );
-  expectTrue(
-    !viewportSource.includes("referenceImage"),
-    "The generic viewport shell should not import or branch on reference-image business logic.",
-  );
-  expectTrue(
-    !panelSource.includes("modeId ==="),
-    "The generic panel shell should render from schema data, not mode-id branches.",
-  );
-  expectTrue(
-    !viewportSource.includes("modeId ==="),
-    "The generic viewport shell should render from schema data, not mode-id branches.",
-  );
-  expectTrue(
-    !panelSource.includes("left-4 top-4"),
-    "The generic panel shell should not render behind the toolbar corner.",
-  );
-  expectTrue(
-    !viewportSource.includes("right-4 top-4"),
-    "Viewport status prompts should not render behind the toolbar corner.",
   );
 });

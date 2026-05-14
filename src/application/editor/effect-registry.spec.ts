@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import { ResultAsync, type AppError } from "@/contracts/errors";
 import type { DocumentId, RequestId, RevisionId } from "@/contracts/shared/ids";

@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import typia, { type tags } from "typia";
 
 import { expectTrue } from "@/testing/expect.spec";
@@ -8,8 +8,7 @@ interface TypiaTransformSentinel {
   value: number & tags.ExclusiveMinimum<0>;
 }
 
-const validateSentinel =
-  typia.createValidateEquals<TypiaTransformSentinel>();
+const validateSentinel = typia.createValidateEquals<TypiaTransformSentinel>();
 
 test("Typia generated validators execute in Bun tests", () => {
   const valid = validateSentinel({

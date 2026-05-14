@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";

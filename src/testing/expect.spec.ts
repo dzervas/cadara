@@ -1,4 +1,4 @@
-import { expect } from "bun:test";
+import { expect } from "vitest";
 
 // Bun's expect(...) assertions do not narrow types for TypeScript, so specs that
 // check discriminated unions like `parsed.success` still need an assertion

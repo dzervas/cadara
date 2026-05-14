@@ -1,4 +1,4 @@
-import { beforeEach, mock, test } from "bun:test";
+import { beforeEach, vi, test } from "vitest";
 
 import { expectTrue } from "@/testing/expect.spec";
 import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
@@ -9,12 +9,10 @@ import {
 } from "./workbench/controllers/controller-test-harness";
 
 const hookHarness = createHookTestHarness();
-const actualReactModule = await import("react");
-mock.module("react", () => hookHarness.reactModule);
+vi.mock("react", () => hookHarness.reactModule);
 
 const { useWorkbenchLocalFileSync } =
   await import("./workbench/controllers/use-workbench-local-file-sync");
-mock.module("react", () => actualReactModule);
 
 beforeEach(() => {
   hookHarness.reset();

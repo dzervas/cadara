@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
-import { test } from "bun:test";
+import { test } from "vitest";
 
 const allowedVendorImportFiles = new Set([
   "src/contracts/errors/sentry-client.ts",

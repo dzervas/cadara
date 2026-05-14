@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import { readFileSync } from "node:fs";
 
@@ -599,8 +599,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     expectTrue(
       booleanSession.featureType === "sweep" &&
         booleanDefinition?.kind === "sweep" &&
-        getAuthoredLiteralValue(booleanDefinition.parameters.operationIntent) ===
-          "subtract" &&
+        getAuthoredLiteralValue(
+          booleanDefinition.parameters.operationIntent,
+        ) === "subtract" &&
         booleanDefinition.parameters.participants.some(
           (participant) => participant.role === "targetBody",
         ),
@@ -709,11 +710,12 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
         definition.parameters.options.twist.type === "angle" &&
         "angle" in definition.parameters.options.twist &&
         Math.abs(
-          Number(getAuthoredLiteralValue(definition.parameters.options.twist.angle)) -
+          Number(
+            getAuthoredLiteralValue(definition.parameters.options.twist.angle),
+          ) -
             Math.PI / 3,
         ) < 0.000001 &&
-        getAuthoredLiteralValue(definition.parameters.options.endScale) ===
-          1.5,
+        getAuthoredLiteralValue(definition.parameters.options.endScale) === 1.5,
       "Hydrated sweep authored advanced options should rebuild as durable definition values.",
     );
   }
@@ -781,8 +783,7 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       "Chamfer definitions should preserve explicit edge participants.",
     );
     expectTrue(
-      getAuthoredLiteralValue(definition.parameters.options?.distance) ===
-        0.75,
+      getAuthoredLiteralValue(definition.parameters.options?.distance) === 0.75,
       "Chamfer definitions should preserve the constant distance option.",
     );
 
@@ -878,11 +879,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
           (participant) =>
             participant.role === "path" && participant.targets[0] === path,
         ) &&
-        (
-          pathDefinition.parameters.options?.path as
-            | { sectionCount?: unknown }
-            | undefined
-        ) &&
+        (pathDefinition.parameters.options?.path as
+          | { sectionCount?: unknown }
+          | undefined) &&
         getAuthoredLiteralValue(
           (
             pathDefinition.parameters.options?.path as
@@ -906,11 +905,9 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     );
     expectTrue(
       explicitSectionDefinition?.kind === "loft" &&
-        (
-          explicitSectionDefinition.parameters.options?.path as
-            | { sectionCount?: unknown }
-            | undefined
-        ) &&
+        (explicitSectionDefinition.parameters.options?.path as
+          | { sectionCount?: unknown }
+          | undefined) &&
         getAuthoredLiteralValue(
           (
             explicitSectionDefinition.parameters.options?.path as

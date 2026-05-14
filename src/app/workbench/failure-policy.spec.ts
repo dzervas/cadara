@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import { createAppError, createTestErrorReporter } from "@/contracts/errors";
 import { expectTrue } from "@/testing/expect.spec";

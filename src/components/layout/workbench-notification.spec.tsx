@@ -1,5 +1,5 @@
 import { MantineProvider } from "@mantine/core";
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";

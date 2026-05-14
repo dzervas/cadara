@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import {

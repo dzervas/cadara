@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 
 import {
@@ -67,16 +67,19 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     "Malformed marked objects should still be retained as causes.",
   );
 
-  const validationError = appErrorFromValidationIssues([
+  const validationError = appErrorFromValidationIssues(
+    [
+      {
+        path: "width",
+        expected: "number",
+        value: "wide",
+        message: "width must be a number.",
+      },
+    ],
     {
-      path: "width",
-      expected: "number",
-      value: "wide",
-      message: "width must be a number.",
+      operation: "Parse dimensions",
     },
-  ], {
-    operation: "Parse dimensions",
-  });
+  );
   expectTrue(
     validationError.code === "app/validation-failed",
     "Validation failures should get validation codes.",
