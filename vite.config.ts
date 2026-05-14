@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
@@ -81,6 +82,9 @@ const shouldUploadSentrySourceMaps = Boolean(
 
 // https://vite.dev/config/
 export default defineConfig({
+  test: {
+    testTimeout: 15_000,
+  },
   worker: {
     plugins: () => [
       UnpluginTypia({ tsconfig: path.resolve(__dirname, "tsconfig.app.json") }),

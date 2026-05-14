@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import { expectTrue } from "@/testing/expect.spec";
 test("test/static/document-repository-boundary.spec.ts", () => {

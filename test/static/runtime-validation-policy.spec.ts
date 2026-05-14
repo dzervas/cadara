@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import { expectTrue } from "@/testing/expect.spec";
 
@@ -23,9 +23,10 @@ test("test/static/runtime-validation-policy.spec.ts", () => {
     `Package metadata must not retain direct Zod validation dependencies: ${packageViolations.join(", ")}`,
   );
 
-  const sourceFiles = collectFiles(["src", "test", "e2e"], [
-    "test/static/runtime-validation-policy.spec.ts",
-  ]);
+  const sourceFiles = collectFiles(
+    ["src", "test", "e2e"],
+    ["test/static/runtime-validation-policy.spec.ts"],
+  );
   const sourceViolations = sourceFiles.flatMap((path) =>
     findForbiddenTerms(path, forbiddenRuntimeValidationTerms),
   );

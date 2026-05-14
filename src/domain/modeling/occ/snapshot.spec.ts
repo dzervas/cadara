@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import {
@@ -1247,9 +1247,9 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         featureId: "feature_phase6_fillet" as FeatureId,
         suppressed: false,
         definition: {
-        kind: "fillet",
-        featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
-        parameters: {
+          kind: "fillet",
+          featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
+          parameters: {
             radius: { source: "literal", value: 0.5 },
             edgeTargets: [
               {

@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import {

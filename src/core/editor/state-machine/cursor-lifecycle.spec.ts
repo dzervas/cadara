@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 
 import { advanceCursorPhase, getCursorPhaseAction } from "./cursor-lifecycle";
 import type { EditSessionCursorContext } from "./types";

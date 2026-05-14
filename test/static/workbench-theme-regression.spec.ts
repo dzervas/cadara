@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
-import { test } from "bun:test";
+import { test } from "vitest";
 
 const allowedFiles = new Set(["src/theme/workbench-theme.ts"]);
 const allowedDirectories = ["src/assets/"];

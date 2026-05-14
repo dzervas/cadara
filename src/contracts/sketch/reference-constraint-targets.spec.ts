@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import { expectTrue } from "@/testing/expect.spec";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
@@ -373,9 +373,7 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
       },
     ],
   } satisfies SketchDefinition;
-  const parsedSymmetric = validateSketchDefinition(
-    symmetricProjectedLine,
-  );
+  const parsedSymmetric = validateSketchDefinition(symmetricProjectedLine);
   expectTrue(
     parsedSymmetric.success,
     "Runtime schema should accept projected symmetric constraint payloads.",

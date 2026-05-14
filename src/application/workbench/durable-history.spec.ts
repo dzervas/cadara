@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import { expectTrue } from "@/testing/expect.spec";
 import { createDurableHistoryService } from "@/application/workbench/durable-history";

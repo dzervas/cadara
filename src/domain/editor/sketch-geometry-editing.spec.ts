@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { readFileSync } from "node:fs";
 
 import { expectTrue } from "@/testing/expect.spec";

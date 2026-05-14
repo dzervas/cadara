@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { readFile } from "node:fs/promises";
 
 import type { MeshExportAccuracy } from "@/contracts/export/capabilities";
@@ -90,10 +90,7 @@ function assertEveryLoopIsClosedAndConnected(
 }
 
 test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
-  function expectInvalidNativeShimPayload(
-    payload: unknown,
-    message: string,
-  ) {
+  function expectInvalidNativeShimPayload(payload: unknown, message: string) {
     let rejected = false;
     try {
       parseNativeShimPayloadJson(JSON.stringify(payload));

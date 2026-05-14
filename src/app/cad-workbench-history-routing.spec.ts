@@ -1,6 +1,6 @@
-import { beforeEach, mock, test } from "bun:test";
+import { beforeEach, vi, test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
+// import { expectTrue } from "@/testing/expect.spec";
 import {
   createAppError,
   createTestErrorReporter,
@@ -13,15 +13,13 @@ import {
   createHookTestHarness,
   flushMicrotasks,
 } from "./workbench/controllers/controller-test-harness";
+import { e } from "mathjs";
 
 const hookHarness = createHookTestHarness();
-const actualReactModule = await import("react");
-const actualWorkbenchDocumentOwnerModule =
-  await import("@/hooks/use-workbench-document-owner");
 let currentDurableHistory: DurableHistoryService = createDurableHistoryStub();
 
-mock.module("react", () => hookHarness.reactModule);
-mock.module("@/hooks/use-workbench-document-owner", () => ({
+vi.mock("react", () => hookHarness.reactModule);
+vi.mock("@/hooks/use-workbench-document-owner", () => ({
   useWorkbenchDocumentOwner() {
     return {
       async reorderDocumentHistory() {
@@ -33,7 +31,7 @@ mock.module("@/hooks/use-workbench-document-owner", () => ({
     };
   },
 }));
-mock.module("@/hooks/use-durable-history", () => ({
+vi.mock("@/hooks/use-durable-history", () => ({
   useDurableHistory() {
     return currentDurableHistory;
   },
@@ -41,11 +39,6 @@ mock.module("@/hooks/use-durable-history", () => ({
 
 const { useWorkbenchHistory } =
   await import("./workbench/controllers/use-workbench-history");
-mock.module("react", () => actualReactModule);
-mock.module(
-  "@/hooks/use-workbench-document-owner",
-  () => actualWorkbenchDocumentOwnerModule,
-);
 
 beforeEach(() => {
   hookHarness.reset();
@@ -155,20 +148,21 @@ test("useWorkbenchHistory routes sketch undo and redo through the durable histor
   controller.requestRedo();
   await flushMicrotasks();
 
-  expectTrue(
-    JSON.stringify(dispatched) ===
-      JSON.stringify([
-        {
-          type: "sketch.draftHistoryRestored",
-          session: { sketchId: "sketch_restored_undo" },
-        },
-        {
-          type: "sketch.draftHistoryRestored",
-          session: { sketchId: "sketch_restored_redo" },
-        },
-      ]),
-    "Sketch undo and redo should restore draft sessions through the durable history coordinator.",
+  // expectTrue(
+  expect(JSON.stringify(dispatched)).toBe(
+    JSON.stringify([
+      {
+        type: "sketch.draftHistoryRestored",
+        session: { sketchId: "sketch_restored_undo" },
+      },
+      {
+        type: "sketch.draftHistoryRestored",
+        session: { sketchId: "sketch_restored_redo" },
+      },
+    ]),
   );
+  // "Sketch undo and redo should restore draft sessions through the durable history coordinator.",
+  // );
 });
 
 test("useWorkbenchHistory routes document undo and redo through the durable history service", async () => {
@@ -233,14 +227,13 @@ test("useWorkbenchHistory routes document undo and redo through the durable hist
   controller.requestRedo();
   await flushMicrotasks();
 
-  expectTrue(
-    JSON.stringify(dispatched) ===
-      JSON.stringify([
-        { type: "document.replaced", snapshot: undoSnapshot },
-        { type: "document.replaced", snapshot: redoSnapshot },
-      ]),
-    "Document undo and redo should replace the active snapshot through the durable history coordinator.",
+  expect(JSON.stringify(dispatched)).toBe(
+    JSON.stringify([
+      { type: "document.replaced", snapshot: undoSnapshot },
+      { type: "document.replaced", snapshot: redoSnapshot },
+    ]),
   );
+  // "Document undo and redo should replace the active snapshot through the durable history coordinator.",
 });
 
 test("useWorkbenchHistory derives sketch toolbar availability from the durable history service", async () => {
@@ -327,11 +320,9 @@ test("useWorkbenchHistory derives sketch toolbar availability from the durable h
     }),
   );
 
-  expectTrue(
-    controller.toolbarHistoryAvailability.canUndo &&
-      !controller.toolbarHistoryAvailability.canRedo,
-    "Active sketch toolbar availability should come from the durable-history coordinator, not the legacy sketch cursor availability.",
-  );
+  expect(controller.toolbarHistoryAvailability.canUndo).toBe(true);
+  expect(controller.toolbarHistoryAvailability.canRedo).toBe(false);
+  // "Active sketch toolbar availability should come from the durable-history coordinator, not the legacy sketch cursor availability.",
 });
 
 test("useWorkbenchHistory updates variables through the document owner and reflects durable-history availability", async () => {
@@ -455,28 +446,19 @@ test("useWorkbenchHistory updates variables through the document owner and refle
   await hookHarness.flushEffects();
   await flushMicrotasks();
 
-  expectTrue(
-    ownerCalls.length === 1,
-    "Variable updates should route through the document owner exactly once.",
-  );
-  expectTrue(
+  expect(ownerCalls.length).toBe(1);
+  expect(
     ownerCalls[0] &&
       (ownerCalls[0] as { options: { operation: string } }).options
         .operation === "Update Width",
-    "Variable updates should preserve the user-facing operation label when calling the document owner.",
-  );
-  expectTrue(
-    Object.keys(invalidVariableMessages).length === 0,
-    "Successful variable updates should clear any prior invalid-value message for that variable.",
-  );
-  expectTrue(
+  ).toBe(true);
+  expect(Object.keys(invalidVariableMessages).length).toBe(0);
+  expect(
     availabilityRequests.includes("rev_history_2"),
-    "Variable updates should trigger a durable-history availability refresh after the accepted document mutation.",
-  );
-  expectTrue(
-    shownErrors.length === 0,
-    "Successful variable updates should not surface workbench errors.",
-  );
+    // "Variable updates should trigger a durable-history availability refresh after the accepted document mutation.",
+  ).toBe(true);
+  expect(shownErrors.length).toBe(0);
+  // "Successful variable updates should not surface workbench errors.");
 });
 
 test("useWorkbenchHistory surfaces invalid variable updates without changing durable-history availability", async () => {
@@ -539,21 +521,14 @@ test("useWorkbenchHistory surfaces invalid variable updates without changing dur
 
   await flushMicrotasks();
 
-  expectTrue(
-    invalidVariableMessages.width ===
-      "Width must reference an existing variable.",
-    "Rejected variable updates should set the invalid-value message for the edited variable.",
+  expect(invalidVariableMessages.width).toBe(
+    "Width must reference an existing variable.",
   );
-  expectTrue(
-    JSON.stringify(shownErrors) ===
-      JSON.stringify(["Width must reference an existing variable."]),
-    "Rejected variable updates should surface the same human-readable error in the workbench.",
+  expect(JSON.stringify(shownErrors)).toBe(
+    JSON.stringify(["Width must reference an existing variable."]),
   );
-  expectTrue(
-    !controller.toolbarHistoryAvailability.canUndo &&
-      !controller.toolbarHistoryAvailability.canRedo,
-    "Rejected variable updates should not change durable-history availability.",
-  );
+  expect(controller.toolbarHistoryAvailability.canUndo).toBe(false);
+  expect(controller.toolbarHistoryAvailability.canRedo).toBe(false);
 });
 
 test("useWorkbenchHistory reorders document history through the document owner and reflects durable-history availability", async () => {
@@ -664,20 +639,13 @@ test("useWorkbenchHistory reorders document history through the document owner a
   await hookHarness.flushEffects();
   await flushMicrotasks();
 
-  expectTrue(
+  expect(
     reorderCalls[0] &&
       (reorderCalls[0] as { item: { featureId: string } }).item.featureId ===
         "feature_b",
-    "Document history reorder should be delegated to the document owner with the requested move.",
-  );
-  expectTrue(
-    availabilityRequests.includes("rev_history_reorder_2"),
-    "Accepted history reorders should trigger a durable-history availability refresh from the repository-backed coordinator.",
-  );
-  expectTrue(
-    shownErrors.length === 0,
-    "Accepted history reorders should not surface workbench errors.",
-  );
+  ).toBe(true);
+  expect(availabilityRequests.includes("rev_history_reorder_2")).toBe(true);
+  expect(shownErrors.length).toBe(0);
 });
 
 function createDurableHistoryStub(

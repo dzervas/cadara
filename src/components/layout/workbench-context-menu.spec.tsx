@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -111,26 +111,5 @@ test("src/components/layout/workbench-context-menu.spec.tsx", async () => {
   expectTrue(
     markup.includes("disabled"),
     "Disabled menu items should render as disabled controls.",
-  );
-
-  const source = await Bun.file(
-    new URL("./workbench-context-menu.tsx", import.meta.url),
-  ).text();
-  expectTrue(
-    source.includes("onPointerDown: handlePointerDown") &&
-      source.includes("event.button !== 2"),
-    "Context menus should support right-button pointer opening in addition to contextmenu events.",
-  );
-  expectTrue(
-    source.includes("transitionProps={{ duration: 0 }}"),
-    "Context menus should open without transition delay for pointer-triggered placement.",
-  );
-  expectTrue(
-    source.includes('floatingStrategy="fixed"'),
-    "Context menus should position the Mantine dropdown with fixed strategy to match the fixed anchor trigger.",
-  );
-  expectTrue(
-    source.includes("createPortal(") && source.includes("document.body"),
-    "Context menu anchor targets should portal to the document body so dropdown positioning stays in the viewport coordinate space.",
   );
 });

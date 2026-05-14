@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import { expectTrue } from "@/testing/expect.spec";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
@@ -500,8 +500,7 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     dimensionIds: [],
     dimensions: [],
   };
-  const parsedNormalAndSymmetric =
-    validateSketchDefinition(normalAndSymmetric);
+  const parsedNormalAndSymmetric = validateSketchDefinition(normalAndSymmetric);
   expectTrue(
     parsedNormalAndSymmetric.success,
     "Runtime schema should accept normal and symmetric constraint payloads.",

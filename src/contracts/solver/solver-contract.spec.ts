@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import {
   SOLVER_SCHEMA_VERSION,
@@ -424,8 +424,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       },
     };
     expectTrue(
-      validateUpdateInteractiveSketchSolveSessionRequest(updateRequest)
-        .success,
+      validateUpdateInteractiveSketchSolveSessionRequest(updateRequest).success,
       "Interactive update request should validate at the contract boundary.",
     );
     expectTrue(
@@ -471,9 +470,8 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       sessionId: started.sessionId,
     };
     expectTrue(
-      validateFinalizeInteractiveSketchSolveSessionRequest(
-        finalizeRequest,
-      ).success,
+      validateFinalizeInteractiveSketchSolveSessionRequest(finalizeRequest)
+        .success,
       "Interactive finalize request should validate at the contract boundary.",
     );
     const finalized =
@@ -498,9 +496,8 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       sessionId: "interactive_sketch_solve_unknown" as const,
     };
     expectTrue(
-      validateDisposeInteractiveSketchSolveSessionRequest(
-        disposeRequest,
-      ).success,
+      validateDisposeInteractiveSketchSolveSessionRequest(disposeRequest)
+        .success,
       "Interactive dispose request should validate at the contract boundary.",
     );
     const disposed =

@@ -1,4 +1,4 @@
-import { beforeEach, mock, test } from "bun:test";
+import { beforeEach, vi, test } from "vitest";
 
 import { expectTrue } from "@/testing/expect.spec";
 import { createTestErrorReporter } from "@/contracts/errors";
@@ -8,13 +8,8 @@ import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain
 import { createHookTestHarness } from "./workbench/controllers/controller-test-harness";
 
 const hookHarness = createHookTestHarness();
-const actualReactModule = await import("react");
-const actualRuntimeExtensionRegistryModule =
-  await import("@/hooks/use-runtime-extension-registry");
-const actualWorkbenchDocumentOwnerModule =
-  await import("@/hooks/use-workbench-document-owner");
-mock.module("react", () => hookHarness.reactModule);
-mock.module("@/hooks/use-runtime-extension-registry", () => ({
+vi.mock("react", () => hookHarness.reactModule);
+vi.mock("@/hooks/use-runtime-extension-registry", () => ({
   useRuntimeExtensionRegistry() {
     return {
       ...createScopedRuntimeExtensionRegistryCompositionForTest(),
@@ -22,7 +17,7 @@ mock.module("@/hooks/use-runtime-extension-registry", () => ({
     };
   },
 }));
-mock.module("@/hooks/use-workbench-document-owner", () => ({
+vi.mock("@/hooks/use-workbench-document-owner", () => ({
   useWorkbenchDocumentOwner() {
     return {
       async commitPartImport() {
@@ -34,15 +29,6 @@ mock.module("@/hooks/use-workbench-document-owner", () => ({
 
 const { useWorkbenchPartImport } =
   await import("./workbench/controllers/use-workbench-part-import");
-mock.module("react", () => actualReactModule);
-mock.module(
-  "@/hooks/use-runtime-extension-registry",
-  () => actualRuntimeExtensionRegistryModule,
-);
-mock.module(
-  "@/hooks/use-workbench-document-owner",
-  () => actualWorkbenchDocumentOwnerModule,
-);
 
 beforeEach(() => {
   hookHarness.reset();

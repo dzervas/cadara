@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 
 import { expectTrue } from "@/testing/expect.spec";
 import { IMPORT_CONTRACT_SCHEMA_VERSION } from "@/contracts/shared/versioning";

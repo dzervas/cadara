@@ -24,6 +24,7 @@ function areHookDepsEqual(
   );
 }
 
+// TODO: The whole react module is mocked???
 export function createHookTestHarness() {
   let hookIndex = 0;
   let stateSlots: unknown[] = [];

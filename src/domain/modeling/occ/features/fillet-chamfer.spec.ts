@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { readFile } from "node:fs/promises";
 
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";

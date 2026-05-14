@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test } from "vitest";
 import { expectTrue } from "@/testing/expect.spec";
 import { createEmptyOperationHistory } from "@/contracts/modeling/operation-history";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
