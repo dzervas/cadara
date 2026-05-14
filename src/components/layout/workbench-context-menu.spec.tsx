@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -84,32 +83,32 @@ test("src/components/layout/workbench-context-menu.spec.tsx", async () => {
     </MantineProvider>,
   );
 
-  expectTrue(
+  expect(
     markup.includes('aria-haspopup="menu"'),
     "Wrapped target should expose a menu popup affordance.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('aria-label="Body actions"'),
     "Menu dropdown should expose the provided accessible label.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Rename"),
     "Menu should render rename item labels.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Delete"),
     "Menu should render regular or danger item labels.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Export"),
     "Menu should render disabled item labels.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Ctrl+Z"),
     "Menu should render right-aligned shortcut hints for command entries.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("disabled"),
     "Disabled menu items should render as disabled controls.",
-  );
+  ).toBeTruthy();
 });

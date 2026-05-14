@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import {
   projectSketchFeedbackAnchor,
@@ -16,10 +15,10 @@ test("src/core/workspace/sketch-feedback-projection.spec.ts", () => {
   };
   const worldPoint = resolveSketchFeedbackAnchorWorldPoint(anchor, plane);
 
-  expectTrue(
-    JSON.stringify(worldPoint) === JSON.stringify([2, 3, 0]),
+  expect(
+    JSON.stringify(worldPoint),
     "Sketch feedback anchors should resolve sketch-space points through the active sketch plane.",
-  );
+  ).toBe(JSON.stringify([2, 3, 0]));
 
   const screenPoint = projectSketchFeedbackAnchor({
     anchor,
@@ -32,16 +31,16 @@ test("src/core/workspace/sketch-feedback-projection.spec.ts", () => {
     }),
   });
 
-  expectTrue(
+  expect(
     screenPoint,
     "Projected feedback anchor should produce a screen point.",
-  );
-  expectTrue(
-    screenPoint.x === 125,
+  ).toBeTruthy();
+  expect(
+    screenPoint.x,
     "Projected feedback anchors should include horizontal descriptor offsets.",
-  );
-  expectTrue(
-    screenPoint.y === 28,
+  ).toBe(125);
+  expect(
+    screenPoint.y,
     "Projected feedback anchors should include vertical descriptor offsets.",
-  );
+  ).toBe(28);
 });

@@ -1,7 +1,6 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
@@ -36,10 +35,10 @@ test("src/domain/export/occ-export-capabilities.spec.ts", async () => {
       3,
     );
     builder.Build(new oc.Message_ProgressRange_1());
-    expectTrue(
+    expect(
       builder.IsDone(),
       "Expected OCC box builder to produce a test export body.",
-    );
+    ).toBeTruthy();
 
     const body = trackNewSolidBody(oc, {
       bodyId: "body_native_mesh_export" as BodyId,
@@ -68,29 +67,29 @@ test("src/domain/export/occ-export-capabilities.spec.ts", async () => {
         },
       );
 
-      expectTrue(
+      expect(
         Array.isArray(result),
         "Native OCC mesh export should return tessellated triangles.",
-      );
+      ).toBeTruthy();
       if (!Array.isArray(result)) {
         return;
       }
 
-      expectTrue(
-        triangulationCallCount === 0,
+      expect(
+        triangulationCallCount,
         "Native OCC mesh export must not call the JS BRep_Tool.Triangulation binding.",
-      );
-      expectTrue(
-        result.length === 12,
+      ).toBe(0);
+      expect(
+        result.length,
         "Native box mesh export should produce twelve triangles.",
-      );
-      expectTrue(
+      ).toBe(12);
+      expect(
         result.every(
           (triangle) =>
             triangle.vertices.length === 3 && triangle.normal.length === 3,
         ),
         "Native mesh export triangles should include three vertices and a derived normal.",
-      );
+      ).toBeTruthy();
     } finally {
       oc.BRep_Tool.Triangulation = originalTriangulation;
       builder.delete?.();

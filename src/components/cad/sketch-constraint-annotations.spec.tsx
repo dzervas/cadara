@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { SketchConstraintAnnotations } from "@/components/cad/sketch-constraint-annotations";
@@ -170,29 +169,29 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
     />,
   );
 
-  expectTrue(
+  expect(
     markup.includes('data-sketch-annotation-glyph="constraintParallel"'),
     "Committed annotation glyphs should render from descriptor glyph kinds.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("z-30"),
     "Committed annotation glyphs should render above committed dimension overlay geometry.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("/icons/sketch-parallel.svg") &&
       markup.includes("/icons/sketch-dimension.svg"),
     "Committed annotation glyphs should use toolbar SVG assets.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("/icons/drawing-angular-dim-line-to-line.svg"),
     "Committed angle dimension annotations should use the angular dimension icon asset.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("/icons/sketch-horizontal.svg") &&
       markup.includes("/icons/sketch-vertical.svg"),
     "Horizontal and vertical constraint annotations should use visible public icon assets.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("/icons/sketch-concentric.svg") &&
       markup.includes("/icons/sketch-midpoint.svg") &&
       markup.includes("/icons/sketch-normal.svg") &&
@@ -200,25 +199,25 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
       markup.includes("/icons/sketch-symmetric.svg") &&
       markup.includes("/icons/sketch-fix.svg"),
     "New committed constraint glyphs should use their dedicated toolbar SVG assets.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("left:120px") &&
       markup.includes("left:158px") &&
       markup.includes("top:80px"),
     "Committed annotation glyphs should offset colliding projected anchors.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Parallel: Parallel lines") &&
       markup.includes("Distance: 10.00 mm distance"),
     "Committed annotation glyphs should preserve durable label/detail metadata for accessible labels.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('data-sketch-annotation-kind="dimension"') &&
       markup.includes(">10.00<"),
     "Committed dimensions should render as compact icon-plus-value chips.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("var(--workbench-shell-danger-text)"),
     "Affected overconstrained annotation glyphs should use the shared danger theme token.",
-  );
+  ).toBeTruthy();
 });

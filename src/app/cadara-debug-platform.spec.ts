@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createCadaraDebugNamespace,
   installCadaraDebugNamespace,
@@ -94,62 +93,62 @@ test("src/app/cadara-debug-platform.spec.ts installs the formal dev namespace an
     targetWindow as Window,
   );
 
-  expectTrue(
-    targetWindow.__cadaraDebug?.version === 1,
+  expect(
+    targetWindow.__cadaraDebug?.version,
     "Debug namespace installation should publish the formal window contract.",
-  );
-  expectTrue(
-    targetWindow.__cadaraDebug?.getState()?.revision === "rev_1",
+  ).toBe(1);
+  expect(
+    targetWindow.__cadaraDebug?.getState()?.revision,
     "Debug namespace should expose structured workbench state.",
-  );
-  expectTrue(
-    targetWindow.__cadaraDebug?.getTrace().totalEntries === 2,
+  ).toBe("rev_1");
+  expect(
+    targetWindow.__cadaraDebug?.getTrace().totalEntries,
     "Debug namespace should expose bounded trace snapshots.",
-  );
-  expectTrue(
-    targetWindow.__cadaraDebug?.selectTarget("body_feature_extrude-1") === true,
+  ).toBe(2);
+  expect(
+    targetWindow.__cadaraDebug?.selectTarget("body_feature_extrude-1"),
     "Debug namespace should route supported actions through the provided bridge callbacks.",
-  );
+  ).toBeTruthy();
   targetWindow.__cadaraDebug?.clearSelection();
   targetWindow.__cadaraDebug?.refreshDocument();
-  expectTrue(
-    clearedSelections === 1,
+  expect(
+    clearedSelections,
     "Debug namespace should expose documented selection clearing through the same event contract.",
-  );
-  expectTrue(
-    refreshedDocuments === 1,
+  ).toBe(1);
+  expect(
+    refreshedDocuments,
     "Debug namespace should expose documented refresh requests through the same event contract.",
-  );
-  expectTrue(
+  ).toBe(1);
+  expect(
     targetWindow.__cadaraDebug?.exportSession().replay.unsupportedSteps[0]
-      ?.code === "browser-coordination-not-captured",
+      ?.code,
     "Session exports should mark unsupported replay steps explicitly.",
-  );
+  ).toBe("browser-coordination-not-captured");
 
   dispose();
-  expectTrue(
-    targetWindow.__cadaraDebug === undefined,
+  expect(
+    targetWindow.__cadaraDebug,
     "Disposing the namespace should remove the dev-only window surface.",
-  );
+  ).toBe(undefined);
 });
 
 test("src/app/cadara-debug-platform.spec.ts gates the namespace to dev or test builds", () => {
-  expectTrue(
-    isCadaraDebugPlatformEnabled({ dev: true }) === true,
+  expect(
+    isCadaraDebugPlatformEnabled({ dev: true }),
     "Development builds should enable the debug namespace.",
-  );
-  expectTrue(
-    isCadaraDebugPlatformEnabled({ dev: false, test: true }) === true,
+  ).toBeTruthy();
+  expect(
+    isCadaraDebugPlatformEnabled({ dev: false, test: true }),
     "Test builds should enable the debug namespace.",
-  );
-  expectTrue(
-    isCadaraDebugPlatformEnabled({ dev: false, test: "true" }) === true,
+  ).toBeTruthy();
+  expect(
+    isCadaraDebugPlatformEnabled({ dev: false, test: "true" }),
     "Stringified test flags should enable the debug namespace.",
-  );
-  expectTrue(
-    isCadaraDebugPlatformEnabled({ dev: false, test: false }) === false,
+  ).toBeTruthy();
+  expect(
+    isCadaraDebugPlatformEnabled({ dev: false, test: false }),
     "Production-like flags should keep the debug namespace disabled.",
-  );
+  ).toBeFalsy();
 });
 
 test("src/app/cadara-debug-platform.spec.ts resolves and dispatches target selection through the editor contract", () => {
@@ -179,17 +178,16 @@ test("src/app/cadara-debug-platform.spec.ts resolves and dispatches target selec
     },
   });
 
-  expectTrue(
-    resolveCadaraDebugTarget(snapshot, "body_feature_extrude-1")?.kind ===
-      "body",
+  expect(
+    resolveCadaraDebugTarget(snapshot, "body_feature_extrude-1")?.kind,
     "Debug selection helpers should resolve target ids against the visible snapshot.",
-  );
-  expectTrue(
-    selected === true,
+  ).toBe("body");
+  expect(
+    selected,
     "Debug selection helpers should accept selectable targets.",
-  );
-  expectTrue(
-    events[0]?.type === "viewport.selectionRequested",
+  ).toBeTruthy();
+  expect(
+    events[0]?.type,
     "Debug selection helpers should dispatch through the editor event contract.",
-  );
+  ).toBe("viewport.selectionRequested");
 });

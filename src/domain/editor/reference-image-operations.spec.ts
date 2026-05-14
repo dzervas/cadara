@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   acceptSketchDraw,
@@ -357,14 +356,14 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image
     ],
   );
 
-  expectTrue(
-    session.definition.points.length === 0,
+  expect(
+    session.definition.points.length,
     "Reference-image imports should not materialize sketch points at import time.",
-  );
-  expectTrue(
-    session.definition.authoringOperations?.length === 2,
+  ).toBe(0);
+  expect(
+    session.definition.authoringOperations?.length,
     "Reference-image imports should commit as authoring operations.",
-  );
+  ).toBe(2);
 
   const updated = updateReferenceImageOperationStates({
     session,
@@ -398,33 +397,33 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image
       ? updated.definition.authoringOperations.at(-1)?.ownedState.calibration
       : undefined;
 
-  expectTrue(
-    updated.definition.authoringOperations?.at(-1)?.kind === "edit",
+  expect(
+    updated.definition.authoringOperations?.at(-1)?.kind,
     "Reference-image state updates should append edit authoring operations.",
-  );
-  expectTrue(
-    !updated.commitRequest?.definition.references.some(
+  ).toBe("edit");
+  expect(
+    updated.commitRequest?.definition.references.some(
       (reference) => reference.kind === "referenceImageAnchor",
     ),
     "Committed sketch definitions must not persist derived reference-image anchor references.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     persistedCalibration === undefined ||
       !("solveResult" in persistedCalibration),
     "Persisted reference-image operation state must not serialize runtime-only calibration solve output.",
-  );
+  ).toBeTruthy();
 
   const updatedRenderables = getSketchSessionDisplayRenderables(updated).filter(
     (entry) => entry.target?.kind === "sketchOperation",
   );
-  expectTrue(
-    updatedRenderables[0]?.label === "reference-a-updated.png",
+  expect(
+    updatedRenderables[0]?.label,
     "Reference-image updates should replay the latest operation label.",
-  );
-  expectTrue(
-    updatedRenderables[0]?.textureFill?.base64Data === "dXBkYXRlZA==",
+  ).toBe("reference-a-updated.png");
+  expect(
+    updatedRenderables[0]?.textureFill?.base64Data,
     "Reference-image updates should replay the latest inline payload bytes for rendering.",
-  );
+  ).toBe("dXBkYXRlZA==");
 
   const explicitEdit = appendReferenceImageOperations(session, [
     createReferenceImageEditOperation({
@@ -452,12 +451,12 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image
   const adjustedRenderables = getSketchSessionDisplayRenderables(
     explicitEdit,
   ).filter((entry) => entry.target?.kind === "sketchOperation");
-  expectTrue(
+  expect(
     adjustedRenderables[1]?.textureFill?.sourceKey.includes(
       "reference-b-adjusted.jpg",
     ),
     "Reference-image edit rows should update the active texture source token for the targeted operation.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/domain/editor/reference-image-operations.spec.ts removes anchor bindings when a bound sketch point is deleted", () => {
@@ -535,14 +534,14 @@ test("src/domain/editor/reference-image-operations.spec.ts removes anchor bindin
 
   const latestOwnedState =
     deleted.definition.authoringOperations?.at(-1)?.ownedState;
-  expectTrue(
-    latestOwnedState?.kind === "referenceImage",
+  expect(
+    latestOwnedState?.kind,
     "Deleting a bound point should append a reference-image edit row after the delete.",
-  );
-  expectTrue(
-    latestOwnedState.calibration?.anchors.length === 0,
+  ).toBe("referenceImage");
+  expect(
+    latestOwnedState.calibration?.anchors.length,
     "Deleting a bound anchor point should detach the anchor binding from the reference-image operation.",
-  );
+  ).toBe(0);
 });
 
 test("src/domain/editor/reference-image-operations.spec.ts renders draft reference-image payload overrides without projected anchor exports", () => {
@@ -647,14 +646,14 @@ test("src/domain/editor/reference-image-operations.spec.ts renders draft referen
     (entry) => entry.target?.kind === "projectedReferenceGeometry",
   );
 
-  expectTrue(
-    draftImage?.textureFill?.base64Data === "dXBkYXRlZA==",
+  expect(
+    draftImage?.textureFill?.base64Data,
     "Active calibration sessions should render the draft reference-image payload.",
-  );
-  expectTrue(
-    projectedAnchor === undefined,
+  ).toBe("dXBkYXRlZA==");
+  expect(
+    projectedAnchor,
     "Draft calibration display should not synthesize projected anchor exports.",
-  );
+  ).toBe(undefined);
 });
 
 test("src/domain/editor/reference-image-operations.spec.ts lets bound anchor points participate in ordinary sketch constraints", () => {
@@ -777,12 +776,15 @@ test("src/domain/editor/reference-image-operations.spec.ts lets bound anchor poi
     (point) => point.pointId === "sketch_point_free",
   );
 
-  expectTrue(anchorPoint && freePoint, "Expected solved line endpoints.");
-  expectTrue(
+  expect(
+    anchorPoint && freePoint,
+    "Expected solved line endpoints.",
+  ).toBeTruthy();
+  expect(
     Math.abs(anchorPoint.solvedPosition[1] - freePoint.solvedPosition[1]) <
       1e-6,
     "Bound anchor points should remain valid local targets for ordinary sketch constraints.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/domain/editor/reference-image-operations.spec.ts reuses bound anchor point ids when drawing snapped lines", () => {
@@ -797,39 +799,39 @@ test("src/domain/editor/reference-image-operations.spec.ts reuses bound anchor p
         ) ?? [])
       : [];
 
-  expectTrue(
-    anchorPointIds.length === 2,
+  expect(
+    anchorPointIds.length,
     "Expected captured fixture to expose two bound anchor points.",
-  );
+  ).toBe(2);
 
   session = beginSketchTool(session, "line");
   session = startSketchDraw(session, [66.08, 23.76]);
-  expectTrue(
-    session.activeSnap?.kind === "endpoint",
+  expect(
+    session.activeSnap?.kind,
     "Bound anchor points should participate in ordinary endpoint snapping.",
-  );
+  ).toBe("endpoint");
   session = acceptSketchDraw(session, [66.76, -22.65]);
 
   const committed = session.definition.entities.at(-1);
-  expectTrue(
-    committed?.kind === "lineSegment",
+  expect(
+    committed?.kind,
     "Expected snapped anchor draw to commit a line segment.",
-  );
-  expectTrue(
+  ).toBe("lineSegment");
+  expect(
     committed.startPointId === anchorPointIds[0] &&
       committed.endPointId === anchorPointIds[1],
     "Snapped anchor lines should reuse the existing anchor point ids at both endpoints.",
-  );
-  expectTrue(
-    session.definition.points.length === 2,
+  ).toBeTruthy();
+  expect(
+    session.definition.points.length,
     "Connecting two existing anchors should not author duplicate endpoint points.",
-  );
-  expectTrue(
-    !session.definition.constraints.some(
+  ).toBe(2);
+  expect(
+    session.definition.constraints.some(
       (constraint) => constraint.kind === "coincident",
     ),
     "Reused anchor endpoints should not need inferred coincident constraints.",
-  );
+  ).toBeFalsy();
 });
 
 test("src/domain/editor/reference-image-operations.spec.ts keeps captured debug-state anchors visible in normal sketch mode", () => {
@@ -845,18 +847,18 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps captured debug-
       renderable.label.startsWith("Anchor "),
   );
 
-  expectTrue(
-    overlayAnchors.length === 2,
+  expect(
+    overlayAnchors.length,
     "Captured bound anchors should render explicit normal-mode overlay markers.",
-  );
-  expectTrue(
+  ).toBe(2);
+  expect(
     overlayAnchors.every(
       (renderable) =>
         renderable.geometry.kind === "marker" &&
         renderable.geometry.displayRadius >= 0.4,
     ),
     "Captured bound anchors should render enlarged overlay markers in normal sketch mode.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/domain/editor/reference-image-operations.spec.ts deletes one reference-image history row without appending a new delete operation or disturbing other images", () => {
@@ -920,26 +922,26 @@ test("src/domain/editor/reference-image-operations.spec.ts deletes one reference
     (entry) => entry.target?.kind === "sketchOperation",
   );
 
-  expectTrue(
+  expect(
     deleted.fullDefinition.authoringOperations?.every(
       (operation) =>
         operation.operationId !== "sketch_operation_1_reference-image" &&
         operation.operationId !== "sketch_operation_3_edit-reference-image",
     ),
     "Deleting a reference-image history row should prune direct operation-owned follow-up rows for that image.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     deleted.fullDefinition.authoringOperations?.every(
       (operation) => operation.kind !== "delete",
     ),
     "Deleting a reference-image history row should not append a new delete operation.",
-  );
-  expectTrue(
-    renderables.length === 1,
+  ).toBeTruthy();
+  expect(
+    renderables.length,
     "Deleting one reference-image history row should preserve other committed reference images.",
-  );
-  expectTrue(
-    renderables[0]?.label === "reference-b.png",
+  ).toBe(1);
+  expect(
+    renderables[0]?.label,
     "Deleting one reference-image history row should leave the untargeted image intact.",
-  );
+  ).toBe("reference-b.png");
 });

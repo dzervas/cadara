@@ -1,4 +1,4 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type {
@@ -31,7 +31,6 @@ import {
   flattenSketchInteractionCurve,
   isSketchInteractionCurveGeometry,
 } from "@/domain/sketch-interaction/geometry";
-import { expectTrue } from "@/testing/expect.spec";
 
 test("collectSketchInteractionGeometry preserves local, projected, datum, and advanced sketch targets", () => {
   const sketchId = "sketch_primary" as SketchId;
@@ -167,39 +166,39 @@ test("collectSketchInteractionGeometry preserves local, projected, datum, and ad
   const geometry = collectSketchInteractionGeometry(session);
   const byKind = new Set(geometry.map((entry) => entry.kind));
 
-  expectTrue(
+  expect(
     byKind.has("point"),
     "Local point definitions and datum origin should be available as semantic interaction points.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     byKind.has("lineSegment"),
     "Local lines, projected lines, and datum axes should be available as semantic line segments.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     byKind.has("circle"),
     "Local and projected circles should be available as semantic circles.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     byKind.has("arc"),
     "Local and projected arcs should be available as semantic arcs.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     byKind.has("spline"),
     "Local and projected splines should be available as semantic splines.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     byKind.has("sampledCurve"),
     "Advanced local curves should be available as sampled semantic curves.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     geometry.some((entry) => entry.target === points[0]!.target),
     "Local point interaction geometry must preserve the authored point target object.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     geometry.some((entry) => entry.target === entities[0]!.target),
     "Local entity interaction geometry must preserve the authored entity target object.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     geometry.some(
       (entry) =>
         entry.target.kind === "projectedReferenceGeometry" &&
@@ -207,8 +206,8 @@ test("collectSketchInteractionGeometry preserves local, projected, datum, and ad
         entry.target.geometryId === projectedReference.geometry[0]!.geometryId,
     ),
     "Projected interaction geometry must use the projectedReferenceGeometry target.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     geometry.some(
       (entry) =>
         entry.target.kind === "sketchDatumReference" &&
@@ -216,7 +215,7 @@ test("collectSketchInteractionGeometry preserves local, projected, datum, and ad
         entry.target.datumId === "xAxis",
     ),
     "Datum axes should use durable sketchDatumReference targets for the active sketch.",
-  );
+  ).toBeTruthy();
 });
 
 test("flattenSketchInteractionCurve respects arc sweeps and closes closed curves", () => {
@@ -274,35 +273,35 @@ test("flattenSketchInteractionCurve respects arc sweeps and closes closed curves
     (entry) => entry.target === circle.target,
   );
 
-  expectTrue(
+  expect(
     arcGeometry !== undefined && isSketchInteractionCurveGeometry(arcGeometry),
     "The authored arc should produce curve geometry.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     circleGeometry !== undefined &&
       isSketchInteractionCurveGeometry(circleGeometry),
     "The authored circle should produce curve geometry.",
-  );
+  ).toBeTruthy();
 
   const arcPoints = flattenSketchInteractionCurve(arcGeometry);
-  expectTrue(
+  expect(
     nearestDistance(arcPoints, [Math.SQRT2, Math.SQRT2]) < 0.08,
     "Flattened arc points should include points inside the authored sweep.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     nearestDistance(arcPoints, [-2, 0]) > 2,
     "Flattened arc points should not include the opposite side outside the authored sweep.",
-  );
+  ).toBeTruthy();
 
   const circlePoints = flattenSketchInteractionCurve(circleGeometry);
-  expectTrue(
+  expect(
     samePoint(circlePoints[0]!, circlePoints[circlePoints.length - 1]!),
     "Closed curves should include the closing segment endpoint.",
-  );
-  expectTrue(
-    !geometry.some((entry) => entry.target === missingLine.target),
+  ).toBeTruthy();
+  expect(
+    geometry.some((entry) => entry.target === missingLine.target),
     "Entities with missing defining points should be excluded instead of receiving fallback targets.",
-  );
+  ).toBeFalsy();
 });
 
 function makeProjectedReference(): ProjectedSketchReferenceRecord {

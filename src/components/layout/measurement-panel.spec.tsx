@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -22,22 +21,22 @@ test("src/components/layout/measurement-panel.spec.tsx", () => {
       />
     </MantineProvider>,
   );
-  expectTrue(
+  expect(
     populatedMarkup.includes("Measure"),
     "Measurement panel should render its section title.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     populatedMarkup.includes("Arc 1"),
     "Measurement panel should render the current selection title.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     populatedMarkup.includes("Arc Length"),
     "Measurement panel should render populated measurement rows.",
-  );
-  expectTrue(
-    !populatedMarkup.includes("Diameter"),
+  ).toBeTruthy();
+  expect(
+    populatedMarkup.includes("Diameter"),
     "Measurement panel should not invent hidden measurement labels.",
-  );
+  ).toBeFalsy();
 
   const notedMarkup = renderToStaticMarkup(
     <MantineProvider>
@@ -52,10 +51,10 @@ test("src/components/layout/measurement-panel.spec.tsx", () => {
       />
     </MantineProvider>,
   );
-  expectTrue(
+  expect(
     notedMarkup.includes("Select another measurable target"),
     "Measurement panel should render note-only point selections.",
-  );
+  ).toBeTruthy();
 
   const emptyMarkup = renderToStaticMarkup(
     <MantineProvider>
@@ -70,8 +69,8 @@ test("src/components/layout/measurement-panel.spec.tsx", () => {
       />
     </MantineProvider>,
   );
-  expectTrue(
-    !emptyMarkup.includes("Unused") && !emptyMarkup.includes("Measure"),
+  expect(
+    emptyMarkup.includes("Unused") && !emptyMarkup.includes("Measure"),
     "Measurement panel should stay hidden when no rows or note are available.",
-  );
+  ).toBeFalsy();
 });

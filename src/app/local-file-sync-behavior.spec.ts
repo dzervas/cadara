@@ -1,6 +1,5 @@
-import { beforeEach, vi, test } from "vitest";
+import { beforeEach, vi, test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
 
 import {
@@ -93,19 +92,18 @@ test("useWorkbenchLocalFileSync restores a binding on mount and reports restore 
     }),
   );
 
-  expectTrue(
-    JSON.stringify(infos) ===
-      JSON.stringify(["Restored local file sync for assembly.cadara."]),
+  expect(
+    JSON.stringify(infos),
     "Restoring a saved local-file binding should surface a user-facing confirmation on mount.",
-  );
-  expectTrue(
-    controller.localFileSyncEnabled === false,
+  ).toBe(JSON.stringify(["Restored local file sync for assembly.cadara."]));
+  expect(
+    controller.localFileSyncEnabled,
     "A one-time restore message should not toggle sync-enabled state by itself.",
-  );
-  expectTrue(
-    failures.length === 0,
+  ).toBeFalsy();
+  expect(
+    failures.length,
     "Successful restore should not report a document-file action failure.",
-  );
+  ).toBe(0);
 
   const restoreFailure = new Error("Local file binding store is unavailable.");
   hookHarness.reset();
@@ -137,16 +135,17 @@ test("useWorkbenchLocalFileSync restores a binding on mount and reports restore 
   await hookHarness.flushEffects();
   await flushMicrotasks();
 
-  expectTrue(
-    JSON.stringify(failures) ===
-      JSON.stringify([
-        {
-          error: restoreFailure,
-          message: "Local file sync restore failed.",
-          source: "workbench.file.restoreLocalBinding",
-        },
-      ]),
+  expect(
+    JSON.stringify(failures),
     "Restore failures should be forwarded through the shared document-file failure reporting seam.",
+  ).toBe(
+    JSON.stringify([
+      {
+        error: restoreFailure,
+        message: "Local file sync restore failed.",
+        source: "workbench.file.restoreLocalBinding",
+      },
+    ]),
   );
 });
 
@@ -188,10 +187,10 @@ test("useWorkbenchLocalFileSync maps worker status updates to visible messages a
   );
 
   await hookHarness.flushEffects();
-  expectTrue(
+  expect(
     statusListener instanceof Function,
     "The controller should subscribe to local-file sync status updates on mount.",
-  );
+  ).toBeTruthy();
 
   statusListener?.(
     makeStatus({
@@ -219,10 +218,10 @@ test("useWorkbenchLocalFileSync maps worker status updates to visible messages a
       },
     }),
   );
-  expectTrue(
+  expect(
     controller.localFileSyncEnabled,
     "Binding restoration should mark local-file sync as enabled.",
-  );
+  ).toBeTruthy();
 
   statusListener?.(
     makeStatus({
@@ -272,20 +271,21 @@ test("useWorkbenchLocalFileSync maps worker status updates to visible messages a
     }),
   );
 
-  expectTrue(
-    JSON.stringify(infos) ===
-      JSON.stringify([
-        "Restored local file sync for assembly.cadara.",
-        "Syncing assembly.cadara.",
-        "Synced assembly.cadara.",
-        "Persistent local bindings are unavailable in this browser.",
-      ]),
+  expect(
+    JSON.stringify(infos),
     "Enabled sync states should surface the expected user-facing information messages.",
+  ).toBe(
+    JSON.stringify([
+      "Restored local file sync for assembly.cadara.",
+      "Syncing assembly.cadara.",
+      "Synced assembly.cadara.",
+      "Persistent local bindings are unavailable in this browser.",
+    ]),
   );
-  expectTrue(
+  expect(
     controller.localFileSyncEnabled,
     "Persistent-binding warnings should still keep sync marked as enabled.",
-  );
+  ).toBeTruthy();
 
   statusListener?.(
     makeStatus({
@@ -313,10 +313,10 @@ test("useWorkbenchLocalFileSync maps worker status updates to visible messages a
       },
     }),
   );
-  expectTrue(
-    !controller.localFileSyncEnabled,
+  expect(
+    controller.localFileSyncEnabled,
     "Permission-required status should disable local-file sync until access is granted.",
-  );
+  ).toBeFalsy();
 
   statusListener?.(
     makeStatus({
@@ -346,14 +346,15 @@ test("useWorkbenchLocalFileSync maps worker status updates to visible messages a
     }),
   );
 
-  expectTrue(
-    JSON.stringify(errors) ===
-      JSON.stringify([
-        "Local file sync needs write permission for assembly.cadara.",
-        "Local file write permission was denied.",
-        "Local file sync target could not be bound.",
-      ]),
+  expect(
+    JSON.stringify(errors),
     "Permission and failure statuses should map to the expected workbench error messages.",
+  ).toBe(
+    JSON.stringify([
+      "Local file sync needs write permission for assembly.cadara.",
+      "Local file write permission was denied.",
+      "Local file sync target could not be bound.",
+    ]),
   );
 });
 
@@ -432,10 +433,10 @@ test("useWorkbenchLocalFileSync does not expose stale binding metadata after swi
     }),
   );
 
-  expectTrue(
-    controller.localFileBindingMetadata?.fileName === "assembly.cadara",
+  expect(
+    controller.localFileBindingMetadata?.fileName,
     "The filesystem-backed document should expose its restored local-file binding.",
-  );
+  ).toBe("assembly.cadara");
 
   controller = hookHarness.render(() =>
     useWorkbenchLocalFileSync({
@@ -454,11 +455,11 @@ test("useWorkbenchLocalFileSync does not expose stale binding metadata after swi
     }),
   );
 
-  expectTrue(
+  expect(
     controller.localFileBindingMetadata === null &&
       controller.localFileSyncEnabled === false,
     "Switching to a browser-only document should not expose the previous document filesystem binding before async restore settles.",
-  );
+  ).toBeTruthy();
 
   await hookHarness.flushEffects();
   await flushMicrotasks();
@@ -479,10 +480,10 @@ test("useWorkbenchLocalFileSync does not expose stale binding metadata after swi
     }),
   );
 
-  expectTrue(
-    firstStatusListener === null,
+  expect(
+    firstStatusListener,
     "Switching modeling services should unsubscribe the previous document status listener.",
-  );
+  ).toBe(null);
 
   secondStatusListener?.({
     documentId: "document_filesystem",
@@ -527,9 +528,9 @@ test("useWorkbenchLocalFileSync does not expose stale binding metadata after swi
     }),
   );
 
-  expectTrue(
+  expect(
     controller.localFileBindingMetadata === null &&
       controller.localFileSyncEnabled === false,
     "Stale sync events and idle browser-document status should keep the active browser-only document unbound.",
-  );
+  ).toBeTruthy();
 });

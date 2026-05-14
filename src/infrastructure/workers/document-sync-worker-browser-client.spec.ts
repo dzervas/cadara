@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   DocumentSyncWorkerRequest,
   DocumentSyncWorkerResponse,
@@ -15,11 +14,11 @@ test("createBrowserDocumentSyncWorkerClient bootstraps the worker search string 
     createWorker: () => worker,
   });
 
-  expectTrue(
+  expect(
     worker.bootstrapMessages.length === 1 &&
       worker.bootstrapMessages[0]?.search === "?document=abc",
     "The browser worker client should bootstrap the worker with the requested location search string.",
-  );
+  ).toBeTruthy();
 
   const statusPromise = client.getWriteStatus({
     documentId: "document_browser_worker" as DocumentSyncWorkerRequest extends {
@@ -30,10 +29,10 @@ test("createBrowserDocumentSyncWorkerClient bootstraps the worker search string 
       : never,
   });
   const request = worker.postedRequests[0];
-  expectTrue(
-    request?.kind === "getWriteStatus",
+  expect(
+    request?.kind,
     "The returned client should be wired to the created worker instance.",
-  );
+  ).toBe("getWriteStatus");
   worker.emit({
     kind: "writeStatus",
     requestId: request.requestId,
@@ -45,16 +44,16 @@ test("createBrowserDocumentSyncWorkerClient bootstraps the worker search string 
   });
 
   const status = await statusPromise;
-  expectTrue(
-    status.kind === "idle",
+  expect(
+    status.kind,
     "The browser client seam should proxy worker responses through the returned DocumentSyncWorkerClient.",
-  );
+  ).toBe("idle");
 
   client.dispose();
-  expectTrue(
-    worker.terminated === true,
+  expect(
+    worker.terminated,
     "Disposing the browser client should terminate the owned worker instance.",
-  );
+  ).toBeTruthy();
 });
 
 test("createBrowserDocumentSyncWorkerClient defaults bootstrap search to an empty string", () => {
@@ -64,10 +63,10 @@ test("createBrowserDocumentSyncWorkerClient defaults bootstrap search to an empt
     createWorker: () => worker,
   }).dispose();
 
-  expectTrue(
-    worker.bootstrapMessages[0]?.search === "",
+  expect(
+    worker.bootstrapMessages[0]?.search,
     "Browser worker bootstrap should default the search string when none is provided.",
-  );
+  ).toBe("");
 });
 
 test("createBrowserDocumentSyncWorkerClient appends a session scoped local-history key for the worker bootstrap", () => {
@@ -84,11 +83,11 @@ test("createBrowserDocumentSyncWorkerClient appends a session scoped local-histo
   const firstScope = new URLSearchParams(firstSearch).get(
     "cadLocalHistoryScope",
   );
-  expectTrue(
+  expect(
     firstScope !== null &&
       new URLSearchParams(firstSearch).get("document") === "abc",
     "Browser worker bootstrap should preserve the provided search and append a stable local-history scope.",
-  );
+  ).toBeTruthy();
 
   const secondWorker = new FakeBrowserWorker();
   createBrowserDocumentSyncWorkerClient({
@@ -97,12 +96,12 @@ test("createBrowserDocumentSyncWorkerClient appends a session scoped local-histo
     sessionStorage,
   }).dispose();
 
-  expectTrue(
+  expect(
     new URLSearchParams(secondWorker.bootstrapMessages[0]?.search ?? "").get(
       "cadLocalHistoryScope",
-    ) === firstScope,
+    ),
     "Browser worker bootstrap should reuse the same session scoped local-history key across refreshes in one tab.",
-  );
+  ).toBe(firstScope);
 });
 
 class FakeBrowserWorker implements DocumentSyncWorkerLike {

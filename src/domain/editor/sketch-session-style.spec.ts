@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
@@ -138,55 +137,58 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
   const lineRenderable = getSketchSessionDisplayRenderables(session).find(
     (entry) => entry.id.includes("line"),
   );
-  expectTrue(lineRenderable, "Sketch line display renderable should exist.");
-  expectTrue(
-    lineRenderable.target?.kind === "sketchEntity",
+  expect(
+    lineRenderable,
+    "Sketch line display renderable should exist.",
+  ).toBeTruthy();
+  expect(
+    lineRenderable.target?.kind,
     "Styled renderables should preserve selection/picking target bindings.",
-  );
-  expectTrue(
-    lineRenderable.linePattern === "solid",
+  ).toBe("sketchEntity");
+  expect(
+    lineRenderable.linePattern,
     "Style metadata should not alter construction/line-pattern state.",
-  );
-  expectTrue(
-    lineRenderable.paintStyle?.color === 0x3366ff,
+  ).toBe("solid");
+  expect(
+    lineRenderable.paintStyle?.color,
     "Paint style color should resolve from persisted style records.",
-  );
-  expectTrue(
-    lineRenderable.paintStyle?.opacity === 0.42,
+  ).toBe(0x3366ff);
+  expect(
+    lineRenderable.paintStyle?.opacity,
     "Paint style opacity should resolve from persisted style records.",
-  );
-  expectTrue(
-    lineRenderable.strokeStyle?.color === 0xff8844,
+  ).toBe(0.42);
+  expect(
+    lineRenderable.strokeStyle?.color,
     "Stroke style color should resolve from persisted style records.",
-  );
-  expectTrue(
-    lineRenderable.strokeStyle?.opacity === 0.63,
+  ).toBe(0xff8844);
+  expect(
+    lineRenderable.strokeStyle?.opacity,
     "Stroke style opacity should resolve from persisted style records.",
-  );
-  expectTrue(
-    lineRenderable.strokeStyle?.width === 2.5,
+  ).toBe(0.63);
+  expect(
+    lineRenderable.strokeStyle?.width,
     "Stroke style width should resolve from persisted style records.",
-  );
-  expectTrue(
-    lineRenderable.strokeStyle?.lineCap === "butt",
+  ).toBe(2.5);
+  expect(
+    lineRenderable.strokeStyle?.lineCap,
     "Persisted stroke cap should resolve through display renderables.",
-  );
-  expectTrue(
-    lineRenderable.strokeStyle?.lineJoin === "bevel",
+  ).toBe("butt");
+  expect(
+    lineRenderable.strokeStyle?.lineJoin,
     "Persisted stroke join should resolve through display renderables.",
-  );
-  expectTrue(
-    lineRenderable.strokeStyle?.miterLimit === 5,
+  ).toBe("bevel");
+  expect(
+    lineRenderable.strokeStyle?.miterLimit,
     "Persisted stroke miter limit should resolve through display renderables.",
-  );
-  expectTrue(
-    lineRenderable.strokeStyle?.dashSize === 0.8,
+  ).toBe(5);
+  expect(
+    lineRenderable.strokeStyle?.dashSize,
     "Stroke dash size should resolve from persisted style records.",
-  );
-  expectTrue(
-    lineRenderable.strokeStyle?.gapSize === 0.3,
+  ).toBe(0.8);
+  expect(
+    lineRenderable.strokeStyle?.gapSize,
     "Stroke gap size should resolve from persisted style records.",
-  );
+  ).toBe(0.3);
 
   const localDefinition = {
     ...definition,
@@ -252,34 +254,34 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
   const localLineRenderable = getSketchSessionDisplayRenderables(
     localSession,
   ).find((entry) => entry.id.includes("line"));
-  expectTrue(
-    localLineRenderable?.paintStyle?.color === 0x111111,
+  expect(
+    localLineRenderable?.paintStyle?.color,
     "Local gradient fill should render with the documented fill-color fallback.",
-  );
-  expectTrue(
-    localLineRenderable.strokeStyle?.color === 0x33ffaa,
+  ).toBe(0x111111);
+  expect(
+    localLineRenderable.strokeStyle?.color,
     "Local stroke color should render from inline style metadata.",
-  );
-  expectTrue(
-    localLineRenderable.strokeStyle?.lineCap === "square",
+  ).toBe(0x33ffaa);
+  expect(
+    localLineRenderable.strokeStyle?.lineCap,
     "Local stroke cap should remain available to display helpers.",
-  );
-  expectTrue(
-    localLineRenderable.strokeStyle?.lineJoin === "miter",
+  ).toBe("square");
+  expect(
+    localLineRenderable.strokeStyle?.lineJoin,
     "Local stroke join should remain available to display helpers.",
-  );
-  expectTrue(
-    localLineRenderable.strokeStyle?.miterLimit === 7,
+  ).toBe("miter");
+  expect(
+    localLineRenderable.strokeStyle?.miterLimit,
     "Local stroke miter limit should remain available to display helpers.",
-  );
-  expectTrue(
-    localLineRenderable.strokeStyle?.dashSize === 0.45,
+  ).toBe(7);
+  expect(
+    localLineRenderable.strokeStyle?.dashSize,
     "Local stroke dash size should render from inline style metadata.",
-  );
-  expectTrue(
-    localLineRenderable.strokeStyle?.gapSize === 0.15,
+  ).toBe(0.45);
+  expect(
+    localLineRenderable.strokeStyle?.gapSize,
     "Local stroke gap size should render from inline style metadata.",
-  );
+  ).toBe(0.15);
 
   const regionDefinition = {
     ...definition,
@@ -399,35 +401,35 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
   const regionRenderable = getSketchSessionDisplayRenderables(
     regionSession,
   ).find((entry) => entry.semanticClass === "region");
-  expectTrue(
-    regionRenderable?.paintStyle?.kind === "linearGradient",
+  expect(
+    regionRenderable?.paintStyle?.kind,
     "Region style records should preserve gradient fill metadata through display renderables.",
-  );
-  expectTrue(
+  ).toBe("linearGradient");
+  expect(
     regionRenderable.paintStyle.startColor === 0x2266ff &&
       regionRenderable.paintStyle.startOpacity === 0.21 &&
       regionRenderable.paintStyle.endColor === 0xffaa33 &&
       regionRenderable.paintStyle.endOpacity === 0.74 &&
       regionRenderable.paintStyle.angleRadians === Math.PI / 3,
     "Region gradient display metadata should preserve colors, opacities, and angle.",
-  );
-  expectTrue(
-    regionRenderable.strokeStyle?.lineCap === "square",
+  ).toBeTruthy();
+  expect(
+    regionRenderable.strokeStyle?.lineCap,
     "Region style record stroke cap should reach display renderables.",
-  );
-  expectTrue(
-    regionRenderable.strokeStyle.lineJoin === "miter",
+  ).toBe("square");
+  expect(
+    regionRenderable.strokeStyle.lineJoin,
     "Region style record stroke join should reach display renderables.",
-  );
-  expectTrue(
-    regionRenderable.strokeStyle.miterLimit === 9,
+  ).toBe("miter");
+  expect(
+    regionRenderable.strokeStyle.miterLimit,
     "Region style record miter limit should reach display renderables.",
-  );
-  expectTrue(
+  ).toBe(9);
+  expect(
     regionRenderable.strokeStyle.dashSize === 1.25 &&
       regionRenderable.strokeStyle.gapSize === 0.5,
     "Region style record dash and gap should reach display renderables.",
-  );
+  ).toBeTruthy();
 
   const disabledStrokeDefinition = {
     ...localDefinition,
@@ -478,10 +480,10 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
   const disabledStrokeLineRenderable = getSketchSessionDisplayRenderables(
     disabledStrokeSession,
   ).find((entry) => entry.id.includes("line"));
-  expectTrue(
-    disabledStrokeLineRenderable?.strokeStyle === undefined,
+  expect(
+    disabledStrokeLineRenderable?.strokeStyle,
     "Local stroke fields should not render unless stroke styling is explicitly enabled.",
-  );
+  ).toBe(undefined);
 
   const pointStyledDefinition = {
     ...localDefinition,
@@ -538,39 +540,39 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       entry.target?.kind === "sketchPoint" &&
       entry.target.pointId === "sketch_point_a",
   );
-  expectTrue(
-    pointRenderable?.strokeStyle?.color === 0xdd44aa,
+  expect(
+    pointRenderable?.strokeStyle?.color,
     "Point marker renderables should resolve enabled local stroke style.",
-  );
+  ).toBe(0xdd44aa);
 
-  expectTrue(
+  expect(
     normalizeSketchConstraintDisplayState(
       { solveState: "solved", constraintState: "wellConstrained" },
       0,
-    ) === "constrained",
+    ),
     "Well constrained solver status should normalize to constrained display state.",
-  );
-  expectTrue(
+  ).toBe("constrained");
+  expect(
     normalizeSketchConstraintDisplayState(
       { solveState: "solved", constraintState: "unknown" },
       0,
-    ) === "underconstrained",
+    ),
     "Unknown solver constrainedness should normalize to underconstrained display state.",
-  );
-  expectTrue(
+  ).toBe("underconstrained");
+  expect(
     normalizeSketchConstraintDisplayState(
       { solveState: "solved", constraintState: "inconsistent" },
       0,
-    ) === "overconstrained",
+    ),
     "Inconsistent solver constrainedness should normalize to overconstrained display state.",
-  );
-  expectTrue(
+  ).toBe("overconstrained");
+  expect(
     normalizeSketchConstraintDisplayState(
       { solveState: "partiallySolved", constraintState: "underConstrained" },
       1,
-    ) === "overconstrained",
+    ),
     "Partial solves with known affected geometry should normalize to overconstrained display state.",
-  );
+  ).toBe("overconstrained");
 
   const constrainedDefinition = {
     ...definition,
@@ -603,11 +605,11 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     definition: constrainedDefinition,
     solvedSnapshot: unsatisfiedSnapshot,
   });
-  expectTrue(
-    displaySummary.state === "overconstrained",
+  expect(
+    displaySummary.state,
     "Unsatisfied partial solve display summary should be overconstrained.",
-  );
-  expectTrue(
+  ).toBe("overconstrained");
+  expect(
     getSketchConstraintDisplayForTarget(
       {
         kind: "sketchEntity",
@@ -617,9 +619,9 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       displaySummary,
     ).isAffectedOverconstraint,
     "Unsatisfied constraints should mark only their affected sketch geometry targets.",
-  );
-  expectTrue(
-    !getSketchConstraintDisplayForTarget(
+  ).toBeTruthy();
+  expect(
+    getSketchConstraintDisplayForTarget(
       {
         kind: "sketchPoint",
         sketchId: "sketch_primary",
@@ -628,5 +630,5 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       displaySummary,
     ).isAffectedOverconstraint,
     "Unaffected geometry should not receive overconstraint diagnostics.",
-  );
+  ).toBeFalsy();
 });

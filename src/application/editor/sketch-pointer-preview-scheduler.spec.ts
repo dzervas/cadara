@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createSketchPointerPreviewScheduler } from "@/application/editor/sketch-pointer-preview-scheduler";
 import type { EditorEvent } from "@/domain/editor/state-machine";
 
@@ -25,27 +24,27 @@ test("src/application/editor/sketch-pointer-preview-scheduler.spec.ts coalesces 
   scheduler.dispatch({ type: "sketch.pointerMoved", point: [2, 2] });
   scheduler.dispatch({ type: "sketch.pointerMoved", point: [3, 3] });
 
-  expectTrue(
-    dispatched.length === 0,
+  expect(
+    dispatched.length,
     "Pointer preview moves should wait for the scheduled animation frame.",
-  );
-  expectTrue(
-    frameCallbacks.size === 1,
+  ).toBe(0);
+  expect(
+    frameCallbacks.size,
     "Pointer preview moves should share one pending animation frame.",
-  );
+  ).toBe(1);
 
   frameCallbacks.get(1)?.(0);
 
-  expectTrue(
-    dispatched.length === 1,
+  expect(
+    dispatched.length,
     "One coalesced pointer preview should dispatch for the frame.",
-  );
-  expectTrue(
+  ).toBe(1);
+  expect(
     dispatched[0]?.type === "sketch.pointerMoved" &&
       dispatched[0].point[0] === 3 &&
       dispatched[0].point[1] === 3,
     "The coalesced pointer preview should use the latest point.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/application/editor/sketch-pointer-preview-scheduler.spec.ts flushes pending pointer preview before acceptance events", () => {
@@ -62,20 +61,20 @@ test("src/application/editor/sketch-pointer-preview-scheduler.spec.ts flushes pe
   scheduler.dispatch({ type: "sketch.pointerMoved", point: [4, 5] });
   scheduler.dispatch({ type: "sketch.pointerReleased", point: [6, 7] });
 
-  expectTrue(
-    cancelledFrames[0] === 7,
+  expect(
+    cancelledFrames[0],
     "Flushing should cancel the stale scheduled frame.",
-  );
-  expectTrue(
-    dispatched.length === 2,
+  ).toBe(7);
+  expect(
+    dispatched.length,
     "Flush should dispatch the pending pointer before the acceptance event.",
-  );
-  expectTrue(
-    dispatched[0]?.type === "sketch.pointerMoved",
+  ).toBe(2);
+  expect(
+    dispatched[0]?.type,
     "The pending pointer preview should dispatch first.",
-  );
-  expectTrue(
-    dispatched[1]?.type === "sketch.pointerReleased",
+  ).toBe("sketch.pointerMoved");
+  expect(
+    dispatched[1]?.type,
     "The acceptance event should dispatch after the flush.",
-  );
+  ).toBe("sketch.pointerReleased");
 });

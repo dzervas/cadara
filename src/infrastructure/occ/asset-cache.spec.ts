@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   OCC_ASSET_CACHE_NAME,
   getOpenCascadeServiceWorkerRegistrationOptions,
@@ -12,19 +11,19 @@ import {
 } from "@/infrastructure/occ/asset-cache";
 
 test("src/infrastructure/occ/asset-cache.spec.ts", () => {
-  expectTrue(
+  expect(
     isOpenCascadeAssetUrl("/cadara-occ.wasm"),
     "OCC wasm URL audit should recognize the custom app-served OpenCascade wasm asset.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     isOpenCascadeAssetUrl("/cadara-occ.js"),
     "OCC asset URL audit should recognize the custom app-served OpenCascade bootstrap module.",
-  );
-  expectTrue(
-    getOpenCascadeServiceWorkerRegistrationOptions().scope === "/",
+  ).toBeTruthy();
+  expect(
+    getOpenCascadeServiceWorkerRegistrationOptions().scope,
     "OCC asset service worker registration scope should cover the custom app-served OCC requests from the shell.",
-  );
-  expectTrue(
+  ).toBe("/");
+  expect(
     getOpenCascadeServiceWorkerVersion({
       querySelector(selector) {
         return selector === 'script[type="module"][src]'
@@ -35,10 +34,10 @@ test("src/infrastructure/occ/asset-cache.spec.ts", () => {
             }
           : null;
       },
-    }) === "/assets/index-live-build.js",
+    }),
     "OCC asset cache registration should derive its cache version from the current build module script URL.",
-  );
-  expectTrue(
+  ).toBe("/assets/index-live-build.js");
+  expect(
     getOpenCascadeServiceWorkerUrl({
       querySelector() {
         return {
@@ -47,16 +46,16 @@ test("src/infrastructure/occ/asset-cache.spec.ts", () => {
           },
         };
       },
-    }) === "/occ-asset-cache-sw.js?v=%2Fassets%2Findex-live-build.js",
+    }),
     "OCC asset cache registration should version the service worker script URL per build.",
-  );
+  ).toBe("/occ-asset-cache-sw.js?v=%2Fassets%2Findex-live-build.js");
 
   const serviceWorkerSource = readFileSync(
     join(process.cwd(), "public/occ-asset-cache-sw.js"),
     "utf8",
   );
-  expectTrue(
+  expect(
     serviceWorkerSource.includes(OCC_ASSET_CACHE_NAME),
     "The OCC service worker cache should be versioned with the OpenCascade package version and current build identifier.",
-  );
+  ).toBeTruthy();
 });

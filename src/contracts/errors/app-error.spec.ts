@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 
 import {
   appErrorFromModelingDiagnostic,
@@ -20,36 +19,36 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     context: [{ key: "operation", value: "Preview feature" }],
   });
 
-  expectTrue(
-    normalized.message === cause.message,
+  expect(
+    normalized.message,
     "Normalization should preserve Error messages.",
-  );
-  expectTrue(
-    normalized.cause === cause,
+  ).toBe(cause.message);
+  expect(
+    normalized.cause,
     "Normalization should preserve the original cause.",
-  );
-  expectTrue(
-    normalized.requestId === "request_preview-1",
+  ).toBe(cause);
+  expect(
+    normalized.requestId,
     "Normalization should preserve request ids.",
-  );
-  expectTrue(
+  ).toBe("request_preview-1");
+  expect(
     normalized.context.some(
       (entry) => entry.key === "operation" && entry.value === "Preview feature",
     ),
     "Normalization should preserve structured context.",
-  );
+  ).toBeTruthy();
 
   const nonError = normalizeUnknownError("bad value", {
     fallbackMessage: "Non-Error throw fell back.",
   });
-  expectTrue(
-    nonError.message === "Non-Error throw fell back.",
+  expect(
+    nonError.message,
     "Non-Error throws should use fallback messages.",
-  );
-  expectTrue(
-    nonError.cause === "bad value",
+  ).toBe("Non-Error throw fell back.");
+  expect(
+    nonError.cause,
     "Non-Error throws should still be retained as causes.",
-  );
+  ).toBe("bad value");
 
   const malformedMarkedValue = {
     [Symbol.for("cadara.appError")]: true,
@@ -58,14 +57,14 @@ test("src/contracts/errors/app-error.spec.ts", () => {
   const malformed = normalizeUnknownError(malformedMarkedValue, {
     fallbackMessage: "Malformed marker fell back.",
   });
-  expectTrue(
-    malformed.message === "Malformed marker fell back.",
+  expect(
+    malformed.message,
     "Malformed marked objects should not escape normalization.",
-  );
-  expectTrue(
-    malformed.cause === malformedMarkedValue,
+  ).toBe("Malformed marker fell back.");
+  expect(
+    malformed.cause,
     "Malformed marked objects should still be retained as causes.",
-  );
+  ).toBe(malformedMarkedValue);
 
   const validationError = appErrorFromValidationIssues(
     [
@@ -80,14 +79,14 @@ test("src/contracts/errors/app-error.spec.ts", () => {
       operation: "Parse dimensions",
     },
   );
-  expectTrue(
-    validationError.code === "app/validation-failed",
+  expect(
+    validationError.code,
     "Validation failures should get validation codes.",
-  );
-  expectTrue(
+  ).toBe("app/validation-failed");
+  expect(
     validationError.message.length > 0,
     "Validation failures should expose a human message.",
-  );
+  ).toBeTruthy();
 
   const diagnosticError = appErrorFromModelingDiagnostic(
     {
@@ -99,14 +98,14 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     },
     { operation: "Update variable" },
   );
-  expectTrue(
-    diagnosticError.message === "Variable x references missing.",
+  expect(
+    diagnosticError.message,
     "Diagnostic messages should be preserved.",
-  );
-  expectTrue(
+  ).toBe("Variable x references missing.");
+  expect(
     diagnosticError.context.some((entry) => entry.key === "diagnosticCode"),
     "Diagnostic codes should be preserved as structured context.",
-  );
+  ).toBeTruthy();
 
   const conflictError = appErrorFromModelingResult({
     operation: "Create feature",
@@ -132,16 +131,16 @@ test("src/contracts/errors/app-error.spec.ts", () => {
       actualRevisionId: "rev_2",
     },
   });
-  expectTrue(
-    conflictError.message === "Refresh before retrying this mutation.",
+  expect(
+    conflictError.message,
     "Repository head conflicts should be the primary modeling boundary error.",
-  );
-  expectTrue(
+  ).toBe("Refresh before retrying this mutation.");
+  expect(
     conflictError.context.some(
       (entry) => entry.key === "actualRevisionId" && entry.value === "rev_2",
     ),
     "Modeling boundary errors should retain revision conflict context.",
-  );
+  ).toBeTruthy();
 
   const modelingDiagnostic = appErrorToModelingDiagnostic(
     createAppError({
@@ -150,10 +149,10 @@ test("src/contracts/errors/app-error.spec.ts", () => {
       message: "Render subtree crashed.",
     }),
   );
-  expectTrue(
-    modelingDiagnostic.severity === "error",
+  expect(
+    modelingDiagnostic.severity,
     "Fatal app errors should become error diagnostics.",
-  );
+  ).toBe("error");
 
   const testReporter = createTestErrorReporter();
   const report = testReporter.report(normalized, {
@@ -166,18 +165,18 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     visibility: "user",
     dedupeKey: "same-error",
   });
-  expectTrue(
-    report !== null,
+  expect(
+    report,
     "Test reporter should keep the first deduped report.",
-  );
-  expectTrue(
-    duplicate === null,
+  ).not.toBe(null);
+  expect(
+    duplicate,
     "Test reporter should suppress duplicate dedupe keys.",
-  );
-  expectTrue(
-    testReporter.reports.length === 1,
+  ).toBe(null);
+  expect(
+    testReporter.reports.length,
     "Test reporter should store reports.",
-  );
+  ).toBe(1);
 
   const consoleRecords: unknown[][] = [];
   const consoleReporter = createConsoleErrorReporter({
@@ -186,8 +185,8 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     },
   });
   consoleReporter.report(normalized, { source: "unit" });
-  expectTrue(
-    String(consoleRecords[0]?.[0]) === "[app-error]",
+  expect(
+    String(consoleRecords[0]?.[0]),
     "Console reporter should emit actionable records.",
-  );
+  ).toBe("[app-error]");
 });

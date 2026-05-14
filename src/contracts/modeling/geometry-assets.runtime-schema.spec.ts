@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   validateGeometryAssetHash,
   validateGeometryAssetManifest,
@@ -14,19 +13,19 @@ test("geometry asset schema entrypoints accept structured Cadara B-rep and baked
   const cadaraParsed = validateGeometryAssetRecord(cadaraRecord);
   const bakedMeshParsed = validateGeometryAssetRecord(bakedMeshRecord);
 
-  expectTrue(
+  expect(
     cadaraParsed.success,
     `Expected structured Cadara B-rep record to parse: ${formatIssues(cadaraParsed)}`,
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     bakedMeshParsed.success,
     `Expected structured baked mesh record to parse: ${formatIssues(bakedMeshParsed)}`,
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     cadaraParsed.data.data?.kind === "cadaraBrep" &&
       bakedMeshParsed.data.data?.kind === "bakedMeshGeometry",
     "Record entrypoints should preserve the structured asset data discriminants.",
-  );
+  ).toBeTruthy();
 });
 
 test("geometry asset schema rejects malformed sha256 hash payloads", () => {
@@ -36,14 +35,14 @@ test("geometry asset schema rejects malformed sha256 hash payloads", () => {
     hash: "sha256:not64hex",
   });
 
-  expectTrue(
-    !parsedHash.success,
+  expect(
+    parsedHash.success,
     "Geometry asset hash validation should reject non-64-hex sha256 payloads.",
-  );
-  expectTrue(
-    !parsedRecord.success,
+  ).toBeFalsy();
+  expect(
+    parsedRecord.success,
     "Geometry asset records should reject malformed retained asset hashes.",
-  );
+  ).toBeFalsy();
 });
 
 test("geometry asset manifests normalize duplicate records with merged owner feature ids", () => {
@@ -60,19 +59,18 @@ test("geometry asset manifests normalize duplicate records with merged owner fea
     schemaVersion: "geometry-asset-manifest/v1alpha1",
     records: [first, second],
   });
-  expectTrue(
+  expect(
     manifestParsed.success,
     `Expected manifest normalization to succeed: ${formatIssues(manifestParsed)}`,
-  );
-  expectTrue(
-    manifestParsed.data.records.length === 1,
+  ).toBeTruthy();
+  expect(
+    manifestParsed.data.records.length,
     "Versioned manifests should normalize duplicate compatible records into one asset record.",
-  );
-  expectTrue(
-    manifestParsed.data.records[0]?.ownerFeatureIds.join(",") ===
-      "feature_a,feature_b,feature_z",
+  ).toBe(1);
+  expect(
+    manifestParsed.data.records[0]?.ownerFeatureIds.join(","),
     "Manifest normalization should merge and sort owner feature ids.",
-  );
+  ).toBe("feature_a,feature_b,feature_z");
 });
 
 test("geometry asset record schema rejects retained non-structured formats and mismatched structured payloads", () => {
@@ -89,39 +87,39 @@ test("geometry asset record schema rejects retained non-structured formats and m
     data: makeCadaraBrepRecord().data,
   });
 
-  expectTrue(
-    !unsupportedFormat.success,
+  expect(
+    unsupportedFormat.success,
     "Retained STEP records should be rejected at the schema entrypoint.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     hasIssue(
       unsupportedFormat,
       "Only translated Cadara B-rep geometry and structured baked mesh geometry may be retained in authored documents.",
     ),
     "Unsupported retained formats should explain why authored documents only allow structured retained geometry.",
-  );
-  expectTrue(
-    !mismatchedCadaraPayload.success,
+  ).toBeTruthy();
+  expect(
+    mismatchedCadaraPayload.success,
     "Cadara B-rep records should reject baked mesh payloads.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     hasIssue(
       mismatchedCadaraPayload,
       "STEP-imported geometry must be stored as translated Cadara B-rep JSON data.",
     ),
     "Cadara B-rep records should require the Cadara B-rep data discriminant.",
-  );
-  expectTrue(
-    !mismatchedMeshPayload.success,
+  ).toBeTruthy();
+  expect(
+    mismatchedMeshPayload.success,
     "Baked mesh records should reject Cadara B-rep payloads.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     hasIssue(
       mismatchedMeshPayload,
       "Baked mesh geometry must be stored as structured JSON data.",
     ),
     "Baked mesh records should require the baked mesh data discriminant.",
-  );
+  ).toBeTruthy();
 });
 
 test("geometry asset record schema reports weighted-curve refinement failures at the record entrypoint", () => {
@@ -180,21 +178,21 @@ test("geometry asset record schema reports weighted-curve refinement failures at
 
   const parsed = validateGeometryAssetRecord(invalidEdgeWeights);
 
-  expectTrue(
-    !parsed.success,
+  expect(
+    parsed.success,
     "Weighted curve invariants should fail when weights or multiplicities do not align.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     hasIssue(parsed, "Cadara B-rep spline weights must align 1:1 with poles."),
     "Curve weight-count mismatches should report a seam-level refinement error.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     hasIssue(
       parsed,
       "Cadara B-rep spline multiplicities must align 1:1 with knots.",
     ),
     "Curve knot/multiplicity mismatches should report a seam-level refinement error.",
-  );
+  ).toBeTruthy();
 });
 
 test("geometry asset schema accepts compact analytic B-rep solids with single-coedge loops", () => {
@@ -242,10 +240,10 @@ test("geometry asset schema accepts compact analytic B-rep solids with single-co
 
   const parsed = validateGeometryAssetRecord(compactRecord);
 
-  expectTrue(
+  expect(
     parsed.success,
     `Expected compact analytic B-rep topology to parse: ${formatIssues(parsed)}`,
-  );
+  ).toBeTruthy();
 });
 
 test("geometry asset record schema reports weighted-surface and topology reference failures at the record entrypoint", () => {
@@ -320,42 +318,42 @@ test("geometry asset record schema reports weighted-surface and topology referen
     },
   });
 
-  expectTrue(
-    !invalidSurface.success,
+  expect(
+    invalidSurface.success,
     "Surface and topology entrypoint refinements should reject invalid structured B-rep payloads.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     hasIssue(invalidSurface, "Cadara B-rep edge references a missing vertex."),
     "Topology reference mismatches should surface at the record entrypoint.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     hasIssue(
       invalidSurface,
       "Cadara B-rep surface poles must match the declared U/V pole counts.",
     ),
     "Surface pole-count mismatches should be reported by the schema entrypoint.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     hasIssue(
       invalidSurface,
       "Cadara B-rep surface weights must align 1:1 with poles.",
     ),
     "Surface weight-count mismatches should be reported by the schema entrypoint.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     hasIssue(
       invalidSurface,
       "Cadara B-rep V multiplicities must align 1:1 with V knots.",
     ),
     "Surface knot/multiplicity mismatches should be reported by the schema entrypoint.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     hasIssue(
       invalidSurface,
       "Cadara B-rep spline weights must align 1:1 with poles.",
     ),
     "Weighted basis curves on extruded/revolved surfaces should also be validated at the record entrypoint.",
-  );
+  ).toBeTruthy();
 });
 
 function hasIssue(

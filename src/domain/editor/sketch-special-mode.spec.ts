@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   initialEditorState,
   runEditorEffect,
@@ -219,25 +218,25 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       point: [4, 6],
       target: operationTarget,
     });
-    expectTrue(
-      entered.state.kind === "editingSketch",
+    expect(
+      entered.state.kind,
       "Special mode entry should preserve sketch editing.",
-    );
-    expectTrue(
-      entered.effects[0]?.type === "sketch.specialModeEffect",
+    ).toBe("editingSketch");
+    expect(
+      entered.effects[0]?.type,
       "Entry should emit the mode effect contract.",
-    );
-    expectTrue(
+    ).toBe("sketch.specialModeEffect");
+    expect(
       entered.state.kind === "editingSketch" &&
         entered.state.session.activeSpecialMode?.modeId === fixtureMode.id,
       "Entry should activate the registered sketch special mode.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       entered.state.selectionFilter?.label === "Fixture selection" &&
         entered.state.selectionFilter.allowedKinds.length === 1 &&
         entered.state.selectionFilter.allowedKinds[0] === "sketchOperation",
       "Entering the mode should install the mode-specific pick contract as the active selection filter.",
-    );
+    ).toBeTruthy();
 
     const runtime: EditorEffectRuntime = {
       async getCurrentDocumentSnapshot() {
@@ -274,47 +273,47 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       entered.state,
       enteredEffectEvent,
     );
-    expectTrue(
+    expect(
       enteredResolved.state.kind === "editingSketch" &&
         enteredResolved.state.session.activeSpecialMode?.state.lastPayload ===
           operationTarget.operationId,
       "Effect completion should re-enter the reducer through the registered mode definition.",
-    );
+    ).toBeTruthy();
 
     const rejectedHover = transitionWithFixtureModes(enteredResolved.state, {
       type: "viewport.hovered",
       target: rejectedTarget,
     });
-    expectTrue(
+    expect(
       rejectedHover.state.kind === "editingSketch" &&
         rejectedHover.state.hoverTarget === null &&
         rejectedHover.state.session.activeSpecialMode?.hoverTarget === null,
       "Mode-specific target contracts should reject targets outside the declared picker semantics.",
-    );
+    ).toBeTruthy();
 
     const hovered = transitionWithFixtureModes(enteredResolved.state, {
       type: "viewport.hovered",
       target: operationTarget,
     });
-    expectTrue(
+    expect(
       hovered.state.kind === "editingSketch" &&
         hovered.state.session.activeSpecialMode?.hoverTarget?.targetId ===
           "sketch_special_target_resolved",
       "Viewport hover should route through the active special-mode adapter.",
-    );
+    ).toBeTruthy();
 
     const clicked = transitionWithFixtureModes(hovered.state, {
       type: "sketch.specialModeClickRequested",
       point: [4, 6],
       target: operationTarget,
     });
-    expectTrue(
+    expect(
       clicked.state.kind === "editingSketch" &&
         clicked.state.session.activeSpecialMode?.state.clicks === 1 &&
         clicked.state.session.activeSpecialMode?.selectedTarget?.targetId ===
           "sketch_special_target_resolved",
       "Special-mode click events should use the resolved mode-local target contract.",
-    );
+    ).toBeTruthy();
 
     const handle = createSketchSpecialModeHandleRef(
       operationTarget.operationId,
@@ -335,12 +334,12 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       handle,
       point: [10, 12],
     });
-    expectTrue(
+    expect(
       draggedEnd.state.kind === "editingSketch" &&
         draggedEnd.state.session.activeSpecialMode?.state.lastPayload ===
           `${handle.handleId}:10,12`,
       "Special-mode handle drags should flow through the dedicated drag channel with durable handle ids.",
-    );
+    ).toBeTruthy();
 
     const invoked = transitionWithFixtureModes(draggedEnd.state, {
       type: "sketch.specialModePanelActionInvoked",
@@ -350,32 +349,32 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
         value: "panel-value",
       },
     });
-    expectTrue(
-      invoked.effects[0]?.type === "sketch.specialModeEffect",
+    expect(
+      invoked.effects[0]?.type,
       "Panel actions should be able to emit async mode effects.",
-    );
+    ).toBe("sketch.specialModeEffect");
 
     const committed = transitionWithFixtureModes(invoked.state, {
       type: "command.commitRequested",
       commandSessionId: "command_sketch-1",
     });
-    expectTrue(
+    expect(
       committed.effects[0]?.type === "sketch.specialModeEffect" &&
         committed.state.kind === "editingSketch" &&
         committed.state.session.activeSpecialMode !== null,
       "Commit requests should preserve the async special-mode effect path instead of dropping lifecycle effects.",
-    );
+    ).toBeTruthy();
 
     const committedResolved = transitionWithFixtureModes(
       committed.state,
       await runEditorEffect(committed.effects[0]!, runtime),
     );
-    expectTrue(
+    expect(
       committedResolved.state.kind === "editingSketch" &&
         committedResolved.state.session.activeSpecialMode === null &&
         committedResolved.state.selectionFilter?.kind === "sketchSession",
       "Completing an effectful commit should exit the mode and restore ordinary sketch selection semantics.",
-    );
+    ).toBeTruthy();
 
     const reentered = transitionWithFixtureModes(committedResolved.state, {
       type: "sketch.specialModeEntered",
@@ -391,12 +390,12 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       type: "command.cancelled",
       commandSessionId: "command_sketch-1",
     });
-    expectTrue(
+    expect(
       cancelled.effects[0]?.type === "sketch.specialModeEffect" &&
         cancelled.state.kind === "editingSketch" &&
         cancelled.state.session.activeSpecialMode !== null,
       "Cancel requests should preserve the async special-mode effect path instead of dropping lifecycle effects.",
-    );
+    ).toBeTruthy();
 
     const cancelledEffectEvent = await runEditorEffect(
       cancelled.effects[0]!,
@@ -406,21 +405,21 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       cancelled.state,
       cancelledEffectEvent,
     );
-    expectTrue(
+    expect(
       cancelledResolved.state.kind === "editingSketch" &&
         cancelledResolved.state.session.activeSpecialMode === null,
       "Cancelling an active special mode should exit after the lifecycle effect resolves.",
-    );
+    ).toBeTruthy();
 
     const staleIgnored = transitionWithFixtureModes(
       cancelledResolved.state,
       cancelledEffectEvent,
     );
-    expectTrue(
+    expect(
       staleIgnored.state.kind === "editingSketch" &&
         staleIgnored.state.session.activeSpecialMode === null,
       "Stale async mode results should be ignored after mode cancellation.",
-    );
+    ).toBeTruthy();
   }
 
   const builtinSession = appendReferenceImageOperations(
@@ -470,9 +469,9 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
     },
   );
 
-  expectTrue(
+  expect(
     builtinOpened.state.kind === "editingSketch" &&
       builtinOpened.state.session.activeSpecialMode !== null,
     "Scoped built-in special-mode compositions should preserve the existing reference-image mode behavior.",
-  );
+  ).toBeTruthy();
 });

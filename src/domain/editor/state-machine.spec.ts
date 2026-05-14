@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   getEditorHistoryAvailability,
   getEditorViewState,
@@ -962,18 +961,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      result.state.kind === "selectionCommand",
+    expect(
+      result.state.kind,
       "Sketch activation should arm a selection command.",
-    );
-    expectTrue(
-      result.state.command.commandSessionId === "command_sketch-1",
+    ).toBe("selectionCommand");
+    expect(
+      result.state.command.commandSessionId,
       "Sketch command session ID should be deterministic.",
-    );
-    expectTrue(
-      result.effects.length === 0,
+    ).toBe("command_sketch-1");
+    expect(
+      result.effects.length,
       "Sketch without a selection should not emit an effect yet.",
-    );
+    ).toBe(0);
 
     const openResult = transitionEditorState(
       {
@@ -988,18 +987,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      openResult.effects.length === 1,
+    expect(
+      openResult.effects.length,
       "Selecting a valid sketch plane should emit one open-session effect.",
-    );
-    expectTrue(
-      openResult.effects[0]?.type === "sketch.openSession",
+    ).toBe(1);
+    expect(
+      openResult.effects[0]?.type,
       "The emitted effect should be sketch.openSession.",
-    );
-    expectTrue(
-      openResult.effects[0]?.commandSessionId === "command_sketch-1",
+    ).toBe("sketch.openSession");
+    expect(
+      openResult.effects[0]?.commandSessionId,
       "The open-session effect must preserve the originating command session ID.",
-    );
+    ).toBe("command_sketch-1");
   }
 
   function testSketchActivationAcceptsAllPrimaryConstructionPlanes() {
@@ -1027,10 +1026,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         target: { kind: "construction", constructionId },
       });
 
-      expectTrue(
-        openResult.effects[0]?.type === "sketch.openSession",
+      expect(
+        openResult.effects[0]?.type,
         `Primary construction plane ${constructionId} should emit sketch.openSession.`,
-      );
+      ).toBe("sketch.openSession");
     }
   }
 
@@ -1055,18 +1054,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      reused.state.kind === "selectionCommand",
+    expect(
+      reused.state.kind,
       "Sketch activation should still route through the sketch selection command.",
-    );
-    expectTrue(
-      reused.state.selection.length === 1,
+    ).toBe("selectionCommand");
+    expect(
+      reused.state.selection.length,
       "Sketch activation should preserve one compatible preselected sketch target.",
-    );
-    expectTrue(
-      reused.effects[0]?.type === "sketch.openSession",
+    ).toBe(1);
+    expect(
+      reused.effects[0]?.type,
       "Sketch activation should immediately open from a compatible preselected target.",
-    );
+    ).toBe("sketch.openSession");
 
     const cleared = transitionEditorState(
       {
@@ -1088,18 +1087,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      cleared.state.kind === "selectionCommand",
+    expect(
+      cleared.state.kind,
       "Sketch activation should remain in selection mode after clearing incompatible preselection.",
-    );
-    expectTrue(
-      cleared.state.selection.length === 0,
+    ).toBe("selectionCommand");
+    expect(
+      cleared.state.selection.length,
       "Sketch activation should clear incompatible multi-target preselection.",
-    );
-    expectTrue(
-      cleared.effects.length === 0,
+    ).toBe(0);
+    expect(
+      cleared.effects.length,
       "Sketch activation should wait for a new pick after clearing incompatible preselection.",
-    );
+    ).toBe(0);
   }
 
   function testSketchActivationAcceptsPlanarFaces() {
@@ -1123,14 +1122,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       target: { kind: "face", bodyId: "body_a", faceId: "face_top" },
     });
 
-    expectTrue(
-      openResult.effects.length === 1,
+    expect(
+      openResult.effects.length,
       "Selecting a planar face should emit one open-session effect.",
-    );
-    expectTrue(
-      openResult.effects[0]?.type === "sketch.openSession",
+    ).toBe(1);
+    expect(
+      openResult.effects[0]?.type,
       "Planar-face sketch selection should open a sketch session.",
-    );
+    ).toBe("sketch.openSession");
   }
 
   function testSectionViewActivationCollectsPlanarSeeds() {
@@ -1151,18 +1150,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activated.state.kind === "selectionCommand",
+    expect(
+      activated.state.kind,
       "Section View activation should arm a selection command.",
-    );
-    expectTrue(
-      activated.state.command.toolId === "sectionView",
+    ).toBe("selectionCommand");
+    expect(
+      activated.state.command.toolId,
       "Section View activation should preserve the tool id.",
-    );
-    expectTrue(
-      activated.effects.length === 0,
+    ).toBe("sectionView");
+    expect(
+      activated.effects.length,
       "Section View activation should stay local until a seed is selected.",
-    );
+    ).toBe(0);
 
     for (const target of [
       { kind: "construction", constructionId: "construction_plane-xy" },
@@ -1179,22 +1178,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         cameraPosition: [0, 0, 20],
       });
 
-      expectTrue(
-        selected.state.kind === "inspectingSection",
+      expect(
+        selected.state.kind,
         `Section View should accept ${target.kind} seeds.`,
-      );
-      expectTrue(
-        selected.state.section.seed.kind === target.kind,
+      ).toBe("inspectingSection");
+      expect(
+        selected.state.section.seed.kind,
         `Section View should store the ${target.kind} seed.`,
-      );
-      expectTrue(
-        selected.state.section.offset === 0,
+      ).toBe(target.kind);
+      expect(
+        selected.state.section.offset,
         "Accepted section seeds should start from the seed plane.",
-      );
-      expectTrue(
-        selected.state.section.retainedSide === "negative",
+      ).toBe(0);
+      expect(
+        selected.state.section.retainedSide,
         "Positive-Z camera should retain the opposite half-space by default.",
-      );
+      ).toBe("negative");
     }
   }
 
@@ -1222,24 +1221,24 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cameraPosition: [0, 0, 20],
     });
 
-    expectTrue(
-      invalidTarget.state.kind === "selectionCommand",
+    expect(
+      invalidTarget.state.kind,
       "Unsupported section seeds should keep the editor in seed-collection mode.",
-    );
+    ).toBe("selectionCommand");
 
     const missingCamera = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "face", bodyId: "body_a", faceId: "face_top" },
     });
 
-    expectTrue(
-      missingCamera.state.kind === "selectionCommand",
+    expect(
+      missingCamera.state.kind,
       "Section View should require viewport camera context before accepting a seed.",
-    );
-    expectTrue(
+    ).toBe("selectionCommand");
+    expect(
       missingCamera.state.preview?.label.includes("viewport-picked"),
       "Camera-less section seed attempts should explain that viewport selection context is required.",
-    );
+    ).toBeTruthy();
   }
 
   function testSectionViewFlipAndClearPreservePlanePosition() {
@@ -1265,10 +1264,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cameraPosition: [0, 0, 20],
     });
 
-    expectTrue(
-      selected.state.kind === "inspectingSection",
+    expect(
+      selected.state.kind,
       "Accepted section seeds should enter active section inspection.",
-    );
+    ).toBe("inspectingSection");
     const moved = transitionEditorState(selected.state, {
       type: "section.offsetUpdated",
       commandSessionId: selected.state.command.commandSessionId,
@@ -1282,28 +1281,27 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           : ("command_unreachable" as CommandSessionId),
     });
 
-    expectTrue(
-      flipped.state.kind === "inspectingSection",
-      "Flipping should keep the section active.",
+    expect(flipped.state.kind, "Flipping should keep the section active.").toBe(
+      "inspectingSection",
     );
-    expectTrue(
-      flipped.state.section.offset === 7.5,
+    expect(
+      flipped.state.section.offset,
       "Flipping should preserve the current plane position.",
-    );
-    expectTrue(
-      flipped.state.section.retainedSide === "positive",
+    ).toBe(7.5);
+    expect(
+      flipped.state.section.retainedSide,
       "Flipping should invert the retained half-space.",
-    );
+    ).toBe("positive");
 
     const cleared = transitionEditorState(flipped.state, {
       type: "section.cleared",
       commandSessionId: flipped.state.command.commandSessionId,
     });
 
-    expectTrue(
-      cleared.state.kind === "idle",
+    expect(
+      cleared.state.kind,
       "Clearing an active section should exit the command session.",
-    );
+    ).toBe("idle");
   }
 
   async function testMeasureActivationPairsSelectionsAndCleansUp() {
@@ -1324,64 +1322,64 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activated.state.kind === "selectionCommand",
+    expect(
+      activated.state.kind,
       "Measure activation should start a transient selection command.",
-    );
-    expectTrue(
-      activated.state.mode === "part",
+    ).toBe("selectionCommand");
+    expect(
+      activated.state.mode,
       "Measure activation should force the workbench into part mode.",
-    );
-    expectTrue(
-      activated.state.selectionFilter.label === "Measurement targets",
+    ).toBe("part");
+    expect(
+      activated.state.selectionFilter.label,
       "Measure activation should install the measurement selection filter.",
-    );
+    ).toBe("Measurement targets");
 
     const firstSelection = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "edge", bodyId: "body_part-1", edgeId: "edge_outer-0" },
     });
-    expectTrue(
-      firstSelection.state.selection.length === 1,
+    expect(
+      firstSelection.state.selection.length,
       "Measure should accept a first measurable target.",
-    );
+    ).toBe(1);
 
     const pairedSelection = transitionEditorState(firstSelection.state, {
       type: "viewport.selectionRequested",
       target: { kind: "face", bodyId: "body_part-1", faceId: "face_top" },
     });
-    expectTrue(
-      pairedSelection.state.selection.length === 2,
+    expect(
+      pairedSelection.state.selection.length,
       "Measure should pair supported two-target selections.",
-    );
+    ).toBe(2);
 
     const replacedSelection = transitionEditorState(pairedSelection.state, {
       type: "viewport.selectionRequested",
       target: { kind: "body", bodyId: "body_part-1" },
     });
-    expectTrue(
+    expect(
       replacedSelection.state.selection.length === 1 &&
         replacedSelection.state.selection[0]?.kind === "body",
       "Selecting a fresh single-target body should replace an existing pairwise measurement.",
-    );
+    ).toBeTruthy();
 
     const clearedSelection = transitionEditorState(replacedSelection.state, {
       type: "selection.cleared",
     });
-    expectTrue(
+    expect(
       clearedSelection.state.kind === "selectionCommand" &&
         clearedSelection.state.selection.length === 0,
       "Selection clearing should remove active measurement targets without exiting the command.",
-    );
+    ).toBeTruthy();
 
     const cancelled = transitionEditorState(clearedSelection.state, {
       type: "command.cancelled",
       commandSessionId: clearedSelection.state.command.commandSessionId,
     });
-    expectTrue(
-      cancelled.state.kind === "idle",
+    expect(
+      cancelled.state.kind,
       "Measure cancellation should return the editor to idle.",
-    );
+    ).toBe("idle");
   }
 
   function testSketchSessionPreservesStoredPlaneDefinition() {
@@ -1452,14 +1450,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const worldPoint = mapSketchPointToWorld(session.plane, [2, 3]);
 
-    expectTrue(
-      session.plane.frame.normal[0] === 1,
+    expect(
+      session.plane.frame.normal[0],
       "Sketch sessions should retain the stored plane definition.",
-    );
-    expectTrue(
+    ).toBe(1);
+    expect(
       worldPoint[0] === 0 && worldPoint[1] === 2 && worldPoint[2] === 3,
       "Sketch display mapping must use the stored plane definition.",
-    );
+    ).toBeTruthy();
   }
 
   function createReopenableYzSketchSnapshot(): WorkspaceSnapshot {
@@ -1598,18 +1596,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activation.state.kind === "editingFeature",
+    expect(
+      activation.state.kind,
       "Extrude activation should enter feature editing.",
-    );
-    expectTrue(
-      activation.effects.length === 1,
+    ).toBe("editingFeature");
+    expect(
+      activation.effects.length,
       "Extrude activation should emit a preview effect.",
-    );
-    expectTrue(
-      activation.effects[0]?.type === "feature.evaluatePreview",
+    ).toBe(1);
+    expect(
+      activation.effects[0]?.type,
       "The emitted effect should be feature.evaluatePreview.",
-    );
+    ).toBe("feature.evaluatePreview");
 
     const staleIgnored = transitionEditorState(activation.state, {
       type: "effect.featurePreviewCompleted",
@@ -1623,10 +1621,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       renderables: [],
     });
 
-    expectTrue(
-      staleIgnored.state === activation.state,
+    expect(
+      staleIgnored.state,
       "A preview response with the wrong request ID must be ignored.",
-    );
+    ).toBe(activation.state);
   }
 
   function testRevolveActivationStartsFeaturePreviewFlow() {
@@ -1652,36 +1650,36 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activation.state.kind === "editingFeature",
+    expect(
+      activation.state.kind,
       "Revolve activation should enter feature editing.",
-    );
-    expectTrue(
-      activation.state.session.featureType === "revolve",
+    ).toBe("editingFeature");
+    expect(
+      activation.state.session.featureType,
       "Revolve activation should create a revolve session.",
-    );
-    expectTrue(
-      activation.effects.length === 0,
+    ).toBe("revolve");
+    expect(
+      activation.effects.length,
       "Revolve activation without an axis should stay local until the draft is complete.",
-    );
+    ).toBe(0);
 
     const completed = transitionEditorState(activation.state, {
       type: "viewport.selectionRequested",
       target: { kind: "edge", bodyId: "body_a", edgeId: "edge_axis" },
     });
 
-    expectTrue(
-      completed.state.kind === "editingFeature",
+    expect(
+      completed.state.kind,
       "Revolve selection updates should remain in feature editing.",
-    );
-    expectTrue(
-      completed.effects.length === 1,
+    ).toBe("editingFeature");
+    expect(
+      completed.effects.length,
       "Selecting the missing revolve axis should emit one preview effect.",
-    );
-    expectTrue(
-      completed.effects[0]?.type === "feature.evaluatePreview",
+    ).toBe(1);
+    expect(
+      completed.effects[0]?.type,
       "Completed revolve drafts should request a preview effect.",
-    );
+    ).toBe("feature.evaluatePreview");
   }
 
   function testRevolveActivationSupportsFaceThenEdgeSelection() {
@@ -1708,48 +1706,48 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activation.state.kind === "editingFeature",
+    expect(
+      activation.state.kind,
       "Face-selected revolve activation should enter feature editing.",
-    );
-    expectTrue(
-      activation.state.session.featureType === "revolve",
+    ).toBe("editingFeature");
+    expect(
+      activation.state.session.featureType,
       "Face-selected revolve activation should create a revolve session.",
-    );
-    expectTrue(
-      activation.state.session.draft.profileTargets[0]?.kind === "face",
+    ).toBe("revolve");
+    expect(
+      activation.state.session.draft.profileTargets[0]?.kind,
       "Face-selected revolve activation should keep the selected face as the revolve profile.",
-    );
-    expectTrue(
-      activation.effects.length === 0,
+    ).toBe("face");
+    expect(
+      activation.effects.length,
       "Face-selected revolve activation should wait for an axis before previewing.",
-    );
+    ).toBe(0);
 
     const completed = transitionEditorState(activation.state, {
       type: "viewport.selectionRequested",
       target: { kind: "edge", bodyId: "body_a", edgeId: "edge_axis" },
     });
 
-    expectTrue(
-      completed.state.kind === "editingFeature",
+    expect(
+      completed.state.kind,
       "Revolve face-then-edge flow should remain in feature editing.",
-    );
-    expectTrue(
-      completed.state.session.featureType === "revolve",
+    ).toBe("editingFeature");
+    expect(
+      completed.state.session.featureType,
       "Revolve face-then-edge flow should preserve the revolve session kind.",
-    );
-    expectTrue(
-      completed.state.session.draft.axisTarget?.kind === "edge",
+    ).toBe("revolve");
+    expect(
+      completed.state.session.draft.axisTarget?.kind,
       "Revolve face-then-edge flow should preserve the selected edge as the axis target.",
-    );
-    expectTrue(
-      completed.effects.length === 1,
+    ).toBe("edge");
+    expect(
+      completed.effects.length,
       "Selecting the axis after a face profile should emit one preview effect.",
-    );
-    expectTrue(
-      completed.effects[0]?.type === "feature.evaluatePreview",
+    ).toBe(1);
+    expect(
+      completed.effects[0]?.type,
       "Completed face-then-edge revolve drafts should request a preview effect.",
-    );
+    ).toBe("feature.evaluatePreview");
   }
 
   function testShellActivationSeedsBodyFromSelectedFace() {
@@ -1769,26 +1767,26 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activation.state.kind === "editingFeature",
+    expect(
+      activation.state.kind,
       "Shell activation should enter feature editing.",
-    );
-    expectTrue(
-      activation.state.session.featureType === "shell",
+    ).toBe("editingFeature");
+    expect(
+      activation.state.session.featureType,
       "Shell activation should create a shell session.",
-    );
-    expectTrue(
-      activation.state.session.draft.bodyTarget?.bodyId === "body_a",
+    ).toBe("shell");
+    expect(
+      activation.state.session.draft.bodyTarget?.bodyId,
       "Shell activation should infer the source body from a selected face.",
-    );
-    expectTrue(
-      activation.effects.length === 1,
+    ).toBe("body_a");
+    expect(
+      activation.effects.length,
       "Shell activation with a face target should emit one preview effect.",
-    );
-    expectTrue(
-      activation.effects[0]?.type === "feature.evaluatePreview",
+    ).toBe(1);
+    expect(
+      activation.effects[0]?.type,
       "Shell activation should request a preview effect.",
-    );
+    ).toBe("feature.evaluatePreview");
   }
 
   function testThickenActivationSeedsFaceTargetsFromSelection() {
@@ -1808,26 +1806,26 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activation.state.kind === "editingFeature",
+    expect(
+      activation.state.kind,
       "Thicken activation should enter feature editing.",
-    );
-    expectTrue(
-      activation.state.session.featureType === "thicken",
+    ).toBe("editingFeature");
+    expect(
+      activation.state.session.featureType,
       "Thicken activation should create a thicken session.",
-    );
-    expectTrue(
-      activation.state.session.draft.faceTargets[0]?.faceId === "face_top",
+    ).toBe("thicken");
+    expect(
+      activation.state.session.draft.faceTargets[0]?.faceId,
       "Thicken activation should seed the selected face into the draft.",
-    );
-    expectTrue(
-      activation.effects.length === 1,
+    ).toBe("face_top");
+    expect(
+      activation.effects.length,
       "Thicken activation with a face target should emit one preview effect.",
-    );
-    expectTrue(
-      activation.effects[0]?.type === "feature.evaluatePreview",
+    ).toBe(1);
+    expect(
+      activation.effects[0]?.type,
       "Thicken activation should request a preview effect.",
-    );
+    ).toBe("feature.evaluatePreview");
   }
 
   function testSplitAndDeleteSolidActivationStartFeatureSessions() {
@@ -1854,23 +1852,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      combineActivation.state.kind === "editingFeature",
+    expect(
+      combineActivation.state.kind,
       "Combine activation should enter feature editing.",
-    );
-    expectTrue(
-      combineActivation.state.session.featureType === "combine",
+    ).toBe("editingFeature");
+    expect(
+      combineActivation.state.session.featureType,
       "Combine activation should create a combine session.",
-    );
-    expectTrue(
-      combineActivation.state.session.draft.targetBodyTargets[0]?.bodyId ===
-        "body_a",
+    ).toBe("combine");
+    expect(
+      combineActivation.state.session.draft.targetBodyTargets[0]?.bodyId,
       "Combine activation should seed the selected body as a target body.",
-    );
-    expectTrue(
-      combineActivation.effects.length === 0,
+    ).toBe("body_a");
+    expect(
+      combineActivation.effects.length,
       "Combine activation should wait for explicit tool bodies before previewing.",
-    );
+    ).toBe(0);
 
     const combineToolSelection = transitionEditorState(
       combineActivation.state,
@@ -1880,17 +1877,17 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
+    expect(
       combineToolSelection.state.kind === "editingFeature" &&
         combineToolSelection.state.session.featureType === "combine" &&
         combineToolSelection.state.session.draft.toolBodyTargets[0]?.bodyId ===
           "body_b",
       "Combine body selection should fill explicit tool bodies after the target role is populated.",
-    );
-    expectTrue(
-      combineToolSelection.effects[0]?.type === "feature.evaluatePreview",
+    ).toBeTruthy();
+    expect(
+      combineToolSelection.effects[0]?.type,
       "Complete Combine drafts should request a preview effect.",
-    );
+    ).toBe("feature.evaluatePreview");
 
     const splitActivation = transitionEditorState(
       {
@@ -1908,22 +1905,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      splitActivation.state.kind === "editingFeature",
+    expect(
+      splitActivation.state.kind,
       "Split activation should enter feature editing.",
-    );
-    expectTrue(
-      splitActivation.state.session.featureType === "split",
+    ).toBe("editingFeature");
+    expect(
+      splitActivation.state.session.featureType,
       "Split activation should create a split session.",
-    );
-    expectTrue(
-      splitActivation.state.session.draft.targetBodyTarget?.bodyId === "body_a",
+    ).toBe("split");
+    expect(
+      splitActivation.state.session.draft.targetBodyTarget?.bodyId,
       "Split activation should seed the selected body as the target body.",
-    );
-    expectTrue(
-      splitActivation.effects.length === 0,
+    ).toBe("body_a");
+    expect(
+      splitActivation.effects.length,
       "Split activation should wait for the tool body before previewing.",
-    );
+    ).toBe(0);
 
     const deleteSolidActivation = transitionEditorState(
       {
@@ -1941,27 +1938,26 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      deleteSolidActivation.state.kind === "editingFeature",
+    expect(
+      deleteSolidActivation.state.kind,
       "Delete-solid activation should enter feature editing.",
-    );
-    expectTrue(
-      deleteSolidActivation.state.session.featureType === "deleteSolid",
+    ).toBe("editingFeature");
+    expect(
+      deleteSolidActivation.state.session.featureType,
       "Delete-solid activation should create a delete-solid session.",
-    );
-    expectTrue(
-      deleteSolidActivation.state.session.draft.bodyTargets[0]?.bodyId ===
-        "body_a",
+    ).toBe("deleteSolid");
+    expect(
+      deleteSolidActivation.state.session.draft.bodyTargets[0]?.bodyId,
       "Delete-solid activation should seed the selected body into the delete list.",
-    );
-    expectTrue(
-      deleteSolidActivation.effects.length === 1,
+    ).toBe("body_a");
+    expect(
+      deleteSolidActivation.effects.length,
       "Delete-solid activation with a selected body should emit one preview effect.",
-    );
-    expectTrue(
-      deleteSolidActivation.effects[0]?.type === "feature.evaluatePreview",
+    ).toBe(1);
+    expect(
+      deleteSolidActivation.effects[0]?.type,
       "Delete-solid activation should request a preview effect.",
-    );
+    ).toBe("feature.evaluatePreview");
   }
 
   function testFeatureActivationReusesCompatibleSelectionAndClearsInvalidSelection() {
@@ -1995,19 +1991,19 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      reused.state.kind === "editingFeature",
+    expect(
+      reused.state.kind,
       "Compatible feature preselection should enter feature editing.",
-    );
-    expectTrue(
-      reused.state.selection.length === 2,
+    ).toBe("editingFeature");
+    expect(
+      reused.state.selection.length,
       "Compatible feature activation should preserve the adopted selection.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       reused.state.session.draft.targetBodyTargets[0]?.bodyId === "body_a" &&
         reused.state.session.draft.toolBodyTargets[0]?.bodyId === "body_b",
       "Feature activation should seed the first adopted target and replay later adopted targets in order.",
-    );
+    ).toBeTruthy();
 
     const cleared = transitionEditorState(
       {
@@ -2020,18 +2016,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      cleared.state.kind === "editingFeature",
+    expect(
+      cleared.state.kind,
       "Incompatible feature preselection should still enter the feature create flow.",
-    );
-    expectTrue(
-      cleared.state.selection.length === 0,
+    ).toBe("editingFeature");
+    expect(
+      cleared.state.selection.length,
       "Incompatible feature preselection should be cleared during activation.",
-    );
-    expectTrue(
-      cleared.state.session.draft.profileTargets.length === 0,
+    ).toBe(0);
+    expect(
+      cleared.state.session.draft.profileTargets.length,
       "Cleared feature activation should not partially seed the draft.",
-    );
+    ).toBe(0);
   }
 
   function testMirrorAndTransformActivationStartFeatureSessions() {
@@ -2051,22 +2047,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      mirrorActivation.state.kind === "editingFeature",
+    expect(
+      mirrorActivation.state.kind,
       "Mirror activation should enter feature editing.",
-    );
-    expectTrue(
-      mirrorActivation.state.session.featureType === "mirror",
+    ).toBe("editingFeature");
+    expect(
+      mirrorActivation.state.session.featureType,
       "Mirror activation should create a mirror session.",
-    );
-    expectTrue(
-      mirrorActivation.state.session.draft.bodyTargets[0]?.bodyId === "body_a",
+    ).toBe("mirror");
+    expect(
+      mirrorActivation.state.session.draft.bodyTargets[0]?.bodyId,
       "Mirror activation should seed the selected body as a mirror target.",
-    );
-    expectTrue(
-      mirrorActivation.effects.length === 0,
+    ).toBe("body_a");
+    expect(
+      mirrorActivation.effects.length,
       "Mirror activation should wait for an explicit plane before previewing.",
-    );
+    ).toBe(0);
 
     const transformActivation = transitionEditorState(
       {
@@ -2084,23 +2080,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      transformActivation.state.kind === "editingFeature",
+    expect(
+      transformActivation.state.kind,
       "Transform activation should enter feature editing.",
-    );
-    expectTrue(
-      transformActivation.state.session.featureType === "transform",
+    ).toBe("editingFeature");
+    expect(
+      transformActivation.state.session.featureType,
       "Transform activation should create a transform session.",
-    );
-    expectTrue(
-      transformActivation.state.session.draft.bodyTargets[0]?.bodyId ===
-        "body_a",
+    ).toBe("transform");
+    expect(
+      transformActivation.state.session.draft.bodyTargets[0]?.bodyId,
       "Transform activation should seed the selected body as a transform target.",
-    );
-    expectTrue(
-      transformActivation.effects.length === 0,
+    ).toBe("body_a");
+    expect(
+      transformActivation.effects.length,
       "Transform activation should wait for an explicit transform reference before previewing.",
-    );
+    ).toBe(0);
   }
 
   function testActiveReferencePickerRoutesSingleAndMultiSelections() {
@@ -2128,76 +2123,76 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activation.state.kind === "editingFeature",
+    expect(
+      activation.state.kind,
       "Shell activation should enter feature editing.",
-    );
+    ).toBe("editingFeature");
 
     const facesActive = transitionEditorState(activation.state, {
       type: "form.referencePickerActivated",
       fieldId: "shell-faces",
     });
 
-    expectTrue(
-      facesActive.state.kind === "editingFeature",
+    expect(
+      facesActive.state.kind,
       "Reference picker activation should stay in feature editing.",
-    );
-    expectTrue(
-      facesActive.state.activeReferencePickerFieldId === "shell-faces",
+    ).toBe("editingFeature");
+    expect(
+      facesActive.state.activeReferencePickerFieldId,
       "Reference picker activation should track the active form field id.",
-    );
-    expectTrue(
-      facesActive.state.selectionFilter?.label === "Shell faces",
+    ).toBe("shell-faces");
+    expect(
+      facesActive.state.selectionFilter?.label,
       "Reference picker activation should switch to the field selection filter.",
-    );
+    ).toBe("Shell faces");
 
     const faceAppended = transitionEditorState(facesActive.state, {
       type: "viewport.selectionRequested",
       target: { kind: "face", bodyId: "body_a", faceId: "face_side" },
     });
 
-    expectTrue(
-      faceAppended.state.kind === "editingFeature",
+    expect(
+      faceAppended.state.kind,
       "Multi-reference selection should stay in feature editing.",
-    );
-    expectTrue(
+    ).toBe("editingFeature");
+    expect(
       faceAppended.state.session.featureType === "shell" &&
         faceAppended.state.session.draft.faceTargets.length === 2,
       "Active multi-reference picker selection should append unique selected instances.",
-    );
+    ).toBeTruthy();
 
     const bodyActive = transitionEditorState(faceAppended.state, {
       type: "form.referencePickerActivated",
       fieldId: "shell-body",
     });
 
-    expectTrue(
-      bodyActive.state.kind === "editingFeature",
+    expect(
+      bodyActive.state.kind,
       "Switching active picker fields should stay in feature editing.",
-    );
-    expectTrue(
-      bodyActive.state.activeReferencePickerFieldId === "shell-body",
+    ).toBe("editingFeature");
+    expect(
+      bodyActive.state.activeReferencePickerFieldId,
       "Switching active picker fields should update the active field id.",
-    );
-    expectTrue(
-      bodyActive.state.selectionFilter?.label === "Shell body",
+    ).toBe("shell-body");
+    expect(
+      bodyActive.state.selectionFilter?.label,
       "Switching active picker fields should update the current selection filter.",
-    );
+    ).toBe("Shell body");
 
     const bodySelected = transitionEditorState(bodyActive.state, {
       type: "viewport.selectionRequested",
       target: { kind: "body", bodyId: "body_b" },
     });
 
-    expectTrue(
-      bodySelected.state.kind === "editingFeature",
+    expect(
+      bodySelected.state.kind,
       "Single-reference selection should stay in feature editing.",
-    );
-    expectTrue(
+    ).toBe("editingFeature");
+    expect(
       bodySelected.state.session.featureType === "shell" &&
         bodySelected.state.session.draft.bodyTarget?.bodyId === "body_b",
       "Active single-reference picker selection should replace the bound reference.",
-    );
+    ).toBeTruthy();
   }
 
   function testReferencePickerCancellationAndSessionCleanup() {
@@ -2217,65 +2212,65 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      activation.state.kind === "editingFeature",
+    expect(
+      activation.state.kind,
       "Shell activation should enter feature editing.",
-    );
+    ).toBe("editingFeature");
 
     const active = transitionEditorState(activation.state, {
       type: "form.referencePickerActivated",
       fieldId: "shell-faces",
     });
 
-    expectTrue(
-      active.state.kind === "editingFeature",
+    expect(
+      active.state.kind,
       "Reference picker activation should stay in feature editing.",
-    );
+    ).toBe("editingFeature");
 
     const escaped = transitionEditorState(active.state, {
       type: "form.referencePickerCancelled",
     });
 
-    expectTrue(
-      escaped.state.kind === "editingFeature",
+    expect(
+      escaped.state.kind,
       "Escape cancellation should not cancel the whole feature session.",
-    );
-    expectTrue(
-      escaped.state.activeReferencePickerFieldId === null,
+    ).toBe("editingFeature");
+    expect(
+      escaped.state.activeReferencePickerFieldId,
       "Escape cancellation should clear the active picker field.",
-    );
-    expectTrue(
-      escaped.state.selection.length === 0,
+    ).toBe(null);
+    expect(
+      escaped.state.selection.length,
       "Escape cancellation should clear picker-specific pending selection.",
-    );
-    expectTrue(
-      escaped.state.selectionFilter?.label === "Shell references",
+    ).toBe(0);
+    expect(
+      escaped.state.selectionFilter?.label,
       "Escape cancellation should restore the feature-level selection filter.",
-    );
+    ).toBe("Shell references");
 
     const cancelled = transitionEditorState(active.state, {
       type: "command.cancelled",
       commandSessionId: active.state.command.commandSessionId,
     });
 
-    expectTrue(
-      cancelled.state.kind === "idle",
+    expect(
+      cancelled.state.kind,
       "Feature session cancellation should leave feature editing.",
-    );
+    ).toBe("idle");
 
     const switched = transitionEditorState(active.state, {
       type: "tool.activated",
       toolId: "fillet",
     });
 
-    expectTrue(
-      switched.state.kind === "editingFeature",
+    expect(
+      switched.state.kind,
       "Switching to another feature tool should enter the new feature session.",
-    );
-    expectTrue(
-      switched.state.activeReferencePickerFieldId === null,
+    ).toBe("editingFeature");
+    expect(
+      switched.state.activeReferencePickerFieldId,
       "Switching to another feature session should clear active picker state.",
-    );
+    ).toBe(null);
   }
 
   async function testImportSessionAutoArmsSinglePlanePicker() {
@@ -2297,22 +2292,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       importSession.dependencies,
     );
 
-    expectTrue(
-      result.state.kind === "importing",
+    expect(
+      result.state.kind,
       "Import file selection should enter the importing state.",
-    );
-    expectTrue(
-      result.state.activeReferencePickerFieldId === "image-plane",
+    ).toBe("importing");
+    expect(
+      result.state.activeReferencePickerFieldId,
       "A single import plane picker should arm automatically when the import session opens.",
-    );
-    expectTrue(
-      result.state.selectionFilter?.label === "Plane references",
+    ).toBe("image-plane");
+    expect(
+      result.state.selectionFilter?.label,
       "Auto-armed import plane pickers should switch the editor into plane-selection mode immediately.",
-    );
-    expectTrue(
-      result.state.command.phase === "collecting",
+    ).toBe("Plane references");
+    expect(
+      result.state.command.phase,
       "Auto-armed import plane pickers should keep the import command in selection-collection mode.",
-    );
+    ).toBe("collecting");
   }
 
   async function testImportPlaneSelectionCompletesSinglePlanePicker() {
@@ -2334,10 +2329,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       importSession.dependencies,
     );
 
-    expectTrue(
-      opened.state.kind === "importing",
+    expect(
+      opened.state.kind,
       "Import file selection should enter the importing state.",
-    );
+    ).toBe("importing");
 
     const selected = transitionEditorState(
       opened.state,
@@ -2351,29 +2346,28 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       importSession.dependencies,
     );
 
-    expectTrue(
-      selected.state.kind === "importing",
+    expect(
+      selected.state.kind,
       "Plane selection should keep the editor inside the import session.",
-    );
-    expectTrue(
+    ).toBe("importing");
+    expect(
       selected.state.session.selections.planeTarget?.kind === "construction" &&
         selected.state.session.selections.planeTarget.constructionId ===
           "construction_plane-xy",
       "Import plane selection should patch the selected construction plane into import selections.",
-    );
-    expectTrue(
-      selected.state.activeReferencePickerFieldId === null,
+    ).toBeTruthy();
+    expect(
+      selected.state.activeReferencePickerFieldId,
       "Single import plane picks should complete the active picker after a valid selection.",
-    );
-    expectTrue(
-      selected.state.selectionFilter?.label ===
-        getDefaultSelectionFilterForMode("part")?.label,
+    ).toBe(null);
+    expect(
+      selected.state.selectionFilter?.label,
       "Completing the import plane pick should restore the default part-mode selection filter.",
-    );
-    expectTrue(
-      selected.state.command.phase === "editing",
+    ).toBe(getDefaultSelectionFilterForMode("part")?.label);
+    expect(
+      selected.state.command.phase,
       "Completing the import plane pick should return the import command to editing mode.",
-    );
+    ).toBe("editing");
   }
 
   function testSelectionClearEventClearsSelectionAndPreservesActiveState() {
@@ -2399,50 +2393,49 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "selection.cleared",
     });
 
-    expectTrue(
-      idleCleared.state.kind === "idle",
+    expect(
+      idleCleared.state.kind,
       "Selection clearing should keep idle state idle.",
-    );
-    expectTrue(
-      idleCleared.state.selection.length === 0,
+    ).toBe("idle");
+    expect(
+      idleCleared.state.selection.length,
       "Selection clearing should remove idle selection.",
-    );
-    expectTrue(
-      idleCleared.state.hoverTarget === null,
+    ).toBe(0);
+    expect(
+      idleCleared.state.hoverTarget,
       "Selection clearing should remove idle hover.",
-    );
+    ).toBe(null);
 
     const commandStarted = transitionEditorState(selectedState, {
       type: "tool.activated",
       toolId: "sketch",
     });
 
-    expectTrue(
-      commandStarted.state.kind === "selectionCommand",
+    expect(
+      commandStarted.state.kind,
       "Sketch activation should create a selection command.",
-    );
+    ).toBe("selectionCommand");
 
     const commandCleared = transitionEditorState(commandStarted.state, {
       type: "selection.cleared",
     });
 
-    expectTrue(
-      commandCleared.state.kind === "selectionCommand",
+    expect(
+      commandCleared.state.kind,
       "Selection clearing should preserve active command state.",
-    );
-    expectTrue(
-      commandCleared.state.command.commandSessionId ===
-        commandStarted.state.command.commandSessionId,
+    ).toBe("selectionCommand");
+    expect(
+      commandCleared.state.command.commandSessionId,
       "Selection clearing should preserve the active command session.",
-    );
-    expectTrue(
-      commandCleared.state.selection.length === 0,
+    ).toBe(commandStarted.state.command.commandSessionId);
+    expect(
+      commandCleared.state.selection.length,
       "Selection clearing should remove active-command selection.",
-    );
-    expectTrue(
-      commandCleared.state.hoverTarget === null,
+    ).toBe(0);
+    expect(
+      commandCleared.state.hoverTarget,
       "Selection clearing should remove active-command hover.",
-    );
+    ).toBe(null);
 
     const sketchSession = createNewSketchSession(
       createStandardPlaneDefinition("xy"),
@@ -2472,23 +2465,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "selection.cleared",
     });
 
-    expectTrue(
-      sketchCleared.state.kind === "editingSketch",
+    expect(
+      sketchCleared.state.kind,
       "Selection clearing should preserve sketch editing state.",
-    );
-    expectTrue(
-      sketchCleared.state.command.commandSessionId ===
-        sketchState.command.commandSessionId,
+    ).toBe("editingSketch");
+    expect(
+      sketchCleared.state.command.commandSessionId,
       "Selection clearing should preserve the sketch command session.",
-    );
-    expectTrue(
-      sketchCleared.state.selection.length === 0,
+    ).toBe(sketchState.command.commandSessionId);
+    expect(
+      sketchCleared.state.selection.length,
       "Selection clearing should remove sketch selection.",
-    );
-    expectTrue(
-      sketchCleared.state.hoverTarget === null,
+    ).toBe(0);
+    expect(
+      sketchCleared.state.hoverTarget,
       "Selection clearing should remove sketch hover.",
-    );
+    ).toBe(null);
   }
 
   function testReplayIsDeterministic() {
@@ -2517,14 +2509,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const first = runEventTrace(events);
     const second = runEventTrace(events);
 
-    expectTrue(
-      JSON.stringify(first.state) === JSON.stringify(second.state),
+    expect(
+      JSON.stringify(first.state),
       "Replaying the same event trace should reach the same machine state.",
-    );
-    expectTrue(
-      JSON.stringify(first.effects) === JSON.stringify(second.effects),
+    ).toBe(JSON.stringify(second.state));
+    expect(
+      JSON.stringify(first.effects),
       "Replaying the same event trace should emit the same effect sequence.",
-    );
+    ).toBe(JSON.stringify(second.effects));
   }
 
   function testDirectSnapshotLoadUpdatesDocumentWithoutFetch() {
@@ -2547,18 +2539,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       snapshot: nextSnapshot,
     });
 
-    expectTrue(
-      loaded.effects.length === 0,
+    expect(
+      loaded.effects.length,
       "Direct snapshot loads should not request another snapshot fetch.",
-    );
-    expectTrue(
-      loaded.state.snapshot?.document.revisionId === "rev_2",
+    ).toBe(0);
+    expect(
+      loaded.state.snapshot?.document.revisionId,
       "Direct snapshot loads should update visible snapshot state immediately.",
-    );
-    expectTrue(
-      loaded.state.document.revisionId === "rev_2",
+    ).toBe("rev_2");
+    expect(
+      loaded.state.document.revisionId,
       "Direct snapshot loads should update the editor document revision.",
-    );
+    ).toBe("rev_2");
   }
 
   function testSelectionKeyUsesDurableRefs() {
@@ -2566,9 +2558,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       kind: "feature",
       featureId: "feature_alpha",
     });
-    expectTrue(
-      key === "feature:feature_alpha",
-      "Selection key derivation should remain deterministic.",
+    expect(key, "Selection key derivation should remain deterministic.").toBe(
+      "feature:feature_alpha",
     );
   }
 
@@ -2616,18 +2607,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingSketch",
+    expect(
+      result.state.kind,
       "Runtime loop should enter sketch editing after opening a sketch session.",
-    );
-    expectTrue(
-      result.state.session.planeTarget.kind === "construction",
+    ).toBe("editingSketch");
+    expect(
+      result.state.session.planeTarget.kind,
       "Opened sketch session should preserve the selected construction plane.",
-    );
-    expectTrue(
-      result.state.command.commandSessionId === "command_sketch-1",
+    ).toBe("construction");
+    expect(
+      result.state.command.commandSessionId,
       "Runtime loop should preserve the originating command session ID.",
-    );
+    ).toBe("command_sketch-1");
   }
 
   async function testRuntimeLoopOpensSketchFromPlanarFace() {
@@ -2637,10 +2628,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         record.binding.target.kind === "face" &&
         record.binding.semanticClass === "planarFace",
     )?.binding.target;
-    expectTrue(
-      planarFace?.kind === "face",
+    expect(
+      planarFace?.kind,
       "Mock runtime snapshot should expose a planar face render target.",
-    );
+    ).toBe("face");
 
     const runtime: EditorEffectRuntime = {
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
@@ -2681,22 +2672,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingSketch",
+    expect(
+      result.state.kind,
       "Runtime loop should enter sketch editing after selecting a planar face.",
-    );
-    expectTrue(
-      result.state.session.planeTarget.kind === "face",
+    ).toBe("editingSketch");
+    expect(
+      result.state.session.planeTarget.kind,
       "Face-backed sketch session should preserve the selected face support.",
-    );
-    expectTrue(
-      result.state.session.plane.support.kind === "face",
+    ).toBe("face");
+    expect(
+      result.state.session.plane.support.kind,
       "Face-backed sketch session should derive a face-supported plane.",
-    );
-    expectTrue(
-      result.state.session.plane.frame.origin[2] === 12,
+    ).toBe("face");
+    expect(
+      result.state.session.plane.frame.origin[2],
       "Face-backed sketch plane should derive its origin from the selected face mesh.",
-    );
+    ).toBe(12);
   }
 
   async function testRuntimeLoopOpensSketchFromNonXYConstruction() {
@@ -2842,14 +2833,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingSketch",
+    expect(
+      result.state.kind,
       "YZ construction plane should also open a sketch session.",
-    );
-    expectTrue(
-      result.state.session.plane.key === "yz",
+    ).toBe("editingSketch");
+    expect(
+      result.state.session.plane.key,
       "Sketch session should preserve the selected YZ plane definition.",
-    );
+    ).toBe("yz");
   }
 
   async function testRuntimeLoopReopensStoredSketchPlane() {
@@ -2900,18 +2891,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingSketch",
+    expect(
+      result.state.kind,
       "Existing sketches should reopen into the sketch editor.",
-    );
-    expectTrue(
-      result.state.session.sketchId === "sketch_yz",
+    ).toBe("editingSketch");
+    expect(
+      result.state.session.sketchId,
       "Reopened sketch sessions should preserve the sketch identity.",
-    );
-    expectTrue(
-      result.state.session.plane.key === "yz",
+    ).toBe("sketch_yz");
+    expect(
+      result.state.session.plane.key,
       "Reopened sketch sessions should preserve the stored sketch plane.",
-    );
+    ).toBe("yz");
   }
 
   async function testRuntimeLoopReopensCommittedFeatureFromExplicitIntent() {
@@ -2960,18 +2951,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingFeature",
+    expect(
+      result.state.kind,
       "Committed feature reopen should enter feature editing.",
-    );
-    expectTrue(
-      result.state.session.mode === "edit",
+    ).toBe("editingFeature");
+    expect(
+      result.state.session.mode,
       "Committed feature reopen should hydrate an edit session.",
-    );
-    expectTrue(
-      result.state.session.featureId === "feature_extrude-1",
+    ).toBe("edit");
+    expect(
+      result.state.session.featureId,
       "Committed feature reopen should preserve the feature identity.",
-    );
+    ).toBe("feature_extrude-1");
   }
 
   async function testRuntimeLoopReopensSketchFromExplicitIntent() {
@@ -3027,18 +3018,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingSketch",
+    expect(
+      result.state.kind,
       "Committed sketch reopen should enter sketch editing.",
-    );
-    expectTrue(
-      result.state.session.sketchId === "sketch_yz",
+    ).toBe("editingSketch");
+    expect(
+      result.state.session.sketchId,
       "Committed sketch reopen should preserve the sketch identity.",
-    );
-    expectTrue(
-      result.state.session.plane.key === "yz",
+    ).toBe("sketch_yz");
+    expect(
+      result.state.session.plane.key,
       "Committed sketch reopen should preserve the stored sketch plane.",
-    );
+    ).toBe("yz");
   }
 
   async function testFeatureEditEntryRollsBackBeforeHydrationFromTail() {
@@ -3058,34 +3049,34 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingFeature",
+    expect(
+      result.state.kind,
       "Feature reopen should enter editing after rollback.",
-    );
-    expectTrue(
-      cursorMoves.length === 1,
+    ).toBe("editingFeature");
+    expect(
+      cursorMoves.length,
       "Feature reopen should move the document cursor before hydration.",
-    );
-    expectTrue(
-      cursorMoves[0]?.cursor.kind === "sketch",
+    ).toBe(1);
+    expect(
+      cursorMoves[0]?.cursor.kind,
       "Editing extrude should roll back to the preceding sketch.",
-    );
-    expectTrue(
-      cursorMoves[0]?.transient === true,
+    ).toBe("sketch");
+    expect(
+      cursorMoves[0]?.transient,
       "Edit-entry rollback should be transient.",
-    );
-    expectTrue(
-      result.state.snapshot?.document.cursor.kind === "sketch",
+    ).toBeTruthy();
+    expect(
+      result.state.snapshot?.document.cursor.kind,
       "Feature edit snapshot should be refreshed at the rollback cursor.",
-    );
-    expectTrue(
-      previewCalls.length === 1,
+    ).toBe("sketch");
+    expect(
+      previewCalls.length,
       "Feature edit preview should run after rollback snapshot refresh.",
-    );
-    expectTrue(
-      previewCalls[0]?.cursor.kind === "sketch",
+    ).toBe(1);
+    expect(
+      previewCalls[0]?.cursor.kind,
       "Feature edit preview should evaluate against the rolled-back document basis.",
-    );
+    ).toBe("sketch");
   }
 
   async function testSketchEditEntryRollsBackBeforeOpenFromTail() {
@@ -3105,32 +3096,32 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingSketch",
+    expect(
+      result.state.kind,
       "Committed sketch reopen should enter sketch editing.",
-    );
-    expectTrue(
-      cursorMoves.length === 1,
+    ).toBe("editingSketch");
+    expect(
+      cursorMoves.length,
       "Sketch reopen should move the document cursor before opening.",
-    );
-    expectTrue(
+    ).toBe(1);
+    expect(
       cursorMoves[0]?.cursor.kind === "feature" &&
         cursorMoves[0].cursor.featureId === "feature_extrude-1",
       "Editing sketch2 should roll back to the preceding extrude.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.state.snapshot?.document.cursor.kind === "feature" &&
         result.state.snapshot.document.cursor.featureId === "feature_extrude-1",
       "Sketch edit snapshot should remain at the document rollback cursor.",
-    );
-    expectTrue(
-      result.state.session.historyCursor.kind !== "empty",
+    ).toBeTruthy();
+    expect(
+      result.state.session.historyCursor.kind,
       "Reopened sketch editing should preserve sketch-local history while the document is rolled back.",
-    );
-    expectTrue(
-      getSnapshotReadCount() === 2,
+    ).not.toBe("empty");
+    expect(
+      getSnapshotReadCount(),
       "Sketch reopen should reuse the rollback snapshot directly instead of forcing an extra document refresh cycle.",
-    );
+    ).toBe(2);
   }
 
   async function testTailSketchReopenSkipsRollbackAndOpensImmediately() {
@@ -3150,22 +3141,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "editingSketch",
+    expect(
+      result.state.kind,
       "Tail sketch reopen should enter sketch editing immediately.",
-    );
-    expectTrue(
-      result.state.session.sketchId === "sketch_yz",
+    ).toBe("editingSketch");
+    expect(
+      result.state.session.sketchId,
       "Tail sketch reopen should preserve the committed sketch id.",
-    );
-    expectTrue(
-      cursorMoves.length === 0,
+    ).toBe("sketch_yz");
+    expect(
+      cursorMoves.length,
       "Tail sketch reopen should not roll the document cursor when the sketch is already current.",
-    );
-    expectTrue(
-      getSnapshotReadCount() === 1,
+    ).toBe(0);
+    expect(
+      getSnapshotReadCount(),
       "Tail sketch reopen should reuse the loaded snapshot instead of re-fetching it.",
-    );
+    ).toBe(1);
   }
 
   async function testFeatureEditCancelRestoresTailCursor() {
@@ -3188,19 +3179,19 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "idle",
+    expect(
+      result.state.kind,
       "Feature edit cancel should return to idle.",
-    );
-    expectTrue(
-      cursorMoves.length === 2,
+    ).toBe("idle");
+    expect(
+      cursorMoves.length,
       "Feature edit cancel should restore the captured entry cursor.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       cursorMoves[1]?.cursor.kind === "feature" &&
         cursorMoves[1].cursor.featureId === "feature_revolve-1",
       "Feature edit cancel should restore the captured tail cursor.",
-    );
+    ).toBeTruthy();
   }
 
   async function testFeatureEditCommitRestoresNonTailCursor() {
@@ -3233,23 +3224,23 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "idle",
+    expect(
+      result.state.kind,
       "Feature edit commit should return to idle after restore.",
-    );
-    expectTrue(
-      featureCommitCalls.length === 1,
+    ).toBe("idle");
+    expect(
+      featureCommitCalls.length,
       "Feature edit commit should submit the hydrated edit session.",
-    );
-    expectTrue(
-      cursorMoves.length === 2,
+    ).toBe(1);
+    expect(
+      cursorMoves.length,
       "Feature edit commit should restore the captured entry cursor.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       cursorMoves[1]?.cursor.kind === "sketch" &&
         cursorMoves[1].cursor.sketchId === "sketch_second",
       "Feature edit commit should restore the captured non-tail cursor instead of the history tail.",
-    );
+    ).toBeTruthy();
   }
 
   async function testSketchAbortRestoresTailCursor() {
@@ -3272,19 +3263,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "idle",
-      "Sketch abort should return to idle.",
+    expect(result.state.kind, "Sketch abort should return to idle.").toBe(
+      "idle",
     );
-    expectTrue(
-      cursorMoves.length === 2,
+    expect(
+      cursorMoves.length,
       "Sketch abort should restore the captured entry cursor.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       cursorMoves[1]?.cursor.kind === "feature" &&
         cursorMoves[1].cursor.featureId === "feature_revolve-1",
       "Sketch abort should restore the captured tail cursor.",
-    );
+    ).toBeTruthy();
   }
 
   async function testFinishSketchAtCurrentSketchCursorSkipsRestore() {
@@ -3316,14 +3306,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "idle",
+    expect(
+      result.state.kind,
       "Finish sketch should return to idle after commit.",
-    );
-    expectTrue(
-      cursorMoves.length === 0,
+    ).toBe("idle");
+    expect(
+      cursorMoves.length,
       "Finish sketch should not restore the document cursor when the reopened sketch is already current.",
-    );
+    ).toBe(0);
     const sketchCommitIndex = result.effects.findIndex(
       (effect) => effect.type === "sketch.commit",
     );
@@ -3331,10 +3321,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       (effect, index) =>
         index > sketchCommitIndex && effect.type === "document.fetchSnapshot",
     );
-    expectTrue(
+    expect(
       sketchCommitIndex >= 0 && refreshIndex > sketchCommitIndex,
       "Finish sketch should refresh the committed snapshot after commit.",
-    );
+    ).toBeTruthy();
   }
 
   async function testRepositoryBackedFeatureEditCommitRefreshesBeforeRestore() {
@@ -3361,19 +3351,20 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime,
     );
 
-    expectTrue(
-      result.state.kind === "idle",
+    expect(
+      result.state.kind,
       "Repository-backed feature edit commit should exit after cursor restore.",
-    );
-    expectTrue(
+    ).toBe("idle");
+    expect(
       result.state.snapshot?.document.cursor.kind === "feature" &&
         result.state.snapshot.document.cursor.featureId === "feature_fillet-1",
       "Repository-backed feature edit commit should restore the tail cursor captured at edit entry.",
-    );
-    expectTrue(
-      result.state.preview?.label !==
-        "The authored document changed after the current snapshot was loaded. Refresh before retrying this mutation.",
+    ).toBeTruthy();
+    expect(
+      result.state.preview?.label,
       "Edit-exit cursor restore should not run against stale repository provenance.",
+    ).not.toBe(
+      "The authored document changed after the current snapshot was loaded. Refresh before retrying this mutation.",
     );
   }
 
@@ -3384,18 +3375,17 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       repositorySource: "peer",
     };
     const previousCursor = getPreviousDocumentHistoryCursor(snapshot);
-    expectTrue(
+    expect(
       previousCursor,
       "Repository cursor fixture should expose a previous cursor.",
-    );
+    ).toBeTruthy();
 
     const boot = transitionEditorState(initialEditorState, {
       type: "session.started",
     });
     const fetchEffect = boot.effects[0];
-    expectTrue(
-      fetchEffect?.type === "document.fetchSnapshot",
-      "Session start should fetch a snapshot.",
+    expect(fetchEffect?.type, "Session start should fetch a snapshot.").toBe(
+      "document.fetchSnapshot",
     );
     const loaded = transitionEditorState(boot.state, {
       type: "effect.snapshotLoaded",
@@ -3413,21 +3403,21 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     });
     const cursorEffect = requested.effects[0];
 
-    expectTrue(
-      cursorEffect?.type === "document.moveHistoryCursor",
+    expect(
+      cursorEffect?.type,
       "Timeline cursor requests should emit the document cursor effect.",
-    );
-    expectTrue(
+    ).toBe("document.moveHistoryCursor");
+    expect(
       cursorEffect.mutationBasis.baseRevisionId ===
         snapshot.document.revisionId &&
         cursorEffect.mutationBasis.baseRepositoryHeads?.[0] === "head_a",
       "Document cursor effects should carry the loaded snapshot repository basis.",
-    );
-    expectTrue(
-      !getEditorHistoryAvailability(requested.state).canUndo &&
+    ).toBeTruthy();
+    expect(
+      getEditorHistoryAvailability(requested.state).canUndo &&
         !getEditorHistoryAvailability(requested.state).canRedo,
       "Document history actions should be unavailable while the cursor mutation is pending.",
-    );
+    ).toBeFalsy();
 
     const conflicted = transitionEditorState(requested.state, {
       type: "effect.documentCursorMoved",
@@ -3449,19 +3439,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      conflicted.effects[0]?.type === "document.fetchSnapshot",
+    expect(
+      conflicted.effects[0]?.type,
       "Repository cursor conflicts should request a refresh.",
-    );
-    expectTrue(
-      conflicted.state.pendingHistoryCursorRequestId === null,
+    ).toBe("document.fetchSnapshot");
+    expect(
+      conflicted.state.pendingHistoryCursorRequestId,
       "Repository cursor conflicts should clear the pending cursor request.",
-    );
-    expectTrue(
-      conflicted.state.pendingSnapshotRequestId ===
-        conflicted.effects[0]?.requestId,
+    ).toBe(null);
+    expect(
+      conflicted.state.pendingSnapshotRequestId,
       "Conflict refresh should be tracked as pending.",
-    );
+    ).toBe(conflicted.effects[0]?.requestId);
   }
 
   function testSnapshotRefreshCanPreserveRenderRecordsForFeatureDiagnostics() {
@@ -3479,9 +3468,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "document.refreshRequested",
     });
     const effect = refresh.effects[0];
-    expectTrue(
-      effect?.type === "document.fetchSnapshot",
-      "Refresh should request a document snapshot.",
+    expect(effect?.type, "Refresh should request a document snapshot.").toBe(
+      "document.fetchSnapshot",
     );
 
     const next = structuredClone(previous);
@@ -3523,20 +3511,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     });
 
-    expectTrue(
-      failedRefresh.state.snapshot?.document.render.records[0]?.id ===
-        previousRender.id,
+    expect(
+      failedRefresh.state.snapshot?.document.render.records[0]?.id,
       "Feature-scoped failed refreshes should preserve previous viewport render records.",
-    );
-    expectTrue(
-      failedRefresh.state.snapshot?.document.diagnostics[0]?.featureId ===
-        featureId,
+    ).toBe(previousRender.id);
+    expect(
+      failedRefresh.state.snapshot?.document.diagnostics[0]?.featureId,
       "Feature-scoped failed refreshes should still expose the new repair diagnostic.",
-    );
-    expectTrue(
-      failedRefresh.state.snapshot?.revisionId === "rev_2",
+    ).toBe(featureId);
+    expect(
+      failedRefresh.state.snapshot?.revisionId,
       "Render preservation should not roll back the authored snapshot revision.",
-    );
+    ).toBe("rev_2");
 
     const fixed = structuredClone(next);
     fixed.revisionId = "rev_3";
@@ -3552,10 +3538,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "document.refreshRequested",
     });
     const secondEffect = secondRefresh.effects[0];
-    expectTrue(
-      secondEffect?.type === "document.fetchSnapshot",
+    expect(
+      secondEffect?.type,
       "Second refresh should request a document snapshot.",
-    );
+    ).toBe("document.fetchSnapshot");
     const fixedRefresh = transitionEditorState(secondRefresh.state, {
       type: "effect.snapshotLoaded",
       payload: {
@@ -3568,15 +3554,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     });
 
-    expectTrue(
-      fixedRefresh.state.snapshot?.document.render.records[0]?.id ===
-        "render_fixed",
+    expect(
+      fixedRefresh.state.snapshot?.document.render.records[0]?.id,
       "Successful corrected refreshes should swap in the new render records.",
-    );
-    expectTrue(
-      fixedRefresh.state.snapshot?.document.diagnostics.length === 0,
+    ).toBe("render_fixed");
+    expect(
+      fixedRefresh.state.snapshot?.document.diagnostics.length,
       "Corrected refreshes should clear feature diagnostics.",
-    );
+    ).toBe(0);
   }
 
   function testDocumentReplacementResetsIntoPartIdleState() {
@@ -3597,22 +3582,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       snapshot: replacement,
     });
 
-    expectTrue(
-      replaced.state.kind === "idle",
+    expect(
+      replaced.state.kind,
       "Whole-document replacement should reset the editor into idle mode.",
-    );
-    expectTrue(
-      replaced.state.mode === "part",
+    ).toBe("idle");
+    expect(
+      replaced.state.mode,
       "Whole-document replacement should return the editor to part mode.",
-    );
-    expectTrue(
-      replaced.state.selection.length === 0,
+    ).toBe("part");
+    expect(
+      replaced.state.selection.length,
       "Whole-document replacement should clear the prior selection.",
-    );
-    expectTrue(
-      replaced.state.snapshot?.revisionId === "rev_replaced",
+    ).toBe(0);
+    expect(
+      replaced.state.snapshot?.revisionId,
       "Whole-document replacement should load the replacement snapshot.",
-    );
+    ).toBe("rev_replaced");
   }
 
   async function testEditorEventLoopBootstrapsAndLoadsSnapshot() {
@@ -3645,22 +3630,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const machineState = actor.getState();
 
-    expectTrue(
-      snapshotCallCount === 1,
+    expect(
+      snapshotCallCount,
       "The editor event loop should bootstrap the initial snapshot load itself.",
-    );
-    expectTrue(
-      machineState.document.documentId === snapshot.document.documentId,
+    ).toBe(1);
+    expect(
+      machineState.document.documentId,
       "Bootstrap should hydrate the document id.",
-    );
-    expectTrue(
-      machineState.document.revisionId === snapshot.document.revisionId,
+    ).toBe(snapshot.document.documentId);
+    expect(
+      machineState.document.revisionId,
       "Bootstrap should hydrate the revision id.",
-    );
-    expectTrue(
-      machineState.snapshot?.revisionId === snapshot.document.revisionId,
+    ).toBe(snapshot.document.revisionId);
+    expect(
+      machineState.snapshot?.revisionId,
       "Bootstrap should store the loaded snapshot.",
-    );
+    ).toBe(snapshot.document.revisionId);
     actor.stop();
   }
 
@@ -3708,10 +3693,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     await flushAsyncWork();
 
     const selectionState = actor.getState();
-    expectTrue(
-      selectionState.kind === "selectionCommand",
+    expect(
+      selectionState.kind,
       "Sketch activation should reach the selection workflow before opening.",
-    );
+    ).toBe("selectionCommand");
 
     actor.dispatch({
       type: "command.cancelled",
@@ -3729,10 +3714,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const cancelledState = actor.getState();
 
-    expectTrue(
-      cancelledState.kind === "idle",
+    expect(
+      cancelledState.kind,
       "Cancelling sketch selection should return the runtime to idle.",
-    );
+    ).toBe("idle");
     actor.stop();
   }
 
@@ -3760,10 +3745,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const openEffect = openRequested.effects[0];
 
-    expectTrue(
-      openEffect?.type === "sketch.openSession",
+    expect(
+      openEffect?.type,
       "Sketch fixture should emit an open-session effect.",
-    );
+    ).toBe("sketch.openSession");
 
     const opened = transitionEditorState(openRequested.state, {
       type: "effect.sketchSessionOpened",
@@ -3774,41 +3759,41 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session: createNewSketchSession(createStandardPlaneDefinition("xy")),
     });
 
-    expectTrue(
-      opened.state.kind === "editingSketch",
+    expect(
+      opened.state.kind,
       "Sketch open fixture should enter sketch editing.",
-    );
+    ).toBe("editingSketch");
 
     const withTool = transitionEditorState(opened.state, {
       type: "tool.activated",
       toolId: "line",
     });
 
-    expectTrue(
-      withTool.state.kind === "editingSketch",
+    expect(
+      withTool.state.kind,
       "Sketch tool activation should stay in sketch editing.",
-    );
-    expectTrue(
-      withTool.state.session.activeTool === "line",
+    ).toBe("editingSketch");
+    expect(
+      withTool.state.session.activeTool,
       "Sketch tool activation should mark the active tool.",
-    );
+    ).toBe("line");
 
     const cleared = transitionEditorState(withTool.state, {
       type: "sketch.activeToolCleared",
     });
 
-    expectTrue(
-      cleared.state.kind === "editingSketch",
+    expect(
+      cleared.state.kind,
       "Clearing an active sketch tool should keep the sketch session open.",
-    );
-    expectTrue(
-      cleared.state.session.activeTool === null,
+    ).toBe("editingSketch");
+    expect(
+      cleared.state.session.activeTool,
       "Clearing an active sketch tool should remove the active tool.",
-    );
-    expectTrue(
-      cleared.state.command.toolId === "sketch",
+    ).toBe(null);
+    expect(
+      cleared.state.command.toolId,
       "Clearing an active sketch tool should restore sketch-session command identity.",
-    );
+    ).toBe("sketch");
   }
 
   function testRemainingSketchToolsActivateWithoutDroppingSketchSession() {
@@ -3834,10 +3819,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     });
     const openEffect = openRequested.effects[0];
 
-    expectTrue(
-      openEffect?.type === "sketch.openSession",
+    expect(
+      openEffect?.type,
       "Sketch fixture should emit an open-session effect.",
-    );
+    ).toBe("sketch.openSession");
 
     const opened = transitionEditorState(openRequested.state, {
       type: "effect.sketchSessionOpened",
@@ -3852,10 +3837,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       toolId: "line",
     });
 
-    expectTrue(
-      withTool.state.kind === "editingSketch",
+    expect(
+      withTool.state.kind,
       "Sketch tool fixture should enter sketch editing.",
-    );
+    ).toBe("editingSketch");
 
     const activeSketchToolIds = [
       ["spline", "spline"],
@@ -3871,34 +3856,33 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       });
       const viewState = getEditorViewState(result.state);
 
-      expectTrue(
-        result.effects.length === 0,
+      expect(
+        result.effects.length,
         `${toolId} should not emit effects while editing a sketch.`,
-      );
-      expectTrue(
-        result.state.kind === "editingSketch",
+      ).toBe(0);
+      expect(
+        result.state.kind,
         `${toolId} should keep the editor in sketch editing.`,
-      );
-      expectTrue(
-        result.state.mode === "sketch",
+      ).toBe("editingSketch");
+      expect(
+        result.state.mode,
         `${toolId} should keep sketch toolbar mode.`,
-      );
-      expectTrue(
-        viewState.sketchSession !== null,
+      ).toBe("sketch");
+      expect(
+        viewState.sketchSession,
         `${toolId} should keep the sketch session visible to the UI.`,
+      ).not.toBe(null);
+      expect(viewState.mode, `${toolId} should keep sketch view mode.`).toBe(
+        "sketch",
       );
-      expectTrue(
-        viewState.mode === "sketch",
-        `${toolId} should keep sketch view mode.`,
-      );
-      expectTrue(
-        result.state.command.toolId === toolId,
+      expect(
+        result.state.command.toolId,
         `${toolId} should replace the active sketch command.`,
-      );
-      expectTrue(
-        result.state.session.activeTool === expectedActiveTool,
+      ).toBe(toolId);
+      expect(
+        result.state.session.activeTool,
         `${toolId} should activate its sketch workflow.`,
-      );
+      ).toBe(expectedActiveTool);
     }
   }
 
@@ -3946,25 +3930,24 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       toolId: "offset",
     });
 
-    expectTrue(
-      reused.state.kind === "editingSketch",
+    expect(
+      reused.state.kind,
       "Sketch edit-tool activation should remain in sketch editing.",
-    );
-    expectTrue(
-      reused.state.selection.length === selectedTargets.length,
+    ).toBe("editingSketch");
+    expect(
+      reused.state.selection.length,
       "Compatible sketch edit-tool activation should preserve current selection.",
-    );
-    expectTrue(
-      reused.state.session.activeEditTool?.selectedTargets.length ===
-        selectedTargets.length,
+    ).toBe(selectedTargets.length);
+    expect(
+      reused.state.session.activeEditTool?.selectedTargets.length,
       "Compatible sketch edit-tool activation should seed the active edit tool from the adopted selection.",
-    );
-    expectTrue(
+    ).toBe(selectedTargets.length);
+    expect(
       reused.state.session.toolStagedEntities.some(
         (entity) => entity.status === "preview",
       ),
       "Compatible sketch edit-tool activation should derive preview geometry from the adopted selection.",
-    );
+    ).toBeTruthy();
 
     const cleared = transitionEditorState(
       {
@@ -3978,18 +3961,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      cleared.state.kind === "editingSketch",
+    expect(
+      cleared.state.kind,
       "Invalid sketch edit-tool activation should stay in sketch editing.",
-    );
-    expectTrue(
-      cleared.state.selection.length === 0,
+    ).toBe("editingSketch");
+    expect(
+      cleared.state.selection.length,
       "Invalid sketch edit-tool activation should clear incompatible selection.",
-    );
-    expectTrue(
-      cleared.state.session.activeEditTool?.selectedTargets.length === 0,
+    ).toBe(0);
+    expect(
+      cleared.state.session.activeEditTool?.selectedTargets.length,
       "Invalid sketch edit-tool activation should start with an empty edit-tool target set.",
-    );
+    ).toBe(0);
   }
 
   function testPassiveSketchStyleToolsDoNotDropSketchSession() {
@@ -4015,10 +3998,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     });
     const openEffect = openRequested.effects[0];
 
-    expectTrue(
-      openEffect?.type === "sketch.openSession",
+    expect(
+      openEffect?.type,
       "Sketch fixture should emit an open-session effect.",
-    );
+    ).toBe("sketch.openSession");
 
     const opened = transitionEditorState(openRequested.state, {
       type: "effect.sketchSessionOpened",
@@ -4033,10 +4016,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       toolId: "line",
     });
 
-    expectTrue(
-      withTool.state.kind === "editingSketch",
+    expect(
+      withTool.state.kind,
       "Sketch tool fixture should enter sketch editing.",
-    );
+    ).toBe("editingSketch");
 
     const passiveSketchToolIds = [
       "fill",
@@ -4049,29 +4032,29 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         toolId,
       });
 
-      expectTrue(
+      expect(
         disabledResult.state.kind === "editingSketch" &&
           disabledResult.state.session.activeStyleFocus === null,
         `${toolId} should stay inactive while SVG rendering is disabled.`,
-      );
+      ).toBeTruthy();
     }
 
-    expectTrue(
+    expect(
       withTool.state.kind === "editingSketch" &&
         !isSketchSvgRenderingEnabled(withTool.state.session),
       "New sketch sessions should start with SVG rendering disabled.",
-    );
+    ).toBeTruthy();
 
     const svgEnabled = transitionEditorState(withTool.state, {
       type: "tool.activated",
       toolId: "svgRendering",
     });
 
-    expectTrue(
+    expect(
       svgEnabled.state.kind === "editingSketch" &&
         isSketchSvgRenderingEnabled(svgEnabled.state.session),
       "SVG rendering activation should explicitly enable sketch style tools.",
-    );
+    ).toBeTruthy();
 
     for (const toolId of passiveSketchToolIds) {
       const result = transitionEditorState(svgEnabled.state, {
@@ -4080,47 +4063,46 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       });
       const viewState = getEditorViewState(result.state);
 
-      expectTrue(
-        result.effects.length === 0,
+      expect(
+        result.effects.length,
         `${toolId} should not emit effects while editing a sketch.`,
-      );
-      expectTrue(
-        result.state.kind === "editingSketch",
+      ).toBe(0);
+      expect(
+        result.state.kind,
         `${toolId} should keep the editor in sketch editing.`,
-      );
-      expectTrue(
-        result.state.mode === "sketch",
+      ).toBe("editingSketch");
+      expect(
+        result.state.mode,
         `${toolId} should keep sketch toolbar mode.`,
-      );
-      expectTrue(
-        viewState.sketchSession !== null,
+      ).toBe("sketch");
+      expect(
+        viewState.sketchSession,
         `${toolId} should keep the sketch session visible to the UI.`,
+      ).not.toBe(null);
+      expect(viewState.mode, `${toolId} should keep sketch view mode.`).toBe(
+        "sketch",
       );
-      expectTrue(
-        viewState.mode === "sketch",
-        `${toolId} should keep sketch view mode.`,
-      );
-      expectTrue(
-        result.state.command.toolId === "line",
+      expect(
+        result.state.command.toolId,
         `${toolId} should not replace the active sketch command.`,
-      );
-      expectTrue(
-        result.state.session.activeTool === "line",
+      ).toBe("line");
+      expect(
+        result.state.session.activeTool,
         `${toolId} should not clear the active sketch tool.`,
-      );
-      expectTrue(
-        result.state.session.activeStyleFocus?.toolId === toolId,
+      ).toBe("line");
+      expect(
+        result.state.session.activeStyleFocus?.toolId,
         `${toolId} should open style focus state.`,
-      );
-      expectTrue(
-        result.state.session.activeStyleFocus.target === null,
+      ).toBe(toolId);
+      expect(
+        result.state.session.activeStyleFocus.target,
         `${toolId} should show target guidance without a selection.`,
-      );
-      expectTrue(
+      ).toBe(null);
+      expect(
         getSketchToolPresentation(result.state.session)?.selectionGuide
-          ?.requiredCount === 1,
+          ?.requiredCount,
         `${toolId} should expose style target guidance.`,
-      );
+      ).toBe(1);
     }
 
     let styledSession = toggleSketchSvgRendering(
@@ -4131,15 +4113,15 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     styledSession = acceptSketchDraw(styledSession, [8, 0]);
 
     const target = styledSession.definition.entities[0]?.target;
-    expectTrue(
+    expect(
       target,
       "Style focus fixture should create a selectable local sketch entity.",
-    );
+    ).toBeTruthy();
     const pointTarget = styledSession.definition.points[0]?.target;
-    expectTrue(
+    expect(
       pointTarget,
       "Style focus fixture should create a selectable local sketch point.",
-    );
+    ).toBeTruthy();
 
     const styledBaseState: SketchEditorState = {
       ...initialEditorState,
@@ -4176,35 +4158,35 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         toolId,
       });
 
-      expectTrue(
-        result.state.kind === "editingSketch",
+      expect(
+        result.state.kind,
         `${toolId} with a target should keep sketch editing.`,
-      );
-      expectTrue(
-        result.state.session.activeStyleFocus?.toolId === toolId,
+      ).toBe("editingSketch");
+      expect(
+        result.state.session.activeStyleFocus?.toolId,
         `${toolId} should become the active style focus.`,
-      );
+      ).toBe(toolId);
       if (toolId === "stroke") {
-        expectTrue(
-          result.state.session.activeStyleFocus.target?.kind === "sketchEntity",
+        expect(
+          result.state.session.activeStyleFocus.target?.kind,
           `${toolId} should bind the selected style target.`,
-        );
-        expectTrue(
+        ).toBe("sketchEntity");
+        expect(
           (getSketchToolPresentation(result.state.session)?.controlGroups?.[0]
             ?.controls.length ?? 0) > 0,
           `${toolId} should expose focused style controls for the selected target.`,
-        );
+        ).toBeTruthy();
       } else {
-        expectTrue(
-          result.state.session.activeStyleFocus.target === null,
+        expect(
+          result.state.session.activeStyleFocus.target,
           `${toolId} should reject a non-region style target.`,
-        );
-        expectTrue(
+        ).toBe(null);
+        expect(
           getSketchToolPresentation(
             result.state.session,
           )?.selectionGuide?.acceptedKinds.includes("region"),
           `${toolId} should request an enclosed region target.`,
-        );
+        ).toBeTruthy();
       }
     }
 
@@ -4220,21 +4202,20 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      pointSelected.state.kind === "editingSketch",
+    expect(
+      pointSelected.state.kind,
       "Sketch point selection should keep sketch editing active.",
-    );
-    expectTrue(
-      pointSelected.state.session.activeEditTarget?.pointId ===
-        pointTarget.pointId,
+    ).toBe("editingSketch");
+    expect(
+      pointSelected.state.session.activeEditTarget?.pointId,
       "Sketch point selection should select the point edit target.",
-    );
-    expectTrue(
-      !getSketchToolPresentation(
+    ).toBe(pointTarget.pointId);
+    expect(
+      getSketchToolPresentation(
         pointSelected.state.session,
       )?.controlGroups?.some((group) => group.id === "sketch-style-controls"),
       "Sketch point selection should not open SVG style controls.",
-    );
+    ).toBeFalsy();
   }
 
   function createConstraintAuthoringEditorState(
@@ -4255,18 +4236,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const secondPointTarget = session.definition.points[1]?.target;
     const lineTarget = session.definition.entities[0]?.target;
 
-    expectTrue(
+    expect(
       pointTarget,
       "Constraint routing fixture should create a selectable sketch point.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       secondPointTarget,
       "Constraint routing fixture should create a second selectable sketch point.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       lineTarget,
       "Constraint routing fixture should create a selectable sketch entity.",
-    );
+    ).toBeTruthy();
 
     return {
       pointTarget,
@@ -4309,29 +4290,29 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       target: pointTarget,
     });
 
-    expectTrue(
-      hovered.state.kind === "editingSketch",
+    expect(
+      hovered.state.kind,
       "Hover fixture should remain in sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       hovered.state.session.constraintAuthoring?.hoverTarget?.target &&
         primitiveRefEquals(
           hovered.state.session.constraintAuthoring.hoverTarget.target,
           pointTarget,
         ),
       "Active constraint authoring should record valid viewport hover targets.",
-    );
+    ).toBeTruthy();
 
     const selected = transitionEditorState(hovered.state, {
       type: "viewport.selectionRequested",
       target: pointTarget,
     });
 
-    expectTrue(
-      selected.state.kind === "editingSketch",
+    expect(
+      selected.state.kind,
       "Selection fixture should remain in sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       selected.state.session.constraintAuthoring?.selectedTargets.length ===
         1 &&
         primitiveRefEquals(
@@ -4339,7 +4320,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           pointTarget,
         ),
       "Active constraint authoring should record valid viewport click targets.",
-    );
+    ).toBeTruthy();
   }
 
   function testDimensionSelectionClickPinsReadyValuePreview() {
@@ -4350,50 +4331,50 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "viewport.selectionRequested",
       target: pointTarget,
     });
-    expectTrue(
-      selectedFirst.state.kind === "editingSketch",
+    expect(
+      selectedFirst.state.kind,
       "First dimension target selection should keep sketch editing.",
-    );
+    ).toBe("editingSketch");
 
     const selectedSecond = transitionEditorState(selectedFirst.state, {
       type: "viewport.selectionRequested",
       target: secondPointTarget,
     });
-    expectTrue(
-      selectedSecond.state.kind === "editingSketch",
+    expect(
+      selectedSecond.state.kind,
       "Second dimension target selection should keep sketch editing.",
-    );
+    ).toBe("editingSketch");
 
     const moved = transitionEditorState(selectedSecond.state, {
       type: "sketch.pointerMoved",
       point: mapSketchPointToWorld(selectedSecond.state.session.plane, [5, 3]),
     });
-    expectTrue(
-      moved.state.kind === "editingSketch",
+    expect(
+      moved.state.kind,
       "Pointer movement over ready dimension preview should keep sketch editing.",
-    );
+    ).toBe("editingSketch");
 
     const clickedGeometry = transitionEditorState(moved.state, {
       type: "viewport.selectionRequested",
       target: lineTarget,
     });
 
-    expectTrue(
-      clickedGeometry.state.kind === "editingSketch",
+    expect(
+      clickedGeometry.state.kind,
       "Dimension placement click fixture should keep sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       clickedGeometry.state.session.constraintAuthoring?.isPreviewPinned ===
         true &&
         clickedGeometry.state.session.constraintAuthoring.selectedTargets
           .length === 2,
       "Clicking geometry while a value-backed dimension is ready should pin placement instead of replacing operands.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getSketchToolPresentation(clickedGeometry.state.session)?.floatingInput
-        ?.label === "Distance",
+        ?.label,
       "Pinning placement from a target click should open the floating value-entry input.",
-    );
+    ).toBe("Distance");
   }
 
   function testDimensionReleaseOverSecondLineDefersToAngleSelection() {
@@ -4409,10 +4390,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const [firstLineTarget, secondLineTarget] = session.definition.entities.map(
       (entity) => entity.target,
     );
-    expectTrue(
+    expect(
       firstLineTarget && secondLineTarget,
       "Angle dimension release fixture should create two selectable lines.",
-    );
+    ).toBeTruthy();
 
     const state: SketchEditorState = {
       ...initialEditorState,
@@ -4448,54 +4429,54 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "viewport.selectionRequested",
       target: firstLineTarget,
     });
-    expectTrue(
-      selectedFirst.state.kind === "editingSketch",
+    expect(
+      selectedFirst.state.kind,
       "First line selection should keep sketch editing.",
-    );
+    ).toBe("editingSketch");
 
     const releaseOverSecond = transitionEditorState(selectedFirst.state, {
       type: "sketch.pointerReleased",
       point: mapSketchPointToWorld(selectedFirst.state.session.plane, [5, 0]),
       target: secondLineTarget,
     });
-    expectTrue(
-      releaseOverSecond.state.kind === "editingSketch",
+    expect(
+      releaseOverSecond.state.kind,
       "Release over second line should keep sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       releaseOverSecond.state.session.constraintAuthoring?.isPreviewPinned ===
         false &&
         releaseOverSecond.state.session.constraintAuthoring.selectedTargets
           .length === 1,
       "Pointer release over a selectable second line should not pin the first line length preview before click selection.",
-    );
+    ).toBeTruthy();
 
     const selectedSecond = transitionEditorState(releaseOverSecond.state, {
       type: "viewport.selectionRequested",
       target: secondLineTarget,
     });
-    expectTrue(
-      selectedSecond.state.kind === "editingSketch",
+    expect(
+      selectedSecond.state.kind,
       "Second line selection should keep sketch editing.",
-    );
+    ).toBe("editingSketch");
 
     let anglePreview = getSketchToolPresentation(
       selectedSecond.state.session,
     )?.overlays?.find((overlay) => overlay.kind === "angleArc");
-    expectTrue(
+    expect(
       selectedSecond.state.session.constraintAuthoring?.selectedTargets
         .length === 2 && anglePreview?.kind === "angleArc",
       "Selecting the second non-parallel line should preserve the two-line angle preview.",
-    );
+    ).toBeTruthy();
 
     const moved = transitionEditorState(selectedSecond.state, {
       type: "sketch.pointerMoved",
       point: mapSketchPointToWorld(selectedSecond.state.session.plane, [8, 3]),
     });
-    expectTrue(
-      moved.state.kind === "editingSketch",
+    expect(
+      moved.state.kind,
       "Pointer movement after angle selection should keep sketch editing.",
-    );
+    ).toBe("editingSketch");
     anglePreview = getSketchToolPresentation(
       moved.state.session,
     )?.overlays?.find((overlay) => overlay.kind === "angleArc");
@@ -4506,26 +4487,26 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         overlay.kind === "dimensionLine" &&
         overlay.referenceKind === "lineLength",
     );
-    expectTrue(
+    expect(
       anglePreview?.kind === "angleArc" && !lengthPreview,
       "Pointer movement after two selected lines should not fall back to the first line length dimension.",
-    );
+    ).toBeTruthy();
 
     const placed = transitionEditorState(moved.state, {
       type: "sketch.pointerReleased",
       point: mapSketchPointToWorld(moved.state.session.plane, [4, -1]),
       target: null,
     });
-    expectTrue(
-      placed.state.kind === "editingSketch",
+    expect(
+      placed.state.kind,
       "Angle placement click should keep sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       placed.state.session.constraintAuthoring?.isPreviewPinned === true &&
         getSketchToolPresentation(placed.state.session)?.floatingInput
           ?.label === "Angle",
       "Clicking the primary viewport after angle preview should pin placement and keep the value entry open.",
-    );
+    ).toBeTruthy();
   }
 
   function testConstraintAuthoringIgnoresInvalidViewportSelection() {
@@ -4538,14 +4519,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       target: lineTarget,
     });
 
-    expectTrue(
-      selected.state.kind === "editingSketch",
+    expect(
+      selected.state.kind,
       "Invalid constraint selection fixture should remain in sketch editing.",
-    );
-    expectTrue(
-      selected.state.session.constraintAuthoring?.selectedTargets.length === 0,
+    ).toBe("editingSketch");
+    expect(
+      selected.state.session.constraintAuthoring?.selectedTargets.length,
       "Dimension point authoring should ignore viewport clicks on rejected sketch entity targets.",
-    );
+    ).toBe(0);
   }
 
   function createConnectedSelectionEditorState(): {
@@ -4668,17 +4649,17 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       target: localTarget,
     });
 
-    expectTrue(
-      selected.state.kind === "editingSketch",
+    expect(
+      selected.state.kind,
       "Connected selection should stay in sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       selected.state.selection.length === 2 &&
         selected.state.selection.every(
           (target) => target.kind === "sketchEntity",
         ),
       "Connected selection should update the normal editor selection with the connected sketch entities.",
-    );
+    ).toBeTruthy();
   }
 
   function testConnectedSketchSelectionEventWorksAfterRectangleToolAcceptsShape() {
@@ -4687,10 +4668,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [4, 3]);
     const localTarget = session.definition.entities[0]?.target;
-    expectTrue(
+    expect(
       localTarget,
       "Rectangle fixture should create a selectable sketch entity.",
-    );
+    ).toBeTruthy();
 
     const selected = transitionEditorState(
       {
@@ -4727,17 +4708,17 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      selected.state.kind === "editingSketch",
+    expect(
+      selected.state.kind,
       "Connected rectangle selection should stay in sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       selected.state.selection.length === 4 &&
         selected.state.selection.every(
           (target) => target.kind === "sketchEntity",
         ),
       "Double-clicking one accepted rectangle edge while Rectangle remains active should select all four rectangle edges.",
-    );
+    ).toBeTruthy();
   }
 
   function testConnectedSketchSelectionEventRejectsUnsupportedTargets() {
@@ -4747,14 +4728,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       target: projectedTarget,
     });
 
-    expectTrue(
-      selected.state.kind === "editingSketch",
+    expect(
+      selected.state.kind,
       "Unsupported connected selection should stay in sketch editing.",
-    );
-    expectTrue(
-      selected.state.selection.length === 0,
+    ).toBe("editingSketch");
+    expect(
+      selected.state.selection.length,
       "Projected reference geometry should not expand through the connected selection event.",
-    );
+    ).toBe(0);
   }
 
   function testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation() {
@@ -4767,10 +4748,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     session = acceptSketchDraw(session, [10, 6]);
 
     const [firstLineId, secondLineId] = session.definition.entityIds;
-    expectTrue(
+    expect(
       firstLineId && secondLineId,
       "Annotation deletion fixture should create two sketch lines.",
-    );
+    ).toBeTruthy();
 
     session = beginSketchTool(session, "constraintParallel");
     session = selectSketchConstraintTarget(session, {
@@ -4785,10 +4766,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     });
 
     const annotation = getSketchAnnotationDescriptors(session)[0];
-    expectTrue(
+    expect(
       annotation,
       "Annotation deletion fixture should create a committed annotation descriptor.",
-    );
+    ).toBeTruthy();
 
     const selected = transitionEditorState(
       {
@@ -4823,40 +4804,39 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      selected.state.kind === "editingSketch",
+    expect(
+      selected.state.kind,
       "Selecting an annotation should stay in sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       selected.state.session.selectedAnnotation &&
         primitiveRefEquals(
           selected.state.session.selectedAnnotation,
           annotation.target,
         ),
       "Viewport annotation selection should select the durable annotation target.",
-    );
-    expectTrue(
-      selected.state.session.definition.constraintIds.length === 1,
+    ).toBeTruthy();
+    expect(
+      selected.state.session.definition.constraintIds.length,
       "Selecting an annotation should not select or delete affected geometry.",
-    );
+    ).toBe(1);
 
     const deleted = transitionEditorState(selected.state, {
       type: "sketch.annotationDeleteRequested",
     });
 
-    expectTrue(
-      deleted.state.kind === "editingSketch",
+    expect(
+      deleted.state.kind,
       "Deleting an annotation should stay in sketch editing.",
-    );
-    expectTrue(
-      deleted.state.session.definition.constraintIds.length === 0,
+    ).toBe("editingSketch");
+    expect(
+      deleted.state.session.definition.constraintIds.length,
       "Annotation deletion should remove the durable constraint record from sketch state.",
-    );
-    expectTrue(
-      deleted.state.session.commitRequest?.definition.constraintIds.length ===
-        0,
+    ).toBe(0);
+    expect(
+      deleted.state.session.commitRequest?.definition.constraintIds.length,
       "Annotation deletion should update the durable sketch commit request.",
-    );
+    ).toBe(0);
   }
 
   function testSketchHistoryDeleteStaysDistinctFromLiveSelectionDelete() {
@@ -4878,10 +4858,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     );
     const operationId =
       baseSession.fullDefinition.authoringOperations?.[0]?.operationId;
-    expectTrue(
+    expect(
       operationId,
       "History-delete fixture should create a committed reference-image operation.",
-    );
+    ).toBeTruthy();
 
     const baseState: SketchEditorState = {
       ...initialEditorState,
@@ -4924,36 +4904,35 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "sketch.historyOperationDeleteRequested",
       operationId,
     });
-    expectTrue(
-      deletedFromHistory.state.kind === "editingSketch",
+    expect(
+      deletedFromHistory.state.kind,
       "History-row deletion should keep the sketch editor active.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       deletedFromHistory.state.session.fullDefinition.authoringOperations
-        ?.length === 0,
+        ?.length,
       "History-row deletion should remove the targeted authored operation instead of appending a delete row.",
-    );
-    expectTrue(
-      deletedFromHistory.state.selection.length === 0,
+    ).toBe(0);
+    expect(
+      deletedFromHistory.state.selection.length,
       "History-row deletion should clear live selection state after the rewrite.",
-    );
+    ).toBe(0);
 
     const liveDelete = transitionEditorState(baseState, {
       type: "sketch.annotationDeleteRequested",
     });
-    expectTrue(
-      liveDelete.state.kind === "editingSketch",
+    expect(
+      liveDelete.state.kind,
       "Live selection deletion should keep the sketch editor active.",
-    );
-    expectTrue(
-      liveDelete.state.session.fullDefinition.authoringOperations?.length === 2,
+    ).toBe("editingSketch");
+    expect(
+      liveDelete.state.session.fullDefinition.authoringOperations?.length,
       "Live selection deletion of a reference image should append a durable delete operation.",
-    );
-    expectTrue(
-      liveDelete.state.session.fullDefinition.authoringOperations?.at(-1)
-        ?.kind === "delete",
+    ).toBe(2);
+    expect(
+      liveDelete.state.session.fullDefinition.authoringOperations?.at(-1)?.kind,
       "Live selection deletion should preserve the existing append-delete semantics for viewport-selected reference images.",
-    );
+    ).toBe("delete");
   }
 
   function testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm() {
@@ -4966,10 +4945,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     session = acceptSketchDraw(session, [10, 5]);
 
     const [firstPointId, , , diagonalPointId] = session.definition.pointIds;
-    expectTrue(
+    expect(
       firstPointId && diagonalPointId,
       "Annotation edit fixture should create selectable sketch points.",
-    );
+    ).toBeTruthy();
 
     session = beginSketchTool(session, "dimensionDistance");
     session = selectSketchConstraintTarget(session, {
@@ -4990,10 +4969,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const annotation = getSketchAnnotationDescriptors(session).find(
       (entry) => entry.target.kind === "dimension",
     );
-    expectTrue(
-      annotation?.target.kind === "dimension",
+    expect(
+      annotation?.target.kind,
       "Annotation edit fixture should create a committed dimension annotation.",
-    );
+    ).toBe("dimension");
 
     const baseState: SketchEditorState = {
       ...initialEditorState,
@@ -5027,18 +5006,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       target: annotation.target,
     });
 
-    expectTrue(
-      opened.state.kind === "editingSketch",
+    expect(
+      opened.state.kind,
       "Annotation edit request should stay in sketch editing.",
-    );
-    expectTrue(
-      opened.state.session.activeAnnotationEdit?.target.kind === "dimension",
+    ).toBe("editingSketch");
+    expect(
+      opened.state.session.activeAnnotationEdit?.target.kind,
       "Annotation edit request should open a committed dimension edit session.",
-    );
-    expectTrue(
-      opened.state.session.toolPresentation?.floatingInput?.value === 24,
+    ).toBe("dimension");
+    expect(
+      opened.state.session.toolPresentation?.floatingInput?.value,
       "Committed dimension edit form should open with the durable dimension value.",
-    );
+    ).toBe(24);
 
     const changed = transitionEditorState(opened.state, {
       type: "sketch.toolPatched",
@@ -5049,15 +5028,15 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       patch: { intent: "commitAnnotationValue" },
     });
 
-    expectTrue(
-      committed.state.kind === "editingSketch",
+    expect(
+      committed.state.kind,
       "Committed dimension edit should stay in sketch editing.",
-    );
-    expectTrue(
+    ).toBe("editingSketch");
+    expect(
       committed.state.session.definition.dimensions[0]?.kind === "distance" &&
         committed.state.session.definition.dimensions[0].value === 33,
       "Committed dimension edit should update the existing durable dimension record.",
-    );
+    ).toBeTruthy();
   }
 
   function testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest() {
@@ -5067,10 +5046,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     session = acceptSketchDraw(session, [8, 0]);
 
     const target = session.definition.entities[0]?.target;
-    expectTrue(
+    expect(
       target,
       "Style patch routing fixture should create a selectable local sketch entity.",
-    );
+    ).toBeTruthy();
 
     const baseState: SketchEditorState = {
       ...initialEditorState,
@@ -5108,20 +5087,19 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     });
 
-    expectTrue(
-      patched.state.kind === "editingSketch",
+    expect(
+      patched.state.kind,
       "Sketch style patch event should remain in sketch editing.",
-    );
-    expectTrue(
-      patched.state.session.definition.entities[0]?.style?.strokeColor ===
-        "#ff00ff",
+    ).toBe("editingSketch");
+    expect(
+      patched.state.session.definition.entities[0]?.style?.strokeColor,
       "Sketch style patch should update the selected local entity style via sketch.toolPatched routing.",
-    );
-    expectTrue(
+    ).toBe("#ff00ff");
+    expect(
       patched.state.session.commitRequest?.definition.entities[0]?.style
-        ?.strokeColor === "#ff00ff",
+        ?.strokeColor,
       "Sketch style patch should rebuild the durable commit request payload.",
-    );
+    ).toBe("#ff00ff");
   }
 
   function testRejectedSketchCommitShowsValidationMessage() {
@@ -5171,14 +5149,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       diagnostics: [diagnostic],
     });
 
-    expectTrue(
-      rejected.state.kind === "editingSketch",
+    expect(
+      rejected.state.kind,
       "Rejected sketch commit should keep the sketch open.",
-    );
-    expectTrue(
-      rejected.state.session.validationMessage === diagnostic.message,
+    ).toBe("editingSketch");
+    expect(
+      rejected.state.session.validationMessage,
       "Rejected sketch commit diagnostics should surface in the visible sketch validation message.",
-    );
+    ).toBe(diagnostic.message);
   }
 
   function testSketchCommitConflictRefreshesBeforeRetry() {
@@ -5186,10 +5164,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [8, 0]);
-    expectTrue(
+    expect(
       session.commitRequest,
       "Sketch conflict fixture should have a commit payload.",
-    );
+    ).toBeTruthy();
 
     const staleSnapshot = createSnapshot();
     staleSnapshot.document.revisionId = "rev_0001";
@@ -5246,22 +5224,22 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     });
 
     const refreshEffect = conflicted.effects[0];
-    expectTrue(
-      refreshEffect?.type === "document.fetchSnapshot",
+    expect(
+      refreshEffect?.type,
       "Sketch commit conflicts should request a snapshot refresh.",
-    );
-    expectTrue(
-      conflicted.state.kind === "editingSketch",
+    ).toBe("document.fetchSnapshot");
+    expect(
+      conflicted.state.kind,
       "Sketch commit conflicts should keep the sketch open.",
-    );
-    expectTrue(
-      conflicted.state.document.revisionId === "rev_0002",
+    ).toBe("editingSketch");
+    expect(
+      conflicted.state.document.revisionId,
       "Sketch commit conflicts should advance the editor revision.",
-    );
-    expectTrue(
-      conflicted.state.pendingSnapshotRequestId === refreshEffect.requestId,
+    ).toBe("rev_0002");
+    expect(
+      conflicted.state.pendingSnapshotRequestId,
       "Conflict refresh should be tracked as pending.",
-    );
+    ).toBe(refreshEffect.requestId);
 
     const refreshedSnapshot = createSnapshot();
     refreshedSnapshot.document.revisionId = "rev_0002";
@@ -5282,14 +5260,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     });
     const retryEffect = retry.effects[0];
 
-    expectTrue(
-      retryEffect?.type === "sketch.commit",
+    expect(
+      retryEffect?.type,
       "Retrying Finish Sketch should emit another sketch commit.",
-    );
-    expectTrue(
-      retryEffect.baseRevisionId === "rev_0002",
+    ).toBe("sketch.commit");
+    expect(
+      retryEffect.baseRevisionId,
       "Sketch commit retries should use the refreshed revision.",
-    );
+    ).toBe("rev_0002");
   }
 
   async function testModelingServiceRuntimePreservesResultRejections() {
@@ -5336,35 +5314,35 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     });
 
-    expectTrue(
+    expect(
       runtime.setDocumentCursor,
       "Modeling service runtime should expose document cursor mutation.",
-    );
+    ).toBeTruthy();
     const rejected = await runtime.setDocumentCursor({
       baseRevisionId: "rev_1",
       cursor: { kind: "feature", featureId: "feature_a" },
     });
 
-    expectTrue(
-      !rejected.accepted,
+    expect(
+      rejected.accepted,
       "Modeling service Result Errs should become typed rejected mutation results.",
-    );
-    expectTrue(
-      rejected.revisionId === "rev_2",
+    ).toBeFalsy();
+    expect(
+      rejected.revisionId,
       "Rejected mutation results should retain actual revision ids.",
-    );
-    expectTrue(
-      rejected.diagnostics[0]?.code === "repository-head-conflict",
+    ).toBe("rev_2");
+    expect(
+      rejected.diagnostics[0]?.code,
       "Rejected mutation diagnostics should retain the modeling diagnostic code.",
-    );
-    expectTrue(
+    ).toBe("repository-head-conflict");
+    expect(
       rejected.errorContext?.some(
         (entry) =>
           entry.key === "diagnosticCodes" &&
           entry.value === "feature-warning,repository-head-conflict",
       ),
       "Rejected mutation results should retain structured modeling error context.",
-    );
+    ).toBeTruthy();
   }
 
   testSketchActivationEmitsCorrelatedOpenEffect();
@@ -5463,15 +5441,15 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       toolId: "importImage",
     });
 
-    expectTrue(
+    expect(
       importing.effects.length === 0 &&
         importing.state.preview?.label === "Select reference images",
       "Import Image should wait for direct user-gesture file selection before emitting the sketch import effect.",
-    );
-    expectTrue(
-      importing.state.kind === "editingSketch",
+    ).toBeTruthy();
+    expect(
+      importing.state.kind,
       "Import Image should preserve sketch editing state while awaiting file selection.",
-    );
+    ).toBe("editingSketch");
 
     const selected = transitionEditorState(importing.state, {
       type: "sketch.referenceImagePayloadsPicked",
@@ -5486,31 +5464,31 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      selected.effects[0]?.type === "sketch.importReferenceImages",
+    expect(
+      selected.effects[0]?.type,
       "Selected reference-image payloads should emit a sketch-owned import effect.",
-    );
+    ).toBe("sketch.importReferenceImages");
 
     const completedEvent = await runEditorEffect(selected.effects[0]!, runtime);
     const completed = transitionEditorState(selected.state, completedEvent);
 
-    expectTrue(
-      completed.state.kind === "editingSketch",
+    expect(
+      completed.state.kind,
       "Successful import should keep the reopened sketch session active.",
-    );
-    expectTrue(
-      completed.state.selection[0]?.kind === "sketch",
+    ).toBe("editingSketch");
+    expect(
+      completed.state.selection[0]?.kind,
       "Successful import should select the reopened sketch target.",
-    );
-    expectTrue(
+    ).toBe("sketch");
+    expect(
       completed.state.selection[0]?.kind === "sketch" &&
         completed.state.selection[0].sketchId === "sketch_imported",
       "Successful import should reopen the imported sketch through the editor runtime rather than the workbench shell.",
-    );
-    expectTrue(
-      completed.state.pendingImportRequestId === null,
+    ).toBeTruthy();
+    expect(
+      completed.state.pendingImportRequestId,
       "Import completion should clear the pending import request.",
-    );
+    ).toBe(null);
   }
 
   function testSketchImageImportCanStartFromSketchSelectionCommand() {
@@ -5530,31 +5508,31 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      commandState.state.kind === "selectionCommand",
+    expect(
+      commandState.state.kind,
       "Sketch activation should arm the sketch selection command.",
-    );
+    ).toBe("selectionCommand");
 
     const selected = transitionEditorState(commandState.state, {
       type: "viewport.selectionRequested",
       target: { kind: "construction", constructionId: "construction_plane-xy" },
     });
 
-    expectTrue(
-      selected.state.kind === "selectionCommand",
+    expect(
+      selected.state.kind,
       "Selecting the sketch plane should keep the sketch command active until the draft opens.",
-    );
+    ).toBe("selectionCommand");
 
     const importing = transitionEditorState(selected.state, {
       type: "tool.activated",
       toolId: "importImage",
     });
 
-    expectTrue(
+    expect(
       importing.state.kind === "selectionCommand" &&
         importing.state.preview?.label === "Select reference images",
       "Import Image should arm file selection from the sketch-entry command state.",
-    );
+    ).toBeTruthy();
 
     const payloadSelected = transitionEditorState(importing.state, {
       type: "sketch.referenceImagePayloadsPicked",
@@ -5569,14 +5547,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      payloadSelected.state.kind === "editingSketch",
+    expect(
+      payloadSelected.state.kind,
       "Picking reference-image payloads should open a draft sketch session.",
-    );
-    expectTrue(
-      payloadSelected.effects[0]?.type === "sketch.importReferenceImages",
+    ).toBe("editingSketch");
+    expect(
+      payloadSelected.effects[0]?.type,
       "Picking reference-image payloads from sketch entry should emit the sketch import effect.",
-    );
+    ).toBe("sketch.importReferenceImages");
   }
 
   function testSketchImagePayloadSelectionAcceptsImportImageOwnedSelectionCommand() {
@@ -5625,14 +5603,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      payloadSelected.state.kind === "editingSketch",
+    expect(
+      payloadSelected.state.kind,
       "Import-image-owned sketch selection commands should open a draft sketch session when payloads are picked.",
-    );
-    expectTrue(
-      payloadSelected.effects[0]?.type === "sketch.importReferenceImages",
+    ).toBe("editingSketch");
+    expect(
+      payloadSelected.effects[0]?.type,
       "Import-image-owned sketch selection commands should emit the sketch import effect.",
-    );
+    ).toBe("sketch.importReferenceImages");
   }
 
   testSelectionClearEventClearsSelectionAndPreservesActiveState();

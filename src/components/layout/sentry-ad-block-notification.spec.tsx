@@ -1,6 +1,5 @@
 import { MantineProvider } from "@mantine/core";
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { SentryAdBlockNotificationView } from "@/components/layout/sentry-ad-block-notification";
@@ -13,24 +12,24 @@ test("src/components/layout/sentry-ad-block-notification.spec.tsx", () => {
     </MantineProvider>,
   );
 
-  expectTrue(
+  expect(
     markup.includes('data-notification-type="warning"'),
     "Sentry ad-block notice should use warning notification presentation.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('role="status"'),
     "Sentry ad-block notice should use warning status semantics.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Error reporting blocked"),
     "Sentry ad-block notice should render a warning title.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Error reporting is blocked by an ad blocker"),
     "Sentry ad-block notice should explain that an ad blocker is blocking error reporting.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Dismiss ad-block notification"),
     "Sentry ad-block notice should preserve manual dismissal.",
-  );
+  ).toBeTruthy();
 });

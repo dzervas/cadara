@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "vitest";
-
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 
 const ROOT = process.cwd();
 
@@ -27,8 +25,8 @@ test("test/static/debug-platform-boundary.spec.ts legacy debug globals stay remo
     }
   }
 
-  expectTrue(
+  expect(
     offenders.length === 0,
     `Legacy debug globals must stay removed from the formal debug platform.\n${offenders.join("\n")}`,
-  );
+  ).toBeTruthy();
 });

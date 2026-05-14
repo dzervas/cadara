@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { IMPORT_CONTRACT_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import {
   validateImportBinding,
@@ -15,10 +14,10 @@ test("src/contracts/import/validation.spec.ts", async () => {
     fileName: "bracket.step",
     pathHint: "/workspace/bracket.step",
   });
-  expectTrue(
+  expect(
     importSourceResult.success,
     "Import source schema should accept local file sources.",
-  );
+  ).toBeTruthy();
 
   const resolvedSourceResult = validateResolvedImportSource({
     name: "bracket.step",
@@ -30,10 +29,10 @@ test("src/contracts/import/validation.spec.ts", async () => {
     bytes: new Uint8Array([1, 2, 3, 4]),
     fingerprint: `sha256:${"a".repeat(64)}`,
   });
-  expectTrue(
+  expect(
     resolvedSourceResult.success,
     "Resolved import source schema should accept fetched byte payloads.",
-  );
+  ).toBeTruthy();
 
   const bindingResult = validateImportBinding({
     schemaVersion: IMPORT_CONTRACT_SCHEMA_VERSION,
@@ -44,10 +43,10 @@ test("src/contracts/import/validation.spec.ts", async () => {
     fingerprint: `sha256:${"b".repeat(64)}`,
     refreshPolicy: "manual",
   });
-  expectTrue(
+  expect(
     bindingResult.success,
     "Import binding schema should accept portable cloud object bindings.",
-  );
+  ).toBeTruthy();
 
   const preparedActionsResult = validateImportPreparedActions({
     addDocumentVariables: [
@@ -75,21 +74,21 @@ test("src/contracts/import/validation.spec.ts", async () => {
       },
     ],
   });
-  expectTrue(
+  expect(
     preparedActionsResult.success,
     "Prepared action schema should accept adapter request payloads and import diagnostics.",
-  );
+  ).toBeTruthy();
 
-  expectTrue(
-    !validateImportSource({ kind: "url", url: "not-a-url" }).success,
+  expect(
+    validateImportSource({ kind: "url", url: "not-a-url" }).success,
     "Import source validation should reject malformed URL sources.",
-  );
-  expectTrue(
-    !validateImportSource({ kind: "localFile", fileName: "   " }).success,
+  ).toBeFalsy();
+  expect(
+    validateImportSource({ kind: "localFile", fileName: "   " }).success,
     "Import source validation should reject empty local file names.",
-  );
-  expectTrue(
-    !validateResolvedImportSource({
+  ).toBeFalsy();
+  expect(
+    validateResolvedImportSource({
       name: "bracket.step",
       origin: { kind: "url", url: "https://example.com/bracket.step" },
       mediaType: "model/step",
@@ -97,9 +96,9 @@ test("src/contracts/import/validation.spec.ts", async () => {
       fingerprint: "sha256:not64hex",
     }).success,
     "Resolved import source validation should reject malformed fingerprints.",
-  );
-  expectTrue(
-    !validateImportBinding({
+  ).toBeFalsy();
+  expect(
+    validateImportBinding({
       schemaVersion: IMPORT_CONTRACT_SCHEMA_VERSION,
       kind: "url",
       url: "not-a-url",
@@ -107,9 +106,9 @@ test("src/contracts/import/validation.spec.ts", async () => {
       refreshPolicy: "manual",
     }).success,
     "Import binding validation should reject malformed URL bindings.",
-  );
-  expectTrue(
-    !validateImportBinding({
+  ).toBeFalsy();
+  expect(
+    validateImportBinding({
       schemaVersion: IMPORT_CONTRACT_SCHEMA_VERSION,
       kind: "cloudObject",
       service: "",
@@ -118,9 +117,9 @@ test("src/contracts/import/validation.spec.ts", async () => {
       refreshPolicy: "manual",
     }).success,
     "Import binding validation should reject empty cloud binding service names.",
-  );
-  expectTrue(
-    !validateImportPreparedActions({
+  ).toBeFalsy();
+  expect(
+    validateImportPreparedActions({
       binding: {
         schemaVersion: IMPORT_CONTRACT_SCHEMA_VERSION,
         kind: "url",
@@ -130,5 +129,5 @@ test("src/contracts/import/validation.spec.ts", async () => {
       },
     }).success,
     "Prepared action validation should reject invalid nested import bindings.",
-  );
+  ).toBeFalsy();
 });

@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-feedback";
@@ -230,45 +229,45 @@ test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
     />,
   );
 
-  expectTrue(
+  expect(
     markup.includes('data-sketch-viewport-overlay="measurement"'),
     "Viewport feedback should render measurement overlays from generic descriptors.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Width") && markup.includes("4.00 mm"),
     "Viewport feedback should render anchored measurement text.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("left:120px") && markup.includes("top:80px"),
     "Viewport feedback should place measurement labels at projected screen positions.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("pointer-events-none absolute"),
     "Viewport feedback should keep transient overlay labels non-interactive so canvas clicks pass through.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes(
       'data-sketch-viewport-floating-input="distance-value-input"',
     ),
     "Viewport feedback should render floating numeric input from projected anchors.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Distance") && markup.includes("Commit"),
     "Viewport feedback should preserve numeric input controls.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('data-sketch-viewport-geometry="dimensionLine"') &&
       markup.includes('x1="100"'),
     "Viewport feedback should render dimension preview line geometry from projected endpoints.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('data-sketch-viewport-geometry="angleArc"') &&
       markup.includes('data-sketch-viewport-arc-side="major"') &&
       markup.includes("L 200 80") &&
       !markup.includes("A 40 40"),
     "Viewport feedback should render major angle arcs as centered sampled paths from projected line references.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes(
       'data-sketch-viewport-drag-handle="distance-preview-drag"',
     ) &&
@@ -276,12 +275,12 @@ test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
         'data-sketch-viewport-drag-handle="parallel-angle-preview-drag"',
       ),
     "Viewport feedback should expose declared dimension preview geometry as draggable handles.",
-  );
-  expectTrue(
-    !markup.includes("Rectangle 1 width"),
+  ).toBeTruthy();
+  expect(
+    markup.includes("Rectangle 1 width"),
     "Committed dimension overlays should leave visible text to the draggable annotation chip.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     markup.includes(
       'data-sketch-viewport-angle-witness="parallel-angle-preview-witness-a"',
     ) &&
@@ -290,21 +289,21 @@ test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
       ) &&
       markup.includes('stroke-dasharray="4 4"'),
     "Viewport feedback should render dashed angular witness lines when the overlay declares them.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes(
       'data-sketch-viewport-angle-witness="committed-angle-overlay-witness-a"',
     ),
     "Viewport feedback should render angular witness lines for committed angle arcs without preview drag handles.",
-  );
-  expectTrue(
-    !markup.includes("First corner") && !markup.includes("Place corner"),
+  ).toBeTruthy();
+  expect(
+    markup.includes("First corner") && !markup.includes("Place corner"),
     "Viewport feedback should suppress non-dimensional anchor and completion tooltips.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     markup.includes('data-sketch-viewport-geometry="snapIndicator"') &&
       markup.includes('data-sketch-snap-kind="midpoint"') &&
       markup.includes("Midpoint"),
     "Viewport feedback should render transient snap indicators and labels.",
-  );
+  ).toBeTruthy();
 });

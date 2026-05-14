@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   SKETCH_SCHEMA_VERSION,
@@ -1028,10 +1027,10 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       1e-5,
       "Projected line boundary should build from live projection data",
     );
-    expectTrue(
-      sketch.definition.entities.length === 3,
+    expect(
+      sketch.definition.entities.length,
       "Projected profile reconstruction must not create copied sketch entities.",
-    );
+    ).toBe(3);
   }
 
   async function testProjectedCircleProfileBuildsFromLiveProjection() {
@@ -1092,11 +1091,11 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       1e-5,
       "Projected circle profile should build from live projection data",
     );
-    expectTrue(
+    expect(
       sketch.definition.points.length === 0 &&
         sketch.definition.entities.length === 0,
       "Projected circle profiles must not create sketch-owned geometry.",
-    );
+    ).toBeTruthy();
   }
 
   async function testProjectedBoundaryInvalidationReportsStructuredCode() {
@@ -1137,14 +1136,14 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       thrown = error as Error & { code?: string };
     }
 
-    expectTrue(
-      thrown?.code === "occ-contract-gap-projected-region-loop",
+    expect(
+      thrown?.code,
       "Missing live projection should report a machine-readable code.",
-    );
-    expectTrue(
+    ).toBe("occ-contract-gap-projected-region-loop");
+    expect(
       thrown.message.includes("cannot be resolved from live projection data"),
       "Missing live projection should report explicit invalidation.",
-    );
+    ).toBeTruthy();
   }
 
   async function testUnauthoredProjectedBoundaryInvalidatesEvenWithProjectionData() {
@@ -1202,20 +1201,20 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       thrown = error as Error & { code?: string };
     }
 
-    expectTrue(
-      thrown?.code === "occ-contract-gap-projected-region-loop",
+    expect(
+      thrown?.code,
       "Unauthored projected boundaries should report a machine-readable invalidation code.",
-    );
-    expectTrue(
+    ).toBe("occ-contract-gap-projected-region-loop");
+    expect(
       thrown.message.includes(
         "not backed by the current authored sketch references",
       ),
       "Stale projection data must not be treated as live authored geometry.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       definition.points.length === 0 && definition.entities.length === 0,
       "Rejected stale projection data must not be copied into sketch geometry.",
-    );
+    ).toBeTruthy();
   }
 
   async function testRejectsMultipleOuterLoops() {
@@ -1245,11 +1244,10 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       thrownMessage = error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(
-      thrownMessage ===
-        `Region ${region.regionId} must contain exactly one outer loop.`,
+    expect(
+      thrownMessage,
       "Malformed regions with multiple outer loops must be rejected explicitly.",
-    );
+    ).toBe(`Region ${region.regionId} must contain exactly one outer loop.`);
   }
 
   await testRectangleProfileBuildsExpectedArea();

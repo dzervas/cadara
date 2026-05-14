@@ -1,4 +1,4 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
@@ -16,7 +16,6 @@ import {
   trackNewSolidBody,
   type OccReferenceInvalidationRecord,
 } from "@/domain/modeling/occ/topology";
-import { expectTrue } from "@/testing/expect.spec";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,
@@ -42,7 +41,7 @@ function makeTrackedBox(
 ) {
   const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 2, 2, 2);
   box.Build(new oc.Message_ProgressRange_1());
-  expectTrue(box.IsDone(), `Expected ${bodyId} box to build.`);
+  expect(box.IsDone(), `Expected ${bodyId} box to build.`).toBeTruthy();
 
   return trackNewSolidBody(oc, {
     bodyId,
@@ -57,16 +56,14 @@ function assertNativeHistoryDidNotFallBack(
   label: string,
 ) {
   for (const invalidation of invalidations.values()) {
-    expectTrue(
-      invalidation.reason !==
-        OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory,
+    expect(
+      invalidation.reason,
       `${label} should use native history instead of unsupported-history invalidations.`,
-    );
-    expectTrue(
-      invalidation.reason !==
-        OCC_REFERENCE_INVALIDATION_REASONS.topologyModified,
+    ).not.toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory);
+    expect(
+      invalidation.reason,
       `${label} should use native successor classifications instead of JS-side modified-history invalidations.`,
-    );
+    ).not.toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyModified);
   }
 }
 
@@ -78,10 +75,10 @@ test("executeFilletFeature uses native transaction history for replacement topol
     "feature_native_fillet_history_seed" as FeatureId,
   );
   const edgeId = body.topology.edgeIds[0];
-  expectTrue(
+  expect(
     edgeId != null,
     "Expected the tracked box to expose a fillet edge target.",
-  );
+  ).toBeTruthy();
   const context = createOccAuthoringState(oc, { bodies: [body] });
 
   const result = executeFilletFeature(
@@ -96,14 +93,14 @@ test("executeFilletFeature uses native transaction history for replacement topol
     (candidate) => candidate.bodyId === body.bodyId,
   );
 
-  expectTrue(
+  expect(
     replacement != null,
     "Native fillet should replace the target body.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     replacement!.topology.faceIds.length > body.topology.faceIds.length,
     "Native fillet should add fillet topology.",
-  );
+  ).toBeTruthy();
   assertNativeHistoryDidNotFallBack(
     result.historyInvalidations,
     "Native fillet",
@@ -118,10 +115,10 @@ test("executeChamferFeature uses native transaction history for replacement topo
     "feature_native_chamfer_history_seed" as FeatureId,
   );
   const edgeId = body.topology.edgeIds[0];
-  expectTrue(
+  expect(
     edgeId != null,
     "Expected the tracked box to expose a chamfer edge target.",
-  );
+  ).toBeTruthy();
   const context = createOccAuthoringState(oc, { bodies: [body] });
 
   const result = executeChamferFeature(
@@ -145,14 +142,14 @@ test("executeChamferFeature uses native transaction history for replacement topo
     (candidate) => candidate.bodyId === body.bodyId,
   );
 
-  expectTrue(
+  expect(
     replacement != null,
     "Native chamfer should replace the target body.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     replacement!.topology.faceIds.length > body.topology.faceIds.length,
     "Native chamfer should add chamfer topology.",
-  );
+  ).toBeTruthy();
   assertNativeHistoryDidNotFallBack(
     result.historyInvalidations,
     "Native chamfer",

@@ -87,7 +87,7 @@ describe("createLocalStorageWorkbenchTabsStore", () => {
     const store = createLocalStorageWorkbenchTabsStore(storage);
 
     const result = store.load();
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBeFalsy();
     if (!result.ok) {
       expect(result.reasonCode).toBe("invalid-json");
     }
@@ -113,7 +113,7 @@ describe("createLocalStorageWorkbenchTabsStore", () => {
     const store = createLocalStorageWorkbenchTabsStore(storage);
 
     const result = store.load();
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBeFalsy();
     if (!result.ok) {
       expect(result.reasonCode).toBe("invalid-shape");
     }

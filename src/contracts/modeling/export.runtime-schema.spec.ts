@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   requireDocumentExportRequest,
   getDefaultCadaraExportOptions,
@@ -15,31 +14,29 @@ test("src/contracts/modeling/export.runtime-schema.spec.ts", () => {
   const stepDefaults = stepExportProvider.getDefaultOptions();
   const cadaraDefaults = getDefaultCadaraExportOptions();
 
-  expectTrue(
-    stlDefaults.encoding === "binary",
+  expect(
+    stlDefaults.encoding,
     "STL export should default to binary encoding.",
-  );
-  expectTrue(
+  ).toBe("binary");
+  expect(
     stlDefaults.meshAccuracy.chordTolerance > 0,
     "STL defaults should include positive mesh tolerance.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     threeMfDefaults.includeMetadata,
     "3MF export should include metadata by default.",
-  );
-  expectTrue(
-    threeMfDefaults.meshAccuracy.angleToleranceRadians ===
-      stlDefaults.meshAccuracy.angleToleranceRadians,
+  ).toBeTruthy();
+  expect(
+    threeMfDefaults.meshAccuracy.angleToleranceRadians,
     "3MF and STL should share the mesh accuracy default.",
+  ).toBe(stlDefaults.meshAccuracy.angleToleranceRadians);
+  expect(stepDefaults.schema, "STEP export should default to AP242.").toBe(
+    "AP242",
   );
-  expectTrue(
-    stepDefaults.schema === "AP242",
-    "STEP export should default to AP242.",
-  );
-  expectTrue(
+  expect(
     cadaraDefaults.pretty,
     "cadara export should default to readable JSON.",
-  );
+  ).toBeTruthy();
 
   const parsedStep = requireDocumentExportRequest({
     contractVersion: "modeling-contract/v1alpha1",
@@ -51,8 +48,8 @@ test("src/contracts/modeling/export.runtime-schema.spec.ts", () => {
     options: stepDefaults,
   });
 
-  expectTrue(
-    parsedStep.format === "step",
+  expect(
+    parsedStep.format,
     "Export request parsing should preserve the format.",
-  );
+  ).toBe("step");
 });

@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   requireAcceptedModelingResult,
   runReportedAction as runWorkbenchAction,
@@ -42,18 +41,18 @@ test("src/app/workbench-action.spec.ts", async () => {
     },
   });
 
-  expectTrue(
+  expect(
     rejected.isErr(),
     "Rejected modeling results should return an error result.",
-  );
-  expectTrue(
-    uiMessage === "Variable width references missing.",
+  ).toBeTruthy();
+  expect(
+    uiMessage,
     "Rejected modeling diagnostics should update UI-facing error state.",
-  );
-  expectTrue(
-    reporter.reports.length === 0,
+  ).toBe("Variable width references missing.");
+  expect(
+    reporter.reports.length,
     "Expected rejected modeling results should not be reported by default.",
-  );
+  ).toBe(0);
 
   const thrownReporter = createTestErrorReporter();
   let thrownMessage = "";
@@ -74,28 +73,28 @@ test("src/app/workbench-action.spec.ts", async () => {
     },
   });
 
-  expectTrue(
+  expect(
     thrown.isErr(),
     "Rejected promises should return an error result.",
-  );
-  expectTrue(
-    thrownMessage === "IndexedDB is unavailable.",
+  ).toBeTruthy();
+  expect(
+    thrownMessage,
     "Rejected promises should preserve human messages.",
-  );
-  expectTrue(
+  ).toBe("IndexedDB is unavailable.");
+  expect(
     thrownReporter.reports[0]?.error.cause instanceof Error,
     "Rejected promises should preserve causes.",
-  );
+  ).toBeTruthy();
 
   const diagnostic = appErrorToModelingDiagnostic(rejected.error, {
     target: { kind: "feature", featureId: "feature_extrude-1" },
   });
-  expectTrue(
-    diagnostic.message === uiMessage,
+  expect(
+    diagnostic.message,
     "UI diagnostics should render normalized messages.",
-  );
-  expectTrue(
-    diagnostic.target?.kind === "feature",
+  ).toBe(uiMessage);
+  expect(
+    diagnostic.target?.kind,
     "AppError diagnostics should preserve diagnostic targets when provided.",
-  );
+  ).toBe("feature");
 });

@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ShortcutCommandDefinition } from "@/core/shortcuts/commands";
 import { createShortcutCommandRegistry } from "@/core/shortcuts/commands";
 import { createEffectiveKeymap } from "@/core/shortcuts/keymap";
@@ -54,10 +53,10 @@ test("src/core/shortcuts/resolver.spec.ts", () => {
       isCommandEnabled: () => true,
     },
   );
-  expectTrue(
-    executed.at(-1) === "editor.cancel",
+  expect(
+    executed.at(-1),
     "Resolver should dispatch the higher-priority scoped command.",
-  );
+  ).toBe("editor.cancel");
 
   resolver.handleKeyDown(
     { key: "Delete", target: { input: true } as unknown as EventTarget },
@@ -68,10 +67,10 @@ test("src/core/shortcuts/resolver.spec.ts", () => {
       isTextEditingTarget: (target) => target !== undefined && target !== null,
     },
   );
-  expectTrue(
+  expect(
     executed.every((commandId) => commandId !== "editor.deleteSelection"),
     "Resolver should ignore guarded shortcuts from text-editing targets.",
-  );
+  ).toBeTruthy();
 
   resolver.handleKeyDown(
     { key: "u" },
@@ -81,10 +80,10 @@ test("src/core/shortcuts/resolver.spec.ts", () => {
       isCommandEnabled: () => false,
     },
   );
-  expectTrue(
-    executed.filter((commandId) => commandId === "editor.undo").length === 0,
+  expect(
+    executed.filter((commandId) => commandId === "editor.undo").length,
     "Resolver should not execute disabled commands.",
-  );
+  ).toBe(0);
 
   resolver.handleKeyDown(
     { key: "g" },
@@ -102,10 +101,10 @@ test("src/core/shortcuts/resolver.spec.ts", () => {
       isCommandEnabled: () => true,
     },
   );
-  expectTrue(
-    executed.at(-1) === "editor.redo",
+  expect(
+    executed.at(-1),
     "Resolver should track and dispatch multi-key sequences.",
-  );
+  ).toBe("editor.redo");
 
   let textPrefixPrevented = false;
   const textPrefixResult = resolver.handleKeyDown(
@@ -123,12 +122,12 @@ test("src/core/shortcuts/resolver.spec.ts", () => {
       isTextEditingTarget: (target) => target !== undefined && target !== null,
     },
   );
-  expectTrue(
-    !textPrefixResult.handled &&
+  expect(
+    textPrefixResult.handled &&
       !textPrefixResult.pendingSequence &&
       !textPrefixPrevented,
     "Resolver should not reserve sequence prefixes from text-editing targets.",
-  );
+  ).toBeFalsy();
 
   let disabledPrefixPrevented = false;
   const disabledPrefixResult = resolver.handleKeyDown(
@@ -144,10 +143,10 @@ test("src/core/shortcuts/resolver.spec.ts", () => {
       isCommandEnabled: () => false,
     },
   );
-  expectTrue(
-    !disabledPrefixResult.handled &&
+  expect(
+    disabledPrefixResult.handled &&
       !disabledPrefixResult.pendingSequence &&
       !disabledPrefixPrevented,
     "Resolver should not reserve sequence prefixes when matching sequence commands are disabled.",
-  );
+  ).toBeFalsy();
 });

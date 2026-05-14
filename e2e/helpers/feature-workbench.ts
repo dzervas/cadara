@@ -180,7 +180,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
     await expect
       .poll(() => this.hasVisibleFeatureErrorDiagnostics(), { timeout: 2_000 })
-      .toBe(false);
+      .toBeFalsy();
     return `Select viewport target ${secondFaceTarget}`;
   }
 

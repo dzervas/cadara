@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 
@@ -62,10 +61,10 @@ test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
   };
 
   const migrated = validateSketchDefinition(baseDefinition);
-  expectTrue(
+  expect(
     migrated.success,
     "Runtime validation should accept definitions where optional style metadata is omitted.",
-  );
+  ).toBeTruthy();
 
   const withStyles: SketchDefinition = {
     ...baseDefinition,
@@ -116,35 +115,35 @@ test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
   };
 
   const parsed = validateSketchDefinition(withStyles);
-  expectTrue(
+  expect(
     parsed.success,
     "Runtime schema should accept authored entity/region style records.",
-  );
+  ).toBeTruthy();
 
   const serialized = JSON.parse(JSON.stringify(parsed.data)) as unknown;
   const roundTrip = validateSketchDefinition(serialized);
-  expectTrue(
+  expect(
     roundTrip.success,
     "Style payloads should survive serialize/parse round-trips.",
-  );
-  expectTrue(
-    roundTrip.data.svgRenderingEnabled === false,
+  ).toBeTruthy();
+  expect(
+    roundTrip.data.svgRenderingEnabled,
     "Round-tripped definitions should preserve SVG rendering state.",
-  );
-  expectTrue(
-    roundTrip.data.styles?.length === 2,
+  ).toBeFalsy();
+  expect(
+    roundTrip.data.styles?.length,
     "Round-tripped style records should be preserved.",
-  );
-  expectTrue(
-    roundTrip.data.styles?.[1]?.fill.kind === "gradient",
+  ).toBe(2);
+  expect(
+    roundTrip.data.styles?.[1]?.fill.kind,
     "Round-tripped gradient fill should be preserved.",
-  );
-  expectTrue(
-    roundTrip.data.styles?.[0]?.stroke.dashSize === 0.6,
+  ).toBe("gradient");
+  expect(
+    roundTrip.data.styles?.[0]?.stroke.dashSize,
     "Round-tripped style records should preserve dash size.",
-  );
-  expectTrue(
-    roundTrip.data.entities[0]?.style?.strokeMiterLimit === 5,
+  ).toBe(0.6);
+  expect(
+    roundTrip.data.entities[0]?.style?.strokeMiterLimit,
     "Round-tripped local style records should preserve miter limits.",
-  );
+  ).toBe(5);
 });

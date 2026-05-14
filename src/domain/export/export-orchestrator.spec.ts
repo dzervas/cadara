@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ExportCapabilities } from "@/contracts/export/capabilities";
 import type { ExportProvider } from "@/contracts/export/provider";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -20,19 +19,18 @@ test("orchestrateGeometryExport returns an unsupported-format diagnostic when no
     makeRegistry(),
   );
 
-  expectTrue(
-    result.ok === false,
-    "Missing providers should return a failure result.",
+  expect(result.ok, "Missing providers should return a failure result.").toBe(
+    false,
   );
-  expectTrue(
-    result.format === "step",
+  expect(
+    result.format,
     "Failure results should preserve the requested format.",
-  );
-  expectTrue(
+  ).toBe("step");
+  expect(
     result.diagnostics[0]?.code === "export-unsupported-format" &&
       result.diagnostics[0].target === target,
     "Unsupported-format failures should point back to the requested target.",
-  );
+  ).toBeTruthy();
 });
 
 test("orchestrateGeometryExport preserves provider failures without rewriting diagnostics", async () => {
@@ -59,14 +57,14 @@ test("orchestrateGeometryExport preserves provider failures without rewriting di
     makeRegistry(provider),
   );
 
-  expectTrue(
-    result.ok === false,
+  expect(
+    result.ok,
     "Provider export failures should remain failures at the orchestrator seam.",
-  );
-  expectTrue(
-    result.diagnostics[0] === diagnostic,
+  ).toBeFalsy();
+  expect(
+    result.diagnostics[0],
     "Provider diagnostics should pass through untouched so callers see the original export failure.",
-  );
+  ).toBe(diagnostic);
 });
 
 test("orchestrateGeometryExport rejects incompatible provider targets before invoking providers", async () => {
@@ -90,18 +88,18 @@ test("orchestrateGeometryExport rejects incompatible provider targets before inv
     makeRegistry(provider),
   );
 
-  expectTrue(
-    result.ok === false,
+  expect(
+    result.ok,
     "Incompatible provider targets should fail at the orchestrator seam.",
-  );
-  expectTrue(
-    result.diagnostics[0]?.code === "export-incompatible-target",
+  ).toBeFalsy();
+  expect(
+    result.diagnostics[0]?.code,
     "Incompatible target failures should use the dedicated diagnostic code.",
-  );
-  expectTrue(
-    invoked === false,
+  ).toBe("export-incompatible-target");
+  expect(
+    invoked,
     "The orchestrator should not invoke an incompatible provider.",
-  );
+  ).toBeFalsy();
 });
 
 test("orchestrateGeometryExport slugs filenames and maps provider success metadata", async () => {
@@ -129,20 +127,20 @@ test("orchestrateGeometryExport slugs filenames and maps provider success metada
     makeRegistry(provider),
   );
 
-  expectTrue(
-    result.ok === true,
+  expect(
+    result.ok,
     "Successful provider exports should produce a success result.",
-  );
-  expectTrue(
-    result.filename === "rotor-housing-rev-b.stl",
+  ).toBeTruthy();
+  expect(
+    result.filename,
     "Success results should expose a slugged download filename derived from the target label.",
-  );
-  expectTrue(
+  ).toBe("rotor-housing-rev-b.stl");
+  expect(
     result.extension === "stl" &&
       result.mimeType === "model/stl" &&
       result.payload instanceof Uint8Array,
     "Success results should map provider extension, mime type, and payload through the seam.",
-  );
+  ).toBeTruthy();
 });
 
 test("orchestrateGeometryExport falls back to cadara-export when the target label cannot produce a slug", async () => {
@@ -167,14 +165,14 @@ test("orchestrateGeometryExport falls back to cadara-export when the target labe
     makeRegistry(provider),
   );
 
-  expectTrue(
-    result.ok === true,
+  expect(
+    result.ok,
     "Labels that slug to empty should still export successfully.",
-  );
-  expectTrue(
-    result.filename === "cadara-export.step",
+  ).toBeTruthy();
+  expect(
+    result.filename,
     "Empty slugs should fall back to the default export filename.",
-  );
+  ).toBe("cadara-export.step");
 });
 
 function makeTarget(): DurableRef {

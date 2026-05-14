@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createAppError,
   createTestErrorReporter,
@@ -20,10 +19,10 @@ test("runReportedAction maps plain values and AppResults without reporting succe
     mapSuccess: (value) => ok(value * 2),
     onError: (error) => handled.push(error.message),
   });
-  expectTrue(
+  expect(
     plain.isOk() && plain.value === 42,
     "Plain successful actions should be wrapped and mapped through the success contract.",
-  );
+  ).toBeTruthy();
 
   const appResult = await runReportedAction({
     operation: "Create sketch",
@@ -32,19 +31,19 @@ test("runReportedAction maps plain values and AppResults without reporting succe
     mapSuccess: (value) => ok(value + 5),
     onError: (error) => handled.push(error.message),
   });
-  expectTrue(
+  expect(
     appResult.isOk() && appResult.value === 15,
     "Successful AppResult actions should flow through mapSuccess unchanged.",
-  );
+  ).toBeTruthy();
 
-  expectTrue(
-    reporter.reports.length === 0,
+  expect(
+    reporter.reports.length,
     "Successful actions should not be reported.",
-  );
-  expectTrue(
-    handled.length === 0,
+  ).toBe(0);
+  expect(
+    handled.length,
     "Successful actions should not call the error callback.",
-  );
+  ).toBe(0);
 });
 
 test("runReportedAction reports mapped failures and preserves caller metadata", async () => {
@@ -69,21 +68,21 @@ test("runReportedAction reports mapped failures and preserves caller metadata", 
     onError: (error) => handled.push(error.message),
   });
 
-  expectTrue(
+  expect(
     result.isErr(),
     "Mapped failures should resolve as AppError results.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     reporter.reports[0]?.error === mappedError &&
       reporter.reports[0]?.metadata.source === "workbench" &&
       reporter.reports[0]?.metadata.visibility === "user" &&
       reporter.reports[0]?.metadata.dedupeKey === "caller-specified-key",
     "Mapped failures should be reported with workbench source, user visibility, and caller metadata.",
-  );
-  expectTrue(
-    handled[0] === "Mapped validation failed.",
+  ).toBeTruthy();
+  expect(
+    handled[0],
     "Mapped failures should call onError with the normalized AppError.",
-  );
+  ).toBe("Mapped validation failed.");
 });
 
 test("runReportedAction lets expected mapped failures notify without reporting", async () => {
@@ -103,18 +102,18 @@ test("runReportedAction lets expected mapped failures notify without reporting",
     onError: (error) => handled.push(error.message),
   });
 
-  expectTrue(
+  expect(
     result.isErr(),
     "Expected mapped failures should still resolve as failures.",
-  );
-  expectTrue(
-    handled[0] === "Variable width references missing.",
+  ).toBeTruthy();
+  expect(
+    handled[0],
     "Expected mapped failures should still notify callers.",
-  );
-  expectTrue(
-    reporter.reports.length === 0,
+  ).toBe("Variable width references missing.");
+  expect(
+    reporter.reports.length,
     "Expected mapped failures should not be reported by default.",
-  );
+  ).toBe(0);
 });
 
 test("runReportedAction still reports thrown defects when mapped failures are expected", async () => {
@@ -132,19 +131,18 @@ test("runReportedAction still reports thrown defects when mapped failures are ex
     onError: (error) => handled.push(error.message),
   });
 
-  expectTrue(
+  expect(
     result.isErr(),
     "Thrown defects should still resolve as failures.",
+  ).toBeTruthy();
+  expect(handled[0], "Thrown defects should still notify callers.").toBe(
+    "Worker crashed.",
   );
-  expectTrue(
-    handled[0] === "Worker crashed.",
-    "Thrown defects should still notify callers.",
-  );
-  expectTrue(
+  expect(
     reporter.reports[0]?.error.message === "Worker crashed." &&
       reporter.reports[0]?.metadata.source === "workbench",
     "Thrown defects should report through the workbench reporter by default.",
-  );
+  ).toBeTruthy();
 });
 
 test("runReportedAction normalizes thrown errors and derives dedupe keys from operation and message", async () => {
@@ -162,11 +160,11 @@ test("runReportedAction normalizes thrown errors and derives dedupe keys from op
     onError: (error) => handled.push(error.message),
   });
 
-  expectTrue(
+  expect(
     result.isErr(),
     "Thrown failures should normalize into AppError results.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     result.isErr() &&
       result.error.code === "workbench/action-failed" &&
       result.error.message === "Kernel exploded." &&
@@ -178,15 +176,13 @@ test("runReportedAction normalizes thrown errors and derives dedupe keys from op
         (entry) => entry.key === "featureId" && entry.value === "feature_1",
       ),
     "Thrown failures should normalize with workbench/action-failed and merged context entries.",
-  );
-  expectTrue(
-    reporter.reports[0]?.metadata.dedupeKey ===
-      "Delete feature:Kernel exploded.",
+  ).toBeTruthy();
+  expect(
+    reporter.reports[0]?.metadata.dedupeKey,
     "Thrown failures should derive a dedupe key from the operation and normalized error message when the caller does not provide one.",
-  );
-  expectTrue(
-    handled[0] === "Kernel exploded.",
-    "Thrown failures should be forwarded to onError.",
+  ).toBe("Delete feature:Kernel exploded.");
+  expect(handled[0], "Thrown failures should be forwarded to onError.").toBe(
+    "Kernel exploded.",
   );
 });
 
@@ -216,16 +212,16 @@ test("runReportedAction preserves reporter dedupe behavior while still notifying
     onError: (error) => handled.push(error.message),
   });
 
-  expectTrue(
+  expect(
     first.isErr() && second.isErr(),
     "Repeated AppResult failures should still resolve as failures.",
-  );
-  expectTrue(
-    reporter.reports.length === 1,
+  ).toBeTruthy();
+  expect(
+    reporter.reports.length,
     "Reporter dedupe should suppress duplicate reports that share the same operation-derived key.",
-  );
-  expectTrue(
-    handled.join(",") === "Selection is invalid.,Selection is invalid.",
+  ).toBe(1);
+  expect(
+    handled.join(","),
     "Caller error handlers should still run even when the reporter dedupes duplicate failures.",
-  );
+  ).toBe("Selection is invalid.,Selection is invalid.");
 });

@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   getToolById,
   getToolbarSectionsForMode,
@@ -17,32 +16,32 @@ test("src/core/tools/tool-registry.spec.ts", () => {
     (section) => section.toolIds,
   );
 
-  expectTrue(
-    importTool.group === "import",
+  expect(
+    importTool.group,
     "Import should register in the import toolbar group.",
-  );
-  expectTrue(
+  ).toBe("import");
+  expect(
     importTool.tooltip.includes("image") && importTool.tooltip.includes("mesh"),
     "Import should describe generic supported file categories.",
-  );
-  expectTrue(
-    toolIconAssetFileNames[importTool.icon] === "import-part.svg",
+  ).toBeTruthy();
+  expect(
+    toolIconAssetFileNames[importTool.icon],
     "Import should use the requested public SVG asset.",
-  );
-  expectTrue(
+  ).toBe("import-part.svg");
+  expect(
     partToolIds.includes("import"),
     "Import should be visible in part mode.",
-  );
-  expectTrue(
-    !sketchToolIds.includes("import"),
+  ).toBeTruthy();
+  expect(
+    sketchToolIds.includes("import"),
     "Import should not be visible while sketching.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     searchToolDefinitions("image").some((tool) => tool.id === "import"),
     "Tool search should discover Import by image intent.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     searchToolDefinitions("mesh").some((tool) => tool.id === "import"),
     "Tool search should discover Import by mesh intent.",
-  );
+  ).toBeTruthy();
 });

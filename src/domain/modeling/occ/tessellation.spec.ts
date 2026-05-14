@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   degreesToOccAngularDeflectionRadians,
   getOccTessellationTier,
@@ -13,38 +12,38 @@ test("src/domain/modeling/occ/tessellation.spec.ts", () => {
   const startup = getOccTessellationTier("startup");
   const fine = getOccTessellationTier("fine");
 
-  expectTrue(
-    degreesToOccAngularDeflectionRadians(180) === Math.PI,
+  expect(
+    degreesToOccAngularDeflectionRadians(180),
     "OCC angular deflection unit audit should convert degree-equivalent settings to radians.",
-  );
-  expectTrue(
+  ).toBe(Math.PI);
+  expect(
     startup.linearDeflectionModelUnits >= 0.5 &&
       startup.linearDeflectionModelUnits <= 1.0,
     "Startup tessellation should use coarse 0.5 to 1.0 model-unit linear deflection.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     startup.angularDeflectionRadians === 0.5 &&
       startup.angularDeflectionDegreeEquivalent > 2,
     "Startup tessellation should keep the existing angular value because it is already coarser than 1-2 degrees.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     fine.linearDeflectionModelUnits < startup.linearDeflectionModelUnits,
     "Fine tessellation should refine geometry without changing topology bindings.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     selectBodyLodTier({
       bodyRadiusModelUnits: 1,
       cameraDistanceModelUnits: 40,
-    }) === "startup",
+    }),
     "Far bodies should select coarse startup LOD.",
-  );
-  expectTrue(
+  ).toBe("startup");
+  expect(
     selectBodyLodTier({
       bodyRadiusModelUnits: 4,
       cameraDistanceModelUnits: 10,
-    }) === "fine",
+    }),
     "Close bodies should select fine LOD refinement.",
-  );
+  ).toBe("fine");
 
   const bodyRenderable = {
     ownerBodyId: "body_1",
@@ -67,24 +66,24 @@ test("src/domain/modeling/occ/tessellation.spec.ts", () => {
     },
   } as RenderableEntityRecord;
 
-  expectTrue(
+  expect(
     selectViewportLodTierForRenderables({
       cameraPosition: [0, 0, 50],
       renderables: [bodyRenderable],
-    }) === "startup",
+    }),
     "Camera-driven LOD should keep far body renderables on the coarse tier.",
-  );
-  expectTrue(
+  ).toBe("startup");
+  expect(
     selectViewportLodTierForRenderables({
       cameraPosition: [0, 0, 4],
       renderables: [bodyRenderable],
-    }) === "fine",
+    }),
     "Camera-driven LOD should request fine meshes when zoomed close to a body.",
-  );
-  expectTrue(
+  ).toBe("fine");
+  expect(
     bodyRenderable.binding.target.kind === "face" &&
       bodyRenderable.binding.target.bodyId === "body_1" &&
       bodyRenderable.binding.target.faceId === "face_1",
     "LOD selection must not rewrite durable selection targets.",
-  );
+  ).toBeTruthy();
 });

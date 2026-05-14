@@ -1,8 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { test } from "vitest";
-
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 
 const forbiddenRuntimeValidationTerms = [
   "zod",
@@ -18,10 +16,10 @@ test("test/static/runtime-validation-policy.spec.ts", () => {
     findForbiddenTerms(path, forbiddenRuntimeValidationTerms),
   );
 
-  expectTrue(
-    packageViolations.length === 0,
+  expect(
+    packageViolations.length,
     `Package metadata must not retain direct Zod validation dependencies: ${packageViolations.join(", ")}`,
-  );
+  ).toBe(0);
 
   const sourceFiles = collectFiles(
     ["src", "test", "e2e"],
@@ -31,20 +29,21 @@ test("test/static/runtime-validation-policy.spec.ts", () => {
     findForbiddenTerms(path, forbiddenRuntimeValidationTerms),
   );
 
-  expectTrue(
-    sourceViolations.length === 0,
+  expect(
+    sourceViolations.length,
     `Source and static tests must not retain Zod-shaped validation APIs: ${sourceViolations.join(", ")}`,
-  );
+  ).toBe(0);
 
-  expectTrue(
+  expect(
     readFileSync("bunfig.toml", "utf8").includes("typia-preload.ts"),
     "Bun runtime and test execution should keep the Typia preload wired.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+
+  expect(
     readFileSync("vite.config.ts", "utf8").includes("UnpluginTypia") &&
       readFileSync("vite.single.config.ts", "utf8").includes("UnpluginTypia"),
     "Both Vite browser build paths should keep Typia transformation wired.",
-  );
+  ).toBeTruthy();
 });
 
 function findForbiddenTerms(path: string, terms: readonly string[]) {

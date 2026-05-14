@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createAppError } from "@/contracts/errors";
 import { createDefaultErrorReporter } from "@/contracts/errors/default-reporter";
 import {
@@ -79,37 +78,34 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
     dedupeKey: "same-action",
   });
 
-  expectTrue(
-    record !== null,
-    "Sentry reporter should return the first record.",
+  expect(record, "Sentry reporter should return the first record.").not.toBe(
+    null,
   );
-  expectTrue(
-    duplicate === null,
-    "Sentry reporter should preserve dedupe behavior.",
+  expect(duplicate, "Sentry reporter should preserve dedupe behavior.").toBe(
+    null,
   );
-  expectTrue(
-    initOptions.length === 1,
+  expect(
+    initOptions.length,
     "Sentry reporter should initialize the SDK once on creation.",
-  );
-  expectTrue(
-    (initOptions[0] as { dsn?: string }).dsn === SENTRY_DSN,
+  ).toBe(1);
+  expect(
+    (initOptions[0] as { dsn?: string }).dsn,
     "Sentry reporter should use the Bugsink DSN.",
-  );
-  expectTrue(
+  ).toBe(SENTRY_DSN);
+  expect(
     initializeSentryErrorReporting({ client }),
     "Repeated initialization should report the initialized client.",
-  );
-  expectTrue(
-    initOptions.length === 1,
+  ).toBeTruthy();
+  expect(
+    initOptions.length,
     "Sentry reporter should not initialize the same SDK client twice.",
-  );
-  expectTrue(
-    createSentryDsnTestUrl("https://public@example.test/sentry/42") ===
-      expectedTestEnvelopeUrl,
+  ).toBe(1);
+  expect(
+    createSentryDsnTestUrl("https://public@example.test/sentry/42"),
     "The Sentry DSN test URL should target the project envelope endpoint with Sentry query metadata.",
-  );
+  ).toBe(expectedTestEnvelopeUrl);
   const checkedRequests: { input: string; init?: RequestInit }[] = [];
-  expectTrue(
+  expect(
     await checkSentryDsnReachability({
       dsn: "https://public@example.test/sentry/42",
       fetchLike(input, init) {
@@ -118,36 +114,36 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
       },
     }),
     "Reachability checks should pass when the browser request resolves.",
-  );
-  expectTrue(
-    checkedRequests[0]?.input === expectedTestEnvelopeUrl,
+  ).toBeTruthy();
+  expect(
+    checkedRequests[0]?.input,
     "Reachability checks should request the derived Sentry envelope endpoint.",
-  );
-  expectTrue(
-    checkedRequests[0]?.init?.method === "GET",
+  ).toBe(expectedTestEnvelopeUrl);
+  expect(
+    checkedRequests[0]?.init?.method,
     "Reachability checks should use a visible browser GET probe.",
-  );
-  expectTrue(
-    !(await checkSentryDsnReachability({
+  ).toBe("GET");
+  expect(
+    await checkSentryDsnReachability({
       dsn: "https://public@example.test/sentry/42",
       fetchLike() {
         return Promise.reject(new Error("blocked"));
       },
-    })),
+    }),
     "Reachability checks should fail when the browser blocks the request.",
-  );
-  expectTrue(
-    capturedEvents.length === 1,
+  ).toBeFalsy();
+  expect(
+    capturedEvents.length,
     "Dedupe should suppress duplicate SDK captures.",
-  );
-  expectTrue(
-    capturedEvents[0]?.kind === "exception",
+  ).toBe(1);
+  expect(
+    capturedEvents[0]?.kind,
     "Error causes should be captured as exceptions to preserve stacks.",
-  );
-  expectTrue(
-    capturedEvents[0]?.value === cause,
+  ).toBe("exception");
+  expect(
+    capturedEvents[0]?.value,
     "The original Error cause should be sent to the SDK.",
-  );
+  ).toBe(cause);
 
   const captureContext = capturedEvents[0]?.context as {
     level?: string;
@@ -160,46 +156,46 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
     extra?: Record<string, unknown>;
     fingerprint?: string[];
   };
-  expectTrue(
-    captureContext.level === "fatal",
+  expect(
+    captureContext.level,
     "AppError severity should map to Sentry level.",
-  );
-  expectTrue(
-    captureContext.tags?.["app.error_code"] === "workbench/action-failed",
+  ).toBe("fatal");
+  expect(
+    captureContext.tags?.["app.error_code"],
     "Error code should be sent as a tag.",
-  );
-  expectTrue(
-    captureContext.tags?.["app.error_source"] === "workbench-action",
+  ).toBe("workbench/action-failed");
+  expect(
+    captureContext.tags?.["app.error_source"],
     "Report source should be sent as a tag.",
-  );
-  expectTrue(
-    captureContext.tags?.command === "extrude",
+  ).toBe("workbench-action");
+  expect(
+    captureContext.tags?.command,
     "External tracking tags should be preserved.",
-  );
-  expectTrue(
-    captureContext.tags?.["app.target_kind"] === "feature",
+  ).toBe("extrude");
+  expect(
+    captureContext.tags?.["app.target_kind"],
     "Target metadata should be represented compactly.",
-  );
-  expectTrue(
-    captureContext.contexts?.app_error?.message === "Workbench action failed.",
+  ).toBe("feature");
+  expect(
+    captureContext.contexts?.app_error?.message,
     "AppError message should be preserved.",
-  );
-  expectTrue(
-    captureContext.contexts?.report?.visibility === "user",
+  ).toBe("Workbench action failed.");
+  expect(
+    captureContext.contexts?.report?.visibility,
     "Report visibility should be included.",
-  );
-  expectTrue(
-    captureContext.contexts?.active_document?.availability === "unavailable",
+  ).toBe("user");
+  expect(
+    captureContext.contexts?.active_document?.availability,
     "Missing document context should be explicit.",
-  );
-  expectTrue(
-    captureContext.extra?.causeStack === cause.stack,
+  ).toBe("unavailable");
+  expect(
+    captureContext.extra?.causeStack,
     "Cause stack should be available as event extra.",
-  );
-  expectTrue(
-    captureContext.fingerprint?.[0] === "workbench-action-failed",
+  ).toBe(cause.stack);
+  expect(
+    captureContext.fingerprint?.[0],
     "External fingerprint should be passed through.",
-  );
+  ).toBe("workbench-action-failed");
 
   const adapter = new MockKernelAdapter();
   const snapshot = (
@@ -231,41 +227,38 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
   };
   const activeDocumentPayload = loadedDocumentContext.extra
     ?.activeDocumentPayload as Record<string, unknown> | null;
-  expectTrue(
-    capturedEvents[1]?.kind === "message",
+  expect(
+    capturedEvents[1]?.kind,
     "Errors without Error causes should be captured as messages.",
-  );
-  expectTrue(
-    loadedDocumentContext.tags?.["active_document.id"] ===
-      snapshot.document.documentId,
+  ).toBe("message");
+  expect(
+    loadedDocumentContext.tags?.["active_document.id"],
     "Document id should be tagged.",
-  );
-  expectTrue(
-    loadedDocumentContext.tags?.["active_document.revision_id"] ===
-      snapshot.document.revisionId,
+  ).toBe(snapshot.document.documentId);
+  expect(
+    loadedDocumentContext.tags?.["active_document.revision_id"],
     "Revision id should be tagged.",
-  );
-  expectTrue(
-    loadedDocumentContext.contexts?.active_document?.payloadStatus ===
-      "attached",
+  ).toBe(snapshot.document.revisionId);
+  expect(
+    loadedDocumentContext.contexts?.active_document?.payloadStatus,
     "Loaded documents should attach payloads.",
-  );
-  expectTrue(
-    activeDocumentPayload !== null,
+  ).toBe("attached");
+  expect(
+    activeDocumentPayload,
     "Loaded document payload should be attached as event extra.",
-  );
-  expectTrue(
-    !("render" in activeDocumentPayload),
+  ).not.toBe(null);
+  expect(
+    "render" in activeDocumentPayload,
     "Telemetry payload should exclude render exports.",
-  );
-  expectTrue(
-    !("presentation" in activeDocumentPayload),
+  ).toBeFalsy();
+  expect(
+    "presentation" in activeDocumentPayload,
     "Telemetry payload should exclude presentation state.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     Array.isArray(activeDocumentPayload.sketches),
     "Telemetry payload should include authored sketches.",
-  );
+  ).toBeTruthy();
 
   const devConsoleRecords: unknown[][] = [];
   const devReporter = createDefaultErrorReporter({
@@ -278,14 +271,14 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
     },
   });
   devReporter.report(error, { source: "unit" });
-  expectTrue(
-    initOptions.length === 1,
+  expect(
+    initOptions.length,
     "Non-production reporter selection should not initialize Sentry.",
-  );
-  expectTrue(
-    devConsoleRecords.length === 1,
+  ).toBe(1);
+  expect(
+    devConsoleRecords.length,
     "Non-production reporter selection should keep local reporting.",
-  );
+  ).toBe(1);
 
   const productionInitOptions: unknown[] = [];
   const productionClient: SentryBrowserBoundary = {
@@ -304,10 +297,10 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
     sentryClient: productionClient,
   });
   productionReporter.report(error, { source: "unit-production" });
-  expectTrue(
-    productionInitOptions.length === 1,
+  expect(
+    productionInitOptions.length,
     "Production reporter selection should initialize Sentry.",
-  );
+  ).toBe(1);
 
   const disabledInitOptions: unknown[] = [];
   const disabledClient: SentryBrowserBoundary = {
@@ -321,17 +314,17 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
       return "event_message";
     },
   };
-  expectTrue(
-    !initializeSentryErrorReporting({ client: disabledClient, enabled: false }),
+  expect(
+    initializeSentryErrorReporting({ client: disabledClient, enabled: false }),
     "Disabled Sentry initialization should report that no client was initialized.",
-  );
-  expectTrue(
-    disabledInitOptions.length === 0,
+  ).toBeFalsy();
+  expect(
+    disabledInitOptions.length,
     "Disabled Sentry initialization should not call the SDK.",
-  );
+  ).toBe(0);
   const disabledProbeUrls: string[] = [];
-  expectTrue(
-    !initializeSentryErrorReporting({
+  expect(
+    initializeSentryErrorReporting({
       client: disabledClient,
       enabled: false,
       dsn: "https://public@example.test/sentry/42",
@@ -342,16 +335,16 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
       },
     }),
     "Disabled Sentry initialization should still leave SDK reporting disabled.",
-  );
+  ).toBeFalsy();
   await Promise.resolve();
-  expectTrue(
-    disabledProbeUrls[0] === expectedTestEnvelopeUrl,
+  expect(
+    disabledProbeUrls[0],
     "The DSN probe should still run when full Sentry reporting is disabled.",
-  );
-  expectTrue(
-    disabledInitOptions.length === 0,
+  ).toBe(expectedTestEnvelopeUrl);
+  expect(
+    disabledInitOptions.length,
     "The dev probe should not initialize the SDK.",
-  );
+  ).toBe(0);
   const probeInitOptions: unknown[] = [];
   const probeUrls: string[] = [];
   const probeClient: SentryBrowserBoundary = {
@@ -365,7 +358,7 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
       return "event_message";
     },
   };
-  expectTrue(
+  expect(
     initializeSentryErrorReporting({
       client: probeClient,
       dsn: "https://public@example.test/sentry/42",
@@ -376,31 +369,30 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
       },
     }),
     "Enabled Sentry initialization should start successfully when the SDK initializes.",
-  );
+  ).toBeTruthy();
   await Promise.resolve();
-  expectTrue(
-    probeInitOptions.length === 1,
+  expect(
+    probeInitOptions.length,
     "The probe client should still initialize the SDK once.",
+  ).toBe(1);
+  expect(probeUrls[0], "Sentry init should probe DSN reachability.").toBe(
+    expectedTestEnvelopeUrl,
   );
-  expectTrue(
-    probeUrls[0] === expectedTestEnvelopeUrl,
-    "Sentry init should probe DSN reachability.",
-  );
-  expectTrue(
+  expect(
     shouldEnableSentryErrorReporting({ isProduction: true, search: null }),
     "Production builds should enable Sentry reporting.",
-  );
-  expectTrue(
-    !shouldEnableSentryErrorReporting({ isProduction: false, search: null }),
+  ).toBeTruthy();
+  expect(
+    shouldEnableSentryErrorReporting({ isProduction: false, search: null }),
     "Non-production builds should keep Sentry disabled by default.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     shouldEnableSentryErrorReporting({
       isProduction: false,
       search: "?cadEnableSentry=1",
     }),
     "The development query opt-in should enable Sentry reporting.",
-  );
+  ).toBeTruthy();
 
   const releaseInitOptions: unknown[] = [];
   const releaseClient: SentryBrowserBoundary = {
@@ -419,14 +411,14 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
     release: "cadara@abcdef",
     dist: "main",
   });
-  expectTrue(
-    (releaseInitOptions[0] as { release?: string }).release === "cadara@abcdef",
+  expect(
+    (releaseInitOptions[0] as { release?: string }).release,
     "Sentry initialization should pass the build release to the browser SDK.",
-  );
-  expectTrue(
-    (releaseInitOptions[0] as { dist?: string }).dist === "main",
+  ).toBe("cadara@abcdef");
+  expect(
+    (releaseInitOptions[0] as { dist?: string }).dist,
     "Sentry initialization should pass the build distribution to the browser SDK.",
-  );
+  ).toBe("main");
   const tracingInitOptions: unknown[] = [];
   const tracingClient: SentryBrowserBoundary = {
     init(options) {
@@ -444,11 +436,10 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
     enablePerformanceTelemetry: true,
     tracesSampleRate: 0.02,
   });
-  expectTrue(
-    (tracingInitOptions[0] as { tracesSampleRate?: number })
-      .tracesSampleRate === 0.02,
+  expect(
+    (tracingInitOptions[0] as { tracesSampleRate?: number }).tracesSampleRate,
     "Sentry initialization should configure tracing only when performance telemetry is enabled.",
-  );
+  ).toBe(0.02);
   const defaultTracingInitOptions: unknown[] = [];
   const defaultTracingClient: SentryBrowserBoundary = {
     init(options) {
@@ -465,18 +456,18 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
     client: defaultTracingClient,
     enablePerformanceTelemetry: true,
   });
-  expectTrue(
+  expect(
     (defaultTracingInitOptions[0] as { tracesSampleRate?: number })
-      .tracesSampleRate === 1,
+      .tracesSampleRate,
     "Sentry performance telemetry should default to full trace sampling.",
-  );
-  expectTrue(
+  ).toBe(1);
+  expect(
     shouldEnablePerformanceTelemetry({
       isProduction: false,
       search: "?cadEnableSentry=1&cadEnablePerfTelemetry=1",
     }),
     "Development performance telemetry should require the explicit perf opt-in.",
-  );
+  ).toBeTruthy();
 
   clearActiveDocumentTelemetryContext();
 });

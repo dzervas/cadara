@@ -1,7 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 import typia, { type tags } from "typia";
-
-import { expectTrue } from "@/testing/expect.spec";
 
 interface TypiaTransformSentinel {
   kind: "typia-transform-sentinel";
@@ -15,24 +13,27 @@ test("Typia generated validators execute in Bun tests", () => {
     kind: "typia-transform-sentinel",
     value: 1,
   });
-  expectTrue(valid.success, "Typia should validate a matching tagged payload.");
+  expect(
+    valid.success,
+    "Typia should validate a matching tagged payload.",
+  ).toBeTruthy();
 
   const extraField = validateSentinel({
     kind: "typia-transform-sentinel",
     value: 1,
     extra: true,
   });
-  expectTrue(
-    !extraField.success,
+  expect(
+    extraField.success,
     "Typia strict validation should reject extra persisted fields.",
-  );
+  ).toBeFalsy();
 
   const invalidConstraint = validateSentinel({
     kind: "typia-transform-sentinel",
     value: 0,
   });
-  expectTrue(
-    !invalidConstraint.success,
+  expect(
+    invalidConstraint.success,
     "Typia should enforce generated primitive constraints.",
-  );
+  ).toBeFalsy();
 });

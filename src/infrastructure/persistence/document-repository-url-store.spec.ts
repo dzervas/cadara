@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createDocumentRepositoryUrlStorageKey,
   MemoryDocumentRepositoryUrlStore,
@@ -12,15 +11,15 @@ test("src/infrastructure/persistence/document-repository-url-store.spec.ts", () 
   const validUrl = "automerge:4NMNnkMhL8jXrdJ9jamS58PAVdXu" as never;
   const memoryStore = new MemoryDocumentRepositoryUrlStore();
   memoryStore.set("doc_workspace", validUrl);
-  expectTrue(
-    memoryStore.get("doc_workspace") === validUrl,
+  expect(
+    memoryStore.get("doc_workspace"),
     "Memory URL stores should return persisted Automerge URLs.",
-  );
+  ).toBe(validUrl);
   memoryStore.delete("doc_workspace");
-  expectTrue(
-    memoryStore.get("doc_workspace") === null,
+  expect(
+    memoryStore.get("doc_workspace"),
     "Memory URL stores should drop deleted URLs.",
-  );
+  ).toBe(null);
 
   const persisted = new Map<string, string>();
   const removed: string[] = [];
@@ -42,28 +41,28 @@ test("src/infrastructure/persistence/document-repository-url-store.spec.ts", () 
     '{"doc_bad":"not-an-automerge-url"}',
   );
   const urlStore = createLocalStorageDocumentRepositoryUrlStore(storage);
-  expectTrue(
-    urlStore.get("doc_bad") === null,
+  expect(
+    urlStore.get("doc_bad"),
     "Local-storage URL stores should ignore invalid persisted payloads instead of surfacing malformed URLs.",
-  );
+  ).toBe(null);
 
   urlStore.set("doc_workspace", validUrl);
-  expectTrue(
+  expect(
     persisted
       .get("cad.documentRepository.automergeUrls.v1")
       ?.includes(validUrl),
     "Local-storage URL stores should persist valid Automerge URLs through the storage adapter.",
-  );
-  expectTrue(
-    urlStore.get("doc_workspace") === validUrl,
+  ).toBeTruthy();
+  expect(
+    urlStore.get("doc_workspace"),
     "Local-storage URL stores should read back the persisted Automerge URL for the document id.",
-  );
+  ).toBe(validUrl);
 
   urlStore.delete("doc_workspace");
-  expectTrue(
+  expect(
     removed.includes("cad.documentRepository.automergeUrls.v1"),
     "Local-storage URL stores should clear the storage key once the final repository URL is removed.",
-  );
+  ).toBeTruthy();
 
   const customKey = createDocumentRepositoryUrlStorageKey("cad-e2e-alt-db");
   const customUrlStore = createLocalStorageDocumentRepositoryUrlStore(
@@ -71,16 +70,16 @@ test("src/infrastructure/persistence/document-repository-url-store.spec.ts", () 
     customKey,
   );
   customUrlStore.set("doc_workspace", validUrl);
-  expectTrue(
+  expect(
     persisted.get(customKey)?.includes(validUrl) &&
       persisted.get("cad.documentRepository.automergeUrls.v1") === undefined,
     "Local-storage URL stores should isolate persisted Automerge URLs by repository backend namespace.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getDocumentRepositoryStorageNamespace(
       "?cadRepositoryDbName=cad-e2e-alt-db",
     ) === "cad-e2e-alt-db" &&
       getDocumentRepositoryStorageNamespace("") === "cad-authored-documents",
     "Repository storage namespaces should derive from the backend search params and fall back to the default database name.",
-  );
+  ).toBeTruthy();
 });

@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   requireReferenceImageOperationState,
   requireReferenceImagePayload,
@@ -44,22 +43,22 @@ test("src/contracts/reference-image/runtime-schema.spec.ts", () => {
     calibration: validCalibration,
   };
 
-  expectTrue(
+  expect(
     validateReferenceImagePayload(validPayload).success,
     "Reference-image payload validation should accept canonical image payloads.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     validateReferenceImagePlacement(validPlacement).success,
     "Reference-image placement validation should accept positive finite placement payloads.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     validateReferenceImageCalibrationState(validCalibration).success,
     "Reference-image calibration validation should accept in-bounds anchors.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     validateReferenceImageOperationState(validState).success,
     "Reference-image operation-state validation should compose image, placement, and calibration invariants.",
-  );
+  ).toBeTruthy();
 
   const invalidPayload = {
     mediaType: "",
@@ -67,41 +66,41 @@ test("src/contracts/reference-image/runtime-schema.spec.ts", () => {
     pixelHeight: 0,
     base64Data: "",
   };
-  expectTrue(
-    !validateReferenceImagePayload(invalidPayload).success,
+  expect(
+    validateReferenceImagePayload(invalidPayload).success,
     "Reference-image payload validation should reject empty media, empty data, and non-positive dimensions.",
-  );
+  ).toBeFalsy();
   try {
     requireReferenceImagePayload(invalidPayload);
-    expectTrue(
+    expect(
       false,
       "Required reference-image payload validation should reject invalid payloads.",
-    );
+    ).toBeTruthy();
   } catch (error) {
-    expectTrue(
+    expect(
       error instanceof Error,
       "Required reference-image payload validation should throw for invalid payloads.",
-    );
+    ).toBeTruthy();
   }
 
-  expectTrue(
-    !validateReferenceImagePlacement({
+  expect(
+    validateReferenceImagePlacement({
       ...validPlacement,
       width: 0,
     }).success,
     "Reference-image placement validation should reject non-positive bounds.",
-  );
-  expectTrue(
-    !validateReferenceImageCalibrationAnchor({
+  ).toBeFalsy();
+  expect(
+    validateReferenceImageCalibrationAnchor({
       anchorId: "anchor_2",
       label: "B",
       uv: [1.1, 0.5],
       pointId: "sketch_point_2",
     }).success,
     "Reference-image calibration anchor validation should reject UVs outside image bounds.",
-  );
-  expectTrue(
-    !validateReferenceImageCalibrationState({
+  ).toBeFalsy();
+  expect(
+    validateReferenceImageCalibrationState({
       ...validCalibration,
       anchors: [
         ...validCalibration.anchors,
@@ -114,7 +113,7 @@ test("src/contracts/reference-image/runtime-schema.spec.ts", () => {
       ],
     }).success,
     "Reference-image calibration validation should reject duplicate anchor ids.",
-  );
+  ).toBeFalsy();
 
   const invalidState = {
     kind: "referenceImage",
@@ -135,20 +134,20 @@ test("src/contracts/reference-image/runtime-schema.spec.ts", () => {
       ],
     },
   };
-  expectTrue(
-    !validateReferenceImageOperationState(invalidState).success,
+  expect(
+    validateReferenceImageOperationState(invalidState).success,
     "Reference-image operation-state validation should reject invalid nested payloads.",
-  );
+  ).toBeFalsy();
   try {
     requireReferenceImageOperationState(invalidState);
-    expectTrue(
+    expect(
       false,
       "Required reference-image operation-state validation should reject invalid nested payloads.",
-    );
+    ).toBeTruthy();
   } catch (error) {
-    expectTrue(
+    expect(
       error instanceof Error,
       "Required reference-image operation-state validation should throw for invalid nested payloads.",
-    );
+    ).toBeTruthy();
   }
 });

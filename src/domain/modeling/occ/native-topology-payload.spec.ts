@@ -1,10 +1,9 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
 import type { MeshExportAccuracy } from "@/contracts/export/capabilities";
 import type { CadaraBrepGeometryAssetBody } from "@/contracts/modeling/geometry-assets";
 import type { BodyId, RevisionId } from "@/contracts/shared/ids";
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createOccNativeMeshExportPayloadFromShimPayload,
   createOccNativeExactBrepPayloadFromShimPayload,
@@ -60,31 +59,31 @@ function assertEveryLoopIsClosedAndConnected(
   body: CadaraBrepGeometryAssetBody | undefined,
   label: string,
 ) {
-  expectTrue(body != null, `${label} should include a B-rep body.`);
+  expect(body != null, `${label} should include a B-rep body.`).toBeTruthy();
   if (!body) {
     return;
   }
 
   for (const [loopIndex, loop] of body.topology.loops.entries()) {
-    expectTrue(
+    expect(
       loop.coedgeIndices.length > 0,
       `${label} loop ${loopIndex} should contain at least one coedge.`,
-    );
+    ).toBeTruthy();
     const pairs = loop.coedgeIndices.map((coedgeIndex) =>
       getCoedgeVertexPair(body, coedgeIndex),
     );
-    expectTrue(
+    expect(
       pairs.every((pair) => pair != null),
       `${label} loop ${loopIndex} should reference existing coedges and edges.`,
-    );
+    ).toBeTruthy();
 
     for (let pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
       const current = pairs[pairIndex];
       const next = pairs[(pairIndex + 1) % pairs.length];
-      expectTrue(
+      expect(
         current != null && next != null && current[1] === next[0],
         `${label} loop ${loopIndex} should be closed and connected at coedge ${pairIndex}.`,
-      );
+      ).toBeTruthy();
     }
   }
 }
@@ -98,7 +97,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       rejected = true;
     }
 
-    expectTrue(rejected, message);
+    expect(rejected, message).toBeTruthy();
   }
 
   function testNativeShimPayloadRejectsMalformedPrimitiveInvariants() {
@@ -235,18 +234,18 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       "t_native",
     );
 
-    expectTrue(
-      typeof topologyJson === "string",
+    expect(
+      typeof topologyJson,
       "Custom OCC build should expose native topology payload JSON.",
-    );
-    expectTrue(
-      typeof meshJson === "string",
+    ).toBe("string");
+    expect(
+      typeof meshJson,
       "Custom OCC build should expose native mesh payload JSON.",
-    );
-    expectTrue(
-      typeof exactBrepJson === "string",
+    ).toBe("string");
+    expect(
+      typeof exactBrepJson,
       "Custom OCC build should expose native exact B-rep payload JSON.",
-    );
+    ).toBe("string");
 
     const nativeTopology = parseNativeShimPayloadJson(topologyJson);
     const nativeMesh = parseNativeShimPayloadJson(meshJson);
@@ -279,142 +278,139 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       nativePayload: nativeExactBrep,
     });
 
-    expectTrue(
-      nativeTopology.topology.length === 26,
+    expect(
+      nativeTopology.topology.length,
       "Box topology should be returned as one flat native record table.",
-    );
-    expectTrue(
-      nativeTopology.edgeVertices.length === 12,
+    ).toBe(26);
+    expect(
+      nativeTopology.edgeVertices.length,
       "Box edge endpoints should be returned in one flat native adjacency table.",
-    );
-    expectTrue(
-      nativeTopology.vertexPoints?.length === 8,
+    ).toBe(12);
+    expect(
+      nativeTopology.vertexPoints?.length,
       "Box vertex points should be returned in one flat native point table.",
-    );
-    expectTrue(
-      nativeTopology.faceEdges?.length === 6,
+    ).toBe(8);
+    expect(
+      nativeTopology.faceEdges?.length,
       "Box face-edge adjacency should be returned in one flat native adjacency table.",
-    );
-    expectTrue(
-      nativeTopology.mesh?.positions?.length === 24,
+    ).toBe(6);
+    expect(
+      nativeTopology.mesh?.positions?.length,
       "Native topology payload should include flat render mesh positions.",
-    );
-    expectTrue(
-      nativeTopology.mesh?.triangleIndices?.length === 12,
+    ).toBe(24);
+    expect(
+      nativeTopology.mesh?.triangleIndices?.length,
       "Native topology payload should include flat render mesh triangle indices.",
-    );
-    expectTrue(
-      nativeTopology.mesh?.triangleFaceBindings?.length === 12,
+    ).toBe(12);
+    expect(
+      nativeTopology.mesh?.triangleFaceBindings?.length,
       "Native topology payload should bind every render triangle to a face.",
-    );
-    expectTrue(
-      topologyPayload.bodies[0]?.identity.length === 27,
+    ).toBe(12);
+    expect(
+      topologyPayload.bodies[0]?.identity.length,
       "Payload identity should include the body plus native subshape records.",
-    );
-    expectTrue(
+    ).toBe(27);
+    expect(
       topologyPayload.buffers.length >= 3,
       "Converted native topology payload should expose transferable mesh buffers.",
-    );
-    expectTrue(
-      topologyPayload.bodies[0]?.renderMesh?.positions.byteLength ===
-        24 * 3 * Float32Array.BYTES_PER_ELEMENT,
+    ).toBeTruthy();
+    expect(
+      topologyPayload.bodies[0]?.renderMesh?.positions.byteLength,
       "Converted native topology payload should describe position data through a buffer-backed table.",
-    );
-    expectTrue(
-      topologyPayload.bodies[0]?.renderMesh?.triangleIndices.byteLength ===
-        12 * 3 * Uint32Array.BYTES_PER_ELEMENT,
+    ).toBe(24 * 3 * Float32Array.BYTES_PER_ELEMENT);
+    expect(
+      topologyPayload.bodies[0]?.renderMesh?.triangleIndices.byteLength,
       "Converted native topology payload should describe triangle indices through a buffer-backed table.",
-    );
-    expectTrue(
-      topologyPayload.bodies[0]?.renderMeshSummary?.positions?.length === 24,
+    ).toBe(12 * 3 * Uint32Array.BYTES_PER_ELEMENT);
+    expect(
+      topologyPayload.bodies[0]?.renderMeshSummary?.positions?.length,
       "Converted native topology payload should retain render mesh positions from the shim payload.",
-    );
-    expectTrue(
+    ).toBe(24);
+    expect(
       nativeExactBrep.cadaraBrep != null,
       "Native exact B-rep shim should return Cadara B-rep records directly.",
-    );
-    expectTrue(
-      !exactBrepPayload.diagnostics.some(
+    ).toBeTruthy();
+    expect(
+      exactBrepPayload.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "occ-native-exact-brep-unsupported-topology",
       ),
       "Native exact B-rep payload should not diagnose oriented coedges as missing when the shim emits exact records.",
-    );
-    expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.faces.length === 6,
+    ).toBeFalsy();
+    expect(
+      exactBrepPayload.brep.bodies[0]?.topology.faces.length,
       "Native exact B-rep payload should expose the box face topology from the shim.",
-    );
-    expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.vertices.length === 8,
+    ).toBe(6);
+    expect(
+      exactBrepPayload.brep.bodies[0]?.topology.vertices.length,
       "Native exact B-rep payload should expose box vertex points from the shim.",
-    );
-    expectTrue(
-      exactBrepPayload.buffers.length === 1,
+    ).toBe(8);
+    expect(
+      exactBrepPayload.buffers.length,
       "Converted native exact B-rep payload should expose a transferable serialized exact payload buffer.",
-    );
-    expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.edges.length === 12,
+    ).toBe(1);
+    expect(
+      exactBrepPayload.brep.bodies[0]?.topology.edges.length,
       "Native exact B-rep payload should expose box edge curves from the shim.",
-    );
-    expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.coedges.length === 24,
+    ).toBe(12);
+    expect(
+      exactBrepPayload.brep.bodies[0]?.topology.coedges.length,
       "Native exact B-rep payload should preserve oriented coedge order for each box face loop.",
-    );
-    expectTrue(
-      exactBrepPayload.brep.bodies[0]?.topology.loops.length === 6,
+    ).toBe(24);
+    expect(
+      exactBrepPayload.brep.bodies[0]?.topology.loops.length,
       "Native exact B-rep payload should expose one oriented loop per box face.",
-    );
+    ).toBe(6);
     assertEveryLoopIsClosedAndConnected(
       exactBrepPayload.brep.bodies[0],
       "Native exact box B-rep payload",
     );
-    expectTrue(
+    expect(
       exactBrepPayload.tables.topology.faces.rowCount === 6 &&
         exactBrepPayload.tables.topology.coedges.rowCount === 24 &&
         exactBrepPayload.tables.curves.rowCount === 12 &&
         exactBrepPayload.tables.surfaces.rowCount === 6 &&
         exactBrepPayload.tables.trims.rowCount === 24,
       "Native exact B-rep payload table metadata should count topology, curves, surfaces, and trims.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       exactBrepPayload.brep.bodies[0]?.topology.edges.every(
         (edge) => edge.curve.kind === "line",
-      ) === true,
+      ),
       "Native exact B-rep payload should preserve box edges as analytic lines.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       exactBrepPayload.brep.bodies[0]?.topology.faces.every(
         (face) => face.surface.kind === "plane",
-      ) === true,
+      ),
       "Native exact B-rep payload should preserve box faces as analytic planes.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       exactBrepPayload.brep.bodies[0]?.topology.coedges.every(
         (coedge) => coedge.curve2d.kind === "line",
-      ) === true,
+      ),
       "Native exact B-rep payload should preserve box 2D trim curves as analytic lines.",
-    );
-    expectTrue(
-      topologyPayload.bodies[0]?.renderMeshSummary?.triangleCount === 12,
+    ).toBeTruthy();
+    expect(
+      topologyPayload.bodies[0]?.renderMeshSummary?.triangleCount,
       "Native topology payload should carry the shim mesh summary without JS face triangulation.",
-    );
-    expectTrue(
-      meshPayload.meshSummary?.triangleCount === 12,
+    ).toBe(12);
+    expect(
+      meshPayload.meshSummary?.triangleCount,
       "Native mesh export payload should carry the shim mesh summary without JS face triangulation.",
-    );
-    expectTrue(
+    ).toBe(12);
+    expect(
       meshPayload.buffers.length >= 3,
       "Converted native mesh export payload should expose transferable mesh buffers.",
-    );
-    expectTrue(
-      meshPayload.mesh.triangleIndices.byteLength ===
-        12 * 3 * Uint32Array.BYTES_PER_ELEMENT,
+    ).toBeTruthy();
+    expect(
+      meshPayload.mesh.triangleIndices.byteLength,
       "Converted native mesh export payload should describe export triangle indices through a buffer-backed table.",
-    );
-    expectTrue(
-      meshPayload.meshSummary?.triangleIndices?.length === 12,
+    ).toBe(12 * 3 * Uint32Array.BYTES_PER_ELEMENT);
+    expect(
+      meshPayload.meshSummary?.triangleIndices?.length,
       "Converted native mesh export payload should retain flat triangle indices from the shim payload.",
-    );
+    ).toBe(12);
     (shape as { delete?: () => void }).delete?.();
     boxBuilder.delete?.();
   }
@@ -443,7 +439,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
+    expect(
       topologyPayload.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "occ-native-topology-invalid-shape" &&
@@ -451,7 +447,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
           diagnostic.target.bodyId === bodyId,
       ),
       "Native topology payload should surface invalid committed shapes as structured diagnostics.",
-    );
+    ).toBeTruthy();
 
     shape.delete?.();
   }
@@ -477,43 +473,43 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       nativePayload: nativeExactBrep,
     });
 
-    expectTrue(
-      !exactBrepPayload.diagnostics.some(
+    expect(
+      exactBrepPayload.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "occ-native-exact-brep-unsupported-topology",
       ),
       "Native exact B-rep payload should return exact curved records instead of the old unsupported-topology diagnostic.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       exactBrepPayload.brep.bodies[0]?.topology.faces.some(
         (face) => face.surface.kind === "cylinder",
       ),
       "Native exact B-rep payload should preserve the cylinder side face as an analytic cylinder.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       exactBrepPayload.brep.bodies[0]?.topology.edges.some(
         (edge) => edge.curve.kind === "circle",
       ),
       "Native exact B-rep payload should preserve circular cylinder trim edges as analytic circles.",
-    );
+    ).toBeTruthy();
     assertEveryLoopIsClosedAndConnected(
       exactBrepPayload.brep.bodies[0],
       "Native exact cylinder B-rep payload",
     );
-    expectTrue(
+    expect(
       exactBrepPayload.brep.bodies[0]?.topology.coedges.every(
         (coedge) =>
           coedge.curve2d.kind !== "polyline" &&
           coedge.curve2d.kind !== "unsupported",
-      ) === true,
+      ),
       "Native exact B-rep payload should emit analytic 2D p-curves for cylinder coedges instead of sampled or unsupported trims.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       exactBrepPayload.brep.bodies[0]?.topology.coedges.some(
         (coedge) => coedge.curve2d.kind === "circle",
-      ) === true,
+      ),
       "Native exact B-rep payload should preserve circular planar cylinder trims as 2D circles.",
-    );
+    ).toBeTruthy();
     (shape as { delete?: () => void }).delete?.();
     cylinderBuilder.delete?.();
   }
@@ -550,15 +546,15 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       (identity) => identity.publicRef?.kind === "face",
     );
 
-    expectTrue(
-      faceIdentity?.kernelUid === "occt7-shim:face:12345",
+    expect(
+      faceIdentity?.kernelUid,
       "Converted native topology payload should preserve kernel-owned identity separately from the public durable id.",
-    );
-    expectTrue(
+    ).toBe("occt7-shim:face:12345");
+    expect(
       faceIdentity?.publicRef?.kind === "face" &&
         !faceIdentity.publicRef.faceId.includes("_t0001_"),
       "Converted native topology payload should allow fresh public ids that are not topology-token traversal ids.",
-    );
+    ).toBeTruthy();
   }
 
   async function testNativeFeatureTransactionPreparesCommittedShapePayload() {
@@ -586,18 +582,18 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      topologyPayload.diagnostics.length === 0,
+    expect(
+      topologyPayload.diagnostics.length,
       "Native committed-shape transaction should accept a valid prepared solid without diagnostics.",
-    );
-    expectTrue(
-      nativeTopology.topology.length === 26,
+    ).toBe(0);
+    expect(
+      nativeTopology.topology.length,
       "Native committed-shape transaction should emit the prepared solid topology table.",
-    );
-    expectTrue(
-      topologyPayload.bodies[0]?.renderMeshSummary?.triangleCount === 12,
+    ).toBe(26);
+    expect(
+      topologyPayload.bodies[0]?.renderMeshSummary?.triangleCount,
       "Native committed-shape transaction should mesh the prepared committed solid in the same payload.",
-    );
+    ).toBe(12);
     (shape as { delete?: () => void }).delete?.();
     boxBuilder.delete?.();
   }
@@ -629,18 +625,18 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      topologyPayload.diagnostics.length === 0,
+    expect(
+      topologyPayload.diagnostics.length,
       "Native boolean transaction should accept a valid join and emit no diagnostics.",
-    );
-    expectTrue(
-      nativeTopology.topology.length === 26,
+    ).toBe(0);
+    expect(
+      nativeTopology.topology.length,
       "Native boolean transaction should emit the committed boolean result topology table.",
-    );
-    expectTrue(
-      topologyPayload.bodies[0]?.renderMeshSummary?.triangleCount === 12,
+    ).toBe(26);
+    expect(
+      topologyPayload.bodies[0]?.renderMeshSummary?.triangleCount,
       "Native boolean transaction should mesh the committed boolean result in the same payload.",
-    );
+    ).toBe(12);
 
     leftBuilder.delete?.();
     rightBuilder.delete?.();
@@ -662,53 +658,53 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
         0.5,
       );
 
-    expectTrue(
+    expect(
       result != null,
       "Custom OCC build should expose native boolean transaction result objects.",
-    );
+    ).toBeTruthy();
     const committedShape = result.Shape() as { IsNull: () => boolean };
     const nativeTopology = parseNativeShimPayloadJson(result.PayloadJson());
     const nativeHistory = parseNativeFeatureTransactionHistoryJson(
       result.HistoryJson(),
     );
 
-    expectTrue(
+    expect(
       result.IsDone(),
       "Native boolean transaction result should report success for a valid join.",
-    );
-    expectTrue(
-      !committedShape.IsNull(),
+    ).toBeTruthy();
+    expect(
+      committedShape.IsNull(),
       "Native boolean transaction result should expose the committed shape.",
-    );
-    expectTrue(
-      nativeTopology.diagnostics.length === 0,
+    ).toBeFalsy();
+    expect(
+      nativeTopology.diagnostics.length,
       "Native boolean transaction result payload should accept a valid join without diagnostics.",
-    );
-    expectTrue(
-      nativeTopology.mesh?.triangleIndices?.length === 12,
+    ).toBe(0);
+    expect(
+      nativeTopology.mesh?.triangleIndices?.length,
       "Native boolean transaction result payload should mesh the committed shape.",
-    );
-    expectTrue(
-      nativeHistory.status === "available",
+    ).toBe(12);
+    expect(
+      nativeHistory.status,
       "Pre-8 native boolean transaction history should report available native successor records when the boolean builder provides history.",
-    );
-    expectTrue(
-      nativeHistory.records.length === 26,
+    ).toBe("available");
+    expect(
+      nativeHistory.records.length,
       "Native boolean transaction history should include records for prior faces, edges, and vertices.",
-    );
-    expectTrue(
+    ).toBe(26);
+    expect(
       nativeHistory.records.some(
         (record) =>
           record.reason === "unique-successor" &&
           record.successors.length === 1,
       ),
       "Native boolean transaction history should identify unique successors for stable topology.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       createOccNativeReferenceInvalidationsFromHistoryPayload(nativeHistory)
-        .length === 0,
+        .length,
       "Unique native boolean successors should not produce invalidation payload records.",
-    );
+    ).toBe(0);
 
     leftBuilder.delete?.();
     rightBuilder.delete?.();
@@ -731,14 +727,14 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     const positions = nativeTopology.mesh?.positions;
     const triangleIndices = nativeTopology.mesh?.triangleIndices;
 
-    expectTrue(
+    expect(
       positions != null,
       "Native mesh orientation test requires native mesh positions.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       triangleIndices != null,
       "Native mesh orientation test requires native mesh triangle indices.",
-    );
+    ).toBeTruthy();
 
     const center: Point3 = [0.5, 1, 1.5];
     let outwardTriangleCount = 0;
@@ -748,26 +744,26 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       const second = positions?.[triangle[1]];
       const third = positions?.[triangle[2]];
 
-      expectTrue(
+      expect(
         first != null && second != null && third != null,
         "Native mesh triangle should reference existing vertices.",
-      );
+      ).toBeTruthy();
 
       const normal = cross(subtract(second, first), subtract(third, first));
       const triangleCenter = scale(add(add(first, second), third), 1 / 3);
       const outward = subtract(triangleCenter, center);
 
-      expectTrue(
+      expect(
         dot(normal, outward) > 0,
         "Native mesh payload should preserve outward triangle winding for reversed OCC faces.",
-      );
+      ).toBeTruthy();
       outwardTriangleCount += 1;
     }
 
-    expectTrue(
-      outwardTriangleCount === 12,
+    expect(
+      outwardTriangleCount,
       "Native mesh orientation test should check every box triangle.",
-    );
+    ).toBe(12);
     (shape as { delete?: () => void }).delete?.();
     boxBuilder.delete?.();
   }

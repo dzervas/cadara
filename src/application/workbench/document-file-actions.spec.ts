@@ -276,7 +276,7 @@ describe("document file actions", () => {
       ...callbacks.callbacks,
     });
 
-    expect(saveSucceeded).toBe(true);
+    expect(saveSucceeded).toBeTruthy();
     expect(writes).toEqual(['{"documentId":"doc_workspace"}']);
     expect(savedBindings).toEqual([
       { documentId: "doc_workspace", handleName: "saved.cadara" },
@@ -316,7 +316,7 @@ describe("document file actions", () => {
       ...callbacks.callbacks,
     });
 
-    expect(saveSucceeded).toBe(false);
+    expect(saveSucceeded).toBeFalsy();
     expect(callbacks.errors).toEqual([
       "Local file write permission was denied.",
     ]);
@@ -344,7 +344,7 @@ describe("document file actions", () => {
       ...callbacks.callbacks,
     });
 
-    expect(exportSucceeded).toBe(true);
+    expect(exportSucceeded).toBeTruthy();
     expect(downloaded).toEqual(["exported.cadara"]);
     expect(callbacks.infos).toEqual(["Downloaded exported.cadara."]);
   });

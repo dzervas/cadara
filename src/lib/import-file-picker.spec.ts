@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   buildImportFilePickerConfiguration,
   showOpenImportFilePicker,
@@ -16,7 +15,7 @@ test("src/lib/import-file-picker.spec.ts", async () => {
     { multiple: true },
   );
 
-  expectTrue(
+  expect(
     configuration.openPickerOptions.types[0]?.accept["image/png"]?.includes(
       ".png",
     ) &&
@@ -24,17 +23,17 @@ test("src/lib/import-file-picker.spec.ts", async () => {
         ".jpg",
       ),
     "Import picker configuration should group extensions under MIME types for the native picker.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     configuration.inputAccept.includes("image/png") &&
       configuration.inputAccept.includes(".png") &&
       configuration.inputAccept.includes(".jpg"),
     "Import picker configuration should build an input accept string from extensions and MIME types.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     configuration.openPickerOptions.multiple,
     "Import picker configuration should forward the multiple-selection flag.",
-  );
+  ).toBeTruthy();
 
   const pngFile = new File(["png"], "reference.png", { type: "image/png" });
   const pickerResult = await showOpenImportFilePicker({
@@ -43,14 +42,14 @@ test("src/lib/import-file-picker.spec.ts", async () => {
     environment: {
       isSecureContext: true,
       async showOpenFilePicker(options) {
-        expectTrue(
+        expect(
           options.types[0]?.accept["image/png"]?.includes(".png"),
           "Native import picker should receive the aggregated accept map.",
-        );
-        expectTrue(
+        ).toBeTruthy();
+        expect(
           options.multiple,
           "Native import picker should receive the multiple-selection flag.",
-        );
+        ).toBeTruthy();
         return [
           {
             name: "reference.png",
@@ -65,10 +64,10 @@ test("src/lib/import-file-picker.spec.ts", async () => {
       },
     },
   });
-  expectTrue(
+  expect(
     pickerResult.ok && pickerResult.files[0] === pngFile,
     "Native import picker should resolve the selected file handle to a File object.",
-  );
+  ).toBeTruthy();
 
   type ChangeHandler = () => void;
 
@@ -112,12 +111,12 @@ test("src/lib/import-file-picker.spec.ts", async () => {
     },
   });
 
-  expectTrue(
+  expect(
     fallbackInputMultiple,
     "Fallback import picker should forward the multiple-selection flag to the input element.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     fallbackResult.ok && fallbackResult.files[0] === fallbackFile,
     "Fallback import picker should resolve the selected input file when the native picker is unavailable.",
-  );
+  ).toBeTruthy();
 });
