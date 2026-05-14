@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createFeatureEditorExpressionControlFormValue,
   createFeatureEditorFormValues,
@@ -31,75 +30,75 @@ test("src/domain/feature-authoring/form-adapter.spec.ts", async () => {
     .flatMap((section) => section.fields)
     .find((field) => field.id === "shell-thickness");
 
-  expectTrue(
-    shellThicknessField?.kind === "numeric",
+  expect(
+    shellThicknessField?.kind,
     "Shell form should expose a numeric thickness field for RHF adaptation.",
-  );
+  ).toBe("numeric");
 
   const shellFormValues = createFeatureEditorFormValues(shellSchema);
   const shellThicknessSource = getFeatureEditorExpressionSourceState(
     shellThicknessField,
     shellFormValues["shell-thickness"],
   );
-  expectTrue(
+  expect(
     shellThicknessSource?.source === "literal" &&
       shellThicknessSource.value.length > 0,
     "Adapter form values should keep numeric literal source state in RHF values.",
-  );
+  ).toBeTruthy();
 
   const numericPatch = createFeatureEditorPatchFromFormValue(
     shellThicknessField,
     "1.25",
   );
-  expectTrue(
-    numericPatch?.thickness === 1.25,
+  expect(
+    numericPatch?.thickness,
     "Adapter numeric values should translate valid RHF strings back into the existing feature patch shape.",
-  );
+  ).toBe(1.25);
   const expressionPatch = createFeatureEditorPatchFromExpression(
     shellThicknessField,
     "wall + 1",
   );
-  expectTrue(
+  expect(
     isExpressionAuthoredValue(expressionPatch?.thickness) &&
       expressionPatch.thickness.valueText === "wall + 1",
     "Adapter numeric values should preserve non-literal text as authored expression patches.",
-  );
+  ).toBeTruthy();
   const numericLookingExpressionPatch = createFeatureEditorPatchFromFormValue(
     shellThicknessField,
     createFeatureEditorExpressionControlFormValue("10", "10"),
   );
-  expectTrue(
+  expect(
     isExpressionAuthoredValue(numericLookingExpressionPatch?.thickness) &&
       numericLookingExpressionPatch.thickness.valueText === "10",
     "Adapter source state should preserve numeric-looking expression text as an authored expression.",
-  );
+  ).toBeTruthy();
 
   const shellOperationField = shellSchema.sections
     .flatMap((section) => section.fields)
     .find((field) => field.id === "shell-operation");
-  expectTrue(
-    shellOperationField?.kind === "enum",
+  expect(
+    shellOperationField?.kind,
     "Shell form should expose an enum operation field for RHF adaptation.",
-  );
+  ).toBe("enum");
 
   const enumLiteralPatch = createFeatureEditorPatchFromFormValue(
     shellOperationField,
     "join",
   );
-  expectTrue(
-    enumLiteralPatch?.operation === "join",
+  expect(
+    enumLiteralPatch?.operation,
     "Adapter enum literal values should patch as literal enum strings.",
-  );
+  ).toBe("join");
 
   const enumExpressionPatch = createFeatureEditorPatchFromFormValue(
     shellOperationField,
     createFeatureEditorExpressionControlFormValue("join", '"join"'),
   );
-  expectTrue(
+  expect(
     isExpressionAuthoredValue(enumExpressionPatch?.operation) &&
       enumExpressionPatch.operation.valueText === '"join"',
     "Adapter source state should preserve enum expression text even when it resolves to an existing option.",
-  );
+  ).toBeTruthy();
 
   const expressionShellSchema = getFeatureEditorFormSchema(
     patchFeatureEditSession(shellSession, {
@@ -110,10 +109,10 @@ test("src/domain/feature-authoring/form-adapter.spec.ts", async () => {
   const expressionThicknessField = expressionShellSchema.sections
     .flatMap((section) => section.fields)
     .find((field) => field.id === "shell-thickness");
-  expectTrue(
-    expressionThicknessField?.kind === "numeric",
+  expect(
+    expressionThicknessField?.kind,
     "Expression shell form should expose thickness.",
-  );
+  ).toBe("numeric");
   const expressionShellValues = createFeatureEditorFormValues(
     expressionShellSchema,
   );
@@ -121,11 +120,11 @@ test("src/domain/feature-authoring/form-adapter.spec.ts", async () => {
     expressionThicknessField,
     expressionShellValues["shell-thickness"],
   );
-  expectTrue(
+  expect(
     expressionThicknessSource?.source === "expression" &&
       expressionThicknessSource.expressionText === "10",
     "Adapter form values should distinguish expression-authored numeric values from literal values.",
-  );
+  ).toBeTruthy();
 
   const revolveSession = createFeatureEditSession({
     featureType: "revolve",
@@ -135,21 +134,21 @@ test("src/domain/feature-authoring/form-adapter.spec.ts", async () => {
     .sections.flatMap((section) => section.fields)
     .find((field) => field.id === "revolve-angle");
 
-  expectTrue(
-    revolveAngleField?.kind === "numeric",
+  expect(
+    revolveAngleField?.kind,
     "Revolve form should expose an angle numeric field for adapter coercion.",
-  );
+  ).toBe("numeric");
 
   const patchedRevolve = patchFeatureEditSession(
     revolveSession,
     createFeatureEditorPatchFromFormValue(revolveAngleField, "180") ?? {},
   );
-  expectTrue(
+  expect(
     patchedRevolve.featureType === "revolve" &&
       patchedRevolve.draft.firstEnd.kind === "blind" &&
       Math.abs(patchedRevolve.draft.firstEnd.angle - Math.PI) < 0.000001,
     "Adapter angle values should preserve the degree-to-radian patch translation owned by the feature domain.",
-  );
+  ).toBeTruthy();
 
   const populatedShellSession = patchFeatureEditSession(shellSession, {
     faceTargets: [
@@ -173,23 +172,23 @@ test("src/domain/feature-authoring/form-adapter.spec.ts", async () => {
     },
   );
 
-  expectTrue(
+  expect(
     featureEditorFormValuesEqual(
       populatedShellSchema,
       populatedShellValues,
       normalizedShellValues,
     ),
     "Adapter form values should normalize reference selections by durable identity rather than object identity.",
-  );
+  ).toBeTruthy();
 
   const shellFacesField = populatedShellSchema.sections
     .flatMap((section) => section.fields)
     .find((field) => field.id === "shell-faces");
-  expectTrue(
+  expect(
     shellFacesField?.kind === "referenceCollection" &&
       !("authoredValue" in shellFacesField),
     "Reference collection fields should not expose expression source metadata.",
-  );
+  ).toBeTruthy();
 
   const conditionalSchema = {
     sections: [
@@ -271,24 +270,24 @@ test("src/domain/feature-authoring/form-adapter.spec.ts", async () => {
     ],
   } satisfies FeatureEditorFormSchema;
   const conditionalValues = createFeatureEditorFormValues(conditionalSchema);
-  expectTrue(
+  expect(
     "loft-section-count" in conditionalValues &&
       "extent-mode" in conditionalValues &&
       "extent-distance" in conditionalValues &&
       !("through-all-offset" in conditionalValues),
     "Adapter form values should recurse into groups and active discriminated variants only.",
-  );
+  ).toBeTruthy();
 
   const sectionCountField = conditionalSchema.sections[0]!.fields[0]!;
-  expectTrue(
-    sectionCountField.kind === "optionGroup",
+  expect(
+    sectionCountField.kind,
     "Conditional schema should contain a grouped option field.",
-  );
+  ).toBe("optionGroup");
   const nestedPatch = createFeatureEditorPatchFromFormValue(
     sectionCountField.fields[0]!,
     "6",
   );
-  expectTrue(
+  expect(
     nestedPatch?.options &&
       typeof nestedPatch.options === "object" &&
       (
@@ -298,22 +297,22 @@ test("src/domain/feature-authoring/form-adapter.spec.ts", async () => {
         >
       ).sectionCount === 6,
     "Adapter nested option fields should emit nested option patches without feature-specific branching.",
-  );
+  ).toBeTruthy();
 
   const discriminatedField = conditionalSchema.sections[0]!.fields[1]!;
-  expectTrue(
-    discriminatedField.kind === "discriminatedOptionGroup",
+  expect(
+    discriminatedField.kind,
     "Conditional schema should contain a discriminated option field.",
-  );
+  ).toBe("discriminatedOptionGroup");
   const discriminantPatch = createFeatureEditorPatchFromFormValue(
     discriminatedField.discriminant,
     "throughAll",
   );
-  expectTrue(
+  expect(
     discriminantPatch?.options &&
       typeof discriminantPatch.options === "object" &&
       (discriminantPatch.options as Record<string, unknown>).extentMode ===
         "throughAll",
     "Adapter discriminant fields should patch through their declared nested option target.",
-  );
+  ).toBeTruthy();
 });

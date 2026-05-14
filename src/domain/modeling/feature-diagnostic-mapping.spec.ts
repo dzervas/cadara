@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { AuthoredFeatureRecord } from "@/contracts/modeling/authored-document";
 import type {
   FeatureDefinition,
@@ -65,34 +64,33 @@ test("src/domain/modeling/feature-diagnostic-mapping.spec.ts", () => {
     },
   }) satisfies ModelingDiagnostic;
 
-  expectTrue(
-    diagnostic.featureId === feature.featureId,
+  expect(
+    diagnostic.featureId,
     "Feature diagnostics should carry the owning feature id.",
-  );
-  expectTrue(
-    diagnostic.fieldId === "profiles",
+  ).toBe(feature.featureId);
+  expect(
+    diagnostic.fieldId,
     "Missing profile references should map to the authored profile field.",
-  );
-  expectTrue(
-    diagnostic.message === "Merge bodies profile selection is incorrect.",
+  ).toBe("profiles");
+  expect(
+    diagnostic.message,
     "User-facing diagnostics should name the repairable authored field.",
-  );
-  expectTrue(
-    diagnostic.repairGuidance ===
-      "Edit Merge bodies and choose a valid profile selection.",
+  ).toBe("Merge bodies profile selection is incorrect.");
+  expect(
+    diagnostic.repairGuidance,
     "Feature diagnostics should include direct repair guidance.",
-  );
-  expectTrue(
-    !diagnostic.message.includes("region_deleted") &&
+  ).toBe("Edit Merge bodies and choose a valid profile selection.");
+  expect(
+    diagnostic.message.includes("region_deleted") &&
       !diagnostic.repairGuidance?.includes("region_deleted"),
     "User-facing diagnostic copy should not expose raw durable ids as the primary message.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     diagnostic.detail?.kind === "invalidReference" &&
       diagnostic.detail.reference.target.kind === "region" &&
       diagnostic.detail.reference.target.regionId === "region_deleted",
     "Raw durable ids should remain available in structured debug context.",
-  );
+  ).toBeTruthy();
 
   const blocked = createDependencyBlockedDiagnostic({
     featureId: "feature_join-blocked" as FeatureId,
@@ -101,22 +99,22 @@ test("src/domain/modeling/feature-diagnostic-mapping.spec.ts", () => {
     blockingFeatureLabel: feature.label,
   });
 
-  expectTrue(
-    blocked.featureId === "feature_join-blocked",
+  expect(
+    blocked.featureId,
     "Dependency-blocked diagnostics should identify the blocked feature.",
-  );
-  expectTrue(
-    blocked.repairGuidance === "Repair Merge bodies, then rebuild Join boss.",
+  ).toBe("feature_join-blocked");
+  expect(
+    blocked.repairGuidance,
     "Dependency-blocked repair guidance should use feature labels instead of raw ids.",
-  );
-  expectTrue(
-    !blocked.message.includes(feature.featureId) &&
+  ).toBe("Repair Merge bodies, then rebuild Join boss.");
+  expect(
+    blocked.message.includes(feature.featureId) &&
       !blocked.repairGuidance?.includes(feature.featureId),
     "Dependency-blocked user-facing copy should keep raw feature ids out of the primary message.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     blocked.detail?.kind === "rebuildFailure" &&
       blocked.detail.affectedFeatureIds.includes(feature.featureId),
     "Dependency-blocked diagnostics should keep raw blocking feature ids in structured debug context.",
-  );
+  ).toBeTruthy();
 });

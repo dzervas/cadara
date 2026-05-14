@@ -1,7 +1,6 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createToolActionBus } from "@/core/tools/tool-action-bus";
 import type { ToolId } from "@/core/tools/tool-registry";
 import type { ToolTriggerMetadata } from "@/core/tools/schema";
@@ -67,30 +66,30 @@ test("useToolActions routes same-component undo and redo handlers before Workben
     </ToolActionContext.Provider>,
   );
 
-  expectTrue(
-    triggerTool !== null,
+  expect(
+    triggerTool,
     "Tool action capture should expose the trigger function.",
-  );
+  ).not.toBe(null);
   if (!triggerTool) {
     throw new Error("Tool action capture should expose the trigger function.");
   }
   await triggerTool("undo", { source: "toolbar" });
   await triggerTool("redo", { source: "toolbar" });
 
-  expectTrue(
+  expect(
     requestUndoCount === 1 && requestRedoCount === 1,
     "Toolbar undo and redo should route through the explicit workbench command handlers.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     dispatched.every(
       (event) =>
         event.type !== "history.undoRequested" &&
         event.type !== "history.redoRequested",
     ),
     "Toolbar undo and redo must not fall back to legacy editor history events when durable handlers are supplied.",
-  );
-  expectTrue(
-    JSON.stringify(triggeredTools) === JSON.stringify(["undo", "redo"]),
+  ).toBeTruthy();
+  expect(
+    JSON.stringify(triggeredTools),
     "Undo and redo toolbar activations should still publish tool action bus events.",
-  );
+  ).toBe(JSON.stringify(["undo", "redo"]));
 });

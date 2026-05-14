@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { defaultSelectionFilter } from "@/core/editor/schema";
 import type {
   FeatureEditorFormField,
@@ -151,12 +150,12 @@ test("form-traversal.ts finds nested form fields in option groups and discrimina
     "variant-switch",
   );
 
-  expectTrue(
+  expect(
     nestedInOptionGroup?.id === "nested-target" &&
       nestedInVariant?.id === "variant-target" &&
       nestedDiscriminant?.id === "variant-switch",
     "Form traversal should recurse through option groups, discriminated variants, and discriminant fields when resolving field ids.",
-  );
+  ).toBeTruthy();
 });
 
 test("form-traversal.ts resolves the active feature reference picker only for top-level reference fields", () => {
@@ -174,14 +173,14 @@ test("form-traversal.ts resolves the active feature reference picker only for to
     "diagnostics",
   ]);
 
-  expectTrue(
+  expect(
     referenceField,
     "Extrude form schema should expose a top-level reference field for picker coverage.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     nonReferenceField,
     "Extrude form schema should expose a non-reference top-level field for negative picker coverage.",
-  );
+  ).toBeTruthy();
 
   const active = getActiveReferencePickerField({
     activeReferencePickerFieldId: referenceField.id,
@@ -192,10 +191,10 @@ test("form-traversal.ts resolves the active feature reference picker only for to
     session,
   } as FeatureEditorState);
 
-  expectTrue(
+  expect(
     active?.id === referenceField.id && inactive === null,
     "Feature picker resolution should return only active top-level reference fields and ignore other field kinds.",
-  );
+  ).toBeTruthy();
 });
 
 test("form-traversal.ts chooses a default import selection field only when exactly one visible reference field remains", () => {
@@ -231,10 +230,10 @@ test("form-traversal.ts chooses a default import selection field only when exact
     makeImportSession(schemaWithTwoVisible),
   );
 
-  expectTrue(
+  expect(
     defaultField?.id === "visible-target" && ambiguousField === null,
     "Import default selection should auto-activate the single visible reference field and stay idle when multiple visible targets exist.",
-  );
+  ).toBeTruthy();
 });
 
 test("form-traversal.ts resolves active import picker fields and patches viewport selections with reopened sketch planes", async () => {
@@ -275,11 +274,11 @@ test("form-traversal.ts resolves active import picker fields and patches viewpor
     { kind: "face", bodyId: "body_fixture", faceId: "face_fixture" },
   );
 
-  expectTrue(
-    activeField?.id === pickerField.id,
+  expect(
+    activeField?.id,
     "Import picker resolution should return the active reference field from the import-session schema.",
-  );
-  expectTrue(
+  ).toBe(pickerField.id);
+  expect(
     pickerPatch !== null &&
       "selectionPatch" in pickerPatch &&
       typeof pickerPatch.selectionPatch === "object" &&
@@ -288,11 +287,11 @@ test("form-traversal.ts resolves active import picker fields and patches viewpor
       pickerPatch.selectionPatch.target.kind === "sketch" &&
       pickerPatch.selectionPatch.plane !== null,
     "Viewport selection patches should reopen the selected sketch from the snapshot and attach its plane for reference-picker imports.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     collectionPatch !== null &&
       Array.isArray(collectionPatch.collectionPatch) &&
       collectionPatch.collectionPatch[0]?.kind === "face",
     "Reference-collection patches should append the selected target without sketch-plane reopening metadata.",
-  );
+  ).toBeTruthy();
 });

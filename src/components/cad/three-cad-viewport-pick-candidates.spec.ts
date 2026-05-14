@@ -1,7 +1,6 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 import * as THREE from "three";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type {
   RegionId,
@@ -101,14 +100,14 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     currentHoverTarget: null,
   });
 
-  expectTrue(
-    originCandidates.length === 1,
+  expect(
+    originCandidates.length,
     "The sketch datum origin should produce a projected pick candidate.",
-  );
-  expectTrue(
-    originCandidates[0]?.semanticClass === "sketchPoint",
+  ).toBe(1);
+  expect(
+    originCandidates[0]?.semanticClass,
     "The sketch datum origin should sort as a point, not as a reference wire.",
-  );
+  ).toBe("sketchPoint");
 
   const axisLine = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([
@@ -132,11 +131,10 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     } as THREE.Intersection<THREE.Object3D>,
   ]);
 
-  expectTrue(
-    resolveAllCandidates([...axisHit, ...originCandidates])?.target ===
-      originTarget,
+  expect(
+    resolveAllCandidates([...axisHit, ...originCandidates])?.target,
     "The origin point should remain pickable at the datum-axis crossing.",
-  );
+  ).toBe(originTarget);
 
   const axisCandidates = collectProjectedSketchCurveCandidates({
     clientX: viewportRect.left + 140,
@@ -151,15 +149,15 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     currentHoverTarget: null,
   });
 
-  expectTrue(
-    axisCandidates.length === 1,
+  expect(
+    axisCandidates.length,
     "The sketch datum axis should have a screen-space pick candidate.",
-  );
-  expectTrue(
+  ).toBe(1);
+  expect(
     axisCandidates[0]?.target.kind === "sketchDatumReference" &&
       axisCandidates[0].target.datumId === "xAxis",
     "The screen-space datum-axis candidate should preserve the datum reference target.",
-  );
+  ).toBeTruthy();
 
   const sessionAxisCandidates = collectProjectedSketchCurveCandidates({
     clientX: viewportRect.left + 140,
@@ -171,14 +169,14 @@ test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {
     currentHoverTarget: null,
   });
 
-  expectTrue(
+  expect(
     sessionAxisCandidates.some(
       (candidate) =>
         candidate.target.kind === "sketchDatumReference" &&
         candidate.target.datumId === "xAxis",
     ),
     "The active sketch session should provide datum-axis pick candidates even when the line renderable is not ray-pickable.",
-  );
+  ).toBeTruthy();
 
   axisLine.geometry.dispose();
   (axisLine.material as THREE.Material).dispose();
@@ -215,10 +213,10 @@ test("active sketch curves are collected as screen-space semantic candidates", (
     currentHoverTarget: null,
   });
 
-  expectTrue(
+  expect(
     lineCandidates.some((candidate) => candidate.target === lineTarget),
     "A pointer within the 10px sketch-curve radius should pick the semantic local line.",
-  );
+  ).toBeTruthy();
 
   const constructionCandidates = collectProjectedSketchCurveCandidates({
     clientX: 100,
@@ -230,12 +228,12 @@ test("active sketch curves are collected as screen-space semantic candidates", (
     currentHoverTarget: null,
   });
 
-  expectTrue(
+  expect(
     constructionCandidates.some(
       (candidate) => candidate.target === constructionTarget,
     ),
     "Dashed construction curves should remain pickable through semantic geometry, including visual dash gaps.",
-  );
+  ).toBeTruthy();
 
   const hoveredExitCandidates = collectProjectedSketchCurveCandidates({
     clientX: 100,
@@ -247,10 +245,10 @@ test("active sketch curves are collected as screen-space semantic candidates", (
     currentHoverTarget: lineTarget,
   });
 
-  expectTrue(
+  expect(
     hoveredExitCandidates.some((candidate) => candidate.target === lineTarget),
     "Hovered sketch curves should use the larger 14px exit radius.",
-  );
+  ).toBeTruthy();
 });
 
 test("semantic sketch curves keep existing candidate ranking against points and regions", () => {
@@ -292,14 +290,14 @@ test("semantic sketch curves keep existing candidate ranking against points and 
     depth: 0,
   });
 
-  expectTrue(
-    resolveAllCandidates([curve, point])?.target === pointTarget,
+  expect(
+    resolveAllCandidates([curve, point])?.target,
     "Sketch points should outrank nearby semantic curve candidates.",
-  );
-  expectTrue(
-    resolveAllCandidates([region, curve])?.target === curveTarget,
+  ).toBe(pointTarget);
+  expect(
+    resolveAllCandidates([region, curve])?.target,
     "Semantic curve candidates should outrank regions.",
-  );
+  ).toBe(curveTarget);
 });
 
 function makeCurveSession(sketchId: SketchId) {

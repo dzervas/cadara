@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionWithDraggedPointTarget } from "@/contracts/sketch/solver-core";
 
@@ -10,15 +9,15 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
     expected: readonly [number, number],
     message: string,
   ) {
-    expectTrue(actual, `${message} Missing point.`);
+    expect(actual, `${message} Missing point.`).toBeTruthy();
     const distance = Math.hypot(
       actual[0] - expected[0],
       actual[1] - expected[1],
     );
-    expectTrue(
+    expect(
       distance < 1e-4,
       `${message} Expected ${expected.join(", ")}, received ${actual.join(", ")}.`,
-    );
+    ).toBeTruthy();
   }
 
   function makePoint(pointId: string, label: string, x: number, y: number) {
@@ -632,10 +631,10 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
       targetTolerance: 1e-4,
     });
 
-    expectTrue(
-      result.kind === "solved",
+    expect(
+      result.kind,
       "Dragged-point solver should accept a free square translation.",
-    );
+    ).toBe("solved");
     const points = new Map(
       result.solvedSnapshot.solvedPoints.map((point) => [
         point.pointId,
@@ -684,10 +683,10 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
         targetTolerance: 1e-4,
       });
 
-      expectTrue(
-        result.kind === "solved",
+      expect(
+        result.kind,
         `Dragged-point solver should translate rectangle when dragging ${point.pointId}.`,
-      );
+      ).toBe("solved");
       const points = new Map(
         result.solvedSnapshot.solvedPoints.map((entry) => [
           entry.pointId,
@@ -733,10 +732,10 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
       targetTolerance: 1e-4,
     });
 
-    expectTrue(
-      result.kind === "solved",
+    expect(
+      result.kind,
       "Dragged-point solver should accept the logo-like free endpoint drag.",
-    );
+    ).toBe("solved");
     const points = new Map(
       result.solvedSnapshot.solvedPoints.map((point) => [
         point.pointId,
@@ -783,10 +782,10 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
         targetTolerance: 1e-4,
       });
 
-      expectTrue(
-        result.kind === "solved",
+      expect(
+        result.kind,
         `Dragged-point solver should accept a logo-like flip from ${entry.pointId}.`,
-      );
+      ).toBe("solved");
       const points = new Map(
         result.solvedSnapshot.solvedPoints.map((point) => [
           point.pointId,
@@ -821,16 +820,16 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
       targetTolerance: 1e-4,
     });
 
-    expectTrue(
-      result.kind === "blocked",
+    expect(
+      result.kind,
       "Dragged-point solver should block an unsatisfied fixed-point drag.",
-    );
-    expectTrue(
+    ).toBe("blocked");
+    expect(
       result.diagnostics.some(
         (diagnostic) => diagnostic.code === "drag-target-unsatisfied",
       ),
       "Blocked dragged-point solve should report a machine-readable diagnostic.",
-    );
+    ).toBeTruthy();
   }
 
   testDraggedPointSolvesFreeSquareTranslation();

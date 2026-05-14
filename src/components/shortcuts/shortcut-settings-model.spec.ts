@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   appendShortcutRecordingStep,
   completeShortcutRecording,
@@ -53,20 +52,20 @@ test("src/components/shortcuts/shortcut-settings-model.spec.ts", () => {
   state = appendShortcutRecordingStep(state, "g");
   state = appendShortcutRecordingStep(state, "f");
 
-  expectTrue(
+  expect(
     getShortcutSettingsDisplayLabel({
-      isRecording: state.recordingCommandId === "editor.focusSearch",
-      recordingSteps: state.recordingSteps,
-      shortcutLabel: "Ctrl+K",
-    }) === "G > F",
+        isRecording: state.recordingCommandId === "editor.focusSearch",
+        recordingSteps: state.recordingSteps,
+        shortcutLabel: "Ctrl+K",
+      }),
     "Recording display should update immediately while a replacement sequence is being edited.",
-  );
+  ).toBe("G > F");
 
   const recordedShortcut = getPendingRecordedShortcut(state);
-  expectTrue(
-    recordedShortcut === "g>f",
+  expect(
+    recordedShortcut,
     "Recorded steps should serialize to the profile override format.",
-  );
+  ).toBe("g>f");
 
   const editValidation = validateShortcutOverrideUpdate(
     registry,
@@ -74,22 +73,15 @@ test("src/components/shortcuts/shortcut-settings-model.spec.ts", () => {
       recordedShortcut,
     ]),
   );
-  expectTrue(
-    editValidation.nextOverrides !== null,
-    "Valid edited shortcuts should be accepted.",
-  );
+  expect(editValidation.nextOverrides, "Valid edited shortcuts should be accepted.").not.toBe(null);
   overrides = editValidation.nextOverrides;
   state = completeShortcutRecording(state, editValidation.conflicts);
 
-  expectTrue(
-    state.recordingCommandId === null,
-    "Saving a valid shortcut should exit recording mode.",
-  );
-  expectTrue(
-    getReferenceShortcutLabel(registry, overrides, "editor.focusSearch") ===
-      "G > F",
+  expect(state.recordingCommandId, "Saving a valid shortcut should exit recording mode.").toBe(null);
+  expect(
+    getReferenceShortcutLabel(registry, overrides, "editor.focusSearch"),
     "Reference display should use the edited shortcut immediately.",
-  );
+  ).toBe("G > F");
 
   state = startShortcutRecording(state, "editor.focusSearch");
   state = appendShortcutRecordingStep(state, "mod+z");
@@ -100,46 +92,45 @@ test("src/components/shortcuts/shortcut-settings-model.spec.ts", () => {
       getPendingRecordedShortcut(state)!,
     ]),
   );
-  expectTrue(
-    conflictValidation.nextOverrides === null,
+  expect(
+    conflictValidation.nextOverrides,
     "Conflicting shortcuts should not produce savable overrides.",
-  );
+  ).toBe(null);
   state = completeShortcutRecording(state, conflictValidation.conflicts);
 
-  expectTrue(
-    state.conflictMessage === "Conflict with editor.undo, editor.focusSearch.",
+  expect(
+    state.conflictMessage,
     "Conflicting edits should expose the ambiguous commands.",
-  );
-  expectTrue(
-    state.recordingCommandId === "editor.focusSearch",
+  ).toBe("Conflict with editor.undo, editor.focusSearch.");
+  expect(
+    state.recordingCommandId,
     "Conflicting edits should keep recording active so the user can correct the shortcut.",
-  );
-  expectTrue(
-    getReferenceShortcutLabel(registry, overrides, "editor.focusSearch") ===
-      "G > F",
+  ).toBe("editor.focusSearch");
+  expect(
+    getReferenceShortcutLabel(registry, overrides, "editor.focusSearch"),
     "Invalid conflicting edits should not replace the current display shortcut.",
-  );
+  ).toBe("G > F");
 
   overrides = disableCommandShortcut(overrides, "editor.focusSearch");
-  expectTrue(
+  expect(
     getPrimaryShortcut(
-      createEffectiveKeymap(registry, overrides),
-      "editor.focusSearch",
-    ) === null,
-    "Disabling should remove the effective shortcut.",
-  );
-  expectTrue(
-    getShortcutSettingsDisplayLabel({
-      isRecording: false,
-      recordingSteps: [],
-      shortcutLabel: getReferenceShortcutLabel(
-        registry,
-        overrides,
+        createEffectiveKeymap(registry, overrides),
         "editor.focusSearch",
       ),
-    }) === "Unassigned",
+    "Disabling should remove the effective shortcut.",
+  ).toBe(null);
+  expect(
+    getShortcutSettingsDisplayLabel({
+        isRecording: false,
+        recordingSteps: [],
+        shortcutLabel: getReferenceShortcutLabel(
+          registry,
+          overrides,
+          "editor.focusSearch",
+        ),
+      }),
     "Disabled shortcuts should display as unassigned immediately.",
-  );
+  ).toBe("Unassigned");
 });
 
 function getReferenceShortcutLabel(

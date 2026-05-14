@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   solveSketchDefinitionCore,
@@ -137,10 +136,10 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
   });
 
   const parsed = validateSketchDefinition(pointOnProjectedLine);
-  expectTrue(
+  expect(
     parsed.success,
     "Runtime schema should accept reference-targeted constraint payloads.",
-  );
+  ).toBeTruthy();
 
   const solved = solveSketchDefinitionCore({
     definition: pointOnProjectedLine,
@@ -151,34 +150,34 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
   const solvedPoint = solved.solvedSnapshot.solvedPoints.find(
     (point) => point.pointId === "sketch_point_a",
   );
-  expectTrue(
+  expect(
     solvedPoint,
     "Reference-targeted solve should return the local point.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     Math.abs(solvedPoint.solvedPosition[1]) < 1e-4,
     "Point-on-projected-line should solve local point onto projected line.",
-  );
-  expectTrue(
-    solved.solvedSnapshot.constraintStatuses[0]?.status === "satisfied",
+  ).toBeTruthy();
+  expect(
+    solved.solvedSnapshot.constraintStatuses[0]?.status,
     "Satisfied reference-targeted constraints should report satisfied status.",
-  );
+  ).toBe("satisfied");
 
   const invalid = validateSketchDefinitionCore({
     definition: pointOnProjectedLine,
     projectedReferences: [],
     tolerances,
   });
-  expectTrue(
-    !invalid.isValid,
+  expect(
+    invalid.isValid,
     "Missing projected target should invalidate the solve request.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     invalid.diagnostics.some(
       (diagnostic) => diagnostic.code === "missing-projected-constraint-target",
     ),
     "Missing projected target should produce a machine-readable diagnostic.",
-  );
+  ).toBeTruthy();
 
   const pointOnProjectedArc = {
     ...makeBaseDefinition({
@@ -229,21 +228,21 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
   const arcPoint = solvedArcPoint.solvedSnapshot.solvedPoints.find(
     (point) => point.pointId === "sketch_point_a",
   );
-  expectTrue(
+  expect(
     arcPoint,
     "Point-on-projected-arc solve should return the local point.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     Math.min(
       Math.hypot(arcPoint.solvedPosition[0] - 5, arcPoint.solvedPosition[1]),
       Math.hypot(arcPoint.solvedPosition[0], arcPoint.solvedPosition[1] - 5),
     ) < 1e-3,
     "Point-on-projected-arc should solve to the finite arc sweep instead of the full parent circle.",
-  );
-  expectTrue(
-    solvedArcPoint.solvedSnapshot.constraintStatuses[0]?.status === "satisfied",
+  ).toBeTruthy();
+  expect(
+    solvedArcPoint.solvedSnapshot.constraintStatuses[0]?.status,
     "Point-on-projected-arc should report satisfied when solved onto the finite arc.",
-  );
+  ).toBe("satisfied");
 
   const perpendicular = solveSketchDefinitionCore({
     definition: makeBaseDefinition({
@@ -267,14 +266,14 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
   const solvedLine = perpendicular.solvedSnapshot.solvedEntities.find(
     (entity) => entity.entityId === "sketch_entity_line",
   );
-  expectTrue(
-    solvedLine?.kind === "lineSegment",
+  expect(
+    solvedLine?.kind,
     "Projected perpendicular solve should return local solved line.",
-  );
-  expectTrue(
+  ).toBe("lineSegment");
+  expect(
     Math.abs(solvedLine.endPosition[0] - solvedLine.startPosition[0]) < 1e-3,
     "Perpendicular-to-projected-line should solve the local line vertical against a horizontal projected line.",
-  );
+  ).toBeTruthy();
 
   const normalProjectedCircle = {
     ...makeBaseDefinition({
@@ -318,20 +317,20 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     ],
   } satisfies SketchDefinition;
   const parsedNormal = validateSketchDefinition(normalProjectedCircle);
-  expectTrue(
+  expect(
     parsedNormal.success,
     "Runtime schema should accept projected normal constraint payloads.",
-  );
+  ).toBeTruthy();
   const solvedNormal = solveSketchDefinitionCore({
     definition: normalProjectedCircle,
     projectedReferences: [projectedCircle],
     tolerances,
     partialSolvePolicy: "bestEffort",
   });
-  expectTrue(
-    solvedNormal.solvedSnapshot.constraintStatuses[0]?.status === "satisfied",
+  expect(
+    solvedNormal.solvedSnapshot.constraintStatuses[0]?.status,
     "Projected normal should report satisfied when line, contact point, and projected circle are aligned.",
-  );
+  ).toBe("satisfied");
 
   const symmetricProjectedLine = {
     ...makeBaseDefinition({
@@ -374,21 +373,20 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     ],
   } satisfies SketchDefinition;
   const parsedSymmetric = validateSketchDefinition(symmetricProjectedLine);
-  expectTrue(
+  expect(
     parsedSymmetric.success,
     "Runtime schema should accept projected symmetric constraint payloads.",
-  );
+  ).toBeTruthy();
   const solvedSymmetric = solveSketchDefinitionCore({
     definition: symmetricProjectedLine,
     projectedReferences: [projectedLine],
     tolerances,
     partialSolvePolicy: "bestEffort",
   });
-  expectTrue(
-    solvedSymmetric.solvedSnapshot.constraintStatuses[0]?.status ===
-      "satisfied",
+  expect(
+    solvedSymmetric.solvedSnapshot.constraintStatuses[0]?.status,
     "Projected symmetric should report satisfied when points are mirrored about the projected line.",
-  );
+  ).toBe("satisfied");
 
   const tangentOutsideArc = solveSketchDefinitionCore({
     definition: {
@@ -477,10 +475,10 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
       (status) =>
         status.constraintId === "constraint_tangent_projected_geometry_arc",
     );
-  expectTrue(
-    tangentStatus?.status === "unsatisfied",
+  expect(
+    tangentStatus?.status,
     "Tangent-to-projected-arc should reject tangency points outside the finite arc sweep.",
-  );
+  ).toBe("unsatisfied");
 
   const datumCoincident = solveSketchDefinitionCore({
     definition: makeBaseDefinition({
@@ -497,14 +495,14 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
   const datumCoincidentPoint = datumCoincident.solvedSnapshot.solvedPoints.find(
     (point) => point.pointId === "sketch_point_a",
   );
-  expectTrue(
+  expect(
     datumCoincidentPoint &&
       Math.hypot(
         datumCoincidentPoint.solvedPosition[0],
         datumCoincidentPoint.solvedPosition[1],
       ) < 1e-4,
     "Coincident-to-origin should solve the local point onto the sketch origin datum.",
-  );
+  ).toBeTruthy();
 
   const datumParallel = solveSketchDefinitionCore({
     definition: makeBaseDefinition({
@@ -521,13 +519,13 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
   const datumParallelLine = datumParallel.solvedSnapshot.solvedEntities.find(
     (entity) => entity.entityId === "sketch_entity_line",
   );
-  expectTrue(
+  expect(
     datumParallelLine?.kind === "lineSegment" &&
       Math.abs(
         datumParallelLine.endPosition[1] - datumParallelLine.startPosition[1],
       ) < 1e-3,
     "Parallel-to-axis should solve the local line onto the sketch-local axis direction.",
-  );
+  ).toBeTruthy();
 
   const datumPointDistanceDefinition: SketchDefinition = {
     ...makeBaseDefinition({
@@ -561,10 +559,10 @@ test("src/contracts/sketch/reference-constraint-targets.spec.ts", async () => {
     datumPointDistance.solvedSnapshot.dimensionStatuses.find(
       (status) => status.dimensionId === "dimension_point_datum_distance",
     );
-  expectTrue(
+  expect(
     datumPointDistanceStatus?.status === "driving" &&
       datumPointDistanceStatus.solvedValue !== null &&
       Math.abs(datumPointDistanceStatus.solvedValue - Math.hypot(4, 5)) < 1e-4,
     "Point-to-origin datum dimensions should evaluate against the sketch origin without projected helper geometry.",
-  );
+  ).toBeTruthy();
 });

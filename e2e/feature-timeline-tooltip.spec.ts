@@ -93,8 +93,8 @@ test("feature error timeline tooltip remains fully visible above the history bar
   });
   const tolerance = 1;
 
-  expect(geometry.tooltipParentIsBody).toBe(true);
-  expect(geometry.historyScrollerContainsTooltip).toBe(false);
+  expect(geometry.tooltipParentIsBody).toBeTruthy();
+  expect(geometry.historyScrollerContainsTooltip).toBeFalsy();
   expect(geometry.historyScrollerOverflowY).toBe("hidden");
   expect(geometry.tooltipPosition).toBe("fixed");
   expect(geometry.tooltipZIndex).toBeGreaterThan(1_000_000);

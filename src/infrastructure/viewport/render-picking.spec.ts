@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import * as THREE from "three";
 
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
@@ -690,7 +689,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     );
 
     const bindings = collectBindings(root);
-    expectTrue(bindings !== null);
+    expect(bindings).not.toBe(null);
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], sketchTarget);
     assertEqual(
@@ -757,15 +756,19 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(facePerimeter);
 
     const bindings = collectBindings(root);
-    expectTrue(bindings !== null);
+    expect(bindings).not.toBe(null);
 
-    expectTrue(
-      !bindings.pickables.includes(facePerimeter),
+    expect(
+      bindings.pickables.includes(facePerimeter),
       "Face hover perimeter overlays must not be pickable.",
-    );
+    ).toBeFalsy();
 
-    expectTrue(faceMesh.material instanceof THREE.MeshStandardMaterial);
-    expectTrue(facePerimeter.material instanceof THREE.LineBasicMaterial);
+    expect(
+      faceMesh.material instanceof THREE.MeshStandardMaterial,
+    ).toBeTruthy();
+    expect(
+      facePerimeter.material instanceof THREE.LineBasicMaterial,
+    ).toBeTruthy();
     const baselineFaceColor = faceMesh.material.color.getHex();
 
     updateWorkspaceHighlight(
@@ -816,7 +819,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(edgeLine);
 
     const bindings = collectBindings(root);
-    expectTrue(bindings !== null);
+    expect(bindings).not.toBe(null);
 
     updateWorkspaceHighlight(
       bindings.targetToObjects,
@@ -824,13 +827,15 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
       null,
     );
 
-    expectTrue(faceMesh.material instanceof THREE.MeshStandardMaterial);
+    expect(
+      faceMesh.material instanceof THREE.MeshStandardMaterial,
+    ).toBeTruthy();
     assertEqual(
       faceMesh.material.color.getHex(),
       GEOMETRY_HIGHLIGHT_COLORS.selected,
       "Selected body targets must highlight owned face renderables.",
     );
-    expectTrue(edgeLine.material instanceof THREE.LineBasicMaterial);
+    expect(edgeLine.material instanceof THREE.LineBasicMaterial).toBeTruthy();
     assertEqual(
       edgeLine.material.color.getHex(),
       GEOMETRY_HIGHLIGHT_COLORS.selected,
@@ -844,14 +849,14 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(marker.group);
 
     const bindings = collectBindings(root);
-    expectTrue(
-      bindings !== null,
+    expect(
+      bindings,
       "collectBindings must return a result for populated roots.",
-    );
-    expectTrue(
+    ).not.toBe(null);
+    expect(
       bindings.pickables.includes(marker.group),
       "collectBindings must include marker group roots as pickables.",
-    );
+    ).toBeTruthy();
 
     const objects =
       bindings.targetToObjects.get("vertex:body_a:vertex_top_right") ?? [];
@@ -873,7 +878,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(marker.group);
 
     const bindings = collectBindings(root);
-    expectTrue(bindings !== null);
+    expect(bindings).not.toBe(null);
 
     updateWorkspaceHighlight(
       bindings.targetToObjects,
@@ -881,15 +886,17 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
       null,
     );
 
-    expectTrue(
+    expect(
       marker.visibleMesh.material instanceof THREE.MeshStandardMaterial,
-    );
+    ).toBeTruthy();
     assertEqual(
       marker.visibleMesh.material.color.getHex(),
       GEOMETRY_HIGHLIGHT_COLORS.selected,
       "Selected marker mesh must receive the selected wire color.",
     );
-    expectTrue(marker.pickProxy.material instanceof THREE.MeshBasicMaterial);
+    expect(
+      marker.pickProxy.material instanceof THREE.MeshBasicMaterial,
+    ).toBeTruthy();
     assertEqual(
       marker.pickProxy.material.opacity,
       0,
@@ -903,15 +910,15 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(marker.group);
 
     const bindings = collectBindings(root);
-    expectTrue(bindings !== null);
+    expect(bindings).not.toBe(null);
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], null, [
       vertexRenderable.binding.target,
     ]);
 
-    expectTrue(
+    expect(
       marker.visibleMesh.material instanceof THREE.MeshStandardMaterial,
-    );
+    ).toBeTruthy();
     assertEqual(
       marker.visibleMesh.material.color.getHex(),
       GEOMETRY_HIGHLIGHT_COLORS.hover,
@@ -937,10 +944,10 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
       segmentKeys.add(start < end ? `${start}|${end}` : `${end}|${start}`);
     }
 
-    expectTrue(
-      !segmentKeys.has("0,0,0|1,1,0"),
+    expect(
+      segmentKeys.has("0,0,0|1,1,0"),
       "Face perimeter extraction must exclude internal triangulation diagonals.",
-    );
+    ).toBeFalsy();
     boundaryGeometry.dispose();
   }
 
@@ -999,10 +1006,10 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
       },
     };
     const material = createRenderableMeshMaterial(regionRenderable, "document");
-    expectTrue(
+    expect(
       material.polygonOffsetFactor < 0 && material.polygonOffsetUnits < 0,
       "Committed sketch regions should be biased toward the camera to avoid coplanar depth flicker.",
-    );
+    ).toBeTruthy();
     material.dispose();
   }
 

@@ -1,6 +1,5 @@
 import { MantineProvider } from "@mantine/core";
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -17,46 +16,46 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
       placement={{ kind: "viewport", right: 152, top: 16 }}
     />,
   );
-  expectTrue(
+  expect(
     infoMarkup.includes('role="status"'),
     "Info notifications should expose status semantics.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes('aria-live="polite"'),
     "Info notifications should use non-interruptive live semantics.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes('data-notification-type="info"'),
     "Info notifications should expose their type hook.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes('data-notification-icon="info"'),
     "Info notifications should expose their icon hook.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes('data-notification-accent="info"'),
     "Info notifications should expose their accent hook.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes("/icons/info.svg"),
     "Info notifications should use the info icon asset.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes("Workbench action"),
     "Info notifications should render the title.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes("Saved the document."),
     "Info notifications should render the message body.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes("Dismiss notification"),
     "Dismissible notifications should render a dismiss control.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     infoMarkup.includes("right:152px") && infoMarkup.includes("top:16px"),
     "Viewport notifications should render viewport placement.",
-  );
+  ).toBeTruthy();
 
   const warningMarkup = renderNotification(
     <WorkbenchNotification
@@ -66,22 +65,22 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
       onDismiss={() => undefined}
     />,
   );
-  expectTrue(
+  expect(
     warningMarkup.includes('role="status"'),
     "Warning notifications should expose status semantics.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     warningMarkup.includes('data-notification-type="warning"'),
     "Warning notifications should expose their type hook.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     warningMarkup.includes("/icons/warning-overlay.svg"),
     "Warning notifications should use a warning icon asset.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     warningMarkup.includes("var(--workbench-notification-warning-accent)"),
     "Warning notifications should resolve accent color through semantic theme tokens.",
-  );
+  ).toBeTruthy();
 
   const errorMarkup = renderNotification(
     <WorkbenchNotification
@@ -92,30 +91,30 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
       onDismiss={() => undefined}
     />,
   );
-  expectTrue(
+  expect(
     errorMarkup.includes('role="alert"'),
     "Error notifications should expose alert semantics.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     errorMarkup.includes('aria-live="assertive"'),
     "Error notifications should use assertive live semantics.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     errorMarkup.includes('data-notification-type="error"'),
     "Error notifications should expose their type hook.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     errorMarkup.includes("/icons/error.svg"),
     "Error notifications should use the error icon asset.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     errorMarkup.includes("Reset stored history"),
     "Notifications should render optional action controls.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     errorMarkup.includes("var(--workbench-notification-error-border)"),
     "Error notifications should resolve border color through semantic theme tokens.",
-  );
+  ).toBeTruthy();
 });
 
 function renderNotification(node: ReactElement) {

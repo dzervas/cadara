@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createAppError } from "@/contracts/errors";
 import { createNewSketchSessionFromSupport } from "@/domain/editor/sketch-session";
 import { createFeatureEditSession } from "@/domain/editor/feature-editing";
@@ -67,7 +66,7 @@ test("error-mapping.ts extracts effect context for feature, sketch, and special-
     payload: {},
   } satisfies EditorEffect);
 
-  expectTrue(
+  expect(
     featureContext.some(
       (entry) =>
         entry.key === "previewId" && entry.value === featureSession.previewId,
@@ -81,15 +80,15 @@ test("error-mapping.ts extracts effect context for feature, sketch, and special-
           entry.key === "baseRevisionId" && entry.value === "rev_fixture",
       ),
     "Feature effect context should include the preview, feature, and revision correlation fields needed for error reporting.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     sketchContext.some(
       (entry) =>
         entry.key === "sketchId" && entry.value === sketchSession.sketchId,
     ),
     "Sketch effect context should include the active sketch id when the effect is sketch-scoped.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     specialModeContext.some(
       (entry) => entry.key === "modeId" && entry.value === "fixture.mode",
     ) &&
@@ -102,7 +101,7 @@ test("error-mapping.ts extracts effect context for feature, sketch, and special-
           entry.value === "reference-image-replace-image",
       ),
     "Sketch special-mode errors should preserve the mode and effect identity in their context.",
-  );
+  ).toBeTruthy();
 });
 
 test("error-mapping.ts maps each editor effect type to its typed failure event seam", () => {
@@ -123,11 +122,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.snapshotFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.snapshotFailed" &&
             event.revisionId === "rev_fixture",
           "Snapshot failures should preserve the document revision context.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -143,11 +142,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.sketchSessionOpenFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.sketchSessionOpenFailed" &&
             event.commandSessionId === "command_sketch-1",
           "Sketch-open failures should preserve the command session correlation.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -161,11 +160,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.featureSessionHydrationFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.featureSessionHydrationFailed" &&
             event.commandSessionId === "command_feature-1",
           "Feature hydration failures should preserve the originating command session.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -179,11 +178,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.featurePreviewFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.featurePreviewFailed" &&
             event.baseRevisionId === "rev_fixture",
           "Preview failures should preserve the base revision they were evaluated against.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -198,11 +197,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.featureCommitFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.featureCommitFailed" &&
             event.baseRevisionId === "rev_fixture",
           "Feature-commit failures should preserve the mutation basis revision.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -217,11 +216,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.sketchCommitFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.sketchCommitFailed" &&
             event.commandSessionId === "command_sketch-1",
           "Sketch-commit failures should preserve the command session correlation.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -235,11 +234,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.sketchReferenceProjectionFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.sketchReferenceProjectionFailed" &&
             event.baseRevisionId === "rev_fixture",
           "Reference-projection failures should preserve the base revision context.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -255,11 +254,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.sketchReferenceImageImportFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.sketchReferenceImageImportFailed" &&
             event.commandSessionId === "command_sketch-1",
           "Reference-image import failures should map back into the dedicated image-import failure event.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -276,11 +275,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.sketchSpecialModeEffectFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.sketchSpecialModeEffectFailed" &&
             event.effectId === "replace-image",
           "Special-mode failures should preserve the effect id so the reducer can reconcile the pending mode request.",
-        );
+        ).toBeTruthy();
       },
     },
     {
@@ -295,11 +294,11 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       },
       expectedType: "effect.documentCursorMoveFailed",
       assertResult: (event) => {
-        expectTrue(
+        expect(
           event.type === "effect.documentCursorMoveFailed" &&
             event.baseRevisionId === "rev_fixture",
           "Cursor-move failures should preserve the base revision used for the history mutation.",
-        );
+        ).toBeTruthy();
       },
     },
   ];
@@ -310,17 +309,18 @@ test("error-mapping.ts maps each editor effect type to its typed failure event s
       new Error("Effect boom."),
       "Fallback.",
     );
-    expectTrue(
-      event.type === expectedType,
+    expect(
+      event.type,
       `Expected ${effect.type} failures to map to ${expectedType}.`,
-    );
+    ).toBe(expectedType);
     assertResult(event);
-    expectTrue(
+
+    expect(
       "message" in event
         ? event.message === "Effect boom."
         : event.error === "Effect boom.",
       `${effect.type} failures should preserve the normalized error message on the mapped event.`,
-    );
+    ).toBeTruthy();
   }
 });
 
@@ -336,15 +336,15 @@ test("error-mapping.ts extracts revision ids and diagnostic codes only from vali
     ],
   });
 
-  expectTrue(
+  expect(
     getAppErrorRevisionId(appError, "actualRevisionId") === "rev_actual" &&
       getAppErrorRevisionId(appError, "invalidRevision") === undefined,
     "Revision extraction should only accept revision-shaped context values.",
-  );
-  expectTrue(
-    getAppErrorDiagnosticCode(appError) === "repository-head-conflict",
+  ).toBeTruthy();
+  expect(
+    getAppErrorDiagnosticCode(appError),
     "Diagnostic-code extraction should return the non-empty diagnostic code from app-error context.",
-  );
+  ).toBe("repository-head-conflict");
 });
 
 test("error-mapping.ts filters non-durable targets and converts modeling mutation app errors into diagnostics", () => {
@@ -371,19 +371,19 @@ test("error-mapping.ts filters non-durable targets and converts modeling mutatio
     durableTarget,
   );
 
-  expectTrue(
+  expect(
     isModelingMutationError(modelingError),
     "Modeling diagnostic app errors should be recognized as modeling-mutation failures.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     diagnostic.code === "stale-face" &&
       diagnostic.message === "Face selection is stale." &&
       diagnostic.target === durableTarget,
     "Modeling mutation conversion should preserve the diagnostic code, message, and durable target.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getDurableDiagnosticTarget(durableTarget) === durableTarget &&
       getDurableDiagnosticTarget(projectedTarget) === null,
     "Non-durable projected or sketch-only targets should be stripped before attaching diagnostics to modeling results.",
-  );
+  ).toBeTruthy();
 });

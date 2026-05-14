@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { ResultAsync, createAppError } from "@/contracts/errors";
 import type { ImportProvider } from "@/contracts/import/provider";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
@@ -139,16 +138,16 @@ test("src/domain/import/orchestrator.spec.ts", async () => {
     },
   });
 
-  expectTrue(
-    result.revisionId === "rev_4",
+  expect(
+    result.revisionId,
     "Import action application should advance to the final mutation revision.",
-  );
-  expectTrue(
+  ).toBe("rev_4");
+  expect(
     result.createdEntityIds.variableIds[0] === "var_scale" &&
       result.createdEntityIds.featureIds[0] === "feature_image_support" &&
       result.createdEntityIds.sketchIds[0] === "sketch_imported_image",
     "Import action application should preserve created ids for variables, features, and sketches.",
-  );
+  ).toBeTruthy();
 
   const file = new File(
     [new Uint8Array([0xde, 0xad, 0xbe, 0xef])],
@@ -156,7 +155,7 @@ test("src/domain/import/orchestrator.spec.ts", async () => {
     { type: "model/step" },
   );
   const source = await resolveLocalFileImportSource(file);
-  expectTrue(
+  expect(
     source.name === "fixture.step" &&
       source.origin.kind === "localFile" &&
       source.origin.fileName === "fixture.step" &&
@@ -164,7 +163,7 @@ test("src/domain/import/orchestrator.spec.ts", async () => {
       source.bytes.length === 4 &&
       source.fingerprint.startsWith("sha256:"),
     "Local-file import source resolution should preserve file metadata, bytes, and a deterministic fingerprint.",
-  );
+  ).toBeTruthy();
 
   const review = {
     providerReview: { units: "mm" as const },
@@ -187,18 +186,18 @@ test("src/domain/import/orchestrator.spec.ts", async () => {
     },
     createDefaultSelections(returnedReview) {
       providerCalls.push("defaults");
-      expectTrue(
-        returnedReview === review,
+      expect(
+        returnedReview,
         "Import session creation should forward the provider review into default-selection creation.",
-      );
+      ).toBe(review);
       return { body: "Body 1" };
     },
     getReviewFormSchema(returnedReview, selections) {
       providerCalls.push("schema");
-      expectTrue(
+      expect(
         returnedReview === review && selections.body === "Body 1",
         "Import session creation should build form schema from the provider review and default selections.",
-      );
+      ).toBeTruthy();
       return { sections: [] } as FeatureEditorFormSchema;
     },
     applySelectionPatch(_review, selections) {
@@ -206,13 +205,13 @@ test("src/domain/import/orchestrator.spec.ts", async () => {
     },
     async prepare(input) {
       providerCalls.push("prepare");
-      expectTrue(
+      expect(
         input.source === source &&
           input.review === review &&
           input.selections.body === "Body 1" &&
           input.capabilities.context.documentId === "doc_workspace",
         "Prepared import actions should receive the resolved source, persisted review, selections, and import capabilities.",
-      );
+      ).toBeTruthy();
       return {
         createFeatures: [
           {
@@ -261,14 +260,14 @@ test("src/domain/import/orchestrator.spec.ts", async () => {
       },
     },
   });
-  expectTrue(
+  expect(
     session.providerId === "step" &&
       session.resolvedSource === source &&
       session.review === review &&
       (session.selections as { body: string }).body === "Body 1" &&
       providerCalls.slice(0, 3).join(",") === "review,defaults,schema",
     "Import session creation should run provider review, default selection, and form-schema wiring in order.",
-  );
+  ).toBeTruthy();
 
   const prepared = await prepareImportActions({
     provider,
@@ -304,10 +303,10 @@ test("src/domain/import/orchestrator.spec.ts", async () => {
       },
     },
   });
-  expectTrue(
+  expect(
     providerCalls.includes("prepare") &&
       prepared.createFeatures?.[0]?.featureLabel === "Imported plane" &&
       prepared.diagnostics?.[0]?.message === "Imported with defaults.",
     "Prepared import actions should come directly from the provider and preserve provider diagnostics.",
-  );
+  ).toBeTruthy();
 });

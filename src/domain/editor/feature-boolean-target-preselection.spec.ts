@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import type {
   RenderableEntityRecord,
   RenderPoint3D,
@@ -35,21 +34,21 @@ test("feature boolean target preselection classifies and applies conservative de
     candidateBodyIds: ["body_a" as BodyId],
     settings: tolerance,
   });
-  expectTrue(
+  expect(
     intersecting.kind === "intersects" && intersecting.bodyId === "body_a",
     "Volumetric preview/body overlap should classify as an intersection with the target body.",
-  );
+  ).toBeTruthy();
 
   const intersectingSession = applyFeatureBooleanTargetPreselection(
     createExtrudeSession(),
     intersecting,
   );
-  expectTrue(
+  expect(
     intersectingSession.draft.operation === "cut" &&
       intersectingSession.draft.booleanScope.kind === "targetBody" &&
       intersectingSession.draft.booleanScope.bodyId === "body_a",
     "Intersecting basic-feature previews should preselect cut with the intersecting body.",
-  );
+  ).toBeTruthy();
 
   const coplanar = classifyPreviewBooleanTarget({
     previewRenderables: [
@@ -61,21 +60,21 @@ test("feature boolean target preselection classifies and applies conservative de
     candidateBodyIds: ["body_a" as BodyId],
     settings: tolerance,
   });
-  expectTrue(
+  expect(
     coplanar.kind === "coplanarContact" && coplanar.bodyId === "body_a",
     "Coplanar preview/body face overlap should classify as coplanar contact.",
-  );
+  ).toBeTruthy();
 
   const coplanarSession = applyFeatureBooleanTargetPreselection(
     createExtrudeSession(),
     coplanar,
   );
-  expectTrue(
+  expect(
     coplanarSession.draft.operation === "join" &&
       coplanarSession.draft.booleanScope.kind === "targetBody" &&
       coplanarSession.draft.booleanScope.bodyId === "body_a",
     "Coplanar basic-feature previews should preselect join with the contacted body.",
-  );
+  ).toBeTruthy();
 
   const noRelationship = classifyPreviewBooleanTarget({
     previewRenderables: [
@@ -91,12 +90,12 @@ test("feature boolean target preselection classifies and applies conservative de
     createExtrudeSession(),
     noRelationship,
   );
-  expectTrue(
+  expect(
     noRelationship.kind === "none" &&
       standaloneSession.draft.operation === "newBody" &&
       standaloneSession.draft.booleanScope.kind === "standalone",
     "No reliable relationship should keep the basic-feature draft standalone.",
-  );
+  ).toBeTruthy();
 
   const prioritized = classifyPreviewBooleanTarget({
     previewRenderables: [
@@ -110,10 +109,10 @@ test("feature boolean target preselection classifies and applies conservative de
     candidateBodyIds: ["body_a" as BodyId, "body_b" as BodyId],
     settings: tolerance,
   });
-  expectTrue(
+  expect(
     prioritized.kind === "intersects" && prioritized.bodyId === "body_b",
     "Reliable intersection should take precedence over coplanar contact.",
-  );
+  ).toBeTruthy();
 });
 
 test("feature boolean target preselection maps advanced intents and preserves manual overrides", () => {
@@ -129,11 +128,11 @@ test("feature boolean target preselection maps advanced intents and preserves ma
     { kind: "coplanarContact", bodyId: "body_a" as BodyId },
   );
 
-  expectTrue(
+  expect(
     advancedSession.draft.operationIntent === "add" &&
       advancedSession.draft.targetBodyTargets[0]?.bodyId === "body_a",
     "Advanced boolean-capable create features should map coplanar contact to add with a target body.",
-  );
+  ).toBeTruthy();
 
   const automatic = applyFeatureBooleanTargetPreselection(
     createExtrudeSession(),
@@ -148,12 +147,12 @@ test("feature boolean target preselection maps advanced intents and preserves ma
     bodyId: "body_b" as BodyId,
   });
 
-  expectTrue(
+  expect(
     preserved.draft.operation === "join" &&
       preserved.draft.booleanScope.kind === "targetBody" &&
       preserved.draft.booleanScope.bodyId === "body_manual",
     "Manual operation and target changes should survive later preview classification changes.",
-  );
+  ).toBeTruthy();
 });
 
 function createExtrudeSession() {

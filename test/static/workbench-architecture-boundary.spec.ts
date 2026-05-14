@@ -1,8 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 const ROOT = process.cwd();
 const LAYER_ROOTS = [
   "src/application",
@@ -30,10 +29,10 @@ test("src/app/workbench-architecture-boundary.spec.ts", () => {
     }
   }
 
-  expectTrue(
-    offenders.length === 0,
+  expect(
+    offenders.length,
     `Modules outside src/app must not import app-layer workbench modules.\n${offenders.join("\n")}`,
-  );
+  ).toBe(0);
 });
 
 test("src/app/workbench-architecture-boundary.spec.ts tool activation routing", () => {
@@ -62,37 +61,37 @@ test("src/app/workbench-architecture-boundary.spec.ts tool activation routing", 
     "utf8",
   );
 
-  expectTrue(
+  expect(
     contextSource.includes("activateTool:"),
     "Workbench command context should expose a shared tool activation entrypoint.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     shortcutSource.includes("activateTool") &&
       !shortcutSource.includes("triggerTool: (toolId"),
     "Shortcut handlers should invoke the shared tool activation entrypoint instead of owning a separate trigger function contract.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolButtonSource.includes("useWorkbenchCommandHandlers") &&
       !toolButtonSource.includes("useToolActions"),
     "Toolbar tool buttons should use the shared workbench command handlers rather than calling tool hooks directly.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     dropdownSource.includes("useWorkbenchCommandHandlers") &&
       !dropdownSource.includes("useToolActions"),
     "Toolbar dropdown triggers should use the shared workbench command handlers rather than calling tool hooks directly.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     workbenchSource.includes("activateTool: triggerTool"),
     "CadWorkbench should inject the shared tool activation entrypoint from its application composition layer.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolActionsSource.includes("getToolCommandBehavior") &&
       toolActionsSource.includes("resolveToolActivationMode") &&
       !toolActionsSource.includes("isRegisteredSketchToolId") &&
       !toolActionsSource.includes("isRegisteredSketchConstraintToolId") &&
       !toolActionsSource.includes("isRegisteredSketchEditToolId"),
     "Tool activation policy should flow through shared tool metadata helpers instead of duplicating sketch tool classification in the hook layer.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/app/workbench-architecture-boundary.spec.ts workbench document ownership routing", () => {
@@ -124,27 +123,27 @@ test("src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
     "utf8",
   );
 
-  expectTrue(
+  expect(
     ownerHookSource.includes("createWorkbenchDocumentOwner") &&
       ownerServiceSource.includes("document.snapshotLoaded") &&
       ownerServiceSource.includes("document.replaced"),
     "Workbench document owner should keep distinct incremental snapshot and whole-document replacement handoffs while the hook remains a thin adapter.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     historySource.includes("useWorkbenchDocumentOwner") &&
       !historySource.includes("modelingService.updateDocumentVariable") &&
       !historySource.includes("modelingService.reorderDocumentHistory") &&
       !historySource.includes("modelingService.getCurrentDocumentSnapshot"),
     "Workbench history controller should delegate variable and reorder ownership to the shared document owner hook.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     importSource.includes("useWorkbenchDocumentOwner") &&
       !importSource.includes("applyImportPreparedActions") &&
       !importSource.includes("prepareImportActions") &&
       !importSource.includes("applyLoadedSnapshot"),
     "Workbench part import controller should delegate accepted import completion through the shared document owner hook.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     workbenchSource.includes(
       "const documentOwner = useWorkbenchDocumentOwner()",
     ) &&
@@ -153,12 +152,12 @@ test("src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
       !workbenchSource.includes("modelingService.commitSketch") &&
       !workbenchSource.includes("modelingService.renameBody"),
     "CadWorkbench should not own ordinary document mutation sequencing once the shared document owner hook is in place.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     presentationHookSource.includes("resetForDocumentReplacement") &&
       presentationHookSource.includes("setInvalidVariableValueMessages({})"),
     "Document-scoped shell presentation state should expose one reset path for whole-document replacement flows.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/app/workbench-architecture-boundary.spec.ts extension registry composition ownership", () => {
@@ -184,7 +183,7 @@ test("src/app/workbench-architecture-boundary.spec.ts extension registry composi
     "utf8",
   );
 
-  expectTrue(
+  expect(
     appSource.includes("createBuiltinRuntimeExtensionRegistryComposition") &&
       appSource.includes("<WorkbenchApp") &&
       workbenchAppSource.includes("RuntimeExtensionRegistryProvider") &&
@@ -192,22 +191,22 @@ test("src/app/workbench-architecture-boundary.spec.ts extension registry composi
         "exportProviders: runtimeExtensionRegistries.exportProviders",
       ),
     "Application bootstrap should own runtime extension registry composition and hand it to the workbench session host for service and UI injection.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     !modelingServiceSource.includes("registerBuiltinExportProviders") &&
       !modelingServiceSource.includes("registerExportProvider("),
     "Modeling service construction must not register built-in export providers as a side effect.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     importControllerSource.includes("importProviders.getAcceptedFileTypes()") &&
       importControllerSource.includes("importProviders.matchProviders("),
     "Import flows should consume explicit import-provider lookup surfaces instead of ambient registry helpers.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     !specialModeRegistrySource.includes("let sketchSpecialModeRegistry"),
     "Sketch special-mode registry composition should be immutable rather than replaced through process-global state.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     specialModePresentationSource.includes(
       "registry: SketchSpecialModeRegistry",
     ) &&
@@ -215,7 +214,7 @@ test("src/app/workbench-architecture-boundary.spec.ts extension registry composi
         "getRegisteredSketchSpecialModeDefinitions()",
       ),
     "Sketch special-mode presentation should consume an explicit registry and avoid registry-owned global discovery.",
-  );
+  ).toBeTruthy();
 });
 
 function walk(directory: string): string[] {

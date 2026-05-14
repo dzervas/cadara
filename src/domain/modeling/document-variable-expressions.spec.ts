@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { DocumentVariableRecord } from "@/contracts/modeling/schema";
 import {
   evaluateDocumentVariableExpressions,
@@ -24,13 +23,13 @@ test("src/domain/modeling/document-variable-expressions.spec.ts", () => {
   function evaluate(variables: readonly DocumentVariableRecord[]) {
     const result = evaluateDocumentVariableExpressions(variables);
 
-    expectTrue(
+    expect(
       result.ok,
       result.ok
         ? "Expected expression evaluation to pass."
         : (result.diagnostics[0]?.message ??
             "Expected expression evaluation to pass."),
-    );
+    ).toBeTruthy();
 
     return result;
   }
@@ -42,59 +41,59 @@ test("src/domain/modeling/document-variable-expressions.spec.ts", () => {
   ) {
     const result = evaluateDocumentVariableExpressions(variables);
 
-    expectTrue(!result.ok, message);
-    expectTrue(
+    expect(result.ok, message).toBeFalsy();
+    expect(
       result.diagnostics.some((diagnostic) => diagnostic.code === code),
       message,
-    );
+    ).toBeTruthy();
   }
 
-  expectTrue(
+  expect(
     isValidDocumentVariableName("width_1"),
     "Identifier-style variable names should be valid.",
-  );
-  expectTrue(
-    !isValidDocumentVariableName("1_width"),
+  ).toBeTruthy();
+  expect(
+    isValidDocumentVariableName("1_width"),
     "Names that cannot parse as math identifiers should be invalid.",
-  );
+  ).toBeFalsy();
 
   const literals = evaluate([variable("x", "50")]);
-  expectTrue(
-    literals.valuesByName.get("x") === 50,
+  expect(
+    literals.valuesByName.get("x"),
     "Simple numeric literals should evaluate.",
-  );
+  ).toBe(50);
 
   const complex = evaluate([variable("area", "(10 + 5) * 2 ^ 3")]);
-  expectTrue(
-    complex.valuesByName.get("area") === 120,
+  expect(
+    complex.valuesByName.get("area"),
     "Complex expressions should use math.js precedence.",
-  );
+  ).toBe(120);
 
   const builtin = evaluate([variable("height", "sqrt(81) + sin(pi / 2)")]);
-  expectTrue(
-    builtin.valuesByName.get("height") === 10,
+  expect(
+    builtin.valuesByName.get("height"),
     "Built-in math.js functions and constants should evaluate.",
-  );
+  ).toBe(10);
 
   const dependent = evaluate([variable("x", "50"), variable("y", "x + 50")]);
-  expectTrue(
-    dependent.valuesByName.get("y") === 100,
+  expect(
+    dependent.valuesByName.get("y"),
     "Dependent expressions should evaluate from document variables.",
-  );
-  expectTrue(
+  ).toBe(100);
+  expect(
     dependent.dependenciesByName.get("y")?.includes("x"),
     "Document-variable references should be collected as dependencies.",
-  );
+  ).toBeTruthy();
 
   const chained = evaluate([
     variable("base", "25"),
     variable("width", "base * 2"),
     variable("area", "width ^ 2"),
   ]);
-  expectTrue(
-    chained.valuesByName.get("area") === 2500,
+  expect(
+    chained.valuesByName.get("area"),
     "Chained dependencies should evaluate in dependency order.",
-  );
+  ).toBe(2500);
 
   assertRejectsWith(
     [variable("bad", "1 +")],

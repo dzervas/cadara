@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -37,77 +36,79 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       .map((definition) => definition.metadata.id)
       .sort();
 
-    expectTrue(
-      JSON.stringify(registeredToolIds) ===
-        JSON.stringify([
-          "alignedRectangle",
-          "bezierCurve",
-          "centerPointArc",
-          "centerPointRectangle",
-          "circle",
-          "circumscribedPolygon",
-          "conic",
-          "controlPointSpline",
-          "ellipse",
-          "ellipticalArc",
-          "inscribedPolygon",
-          "line",
-          "midpointLine",
-          "point",
-          "profileText",
-          "rectangle",
-          "spline",
-          "tangentArc",
-          "threePointArc",
-          "threePointCircle",
-        ]),
+    expect(
+      JSON.stringify(registeredToolIds),
       "The sketch tool registry should contain every current drawing tool.",
+    ).toBe(
+      JSON.stringify([
+        "alignedRectangle",
+        "bezierCurve",
+        "centerPointArc",
+        "centerPointRectangle",
+        "circle",
+        "circumscribedPolygon",
+        "conic",
+        "controlPointSpline",
+        "ellipse",
+        "ellipticalArc",
+        "inscribedPolygon",
+        "line",
+        "midpointLine",
+        "point",
+        "profileText",
+        "rectangle",
+        "spline",
+        "tangentArc",
+        "threePointArc",
+        "threePointCircle",
+      ]),
     );
-    expectTrue(
+    expect(
       isRegisteredSketchToolId("line"),
       "Line should resolve as a registered sketch tool.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       isRegisteredSketchToolId("midpointLine"),
       "Midpoint Line should resolve as a registered sketch tool.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       isRegisteredSketchToolId("spline"),
       "Spline should resolve as a registered sketch tool.",
-    );
-    expectTrue(
-      JSON.stringify(registeredEditToolIds) ===
-        JSON.stringify([
-          "offset",
-          "sketchChamfer",
-          "sketchCircularPattern",
-          "sketchExtend",
-          "sketchFillet",
-          "sketchLinearPattern",
-          "sketchMirror",
-          "sketchSlot",
-          "sketchSplit",
-          "sketchTransform",
-          "trim",
-        ]),
+    ).toBeTruthy();
+    expect(
+      JSON.stringify(registeredEditToolIds),
       "The sketch edit registry should contain every current edit operator.",
+    ).toBe(
+      JSON.stringify([
+        "offset",
+        "sketchChamfer",
+        "sketchCircularPattern",
+        "sketchExtend",
+        "sketchFillet",
+        "sketchLinearPattern",
+        "sketchMirror",
+        "sketchSlot",
+        "sketchSplit",
+        "sketchTransform",
+        "trim",
+      ]),
     );
-    expectTrue(
+    expect(
       isRegisteredSketchEditToolId("sketchFillet"),
       "Sketch fillet should resolve as a registered sketch edit tool.",
-    );
-    expectTrue(
-      !isRegisteredSketchEditToolId("fillet"),
+    ).toBeTruthy();
+    expect(
+      isRegisteredSketchEditToolId("fillet"),
       "Part fillet should stay distinct from sketch fillet.",
-    );
+    ).toBeFalsy();
   }
 
   function testToolFamiliesAndDiscoveryExposePrimitiveConstructors() {
-    expectTrue(
+    expect(
       getToolById("line").dropdown?.variantIds.includes("midpointLine"),
       "Line family should expose the midpoint-line constructor.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getToolById("rectangle").dropdown?.variantIds.includes(
         "centerPointRectangle",
       ) &&
@@ -115,12 +116,12 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
           "alignedRectangle",
         ),
       "Rectangle family should expose center-point and aligned rectangle constructors.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getToolById("circle").dropdown?.variantIds.includes("threePointCircle"),
       "Circle family should expose the 3-point circle constructor.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getToolById("centerPointArc").dropdown?.variantIds.includes(
         "threePointArc",
       ) &&
@@ -128,60 +129,60 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
           "tangentArc",
         ),
       "Arc family should expose center, 3-point, and tangent arc constructors.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getToolById("inscribedPolygon").dropdown?.variantIds.includes(
         "circumscribedPolygon",
       ),
       "Polygon family should expose inscribed and circumscribed constructors.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getToolById("ellipse").dropdown?.variantIds.includes("ellipticalArc") &&
         getToolById("ellipse").dropdown?.variantIds.includes("conic") &&
         getToolById("ellipse").dropdown?.variantIds.includes("bezierCurve"),
       "Advanced curve family should expose ellipse, elliptical arc, conic, and Bezier constructors.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getToolById("spline").dropdown?.variantIds.includes("controlPointSpline"),
       "Spline family should expose fit-point and control-point spline constructors.",
-    );
+    ).toBeTruthy();
 
     const sketchDrawingSection = getToolbarSectionsForMode("sketch").find(
       (section) => section.id === "drawing",
     );
-    expectTrue(
-      getToolById("point").id === "point",
+    expect(
+      getToolById("point").id,
       "Point should resolve through the shared tool registry.",
-    );
-    expectTrue(
-      getToolById("point").icon === "point",
+    ).toBe("point");
+    expect(
+      getToolById("point").icon,
       "Point should expose a dedicated toolbar icon instead of reusing Circle.",
-    );
-    expectTrue(
+    ).toBe("point");
+    expect(
       sketchDrawingSection?.toolIds.includes("point"),
       "Sketch toolbar should include the Point constructor.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       sketchDrawingSection?.toolIds.includes("centerPointArc"),
       "Sketch toolbar should include an arc family trigger.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       sketchDrawingSection?.toolIds.includes("ellipse"),
       "Sketch toolbar should include an advanced curve family trigger.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       sketchDrawingSection?.toolIds.includes("inscribedPolygon"),
       "Sketch toolbar should include a polygon family trigger.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       sketchDrawingSection?.toolIds.includes("profileText"),
       "Sketch toolbar should include profile text.",
-    );
-    expectTrue(
-      !sketchDrawingSection?.toolIds.includes("anchorPoint"),
+    ).toBeTruthy();
+    expect(
+      sketchDrawingSection?.toolIds.includes("anchorPoint"),
       "Sketch toolbar should no longer expose the legacy image pin tool.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       getToolbarSectionsForMode("sketch").some(
         (section) =>
           section.id === "sketchOps" &&
@@ -193,8 +194,8 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
           section.toolIds.includes("sketchSlot"),
       ),
       "Sketch toolbar should include the sketch edit operators.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       searchToolDefinitions("tangent").some(
         (tool) => tool.id === "tangentArc",
       ) &&
@@ -202,24 +203,24 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
           (tool) => tool.id === "circumscribedPolygon",
         ),
       "Tool search should discover sketch constructor dropdown variants.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       searchToolDefinitions("fillet").some(
         (tool) => tool.id === "sketchFillet",
       ) && searchToolDefinitions("fillet").some((tool) => tool.id === "fillet"),
       "Tool search should expose sketch and part fillet tools separately.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       searchToolDefinitions("bezier").some(
         (tool) => tool.id === "bezierCurve",
       ) &&
         searchToolDefinitions("text").some((tool) => tool.id === "profileText"),
       "Tool search should discover advanced curve and text constructors.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       searchToolDefinitions("point").some((tool) => tool.id === "point"),
       "Tool search should discover the Point constructor.",
-    );
+    ).toBeTruthy();
   }
 
   function testLinePointerLifecycleProducesStagedGeometry() {
@@ -234,37 +235,37 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       point: [10, 0],
     });
 
-    expectTrue(
-      moved.stagedEntities.length === 1,
+    expect(
+      moved.stagedEntities.length,
       "Line pointer movement should produce one staged line entity.",
-    );
-    expectTrue(
-      moved.stagedEntities[0]?.kind === "line",
+    ).toBe(1);
+    expect(
+      moved.stagedEntities[0]?.kind,
       "Line staged geometry should be a line entity.",
-    );
-    expectTrue(
-      moved.presentation.measurements?.[0]?.label === "Length",
+    ).toBe("line");
+    expect(
+      moved.presentation.measurements?.[0]?.label,
       "Line presentation should expose live length guidance.",
-    );
+    ).toBe("Length");
     const lengthOverlay = moved.presentation.overlays?.find(
       (overlay) => overlay.id === "line-length-overlay",
     );
     const angleOverlay = moved.presentation.overlays?.find(
       (overlay) => overlay.id === "line-angle-overlay",
     );
-    expectTrue(
+    expect(
       lengthOverlay?.kind === "measurement" &&
         lengthOverlay.value === 10 &&
         lengthOverlay.anchor.kind === "sketchPoint",
       "Line presentation should expose anchored live length guidance.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       angleOverlay?.kind === "measurement" &&
         angleOverlay.label === "Angle" &&
         angleOverlay.value === 0 &&
         angleOverlay.unit === "deg",
       "Line presentation should expose anchored live angle guidance.",
-    );
+    ).toBeTruthy();
   }
 
   function testCirclePresentationSchemaExposesPromptControlAndDiameterOverlay() {
@@ -279,26 +280,26 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       point: [4, 5],
     });
 
-    expectTrue(
-      moved.presentation.prompts[0]?.text === "Set radius",
+    expect(
+      moved.presentation.prompts[0]?.text,
       "Circle presentation should update its prompt by interaction step.",
-    );
-    expectTrue(
+    ).toBe("Set radius");
+    expect(
       moved.presentation.controls?.some(
         (control) => control.id === "circle-radius",
       ),
       "Circle presentation should expose radius through a generic numeric control.",
-    );
+    ).toBeTruthy();
     const diameterOverlay = moved.presentation.overlays?.find(
       (overlay) => overlay.id === "circle-diameter-overlay",
     );
-    expectTrue(
+    expect(
       diameterOverlay?.kind === "measurement" &&
         diameterOverlay.label === "Diameter" &&
         diameterOverlay.value === 10 &&
         diameterOverlay.anchor.kind === "cursor",
       "Circle presentation should expose diameter at the active circle edge.",
-    );
+    ).toBeTruthy();
   }
 
   function testRectanglePresentationSchemaExposesAnchoredWidthAndHeightOverlays() {
@@ -319,18 +320,18 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       (overlay) => overlay.id === "rectangle-height-overlay",
     );
 
-    expectTrue(
+    expect(
       widthOverlay?.kind === "measurement" &&
         widthOverlay.value === 4 &&
         widthOverlay.anchor.kind === "sketchPoint",
       "Rectangle presentation should expose anchored live width guidance.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       heightOverlay?.kind === "measurement" &&
         heightOverlay.value === 3 &&
         heightOverlay.anchor.kind === "sketchPoint",
       "Rectangle presentation should expose anchored live height guidance.",
-    );
+    ).toBeTruthy();
   }
 
   function testSessionRuntimeDelegatesCommitOutputToToolModule() {
@@ -345,28 +346,28 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     const moved = updateSketchPointer(started, [4, 3]);
     const accepted = acceptSketchDraw(moved, [4, 3]);
 
-    expectTrue(
-      accepted.definition.entityIds.length === 4,
+    expect(
+      accepted.definition.entityIds.length,
       "Rectangle commit output should add four line entities.",
-    );
-    expectTrue(
-      accepted.definition.constraintIds.length === 4,
+    ).toBe(4);
+    expect(
+      accepted.definition.constraintIds.length,
       "Rectangle commit output should add horizontal and vertical constraints.",
-    );
-    expectTrue(
-      accepted.definition.dimensionIds.length === 2,
+    ).toBe(4);
+    expect(
+      accepted.definition.dimensionIds.length,
       "Rectangle commit output should add width and height dimensions.",
-    );
-    expectTrue(
-      accepted.toolStagedEntities.length === 0,
+    ).toBe(2);
+    expect(
+      accepted.toolStagedEntities.length,
       "Accepted rectangle geometry should clear preview entities.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       deriveSketchDisplayEntities(accepted).every(
         (entity) => entity.status === "accepted",
       ),
       "Accepted rectangle display geometry should derive from committed entities.",
-    );
+    ).toBeTruthy();
   }
 
   function drawSketchTool(
@@ -393,14 +394,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       [1, 2],
       [1, 2],
     ]);
-    expectTrue(
-      pointSession.definition.entities[0]?.kind === "point",
+    expect(
+      pointSession.definition.entities[0]?.kind,
       "Point constructor should commit a durable point entity.",
-    );
-    expectTrue(
-      pointSession.commitRequest?.definition.entities[0]?.kind === "point",
+    ).toBe("point");
+    expect(
+      pointSession.commitRequest?.definition.entities[0]?.kind,
       "Point commit request should include durable point geometry.",
-    );
+    ).toBe("point");
 
     const midpointSession = drawSketchTool("midpointLine", [
       [1, 1],
@@ -412,14 +413,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     const midpointConstraint = midpointSession.definition.constraints.find(
       (constraint) => constraint.kind === "midpoint",
     );
-    expectTrue(
-      line?.kind === "lineSegment",
+    expect(
+      line?.kind,
       "Midpoint line should commit a durable line segment.",
-    );
-    expectTrue(
-      midpointConstraint?.kind === "midpoint",
+    ).toBe("lineSegment");
+    expect(
+      midpointConstraint?.kind,
       "Midpoint line should commit midpoint intent.",
-    );
+    ).toBe("midpoint");
   }
 
   function testRectangleConstructorsCommitDurableIntent() {
@@ -427,29 +428,29 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       [0, 0],
       [2, 1],
     ]);
-    expectTrue(
+    expect(
       centerRectangle.definition.entities.filter(
         (entity) => entity.kind === "lineSegment",
-      ).length === 6,
+      ).length,
       "Center rectangle should commit four edges and two construction diagonals.",
-    );
-    expectTrue(
+    ).toBe(6);
+    expect(
       centerRectangle.definition.constraints.filter(
         (constraint) => constraint.kind === "midpoint",
-      ).length === 2,
+      ).length,
       "Center rectangle should preserve center intent through midpoint constraints.",
-    );
+    ).toBe(2);
 
     const alignedRectangle = drawSketchTool("alignedRectangle", [
       [0, 0],
       [4, 0],
       [4, 3],
     ]);
-    expectTrue(
-      alignedRectangle.definition.entities.length === 4,
+    expect(
+      alignedRectangle.definition.entities.length,
       "Aligned rectangle should commit four line entities.",
-    );
-    expectTrue(
+    ).toBe(4);
+    expect(
       alignedRectangle.definition.constraints.some(
         (constraint) => constraint.kind === "parallel",
       ) &&
@@ -460,7 +461,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
           (constraint) => constraint.kind === "equalLength",
         ),
       "Aligned rectangle should preserve parallel, perpendicular, and equal-length intent.",
-    );
+    ).toBeTruthy();
   }
 
   function testCircleArcAndPolygonConstructorsCommitDurableIntent() {
@@ -469,86 +470,86 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       [1, 0],
       [0, -1],
     ]);
-    expectTrue(
-      threePointCircle.definition.entities[0]?.kind === "circle",
+    expect(
+      threePointCircle.definition.entities[0]?.kind,
       "3-point circle should commit a durable circle.",
-    );
-    expectTrue(
+    ).toBe("circle");
+    expect(
       threePointCircle.definition.constraints.filter(
         (constraint) => constraint.kind === "pointOnCurve",
-      ).length === 3,
+      ).length,
       "3-point circle should preserve its defining perimeter points.",
-    );
+    ).toBe(3);
 
     const centerArc = drawSketchTool("centerPointArc", [
       [0, 0],
       [1, 0],
       [0, 1],
     ]);
-    expectTrue(
-      centerArc.definition.entities[0]?.kind === "arc",
+    expect(
+      centerArc.definition.entities[0]?.kind,
       "Center-point arc should commit a durable arc.",
-    );
+    ).toBe("arc");
 
     const threePointArc = drawSketchTool("threePointArc", [
       [1, 0],
       [0, 1],
       [-1, 0],
     ]);
-    expectTrue(
-      threePointArc.definition.entities[0]?.kind === "arc",
+    expect(
+      threePointArc.definition.entities[0]?.kind,
       "3-point arc should commit a durable arc.",
-    );
-    expectTrue(
+    ).toBe("arc");
+    expect(
       threePointArc.definition.constraints.some(
         (constraint) => constraint.kind === "pointOnCurve",
       ),
       "3-point arc should preserve its through-point relationship.",
-    );
+    ).toBeTruthy();
 
     const tangentArc = drawSketchTool("tangentArc", [
       [0, 0],
       [1, 0],
       [1, 1],
     ]);
-    expectTrue(
-      tangentArc.definition.entities[0]?.kind === "arc",
+    expect(
+      tangentArc.definition.entities[0]?.kind,
       "Tangent arc should commit a durable arc.",
-    );
+    ).toBe("arc");
 
     const inscribedPolygon = drawSketchTool("inscribedPolygon", [
       [0, 0],
       [0, 2],
     ]);
-    expectTrue(
+    expect(
       inscribedPolygon.definition.entities.filter(
         (entity) => entity.kind === "lineSegment",
-      ).length === 6,
+      ).length,
       "Inscribed polygon should commit a closed line loop.",
-    );
-    expectTrue(
+    ).toBe(6);
+    expect(
       inscribedPolygon.definition.constraints.some(
         (constraint) => constraint.kind === "pointOnCurve",
       ),
       "Inscribed polygon should constrain vertices to its construction circle.",
-    );
+    ).toBeTruthy();
 
     const circumscribedPolygon = drawSketchTool("circumscribedPolygon", [
       [0, 0],
       [0, 2],
     ]);
-    expectTrue(
+    expect(
       circumscribedPolygon.definition.entities.filter(
         (entity) => entity.kind === "lineSegment",
-      ).length === 6,
+      ).length,
       "Circumscribed polygon should commit a closed line loop.",
-    );
-    expectTrue(
+    ).toBe(6);
+    expect(
       circumscribedPolygon.definition.constraints.some(
         (constraint) => constraint.kind === "tangent",
       ),
       "Circumscribed polygon should constrain sides tangent to its construction circle.",
-    );
+    ).toBeTruthy();
   }
 
   function testSplineCollectsThreePointsAndCommitsDurableGeometry() {
@@ -563,43 +564,43 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [1, 2]);
 
-    expectTrue(
-      session.status === "drawing",
+    expect(
+      session.status,
       "Spline should keep collecting after the second point.",
-    );
-    expectTrue(
-      session.definition.entities.length === 0,
+    ).toBe("drawing");
+    expect(
+      session.definition.entities.length,
       "Spline should not commit before it has enough points.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       session.toolStagedEntities.some(
         (entity) => entity.kind === "spline" && entity.status === "preview",
       ),
       "Spline should stage preview geometry while collecting points.",
-    );
+    ).toBeTruthy();
 
     session = acceptSketchDraw(session, [3, 0]);
 
-    expectTrue(
-      session.status === "idle",
+    expect(
+      session.status,
       "Spline should return to idle after its first complete curve.",
-    );
-    expectTrue(
-      session.definition.entities[0]?.kind === "spline",
+    ).toBe("idle");
+    expect(
+      session.definition.entities[0]?.kind,
       "Spline commit output should add a durable spline entity.",
-    );
-    expectTrue(
-      session.definition.points.length === 3,
+    ).toBe("spline");
+    expect(
+      session.definition.points.length,
       "Spline commit output should add its fit points.",
-    );
-    expectTrue(
-      session.commitRequest?.definition.entities[0]?.kind === "spline",
+    ).toBe(3);
+    expect(
+      session.commitRequest?.definition.entities[0]?.kind,
       "Spline commit request should include durable spline geometry.",
-    );
-    expectTrue(
-      session.toolStagedEntities.length === 0,
+    ).toBe("spline");
+    expect(
+      session.toolStagedEntities.length,
       "Spline commit should clear staged preview geometry.",
-    );
+    ).toBe(0);
   }
 
   function testAdvancedCurveConstructorsCommitDurableIntent() {
@@ -608,15 +609,15 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       [2, 0],
       [0, 1],
     ]);
-    expectTrue(
-      ellipse.definition.entities[0]?.kind === "ellipse",
+    expect(
+      ellipse.definition.entities[0]?.kind,
       "Ellipse tool should commit a durable ellipse entity.",
-    );
-    expectTrue(
-      ellipse.definition.points.length === 2,
+    ).toBe("ellipse");
+    expect(
+      ellipse.definition.points.length,
       "Ellipse tool should persist center and major-axis defining points.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       getSketchSessionDisplayRenderables(ellipse).some(
         (renderable) =>
           renderable.target?.kind === "sketchEntity" &&
@@ -625,7 +626,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
           renderable.geometry.kind === "polyline",
       ),
       "Committed ellipse should render with a stable sketch entity target.",
-    );
+    ).toBeTruthy();
 
     const ellipticalArc = drawSketchTool("ellipticalArc", [
       [0, 0],
@@ -634,20 +635,20 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       [3, 0],
       [0, 1],
     ]);
-    expectTrue(
-      ellipticalArc.definition.entities[0]?.kind === "ellipticalArc",
+    expect(
+      ellipticalArc.definition.entities[0]?.kind,
       "Elliptical arc tool should commit durable elliptical arc geometry.",
-    );
+    ).toBe("ellipticalArc");
 
     const conic = drawSketchTool("conic", [
       [0, 0],
       [1, 2],
       [2, 0],
     ]);
-    expectTrue(
-      conic.definition.entities[0]?.kind === "conic",
+    expect(
+      conic.definition.entities[0]?.kind,
       "Conic tool should commit durable conic geometry.",
-    );
+    ).toBe("conic");
     const solvedConic = solveSketchDefinitionCore({
       definition: conic.definition,
       tolerances: {
@@ -664,12 +665,12 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       definition: conic.definition,
       solvedSnapshot: solvedConic.solvedSnapshot,
     });
-    expectTrue(
+    expect(
       conicRegions.diagnostics.some(
         (diagnostic) => diagnostic.code === "unsupported-profile-entity",
       ),
       "Valid advanced curves that are not profile-capable yet should emit unsupported-case diagnostics.",
-    );
+    ).toBeTruthy();
 
     const bezier = drawSketchTool("bezierCurve", [
       [0, 0],
@@ -677,15 +678,15 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       [2, 2],
       [3, 0],
     ]);
-    expectTrue(
-      bezier.definition.entities[0]?.kind === "bezierCurve",
+    expect(
+      bezier.definition.entities[0]?.kind,
       "Bezier tool should commit durable Bezier geometry.",
-    );
-    expectTrue(
+    ).toBe("bezierCurve");
+    expect(
       bezier.definition.entities[0]?.kind === "bezierCurve" &&
         bezier.definition.entities[0].degree === 3,
       "Bezier tool should preserve cubic degree.",
-    );
+    ).toBeTruthy();
 
     const controlSpline = drawSketchTool("controlPointSpline", [
       [0, 0],
@@ -693,26 +694,26 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       [2, 2],
       [3, 0],
     ]);
-    expectTrue(
-      controlSpline.definition.entities[0]?.kind === "spline",
+    expect(
+      controlSpline.definition.entities[0]?.kind,
       "Control-point spline should still commit durable spline geometry.",
-    );
-    expectTrue(
+    ).toBe("spline");
+    expect(
       controlSpline.definition.entities[0]?.kind === "spline" &&
         controlSpline.definition.entities[0].degree === 3,
       "Control-point spline should stay distinct from fit-point spline degree.",
-    );
+    ).toBeTruthy();
 
     const fitSpline = drawSketchTool("spline", [
       [0, 0],
       [1, 2],
       [2, 0],
     ]);
-    expectTrue(
+    expect(
       fitSpline.definition.entities[0]?.kind === "spline" &&
         fitSpline.definition.entities[0].degree === 2,
       "Fit-point spline behavior should remain unchanged.",
-    );
+    ).toBeTruthy();
   }
 
   function testAdvancedToolValidationRejectsDegenerateInput() {
@@ -727,15 +728,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     session = acceptSketchDraw(session, [1, 0]);
     session = acceptSketchDraw(session, [2, 0]);
 
-    expectTrue(
-      session.definition.entities.length === 0,
+    expect(
+      session.definition.entities.length,
       "Invalid ellipse input should not mutate the authored sketch definition.",
-    );
-    expectTrue(
-      session.validationMessage ===
-        "Ellipse requires non-zero major and minor radii.",
+    ).toBe(0);
+    expect(
+      session.validationMessage,
       "Invalid ellipse input should report validation feedback.",
-    );
+    ).toBe("Ellipse requires non-zero major and minor radii.");
   }
 
   function testProfileTextCommitsEditableTextAndDerivedProfile() {
@@ -760,20 +760,20 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     session = acceptSketchDraw(session, [0, 2]);
 
     const textEntity = session.definition.entities[0];
-    expectTrue(
-      textEntity?.kind === "profileText",
+    expect(
+      textEntity?.kind,
       "Text tool should commit a durable profileText entity.",
-    );
-    expectTrue(
+    ).toBe("profileText");
+    expect(
       textEntity.kind === "profileText" && textEntity.text === "CUT",
       "Text tool should preserve editable text content.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       textEntity.kind === "profileText" &&
         textEntity.horizontalAlign === "center",
       "Text tool should persist placement options.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getSketchSessionDisplayRenderables(session).some(
         (renderable) =>
           renderable.target?.kind === "sketchEntity" &&
@@ -781,7 +781,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
           renderable.geometry.kind === "polyline",
       ),
       "Committed text should render with a stable sketch entity target.",
-    );
+    ).toBeTruthy();
 
     const solved = solveSketchDefinitionCore({
       definition: session.definition,
@@ -800,11 +800,11 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       solvedSnapshot: solved.solvedSnapshot,
     });
 
-    expectTrue(
+    expect(
       regions.regions.length >= 1,
       "Supported profile-generating text should expose downstream profile regions.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       regions.regions.some((region) =>
         region.loops.some((loop) =>
           loop.segments.some(
@@ -815,7 +815,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
         ),
       ),
       "Derived text profile should preserve the text entity as its selectable boundary source.",
-    );
+    ).toBeTruthy();
   }
 
   function testInvalidProfileTextDoesNotCommitPartialEntity() {
@@ -834,14 +834,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [0, 2]);
 
-    expectTrue(
-      session.definition.entities.length === 0,
+    expect(
+      session.definition.entities.length,
       "Invalid text input should not commit a partial profileText entity.",
-    );
-    expectTrue(
-      session.validationMessage === "Text content is required.",
+    ).toBe(0);
+    expect(
+      session.validationMessage,
       "Invalid text should report validation feedback.",
-    );
+    ).toBe("Text content is required.");
   }
 
   function testGenericPresentationAccessFromSession() {
@@ -854,14 +854,14 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     );
     const presentation = getSketchToolPresentation(session);
 
-    expectTrue(
-      presentation?.prompts[0]?.text === "Pick line start",
+    expect(
+      presentation?.prompts[0]?.text,
       "Session presentation should be resolved through the active sketch tool schema.",
-    );
-    expectTrue(
-      presentation.validation?.length === 0,
+    ).toBe("Pick line start");
+    expect(
+      presentation.validation?.length,
       "Newly activated sketch tools should expose validation as declarative schema state.",
-    );
+    ).toBe(0);
   }
 
   testRegistryContainsCurrentSketchToolSet();

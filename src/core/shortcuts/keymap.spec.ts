@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ShortcutCommandDefinition } from "@/core/shortcuts/commands";
 import { createShortcutCommandRegistry } from "@/core/shortcuts/commands";
 import {
@@ -40,42 +39,42 @@ test("src/core/shortcuts/keymap.spec.ts", () => {
   const registry = createShortcutCommandRegistry(commands);
   const defaults = createEffectiveKeymap(registry);
 
-  expectTrue(
-    serializeShortcut(getPrimaryShortcut(defaults, "editor.undo")!) === "mod+z",
+  expect(
+    serializeShortcut(getPrimaryShortcut(defaults, "editor.undo")!),
     "Effective keymaps should use default shortcuts without profile overrides.",
-  );
+  ).toBe("mod+z");
 
   const remapped = createEffectiveKeymap(registry, {
     "editor.undo": { shortcuts: ["u"] },
     "editor.cancel": { shortcuts: [] },
   });
-  expectTrue(
-    serializeShortcut(getPrimaryShortcut(remapped, "editor.undo")!) === "u",
+  expect(
+    serializeShortcut(getPrimaryShortcut(remapped, "editor.undo")!),
     "Profile overrides should replace default shortcuts.",
-  );
-  expectTrue(
-    getPrimaryShortcut(remapped, "editor.cancel") === null,
+  ).toBe("u");
+  expect(
+    getPrimaryShortcut(remapped, "editor.cancel"),
     "An empty profile shortcut list should disable a command shortcut.",
-  );
+  ).toBe(null);
 
   const duplicate = createEffectiveKeymap(registry, {
     "editor.redo": { shortcuts: ["mod+z"] },
   });
-  expectTrue(
+  expect(
     detectShortcutConflicts(registry, duplicate).some(
       (conflict) => conflict.kind === "duplicate",
     ),
     "Duplicate shortcuts in overlapping scopes should be reported.",
-  );
+  ).toBeTruthy();
 
   const prefix = createEffectiveKeymap(registry, {
     "editor.cancel": { shortcuts: ["g"] },
     "editor.redo": { shortcuts: ["g>f"] },
   });
-  expectTrue(
+  expect(
     detectShortcutConflicts(registry, prefix).some(
       (conflict) => conflict.kind === "prefix",
     ),
     "Same-scope prefix sequence ambiguity should be reported.",
-  );
+  ).toBeTruthy();
 });

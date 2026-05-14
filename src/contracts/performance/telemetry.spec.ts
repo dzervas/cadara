@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   classifyRevisionResult,
   filterPerformanceSpanAttributes,
@@ -22,10 +21,10 @@ test("src/contracts/performance/telemetry.spec.ts preserves no-op results and fi
     action: () => Promise.resolve({ ok: true as const }),
   });
 
-  expectTrue(
-    result.ok === true,
+  expect(
+    result.ok,
     "No-op telemetry should preserve successful operation results.",
-  );
+  ).toBeTruthy();
 
   const rejected = new Error("boom");
   try {
@@ -35,10 +34,10 @@ test("src/contracts/performance/telemetry.spec.ts preserves no-op results and fi
       action: () => Promise.reject(rejected),
     });
   } catch (error) {
-    expectTrue(
-      error === rejected,
+    expect(
+      error,
       "No-op telemetry should preserve the exact thrown error.",
-    );
+    ).toBe(rejected);
   }
 
   const filtered = filterPerformanceSpanAttributes({
@@ -50,30 +49,30 @@ test("src/contracts/performance/telemetry.spec.ts preserves no-op results and fi
     pointer_move_x: 20,
   });
 
-  expectTrue(
-    filtered["cadara.operation"] === "solveSketch",
+  expect(
+    filtered["cadara.operation"],
     "Allowed low-cardinality attributes should be retained.",
-  );
-  expectTrue(
-    filtered["cadara.constraint_count"] === 4,
+  ).toBe("solveSketch");
+  expect(
+    filtered["cadara.constraint_count"],
     "Cheap count attributes should be retained.",
-  );
-  expectTrue(
-    !("mesh_triangle_total" in filtered),
+  ).toBe(4);
+  expect(
+    "mesh_triangle_total" in filtered,
     "Mesh triangle totals should not be allowed telemetry attributes.",
-  );
-  expectTrue(
-    !("automerge_version_count" in filtered),
+  ).toBeFalsy();
+  expect(
+    "automerge_version_count" in filtered,
     "Full Automerge version counts should not be allowed telemetry attributes.",
-  );
-  expectTrue(
-    !("solver_iteration_count" in filtered),
+  ).toBeFalsy();
+  expect(
+    "solver_iteration_count" in filtered,
     "Solver iteration counts should not be allowed telemetry attributes.",
-  );
-  expectTrue(
-    !("pointer_move_x" in filtered),
+  ).toBeFalsy();
+  expect(
+    "pointer_move_x" in filtered,
     "Pointer-move attributes should not be allowed telemetry attributes.",
-  );
+  ).toBeFalsy();
 });
 
 test("src/contracts/performance/telemetry.spec.ts records Sentry spans with filtered attributes", () => {
@@ -120,54 +119,51 @@ test("src/contracts/performance/telemetry.spec.ts records Sentry spans with filt
   );
 
   const started = startedSpans[0] as { attributes?: Record<string, unknown> };
-  expectTrue(
-    started.attributes?.["cadara.operation"] === "getDocumentSnapshot",
+  expect(
+    started.attributes?.["cadara.operation"],
     "Sentry spans should receive operation attributes.",
-  );
-  expectTrue(
-    !("pointer_move_x" in (started.attributes ?? {})),
+  ).toBe("getDocumentSnapshot");
+  expect(
+    "pointer_move_x" in (started.attributes ?? {}),
     "Sentry spans should not receive high-frequency attributes.",
-  );
-  expectTrue(
-    endedAttributes[0]?.["cadara.result"] === "success",
+  ).toBeFalsy();
+  expect(
+    endedAttributes[0]?.["cadara.result"],
     "Sentry span end should include result classification.",
-  );
+  ).toBe("success");
 });
 
 test("src/contracts/performance/telemetry.spec.ts classifies revision results and keeps dev tracing opt-in conservative", () => {
-  expectTrue(
-    classifyRevisionResult({ revisionState: { kind: "accepted" } }) ===
-      "success",
+  expect(
+    classifyRevisionResult({ revisionState: { kind: "accepted" } }),
     "Accepted revision results should classify as success.",
-  );
-  expectTrue(
-    classifyRevisionResult({ revisionState: { kind: "rejected" } }) ===
-      "rejected",
+  ).toBe("success");
+  expect(
+    classifyRevisionResult({ revisionState: { kind: "rejected" } }),
     "Rejected revision results should classify as rejected.",
-  );
-  expectTrue(
-    classifyRevisionResult({ revisionState: { kind: "conflict" } }) ===
-      "conflict",
+  ).toBe("rejected");
+  expect(
+    classifyRevisionResult({ revisionState: { kind: "conflict" } }),
     "Conflicted revision results should classify as conflict.",
-  );
-  expectTrue(
+  ).toBe("conflict");
+  expect(
     shouldEnablePerformanceTelemetry({ isProduction: true, search: null }),
     "Production should enable sampled performance telemetry.",
-  );
-  expectTrue(
-    !shouldEnablePerformanceTelemetry({
+  ).toBeTruthy();
+  expect(
+    shouldEnablePerformanceTelemetry({
       isProduction: false,
       search: "?cadEnableSentry=1",
     }),
     "Development should not enable performance telemetry from error reporting alone.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     shouldEnablePerformanceTelemetry({
       isProduction: false,
       search: "?cadEnableSentry=1&cadEnablePerfTelemetry=1",
     }),
     "Development should require explicit performance telemetry opt-in.",
-  );
+  ).toBeTruthy();
 });
 
 function makeDescriptor(

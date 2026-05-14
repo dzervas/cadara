@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   requireFeatureDefinition,
   validateFeatureDefinition,
@@ -39,7 +38,7 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
   };
 
   const parsedExtrude = requireFeatureDefinition(baseExtrude);
-  expectTrue(
+  expect(
     parsedExtrude.kind === "extrude" &&
       getAuthoredLiteralValue(
         parsedExtrude.parameters.extent.end.kind === "blind"
@@ -47,7 +46,7 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
           : null,
       ) === 12,
     "Runtime validation should preserve literal authored wrappers on canonical extrude extents.",
-  );
+  ).toBeTruthy();
 
   const rawLiteral = validateFeatureDefinition({
     ...baseExtrude,
@@ -63,10 +62,10 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       },
     },
   });
-  expectTrue(
-    !rawLiteral.success,
+  expect(
+    rawLiteral.success,
     "Runtime validation should reject legacy raw literals on authored-value fields.",
-  );
+  ).toBeFalsy();
 
   const expression = requireFeatureDefinition({
     ...baseExtrude,
@@ -82,13 +81,13 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       },
     },
   });
-  expectTrue(
+  expect(
     expression.kind === "extrude" &&
       expression.parameters.extent.end.kind === "blind" &&
       isExpressionAuthoredValue(expression.parameters.extent.end.distance) &&
       expression.parameters.extent.end.distance.valueText === "depth + 1",
     "Runtime validation should accept expression-authored wrappers on expression-capable fields.",
-  );
+  ).toBeTruthy();
 
   const blankExpression = validateFeatureDefinition({
     ...baseExtrude,
@@ -104,10 +103,10 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       },
     },
   });
-  expectTrue(
-    !blankExpression.success,
+  expect(
+    blankExpression.success,
     "Runtime validation should reject expression-authored wrappers without usable expression text.",
-  );
+  ).toBeFalsy();
 
   const invalidLiteral = validateFeatureDefinition({
     ...baseExtrude,
@@ -123,10 +122,10 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       },
     },
   });
-  expectTrue(
-    !invalidLiteral.success,
+  expect(
+    invalidLiteral.success,
     "Runtime validation should reject literal wrappers with the wrong value type.",
-  );
+  ).toBeFalsy();
 
   const referenceExpression = validateFeatureDefinition({
     ...baseExtrude,
@@ -135,10 +134,10 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       profiles: [{ source: "expression", valueText: "profileRef" }],
     },
   });
-  expectTrue(
-    !referenceExpression.success,
+  expect(
+    referenceExpression.success,
     "Runtime validation should reject expression wrappers on reference fields.",
-  );
+  ).toBeFalsy();
 
   const advancedOptionExpression = requireFeatureDefinition({
     kind: "loft",
@@ -161,7 +160,7 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       },
     },
   });
-  expectTrue(
+  expect(
     advancedOptionExpression.kind === "loft" &&
       !!advancedOptionExpression.parameters.options?.path &&
       typeof advancedOptionExpression.parameters.options.path === "object" &&
@@ -172,7 +171,7 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       advancedOptionExpression.parameters.options.path.sectionCount
         .valueText === "sections + 1",
     "Runtime validation should preserve expression-authored positive integer advanced options.",
-  );
+  ).toBeTruthy();
 
   const sweepAdvancedOptions = requireFeatureDefinition({
     kind: "sweep",
@@ -201,7 +200,7 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       },
     },
   });
-  expectTrue(
+  expect(
     sweepAdvancedOptions.kind === "sweep" &&
       sweepAdvancedOptions.parameters.options?.twist &&
       typeof sweepAdvancedOptions.parameters.options.twist === "object" &&
@@ -209,7 +208,7 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       sweepAdvancedOptions.parameters.options.twist.type === "turns" &&
       !("angle" in sweepAdvancedOptions.parameters.options.twist),
     "Runtime validation should preserve only the active sweep twist variant.",
-  );
+  ).toBeTruthy();
 
   const advancedReferenceExpression = validateFeatureDefinition({
     kind: "loft",
@@ -225,8 +224,8 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
       options: { path: { sectionCount: 2 } },
     },
   });
-  expectTrue(
-    !advancedReferenceExpression.success,
+  expect(
+    advancedReferenceExpression.success,
     "Runtime validation should reject expression wrappers on advanced participant references.",
-  );
+  ).toBeFalsy();
 });

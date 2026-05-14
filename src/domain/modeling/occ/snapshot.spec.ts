@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import {
   createModelingService,
@@ -321,10 +320,10 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       options.height ?? 6,
     );
     box.Build(new oc.Message_ProgressRange_1());
-    expectTrue(
+    expect(
       box.IsDone(),
       "Expected OCC box builder to succeed for phase 6 snapshot tests.",
-    );
+    ).toBeTruthy();
 
     return trackNewSolidBody(oc, {
       bodyId: options.bodyId ?? "body_phase6_seed",
@@ -356,10 +355,10 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       );
     });
 
-    expectTrue(
+    expect(
       faceId,
       `Expected body ${body.bodyId} to expose a planar face at ${axis}=${coordinate}.`,
-    );
+    ).toBeTruthy();
     return faceId;
   }
 
@@ -487,92 +486,92 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     const validator = createModelingSnapshotValidator(snapshot);
     const normalized = await validator.getCurrentDocumentSnapshot();
 
-    expectTrue(
-      normalized.document.documentId === OCC_KERNEL_DOCUMENT_ID,
+    expect(
+      normalized.document.documentId,
       "Phase 6 workspace snapshot must preserve the document ID.",
-    );
-    expectTrue(
+    ).toBe(OCC_KERNEL_DOCUMENT_ID);
+    expect(
       normalized.document.render.records.length > 0,
       "Phase 6 workspace snapshot must export render records.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.featureTree.length >= 5,
       "Phase 6 workspace snapshot must populate the feature tree.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.objects.length >= 4,
       "Phase 6 workspace snapshot must populate the object tree.",
-    );
-    expectTrue(
-      normalized.document.features.length === 2,
+    ).toBeTruthy();
+    expect(
+      normalized.document.features.length,
       "Phase 6 workspace snapshot must include every rebuilt feature.",
-    );
-    expectTrue(
-      normalized.document.bodies.length === 1,
+    ).toBe(2);
+    expect(
+      normalized.document.bodies.length,
       "Phase 6 workspace snapshot must include rebuilt body snapshots.",
-    );
+    ).toBe(1);
 
     const planarFaceEntity = normalized.document.entities.find(
       (entry) =>
         entry.target.kind === "face" &&
         entry.selectionSemantics.includes("planarFace"),
     );
-    expectTrue(
+    expect(
       planarFaceEntity,
       "Phase 6 snapshot entities must expose planar-face selection semantics.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       planarFaceEntity.selectionSemantics.includes("planarReference"),
       "Planar face entities must also advertise planar-reference semantics.",
-    );
+    ).toBeTruthy();
 
     const constructionEntity = normalized.document.entities.find(
       (entry) =>
         entry.target.kind === "construction" &&
         entry.selectionSemantics.includes("constructionPlane"),
     );
-    expectTrue(
+    expect(
       constructionEntity,
       "Phase 6 snapshot entities must expose construction-plane semantics.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       constructionEntity.selectionSemantics.includes("planarReference"),
       "Construction entities must also advertise planar-reference semantics.",
-    );
+    ).toBeTruthy();
 
-    expectTrue(
+    expect(
       normalized.document.render.records.some(
         (record) =>
           record.binding.topology === "face" &&
           record.binding.semanticClass === "planarFace",
       ),
       "Phase 6 render export must include planar-face mesh bindings.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.render.records.some(
         (record) =>
           record.binding.topology === "edge" &&
           record.binding.semanticClass === "featureEdge",
       ),
       "Phase 6 render export must include edge polyline bindings.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.render.records.some(
         (record) =>
           record.binding.topology === "vertex" &&
           record.binding.semanticClass === "featureVertex",
       ),
       "Phase 6 render export must include vertex marker bindings.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.render.records.some(
         (record) =>
           record.binding.topology === null &&
           record.binding.semanticClass === "construction",
       ),
       "Phase 6 render export must include construction render bindings.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.render.records.some(
         (record) =>
           record.binding.topology === null &&
@@ -580,8 +579,8 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
           record.geometry.kind === "mesh",
       ),
       "Phase 6 render export must expose filled construction-plane surfaces for viewport picking.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.render.records.some(
         (record) =>
           record.binding.topology === null &&
@@ -590,35 +589,35 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
           record.geometry.kind === "mesh",
       ),
       "Phase 6 render export must expose filled sketch-region surfaces for viewport profile picking.",
-    );
+    ).toBeTruthy();
     const yzConstruction = normalized.document.constructions.find(
       (construction) => construction.constructionId === "construction_plane-yz",
     );
-    expectTrue(
+    expect(
       yzConstruction,
       "Phase 6 snapshot must include the standard YZ construction plane.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       yzConstruction.plane.key === "yz" &&
         yzConstruction.plane.frame.normal[0] === 1,
       "Construction snapshots must carry explicit plane definitions for non-XY sketch entry.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.render.records.some(
         (record) =>
           record.binding.topology === null &&
           record.binding.semanticClass === "sketchCurve",
       ),
       "Phase 6 render export must include sketch-curve render bindings.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       normalized.document.render.records.some(
         (record) =>
           record.binding.topology === null &&
           record.binding.semanticClass === "sketchPoint",
       ),
       "Phase 6 render export must include sketch-point render bindings.",
-    );
+    ).toBeTruthy();
   }
 
   async function testSketchOwnedProfilesMarkConsumedSketchOwnership() {
@@ -673,20 +672,20 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     );
     const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot);
 
-    expectTrue(
+    expect(
       sketchEntity,
       "Region-consumer coverage must expose the committed sketch entity row.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       sketchEntity.consumedByFeatureIds.includes(
         "feature_phase6_region_consumer" as FeatureId,
       ),
       "Sketch-owned region profiles should mark the owning sketch as consumed.",
-    );
-    expectTrue(
-      autoHiddenSketchTargetKeys[sketchKey] === true,
+    ).toBeTruthy();
+    expect(
+      autoHiddenSketchTargetKeys[sketchKey],
       "Derived auto-hide should treat sketch-owned consumed profiles as consumed sketch rows.",
-    );
+    ).toBeTruthy();
   }
 
   async function testPlanarFaceProfilesDoNotInventConsumedSketchOwnership() {
@@ -701,10 +700,10 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     });
     const faceId = body.topology.faceIds[0];
 
-    expectTrue(
+    expect(
       faceId,
       "Planar-face profile coverage requires at least one body face.",
-    );
+    ).toBeTruthy();
 
     const rebuilt = rebuildOccAuthoringState(
       createOccAuthoringState(oc, {
@@ -745,18 +744,18 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     );
     const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot);
 
-    expectTrue(
+    expect(
       sketchEntity,
       "Planar-face profile coverage must keep the unrelated sketch entity available.",
-    );
-    expectTrue(
-      sketchEntity.consumedByFeatureIds.length === 0,
+    ).toBeTruthy();
+    expect(
+      sketchEntity.consumedByFeatureIds.length,
       "Planar-face-only profiles should not mark unrelated committed sketches as consumed.",
-    );
-    expectTrue(
-      autoHiddenSketchTargetKeys[`sketch:${sketch.sketchId}`] !== true,
+    ).toBe(0);
+    expect(
+      autoHiddenSketchTargetKeys[`sketch:${sketch.sketchId}`],
       "Planar-face-only profiles should not derive auto-hidden sketch rows.",
-    );
+    ).not.toBeTruthy();
   }
 
   async function testShellSnapshotEntitiesExposeContributorAncestry() {
@@ -809,10 +808,10 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     ]);
     const extrudeBody = extrudeState.bodies[0];
 
-    expectTrue(
+    expect(
       extrudeBody,
       "Shell contributor coverage requires the extrude body to exist.",
-    );
+    ).toBeTruthy();
 
     const removableFaceId = findPlanarFaceByAxis(oc, extrudeBody, "z", 6);
     const shellDefinition: FeatureDefinition = {
@@ -848,10 +847,10 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       (body) => body.ownerFeatureId === shellFeatureId,
     );
 
-    expectTrue(
+    expect(
       shelledBody,
       "Shelled contributor coverage requires the replacement body to exist.",
-    );
+    ).toBeTruthy();
 
     const preservedBackFaceId = findPlanarFaceByAxis(oc, shelledBody, "y", 8);
     const innerBackFaceId = findPlanarFaceByAxis(oc, shelledBody, "y", 7);
@@ -883,33 +882,30 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       innerBackFaceId,
     );
 
-    expectTrue(
+    expect(
       preservedBackFace,
       "Shelled snapshots must expose the preserved back face entity.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       innerBackFace,
       "Shelled snapshots must expose the inner shell face entity.",
-    );
-    expectTrue(
-      preservedBackFace.contributingFeatureIds.join("|") === extrudeFeatureId,
+    ).toBeTruthy();
+    expect(
+      preservedBackFace.contributingFeatureIds.join("|"),
       "Preserved back faces should keep only the original extrude contributor ancestry.",
-    );
-    expectTrue(
-      innerBackFace.contributingFeatureIds.join("|") ===
-        `${extrudeFeatureId}|${shellFeatureId}`,
+    ).toBe(extrudeFeatureId);
+    expect(
+      innerBackFace.contributingFeatureIds.join("|"),
       "Inner shell faces should expose authored-order extrude and shell contributor ancestry.",
-    );
-    expectTrue(
-      reloadedPreservedBackFace?.contributingFeatureIds.join("|") ===
-        preservedBackFace.contributingFeatureIds.join("|"),
+    ).toBe(`${extrudeFeatureId}|${shellFeatureId}`);
+    expect(
+      reloadedPreservedBackFace?.contributingFeatureIds.join("|"),
       "Reloaded snapshots should preserve contributor ancestry for preserved shell topology.",
-    );
-    expectTrue(
-      reloadedInnerBackFace?.contributingFeatureIds.join("|") ===
-        innerBackFace.contributingFeatureIds.join("|"),
+    ).toBe(preservedBackFace.contributingFeatureIds.join("|"));
+    expect(
+      reloadedInnerBackFace?.contributingFeatureIds.join("|"),
       "Reloaded snapshots should preserve contributor ancestry for inner shell topology.",
-    );
+    ).toBe(innerBackFace.contributingFeatureIds.join("|"));
   }
 
   async function testConstructionSketchGeometryIsOmittedFromDocumentRenderExport() {
@@ -952,23 +948,23 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       console.warn = originalWarn;
     }
 
-    expectTrue(
-      !snapshot.document.render.records.some(
+    expect(
+      snapshot.document.render.records.some(
         (record) =>
           record.binding.target.kind === "sketchEntity" &&
           record.binding.target.entityId === constructionEntityId,
       ),
       "Document render export should omit construction sketch curves outside active sketch editing.",
-    );
-    expectTrue(
-      !snapshot.document.render.records.some(
+    ).toBeFalsy();
+    expect(
+      snapshot.document.render.records.some(
         (record) =>
           record.binding.target.kind === "sketchPoint" &&
           record.binding.target.pointId === constructionPointId,
       ),
       "Document render export should omit construction sketch points outside active sketch editing.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       snapshot.document.render.records.some(
         (record) =>
           record.binding.target.kind === "sketchEntity" &&
@@ -976,7 +972,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
             sketch.sketch.definition.entities[1]!.entityId,
       ),
       "Normal sketch curves should remain visible in the document render export.",
-    );
+    ).toBeTruthy();
   }
 
   async function testNestedSketchRegionsExportSeparateMeshes() {
@@ -1126,15 +1122,15 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         record.geometry.kind === "mesh",
     );
 
-    expectTrue(
-      derived.regions.length === 1,
+    expect(
+      derived.regions.length,
       "Nested square/circle sketch should derive one even-parity bounded profile cell.",
-    );
-    expectTrue(
-      regionMeshes.length === 1,
+    ).toBe(1);
+    expect(
+      regionMeshes.length,
       "Render export must include one pickable mesh per bounded sketch region.",
-    );
-    expectTrue(
+    ).toBe(1);
+    expect(
       derived.regions.every((region) =>
         regionMeshes.some(
           (record) =>
@@ -1143,7 +1139,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         ),
       ),
       "Every derived bounded region should have a matching render mesh.",
-    );
+    ).toBeTruthy();
   }
 
   async function testJoinedExtrudeSnapshotDoesNotRenderInteriorBooleanTopology() {
@@ -1214,18 +1210,18 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         record.binding.semanticClass === "featureVertex",
     );
 
-    expectTrue(
-      faceRecords.length === 6,
+    expect(
+      faceRecords.length,
       `Joined extrude snapshot should render six prism faces, got ${faceRecords.length}.`,
-    );
-    expectTrue(
-      edgeRecords.length === 12,
+    ).toBe(6);
+    expect(
+      edgeRecords.length,
       `Joined extrude snapshot should not render middle seam edges, got ${edgeRecords.length}.`,
-    );
-    expectTrue(
-      vertexRecords.length === 8,
+    ).toBe(12);
+    expect(
+      vertexRecords.length,
       `Joined extrude snapshot should not render middle seam vertices, got ${vertexRecords.length}.`,
-    );
+    ).toBe(8);
   }
 
   async function testWorkspaceSnapshotPreservesInvalidatedReferencesWithoutPromotingDiagnostics() {
@@ -1237,10 +1233,10 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
     });
     const targetEdgeId = baseBody.topology.edgeIds[0];
-    expectTrue(
+    expect(
       targetEdgeId,
       "Expected the seeded box body to expose at least one durable edge.",
-    );
+    ).toBeTruthy();
 
     const rebuilt = rebuildOccAuthoringState(initialState, [
       {
@@ -1271,18 +1267,18 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         reference.invalidation !== null,
     );
 
-    expectTrue(
+    expect(
       invalidatedEdge,
       "Phase 6 snapshot references must preserve invalidated durable topology targets.",
-    );
-    expectTrue(
-      !snapshot.document.diagnostics.some(
+    ).toBeTruthy();
+    expect(
+      snapshot.document.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "occ-invalid-reference" &&
           diagnostic.detail?.kind === "invalidReference",
       ),
       "Phase 6 snapshot diagnostics must not surface historical invalidated references after a successful rebuild.",
-    );
+    ).toBeFalsy();
   }
 
   async function testOccSnapshotSurfacesSketchNavigationAndHistory() {
@@ -1297,7 +1293,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     });
     const snapshot = buildOccWorkspaceSnapshot(state);
 
-    expectTrue(
+    expect(
       snapshot.presentation.objects.some(
         (item) =>
           item.kind === "sketch" &&
@@ -1305,8 +1301,8 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
           item.target.sketchId === sketch.sketchId,
       ),
       "OCC snapshot object navigation must include committed sketch rows.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       snapshot.presentation.documentHistory.some(
         (item) =>
           item.kind === "sketch" &&
@@ -1314,7 +1310,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
           item.target.sketchId === sketch.sketchId,
       ),
       "OCC snapshot document history must include committed sketch items.",
-    );
+    ).toBeTruthy();
   }
 
   async function testRegionRenderFailuresWarnAndSkipOnlyBadRegion() {
@@ -1338,27 +1334,27 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     };
     try {
       const snapshot = buildOccWorkspaceSnapshot(state);
-      expectTrue(
-        !snapshot.document.render.records.some(
+      expect(
+        snapshot.document.render.records.some(
           (record) =>
             record.binding.semanticClass === "region" &&
             record.binding.target.kind === "region" &&
             record.binding.target.regionId === region.regionId,
         ),
         "Bad region profiles should be skipped from render export.",
-      );
+      ).toBeFalsy();
     } finally {
       console.warn = originalWarn;
     }
 
-    expectTrue(
+    expect(
       warnings.some(
         (warning) =>
           warning.includes(String(region.regionId)) &&
           warning.includes("failed to build profile face"),
       ),
       "Skipped region profile render failures should be surfaced as console warnings.",
-    );
+    ).toBeTruthy();
   }
 
   async function testProjectedRegionContractGapSkipsRegionRenderWithoutWarning() {
@@ -1430,23 +1426,23 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     };
     try {
       const snapshot = buildOccWorkspaceSnapshot(state);
-      expectTrue(
-        !snapshot.document.render.records.some(
+      expect(
+        snapshot.document.render.records.some(
           (record) =>
             record.binding.semanticClass === "region" &&
             record.binding.target.kind === "region" &&
             record.binding.target.regionId === region.regionId,
         ),
         "Projected-region contract gaps should skip unsupported region render records.",
-      );
+      ).toBeFalsy();
     } finally {
       console.warn = originalWarn;
     }
 
-    expectTrue(
-      warnings.length === 0,
+    expect(
+      warnings.length,
       "Projected-region contract gaps should not be logged as snapshot render warnings.",
-    );
+    ).toBe(0);
   }
 
   await testWorkspaceSnapshotBuildsContractValidRenderExport();

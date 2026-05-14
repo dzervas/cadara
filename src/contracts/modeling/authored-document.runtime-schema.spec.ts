@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
@@ -17,27 +16,27 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
 
   const authoredDocument = createAuthoredModelDocumentFromSnapshot(snapshot);
   const parsed = parseAuthoredModelDocument(authoredDocument);
-  expectTrue(
+  expect(
     parsed.ok,
     "Authored documents derived from snapshots should validate.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     parsed.ok &&
       parsed.document.features.every((feature) => feature.suppressed === false),
     "Authored documents derived from active snapshot features should persist explicit unsuppressed state.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     parsed.ok && parsed.document.name === snapshot.document.name,
     "Authored documents should preserve the durable document name.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     parsed.ok && parsed.document.assets.records.length === 0,
     "Authored documents should default to an empty geometry asset manifest.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     parsed.ok && parsed.document.embeddedBinaryAssets.length === 0,
     "Authored documents should default to an empty embedded binary asset list.",
-  );
+  ).toBeTruthy();
 
   const missingSuppression = structuredClone(authoredDocument) as unknown as {
     features: Array<Record<string, unknown>>;
@@ -45,10 +44,10 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
   delete missingSuppression.features[0]!.suppressed;
 
   const rejected = parseAuthoredModelDocument(missingSuppression);
-  expectTrue(
-    !rejected.ok,
+  expect(
+    rejected.ok,
     "Authored feature records without explicit suppression state should be rejected.",
-  );
+  ).toBeFalsy();
 
   const legacyRawAuthoredValue = structuredClone(authoredDocument);
   const extrude = legacyRawAuthoredValue.features.find(
@@ -64,8 +63,8 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
   const rejectedLegacyLiteral = parseAuthoredModelDocument(
     legacyRawAuthoredValue,
   );
-  expectTrue(
-    !rejectedLegacyLiteral.ok,
+  expect(
+    rejectedLegacyLiteral.ok,
     "Persisted authored documents should reject legacy raw literals on feature authored-value fields.",
-  );
+  ).toBeFalsy();
 });

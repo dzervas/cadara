@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   clearActiveDocumentTelemetryContext,
   createActiveDocumentTelemetryContext,
@@ -14,11 +13,10 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 
 test("src/contracts/errors/telemetry-context.spec.ts", async () => {
   clearActiveDocumentTelemetryContext();
-  expectTrue(
-    getErrorReporterTelemetryContext().activeDocument.availability ===
-      "unavailable",
+  expect(
+    getErrorReporterTelemetryContext().activeDocument.availability,
     "Telemetry context should start unavailable.",
-  );
+  ).toBe("unavailable");
 
   const adapter = new MockKernelAdapter();
   const snapshot = (
@@ -29,42 +27,42 @@ test("src/contracts/errors/telemetry-context.spec.ts", async () => {
   ).snapshot;
   const context = createActiveDocumentTelemetryContext(snapshot);
 
-  expectTrue(
-    context.availability === "loaded",
+  expect(
+    context.availability,
     "Snapshot telemetry context should be loaded.",
-  );
-  expectTrue(
-    context.documentId === snapshot.document.documentId,
+  ).toBe("loaded");
+  expect(
+    context.documentId,
     "Snapshot telemetry should include document id.",
-  );
-  expectTrue(
-    context.revisionId === snapshot.document.revisionId,
+  ).toBe(snapshot.document.documentId);
+  expect(
+    context.revisionId,
     "Snapshot telemetry should include revision id.",
-  );
-  expectTrue(
-    context.counts.sketches === snapshot.document.sketches.length,
+  ).toBe(snapshot.document.revisionId);
+  expect(
+    context.counts.sketches,
     "Snapshot telemetry should include sketch count.",
-  );
-  expectTrue(
-    context.counts.features === snapshot.document.features.length,
+  ).toBe(snapshot.document.sketches.length);
+  expect(
+    context.counts.features,
     "Snapshot telemetry should include feature count.",
-  );
-  expectTrue(
-    context.payloadStatus === "attached",
+  ).toBe(snapshot.document.features.length);
+  expect(
+    context.payloadStatus,
     "Small durable authored document payloads should be attached.",
-  );
-  expectTrue(
-    context.document.documentId === snapshot.document.documentId,
+  ).toBe("attached");
+  expect(
+    context.document.documentId,
     "Attached payload should be the durable authored document.",
-  );
-  expectTrue(
-    !("render" in context.document),
+  ).toBe(snapshot.document.documentId);
+  expect(
+    "render" in context.document,
     "Attached payload should exclude render exports.",
-  );
-  expectTrue(
-    !("presentation" in context.document),
+  ).toBeFalsy();
+  expect(
+    "presentation" in context.document,
     "Attached payload should exclude presentation state.",
-  );
+  ).toBeFalsy();
 
   const asset = await createDeterministicGeometryAsset({
     ownerFeatureIds: [snapshot.document.features[0]!.featureId],
@@ -78,52 +76,51 @@ test("src/contracts/errors/telemetry-context.spec.ts", async () => {
     ),
   ];
   const assetContext = createActiveDocumentTelemetryContext(diagnosticSnapshot);
-  expectTrue(
+  expect(
     assetContext.availability === "loaded" &&
       assetContext.assetDiagnostics[0]?.hashPrefix ===
         asset.asset.hash.replace(/^sha256:/, "").slice(0, 12) &&
       !("bytes" in assetContext.assetDiagnostics[0]),
     "Telemetry should summarize geometry asset diagnostics without raw bytes.",
-  );
+  ).toBeTruthy();
 
   publishActiveDocumentTelemetryContext(context);
-  expectTrue(
-    getErrorReporterTelemetryContext().activeDocument.availability === "loaded",
+  expect(
+    getErrorReporterTelemetryContext().activeDocument.availability,
     "Published telemetry context should be readable by reporters.",
-  );
+  ).toBe("loaded");
 
   const omittedContext = createActiveDocumentTelemetryContext(snapshot, {
     payloadByteLimit: 1,
   });
-  expectTrue(
-    omittedContext.availability === "loaded",
+  expect(
+    omittedContext.availability,
     "Oversized document telemetry should still carry identity.",
-  );
-  expectTrue(
-    omittedContext.payloadStatus === "omitted-too-large",
+  ).toBe("loaded");
+  expect(
+    omittedContext.payloadStatus,
     "Oversized payloads should be omitted explicitly.",
-  );
-  expectTrue(
-    omittedContext.documentId === snapshot.document.documentId,
+  ).toBe("omitted-too-large");
+  expect(
+    omittedContext.documentId,
     "Oversized fallback should keep document id.",
-  );
-  expectTrue(
-    omittedContext.revisionId === snapshot.document.revisionId,
+  ).toBe(snapshot.document.documentId);
+  expect(
+    omittedContext.revisionId,
     "Oversized fallback should keep revision id.",
-  );
-  expectTrue(
+  ).toBe(snapshot.document.revisionId);
+  expect(
     "omittedReason" in omittedContext,
     "Oversized fallback should explain why the payload is absent.",
-  );
-  expectTrue(
-    !("document" in omittedContext),
+  ).toBeTruthy();
+  expect(
+    "document" in omittedContext,
     "Oversized fallback should not attach the full document.",
-  );
+  ).toBeFalsy();
 
   clearActiveDocumentTelemetryContext();
-  expectTrue(
-    getErrorReporterTelemetryContext().activeDocument.availability ===
-      "unavailable",
+  expect(
+    getErrorReporterTelemetryContext().activeDocument.availability,
     "Clearing telemetry context should mark the active document unavailable.",
-  );
+  ).toBe("unavailable");
 });

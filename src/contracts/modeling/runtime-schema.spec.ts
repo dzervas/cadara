@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   requireDeleteDocumentTargetRequest,
   requireDeleteDocumentTargetResponse,
@@ -18,10 +17,10 @@ test("src/contracts/modeling/runtime-schema.spec.ts", async () => {
     baseRevisionId: "rev_0001",
     target: { kind: "feature", featureId: "feature_extrude-1" },
   });
-  expectTrue(
-    request.target.kind === "feature",
+  expect(
+    request.target.kind,
     "Generic delete requests should accept feature history targets.",
-  );
+  ).toBe("feature");
 
   const unsupportedRequest = requireDeleteDocumentTargetRequest({
     contractVersion: "modeling-contract/v1alpha1",
@@ -29,10 +28,10 @@ test("src/contracts/modeling/runtime-schema.spec.ts", async () => {
     baseRevisionId: "rev_0001",
     target: { kind: "face", bodyId: "body_part-1", faceId: "face_top" },
   });
-  expectTrue(
-    unsupportedRequest.target.kind === "face",
+  expect(
+    unsupportedRequest.target.kind,
     "Generic delete requests should preserve unsupported durable targets for adapter rejection.",
-  );
+  ).toBe("face");
 
   const malformedRequest = validateDeleteDocumentTargetRequest({
     contractVersion: "modeling-contract/v1alpha1",
@@ -40,10 +39,10 @@ test("src/contracts/modeling/runtime-schema.spec.ts", async () => {
     baseRevisionId: "rev_0001",
     target: { kind: "feature" },
   });
-  expectTrue(
-    !malformedRequest.success,
+  expect(
+    malformedRequest.success,
     "Malformed generic delete targets should fail runtime request validation.",
-  );
+  ).toBeFalsy();
 
   const conflictResponse = requireDeleteDocumentTargetResponse({
     contractVersion: "modeling-contract/v1alpha1",
@@ -64,28 +63,28 @@ test("src/contracts/modeling/runtime-schema.spec.ts", async () => {
     changedTargets: [],
     diagnostics: [],
   });
-  expectTrue(
-    conflictResponse.revisionState.kind === "conflict",
+  expect(
+    conflictResponse.revisionState.kind,
     "Generic delete responses should validate stale revision conflicts.",
-  );
+  ).toBe("conflict");
 
   const adapter = new MockKernelAdapter();
   const response = await adapter.getDocumentSnapshot({
     contractVersion: "modeling-contract/v1alpha1",
     documentId: "doc_workspace",
   });
-  expectTrue(
+  expect(
     validateGetDocumentSnapshotResponse(response).success,
     "Seeded document snapshot responses should use canonical authored-value wrappers.",
-  );
+  ).toBeTruthy();
 
   const invalidFeature = response.snapshot.document.features.find(
     (feature) => feature.definition.kind === "extrude",
   );
-  expectTrue(
-    invalidFeature?.definition.kind === "extrude",
+  expect(
+    invalidFeature?.definition.kind,
     "Seeded snapshot should expose an extrude definition for boundary validation.",
-  );
+  ).toBe("extrude");
 
   const invalidDefinition = {
     ...invalidFeature.definition,
@@ -118,16 +117,16 @@ test("src/contracts/modeling/runtime-schema.spec.ts", async () => {
     snapshot: invalidWorkspace,
   };
 
-  expectTrue(
-    !validateKernelDocumentSnapshot(invalidDocument).success,
+  expect(
+    validateKernelDocumentSnapshot(invalidDocument).success,
     "Kernel snapshot validation should reject legacy raw authored values nested in feature definitions.",
-  );
-  expectTrue(
-    !validateWorkspaceSnapshot(invalidWorkspace).success,
+  ).toBeFalsy();
+  expect(
+    validateWorkspaceSnapshot(invalidWorkspace).success,
     "Workspace snapshot validation should reject legacy raw authored values nested in feature definitions.",
-  );
-  expectTrue(
-    !validateGetDocumentSnapshotResponse(invalidResponse).success,
+  ).toBeFalsy();
+  expect(
+    validateGetDocumentSnapshotResponse(invalidResponse).success,
     "Snapshot response validation should reject legacy raw authored values nested in feature definitions.",
-  );
+  ).toBeFalsy();
 });

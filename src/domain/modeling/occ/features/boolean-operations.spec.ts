@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
-import { expectTrue } from "@/testing/expect.spec";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
@@ -53,7 +52,7 @@ function makeTrackedBox(
     dimensions[2],
   );
   box.Build(new oc.Message_ProgressRange_1());
-  expectTrue(box.IsDone(), `Expected ${bodyId} box to build.`);
+  expect(box.IsDone(), `Expected ${bodyId} box to build.`).toBeTruthy();
 
   return trackNewSolidBody(oc, {
     bodyId,
@@ -74,7 +73,7 @@ function makeBoxShape(
     dimensions[2],
   );
   box.Build(new oc.Message_ProgressRange_1());
-  expectTrue(box.IsDone(), "Expected replacement box to build.");
+  expect(box.IsDone(), "Expected replacement box to build.").toBeTruthy();
 
   return box.Shape();
 }
@@ -119,29 +118,25 @@ test("resolveReplacementBodies invalidates topology explicitly when replacement 
   );
 
   const expectedTargets = topologyTargets(body);
-  expectTrue(
-    result.replacements.length === 1,
-    "Expected one replacement body.",
-  );
-  expectTrue(
-    result.historyInvalidations.size === expectedTargets.length,
+  expect(result.replacements.length, "Expected one replacement body.").toBe(1);
+  expect(
+    result.historyInvalidations.size,
     "Expected every previous face, edge, and vertex to receive an unsupported-history invalidation.",
-  );
+  ).toBe(expectedTargets.length);
 
   for (const target of expectedTargets) {
     const invalidation = result.historyInvalidations.get(
       getOccDurableRefKey(target),
     );
-    expectTrue(
-      invalidation?.reason ===
-        OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory,
+    expect(
+      invalidation?.reason,
       `Expected ${getOccDurableRefKey(target)} to be invalidated as unsupported history.`,
-    );
-    expectTrue(
+    ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory);
+    expect(
       invalidation.sourceTarget?.kind === "body" &&
         invalidation.sourceTarget.bodyId === body.bodyId,
       `Expected ${getOccDurableRefKey(target)} to identify its owning body as the invalidation source.`,
-    );
+    ).toBeTruthy();
   }
 });
 
@@ -191,16 +186,16 @@ test("resolveNativeFeatureTransactionReplacement rejects committed shapes with n
       "validation-gate",
       "feature_native_validation_gate_replace" as FeatureId,
     );
-    expectTrue(
+    expect(
       false,
       "Native transaction validation diagnostics should reject committed state.",
-    );
+    ).toBeTruthy();
   } catch (error) {
-    expectTrue(
+    expect(
       error instanceof Error &&
         error.message.includes("Native validation rejected test shape."),
       "Native transaction rejection should surface the native validation diagnostic message.",
-    );
+    ).toBeTruthy();
   }
 });
 
@@ -264,23 +259,22 @@ test("resolveNativeFeatureTransactionReplacement consumes native replacement top
     "feature_native_payload_identity_replace" as FeatureId,
   );
 
-  expectTrue(
-    result.replacements[0]?.topology.faceIds[0] === nativeFaceId,
+  expect(
+    result.replacements[0]?.topology.faceIds[0],
     "Native transaction replacement faces should come from native payload ids, not a second TS enumeration pass.",
-  );
-  expectTrue(
-    result.replacements[0]?.topology.edgeIds[0] === nativeEdgeId,
+  ).toBe(nativeFaceId);
+  expect(
+    result.replacements[0]?.topology.edgeIds[0],
     "Native transaction replacement edges should come from native payload ids, not a second TS enumeration pass.",
-  );
-  expectTrue(
-    result.replacements[0]?.topology.vertexIds[0] === nativeVertexId,
+  ).toBe(nativeEdgeId);
+  expect(
+    result.replacements[0]?.topology.vertexIds[0],
     "Native transaction replacement vertices should come from native payload ids, not a second TS enumeration pass.",
-  );
-  expectTrue(
-    result.replacements[0]?.nativeTopologyPayload?.topology[0]?.id ===
-      transactionPayload.topology[0]?.id,
+  ).toBe(nativeVertexId);
+  expect(
+    result.replacements[0]?.nativeTopologyPayload?.topology[0]?.id,
     "Native transaction replacements should retain their native payload when history reconciliation leaves payload ids intact.",
-  );
+  ).toBe(transactionPayload.topology[0]?.id);
 });
 
 test("committed native topology snapshots reuse body-owned transaction payloads", async () => {
@@ -291,18 +285,18 @@ test("committed native topology snapshots reuse body-owned transaction payloads"
     "feature_committed_payload_reuse" as FeatureId,
     [1, 1, 1],
   );
-  expectTrue(
+  expect(
     body.nativeTopologyPayload != null,
     "Tracked OCC body should carry the native topology payload that established its ids.",
-  );
+  ).toBeTruthy();
   const nativeHost = oc as unknown as OpenCascadeNativeTopologyKernelHost;
   const originalBuildCommittedShapePayload =
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildCommittedShapePayload;
-  expectTrue(
-    typeof originalBuildCommittedShapePayload === "function",
+  expect(
+    typeof originalBuildCommittedShapePayload,
     "Expected custom OCC runtime to expose committed shape payload extraction.",
-  );
+  ).toBe("function");
   nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildCommittedShapePayload =
     () => {
       throw new Error(
@@ -338,14 +332,14 @@ test("committed native topology snapshots reuse body-owned transaction payloads"
     )?.id;
     const firstBodyPayloadId = body.nativeTopologyPayload?.topology[0]?.id;
 
-    expectTrue(
-      result.kind === "nativeTopologyPayload",
+    expect(
+      result.kind,
       "Committed native topology snapshot should build successfully.",
-    );
-    expectTrue(
-      firstPayloadId === firstBodyPayloadId,
+    ).toBe("nativeTopologyPayload");
+    expect(
+      firstPayloadId,
       "Committed native topology snapshot should emit the body-owned native transaction payload.",
-    );
+    ).toBe(firstBodyPayloadId);
   } finally {
     nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildCommittedShapePayload =
       originalBuildCommittedShapePayload;
@@ -374,30 +368,30 @@ test("native transaction replacements retain rewritten committed payloads after 
     (candidate) => candidate.bodyId === body.bodyId,
   );
 
-  expectTrue(
+  expect(
     replacement != null,
     "Native boolean replacement should preserve the target body.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     body.topology.faceIds.every((faceId) =>
       replacement?.topology.faceIds.includes(faceId),
     ),
     "Native boolean history should preserve public face ids with unique successors.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     replacement?.nativeTopologyPayload?.topology.some(
       (record) => record.id === body.topology.faceIds[0],
-    ) === true,
+    ),
     "Native transaction payload should be rewritten to the reconciled public face ids.",
-  );
+  ).toBeTruthy();
 
   const originalBuildCommittedShapePayload =
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildCommittedShapePayload;
-  expectTrue(
-    typeof originalBuildCommittedShapePayload === "function",
+  expect(
+    typeof originalBuildCommittedShapePayload,
     "Expected custom OCC runtime to expose committed shape payload extraction.",
-  );
+  ).toBe("function");
   nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildCommittedShapePayload =
     () => {
       throw new Error(
@@ -430,16 +424,16 @@ test("native transaction replacements retain rewritten committed payloads after 
       { useCommittedShapeTransaction: true },
     );
 
-    expectTrue(
-      nativeSnapshot.kind === "nativeTopologyPayload",
+    expect(
+      nativeSnapshot.kind,
       "Committed native topology snapshot should build successfully.",
-    );
-    expectTrue(
+    ).toBe("nativeTopologyPayload");
+    expect(
       nativeSnapshot.payload?.bodies[0]?.topology.some(
         (record) => record.id === body.topology.faceIds[0],
-      ) === true,
+      ),
       "Committed native topology snapshot should reuse the rewritten transaction payload.",
-    );
+    ).toBeTruthy();
   } finally {
     nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildCommittedShapePayload =
       originalBuildCommittedShapePayload;
@@ -468,32 +462,32 @@ test("applyBooleanPolicy preserves unique native boolean history successors", as
     (candidate) => candidate.bodyId === body.bodyId,
   );
 
-  expectTrue(
+  expect(
     replacement != null,
     "Native boolean policy should replace the target body.",
-  );
-  expectTrue(
-    result.historyInvalidations.size === 0,
+  ).toBeTruthy();
+  expect(
+    result.historyInvalidations.size,
     "Native boolean history should not invalidate references that have unique successors.",
-  );
-  expectTrue(
+  ).toBe(0);
+  expect(
     body.topology.faceIds.every((faceId) =>
       replacement?.topology.faceIds.includes(faceId),
     ),
     "Native boolean history should preserve previous face ids with unique successors.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     body.topology.edgeIds.every((edgeId) =>
       replacement?.topology.edgeIds.includes(edgeId),
     ),
     "Native boolean history should preserve previous edge ids with unique successors.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     body.topology.vertexIds.every((vertexId) =>
       replacement?.topology.vertexIds.includes(vertexId),
     ),
     "Native boolean history should preserve previous vertex ids with unique successors.",
-  );
+  ).toBeTruthy();
 });
 
 test("applyBooleanPolicy uses native boolean transactions for per-target multi-body policy", async () => {
@@ -515,10 +509,10 @@ test("applyBooleanPolicy uses native boolean transactions for per-target multi-b
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildBooleanCommittedShapeTransactionWithHistory;
   let nativeCallCount = 0;
-  expectTrue(
-    typeof nativeBuilder === "function",
+  expect(
+    typeof nativeBuilder,
     "Expected custom OCC runtime to expose native boolean transactions.",
-  );
+  ).toBe("function");
   nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildBooleanCommittedShapeTransactionWithHistory =
     (...args) => {
       nativeCallCount += 1;
@@ -535,20 +529,20 @@ test("applyBooleanPolicy uses native boolean transactions for per-target multi-b
     featureShape,
   );
 
-  expectTrue(
-    nativeCallCount === 2,
+  expect(
+    nativeCallCount,
     "Per-target multi-body cut should use one native boolean transaction per target body.",
-  );
-  expectTrue(
+  ).toBe(2);
+  expect(
     result.bodies.some((candidate) => candidate.bodyId === bodyA.bodyId),
     "Multi-body cut should keep body A.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     result.bodies.some((candidate) => candidate.bodyId === bodyB.bodyId),
     "Multi-body cut should keep body B.",
-  );
-  expectTrue(
-    ![...result.historyInvalidations.values()].some(
+  ).toBeTruthy();
+  expect(
+    [...result.historyInvalidations.values()].some(
       (invalidation) =>
         invalidation.reason ===
           OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory ||
@@ -556,5 +550,5 @@ test("applyBooleanPolicy uses native boolean transactions for per-target multi-b
           OCC_REFERENCE_INVALIDATION_REASONS.topologyModified,
     ),
     "Native multi-body cut should not fall back to unsupported or JS-side modified-history invalidations.",
-  );
+  ).toBeFalsy();
 });

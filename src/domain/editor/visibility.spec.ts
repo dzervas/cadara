@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   getAutoHiddenSketchTargetKeys,
   getSketchEditingOriginPlaneTargetKeys,
@@ -25,18 +24,18 @@ test("src/domain/editor/visibility.spec.ts", async () => {
       item.target.sketchId === "sketch_primary",
   )?.target;
 
-  expectTrue(
-    sketchTarget?.kind === "sketch",
+  expect(
+    sketchTarget?.kind,
     "Visibility fixture should expose the consumed primary sketch row.",
-  );
+  ).toBe("sketch");
 
   const sketchKey = getPrimitiveRefKey(sketchTarget);
   const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot);
 
-  expectTrue(
-    autoHiddenSketchTargetKeys[sketchKey] === true,
+  expect(
+    autoHiddenSketchTargetKeys[sketchKey],
     "Consumed sketch rows should derive auto-hidden state from snapshot consumption metadata.",
-  );
+  ).toBeTruthy();
 
   const initialVisibility = getWorkbenchVisibilityState({
     snapshot,
@@ -44,10 +43,10 @@ test("src/domain/editor/visibility.spec.ts", async () => {
     explicitlyShownAutoHiddenTargetKeys: {},
   });
 
-  expectTrue(
-    initialVisibility.effectiveHiddenTargetKeys[sketchKey] === true,
+  expect(
+    initialVisibility.effectiveHiddenTargetKeys[sketchKey],
     "Consumed sketch rows should start hidden when no explicit show override exists.",
-  );
+  ).toBeTruthy();
 
   const originPlaneKeys = Object.values(OCC_KERNEL_CONSTRUCTION_IDS).map(
     (constructionId) =>
@@ -55,10 +54,10 @@ test("src/domain/editor/visibility.spec.ts", async () => {
   );
   const originPlaneVisibility = getSketchEditingOriginPlaneTargetKeys(true);
 
-  expectTrue(
+  expect(
     originPlaneKeys.every((key) => originPlaneVisibility[key] === true),
     "Sketch editing should derive temporary hidden state for every origin plane.",
-  );
+  ).toBeTruthy();
 
   const sketchEditingVisibility = getWorkbenchVisibilityState({
     snapshot,
@@ -67,12 +66,12 @@ test("src/domain/editor/visibility.spec.ts", async () => {
     isSketchEditing: true,
   });
 
-  expectTrue(
+  expect(
     originPlaneKeys.every(
       (key) => sketchEditingVisibility.effectiveHiddenTargetKeys[key] === true,
     ),
     "Sketch editing should hide all origin planes without a user visibility toggle.",
-  );
+  ).toBeTruthy();
 
   const exitedSketchVisibility = getWorkbenchVisibilityState({
     snapshot,
@@ -81,18 +80,18 @@ test("src/domain/editor/visibility.spec.ts", async () => {
     isSketchEditing: false,
   });
 
-  expectTrue(
+  expect(
     originPlaneKeys.every(
       (key) => exitedSketchVisibility.effectiveHiddenTargetKeys[key] !== true,
     ),
     "Leaving sketch editing should restore origin-plane visibility when the user had not hidden them.",
-  );
+  ).toBeTruthy();
 
   const explicitlyHiddenPlaneKey = originPlaneKeys[1];
-  expectTrue(
+  expect(
     explicitlyHiddenPlaneKey != null,
     "Origin-plane visibility fixture should include a YZ plane key.",
-  );
+  ).toBeTruthy();
 
   const exitedWithPreviousPlaneHiddenVisibility = getWorkbenchVisibilityState({
     snapshot,
@@ -101,12 +100,12 @@ test("src/domain/editor/visibility.spec.ts", async () => {
     isSketchEditing: false,
   });
 
-  expectTrue(
+  expect(
     exitedWithPreviousPlaneHiddenVisibility.effectiveHiddenTargetKeys[
       explicitlyHiddenPlaneKey
-    ] === true,
+    ],
     "Leaving sketch editing should preserve an origin plane that was already hidden.",
-  );
+  ).toBeTruthy();
 
   const shownOverride = toggleWorkbenchTargetVisibility({
     target: sketchTarget,
@@ -122,10 +121,10 @@ test("src/domain/editor/visibility.spec.ts", async () => {
       shownOverride.explicitlyShownAutoHiddenTargetKeys,
   });
 
-  expectTrue(
-    shownVisibility.effectiveHiddenTargetKeys[sketchKey] !== true,
+  expect(
+    shownVisibility.effectiveHiddenTargetKeys[sketchKey],
     "Toggling an auto-hidden sketch should create a session-local show override.",
-  );
+  ).not.toBeTruthy();
 
   const hiddenAgain = toggleWorkbenchTargetVisibility({
     target: sketchTarget,
@@ -142,10 +141,10 @@ test("src/domain/editor/visibility.spec.ts", async () => {
       hiddenAgain.explicitlyShownAutoHiddenTargetKeys,
   });
 
-  expectTrue(
-    hiddenAgainVisibility.effectiveHiddenTargetKeys[sketchKey] === true,
+  expect(
+    hiddenAgainVisibility.effectiveHiddenTargetKeys[sketchKey],
     "Toggling a shown consumed sketch again should fall back to the derived auto-hidden state.",
-  );
+  ).toBeTruthy();
 
   const reconciled = reconcileVisibilityIntentKeys(
     {
@@ -155,8 +154,8 @@ test("src/domain/editor/visibility.spec.ts", async () => {
     new Set([sketchKey]),
   );
 
-  expectTrue(
+  expect(
     reconciled[sketchKey] === true && reconciled["sketch:stale"] !== true,
     "Visibility intent reconciliation should drop stale target keys after snapshot updates.",
-  );
+  ).toBeTruthy();
 });

@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   SketchDefinition,
   SketchDerivationDefinition,
@@ -74,15 +73,15 @@ test("evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep
     [-2, 1],
     "Mirror relationships should reflect arc end points across the mirror axis.",
   );
-  expectTrue(
+  expect(
     mirroredArc.kind === "arc" &&
       mirroredArc.sweepDirection === "counterClockwise",
     "Mirrored arcs should reverse sweep direction so the mirrored geometry remains consistent.",
-  );
-  expectTrue(
-    result.diagnostics.length === 0,
+  ).toBeTruthy();
+  expect(
+    result.diagnostics.length,
     "Valid mirror relationships should not emit diagnostics.",
-  );
+  ).toBe(0);
 });
 
 test("evaluateSketchDerivations applies linear, circular, and transform relationships through the exported seam", () => {
@@ -216,10 +215,10 @@ test("evaluateSketchDerivations applies linear, circular, and transform relation
     [8, 0],
     "Transform relationships should rotate, scale, then translate circle centers.",
   );
-  expectTrue(
+  expect(
     scaledCircle.kind === "circle" && scaledCircle.radius === 4,
     "Transform relationships should scale circle radii by the absolute value of the transform scale.",
-  );
+  ).toBeTruthy();
   assertPoint(
     pointPosition(result.definition, "pattern_out"),
     [0, 2],
@@ -240,10 +239,10 @@ test("evaluateSketchDerivations applies linear, circular, and transform relation
     [-1, 2],
     "Transforms should apply consistently across every spline point in the output map.",
   );
-  expectTrue(
-    result.diagnostics.length === 0,
+  expect(
+    result.diagnostics.length,
     "Valid derived relationships should not emit diagnostics.",
-  );
+  ).toBe(0);
 });
 
 test("evaluateSketchDerivations emits diagnostics for missing seed, missing output, and missing mirror axis seams", () => {
@@ -313,18 +312,18 @@ test("evaluateSketchDerivations emits diagnostics for missing seed, missing outp
   const result = evaluateSketchDerivations(definition);
   const codes = result.diagnostics.map((diagnostic) => diagnostic.code);
 
-  expectTrue(
+  expect(
     codes.includes("derived-transform-missing-seed"),
     "Missing seed entities should emit a missing-seed diagnostic.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     codes.includes("derived-transform-missing-output"),
     "Missing output entities should emit a missing-output diagnostic.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     codes.includes("derived-transform-missing-mirror-axis"),
     "Missing mirror axes should emit a missing-axis diagnostic.",
-  );
+  ).toBeTruthy();
 });
 
 function assertPoint(
@@ -335,20 +334,20 @@ function assertPoint(
   const close =
     Math.abs(actual[0] - expected[0]) < 1e-9 &&
     Math.abs(actual[1] - expected[1]) < 1e-9;
-  expectTrue(
+  expect(
     close,
     `${message} Expected [${expected.join(", ")}], received [${actual.join(", ")}].`,
-  );
+  ).toBeTruthy();
 }
 
 function pointPosition(definition: SketchDefinition, pointId: string) {
   const point = definition.points.find(
     (candidate) => candidate.pointId === pointId,
   );
-  expectTrue(
+  expect(
     point,
     `Expected point ${pointId} to exist in the evaluated sketch definition.`,
-  );
+  ).toBeTruthy();
   return point.position;
 }
 
@@ -359,10 +358,10 @@ function entity(
   const candidate = definition.entities.find(
     (entry) => entry.entityId === entityId,
   );
-  expectTrue(
+  expect(
     candidate,
     `Expected entity ${entityId} to exist in the evaluated sketch definition.`,
-  );
+  ).toBeTruthy();
   return candidate;
 }
 

@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createWorkbenchDocumentOwner } from "@/application/workbench/document-owner";
 import { createAppError, err, ok } from "@/contracts/errors";
 import type { ImportProvider } from "@/contracts/import/provider";
@@ -139,21 +138,21 @@ test("document owner accepts variable mutations and refreshes the snapshot", asy
     fallbackMessage: "Add variable failed.",
   });
 
-  expectTrue(
+  expect(
     result.isOk(),
     "Accepted variable mutations should resolve successfully through the document owner seam.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     addCalls[0]?.baseRevisionId === snapshot.document.revisionId &&
       addCalls[0]?.name === `var${snapshot.document.variables.length + 1}` &&
       addCalls[0]?.valueText === "0",
     "Document owner should derive variable defaults from the active snapshot revision and variable count.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     dispatched[0]?.type === "document.snapshotLoaded" &&
       dispatched[0].snapshot === nextSnapshot,
     "Accepted variable mutations should refresh and dispatch the next snapshot.",
-  );
+  ).toBeTruthy();
 });
 
 test("document owner preserves rejected and errored variable mutations without refreshing", async () => {
@@ -193,14 +192,14 @@ test("document owner preserves rejected and errored variable mutations without r
     fallbackMessage: "Add variable failed.",
   });
 
-  expectTrue(
+  expect(
     rejectedResult.isErr(),
     "Rejected modeling results should propagate as workbench errors.",
-  );
-  expectTrue(
-    dispatched.length === 0,
+  ).toBeTruthy();
+  expect(
+    dispatched.length,
     "Rejected mutations should not dispatch a refreshed snapshot.",
-  );
+  ).toBe(0);
 
   const erroredOwner = createOwner({
     machineState: { snapshot } as EditorState,
@@ -222,19 +221,19 @@ test("document owner preserves rejected and errored variable mutations without r
     fallbackMessage: "Add variable failed.",
   });
 
-  expectTrue(
+  expect(
     erroredResult.isErr(),
     "Upstream AppError results should pass through the document owner seam.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     erroredResult.isErr() &&
       erroredResult.error.message === "Repository offline.",
     "The owner should not wrap modeling AppErrors when the modeling service already normalized them.",
-  );
-  expectTrue(
-    dispatched.length === 0,
+  ).toBeTruthy();
+  expect(
+    dispatched.length,
     "Errored mutations should not dispatch a refreshed snapshot.",
-  );
+  ).toBe(0);
 });
 
 test("document owner covers snapshot replacement and loading guards", async () => {
@@ -255,15 +254,15 @@ test("document owner covers snapshot replacement and loading guards", async () =
   });
 
   const replaced = await owner.replaceActiveDocumentBasis();
-  expectTrue(
-    replaced === nextSnapshot,
+  expect(
+    replaced,
     "Replacing the active document basis should return the fetched snapshot.",
-  );
-  expectTrue(
+  ).toBe(nextSnapshot);
+  expect(
     dispatched[0]?.type === "document.replaced" &&
       dispatched[0].snapshot === nextSnapshot,
     "Replacing the active document basis should dispatch the replacement event.",
-  );
+  ).toBeTruthy();
 
   const loadingOwner = createOwner({
     machineState: { snapshot: null } as EditorState,
@@ -287,10 +286,10 @@ test("document owner covers snapshot replacement and loading guards", async () =
   } catch (error: unknown) {
     message = error instanceof Error ? error.message : String(error);
   }
-  expectTrue(
-    message === "The current document is still loading.",
+  expect(
+    message,
     "Mutation entrypoints should guard against missing snapshots.",
-  );
+  ).toBe("The current document is still loading.");
 });
 
 test("document owner routes durable document rename through the modeling seam and refreshes the snapshot", async () => {
@@ -325,19 +324,19 @@ test("document owner routes durable document rename through the modeling seam an
     fallbackMessage: "Rename document failed.",
   });
 
-  expectTrue(
+  expect(
     result.isOk(),
     "Accepted document rename mutations should resolve successfully through the document owner seam.",
-  );
-  expectTrue(
-    renameCalls[0] === "Bracket v3",
+  ).toBeTruthy();
+  expect(
+    renameCalls[0],
     "Document owner should pass the durable document name through to the modeling service.",
-  );
-  expectTrue(
+  ).toBe("Bracket v3");
+  expect(
     dispatched[0]?.type === "document.snapshotLoaded" &&
       dispatched[0].snapshot === nextSnapshot,
     "Accepted document renames should refresh and dispatch the next snapshot through the shared snapshot-loaded handoff.",
-  );
+  ).toBeTruthy();
 });
 
 test("document owner routes rename operations for bodies, features, and sketches", async () => {
@@ -433,33 +432,33 @@ test("document owner routes rename operations for bodies, features, and sketches
     { operation: "Rename sketch", fallbackMessage: "Rename sketch failed." },
   );
 
-  expectTrue(
+  expect(
     bodyRename.isOk() && featureRename.isOk() && sketchRename.isOk(),
     "Accepted rename flows should resolve successfully.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     renameBodyCalls[0]?.bodyId === body.bodyId &&
       renameBodyCalls[0]?.bodyLabel === "Renamed body" &&
       renameBodyCalls[0]?.baseRevisionId === snapshot.document.revisionId,
     "Body renames should forward the body id, new label, and active base revision.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     updateFeatureCalls[0]?.featureId === feature.featureId &&
       updateFeatureCalls[0]?.featureLabel === "Renamed feature" &&
       updateFeatureCalls[0]?.definition === feature.definition,
     "Feature renames should preserve the existing definition while updating the label.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     commitSketchCalls[0]?.sketchId === sketch.sketchId &&
       commitSketchCalls[0]?.sketchLabel === "Renamed sketch" &&
       commitSketchCalls[0]?.solverCorrelation === correlations[0],
     "Sketch renames should hand the sketch solver correlation through the modeling service port.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     dispatched.filter((event) => event.type === "document.snapshotLoaded")
-      .length === 3,
+      .length,
     "Accepted rename mutations should refresh the snapshot after each accepted operation.",
-  );
+  ).toBe(3);
 });
 
 test("document owner enforces rename and delete guardrails", async () => {
@@ -496,9 +495,8 @@ test("document owner enforces rename and delete guardrails", async () => {
   } catch (error: unknown) {
     deleteMessage = error instanceof Error ? error.message : String(error);
   }
-  expectTrue(
-    deleteMessage === "Only durable document targets can be deleted.",
-    "Delete should reject non-durable targets.",
+  expect(deleteMessage, "Delete should reject non-durable targets.").toBe(
+    "Only durable document targets can be deleted.",
   );
 
   let featureMissingMessage: string | null = null;
@@ -519,10 +517,10 @@ test("document owner enforces rename and delete guardrails", async () => {
     featureMissingMessage =
       error instanceof Error ? error.message : String(error);
   }
-  expectTrue(
-    featureMissingMessage === "Could not find feature_missing.",
+  expect(
+    featureMissingMessage,
     "Feature rename should fail when the selected feature is missing.",
-  );
+  ).toBe("Could not find feature_missing.");
 
   let sketchMissingMessage: string | null = null;
   try {
@@ -539,10 +537,10 @@ test("document owner enforces rename and delete guardrails", async () => {
     sketchMissingMessage =
       error instanceof Error ? error.message : String(error);
   }
-  expectTrue(
-    sketchMissingMessage === "Could not find sketch_missing.",
+  expect(
+    sketchMissingMessage,
     "Sketch rename should fail when the selected sketch is missing.",
-  );
+  ).toBe("Could not find sketch_missing.");
 
   let unsupportedMessage: string | null = null;
   try {
@@ -558,11 +556,10 @@ test("document owner enforces rename and delete guardrails", async () => {
   } catch (error: unknown) {
     unsupportedMessage = error instanceof Error ? error.message : String(error);
   }
-  expectTrue(
-    unsupportedMessage ===
-      "Only sketches, features, and bodies can be renamed.",
+  expect(
+    unsupportedMessage,
     "Rename should reject unsupported durable target kinds.",
-  );
+  ).toBe("Only sketches, features, and bodies can be renamed.");
 });
 
 test("document owner forwards history reorder, variable update, and durable delete mutations", async () => {
@@ -625,16 +622,16 @@ test("document owner forwards history reorder, variable update, and durable dele
       fallbackMessage: "Update variable failed.",
     },
   );
-  expectTrue(
+  expect(
     variableResult.isOk(),
     "Variable updates should resolve through the accepted mutation path.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     variableUpdates[0]?.variableId === variableId &&
       variableUpdates[0]?.name === "width" &&
       variableUpdates[0]?.valueText === "42 mm",
     "Variable updates should forward the active variable id and requested patch values.",
-  );
+  ).toBeTruthy();
 
   const reorderResult = await owner.reorderDocumentHistory(historyItem, null, {
     operation: "Reorder history",
@@ -645,20 +642,20 @@ test("document owner forwards history reorder, variable update, and durable dele
     { operation: "Delete body", fallbackMessage: "Delete body failed." },
   );
 
-  expectTrue(
+  expect(
     reorderResult.isOk() && deleteResult.isOk(),
     "History reorder and durable delete flows should resolve successfully.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     reorderCalls[0]?.item === historyItem &&
       reorderCalls[0]?.beforeItem === null,
     "History reorders should forward the selected item and anchor to the modeling service.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     deleteCalls[0]?.kind === "body" &&
       deleteCalls[0].bodyId === snapshot.document.bodies[0]!.bodyId,
     "Durable delete should forward the selected durable target unchanged.",
-  );
+  ).toBeTruthy();
 });
 
 test("document owner handles import provider lookup, diagnostic failures, and successful replay", async () => {
@@ -666,23 +663,22 @@ test("document owner handles import provider lookup, diagnostic failures, and su
   const nextSnapshot = await createSeedDocumentSnapshot();
   const provider = createImportProvider({
     prepare: async ({ source, review, selections, capabilities }) => {
-      expectTrue(
-        source.name === "fixture.step",
+      expect(
+        source.name,
         "Import source should be forwarded to the provider.",
-      );
-      expectTrue(
-        (review as ImportReviewEnvelope<{ units: "mm" }>).providerReview
-          .units === "mm",
+      ).toBe("fixture.step");
+      expect(
+        (review as ImportReviewEnvelope<{ units: "mm" }>).providerReview.units,
         "Provider review should be forwarded unchanged.",
-      );
-      expectTrue(
-        (selections as { enabled: boolean }).enabled === true,
+      ).toBe("mm");
+      expect(
+        (selections as { enabled: boolean }).enabled,
         "Import selections should be forwarded unchanged.",
-      );
-      expectTrue(
-        capabilities.context.baseRevisionId === snapshot.document.revisionId,
+      ).toBeTruthy();
+      expect(
+        capabilities.context.baseRevisionId,
         "Import capabilities should target the active snapshot revision.",
-      );
+      ).toBe(snapshot.document.revisionId);
       return {
         addDocumentVariables: [
           {
@@ -738,20 +734,20 @@ test("document owner handles import provider lookup, diagnostic failures, and su
   });
 
   const success = await successfulOwner.commitPartImport(activeImportSession);
-  expectTrue(
+  expect(
     success.ok,
     "Successful imports should return a committed import result.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     success.ok &&
       success.createdEntityIds.variableIds[0] === "variable_scale" &&
       success.snapshot === nextSnapshot,
     "Successful imports should replay created ids and refresh the snapshot.",
-  );
-  expectTrue(
-    mutationCalls[0] === snapshot.document.revisionId,
+  ).toBeTruthy();
+  expect(
+    mutationCalls[0],
     "Prepared import actions should start from the active snapshot revision.",
-  );
+  ).toBe(snapshot.document.revisionId);
 
   const diagnosticsOwner = createOwner({
     machineState: { snapshot } as EditorState,
@@ -791,16 +787,16 @@ test("document owner handles import provider lookup, diagnostic failures, and su
   });
 
   const blocked = await diagnosticsOwner.commitPartImport(activeImportSession);
-  expectTrue(
-    !blocked.ok,
+  expect(
+    blocked.ok,
     "Error-severity import diagnostics should block a successful import result.",
-  );
-  expectTrue(
-    !blocked.ok &&
+  ).toBeFalsy();
+  expect(
+    blocked.ok &&
       blocked.diagnostics[0]?.message ===
         "Geometry could not be reconstructed.",
     "Blocked imports should return the provider diagnostics to the caller.",
-  );
+  ).toBeFalsy();
 
   const missingProviderOwner = createOwner({
     machineState: { snapshot } as EditorState,
@@ -818,9 +814,8 @@ test("document owner handles import provider lookup, diagnostic failures, and su
     missingProviderMessage =
       error instanceof Error ? error.message : String(error);
   }
-  expectTrue(
-    missingProviderMessage ===
-      "The selected import provider is no longer registered.",
+  expect(
+    missingProviderMessage,
     "Import commit should fail when the selected provider is no longer registered.",
-  );
+  ).toBe("The selected import provider is no longer registered.");
 });

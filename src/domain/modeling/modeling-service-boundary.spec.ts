@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   AddDocumentVariableResponse,
   CreateFeatureResponse,
@@ -53,9 +52,8 @@ test("src/domain/modeling/modeling-service-boundary.spec.ts", async () => {
   const seedFeature = snapshot.document.features.find(
     (feature) => feature.definition.kind === "extrude",
   );
-  expectTrue(
-    seedFeature?.definition.kind === "extrude",
-    "Seed extrude feature must exist.",
+  expect(seedFeature?.definition.kind, "Seed extrude feature must exist.").toBe(
+    "extrude",
   );
 
   const featureResult = await service.createFeature({
@@ -63,22 +61,22 @@ test("src/domain/modeling/modeling-service-boundary.spec.ts", async () => {
     definition: seedFeature.definition,
   });
 
-  expectTrue(
+  expect(
     featureResult.isErr(),
     "Malformed feature mutation responses should return a boundary error.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     featureResult.error.message.includes("CreateFeatureResponse"),
     "Feature response errors should name the first schema.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     featureResult.error.message.includes("UpdateFeatureResponse"),
     "Feature response errors should name the fallback schema.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     featureResult.error.message.includes("featureId"),
     "Feature response errors should include actionable schema issue paths.",
-  );
+  ).toBeTruthy();
 
   const variableResult = await service.addDocumentVariable({
     baseRevisionId: snapshot.document.revisionId,
@@ -87,20 +85,20 @@ test("src/domain/modeling/modeling-service-boundary.spec.ts", async () => {
     valueText: "10",
   });
 
-  expectTrue(
+  expect(
     variableResult.isErr(),
     "Malformed document variable mutation responses should return a boundary error.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     variableResult.error.message.includes("AddDocumentVariableResponse"),
     "Variable response errors should name the first schema.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     variableResult.error.message.includes("UpdateDocumentVariableResponse"),
     "Variable response errors should name the fallback schema.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     variableResult.error.message.includes("variableId"),
     "Variable response errors should include actionable schema issue paths.",
-  );
+  ).toBeTruthy();
 });

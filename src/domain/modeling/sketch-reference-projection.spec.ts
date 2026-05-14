@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import {
   CONTRACT_VERSION,
@@ -139,10 +138,10 @@ test("model edge projection classifies supported projected geometry generically"
     ],
     false,
   ).projectedReferences[0]?.geometry[0];
-  expectTrue(
-    line?.kind === "lineSegment",
+  expect(
+    line?.kind,
     "Open collinear model edges should project as line segments.",
-  );
+  ).toBe("lineSegment");
 
   const circle = projectEdge(
     [
@@ -153,14 +152,14 @@ test("model edge projection classifies supported projected geometry generically"
     ],
     true,
   ).projectedReferences[0]?.geometry[0];
-  expectTrue(
-    circle?.kind === "circle",
+  expect(
+    circle?.kind,
     "Closed circular model edges should project as circles.",
-  );
-  expectTrue(
+  ).toBe("circle");
+  expect(
     Math.abs(circle.radius - 1) < 1e-6,
     "Projected circle should preserve the source radius.",
-  );
+  ).toBeTruthy();
 
   const arc = projectEdge(
     [
@@ -170,14 +169,13 @@ test("model edge projection classifies supported projected geometry generically"
     ],
     false,
   ).projectedReferences[0]?.geometry[0];
-  expectTrue(
-    arc?.kind === "arc",
-    "Open circular model edges should project as arcs.",
+  expect(arc?.kind, "Open circular model edges should project as arcs.").toBe(
+    "arc",
   );
-  expectTrue(
-    arc.sweepDirection === "counterClockwise",
+  expect(
+    arc.sweepDirection,
     "Projected arc should preserve sweep direction.",
-  );
+  ).toBe("counterClockwise");
 });
 
 test("model edge projection handles closed edge sampling variants without misclassifying unsupported curves", () => {
@@ -191,14 +189,14 @@ test("model edge projection handles closed edge sampling variants without miscla
     ],
     true,
   ).projectedReferences[0];
-  expectTrue(
-    repeatedEndpointCircle?.status === "projected",
+  expect(
+    repeatedEndpointCircle?.status,
     "Closed circular model edges with repeated endpoints should project.",
-  );
-  expectTrue(
-    repeatedEndpointCircle.geometry[0]?.kind === "circle",
+  ).toBe("projected");
+  expect(
+    repeatedEndpointCircle.geometry[0]?.kind,
     "Repeated endpoint circles should project as circles.",
-  );
+  ).toBe("circle");
 
   const inferredClosedCircle = projectEdge(
     [
@@ -210,10 +208,10 @@ test("model edge projection handles closed edge sampling variants without miscla
     ],
     false,
   ).projectedReferences[0]?.geometry[0];
-  expectTrue(
-    inferredClosedCircle?.kind === "circle",
+  expect(
+    inferredClosedCircle?.kind,
     "Repeated endpoints should infer closed circular model edges.",
-  );
+  ).toBe("circle");
 
   const spline = projectEdge(
     [
@@ -226,16 +224,16 @@ test("model edge projection handles closed edge sampling variants without miscla
     true,
   ).projectedReferences[0];
   const splineGeometry = spline?.geometry[0];
-  expectTrue(
-    spline?.status === "projected",
+  expect(
+    spline?.status,
     "Non-line and non-circular model edges should still project as freeform curves.",
-  );
-  expectTrue(
-    splineGeometry?.kind === "spline",
+  ).toBe("projected");
+  expect(
+    splineGeometry?.kind,
     "Freeform model edges should project as splines.",
-  );
-  expectTrue(
+  ).toBe("spline");
+  expect(
     splineGeometry.isClosed,
     "Projected freeform curves should preserve closed sampling.",
-  );
+  ).toBeTruthy();
 });

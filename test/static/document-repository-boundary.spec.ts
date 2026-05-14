@@ -1,8 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 test("test/static/document-repository-boundary.spec.ts", () => {
   const sourceRoot = join(process.cwd(), "src");
   const offenders: string[] = [];
@@ -23,10 +22,10 @@ test("test/static/document-repository-boundary.spec.ts", () => {
     }
   }
 
-  expectTrue(
+  expect(
     offenders.length === 0,
     `Automerge imports must stay inside the repository implementation layer: ${offenders.join(", ")}`,
-  );
+  ).toBeTruthy();
 });
 
 function walkTypescriptFiles(directory: string): string[] {

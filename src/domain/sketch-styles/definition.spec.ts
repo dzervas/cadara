@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   SKETCH_STYLE_PATCH_INTENT,
   buildSketchStyleControls,
@@ -10,77 +9,77 @@ import {
 
 test("src/domain/sketch-styles/definition.spec.ts", () => {
   const controls = buildSketchStyleControls(undefined);
-  expectTrue(
+  expect(
     controls.some((control) => control.id === "sketch-style-fill-mode"),
     "Style controls should expose fill mode.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     controls.some((control) => control.id === "sketch-style-gradient-start"),
     "Style controls should expose gradient start color.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     controls.some((control) => control.id === "sketch-style-stroke-join"),
     "Style controls should expose stroke join.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     controls.some(
       (control) => control.id === "sketch-style-stroke-miter-limit",
     ),
     "Style controls should expose stroke miter limit.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     controls.some((control) => control.id === "sketch-style-stroke-dash-size"),
     "Style controls should expose stroke dash size.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     controls.some((control) => control.id === "sketch-style-stroke-gap-size"),
     "Style controls should expose stroke gap size.",
-  );
+  ).toBeTruthy();
   const defaultStrokeEnabled = controls.find(
     (control) => control.id === "sketch-style-stroke-enabled",
   );
   const defaultStrokeColor = controls.find(
     (control) => control.id === "sketch-style-stroke-color",
   );
-  expectTrue(
+  expect(
     defaultStrokeEnabled?.kind === "toggle" &&
       defaultStrokeEnabled.value === false,
     "Stroke styling should be disabled by default.",
-  );
-  expectTrue(
-    defaultStrokeColor?.disabled === true,
+  ).toBeTruthy();
+  expect(
+    defaultStrokeColor?.disabled,
     "Stroke controls should be disabled until stroke styling is enabled.",
-  );
+  ).toBeTruthy();
 
   const accepted = parseSketchStylePatch({
     intent: SKETCH_STYLE_PATCH_INTENT,
     field: "strokeWidth",
     value: 3,
   });
-  expectTrue(
+  expect(
     accepted?.field === "strokeWidth" && accepted.value === 3,
     "Style patch parser should accept local style fields.",
-  );
+  ).toBeTruthy();
 
   const acceptedDash = parseSketchStylePatch({
     intent: SKETCH_STYLE_PATCH_INTENT,
     field: "strokeDashSize",
     value: 0.75,
   });
-  expectTrue(
+  expect(
     acceptedDash?.field === "strokeDashSize" && acceptedDash.value === 0.75,
     "Style patch parser should accept dash fields.",
-  );
+  ).toBeTruthy();
 
   const acceptedMiter = parseSketchStylePatch({
     intent: SKETCH_STYLE_PATCH_INTENT,
     field: "strokeMiterLimit",
     value: 8,
   });
-  expectTrue(
+  expect(
     acceptedMiter?.field === "strokeMiterLimit" && acceptedMiter.value === 8,
     "Style patch parser should accept miter fields.",
-  );
+  ).toBeTruthy();
 
   const strokePresentation = buildSketchStylePresentation(
     {
@@ -93,7 +92,7 @@ test("src/domain/sketch-styles/definition.spec.ts", () => {
     },
     undefined,
   );
-  expectTrue(
+  expect(
     strokePresentation.controlGroups?.[0]?.controls.some(
       (control) => control.id === "sketch-style-stroke-enabled",
     ) &&
@@ -104,26 +103,26 @@ test("src/domain/sketch-styles/definition.spec.ts", () => {
         (control) => control.id === "sketch-style-stroke-gap-size",
       ),
     "Focused stroke presentation should expose stroke enablement and dash controls.",
-  );
+  ).toBeTruthy();
 
   const guidancePresentation = buildSketchStylePresentation(
     { toolId: "fill", target: null },
     undefined,
   );
-  expectTrue(
+  expect(
     guidancePresentation.selectionGuide?.requiredCount === 1 &&
       guidancePresentation.selectionGuide.acceptedKinds.includes("region") &&
       guidancePresentation.controls?.length === 0,
     "Fill presentation should request an enclosed region target when no compatible target is selected.",
-  );
+  ).toBeTruthy();
 
   const rejected = parseSketchStylePatch({
     intent: SKETCH_STYLE_PATCH_INTENT,
     field: "externalGeometryRef",
     value: "paint://other-sketch",
   });
-  expectTrue(
-    rejected === null,
+  expect(
+    rejected,
     "Style patch parser should ignore external style sources.",
-  );
+  ).toBe(null);
 });

@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
@@ -81,76 +80,76 @@ test("src/components/layout/workbench-state-debugger.spec.tsx", async () => {
   const expandedMarkup = renderToStaticMarkup(
     <WorkbenchStateDebugger state={createDebuggerModel()} defaultExpanded />,
   );
-  expectTrue(
+  expect(
     expandedMarkup.includes("State Debugger"),
     "Debugger should render its title.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes("Active mode"),
     "Expanded debugger should render active mode.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes("editingFeature"),
     "Expanded debugger should render machine state.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes("Draft extrude profile"),
     "Expanded debugger should render preview state.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes(
       "Extrude profiles, planar faces, or boolean bodies",
     ),
     "Expanded debugger should render selection filter label.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes("sketch_1.region_profile, body_1"),
     "Expanded debugger should render selected targets.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes(
       "Join, cut, and intersect require one explicit target body.",
     ),
     "Expanded debugger should render selection requirement descriptions.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes("(2 slots)"),
     "Expanded debugger should render selection requirement slot counts.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes("Profile region"),
     "Expanded debugger should render selection detail.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes("Topology naming"),
     "Expanded debugger should include the hidden topology debug section.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     expandedMarkup.includes("occ-topology-ambiguous"),
     "Topology debug section should render invalidation reasons.",
-  );
+  ).toBeTruthy();
 
   const collapsedMarkup = renderToStaticMarkup(
     <WorkbenchStateDebugger state={createDebuggerModel()} />,
   );
-  expectTrue(
+  expect(
     collapsedMarkup.includes('aria-expanded="false"'),
     "Collapsed debugger should expose collapsed state.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     collapsedMarkup.includes("State Debugger"),
     "Collapsed debugger should retain an expand affordance.",
-  );
-  expectTrue(
-    !collapsedMarkup.includes("Active mode"),
+  ).toBeTruthy();
+  expect(
+    collapsedMarkup.includes("Active mode"),
     "Collapsed debugger should hide detailed rows.",
-  );
-  expectTrue(
-    !collapsedMarkup.includes("Boolean target"),
+  ).toBeFalsy();
+  expect(
+    collapsedMarkup.includes("Boolean target"),
     "Collapsed debugger should hide requirement rows.",
-  );
-  expectTrue(
-    !collapsedMarkup.includes("Topology naming"),
+  ).toBeFalsy();
+  expect(
+    collapsedMarkup.includes("Topology naming"),
     "Collapsed debugger should hide topology debug rows.",
-  );
+  ).toBeFalsy();
 });

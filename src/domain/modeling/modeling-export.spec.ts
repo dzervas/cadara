@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { getDefaultCadaraExportOptions } from "@/contracts/modeling/export.runtime-schema";
 import { AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION } from "@/contracts/shared/versioning";
@@ -26,36 +25,36 @@ test("src/domain/modeling/modeling-export.spec.ts", async () => {
       options: getDefaultCadaraExportOptions(),
     });
 
-    expectTrue(
+    expect(
       result.ok,
       "cadara export should succeed for the current document revision.",
-    );
-    expectTrue(
-      result.filename === "part-1.cadara",
+    ).toBeTruthy();
+    expect(
+      result.filename,
       "cadara export should use the selected row label for the filename.",
-    );
-    expectTrue(
-      result.mimeType === "application/vnd.cadara+json",
+    ).toBe("part-1.cadara");
+    expect(
+      result.mimeType,
       "cadara export should advertise a JSON MIME type.",
-    );
-    expectTrue(
-      typeof result.payload === "string",
+    ).toBe("application/vnd.cadara+json");
+    expect(
+      typeof result.payload,
       "cadara export should return text JSON.",
-    );
+    ).toBe("string");
 
     const payload = JSON.parse(result.payload) as Record<string, unknown>;
-    expectTrue(
-      payload.contractVersion === snapshot.document.contractVersion,
+    expect(
+      payload.contractVersion,
       "cadara export should preserve contract version.",
-    );
-    expectTrue(
-      payload.schemaVersion === snapshot.document.schemaVersion,
+    ).toBe(snapshot.document.contractVersion);
+    expect(
+      payload.schemaVersion,
       "cadara export should preserve schema version.",
-    );
-    expectTrue(
-      !("presentation" in payload),
+    ).toBe(snapshot.document.schemaVersion);
+    expect(
+      "presentation" in payload,
       "cadara export should not include presentation-only workspace state.",
-    );
+    ).toBeFalsy();
   }
 
   async function testGeometryExportPayloadMetadata() {
@@ -73,27 +72,30 @@ test("src/domain/modeling/modeling-export.spec.ts", async () => {
       options: stepExportProvider.getDefaultOptions(),
     });
 
-    expectTrue(result.ok, "Mock STEP export should succeed for a body target.");
-    expectTrue(
-      result.filename === "part-1.step",
+    expect(
+      result.ok,
+      "Mock STEP export should succeed for a body target.",
+    ).toBeTruthy();
+    expect(
+      result.filename,
       "Geometry export should include the returned filename.",
-    );
-    expectTrue(
-      result.extension === "step",
+    ).toBe("part-1.step");
+    expect(
+      result.extension,
       "Geometry export should include the returned extension.",
-    );
-    expectTrue(
-      result.mimeType === "model/step",
+    ).toBe("step");
+    expect(
+      result.mimeType,
       "Geometry export should include the returned MIME type.",
-    );
-    expectTrue(
-      typeof result.payload === "string",
+    ).toBe("model/step");
+    expect(
+      typeof result.payload,
       "Mock STEP export should return a text payload.",
-    );
-    expectTrue(
+    ).toBe("string");
+    expect(
       result.payload.includes("cadara mock step export"),
       "Mock geometry export should identify the format.",
-    );
+    ).toBeTruthy();
   }
 
   async function testUnexportableGeometryTargetReportsDiagnostic() {
@@ -111,13 +113,15 @@ test("src/domain/modeling/modeling-export.spec.ts", async () => {
       options: stlExportProvider.getDefaultOptions(),
     });
 
-    expectTrue(!result.ok, "Geometry export should reject non-body targets.");
-    expectTrue(
+    expect(result.ok, "Geometry export should reject non-body targets.").toBe(
+      false,
+    );
+    expect(
       result.diagnostics.some(
         (diagnostic) => diagnostic.code === "export-incompatible-target",
       ),
       "Unexportable targets should report a structured diagnostic.",
-    );
+    ).toBeTruthy();
   }
 
   async function testFileMenuExportImportsAuthoredDocumentJson() {
@@ -127,28 +131,28 @@ test("src/domain/modeling/modeling-export.spec.ts", async () => {
     });
     const exportResult = await service.exportCurrentDocument();
 
-    expectTrue(
-      exportResult.filename === "document.cadara",
+    expect(
+      exportResult.filename,
       "Current document export should use a document-level cadara filename.",
-    );
-    expectTrue(
-      exportResult.mimeType === "application/vnd.cadara+json",
+    ).toBe("document.cadara");
+    expect(
+      exportResult.mimeType,
       "Current document export should use the cadara JSON MIME type.",
-    );
-    expectTrue(
-      typeof exportResult.payload === "string",
+    ).toBe("application/vnd.cadara+json");
+    expect(
+      typeof exportResult.payload,
       "Current document export should return authored JSON text.",
-    );
+    ).toBe("string");
 
     const exported = JSON.parse(exportResult.payload) as AuthoredModelDocument;
-    expectTrue(
-      exported.schemaVersion === AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
+    expect(
+      exported.schemaVersion,
       "Current document export should use the authored document schema.",
-    );
-    expectTrue(
-      !("presentation" in exported),
+    ).toBe(AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION);
+    expect(
+      "presentation" in exported,
       "Current document export should exclude presentation-only state.",
-    );
+    ).toBeFalsy();
 
     const importedDocument: AuthoredModelDocument = {
       ...exported,
@@ -160,29 +164,29 @@ test("src/domain/modeling/modeling-export.spec.ts", async () => {
     const importResult = await service.importDocument({
       document: importedDocument,
     });
-    expectTrue(
+    expect(
       importResult.ok,
       "Valid authored document import should succeed.",
-    );
+    ).toBeTruthy();
 
     const snapshot = await service.getCurrentDocumentSnapshot();
-    expectTrue(
+    expect(
       snapshot.document.bodies.some((body) => body.label === "Imported Body"),
       "Imported authored body labels should appear in the refreshed snapshot.",
-    );
+    ).toBeTruthy();
 
     const newResult = await service.createNewDocument();
-    expectTrue(
+    expect(
       newResult.ok,
       "New document reset should restore the seeded authored document.",
-    );
+    ).toBeTruthy();
     const resetSnapshot = await service.getCurrentDocumentSnapshot();
-    expectTrue(
+    expect(
       resetSnapshot.document.bodies.every(
         (body) => body.label !== "Imported Body",
       ),
       "New document reset should remove imported authored body labels.",
-    );
+    ).toBeTruthy();
   }
 
   async function testFileMenuImportRejectsInvalidDocumentJson() {
@@ -197,17 +201,17 @@ test("src/domain/modeling/modeling-export.spec.ts", async () => {
       },
     });
 
-    expectTrue(
-      !result.ok,
+    expect(
+      result.ok,
       "Invalid authored document import should be rejected.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       result.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "document-import-unsupported-schema-version",
       ),
       "Invalid import should report a structured schema diagnostic.",
-    );
+    ).toBeTruthy();
   }
 
   async function testGeometryExportRequiresExplicitComposition() {
@@ -224,16 +228,16 @@ test("src/domain/modeling/modeling-export.spec.ts", async () => {
       options: stepExportProvider.getDefaultOptions(),
     });
 
-    expectTrue(
-      !result.ok,
+    expect(
+      result.ok,
       "Geometry export without an explicit export-provider composition should fail.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       result.diagnostics.some(
         (diagnostic) => diagnostic.code === "export-unsupported-format",
       ),
       "Missing explicit export-provider composition should surface an unsupported-format diagnostic.",
-    );
+    ).toBeTruthy();
   }
 
   await testCadaraExportsDurableDocumentJson();

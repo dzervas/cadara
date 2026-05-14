@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { defaultSelectionFilter } from "@/core/editor/schema";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
@@ -99,17 +98,17 @@ test("effect-emitters.ts derives snapshot mutation bases with and without reposi
     },
   });
 
-  expectTrue(
+  expect(
     matchingBasis?.baseRevisionId === snapshot.document.revisionId &&
       JSON.stringify(matchingBasis.baseRepositoryHeads) ===
         JSON.stringify(["head_1", "head_2"]),
     "Matching loaded snapshots should carry repository heads into mutation bases.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     staleSnapshotBasis?.baseRevisionId === snapshot.document.revisionId &&
       staleSnapshotBasis.baseRepositoryHeads === undefined,
     "Stale snapshots should fall back to a revision-only mutation basis.",
-  );
+  ).toBeTruthy();
 });
 
 test("effect-emitters.ts suppresses history cursor moves while another document refresh is pending and emits them with repository context otherwise", async () => {
@@ -136,17 +135,17 @@ test("effect-emitters.ts suppresses history cursor moves while another document 
     false,
   );
 
-  expectTrue(
+  expect(
     suppressed.effects.length === 0 && suppressed.state === suppressed.state,
     "Document cursor moves should not enqueue another history mutation while a refresh is already pending.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     emitted.effects[0]?.type === "document.moveHistoryCursor" &&
       emitted.effects[0].mutationBasis.baseRepositoryHeads?.[0] === "head_1" &&
       emitted.state.pendingHistoryCursorRequestId ===
         emitted.effects[0].requestId,
     "Document cursor moves should preserve repository-head freshness and track the pending request id when they are emitted.",
-  );
+  ).toBeTruthy();
 });
 
 test("effect-emitters.ts turns missing feature inputs into diagnostics instead of effect requests", async () => {
@@ -154,20 +153,20 @@ test("effect-emitters.ts turns missing feature inputs into diagnostics instead o
   const previewResult = emitFeaturePreview(makeFeatureState(snapshot));
   const commitResult = emitFeatureCommit(makeFeatureState(snapshot));
 
-  expectTrue(
+  expect(
     previewResult.effects.length === 0 &&
       previewResult.state.kind === "editingFeature" &&
       previewResult.state.session.status === "idle" &&
       previewResult.state.session.diagnostics.length > 0,
     "Feature preview should stay synchronous and surface missing-input diagnostics when the feature definition cannot be built.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     commitResult.effects.length === 0 &&
       commitResult.state.kind === "editingFeature" &&
       commitResult.state.session.status === "idle" &&
       commitResult.state.session.diagnostics.length > 0,
     "Feature commit should surface commit-time missing-input diagnostics instead of issuing an invalid mutation request.",
-  );
+  ).toBeTruthy();
 });
 
 test("effect-emitters.ts guards feature preview when no document revision is loaded", async () => {
@@ -180,10 +179,10 @@ test("effect-emitters.ts guards feature preview when no document revision is loa
     },
   });
 
-  expectTrue(
+  expect(
     result.effects.length === 0 && result.state.document.revisionId === null,
     "Feature preview should not issue an effect before the editor has a loaded document revision.",
-  );
+  ).toBeTruthy();
 });
 
 test("effect-emitters.ts emits reference-image imports only when the sketch edit session has a valid mutation basis and payloads", async () => {
@@ -193,10 +192,10 @@ test("effect-emitters.ts emits reference-image imports only when the sketch edit
     snapshot,
   );
 
-  expectTrue(
+  expect(
     session,
     "Seed snapshot should expose a sketch session for sketch effect coverage.",
-  );
+  ).toBeTruthy();
 
   const state = makeSketchState(snapshot, session);
   const suppressed = emitSketchReferenceImageImportWithPayloads(state, []);
@@ -210,16 +209,16 @@ test("effect-emitters.ts emits reference-image imports only when the sketch edit
     },
   ]);
 
-  expectTrue(
-    suppressed.effects.length === 0,
+  expect(
+    suppressed.effects.length,
     "Reference-image import should be suppressed when no payloads were chosen.",
-  );
-  expectTrue(
+  ).toBe(0);
+  expect(
     emitted.effects[0]?.type === "sketch.importReferenceImages" &&
       emitted.effects[0].payloads.length === 1 &&
       emitted.state.pendingImportRequestId === emitted.effects[0].requestId,
     "Reference-image import should emit the dedicated sketch import effect and track the in-flight request id.",
-  );
+  ).toBeTruthy();
 });
 
 test("effect-emitters.ts restores editing state when a sketch special-mode effect cannot run and emits the effect when the pending request matches", async () => {
@@ -229,10 +228,10 @@ test("effect-emitters.ts restores editing state when a sketch special-mode effec
     snapshot,
   );
 
-  expectTrue(
+  expect(
     session,
     "Seed snapshot should expose a sketch session for special-mode effect coverage.",
-  );
+  ).toBeTruthy();
 
   const specialModeDefinition = {
     id: "fixture.special-mode",
@@ -293,18 +292,18 @@ test("effect-emitters.ts restores editing state when a sketch special-mode effec
     dependencies,
   );
 
-  expectTrue(
+  expect(
     fallback.effects.length === 0 &&
       fallback.state.kind === "editingSketch" &&
       fallback.state.command.phase === "editing" &&
       fallback.state.selectionFilter?.label === "Fixture mode selection",
     "Special-mode effect requests with the wrong pending request id should stay in editing mode and keep the mode-specific selection contract.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     emitted.effects[0]?.type === "sketch.specialModeEffect" &&
       emitted.effects[0].effectId === "replace-image" &&
       emitted.state.command.phase === "awaitingEffect" &&
       emitted.state.preview?.label === "Running replace-image",
     "Matching special-mode requests should emit the special-mode effect seam and move the command into the awaiting-effect phase.",
-  );
+  ).toBeTruthy();
 });

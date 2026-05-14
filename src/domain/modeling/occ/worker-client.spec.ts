@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { GetDocumentSnapshotResponse } from "@/contracts/modeling/schema";
 import { packWorkspaceSnapshotRenderMeshes } from "@/domain/modeling/occ/mesh-transport";
@@ -54,18 +53,18 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     });
     const request = worker.posted[0];
 
-    expectTrue(
-      request?.kind === "invoke",
+    expect(
+      request?.kind,
       "Warmup should post an invoke request to the OCC worker.",
-    );
-    expectTrue(
+    ).toBe("invoke");
+    expect(
       request.requestId.startsWith("request_occ_warmup_"),
       "Worker request ids should satisfy the shared RequestId contract.",
-    );
-    expectTrue(
-      request.operation.kind === "warmup",
+    ).toBeTruthy();
+    expect(
+      request.operation.kind,
       "Warmup should use the worker warmup operation.",
-    );
+    ).toBe("warmup");
 
     worker.emit({
       kind: "invoked",
@@ -122,11 +121,11 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
       "startup",
     );
     const request = worker.posted[0];
-    expectTrue(
+    expect(
       request?.kind === "invoke" &&
         request.operation.kind === "getDocumentSnapshot",
       "Snapshot queries should use the worker getDocumentSnapshot operation.",
-    );
+    ).toBeTruthy();
 
     const packed = packWorkspaceSnapshotRenderMeshes(snapshotResponse.snapshot);
     worker.emit({
@@ -142,10 +141,10 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     const response = await promise;
     const geometry = response.snapshot.document.render.records[0]?.geometry;
 
-    expectTrue(
-      geometry?.kind === "mesh",
+    expect(
+      geometry?.kind,
       "Worker snapshot responses should be unpacked back into public mesh records.",
-    );
+    ).toBe("mesh");
   }
 
   async function testWarmupFailuresSurfaceToCaller() {
@@ -154,10 +153,10 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     const promise = client.warmup();
     const request = worker.posted[0];
 
-    expectTrue(
-      request?.kind === "invoke",
+    expect(
+      request?.kind,
       "Warmup failure tests should still use invoke requests.",
-    );
+    ).toBe("invoke");
 
     worker.emit({
       kind: "failure",
@@ -175,7 +174,10 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
       failed = error instanceof Error && error.message === "warmup failed";
     }
 
-    expectTrue(failed, "Worker warmup failures must surface to the caller.");
+    expect(
+      failed,
+      "Worker warmup failures must surface to the caller.",
+    ).toBeTruthy();
   }
 
   async function testExportCapabilitiesCreateCloneSafeWorkerRequests() {
@@ -192,23 +194,23 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     );
     const request = worker.posted[0];
 
-    expectTrue(
+    expect(
       request?.kind === "invoke" &&
         request.operation.kind === "tessellateExportMesh" &&
         request.operation.documentId === "doc_export_caps" &&
         request.operation.baseRevisionId === "revision_1",
       "Export capability calls should carry document identity and data-only arguments into the OCC worker request.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       typeof capabilities.mesh.tessellate === "function" &&
         typeof capabilities.brep.writeStep === "function",
       "Worker export capabilities should be local proxy functions rather than worker-cloned functions.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       JSON.stringify(request.operation).includes("tessellateExportMesh") &&
         !JSON.stringify(request.operation).includes("function"),
       "Worker export requests should remain structured-clone-safe data payloads.",
-    );
+    ).toBeTruthy();
 
     worker.emit({
       kind: "invoked",
@@ -226,10 +228,10 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
       "requestId must be a RequestId.",
     );
 
-    expectTrue(
-      failure.error.message === "requestId must be a RequestId.",
+    expect(
+      failure.error.message,
       "OCC worker failure normalization should preserve validation strings.",
-    );
+    ).toBe("requestId must be a RequestId.");
   }
 
   await testWarmupInvokesWorkerOperation();

@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createToolActionBus } from "@/core/tools/tool-action-bus";
 
 test("src/core/tools/tool-action-bus.spec.ts", () => {
@@ -13,8 +12,8 @@ test("src/core/tools/tool-action-bus.spec.ts", () => {
   actionBus.triggerTool("line", "sketch", { source: "shortcut" });
   unsubscribe();
 
-  expectTrue(
-    observedSource === "shortcut",
+  expect(
+    observedSource,
     "Tool action events should preserve shortcut source metadata.",
-  );
+  ).toBe("shortcut");
 });

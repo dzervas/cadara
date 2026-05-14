@@ -140,13 +140,13 @@ test("useWorkbenchNotifications reports restore failures once and exposes restor
         entry.key === "documentId" && entry.value === "document_restore_failed",
     ),
     "History restore reports should carry document context.",
-  ).toBe(true);
+  ).toBeTruthy();
   expect(
     reporter.reports[0]?.error.context.some(
       (entry) => entry.key === "reasonCode" && entry.value === "restore-failed",
     ),
     "History restore reports should carry diagnostic context.",
-  ).toBe(true);
+  ).toBeTruthy();
 
   controller = hookHarness.render(() =>
     useWorkbenchNotifications({
@@ -201,7 +201,7 @@ test("useWorkbenchNotifications reports document file action failures and mirror
       controller.workbenchStatusNotification.message ===
         "Local file sync restore failed.",
     "Document file action failures should surface the same visible error through the notification seam.",
-  ).toBe(true);
+  ).toBeTruthy();
   expect(
     reporter.reports.length,
     "Document file action failures should be forwarded to the error reporter once.",
@@ -211,12 +211,12 @@ test("useWorkbenchNotifications reports document file action failures and mirror
       "workbench.file.restoreLocalBinding" &&
       reporter.reports[0]?.metadata.visibility === "user",
     "Document file action failures should be reported with the original source and user visibility.",
-  ).toBe(true);
+  ).toBeTruthy();
   expect(
     reporter.reports[0]?.error.message === "Local file sync restore failed." &&
       reporter.reports[0]?.error.context[0]?.key === "reason" &&
       reporter.reports[0]?.error.context[0]?.value ===
         "IndexedDB quota exceeded.",
     "Document file action failures should preserve the user-visible message and the low-level reason context.",
-  ).toBe(true);
+  ).toBeTruthy();
 });

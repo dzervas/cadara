@@ -1,6 +1,5 @@
-import { beforeEach, vi, test } from "vitest";
+import { beforeEach, vi, test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createTestErrorReporter } from "@/contracts/errors";
 import { createImportProviderRegistry } from "@/domain/import/provider-registry";
 import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain/extensions/test-registry-composition";
@@ -119,10 +118,10 @@ test("useWorkbenchPartImport starts an import session for a matching provider", 
           return { files: [file], ok: true as const };
         },
         async resolveImportSource(selectedFile) {
-          expectTrue(
-            selectedFile === file,
+          expect(
+            selectedFile,
             "The selected file should be passed to source resolution.",
-          );
+          ).toBe(file);
           return {
             bytes: new Uint8Array([1, 2, 3]),
             fingerprint: "sha256:test",
@@ -149,23 +148,22 @@ test("useWorkbenchPartImport starts an import session for a matching provider", 
 
   await controller.requestPartImport();
 
-  expectTrue(
-    errors.length === 0,
+  expect(
+    errors.length,
     "A successful import selection should not surface an error.",
-  );
-  expectTrue(
-    createCapabilitiesCalls.length === 1,
+  ).toBe(0);
+  expect(
+    createCapabilitiesCalls.length,
     "Import review should build capabilities once from the controller seam.",
-  );
-  expectTrue(
-    createSessionCalls.length === 1,
+  ).toBe(1);
+  expect(
+    createSessionCalls.length,
     "Import review should create exactly one import session.",
-  );
-  expectTrue(
-    JSON.stringify(events) ===
-      JSON.stringify([{ type: "import.fileSelected", session }]),
+  ).toBe(1);
+  expect(
+    JSON.stringify(events),
     "Successful file selection should dispatch the selected import session.",
-  );
+  ).toBe(JSON.stringify([{ type: "import.fileSelected", session }]));
 });
 
 test("useWorkbenchPartImport blocks invalid request states and reports the visible failure", async () => {
@@ -219,10 +217,10 @@ test("useWorkbenchPartImport blocks invalid request states and reports the visib
   );
 
   await blockedByEdit.requestPartImport();
-  expectTrue(
-    pickerCalls === 0,
+  expect(
+    pickerCalls,
     "Active editing should block part import before the file picker opens.",
-  );
+  ).toBe(0);
 
   const missingSnapshot = hookHarness.render(() =>
     useWorkbenchPartImport({
@@ -359,14 +357,15 @@ test("useWorkbenchPartImport blocks invalid request states and reports the visib
 
   await unmatched.requestPartImport();
 
-  expectTrue(
-    JSON.stringify(errors) ===
-      JSON.stringify([
-        "The current document is still loading.",
-        "No part importers are currently registered.",
-        "No importer is available for mesh.obj.",
-      ]),
+  expect(
+    JSON.stringify(errors),
     "The controller should surface the user-visible failure for each blocked import state.",
+  ).toBe(
+    JSON.stringify([
+      "The current document is still loading.",
+      "No part importers are currently registered.",
+      "No importer is available for mesh.obj.",
+    ]),
   );
 });
 
@@ -448,14 +447,14 @@ test("useWorkbenchPartImport lets the user choose among multiple matching provid
 
   await controller.requestPartImport();
 
-  expectTrue(
-    JSON.stringify(selectedProviders) === JSON.stringify(["step-b"]),
+  expect(
+    JSON.stringify(selectedProviders),
     "Prompt selection should choose the requested matching provider.",
-  );
-  expectTrue(
-    events.length === 1,
+  ).toBe(JSON.stringify(["step-b"]));
+  expect(
+    events.length,
     "Provider selection should still dispatch a single import session event.",
-  );
+  ).toBe(1);
 });
 
 test("useWorkbenchPartImport commits the active session, reopens a created sketch, and reports failures", async () => {
@@ -507,27 +506,28 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
 
   await successful.commitImportSession();
 
-  expectTrue(
-    errors.length === 0,
+  expect(
+    errors.length,
     "A successful commit should not surface an error.",
-  );
-  expectTrue(
-    JSON.stringify(events) ===
-      JSON.stringify([
-        { type: "import.commitRequested" },
-        { type: "import.committed" },
-        {
-          type: "authoring.reopenRequested",
-          target: { kind: "sketch", sketchId: "sketch_imported_1" },
-          toolId: "sketch",
-        },
-      ]),
+  ).toBe(0);
+  expect(
+    JSON.stringify(events),
     "A successful sketch import should commit, then reopen the created sketch.",
+  ).toBe(
+    JSON.stringify([
+      { type: "import.commitRequested" },
+      { type: "import.committed" },
+      {
+        type: "authoring.reopenRequested",
+        target: { kind: "sketch", sketchId: "sketch_imported_1" },
+        toolId: "sketch",
+      },
+    ]),
   );
-  expectTrue(
-    JSON.stringify(infos) === JSON.stringify(["Imported housing.step."]),
+  expect(
+    JSON.stringify(infos),
     "A successful commit should surface a user-facing confirmation with the imported file name.",
-  );
+  ).toBe(JSON.stringify(["Imported housing.step."]));
 
   const failedEvents: unknown[] = [];
   const failedController = hookHarness.render(() =>
@@ -600,34 +600,35 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
 
   await thrownController.commitImportSession();
 
-  expectTrue(
-    JSON.stringify(failedEvents) ===
-      JSON.stringify([
-        { type: "import.commitRequested" },
-        {
-          type: "import.failed",
-          diagnostics: [
-            {
-              code: "import-invalid",
-              detail: null,
-              message: "Import surface is self-intersecting.",
-              severity: "error",
-              target: null,
-            },
-          ],
-        },
-      ]),
+  expect(
+    JSON.stringify(failedEvents),
     "Rejected import commits should dispatch the returned diagnostics through the controller seam.",
+  ).toBe(
+    JSON.stringify([
+      { type: "import.commitRequested" },
+      {
+        type: "import.failed",
+        diagnostics: [
+          {
+            code: "import-invalid",
+            detail: null,
+            message: "Import surface is self-intersecting.",
+            severity: "error",
+            target: null,
+          },
+        ],
+      },
+    ]),
   );
-  expectTrue(
-    thrownEvents.length === 2,
+  expect(
+    thrownEvents.length,
     "Thrown commit failures should still dispatch the commit request and normalized failure.",
-  );
-  expectTrue(
-    (thrownEvents[0] as { type: string }).type === "import.commitRequested",
+  ).toBe(2);
+  expect(
+    (thrownEvents[0] as { type: string }).type,
     "Thrown commit failures should preserve the initial commit request event.",
-  );
-  expectTrue(
+  ).toBe("import.commitRequested");
+  expect(
     (thrownEvents[1] as { type: string }).type === "import.failed" &&
       (
         thrownEvents[1] as {
@@ -640,13 +641,14 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
         }
       ).diagnostics[0]?.message === "Import transaction rolled back.",
     "Thrown commit failures should be normalized into an import.failed event.",
-  );
-  expectTrue(
-    JSON.stringify(errors.slice(-2)) ===
-      JSON.stringify([
-        "Import surface is self-intersecting.",
-        "Import transaction rolled back.",
-      ]),
+  ).toBeTruthy();
+  expect(
+    JSON.stringify(errors.slice(-2)),
     "Commit failures should preserve the visible error message for both returned diagnostics and thrown errors.",
+  ).toBe(
+    JSON.stringify([
+      "Import surface is self-intersecting.",
+      "Import transaction rolled back.",
+    ]),
   );
 });

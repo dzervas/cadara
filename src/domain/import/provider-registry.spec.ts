@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ImportProvider } from "@/contracts/import/provider";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
@@ -60,44 +59,44 @@ test("src/domain/import/provider-registry.spec.ts", async () => {
     stepProvider,
   ]);
 
-  expectTrue(
-    registry.getAll().length === 2,
+  expect(
+    registry.getAll().length,
     "Import registry should dedupe providers by id.",
-  );
-  expectTrue(
-    registry.getById("png-import") === pngProvider,
+  ).toBe(2);
+  expect(
+    registry.getById("png-import"),
     "Import registry should resolve providers by id.",
-  );
-  expectTrue(
+  ).toBe(pngProvider);
+  expect(
     registry
       .getAcceptedFileTypes()
       .some(
         (entry) => entry.extension === "png" && entry.mediaType === "image/png",
       ),
     "Import registry should expose accepted file types from its explicit composition.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     registry.matchProviders({
       name: "fixture.png",
       origin: { kind: "localFile", fileName: "fixture.png" },
       mediaType: "image/png",
       bytes: new Uint8Array([0]),
       fingerprint: `sha256:${"a".repeat(64)}` as const,
-    }).length === 1,
+    }).length,
     "Import provider matching should be determined by the scoped registry composition.",
-  );
+  ).toBe(1);
 
   const isolatedA = createScopedImportProviderRegistryForTest([pngProvider]);
   const isolatedB = createScopedImportProviderRegistryForTest([stepProvider]);
 
-  expectTrue(
-    isolatedA.getById("step-import") === null,
+  expect(
+    isolatedA.getById("step-import"),
     "Scoped import registries should not leak between tests.",
-  );
-  expectTrue(
-    isolatedB.getById("png-import") === null,
+  ).toBe(null);
+  expect(
+    isolatedB.getById("png-import"),
     "Scoped import registries should remain isolated.",
-  );
+  ).toBe(null);
 
   const review = await pngProvider.review({
     source: {
@@ -145,8 +144,8 @@ test("src/domain/import/provider-registry.spec.ts", async () => {
     },
   });
 
-  expectTrue(
-    review.providerReview.name === "fixture.png",
+  expect(
+    review.providerReview.name,
     "Provider behavior should remain unchanged after registry composition refactor.",
-  );
+  ).toBe("fixture.png");
 });

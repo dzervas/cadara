@@ -40,6 +40,7 @@ test("reload preserves a circle centered on a projected solid vertex", async ({
     .not.toContain("Authored sketch sketch_2 could not be restored");
 });
 
+// TODO: Flaky
 test("reopen and finish preserves a face-backed referenced-vertex circle sketch", async ({
   page,
 }, testInfo) => {

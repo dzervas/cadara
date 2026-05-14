@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
   acceptSketchDraw,
@@ -144,64 +143,64 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
 
   function testConstructionActivationModes() {
     let session = beginSketchTool(createSession(), "construction");
-    expectTrue(
-      session.activeTool === "construction",
+    expect(
+      session.activeTool,
       "Construction activation should arm target-picking.",
-    );
-    expectTrue(
+    ).toBe("construction");
+    expect(
       session.constructionTargetPicking,
       "Construction target-picking should be explicit editor state.",
-    );
-    expectTrue(
-      !session.constructionModifierActive,
+    ).toBeTruthy();
+    expect(
+      session.constructionModifierActive,
       "First construction activation should not immediately set the modifier.",
-    );
+    ).toBeFalsy();
 
     session = beginSketchTool(session, "line");
-    expectTrue(
-      session.activeTool === "line",
+    expect(
+      session.activeTool,
       "Drawing tool activation should become the active geometry tool.",
-    );
-    expectTrue(
-      !session.constructionTargetPicking,
+    ).toBe("line");
+    expect(
+      session.constructionTargetPicking,
       "Drawing tool activation should leave target-picking mode.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       session.constructionModifierActive,
       "Drawing tool activation after Construction should set persistent construction context.",
-    );
+    ).toBeTruthy();
 
     session = beginSketchTool(session, "construction");
-    expectTrue(
-      session.activeTool === null,
+    expect(
+      session.activeTool,
       "Second Construction activation should clear active construction state.",
-    );
-    expectTrue(
-      !session.constructionModifierActive,
+    ).toBe(null);
+    expect(
+      session.constructionModifierActive,
       "Second Construction activation should turn off construction authoring.",
-    );
+    ).toBeFalsy();
   }
 
   function testConstructionStateCleanup() {
     let session = beginSketchTool(createSession(), "construction");
     session = clearActiveSketchTool(session);
 
-    expectTrue(
-      session.activeTool === null,
+    expect(
+      session.activeTool,
       "Clearing the active sketch tool should clear Construction target-picking.",
-    );
-    expectTrue(
-      !session.constructionTargetPicking,
+    ).toBe(null);
+    expect(
+      session.constructionTargetPicking,
       "Clearing the active sketch tool should clear target-picking state.",
-    );
+    ).toBeFalsy();
 
     session = beginSketchTool(beginSketchTool(session, "construction"), "line");
     session = clearActiveSketchTool(session);
 
-    expectTrue(
-      !session.constructionModifierActive,
+    expect(
+      session.constructionModifierActive,
       "Clearing the active sketch tool should clear persistent construction context.",
-    );
+    ).toBeFalsy();
   }
 
   function testConstructionToggleMutatesOnlySelectedEntity() {
@@ -212,22 +211,22 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
       entityId: "sketch_entity_ab",
     });
 
-    expectTrue(
+    expect(
       session.definition.entities.find(
         (entity) => entity.entityId === "sketch_entity_ab",
       )?.isConstruction,
       "Selected edge should toggle to construction.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       session.definition.points.every((point) => !point.isConstruction),
       "Edge toggles must not mutate shared endpoint point records.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       session.commitRequest?.definition.entities.find(
         (entity) => entity.entityId === "sketch_entity_ab",
       )?.isConstruction,
       "Construction edge toggles should prepare an authored sketch commit mutation.",
-    );
+    ).toBeTruthy();
 
     session = beginSketchTool(session, "construction");
     session = toggleSketchConstructionTarget(session, {
@@ -235,12 +234,12 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
       sketchId: "sketch_primary",
       entityId: "sketch_entity_ab",
     });
-    expectTrue(
-      !session.definition.entities.find(
+    expect(
+      session.definition.entities.find(
         (entity) => entity.entityId === "sketch_entity_ab",
       )?.isConstruction,
       "Selecting a construction edge again should toggle it back to normal.",
-    );
+    ).toBeFalsy();
   }
 
   function testConstructionVertexToggleIncludesPointEntity() {
@@ -251,24 +250,24 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
       pointId: "sketch_point_c",
     });
 
-    expectTrue(
+    expect(
       session.definition.points.find(
         (point) => point.pointId === "sketch_point_c",
       )?.isConstruction,
       "Selected point should toggle to construction.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       session.definition.entities.find(
         (entity) => entity.entityId === "sketch_entity_c",
       )?.isConstruction,
       "Point-entity records associated with the selected point should toggle too.",
-    );
-    expectTrue(
-      !session.definition.entities.find(
+    ).toBeTruthy();
+    expect(
+      session.definition.entities.find(
         (entity) => entity.entityId === "sketch_entity_bc",
       )?.isConstruction,
       "Non-point entities sharing that vertex should not be implicitly toggled.",
-    );
+    ).toBeFalsy();
 
     session = beginSketchTool(session, "construction");
     session = toggleSketchConstructionTarget(session, {
@@ -277,18 +276,18 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
       entityId: "sketch_entity_c",
     });
 
-    expectTrue(
-      !session.definition.points.find(
+    expect(
+      session.definition.points.find(
         (point) => point.pointId === "sketch_point_c",
       )?.isConstruction,
       "Selecting a construction point-entity should toggle its point record back to normal.",
-    );
-    expectTrue(
-      !session.definition.entities.find(
+    ).toBeFalsy();
+    expect(
+      session.definition.entities.find(
         (entity) => entity.entityId === "sketch_entity_c",
       )?.isConstruction,
       "Selecting a construction point-entity should toggle that entity back to normal.",
-    );
+    ).toBeFalsy();
   }
 
   function testConstructionModifierAuthorsNewGeometry() {
@@ -297,28 +296,28 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
     session = startSketchDraw(session, [0, 0]);
     session = acceptSketchDraw(session, [4, 3]);
 
-    expectTrue(
+    expect(
       session.definition.points
         .slice(-4)
         .every((point) => point.isConstruction),
       "Construction context should author new rectangle points as construction.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       session.definition.entities
         .slice(-4)
         .every((entity) => entity.isConstruction),
       "Construction context should author new rectangle entities as construction.",
-    );
+    ).toBeTruthy();
 
     session = beginSketchTool(session, "construction");
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 4]);
     session = acceptSketchDraw(session, [1, 4]);
 
-    expectTrue(
-      session.definition.entities.at(-1)?.isConstruction === false,
+    expect(
+      session.definition.entities.at(-1)?.isConstruction,
       "Toggling Construction off should restore normal geometry authoring.",
-    );
+    ).toBeFalsy();
   }
 
   function testConstructionRenderableFeedbackIsDashedAndPickable() {
@@ -341,21 +340,21 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
         renderable.target.entityId === "sketch_entity_ab",
     );
 
-    expectTrue(
-      constructionRenderable?.linePattern === "dashed",
+    expect(
+      constructionRenderable?.linePattern,
       "Construction sketch edges should use dashed edit feedback.",
-    );
-    expectTrue(
-      constructionRenderable.target?.kind === "sketchEntity",
+    ).toBe("dashed");
+    expect(
+      constructionRenderable.target?.kind,
       "Construction sketch edges should remain bound for picking.",
-    );
+    ).toBe("sketchEntity");
 
     session = beginSketchTool(session, "construction");
     session = beginSketchGeometryDrag(session, target, [0, 0]);
-    expectTrue(
-      session.activeDrag === null,
+    expect(
+      session.activeDrag,
       "Construction target-picking should not start direct geometry drag.",
-    );
+    ).toBe(null);
   }
 
   testConstructionActivationModes();

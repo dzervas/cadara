@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
 import type {
@@ -37,10 +36,10 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       seedDocument: seed,
     });
     const loadRequest = worker.takePosted("load");
-    expectTrue(
-      loadRequest.storageKey === "automerge:stored-url",
+    expect(
+      loadRequest.storageKey,
       "Worker-backed loads should pass the stored Automerge URL to the worker.",
-    );
+    ).toBe("automerge:stored-url");
     const repositoryDiagnostics: ModelingDiagnostic[] = [
       {
         code: "geometry-asset-missing",
@@ -98,20 +97,20 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       },
     });
     const loaded = await load;
-    expectTrue(
+    expect(
       loaded.ok,
       "Worker-backed repository load should resolve with worker-normalized documents.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       loaded.ok &&
         loaded.diagnostics?.map((diagnostic) => diagnostic.code).join(",") ===
           "geometry-asset-missing,normalized-order",
       "Worker-backed loads should preserve repository diagnostics and worker normalization diagnostics.",
-    );
-    expectTrue(
-      urlStore.get(seed.documentId) === "automerge:worker-url",
+    ).toBeTruthy();
+    expect(
+      urlStore.get(seed.documentId),
       "Worker-returned Automerge URLs should be persisted by the main-thread URL store.",
-    );
+    ).toBe("automerge:worker-url");
 
     const mutation = repository.mutate({
       documentId: seed.documentId,
@@ -148,10 +147,10 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       },
     });
     const mutated = await mutation;
-    expectTrue(
+    expect(
       mutated.ok && mutated.metadata.source === "local",
       "Worker-backed mutations should preserve repository metadata.",
-    );
+    ).toBeTruthy();
 
     const asset = await createDeterministicGeometryAsset({
       ownerFeatureIds: [seed.features[0]!.featureId],
@@ -169,11 +168,10 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       assets: [asset],
     });
     const assetMutateRequest = worker.takePosted("mutate");
-    expectTrue(
-      assetMutateRequest.assets?.[0]?.bytes.byteLength ===
-        asset.bytes.byteLength,
+    expect(
+      assetMutateRequest.assets?.[0]?.bytes.byteLength,
       "Worker-backed asset mutations should send package blobs to the document sync worker.",
-    );
+    ).toBe(asset.bytes.byteLength);
     worker.emit({
       kind: "mutated",
       requestId: assetMutateRequest.requestId,
@@ -213,42 +211,42 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       },
     });
     const assetMutated = await assetMutation;
-    expectTrue(
+    expect(
       assetMutated.ok && assetMutated.assetAvailability?.[0]?.available,
       "Worker-backed asset mutations should preserve asset availability metadata.",
-    );
+    ).toBeTruthy();
 
     const recordBytes = repository.getGeometryAssetRecord(asset.asset);
     const recordRequest = worker.takePosted("getGeometryAssetRecord");
-    expectTrue(
-      recordRequest.asset.hash === asset.asset.hash,
+    expect(
+      recordRequest.asset.hash,
       "Worker-backed asset record reads should proxy through the worker.",
-    );
+    ).toBe(asset.asset.hash);
     worker.emit({
       kind: "geometryAssetRecord",
       requestId: recordRequest.requestId,
       bytes: asset.bytes,
     });
-    expectTrue(
-      (await recordBytes)?.byteLength === asset.bytes.byteLength,
+    expect(
+      (await recordBytes)?.byteLength,
       "Worker-backed asset record reads should return worker bytes.",
-    );
+    ).toBe(asset.bytes.byteLength);
 
     const hashBytes = repository.getGeometryAssetBytes(asset.asset.hash);
     const hashRequest = worker.takePosted("getGeometryAssetBytes");
-    expectTrue(
-      hashRequest.hash === asset.asset.hash,
+    expect(
+      hashRequest.hash,
       "Worker-backed asset hash reads should proxy through the worker.",
-    );
+    ).toBe(asset.asset.hash);
     worker.emit({
       kind: "geometryAssetBytes",
       requestId: hashRequest.requestId,
       bytes: asset.bytes,
     });
-    expectTrue(
-      (await hashBytes)?.byteLength === asset.bytes.byteLength,
+    expect(
+      (await hashBytes)?.byteLength,
       "Worker-backed asset hash reads should return worker bytes.",
-    );
+    ).toBe(asset.bytes.byteLength);
 
     const observed: string[] = [];
     const unsubscribe = repository.subscribe(seed.documentId, (event) => {
@@ -301,10 +299,10 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       },
     });
     await flushAsync();
-    expectTrue(
-      observed.join(",") === "peer:2",
+    expect(
+      observed.join(","),
       "Peer updates should keep repository diagnostics after worker normalization.",
-    );
+    ).toBe("peer:2");
     unsubscribe();
     client.dispose();
   }
@@ -327,10 +325,10 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       availability: { canUndo: true, canRedo: false },
     });
     const availability = await availabilityPromise;
-    expectTrue(
+    expect(
       availability.canUndo && !availability.canRedo,
       "Worker-backed repositories should proxy durable-history availability queries.",
-    );
+    ).toBeTruthy();
 
     const undoPromise = repository.undoDurableHistory(seed.documentId);
     const undoRequest = worker.takePosted("undoDurableHistory");
@@ -364,10 +362,10 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       },
     });
     const undone = await undoPromise;
-    expectTrue(
+    expect(
       undone?.ok && undone.metadata.source === "undo",
       "Worker-backed durable undo should preserve worker metadata.",
-    );
+    ).toBeTruthy();
 
     const draftHistoryPromise = repository.getSketchDraftHistory(
       seed.documentId,
@@ -381,12 +379,12 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       availability: { canUndo: false, canRedo: false },
     });
     const draftHistory = await draftHistoryPromise;
-    expectTrue(
+    expect(
       draftHistory.session === null &&
         !draftHistory.availability.canUndo &&
         !draftHistory.availability.canRedo,
       "Worker-backed repositories should proxy sketch draft history queries.",
-    );
+    ).toBeTruthy();
 
     const saveDraftPromise = repository.saveSketchDraftHistory(
       seed.documentId,
@@ -448,10 +446,10 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       availability: { canUndo: true, canRedo: false },
     });
     const savedAvailability = await saveDraftPromise;
-    expectTrue(
+    expect(
       savedAvailability.canUndo && !savedAvailability.canRedo,
       "Worker-backed repositories should proxy sketch draft persistence.",
-    );
+    ).toBeTruthy();
 
     const clearDraftPromise = repository.clearSketchDraftHistory(
       seed.documentId,

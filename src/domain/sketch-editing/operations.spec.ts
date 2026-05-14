@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
@@ -229,18 +228,18 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
-    expectTrue(
+    expect(
       fillet.valid && fillet.definition,
       "Fillet should accept adjacent line segments.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       fillet.definition.entities.some((entity) => entity.kind === "arc"),
       "Fillet should add a durable arc.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       fillet.previewEntities.length > 0,
       "Fillet should expose preview geometry.",
-    );
+    ).toBeTruthy();
 
     const chamfer = createSketchChamferMutation({
       definition: createCornerDefinition(),
@@ -249,14 +248,14 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
-    expectTrue(
+    expect(
       chamfer.valid && chamfer.definition,
       "Chamfer should accept adjacent line segments.",
-    );
-    expectTrue(
-      chamfer.definition.entities.length === 3,
+    ).toBeTruthy();
+    expect(
+      chamfer.definition.entities.length,
       "Chamfer should preserve source lines and add one chamfer line.",
-    );
+    ).toBe(3);
   }
 
   function testExtendAndSplitMutateOnlySelectedLine() {
@@ -278,20 +277,20 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
-    expectTrue(
+    expect(
       extended.valid && extended.definition,
       "Extend should accept a target line and boundary line.",
-    );
-    expectTrue(
-      extended.definition.entities.length === extendDefinition.entities.length,
+    ).toBeTruthy();
+    expect(
+      extended.definition.entities.length,
       "Extend should not add unrelated entities.",
-    );
-    expectTrue(
+    ).toBe(extendDefinition.entities.length);
+    expect(
       extended.definition.points.some(
         (point) => point.position[0] === 3 && point.position[1] === 0,
       ),
       "Extend should add an endpoint at the boundary intersection.",
-    );
+    ).toBeTruthy();
 
     const split = createSketchSplitMutation({
       definition: createCrossingDefinition(),
@@ -299,14 +298,14 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
-    expectTrue(
+    expect(
       split.valid && split.definition,
       "Split should accept a target line and crossing boundary.",
-    );
-    expectTrue(
-      split.definition.entities.length === 3,
+    ).toBeTruthy();
+    expect(
+      split.definition.entities.length,
       "Split should divide the selected line into two line entities.",
-    );
+    ).toBe(3);
   }
 
   function testSlotCreatesDurableGeometryForSupportedReferences() {
@@ -324,15 +323,15 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
-    expectTrue(
+    expect(
       lineSlot.valid && lineSlot.contribution,
       "Slot should accept a line reference.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       lineSlot.contribution.entities.filter((entity) => entity.kind === "arc")
-        .length === 2,
+        .length,
       "Line slot should add rounded end arcs.",
-    );
+    ).toBe(2);
 
     const curveDefinition = makeDefinition(
       [
@@ -365,14 +364,14 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
-    expectTrue(
+    expect(
       arcSlot.valid && arcSlot.contribution,
       "Slot should accept an arc reference.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       arcSlot.contribution.entities.some((entity) => entity.kind === "arc"),
       "Arc slot should create arc boundary geometry.",
-    );
+    ).toBeTruthy();
 
     const splineSlot = createSketchSlotContribution({
       definition: curveDefinition,
@@ -381,16 +380,16 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       sequence: 10,
       factories: createFactories(),
     });
-    expectTrue(
+    expect(
       splineSlot.valid && splineSlot.contribution,
       "Slot should accept a spline reference.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       splineSlot.contribution.entities.some(
         (entity) => entity.kind === "spline",
       ),
       "Spline slot should create spline boundary geometry.",
-    );
+    ).toBeTruthy();
   }
 
   function testSlotCreatesProfileOffsetsForClosedLineLoops() {
@@ -416,14 +415,14 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       factories: createFactories(),
     });
 
-    expectTrue(
+    expect(
       slot.valid && slot.contribution,
       "Slot should accept a closed line profile.",
-    );
-    expectTrue(
-      slot.contribution.entities.length === 8,
+    ).toBeTruthy();
+    expect(
+      slot.contribution.entities.length,
       "Closed profile slot should create outer and inner line loops.",
-    );
+    ).toBe(8);
   }
 
   testFilletAndChamferMutateAdjacentLines();

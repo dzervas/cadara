@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
@@ -37,14 +36,14 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
       documentId: seed.documentId,
       seedDocument: seed,
     });
-    expectTrue(
+    expect(
       loaded.ok,
       "Memory repository should create a missing document from the seed document.",
-    );
-    expectTrue(
-      loaded.status.kind === "seeded",
+    ).toBeTruthy();
+    expect(
+      loaded.status.kind,
       "Missing memory documents should report seeded status.",
-    );
+    ).toBe("seeded");
 
     let observed: AuthoredModelDocument | null = null;
     let observedHeads: readonly string[] = [];
@@ -63,39 +62,38 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         ),
       },
     });
-    expectTrue(
+    expect(
       mutated.ok,
       "Memory repository should accept plain authored document mutations.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       observed?.bodyLabels.some((label) => label.label === "Repository Body"),
       "Subscribers should receive plain authored documents.",
-    );
-    expectTrue(
-      observedHeads[0] === `memory:${mutated.document.revisionId}`,
+    ).toBeTruthy();
+    expect(
+      observedHeads[0],
       "Memory repository changes should include head metadata.",
-    );
+    ).toBe(`memory:${mutated.document.revisionId}`);
     unsubscribe();
     observed = null;
     await repository.mutate({ documentId: seed.documentId, document: seed });
-    expectTrue(
-      observed === null,
+    expect(
+      observed,
       "Unsubscribed memory repository listeners should not receive later changes.",
-    );
+    ).toBe(null);
 
     const reset = await repository.reset(seed.documentId);
-    expectTrue(
-      reset.kind === "reset",
-      "Repository reset should report reset status.",
+    expect(reset.kind, "Repository reset should report reset status.").toBe(
+      "reset",
     );
     const reloaded = await repository.load({
       documentId: seed.documentId,
       seedDocument: seed,
     });
-    expectTrue(
+    expect(
       reloaded.ok && reloaded.status.kind === "seeded",
       "Repository should recreate a seeded document after reset.",
-    );
+    ).toBeTruthy();
   }
 
   async function testRepositoryAssetMutationsAreAtomic() {
@@ -123,38 +121,38 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
       document: documentWithAsset,
       assets: [asset, unrelatedAsset],
     });
-    expectTrue(
-      !invalidAssetBatch.ok,
+    expect(
+      invalidAssetBatch.ok,
       "Asset mutations with blobs outside the authored manifest should fail.",
-    );
+    ).toBeFalsy();
 
     const embeddedAsset = await repository.mutate({
       documentId: seed.documentId,
       document: documentWithAsset,
     });
-    expectTrue(
+    expect(
       embeddedAsset.ok,
       "Asset-referencing mutations should commit when required bytes are embedded in JSON.",
-    );
+    ).toBeTruthy();
 
     const storedAsset = await repository.mutate({
       documentId: seed.documentId,
       document: documentWithAsset,
       assets: [asset],
     });
-    expectTrue(
+    expect(
       storedAsset.ok,
       "Asset-referencing mutations should commit after required blobs are stored.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       storedAsset.ok &&
         storedAsset.assetAvailability?.every((entry) => entry.available),
       "Committed asset mutations should report asset availability metadata.",
-    );
-    expectTrue(
-      (await repository.getGeometryAssetRecord(asset.asset)) !== null,
+    ).toBeTruthy();
+    expect(
+      await repository.getGeometryAssetRecord(asset.asset),
       "Repository asset resolver should return stored immutable blob bytes.",
-    );
+    ).not.toBe(null);
   }
 
   async function testPeerAssetTransferStoresBlobs() {
@@ -194,18 +192,18 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
       assets: [asset],
     });
 
-    expectTrue(
+    expect(
       observed.includes("peer:true"),
       "Peer asset transfer should notify with available verified blob metadata.",
-    );
-    expectTrue(
-      (await peer.getGeometryAssetRecord(asset.asset)) !== null,
+    ).toBeTruthy();
+    expect(
+      await peer.getGeometryAssetRecord(asset.asset),
       "Peer asset transfer should store received blob bytes.",
-    );
-    expectTrue(
-      (await peer.getGeometryAssetBytes(asset.asset.hash)) !== null,
+    ).not.toBe(null);
+    expect(
+      await peer.getGeometryAssetBytes(asset.asset.hash),
       "Peer asset transfer should make blobs resolvable by hash for restore paths.",
-    );
+    ).not.toBe(null);
   }
 
   async function testIndexedDbRepositoryUsesInternalHandleAndReportsFailures() {
@@ -225,26 +223,26 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
       documentId: seed.documentId,
       seedDocument: seed,
     });
-    expectTrue(
+    expect(
       loaded.ok && loaded.status.kind === "seeded",
       "IndexedDB repository should seed missing Automerge documents.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       loaded.ok && loaded.metadata.heads.length > 0,
       "Seeded Automerge documents should expose causal heads.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       seedEvents.every((source) => source !== "peer"),
       "Seeded Automerge documents should not emit peer-originated changes.",
-    );
-    expectTrue(
-      repo.createdCount === 1,
+    ).toBeTruthy();
+    expect(
+      repo.createdCount,
       "IndexedDB repository should create an internal Automerge handle for missing documents.",
-    );
-    expectTrue(
-      urlStore.get(seed.documentId) !== null,
+    ).toBe(1);
+    expect(
+      urlStore.get(seed.documentId),
       "IndexedDB repository should persist the app document to Automerge URL mapping.",
-    );
+    ).not.toBe(null);
 
     const restored = await new IndexedDbAutomergeDocumentRepository({
       repo,
@@ -256,19 +254,19 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         bodyLabels: [],
       },
     });
-    expectTrue(
+    expect(
       restored.ok && restored.status.kind === "restored",
       "A new repository instance should restore through the stored Automerge URL.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       restored.ok && restored.metadata.source === "restore",
       "Restored Automerge documents should identify restore as the change source.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       restored.ok &&
         restored.document.bodyLabels.length === seed.bodyLabels.length,
       "Refresh restore should use the stored authored document.",
-    );
+    ).toBeTruthy();
 
     const events: string[] = [];
     const unsubscribe = repository.subscribe(seed.documentId, (event) => {
@@ -289,10 +287,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
     await Promise.resolve();
     await Promise.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expectTrue(
+    expect(
       events.some((event) => event.startsWith("peer:")),
       "Peer-originated handle changes should notify subscribers.",
-    );
+    ).toBeTruthy();
     unsubscribe();
     const eventCount = events.length;
     repo.pushPeerChange(urlStore.get(seed.documentId)!, {
@@ -303,10 +301,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
     await Promise.resolve();
     await Promise.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expectTrue(
-      events.length === eventCount,
+    expect(
+      events.length,
       "Unsubscribed Automerge repository listeners should not receive later peer changes.",
-    );
+    ).toBe(eventCount);
 
     const unsupported = await repository.mutate({
       documentId: seed.documentId,
@@ -316,14 +314,14 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
           "authored-model-document/v9" as AuthoredModelDocument["schemaVersion"],
       },
     });
-    expectTrue(
-      !unsupported.ok,
+    expect(
+      unsupported.ok,
       "Unsupported authored schemas should fail without replacing existing data.",
-    );
-    expectTrue(
-      unsupported.status.diagnostic.reasonCode === "unsupported-schema-version",
+    ).toBeFalsy();
+    expect(
+      unsupported.status.diagnostic.reasonCode,
       "Unsupported schema failures should be explicit.",
-    );
+    ).toBe("unsupported-schema-version");
 
     repo.failNextFind = true;
     const findFailed = await new IndexedDbAutomergeDocumentRepository({
@@ -333,32 +331,36 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
       documentId: seed.documentId,
       seedDocument: seed,
     });
-    expectTrue(!findFailed.ok, "DocHandle load failures should be reported.");
-    expectTrue(
-      findFailed.status.diagnostic.reasonCode === "automerge-load-failed",
-      "DocHandle load failures should keep a repository diagnostic.",
+    expect(findFailed.ok, "DocHandle load failures should be reported.").toBe(
+      false,
     );
+    expect(
+      findFailed.status.diagnostic.reasonCode,
+      "DocHandle load failures should keep a repository diagnostic.",
+    ).toBe("automerge-load-failed");
 
     repo.failNextChange = true;
     const writeFailed = await repository.mutate({
       documentId: seed.documentId,
       document: seed,
     });
-    expectTrue(!writeFailed.ok, "DocHandle write failures should be reported.");
-    expectTrue(
-      writeFailed.status.diagnostic.reasonCode === "automerge-write-failed",
-      "Write failures should keep a repository diagnostic.",
+    expect(writeFailed.ok, "DocHandle write failures should be reported.").toBe(
+      false,
     );
+    expect(
+      writeFailed.status.diagnostic.reasonCode,
+      "Write failures should keep a repository diagnostic.",
+    ).toBe("automerge-write-failed");
 
     const reset = await repository.reset(seed.documentId);
-    expectTrue(
-      reset.kind === "reset",
+    expect(
+      reset.kind,
       "IndexedDB repository reset should clear the mapped document.",
-    );
-    expectTrue(
-      urlStore.get(seed.documentId) === null,
+    ).toBe("reset");
+    expect(
+      urlStore.get(seed.documentId),
       "Reset should remove the stored Automerge URL mapping.",
-    );
+    ).toBe(null);
   }
 
   async function testDocumentRepositoriesPersistDurableUndoRedoLocally() {
@@ -377,43 +379,43 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         ),
       },
     });
-    expectTrue(
+    expect(
       mutated.ok,
       "Durable history fixtures require the initial repository mutation to succeed.",
-    );
+    ).toBeTruthy();
 
     const afterMutation = await repository.getDurableHistoryAvailability(
       seed.documentId,
     );
-    expectTrue(
+    expect(
       afterMutation.canUndo && !afterMutation.canRedo,
       "Accepted local mutations should create one durable undo step.",
-    );
+    ).toBeTruthy();
 
     const undone = await repository.undoDurableHistory(seed.documentId);
-    expectTrue(
+    expect(
       undone?.ok &&
         undone.document.bodyLabels.every(
           (label) => label.label !== "Durable Undo Body",
         ),
       "Undo should restore the prior authored document snapshot through the repository seam.",
-    );
+    ).toBeTruthy();
     const afterUndo = await repository.getDurableHistoryAvailability(
       seed.documentId,
     );
-    expectTrue(
-      !afterUndo.canUndo && afterUndo.canRedo,
+    expect(
+      afterUndo.canUndo && afterUndo.canRedo,
       "Undo should move durable history availability onto redo.",
-    );
+    ).toBeFalsy();
 
     const redone = await repository.redoDurableHistory(seed.documentId);
-    expectTrue(
+    expect(
       redone?.ok &&
         redone.document.bodyLabels.some(
           (label) => label.label === "Durable Undo Body",
         ),
       "Redo should reapply the durable authored document snapshot through the repository seam.",
-    );
+    ).toBeTruthy();
 
     await repository.receivePeerDocument({
       ...seed,
@@ -422,10 +424,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
     const afterPeer = await repository.getDurableHistoryAvailability(
       seed.documentId,
     );
-    expectTrue(
-      !afterPeer.canUndo && !afterPeer.canRedo,
+    expect(
+      afterPeer.canUndo && !afterPeer.canRedo,
       "Peer-authored repository changes should not arrive as locally undoable durable history.",
-    );
+    ).toBeFalsy();
   }
 
   async function testIndexedDbRepositoryRestoresDurableHistoryAcrossRefresh() {
@@ -451,10 +453,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         ),
       },
     });
-    expectTrue(
+    expect(
       mutated.ok,
       "Refresh durable-history coverage needs an accepted repository mutation.",
-    );
+    ).toBeTruthy();
 
     const refreshedRepository = new IndexedDbAutomergeDocumentRepository({
       repo,
@@ -467,10 +469,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
     });
     const restoredAvailability =
       await refreshedRepository.getDurableHistoryAvailability(seed.documentId);
-    expectTrue(
+    expect(
       restoredAvailability.canUndo && !restoredAvailability.canRedo,
       "Refreshing the same local repository should restore durable undo availability from repository-local storage.",
-    );
+    ).toBeTruthy();
   }
 
   async function testIndexedDbRepositoryScopesDurableHistoryPerLocalSession() {
@@ -496,10 +498,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         ),
       },
     });
-    expectTrue(
+    expect(
       mutated.ok,
       "Session-scoped durable history coverage needs an accepted repository mutation.",
-    );
+    ).toBeTruthy();
 
     const refreshedSessionA = new IndexedDbAutomergeDocumentRepository({
       repo,
@@ -513,10 +515,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
     });
     const sessionAAvailability =
       await refreshedSessionA.getDurableHistoryAvailability(seed.documentId);
-    expectTrue(
+    expect(
       sessionAAvailability.canUndo && !sessionAAvailability.canRedo,
       "Refreshing the same local session should restore that session scoped durable undo state.",
-    );
+    ).toBeTruthy();
 
     const sessionB = new IndexedDbAutomergeDocumentRepository({
       repo,
@@ -528,18 +530,18 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
     const sessionBAvailability = await sessionB.getDurableHistoryAvailability(
       seed.documentId,
     );
-    expectTrue(
-      !sessionBAvailability.canUndo && !sessionBAvailability.canRedo,
+    expect(
+      sessionBAvailability.canUndo && !sessionBAvailability.canRedo,
       "A different local session should not inherit another session durable undo ledger.",
-    );
+    ).toBeFalsy();
 
     await sessionB.reset(seed.documentId);
     const sessionAAfterReset =
       await refreshedSessionA.getDurableHistoryAvailability(seed.documentId);
-    expectTrue(
+    expect(
       sessionAAfterReset.canUndo && !sessionAAfterReset.canRedo,
       "Resetting a different local session should not clear the original session durable undo ledger.",
-    );
+    ).toBeTruthy();
   }
 
   async function testIndexedDbUndoFailureKeepsDurableHistoryAvailability() {
@@ -566,25 +568,25 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         ),
       },
     });
-    expectTrue(
+    expect(
       mutated.ok,
       "Undo failure coverage needs an accepted repository mutation.",
-    );
+    ).toBeTruthy();
 
     repo.failNextChange = true;
     const failedUndo = await repository.undoDurableHistory(seed.documentId);
-    expectTrue(
-      !failedUndo?.ok,
+    expect(
+      failedUndo?.ok,
       "Undo should surface repository write failures.",
-    );
+    ).toBeFalsy();
 
     const availability = await repository.getDurableHistoryAvailability(
       seed.documentId,
     );
-    expectTrue(
+    expect(
       availability.canUndo && !availability.canRedo,
       "A failed durable undo should leave the undo and redo ledger unchanged.",
-    );
+    ).toBeTruthy();
   }
 
   async function testRepositoryPersistsLocalSketchDraftHistory() {
@@ -608,54 +610,54 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
       "draft:xy",
       initialDraft,
     );
-    expectTrue(
-      !initialAvailability.canUndo && !initialAvailability.canRedo,
+    expect(
+      initialAvailability.canUndo && !initialAvailability.canRedo,
       "Seeding a draft session should not create undo history before the draft changes.",
-    );
+    ).toBeFalsy();
 
     const updatedAvailability = await repository.saveSketchDraftHistory(
       seed.documentId,
       "draft:xy",
       updatedDraft,
     );
-    expectTrue(
+    expect(
       updatedAvailability.canUndo && !updatedAvailability.canRedo,
       "Updating a draft session should create repository-backed draft undo availability.",
-    );
+    ).toBeTruthy();
 
     const undone = await repository.undoSketchDraftHistory(
       seed.documentId,
       "draft:xy",
     );
-    expectTrue(
-      undone.session?.sketchLabel === initialDraft.sketchLabel,
+    expect(
+      undone.session?.sketchLabel,
       "Draft undo should restore the prior persisted sketch draft session.",
-    );
-    expectTrue(
-      !undone.availability.canUndo && undone.availability.canRedo,
+    ).toBe(initialDraft.sketchLabel);
+    expect(
+      undone.availability.canUndo && undone.availability.canRedo,
       "Draft undo should move local draft availability onto redo.",
-    );
+    ).toBeFalsy();
 
     const redone = await repository.redoSketchDraftHistory(
       seed.documentId,
       "draft:xy",
     );
-    expectTrue(
-      redone.session?.sketchLabel === updatedDraft.sketchLabel,
+    expect(
+      redone.session?.sketchLabel,
       "Draft redo should reapply the newer persisted sketch draft session.",
-    );
+    ).toBe(updatedDraft.sketchLabel);
 
     await repository.clearSketchDraftHistory(seed.documentId, "draft:xy");
     const cleared = await repository.getSketchDraftHistory(
       seed.documentId,
       "draft:xy",
     );
-    expectTrue(
+    expect(
       cleared.session === null &&
         !cleared.availability.canUndo &&
         !cleared.availability.canRedo,
       "Explicit draft clearing should remove repository-local sketch draft history.",
-    );
+    ).toBeTruthy();
   }
 
   function testLocalStorageUrlStoreValidatesPersistedPayloads() {
@@ -666,10 +668,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
     >[1];
 
     urlStore.set("doc_workspace", validUrl);
-    expectTrue(
-      urlStore.get("doc_workspace") === validUrl,
+    expect(
+      urlStore.get("doc_workspace"),
       "Valid Automerge URLs should round-trip through localStorage.",
-    );
+    ).toBe(validUrl);
 
     storage.setItem(
       "cad.documentRepository.automergeUrls.v1",
@@ -677,10 +679,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         doc_workspace: "https://not-automerge",
       }),
     );
-    expectTrue(
-      urlStore.get("doc_workspace") === null,
+    expect(
+      urlStore.get("doc_workspace"),
       "Malformed persisted URLs should be rejected by runtime validation.",
-    );
+    ).toBe(null);
 
     storage.setItem(
       "cad.documentRepository.automergeUrls.v1",
@@ -688,10 +690,10 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         doc_workspace: "automerge:invalidid",
       }),
     );
-    expectTrue(
-      urlStore.get("doc_workspace") === null,
+    expect(
+      urlStore.get("doc_workspace"),
       "Semantically invalid Automerge URLs should be rejected.",
-    );
+    ).toBe(null);
 
     storage.setItem(
       "cad.documentRepository.automergeUrls.v1",
@@ -699,28 +701,28 @@ test("src/domain/modeling/document-repository.spec.ts", async () => {
         doc_workspace: 42,
       }),
     );
-    expectTrue(
-      urlStore.get("doc_workspace") === null,
+    expect(
+      urlStore.get("doc_workspace"),
       "Non-string persisted URLs should be rejected by runtime validation.",
-    );
+    ).toBe(null);
 
     storage.setItem(
       "cad.documentRepository.automergeUrls.v1",
       JSON.stringify(null),
     );
-    expectTrue(
-      urlStore.get("doc_workspace") === null,
+    expect(
+      urlStore.get("doc_workspace"),
       "Null persisted payloads should be rejected by runtime validation.",
-    );
+    ).toBe(null);
 
     storage.setItem(
       "cad.documentRepository.automergeUrls.v1",
       JSON.stringify([validUrl]),
     );
-    expectTrue(
-      urlStore.get("doc_workspace") === null,
+    expect(
+      urlStore.get("doc_workspace"),
       "Array persisted payloads should be rejected by runtime validation.",
-    );
+    ).toBe(null);
   }
 
   await testMemoryRepositoryLoadsMutatesSubscribesAndResets();

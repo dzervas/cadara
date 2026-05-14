@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { WorkbenchInspectorOverlay } from "@/components/layout/workbench-inspector-overlay";
@@ -15,19 +14,19 @@ test("src/components/layout/workbench-inspector-overlay.spec.tsx", async () => {
     </WorkbenchInspectorOverlay>,
   );
 
-  expectTrue(
+  expect(
     markup.includes("absolute") && markup.includes("pointer-events-none"),
     "Workbench inspector overlay should stay positioned inside the viewport frame instead of taking page flow space.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("pointer-events-auto") &&
       markup.includes("min-w-0") &&
       markup.includes("max-w-md"),
     "Workbench inspector overlay should clip and capture interaction only inside the panel surface, capped at a medium-width column so it does not collide with the parts tree or the right-edge floating chrome.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes(`left:${VIEWPORT_FLOATING_PANEL_LEFT_PX}px`) &&
       markup.includes(`top:${VIEWPORT_FLOATING_PANEL_TOP_STYLE}`),
     "Workbench inspector overlay should use the shared floating panel slot below the toolbar and past the parts tree.",
-  );
+  ).toBeTruthy();
 });

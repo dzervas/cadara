@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import type {
   FeatureDefinition,
   SketchSnapshotRecord,
@@ -431,7 +430,7 @@ function applyFeature(
 
 function requireBody(state: OccAuthoringState, bodyId: BodyId) {
   const body = state.bodies.find((entry) => entry.bodyId === bodyId);
-  expectTrue(body, `Expected body ${bodyId} to exist.`);
+  expect(body, `Expected body ${bodyId} to exist.`).toBeTruthy();
   return body;
 }
 
@@ -460,10 +459,10 @@ function findPlanarFaceAtZ(
     );
   });
 
-  expectTrue(
+  expect(
     faceId,
     `Expected body ${body.bodyId} to expose a horizontal planar face at z=${z}.`,
-  );
+  ).toBeTruthy();
   return faceId;
 }
 
@@ -488,10 +487,10 @@ function findLinearEdgeByDirection(
     return Math.abs(dot(edgeDirection, direction)) > 0.999;
   });
 
-  expectTrue(
+  expect(
     edgeId,
     `Expected body ${body.bodyId} to expose a linear edge in direction ${direction.join(",")}.`,
-  );
+  ).toBeTruthy();
   return edgeId;
 }
 
@@ -547,10 +546,10 @@ function findEdgeByEndpoints(
     return edge ? edgeHasEndpoints(oc, edge, first, second) : false;
   });
 
-  expectTrue(
+  expect(
     edgeId,
     `Expected body ${body.bodyId} to expose an edge from ${first.join(",")} to ${second.join(",")}.`,
-  );
+  ).toBeTruthy();
   return edgeId;
 }
 
@@ -566,10 +565,10 @@ function findVertexAt(
       : false;
   });
 
-  expectTrue(
+  expect(
     vertexId,
     `Expected body ${body.bodyId} to expose a vertex at ${position.join(",")}.`,
-  );
+  ).toBeTruthy();
   return vertexId;
 }
 
@@ -754,8 +753,8 @@ test("proper naming should keep an untouched bottom face live after joined boss 
     },
   );
 
-  expectTrue(
-    resolved.resolution.invalidation === null,
+  expect(
+    resolved.resolution.invalidation,
     `Expected the untouched bottom face to stay live after top-side joins; current result is ${formatInvalidation(
       fixture.afterRib,
       {
@@ -764,7 +763,7 @@ test("proper naming should keep an untouched bottom face live after joined boss 
         faceId: fixture.bottomFaceId,
       },
     )}.`,
-  );
+  ).toBe(null);
 });
 
 test("proper naming should allow a downstream plane to reference a pre-join unaffected face", async () => {
@@ -780,10 +779,10 @@ test("proper naming should allow a downstream plane to reference a pre-join unaf
     thrownMessage = error instanceof Error ? error.message : String(error);
   }
 
-  expectTrue(
-    thrownMessage === null,
+  expect(
+    thrownMessage,
     `Expected a face-backed plane to resolve through boolean history, but the current adapter rejected it: ${thrownMessage}.`,
-  );
+  ).toBe(null);
 });
 
 test("proper naming should carry a selected vertical edge through same-domain simplification", async () => {
@@ -802,10 +801,10 @@ test("proper naming should carry a selected vertical edge through same-domain si
     thrownMessage = error instanceof Error ? error.message : String(error);
   }
 
-  expectTrue(
-    thrownMessage === null,
+  expect(
+    thrownMessage,
     `Expected the selected vertical edge to survive the simplified join for downstream fillet selection, but the current adapter rejected it: ${thrownMessage}.`,
-  );
+  ).toBe(null);
 });
 
 test("proper naming should carry untouched edge and vertex references through chained fillet and chamfer operations", async () => {
@@ -877,14 +876,14 @@ test("proper naming should carry untouched edge and vertex references through ch
     },
   );
 
-  expectTrue(
-    edgeResolved.resolution.invalidation === null,
+  expect(
+    edgeResolved.resolution.invalidation,
     `Expected untouched edge to stay live through chained fillet/chamfer operations, got ${edgeResolved.resolution.invalidation?.reason}.`,
-  );
-  expectTrue(
-    vertexResolved.resolution.invalidation === null,
+  ).toBe(null);
+  expect(
+    vertexResolved.resolution.invalidation,
     `Expected untouched vertex to stay live through chained fillet/chamfer operations, got ${vertexResolved.resolution.invalidation?.reason}.`,
-  );
+  ).toBe(null);
 });
 
 test("proper naming should allow an old edge id to drive a downstream fillet after chained fillet and chamfer operations", async () => {
@@ -946,10 +945,10 @@ test("proper naming should allow an old edge id to drive a downstream fillet aft
     thrownMessage = error instanceof Error ? error.message : String(error);
   }
 
-  expectTrue(
-    thrownMessage === null,
+  expect(
+    thrownMessage,
     `Expected old edge id to resolve for downstream fillet after chained fillet/chamfer operations, got ${thrownMessage}.`,
-  );
+  ).toBe(null);
 });
 
 test("proper naming should keep untouched edge and vertex references live through shell replacement", async () => {
@@ -1011,14 +1010,14 @@ test("proper naming should keep untouched edge and vertex references live throug
     },
   );
 
-  expectTrue(
-    edgeResolved.resolution.invalidation === null,
+  expect(
+    edgeResolved.resolution.invalidation,
     `Expected untouched edge to stay live through shell replacement, got ${edgeResolved.resolution.invalidation?.reason}.`,
-  );
-  expectTrue(
-    vertexResolved.resolution.invalidation === null,
+  ).toBe(null);
+  expect(
+    vertexResolved.resolution.invalidation,
     `Expected untouched vertex to stay live through shell replacement, got ${vertexResolved.resolution.invalidation?.reason}.`,
-  );
+  ).toBe(null);
 });
 
 test("proper naming should carry thicken-produced topology through chained fillet and chamfer operations", async () => {
@@ -1106,14 +1105,14 @@ test("proper naming should carry thicken-produced topology through chained fille
     },
   );
 
-  expectTrue(
-    edgeResolved.resolution.invalidation === null,
+  expect(
+    edgeResolved.resolution.invalidation,
     `Expected thicken-produced edge to stay live through chained edits, got ${edgeResolved.resolution.invalidation?.reason}.`,
-  );
-  expectTrue(
-    vertexResolved.resolution.invalidation === null,
+  ).toBe(null);
+  expect(
+    vertexResolved.resolution.invalidation,
     `Expected thicken-produced vertex to stay live through chained edits, got ${vertexResolved.resolution.invalidation?.reason}.`,
-  );
+  ).toBe(null);
 });
 
 test("proper naming should keep stable references live after an authored rebuild", async () => {
@@ -1132,10 +1131,10 @@ test("proper naming should keep stable references live after an authored rebuild
     },
   );
 
-  expectTrue(
-    resolved.resolution.invalidation === null,
+  expect(
+    resolved.resolution.invalidation,
     `Expected rebuilt authored history to preserve the bottom face reference, got ${resolved.resolution.invalidation?.reason}.`,
-  );
+  ).toBe(null);
 }, 15000);
 
 test("proper naming should report a deleted-topology diagnostic for a cut-away face", async () => {
@@ -1184,15 +1183,14 @@ test("proper naming should report a deleted-topology diagnostic for a cut-away f
     },
   );
 
-  expectTrue(
-    resolved.resolution.invalidation?.reason ===
-      OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+  expect(
+    resolved.resolution.invalidation?.reason,
     `Expected cut-away face to be invalidated as deleted topology, got ${resolved.resolution.invalidation?.reason}.`,
-  );
-  expectTrue(
-    resolved.diagnostics[0]?.detail?.kind === "invalidReference",
+  ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted);
+  expect(
+    resolved.diagnostics[0]?.detail?.kind,
     "Deleted topology must surface a structured invalid-reference diagnostic.",
-  );
+  ).toBe("invalidReference");
 });
 
 test("proper naming should report an ambiguous-topology diagnostic for split successors", async () => {
@@ -1258,11 +1256,10 @@ test("proper naming should report an ambiguous-topology diagnostic for split suc
     },
   );
 
-  expectTrue(
-    resolved.resolution.invalidation?.reason ===
-      OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
+  expect(
+    resolved.resolution.invalidation?.reason,
     `Expected split face reference to be invalidated as ambiguous topology, got ${resolved.resolution.invalidation?.reason}.`,
-  );
+  ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous);
 });
 
 test("proper naming should invalidate consumed Combine tool-body topology", async () => {
@@ -1307,7 +1304,10 @@ test("proper naming should invalidate consumed Combine tool-body topology", asyn
     }),
   });
   const toolFaceId = requireBody(afterTool, toolBodyId).topology.faceIds[0];
-  expectTrue(toolFaceId, "Tool body must expose a face before Combine.");
+  expect(
+    toolFaceId,
+    "Tool body must expose a face before Combine.",
+  ).toBeTruthy();
   const afterCombine = applyFeature(afterTool, {
     featureId: featureId("combine_add"),
     definition: createCombineDefinition(targetBodyId, toolBodyId),
@@ -1325,13 +1325,12 @@ test("proper naming should invalidate consumed Combine tool-body topology", asyn
     },
   );
 
-  expectTrue(
-    resolved.resolution.invalidation?.reason ===
-      OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+  expect(
+    resolved.resolution.invalidation?.reason,
     `Expected consumed tool-body face to be invalidated as deleted topology, got ${resolved.resolution.invalidation?.reason}.`,
-  );
-  expectTrue(
-    !afterCombine.bodies.some((body) => body.bodyId === toolBodyId),
+  ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted);
+  expect(
+    afterCombine.bodies.some((body) => body.bodyId === toolBodyId),
     "Consumed Combine tool body must not remain live after add.",
-  );
+  ).toBeFalsy();
 });

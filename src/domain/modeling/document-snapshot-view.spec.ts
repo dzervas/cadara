@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   buildSelectionTargetCatalog,
   getEntityRecordForTarget,
@@ -35,63 +34,63 @@ test("document snapshot view resolves selection details, contributing features, 
   } as const;
 
   const featureEntity = getEntityRecordForTarget(snapshot, featureTarget);
-  expectTrue(
-    featureEntity?.label === "Extrude 1",
+  expect(
+    featureEntity?.label,
     "Entity lookup should resolve snapshot presentation entities by durable target key.",
-  );
-  expectTrue(
-    getEntityRecordForTarget(snapshot, missingTarget) === null,
+  ).toBe("Extrude 1");
+  expect(
+    getEntityRecordForTarget(snapshot, missingTarget),
     "Entity lookup should return null for missing snapshot targets.",
-  );
+  ).toBe(null);
 
   const featureSelection = getSelectionDetail(snapshot, featureTarget);
-  expectTrue(
+  expect(
     featureSelection.label === "Extrude 1" &&
       featureSelection.kindLabel === "feature" &&
       featureSelection.ownerLabel === "Extrude 1" &&
       featureSelection.relatedLabels.includes("Part 1 body"),
     "Feature selection detail should resolve the feature label, owner label, and related entity labels.",
-  );
+  ).toBeTruthy();
 
   const sketchSelection = getSelectionDetail(snapshot, sketchTarget);
-  expectTrue(
-    sketchSelection.ownerLabel === "Sketch 1",
+  expect(
+    sketchSelection.ownerLabel,
     "Sketch-owned selections should surface the owning sketch label.",
-  );
+  ).toBe("Sketch 1");
 
   const bodySelection = getSelectionDetail(snapshot, bodyTarget);
-  expectTrue(
-    bodySelection.ownerLabel === "Extrude 1",
+  expect(
+    bodySelection.ownerLabel,
     "Body-owned selections should surface the owning feature label when available.",
-  );
+  ).toBe("Extrude 1");
 
   const unresolvedSelection = getSelectionDetail(snapshot, missingTarget);
-  expectTrue(
+  expect(
     unresolvedSelection.label === "feature_missing" &&
       unresolvedSelection.ownerLabel === "Unresolved selection" &&
       unresolvedSelection.relatedLabels.length === 0,
     "Missing selections should fall back to primitive labels without related targets.",
-  );
+  ).toBeTruthy();
 
   const contributing = getTargetContributingFeatureIds(snapshot, faceTarget);
-  expectTrue(
+  expect(
     contributing.length === 1 && contributing[0] === "feature_extrude-1",
     "Selection detail helpers should expose contributing feature ids from the presentation entity.",
-  );
-  expectTrue(
-    getTargetContributingFeatureIds(snapshot, null).length === 0,
+  ).toBeTruthy();
+  expect(
+    getTargetContributingFeatureIds(snapshot, null).length,
     "Null targets should produce an empty contributing-feature list.",
-  );
+  ).toBe(0);
 
-  expectTrue(
+  expect(
     getFeatureSnapshot(snapshot, featureTarget.featureId)?.label ===
       "Extrude 1" &&
       getFeatureSnapshot(snapshot, missingTarget.featureId) === null,
     "Feature lookup should resolve existing feature snapshots and return null for missing ids.",
-  );
+  ).toBeTruthy();
 
   const catalog = buildSelectionTargetCatalog(snapshot);
-  expectTrue(
+  expect(
     catalog.selectableTargetKeys.includes(
       "construction:construction_plane-xy",
     ) &&
@@ -101,7 +100,7 @@ test("document snapshot view resolves selection details, contributing features, 
       ) &&
       catalog.planarFaceKeys.includes("face:body_part-1:face_top"),
     "Selection catalog classification should split selectable targets into sketch, construction-plane, and planar-face buckets.",
-  );
+  ).toBeTruthy();
 
   const brokenSnapshot = {
     ...snapshot,
@@ -132,9 +131,10 @@ test("document snapshot view resolves selection details, contributing features, 
     relatedTargetMessage =
       error instanceof Error ? error.message : String(error);
   }
-  expectTrue(
-    relatedTargetMessage ===
-      "Related target feature:feature_missing is missing from snapshot.presentation.entities.",
+  expect(
+    relatedTargetMessage,
     "Missing related targets should fail loudly instead of silently dropping broken presentation links.",
+  ).toBe(
+    "Related target feature:feature_missing is missing from snapshot.presentation.entities.",
   );
 });

@@ -1,5 +1,4 @@
-import { test } from "vitest";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -41,29 +40,38 @@ test("src/components/layout/document-export-modal.spec.tsx", () => {
     </MantineProvider>,
   );
 
-  expectTrue(
+  expect(
     stlMarkup.includes("Export Part 1"),
     "Export modal should be scoped to the selected row label.",
-  );
-  expectTrue(stlMarkup.includes("STL"), "Export modal should list STL.");
-  expectTrue(stlMarkup.includes("STEP"), "Export modal should list STEP.");
-  expectTrue(stlMarkup.includes("3MF"), "Export modal should list 3MF.");
-  expectTrue(
-    !stlMarkup.includes("cadara"),
+  ).toBeTruthy();
+  expect(
+    stlMarkup.includes("STL"),
+    "Export modal should list STL.",
+  ).toBeTruthy();
+  expect(
+    stlMarkup.includes("STEP"),
+    "Export modal should list STEP.",
+  ).toBeTruthy();
+  expect(
+    stlMarkup.includes("3MF"),
+    "Export modal should list 3MF.",
+  ).toBeTruthy();
+  expect(
+    stlMarkup.includes("cadara"),
     "Solid export modal should not list cadara document export.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     stlMarkup.includes("Mesh accuracy"),
     "STL export should show mesh accuracy controls.",
-  );
-  expectTrue(
-    !stlMarkup.includes("STEP options"),
+  ).toBeTruthy();
+  expect(
+    stlMarkup.includes("STEP options"),
     "STL export should not show STEP-specific controls.",
-  );
-  expectTrue(
-    !stlMarkup.includes("cadara JSON"),
+  ).toBeFalsy();
+  expect(
+    stlMarkup.includes("cadara JSON"),
     "STL export should not show cadara-specific controls.",
-  );
+  ).toBeFalsy();
 
   const sketchMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -89,26 +97,26 @@ test("src/components/layout/document-export-modal.spec.tsx", () => {
     </MantineProvider>,
   );
 
-  expectTrue(
+  expect(
     sketchMarkup.includes("SVG"),
     "Sketch export modal should list SVG.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     sketchMarkup.includes("DXF"),
     "Sketch export modal should list DXF.",
-  );
-  expectTrue(
-    !sketchMarkup.includes("STL"),
+  ).toBeTruthy();
+  expect(
+    sketchMarkup.includes("STL"),
     "Sketch export modal should omit STL.",
-  );
-  expectTrue(
-    !sketchMarkup.includes("STEP"),
+  ).toBeFalsy();
+  expect(
+    sketchMarkup.includes("STEP"),
     "Sketch export modal should omit STEP.",
-  );
-  expectTrue(
-    !sketchMarkup.includes("3MF"),
+  ).toBeFalsy();
+  expect(
+    sketchMarkup.includes("3MF"),
     "Sketch export modal should omit 3MF.",
-  );
+  ).toBeFalsy();
 
   const stepMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -131,28 +139,26 @@ test("src/components/layout/document-export-modal.spec.tsx", () => {
     </MantineProvider>,
   );
 
-  expectTrue(
+  expect(
     stepMarkup.includes("STEP options"),
     "STEP export should show STEP-specific controls.",
-  );
-  expectTrue(
-    !stepMarkup.includes("Mesh accuracy"),
+  ).toBeTruthy();
+  expect(
+    stepMarkup.includes("Mesh accuracy"),
     "STEP export should omit mesh accuracy controls.",
-  );
+  ).toBeFalsy();
 
   const stepDefaults = stepExportProvider.getDefaultOptions();
   const input = buildDocumentExportModalInput(target, "step", stepDefaults);
 
-  expectTrue(
-    input.format === "step",
+  expect(
+    input.format,
     "Modal submission should preserve the selected format.",
-  );
-  expectTrue(
-    !(
-      typeof input.options === "object" &&
+  ).toBe("step");
+  expect(
+    typeof input.options === "object" &&
       input.options !== null &&
-      "meshAccuracy" in input.options
-    ),
+      "meshAccuracy" in input.options,
     "Modal submission should not include incompatible mesh options for STEP.",
-  );
+  ).toBeFalsy();
 });

@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   ExportCapabilities,
   MeshExportAccuracy,
@@ -73,56 +72,53 @@ function createMockCapabilities(
 
 test("src/domain/export/providers/export-providers.spec.ts", async () => {
   function testStlProviderMetadata() {
-    expectTrue(
-      stlExportProvider.id === "stl",
-      "STL provider should have id stl.",
+    expect(stlExportProvider.id, "STL provider should have id stl.").toBe(
+      "stl",
     );
-    expectTrue(
-      stlExportProvider.formatId === "stl",
+    expect(
+      stlExportProvider.formatId,
       "STL provider should have formatId stl.",
-    );
-    expectTrue(
-      stlExportProvider.fileExtension === "stl",
+    ).toBe("stl");
+    expect(
+      stlExportProvider.fileExtension,
       "STL provider should have extension stl.",
-    );
-    expectTrue(
-      stlExportProvider.mimeType === "model/stl",
+    ).toBe("stl");
+    expect(
+      stlExportProvider.mimeType,
       "STL provider should advertise correct MIME type.",
-    );
+    ).toBe("model/stl");
   }
 
   function testStlProviderDefaultOptions() {
     const defaults = stlExportProvider.getDefaultOptions();
-    expectTrue(
-      defaults.encoding === "binary",
-      "STL defaults to binary encoding.",
+    expect(defaults.encoding, "STL defaults to binary encoding.").toBe(
+      "binary",
     );
-    expectTrue(
+    expect(
       defaults.meshAccuracy.chordTolerance > 0,
       "STL default chord tolerance should be positive.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       defaults.meshAccuracy.angleToleranceRadians > 0,
       "STL default angle tolerance should be positive.",
-    );
+    ).toBeTruthy();
   }
 
   function testStlProviderOptionForm() {
     const defaults = stlExportProvider.getDefaultOptions();
     const schema = stlExportProvider.getOptionFormSchema(defaults);
     const section = schema.sections[0];
-    expectTrue(
-      section !== undefined,
-      "STL schema should have at least one section.",
+    expect(section, "STL schema should have at least one section.").not.toBe(
+      undefined,
     );
-    expectTrue(
-      section.title === "Mesh accuracy",
+    expect(
+      section.title,
       'STL schema section should be titled "Mesh accuracy".',
-    );
-    expectTrue(
+    ).toBe("Mesh accuracy");
+    expect(
       schema.sections.some((s) => s.fields.some((f) => f.kind === "enum")),
       "STL schema should have an encoding field.",
-    );
+    ).toBeTruthy();
   }
 
   function testStlProviderApplyPatch() {
@@ -131,11 +127,11 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       "meshAccuracy.chordTolerance": 0.1,
       encoding: "ascii",
     });
-    expectTrue(
-      updated.meshAccuracy.chordTolerance === 0.1,
+    expect(
+      updated.meshAccuracy.chordTolerance,
       "Patch should update chord tolerance.",
-    );
-    expectTrue(updated.encoding === "ascii", "Patch should update encoding.");
+    ).toBe(0.1);
+    expect(updated.encoding, "Patch should update encoding.").toBe("ascii");
   }
 
   async function testStlExportSucceeds() {
@@ -146,14 +142,14 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       options: stlExportProvider.getDefaultOptions(),
       capabilities,
     });
-    expectTrue(
+    expect(
       result.ok,
       "STL export should succeed with a valid body target and triangles.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload instanceof Uint8Array,
       "STL binary export should return a Uint8Array payload.",
-    );
+    ).toBeTruthy();
   }
 
   async function testStlExportAscii() {
@@ -168,15 +164,15 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       options,
       capabilities,
     });
-    expectTrue(result.ok, "ASCII STL export should succeed.");
-    expectTrue(
-      typeof result.payload === "string",
+    expect(result.ok, "ASCII STL export should succeed.").toBeTruthy();
+    expect(
+      typeof result.payload,
       "ASCII STL export should return a string payload.",
-    );
-    expectTrue(
+    ).toBe("string");
+    expect(
       result.payload.includes("solid cadara"),
       "ASCII STL should start with solid cadara.",
-    );
+    ).toBeTruthy();
   }
 
   async function testStlExportFailsOnCapabilityDiagnostic() {
@@ -193,41 +189,39 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       options: stlExportProvider.getDefaultOptions(),
       capabilities,
     });
-    expectTrue(
-      !result.ok,
+    expect(
+      result.ok,
       "STL export should fail when capabilities return a diagnostic.",
-    );
-    expectTrue(
-      result.diagnostics[0]?.code === "test-failure",
+    ).toBeFalsy();
+    expect(
+      result.diagnostics[0]?.code,
       "Diagnostic code should be propagated.",
-    );
+    ).toBe("test-failure");
   }
 
   function testStepProviderMetadata() {
-    expectTrue(
-      stepExportProvider.id === "step",
-      "STEP provider should have id step.",
+    expect(stepExportProvider.id, "STEP provider should have id step.").toBe(
+      "step",
     );
-    expectTrue(
-      stepExportProvider.formatId === "step",
+    expect(
+      stepExportProvider.formatId,
       "STEP provider should have formatId step.",
-    );
-    expectTrue(
-      stepExportProvider.fileExtension === "step",
+    ).toBe("step");
+    expect(
+      stepExportProvider.fileExtension,
       "STEP provider should have extension step.",
-    );
-    expectTrue(
-      stepExportProvider.mimeType === "model/step",
+    ).toBe("step");
+    expect(
+      stepExportProvider.mimeType,
       "STEP provider should advertise correct MIME type.",
-    );
+    ).toBe("model/step");
   }
 
   function testStepProviderDefaultOptions() {
     const defaults = stepExportProvider.getDefaultOptions();
-    expectTrue(defaults.schema === "AP242", "STEP defaults to AP242 schema.");
-    expectTrue(
-      defaults.unit === "millimeter",
-      "STEP defaults to millimeter units.",
+    expect(defaults.schema, "STEP defaults to AP242 schema.").toBe("AP242");
+    expect(defaults.unit, "STEP defaults to millimeter units.").toBe(
+      "millimeter",
     );
   }
 
@@ -235,14 +229,13 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const defaults = stepExportProvider.getDefaultOptions();
     const schema = stepExportProvider.getOptionFormSchema(defaults);
     const section = schema.sections[0];
-    expectTrue(
-      section !== undefined,
-      "STEP schema should have at least one section.",
+    expect(section, "STEP schema should have at least one section.").not.toBe(
+      undefined,
     );
-    expectTrue(
-      section.title === "STEP options",
+    expect(
+      section.title,
       'STEP schema section should be titled "STEP options".',
-    );
+    ).toBe("STEP options");
   }
 
   async function testStepExportSucceeds() {
@@ -255,67 +248,64 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       options: stepExportProvider.getDefaultOptions(),
       capabilities,
     });
-    expectTrue(result.ok, "STEP export should succeed.");
-    expectTrue(
-      typeof result.payload === "string",
+    expect(result.ok, "STEP export should succeed.").toBeTruthy();
+    expect(
+      typeof result.payload,
       "STEP export should return a string payload.",
-    );
-    expectTrue(
+    ).toBe("string");
+    expect(
       result.payload.includes("ISO-10303"),
       "STEP export payload should match what capabilities returned.",
-    );
+    ).toBeTruthy();
   }
 
   function testThreeMfProviderMetadata() {
-    expectTrue(
-      threeMfExportProvider.id === "3mf",
-      "3MF provider should have id 3mf.",
+    expect(threeMfExportProvider.id, "3MF provider should have id 3mf.").toBe(
+      "3mf",
     );
-    expectTrue(
-      threeMfExportProvider.formatId === "3mf",
+    expect(
+      threeMfExportProvider.formatId,
       "3MF provider should have formatId 3mf.",
-    );
-    expectTrue(
-      threeMfExportProvider.fileExtension === "3mf",
+    ).toBe("3mf");
+    expect(
+      threeMfExportProvider.fileExtension,
       "3MF provider should have extension 3mf.",
-    );
-    expectTrue(
-      threeMfExportProvider.mimeType === "model/3mf",
+    ).toBe("3mf");
+    expect(
+      threeMfExportProvider.mimeType,
       "3MF provider should advertise correct MIME type.",
-    );
+    ).toBe("model/3mf");
   }
 
   function testThreeMfProviderDefaultOptions() {
     const defaults = threeMfExportProvider.getDefaultOptions();
-    expectTrue(
-      defaults.unit === "millimeter",
-      "3MF defaults to millimeter units.",
+    expect(defaults.unit, "3MF defaults to millimeter units.").toBe(
+      "millimeter",
     );
-    expectTrue(
-      defaults.includeMetadata === true,
+    expect(
+      defaults.includeMetadata,
       "3MF defaults to including metadata.",
-    );
+    ).toBeTruthy();
   }
 
   function testThreeMfProviderOptionForm() {
     const defaults = threeMfExportProvider.getDefaultOptions();
     const schema = threeMfExportProvider.getOptionFormSchema(defaults);
     const section = schema.sections[0];
-    expectTrue(
-      section !== undefined,
-      "3MF schema should have at least one section.",
+    expect(section, "3MF schema should have at least one section.").not.toBe(
+      undefined,
     );
-    expectTrue(
-      section.title === "Mesh accuracy",
+    expect(
+      section.title,
       '3MF schema section should be titled "Mesh accuracy".',
-    );
+    ).toBe("Mesh accuracy");
     const hasCheckbox = section.fields.some(
       (f) => f.kind === "custom" && f.rendererId === "checkbox",
     );
-    expectTrue(
+    expect(
       hasCheckbox,
       "3MF schema should have a checkbox field for includeMetadata.",
-    );
+    ).toBeTruthy();
   }
 
   async function testThreeMfExportSucceeds() {
@@ -326,14 +316,14 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       options: threeMfExportProvider.getDefaultOptions(),
       capabilities,
     });
-    expectTrue(
+    expect(
       result.ok,
       "3MF export should succeed with a valid body target and triangles.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload instanceof Uint8Array,
       "3MF export should return a Uint8Array (ZIP) payload.",
-    );
+    ).toBeTruthy();
   }
 
   async function testSvgSketchExportPreservesStyles() {
@@ -345,42 +335,42 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       capabilities,
     });
 
-    expectTrue(
+    expect(
       result.ok,
       "SVG sketch export should succeed with a sketch vector model.",
-    );
-    expectTrue(
-      typeof result.payload === "string",
+    ).toBeTruthy();
+    expect(
+      typeof result.payload,
       "SVG sketch export should return text payload.",
-    );
-    expectTrue(
+    ).toBe("string");
+    expect(
       result.payload.includes("<svg"),
       "SVG sketch export should include an SVG root.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes("viewBox="),
       "SVG sketch export should include a viewBox.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes('stroke="#ff3366"'),
       "SVG sketch export should serialize authored stroke color.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes('stroke-width="2"'),
       "SVG sketch export should serialize authored stroke width.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes('vector-effect="non-scaling-stroke"'),
       "SVG sketch export should preserve authored stroke width as display pixels instead of model units.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes('fill="url(#cadara-gradient-1)"'),
       "SVG sketch export should serialize gradient region fills.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes('stop-color="#2266ff"'),
       "SVG sketch export should include gradient definitions.",
-    );
+    ).toBeTruthy();
   }
 
   async function testSvgSketchExportNormalizesBoundsAndDefaultStroke() {
@@ -394,30 +384,30 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       capabilities,
     });
 
-    expectTrue(
+    expect(
       result.ok,
       "SVG sketch export should succeed for an unstyled offset sketch.",
-    );
-    expectTrue(
-      typeof result.payload === "string",
+    ).toBeTruthy();
+    expect(
+      typeof result.payload,
       "SVG sketch export should return text payload.",
-    );
-    expectTrue(
+    ).toBe("string");
+    expect(
       result.payload.includes(
         'width="5.187448mm" height="9.482872mm" viewBox="0 0 5.187448 9.482872"',
       ),
       "SVG sketch export should normalize geometry bounds without padding or source-coordinate offsets.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes('d="M 0 0 L 5.187448 0"'),
       "SVG sketch export should translate entity coordinates into the normalized SVG viewBox.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes(
         'stroke="black" stroke-width="1" vector-effect="non-scaling-stroke" fill="none"',
       ),
       "Unstyled SVG sketch export should use a non-scaling default stroke so small sketches do not render with huge model-unit strokes.",
-    );
+    ).toBeTruthy();
   }
 
   async function testDxfSketchExportProducesEntitiesAndDiagnostics() {
@@ -429,28 +419,28 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
       capabilities,
     });
 
-    expectTrue(
+    expect(
       result.ok,
       "DXF sketch export should succeed with supported geometry even when diagnostics are present.",
-    );
-    expectTrue(
-      typeof result.payload === "string",
+    ).toBeTruthy();
+    expect(
+      typeof result.payload,
       "DXF sketch export should return text payload.",
-    );
-    expectTrue(
+    ).toBe("string");
+    expect(
       result.payload.includes("SECTION\n2\nENTITIES"),
       "DXF sketch export should include the ENTITIES section.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.includes("LINE"),
       "DXF sketch export should include line entities.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.diagnostics.some(
         (diagnostic) => diagnostic.code === "sketch-vector-unsupported-entity",
       ),
       "DXF sketch export should preserve unsupported geometry diagnostics.",
-    );
+    ).toBeTruthy();
   }
 
   testStlProviderMetadata();

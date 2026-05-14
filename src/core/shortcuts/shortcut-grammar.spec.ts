@@ -1,6 +1,5 @@
-import { test } from "vitest";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   formatShortcut,
   normalizeShortcut,
@@ -11,53 +10,41 @@ import {
 
 test("src/core/shortcuts/shortcut-grammar.spec.ts", () => {
   const chord = parseShortcut("mod+shift+z");
-  expectTrue(
-    chord.chords.length === 1,
-    "Modifier shortcuts should parse as one chord.",
-  );
-  expectTrue(
-    serializeShortcut(chord) === "mod+shift+z",
+  expect(chord.chords.length, "Modifier shortcuts should parse as one chord.").toBe(1);
+  expect(
+    serializeShortcut(chord),
     "Shortcut parser should normalize modifier order and key casing.",
-  );
+  ).toBe("mod+shift+z");
 
   const sequence = parseShortcut("g>f");
-  expectTrue(
-    sequence.chords.length === 2,
-    "Sequences should parse as ordered chord lists.",
-  );
-  expectTrue(
-    serializeShortcut(sequence) === "g>f",
-    "Sequences should preserve ordered keys.",
-  );
-  expectTrue(
-    normalizeShortcut("Esc") === "escape",
-    "Aliases should normalize to event.key values.",
-  );
-  expectTrue(
-    normalizeShortcut("control+del") === "ctrl+delete",
+  expect(sequence.chords.length, "Sequences should parse as ordered chord lists.").toBe(2);
+  expect(serializeShortcut(sequence), "Sequences should preserve ordered keys.").toBe("g>f");
+  expect(normalizeShortcut("Esc"), "Aliases should normalize to event.key values.").toBe("escape");
+  expect(
+    normalizeShortcut("control+del"),
     "Modifier and key aliases should normalize.",
-  );
+  ).toBe("ctrl+delete");
 
-  expectTrue(
-    formatShortcut("mod+z", { platform: "mac" }) === "Cmd+Z",
+  expect(
+    formatShortcut("mod+z", { platform: "mac" }),
     "Mac formatting should display a Command-style modifier label.",
-  );
-  expectTrue(
-    formatShortcut("mod+z", { platform: "windows" }) === "Ctrl+Z",
+  ).toBe("Cmd+Z");
+  expect(
+    formatShortcut("mod+z", { platform: "windows" }),
     "Non-Mac formatting should display Ctrl for mod.",
-  );
-  expectTrue(
-    formatShortcut("g>f", { platform: "windows" }) === "G > F",
+  ).toBe("Ctrl+Z");
+  expect(
+    formatShortcut("g>f", { platform: "windows" }),
     "Sequence formatting should preserve ordered sequence steps.",
-  );
+  ).toBe("G > F");
 
-  expectTrue(
+  expect(
     serializeShortcut(
-      shortcutFromKeyboardEvent(
-        { key: "Z", ctrlKey: true },
-        { platform: "windows" },
+        shortcutFromKeyboardEvent(
+          { key: "Z", ctrlKey: true },
+          { platform: "windows" },
+        ),
       ),
-    ) === "mod+z",
     "Keyboard events should normalize from logical event.key and platform modifiers.",
-  );
+  ).toBe("mod+z");
 });
