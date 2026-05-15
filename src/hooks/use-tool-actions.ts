@@ -1,29 +1,13 @@
 import { useContext } from "react";
 
-import { ToolActionContext } from "@/hooks/tool-action-context";
-import { createRequiredContextHook } from "@/hooks/create-required-context-hook";
 import type { ToolId } from "@/core/tools/tool-registry";
-import type { ToolTriggerMetadata } from "@/core/tools/schema";
 import { useEditorState } from "@/hooks/use-editor-state";
-import {
-  getToolCommandBehavior,
-  resolveToolActivationMode,
-} from "@/core/tools/activation-policy";
+import { getToolCommandBehavior } from "@/core/tools/activation-policy";
 import { supportedReferenceImageFileTypes } from "@/domain/reference-image/raster";
 import { readReferenceImagePayload } from "@/domain/reference-image/import-flow";
 import { WorkbenchCommandContext } from "@/hooks/workbench-command-context";
 import type { WorkbenchCommandHandlers } from "@/hooks/workbench-command-context";
 import { showOpenImportFilePicker } from "@/lib/import-file-picker";
-
-const useRequiredToolActionContext = createRequiredContextHook(
-  ToolActionContext,
-  "useToolActionContext",
-  "ToolActionProvider",
-);
-
-export function useToolActionBus() {
-  return useRequiredToolActionContext().actionBus;
-}
 
 type ToolActionCommandHandlers = Pick<
   WorkbenchCommandHandlers,
@@ -35,7 +19,6 @@ interface ToolActionsOptions {
 }
 
 export function useToolActions(options: ToolActionsOptions = {}) {
-  const { actionBus } = useRequiredToolActionContext();
   const contextCommandHandlers = useContext(WorkbenchCommandContext);
   const commandHandlers = options.commandHandlers ?? contextCommandHandlers;
   const { machineState, dispatch } = useEditorState();
@@ -45,11 +28,7 @@ export function useToolActions(options: ToolActionsOptions = {}) {
       machineState.command.toolId === "sketch");
 
   return {
-    async triggerTool(toolId: ToolId, metadata: ToolTriggerMetadata) {
-      const activationMode = resolveToolActivationMode(
-        toolId,
-        machineState.mode,
-      );
+    async triggerTool(toolId: ToolId) {
       const commandBehavior = getToolCommandBehavior(toolId);
 
       if (commandBehavior === "undo") {
@@ -58,7 +37,6 @@ export function useToolActions(options: ToolActionsOptions = {}) {
         } else if (machineState.kind === "editingSketch") {
           dispatch({ type: "history.undoRequested" });
         }
-        actionBus.triggerTool(toolId, activationMode, metadata);
         return;
       }
 
@@ -68,7 +46,6 @@ export function useToolActions(options: ToolActionsOptions = {}) {
         } else if (machineState.kind === "editingSketch") {
           dispatch({ type: "history.redoRequested" });
         }
-        actionBus.triggerTool(toolId, activationMode, metadata);
         return;
       }
 
@@ -76,13 +53,11 @@ export function useToolActions(options: ToolActionsOptions = {}) {
         if (commandHandlers) {
           void commandHandlers.requestPartImport();
         }
-        actionBus.triggerTool(toolId, activationMode, metadata);
         return;
       }
 
       if (commandBehavior === "sketchReferenceImageImport") {
         if (!canImportReferenceImage) {
-          actionBus.triggerTool(toolId, activationMode, metadata);
           return;
         }
 
@@ -90,7 +65,6 @@ export function useToolActions(options: ToolActionsOptions = {}) {
           type: "tool.activated",
           toolId,
         });
-        actionBus.triggerTool(toolId, activationMode, metadata);
 
         const pickerResult = await showOpenImportFilePicker({
           acceptedFileTypes: supportedReferenceImageFileTypes,
@@ -134,8 +108,6 @@ export function useToolActions(options: ToolActionsOptions = {}) {
         type: "tool.activated",
         toolId,
       });
-
-      actionBus.triggerTool(toolId, activationMode, metadata);
     },
   };
 }

@@ -18,7 +18,6 @@ import {
   createShortcutResolver,
   type ShortcutResolverEvent,
 } from "@/core/shortcuts/resolver";
-import { createToolActionBus } from "@/core/tools/tool-action-bus";
 import type { ToolId } from "@/core/tools/tool-registry";
 import { isTextEditingTarget } from "@/hooks/shortcut-targets";
 
@@ -127,10 +126,6 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
     sketchFixture.triggeredToolIds.at(-1),
     "Line shortcut should trigger the Line tool.",
   ).toBe("line");
-  expect(
-    sketchFixture.observedLineSource,
-    "Line shortcut should route shortcut source metadata.",
-  ).toBe("shortcut");
 
   const escapeFixture = createFixture({
     mode: "sketch",
@@ -303,23 +298,16 @@ function createFixture({
   selection = [],
   sketchSession = null,
 }: FixtureOptions) {
-  const actionBus = createToolActionBus();
   const dispatchedEvents: EditorEvent[] = [];
   let redoRequests = 0;
   const triggeredToolIds: ToolId[] = [];
   let undoRequests = 0;
-  let observedLineSource: string | null = null;
-
-  actionBus.subscribeToTool("line", (event) => {
-    observedLineSource = event.source;
-  });
 
   const commandHandlers = createWorkbenchShortcutCommandHandlers({
     activeCommand: null,
     activeReferencePickerFieldId: null,
-    activateTool: (toolId, metadata) => {
+    activateTool: (toolId, _metadata) => {
       triggeredToolIds.push(toolId);
-      actionBus.triggerTool(toolId, mode, metadata);
     },
     canRedo,
     canUndo,
@@ -347,9 +335,6 @@ function createFixture({
   return {
     get dispatchedEvents() {
       return dispatchedEvents;
-    },
-    get observedLineSource() {
-      return observedLineSource;
     },
     get redoRequests() {
       return redoRequests;

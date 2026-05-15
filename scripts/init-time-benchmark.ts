@@ -1,3 +1,4 @@
+// TODO: Turn into a vitest benchmark
 import { chromium, type Page } from "@playwright/test";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";

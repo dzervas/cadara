@@ -8,7 +8,6 @@ import {
   startBrowserOccWarmup,
 } from "@/infrastructure/occ/browser-kernel-runtime";
 import { ErrorReporterProvider } from "@/hooks/error-reporter-provider";
-import { createToolActionBus } from "@/core/tools/tool-action-bus";
 import { ReportedErrorBoundary } from "@/components/layout/reported-error-boundary";
 import { BuildMetadataLabel } from "@/components/layout/build-metadata-label";
 import { SentryAdBlockNotification } from "@/components/layout/sentry-ad-block-notification";
@@ -21,7 +20,6 @@ import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { createBuiltinRuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 
 function App() {
-  const actionBus = useMemo(() => createToolActionBus(), []);
   const runtimeExtensionRegistries = useMemo(
     () => createBuiltinRuntimeExtensionRegistryComposition(),
     [],
@@ -73,7 +71,6 @@ function App() {
         <OccWarmupErrorEffect performanceTelemetry={performanceTelemetry} />
         <OccAssetCacheEffect />
         <WorkbenchApp
-          actionBus={actionBus}
           createKernelAdapter={createBrowserOccKernelAdapter}
           documentSyncWorkerClient={
             shouldDisableDevRepository() ? null : documentSyncWorkerClient

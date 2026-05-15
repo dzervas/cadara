@@ -21,8 +21,6 @@ import {
 import { EditorProvider } from "@/hooks/editor-provider";
 import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
-import { ToolActionProvider } from "@/hooks/tool-action-provider";
-import type { ToolActionBus } from "@/core/tools/tool-action-bus";
 import { CadWorkbench } from "@/app/workbench/cad-workbench";
 import { createDurableHistoryService } from "@/application/workbench/durable-history";
 import { createLocalStorageOperationHistoryStore } from "@/infrastructure/persistence/local-storage-operation-history-store";
@@ -65,7 +63,6 @@ function createWorkbenchOperationHistoryKey(documentId: DocumentId) {
 }
 
 interface WorkbenchAppProps {
-  actionBus: ToolActionBus;
   createKernelAdapter: (
     documentId: DocumentId,
     performanceTelemetry?: PerformanceTelemetry,
@@ -76,7 +73,6 @@ interface WorkbenchAppProps {
 }
 
 export function WorkbenchApp({
-  actionBus,
   createKernelAdapter,
   documentSyncWorkerClient,
   performanceTelemetry = noopPerformanceTelemetry,
@@ -315,19 +311,17 @@ export function WorkbenchApp({
             modelingService={modelingService}
             editorDependencies={editorDependencies}
           >
-            <ToolActionProvider actionBus={actionBus}>
-              <CadWorkbench
-                tabsState={tabsState}
-                onActivateDocumentTab={activateDocumentTab}
-                onCloseDocumentTab={closeDocumentTab}
-                onCreateNewDocument={createNewDocumentTab}
-                onOpenDocumentCopy={openDocumentCopy}
-                onOpenLinkedDocument={openLinkedDocument}
-                performanceTelemetry={performanceTelemetry}
-                onReorderDocumentTab={reorderDocumentTab}
-                onSyncActiveDocumentTab={syncActiveDocumentTab}
-              />
-            </ToolActionProvider>
+            <CadWorkbench
+              tabsState={tabsState}
+              onActivateDocumentTab={activateDocumentTab}
+              onCloseDocumentTab={closeDocumentTab}
+              onCreateNewDocument={createNewDocumentTab}
+              onOpenDocumentCopy={openDocumentCopy}
+              onOpenLinkedDocument={openLinkedDocument}
+              performanceTelemetry={performanceTelemetry}
+              onReorderDocumentTab={reorderDocumentTab}
+              onSyncActiveDocumentTab={syncActiveDocumentTab}
+            />
           </EditorProvider>
         </DurableHistoryProvider>
       </ModelingServiceProvider>
