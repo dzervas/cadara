@@ -98,7 +98,6 @@ import {
 } from "@/domain/modeling/document-snapshot-view";
 import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
 import { createTopologyDebugSummary } from "@/domain/modeling/topology-debug";
-import { installConsoleLoggingSubscribers } from "@/domain/tools/console-logging";
 import { useCadaraDebugPlatform } from "@/app/debug/use-cadara-debug-platform";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
@@ -109,7 +108,7 @@ import { useModelingService } from "@/hooks/use-modeling-service";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
 import { WorkbenchCommandProvider } from "@/hooks/workbench-command-provider";
 import { ShortcutProvider } from "@/hooks/shortcut-provider";
-import { useToolActionBus, useToolActions } from "@/hooks/use-tool-actions";
+import { useToolActions } from "@/hooks/use-tool-actions";
 import { downloadDocumentExportResult } from "@/lib/download-export";
 import {
   createWorkbenchShortcutCommandHandlers,
@@ -163,7 +162,6 @@ export function CadWorkbench({
   onReorderDocumentTab,
   onSyncActiveDocumentTab,
 }: CadWorkbenchProps) {
-  const actionBus = useToolActionBus();
   const durableHistory = useDurableHistory();
   const modelingService = useModelingService();
   const { sketchSpecialModes } = useRuntimeExtensionRegistry();
@@ -252,8 +250,6 @@ export function CadWorkbench({
     errorReporter,
     modelingService,
   });
-
-  useEffect(() => installConsoleLoggingSubscribers(actionBus), [actionBus]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
