@@ -29,9 +29,9 @@ test("src/infrastructure/persistence/local-storage-operation-history-store.spec.
   persisted.set("cad.modeling.operationHistory.v1", '{"broken"');
   const invalid = store.load();
   expect(
-    invalid.ok && invalid.reasonCode === "invalid-json",
+    !invalid.ok && invalid.reasonCode === "invalid-json",
     "Operation history stores should return an explicit invalid-json failure for malformed persisted payloads.",
-  ).toBeFalsy();
+  ).toBeTruthy();
 
   const payload = createEmptyOperationHistory("doc_workspace", ["head_1"]);
   store.save(payload);

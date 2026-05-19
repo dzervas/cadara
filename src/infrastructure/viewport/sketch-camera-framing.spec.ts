@@ -64,6 +64,8 @@ test("src/infrastructure/viewport/sketch-camera-framing.spec.ts", async () => {
       id: "renderable_sketch_line_1",
       label: "Line",
       target: null,
+      // TODO: is this right?
+      role: "local",
       geometry: {
         kind: "polyline",
         points,

@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { assert, expect, test } from "vitest";
 
 import * as THREE from "three";
 
@@ -154,7 +154,7 @@ test("src/infrastructure/viewport/viewport-projection.spec.ts", () => {
       renderables,
     });
 
-    expect(frame).toBeTruthy();
+    assert(frame !== null);
     approxVector(frame.target, new THREE.Vector3(1500, 2500, 480));
     expect(frame.orthographicZoom < 1).toBeTruthy();
 

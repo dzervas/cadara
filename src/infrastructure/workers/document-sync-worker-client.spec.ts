@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, assert } from "vitest";
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { GeometryAssetAvailability } from "@/contracts/modeling/geometry-assets";
@@ -33,6 +33,7 @@ import {
   createLocalAuthoredDocumentPayload,
   type LocalFileSystemFileHandle,
 } from "@/lib/local-file-system-access";
+import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 
 test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () => {
   async function testRequestOrderingAndStructuredFailures() {
@@ -103,6 +104,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       subscribeRequest.kind,
       "Client should post a subscribe request.",
     ).toBe("subscribe");
+    assert("subscriptionId" in subscribeRequest);
     worker.emit({
       kind: "subscribed",
       requestId: subscribeRequest.requestId,
@@ -756,9 +758,9 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       posted,
       "request_document_sync_matching_linked_load",
     );
+    assert(loaded?.result.ok);
     expect(
       loaded?.result === repository.lastLoadResult &&
-        loaded.result.ok &&
         loaded.result.metadata === repository.lastLoadResult?.metadata &&
         loaded.result.diagnostics === repository.lastLoadResult?.diagnostics &&
         loaded.result.assetAvailability ===
@@ -1154,7 +1156,7 @@ class FailingLocalFileBindingStore implements LocalFileBindingStore {
 
   async save(_record: LocalFileBindingRecord) {
     return this.failSave
-      ? { ok: false as const, reason: "failed" as const }
+      ? { ok: false as const, reason: "failed" as const, error: "test fixture" }
       : { ok: false as const, reason: "unsupported-storage" as const };
   }
 
@@ -1168,7 +1170,7 @@ class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
   deleted: string[] = [];
 
   get(documentId: string) {
-    return this.values.get(documentId) ?? null;
+    return (this.values.get(documentId) as AutomergeUrl) ?? null;
   }
 
   set(documentId: string, url: string) {
@@ -1181,20 +1183,24 @@ class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
   }
 }
 
+interface TrackingMemoryDocumentRepositoryLoadOverrides {
+  metadata?: DocumentRepositoryMetadata;
+  diagnostics?: ModelingDiagnostic[];
+  assetAvailability?: GeometryAssetAvailability[];
+}
+
 class TrackingMemoryDocumentRepository extends MemoryDocumentRepository {
   lastLoadResult: DocumentRepositoryLoadResult | null = null;
+  loadOverrides: TrackingMemoryDocumentRepositoryLoadOverrides = {};
   readonly mutations: AuthoredModelDocument[] = [];
   readonly notifications: DocumentRepositoryChangeEvent[] = [];
 
   constructor(
     initialDocuments: AuthoredModelDocument[],
-    private readonly loadOverrides: {
-      metadata?: DocumentRepositoryMetadata;
-      diagnostics?: ModelingDiagnostic[];
-      assetAvailability?: GeometryAssetAvailability[];
-    } = {},
+    loadOverrides: TrackingMemoryDocumentRepositoryLoadOverrides = {},
   ) {
     super(initialDocuments);
+    this.loadOverrides = loadOverrides;
   }
 
   async load(input: Parameters<MemoryDocumentRepository["load"]>[0]) {

@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, assert } from "vitest";
 
 import type { DocumentSyncWorkerRequest } from "@/domain/modeling/document-sync-worker-protocol";
 import { createDocumentSyncWorkerDispatcher } from "@/infrastructure/workers/document-sync-worker-dispatcher";
@@ -10,6 +10,7 @@ test("src/infrastructure/workers/document-sync-worker-dispatcher.spec.ts", async
     const dispatcher = createDocumentSyncWorkerDispatcher((search) => {
       observedSearches.push(search);
       return (request) => {
+        assert("documentId" in request);
         handledRequests.push(`${search}:${request.kind}:${request.documentId}`);
       };
     });
@@ -36,17 +37,22 @@ test("src/infrastructure/workers/document-sync-worker-dispatcher.spec.ts", async
     expect(
       observedSearches.join(","),
       "The worker dispatcher should initialize the worker message handler from the bootstrap search string.",
-    ).toBe("?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a");
+    ).toBe(
+      "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a",
+    );
     expect(
       handledRequests.join(","),
       "Requests queued before bootstrap should be replayed through the configured worker handler.",
-    ).toBe("?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a:subscribe:doc_workspace");
+    ).toBe(
+      "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a:subscribe:doc_workspace",
+    );
   }
 
   function testConfiguredWorkerHandlesLaterRequestsImmediately() {
     const handledRequests: string[] = [];
     const dispatcher = createDocumentSyncWorkerDispatcher((search) => {
       return (request) => {
+        assert("documentId" in request);
         handledRequests.push(`${search}:${request.kind}:${request.documentId}`);
       };
     });

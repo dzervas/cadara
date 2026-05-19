@@ -61,7 +61,7 @@ test("src/lib/download-export.spec.ts", () => {
     "part-1.step",
   );
   expect(
-    capturedBlob?.type,
+    capturedBlob!.type,
     "Download should use the returned MIME type.",
   ).toBe("model/step");
   expect(

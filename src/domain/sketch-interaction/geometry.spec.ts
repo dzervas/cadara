@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, assert } from "vitest";
 
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type {
@@ -30,6 +30,7 @@ import {
   collectSketchInteractionGeometry,
   flattenSketchInteractionCurve,
   isSketchInteractionCurveGeometry,
+  type SketchInteractionCurveGeometry,
 } from "@/domain/sketch-interaction/geometry";
 
 test("collectSketchInteractionGeometry preserves local, projected, datum, and advanced sketch targets", () => {
@@ -273,8 +274,9 @@ test("flattenSketchInteractionCurve respects arc sweeps and closes closed curves
     (entry) => entry.target === circle.target,
   );
 
+  assert(arcGeometry !== undefined, "arcGeometry should not be undefined.");
   expect(
-    arcGeometry !== undefined && isSketchInteractionCurveGeometry(arcGeometry),
+    isSketchInteractionCurveGeometry(arcGeometry),
     "The authored arc should produce curve geometry.",
   ).toBeTruthy();
   expect(
@@ -283,7 +285,9 @@ test("flattenSketchInteractionCurve respects arc sweeps and closes closed curves
     "The authored circle should produce curve geometry.",
   ).toBeTruthy();
 
-  const arcPoints = flattenSketchInteractionCurve(arcGeometry);
+  const arcPoints = flattenSketchInteractionCurve(
+    arcGeometry as SketchInteractionCurveGeometry,
+  );
   expect(
     nearestDistance(arcPoints, [Math.SQRT2, Math.SQRT2]) < 0.08,
     "Flattened arc points should include points inside the authored sweep.",
@@ -293,7 +297,9 @@ test("flattenSketchInteractionCurve respects arc sweeps and closes closed curves
     "Flattened arc points should not include the opposite side outside the authored sweep.",
   ).toBeTruthy();
 
-  const circlePoints = flattenSketchInteractionCurve(circleGeometry);
+  const circlePoints = flattenSketchInteractionCurve(
+    circleGeometry as SketchInteractionCurveGeometry,
+  );
   expect(
     samePoint(circlePoints[0]!, circlePoints[circlePoints.length - 1]!),
     "Closed curves should include the closing segment endpoint.",

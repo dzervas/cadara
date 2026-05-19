@@ -232,7 +232,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Horizontal should commit a durable horizontal constraint.",
     ).toBe("horizontal");
     expect(
-      horizontalConstraint.entityId,
+      horizontalConstraint?.entityId,
       "Horizontal should target the selected line entity.",
     ).toBe(horizontalLineId);
     expect(
@@ -266,7 +266,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Vertical should commit a durable vertical constraint.",
     ).toBe("vertical");
     expect(
-      verticalConstraint.entityId,
+      verticalConstraint?.entityId,
       "Vertical should target the selected line entity.",
     ).toBe(verticalLineId);
     expect(

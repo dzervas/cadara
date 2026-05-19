@@ -27,9 +27,9 @@ test("src/domain/reference-image-calibration/state.spec.ts preserves anchor UVs 
 
   const calibrated = solveReferenceImageOperationState(
     {
-      ...operation.ownedState,
+      ...operation.ownedState!,
       calibration: {
-        ...operation.ownedState.calibration!,
+        ...operation.ownedState!.calibration!,
         anchors: [
           createReferenceImageCalibrationAnchor({
             anchorId: "anchor_a",
@@ -90,12 +90,12 @@ test("src/domain/reference-image-calibration/state.spec.ts preserves the last st
     },
   });
 
-  const initialPlacement = operation.ownedState.placement;
+  const initialPlacement = operation.ownedState!.placement;
   const solved = solveReferenceImageOperationState(
     {
-      ...operation.ownedState,
+      ...operation.ownedState!,
       calibration: {
-        ...operation.ownedState.calibration!,
+        ...operation.ownedState!.calibration!,
         scaleMode: "independent",
         anchors: [
           createReferenceImageCalibrationAnchor({

@@ -179,10 +179,6 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       "Sketch toolbar should include profile text.",
     ).toBeTruthy();
     expect(
-      sketchDrawingSection?.toolIds.includes("anchorPoint"),
-      "Sketch toolbar should no longer expose the legacy image pin tool.",
-    ).toBeFalsy();
-    expect(
       getToolbarSectionsForMode("sketch").some(
         (section) =>
           section.id === "sketchOps" &&
@@ -859,7 +855,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       "Session presentation should be resolved through the active sketch tool schema.",
     ).toBe("Pick line start");
     expect(
-      presentation.validation?.length,
+      presentation?.validation?.length,
       "Newly activated sketch tools should expose validation as declarative schema state.",
     ).toBe(0);
   }

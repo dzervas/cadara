@@ -107,7 +107,7 @@ test("src/lib/import-file-picker.spec.ts", async () => {
 
           return input as unknown as HTMLInputElement;
         },
-      } as Document,
+      } as unknown as Document,
     },
   });
 

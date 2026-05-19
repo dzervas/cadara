@@ -1,6 +1,10 @@
 import { test, expect } from "vitest";
 
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SketchEntityDefinition,
+  SketchPointDefinition,
+} from "@/contracts/sketch/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchEntityId,
@@ -17,7 +21,11 @@ import {
 } from "@/domain/sketch-editing/operations";
 
 test("src/domain/sketch-editing/operations.spec.ts", () => {
-  function makePoint(pointId: string, label: string, position: SketchPoint) {
+  function makePoint(
+    pointId: string,
+    label: string,
+    position: SketchPoint,
+  ): SketchPointDefinition {
     return {
       pointId: pointId as SketchPointId,
       label,
@@ -36,7 +44,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     label: string,
     startPointId: string,
     endPointId: string,
-  ) {
+  ): SketchEntityDefinition {
     return {
       kind: "lineSegment" as const,
       entityId: entityId as SketchEntityId,
@@ -58,7 +66,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     centerPointId: string,
     startPointId: string,
     endPointId: string,
-  ) {
+  ): SketchEntityDefinition {
     return {
       kind: "arc" as const,
       entityId: entityId as SketchEntityId,
@@ -80,7 +88,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     entityId: string,
     label: string,
     fitPointIds: readonly string[],
-  ) {
+  ): SketchEntityDefinition {
     return {
       kind: "spline" as const,
       entityId: entityId as SketchEntityId,
@@ -118,6 +126,17 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
   function createFactories(): SketchEditOperationFactories {
     return {
       createPointId: (suffix) => `sketch_point_10_${suffix}` as SketchPointId,
+      createPointEntity: (label, entityId, pointId) =>
+        ({
+          pointId,
+          label,
+          target: {
+            kind: "sketchEntity",
+            sketchId: "sketch_primary" as SketchId,
+            entityId,
+          },
+          isConstruction: false,
+        }) as SketchEntityDefinition,
       createEntityId: (suffix) =>
         `sketch_entity_10_${suffix}` as SketchEntityId,
       createPoint: (label, pointId, position) => ({
@@ -233,7 +252,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Fillet should accept adjacent line segments.",
     ).toBeTruthy();
     expect(
-      fillet.definition.entities.some((entity) => entity.kind === "arc"),
+      fillet.definition?.entities.some((entity) => entity.kind === "arc"),
       "Fillet should add a durable arc.",
     ).toBeTruthy();
     expect(
@@ -253,7 +272,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Chamfer should accept adjacent line segments.",
     ).toBeTruthy();
     expect(
-      chamfer.definition.entities.length,
+      chamfer.definition?.entities.length,
       "Chamfer should preserve source lines and add one chamfer line.",
     ).toBe(3);
   }
@@ -282,11 +301,11 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Extend should accept a target line and boundary line.",
     ).toBeTruthy();
     expect(
-      extended.definition.entities.length,
+      extended.definition?.entities.length,
       "Extend should not add unrelated entities.",
     ).toBe(extendDefinition.entities.length);
     expect(
-      extended.definition.points.some(
+      extended.definition?.points.some(
         (point) => point.position[0] === 3 && point.position[1] === 0,
       ),
       "Extend should add an endpoint at the boundary intersection.",
@@ -303,7 +322,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Split should accept a target line and crossing boundary.",
     ).toBeTruthy();
     expect(
-      split.definition.entities.length,
+      split.definition?.entities.length,
       "Split should divide the selected line into two line entities.",
     ).toBe(3);
   }
@@ -328,7 +347,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Slot should accept a line reference.",
     ).toBeTruthy();
     expect(
-      lineSlot.contribution.entities.filter((entity) => entity.kind === "arc")
+      lineSlot.contribution?.entities.filter((entity) => entity.kind === "arc")
         .length,
       "Line slot should add rounded end arcs.",
     ).toBe(2);
@@ -369,7 +388,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Slot should accept an arc reference.",
     ).toBeTruthy();
     expect(
-      arcSlot.contribution.entities.some((entity) => entity.kind === "arc"),
+      arcSlot.contribution?.entities.some((entity) => entity.kind === "arc"),
       "Arc slot should create arc boundary geometry.",
     ).toBeTruthy();
 
@@ -385,7 +404,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Slot should accept a spline reference.",
     ).toBeTruthy();
     expect(
-      splineSlot.contribution.entities.some(
+      splineSlot.contribution?.entities.some(
         (entity) => entity.kind === "spline",
       ),
       "Spline slot should create spline boundary geometry.",
@@ -420,7 +439,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       "Slot should accept a closed line profile.",
     ).toBeTruthy();
     expect(
-      slot.contribution.entities.length,
+      slot.contribution?.entities.length,
       "Closed profile slot should create outer and inner line loops.",
     ).toBe(8);
   }
