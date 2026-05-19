@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, expectTypeOf } from "vitest";
 
 import {
   CADARA_OPEN_FILE_PICKER_OPTIONS,
@@ -54,20 +54,23 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
         return [openHandle];
       },
     });
+    expectTypeOf(
+      openOptions!,
+    ).toEqualTypeOf<LocalFileSystemOpenPickerOptions>();
     expect(
       openResult.ok && openResult.handle === openHandle,
       "Open picker should return the selected local file handle.",
     ).toBeTruthy();
     expect(
-      openOptions?.types[0]?.accept["application/json"]?.includes(".cadara"),
+      openOptions!.types[0]?.accept["application/json"]?.includes(".cadara"),
       "Open picker should accept .cadara JSON files.",
     ).toBeTruthy();
     expect(
-      openOptions?.types[0]?.accept["application/json"]?.includes(".json"),
+      openOptions!.types[0]?.accept["application/json"]?.includes(".json"),
       "Open picker should accept JSON files.",
     ).toBeTruthy();
     expect(
-      openOptions?.multiple,
+      openOptions!.multiple,
       "Open picker should select a single document.",
     ).toBeFalsy();
 
@@ -85,11 +88,11 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
       "Save picker should return the selected destination handle.",
     ).toBeTruthy();
     expect(
-      saveOptions?.suggestedName.endsWith(".cadara"),
+      saveOptions!.suggestedName.endsWith(".cadara"),
       "Save picker should suggest a cadara filename.",
     ).toBeTruthy();
     expect(
-      saveOptions?.types[0]?.accept["application/json"]?.includes(".cadara"),
+      saveOptions!.types[0]?.accept["application/json"]?.includes(".cadara"),
       "Save picker should accept .cadara JSON files.",
     ).toBeTruthy();
   }
@@ -99,18 +102,18 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
       isSecureContext: true,
     });
     expect(
-      unsupportedOpen.supported &&
+      !unsupportedOpen.supported &&
         unsupportedOpen.reason === "missing-open-picker",
       "Missing open picker should be reported explicitly.",
-    ).toBeFalsy();
+    ).toBeTruthy();
     const unsupportedSave = getLocalFileSystemSaveSupport({
       isSecureContext: false,
     });
     expect(
-      unsupportedSave.supported &&
+      !unsupportedSave.supported &&
         unsupportedSave.reason === "insecure-context",
       "Insecure save context should be reported explicitly.",
-    ).toBeFalsy();
+    ).toBeTruthy();
 
     const cancelledOpen = await showOpenLocalDocumentPicker({
       isSecureContext: true,
@@ -119,9 +122,9 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
       },
     });
     expect(
-      cancelledOpen.ok && cancelledOpen.reason === "cancelled",
+      !cancelledOpen.ok && cancelledOpen.reason === "cancelled",
       "Open picker AbortError should be normalized to cancellation.",
-    ).toBeFalsy();
+    ).toBeTruthy();
 
     const cancelledSave = await showSaveLocalDocumentPicker({
       isSecureContext: true,
@@ -130,9 +133,9 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
       },
     });
     expect(
-      cancelledSave.ok && cancelledSave.reason === "cancelled",
+      !cancelledSave.ok && cancelledSave.reason === "cancelled",
       "Save picker AbortError should be normalized to cancellation.",
-    ).toBeFalsy();
+    ).toBeTruthy();
   }
 
   async function testWritePermissionAndPersistentBindingSupport() {
@@ -197,9 +200,9 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
       "Binding store should report unsupported storage when IndexedDB is unavailable.",
     ).toBeFalsy();
     expect(
-      loadResult.ok && loadResult.reason === "unsupported-storage",
+      !loadResult.ok && loadResult.reason === "unsupported-storage",
       "Binding store operations should return explicit unsupported-storage results.",
-    ).toBeFalsy();
+    ).toBeTruthy();
   }
 
   function testStableSerialization() {
@@ -224,6 +227,7 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
   async function testCadaraDocumentsStaySingleJsonObjects() {
     const asset = await createDeterministicGeometryAsset();
     const document = {
+      name: "local-file-system-access.spec.ts",
       contractVersion: "modeling-contract/v1alpha1",
       schemaVersion: "authored-model-document/v1alpha1",
       documentId: "doc_workspace",
@@ -240,6 +244,7 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
       historyOrder: [],
       cursor: { kind: "empty" },
       bodyLabels: [],
+      embeddedBinaryAssets: [],
       assets: {
         schemaVersion: "geometry-asset-manifest/v1alpha1",
         records: [asset.asset],

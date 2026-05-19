@@ -1,7 +1,10 @@
-import { test, expect } from "vitest";
+import { test, expect, assert } from "vitest";
 import * as THREE from "three";
 
-import type { RenderableEntityRecord } from "@/contracts/render/schema";
+import type {
+  RenderableEntityRecord,
+  RenderMeshGeometry,
+} from "@/contracts/render/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   MARKER_SPHERE_GEOMETRY,
@@ -604,6 +607,9 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         ...firstRegionRenderable.binding,
         pickId: "pick_region_b",
         target: { kind: "region", sketchId: "sketch_a", regionId: "region_b" },
+        // Required to let ts check the type of the target
+        topology: null,
+        semanticClass: "region",
       },
     };
     const first = createBoundObject(firstRegionRenderable);
@@ -689,7 +695,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     );
 
     const bindings = collectBindings(root);
-    expect(bindings).not.toBe(null);
+    assert(bindings);
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], sketchTarget);
     assertEqual(
@@ -756,7 +762,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(facePerimeter);
 
     const bindings = collectBindings(root);
-    expect(bindings).not.toBe(null);
+    assert(bindings);
 
     expect(
       bindings.pickables.includes(facePerimeter),
@@ -819,7 +825,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(edgeLine);
 
     const bindings = collectBindings(root);
-    expect(bindings).not.toBe(null);
+    assert(bindings);
 
     updateWorkspaceHighlight(
       bindings.targetToObjects,
@@ -849,10 +855,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(marker.group);
 
     const bindings = collectBindings(root);
-    expect(
-      bindings,
-      "collectBindings must return a result for populated roots.",
-    ).not.toBe(null);
+    assert(bindings);
     expect(
       bindings.pickables.includes(marker.group),
       "collectBindings must include marker group roots as pickables.",
@@ -878,7 +881,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(marker.group);
 
     const bindings = collectBindings(root);
-    expect(bindings).not.toBe(null);
+    assert(bindings);
 
     updateWorkspaceHighlight(
       bindings.targetToObjects,
@@ -910,7 +913,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     root.add(marker.group);
 
     const bindings = collectBindings(root);
-    expect(bindings).not.toBe(null);
+    assert(bindings);
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], null, [
       vertexRenderable.binding.target,
@@ -928,7 +931,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
 
   {
     const boundaryGeometry = createMeshBoundaryLineSegmentsGeometry(
-      faceRenderable.geometry,
+      faceRenderable.geometry as RenderMeshGeometry,
     );
     const position = boundaryGeometry.getAttribute("position");
     assertEqual(
@@ -1247,6 +1250,8 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
       binding: {
         ...vertexRenderable.binding,
         pickId: "pick_duplicate_vertex",
+        topology: "vertex",
+        semanticClass: "featureVertex",
         target: {
           kind: "vertex",
           bodyId: "body_a",
@@ -1260,6 +1265,8 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
       binding: {
         ...vertexRenderable.binding,
         pickId: "pick_duplicate_vertex",
+        topology: "vertex",
+        semanticClass: "featureVertex",
         target: {
           kind: "vertex",
           bodyId: "body_a",

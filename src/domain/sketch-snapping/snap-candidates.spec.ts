@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, assert } from "vitest";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
@@ -14,7 +14,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     expected: readonly [number, number],
     message: string,
   ) {
-    expect(actual, `${message} Missing point.`).toBeTruthy();
+    assert(actual, `${message} Missing point.`);
     const distance = Math.hypot(
       actual[0] - expected[0],
       actual[1] - expected[1],
@@ -199,11 +199,11 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       "Pointer near a circle center should prefer a center snap.",
     ).toBe("center");
     expect(
-      circleCenter.activeCandidate.preview.label,
+      circleCenter.activeCandidate?.preview.label,
       "Circle center snap should expose center preview metadata.",
     ).toBe("Center");
     expect(
-      circleCenter.activeCandidate.preview.glyph,
+      circleCenter.activeCandidate?.preview.glyph,
       "Circle center snap should expose the center glyph.",
     ).toBe("center");
     assertClosePoint(
@@ -247,7 +247,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       "Midpoint snap should return the exact line midpoint.",
     );
     expect(
-      result.activeCandidate.sources.some(
+      result.activeCandidate?.sources.some(
         (source) => source.kind === "localEntity",
       ),
       "Midpoint snap should carry the source line reference.",
@@ -272,7 +272,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       "Projected line snap should use derived projected coordinates.",
     );
     expect(
-      result.activeCandidate.sources.some(
+      result.activeCandidate?.sources.some(
         (source) => source.kind === "projectedGeometry",
       ),
       "Projected snap should reference projected geometry without creating local geometry.",
@@ -305,7 +305,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       "Datum origin snap should use exact local origin coordinates.",
     );
     expect(
-      origin.activeCandidate.sources.some(
+      origin.activeCandidate?.sources.some(
         (source) =>
           source.kind === "sketchDatum" && source.datumId === "origin",
       ),
@@ -328,7 +328,7 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       "Datum axis snap should project to the nearest axis point.",
     );
     expect(
-      axis.activeCandidate.sources.some(
+      axis.activeCandidate?.sources.some(
         (source) => source.kind === "sketchDatum" && source.datumId === "xAxis",
       ),
       "Datum axis snap should carry a sketch-datum source.",
@@ -527,12 +527,12 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       geometries: competingPoints,
       tolerance: 0.2,
       activeTool: "line",
-      activeCandidateKey: previous.key,
+      activeCandidateKey: previous?.key,
     });
     expect(
       hysteresis.activeCandidate?.key,
       "Active candidate hysteresis should keep a nearby previous candidate stable.",
-    ).toBe(previous.key);
+    ).toBe(previous?.key);
   }
 
   testCenterCandidates();

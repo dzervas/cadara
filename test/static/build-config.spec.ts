@@ -33,22 +33,12 @@ function collectPluginNames(pluginOption: UserConfig["plugins"]): string[] {
 }
 
 test("test/static/build-config.spec.ts", async () => {
-  const config =
-    typeof viteConfig === "function"
-      ? await viteConfig({
-          command: "build",
-          mode: "production",
-          isSsrBuild: false,
-          isPreview: false,
-        })
-      : viteConfig;
-
   expect(
-    (config as UserConfig).build?.sourcemap === "hidden",
+    (viteConfig as UserConfig).build?.sourcemap === "hidden",
     "Production build should emit hidden JavaScript source maps for private Sentry upload.",
   ).toBeTruthy();
   expect(
-    collectPluginNames((config as UserConfig).plugins).some((pluginName) =>
+    collectPluginNames((viteConfig as UserConfig).plugins).some((pluginName) =>
       pluginName.includes("sentry"),
     ),
     "Production build should include the Sentry Vite plugin for release source-map upload.",

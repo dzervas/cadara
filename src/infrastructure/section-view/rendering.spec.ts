@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, assert } from "vitest";
 import * as THREE from "three";
 
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
@@ -156,10 +156,10 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
       },
     });
 
-    expect(
-      offset,
+    assert(
+      offset !== null,
       "Section drag should resolve an offset from a non-parallel pointer ray.",
-    ).not.toBe(null);
+    );
     expect(
       Math.abs(offset - 4) < 0.05,
       "Section drag should stay constrained to the section normal axis.",
