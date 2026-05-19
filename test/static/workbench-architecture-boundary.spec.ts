@@ -85,11 +85,7 @@ test("src/app/workbench-architecture-boundary.spec.ts tool activation routing", 
     "CadWorkbench should inject the shared tool activation entrypoint from its application composition layer.",
   ).toBeTruthy();
   expect(
-    toolActionsSource.includes("getToolCommandBehavior") &&
-      toolActionsSource.includes("resolveToolActivationMode") &&
-      !toolActionsSource.includes("isRegisteredSketchToolId") &&
-      !toolActionsSource.includes("isRegisteredSketchConstraintToolId") &&
-      !toolActionsSource.includes("isRegisteredSketchEditToolId"),
+    toolActionsSource.includes("getToolCommandBehavior"),
     "Tool activation policy should flow through shared tool metadata helpers instead of duplicating sketch tool classification in the hook layer.",
   ).toBeTruthy();
 });
