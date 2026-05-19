@@ -12,31 +12,7 @@ import type {
   RevisionId,
   SketchId,
 } from "@/core/editor/schema";
-import type {
-  CommitSketchRequest,
-  AddDocumentVariableRequest,
-  CreateFeatureRequest,
-  DeleteDocumentTargetRequest,
-  DeleteFeatureRequest,
-  DocumentFeatureCursor,
-  WorkspaceSnapshot,
-  EvaluatePreviewRequest,
-  EvaluatePreviewResponse,
-  ModelingDiagnostic,
-  MutationRevisionState,
-  PreviewFreshness,
-  RebuildResult,
-  RenameBodyRequest,
-  ReorderDocumentHistoryRequest,
-  ReorderDocumentHistoryResponse,
-  ReorderFeatureRequest,
-  ResolvedReferenceRecord,
-  SetFeatureCursorRequest,
-  SetFeatureSuppressionRequest,
-  SnapshotMutationBasis,
-  UpdateFeatureRequest,
-  UpdateDocumentVariableRequest,
-} from "@/contracts/modeling/schema";
+import type * as schema from "@/contracts/modeling/schema";
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
 import type { RenderExport } from "@/contracts/render/schema";
 import type {
@@ -69,7 +45,7 @@ export interface ModelingService {
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>;
   resetOperationHistory(): void;
   setViewportLodTier(tierId: OccTessellationTierId): boolean;
-  getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>;
+  getCurrentDocumentSnapshot(): Promise<schema.WorkspaceSnapshot>;
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>;
   importDocument(
     input: ModelingImportDocumentInput,
@@ -140,7 +116,7 @@ export interface ModelingService {
 }
 
 export interface ModelingServiceOptions {
-  currentDocumentId: WorkspaceSnapshot["document"]["documentId"];
+  currentDocumentId: schema.WorkspaceSnapshot["document"]["documentId"];
   sketchSolver?: SketchSolverBoundary;
   operationHistoryStore?: OperationHistoryStore | null;
   documentRepository?: DocumentRepository | null;
@@ -195,155 +171,155 @@ export interface SketchSolverService {
 }
 
 export interface ModelingFeatureMutationResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   featureId: FeatureId;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingFeatureSuppressionResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   featureId: FeatureId;
   suppressed: boolean;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingDeleteFeatureResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   deletedFeatureId: FeatureId;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingDeleteTargetResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   deletedTarget: PrimitiveRef;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingRenameBodyResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   bodyId: BodyId;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingReorderFeatureResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   featureId: FeatureId;
   beforeFeatureId: FeatureId | null;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingReorderDocumentHistoryResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
-  item: ReorderDocumentHistoryResponse["item"];
-  beforeItem: ReorderDocumentHistoryResponse["beforeItem"];
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
+  item: schema.ReorderDocumentHistoryResponse["item"];
+  beforeItem: schema.ReorderDocumentHistoryResponse["beforeItem"];
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingSetFeatureCursorResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
-  cursor: DocumentFeatureCursor;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
+  cursor: schema.DocumentFeatureCursor;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingCommitSketchResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   sketchId: SketchId;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingDocumentVariableMutationResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   variableId: DocumentVariableId;
-  revisionState: MutationRevisionState;
-  rebuildResult: RebuildResult;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 type ModelingMutationBasisInput = Pick<
-  SnapshotMutationBasis,
+  schema.SnapshotMutationBasis,
   "baseRepositoryHeads"
 >;
 
 export type ModelingCreateFeatureInput = Omit<
-  CreateFeatureRequest,
+  schema.CreateFeatureRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingAddDocumentVariableInput = Omit<
-  AddDocumentVariableRequest,
+  schema.AddDocumentVariableRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingUpdateFeatureInput = Omit<
-  UpdateFeatureRequest,
+  schema.UpdateFeatureRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingSetFeatureSuppressionInput = Omit<
-  SetFeatureSuppressionRequest,
+  schema.SetFeatureSuppressionRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingUpdateDocumentVariableInput = Omit<
-  UpdateDocumentVariableRequest,
+  schema.UpdateDocumentVariableRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingDeleteFeatureInput = Omit<
-  DeleteFeatureRequest,
+  schema.DeleteFeatureRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingDeleteTargetInput = Omit<
-  DeleteDocumentTargetRequest,
+  schema.DeleteDocumentTargetRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingRenameBodyInput = Omit<
-  RenameBodyRequest,
+  schema.RenameBodyRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingReorderFeatureInput = Omit<
-  ReorderFeatureRequest,
+  schema.ReorderFeatureRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingReorderDocumentHistoryInput = Omit<
-  ReorderDocumentHistoryRequest,
+  schema.ReorderDocumentHistoryRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput>;
 export type ModelingSetFeatureCursorInput = Omit<
-  SetFeatureCursorRequest,
+  schema.SetFeatureCursorRequest,
   "contractVersion" | "documentId"
 > & {
   persistHistory?: boolean;
@@ -360,8 +336,12 @@ export interface ModelingImportDocumentInput {
 }
 
 export type ModelingDocumentFileMutationResult =
-  | { ok: true; revisionId: RevisionId; diagnostics: ModelingDiagnostic[] }
-  | { ok: false; diagnostics: ModelingDiagnostic[] };
+  | {
+      ok: true;
+      revisionId: RevisionId;
+      diagnostics: schema.ModelingDiagnostic[];
+    }
+  | { ok: false; diagnostics: schema.ModelingDiagnostic[] };
 
 export interface ModelingCommitSketchCorrelation {
   requestId: RequestId;
@@ -373,12 +353,12 @@ export interface ModelingCommitSketchCorrelation {
 
 export interface ModelingCommitSketchInput
   extends
-    Omit<CommitSketchRequest, "contractVersion" | "documentId">,
+    Omit<schema.CommitSketchRequest, "contractVersion" | "documentId">,
     Partial<ModelingMutationBasisInput> {
   solverCorrelation: ModelingCommitSketchCorrelation | null;
 }
 export type ModelingEvaluatePreviewInput = Omit<
-  EvaluatePreviewRequest,
+  schema.EvaluatePreviewRequest,
   "contractVersion" | "documentId"
 >;
 export type ModelingProjectSketchExternalReferencesInput = Omit<
@@ -387,15 +367,15 @@ export type ModelingProjectSketchExternalReferencesInput = Omit<
 >;
 
 export interface ModelingPreviewResult {
-  revisionId: WorkspaceSnapshot["document"]["revisionId"];
-  previewId: EvaluatePreviewResponse["previewId"];
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
+  previewId: schema.EvaluatePreviewResponse["previewId"];
   renderables: RenderExport["records"];
-  freshness: PreviewFreshness;
+  freshness: schema.PreviewFreshness;
   stale: boolean;
-  diagnostics: ModelingDiagnostic[];
+  diagnostics: schema.ModelingDiagnostic[];
 }
 
 export interface ModelingResolvedReferenceResult {
-  resolution: ResolvedReferenceRecord;
-  diagnostics: ModelingDiagnostic[];
+  resolution: schema.ResolvedReferenceRecord;
+  diagnostics: schema.ModelingDiagnostic[];
 }

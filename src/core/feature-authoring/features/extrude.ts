@@ -2,6 +2,7 @@ import type {
   ExtrudeEndCondition,
   ExtrudeFeatureExtent,
   LinearExtentDirection,
+  ModelingDiagnostic,
   UpToOffsetDirection,
 } from "@/contracts/modeling/schema";
 import type {
@@ -20,22 +21,7 @@ import {
   extrudeSelectionFilter,
 } from "@/core/editor/schema";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
-import {
-  acceptAuthoredPatch,
-  appendUniqueTarget,
-  asBodyRef,
-  asExtrudeProfileRef,
-  asUpToTargetRef,
-  authoredDefinitionValue,
-  authoredNumberFormValue,
-  authoredStringLiteral,
-  createBooleanOperationFields,
-  createMissingInputDiagnostic,
-  createSingleTargetSelectionFilter,
-  expressionCapableAuthoredValue,
-  isFiniteAuthoredNumber,
-  isPositiveAuthoredNumber,
-} from "@/core/feature-authoring/features/shared";
+import * as shared from "@/core/feature-authoring/features/shared";
 import type { FeatureEditorFormField } from "@/core/feature-authoring/form-schema";
 
 const DEFAULT_FIRST_END: ExtrudeFeatureEndConditionDraft = {
@@ -95,8 +81,8 @@ function ensureEndSupportsMode(
 }
 
 function coerceTargetForEnd(kind: ExtrudeEndCondition["kind"], value: unknown) {
-  const target = asUpToTargetRef(
-    value as Parameters<typeof asUpToTargetRef>[0],
+  const target = shared.asUpToTargetRef(
+    value as Parameters<typeof shared.asUpToTargetRef>[0],
   );
   if (kind === "upToFace") {
     return target?.kind === "face" ? target : null;
@@ -133,12 +119,12 @@ function patchEnd(
     : "direction" in end
       ? end.direction
       : "positive";
-  const draftAngle = acceptAuthoredPatch(
+  const draftAngle = shared.acceptAuthoredPatch(
     patch[draftKey],
     "draftAngle" in end ? (end.draftAngle ?? 0) : 0,
     (value): value is number => typeof value === "number",
   );
-  const offsetDistance = acceptAuthoredPatch(
+  const offsetDistance = shared.acceptAuthoredPatch(
     patch[offsetDistanceKey],
     "offset" in end ? (end.offset?.distance ?? 0) : 0,
     (value): value is number => typeof value === "number",
@@ -148,7 +134,7 @@ function patchEnd(
     : "offset" in end
       ? (end.offset?.direction ?? "shorten")
       : "shorten";
-  const offset = isFiniteAuthoredNumber(offsetDistance)
+  const offset = shared.isFiniteAuthoredNumber(offsetDistance)
     ? { distance: offsetDistance, direction: offsetDirection }
     : undefined;
 
@@ -156,7 +142,7 @@ function patchEnd(
     return {
       kind: "blind",
       direction,
-      distance: acceptAuthoredPatch(
+      distance: shared.acceptAuthoredPatch(
         patch[depthKey],
         end.kind === "blind" ? end.distance : 12,
         (value): value is number => typeof value === "number",
@@ -229,23 +215,25 @@ function endHasRequiredTarget(end: ExtrudeFeatureEndConditionDraft) {
 
 function endHasValidScalars(end: ExtrudeFeatureEndConditionDraft) {
   return (
-    (end.kind !== "blind" || isPositiveAuthoredNumber(end.distance)) &&
+    (end.kind !== "blind" || shared.isPositiveAuthoredNumber(end.distance)) &&
     (!("draftAngle" in end) ||
       end.draftAngle === undefined ||
-      isFiniteAuthoredNumber(end.draftAngle)) &&
+      shared.isFiniteAuthoredNumber(end.draftAngle)) &&
     (!("offset" in end) ||
       end.offset === undefined ||
-      isFiniteAuthoredNumber(end.offset.distance))
+      shared.isFiniteAuthoredNumber(end.offset.distance))
   );
 }
 
-function definitionEnd(end: ExtrudeFeatureEndConditionDraft): ExtrudeEndCondition {
+function definitionEnd(
+  end: ExtrudeFeatureEndConditionDraft,
+): ExtrudeEndCondition {
   switch (end.kind) {
     case "blind":
       return {
         ...end,
-        distance: authoredDefinitionValue(end.distance, 12),
-        draftAngle: authoredDefinitionValue(end.draftAngle ?? 0, 0),
+        distance: shared.authoredDefinitionValue(end.distance, 12),
+        draftAngle: shared.authoredDefinitionValue(end.draftAngle ?? 0, 0),
       };
     case "upToNext":
     case "upToFace":
@@ -253,12 +241,15 @@ function definitionEnd(end: ExtrudeFeatureEndConditionDraft): ExtrudeEndConditio
     case "upToVertex":
       return {
         ...end,
-        draftAngle: authoredDefinitionValue(end.draftAngle ?? 0, 0),
+        draftAngle: shared.authoredDefinitionValue(end.draftAngle ?? 0, 0),
         ...(end.offset
           ? {
               offset: {
                 ...end.offset,
-                distance: authoredDefinitionValue(end.offset.distance, 0),
+                distance: shared.authoredDefinitionValue(
+                  end.offset.distance,
+                  0,
+                ),
               },
             }
           : {}),
@@ -266,7 +257,7 @@ function definitionEnd(end: ExtrudeFeatureEndConditionDraft): ExtrudeEndConditio
     case "throughAll":
       return {
         ...end,
-        draftAngle: authoredDefinitionValue(end.draftAngle ?? 0, 0),
+        draftAngle: shared.authoredDefinitionValue(end.draftAngle ?? 0, 0),
       };
   }
 }
@@ -330,7 +321,7 @@ function endFields(
       kind: "numeric",
       id: `${idPrefix}-depth`,
       label: `${labelPrefix}Depth`,
-      value: authoredNumberFormValue(end.distance),
+      value: shared.authoredNumberFormValue(end.distance),
       input: "number",
       step: 0.1,
       directionToggle: {
@@ -341,10 +332,10 @@ function endFields(
         forwardLabel: "Positive normal",
         reverseLabel: "Negative normal",
       },
-      authoredValue: expressionCapableAuthoredValue(end.distance, {
+      authoredValue: shared.expressionCapableAuthoredValue(end.distance, {
         kind: "positiveNumber",
       }),
-      error: isPositiveAuthoredNumber(end.distance)
+      error: shared.isPositiveAuthoredNumber(end.distance)
         ? null
         : { message: "Depth must be greater than zero." },
       patch: { patchKey: depthKey },
@@ -387,7 +378,7 @@ function endFields(
       picker: {
         mode: "replace",
         allowsMultiple: false,
-        selectionFilter: createSingleTargetSelectionFilter(
+        selectionFilter: shared.createSingleTargetSelectionFilter(
           extrudeSelectionFilter,
           {
             id: `${idPrefix}-up-to-target`,
@@ -411,10 +402,10 @@ function endFields(
         kind: "numeric",
         id: `${idPrefix}-up-to-offset`,
         label: `${labelPrefix}Offset`,
-        value: authoredNumberFormValue(end.offset?.distance ?? 0),
+        value: shared.authoredNumberFormValue(end.offset?.distance ?? 0),
         input: "number",
         step: 0.1,
-        authoredValue: expressionCapableAuthoredValue(
+        authoredValue: shared.expressionCapableAuthoredValue(
           end.offset?.distance ?? 0,
           {
             kind: "finiteNumber",
@@ -422,7 +413,7 @@ function endFields(
         ),
         error:
           end.offset?.distance === undefined ||
-          isFiniteAuthoredNumber(end.offset.distance)
+          shared.isFiniteAuthoredNumber(end.offset.distance)
             ? null
             : { message: "Offset must be finite." },
         patch: { patchKey: offsetDistanceKey },
@@ -445,17 +436,18 @@ function endFields(
     kind: "numeric",
     id: `${idPrefix}-draft-angle`,
     label: `${labelPrefix}Draft angle (degrees)`,
-    value: authoredNumberFormValue(
+    value: shared.authoredNumberFormValue(
       end.draftAngle ?? 0,
       (value) => value * (180 / Math.PI),
     ),
     input: "angleDegrees",
     step: 1,
-    authoredValue: expressionCapableAuthoredValue(end.draftAngle ?? 0, {
+    authoredValue: shared.expressionCapableAuthoredValue(end.draftAngle ?? 0, {
       kind: "angle",
     }),
     error:
-      end.draftAngle === undefined || isFiniteAuthoredNumber(end.draftAngle)
+      end.draftAngle === undefined ||
+      shared.isFiniteAuthoredNumber(end.draftAngle)
         ? null
         : { message: "Draft angle must be finite." },
     patch: { patchKey: draftKey },
@@ -501,7 +493,7 @@ export const extrudeAuthoringDefinition = {
     },
   },
   createDraft(input) {
-    const profileTarget = asExtrudeProfileRef(input.selectedTarget);
+    const profileTarget = shared.asExtrudeProfileRef(input.selectedTarget);
     return {
       profileTargets: profileTarget ? [profileTarget] : [],
       extentMode: "oneSide",
@@ -535,13 +527,13 @@ export const extrudeAuthoringDefinition = {
           : Array.isArray(patch.profileTargets)
             ? patch.profileTargets.filter(
                 (entry): entry is (typeof draft.profileTargets)[number] =>
-                  asExtrudeProfileRef(
-                    entry as Parameters<typeof asExtrudeProfileRef>[0],
+                  shared.asExtrudeProfileRef(
+                    entry as Parameters<typeof shared.asExtrudeProfileRef>[0],
                   ) !== null,
               )
-            : asExtrudeProfileRef(
+            : shared.asExtrudeProfileRef(
                   patch.profileTarget as Parameters<
-                    typeof asExtrudeProfileRef
+                    typeof shared.asExtrudeProfileRef
                   >[0],
                 )
               ? [patch.profileTarget as (typeof draft.profileTargets)[number]]
@@ -552,7 +544,7 @@ export const extrudeAuthoringDefinition = {
         patchEnd(draft.firstEnd, patch, "first"),
       ),
       secondEnd: patchEnd(draft.secondEnd, patch, "second"),
-      operation: acceptAuthoredPatch(
+      operation: shared.acceptAuthoredPatch(
         patch.operation,
         draft.operation,
         isBooleanOperation,
@@ -564,13 +556,13 @@ export const extrudeAuthoringDefinition = {
     if (target.kind === "region" || target.kind === "face") {
       return {
         ...draft,
-        profileTargets: appendUniqueTarget(draft.profileTargets, target),
+        profileTargets: shared.appendUniqueTarget(draft.profileTargets, target),
       };
     }
 
-    const bodyTarget = asBodyRef(target);
+    const bodyTarget = shared.asBodyRef(target);
     return bodyTarget &&
-      authoredStringLiteral(draft.operation, "newBody") !== "newBody"
+      shared.authoredStringLiteral(draft.operation, "newBody") !== "newBody"
       ? this.applyPatch(draft, { booleanTargetBodyId: bodyTarget.bodyId })
       : draft;
   },
@@ -583,11 +575,11 @@ export const extrudeAuthoringDefinition = {
       : "Select one or more sketch regions or planar faces for extrude";
   },
   getMissingInputsDiagnostics(input) {
-    const diagnostics = [];
+    const diagnostics: ModelingDiagnostic[] = [];
 
     if (input.draft.profileTargets.length === 0) {
       diagnostics.push(
-        createMissingInputDiagnostic({
+        shared.createMissingInputDiagnostic({
           feature: "extrude",
           phase: input.phase,
           suffix: "profile",
@@ -602,7 +594,7 @@ export const extrudeAuthoringDefinition = {
       !endHasRequiredTarget(input.draft.firstEnd)
     ) {
       diagnostics.push(
-        createMissingInputDiagnostic({
+        shared.createMissingInputDiagnostic({
           feature: "extrude",
           phase: input.phase,
           suffix: "end-condition",
@@ -618,7 +610,7 @@ export const extrudeAuthoringDefinition = {
         !endHasRequiredTarget(input.draft.secondEnd))
     ) {
       diagnostics.push(
-        createMissingInputDiagnostic({
+        shared.createMissingInputDiagnostic({
           feature: "extrude",
           phase: input.phase,
           suffix: "second-end-condition",
@@ -630,12 +622,12 @@ export const extrudeAuthoringDefinition = {
 
     if (
       !hasBooleanTargetScope(
-        authoredStringLiteral(input.draft.operation, "newBody"),
+        shared.authoredStringLiteral(input.draft.operation, "newBody"),
         input.draft.booleanScope,
       )
     ) {
       diagnostics.push(
-        createMissingInputDiagnostic({
+        shared.createMissingInputDiagnostic({
           feature: "extrude",
           phase: input.phase,
           suffix: "boolean-target",
@@ -647,7 +639,7 @@ export const extrudeAuthoringDefinition = {
     return diagnostics;
   },
   buildDefinition(draft) {
-    const operation = authoredStringLiteral(draft.operation, "newBody");
+    const operation = shared.authoredStringLiteral(draft.operation, "newBody");
     const firstEnd = ensureEndSupportsMode(draft.extentMode, draft.firstEnd);
     const extent: ExtrudeFeatureExtent =
       draft.extentMode === "twoSide"
@@ -683,7 +675,10 @@ export const extrudeAuthoringDefinition = {
             ],
             startExtent: { kind: "profilePlane" },
             extent,
-            operation: authoredDefinitionValue(draft.operation, operation),
+            operation: shared.authoredDefinitionValue(
+              draft.operation,
+              operation,
+            ),
             booleanScope: draft.booleanScope,
           },
         }
@@ -693,7 +688,10 @@ export const extrudeAuthoringDefinition = {
     const booleanTargetBodies = getBooleanScopeBodyTargets(
       session.draft.booleanScope,
     );
-    const operation = authoredStringLiteral(session.draft.operation, "newBody");
+    const operation = shared.authoredStringLiteral(
+      session.draft.operation,
+      "newBody",
+    );
     return {
       sections: [
         {
@@ -758,7 +756,7 @@ export const extrudeAuthoringDefinition = {
             ...(session.draft.extentMode === "twoSide"
               ? endFields("second", session.draft.secondEnd)
               : []),
-            ...createBooleanOperationFields({
+            ...shared.createBooleanOperationFields({
               prefix: "extrude",
               operation,
               operationValue: session.draft.operation,

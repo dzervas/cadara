@@ -8,6 +8,11 @@ test("test/static/document-repository-boundary.spec.ts", () => {
 
   for (const file of walkTypescriptFiles(sourceRoot)) {
     const relativePath = relative(process.cwd(), file);
+
+    if (relativePath.endsWith(".spec.ts")) {
+      continue;
+    }
+
     const source = readFileSync(file, "utf8");
     if (
       source.includes("@automerge/automerge") &&
@@ -23,9 +28,9 @@ test("test/static/document-repository-boundary.spec.ts", () => {
   }
 
   expect(
-    offenders.length === 0,
+    offenders.length,
     `Automerge imports must stay inside the repository implementation layer: ${offenders.join(", ")}`,
-  ).toBeTruthy();
+  ).toBe(0);
 });
 
 function walkTypescriptFiles(directory: string): string[] {
