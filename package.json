@@ -19,7 +19,7 @@
     "bench:sketch": "bun ./scripts/sketch-solver-benchmark.ts",
     "test:logic": "vitest run src/contracts src/core src/domain src/application src/infrastructure/modeling src/infrastructure/persistence src/infrastructure/workers",
     "test:logic:coverage": "vitest run --coverage --coverage-reporter=text --coverage.reporter=clover --coverage.reportsDirectory coverage/logic",
-    "test:ui": "vitest run src/app src/components src/hooks src/lib src/infrastructure/occ src/infrastructure/section-view src/infrastructure/viewport",
+    "test:ui": "vitest run src/workbench src/components src/hooks src/lib src/infrastructure/occ src/infrastructure/section-view src/infrastructure/viewport",
     "test:static": "vitest run test/static",
     "test": "bun run test:logic && bun run test:ui && bun run test:static",
     "test:e2e": "playwright test",

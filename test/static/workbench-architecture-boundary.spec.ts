@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { test, expect } from "vitest";
 
@@ -11,9 +11,10 @@ const LAYER_ROOTS = [
   "src/domain",
   "src/hooks",
   "src/infrastructure",
+  "src/workbench",
 ] as const;
 
-test("src/app/workbench-architecture-boundary.spec.ts", () => {
+test("workbench architecture keeps src/app out of feature layers", () => {
   const offenders: string[] = [];
 
   for (const layerRoot of LAYER_ROOTS) {
@@ -31,17 +32,81 @@ test("src/app/workbench-architecture-boundary.spec.ts", () => {
 
   expect(
     offenders.length,
-    `Modules outside src/app must not import app-layer workbench modules.\n${offenders.join("\n")}`,
+    `Modules outside src/app must not import app-layer modules.\n${offenders.join("\n")}`,
   ).toBe(0);
 });
 
-test("src/app/workbench-architecture-boundary.spec.ts tool activation routing", () => {
+test("workbench architecture keeps src/app bootstrap-only", () => {
+  const appDirectory = join(ROOT, "src/app");
+  const files = existsSync(appDirectory)
+    ? walk(appDirectory).filter((filePath) => /\.(ts|tsx)$/.test(filePath))
+    : [];
+
+  expect(
+    files.map((filePath) => relative(ROOT, filePath)),
+    "src/app should not contain workbench feature implementation; root src/App.tsx owns browser bootstrap.",
+  ).toEqual([]);
+});
+
+test("workbench architecture keeps SLOP ownership comments searchable", () => {
+  const offenders: string[] = [];
+
+  for (const layerRoot of ["src/workbench", "src/components/cad"] as const) {
+    for (const filePath of walk(join(ROOT, layerRoot))) {
+      if (!/\.(ts|tsx)$/.test(filePath) || /\.spec\.(ts|tsx)$/.test(filePath)) {
+        continue;
+      }
+
+      const source = readFileSync(filePath, "utf8");
+      if (!source.includes("SLOP:")) {
+        continue;
+      }
+
+      if (!source.startsWith("// SLOP:")) {
+        offenders.push(relative(ROOT, filePath));
+      }
+    }
+  }
+
+  expect(
+    offenders,
+    `File-level architecture debt comments must start with // SLOP:.\n${offenders.join("\n")}`,
+  ).toEqual([]);
+});
+
+test("workbench architecture keeps viewport internals off editor providers", () => {
+  const offenders: string[] = [];
+  const forbiddenImports = [
+    "@/hooks/use-editor-state",
+    "@/hooks/editor-provider",
+    "@/hooks/use-runtime-extension-registry",
+    "@/hooks/runtime-extension-registry-provider",
+  ];
+
+  for (const filePath of walk(join(ROOT, "src/components/cad"))) {
+    if (!/three-cad-viewport.*\.(ts|tsx)$/.test(filePath)) {
+      continue;
+    }
+
+    const source = readFileSync(filePath, "utf8");
+    if (forbiddenImports.some((importPath) => source.includes(importPath))) {
+      offenders.push(relative(ROOT, filePath));
+    }
+  }
+
+  expect(
+    offenders,
+    `Viewport internals must receive editor/runtime state through the viewport model instead of provider hooks.\n${offenders.join("\n")}`,
+  ).toEqual([]);
+});
+
+test("workbench architecture preserves tool activation routing", () => {
   const contextSource = readFileSync(
     join(ROOT, "src/hooks/workbench-command-context.ts"),
     "utf8",
   );
   const shortcutSource = readFileSync(
-    join(ROOT, "src/app/workbench/commands/workbench-shortcuts.ts"),
+    join(ROOT, "src/workbench/commands/workbench-shortcuts.ts"),
     "utf8",
   );
   const toolButtonSource = readFileSync(
@@ -53,7 +118,7 @@ test("src/app/workbench-architecture-boundary.spec.ts tool activation routing", 
     "utf8",
   );
   const workbenchSource = readFileSync(
-    join(ROOT, "src/app/workbench/cad-workbench.tsx"),
+    join(ROOT, "src/workbench/shell/cad-workbench.tsx"),
     "utf8",
   );
   const toolActionsSource = readFileSync(
@@ -90,17 +155,17 @@ test("src/app/workbench-architecture-boundary.spec.ts tool activation routing", 
   ).toBeTruthy();
 });
 
-test("src/app/workbench-architecture-boundary.spec.ts workbench document ownership routing", () => {
+test("workbench architecture preserves document ownership routing", () => {
   const workbenchSource = readFileSync(
-    join(ROOT, "src/app/workbench/cad-workbench.tsx"),
+    join(ROOT, "src/workbench/shell/cad-workbench.tsx"),
     "utf8",
   );
   const historySource = readFileSync(
-    join(ROOT, "src/app/workbench/controllers/use-workbench-history.ts"),
+    join(ROOT, "src/workbench/adapters/use-workbench-history.ts"),
     "utf8",
   );
   const importSource = readFileSync(
-    join(ROOT, "src/app/workbench/controllers/use-workbench-part-import.ts"),
+    join(ROOT, "src/workbench/adapters/use-workbench-part-import.ts"),
     "utf8",
   );
   const ownerHookSource = readFileSync(
@@ -108,14 +173,11 @@ test("src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
     "utf8",
   );
   const ownerServiceSource = readFileSync(
-    join(ROOT, "src/application/workbench/document-owner.ts"),
+    join(ROOT, "src/workbench/document/document-owner.ts"),
     "utf8",
   );
   const presentationHookSource = readFileSync(
-    join(
-      ROOT,
-      "src/app/workbench/controllers/use-workbench-document-presentation.ts",
-    ),
+    join(ROOT, "src/workbench/adapters/use-workbench-document-presentation.ts"),
     "utf8",
   );
 
@@ -156,10 +218,10 @@ test("src/app/workbench-architecture-boundary.spec.ts workbench document ownersh
   ).toBeTruthy();
 });
 
-test("src/app/workbench-architecture-boundary.spec.ts extension registry composition ownership", () => {
+test("workbench architecture preserves extension registry composition ownership", () => {
   const appSource = readFileSync(join(ROOT, "src/App.tsx"), "utf8");
   const workbenchAppSource = readFileSync(
-    join(ROOT, "src/app/workbench/workbench-app.tsx"),
+    join(ROOT, "src/workbench/bootstrap/workbench-app.tsx"),
     "utf8",
   );
   const modelingServiceSource = readFileSync(
@@ -167,7 +229,7 @@ test("src/app/workbench-architecture-boundary.spec.ts extension registry composi
     "utf8",
   );
   const importControllerSource = readFileSync(
-    join(ROOT, "src/app/workbench/controllers/use-workbench-part-import.ts"),
+    join(ROOT, "src/workbench/adapters/use-workbench-part-import.ts"),
     "utf8",
   );
   const specialModeRegistrySource = readFileSync(

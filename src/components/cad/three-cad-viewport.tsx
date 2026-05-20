@@ -1,3 +1,4 @@
+// SLOP: Retained viewport renderer while the workbench/viewport port boundary is introduced and hidden context reads are removed.
 import { Button } from "@mantine/core";
 import { Canvas } from "@react-three/fiber";
 import { Bvh, OrbitControls } from "@react-three/drei";
@@ -73,21 +74,11 @@ import {
   type SectionViewSession,
   type Vec3,
 } from "@/core/section-view/session";
-import type {
-  SketchAnnotationDescriptor,
-  SketchSessionDisplayRenderable,
-} from "@/domain/editor/sketch-session";
-import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
-import type {
-  SketchSpecialModeHandleRef,
-  SketchSpecialModeViewportPresentation,
-} from "@/core/sketch-special-modes/schema";
-import { doesSketchSpecialModeAcceptTarget } from "@/core/sketch-special-modes/presentation";
+import type { SketchSpecialModeHandleRef } from "@/core/sketch-special-modes/schema";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
 } from "@/contracts/shared/references";
-import type { MeasurementWitness } from "@/domain/measure/measurement";
 import {
   collectBindings,
   collectRaycastPickCandidates,
@@ -118,7 +109,6 @@ import {
   type ViewportProjectionMode,
 } from "@/infrastructure/viewport/viewport-projection";
 import { computeSketchCameraFrame } from "@/infrastructure/viewport/sketch-camera-framing";
-import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { ViewNavigationPresetId } from "@/infrastructure/viewport/view-navigation";
 import {
@@ -131,8 +121,12 @@ import {
   mapWorldPointToWorkspaceSketch,
   type WorkspaceVec3,
 } from "@/core/workspace/sketch-plane-mapping";
-import { useEditorState } from "@/hooks/use-editor-state";
-import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
+import {
+  getLatestViewportFitViewRequestId,
+  type ViewportCommand,
+  type ViewportIntent,
+  type ViewportModel,
+} from "@/workbench/viewport/viewport-boundary";
 import {
   LEGACY_VIEWPORT_HEIGHT_PX,
   LEGACY_VIEWPORT_LEFT_INSET_PX,
@@ -155,102 +149,145 @@ import {
 } from "@/components/cad/three-cad-viewport-helpers";
 
 interface ThreeCadViewportProps {
-  activeSectionView: SectionViewSession | null;
-  hoverTarget: PrimitiveRef | null;
-  measurementWitnesses: readonly MeasurementWitness[];
-  renderables: ViewportRenderableRecord[];
-  sketchDisplayRenderables: SketchSessionDisplayRenderable[];
-  sketchAnnotations: SketchAnnotationDescriptor[];
-  onHover: (target: PrimitiveRef) => void;
-  onSelect: (target: PrimitiveRef, cameraPosition?: Vec3) => void;
-  onConnectedSketchSelect: (target: PrimitiveRef) => void;
-  onDeselect: () => void;
-  onAnnotationEdit: (
-    target: Extract<PrimitiveRef, { kind: "constraint" | "dimension" }>,
-  ) => void;
-  onClearHover: () => void;
-  onSketchMove: (point: readonly [number, number]) => void;
-  onSketchRelease: (
-    point: readonly [number, number],
-    target?: PrimitiveRef | null,
-  ) => void;
-  onSketchGeometryDragStart: (
-    target: PrimitiveRef,
-    point: readonly [number, number],
-  ) => void;
-  onSketchGeometryDragMove: (point: readonly [number, number]) => void;
-  onSketchGeometryDragEnd: (point: readonly [number, number]) => void;
-  onSpecialModeClick: (
-    point: readonly [number, number],
-    target?: PrimitiveRef | null,
-  ) => void;
-  onSpecialModeDoubleClick: (
-    point: readonly [number, number],
-    target?: PrimitiveRef | null,
-  ) => void;
-  onSpecialModeDragStart: (
-    handle: SketchSpecialModeHandleRef,
-    point: readonly [number, number],
-  ) => void;
-  onSpecialModeDragMove: (
-    handle: SketchSpecialModeHandleRef,
-    point: readonly [number, number],
-  ) => void;
-  onSpecialModeDragEnd: (
-    handle: SketchSpecialModeHandleRef,
-    point: readonly [number, number],
-  ) => void;
-  onSectionOffsetChange: (offset: number) => void;
-  onSectionFlip: () => void;
-  onSectionClear: () => void;
-  onSketchToolPatch: (patch: Record<string, unknown>) => void;
-  onLodTierChange: (tierId: OccTessellationTierId) => void;
-  selection: PrimitiveRef[];
-  sketchToolPresentation: SketchToolPresentationSchema | null;
-  specialModePresentation: SketchSpecialModeViewportPresentation | null;
-  fitViewRequestId: number;
-  hasNonEmptyCommittedGeometry?: boolean;
-  onCanvasCreated?: () => void;
-  onFirstNonEmptyGeometryFrame?: () => void;
+  model: ViewportModel;
+  commands: readonly ViewportCommand[];
+  onIntent: (intent: ViewportIntent) => void;
 }
 
 export function ThreeCadViewport({
-  activeSectionView,
-  hoverTarget,
-  measurementWitnesses,
-  renderables,
-  sketchDisplayRenderables,
-  sketchAnnotations,
-  onHover,
-  onSelect,
-  onConnectedSketchSelect,
-  onDeselect,
-  onAnnotationEdit,
-  onClearHover,
-  onSketchMove,
-  onSketchRelease,
-  onSketchGeometryDragStart,
-  onSketchGeometryDragMove,
-  onSketchGeometryDragEnd,
-  onSpecialModeClick,
-  onSpecialModeDoubleClick,
-  onSpecialModeDragStart,
-  onSpecialModeDragMove,
-  onSpecialModeDragEnd,
-  onSectionOffsetChange,
-  onSectionFlip,
-  onSectionClear,
-  onSketchToolPatch,
-  onLodTierChange,
-  selection,
-  sketchToolPresentation,
-  specialModePresentation,
-  fitViewRequestId,
-  hasNonEmptyCommittedGeometry = false,
-  onCanvasCreated,
-  onFirstNonEmptyGeometryFrame,
+  model,
+  commands,
+  onIntent,
 }: ThreeCadViewportProps) {
-  const { sketchSpecialModes } = useRuntimeExtensionRegistry();
+  const {
+    activeSectionView,
+    hoverTarget,
+    measurementWitnesses,
+    renderables,
+    sketchDisplayRenderables,
+    sketchAnnotations,
+    selection,
+    sketchToolPresentation,
+    specialModePresentation,
+    hasNonEmptyCommittedGeometry,
+    interaction,
+    capabilities,
+  } = model;
+  const {
+    mode,
+    selectionFilter,
+    selectionCatalog,
+    sketchSession,
+    isEditorRenderIdle,
+  } = interaction;
+  const fitViewRequestId = getLatestViewportFitViewRequestId(commands);
+  const onHover = useCallback(
+    (target: PrimitiveRef) => onIntent({ type: "hovered", target }),
+    [onIntent],
+  );
+  const onSelect = useCallback(
+    (target: PrimitiveRef, cameraPosition?: Vec3) =>
+      onIntent({ type: "selected", target, cameraPosition }),
+    [onIntent],
+  );
+  const onConnectedSketchSelect = useCallback(
+    (target: PrimitiveRef) =>
+      onIntent({ type: "connectedSketchSelected", target }),
+    [onIntent],
+  );
+  const onDeselect = useCallback(
+    () => onIntent({ type: "deselected" }),
+    [onIntent],
+  );
+  const onAnnotationEdit = useCallback(
+    (target: Extract<PrimitiveRef, { kind: "constraint" | "dimension" }>) =>
+      onIntent({ type: "annotationEditRequested", target }),
+    [onIntent],
+  );
+  const onClearHover = useCallback(
+    () => onIntent({ type: "hoverCleared" }),
+    [onIntent],
+  );
+  const onSketchMove = useCallback(
+    (point: readonly [number, number]) =>
+      onIntent({ type: "sketchPointerMoved", point }),
+    [onIntent],
+  );
+  const onSketchRelease = useCallback(
+    (point: readonly [number, number], target?: PrimitiveRef | null) =>
+      onIntent({ type: "sketchPointerReleased", point, target }),
+    [onIntent],
+  );
+  const onSketchGeometryDragStart = useCallback(
+    (target: PrimitiveRef, point: readonly [number, number]) =>
+      onIntent({ type: "sketchGeometryDragStarted", target, point }),
+    [onIntent],
+  );
+  const onSketchGeometryDragMove = useCallback(
+    (point: readonly [number, number]) =>
+      onIntent({ type: "sketchGeometryDragMoved", point }),
+    [onIntent],
+  );
+  const onSketchGeometryDragEnd = useCallback(
+    (point: readonly [number, number]) =>
+      onIntent({ type: "sketchGeometryDragEnded", point }),
+    [onIntent],
+  );
+  const onSpecialModeClick = useCallback(
+    (point: readonly [number, number], target?: PrimitiveRef | null) =>
+      onIntent({ type: "specialModeClicked", point, target }),
+    [onIntent],
+  );
+  const onSpecialModeDoubleClick = useCallback(
+    (point: readonly [number, number], target?: PrimitiveRef | null) =>
+      onIntent({ type: "specialModeDoubleClicked", point, target }),
+    [onIntent],
+  );
+  const onSpecialModeDragStart = useCallback(
+    (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) =>
+      onIntent({ type: "specialModeDragStarted", handle, point }),
+    [onIntent],
+  );
+  const onSpecialModeDragMove = useCallback(
+    (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) =>
+      onIntent({ type: "specialModeDragMoved", handle, point }),
+    [onIntent],
+  );
+  const onSpecialModeDragEnd = useCallback(
+    (handle: SketchSpecialModeHandleRef, point: readonly [number, number]) =>
+      onIntent({ type: "specialModeDragEnded", handle, point }),
+    [onIntent],
+  );
+  const onSectionOffsetChange = useCallback(
+    (offset: number) => onIntent({ type: "sectionOffsetChanged", offset }),
+    [onIntent],
+  );
+  const onSectionFlip = useCallback(
+    () => onIntent({ type: "sectionFlipRequested" }),
+    [onIntent],
+  );
+  const onSectionClear = useCallback(
+    () => onIntent({ type: "sectionClearRequested" }),
+    [onIntent],
+  );
+  const onSketchToolPatch = useCallback(
+    (patch: Record<string, unknown>) =>
+      onIntent({ type: "sketchToolPatched", patch }),
+    [onIntent],
+  );
+  const onLodTierChange = useCallback(
+    (tierId: OccTessellationTierId) =>
+      onIntent({ type: "lodTierChanged", tierId }),
+    [onIntent],
+  );
+  const onCanvasCreated = useCallback(
+    () => onIntent({ type: "canvasCreated" }),
+    [onIntent],
+  );
+  const onFirstNonEmptyGeometryFrame = useCallback(
+    () => onIntent({ type: "firstNonEmptyGeometryFrame" }),
+    [onIntent],
+  );
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const viewCubeRef = useRef<HTMLDivElement | null>(null);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
@@ -334,10 +371,6 @@ export function ThreeCadViewport({
   const lodTierChangeRef = useRef(onLodTierChange);
   const canvasCreatedRef = useRef(onCanvasCreated);
   const firstNonEmptyGeometryFrameRef = useRef(onFirstNonEmptyGeometryFrame);
-  const {
-    machineState,
-    state: { mode, selectionFilter, selectionCatalog, sketchSession },
-  } = useEditorState();
   const sketchDisplayStylesEnabled = shouldApplySketchDisplayStyles(
     mode,
     sketchSession !== null,
@@ -348,6 +381,9 @@ export function ThreeCadViewport({
   );
   const selectionRef = useRef(selection);
   const sketchSessionRef = useRef(sketchSession);
+  const acceptsSpecialModeTargetRef = useRef(
+    capabilities.acceptsSpecialModeTarget,
+  );
   const sectionViewRef = useRef(activeSectionView);
   const renderablesRef = useRef(renderables);
   const sketchDisplayRenderablesRef = useRef(sketchDisplayRenderables);
@@ -562,6 +598,7 @@ export function ThreeCadViewport({
     firstNonEmptyGeometryFrameRef.current = onFirstNonEmptyGeometryFrame;
     selectionRef.current = selection;
     sketchSessionRef.current = sketchSession;
+    acceptsSpecialModeTargetRef.current = capabilities.acceptsSpecialModeTarget;
     sectionViewRef.current = activeSectionView;
     selectionFilterRef.current = selectionFilter;
     selectionCatalogRef.current = selectionCatalog;
@@ -594,6 +631,7 @@ export function ThreeCadViewport({
     sketchSession,
     selectionCatalog,
     selectionFilter,
+    capabilities.acceptsSpecialModeTarget,
   ]);
 
   useLayoutEffect(() => {
@@ -1053,13 +1091,12 @@ export function ThreeCadViewport({
       const activeSpecialModeSession = sketchSessionRef.current;
 
       if (activeSpecialModeSession?.activeSpecialMode) {
-        return doesSketchSpecialModeAcceptTarget(
-          activeSpecialModeSession,
+        return acceptsSpecialModeTargetRef.current({
+          session: activeSpecialModeSession,
           target,
-          selectionRef.current,
-          selectionCatalogRef.current,
-          sketchSpecialModes,
-        );
+          selection: selectionRef.current,
+          selectionCatalog: selectionCatalogRef.current,
+        });
       }
 
       return selectionFilterAllowsTarget(
@@ -1837,7 +1874,6 @@ export function ThreeCadViewport({
     cancelSketchGeometryDragMove,
     canvasReadyVersion,
     scheduleSketchGeometryDragMove,
-    sketchSpecialModes,
   ]);
 
   useEffect(() => {
@@ -1931,8 +1967,6 @@ export function ThreeCadViewport({
       delete window.__cadProjectSectionHandleToScreen;
     };
   }, [activeSectionView]);
-
-  const isEditorRenderIdle = machineState.kind === "idle";
 
   return (
     <div
