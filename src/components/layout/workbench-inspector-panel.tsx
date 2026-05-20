@@ -32,7 +32,7 @@ export function WorkbenchInspectorPanel({
   return (
     <Paper
       component="aside"
-      className="flex max-h-[70vh] w-[320px] min-w-0 max-w-full flex-col overflow-hidden rounded-[6px]"
+      className="flex max-h-[70vh] w-[320px] min-w-0 max-w-full flex-col overflow-hidden rounded-md"
       style={{
         background: "var(--workbench-shell-surface-panel-elev)",
         boxShadow: "var(--workbench-shell-elevation-md)",

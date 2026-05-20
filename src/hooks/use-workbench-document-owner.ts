@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import { createWorkbenchDocumentOwner } from "@/application/workbench/document-owner";
+import { createWorkbenchDocumentOwner } from "@/workbench/document/document-owner";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useModelingService } from "@/hooks/use-modeling-service";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";

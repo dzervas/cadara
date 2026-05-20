@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 
-import { WorkbenchApp } from "@/app/workbench/workbench-app";
+import { WorkbenchApp } from "@/workbench/bootstrap/workbench-app";
 import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-browser-client";
 import { registerOpenCascadeAssetCache } from "@/infrastructure/occ/asset-cache";
 import {
