@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -13,31 +12,31 @@ import {
 test("src/components/layout/toolbar-presentation.spec.tsx", async () => {
   const iconMarkup = renderToStaticMarkup(<ToolbarToolIcon icon="extrude" />);
 
-  expectTrue(
+  expect(
     iconMarkup.includes("/icons/extrude.svg"),
     "Toolbar icons should resolve to local SVG assets.",
-  );
-  expectTrue(
-    !iconMarkup.includes("lucide"),
+  ).toBeTruthy();
+  expect(
+    iconMarkup.includes("lucide"),
     "Toolbar icons should not render Lucide glyph markup.",
-  );
-  expectTrue(
-    !iconMarkup.includes("filter:"),
+  ).toBeFalsy();
+  expect(
+    iconMarkup.includes("filter:"),
     "Toolbar icons should preserve their authored SVG colors.",
-  );
+  ).toBeFalsy();
 
   const sketchLineAsset = readFileSync(
     "public/icons/sketch-line-segment.svg",
     "utf8",
   );
-  expectTrue(
+  expect(
     sketchLineAsset.includes("#CDCDCD") && sketchLineAsset.includes("#1651B0"),
     "Sketch toolbar assets should use light neutral strokes while preserving blue highlights.",
-  );
-  expectTrue(
-    !sketchLineAsset.includes("#333333"),
+  ).toBeTruthy();
+  expect(
+    sketchLineAsset.includes("#333333"),
     "Sketch toolbar assets should not use dark neutral strokes.",
-  );
+  ).toBeFalsy();
 
   for (const iconPath of [
     "public/icons/undo.svg",
@@ -46,14 +45,14 @@ test("src/components/layout/toolbar-presentation.spec.tsx", async () => {
     "public/icons/SectionView-Linked.svg",
   ]) {
     const asset = readFileSync(iconPath, "utf8");
-    expectTrue(
+    expect(
       asset.includes("#CDCDCD"),
       `${iconPath} should use a light neutral toolbar stroke.`,
-    );
-    expectTrue(
-      !asset.includes("#333333"),
+    ).toBeTruthy();
+    expect(
+      asset.includes("#333333"),
       `${iconPath} should not use dark neutral toolbar strokes.`,
-    );
+    ).toBeFalsy();
   }
 
   const runtimeGlobal = globalThis as typeof globalThis & {
@@ -68,10 +67,10 @@ test("src/components/layout/toolbar-presentation.spec.tsx", async () => {
       },
     };
 
-    expectTrue(
-      getToolIconSrc("extrude") === "data:image/svg+xml;base64,PHN2Zy8+",
+    expect(
+      getToolIconSrc("extrude"),
       "Toolbar icons should use injected single-file SVG assets when present.",
-    );
+    ).toBe("data:image/svg+xml;base64,PHN2Zy8+");
   } finally {
     runtimeGlobal.__CADARA_SINGLE_ASSETS__ = previousAssets;
   }
@@ -83,24 +82,24 @@ test("src/components/layout/toolbar-presentation.spec.tsx", async () => {
     />,
   );
 
-  expectTrue(
+  expect(
     tooltipMarkup.includes("Pattern"),
     "Tooltips should show the tool name as the heading.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     tooltipMarkup.includes("Choose a pattern tool."),
     "Tooltips should show descriptive copy beneath the heading.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     tooltipMarkup.includes("--workbench-tooltip-title") &&
       tooltipMarkup.includes("--workbench-tooltip-description"),
     "Toolbar tooltip copy should derive its contrast treatment from shared workbench theme variables.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     tooltipMarkup.includes("whitespace-normal") &&
       tooltipMarkup.includes("break-words"),
     "Toolbar tooltip copy should wrap instead of forcing long text onto one line.",
-  );
+  ).toBeTruthy();
 });
 
 test("tool icon assets stay centralized outside toolbar, sidebar, and history components", () => {
@@ -174,11 +173,10 @@ test("tool icon assets stay centralized outside toolbar, sidebar, and history co
     svgGradient: "svg-gradient.svg",
   };
 
-  expectTrue(
-    JSON.stringify(toolIconAssetFileNames) ===
-      JSON.stringify(expectedCurrentToolbarAssets),
+  expect(
+    JSON.stringify(toolIconAssetFileNames),
     "The shared tool icon source should preserve every current toolbar SVG filename.",
-  );
+  ).toBe(JSON.stringify(expectedCurrentToolbarAssets));
 
   for (const componentPath of [
     "src/components/layout/toolbar-tool-icon.tsx",
@@ -187,17 +185,17 @@ test("tool icon assets stay centralized outside toolbar, sidebar, and history co
     "src/components/layout/feature-sidebar.tsx",
   ]) {
     const source = readFileSync(componentPath, "utf8");
-    expectTrue(
-      !source.includes("Record<ToolIconId, string>"),
+    expect(
+      source.includes("Record<ToolIconId, string>"),
       `${componentPath} should not define a tool icon asset filename map.`,
-    );
-    expectTrue(
-      !source.includes("toolbarToolIconAssetMap"),
+    ).toBeFalsy();
+    expect(
+      source.includes("toolbarToolIconAssetMap"),
       `${componentPath} should not import the old toolbar-local icon map.`,
-    );
-    expectTrue(
-      !source.includes("getToolbarToolIconSrc"),
+    ).toBeFalsy();
+    expect(
+      source.includes("getToolbarToolIconSrc"),
       `${componentPath} should not import the old toolbar-local icon helper.`,
-    );
+    ).toBeFalsy();
   }
 });

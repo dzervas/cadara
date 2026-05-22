@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { runSketchImageImportFlow } from "@/domain/reference-image/import-flow";
 import { ResultAsync, createAppError } from "@/contracts/errors";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
@@ -27,16 +26,16 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
   });
   const snapshot = await seedService.getCurrentDocumentSnapshot();
   const sourceSketch = snapshot.document.sketches[0];
-  expectTrue(
+  expect(
     sourceSketch,
     "Seed sketch should exist for sketch image-import coverage.",
-  );
+  ).toBeTruthy();
 
   const session = createSketchSessionFromSnapshot(sourceSketch);
-  expectTrue(
+  expect(
     session.commitRequest,
     "Active sketch sessions should expose a commit request.",
-  );
+  ).toBeTruthy();
 
   const expectedPayload: ReferenceImagePayload = {
     mediaType: "image/png",
@@ -78,10 +77,10 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
     },
     getCurrentDocumentSnapshot() {
       callOrder.push("getCurrentDocumentSnapshot");
-      expectTrue(
+      expect(
         capturedCommitInput,
         "Committed sketch input should exist before refreshing the snapshot.",
-      );
+      ).toBeTruthy();
       const nextSketches = snapshot.document.sketches.map((sketch) =>
         sketch.sketchId === sourceSketch.sketchId
           ? {
@@ -125,34 +124,34 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
     },
   });
 
-  expectTrue(
+  expect(
     pickerCalls[0]?.multiple === true &&
       pickerCalls[0]?.acceptedFileTypes.length > 0,
     "Sketch image import should open the direct reference-image picker with multi-file support.",
-  );
+  ).toBeTruthy();
   const pickFilesIndex = callOrder.indexOf("pickFiles");
   const readPayloadIndex = callOrder.indexOf("readPayload");
   const commitSketchIndex = callOrder.indexOf("commitSketch");
   const snapshotRefreshIndex = callOrder.indexOf("getCurrentDocumentSnapshot");
-  expectTrue(
+  expect(
     pickFilesIndex === 0 &&
       readPayloadIndex > pickFilesIndex &&
       commitSketchIndex > readPayloadIndex &&
       snapshotRefreshIndex > commitSketchIndex,
     "Sketch image import should read inline payloads, commit the sketch, then refresh the snapshot.",
-  );
-  expectTrue(
-    result.kind === "committed",
+  ).toBeTruthy();
+  expect(
+    result.kind,
     "Sketch image import should commit accepted inline reference images.",
-  );
-  expectTrue(
+  ).toBe("committed");
+  expect(
     capturedCommitInput,
     "Sketch image import should commit through modelingService.commitSketch.",
-  );
+  ).toBeTruthy();
   const committedInput = capturedCommitInput;
 
   const baselineDefinition = session.commitRequest.definition;
-  expectTrue(
+  expect(
     committedInput.definition.pointIds.length ===
       baselineDefinition.pointIds.length &&
       committedInput.definition.entityIds.length ===
@@ -162,16 +161,16 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
       committedInput.definition.dimensionIds.length ===
         baselineDefinition.dimensionIds.length,
     "Sketch image import should not route through sketch point/entity/constraint materialization.",
-  );
+  ).toBeTruthy();
 
   const importedOperation = committedInput.definition.authoringOperations?.find(
     (operation) => operation.kind === "referenceImage",
   );
-  expectTrue(
-    importedOperation?.kind === "referenceImage",
+  expect(
+    importedOperation?.kind,
     "Sketch image import should commit a reference-image authoring operation in the sketch payload.",
-  );
-  expectTrue(
+  ).toBe("referenceImage");
+  expect(
     JSON.stringify({
       operationId: importedOperation?.operationId,
       label: "reference.png",
@@ -194,28 +193,29 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
           rotationRadians: 0,
         },
       },
-    }) ===
-      JSON.stringify({
-        operationId: importedOperation?.operationId,
-        label: importedOperation?.label,
-        kind: importedOperation?.kind,
-        targets: importedOperation?.targets,
-        ownedState: importedOperation?.ownedState && {
-          kind: importedOperation.ownedState.kind,
-          image: importedOperation.ownedState.image,
-          placement: importedOperation.ownedState.placement,
-        },
-      }),
+    }),
     "Sketch image import should commit the full inline reference-image payload and centered placement state.",
+  ).toBe(
+    JSON.stringify({
+      operationId: importedOperation?.operationId,
+      label: importedOperation?.label,
+      kind: importedOperation?.kind,
+      targets: importedOperation?.targets,
+      ownedState: importedOperation?.ownedState && {
+        kind: importedOperation.ownedState.kind,
+        image: importedOperation.ownedState.image,
+        placement: importedOperation.ownedState.placement,
+      },
+    }),
   );
-  expectTrue(
+  expect(
     result.reopenRequest.type === "authoring.reopenRequested" &&
       result.reopenRequest.target.kind === "sketch" &&
       result.reopenRequest.target.sketchId === result.sketchId &&
       result.reopenRequest.toolId === "sketch",
     "Sketch image import should return the sketch reopen request needed to keep the editor in sketch mode after commit.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     result.snapshot.document.sketches.some(
       (sketch) =>
         sketch.sketchId === result.sketchId &&
@@ -228,7 +228,7 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
         ),
     ),
     "Sketch image import should refresh to a snapshot that preserves the committed inline reference-image payload.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft sketch through the real modeling service", async () => {
@@ -262,11 +262,11 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
     ],
   });
 
-  expectTrue(
-    result.kind === "committed",
+  expect(
+    result.kind,
     "Importing into a new draft sketch should commit successfully through the modeling service.",
-  );
-  expectTrue(
+  ).toBe("committed");
+  expect(
     result.snapshot.document.sketches.some(
       (sketch) =>
         sketch.sketchId === result.sketchId &&
@@ -275,7 +275,7 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
         ),
     ),
     "A committed draft-sketch import should persist the reference-image operation into the reopened sketch snapshot.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft sketches through OpenCascade", async () => {
@@ -316,27 +316,27 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft
     ],
   });
 
-  expectTrue(
-    result.kind === "committed",
+  expect(
+    result.kind,
     "OpenCascade should accept reference-image-only sketch commits.",
-  );
+  ).toBe("committed");
   const committedSketch = result.snapshot.document.sketches.find(
     (sketch) => sketch.sketchId === result.sketchId,
   );
-  expectTrue(
+  expect(
     committedSketch,
     "Committed reference-image sketch should exist in the refreshed OpenCascade snapshot.",
-  );
-  expectTrue(
-    committedSketch.sketch.solvedSnapshot.status.solveState === "notEvaluated",
+  ).toBeTruthy();
+  expect(
+    committedSketch.sketch.solvedSnapshot.status.solveState,
     "Reference-image-only sketches should persist without requiring solved sketch geometry.",
-  );
-  expectTrue(
+  ).toBe("notEvaluated");
+  expect(
     committedSketch.sketch.definition.authoringOperations?.some(
       (operation) => operation.kind === "referenceImage",
     ),
     "OpenCascade snapshot should preserve the reference-image authoring operation.",
-  );
+  ).toBeTruthy();
 
   const restoredAdapter = createAdapter();
   await restoredAdapter.restoreAuthoredModelDocument(
@@ -349,12 +349,12 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft
   const restoredSketch = restoredSnapshot.snapshot.document.sketches.find(
     (sketch) => sketch.sketchId === result.sketchId,
   );
-  expectTrue(
+  expect(
     restoredSketch?.sketch.definition.authoringOperations?.some(
       (operation) => operation.kind === "referenceImage",
     ),
     "OpenCascade authored-document restore should preserve reference-image-only sketches.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision basis and retries one conflict", async () => {
@@ -363,10 +363,10 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision
   });
   const seedSnapshot = await seedService.getCurrentDocumentSnapshot();
   const sourceSketch = seedSnapshot.document.sketches[0];
-  expectTrue(
+  expect(
     sourceSketch,
     "Seed sketch should exist for stale-basis import coverage.",
-  );
+  ).toBeTruthy();
 
   const session = createSketchSessionFromSnapshot(sourceSketch);
   const importedPayload: ReferenceImagePayload = {
@@ -498,13 +498,12 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts refreshes stale revision
     payloads: [importedPayload],
   });
 
-  expectTrue(
-    result.kind === "committed",
+  expect(
+    result.kind,
     "A stale import basis should refresh and retry to complete the import.",
-  );
-  expectTrue(
-    JSON.stringify(commitBaseRevisionIds) ===
-      JSON.stringify(["rev_0002", "rev_0003"]),
+  ).toBe("committed");
+  expect(
+    JSON.stringify(commitBaseRevisionIds),
     "Sketch image import should commit against the current snapshot revision first, then retry once with the refreshed revision after a conflict.",
-  );
+  ).toBe(JSON.stringify(["rev_0002", "rev_0003"]));
 });

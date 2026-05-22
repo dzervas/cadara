@@ -11,6 +11,7 @@ interface ReportedErrorBoundaryInnerProps extends PropsWithChildren {
   reporter: ErrorReporter;
 }
 
+// TODO: Class component????
 class ReportedErrorBoundaryInner extends Component<
   ReportedErrorBoundaryInnerProps,
   ReportedErrorBoundaryState

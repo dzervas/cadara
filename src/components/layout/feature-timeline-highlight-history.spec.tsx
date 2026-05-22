@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -262,10 +261,10 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
       );
     });
 
-    expectTrue(
+    expect(
       faceId,
       `Expected body ${body.bodyId} to expose a planar face at ${axis}=${coordinate}.`,
-    );
+    ).toBeTruthy();
     return faceId;
   }
 
@@ -299,10 +298,10 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
   ]);
   const extrudeBody = extrudeState.bodies[0];
 
-  expectTrue(
+  expect(
     extrudeBody,
     "Timeline highlight coverage requires the extrude body to exist.",
-  );
+  ).toBeTruthy();
 
   const removableFaceId = findPlanarFaceByAxis(oc, extrudeBody, "z", 6);
   const shellDefinition: FeatureDefinition = {
@@ -335,10 +334,10 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
     (body) => body.ownerFeatureId === shellFeatureId,
   );
 
-  expectTrue(
+  expect(
     shelledBody,
     "Timeline highlight coverage requires the shelled body to exist.",
-  );
+  ).toBeTruthy();
 
   const innerShellFaceTarget: PrimitiveRef = {
     kind: "face",
@@ -411,24 +410,24 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
       `data-derived-highlighted="true"[^>]*data-history-feature-id="${featureId}"|data-history-feature-id="${featureId}"[^>]*data-derived-highlighted="true"`,
     ).test(markup);
 
-  expectTrue(
+  expect(
     hasHighlightedFeature(innerFaceMarkup, extrudeFeatureId),
     "Selecting an inner shell face should highlight the upstream extrude history item.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     hasHighlightedFeature(innerFaceMarkup, shellFeatureId),
     "Selecting an inner shell face should highlight the downstream shell history item.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     hasHighlightedFeature(preservedFaceMarkup, extrudeFeatureId),
     "Selecting a preserved back face should keep the extrude history item highlighted.",
-  );
-  expectTrue(
-    !hasHighlightedFeature(preservedFaceMarkup, shellFeatureId),
+  ).toBeTruthy();
+  expect(
+    hasHighlightedFeature(preservedFaceMarkup, shellFeatureId),
     "Selecting a preserved back face should not highlight the unrelated shell history item.",
-  );
-  expectTrue(
-    !deselectedMarkup.includes('data-derived-highlighted="true"'),
+  ).toBeFalsy();
+  expect(
+    deselectedMarkup.includes('data-derived-highlighted="true"'),
     "Clearing selection should remove every derived history highlight.",
-  );
+  ).toBeFalsy();
 });

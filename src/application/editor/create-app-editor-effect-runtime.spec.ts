@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
@@ -15,7 +14,10 @@ async function expectRejects(
   try {
     await action();
   } catch (error) {
-    expectTrue(error instanceof Error && pattern.test(error.message), message);
+    expect(
+      error instanceof Error && pattern.test(error.message),
+      message,
+    ).toBeTruthy();
     return;
   }
 
@@ -39,10 +41,10 @@ test("create-app-editor-effect-runtime.ts maps cancelled sketch image imports ba
     snapshot,
   );
 
-  expectTrue(
+  expect(
     session,
     "Seed snapshot should expose a sketch session for image-import runtime coverage.",
-  );
+  ).toBeTruthy();
 
   const runtime = createAppEditorEffectRuntime(makeModelingService(snapshot), {
     async runSketchImageImportFlow() {
@@ -67,11 +69,11 @@ test("create-app-editor-effect-runtime.ts maps cancelled sketch image imports ba
     ],
   });
 
-  expectTrue(
+  expect(
     result?.status === "cancelled" &&
       result.revisionId === snapshot.document.revisionId,
     "Cancelled reference-image imports should resolve through the cancelled result seam pinned to the original base revision.",
-  );
+  ).toBeTruthy();
 });
 
 test("create-app-editor-effect-runtime.ts rethrows failed import-flow results and reports reopen failures after a commit", async () => {
@@ -81,10 +83,10 @@ test("create-app-editor-effect-runtime.ts rethrows failed import-flow results an
     snapshot,
   );
 
-  expectTrue(
+  expect(
     session,
     "Seed snapshot should expose a sketch session for image-import runtime failure coverage.",
-  );
+  ).toBeTruthy();
 
   const failingRuntime = createAppEditorEffectRuntime(
     makeModelingService(snapshot),
@@ -193,9 +195,9 @@ test("create-app-editor-effect-runtime.ts routes reference-image replacement spe
     payload: {},
   });
 
-  expectTrue(
+  expect(
     result?.effectId === "replace-image" &&
       result.payload.image === pickedImage,
     "Reference-image replacement special-mode effects should resolve by attaching the picked image payload to the effect result.",
-  );
+  ).toBeTruthy();
 });

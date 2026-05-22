@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createScopedExportProviderRegistryForTest,
   createScopedRuntimeExtensionRegistryCompositionForTest,
@@ -22,43 +21,40 @@ test("src/domain/export/provider-registry.spec.ts", () => {
   ]);
 
   const providers = registry.getAll();
-  expectTrue(providers.length === 5, "Registry should dedupe providers by id.");
-  expectTrue(
-    registry.getByFormat("stl") === stlExportProvider,
+  expect(providers.length, "Registry should dedupe providers by id.").toBe(5);
+  expect(
+    registry.getByFormat("stl"),
     "Lookup by STL format should return STL provider.",
-  );
-  expectTrue(
-    registry.getByFormat("step") === stepExportProvider,
+  ).toBe(stlExportProvider);
+  expect(
+    registry.getByFormat("step"),
     "Lookup by STEP format should return STEP provider.",
-  );
-  expectTrue(
-    registry.getByFormat("3mf") === threeMfExportProvider,
+  ).toBe(stepExportProvider);
+  expect(
+    registry.getByFormat("3mf"),
     "Lookup by 3MF format should return 3MF provider.",
-  );
-  expectTrue(
-    registry.getByFormat("svg") === svgSketchExportProvider,
+  ).toBe(threeMfExportProvider);
+  expect(
+    registry.getByFormat("svg"),
     "Lookup by SVG format should return SVG sketch provider.",
-  );
-  expectTrue(
-    registry.getByFormat("dxf") === dxfSketchExportProvider,
+  ).toBe(svgSketchExportProvider);
+  expect(
+    registry.getByFormat("dxf"),
     "Lookup by DXF format should return DXF sketch provider.",
-  );
-  expectTrue(
-    registry.getByFormat("unknown") === undefined,
-    "Unknown formats should not resolve.",
-  );
-  expectTrue(
+  ).toBe(dxfSketchExportProvider);
+  expect(registry.getByFormat("unknown"), "Unknown formats should not resolve.").toBe(undefined);
+  expect(
     registry
       .getCompatibleFormats({ kind: "body", bodyId: "body_1" })
-      .join("|") === "stl|step|3mf",
+      .join("|"),
     "Body targets should only resolve body-compatible formats.",
-  );
-  expectTrue(
+  ).toBe("stl|step|3mf");
+  expect(
     registry
       .getCompatibleFormats({ kind: "sketch", sketchId: "sketch_1" })
-      .join("|") === "svg|dxf",
+      .join("|"),
     "Committed sketch targets should only resolve sketch vector formats.",
-  );
+  ).toBe("svg|dxf");
 
   const isolatedA = createScopedRuntimeExtensionRegistryCompositionForTest({
     exportProviders: [stlExportProvider],
@@ -67,16 +63,16 @@ test("src/domain/export/provider-registry.spec.ts", () => {
     exportProviders: [stepExportProvider],
   }).exportProviders;
 
-  expectTrue(
-    isolatedA.getAll().length === 1,
+  expect(
+    isolatedA.getAll().length,
     "Scoped export registries should preserve local membership.",
-  );
-  expectTrue(
-    isolatedB.getAll().length === 1,
+  ).toBe(1);
+  expect(
+    isolatedB.getAll().length,
     "Separate scoped export registries should not inherit other tests.",
-  );
-  expectTrue(
-    isolatedA.getByFormat("step") === undefined,
+  ).toBe(1);
+  expect(
+    isolatedA.getByFormat("step"),
     "Scoped export registries should not leak providers across compositions.",
-  );
+  ).toBe(undefined);
 });

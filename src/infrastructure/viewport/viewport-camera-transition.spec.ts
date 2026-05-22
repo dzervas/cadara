@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { assert, expect, test } from "vitest";
 
 import * as THREE from "three";
 
@@ -49,7 +49,7 @@ test("src/infrastructure/viewport/viewport-camera-transition.spec.ts", () => {
     });
 
     const firstStep = controller.advance(100);
-    expect(firstStep).toBeTruthy();
+    assert(firstStep);
     expect(firstStep.completed === false).toBeTruthy();
     expect(firstStep.frame.position.x > 0).toBeTruthy();
     expect(firstStep.frame.orthographicZoom > 1).toBeTruthy();
@@ -75,7 +75,7 @@ test("src/infrastructure/viewport/viewport-camera-transition.spec.ts", () => {
       durationMs: 300,
     });
     const inFlight = controller.advance(120);
-    expect(inFlight).toBeTruthy();
+    assert(inFlight);
 
     controller.start({
       fromFrame: inFlight.frame,

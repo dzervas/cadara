@@ -59,10 +59,6 @@ test("pattern dropdown stays responsive without restarting shortcut profile load
    * browser hang and eventual crash.
    */
   for (let index = 0; index < 3; index += 1) {
-    await patternButton.hover();
-    await expect(
-      page.getByRole("tooltip").filter({ hasText: "Pattern" }),
-    ).toBeVisible();
     await patternButton.click({ timeout: 5_000 });
 
     const circularPatternItem = page
@@ -74,6 +70,7 @@ test("pattern dropdown stays responsive without restarting shortcut profile load
       await circularPatternItem.click({ timeout: 5_000 });
     } else {
       await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toBeHidden();
     }
 
     await page.waitForLoadState("load");

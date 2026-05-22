@@ -20,8 +20,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"]
-    }
+      "@/*": ["./src/*"],
+    },
   },
-  "include": ["vite.config.ts", "vite.single.config.ts"]
+  "include": ["vite.config.ts", "vite.single.config.ts"],
 }

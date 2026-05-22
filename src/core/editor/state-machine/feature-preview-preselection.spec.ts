@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   createFeatureEditSession,
   patchFeatureEditSession,
@@ -61,17 +60,17 @@ test("feature preview completion preselects boolean targets and preserves later 
     },
   );
 
-  expectTrue(
-    previewCompleted.state.kind === "editingFeature",
+  expect(
+    previewCompleted.state.kind,
     "Preview completion should stay in feature editing.",
-  );
-  expectTrue(
+  ).toBe("editingFeature");
+  expect(
     previewCompleted.state.kind === "editingFeature" &&
       previewCompleted.state.session.draft.operation === "cut" &&
       previewCompleted.state.session.draft.booleanScope.kind === "targetBody" &&
       previewCompleted.state.session.draft.booleanScope.bodyId === "body_a",
     "Successful preview completion should preselect cut and the intersecting target body.",
-  );
+  ).toBeTruthy();
 
   if (previewCompleted.state.kind !== "editingFeature") {
     throw new Error("Expected feature editing after preview completion.");
@@ -106,7 +105,7 @@ test("feature preview completion preselects boolean targets and preserves later 
     },
   );
 
-  expectTrue(
+  expect(
     laterPreviewCompleted.state.kind === "editingFeature" &&
       laterPreviewCompleted.state.session.draft.operation === "join" &&
       laterPreviewCompleted.state.session.draft.booleanScope.kind ===
@@ -114,7 +113,7 @@ test("feature preview completion preselects boolean targets and preserves later 
       laterPreviewCompleted.state.session.draft.booleanScope.bodyId ===
         "body_manual",
     "Manual operation and target selections should survive later preview completion classifications.",
-  );
+  ).toBeTruthy();
 });
 
 test("feature preview completion keeps unsupported advanced boolean families explicit", () => {
@@ -150,13 +149,13 @@ test("feature preview completion keeps unsupported advanced boolean families exp
     },
   );
 
-  expectTrue(
+  expect(
     previewCompleted.state.kind === "editingFeature" &&
       previewCompleted.state.session.featureType === "thicken" &&
       previewCompleted.state.session.draft.operationIntent === "create" &&
       previewCompleted.state.session.draft.targetBodyTargets.length === 0,
     "Preview completion should leave advanced families explicit until their boolean composition path is supported.",
-  );
+  ).toBeTruthy();
 });
 
 function createPreviewState(

@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -65,10 +64,10 @@ test("src/components/shortcuts/shortcut-hint.spec.tsx", () => {
       </ShortcutContext.Provider>
     </MantineProvider>,
   );
-  expectTrue(
+  expect(
     assignedMarkup.includes("Ctrl+Z"),
     "Shortcut hints should render assigned shortcut labels.",
-  );
+  ).toBeTruthy();
 
   const sequenceMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -77,10 +76,10 @@ test("src/components/shortcuts/shortcut-hint.spec.tsx", () => {
       </ShortcutContext.Provider>
     </MantineProvider>,
   );
-  expectTrue(
+  expect(
     sequenceMarkup.includes("G &gt; F"),
     "Shortcut hints should render sequence shortcut labels.",
-  );
+  ).toBeTruthy();
 
   const unassignedMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -89,10 +88,10 @@ test("src/components/shortcuts/shortcut-hint.spec.tsx", () => {
       </ShortcutContext.Provider>
     </MantineProvider>,
   );
-  expectTrue(
-    !unassignedMarkup.includes("data-shortcut-hint"),
+  expect(
+    unassignedMarkup.includes("data-shortcut-hint"),
     "Unassigned shortcut hints should render nothing.",
-  );
+  ).toBeFalsy();
 
   const settingsMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -101,28 +100,28 @@ test("src/components/shortcuts/shortcut-hint.spec.tsx", () => {
       </ShortcutContext.Provider>
     </MantineProvider>,
   );
-  expectTrue(
+  expect(
     settingsMarkup.includes("History"),
     "Shortcut settings should group commands by registry category.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     settingsMarkup.includes("Unassigned"),
     "Shortcut settings should show disabled shortcuts as unassigned.",
-  );
-  expectTrue(
-    getRecordedShortcutStep({ key: "Control", ctrlKey: true }) === null,
+  ).toBeTruthy();
+  expect(
+    getRecordedShortcutStep({ key: "Control", ctrlKey: true }),
     "Shortcut recording should ignore modifier-only keydown events.",
-  );
-  expectTrue(
-    getRecordedShortcutStep({ key: "Z", ctrlKey: true }) === "mod+z",
+  ).toBe(null);
+  expect(
+    getRecordedShortcutStep({ key: "Z", ctrlKey: true }),
     "Shortcut recording should still capture modified non-modifier keys.",
-  );
-  expectTrue(
-    getRecordedShortcutStep({ key: "+" }) === null,
+  ).toBe("mod+z");
+  expect(
+    getRecordedShortcutStep({ key: "+" }),
     "Shortcut recording should ignore the plus separator key.",
-  );
-  expectTrue(
-    getRecordedShortcutStep({ key: ">" }) === null,
+  ).toBe(null);
+  expect(
+    getRecordedShortcutStep({ key: ">" }),
     "Shortcut recording should ignore the sequence separator key.",
-  );
+  ).toBe(null);
 });

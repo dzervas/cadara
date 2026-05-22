@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
 import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
@@ -9,7 +9,6 @@ import type {
 } from "@/contracts/sketch/schema";
 import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
-import { expectTrue } from "@/testing/expect.spec";
 
 test("buildSketchVectorExportModel extracts committed sketch geometry, regions, styles, and diagnostics", () => {
   const modelOrFailure = buildSketchVectorExportModel({
@@ -19,46 +18,45 @@ test("buildSketchVectorExportModel extracts committed sketch geometry, regions, 
     target: { kind: "sketch", sketchId: "sketch_profile" },
   });
 
-  expectTrue(
-    !("diagnostic" in modelOrFailure),
+  expect(
+    "diagnostic" in modelOrFailure,
     "Committed sketch targets should resolve to a sketch vector export model.",
-  );
+  ).toBeFalsy();
   const model = modelOrFailure as SketchVectorExportModel;
 
-  expectTrue(
-    model.sketchId === "sketch_profile",
+  expect(
+    model.sketchId,
     "The export model should preserve sketch identity.",
-  );
-  expectTrue(
-    model.revisionId === "rev_0001",
+  ).toBe("sketch_profile");
+  expect(
+    model.revisionId,
     "The export model should preserve document revision identity.",
+  ).toBe("rev_0001");
+  expect(model.units, "The export model should declare document units.").toBe(
+    "millimeter",
   );
-  expectTrue(
-    model.units === "millimeter",
-    "The export model should declare document units.",
-  );
-  expectTrue(
+  expect(
     model.entities.some(
       (entity) =>
         entity.kind === "lineSegment" &&
         entity.style?.stroke?.color === "#ff3366",
     ),
     "Styled sketch line entities should preserve authored stroke style.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     model.entities.some((entity) => entity.kind === "circle"),
     "Circle entities should be included in the sketch export model.",
-  );
-  expectTrue(
-    model.regions[0]?.style?.fill.kind === "gradient",
+  ).toBeTruthy();
+  expect(
+    model.regions[0]?.style?.fill.kind,
     "Closed regions should carry authored region fill styles for SVG export.",
-  );
-  expectTrue(
+  ).toBe("gradient");
+  expect(
     model.diagnostics.some(
       (diagnostic) => diagnostic.code === "sketch-vector-unsupported-entity",
     ),
     "Unsupported sketch entity kinds should be reported without dropping supported geometry.",
-  );
+  ).toBeTruthy();
 });
 
 test("buildSketchVectorExportModel exports solved committed geometry for dimensioned rectangles", () => {
@@ -70,10 +68,10 @@ test("buildSketchVectorExportModel exports solved committed geometry for dimensi
     target: { kind: "sketch", sketchId: "sketch_profile" },
   });
 
-  expectTrue(
-    !("diagnostic" in modelOrFailure),
+  expect(
+    "diagnostic" in modelOrFailure,
     "Committed sketch targets should resolve to a sketch vector export model.",
-  );
+  ).toBeFalsy();
   const model = modelOrFailure as SketchVectorExportModel;
   const redLine = model.entities.find(
     (entity) =>
@@ -84,26 +82,26 @@ test("buildSketchVectorExportModel exports solved committed geometry for dimensi
       entity.kind === "lineSegment" && entity.entityId === "entity_bc",
   );
 
-  expectTrue(
+  expect(
     redLine?.kind === "lineSegment" &&
       redLine.start[0] === 0 &&
       redLine.start[1] === 0 &&
       redLine.end[0] === 5.19 &&
       redLine.end[1] === 0,
     "Sketch export should use solved line positions, not original authored draft positions.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     rightLine?.kind === "lineSegment" &&
       rightLine.start[0] === 5.19 &&
       rightLine.start[1] === 0 &&
       rightLine.end[0] === 5.19 &&
       rightLine.end[1] === 9.48,
     "Dimensioned vertical rectangle export should preserve the solved 5.19 by 9.48 dimensions.",
-  );
-  expectTrue(
-    redLine.style?.stroke?.color === "#ff3366",
+  ).toBeTruthy();
+  expect(
+    redLine.style?.stroke?.color,
     "Solved geometry export should preserve authored red stroke style.",
-  );
+  ).toBe("#ff3366");
 });
 
 function createSketchSnapshot(

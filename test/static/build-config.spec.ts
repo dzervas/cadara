@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import type { UserConfig } from "vite";
 
 import viteConfig, { getOpenCascadeAssetHeaders } from "../../vite.config";
@@ -34,42 +33,31 @@ function collectPluginNames(pluginOption: UserConfig["plugins"]): string[] {
 }
 
 test("test/static/build-config.spec.ts", async () => {
-  const config =
-    typeof viteConfig === "function"
-      ? await viteConfig({
-          command: "build",
-          mode: "production",
-          isSsrBuild: false,
-          isPreview: false,
-        })
-      : viteConfig;
-
-  expectTrue(
-    (config as UserConfig).build?.sourcemap === "hidden",
+  expect(
+    (viteConfig as UserConfig).build?.sourcemap === "hidden",
     "Production build should emit hidden JavaScript source maps for private Sentry upload.",
-  );
-  expectTrue(
-    collectPluginNames((config as UserConfig).plugins).some((pluginName) =>
+  ).toBeTruthy();
+  expect(
+    collectPluginNames((viteConfig as UserConfig).plugins).some((pluginName) =>
       pluginName.includes("sentry"),
     ),
     "Production build should include the Sentry Vite plugin for release source-map upload.",
-  );
-
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getOpenCascadeAssetHeaders("/cadara-occ.wasm")["Content-Type"] ===
       "application/wasm",
     "The custom app-served OpenCascade wasm response should preserve a streaming-compatible MIME type.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getOpenCascadeAssetHeaders("/cadara-occ.wasm")["Cache-Control"]?.includes(
       "immutable",
     ),
     "The custom OpenCascade wasm asset should be eligible for immutable repeat-load caching.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getOpenCascadeAssetHeaders("/cadara-occ.js")["Cache-Control"]?.includes(
       "immutable",
     ),
     "The custom OpenCascade bootstrap module should be eligible for immutable repeat-load caching.",
-  );
+  ).toBeTruthy();
 });

@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 
@@ -19,29 +18,29 @@ test("sketch-plane-editing.ts hydrates the current support target and exposes a 
   const sketchId = snapshot.document.sketches[0]!.sketchId;
   const session = hydrateSketchPlaneEditSession(snapshot, sketchId);
 
-  expectTrue(
+  expect(
     session,
     "Seed snapshot should expose a committed sketch plane edit session.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     session?.currentPlaneTarget.kind === "construction" &&
       session.currentPlaneTarget.constructionId === "construction_plane-xy" &&
       session.draft.selectedPlaneTarget?.kind === "construction" &&
       session.draft.selectedPlaneTarget.constructionId ===
         "construction_plane-xy",
     "Sketch-plane editing should hydrate the committed support target as the initial picker selection.",
-  );
+  ).toBeTruthy();
 
   const schema = session ? getSketchPlaneEditFormSchema(session) : null;
   const planeField = schema?.sections[0]?.fields[0];
 
-  expectTrue(
+  expect(
     planeField?.kind === "referencePicker" &&
       planeField.label === "Support plane" &&
       planeField.patch.patchKey === "selectedPlaneTarget" &&
       planeField.picker.selectionFilter.kind === "planeReferences",
     "Sketch-plane editing should expose the plane reassignment field through the shared reference-picker schema.",
-  );
+  ).toBeTruthy();
 });
 
 test("sketch-plane-editing.ts applies construction-plane picks and builds recommit payloads from the selected support", async () => {
@@ -49,10 +48,10 @@ test("sketch-plane-editing.ts applies construction-plane picks and builds recomm
   const sketchId = snapshot.document.sketches[0]!.sketchId;
   const session = hydrateSketchPlaneEditSession(snapshot, sketchId);
 
-  expectTrue(
+  expect(
     session,
     "Seed snapshot should expose a sketch-plane edit session for patch coverage.",
-  );
+  ).toBeTruthy();
 
   const patched = session
     ? applySelectionToSketchPlaneEditSession(
@@ -68,7 +67,7 @@ test("sketch-plane-editing.ts applies construction-plane picks and builds recomm
     : null;
   const request = patched ? buildSketchPlaneCommitRequest(patched) : null;
 
-  expectTrue(
+  expect(
     patched?.draft.selectedPlaneTarget?.kind === "construction" &&
       patched.draft.selectedPlaneTarget.constructionId ===
         "construction_plane-yz" &&
@@ -77,13 +76,13 @@ test("sketch-plane-editing.ts applies construction-plane picks and builds recomm
       ignored.draft.selectedPlaneTarget.constructionId ===
         "construction_plane-yz",
     "Sketch-plane editing should accept valid picked supports and ignore malformed direct patches.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     request?.plane.support.kind === "construction" &&
       request.plane.support.constructionId === "construction_plane-yz" &&
       request.sketchId === sketchId,
     "Sketch-plane recommits should preserve the authored sketch identity while swapping only the selected support plane.",
-  );
+  ).toBeTruthy();
 });
 
 test("sketch-plane-editing.ts resolves planar face picks into face-backed sketch planes", async () => {
@@ -100,10 +99,10 @@ test("sketch-plane-editing.ts resolves planar face picks into face-backed sketch
       entity.selectionSemantics.includes("planarFace"),
   )?.target;
 
-  expectTrue(
+  expect(
     session && faceTarget?.kind === "face",
     "Planar face coverage needs a committed sketch session and a planar face target.",
-  );
+  ).toBeTruthy();
 
   const patched =
     session && faceTarget?.kind === "face"
@@ -111,15 +110,15 @@ test("sketch-plane-editing.ts resolves planar face picks into face-backed sketch
       : null;
   const request = patched ? buildSketchPlaneCommitRequest(patched) : null;
 
-  expectTrue(
+  expect(
     patched?.draft.selectedPlaneTarget?.kind === "face" &&
       patched.draft.selectedPlane?.support.kind === "face",
     "Sketch-plane editing should resolve planar face picks into a face-backed sketch plane draft.",
-  );
-  expectTrue(
-    request?.plane.support.kind === "face",
+  ).toBeTruthy();
+  expect(
+    request?.plane.support.kind,
     "Face-backed plane picks should recommit through the same sketch-plane request seam.",
-  );
+  ).toBe("face");
 });
 
 test("sketch-plane-editing.ts omits the flow when a committed sketch no longer has a supported support target", async () => {
@@ -143,11 +142,11 @@ test("sketch-plane-editing.ts omits the flow when a committed sketch no longer h
     },
   };
 
-  expectTrue(
+  expect(
     canReassignCommittedSketchPlane(snapshot, sketchId) &&
       hydrateSketchPlaneEditSession(unsupportedSupportSnapshot, sketchId) ===
         null &&
       !canReassignCommittedSketchPlane(unsupportedSupportSnapshot, sketchId),
     "Sketch-plane editing should stay unavailable when the committed sketch no longer has a supported construction or planar-face support.",
-  );
+  ).toBeTruthy();
 });

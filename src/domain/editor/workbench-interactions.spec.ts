@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   getEditorViewState,
   initialEditorState,
@@ -32,14 +31,14 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       featureId: "feature_extrude-1",
     });
 
-    expectTrue(
-      event?.type === "authoring.reopenRequested",
+    expect(
+      event?.type,
       "Feature double-click should emit a reopen event.",
-    );
-    expectTrue(
-      event.toolId === "extrude",
+    ).toBe("authoring.reopenRequested");
+    expect(
+      event.toolId,
       "Feature double-click should reopen through the committed feature tool.",
-    );
+    ).toBe("extrude");
   }
 
   function testSketchReopenIntentUsesSketchFlow() {
@@ -48,14 +47,13 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       sketchId: "sketch_primary",
     });
 
-    expectTrue(
-      event?.type === "authoring.reopenRequested",
-      "Sketch double-click should emit a reopen event.",
+    expect(event?.type, "Sketch double-click should emit a reopen event.").toBe(
+      "authoring.reopenRequested",
     );
-    expectTrue(
-      event.toolId === "sketch",
+    expect(
+      event.toolId,
       "Sketch double-click should reopen through the sketch flow.",
-    );
+    ).toBe("sketch");
   }
 
   function testEscapePrefersReferencePickerCancellation() {
@@ -74,10 +72,10 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       },
     });
 
-    expectTrue(
-      event?.type === "form.referencePickerCancelled",
+    expect(
+      event?.type,
       "Escape should cancel reference pickers before any broader authoring state.",
-    );
+    ).toBe("form.referencePickerCancelled");
   }
 
   function testEscapeClearsActiveSketchToolBeforeExitingSketch() {
@@ -95,10 +93,10 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       },
     });
 
-    expectTrue(
-      event?.type === "sketch.activeToolCleared",
+    expect(
+      event?.type,
       "Escape should clear the active sketch tool before exiting sketch mode.",
-    );
+    ).toBe("sketch.activeToolCleared");
   }
 
   function testEscapeClearsActiveSketchStyleFocus() {
@@ -130,10 +128,10 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       },
     });
 
-    expectTrue(
-      event?.type === "sketch.activeToolCleared",
+    expect(
+      event?.type,
       "Escape should clear active sketch style focus before clearing selection.",
-    );
+    ).toBe("sketch.activeToolCleared");
   }
 
   function testEscapeDoesNothingWhenSketchIsIdle() {
@@ -151,9 +149,8 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       },
     });
 
-    expectTrue(
-      event === null,
-      "Escape should not finish an idle sketch session.",
+    expect(event, "Escape should not finish an idle sketch session.").toBe(
+      null,
     );
   }
 
@@ -165,10 +162,10 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       sketchSession: null,
     });
 
-    expectTrue(
-      event?.type === "selection.cleared",
+    expect(
+      event?.type,
       "Escape should clear selection when no active interaction handles it.",
-    );
+    ).toBe("selection.cleared");
   }
 
   function testViewportDoubleClickConnectedSelectionRoutingOnlyUsesIdleSketchEntities() {
@@ -178,40 +175,40 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       entityId: "sketch_entity_ab",
     } as const;
 
-    expectTrue(
+    expect(
       shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: null,
         sketchStatus: "idle",
         target: sketchEntityTarget,
       }),
       "Idle sketch entity double-clicks should route to connected selection.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: "rectangle",
         sketchStatus: "idle",
         target: sketchEntityTarget,
       }),
       "Idle drawing tools should allow connected selection after accepting a shape.",
-    );
-    expectTrue(
-      !shouldViewportDoubleClickRequestConnectedSketchSelection({
+    ).toBeTruthy();
+    expect(
+      shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: "line",
         sketchStatus: "drawing",
         target: sketchEntityTarget,
       }),
       "In-progress drawing tools should keep their existing click routing.",
-    );
-    expectTrue(
-      !shouldViewportDoubleClickRequestConnectedSketchSelection({
+    ).toBeFalsy();
+    expect(
+      shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: "dimensionDistance",
         sketchStatus: "collectingTargets",
         target: sketchEntityTarget,
       }),
       "Active constraint tools should keep target routing instead of connected selection.",
-    );
-    expectTrue(
-      !shouldViewportDoubleClickRequestConnectedSketchSelection({
+    ).toBeFalsy();
+    expect(
+      shouldViewportDoubleClickRequestConnectedSketchSelection({
         activeSketchTool: null,
         sketchStatus: "idle",
         target: {
@@ -222,17 +219,17 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
         },
       }),
       "Projected reference geometry should not route to connected local selection.",
-    );
-    expectTrue(
-      !shouldViewportClickEventRequestConnectedSketchSelection({
+    ).toBeFalsy();
+    expect(
+      shouldViewportClickEventRequestConnectedSketchSelection({
         activeSketchTool: null,
         clickDetail: 1,
         sketchStatus: "idle",
         target: sketchEntityTarget,
       }),
       "Ordinary click events should not route to connected selection.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       shouldViewportClickEventRequestConnectedSketchSelection({
         activeSketchTool: null,
         clickDetail: 2,
@@ -240,119 +237,119 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
         target: sketchEntityTarget,
       }),
       "The second click event in a double-click sequence should route to connected selection without waiting for a separate dblclick event.",
-    );
+    ).toBeTruthy();
   }
 
   function testViewportClickSelectionRoutingAllowsConstraintsOnly() {
-    expectTrue(
+    expect(
       shouldViewportClickRequestSelection(null),
       "Viewport clicks should request selection when no sketch tool is active.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       shouldViewportClickRequestSelection("constraintCoincident"),
       "Viewport clicks should request selection while a constraint tool is active.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       shouldViewportClickRequestSelection("construction"),
       "Viewport clicks should request selection while Construction is picking an existing sketch target.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       shouldViewportClickRequestSelection("trim"),
       "Viewport clicks should request selection while Trim is picking an existing sketch target.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       shouldViewportClickRequestSelection("offset"),
       "Viewport clicks should request selection while Offset is picking an existing sketch target.",
-    );
-    expectTrue(
-      !shouldViewportClickRequestSelection("line"),
+    ).toBeTruthy();
+    expect(
+      shouldViewportClickRequestSelection("line"),
       "Viewport clicks should keep drawing tools on the pointer construction path.",
-    );
+    ).toBeFalsy();
   }
 
   function testViewportCanvasClickIntentClearsOnlyEmptyClicks() {
-    expectTrue(
+    expect(
       getViewportCanvasClickIntent({
         activeSketchTool: null,
         hasResolvedTarget: false,
-      }) === "clearSelection",
+      }),
       "Empty viewport clicks should clear selection when no sketch tool is active.",
-    );
-    expectTrue(
+    ).toBe("clearSelection");
+    expect(
       getViewportCanvasClickIntent({
         activeSketchTool: "line",
         hasResolvedTarget: false,
-      }) === "clearSelection",
+      }),
       "Empty viewport clicks should clear selection even while a drawing tool is active.",
-    );
-    expectTrue(
+    ).toBe("clearSelection");
+    expect(
       getViewportCanvasClickIntent({
         activeSketchTool: "line",
         hasResolvedTarget: true,
         isBackgroundDatumTarget: true,
         selectionFilterKind: "sketchSession",
-      }) === "clearSelection",
+      }),
       "Background datum plane hits should behave like empty clicks while drawing tools are active.",
-    );
-    expectTrue(
+    ).toBe("clearSelection");
+    expect(
       getViewportCanvasClickIntent({
         activeSketchTool: null,
         hasResolvedTarget: true,
-      }) === "selectTarget",
+      }),
       "Target clicks should continue through normal selection routing when selection clicks are allowed.",
-    );
-    expectTrue(
+    ).toBe("selectTarget");
+    expect(
       getViewportCanvasClickIntent({
         activeSketchTool: null,
         hasResolvedTarget: true,
         isBackgroundDatumTarget: true,
         selectionFilterKind: "sketchStart",
-      }) === "selectTarget",
+      }),
       "Sketch-start selection should still allow selecting background datum planes.",
-    );
-    expectTrue(
+    ).toBe("selectTarget");
+    expect(
       getViewportCanvasClickIntent({
         activeSketchTool: "line",
         hasResolvedTarget: true,
-      }) === "ignore",
+      }),
       "Target clicks should preserve drawing-tool routing when selection clicks are not allowed.",
-    );
-    expectTrue(
+    ).toBe("ignore");
+    expect(
       getViewportCanvasClickIntent({
         activeSketchTool: "trim",
         hasResolvedTarget: true,
-      }) === "selectTarget",
+      }),
       "Trim target clicks should route through selection so sketch entities can be edited.",
-    );
+    ).toBe("selectTarget");
   }
 
   function testViewportSketchGeometryDragCanInterruptIdleDrawingTools() {
-    expectTrue(
+    expect(
       shouldViewportStartSketchGeometryDrag(null, "idle"),
       "Viewport sketch geometry drags should start when no sketch tool is active.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       shouldViewportStartSketchGeometryDrag("line", "idle"),
       "Idle drawing tools should allow dragged sketch vertices to interrupt placement.",
-    );
-    expectTrue(
-      !shouldViewportStartSketchGeometryDrag("line", "drawing"),
+    ).toBeTruthy();
+    expect(
+      shouldViewportStartSketchGeometryDrag("line", "drawing"),
       "Viewport sketch geometry drags should not interrupt an in-progress drawing gesture.",
-    );
-    expectTrue(
-      !shouldViewportStartSketchGeometryDrag(
+    ).toBeFalsy();
+    expect(
+      shouldViewportStartSketchGeometryDrag(
         "constraintCoincident",
         "collectingTargets",
       ),
       "Viewport sketch geometry drags should not interrupt constraint target collection.",
-    );
-    expectTrue(
-      !shouldViewportStartSketchGeometryDrag(
+    ).toBeFalsy();
+    expect(
+      shouldViewportStartSketchGeometryDrag(
         "construction",
         "collectingTargets",
       ),
       "Viewport sketch geometry drags should not interrupt Construction target-picking.",
-    );
+    ).toBeFalsy();
   }
 
   testFeatureReopenIntentUsesCommittedFeatureKind();

@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createOccPreloadController } from "@/domain/modeling/occ/preload";
 
 test("src/domain/modeling/occ/preload.spec.ts", async () => {
@@ -18,10 +17,7 @@ test("src/domain/modeling/occ/preload.spec.ts", async () => {
       controller.preload(),
     ]);
 
-    expectTrue(
-      preloadCalls === 1,
-      "OCC eager preload must not duplicate an in-flight runtime load.",
-    );
+    expect(preloadCalls, "OCC eager preload must not duplicate an in-flight runtime load.").toBe(1);
   }
 
   async function testPreloadRetriesAfterFailure() {
@@ -44,11 +40,8 @@ test("src/domain/modeling/occ/preload.spec.ts", async () => {
 
     await controller.preload();
 
-    expectTrue(failed, "OCC preload failures must be surfaced to the caller.");
-    expectTrue(
-      preloadCalls === 2,
-      "OCC preload must retry after a failed load.",
-    );
+    expect(failed, "OCC preload failures must be surfaced to the caller.").toBeTruthy();
+    expect(preloadCalls, "OCC preload must retry after a failed load.").toBe(2);
   }
 
   await testPreloadStartsOnceForRepeatedCalls();

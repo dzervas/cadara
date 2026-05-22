@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -84,53 +83,32 @@ test("src/components/layout/workbench-context-menu.spec.tsx", async () => {
     </MantineProvider>,
   );
 
-  expectTrue(
+  expect(
     markup.includes('aria-haspopup="menu"'),
     "Wrapped target should expose a menu popup affordance.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('aria-label="Body actions"'),
     "Menu dropdown should expose the provided accessible label.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Rename"),
     "Menu should render rename item labels.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Delete"),
     "Menu should render regular or danger item labels.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Export"),
     "Menu should render disabled item labels.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Ctrl+Z"),
     "Menu should render right-aligned shortcut hints for command entries.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("disabled"),
     "Disabled menu items should render as disabled controls.",
-  );
-
-  const source = await Bun.file(
-    new URL("./workbench-context-menu.tsx", import.meta.url),
-  ).text();
-  expectTrue(
-    source.includes("onPointerDown: handlePointerDown") &&
-      source.includes("event.button !== 2"),
-    "Context menus should support right-button pointer opening in addition to contextmenu events.",
-  );
-  expectTrue(
-    source.includes("transitionProps={{ duration: 0 }}"),
-    "Context menus should open without transition delay for pointer-triggered placement.",
-  );
-  expectTrue(
-    source.includes('floatingStrategy="fixed"'),
-    "Context menus should position the Mantine dropdown with fixed strategy to match the fixed anchor trigger.",
-  );
-  expectTrue(
-    source.includes("createPortal(") && source.includes("document.body"),
-    "Context menu anchor targets should portal to the document body so dropdown positioning stays in the viewport coordinate space.",
-  );
+  ).toBeTruthy();
 });

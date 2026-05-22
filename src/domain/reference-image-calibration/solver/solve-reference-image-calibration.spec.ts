@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ReferenceImagePlacement } from "@/contracts/reference-image/schema";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
 
@@ -56,32 +55,32 @@ test("src/domain/reference-image-calibration/solver/solve-reference-image-calibr
       constraints: [],
     });
 
-    expectTrue(
-      result.diagnostics.length === 0,
+    expect(
+      result.diagnostics.length,
       `${scaleMode} rotated exact fit should solve without diagnostics.`,
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       Math.abs(result.placement.center[0] - exactPlacement.center[0]) < 1e-3,
       `${scaleMode} rotated solve should recover center X.`,
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(result.placement.center[1] - exactPlacement.center[1]) < 1e-3,
       `${scaleMode} rotated solve should recover center Y.`,
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(result.placement.width - exactPlacement.width) < 1e-3,
       `${scaleMode} rotated solve should recover width.`,
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(result.placement.height - exactPlacement.height) < 1e-3,
       `${scaleMode} rotated solve should recover height.`,
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(
         result.placement.rotationRadians - exactPlacement.rotationRadians,
       ) < 1e-3,
       `${scaleMode} rotated solve should recover rotation.`,
-    );
+    ).toBeTruthy();
   }
 });
 
@@ -115,16 +114,16 @@ test("src/domain/reference-image-calibration/solver/solve-reference-image-calibr
     constraints: [],
   });
 
-  expectTrue(
+  expect(
     result.diagnostics.some(
       (diagnostic) => diagnostic.code === "underconstrained-calibration",
     ),
     "Independent calibration should mark a single-axis target set as underconstrained.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     result.placement.height > 1,
     "Independent underconstrained solves should not collapse the unconstrained image axis.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/domain/reference-image-calibration/solver/solve-reference-image-calibration.spec.ts validates anchor-fit residuals after solving", () => {
@@ -166,16 +165,16 @@ test("src/domain/reference-image-calibration/solver/solve-reference-image-calibr
     ],
   });
 
-  expectTrue(
+  expect(
     result.diagnostics.some(
       (diagnostic) => diagnostic.code === "unsatisfied-anchor-target",
     ),
     "Conflicting calibration should surface anchor-fit residual warnings, not only distance warnings.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     result.diagnostics.some(
       (diagnostic) => diagnostic.code === "unsatisfied-distance-constraint",
     ),
     "Conflicting calibration should still report unsatisfied distance constraints.",
-  );
+  ).toBeTruthy();
 });

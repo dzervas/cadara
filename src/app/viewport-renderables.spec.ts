@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import {
@@ -169,9 +168,9 @@ test("src/app/viewport-renderables.spec.ts", async () => {
     });
 
     assertEqual(composed.documentRenderables.length, 2);
-    expectTrue(
+    expect(
       composed.documentRenderables.every(({ origin }) => origin === "document"),
-    );
+    ).toBeTruthy();
   }
 
   {
@@ -185,13 +184,13 @@ test("src/app/viewport-renderables.spec.ts", async () => {
     });
 
     assertEqual(composed.documentRenderables.length, 0);
-    expectTrue(
+    expect(
       isTargetHidden(
         { kind: "face", bodyId: "body_a", faceId: "face_a" },
         { "body:body_a": true },
       ),
       "Body-hidden visibility should hide body-owned topology selection targets.",
-    );
+    ).toBeTruthy();
   }
 
   {
@@ -214,7 +213,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
       committedEdge.id,
     );
     assertEqual(composed.documentRenderables[2]?.renderable.id, previewFace.id);
-    expectTrue(
+    expect(
       isTargetHidden(
         {
           kind: "sketchPoint",
@@ -224,7 +223,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
         { "sketch:sketch_a": true },
       ),
       "Sketch-owned selection targets should be hidden when their owning committed sketch is hidden.",
-    );
+    ).toBeTruthy();
   }
 
   {
@@ -251,24 +250,24 @@ test("src/app/viewport-renderables.spec.ts", async () => {
     });
 
     assertEqual(composed.documentRenderables.length, 2);
-    expectTrue(
+    expect(
       composed.documentRenderables.every(
         ({ renderable }) => renderable.id !== activeSketchRegion.id,
       ),
       "Committed regions from the actively edited sketch should be hidden.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       composed.documentRenderables.every(
         ({ renderable }) => renderable.id !== committedSketchCurve.id,
       ),
       "Committed sketch curves from the actively edited sketch should be hidden.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       composed.documentRenderables.some(
         ({ renderable }) => renderable.id === otherSketchRegion.id,
       ),
       "Committed regions from inactive sketches should remain visible.",
-    );
+    ).toBeTruthy();
   }
 
   {
@@ -339,11 +338,11 @@ test("src/app/viewport-renderables.spec.ts", async () => {
       hiddenTargetKeys: {},
     });
 
-    expectTrue(
+    expect(
       composed.documentRenderables[0]?.sketchConstraintDisplay
         ?.isAffectedOverconstraint,
       "Committed sketch renderables should carry solved constraint display diagnostics from their sketch snapshot.",
-    );
+    ).toBeTruthy();
   }
 
   {
@@ -364,7 +363,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
       hiddenTargetKeys: {},
     });
 
-    expectTrue(
+    expect(
       previewComposed.sketchDisplayRenderables.some(
         (renderable) =>
           renderable.label === "Spline preview" &&
@@ -372,7 +371,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
           renderable.geometry.points.length >= 2,
       ),
       "Spline preview should render as viewport polyline feedback.",
-    );
+    ).toBeTruthy();
 
     session = acceptSketchDraw(session, [3, 0]);
     const committedComposed = composeViewportRenderables({
@@ -382,7 +381,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
       hiddenTargetKeys: {},
     });
 
-    expectTrue(
+    expect(
       committedComposed.sketchDisplayRenderables.some(
         (renderable) =>
           renderable.target?.kind === "sketchEntity" &&
@@ -390,6 +389,6 @@ test("src/app/viewport-renderables.spec.ts", async () => {
           renderable.geometry.points.length > 3,
       ),
       "Persisted spline geometry should render as a sampled viewport polyline.",
-    );
+    ).toBeTruthy();
   }
 });

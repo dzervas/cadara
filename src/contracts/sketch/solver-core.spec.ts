@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
@@ -155,10 +154,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       squaredError += delta * delta;
     }
     const error = Math.sqrt(squaredError);
-    expectTrue(
+    expect(
       error < tolerance,
       `Gradient mismatch for ${constraintId}. Error ${error} exceeds tolerance ${tolerance}.`,
-    );
+    ).toBeTruthy();
   }
 
   function assertRotatedRectangleMatchesIsotopeBranches(
@@ -177,10 +176,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const c = coords.get("sketch_point_c");
     const d = coords.get("sketch_point_d");
     const reference = coords.get("sketch_point_reference");
-    expectTrue(
+    expect(
       a && b && c && d && reference,
       `Expected solved rotated-rectangle anchors for ${strategy}.`,
-    );
+    ).toBeTruthy();
 
     const sqrt2 = Math.sqrt(2);
     const halfSqrt2 = sqrt2 / 2;
@@ -189,67 +188,67 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       expected: readonly [number, number],
     ) => Math.hypot(point[0] - expected[0], point[1] - expected[1]) < tolerance;
 
-    expectTrue(
+    expect(
       matches(reference, [1, 0]),
       `Reference point should remain fixed for ${strategy}.`,
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       matches(a, [0, 0]),
       `A should remain at origin for ${strategy}.`,
-    );
+    ).toBeTruthy();
 
     if (b[1] < 0) {
-      expectTrue(
+      expect(
         matches(b, [sqrt2, -sqrt2]),
         `B should match isotope below-axis branch for ${strategy}.`,
-      );
+      ).toBeTruthy();
       if (c[1] < b[1]) {
-        expectTrue(
+        expect(
           matches(c, [-halfSqrt2, -5 * halfSqrt2]),
           `C should match isotope down-left branch for ${strategy}.`,
-        );
-        expectTrue(
+        ).toBeTruthy();
+        expect(
           matches(d, [-3 * halfSqrt2, -3 * halfSqrt2]),
           `D should match isotope down-left branch for ${strategy}.`,
-        );
+        ).toBeTruthy();
         return;
       }
 
-      expectTrue(
+      expect(
         matches(c, [5 * halfSqrt2, halfSqrt2]),
         `C should match isotope up-right branch for ${strategy}.`,
-      );
-      expectTrue(
+      ).toBeTruthy();
+      expect(
         matches(d, [3 * halfSqrt2, 3 * halfSqrt2]),
         `D should match isotope up-right branch for ${strategy}.`,
-      );
+      ).toBeTruthy();
       return;
     }
 
-    expectTrue(
+    expect(
       matches(b, [sqrt2, sqrt2]),
       `B should match isotope above-axis branch for ${strategy}.`,
-    );
+    ).toBeTruthy();
     if (c[1] > b[1]) {
-      expectTrue(
+      expect(
         matches(c, [-halfSqrt2, 5 * halfSqrt2]),
         `C should match isotope up-left branch for ${strategy}.`,
-      );
-      expectTrue(
+      ).toBeTruthy();
+      expect(
         matches(d, [-3 * halfSqrt2, 3 * halfSqrt2]),
         `D should match isotope up-left branch for ${strategy}.`,
-      );
+      ).toBeTruthy();
       return;
     }
 
-    expectTrue(
+    expect(
       matches(c, [5 * halfSqrt2, -halfSqrt2]),
       `C should match isotope down-right branch for ${strategy}.`,
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       matches(d, [3 * halfSqrt2, -3 * halfSqrt2]),
       `D should match isotope down-right branch for ${strategy}.`,
-    );
+    ).toBeTruthy();
   }
 
   function createLogoReferenceImageAnchorFixture(): SketchDefinition {
@@ -554,12 +553,12 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       1e-4,
       "Non-overlapping driven line end should solve onto the reference infinite line.",
     );
-    expectTrue(
+    expect(
       lineSolved.solvedSnapshot.constraintStatuses.find(
         (status) => status.constraintId === "constraint_collinear_lines",
-      )?.status === "satisfied",
+      )?.status,
       "Line-line Collinear should report satisfied after solving.",
-    );
+    ).toBe("satisfied");
 
     const pointDefinition = createCollinearDefinition({
       points: [
@@ -613,12 +612,12 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       1e-4,
       "Point-line Collinear should solve onto the reference infinite line.",
     );
-    expectTrue(
+    expect(
       pointSolved.solvedSnapshot.constraintStatuses.find(
         (status) => status.constraintId === "constraint_collinear_point",
-      )?.status === "satisfied",
+      )?.status,
       "Point-line Collinear should report satisfied for a point that lies on the infinite line outside the finite segment span.",
-    );
+    ).toBe("satisfied");
   }
 
   async function testCollinearSolvesAgainstProjectedLineWithoutMovingReference() {
@@ -700,12 +699,12 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       1e-4,
       "Projected-line Collinear should move the local line end onto the read-only line.",
     );
-    expectTrue(
+    expect(
       solved.solvedSnapshot.constraintStatuses.find(
         (status) => status.constraintId === "constraint_collinear_projected",
-      )?.status === "satisfied",
+      )?.status,
       "Projected-line Collinear should report satisfied when the editable line reaches the projected line.",
-    );
+    ).toBe("satisfied");
   }
 
   async function testCollinearValidationReportsMissingAndDegenerateTargets() {
@@ -736,12 +735,12 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       definition: missing,
       tolerances,
     });
-    expectTrue(
+    expect(
       missingValidation.diagnostics.some(
         (diagnostic) => diagnostic.code === "missing-collinear-target",
       ),
       "Collinear validation should report missing local operands.",
-    );
+    ).toBeTruthy();
 
     const degenerate = createCollinearDefinition({
       points: [
@@ -771,12 +770,12 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       definition: degenerate,
       tolerances,
     });
-    expectTrue(
+    expect(
       degenerateValidation.diagnostics.some(
         (diagnostic) => diagnostic.code === "degenerate-line-segment",
       ),
       "Degenerate Collinear reference lines should surface a solver validation diagnostic instead of fallback geometry.",
-    );
+    ).toBeTruthy();
   }
 
   async function testFixPoint() {
@@ -809,15 +808,15 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     });
 
     const point = solved.solvedSnapshot.solvedPoints[0];
-    expectTrue(point !== undefined, "Expected one solved point.");
-    expectTrue(
+    expect(point, "Expected one solved point.").not.toBe(undefined);
+    expect(
       Math.abs(point.solvedPosition[0] - 1) < 1e-6,
       "Fix point should preserve x.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(point.solvedPosition[1] - 1) < 1e-6,
       "Fix point should solve y to 1.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(definition, "constraint_fix_a", 1e-6);
   }
 
@@ -855,18 +854,18 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     });
 
     const [a, b] = solved.solvedSnapshot.solvedPoints;
-    expectTrue(
+    expect(
       a !== undefined && b !== undefined,
       "Expected solved point pair.",
-    );
+    ).toBeTruthy();
     const distance = Math.hypot(
       a.solvedPosition[0] - b.solvedPosition[0],
       a.solvedPosition[1] - b.solvedPosition[1],
     );
-    expectTrue(
+    expect(
       Math.abs(distance - 3) < 1e-4,
       "Aligned distance should solve to 3.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "dimension_distance",
@@ -907,14 +906,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     });
 
     const [a, b] = solved.solvedSnapshot.solvedPoints;
-    expectTrue(
+    expect(
       a !== undefined && b !== undefined,
       "Expected solved point pair.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(b.solvedPosition[0] - a.solvedPosition[0] + 3) < 1e-4,
       "Horizontal distance should solve to -3.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "dimension_horizontal_distance",
@@ -955,14 +954,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     });
 
     const [a, b] = solved.solvedSnapshot.solvedPoints;
-    expectTrue(
+    expect(
       a !== undefined && b !== undefined,
       "Expected solved point pair.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(b.solvedPosition[1] - a.solvedPosition[1] - 3) < 1e-4,
       "Vertical distance should solve to 3.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "dimension_vertical_distance",
@@ -1148,11 +1147,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       1e-4,
       "Line angle should report enclosed angle.",
     );
-    expectTrue(
-      statusById.get("dimension_invalid_line_distance")?.status ===
-        "unsatisfied",
+    expect(
+      statusById.get("dimension_invalid_line_distance")?.status,
       "A line distance dimension between non-parallel lines should remain unsatisfied instead of becoming an angle dimension.",
-    );
+    ).toBe("unsatisfied");
   }
 
   async function testAxisQualifiedDistance() {
@@ -1203,10 +1201,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     });
     const [horizontalA, horizontalB] =
       solvedHorizontal.solvedSnapshot.solvedPoints;
-    expectTrue(
+    expect(
       horizontalA !== undefined && horizontalB !== undefined,
       "Expected solved horizontal point pair.",
-    );
+    ).toBeTruthy();
     assertClose(
       horizontalB.solvedPosition[0] - horizontalA.solvedPosition[0],
       3,
@@ -1225,10 +1223,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       partialSolvePolicy: "bestEffort",
     });
     const [verticalA, verticalB] = solvedVertical.solvedSnapshot.solvedPoints;
-    expectTrue(
+    expect(
       verticalA !== undefined && verticalB !== undefined,
       "Expected solved vertical point pair.",
-    );
+    ).toBeTruthy();
     assertClose(
       verticalB.solvedPosition[1] - verticalA.solvedPosition[1],
       4,
@@ -1309,18 +1307,18 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       (status) => status.dimensionId === "dimension_obtuse_angle",
     );
 
-    expectTrue(
-      solved.status.solveState === "solved",
+    expect(
+      solved.status.solveState,
       "Obtuse line-angle dimensions should remain solvable.",
-    );
-    expectTrue(
-      solved.status.constraintState !== "overConstrained",
+    ).toBe("solved");
+    expect(
+      solved.status.constraintState,
       "Obtuse line-angle dimensions should not be classified as over-constrained.",
-    );
-    expectTrue(
+    ).not.toBe("overConstrained");
+    expect(
       pointC,
       "Expected solved endpoint for the obtuse-angle fixture.",
-    );
+    ).toBeTruthy();
     assertClose(
       pointC.solvedPosition[0],
       8.660254037844387,
@@ -1379,14 +1377,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       partialSolvePolicy: "bestEffort",
     });
     const [a, b] = solved.solvedSnapshot.solvedPoints;
-    expectTrue(
+    expect(
       a !== undefined && b !== undefined,
       "Expected solved line endpoints.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(b.solvedPosition[1] - a.solvedPosition[1]) < 1e-6,
       "Horizontal line should end with zero y delta.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "constraint_horizontal",
@@ -1432,14 +1430,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       partialSolvePolicy: "bestEffort",
     });
     const [a, b] = solved.solvedSnapshot.solvedPoints;
-    expectTrue(
+    expect(
       a !== undefined && b !== undefined,
       "Expected solved line endpoints.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(b.solvedPosition[0] - a.solvedPosition[0]) < 1e-6,
       "Vertical line should end with zero x delta.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "constraint_vertical",
@@ -1488,7 +1486,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const pointM = solved.solvedSnapshot.solvedPoints.find(
       (point) => point.pointId === "sketch_point_m",
     );
-    expectTrue(pointA && pointB && pointM, "Expected solved angle points.");
+    expect(
+      pointA && pointB && pointM,
+      "Expected solved angle points.",
+    ).toBeTruthy();
     const d1x = pointA.solvedPosition[0] - pointM.solvedPosition[0];
     const d1y = pointA.solvedPosition[1] - pointM.solvedPosition[1];
     const d2x = pointB.solvedPosition[0] - pointM.solvedPosition[0];
@@ -1503,10 +1504,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         ),
       ),
     );
-    expectTrue(
+    expect(
       Math.abs(angle - Math.PI / 4) < 1e-4,
       "Angle should solve to PI/4.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(definition, "constraint_angle", 1e-6);
   }
 
@@ -1566,10 +1567,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const pointM = solved.solvedSnapshot.solvedPoints.find(
       (point) => point.pointId === "sketch_point_m",
     );
-    expectTrue(
+    expect(
       pointA && pointB && pointM,
       "Expected solved points for specific angle case.",
-    );
+    ).toBeTruthy();
     const d1x = pointA.solvedPosition[0] - pointM.solvedPosition[0];
     const d1y = pointA.solvedPosition[1] - pointM.solvedPosition[1];
     const d2x = pointB.solvedPosition[0] - pointM.solvedPosition[0];
@@ -1584,10 +1585,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         ),
       ),
     );
-    expectTrue(
+    expect(
       Math.abs(angle - Math.PI / 2) < 1e-3,
       "Specific angle case should solve to PI/2.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "constraint_angle_specific",
@@ -1659,10 +1660,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       points.get("sketch_point_b2")![0] - points.get("sketch_point_b1")![0],
       points.get("sketch_point_b2")![1] - points.get("sketch_point_b1")![1],
     );
-    expectTrue(
+    expect(
       Math.abs(lenA - lenB) < 1e-4,
       "Equal-length constraint should equalize solved line lengths.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "constraint_equal_length",
@@ -1735,10 +1736,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const by =
       points.get("sketch_point_b2")![1] - points.get("sketch_point_b1")![1];
     const cross = ax * by - ay * bx;
-    expectTrue(
+    expect(
       Math.abs(cross) < 1e-4,
       "Parallel constraint should drive the line cross product to zero.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "constraint_parallel",
@@ -1811,10 +1812,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const by =
       points.get("sketch_point_b2")![1] - points.get("sketch_point_b1")![1];
     const dot = ax * bx + ay * by;
-    expectTrue(
+    expect(
       Math.abs(dot) < 1e-2,
       "Perpendicular constraint should drive the line dot product near zero.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "constraint_perpendicular",
@@ -1882,17 +1883,17 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const point = solved.solvedSnapshot.solvedPoints.find(
       (entry) => entry.pointId === "sketch_point_line_end",
     );
-    expectTrue(
+    expect(
       arc?.kind === "arc" && point,
       "Expected solved arc and endpoint point.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.hypot(
         arc.startPosition[0] - point.solvedPosition[0],
         arc.startPosition[1] - point.solvedPosition[1],
       ) < 1e-4,
       "Arc start coincidence should match the referenced point.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "dimension_arc_start_coincident",
@@ -1960,17 +1961,17 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const point = solved.solvedSnapshot.solvedPoints.find(
       (entry) => entry.pointId === "sketch_point_line_start",
     );
-    expectTrue(
+    expect(
       arc?.kind === "arc" && point,
       "Expected solved arc and endpoint point.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.hypot(
         arc.endPosition[0] - point.solvedPosition[0],
         arc.endPosition[1] - point.solvedPosition[1],
       ) < 1e-4,
       "Arc end coincidence should match the referenced point.",
-    );
+    ).toBeTruthy();
     assertGradientMatchesFiniteDifference(
       definition,
       "dimension_arc_end_coincident",
@@ -2097,30 +2098,30 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         point.solvedPosition,
       ]),
     );
-    expectTrue(coords.has("sketch_point_a"), "Expected A.");
-    expectTrue(coords.has("sketch_point_b"), "Expected B.");
-    expectTrue(coords.has("sketch_point_c"), "Expected C.");
-    expectTrue(coords.has("sketch_point_d"), "Expected D.");
+    expect(coords.has("sketch_point_a"), "Expected A.").toBeTruthy();
+    expect(coords.has("sketch_point_b"), "Expected B.").toBeTruthy();
+    expect(coords.has("sketch_point_c"), "Expected C.").toBeTruthy();
+    expect(coords.has("sketch_point_d"), "Expected D.").toBeTruthy();
     const a = coords.get("sketch_point_a")!;
     const b = coords.get("sketch_point_b")!;
     const c = coords.get("sketch_point_c")!;
     const d = coords.get("sketch_point_d")!;
-    expectTrue(
+    expect(
       Math.hypot(a[0] - 0, a[1] - 0) < 1e-5,
       "A should solve to origin.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.hypot(b[0] - 2, b[1] - 0) < 1e-4,
       "B should solve to (2,0).",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.hypot(c[0] - 2, c[1] - 3) < 1e-4,
       "C should solve to (2,3).",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.hypot(d[0] - 0, d[1] - 3) < 1e-4,
       "D should solve to (0,3).",
-    );
+    ).toBeTruthy();
   }
 
   async function testRotatedRectangle() {
@@ -2169,11 +2170,13 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       (point) => point.pointId === anchor2,
     );
 
-    expectTrue(
-      solved.status.solveState === "solved",
+    expect(
+      solved.status.solveState,
       "Logo-like anchor-to-origin constraint should solve.",
+    ).toBe("solved");
+    expect(anchor, "Expected solved reference image anchor.").not.toBe(
+      undefined,
     );
-    expectTrue(anchor !== undefined, "Expected solved reference image anchor.");
     assertClose(
       anchor.solvedPosition[0],
       0,
@@ -2186,18 +2189,18 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       1e-5,
       "Reference image anchor should solve to origin y.",
     );
-    expectTrue(
+    expect(
       solved.solvedSnapshot.constraintStatuses.every(
         (status) => status.status === "satisfied",
       ),
       "All logo-like fixture constraints should remain satisfied after anchor-to-origin solve.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       solved.solvedSnapshot.dimensionStatuses.every(
         (status) => status.status !== "unsatisfied",
       ),
       "All logo-like fixture dimensions should remain satisfied after anchor-to-origin solve.",
-    );
+    ).toBeTruthy();
   }
 
   async function assertRotatedRectangleSolvesWithStrategy(
@@ -2348,14 +2351,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const b = coords.get("sketch_point_b");
     const d = coords.get("sketch_point_d");
     const reference = coords.get("sketch_point_reference");
-    expectTrue(
+    expect(
       a && b && d && reference,
       `Expected solved rotated-rectangle anchors for ${strategy}.`,
-    );
-    expectTrue(
-      solved.status.solveState === options.expectedSolveState,
+    ).toBeTruthy();
+    expect(
+      solved.status.solveState,
       `Rotated rectangle should report ${options.expectedSolveState} for ${strategy}.`,
-    );
+    ).toBe(options.expectedSolveState);
     assertRotatedRectangleMatchesIsotopeBranches(
       solved,
       strategy,
@@ -2499,30 +2502,30 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const b = coords.get("sketch_point_b");
     const c = coords.get("sketch_point_c");
     const d = coords.get("sketch_point_d");
-    expectTrue(
+    expect(
       a && b && c && d,
       "Expected solved axis-aligned rectangle anchors for gradient descent.",
-    );
-    expectTrue(
-      solved.status.solveState === "solved",
+    ).toBeTruthy();
+    expect(
+      solved.status.solveState,
       "Gradient descent should solve the axis-aligned rectangle fixture.",
-    );
-    expectTrue(
+    ).toBe("solved");
+    expect(
       Math.hypot(a[0] - 0, a[1] - 0) < 1e-5,
       "Gradient descent should keep A at the origin.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.hypot(b[0] - 2, b[1] - 0) < 1e-4,
       "Gradient descent should solve B to (2,0).",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.hypot(c[0] - 2, c[1] - 3) < 1e-4,
       "Gradient descent should solve C to (2,3).",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.hypot(d[0] - 0, d[1] - 3) < 1e-4,
       "Gradient descent should solve D to (0,3).",
-    );
+    ).toBeTruthy();
   }
 
   async function testRotatedRectangleGaussNewton() {
@@ -2567,7 +2570,9 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     };
 
     const validation = validateSketchDefinitionCore({ definition, tolerances });
-    expectTrue(!validation.isValid, "Degenerate line should fail validation.");
+    expect(validation.isValid, "Degenerate line should fail validation.").toBe(
+      false,
+    );
   }
 
   async function testValidationRejectsPointIdsWithoutRecords() {
@@ -2586,12 +2591,12 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     };
 
     const validation = validateSketchDefinitionCore({ definition, tolerances });
-    expectTrue(
+    expect(
       validation.diagnostics.some(
         (diagnostic) => diagnostic.code === "point-missing-from-records",
       ),
       "Validation should reject point ids that do not have backing records.",
-    );
+    ).toBeTruthy();
   }
 
   async function testValidationRejectsMissingConstraintReferences() {
@@ -2618,12 +2623,12 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     };
 
     const validation = validateSketchDefinitionCore({ definition, tolerances });
-    expectTrue(
+    expect(
       validation.diagnostics.some(
         (diagnostic) => diagnostic.code === "missing-fix-point",
       ),
       "Validation should reject constraints that reference missing points.",
-    );
+    ).toBeTruthy();
   }
 
   async function testValidationRejectsDuplicatePointRecords() {
@@ -2649,16 +2654,16 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     };
 
     const validation = validateSketchDefinitionCore({ definition, tolerances });
-    expectTrue(
-      !validation.isValid,
+    expect(
+      validation.isValid,
       "Validation should reject duplicate point records even when pointIds is unique.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       validation.diagnostics.some(
         (diagnostic) => diagnostic.code === "duplicate-point-record",
       ),
       "Validation should emit duplicate-point-record for duplicate point records.",
-    );
+    ).toBeTruthy();
   }
 
   async function testValidationRejectsDuplicateEntityRecords() {
@@ -2694,16 +2699,16 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     };
 
     const validation = validateSketchDefinitionCore({ definition, tolerances });
-    expectTrue(
-      !validation.isValid,
+    expect(
+      validation.isValid,
       "Validation should reject duplicate entity records even when entityIds is unique.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       validation.diagnostics.some(
         (diagnostic) => diagnostic.code === "duplicate-entity-record",
       ),
       "Validation should emit duplicate-entity-record for duplicate entity records.",
-    );
+    ).toBeTruthy();
   }
 
   async function testCircleRadiusDimensionDrivesSolvedCircleRadius() {
@@ -2744,29 +2749,29 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       (status) => status.dimensionId === "dimension_circle_radius",
     );
 
-    expectTrue(
-      solved.status.solveState === "solved",
+    expect(
+      solved.status.solveState,
       "Circle radius dimension should keep the solve in a solved state.",
-    );
-    expectTrue(
-      !!solvedCircle,
+    ).toBe("solved");
+    expect(
+      !solvedCircle,
       "Circle radius dimension should produce solved circle geometry.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       solvedCircle?.kind === "circle" &&
         Math.abs(solvedCircle.solvedRadius - 2) < 1e-4,
       "Circle radius dimension should drive the solved circle radius to the dimension value.",
-    );
-    expectTrue(
-      dimensionStatus?.status === "driving",
+    ).toBeTruthy();
+    expect(
+      dimensionStatus?.status,
       "Circle radius dimension should report driving status once satisfied.",
-    );
-    expectTrue(
+    ).toBe("driving");
+    expect(
       dimensionStatus !== undefined &&
         dimensionStatus.solvedValue !== null &&
         Math.abs(dimensionStatus.solvedValue - 2) < 1e-4,
       "Circle radius dimension status should report the solved radius value.",
-    );
+    ).toBeTruthy();
   }
 
   async function testCircleDiameterDimensionDrivesSolvedCircleRadius() {
@@ -2807,29 +2812,29 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       (status) => status.dimensionId === "dimension_circle_diameter",
     );
 
-    expectTrue(
-      solved.status.solveState === "solved",
+    expect(
+      solved.status.solveState,
       "Circle diameter dimension should keep the solve in a solved state.",
-    );
-    expectTrue(
-      !!solvedCircle,
+    ).toBe("solved");
+    expect(
+      !solvedCircle,
       "Circle diameter dimension should produce solved circle geometry.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       solvedCircle?.kind === "circle" &&
         Math.abs(solvedCircle.solvedRadius - 3) < 1e-4,
       "Circle diameter dimension should drive the solved circle radius to half of the diameter value.",
-    );
-    expectTrue(
-      dimensionStatus?.status === "driving",
+    ).toBeTruthy();
+    expect(
+      dimensionStatus?.status,
       "Circle diameter dimension should report driving status once satisfied.",
-    );
-    expectTrue(
+    ).toBe("driving");
+    expect(
       dimensionStatus !== undefined &&
         dimensionStatus.solvedValue !== null &&
         Math.abs(dimensionStatus.solvedValue - 6) < 1e-4,
       "Circle diameter dimension status should report the solved diameter value.",
-    );
+    ).toBeTruthy();
   }
 
   function createIndependentLineComponentsDefinition(): SketchDefinition {
@@ -2905,32 +2910,32 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       ),
     };
 
-    expectTrue(
-      program.components.length === 2,
+    expect(
+      program.components.length,
       "Compiled program should partition independent line components.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       isCompiledSketchSolveProgramCompatible(program, {
         definition: numericEdit,
         tolerances,
       }),
       "Compiled program should remain compatible across authored point numeric edits.",
-    );
-    expectTrue(
-      !isCompiledSketchSolveProgramCompatible(program, {
+    ).toBeTruthy();
+    expect(
+      isCompiledSketchSolveProgramCompatible(program, {
         definition,
         tolerances: { ...tolerances, coincidence: 1e-5 },
       }),
       "Compiled program should invalidate when tolerance policy changes.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       solveSketchDefinitionCore({
         definition,
         tolerances,
         partialSolvePolicy: "bestEffort",
-      }).status.solveState === "solved",
+      }).status.solveState,
       "Full solve should route through the compiled-program path and remain solved.",
-    );
+    ).toBe("solved");
   }
 
   async function testInteractiveSessionWarmStartStaleRejectionAndComponentIsolation() {
@@ -2950,10 +2955,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       program,
       priorSolvedSnapshot: solved.solvedSnapshot,
     });
-    expectTrue(
+    expect(
       session.warmStarted,
       "Interactive sessions should warm-start from compatible solved snapshots.",
-    );
+    ).toBeTruthy();
 
     const result = updateCompiledSketchSolveSession(
       session,
@@ -2964,10 +2969,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       },
       1e-4,
     );
-    expectTrue(
-      result.kind === "solved",
+    expect(
+      result.kind,
       "Interactive update should accept a translatable constrained component.",
-    );
+    ).toBe("solved");
     const points = new Map(
       result.solvedSnapshot.solvedPoints.map((point) => [
         point.pointId,
@@ -2993,14 +2998,14 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       pointId: "sketch_point_b",
       position: [3, 0],
     });
-    expectTrue(
+    expect(
       stale.kind === "blocked" &&
         stale.reason === "staleSession" &&
         stale.diagnostics.some(
           (diagnostic) => diagnostic.code === "stale-interactive-solve-session",
         ),
       "Disposed interactive sessions should reject later updates with a stale-session diagnostic.",
-    );
+    ).toBeTruthy();
   }
 
   async function testCompiledInteractiveDragKeepsInitiallyCoincidentPointsTogether() {
@@ -3040,10 +3045,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       partialSolvePolicy: "bestEffort",
       targetTolerance: 1e-4,
     });
-    expectTrue(
-      stateless.kind === "solved",
+    expect(
+      stateless.kind,
       "Stateless dragged solve should accept initially coincident points.",
-    );
+    ).toBe("solved");
 
     const program = compileSketchSolveProgram({
       definition,
@@ -3065,10 +3070,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       1e-4,
     );
 
-    expectTrue(
-      compiled.kind === "solved",
+    expect(
+      compiled.kind,
       "Compiled interactive update should accept initially coincident points.",
-    );
+    ).toBe("solved");
     const points = new Map(
       compiled.solvedSnapshot.solvedPoints.map((point) => [
         point.pointId,
@@ -3225,10 +3230,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       1e-4,
     );
 
-    expectTrue(
-      result.kind === "solved",
+    expect(
+      result.kind,
       "Interactive update should accept rigid rectangle translation.",
-    );
+    ).toBe("solved");
     const points = new Map(
       result.solvedSnapshot.solvedPoints.map((point) => [
         point.pointId,

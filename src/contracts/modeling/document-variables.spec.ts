@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { parseWorkspaceSnapshot } from "@/contracts/modeling/runtime-schema";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 
@@ -22,38 +21,30 @@ test("src/contracts/modeling/document-variables.spec.ts", async () => {
         },
       ],
     },
-    variables: [
-      {
-        variableId: "variable_width" as const,
-        name: "width",
-        valueText: "10 + 2",
-      },
-    ],
   };
 
   const parsed = parseWorkspaceSnapshot(snapshot);
 
-  expectTrue(
-    parsed.document.variables[0]?.variableId === "variable_width",
+  expect(
+    parsed.document.variables[0]?.variableId,
     "Snapshot validation should preserve variable ids.",
-  );
-  expectTrue(
-    parsed.document.variables[0]?.name === "width",
+  ).toBe("variable_width");
+  expect(
+    parsed.document.variables[0]?.name,
     "Snapshot validation should preserve variable names.",
-  );
-  expectTrue(
-    parsed.document.variables[0]?.valueText === "10 + 2",
+  ).toBe("width");
+  expect(
+    parsed.document.variables[0]?.valueText,
     "Snapshot validation should preserve raw variable value text.",
-  );
-  expectTrue(
-    !("calculatedValue" in parsed.document.variables[0]!),
+  ).toBe("10 + 2");
+  expect(
+    "calculatedValue" in parsed.document.variables[0]!,
     "Snapshot validation should not add calculated variable values.",
-  );
-  expectTrue(
-    parsed.document.references.length ===
-      response.snapshot.document.references.length,
+  ).toBeFalsy();
+  expect(
+    parsed.document.references.length,
     "Snapshot validation should not change snapshot reference records.",
-  );
+  ).toBe(response.snapshot.document.references.length);
 
   try {
     parseWorkspaceSnapshot({
@@ -70,14 +61,14 @@ test("src/contracts/modeling/document-variables.spec.ts", async () => {
         ],
       },
     });
-    expectTrue(
+    expect(
       false,
       "Snapshot validation should reject persisted variable runtime calculation state.",
-    );
+    ).toBeTruthy();
   } catch (error) {
-    expectTrue(
+    expect(
       error instanceof Error,
       "Snapshot validation should report invalid variable records.",
-    );
+    ).toBeTruthy();
   }
 });

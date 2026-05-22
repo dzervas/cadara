@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import {
@@ -50,31 +49,31 @@ test("src/domain/modeling/occ/mesh-transport.spec.ts", () => {
   const packed = packWorkspaceSnapshotRenderMeshes(snapshot);
   const packedGeometry = packed.snapshot.document.render.records[0]?.geometry;
 
-  expectTrue(
-    packedGeometry?.kind === "packedMesh",
+  expect(
+    packedGeometry?.kind,
     "Worker mesh transport should pack mesh records into typed-array views.",
-  );
-  expectTrue(
+  ).toBe("packedMesh");
+  expect(
     packedGeometry.vertexPositions.byteOffset === 0 &&
       packedGeometry.vertexPositions.byteLength === 36 &&
       packedGeometry.vertexPositions.elementCount === 9,
     "Packed mesh positions should carry explicit view metadata.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     packed.transferList.includes(packedGeometry.vertexPositions.buffer),
     "Packed mesh buffers should be included in the worker transfer list.",
-  );
+  ).toBeTruthy();
 
   const unpacked = unpackWorkspaceSnapshotRenderMeshes(packed.snapshot);
   const unpackedGeometry = unpacked.document.render.records[0]?.geometry;
 
-  expectTrue(
-    unpackedGeometry?.kind === "mesh",
+  expect(
+    unpackedGeometry?.kind,
     "Main-thread unpacking should reconstruct public mesh geometry records.",
-  );
-  expectTrue(
+  ).toBe("mesh");
+  expect(
     unpackedGeometry.vertexPositions[1]?.[0] === 1 &&
       unpackedGeometry.triangleIndices[0]?.[2] === 2,
     "Reconstructed mesh geometry should preserve positions and triangle indices.",
-  );
+  ).toBeTruthy();
 });

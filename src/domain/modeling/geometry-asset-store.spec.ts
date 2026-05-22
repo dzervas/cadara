@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createIndexedDbGeometryAssetStore,
   createMemoryGeometryAssetStore,
@@ -15,24 +14,24 @@ test("src/domain/modeling/geometry-asset-store.spec.ts", async () => {
   const firstPut = await store.put(asset);
   const secondPut = await store.put(asset);
 
-  expectTrue(
+  expect(
     firstPut.ok && !firstPut.deduped,
     "First geometry asset write should store the blob.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     secondPut.ok && secondPut.deduped,
     "Repeated geometry asset writes should dedupe by content hash.",
-  );
+  ).toBeTruthy();
 
   const loaded = await store.get(asset.asset);
-  expectTrue(
+  expect(
     loaded.ok,
     "Stored geometry asset blobs should be readable by manifest record.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     loaded.ok && loaded.bytes.byteLength === asset.bytes.byteLength,
     "Loaded geometry asset bytes should preserve byte length.",
-  );
+  ).toBeTruthy();
 
   const missing = await store.get({
     ...asset.asset,
@@ -40,18 +39,18 @@ test("src/domain/modeling/geometry-asset-store.spec.ts", async () => {
     assetId: "asset_missing_geometry",
     hash: `sha256:${"1".repeat(64)}`,
   });
-  expectTrue(
-    !missing.ok && missing.diagnostic.code === "geometry-asset-missing",
+  expect(
+    missing.ok && missing.diagnostic.code === "geometry-asset-missing",
     "Missing asset lookup should return a structured diagnostic.",
-  );
+  ).toBeFalsy();
 
   const corruptBytes = asset.bytes.slice();
   corruptBytes[0] = (corruptBytes[0]! + 1) % 255;
   const corrupt = await store.put({ asset: asset.asset, bytes: corruptBytes });
-  expectTrue(
-    !corrupt.ok && corrupt.diagnostic.code === "geometry-asset-corrupt",
+  expect(
+    corrupt.ok && corrupt.diagnostic.code === "geometry-asset-corrupt",
     "Corrupt asset bytes should be rejected before storage.",
-  );
+  ).toBeFalsy();
 
   const repairStore = createMemoryGeometryAssetStore();
   await repairStore.put(asset);
@@ -61,22 +60,22 @@ test("src/domain/modeling/geometry-asset-store.spec.ts", async () => {
   internalBlobs.set(asset.asset.hash, corruptBytes);
   const repaired = await repairStore.put(asset);
   const repairedLoaded = await repairStore.get(asset.asset);
-  expectTrue(
+  expect(
     repaired.ok && !repaired.deduped,
     "Putting valid bytes over a corrupt stored blob should repair the content-addressed entry.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     repairedLoaded.ok,
     "Repaired geometry asset entries should load after integrity verification.",
-  );
+  ).toBeTruthy();
 
   const unavailableStore = createIndexedDbGeometryAssetStore({
     indexedDB: undefined,
   });
   const storageFailure = await unavailableStore.put(asset);
-  expectTrue(
-    !storageFailure.ok &&
+  expect(
+    storageFailure.ok &&
       storageFailure.diagnostic.code === "geometry-asset-storage-failed",
     "IndexedDB storage failures should be reported as geometry asset diagnostics.",
-  );
+  ).toBeFalsy();
 });

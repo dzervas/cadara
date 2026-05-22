@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createExpressionAuthoredValue,
   createLiteralAuthoredValue,
@@ -40,10 +39,10 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
     definition: extrude(createLiteralAuthoredValue(12)),
     variables: [],
   });
-  expectTrue(
+  expect(
     literal.ok && literal.definition.parameters.extent.end.distance === 12,
     "Literal authored values should resolve to concrete values.",
-  );
+  ).toBeTruthy();
 
   const expression = createExpressionAuthoredValue("depth + 3");
   const resolved = resolveFeatureDefinitionValues({
@@ -52,14 +51,14 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
       { variableId: "variable_depth", name: "depth", valueText: "9" },
     ],
   });
-  expectTrue(
+  expect(
     resolved.ok && resolved.definition.parameters.extent.end.distance === 12,
     "Expression authored values should resolve from document variables.",
-  );
-  expectTrue(
-    expression.valueText === "depth + 3",
+  ).toBeTruthy();
+  expect(
+    expression.valueText,
     "Resolution must not rewrite the authored expression source.",
-  );
+  ).toBe("depth + 3");
 
   const recomputed = resolveFeatureDefinitionValues({
     definition: extrude(expression),
@@ -67,11 +66,11 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
       { variableId: "variable_depth", name: "depth", valueText: "15" },
     ],
   });
-  expectTrue(
+  expect(
     recomputed.ok &&
       recomputed.definition.parameters.extent.end.distance === 18,
     "Variable changes should recompute dependent feature values.",
-  );
+  ).toBeTruthy();
 
   const invalidSyntax = resolveFeatureDefinitionValues({
     definition: extrude(createExpressionAuthoredValue("depth +")),
@@ -79,14 +78,14 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
       { variableId: "variable_depth", name: "depth", valueText: "9" },
     ],
   });
-  expectTrue(
-    !invalidSyntax.ok &&
+  expect(
+    invalidSyntax.ok &&
       invalidSyntax.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "feature-value-expression-invalid-syntax",
       ),
     "Invalid expression syntax should reject before execution.",
-  );
+  ).toBeFalsy();
 
   const invalidDomain = resolveFeatureDefinitionValues({
     definition: extrude(expression),
@@ -94,14 +93,14 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
       { variableId: "variable_depth", name: "depth", valueText: "-3" },
     ],
   });
-  expectTrue(
-    !invalidDomain.ok &&
+  expect(
+    invalidDomain.ok &&
       invalidDomain.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "feature-value-expression-not-positive",
       ),
     "Invalid dependent results should surface value-kind diagnostics.",
-  );
+  ).toBeFalsy();
 
   const loft = (sectionCount: unknown): FeatureDefinition => ({
     kind: "loft",
@@ -126,7 +125,7 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
       { variableId: "variable_sections", name: "sections", valueText: "3" },
     ],
   });
-  expectTrue(
+  expect(
     resolvedSectionCount.ok &&
       resolvedSectionCount.definition.kind === "loft" &&
       (
@@ -135,7 +134,7 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
           | undefined
       )?.sectionCount === 4,
     "Expression-authored positive integer advanced options should resolve to concrete integer values.",
-  );
+  ).toBeTruthy();
 
   const invalidSectionCount = resolveFeatureDefinitionValues({
     definition: loft(createExpressionAuthoredValue("sections / 2")),
@@ -143,12 +142,12 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
       { variableId: "variable_sections", name: "sections", valueText: "3" },
     ],
   });
-  expectTrue(
-    !invalidSectionCount.ok &&
+  expect(
+    invalidSectionCount.ok &&
       invalidSectionCount.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "feature-value-expression-not-integer",
       ),
     "Positive integer advanced option expressions should reject non-integer results before geometry execution.",
-  );
+  ).toBeFalsy();
 });

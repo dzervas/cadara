@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   beginSketchAnnotationEdit,
   beginSketchTool,
@@ -131,19 +130,20 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
 
   function testToolbarDefinitionsExposeConstraintFamilies() {
     const dimensionTool = getToolById("dimension");
-    expectTrue(
+    expect(
       "dropdown" in dimensionTool && Boolean(dimensionTool.dropdown),
       "Dimension tool should expose a dropdown family.",
-    );
-    expectTrue(
-      JSON.stringify(dimensionTool.dropdown?.variantIds) ===
-        JSON.stringify([
-          "dimensionDistance",
-          "dimensionHorizontal",
-          "dimensionVertical",
-          "dimensionRadius",
-        ]),
+    ).toBeTruthy();
+    expect(
+      JSON.stringify(dimensionTool.dropdown?.variantIds),
       "Dimension dropdown should expose the supported dimensional authoring variants.",
+    ).toBe(
+      JSON.stringify([
+        "dimensionDistance",
+        "dimensionHorizontal",
+        "dimensionVertical",
+        "dimensionRadius",
+      ]),
     );
 
     const newConstraintTools = {
@@ -171,50 +171,49 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
 
     for (const [toolId, asset] of Object.entries(newConstraintTools)) {
       const tool = getToolById(toolId as keyof typeof newConstraintTools);
-      expectTrue(
-        tool.group === "constraints",
+      expect(
+        tool.group,
         `${toolId} should register in the sketch constraint group.`,
-      );
-      expectTrue(
+      ).toBe("constraints");
+      expect(
         tool.modes.length === 1 && tool.modes[0] === "sketch",
         `${toolId} should be sketch-only.`,
+      ).toBeTruthy();
+      expect(tool.icon, `${toolId} should use a stable matching icon id.`).toBe(
+        toolId,
       );
-      expectTrue(
-        tool.icon === toolId,
-        `${toolId} should use a stable matching icon id.`,
-      );
-      expectTrue(
-        toolIconAssetFileNames[tool.icon] === asset,
+      expect(
+        toolIconAssetFileNames[tool.icon],
         `${toolId} should map to ${asset}.`,
-      );
-      expectTrue(
+      ).toBe(asset);
+      expect(
         sketchConstraintSection?.toolIds.includes(tool.id),
         `${toolId} should be exposed in the sketch toolbar.`,
-      );
-      expectTrue(
-        !partToolIds.includes(tool.id),
+      ).toBeTruthy();
+      expect(
+        partToolIds.includes(tool.id),
         `${toolId} should not be exposed in part mode.`,
-      );
-      expectTrue(
+      ).toBeFalsy();
+      expect(
         registeredConstraintIds.has(tool.id),
         `${toolId} should have sketch constraint behavior registered.`,
-      );
+      ).toBeTruthy();
     }
-    expectTrue(
+    expect(
       searchToolDefinitions("collinear").some(
         (tool) => tool.id === "constraintCollinear",
       ),
       "Tool search should expose the Collinear sketch constraint.",
-    );
+    ).toBeTruthy();
   }
 
   function testHorizontalAndVerticalAuthoringCommitDurableConstraints() {
     let horizontalSession = createSessionWithTwoLines();
     const [horizontalLineId] = horizontalSession.definition.entityIds;
-    expectTrue(
+    expect(
       horizontalLineId,
       "Expected a local line for horizontal authoring.",
-    );
+    ).toBeTruthy();
 
     horizontalSession = beginSketchTool(
       horizontalSession,
@@ -228,31 +227,31 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
 
     const horizontalConstraint =
       horizontalSession.definition.constraints.at(-1);
-    expectTrue(
-      horizontalConstraint?.kind === "horizontal",
+    expect(
+      horizontalConstraint?.kind,
       "Horizontal should commit a durable horizontal constraint.",
-    );
-    expectTrue(
-      horizontalConstraint.entityId === horizontalLineId,
+    ).toBe("horizontal");
+    expect(
+      horizontalConstraint?.entityId,
       "Horizontal should target the selected line entity.",
-    );
-    expectTrue(
-      horizontalSession.definition.dimensions.length === 0,
+    ).toBe(horizontalLineId);
+    expect(
+      horizontalSession.definition.dimensions.length,
       "Horizontal should not append a dimension record.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       getSketchAnnotationDescriptors(horizontalSession).some(
         (entry) => entry.glyphKind === "constraintHorizontal",
       ),
       "Horizontal constraints should expose the horizontal glyph in committed annotations.",
-    );
+    ).toBeTruthy();
 
     let verticalSession = createSessionWithTwoLines();
     const [, verticalLineId] = verticalSession.definition.entityIds;
-    expectTrue(
+    expect(
       verticalLineId,
       "Expected a second local line for vertical authoring.",
-    );
+    ).toBeTruthy();
 
     verticalSession = beginSketchTool(verticalSession, "constraintVertical");
     verticalSession = selectSketchConstraintTarget(verticalSession, {
@@ -262,24 +261,24 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const verticalConstraint = verticalSession.definition.constraints.at(-1);
-    expectTrue(
-      verticalConstraint?.kind === "vertical",
+    expect(
+      verticalConstraint?.kind,
       "Vertical should commit a durable vertical constraint.",
-    );
-    expectTrue(
-      verticalConstraint.entityId === verticalLineId,
+    ).toBe("vertical");
+    expect(
+      verticalConstraint?.entityId,
       "Vertical should target the selected line entity.",
-    );
-    expectTrue(
-      verticalSession.definition.dimensions.length === 0,
+    ).toBe(verticalLineId);
+    expect(
+      verticalSession.definition.dimensions.length,
       "Vertical should not append a dimension record.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       getSketchAnnotationDescriptors(verticalSession).some(
         (entry) => entry.glyphKind === "constraintVertical",
       ),
       "Vertical constraints should expose the vertical glyph in committed annotations.",
-    );
+    ).toBeTruthy();
   }
 
   function testHorizontalAndVerticalRejectUnsupportedTargets() {
@@ -287,10 +286,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const circle = session.definition.entities.find(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
-      circle?.kind === "circle",
+    expect(
+      circle?.kind,
       "Expected a circle target for unsupported constraint picks.",
-    );
+    ).toBe("circle");
     const initialConstraintCount = session.definition.constraints.length;
     const initialDimensionCount = session.definition.dimensions.length;
 
@@ -301,23 +300,22 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       entityId: circle.entityId,
     });
 
-    expectTrue(
-      session.definition.constraints.length === initialConstraintCount,
+    expect(
+      session.definition.constraints.length,
       "Unsupported horizontal targets should not commit partial constraints.",
-    );
-    expectTrue(
-      session.definition.dimensions.length === initialDimensionCount,
+    ).toBe(initialConstraintCount);
+    expect(
+      session.definition.dimensions.length,
       "Unsupported horizontal targets should not append dimensions.",
-    );
-    expectTrue(
-      session.constraintAuthoring?.selectedTargets.length === 0,
+    ).toBe(initialDimensionCount);
+    expect(
+      session.constraintAuthoring?.selectedTargets.length,
       "Unsupported horizontal targets should not stay selected.",
-    );
-    expectTrue(
-      getSketchToolPresentation(session)?.validation?.[0]?.message ===
-        "Horizontal needs the supported target combination.",
+    ).toBe(0);
+    expect(
+      getSketchToolPresentation(session)?.validation?.[0]?.message,
       "Unsupported horizontal targets should surface validation feedback.",
-    );
+    ).toBe("Horizontal needs the supported target combination.");
 
     session = beginSketchTool(session, "constraintVertical");
     session = selectSketchConstraintTarget(session, {
@@ -326,23 +324,22 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       entityId: circle.entityId,
     });
 
-    expectTrue(
-      session.definition.constraints.length === initialConstraintCount,
+    expect(
+      session.definition.constraints.length,
       "Unsupported vertical targets should not commit partial constraints.",
-    );
-    expectTrue(
-      session.definition.dimensions.length === initialDimensionCount,
+    ).toBe(initialConstraintCount);
+    expect(
+      session.definition.dimensions.length,
       "Unsupported vertical targets should not append dimensions.",
-    );
-    expectTrue(
-      session.constraintAuthoring?.selectedTargets.length === 0,
+    ).toBe(initialDimensionCount);
+    expect(
+      session.constraintAuthoring?.selectedTargets.length,
       "Unsupported vertical targets should not stay selected.",
-    );
-    expectTrue(
-      getSketchToolPresentation(session)?.validation?.[0]?.message ===
-        "Vertical needs the supported target combination.",
+    ).toBe(0);
+    expect(
+      getSketchToolPresentation(session)?.validation?.[0]?.message,
       "Unsupported vertical targets should surface validation feedback.",
-    );
+    ).toBe("Vertical needs the supported target combination.");
   }
 
   function testHorizontalAndVerticalUseSketchPlaneAxes() {
@@ -354,7 +351,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     horizontalSession = acceptSketchDraw(horizontalSession, [5, 4]);
 
     const [horizontalLineId] = horizontalSession.definition.entityIds;
-    expectTrue(horizontalLineId, "Expected a local line on the YZ plane.");
+    expect(
+      horizontalLineId,
+      "Expected a local line on the YZ plane.",
+    ).toBeTruthy();
 
     horizontalSession = beginSketchTool(
       horizontalSession,
@@ -369,20 +369,20 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const horizontalLine = horizontalSession.definition.entities.find(
       (entity) => entity.entityId === horizontalLineId,
     );
-    expectTrue(
-      horizontalLine?.kind === "lineSegment",
+    expect(
+      horizontalLine?.kind,
       "Expected the authored horizontal line to remain available.",
-    );
+    ).toBe("lineSegment");
     const horizontalStart = horizontalSession.definition.points.find(
       (point) => point.pointId === horizontalLine.startPointId,
     );
     const horizontalEnd = horizontalSession.definition.points.find(
       (point) => point.pointId === horizontalLine.endPointId,
     );
-    expectTrue(
+    expect(
       horizontalStart && horizontalEnd,
       "Expected solved horizontal line endpoints.",
-    );
+    ).toBeTruthy();
 
     const horizontalStartWorld = mapSketchPointToWorkspaceWorld(
       horizontalSession.plane,
@@ -392,15 +392,15 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       horizontalSession.plane,
       horizontalEnd.position,
     );
-    expectTrue(
+    expect(
       Math.abs(horizontalEnd.position[1] - horizontalStart.position[1]) < 1e-6,
       "Horizontal should solve in local sketch coordinates.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(horizontalEndWorld[2] - horizontalStartWorld[2]) < 1e-6 &&
         Math.abs(horizontalEndWorld[1] - horizontalStartWorld[1]) > 1e-3,
       "Horizontal on the YZ plane should align to world Y, not reinterpret against world X.",
-    );
+    ).toBeTruthy();
 
     let verticalSession = createNewSketchSession(
       createStandardPlaneDefinition("xz"),
@@ -410,7 +410,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     verticalSession = acceptSketchDraw(verticalSession, [4, 5]);
 
     const [verticalLineId] = verticalSession.definition.entityIds;
-    expectTrue(verticalLineId, "Expected a local line on the XZ plane.");
+    expect(
+      verticalLineId,
+      "Expected a local line on the XZ plane.",
+    ).toBeTruthy();
 
     verticalSession = beginSketchTool(verticalSession, "constraintVertical");
     verticalSession = selectSketchConstraintTarget(verticalSession, {
@@ -422,20 +425,20 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const verticalLine = verticalSession.definition.entities.find(
       (entity) => entity.entityId === verticalLineId,
     );
-    expectTrue(
-      verticalLine?.kind === "lineSegment",
+    expect(
+      verticalLine?.kind,
       "Expected the authored vertical line to remain available.",
-    );
+    ).toBe("lineSegment");
     const verticalStart = verticalSession.definition.points.find(
       (point) => point.pointId === verticalLine.startPointId,
     );
     const verticalEnd = verticalSession.definition.points.find(
       (point) => point.pointId === verticalLine.endPointId,
     );
-    expectTrue(
+    expect(
       verticalStart && verticalEnd,
       "Expected solved vertical line endpoints.",
-    );
+    ).toBeTruthy();
 
     const verticalStartWorld = mapSketchPointToWorkspaceWorld(
       verticalSession.plane,
@@ -445,16 +448,16 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       verticalSession.plane,
       verticalEnd.position,
     );
-    expectTrue(
+    expect(
       Math.abs(verticalEnd.position[0] - verticalStart.position[0]) < 1e-6,
       "Vertical should solve in local sketch coordinates.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(verticalEndWorld[0] - verticalStartWorld[0]) < 1e-6 &&
         Math.abs(verticalEndWorld[2] - verticalStartWorld[2]) > 1e-3 &&
         Math.abs(verticalEndWorld[1] - verticalStartWorld[1]) < 1e-6,
       "Vertical on the XZ plane should align to world Z, not reinterpret against world Y.",
-    );
+    ).toBeTruthy();
   }
 
   function testConcentricAuthoringCommitsLocalAndProjectedConstraints() {
@@ -462,10 +465,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const [firstCircle, secondCircle] = localSession.definition.entities.filter(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
+    expect(
       firstCircle?.kind === "circle" && secondCircle?.kind === "circle",
       "Expected two local circles.",
-    );
+    ).toBeTruthy();
 
     localSession = beginSketchTool(localSession, "constraintConcentric");
     localSession = selectSketchConstraintTarget(
@@ -477,26 +480,26 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       secondCircle.target,
     );
 
-    expectTrue(
-      localSession.definition.constraints[0]?.kind === "concentric",
+    expect(
+      localSession.definition.constraints[0]?.kind,
       "Concentric should commit a local durable constraint.",
-    );
+    ).toBe("concentric");
     const localAnnotation = getSketchAnnotationDescriptors(localSession).find(
       (entry) => entry.target.kind === "constraint",
     );
-    expectTrue(
-      localAnnotation?.glyphKind === "constraintConcentric",
+    expect(
+      localAnnotation?.glyphKind,
       "Concentric constraints should expose a concentric glyph.",
-    );
+    ).toBe("constraintConcentric");
 
     let projectedSession = createSessionWithTwoCircles();
     const projectedCircle = projectedSession.definition.entities.find(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
-      projectedCircle?.kind === "circle",
+    expect(
+      projectedCircle?.kind,
       "Expected a local circle for projected concentric authoring.",
-    );
+    ).toBe("circle");
     projectedSession = addProjectedReference(projectedSession, {
       referenceId: "ref_circle",
       status: "projected",
@@ -527,18 +530,18 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const projectedConstraint = projectedSession.definition.constraints[0];
-    expectTrue(
-      projectedConstraint?.kind === "concentricProjectedCurve",
+    expect(
+      projectedConstraint?.kind,
       "Concentric should commit a projected-curve durable constraint when one target is projected.",
-    );
+    ).toBe("concentricProjectedCurve");
     const center = projectedSession.definition.points.find(
       (point) => point.pointId === projectedCircle.centerPointId,
     );
-    expectTrue(
+    expect(
       center &&
         Math.hypot(center.position[0] - 6, center.position[1] - 3) < 1e-4,
       "Projected concentric should solve the local center onto the projected center.",
-    );
+    ).toBeTruthy();
   }
 
   function testMidpointAuthoringCommitsLocalAndProjectedConstraints() {
@@ -558,15 +561,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       entityId: lineId!,
     });
 
-    expectTrue(
-      localSession.definition.constraints[0]?.kind === "midpoint",
+    expect(
+      localSession.definition.constraints[0]?.kind,
       "Midpoint should commit a local midpoint constraint.",
-    );
-    expectTrue(
-      getSketchAnnotationDescriptors(localSession)[0]?.glyphKind ===
-        "constraintMidpoint",
+    ).toBe("midpoint");
+    expect(
+      getSketchAnnotationDescriptors(localSession)[0]?.glyphKind,
       "Midpoint should expose a midpoint glyph.",
-    );
+    ).toBe("constraintMidpoint");
 
     let projectedSession = createSessionWithTwoLines();
     const projectedPointId = projectedSession.definition.pointIds[0];
@@ -597,11 +599,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       pointId: projectedPointId!,
     });
 
-    expectTrue(
-      projectedSession.definition.constraints[0]?.kind ===
-        "midpointProjectedLine",
+    expect(
+      projectedSession.definition.constraints[0]?.kind,
       "Midpoint should commit a projected-line midpoint constraint.",
-    );
+    ).toBe("midpointProjectedLine");
   }
 
   function testPierceAuthoringCommitsLocalAndProjectedConstraints() {
@@ -621,15 +622,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       pointId: pointId!,
     });
 
-    expectTrue(
-      localSession.definition.constraints[0]?.kind === "pointOnCurve",
+    expect(
+      localSession.definition.constraints[0]?.kind,
       "Pierce should commit a local point-on-curve constraint.",
-    );
-    expectTrue(
-      getSketchAnnotationDescriptors(localSession)[0]?.glyphKind ===
-        "constraintPierce",
+    ).toBe("pointOnCurve");
+    expect(
+      getSketchAnnotationDescriptors(localSession)[0]?.glyphKind,
       "Pierce should expose a pierce glyph.",
-    );
+    ).toBe("constraintPierce");
 
     let projectedSession = createSessionWithTwoLines();
     const projectedPointId = projectedSession.definition.pointIds[0];
@@ -660,20 +660,19 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       geometryKind: "circle",
     });
 
-    expectTrue(
-      projectedSession.definition.constraints[0]?.kind ===
-        "pointOnProjectedCurve",
+    expect(
+      projectedSession.definition.constraints[0]?.kind,
       "Pierce should commit a projected point-on-curve constraint.",
-    );
+    ).toBe("pointOnProjectedCurve");
   }
 
   function testCollinearAuthoringCommitsLocalProjectedAndMultiTargetConstraints() {
     let localSession = createSessionWithTwoLines();
     const [referenceLineId, drivenLineId] = localSession.definition.entityIds;
-    expectTrue(
+    expect(
       referenceLineId && drivenLineId,
       "Expected two local lines for collinear authoring.",
-    );
+    ).toBeTruthy();
 
     localSession = beginSketchTool(localSession, "constraintCollinear");
     localSession = selectSketchConstraintTarget(localSession, {
@@ -688,31 +687,31 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const localConstraint = localSession.definition.constraints.at(-1);
-    expectTrue(
-      localConstraint?.kind === "collinear",
+    expect(
+      localConstraint?.kind,
       "Collinear should commit a durable local collinear constraint.",
-    );
-    expectTrue(
+    ).toBe("collinear");
+    expect(
       localConstraint?.kind === "collinear" &&
         localConstraint.target.kind === "localEntity" &&
         localConstraint.target.entityId === drivenLineId &&
         localConstraint.line.entityId === referenceLineId,
       "Line-line Collinear should preserve selection order with the first line as reference.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getSketchAnnotationDescriptors(localSession).some(
         (annotation) => annotation.glyphKind === "constraintCollinear",
       ),
       "Collinear should expose a committed collinear annotation glyph.",
-    );
+    ).toBeTruthy();
 
     let pointLineSession = createSessionWithTwoLines();
     const pointId = pointLineSession.definition.pointIds[2];
     const lineId = pointLineSession.definition.entityIds[0];
-    expectTrue(
+    expect(
       pointId && lineId,
       "Expected a point and line for point-line collinear authoring.",
-    );
+    ).toBeTruthy();
     pointLineSession = beginSketchTool(pointLineSession, "constraintCollinear");
     pointLineSession = selectSketchConstraintTarget(pointLineSession, {
       kind: "sketchPoint",
@@ -726,13 +725,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const pointConstraint = pointLineSession.definition.constraints.at(-1);
-    expectTrue(
+    expect(
       pointConstraint?.kind === "collinear" &&
         pointConstraint.target.kind === "localPoint" &&
         pointConstraint.target.pointId === pointId &&
         pointConstraint.line.entityId === lineId,
       "Point-line Collinear should commit with the editable point as the driven target regardless of selection order.",
-    );
+    ).toBeTruthy();
 
     let projectedSession = createSessionWithTwoLines();
     const projectedLineId = projectedSession.definition.entityIds[0];
@@ -764,12 +763,12 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const projectedConstraint = projectedSession.definition.constraints.at(-1);
-    expectTrue(
+    expect(
       projectedConstraint?.kind === "collinearProjectedLine" &&
         projectedConstraint.target.kind === "localEntity" &&
         projectedConstraint.projectedLine.kind === "projectedGeometry",
       "Collinear should commit editable local targets against a read-only projected line in either selection order.",
-    );
+    ).toBeTruthy();
 
     const definition = getSketchConstraintDefinition("constraintCollinear");
     const projectedTarget = definition.resolveTarget(
@@ -800,10 +799,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       },
       projectedSession.projectedReferences,
     );
-    expectTrue(
+    expect(
       projectedTarget && localLineTarget && localPointTarget,
       "Collinear registry should resolve projected lines, local lines, and local points.",
-    );
+    ).toBeTruthy();
 
     const multi = definition.createCommitContribution({
       sequence: 42,
@@ -814,13 +813,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       createConstraintId: (suffix) => `constraint_42_${suffix}` as const,
       createDimensionId: (suffix) => `dimension_42_${suffix}` as const,
     });
-    expectTrue(
+    expect(
       multi.constraints?.length === 2 &&
         multi.constraints.every(
           (constraint) => constraint.kind === "collinearProjectedLine",
         ),
       "Collinear commit contribution should support multiple editable targets against the first projected reference line.",
-    );
+    ).toBeTruthy();
   }
 
   function testCollinearRejectsUnsupportedDegenerateAndReadonlyOnlyTargets() {
@@ -828,10 +827,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const circle = unsupportedSession.definition.entities.find(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
-      circle?.kind === "circle",
+    expect(
+      circle?.kind,
       "Expected a circle target for unsupported collinear picks.",
-    );
+    ).toBe("circle");
     const unsupportedInitialConstraintCount =
       unsupportedSession.definition.constraints.length;
     unsupportedSession = beginSketchTool(
@@ -842,16 +841,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       unsupportedSession,
       circle.target,
     );
-    expectTrue(
-      unsupportedSession.definition.constraints.length ===
-        unsupportedInitialConstraintCount,
+    expect(
+      unsupportedSession.definition.constraints.length,
       "Unsupported Collinear targets should not commit constraints.",
-    );
-    expectTrue(
-      getSketchToolPresentation(unsupportedSession)?.validation?.[0]
-        ?.message === "Collinear needs the supported target combination.",
+    ).toBe(unsupportedInitialConstraintCount);
+    expect(
+      getSketchToolPresentation(unsupportedSession)?.validation?.[0]?.message,
       "Unsupported Collinear targets should surface validation feedback.",
-    );
+    ).toBe("Collinear needs the supported target combination.");
 
     let readonlySession = createSessionWithTwoLines();
     const readonlyInitialConstraintCount =
@@ -882,31 +879,30 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       datumId: "xAxis",
       geometryKind: "lineSegment",
     });
-    expectTrue(
-      readonlySession.definition.constraints.length ===
-        readonlyInitialConstraintCount,
+    expect(
+      readonlySession.definition.constraints.length,
       "Readonly-only Collinear targets should not commit constraints.",
-    );
-    expectTrue(
+    ).toBe(readonlyInitialConstraintCount);
+    expect(
       readonlySession.validationMessage?.includes("Collinear needs"),
       "Readonly-only Collinear should report validation feedback.",
-    );
+    ).toBeTruthy();
 
     let degenerateSession = createSessionWithTwoLines();
     const firstLine = degenerateSession.definition.entities.find(
       (entity) => entity.kind === "lineSegment",
     );
-    expectTrue(
-      firstLine?.kind === "lineSegment",
+    expect(
+      firstLine?.kind,
       "Expected a line fixture for degenerate collinear validation.",
-    );
+    ).toBe("lineSegment");
     const start = degenerateSession.definition.points.find(
       (point) => point.pointId === firstLine.startPointId,
     );
-    expectTrue(
+    expect(
       start,
       "Expected a start point for degenerate collinear validation.",
-    );
+    ).toBeTruthy();
     const degenerateDefinition = {
       ...degenerateSession.definition,
       points: degenerateSession.definition.points.map((point) =>
@@ -930,11 +926,11 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const standalonePoint = degenerateSession.definition.entities.find(
       (entity) => entity.kind === "point",
     );
-    expectTrue(
+    expect(
       degenerateLine?.kind === "lineSegment" &&
         standalonePoint?.kind === "point",
       "Expected degenerate line and standalone point fixtures.",
-    );
+    ).toBeTruthy();
 
     degenerateSession = beginSketchTool(
       degenerateSession,
@@ -949,14 +945,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       sketchId: "sketch_draft",
       pointId: standalonePoint.pointId,
     });
-    expectTrue(
-      degenerateSession.definition.constraints.length === 0,
+    expect(
+      degenerateSession.definition.constraints.length,
       "Degenerate Collinear references should not commit constraints.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       degenerateSession.validationMessage?.includes("Collinear needs"),
       "Degenerate Collinear references should report validation feedback.",
-    );
+    ).toBeTruthy();
   }
 
   function testFixGeometryCommitsSupportedTargets() {
@@ -968,19 +964,18 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       sketchId: "sketch_draft",
       pointId: pointId!,
     });
-    expectTrue(
-      pointSession.definition.constraints.length === 1,
+    expect(
+      pointSession.definition.constraints.length,
       "Fixing a point should commit one fix-point constraint.",
-    );
-    expectTrue(
-      pointSession.definition.constraints[0]?.kind === "fixPoint",
+    ).toBe(1);
+    expect(
+      pointSession.definition.constraints[0]?.kind,
       "Point fix should use fixPoint.",
-    );
-    expectTrue(
-      getSketchAnnotationDescriptors(pointSession)[0]?.glyphKind ===
-        "constraintFixed",
+    ).toBe("fixPoint");
+    expect(
+      getSketchAnnotationDescriptors(pointSession)[0]?.glyphKind,
       "Fix constraints should expose the fixed glyph.",
-    );
+    ).toBe("constraintFixed");
 
     let lineSession = createSessionWithTwoLines();
     const lineId = lineSession.definition.entityIds[0];
@@ -990,32 +985,32 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       sketchId: "sketch_draft",
       entityId: lineId!,
     });
-    expectTrue(
-      lineSession.definition.constraints.length === 2,
+    expect(
+      lineSession.definition.constraints.length,
       "Fixing a line should fix both endpoints.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       lineSession.definition.constraints.every(
         (constraint) => constraint.kind === "fixPoint",
       ),
       "Line fix should use fixPoint constraints.",
-    );
+    ).toBeTruthy();
 
     let circleSession = createSessionWithTwoCircles();
     const circle = circleSession.definition.entities.find(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(circle?.kind === "circle", "Expected a local circle.");
+    expect(circle?.kind, "Expected a local circle.").toBe("circle");
     circleSession = beginSketchTool(circleSession, "constraintFix");
     circleSession = selectSketchConstraintTarget(circleSession, circle.target);
-    expectTrue(
-      circleSession.definition.constraints.length === 1,
+    expect(
+      circleSession.definition.constraints.length,
       "Fixing a circle should fix its center point.",
-    );
-    expectTrue(
-      circleSession.definition.dimensions[0]?.kind === "circleRadius",
+    ).toBe(1);
+    expect(
+      circleSession.definition.dimensions[0]?.kind,
       "Fixing a circle should add a radius dimension for the current size.",
-    );
+    ).toBe("circleRadius");
   }
 
   function testNormalAuthoringCommitsValidTargetsAndRejectsInvalidTargets() {
@@ -1026,10 +1021,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const circle = session.definition.entities.find(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
+    expect(
       line?.kind === "lineSegment" && circle?.kind === "circle",
       "Expected a line and circle for normal authoring.",
-    );
+    ).toBeTruthy();
 
     session = beginSketchTool(session, "constraintNormal");
     session = selectSketchConstraintTarget(session, line.target);
@@ -1040,28 +1035,28 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       pointId: line.startPointId,
     });
 
-    expectTrue(
+    expect(
       session.definition.constraints.some(
         (constraint) => constraint.kind === "normal",
       ),
       "Normal should commit a local normal constraint.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getSketchAnnotationDescriptors(session).some(
         (annotation) => annotation.glyphKind === "constraintNormal",
       ),
       "Normal should expose a normal glyph.",
-    );
+    ).toBeTruthy();
 
     let invalidSession = createSessionWithTwoCircles();
     const [firstCircle, secondCircle] =
       invalidSession.definition.entities.filter(
         (entity) => entity.kind === "circle",
       );
-    expectTrue(
+    expect(
       firstCircle?.kind === "circle" && secondCircle?.kind === "circle",
       "Expected two circles for invalid normal authoring.",
-    );
+    ).toBeTruthy();
     invalidSession = beginSketchTool(invalidSession, "constraintNormal");
     invalidSession = selectSketchConstraintTarget(
       invalidSession,
@@ -1077,14 +1072,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       pointId: invalidSession.definition.pointIds[0]!,
     });
 
-    expectTrue(
-      invalidSession.definition.constraints.length === 0,
+    expect(
+      invalidSession.definition.constraints.length,
       "Invalid normal targets should not commit a partial constraint.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       invalidSession.validationMessage?.includes("Normal needs"),
       "Invalid normal targets should report validation feedback.",
-    );
+    ).toBeTruthy();
   }
 
   function testSymmetricAuthoringCommitsLocalAndProjectedAxes() {
@@ -1110,15 +1105,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       entityId: axisId!,
     });
 
-    expectTrue(
-      localSession.definition.constraints[0]?.kind === "symmetric",
+    expect(
+      localSession.definition.constraints[0]?.kind,
       "Symmetric should commit a local-axis constraint.",
-    );
-    expectTrue(
-      getSketchAnnotationDescriptors(localSession)[0]?.glyphKind ===
-        "constraintSymmetric",
+    ).toBe("symmetric");
+    expect(
+      getSketchAnnotationDescriptors(localSession)[0]?.glyphKind,
       "Symmetric should expose a symmetric glyph.",
-    );
+    ).toBe("constraintSymmetric");
 
     let projectedSession = createSessionWithTwoLines();
     projectedSession = addProjectedReference(projectedSession, {
@@ -1152,11 +1146,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       pointId: projectedSession.definition.pointIds[1]!,
     });
 
-    expectTrue(
-      projectedSession.definition.constraints[0]?.kind ===
-        "symmetricProjectedLine",
+    expect(
+      projectedSession.definition.constraints[0]?.kind,
       "Symmetric should commit a projected-axis constraint.",
-    );
+    ).toBe("symmetricProjectedLine");
   }
 
   function testGeometricConstraintAuthoringCommitsDurableRecord() {
@@ -1175,44 +1168,44 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       entityId: secondLineId!,
     });
 
-    expectTrue(
-      session.definition.constraintIds.length === 1,
+    expect(
+      session.definition.constraintIds.length,
       "Parallel authoring should append one durable constraint record.",
-    );
-    expectTrue(
-      session.constraintAuthoring === null,
+    ).toBe(1);
+    expect(
+      session.constraintAuthoring,
       "Geometric constraints should commit immediately after the final selection.",
-    );
+    ).toBe(null);
     const annotation = getSketchAnnotationDescriptors(session).find(
       (entry) => entry.target.kind === "constraint",
     );
-    expectTrue(
+    expect(
       annotation,
       "Committed geometric constraints should be exposed as durable annotation descriptors.",
-    );
-    expectTrue(
-      annotation.glyphKind === "constraintParallel",
+    ).toBeTruthy();
+    expect(
+      annotation.glyphKind,
       "Parallel constraints should expose a distinct glyph kind.",
-    );
-    expectTrue(
-      annotation.anchor.kind === "sketchPoint",
+    ).toBe("constraintParallel");
+    expect(
+      annotation.anchor.kind,
       "Constraint descriptors should expose a viewport anchor.",
-    );
-    expectTrue(
+    ).toBe("sketchPoint");
+    expect(
       annotation.affectedGeometryRefs.length === 2 &&
         annotation.affectedGeometryRefs.every(
           (target) => target.kind === "sketchEntity",
         ),
       "Constraint descriptors should expose affected sketch geometry refs.",
-    );
+    ).toBeTruthy();
 
     session = selectSketchAnnotation(session, annotation.target);
     session = deleteSelectedSketchAnnotation(session);
 
-    expectTrue(
-      session.definition.constraintIds.length === 0,
+    expect(
+      session.definition.constraintIds.length,
       "Deleting the selected constraint should remove the durable constraint record.",
-    );
+    ).toBe(0);
   }
 
   function testProjectedCoincidentAuthoringCommitsTypedOperand() {
@@ -1245,16 +1238,16 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const constraint = session.definition.constraints[0];
-    expectTrue(
-      constraint?.kind === "coincidentProjectedPoint",
+    expect(
+      constraint?.kind,
       "Coincident authoring should commit a projected-point constraint through normal target selection.",
-    );
-    expectTrue(
+    ).toBe("coincidentProjectedPoint");
+    expect(
       constraint.projectedPoint.reference.referenceId === "ref_point" &&
         constraint.projectedPoint.reference.geometryId ===
           "projected_geometry_point",
       "Projected-point coincident authoring should store the selected reference geometry operand.",
-    );
+    ).toBeTruthy();
   }
 
   function testProjectedCoincidentAuthoringCanConstrainCircleCenter() {
@@ -1282,10 +1275,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const circle = session.definition.entities.find(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
-      circle?.kind === "circle",
+    expect(
+      circle?.kind,
       "Circle authoring should create a local circle entity.",
-    );
+    ).toBe("circle");
 
     session = beginSketchTool(session, "constraintCoincident");
     session = selectSketchConstraintTarget(session, {
@@ -1303,22 +1296,22 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const constraint = session.definition.constraints.find(
       (entry) => entry.kind === "coincidentProjectedPoint",
     );
-    expectTrue(
-      constraint?.kind === "coincidentProjectedPoint",
+    expect(
+      constraint?.kind,
       "Coincident authoring should support selecting a circle and a projected point to constrain the circle center.",
-    );
-    expectTrue(
-      constraint.point.pointId === circle.centerPointId,
+    ).toBe("coincidentProjectedPoint");
+    expect(
+      constraint.point.pointId,
       "Circle-to-projected-point coincident authoring should target the circle center point.",
-    );
+    ).toBe(circle.centerPointId);
     const center = session.definition.points.find(
       (point) => point.pointId === circle.centerPointId,
     );
-    expectTrue(
+    expect(
       center &&
         Math.hypot(center.position[0] - 3, center.position[1] - 3) < 1e-6,
       "Circle-to-projected-point coincident authoring should solve the circle center onto the projected point immediately.",
-    );
+    ).toBeTruthy();
   }
 
   function testCoincidentAuthoringCommitsLocalPointOnCurveOperands() {
@@ -1388,14 +1381,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       const targetPointId = session.definition.pointIds.at(-1);
       const curveId = testCase.selectCurve(session);
 
-      expectTrue(
+      expect(
         Boolean(targetPointId),
         `${testCase.label} setup should create a selectable sketch point.`,
-      );
-      expectTrue(
+      ).toBeTruthy();
+      expect(
         Boolean(curveId),
         `${testCase.label} setup should create a selectable sketch curve.`,
-      );
+      ).toBeTruthy();
 
       session = beginSketchTool(session, "constraintCoincident");
       session = selectSketchConstraintTarget(session, {
@@ -1410,16 +1403,16 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       });
 
       const constraint = session.definition.constraints.at(-1);
-      expectTrue(
-        constraint?.kind === "pointOnCurve",
+      expect(
+        constraint?.kind,
         `Coincident authoring should commit a local point-on-${testCase.label} constraint.`,
-      );
-      expectTrue(
+      ).toBe("pointOnCurve");
+      expect(
         constraint.kind === "pointOnCurve" &&
           constraint.point.pointId === targetPointId &&
           constraint.curve.entityId === curveId,
         `Local point-on-${testCase.label} coincident authoring should store typed point and curve operands.`,
-      );
+      ).toBeTruthy();
     }
   }
 
@@ -1428,10 +1421,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const circles = session.definition.entities.filter(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
-      circles.length === 2,
+    expect(
+      circles.length,
       "Circle setup should create two selectable circle entities.",
-    );
+    ).toBe(2);
 
     session = beginSketchTool(session, "constraintCoincident");
     session = selectSketchConstraintTarget(session, {
@@ -1446,16 +1439,16 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const constraint = session.definition.constraints.at(-1);
-    expectTrue(
-      constraint?.kind === "coincident",
+    expect(
+      constraint?.kind,
       "Coincident authoring should support selecting two local circle entities by constraining their centers.",
-    );
-    expectTrue(
+    ).toBe("coincident");
+    expect(
       constraint.kind === "coincident" &&
         constraint.pointIds[0] === circles[0]!.centerPointId &&
         constraint.pointIds[1] === circles[1]!.centerPointId,
       "Local circle-circle coincident authoring should store the selected circle center points.",
-    );
+    ).toBeTruthy();
   }
 
   function testCoincidentAuthoringMakesLocalLinesShareUnderlyingGeometry() {
@@ -1463,10 +1456,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const lines = session.definition.entities.filter(
       (entity) => entity.kind === "lineSegment",
     );
-    expectTrue(
-      lines.length === 2,
+    expect(
+      lines.length,
       "Line setup should create two selectable line entities.",
-    );
+    ).toBe(2);
 
     session = beginSketchTool(session, "constraintCoincident");
     session = selectSketchConstraintTarget(session, {
@@ -1481,12 +1474,12 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const constraints = session.definition.constraints.slice(-2);
-    expectTrue(
+    expect(
       constraints.length === 2 &&
         constraints.every((constraint) => constraint.kind === "pointOnCurve"),
       "Coincident authoring should constrain the second selected line onto the first selected line.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       constraints.every(
         (constraint) =>
           constraint.kind === "pointOnCurve" &&
@@ -1495,7 +1488,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
             constraint.point.pointId === lines[1]!.endPointId),
       ),
       "Line-line coincident authoring should store the driven line endpoints against the first selected line.",
-    );
+    ).toBeTruthy();
   }
 
   function testProjectedParallelAuthoringCommitsTypedOperand() {
@@ -1529,16 +1522,16 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const constraint = session.definition.constraints[0];
-    expectTrue(
-      constraint?.kind === "parallelProjectedLine",
+    expect(
+      constraint?.kind,
       "Parallel authoring should commit a projected-line constraint through normal target selection.",
-    );
-    expectTrue(
+    ).toBe("parallelProjectedLine");
+    expect(
       constraint.projectedLine.reference.referenceId === "ref_line" &&
         constraint.projectedLine.reference.geometryId ===
           "projected_geometry_line",
       "Projected parallel authoring should store the selected reference geometry operand.",
-    );
+    ).toBeTruthy();
   }
 
   function testSketchDatumAuthoringCommitsTypedOperands() {
@@ -1561,12 +1554,12 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const coincident = coincidentSession.definition.constraints[0];
-    expectTrue(
+    expect(
       coincident?.kind === "coincidentProjectedPoint" &&
         coincident.projectedPoint.kind === "sketchDatum" &&
         coincident.projectedPoint.datum === "origin",
       "Coincident authoring should store the sketch origin as a durable datum operand.",
-    );
+    ).toBeTruthy();
 
     let parallelSession = createSessionWithTwoLines();
     const [lineId] = parallelSession.definition.entityIds;
@@ -1584,12 +1577,12 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const parallel = parallelSession.definition.constraints[0];
-    expectTrue(
+    expect(
       parallel?.kind === "parallelProjectedLine" &&
         parallel.projectedLine.kind === "sketchDatum" &&
         parallel.projectedLine.datum === "xAxis",
       "Parallel authoring should store the sketch X axis as a durable datum operand.",
-    );
+    ).toBeTruthy();
   }
 
   function testSketchDatumDimensionAuthoringCommitsTypedOperands() {
@@ -1615,12 +1608,12 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const pointDatum = pointSession.definition.dimensions.find(
       (dimension) => dimension.kind === "pointDatumDistance",
     );
-    expectTrue(
+    expect(
       pointDatum?.kind === "pointDatumDistance" &&
         pointDatum.point.pointId === pointId &&
         pointDatum.datum.datum === "origin",
       "Point-to-origin distance authoring should commit a durable datum-point dimension.",
-    );
+    ).toBeTruthy();
 
     let lineSession = createNewSketchSessionFromSupport({
       kind: "construction",
@@ -1650,13 +1643,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const lineDatum = lineSession.definition.dimensions.find(
       (dimension) => dimension.kind === "lineDistance",
     );
-    expectTrue(
+    expect(
       lineDatum?.kind === "lineDistance" &&
         lineDatum.lines.some(
           (line) => line.kind === "sketchDatum" && line.datum === "xAxis",
         ),
       "Line-to-axis distance authoring should commit a durable datum-axis operand.",
-    );
+    ).toBeTruthy();
   }
 
   function testPointOnProjectedCurveAuthoringCommitsTypedOperand() {
@@ -1716,15 +1709,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       });
 
       const constraint = session.definition.constraints[0];
-      expectTrue(
-        constraint?.kind === "pointOnProjectedCurve",
+      expect(
+        constraint?.kind,
         `Coincident authoring should commit a point-on-projected-${testCase.geometryKind} constraint.`,
-      );
-      expectTrue(
-        constraint.projectedCurve.reference.geometryId ===
-          testCase.geometry.geometryId,
+      ).toBe("pointOnProjectedCurve");
+      expect(
+        constraint.projectedCurve.reference.geometryId,
         "Point-on-projected-curve authoring should store the selected reference geometry operand.",
-      );
+      ).toBe(testCase.geometry.geometryId);
     }
   }
 
@@ -1760,35 +1752,34 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     });
 
     const constraint = session.definition.constraints[0];
-    expectTrue(
-      constraint?.kind === "perpendicularProjectedLine",
+    expect(
+      constraint?.kind,
       "Perpendicular authoring should commit a durable projected-line constraint when the second target is projected.",
-    );
-    expectTrue(
+    ).toBe("perpendicularProjectedLine");
+    expect(
       constraint.projectedLine.reference.referenceId === "ref_edge" &&
         constraint.projectedLine.reference.geometryId ===
           "projected_geometry_line",
       "Projected-line constraint should store typed reference and geometry IDs.",
-    );
-    expectTrue(
-      session.commitRequest?.definition.constraints[0]?.kind ===
-        "perpendicularProjectedLine",
+    ).toBeTruthy();
+    expect(
+      session.commitRequest?.definition.constraints[0]?.kind,
       "Reference-targeted constraint should be present in the modeling-boundary commit payload.",
-    );
+    ).toBe("perpendicularProjectedLine");
 
     const annotation = getSketchAnnotationDescriptors(session).find(
       (entry) => entry.target.kind === "constraint",
     );
-    expectTrue(
-      annotation?.glyphKind === "constraintPerpendicular",
+    expect(
+      annotation?.glyphKind,
       "Reference-targeted line constraint should render a perpendicular annotation.",
-    );
-    expectTrue(
+    ).toBe("constraintPerpendicular");
+    expect(
       annotation.affectedGeometryRefs.some(
         (target) => target.kind === "projectedReferenceGeometry",
       ),
       "Reference-targeted annotation should highlight the projected target.",
-    );
+    ).toBeTruthy();
   }
 
   function testDimensionalConstraintShowsFloatingInputAndSupportsDeletion() {
@@ -1809,10 +1800,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     session = pinSketchConstraintPreview(session, [5, 12]);
 
     const presentation = getSketchToolPresentation(session);
-    expectTrue(
-      presentation?.floatingInput?.label === "Distance",
+    expect(
+      presentation?.floatingInput?.label,
       "Distance authoring should request a floating numeric input.",
-    );
+    ).toBe("Distance");
 
     session = patchSketchConstraintValue(session, { value: 24 });
     session = patchSketchConstraintValue(session, {
@@ -1822,47 +1813,47 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const annotation = getSketchAnnotationDescriptors(session).find(
       (entry) => entry.target.kind === "dimension",
     );
-    expectTrue(
+    expect(
       annotation,
       "Committed dimensions should be exposed as durable annotation descriptors.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       annotation.glyphKind === "dimensionDistance" ||
         annotation.glyphKind === "dimensionHorizontal" ||
         annotation.glyphKind === "dimensionVertical",
       "Distance dimensions should expose a dimension-specific glyph kind.",
-    );
-    expectTrue(
-      annotation.anchor.kind === "sketchPoint",
+    ).toBeTruthy();
+    expect(
+      annotation.anchor.kind,
       "Dimension descriptors should expose a viewport anchor.",
-    );
-    expectTrue(
-      annotation.visibleLabel === "24.00",
+    ).toBe("sketchPoint");
+    expect(
+      annotation.visibleLabel,
       "Committed dimensions should expose compact visible value text.",
-    );
-    expectTrue(
-      annotation.detail === "24.00 mm distance",
+    ).toBe("24.00");
+    expect(
+      annotation.detail,
       "Committed distance dimension details should avoid deprecated directional role labels.",
-    );
-    expectTrue(
-      annotation.dragHandle?.dimensionId === annotation.target.dimensionId,
+    ).toBe("24.00 mm distance");
+    expect(
+      annotation.dragHandle?.dimensionId,
       "Committed dimensions should expose annotation-chip drag metadata for durable placement updates.",
-    );
-    expectTrue(
+    ).toBe(annotation.target.dimensionId);
+    expect(
       annotation.affectedGeometryRefs.length === 2 &&
         annotation.affectedGeometryRefs.every(
           (target) => target.kind === "sketchPoint",
         ),
       "Dimension descriptors should expose affected sketch point refs.",
-    );
+    ).toBeTruthy();
 
     session = selectSketchAnnotation(session, annotation!.target);
     session = deleteSelectedSketchAnnotation(session);
 
-    expectTrue(
-      session.definition.dimensionIds.length === 0,
+    expect(
+      session.definition.dimensionIds.length,
       "Deleting the selected dimension should remove the durable dimension record.",
-    );
+    ).toBe(0);
   }
 
   function testCommittedDimensionAnnotationReopensValueInputAndEditsDurableRecord() {
@@ -1888,38 +1879,38 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const annotation = getSketchAnnotationDescriptors(session).find(
       (entry) => entry.target.kind === "dimension",
     );
-    expectTrue(
-      annotation?.target.kind === "dimension",
+    expect(
+      annotation?.target.kind,
       "Committed dimension should expose an editable annotation target.",
-    );
+    ).toBe("dimension");
 
     session = beginSketchAnnotationEdit(session, annotation.target);
 
     const input = getSketchToolPresentation(session)?.floatingInput;
-    expectTrue(
-      input?.label === "Distance",
+    expect(
+      input?.label,
       "Double-clicking a distance annotation should reopen its value input.",
-    );
-    expectTrue(
-      input.value === 24,
+    ).toBe("Distance");
+    expect(
+      input.value,
       "The reopened distance input should use the durable dimension value.",
-    );
+    ).toBe(24);
 
     session = patchSketchConstraintValue(session, { value: 31 });
     session = patchSketchConstraintValue(session, {
       intent: "commitAnnotationValue",
     });
 
-    expectTrue(
+    expect(
       session.definition.dimensions[0]?.kind === "distance" &&
         session.definition.dimensions[0].value === 31,
       "Committing the reopened distance input should update the durable dimension record.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       session.commitRequest?.definition.dimensions[0]?.kind === "distance" &&
         session.commitRequest.definition.dimensions[0].value === 31,
       "Committing the reopened distance input should update the durable sketch mutation payload.",
-    );
+    ).toBeTruthy();
   }
 
   function testCommittedRectangleWidthEditSolvesDraftGeometry() {
@@ -1937,10 +1928,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         entry.glyphKind === "dimensionHorizontal" &&
         entry.target.kind === "dimension",
     );
-    expectTrue(
-      annotation?.target.kind === "dimension",
+    expect(
+      annotation?.target.kind,
       "Rectangle width should expose an editable horizontal dimension.",
-    );
+    ).toBe("dimension");
 
     session = patchSketchDimensionAnnotationPlacement(session, {
       intent: "setDimensionAnnotationPlacement",
@@ -1952,12 +1943,12 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         entry.target.kind === "dimension" &&
         entry.target.dimensionId === annotation.target.dimensionId,
     );
-    expectTrue(
+    expect(
       movedAnnotation?.anchor.kind === "sketchPoint" &&
         Math.abs(movedAnnotation.anchor.point[0] - 5) < 1e-9 &&
         Math.abs(movedAnnotation.anchor.point[1] + 4) < 1e-9,
       "Committed dimension annotation chips should use the dynamic dimension label placement.",
-    );
+    ).toBeTruthy();
 
     session = beginSketchAnnotationEdit(session, annotation.target);
     session = patchSketchConstraintValue(session, { value: 20 });
@@ -1968,35 +1959,35 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const dimension = session.definition.dimensions.find(
       (entry) => entry.dimensionId === annotation.target.dimensionId,
     );
-    expectTrue(
+    expect(
       dimension?.kind === "distance" && dimension.value === 20,
       "Width edit should update the durable dimension.",
-    );
-    expectTrue(
-      dimension.pointIds.length === 2,
+    ).toBeTruthy();
+    expect(
+      dimension.pointIds.length,
       "Width dimension should keep its point pair.",
-    );
+    ).toBe(2);
 
     const points = new Map(
       session.definition.points.map((point) => [point.pointId, point.position]),
     );
     const left = points.get(dimension.pointIds[0]!);
     const right = points.get(dimension.pointIds[1]!);
-    expectTrue(
+    expect(
       left && right,
       "Edited width dimension should reference solved draft points.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       Math.abs(right[0] - left[0] - 20) < 1e-4,
       "Width edit should solve the draft geometry before finish.",
-    );
+    ).toBeTruthy();
     const payloadDimension = session.commitRequest?.definition.dimensions.find(
       (entry) => entry.dimensionId === annotation.target.dimensionId,
     );
-    expectTrue(
+    expect(
       payloadDimension?.kind === "distance" && payloadDimension.value === 20,
       "Width edit should update the durable sketch mutation payload.",
-    );
+    ).toBeTruthy();
   }
 
   function testCommittedCircleRadiusEditUpdatesEntityRadius() {
@@ -2014,10 +2005,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         entry.glyphKind === "dimensionRadius" &&
         entry.target.kind === "dimension",
     );
-    expectTrue(
-      annotation?.target.kind === "dimension",
+    expect(
+      annotation?.target.kind,
       "Circle radius should expose an editable radius dimension.",
-    );
+    ).toBe("dimension");
 
     session = beginSketchAnnotationEdit(session, annotation.target);
     session = patchSketchConstraintValue(session, { value: 18 });
@@ -2028,24 +2019,24 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const dimension = session.definition.dimensions.find(
       (entry) => entry.dimensionId === annotation.target.dimensionId,
     );
-    expectTrue(
+    expect(
       dimension?.kind === "circleRadius" && dimension.value === 18,
       "Radius edit should update the durable dimension.",
-    );
+    ).toBeTruthy();
     const circle = session.definition.entities.find(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
+    expect(
       circle?.kind === "circle" && circle.radius === 18,
       "Radius edit should update the authored circle radius.",
-    );
+    ).toBeTruthy();
     const payloadCircle = session.commitRequest?.definition.entities.find(
       (entity) => entity.kind === "circle",
     );
-    expectTrue(
+    expect(
       payloadCircle?.kind === "circle" && payloadCircle.radius === 18,
       "Radius edit should update the durable sketch mutation payload.",
-    );
+    ).toBeTruthy();
   }
 
   function testExpandedDimensionAuthoringCommitsDurablePayloads() {
@@ -2059,7 +2050,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const circleId = circleSession.definition.entities.find(
       (entity) => entity.kind === "circle",
     )?.entityId;
-    expectTrue(circleId, "Circle fixture should create a circle entity.");
+    expect(
+      circleId,
+      "Circle fixture should create a circle entity.",
+    ).toBeTruthy();
 
     circleSession = beginSketchTool(circleSession, "dimensionDistance");
     circleSession = selectSketchConstraintTarget(circleSession, {
@@ -2067,14 +2061,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       sketchId: "sketch_draft",
       entityId: circleId,
     });
-    expectTrue(
+    expect(
       getSketchToolPresentation(circleSession)?.overlays?.some(
         (overlay) =>
           overlay.kind === "dimensionLine" &&
           overlay.referenceKind === "diameter",
       ),
       "Selecting one circle with Dimension should start a diameter preview before committing the value.",
-    );
+    ).toBeTruthy();
     circleSession = patchSketchConstraintValue(circleSession, {
       intent: "setConstraintAnnotationPlacement",
       point: [0, 5],
@@ -2086,14 +2080,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const diameter = circleSession.definition.dimensions.find(
       (dimension) => dimension.kind === "diameter",
     );
-    expectTrue(
+    expect(
       diameter?.kind === "diameter" &&
         diameter.entityId === circleId &&
         diameter.value === 12 &&
         diameter.annotationPlacement?.kind === "dimensionLine",
       "Diameter authoring should commit a durable diameter dimension with annotation placement.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getSketchToolPresentation(circleSession)?.overlays?.some(
         (overlay) =>
           overlay.kind === "dimensionLine" &&
@@ -2101,7 +2095,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
           !overlay.dragHandle,
       ),
       "Committed diameter dimensions should keep overlay geometry visible without reusing it as the durable drag handle.",
-    );
+    ).toBeTruthy();
     circleSession = patchSketchDimensionAnnotationPlacement(circleSession, {
       intent: "setDimensionAnnotationPlacement",
       dimensionId: diameter.dimensionId,
@@ -2110,19 +2104,19 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const movedDiameter = circleSession.definition.dimensions.find(
       (dimension) => dimension.dimensionId === diameter.dimensionId,
     );
-    expectTrue(
+    expect(
       movedDiameter?.kind === "diameter" &&
         movedDiameter.annotationPlacement?.kind === "dimensionLine" &&
         Math.abs(movedDiameter.annotationPlacement.angleRadians ?? 0) < 1e-9,
       "Dragging a committed diameter annotation should update its durable annotation placement.",
-    );
+    ).toBeTruthy();
 
     let lengthSession = createSessionWithTwoLines();
     const [lengthLineId] = lengthSession.definition.entityIds;
-    expectTrue(
+    expect(
       lengthLineId,
       "Line length fixture should create a line entity.",
-    );
+    ).toBeTruthy();
     lengthSession = beginSketchTool(lengthSession, "dimensionDistance");
     lengthSession = selectSketchConstraintTarget(lengthSession, {
       kind: "sketchEntity",
@@ -2132,17 +2126,16 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const lengthPreview = getSketchToolPresentation(
       lengthSession,
     )?.overlays?.find((overlay) => overlay.kind === "dimensionLine");
-    expectTrue(
+    expect(
       lengthPreview?.kind === "dimensionLine" &&
         lengthPreview.referenceKind === "lineLength",
       "Selecting one local line with Dimension should preview an editable line-length dimension.",
-    );
+    ).toBeTruthy();
     lengthSession = pinSketchConstraintPreview(lengthSession, [5, -2]);
-    expectTrue(
-      getSketchToolPresentation(lengthSession)?.floatingInput?.label ===
-        "Length",
+    expect(
+      getSketchToolPresentation(lengthSession)?.floatingInput?.label,
       "Pinning a single-line Dimension preview should open line-length value entry.",
-    );
+    ).toBe("Length");
     lengthSession = patchSketchConstraintValue(lengthSession, { value: 8 });
     lengthSession = patchSketchConstraintValue(lengthSession, {
       intent: "commitConstraintValue",
@@ -2150,20 +2143,20 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const lineLength = lengthSession.definition.dimensions.find(
       (dimension) => dimension.kind === "lineLength",
     );
-    expectTrue(
+    expect(
       lineLength?.kind === "lineLength" &&
         lineLength.entityId === lengthLineId &&
         lineLength.value === 8 &&
         lineLength.annotationPlacement?.kind === "dimensionLine",
       "Single-line Dimension authoring should commit a durable line-length dimension tied to the selected edge.",
-    );
+    ).toBeTruthy();
 
     let lineSession = createSessionWithTwoLines();
     const [firstLineId, secondLineId] = lineSession.definition.entityIds;
-    expectTrue(
+    expect(
       firstLineId && secondLineId,
       "Line fixture should create two line entities.",
-    );
+    ).toBeTruthy();
     lineSession = beginSketchTool(lineSession, "dimensionDistance");
     lineSession = selectSketchConstraintTarget(lineSession, {
       kind: "sketchEntity",
@@ -2182,20 +2175,20 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const lineDistance = lineSession.definition.dimensions.find(
       (dimension) => dimension.kind === "lineDistance",
     );
-    expectTrue(
+    expect(
       lineDistance?.kind === "lineDistance" &&
         lineDistance.lines.every((line) => line.kind === "localEntity") &&
         lineDistance.value === 6,
       "Parallel line targets should commit a durable line-to-line distance dimension.",
-    );
+    ).toBeTruthy();
 
     let pointLineSession = createSessionWithTwoLines();
     const lineId = pointLineSession.definition.entityIds[0];
     const pointId = pointLineSession.definition.pointIds[3];
-    expectTrue(
+    expect(
       lineId && pointId,
       "Point-line fixture should expose a line and a point.",
-    );
+    ).toBeTruthy();
     pointLineSession = beginSketchTool(pointLineSession, "dimensionDistance");
     pointLineSession = selectSketchConstraintTarget(pointLineSession, {
       kind: "sketchPoint",
@@ -2216,13 +2209,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const pointLineDistance = pointLineSession.definition.dimensions.find(
       (dimension) => dimension.kind === "linePointDistance",
     );
-    expectTrue(
+    expect(
       pointLineDistance?.kind === "linePointDistance" &&
         pointLineDistance.line.kind === "localEntity" &&
         pointLineDistance.point.kind === "localPoint" &&
         pointLineDistance.value === 4,
       "Line and point targets should commit a durable line-to-point distance dimension in either selection order.",
-    );
+    ).toBeTruthy();
 
     let angleSession = createNewSketchSessionFromSupport({
       kind: "construction",
@@ -2236,10 +2229,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     angleSession = acceptSketchDraw(angleSession, [5, 5]);
     const [horizontalLineId, verticalLineId] =
       angleSession.definition.entityIds;
-    expectTrue(
+    expect(
       horizontalLineId && verticalLineId,
       "Angle fixture should create two non-parallel line entities.",
-    );
+    ).toBeTruthy();
     angleSession = beginSketchTool(angleSession, "dimensionDistance");
     angleSession = selectSketchConstraintTarget(angleSession, {
       kind: "sketchEntity",
@@ -2254,7 +2247,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const anglePreview = getSketchToolPresentation(
       angleSession,
     )?.overlays?.find((overlay) => overlay.kind === "angleArc");
-    expectTrue(
+    expect(
       anglePreview?.kind === "angleArc" &&
         Math.abs(anglePreview.center[0] - 5) < 1e-9 &&
         Math.abs(anglePreview.center[1]) < 1e-9 &&
@@ -2262,22 +2255,22 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         Math.abs(anglePreview.end[0] - 5) < 1e-9 &&
         anglePreview.side === "minor",
       "Angle preview arc should be centered at the line intersection and start/end on the selected line references.",
-    );
+    ).toBeTruthy();
     angleSession = pinSketchConstraintPreview(angleSession, [4, -1]);
     const majorAnglePreview = getSketchToolPresentation(
       angleSession,
     )?.overlays?.find((overlay) => overlay.kind === "angleArc");
-    expectTrue(
+    expect(
       majorAnglePreview?.kind === "angleArc" &&
         majorAnglePreview.side === "major",
       "Dragging an angle preview across the opposite sector should select the major complement arc.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getSketchToolPresentation(angleSession)?.floatingInput?.label ===
         "Angle" &&
         getSketchToolPresentation(angleSession)?.floatingInput?.unit === "deg",
       "Pinned non-parallel line dimensions should open degree-based angle value entry.",
-    );
+    ).toBeTruthy();
 
     let angleHandleSession = createNewSketchSessionFromSupport({
       kind: "construction",
@@ -2291,10 +2284,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     angleHandleSession = acceptSketchDraw(angleHandleSession, [5, 5]);
     const [handleHorizontalLineId, handleVerticalLineId] =
       angleHandleSession.definition.entityIds;
-    expectTrue(
+    expect(
       handleHorizontalLineId && handleVerticalLineId,
       "Angle handle fixture should create two non-parallel line entities.",
-    );
+    ).toBeTruthy();
     angleHandleSession = beginSketchTool(
       angleHandleSession,
       "dimensionDistance",
@@ -2313,12 +2306,12 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       intent: "setConstraintAnnotationPlacement",
       point: [4, -1],
     });
-    expectTrue(
+    expect(
       angleHandleSession.constraintAuthoring?.isPreviewPinned === true &&
         getSketchToolPresentation(angleHandleSession)?.floatingInput?.label ===
           "Angle",
       "Clicking or dragging an uncommitted angle preview handle should pin the preview and open value entry.",
-    );
+    ).toBeTruthy();
 
     angleSession = patchSketchConstraintValue(angleSession, { value: 90 });
     angleSession = patchSketchConstraintValue(angleSession, {
@@ -2327,33 +2320,33 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const angle = angleSession.definition.dimensions.find(
       (dimension) => dimension.kind === "lineAngle",
     );
-    expectTrue(
+    expect(
       angle?.kind === "lineAngle" &&
         Math.abs(angle.valueRadians - Math.PI / 2) < 1e-9 &&
         angle.lines.every((line) => line.kind === "localEntity") &&
         angle.annotationPlacement?.side === "major",
       "Non-parallel line targets should commit a durable line angle dimension with the selected arc side.",
-    );
+    ).toBeTruthy();
     const angleAnnotation = getSketchAnnotationDescriptors(angleSession).find(
       (entry) =>
         entry.target.kind === "dimension" &&
         entry.target.dimensionId === angle.dimensionId,
     );
-    expectTrue(
+    expect(
       angleAnnotation?.glyphKind === "dimensionAngle" &&
         angleAnnotation.visibleLabel === "90.0°" &&
         angleAnnotation.detail === "90.0 deg angle",
       "Committed angle dimensions should expose angle-specific glyph metadata and degree-based detail text.",
-    );
-    expectTrue(
-      angleAnnotation?.target.kind === "dimension",
+    ).toBeTruthy();
+    expect(
+      angleAnnotation?.target.kind,
       "Committed angle annotation should expose a dimension target.",
-    );
+    ).toBe("dimension");
     let angleEditSession = beginSketchAnnotationEdit(
       angleSession,
       angleAnnotation.target,
     );
-    expectTrue(
+    expect(
       getSketchToolPresentation(angleEditSession)?.floatingInput?.label ===
         "Angle" &&
         getSketchToolPresentation(angleEditSession)?.floatingInput?.unit ===
@@ -2361,7 +2354,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         getSketchToolPresentation(angleEditSession)?.floatingInput?.value ===
           90,
       "Reopened angle dimension edits should be seeded in degrees.",
-    );
+    ).toBeTruthy();
     angleEditSession = patchSketchConstraintValue(angleEditSession, {
       value: 90,
     });
@@ -2371,16 +2364,16 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const editedAngle = angleEditSession.definition.dimensions.find(
       (dimension) => dimension.dimensionId === angle.dimensionId,
     );
-    expectTrue(
+    expect(
       angleEditSession.status === "idle" &&
         editedAngle?.kind === "lineAngle" &&
         Math.abs(editedAngle.valueRadians - Math.PI / 2) < 1e-9,
       "Committed angle dimension edits should accept degree input and preserve durable radians.",
-    );
+    ).toBeTruthy();
     const committedAngleOverlay = getSketchToolPresentation(
       angleSession,
     )?.overlays?.find((overlay) => overlay.kind === "angleArc");
-    expectTrue(
+    expect(
       committedAngleOverlay?.kind === "angleArc" &&
         Math.abs(committedAngleOverlay.center[0] - 5) < 1e-9 &&
         Math.abs(committedAngleOverlay.center[1]) < 1e-9 &&
@@ -2389,12 +2382,12 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         committedAngleOverlay.side === "major" &&
         !committedAngleOverlay.dragHandle,
       "Committed line angle dimensions should render durable angle arcs without using them as a second drag handle.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       committedAngleOverlay?.kind === "angleArc" &&
         (committedAngleOverlay.witnessLines?.length ?? 0) === 0,
       "Committed line angle dimensions should avoid extra witness geometry when the true intersection lies on both segments.",
-    );
+    ).toBeTruthy();
     angleSession = patchSketchDimensionAnnotationPlacement(angleSession, {
       intent: "setDimensionAnnotationPlacement",
       dimensionId: angle.dimensionId,
@@ -2403,11 +2396,11 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const movedAngle = angleSession.definition.dimensions.find(
       (dimension) => dimension.dimensionId === angle.dimensionId,
     );
-    expectTrue(
+    expect(
       movedAngle?.kind === "lineAngle" &&
         movedAngle.annotationPlacement?.side === "minor",
       "Dragging a committed angle annotation back across the close sector should update the durable arc side.",
-    );
+    ).toBeTruthy();
   }
 
   function testDistancePreviewUsesPartialTargetAndPointer() {
@@ -2426,13 +2419,13 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       (overlay) => overlay.id === "distance-preview",
     );
 
-    expectTrue(
+    expect(
       dimensionPreview?.kind === "dimensionLine" &&
         dimensionPreview.referenceKind === "aligned" &&
         dimensionPreview.end[0] === 8 &&
         dimensionPreview.end[1] === 3,
       "Distance authoring should emit a transient dimension line from one selected point to the active pointer.",
-    );
+    ).toBeTruthy();
   }
 
   function testAngleWitnessLinesAppearForOffSegmentIntersections() {
@@ -2447,10 +2440,10 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     session = startSketchDraw(session, [6, -3]);
     session = acceptSketchDraw(session, [6, 3]);
     const [horizontalLineId, verticalLineId] = session.definition.entityIds;
-    expectTrue(
+    expect(
       horizontalLineId && verticalLineId,
       "Off-segment angle fixture should create two non-parallel line entities.",
-    );
+    ).toBeTruthy();
 
     session = beginSketchTool(session, "dimensionDistance");
     session = selectSketchConstraintTarget(session, {
@@ -2467,7 +2460,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const preview = getSketchToolPresentation(session)?.overlays?.find(
       (overlay) => overlay.kind === "angleArc",
     );
-    expectTrue(
+    expect(
       preview?.kind === "angleArc" &&
         preview.witnessLines?.some(
           (line) =>
@@ -2476,7 +2469,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
             line.end[0] < 6,
         ),
       "Angle previews should add witness geometry when the true intersection lies beyond a selected segment.",
-    );
+    ).toBeTruthy();
 
     session = patchSketchConstraintValue(session, { value: 90 });
     session = patchSketchConstraintValue(session, {
@@ -2485,7 +2478,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     const committed = getSketchToolPresentation(session)?.overlays?.find(
       (overlay) => overlay.kind === "angleArc",
     );
-    expectTrue(
+    expect(
       committed?.kind === "angleArc" &&
         committed.witnessLines?.some(
           (line) =>
@@ -2494,34 +2487,34 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
             line.end[0] < 6,
         ),
       "Committed angle dimensions should preserve witness geometry for off-segment intersections.",
-    );
+    ).toBeTruthy();
   }
 
   function testPointDistanceReferenceSelectionFollowsPointer() {
-    expectTrue(
+    expect(
       selectPointToPointDimensionReference({
         first: [0, 0],
         second: [10, 4],
         pointer: [5, 2],
-      }) === "aligned",
+      }),
       "Pointer near the point-to-point segment should keep the aligned reference.",
-    );
-    expectTrue(
+    ).toBe("aligned");
+    expect(
       selectPointToPointDimensionReference({
         first: [0, 0],
         second: [10, 4],
         pointer: [5, 12],
-      }) === "horizontal",
+      }),
       "Pointer above the target span should select the horizontal distance reference.",
-    );
-    expectTrue(
+    ).toBe("horizontal");
+    expect(
       selectPointToPointDimensionReference({
         first: [0, 0],
         second: [10, 4],
         pointer: [18, 2],
-      }) === "vertical",
+      }),
       "Pointer beside the target span should select the vertical distance reference.",
-    );
+    ).toBe("vertical");
   }
 
   function testDistancePreviewFollowsPointerUntilPlacementClick() {
@@ -2551,17 +2544,17 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       (overlay) => overlay.id === "distance-preview",
     );
 
-    expectTrue(
+    expect(
       horizontalPreview?.kind === "dimensionLine" &&
         horizontalPreview.referenceKind === "horizontal",
       "Distance preview should select a horizontal reference when the pointer is above the target span.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       session.constraintAuthoring?.isPreviewPinned === false &&
         verticalPreview?.kind === "dimensionLine" &&
         verticalPreview.referenceKind === "vertical",
       "Distance preview should keep following the pointer after value entry opens.",
-    );
+    ).toBeTruthy();
   }
 
   function testConstraintPreviewStopsMovingAfterPinClick() {
@@ -2592,14 +2585,14 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       (overlay) => overlay.id === "distance-preview",
     );
 
-    expectTrue(
+    expect(
       pinnedPreview?.kind === "dimensionLine" &&
         afterMovePreview?.kind === "dimensionLine" &&
         pinnedPreview.referenceKind === "horizontal" &&
         afterMovePreview.referenceKind === "horizontal" &&
         afterMovePreview.start[1] === pinnedPreview.start[1],
       "Pinned constraint previews should not move while the pointer travels to the Commit button.",
-    );
+    ).toBeTruthy();
 
     let targetClickSession = createSessionWithTwoLines();
     const [targetClickLineId] = targetClickSession.definition.entityIds;
@@ -2641,7 +2634,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       targetClickSession,
     )?.overlays?.find((overlay) => overlay.id === "distance-preview");
 
-    expectTrue(
+    expect(
       targetClickSession.constraintAuthoring?.isPreviewPinned === true &&
         targetClickSession.constraintAuthoring.selectedTargets.length === 2 &&
         targetClickPreview?.kind === "dimensionLine" &&
@@ -2649,7 +2642,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
         targetClickPreview.referenceKind === "vertical" &&
         afterTargetClickMovePreview.referenceKind === "vertical",
       "Pinned dimension previews should ignore later target selections instead of replacing operands.",
-    );
+    ).toBeTruthy();
   }
 
   testToolbarDefinitionsExposeConstraintFamilies();

@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createEditorDebugTraceRecorder } from "@/application/editor/editor-debug-trace";
 import { createEditorEventLoop } from "@/application/editor/editor-event-loop";
 import type { EditorRuntimeTraceEntry } from "@/domain/debug/debug-platform";
@@ -83,30 +82,24 @@ test("src/application/editor/editor-debug-trace.spec.ts keeps a bounded runtime 
 
   const snapshot = recorder.getSnapshot();
 
-  expectTrue(
-    snapshot.maxEntries === 2,
-    "Trace recorder should report its configured capacity.",
-  );
-  expectTrue(
-    snapshot.totalEntries === 3,
+  expect(snapshot.maxEntries, "Trace recorder should report its configured capacity.").toBe(2);
+  expect(
+    snapshot.totalEntries,
     "Trace recorder should report the total recorded entry count.",
-  );
-  expectTrue(
-    snapshot.droppedEntries === 1,
+  ).toBe(3);
+  expect(
+    snapshot.droppedEntries,
     "Trace recorder should count entries dropped from the ring buffer.",
-  );
-  expectTrue(
-    snapshot.entries.length === 2,
+  ).toBe(1);
+  expect(
+    snapshot.entries.length,
     "Trace recorder should keep only the bounded recent entries.",
-  );
-  expectTrue(
-    snapshot.entries[0]?.sequence === 2,
+  ).toBe(2);
+  expect(
+    snapshot.entries[0]?.sequence,
     "Trace recorder should evict the oldest entry first.",
-  );
-  expectTrue(
-    snapshot.entries[1]?.sequence === 3,
-    "Trace recorder should retain the newest entry.",
-  );
+  ).toBe(2);
+  expect(snapshot.entries[1]?.sequence, "Trace recorder should retain the newest entry.").toBe(3);
 });
 
 test("src/application/editor/editor-debug-trace.spec.ts observes event, effect completion, and follow-up transition sequencing", async () => {
@@ -144,37 +137,37 @@ test("src/application/editor/editor-debug-trace.spec.ts observes event, effect c
   const startedTrace = traces[1];
   const completedTrace = traces[2];
 
-  expectTrue(
-    dispatchedTrace?.kind === "event-dispatched",
+  expect(
+    dispatchedTrace?.kind,
     "Trace observers should see the initial session.started dispatch.",
-  );
+  ).toBe("event-dispatched");
   if (dispatchedTrace?.kind === "event-dispatched") {
-    expectTrue(
-      dispatchedTrace.event.type === "session.started",
+    expect(
+      dispatchedTrace.event.type,
       "Trace observers should receive the dispatched event type.",
-    );
-    expectTrue(
-      dispatchedTrace.emittedEffects[0]?.type === "document.fetchSnapshot",
+    ).toBe("session.started");
+    expect(
+      dispatchedTrace.emittedEffects[0]?.type,
       "Dispatched events should report emitted effects.",
-    );
+    ).toBe("document.fetchSnapshot");
   }
-  expectTrue(
-    startedTrace?.kind === "effect-started",
+  expect(
+    startedTrace?.kind,
     "Trace observers should see effect execution start.",
-  );
-  expectTrue(
-    completedTrace?.kind === "effect-completed",
+  ).toBe("effect-started");
+  expect(
+    completedTrace?.kind,
     "Trace observers should see completed effects.",
-  );
+  ).toBe("effect-completed");
   if (completedTrace?.kind === "effect-completed") {
-    expectTrue(
-      completedTrace.completion.type === "effect.snapshotLoaded",
+    expect(
+      completedTrace.completion.type,
       "Completed effects should report the follow-up event type.",
-    );
-    expectTrue(
-      completedTrace.state.revisionId === snapshot.document.revisionId,
+    ).toBe("effect.snapshotLoaded");
+    expect(
+      completedTrace.state.revisionId,
       "Completed effects should report the accepted state summary.",
-    );
+    ).toBe(snapshot.document.revisionId);
   }
 
   traceSubscription.unsubscribe();
@@ -202,19 +195,19 @@ test("src/application/editor/editor-debug-trace.spec.ts records failed effects w
 
   const failedTrace = traces[2];
 
-  expectTrue(
-    failedTrace?.kind === "effect-failed",
+  expect(
+    failedTrace?.kind,
     "Trace observers should receive failed effect entries.",
-  );
+  ).toBe("effect-failed");
   if (failedTrace?.kind === "effect-failed") {
-    expectTrue(
-      failedTrace.error.message === "Trace this failure.",
+    expect(
+      failedTrace.error.message,
       "Failed effect entries should summarize the surfaced error.",
-    );
-    expectTrue(
-      failedTrace.failure.type === "effect.snapshotFailed",
+    ).toBe("Trace this failure.");
+    expect(
+      failedTrace.failure.type,
       "Failed effect entries should report the synthesized failure event.",
-    );
+    ).toBe("effect.snapshotFailed");
   }
 
   traceSubscription.unsubscribe();

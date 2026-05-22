@@ -1,7 +1,6 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 
@@ -157,11 +156,11 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     dimensions: [],
   };
 
-  const parsed = sketchDefinitionSchema.safeParse(definition);
-  expectTrue(
+  const parsed = validateSketchDefinition(definition);
+  expect(
     parsed.success,
     "Runtime schema should accept inferred local constraint variants.",
-  );
+  ).toBeTruthy();
 
   const solved = solveSketchDefinitionCore({
     definition,
@@ -176,25 +175,28 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   );
   const mid = solvedPoints.get("sketch_point_mid");
   const curvePoint = solvedPoints.get("sketch_point_curve");
-  expectTrue(mid, "Midpoint solve should return the midpoint target point.");
-  expectTrue(
+  expect(
+    mid,
+    "Midpoint solve should return the midpoint target point.",
+  ).toBeTruthy();
+  expect(
     curvePoint,
     "Point-on-curve solve should return the curve target point.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     Math.hypot(mid[0] - 2, mid[1]) < 1e-3,
     "Midpoint constraint should solve the point to the line midpoint.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     Math.abs(Math.hypot(curvePoint[0] - 7, curvePoint[1] - 3) - 2) < 1e-3,
     "Point-on-curve should solve the point onto the circle.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     solved.solvedSnapshot.constraintStatuses.every(
       (status) => status.status === "satisfied",
     ),
     "Solved inferred constraints should report satisfied statuses.",
-  );
+  ).toBeTruthy();
 
   const tangentAndConcentric: SketchDefinition = {
     schemaVersion: "sketch-definition/v1alpha1",
@@ -322,12 +324,12 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     tolerances,
     partialSolvePolicy: "bestEffort",
   });
-  expectTrue(
+  expect(
     tangentSolved.solvedSnapshot.constraintStatuses.every(
       (status) => status.status === "satisfied",
     ),
     "Already satisfied tangent and concentric constraints should report satisfied statuses.",
-  );
+  ).toBeTruthy();
 
   const normalAndSymmetric: SketchDefinition = {
     schemaVersion: "sketch-definition/v1alpha1",
@@ -500,23 +502,22 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     dimensionIds: [],
     dimensions: [],
   };
-  const parsedNormalAndSymmetric =
-    sketchDefinitionSchema.safeParse(normalAndSymmetric);
-  expectTrue(
+  const parsedNormalAndSymmetric = validateSketchDefinition(normalAndSymmetric);
+  expect(
     parsedNormalAndSymmetric.success,
     "Runtime schema should accept normal and symmetric constraint payloads.",
-  );
+  ).toBeTruthy();
   const normalAndSymmetricSolved = solveSketchDefinitionCore({
     definition: normalAndSymmetric,
     tolerances,
     partialSolvePolicy: "bestEffort",
   });
-  expectTrue(
+  expect(
     normalAndSymmetricSolved.solvedSnapshot.constraintStatuses.every(
       (status) => status.status === "satisfied",
     ),
     "Already satisfied normal and symmetric constraints should report satisfied statuses.",
-  );
+  ).toBeTruthy();
 
   function solveConstraintStatus(
     definition: SketchDefinition,
@@ -682,13 +683,13 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
       },
     ],
   };
-  expectTrue(
+  expect(
     solveConstraintStatus(
       circleArcOutsideSweep,
       "constraint_circle_arc_tangent",
-    ) === "unsatisfied",
+    ),
     "Circle-to-arc tangent should be unsatisfied when the tangent contact is outside the finite arc sweep.",
-  );
+  ).toBe("unsatisfied");
 
   const arcArcOutsideSweep: SketchDefinition = {
     schemaVersion: "sketch-definition/v1alpha1",
@@ -900,9 +901,8 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
       },
     ],
   };
-  expectTrue(
-    solveConstraintStatus(arcArcOutsideSweep, "constraint_arc_arc_tangent") ===
-      "unsatisfied",
+  expect(
+    solveConstraintStatus(arcArcOutsideSweep, "constraint_arc_arc_tangent"),
     "Arc-to-arc tangent should be unsatisfied when either tangent contact is outside a finite arc sweep.",
-  );
+  ).toBe("unsatisfied");
 });

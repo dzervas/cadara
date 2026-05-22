@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ShortcutCommandDefinition } from "@/core/shortcuts/commands";
 import { createShortcutCommandRegistry } from "@/core/shortcuts/commands";
 import {
@@ -36,24 +35,24 @@ test("src/hooks/shortcut-provider.spec.ts", () => {
   ]);
 
   const remapResult = validateShortcutOverrideUpdate(registry, redoOnUndo);
-  expectTrue(
-    remapResult.nextOverrides === redoOnUndo,
+  expect(
+    remapResult.nextOverrides,
     "Redo can reuse Undo shortcut while Undo remains disabled.",
-  );
-  expectTrue(
-    remapResult.conflicts.length === 0,
+  ).toBe(redoOnUndo);
+  expect(
+    remapResult.conflicts.length,
     "Disabled Undo should not conflict with remapped Redo.",
-  );
+  ).toBe(0);
 
   const resetResult = validateShortcutOverrideUpdate(
     registry,
     resetCommandShortcut(redoOnUndo, "editor.undo"),
   );
-  expectTrue(
-    resetResult.nextOverrides === null,
+  expect(
+    resetResult.nextOverrides,
     "Resetting Undo should be rejected when it restores a conflict.",
-  );
-  expectTrue(
+  ).toBe(null);
+  expect(
     resetResult.conflicts.some(
       (conflict) =>
         conflict.kind === "duplicate" &&
@@ -61,5 +60,5 @@ test("src/hooks/shortcut-provider.spec.ts", () => {
         conflict.commandIds.includes("editor.redo"),
     ),
     "Reset validation should report the Undo/Redo duplicate shortcut conflict.",
-  );
+  ).toBeTruthy();
 });

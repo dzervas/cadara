@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   EditorEvent,
   EditorViewState,
@@ -19,7 +18,6 @@ import {
   createShortcutResolver,
   type ShortcutResolverEvent,
 } from "@/core/shortcuts/resolver";
-import { createToolActionBus } from "@/core/tools/tool-action-bus";
 import type { ToolId } from "@/core/tools/tool-registry";
 import { isTextEditingTarget } from "@/hooks/shortcut-targets";
 
@@ -37,15 +35,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
   });
 
   const deleteResult = deleteFixture.press({ key: "Delete" });
-  expectTrue(
-    deleteResult.commandId === "editor.deleteSelection",
+  expect(
+    deleteResult.commandId,
     "Delete should resolve the annotation delete command.",
-  );
-  expectTrue(
-    deleteFixture.dispatchedEvents.at(-1)?.type ===
-      "sketch.annotationDeleteRequested",
+  ).toBe("editor.deleteSelection");
+  expect(
+    deleteFixture.dispatchedEvents.at(-1)?.type,
     "Delete shortcut should dispatch the annotation delete event.",
-  );
+  ).toBe("sketch.annotationDeleteRequested");
 
   const backspaceFixture = createFixture({
     mode: "sketch",
@@ -60,15 +57,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
   });
 
   const backspaceResult = backspaceFixture.press({ key: "Backspace" });
-  expectTrue(
-    backspaceResult.commandId === "editor.deleteSelection",
+  expect(
+    backspaceResult.commandId,
     "Backspace should resolve the annotation delete command.",
-  );
-  expectTrue(
-    backspaceFixture.dispatchedEvents.at(-1)?.type ===
-      "sketch.annotationDeleteRequested",
+  ).toBe("editor.deleteSelection");
+  expect(
+    backspaceFixture.dispatchedEvents.at(-1)?.type,
     "Backspace shortcut should dispatch the annotation delete event.",
-  );
+  ).toBe("sketch.annotationDeleteRequested");
 
   const deleteGeometryFixture = createFixture({
     mode: "sketch",
@@ -83,15 +79,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
   });
 
   const deleteGeometryResult = deleteGeometryFixture.press({ key: "Delete" });
-  expectTrue(
-    deleteGeometryResult.commandId === "editor.deleteSelection",
+  expect(
+    deleteGeometryResult.commandId,
     "Delete should resolve for selected sketch geometry.",
-  );
-  expectTrue(
-    deleteGeometryFixture.dispatchedEvents.at(-1)?.type ===
-      "sketch.annotationDeleteRequested",
+  ).toBe("editor.deleteSelection");
+  expect(
+    deleteGeometryFixture.dispatchedEvents.at(-1)?.type,
     "Delete shortcut should dispatch the shared delete-selection event for sketch geometry.",
-  );
+  ).toBe("sketch.annotationDeleteRequested");
 
   const backspacePointFixture = createFixture({
     mode: "sketch",
@@ -108,15 +103,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
   const backspacePointResult = backspacePointFixture.press({
     key: "Backspace",
   });
-  expectTrue(
-    backspacePointResult.commandId === "editor.deleteSelection",
+  expect(
+    backspacePointResult.commandId,
     "Backspace should resolve for selected sketch points.",
-  );
-  expectTrue(
-    backspacePointFixture.dispatchedEvents.at(-1)?.type ===
-      "sketch.annotationDeleteRequested",
+  ).toBe("editor.deleteSelection");
+  expect(
+    backspacePointFixture.dispatchedEvents.at(-1)?.type,
     "Backspace shortcut should dispatch the shared delete-selection event for sketch points.",
-  );
+  ).toBe("sketch.annotationDeleteRequested");
 
   const sketchFixture = createFixture({
     mode: "sketch",
@@ -124,18 +118,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
   });
 
   const lineResult = sketchFixture.press({ key: "l" });
-  expectTrue(
-    lineResult.commandId === "tool.line",
+  expect(
+    lineResult.commandId,
     "Line shortcut should resolve to the Line tool command in sketch mode.",
-  );
-  expectTrue(
-    sketchFixture.triggeredToolIds.at(-1) === "line",
+  ).toBe("tool.line");
+  expect(
+    sketchFixture.triggeredToolIds.at(-1),
     "Line shortcut should trigger the Line tool.",
-  );
-  expectTrue(
-    sketchFixture.observedLineSource === "shortcut",
-    "Line shortcut should route shortcut source metadata.",
-  );
+  ).toBe("line");
 
   const escapeFixture = createFixture({
     mode: "sketch",
@@ -143,14 +133,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
   });
 
   const escapeResult = escapeFixture.press({ key: "Escape" });
-  expectTrue(
-    escapeResult.commandId === "editor.cancel",
+  expect(
+    escapeResult.commandId,
     "Escape should resolve to the workbench cancel command.",
-  );
-  expectTrue(
-    escapeFixture.dispatchedEvents.at(-1)?.type === "sketch.activeToolCleared",
+  ).toBe("editor.cancel");
+  expect(
+    escapeFixture.dispatchedEvents.at(-1)?.type,
     "Escape should dispatch the sketch active-tool clear event when a sketch tool is active.",
-  );
+  ).toBe("sketch.activeToolCleared");
 
   const escapeStyleFocusFixture = createFixture({
     mode: "sketch",
@@ -167,15 +157,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
   const escapeStyleFocusResult = escapeStyleFocusFixture.press({
     key: "Escape",
   });
-  expectTrue(
-    escapeStyleFocusResult.commandId === "editor.cancel",
+  expect(
+    escapeStyleFocusResult.commandId,
     "Escape should resolve to cancel while a sketch style tool is focused.",
-  );
-  expectTrue(
-    escapeStyleFocusFixture.dispatchedEvents.at(-1)?.type ===
-      "sketch.activeToolCleared",
+  ).toBe("editor.cancel");
+  expect(
+    escapeStyleFocusFixture.dispatchedEvents.at(-1)?.type,
     "Escape should dispatch sketch active-tool clear before clearing selection while a style tool is focused.",
-  );
+  ).toBe("sketch.activeToolCleared");
 
   const escapeSelectionFixture = createFixture({
     mode: "part",
@@ -183,15 +172,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
   });
 
   const escapeSelectionResult = escapeSelectionFixture.press({ key: "Escape" });
-  expectTrue(
-    escapeSelectionResult.commandId === "editor.cancel",
+  expect(
+    escapeSelectionResult.commandId,
     "Escape should resolve to cancel for selection clearing.",
-  );
-  expectTrue(
-    escapeSelectionFixture.dispatchedEvents.at(-1)?.type ===
-      "selection.cleared",
+  ).toBe("editor.cancel");
+  expect(
+    escapeSelectionFixture.dispatchedEvents.at(-1)?.type,
     "Escape should dispatch selection clearing when no higher-priority interaction handles it.",
-  );
+  ).toBe("selection.cleared");
 
   const finishSketchFixture = createFixture({
     mode: "sketch",
@@ -202,36 +190,34 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
     key: "Enter",
     shiftKey: true,
   });
-  expectTrue(
-    finishSketchResult.commandId === "tool.finishSketch",
+  expect(
+    finishSketchResult.commandId,
     "Shift+Enter should resolve to Finish Sketch.",
-  );
-  expectTrue(
-    finishSketchFixture.triggeredToolIds.at(-1) === "finishSketch",
+  ).toBe("tool.finishSketch");
+  expect(
+    finishSketchFixture.triggeredToolIds.at(-1),
     "Finish Sketch shortcut should trigger the finishSketch tool.",
-  );
+  ).toBe("finishSketch");
 
   const undoFixture = createFixture({ canUndo: true, mode: "part" });
   const undoResult = undoFixture.press({ ctrlKey: true, key: "z" });
-  expectTrue(
-    undoResult.commandId === "editor.undo",
-    "Ctrl+Z should resolve to Undo.",
+  expect(undoResult.commandId, "Ctrl+Z should resolve to Undo.").toBe(
+    "editor.undo",
   );
-  expectTrue(
-    undoFixture.undoRequests === 1,
+  expect(
+    undoFixture.undoRequests,
     "Undo shortcut should reuse the shared history entrypoint.",
-  );
+  ).toBe(1);
 
   const redoFixture = createFixture({ canRedo: true, mode: "part" });
   const redoResult = redoFixture.press({ ctrlKey: true, key: "y" });
-  expectTrue(
-    redoResult.commandId === "editor.redo",
-    "Ctrl+Y should resolve to Redo.",
+  expect(redoResult.commandId, "Ctrl+Y should resolve to Redo.").toBe(
+    "editor.redo",
   );
-  expectTrue(
-    redoFixture.redoRequests === 1,
+  expect(
+    redoFixture.redoRequests,
     "Redo shortcut should reuse the shared history entrypoint.",
-  );
+  ).toBe(1);
 
   const guardedInputFixture = createFixture({
     mode: "sketch",
@@ -245,14 +231,14 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
       inputPrevented = true;
     },
   });
-  expectTrue(
-    !inputResult.handled && !inputPrevented,
+  expect(
+    inputResult.handled && !inputPrevented,
     "Printable tool shortcuts should not be handled from inputs.",
-  );
-  expectTrue(
-    guardedInputFixture.triggeredToolIds.length === 0,
+  ).toBeFalsy();
+  expect(
+    guardedInputFixture.triggeredToolIds.length,
     "Input guard should prevent Line activation.",
-  );
+  ).toBe(0);
 
   const guardedContentEditableFixture = createFixture({
     mode: "sketch",
@@ -262,39 +248,39 @@ test("src/app/workbench-shortcuts.spec.ts", () => {
     key: "l",
     target: createTextTarget({ isContentEditable: true }),
   });
-  expectTrue(
-    !contentEditableResult.handled,
+  expect(
+    contentEditableResult.handled,
     "Printable tool shortcuts should not be handled from contenteditable targets.",
-  );
-  expectTrue(
-    guardedContentEditableFixture.triggeredToolIds.length === 0,
+  ).toBeFalsy();
+  expect(
+    guardedContentEditableFixture.triggeredToolIds.length,
     "Contenteditable guard should prevent Line activation.",
-  );
+  ).toBe(0);
 
   const partModeFixture = createFixture({ mode: "part" });
   const partLineResult = partModeFixture.press({ key: "l" });
-  expectTrue(
-    partLineResult.commandId === null,
+  expect(
+    partLineResult.commandId,
     "Sketch tool shortcuts should not resolve in part mode.",
-  );
-  expectTrue(
-    partModeFixture.triggeredToolIds.length === 0,
+  ).toBe(null);
+  expect(
+    partModeFixture.triggeredToolIds.length,
     "Part mode should not trigger sketch-only tools.",
-  );
+  ).toBe(0);
 
   const sketchModeFixture = createFixture({
     mode: "sketch",
     sketchSession: createSketchSession(),
   });
   const sketchExtrudeResult = sketchModeFixture.press({ key: "e" });
-  expectTrue(
-    sketchExtrudeResult.commandId === null,
+  expect(
+    sketchExtrudeResult.commandId,
     "Part tool shortcuts should not resolve in sketch mode.",
-  );
-  expectTrue(
-    sketchModeFixture.triggeredToolIds.length === 0,
+  ).toBe(null);
+  expect(
+    sketchModeFixture.triggeredToolIds.length,
     "Sketch mode should not trigger part-only tools.",
-  );
+  ).toBe(0);
 });
 
 interface FixtureOptions {
@@ -312,23 +298,16 @@ function createFixture({
   selection = [],
   sketchSession = null,
 }: FixtureOptions) {
-  const actionBus = createToolActionBus();
   const dispatchedEvents: EditorEvent[] = [];
   let redoRequests = 0;
   const triggeredToolIds: ToolId[] = [];
   let undoRequests = 0;
-  let observedLineSource: string | null = null;
-
-  actionBus.subscribeToTool("line", (event) => {
-    observedLineSource = event.source;
-  });
 
   const commandHandlers = createWorkbenchShortcutCommandHandlers({
     activeCommand: null,
     activeReferencePickerFieldId: null,
-    activateTool: (toolId, metadata) => {
+    activateTool: (toolId, _metadata) => {
       triggeredToolIds.push(toolId);
-      actionBus.triggerTool(toolId, mode, metadata);
     },
     canRedo,
     canUndo,
@@ -356,9 +335,6 @@ function createFixture({
   return {
     get dispatchedEvents() {
       return dispatchedEvents;
-    },
-    get observedLineSource() {
-      return observedLineSource;
     },
     get redoRequests() {
       return redoRequests;

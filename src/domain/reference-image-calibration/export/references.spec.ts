@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
   buildReferenceImageAnchorProjectedReferences,
@@ -43,10 +42,10 @@ test("src/domain/reference-image-calibration/export/references.spec.ts does not 
     "sketch_primary",
   );
 
-  expectTrue(
+  expect(
     merged.references.length === 0 && merged.referenceIds.length === 0,
     "Reference-image calibration should no longer synthesize fixed exported anchor references.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/domain/reference-image-calibration/export/references.spec.ts does not emit projected anchor geometry records", () => {
@@ -79,8 +78,8 @@ test("src/domain/reference-image-calibration/export/references.spec.ts does not 
     authoringOperations: [operation],
   } satisfies SketchDefinition);
 
-  expectTrue(
-    projectedReferences.length === 0,
+  expect(
+    projectedReferences.length,
     "Reference-image calibration should no longer export projected anchor geometry into the main sketch solve.",
-  );
+  ).toBe(0);
 });

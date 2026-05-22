@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   MAX_LEFT_SIDEBAR_WIDTH,
   MIN_LEFT_SIDEBAR_WIDTH,
@@ -9,28 +8,26 @@ import {
 } from "@/app/workbench/shell/workbench-shell-layout";
 
 test("src/app/workbench-shell-layout.spec.ts", async () => {
-  expectTrue(
-    clampWorkbenchSidebarWidth(MIN_LEFT_SIDEBAR_WIDTH - 80, 1600) ===
-      MIN_LEFT_SIDEBAR_WIDTH,
+  expect(
+    clampWorkbenchSidebarWidth(MIN_LEFT_SIDEBAR_WIDTH - 80, 1600),
     "Sidebar resizing should not collapse below the minimum width.",
-  );
+  ).toBe(MIN_LEFT_SIDEBAR_WIDTH);
 
-  expectTrue(
-    clampWorkbenchSidebarWidth(MAX_LEFT_SIDEBAR_WIDTH + 120, 2000) ===
-      MAX_LEFT_SIDEBAR_WIDTH,
+  expect(
+    clampWorkbenchSidebarWidth(MAX_LEFT_SIDEBAR_WIDTH + 120, 2000),
     "Sidebar resizing should not exceed the configured maximum width on wide workbenches.",
-  );
+  ).toBe(MAX_LEFT_SIDEBAR_WIDTH);
 
-  expectTrue(
+  expect(
     clampWorkbenchSidebarWidth(
-      900,
-      MIN_LEFT_SIDEBAR_WIDTH + MIN_WORKBENCH_VIEWPORT_WIDTH + 120,
-    ) === 400,
+        900,
+        MIN_LEFT_SIDEBAR_WIDTH + MIN_WORKBENCH_VIEWPORT_WIDTH + 120,
+      ),
     "Sidebar resizing should preserve the minimum viewport width on narrow workbenches.",
-  );
+  ).toBe(400);
 
-  expectTrue(
-    getWorkbenchSidebarWidthFromPointer(540, 120, 1200) === 420,
+  expect(
+    getWorkbenchSidebarWidthFromPointer(540, 120, 1200),
     "Sidebar dragging should resolve width from the shell-relative pointer position.",
-  );
+  ).toBe(420);
 });

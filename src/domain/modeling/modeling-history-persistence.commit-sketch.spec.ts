@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   createCreateFeatureHistoryEntry,
   createDeleteTargetHistoryEntry,
@@ -33,12 +32,12 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     result: AppResultAsync<T>,
   ): Promise<T> {
     const resolved = await result;
-    expectTrue(
+    expect(
       resolved.isOk(),
       resolved.isErr()
         ? resolved.error.message
         : "Modeling result should be ok.",
-    );
+    ).toBeTruthy();
     return resolved.value;
   }
 
@@ -242,10 +241,10 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
       solvedSnapshot: solved.solvedSnapshot,
     }).regions;
     const regionId = regions[0]?.regionId;
-    expectTrue(
+    expect(
       regionId,
       "Draft sketch should derive a region for persisted feature replay.",
-    );
+    ).toBeTruthy();
     return regionId;
   }
 
@@ -328,7 +327,6 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
       },
       featureTree: [],
       objects: [],
-      documentHistory: [],
       features,
       cursor: { kind: "empty" as const },
       sketches,
@@ -345,27 +343,6 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     };
 
     return {
-      contractVersion: CONTRACT_VERSION,
-      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      documentId: "doc_workspace",
-      revisionId,
-      settings: document.settings,
-      capabilities: document.capabilities,
-      featureTree: [],
-      objects: [],
-      features,
-      cursor: { kind: "empty" },
-      sketches,
-      bodies: [],
-      constructions: [],
-      variables: [],
-      entities: [],
-      references: [],
-      diagnostics: [],
-      render: {
-        schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
-        records: [],
-      },
       document,
       presentation: {
         featureTree: [],
@@ -373,6 +350,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
         documentHistory: [],
         entities: [],
       },
+      provenance: null,
     };
   }
 
@@ -784,47 +762,46 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
       }),
     );
 
-    expectTrue(
-      result.revisionState.kind === "accepted",
-      "Sketch commit should be accepted.",
+    expect(result.revisionState.kind, "Sketch commit should be accepted.").toBe(
+      "accepted",
     );
 
     const savedHistory = store.savedPayloads.at(-1);
-    expectTrue(
+    expect(
       savedHistory,
       "Accepted commitSketch mutations should persist history.",
-    );
+    ).toBeTruthy();
     const persistedEntry = savedHistory.entries[0];
-    expectTrue(
-      persistedEntry?.kind === "commitSketch",
+    expect(
+      persistedEntry?.kind,
       "Persisted history entry must remain commitSketch.",
-    );
-    expectTrue(
+    ).toBe("commitSketch");
+    expect(
       persistedEntry?.kind === "commitSketch" &&
         persistedEntry.payload.sketchId === result.sketchId,
       "Persisted commitSketch entries must store the committed sketch id.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       persistedEntry?.kind === "commitSketch" &&
         persistedEntry.payload.definition.points.every(
           (point) => point.target.sketchId === result.sketchId,
         ),
       "Persisted commitSketch point targets must be normalized to the committed sketch id.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       persistedEntry?.kind === "commitSketch" &&
         persistedEntry.payload.definition.entities.every(
           (entity) => entity.target.sketchId === result.sketchId,
         ),
       "Persisted commitSketch entity targets must be normalized to the committed sketch id.",
-    );
+    ).toBeTruthy();
 
     const reloadedStore = createMemoryOperationHistoryStore(savedHistory);
     const loadResult = reloadedStore.load();
-    expectTrue(
+    expect(
       loadResult.ok,
       "Persisted commitSketch history should remain loadable after save.",
-    );
+    ).toBeTruthy();
   }
 
   async function testLegacyCommitSketchHistoryRestores() {
@@ -836,36 +813,36 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     });
 
     const restoreState = await service.getHistoryRestoreState();
-    expectTrue(
-      restoreState.kind === "restored",
+    expect(
+      restoreState.kind,
       "Legacy commitSketch history should still restore successfully.",
-    );
-    expectTrue(
-      restoreState.entriesReplayed === 1,
+    ).toBe("restored");
+    expect(
+      restoreState.entriesReplayed,
       "Legacy commitSketch history should replay its single entry.",
-    );
+    ).toBe(1);
 
     const snapshot = await service.getCurrentDocumentSnapshot();
-    expectTrue(
+    expect(
       snapshot.document.sketches.some(
         (entry) =>
           entry.label === "Legacy Draft Sketch" &&
           entry.sketchId === "sketch_legacy_replayed",
       ),
       "Legacy commitSketch history should rebuild the committed sketch snapshot.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       snapshot.document.sketches[0]?.sketch.definition.points.every(
         (point) => point.target.sketchId === "sketch_legacy_replayed",
       ),
       "Legacy commitSketch replay should normalize point targets to the committed sketch id.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       snapshot.document.sketches[0]?.sketch.definition.entities.every(
         (entity) => entity.target.sketchId === "sketch_legacy_replayed",
       ),
       "Legacy commitSketch replay should normalize entity targets to the committed sketch id.",
-    );
+    ).toBeTruthy();
   }
 
   async function testExplicitAllocatorCompatibleSketchIdsReplayDuringRestore() {
@@ -954,31 +931,31 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
 
     const restoreState = await service.getHistoryRestoreState();
 
-    expectTrue(
-      restoreState.kind === "restored",
+    expect(
+      restoreState.kind,
       "Allocator-compatible explicit sketch ids should restore successfully on an empty strict adapter.",
-    );
-    expectTrue(
-      restoreState.entriesReplayed === 2,
+    ).toBe("restored");
+    expect(
+      restoreState.entriesReplayed,
       "Replay should apply both the sketch and feature entries.",
-    );
+    ).toBe(2);
 
     const snapshot = await service.getCurrentDocumentSnapshot();
 
-    expectTrue(
+    expect(
       snapshot.document.sketches.some(
         (entry) => entry.sketchId === "sketch_primary",
       ),
       "Replay should recreate the expected primary sketch id.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       snapshot.document.features.some(
         (entry) =>
           entry.featureId === "feature_extrude-1" &&
           entry.definition.kind === "extrude",
       ),
       "Replay should continue into downstream feature history after recreating the sketch.",
-    );
+    ).toBeTruthy();
   }
 
   async function testSketchDeleteReplayAllowsReusedAllocatorSketchId() {
@@ -1090,18 +1067,18 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
 
     const restoreState = await service.getHistoryRestoreState();
 
-    expectTrue(
-      restoreState.kind === "restored",
+    expect(
+      restoreState.kind,
       "Sketch delete replay should remove deleted sketches from the cursor before resolving reused sketch ids.",
-    );
-    expectTrue(
-      restoreState.entriesReplayed === 4,
+    ).toBe("restored");
+    expect(
+      restoreState.entriesReplayed,
       "Replay should apply create, secondary create, delete, and recreated sketch entries.",
-    );
+    ).toBe(4);
 
     const snapshot = await service.getCurrentDocumentSnapshot();
 
-    expectTrue(
+    expect(
       snapshot.document.sketches.length === 2 &&
         snapshot.document.sketches.some(
           (entry) => entry.sketchId === "sketch_2",
@@ -1110,13 +1087,13 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
           (entry) => entry.sketchId === "sketch_primary",
         ),
       "Replay should recreate the allocator-compatible sketch id after deletion.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       snapshot.document.sketches.find(
         (entry) => entry.sketchId === "sketch_primary",
-      )?.label === "Reused Replay Sketch",
+      )?.label,
       "Replay should preserve the final reused sketch entry.",
-    );
+    ).toBe("Reused Replay Sketch");
   }
 
   async function testSketchDeleteReplayUsesNextOrdinalAfterMiddleDelete() {
@@ -1216,19 +1193,19 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
 
     const restoreState = await service.getHistoryRestoreState();
 
-    expectTrue(
-      restoreState.kind === "restored",
+    expect(
+      restoreState.kind,
       "Sketch delete replay should resolve allocator-compatible ids from the max remaining sketch ordinal.",
-    );
-    expectTrue(
-      restoreState.entriesReplayed === 5,
+    ).toBe("restored");
+    expect(
+      restoreState.entriesReplayed,
       "Replay should apply all entries across the middle sketch delete.",
-    );
+    ).toBe(5);
 
     const snapshot = await service.getCurrentDocumentSnapshot();
 
-    expectTrue(
-      !snapshot.document.sketches.some(
+    expect(
+      snapshot.document.sketches.some(
         (entry) => entry.sketchId === "sketch_2",
       ) &&
         snapshot.document.sketches.some(
@@ -1238,7 +1215,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
           (entry) => entry.sketchId === "sketch_4",
         ),
       "Replay should skip the deleted ordinal and restore the next allocated sketch id.",
-    );
+    ).toBeFalsy();
   }
 
   await testCommitSketchPersistenceNormalizesSketchIds();

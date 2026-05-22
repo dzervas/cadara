@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   getWorkbenchNotificationAutoDismissMs,
   scheduleWorkbenchNotificationAutoDismiss,
@@ -8,18 +7,18 @@ import {
 } from "@/components/layout/workbench-notification-model";
 
 test("src/components/layout/workbench-notification-model.spec.ts", () => {
-  expectTrue(
-    getWorkbenchNotificationAutoDismissMs("info") === 5_000,
+  expect(
+    getWorkbenchNotificationAutoDismissMs("info"),
     "Info notifications should dismiss after 5 seconds.",
-  );
-  expectTrue(
-    getWorkbenchNotificationAutoDismissMs("warning") === 15_000,
+  ).toBe(5_000);
+  expect(
+    getWorkbenchNotificationAutoDismissMs("warning"),
     "Warning notifications should dismiss after 15 seconds.",
-  );
-  expectTrue(
-    getWorkbenchNotificationAutoDismissMs("error") === null,
+  ).toBe(15_000);
+  expect(
+    getWorkbenchNotificationAutoDismissMs("error"),
     "Error notifications should not auto-dismiss.",
-  );
+  ).toBe(null);
 
   const scheduled: Array<{
     callback: () => void;
@@ -46,21 +45,12 @@ test("src/components/layout/workbench-notification-model.spec.ts", () => {
     },
     timerHost,
   );
-  expectTrue(cleanupInfo, "Info notifications should schedule a timer.");
-  expectTrue(
-    scheduled[0]?.delay === 5_000,
-    "Info timer should use the 5 second delay.",
-  );
+  expect(cleanupInfo, "Info notifications should schedule a timer.").toBeTruthy();
+  expect(scheduled[0]?.delay, "Info timer should use the 5 second delay.").toBe(5_000);
   scheduled[0]?.callback();
-  expectTrue(
-    dismissCount === 1,
-    "Info timer callback should dismiss the notification.",
-  );
+  expect(dismissCount, "Info timer callback should dismiss the notification.").toBe(1);
   cleanupInfo();
-  expectTrue(
-    cleared[0] === "timer-0",
-    "Manual cleanup should clear the pending info timer.",
-  );
+  expect(cleared[0], "Manual cleanup should clear the pending info timer.").toBe("timer-0");
 
   const cleanupWarning = scheduleWorkbenchNotificationAutoDismiss(
     "warning",
@@ -69,11 +59,8 @@ test("src/components/layout/workbench-notification-model.spec.ts", () => {
     },
     timerHost,
   );
-  expectTrue(cleanupWarning, "Warning notifications should schedule a timer.");
-  expectTrue(
-    scheduled[1]?.delay === 15_000,
-    "Warning timer should use the 15 second delay.",
-  );
+  expect(cleanupWarning, "Warning notifications should schedule a timer.").toBeTruthy();
+  expect(scheduled[1]?.delay, "Warning timer should use the 15 second delay.").toBe(15_000);
 
   const cleanupError = scheduleWorkbenchNotificationAutoDismiss(
     "error",
@@ -82,14 +69,8 @@ test("src/components/layout/workbench-notification-model.spec.ts", () => {
     },
     timerHost,
   );
-  expectTrue(
-    cleanupError === null,
-    "Error notifications should not schedule an auto-dismiss timer.",
-  );
-  expectTrue(
-    scheduled.length === 2,
-    "Error notifications should leave timer state unchanged.",
-  );
+  expect(cleanupError, "Error notifications should not schedule an auto-dismiss timer.").toBe(null);
+  expect(scheduled.length, "Error notifications should leave timer state unchanged.").toBe(2);
 });
 
 test("workbench notification auto-dismiss model accepts only supported types", () => {

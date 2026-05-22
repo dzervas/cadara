@@ -86,6 +86,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     return new FeatureChainHarness(this, base);
   }
 
+  // TODO: This should be taken by the feature definition
   async activateFeature(kind: FeatureKind) {
     const toolNames: Record<FeatureKind, string> = {
       extrude: "Create an extruded solid or surface.",
@@ -180,7 +181,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
 
     await expect
       .poll(() => this.hasVisibleFeatureErrorDiagnostics(), { timeout: 2_000 })
-      .toBe(false);
+      .toBeFalsy();
     return `Select viewport target ${secondFaceTarget}`;
   }
 
@@ -260,9 +261,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
             ),
           { timeout: 30_000 },
         )
-        .toBe(true, {
-          message: `${expectedFeatureId} should be present in the committed document.`,
-        });
+        .toBe(true);
     }
   }
 

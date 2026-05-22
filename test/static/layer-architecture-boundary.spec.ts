@@ -1,8 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 const ROOT = process.cwd();
 
 function walk(directory: string): string[] {
@@ -70,10 +69,10 @@ test("src/layer-architecture-boundary.spec.ts core stays framework and browser f
     }
   }
 
-  expectTrue(
-    offenders.length === 0,
+  expect(
+    offenders.length,
     `Core modules must remain framework-, browser-, and adapter-free.\n${offenders.join("\n")}`,
-  );
+  ).toBe(0);
 });
 
 test("src/layer-architecture-boundary.spec.ts application stays React free", () => {
@@ -93,10 +92,10 @@ test("src/layer-architecture-boundary.spec.ts application stays React free", () 
     }
   }
 
-  expectTrue(
-    offenders.length === 0,
+  expect(
+    offenders.length,
     `Application modules must not depend on React hooks or UI components.\n${offenders.join("\n")}`,
-  );
+  ).toBe(0);
 });
 
 test("src/layer-architecture-boundary.spec.ts infrastructure stays outside UI composition", () => {
@@ -116,10 +115,10 @@ test("src/layer-architecture-boundary.spec.ts infrastructure stays outside UI co
     }
   }
 
-  expectTrue(
-    offenders.length === 0,
-    `Infrastructure modules must not depend on UI composition layers.\n${offenders.join("\n")}`,
-  );
+  expect(
+    offenders.length,
+    `Infrastructure modules must not depend on React hooks or UI components.\n${offenders.join("\n")}`,
+  ).toBe(0);
 });
 
 test("src/layer-architecture-boundary.spec.ts migrated compatibility entrypoints stay deleted", () => {
@@ -139,10 +138,10 @@ test("src/layer-architecture-boundary.spec.ts migrated compatibility entrypoints
     }
   });
 
-  expectTrue(
-    offenders.length === 0,
-    `Migrated compatibility entrypoints must stay deleted.\n${offenders.join("\n")}`,
-  );
+  expect(
+    offenders.length,
+    `Migrated compatibility entrypoints must be deleted.\n${offenders.join("\n")}`,
+  ).toBe(0);
 });
 
 test("src/layer-architecture-boundary.spec.ts core domain dependency debt stays explicit", () => {
@@ -188,8 +187,8 @@ test("src/layer-architecture-boundary.spec.ts core domain dependency debt stays 
     }
   }
 
-  expectTrue(
-    offenders.length === 0,
+  expect(
+    offenders.length,
     `New core modules must not depend on domain. Move the dependency to core/application, or explicitly retire existing debt first.\n${offenders.join("\n")}`,
-  );
+  ).toBe(0);
 });

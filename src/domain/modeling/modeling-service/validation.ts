@@ -29,7 +29,9 @@ import type {
 import type { SketchPlaneSupportRef } from "@/contracts/shared/sketch-plane";
 import {
   getAuthoredLiteralValue,
+  isAuthoredValue,
   isExpressionAuthoredValue,
+  type AuthoredValue,
   type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
 
@@ -52,6 +54,20 @@ export function isAuthoredEnumLike(value: unknown, options: readonly string[]) {
     (typeof literal === "string" && options.includes(literal)) ||
     isExpressionAuthoredValue(value)
   );
+}
+
+export function toContractAuthoredValue<T>(
+  value: MaybeAuthoredValue<T>,
+  fallback: T,
+): AuthoredValue<T> {
+  if (isExpressionAuthoredValue(value) || isAuthoredValue(value)) {
+    return value as AuthoredValue<T>;
+  }
+
+  return {
+    source: "literal",
+    value: getAuthoredLiteralValue(value) ?? fallback,
+  };
 }
 
 export function assertDocumentId(value: unknown): DocumentId {
@@ -394,11 +410,17 @@ export function normalizeUpToOffset(
 
   return field === "distance"
     ? {
-        distance: value.distance as MaybeAuthoredValue<number>,
+        distance: toContractAuthoredValue(
+          value.distance as MaybeAuthoredValue<number>,
+          0,
+        ),
         direction: value.direction as UpToOffsetDirection,
       }
     : {
-        angle: value.angle as MaybeAuthoredValue<number>,
+        angle: toContractAuthoredValue(
+          value.angle as MaybeAuthoredValue<number>,
+          0,
+        ),
         direction: value.direction as UpToOffsetDirection,
       };
 }

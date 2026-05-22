@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   EditorEffect,
   EditorEffectRuntime,
@@ -98,18 +97,18 @@ test("src/application/editor/editor-event-loop.spec.ts bootstraps through start(
     (candidate) => candidate.document.revisionId !== null,
   );
 
-  expectTrue(
-    snapshotCallCount === 1,
+  expect(
+    snapshotCallCount,
     "Starting the loop should dispatch session.started and fetch the initial snapshot once.",
-  );
-  expectTrue(
-    state.document.documentId === snapshot.document.documentId,
+  ).toBe(1);
+  expect(
+    state.document.documentId,
     "Starting the loop should hydrate the document id.",
-  );
-  expectTrue(
-    state.document.revisionId === snapshot.document.revisionId,
+  ).toBe(snapshot.document.documentId);
+  expect(
+    state.document.revisionId,
     "Starting the loop should hydrate the revision id.",
-  );
+  ).toBe(snapshot.document.revisionId);
 
   loop.stop();
 });
@@ -137,23 +136,23 @@ test("src/application/editor/editor-event-loop.spec.ts dispatches synchronous ev
     snapshot: importedSnapshot,
   });
 
-  expectTrue(
-    loop.getState().document.revisionId === "rev_imported",
+  expect(
+    loop.getState().document.revisionId,
     "Dispatch should route direct editor events through the reducer immediately.",
-  );
-  expectTrue(
+  ).toBe("rev_imported");
+  expect(
     notifications > 0,
     "Subscribers should be notified after transitions.",
-  );
+  ).toBeTruthy();
 
   const beforeUnsubscribe = notifications;
   subscription.unsubscribe();
   loop.dispatch({ type: "selection.cleared" });
 
-  expectTrue(
-    notifications === beforeUnsubscribe,
+  expect(
+    notifications,
     "Unsubscribed listeners should stop receiving state updates.",
-  );
+  ).toBe(beforeUnsubscribe);
 
   loop.stop();
 });
@@ -177,16 +176,16 @@ test("src/application/editor/editor-event-loop.spec.ts executes effects serially
   loop.start();
   loop.dispatch({ type: "document.refreshRequested" });
 
-  expectTrue(
-    startedEffects.length === 1,
+  expect(
+    startedEffects.length,
     "Only the first queued effect should start while it is in flight.",
-  );
+  ).toBe(1);
 
   const firstEffect = startedEffects[0];
-  expectTrue(
-    firstEffect?.type === "document.fetchSnapshot",
+  expect(
+    firstEffect?.type,
     "Session bootstrap should enqueue a snapshot fetch effect.",
-  );
+  ).toBe("document.fetchSnapshot");
   resolvers[0]?.({
     type: "effect.snapshotLoaded",
     payload: {
@@ -201,14 +200,14 @@ test("src/application/editor/editor-event-loop.spec.ts executes effects serially
 
   await waitForCondition(() => startedEffects.length === 2);
 
-  expectTrue(
-    startedEffects.length === 2,
+  expect(
+    startedEffects.length,
     "The next queued effect should start only after the prior effect completes.",
-  );
-  expectTrue(
-    startedEffects[1]?.type === "document.fetchSnapshot",
+  ).toBe(2);
+  expect(
+    startedEffects[1]?.type,
     "Queued effects should preserve FIFO ordering.",
-  );
+  ).toBe("document.fetchSnapshot");
 
   const secondEffect = startedEffects[1];
   if (secondEffect) {
@@ -250,18 +249,18 @@ test("src/application/editor/editor-event-loop.spec.ts reports escaped effect er
     (candidate) => candidate.pendingSnapshotRequestId === null,
   );
 
-  expectTrue(
-    reporter.reports.length === 1,
+  expect(
+    reporter.reports.length,
     "Escaped effect failures should be reported through the configured error reporter.",
-  );
-  expectTrue(
-    reporter.reports[0]?.error.code === "editor/invocation-failed",
+  ).toBe(1);
+  expect(
+    reporter.reports[0]?.error.code,
     "Escaped effect failures should use the invocation failure code.",
-  );
-  expectTrue(
-    state.preview?.kind === "selection",
+  ).toBe("editor/invocation-failed");
+  expect(
+    state.preview?.kind,
     "Escaped effect failures should re-enter the reducer as visible failure state.",
-  );
+  ).toBe("selection");
 
   loop.stop();
 });
@@ -302,10 +301,10 @@ test("src/application/editor/editor-event-loop.spec.ts stop() discards queued an
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expectTrue(
-    loop.getState().document.revisionId === null,
+  expect(
+    loop.getState().document.revisionId,
     "Stopping the loop should ignore in-flight effect completions.",
-  );
+  ).toBe(null);
 });
 
 test("src/application/editor/editor-event-loop.spec.ts restart() resumes draining after stop during an in-flight effect", async () => {
@@ -332,10 +331,10 @@ test("src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
   loop.stop();
   loop.start();
 
-  expectTrue(
-    startedEffects.length === 1,
+  expect(
+    startedEffects.length,
     "Restart should queue a new bootstrap effect even while the previous drain is still in flight.",
-  );
+  ).toBe(1);
 
   resolvers[0]?.({
     type: "effect.snapshotLoaded",
@@ -354,10 +353,10 @@ test("src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
   await waitForCondition(() => startedEffects.length === 2);
 
   const restartedEffect = startedEffects[1];
-  expectTrue(
-    restartedEffect?.type === "document.fetchSnapshot",
+  expect(
+    restartedEffect?.type,
     "Restart should resume draining the new bootstrap snapshot effect.",
-  );
+  ).toBe("document.fetchSnapshot");
 
   resolvers[1]?.({
     type: "effect.snapshotLoaded",
@@ -376,9 +375,9 @@ test("src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
     (candidate) => candidate.document.revisionId !== null,
   );
 
-  expectTrue(
-    state.document.revisionId === snapshot.document.revisionId,
+  expect(
+    state.document.revisionId,
     "Restarted drains should still deliver the snapshot into loop state.",
-  );
+  ).toBe(snapshot.document.revisionId);
   loop.stop();
 });

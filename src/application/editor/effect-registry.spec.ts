@@ -1,8 +1,7 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
 import { ResultAsync, type AppError } from "@/contracts/errors";
 import type { DocumentId, RequestId, RevisionId } from "@/contracts/shared/ids";
-import { expectTrue } from "@/testing/expect.spec";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -73,11 +72,11 @@ test("src/application/editor/effect-registry.spec.ts commits the full sketch def
     },
   });
 
-  expectTrue(
+  expect(
     rolledBackSession.definition.entityIds.length === 1 &&
       rolledBackSession.fullDefinition.entityIds.length === 2,
     "The fixture should distinguish the visible rollback definition from the durable full sketch definition.",
-  );
+  ).toBeTruthy();
 
   const result = await runtime.commitSketch({
     requestId: "request_commit_full_sketch" as RequestId,
@@ -88,12 +87,12 @@ test("src/application/editor/effect-registry.spec.ts commits the full sketch def
     session: rolledBackSession,
   });
 
-  expectTrue(
-    result?.accepted === true,
+  expect(
+    result?.accepted,
     "Rolled-back sketch commit coverage should accept through the fake modeling service.",
-  );
-  expectTrue(
-    committedEntityCount === 2,
+  ).toBeTruthy();
+  expect(
+    committedEntityCount,
     "Sketch commits must preserve full history tail geometry when the cursor is only rolled back for viewing.",
-  );
+  ).toBe(2);
 });

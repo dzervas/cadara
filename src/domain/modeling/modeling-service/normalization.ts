@@ -17,6 +17,7 @@ import type {
   ExtrudeEndCondition,
   ExtrudeFeatureExtent,
   ExtrudeFeatureParameters,
+  FeatureBooleanOperation,
   FeatureDefinition,
   FeatureSnapshotRecord,
   FilletFeatureParameters,
@@ -48,10 +49,11 @@ import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   isAdvancedParticipantRole,
   isAdvancedSolidFeatureKind,
+  type AdvancedSolidOperationIntent,
 } from "@/contracts/modeling/advanced-solid";
 import {
-  kernelDocumentSnapshotSchema,
-  workspaceSnapshotSchema,
+  parseWorkspaceSnapshot,
+  requireKernelDocumentSnapshot,
 } from "@/contracts/modeling/runtime-schema";
 import {
   getAuthoredLiteralValue,
@@ -121,6 +123,7 @@ import {
   assertRevolveAxisRef,
   assertUpToTargetForKind,
   normalizeUpToOffset,
+  toContractAuthoredValue,
 } from "./validation";
 
 export function normalizeSketchPlaneKey(
@@ -211,9 +214,17 @@ export function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
       return {
         kind: "blind",
         direction,
-        distance: value.distance as MaybeAuthoredValue<number>,
+        distance: toContractAuthoredValue(
+          value.distance as MaybeAuthoredValue<number>,
+          12,
+        ),
         ...(draftAngle !== undefined
-          ? { draftAngle: draftAngle as MaybeAuthoredValue<number> }
+          ? {
+              draftAngle: toContractAuthoredValue(
+                draftAngle as MaybeAuthoredValue<number>,
+                0,
+              ),
+            }
           : {}),
       };
     }
@@ -222,7 +233,12 @@ export function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
         kind: "throughAll",
         direction,
         ...(draftAngle !== undefined
-          ? { draftAngle: draftAngle as MaybeAuthoredValue<number> }
+          ? {
+              draftAngle: toContractAuthoredValue(
+                draftAngle as MaybeAuthoredValue<number>,
+                0,
+              ),
+            }
           : {}),
       };
     case "upToNext": {
@@ -235,7 +251,12 @@ export function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
         direction,
         ...(linearOffset ? { offset: linearOffset } : {}),
         ...(draftAngle !== undefined
-          ? { draftAngle: draftAngle as MaybeAuthoredValue<number> }
+          ? {
+              draftAngle: toContractAuthoredValue(
+                draftAngle as MaybeAuthoredValue<number>,
+                0,
+              ),
+            }
           : {}),
       };
     }
@@ -249,7 +270,12 @@ export function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
         target: assertUpToTargetForKind(value.kind, value.target),
         ...(offset && "distance" in offset ? { offset } : {}),
         ...(draftAngle !== undefined
-          ? { draftAngle: draftAngle as MaybeAuthoredValue<number> }
+          ? {
+              draftAngle: toContractAuthoredValue(
+                draftAngle as MaybeAuthoredValue<number>,
+                0,
+              ),
+            }
           : {}),
       } as ExtrudeEndCondition;
     }
@@ -318,7 +344,10 @@ export function normalizeExtrudeFeatureParameters(
     profiles: assertExtrudeProfileRefs(value.profiles, "Extrude"),
     startExtent: { kind: "profilePlane" },
     extent,
-    operation: value.operation as ExtrudeFeatureParameters["operation"],
+    operation: toContractAuthoredValue(
+      value.operation as MaybeAuthoredValue<FeatureBooleanOperation>,
+      "newBody",
+    ),
     booleanScope:
       isRecord(value.booleanScope) &&
       value.booleanScope.kind === "targetBody" &&
@@ -342,13 +371,16 @@ export function normalizeFilletFeatureParameters(
 ): FilletFeatureParameters {
   if (
     !isRecord(value) ||
-    typeof value.radius !== "number" ||
+    !isAuthoredNumberLike(value.radius) ||
     !Array.isArray(value.edgeTargets)
   ) {
     throw new Error("Invalid fillet feature parameters payload.");
   }
 
-  if (value.radius <= 0) {
+  const radius = getAuthoredLiteralValue(
+    value.radius as MaybeAuthoredValue<number>,
+  );
+  if (radius !== null && radius <= 0) {
     throw new Error("Fillet radius must be positive.");
   }
 
@@ -360,7 +392,10 @@ export function normalizeFilletFeatureParameters(
 
   return {
     edgeTargets: value.edgeTargets.map((target) => assertFilletEdgeRef(target)),
-    radius: value.radius,
+    radius: toContractAuthoredValue(
+      value.radius as MaybeAuthoredValue<number>,
+      1,
+    ),
   };
 }
 
@@ -419,10 +454,10 @@ export function normalizeRevolveEnd(value: unknown): RevolveEndCondition {
       return {
         kind: "blind",
         direction,
-        angle: value.angle as Extract<
-          RevolveEndCondition,
-          { kind: "blind" }
-        >["angle"],
+        angle: toContractAuthoredValue(
+          value.angle as MaybeAuthoredValue<number>,
+          Math.PI * 2,
+        ),
       };
     }
     case "upToNext": {
@@ -517,10 +552,16 @@ export function normalizeRevolveFeatureParameters(
     profiles: assertExtrudeProfileRefs(value.profiles, "Revolve"),
     axis: assertRevolveAxisRef(value.axis),
     startAngle: isAuthoredNumberLike(value.startAngle)
-      ? (value.startAngle as RevolveFeatureParameters["startAngle"])
-      : 0,
+      ? toContractAuthoredValue(
+          value.startAngle as MaybeAuthoredValue<number>,
+          0,
+        )
+      : toContractAuthoredValue(0, 0),
     extent,
-    operation: value.operation as RevolveFeatureParameters["operation"],
+    operation: toContractAuthoredValue(
+      value.operation as MaybeAuthoredValue<FeatureBooleanOperation>,
+      "newBody",
+    ),
     booleanScope:
       isRecord(value.booleanScope) &&
       value.booleanScope.kind === "targetBody" &&
@@ -544,13 +585,16 @@ export function normalizeShellFeatureParameters(
 ): ShellFeatureParameters {
   if (
     !isRecord(value) ||
-    typeof value.thickness !== "number" ||
+    !isAuthoredNumberLike(value.thickness) ||
     !Array.isArray(value.faceTargets)
   ) {
     throw new Error("Invalid shell feature parameters payload.");
   }
 
-  if (value.thickness <= 0) {
+  const thickness = getAuthoredLiteralValue(
+    value.thickness as MaybeAuthoredValue<number>,
+  );
+  if (thickness !== null && thickness <= 0) {
     throw new Error("Shell thickness must be positive.");
   }
 
@@ -561,10 +605,12 @@ export function normalizeShellFeatureParameters(
   }
 
   if (
-    value.operation !== "newBody" &&
-    value.operation !== "join" &&
-    value.operation !== "cut" &&
-    value.operation !== "intersect"
+    !isAuthoredEnumLike(value.operation, [
+      "newBody",
+      "join",
+      "cut",
+      "intersect",
+    ])
   ) {
     throw new Error("Invalid shell operation payload.");
   }
@@ -578,8 +624,14 @@ export function normalizeShellFeatureParameters(
   return {
     bodyTarget,
     faceTargets: value.faceTargets.map((target) => assertShellFaceRef(target)),
-    thickness: value.thickness,
-    operation: value.operation,
+    thickness: toContractAuthoredValue(
+      value.thickness as MaybeAuthoredValue<number>,
+      1,
+    ),
+    operation: toContractAuthoredValue(
+      value.operation as MaybeAuthoredValue<FeatureBooleanOperation>,
+      "newBody",
+    ),
     booleanScope:
       isRecord(value.booleanScope) &&
       value.booleanScope.kind === "targetBody" &&
@@ -608,10 +660,12 @@ export function normalizeAdvancedSolidFeatureParameters(
   const operationIntent = value.operationIntent;
   if (
     operationIntent !== undefined &&
-    operationIntent !== "create" &&
-    operationIntent !== "add" &&
-    operationIntent !== "subtract" &&
-    operationIntent !== "intersect"
+    !isAuthoredEnumLike(operationIntent, [
+      "create",
+      "add",
+      "subtract",
+      "intersect",
+    ])
   ) {
     throw new Error("Invalid advanced solid operation intent payload.");
   }
@@ -631,7 +685,14 @@ export function normalizeAdvancedSolidFeatureParameters(
         targets: participant.targets.map((target) => assertDurableRef(target)),
       };
     }),
-    ...(operationIntent ? { operationIntent } : {}),
+    ...(operationIntent
+      ? {
+          operationIntent: toContractAuthoredValue(
+            operationIntent as MaybeAuthoredValue<AdvancedSolidOperationIntent>,
+            "create",
+          ),
+        }
+      : {}),
     ...(isRecord(value.options) ? { options: { ...value.options } } : {}),
   };
 }
@@ -3195,7 +3256,7 @@ export function normalizeEntities(value: unknown): SnapshotEntityRecord[] {
 export function normalizeKernelDocumentSnapshot(
   value: unknown,
 ): KernelDocumentSnapshot {
-  const parsed = kernelDocumentSnapshotSchema.parse(value);
+  const parsed = requireKernelDocumentSnapshot(value);
 
   return {
     ...parsed,
@@ -3206,7 +3267,7 @@ export function normalizeKernelDocumentSnapshot(
 }
 
 export function normalizeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
-  const parsed = workspaceSnapshotSchema.parse(value);
+  const parsed = parseWorkspaceSnapshot(value);
   const document = normalizeKernelDocumentSnapshot(parsed.document);
   const presentation = normalizeDocumentPresentation(parsed.presentation);
 

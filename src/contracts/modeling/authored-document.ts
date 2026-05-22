@@ -16,6 +16,7 @@ import type {
 import type { GeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
 import { createEmptyGeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
+import { normalizeFeatureDefinitionAuthoredValues } from "@/contracts/modeling/feature-authored-values";
 import {
   AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   CONTRACT_VERSION,
@@ -94,7 +95,7 @@ export function createAuthoredModelDocumentFromSnapshot(
       featureId: feature.featureId,
       label: feature.label,
       suppressed: feature.suppressed,
-      definition: structuredClone(feature.definition),
+      definition: normalizeFeatureDefinitionAuthoredValues(feature.definition),
     })),
     featureOrder: snapshot.document.features.map(
       (feature) => feature.featureId,

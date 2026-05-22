@@ -1,18 +1,19 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition, SketchRecord } from "@/contracts/sketch/schema";
 import { SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 import {
-  sketchDefinitionSchema,
-  solvedSketchSnapshotSchema,
+  requireSketchDefinition,
+  requireSolvedSketchSnapshot,
+  validateSketchDefinition,
+  validateSolvedSketchSnapshot,
 } from "@/contracts/sketch/runtime-schema";
 import {
   solveSketchDefinitionCore,
   validateSketchDefinitionCore,
 } from "@/contracts/sketch/solver-core";
 import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
-import { validateOperationHistoryPayload } from "@/contracts/modeling/operation-history";
+import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import {
   CONTRACT_VERSION,
   OPERATION_HISTORY_SCHEMA_VERSION,
@@ -175,13 +176,13 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     styles: [],
   };
 
-  const parsed = sketchDefinitionSchema.safeParse(definition);
-  expectTrue(
+  const parsed = validateSketchDefinition(definition);
+  expect(
     parsed.success,
     "Runtime schema should accept advanced sketch entity payloads.",
-  );
+  ).toBeTruthy();
 
-  const invalid = sketchDefinitionSchema.safeParse({
+  const invalid = validateSketchDefinition({
     ...definition,
     entities: [
       {
@@ -190,16 +191,68 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
-    !invalid.success,
+  expect(
+    invalid.success,
     "Runtime schema should reject invalid advanced entity payloads.",
-  );
+  ).toBeFalsy();
+
+  const invalidCircle = validateSketchDefinition({
+    ...definition,
+    entities: [
+      {
+        kind: "circle",
+        entityId: "sketch_entity_ellipse",
+        label: "Circle",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: "sketch_entity_ellipse",
+        },
+        isConstruction: false,
+        centerPointId: "sketch_point_center",
+        radius: 0,
+      },
+    ],
+  });
+  expect(
+    invalidCircle.success,
+    "Runtime schema should reject circle entities with non-positive radius.",
+  ).toBeFalsy();
+  try {
+    requireSketchDefinition({
+      ...definition,
+      entities: [
+        {
+          kind: "circle",
+          entityId: "sketch_entity_ellipse",
+          label: "Circle",
+          target: {
+            kind: "sketchEntity",
+            sketchId,
+            entityId: "sketch_entity_ellipse",
+          },
+          isConstruction: false,
+          centerPointId: "sketch_point_center",
+          radius: 0,
+        },
+      ],
+    });
+    expect(
+      false,
+      "Required sketch definition validation should reject non-positive circle radius.",
+    ).toBeTruthy();
+  } catch (error) {
+    expect(
+      error instanceof Error,
+      "Required sketch definition validation should throw for non-positive circle radius.",
+    ).toBeTruthy();
+  }
 
   const validation = validateSketchDefinitionCore({ definition, tolerances });
-  expectTrue(
+  expect(
     validation.isValid,
     "Advanced entities with valid defining data should pass sketch validation.",
-  );
+  ).toBeTruthy();
 
   const solved = solveSketchDefinitionCore({
     definition,
@@ -209,30 +262,67 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
   const solvedKinds = new Set(
     solved.solvedSnapshot.solvedEntities.map((entity) => entity.kind),
   );
-  expectTrue(
+  expect(
     solvedKinds.has("ellipse"),
     "Solved snapshot should preserve ellipse geometry.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     solvedKinds.has("ellipticalArc"),
     "Solved snapshot should preserve elliptical arc geometry.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     solvedKinds.has("conic"),
     "Solved snapshot should preserve conic geometry.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     solvedKinds.has("bezierCurve"),
     "Solved snapshot should preserve Bezier geometry.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     solvedKinds.has("profileText"),
     "Solved snapshot should preserve profile text geometry.",
-  );
-  expectTrue(
-    solvedSketchSnapshotSchema.safeParse(solved.solvedSnapshot).success,
+  ).toBeTruthy();
+  expect(
+    validateSolvedSketchSnapshot(solved.solvedSnapshot).success,
     "Solved snapshot runtime schema should validate advanced entities.",
-  );
+  ).toBeTruthy();
+  const invalidSolvedCircle = validateSolvedSketchSnapshot({
+    ...solved.solvedSnapshot,
+    solvedEntities: [
+      {
+        entityId: "sketch_entity_circle",
+        kind: "circle",
+        centerPosition: [0, 0],
+        solvedRadius: 0,
+      },
+    ],
+  });
+  expect(
+    invalidSolvedCircle.success,
+    "Solved snapshot runtime schema should reject non-positive solved circle radius.",
+  ).toBeFalsy();
+  try {
+    requireSolvedSketchSnapshot({
+      ...solved.solvedSnapshot,
+      solvedEntities: [
+        {
+          entityId: "sketch_entity_circle",
+          kind: "circle",
+          centerPosition: [0, 0],
+          solvedRadius: 0,
+        },
+      ],
+    });
+    expect(
+      false,
+      "Required solved snapshot validation should reject non-positive solved circle radius.",
+    ).toBeTruthy();
+  } catch (error) {
+    expect(
+      error instanceof Error,
+      "Required solved snapshot validation should throw for non-positive solved circle radius.",
+    ).toBeTruthy();
+  }
 
   const unsupportedConstraintValidation = validateSketchDefinitionCore({
     definition: {
@@ -250,13 +340,13 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     },
     tolerances,
   });
-  expectTrue(
+  expect(
     unsupportedConstraintValidation.diagnostics.some(
       (diagnostic) =>
         diagnostic.code === "unsupported-solver-entity-constraint",
     ),
     "Solver validation should emit an explicit unsupported advanced-constraint diagnostic.",
-  );
+  ).toBeTruthy();
 
   const derived = deriveSketchRegionsCore({
     documentId: "doc_workspace",
@@ -265,16 +355,16 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     definition,
     solvedSnapshot: solved.solvedSnapshot,
   });
-  expectTrue(
+  expect(
     derived.regions.length >= 2,
     "Ellipse and profile text should derive selectable closed regions.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     derived.diagnostics.some(
       (diagnostic) => diagnostic.code === "unsupported-profile-entity",
     ),
     "Unsupported advanced profile conversion should produce a structured diagnostic.",
-  );
+  ).toBeTruthy();
 
   const session = {
     ...createNewSketchSession(plane),
@@ -283,7 +373,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     fullDefinition: definition,
   };
   const sessionRenderables = getSketchSessionDisplayRenderables(session);
-  expectTrue(
+  expect(
     sessionRenderables.some(
       (renderable) =>
         renderable.target?.kind === "sketchEntity" &&
@@ -291,7 +381,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
         renderable.geometry.kind === "polyline",
     ),
     "Active sketch display should render advanced entities as sketch polylines.",
-  );
+  ).toBeTruthy();
 
   const sketchRecord: SketchRecord = {
     ownerDocumentId: "doc_workspace",
@@ -322,7 +412,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
   const renderExport = buildOccRenderExport(
     createOccAuthoringState({} as never, { sketches: [sketchSnapshot] }),
   );
-  expectTrue(
+  expect(
     renderExport.records.some(
       (record) =>
         record.binding.semanticClass === "sketchCurve" &&
@@ -331,7 +421,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
         record.geometry.kind === "polyline",
     ),
     "Committed sketch render export should render advanced entities as sketch curves.",
-  );
+  ).toBeTruthy();
 
   const operationHistory = validateOperationHistoryPayload({
     contractVersion: CONTRACT_VERSION,
@@ -344,15 +434,13 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
           sketchId,
           sketchLabel: "Advanced",
           plane,
-          planeTarget: plane.support,
-          planeKey: plane.key,
           definition,
         },
       },
     ],
   });
-  expectTrue(
+  expect(
     operationHistory.ok,
     "Operation history should persist advanced sketch entity definitions.",
-  );
+  ).toBeTruthy();
 });

@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -19,19 +18,23 @@ import {
   toggleSketchSvgRendering,
 } from "@/domain/editor/sketch-session";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
-import { createToolActionBus } from "@/core/tools/tool-action-bus";
 import { EditorContext } from "@/hooks/editor-context";
-import { ToolActionProvider } from "@/hooks/tool-action-provider";
 import { WorkbenchCommandProvider } from "@/hooks/workbench-command-provider";
 import { workbenchTheme } from "@/theme/workbench-theme";
 
 test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   function getToolMarkup(markup: string, toolId: string) {
     const toolIdIndex = markup.indexOf(`data-tool-id="${toolId}"`);
-    expectTrue(toolIdIndex >= 0, `Expected ${toolId} tool markup to exist.`);
+    expect(
+      toolIdIndex >= 0,
+      `Expected ${toolId} tool markup to exist.`,
+    ).toBeTruthy();
 
     const start = markup.lastIndexOf("<button", toolIdIndex);
-    expectTrue(start >= 0, `Expected ${toolId} tool button markup to exist.`);
+    expect(
+      start >= 0,
+      `Expected ${toolId} tool button markup to exist.`,
+    ).toBeTruthy();
 
     const end = markup.indexOf("</button>", toolIdIndex);
     return end >= 0 ? markup.slice(start, end) : markup.slice(start);
@@ -41,16 +44,16 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     const triggerIndex = markup.indexOf(
       `data-tool-dropdown-trigger="${toolId}"`,
     );
-    expectTrue(
+    expect(
       triggerIndex >= 0,
       `Expected ${toolId} dropdown trigger markup to exist.`,
-    );
+    ).toBeTruthy();
 
     const start = markup.lastIndexOf("<button", triggerIndex);
-    expectTrue(
+    expect(
       start >= 0,
       `Expected ${toolId} dropdown trigger button markup to exist.`,
-    );
+    ).toBeTruthy();
 
     const end = markup.indexOf("</button>", triggerIndex);
     return end >= 0 ? markup.slice(start, end) : markup.slice(start);
@@ -84,11 +87,9 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
             dispatch: () => undefined,
           }}
         >
-          <ToolActionProvider actionBus={createToolActionBus()}>
-            <WorkbenchCommandProvider handlers={workbenchHandlers}>
-              <WorkspaceToolbar onReportBug={onReportBug} />
-            </WorkbenchCommandProvider>
-          </ToolActionProvider>
+          <WorkbenchCommandProvider handlers={workbenchHandlers}>
+            <WorkspaceToolbar onReportBug={onReportBug} />
+          </WorkbenchCommandProvider>
         </EditorContext.Provider>
       </MantineProvider>,
     );
@@ -96,96 +97,96 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
 
   const toolbarMarkup = renderToolbar();
 
-  expectTrue(
+  expect(
     toolbarMarkup.includes("Search tools"),
     "Toolbar should keep the tool search input.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes('role="combobox"') &&
       toolbarMarkup.includes('aria-autocomplete="list"') &&
       toolbarMarkup.includes('aria-expanded="false"'),
     "Toolbar search should expose collapsed combobox semantics before any results are shown.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes('aria-label="File"') &&
       toolbarMarkup.indexOf('aria-label="File"') <
         toolbarMarkup.indexOf('data-tool-id="undo"'),
     "Toolbar should render the file menu trigger (the spark logo) before the CAD tool sections.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes("min-w-0"),
     "Toolbar tool cluster row should be allowed to shrink so the absolute floating bar does not widen the workbench shell.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes('data-toolbar-responsive-rows="1"'),
     "Toolbar should advertise its measured responsive row count so browser coverage can guard narrow-width spillover.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes('role="toolbar"') &&
       toolbarMarkup.includes('aria-label="CAD tools"'),
     "Toolbar tool groups should be wrapped in an explicit toolbar landmark.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes("/icons/extrude.svg"),
     "Toolbar should render standard tool buttons with local SVG assets.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes('data-tool-id="import"') &&
       toolbarMarkup.includes('aria-label="Import"') &&
       toolbarMarkup.includes("/icons/import-part.svg"),
     "Toolbar should expose import as a real icon-only tool in part mode.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes("/icons/linear-pattern.svg"),
     "Toolbar should render dropdown-backed tool triggers with local SVG assets.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes('aria-label="Extrude"'),
     "Toolbar buttons should expose concise accessibility labels based on the tool name.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes('href="https://github.com/dzervas/cadara"') &&
       toolbarMarkup.includes('target="_blank"') &&
       toolbarMarkup.includes('rel="noreferrer"') &&
       toolbarMarkup.includes('aria-label="Open repository on GitHub"') &&
       toolbarMarkup.includes("/icons/GitHub-logo.svg"),
     "Toolbar should render a safe GitHub repository link at the end.",
-  );
+  ).toBeTruthy();
 
   const reportBugToolbarMarkup = renderToolbar({
     onReportBug: () => undefined,
   });
 
-  expectTrue(
+  expect(
     reportBugToolbarMarkup.includes('aria-label="Report bug"') &&
       reportBugToolbarMarkup.includes('type="button"') &&
       reportBugToolbarMarkup.includes("/icons/bug.svg"),
     "Toolbar should render the report-bug action as an icon-only button with local asset and accessible label.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     toolbarMarkup.includes('data-tool-id="undo"') &&
       toolbarMarkup.includes('data-tool-id="redo"') &&
       getToolMarkup(toolbarMarkup, "undo").includes('data-disabled="true"') &&
       getToolMarkup(toolbarMarkup, "redo").includes('data-disabled="true"'),
     "Undo and redo should render disabled when no history step is available.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getToolMarkup(toolbarMarkup, "undo").includes("opacity:0.46") &&
       getToolMarkup(toolbarMarkup, "redo").includes("opacity:0.46"),
     "Disabled undo and redo buttons should render with a visibly muted toolbar treatment.",
-  );
-  expectTrue(
-    !toolbarMarkup.includes("Filter:"),
+  ).toBeTruthy();
+  expect(
+    toolbarMarkup.includes("Filter:"),
     "Toolbar should not duplicate the selection filter debugger readout.",
-  );
-  expectTrue(
-    !toolbarMarkup.includes("Requirement:"),
+  ).toBeFalsy();
+  expect(
+    toolbarMarkup.includes("Requirement:"),
     "Toolbar should not duplicate the requirement debugger readout.",
-  );
-  expectTrue(
-    !toolbarMarkup.includes("Slots:"),
+  ).toBeFalsy();
+  expect(
+    toolbarMarkup.includes("Slots:"),
     "Toolbar should not duplicate the slot-count debugger readout.",
-  );
+  ).toBeFalsy();
 
   const sketchToolbarMarkup = renderToolbar({
     state: {
@@ -201,11 +202,11 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     },
   });
 
-  expectTrue(
+  expect(
     sketchToolbarMarkup.includes('aria-label="Finish Sketch"'),
     "Toolbar should render Finish Sketch while a sketch session is active.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     sketchToolbarMarkup.includes("/icons/sketch-line-segment.svg") &&
       sketchToolbarMarkup.includes("/icons/sketch-dimension.svg") &&
       sketchToolbarMarkup.includes("/icons/sketch-construction.svg") &&
@@ -213,22 +214,22 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
       sketchToolbarMarkup.includes("/icons/svg-fill.svg") &&
       sketchToolbarMarkup.includes("/icons/svg-stroke.svg"),
     "Sketch toolbar buttons and dropdown triggers should keep local SVG icons.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     sketchToolbarMarkup.includes('data-tool-id="svgRendering"') &&
       sketchToolbarMarkup.includes('data-tool-id="fill"') &&
       sketchToolbarMarkup.includes('data-tool-id="stroke"') &&
       !sketchToolbarMarkup.includes('data-tool-id="fillType"') &&
       !sketchToolbarMarkup.includes('data-tool-id="strokeOptions"'),
     "Sketch toolbar should include the SVG rendering toggle and only Fill/Stroke SVG style tools.",
-  );
-  expectTrue(
-    !getDropdownTriggerMarkup(sketchToolbarMarkup, "line").includes(
+  ).toBeTruthy();
+  expect(
+    getDropdownTriggerMarkup(sketchToolbarMarkup, "line").includes(
       "border-left",
     ),
     "Sketch dropdown tools should not render a divider between the tool icon and dropdown affordance.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     getToolMarkup(sketchToolbarMarkup, "fill").includes(
       'data-disabled="true"',
     ) &&
@@ -239,12 +240,12 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
         'aria-pressed="true"',
       ),
     "New sketch sessions should render SVG style controls disabled until SVG rendering is enabled.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     sketchToolbarMarkup.includes("var(--workbench-shell-success-surface)") &&
       sketchToolbarMarkup.includes("var(--workbench-shell-success-border)"),
     "Finish Sketch should use the semantic success treatment from the shared workbench theme.",
-  );
+  ).toBeTruthy();
 
   let styledSession = toggleSketchSvgRendering(
     createNewSketchSession(createStandardPlaneDefinition("xy")),
@@ -253,10 +254,10 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   styledSession = startSketchDraw(styledSession, [0, 0]);
   styledSession = acceptSketchDraw(styledSession, [4, 0]);
   const styleTarget = styledSession.definition.entities[0]?.target;
-  expectTrue(
+  expect(
     styleTarget,
     "Toolbar style availability fixture should create a local sketch entity.",
-  );
+  ).toBeTruthy();
   styledSession = focusSketchStyleTool(styledSession, [styleTarget], "stroke");
 
   const styleTargetToolbarMarkup = renderToolbar({
@@ -272,8 +273,8 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     },
   });
 
-  expectTrue(
-    !getToolMarkup(styleTargetToolbarMarkup, "fill").includes(
+  expect(
+    getToolMarkup(styleTargetToolbarMarkup, "fill").includes(
       'data-disabled="true"',
     ) &&
       !getToolMarkup(styleTargetToolbarMarkup, "stroke").includes(
@@ -283,7 +284,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
         'aria-pressed="true"',
       ),
     "Fill and Stroke should remain available while Stroke shows active for a selected sketch entity.",
-  );
+  ).toBeFalsy();
 
   const baseSvgDisabledSession = createNewSketchSession(
     createStandardPlaneDefinition("xy"),
@@ -311,7 +312,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     },
   });
 
-  expectTrue(
+  expect(
     getToolMarkup(svgDisabledToolbarMarkup, "fill").includes(
       'data-disabled="true"',
     ) &&
@@ -322,7 +323,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
         'aria-pressed="true"',
       ),
     "Fill and Stroke should only disable when SVG rendering is off.",
-  );
+  ).toBeTruthy();
 
   const constructionSession = {
     ...createNewSketchSession(createStandardPlaneDefinition("xy")),
@@ -340,11 +341,11 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     },
   });
 
-  expectTrue(
+  expect(
     constructionToolbarMarkup.includes('aria-label="Construction"') &&
       constructionToolbarMarkup.includes('aria-pressed="true"'),
     "Construction should render selected while acting as a sketch modifier.",
-  );
+  ).toBeTruthy();
 
   const historyToolbarMarkup = renderToolbar({
     state: {
@@ -355,24 +356,24 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     },
   });
 
-  expectTrue(
+  expect(
     getToolMarkup(historyToolbarMarkup, "redo").includes(
       'data-disabled="true"',
     ),
     "Redo should render disabled when no redo step is available.",
-  );
-  expectTrue(
-    !getToolMarkup(historyToolbarMarkup, "undo").includes(
+  ).toBeTruthy();
+  expect(
+    getToolMarkup(historyToolbarMarkup, "undo").includes(
       'data-disabled="true"',
     ),
     "Undo should render enabled when an undo step is available.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     getNextToolSearchHighlightIndex(-1, "ArrowDown", 4) === 0 &&
       getNextToolSearchHighlightIndex(0, "ArrowUp", 4) === 0 &&
       getNextToolSearchHighlightIndex(1, "End", 4) === 3 &&
       getNextToolSearchHighlightIndex(3, "Home", 4) === 0 &&
       getNextToolSearchHighlightIndex(0, "Escape", 4) === null,
     "Toolbar search keyboard navigation should clamp within the result set and ignore unrelated keys.",
-  );
+  ).toBeTruthy();
 });

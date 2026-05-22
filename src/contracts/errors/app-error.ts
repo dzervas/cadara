@@ -1,7 +1,7 @@
 import { err, ok, ResultAsync, type Result } from "neverthrow";
-import type { ZodError } from "zod";
 
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
+import type { ContractValidationIssue } from "@/contracts/shared/validation";
 import type { RequestId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 
@@ -136,17 +136,18 @@ export function normalizeUnknownError(
   });
 }
 
-export function appErrorFromZodError(
-  zodError: ZodError,
+export function appErrorFromValidationIssues(
+  issues: readonly ContractValidationIssue[],
   input: {
     operation: string;
     fallbackMessage?: string;
     requestId?: RequestId;
     context?: readonly AppErrorContextEntry[];
+    cause?: unknown;
   },
 ): AppError {
-  const firstIssue = zodError.issues[0];
-  const path = firstIssue?.path.join(".") ?? null;
+  const firstIssue = issues[0];
+  const path = firstIssue?.path || null;
 
   return createAppError({
     code: "app/validation-failed",
@@ -157,10 +158,10 @@ export function appErrorFromZodError(
     context: [
       { key: "operation", value: input.operation },
       ...errorContext("path", path),
-      ...errorContext("issueCount", zodError.issues.length),
+      ...errorContext("issueCount", issues.length),
       ...(input.context ?? []),
     ],
-    cause: zodError,
+    cause: input.cause,
     requestId: input.requestId,
     recoverable: true,
   });

@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { planeSelectionFilter } from "@/core/editor/schema";
 import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
 import { getDocumentHistoryCursorBeforeTarget } from "@/domain/modeling/document-history";
@@ -42,7 +41,7 @@ test("sketch-plane-flow.spec.ts requests rollback-aware sketch-plane editing whe
     { kind: "sketch", sketchId },
   );
 
-  expectTrue(
+  expect(
     requested.state.kind === "selectionCommand" &&
       requested.state.command.toolId === "sketchPlaneEdit" &&
       requested.state.editSessionCursorContext?.sessionKind ===
@@ -52,7 +51,7 @@ test("sketch-plane-flow.spec.ts requests rollback-aware sketch-plane editing whe
       JSON.stringify(requested.effects[0].cursor) ===
         JSON.stringify(expectedRollbackCursor),
     "Committed sketch-plane edits should reuse the rollback-aware history cursor seam before opening the inspector.",
-  );
+  ).toBeTruthy();
 });
 
 test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and restores the prior cursor when needed", async () => {
@@ -70,7 +69,7 @@ test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
     target: { kind: "sketch", sketchId },
   });
 
-  expectTrue(
+  expect(
     opened.state.kind === "editingSketchPlane" &&
       opened.state.command.toolId === "sketchPlaneEdit" &&
       opened.state.command.phase === "collecting" &&
@@ -80,7 +79,7 @@ test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
       opened.state.selection.length === 0 &&
       opened.effects.length === 0,
     "Sketch-plane edits should open immediately with the only support-plane picker armed when the active history cursor is already on the target sketch.",
-  );
+  ).toBeTruthy();
 
   const cancelledDirect =
     opened.state.kind === "editingSketchPlane"
@@ -90,19 +89,19 @@ test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
         })
       : null;
 
-  expectTrue(
+  expect(
     cancelledDirect?.state.kind === "idle" &&
       cancelledDirect.effects.length === 0 &&
       cancelledDirect.state.document.revisionId ===
         snapshot.document.revisionId,
     "Cancelling an unchanged direct sketch-plane edit should leave the loaded document revision untouched.",
-  );
+  ).toBeTruthy();
 
   const session = hydrateSketchPlaneEditSession(snapshot, sketchId);
-  expectTrue(
+  expect(
     session,
     "Seed snapshot should expose a sketch-plane edit session for restore coverage.",
-  );
+  ).toBeTruthy();
 
   const restoringState = session
     ? {
@@ -127,13 +126,13 @@ test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
       })
     : null;
 
-  expectTrue(
+  expect(
     cancelledWithRestore?.state.kind === "idle" &&
       cancelledWithRestore.state.editSessionCursorContext?.phase ===
         "restoring" &&
       cancelledWithRestore.effects[0]?.type === "document.moveHistoryCursor",
     "Cancelling a rollback-opened sketch-plane edit should restore the prior document cursor through the existing restore seam.",
-  );
+  ).toBeTruthy();
 });
 
 test("sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference picker through the shared form events", async () => {
@@ -151,10 +150,10 @@ test("sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference
     target: { kind: "sketch", sketchId },
   });
 
-  expectTrue(
-    opened.state.kind === "editingSketchPlane",
+  expect(
+    opened.state.kind,
     "Sketch-plane picker coverage needs the direct edit session to open.",
-  );
+  ).toBe("editingSketchPlane");
 
   const activated =
     opened.state.kind === "editingSketchPlane"
@@ -164,13 +163,13 @@ test("sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference
         })
       : null;
 
-  expectTrue(
+  expect(
     activated?.state.kind === "editingSketchPlane" &&
       activated.state.activeReferencePickerFieldId === "sketch-plane-support" &&
       activated.state.command.phase === "collecting" &&
       activated.state.selectionFilter?.kind === "planeReferences",
     "Sketch-plane edits should reuse the shared reference-picker activation seam and switch to plane selection collection.",
-  );
+  ).toBeTruthy();
 
   const cancelled =
     activated?.state.kind === "editingSketchPlane"
@@ -179,7 +178,7 @@ test("sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference
         })
       : null;
 
-  expectTrue(
+  expect(
     cancelled?.state.kind === "editingSketchPlane" &&
       cancelled.state.activeReferencePickerFieldId === null &&
       cancelled.state.command.phase === "editing" &&
@@ -187,7 +186,7 @@ test("sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference
       cancelled.state.preview?.label ===
         getSketchPlaneEditPreviewLabel(cancelled.state.session),
     "Cancelling the sketch-plane picker should restore the sketch-scoped selection and preview state.",
-  );
+  ).toBeTruthy();
 });
 
 test("sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked plane change and refreshes the accepted snapshot afterward", async () => {
@@ -205,19 +204,19 @@ test("sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked p
     target: { kind: "sketch", sketchId },
   });
 
-  expectTrue(
-    opened.state.kind === "editingSketchPlane",
+  expect(
+    opened.state.kind,
     "Sketch-plane commit coverage needs the direct edit session to open.",
-  );
+  ).toBe("editingSketchPlane");
 
   const unchangedCommit =
     opened.state.kind === "editingSketchPlane"
       ? emitSketchPlaneCommit(opened.state)
       : null;
-  expectTrue(
-    unchangedCommit?.effects.length === 0,
+  expect(
+    unchangedCommit?.effects.length,
     "Sketch-plane commits should stay synchronous when the draft still targets the current support plane.",
-  );
+  ).toBe(0);
 
   const pickerActivated =
     opened.state.kind === "editingSketchPlane"
@@ -244,12 +243,12 @@ test("sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked p
         })
       : null;
 
-  expectTrue(
+  expect(
     committed?.state.kind === "editingSketchPlane" &&
       committed.state.pendingCommitRequestId !== null &&
       committed.effects[0]?.type === "sketchPlane.commit",
     "Sketch-plane commits should issue the dedicated recommit effect once the picked support plane changes.",
-  );
+  ).toBeTruthy();
 
   const accepted =
     committed?.state.kind === "editingSketchPlane"
@@ -265,10 +264,10 @@ test("sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked p
         })
       : null;
 
-  expectTrue(
+  expect(
     accepted?.state.kind === "idle" &&
       accepted.state.document.revisionId === "rev_sketch_plane_updated" &&
       accepted.effects[0]?.type === "document.fetchSnapshot",
     "Accepted sketch-plane reassignment should advance the document revision and refresh the rebuilt snapshot through the standard fetch seam.",
-  );
+  ).toBeTruthy();
 });

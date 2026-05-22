@@ -1,5 +1,5 @@
 import type { ModelingOperationHistoryPayload } from "@/contracts/modeling/operation-history";
-import { validateOperationHistoryPayload } from "@/contracts/modeling/operation-history";
+import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import type {
   OperationHistoryStore,
   StorageLike,

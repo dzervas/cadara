@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type {
   CommitSketchResponse,
@@ -222,26 +221,20 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
       solverCorrelation: null,
     });
 
-    expectTrue(
-      warmupCalls === 1,
-      "Worker-owned preload should warm the shared worker runtime.",
-    );
-    expectTrue(
-      restoreCalls === 1,
-      "Worker-owned restores should delegate to the worker runtime.",
-    );
-    expectTrue(
-      snapshotCalls === 1,
+    expect(warmupCalls, "Worker-owned preload should warm the shared worker runtime.").toBe(1);
+    expect(restoreCalls, "Worker-owned restores should delegate to the worker runtime.").toBe(1);
+    expect(
+      snapshotCalls,
       "Worker-owned snapshots after restore should delegate to the retained worker runtime.",
-    );
-    expectTrue(
-      commitSketchCalls === 1,
+    ).toBe(1);
+    expect(
+      commitSketchCalls,
       "Worker-owned commitSketch should delegate to the worker runtime.",
-    );
-    expectTrue(
-      localOccLoads === 0,
+    ).toBe(1);
+    expect(
+      localOccLoads,
       "Worker-owned browser mutations should not initialize a local OCC runtime.",
-    );
+    ).toBe(0);
   }
 
   async function testEmptySnapshotsDoNotRequireNativeSolidTopologySupport() {
@@ -263,14 +256,14 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
       documentId: OCC_KERNEL_DOCUMENT_ID,
     });
 
-    expectTrue(
-      snapshot.snapshot.document.bodies.length === 0,
+    expect(
+      snapshot.snapshot.document.bodies.length,
       "Empty snapshots should not require solid topology payloads.",
-    );
-    expectTrue(
-      nativeSnapshot.kind === "nativeTopologyUnavailable",
+    ).toBe(0);
+    expect(
+      nativeSnapshot.kind,
       "Explicit native topology requests should still fail loudly when native support is missing.",
-    );
+    ).toBe("nativeTopologyUnavailable");
   }
 
   async function testNativeFeatureHistoryRebuildDoesNotCallPublicRestore() {
@@ -315,14 +308,14 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
 
     const result = await adapter.executeNativeFeatureHistoryRebuild(document);
 
-    expectTrue(
-      publicRestoreCalls === 0,
+    expect(
+      publicRestoreCalls,
       "Native feature-history rebuild should not call the public restore path.",
-    );
-    expectTrue(
-      result.kind === "nativeTopologyUnavailable",
+    ).toBe(0);
+    expect(
+      result.kind,
       "Explicit native feature-history rebuild requests should still fail loudly when native support is missing.",
-    );
+    ).toBe("nativeTopologyUnavailable");
   }
 
   await testWorkerOwnedWarmupAndMutationsBypassLocalOcc();

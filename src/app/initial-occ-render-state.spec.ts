@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   hasNonEmptyCommittedGeometry,
   isInitialOccRenderPending,
@@ -8,31 +7,30 @@ import {
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
 test("src/app/initial-occ-render-state.spec.ts", () => {
-  expectTrue(
-    isInitialOccRenderPending({ snapshot: null }) === true,
+  expect(
+    isInitialOccRenderPending({ snapshot: null }),
     "The viewport should show initial OCC render progress before the first workspace snapshot.",
-  );
-  expectTrue(
-    isInitialOccRenderPending({ snapshot: { revisionId: "rev_0001" } }) ===
-      false,
+  ).toBeTruthy();
+  expect(
+    isInitialOccRenderPending({ snapshot: { revisionId: "rev_0001" } }),
     "The viewport loading state should clear after the first workspace snapshot is ready.",
-  );
-  expectTrue(
-    !hasNonEmptyCommittedGeometry([]),
+  ).toBeFalsy();
+  expect(
+    hasNonEmptyCommittedGeometry([]),
     "Empty renderable sets should not report a first geometry frame.",
-  );
-  expectTrue(
-    !hasNonEmptyCommittedGeometry([makeRenderable("preview", [[0, 1, 2]])]),
+  ).toBeFalsy();
+  expect(
+    hasNonEmptyCommittedGeometry([makeRenderable("preview", [[0, 1, 2]])]),
     "Preview meshes should not satisfy committed startup geometry readiness.",
-  );
-  expectTrue(
-    !hasNonEmptyCommittedGeometry([makeRenderable("document", [])]),
+  ).toBeFalsy();
+  expect(
+    hasNonEmptyCommittedGeometry([makeRenderable("document", [])]),
     "Document meshes without triangles should not satisfy committed startup geometry readiness.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     hasNonEmptyCommittedGeometry([makeRenderable("document", [[0, 1, 2]])]),
     "A committed document mesh with triangles should satisfy first geometry frame readiness.",
-  );
+  ).toBeTruthy();
 });
 
 function makeRenderable(

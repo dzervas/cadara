@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createDurableHistoryService } from "@/application/workbench/durable-history";
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
 import {
@@ -11,6 +10,7 @@ import { createMemoryDocumentRepository } from "@/domain/modeling/memory-documen
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { AppResultAsync } from "@/contracts/errors";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
@@ -25,12 +25,12 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
     result: AppResultAsync<T>,
   ): Promise<T> {
     const resolved = await result;
-    expectTrue(
+    expect(
       resolved.isOk(),
       resolved.isErr()
         ? resolved.error.message
         : "Expected modeling result to be ok.",
-    );
+    ).toBeTruthy();
     return resolved.value;
   }
 
@@ -90,9 +90,8 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
         valueText: "10",
       }),
     );
-    expectTrue(
-      added.revisionState.kind === "accepted",
-      "Variable setup should be accepted.",
+    expect(added.revisionState.kind, "Variable setup should be accepted.").toBe(
+      "accepted",
     );
     await modelingService.waitForPersistence();
 
@@ -100,10 +99,10 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
     const variable = withVariable.document.variables.find(
       (entry) => entry.name === "Width",
     );
-    expectTrue(
+    expect(
       variable,
       "Added variable should exist before update undo coverage runs.",
-    );
+    ).toBeTruthy();
 
     const updated = await unwrapModelingResult(
       modelingService.updateDocumentVariable({
@@ -113,29 +112,29 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
         valueText: "25",
       }),
     );
-    expectTrue(
-      updated.revisionState.kind === "accepted",
+    expect(
+      updated.revisionState.kind,
       "Variable update should be accepted.",
-    );
+    ).toBe("accepted");
 
     const availability = await durableHistory.getAvailability({
       documentId: withVariable.document.documentId,
       sketchSession: null,
     });
-    expectTrue(
+    expect(
       availability.canUndo,
       "Immediate durable-history availability should reflect a background variable update.",
-    );
+    ).toBeTruthy();
 
     const undone = await durableHistory.undo({
       documentId: withVariable.document.documentId,
       sketchSession: null,
     });
-    expectTrue(
-      undone?.context === "document",
+    expect(
+      undone?.context,
       "Immediate undo after a variable update should restore a document snapshot.",
-    );
-    expectTrue(
+    ).toBe("document");
+    expect(
       undone?.context === "document" &&
         undone.snapshot.document.variables.some(
           (entry) =>
@@ -143,7 +142,7 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
             entry.valueText === "10",
         ),
       "Immediate undo after a variable update should restore the prior variable value.",
-    );
+    ).toBeTruthy();
   }
 
   async function testImmediateUndoAfterBackgroundExtrudeUpdate() {
@@ -154,10 +153,10 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
     const initialExtrude = initial.document.features.find(
       (feature) => feature.featureId === "feature_extrude-1",
     );
-    expectTrue(
-      initialExtrude?.definition.kind === "extrude",
+    expect(
+      initialExtrude?.definition.kind,
       "Seed extrude should exist before extrude undo coverage runs.",
-    );
+    ).toBe("extrude");
     const initialDistance =
       initialExtrude.definition.parameters.extent.mode === "oneSide" &&
       initialExtrude.definition.parameters.extent.end.kind === "blind"
@@ -185,19 +184,19 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
         },
       }),
     );
-    expectTrue(
-      updated.revisionState.kind === "accepted",
+    expect(
+      updated.revisionState.kind,
       "Extrude update should be accepted.",
-    );
+    ).toBe("accepted");
 
     const availability = await durableHistory.getAvailability({
       documentId: initial.document.documentId,
       sketchSession: null,
     });
-    expectTrue(
+    expect(
       availability.canUndo,
       "Immediate durable-history availability should reflect a background extrude update.",
-    );
+    ).toBeTruthy();
 
     const undone = await durableHistory.undo({
       documentId: initial.document.documentId,
@@ -209,19 +208,19 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
             (feature) => feature.featureId === "feature_extrude-1",
           )
         : null;
-    expectTrue(
-      restoredExtrude?.definition.kind === "extrude",
+    expect(
+      restoredExtrude?.definition.kind,
       "Immediate undo after an extrude update should restore the extrude feature.",
-    );
-    expectTrue(
+    ).toBe("extrude");
+    expect(
       restoredExtrude?.definition.kind === "extrude" &&
         restoredExtrude.definition.parameters.extent.mode === "oneSide" &&
         restoredExtrude.definition.parameters.extent.end.kind === "blind" &&
-        JSON.stringify(
+        getAuthoredLiteralValue(
           restoredExtrude.definition.parameters.extent.end.distance,
-        ) === JSON.stringify(initialDistance),
+        ) === getAuthoredLiteralValue(initialDistance),
       "Immediate undo after an extrude update should restore the prior extrude extent distance.",
-    );
+    ).toBeTruthy();
   }
 
   async function testImmediateUndoAfterBackgroundSketchPlaneCommit() {
@@ -229,10 +228,10 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
       await createBackgroundDurableHistoryFixture();
     const initial = await modelingService.getCurrentDocumentSnapshot();
     const sketch = initial.document.sketches[0];
-    expectTrue(
+    expect(
       sketch,
       "Seed sketch should exist for sketch-plane undo coverage.",
-    );
+    ).toBeTruthy();
 
     const committed = await unwrapModelingResult(
       modelingService.commitSketch({
@@ -247,19 +246,19 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
           ) ?? null,
       }),
     );
-    expectTrue(
-      committed.revisionState.kind === "accepted",
+    expect(
+      committed.revisionState.kind,
       "Sketch-plane commit should be accepted.",
-    );
+    ).toBe("accepted");
 
     const availability = await durableHistory.getAvailability({
       documentId: initial.document.documentId,
       sketchSession: null,
     });
-    expectTrue(
+    expect(
       availability.canUndo,
       "Immediate durable-history availability should reflect a background sketch-plane commit.",
-    );
+    ).toBeTruthy();
 
     const undone = await durableHistory.undo({
       documentId: initial.document.documentId,
@@ -271,14 +270,14 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
             (entry) => entry.sketchId === sketch.sketchId,
           )
         : null;
-    expectTrue(
+    expect(
       restoredSketch,
       "Immediate undo after a sketch-plane commit should restore the committed sketch.",
-    );
-    expectTrue(
-      restoredSketch?.plane.key === sketch.plane.key,
+    ).toBeTruthy();
+    expect(
+      restoredSketch?.plane.key,
       "Immediate undo after a sketch-plane commit should restore the prior sketch plane.",
-    );
+    ).toBe(sketch.plane.key);
   }
 
   async function testImmediateUndoWaitsForDelayedRepositoryUndoEvent() {
@@ -294,20 +293,20 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
         valueText: "5",
       }),
     );
-    expectTrue(
-      added.revisionState.kind === "accepted",
+    expect(
+      added.revisionState.kind,
       "Delayed-notification variable setup should be accepted.",
-    );
+    ).toBe("accepted");
     await modelingService.waitForPersistence();
 
     const withVariable = await modelingService.getCurrentDocumentSnapshot();
     const variable = withVariable.document.variables.find(
       (entry) => entry.name === "Depth",
     );
-    expectTrue(
+    expect(
       variable,
       "Delayed-notification variable should exist before undo coverage runs.",
-    );
+    ).toBeTruthy();
 
     const updated = await unwrapModelingResult(
       modelingService.updateDocumentVariable({
@@ -317,23 +316,23 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
         valueText: "15",
       }),
     );
-    expectTrue(
-      updated.revisionState.kind === "accepted",
+    expect(
+      updated.revisionState.kind,
       "Delayed-notification variable update should be accepted.",
-    );
+    ).toBe("accepted");
 
     const undone = await durableHistory.undo({
       documentId: withVariable.document.documentId,
       sketchSession: null,
     });
-    expectTrue(
+    expect(
       undone?.context === "document" &&
         undone.snapshot.document.variables.some(
           (entry) =>
             entry.variableId === variable.variableId && entry.valueText === "5",
         ),
       "Document undo should wait for the delayed repository undo event before fetching the restored snapshot.",
-    );
+    ).toBeTruthy();
   }
 
   async function testImmediateUndoDoesNotRequireLatestEventReplay() {
@@ -352,20 +351,20 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
         valueText: "30",
       }),
     );
-    expectTrue(
-      added.revisionState.kind === "accepted",
+    expect(
+      added.revisionState.kind,
       "No-replay variable setup should be accepted.",
-    );
+    ).toBe("accepted");
     await baseModelingService.waitForPersistence();
 
     const withVariable = await baseModelingService.getCurrentDocumentSnapshot();
     const variable = withVariable.document.variables.find(
       (entry) => entry.name === "Height",
     );
-    expectTrue(
+    expect(
       variable,
       "No-replay variable should exist before undo coverage runs.",
-    );
+    ).toBeTruthy();
 
     const updated = await unwrapModelingResult(
       baseModelingService.updateDocumentVariable({
@@ -375,16 +374,16 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
         valueText: "35",
       }),
     );
-    expectTrue(
-      updated.revisionState.kind === "accepted",
+    expect(
+      updated.revisionState.kind,
       "No-replay variable update should be accepted.",
-    );
+    ).toBe("accepted");
 
     const undone = await durableHistory.undo({
       documentId: withVariable.document.documentId,
       sketchSession: null,
     });
-    expectTrue(
+    expect(
       undone?.context === "document" &&
         undone.snapshot.document.variables.some(
           (entry) =>
@@ -392,7 +391,7 @@ test("src/application/workbench/durable-history.spec.ts", async () => {
             entry.valueText === "30",
         ),
       "Document undo should subscribe before mutating so synchronous repository events are not missed.",
-    );
+    ).toBeTruthy();
   }
 
   await testImmediateUndoAfterBackgroundVariableUpdate();

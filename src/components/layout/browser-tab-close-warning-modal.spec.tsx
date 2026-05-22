@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -8,7 +8,6 @@ import {
   BrowserTabCloseWarningModal,
 } from "@/components/layout/browser-tab-close-warning-modal";
 import { workbenchTheme } from "@/theme/workbench-theme";
-import { expectTrue } from "@/testing/expect.spec";
 
 test("browser-tab-close-warning-modal renders loss warning and save choices", () => {
   const markup = renderToStaticMarkup(
@@ -25,37 +24,37 @@ test("browser-tab-close-warning-modal renders loss warning and save choices", ()
     </MantineProvider>,
   );
 
-  expectTrue(
+  expect(
     markup.includes(BROWSER_TAB_CLOSE_WARNING_TITLE),
     "Modal should name the close warning.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Bracket draft"),
     "Modal should identify the browser-only document being closed.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes(BROWSER_TAB_CLOSE_WARNING_MESSAGE),
     "Modal should warn that closing without saving loses the document forever.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Download a copy"),
     "Modal should offer a portable copy path.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Save and keep linked"),
     "Modal should offer a direct local sync path.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("Close without saving"),
     "Modal should make destructive close explicit.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.indexOf("Download a copy") < markup.indexOf("Cancel"),
     "Modal should place save choices above the bottom cancel row.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.indexOf("Save and keep linked") <
       markup.indexOf("Close without saving"),
     "Modal should place local sync above the destructive close action.",
-  );
+  ).toBeTruthy();
 });

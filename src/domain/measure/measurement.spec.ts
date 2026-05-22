@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   WorkspaceSnapshot,
   SnapshotEntityRecord,
@@ -632,12 +631,12 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     lineMeasurement?.rows.some(
       (row) => row.label === "Length" && row.value === "4 mm",
     ),
     "Line measurement should expose intrinsic edge length.",
-  );
+  ).toBeTruthy();
 
   const circleMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
@@ -650,22 +649,22 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     circleMeasurement?.rows.some(
       (row) => row.label === "Radius" && row.value === "1.25 mm",
     ),
     "Circle measurement should expose radius.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     circleMeasurement?.rows.some(
       (row) => row.label === "Diameter" && row.value === "2.5 mm",
     ),
     "Circle measurement should expose diameter.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     circleMeasurement?.rows.some((row) => row.label === "Circumference"),
     "Circle measurement should expose circumference.",
-  );
+  ).toBeTruthy();
 
   const arcMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
@@ -678,18 +677,18 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     arcMeasurement?.rows.some(
       (row) => row.label === "Sweep" && row.value === "90 deg",
     ),
     "Arc measurement should expose sweep angle.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     arcMeasurement?.rows.some(
       (row) => row.label === "Arc Length" && row.value === "1.57 mm",
     ),
     "Arc measurement should expose arc length.",
-  );
+  ).toBeTruthy();
 
   const splineMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
@@ -702,18 +701,18 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     splineMeasurement?.rows.some(
       (row) => row.label === "Degree" && row.value === "3",
     ),
     "Spline measurement should expose degree when available.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     splineMeasurement?.rows.some(
       (row) => row.label === "Fit Points" && row.value === "3",
     ),
     "Spline measurement should expose fit-point metadata.",
-  );
+  ).toBeTruthy();
 
   const regionMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
@@ -726,54 +725,54 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     regionMeasurement?.rows.some(
       (row) => row.label === "Area" && row.value === "12 mm²",
     ),
     "Region measurement should expose profile area.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     regionMeasurement?.rows.some(
       (row) => row.label === "Perimeter" && row.value === "14 mm",
     ),
     "Region measurement should expose profile perimeter.",
-  );
+  ).toBeTruthy();
 
   const faceMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
     selection: [{ kind: "face", bodyId: "body_measure", faceId: "face_top" }],
     snapshot,
   });
-  expectTrue(
+  expect(
     faceMeasurement?.rows.some(
       (row) => row.label === "Area" && row.value === "12 mm²",
     ),
     "Face measurement should expose surface area.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     faceMeasurement?.rows.some(
       (row) => row.label === "Perimeter" && row.value === "14 mm",
     ),
     "Face measurement should expose perimeter.",
-  );
+  ).toBeTruthy();
 
   const bodyMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
     selection: [{ kind: "body", bodyId: "body_measure" }],
     snapshot,
   });
-  expectTrue(
+  expect(
     bodyMeasurement?.rows.some(
       (row) => row.label === "Surface Area" && row.value === "94 mm²",
     ),
     "Body measurement should expose surface area when every face mesh is available.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     bodyMeasurement?.rows.some(
       (row) => row.label === "Volume" && row.value === "60 mm³",
     ),
     "Body measurement should expose solid volume when the body shell closes.",
-  );
+  ).toBeTruthy();
 
   const pairMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
@@ -787,15 +786,15 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     pairMeasurement?.rows.length === 1 &&
       pairMeasurement.rows[0]?.value === "5 mm",
     "Supported pairwise measurements should expose minimum distance only.",
-  );
-  expectTrue(
-    pairMeasurement?.witnesses.length === 3,
+  ).toBeTruthy();
+  expect(
+    pairMeasurement?.witnesses.length,
     "Pairwise measurements should retain a witness segment with endpoint markers.",
-  );
+  ).toBe(3);
 
   const parallelEdgeMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
@@ -805,32 +804,32 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     parallelEdgeMeasurement?.rows.some(
       (row) => row.label === "Distance" && row.value === "3 mm",
     ),
     "Parallel edge measurements should expose perpendicular spacing between the two selected edges.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     parallelEdgeMeasurement?.rows.some(
       (row) => row.label === "Angle" && row.value === "0 deg",
     ),
     "Parallel edge measurements should expose zero angle for parallel line-like edges.",
-  );
-  expectTrue(
-    parallelEdgeMeasurement?.witnesses.length === 3,
+  ).toBeTruthy();
+  expect(
+    parallelEdgeMeasurement?.witnesses.length,
     "Parallel edge measurements should keep both edge highlights plus a single connector line.",
-  );
-  expectTrue(
+  ).toBe(3);
+  expect(
     parallelEdgeMeasurement?.witnesses.every(
       (witness) => witness.kind !== "marker",
     ),
     "Curve-to-curve pairwise measurements should not add endpoint markers that read like vertex selection.",
-  );
+  ).toBeTruthy();
   const parallelConnector = parallelEdgeMeasurement?.witnesses.find((witness) =>
     witness.id.includes(":distance"),
   );
-  expectTrue(
+  expect(
     parallelConnector?.kind === "polyline" &&
       JSON.stringify(parallelConnector.points) ===
         JSON.stringify([
@@ -838,7 +837,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
           [2, 3, 5],
         ]),
     "Parallel edge connectors should anchor at representative mid-span closest points rather than arbitrary segment starts.",
-  );
+  ).toBeTruthy();
 
   const touchingEdgeMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
@@ -848,29 +847,29 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     touchingEdgeMeasurement?.rows.some(
       (row) => row.label === "Distance" && row.value === "0 mm",
     ),
     "Intersecting edge measurements should still report zero minimum distance.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     touchingEdgeMeasurement?.rows.some(
       (row) => row.label === "Angle" && row.value === "90 deg",
     ),
     "Intersecting perpendicular edge measurements should also expose the line-to-line angle.",
-  );
-  expectTrue(
-    touchingEdgeMeasurement?.witnesses.length === 2,
+  ).toBeTruthy();
+  expect(
+    touchingEdgeMeasurement?.witnesses.length,
     "Zero-distance edge measurements should keep only the two selected edge highlights.",
-  );
-  expectTrue(
+  ).toBe(2);
+  expect(
     touchingEdgeMeasurement?.witnesses.every(
       (witness) =>
         witness.kind === "polyline" && !witness.id.includes(":distance"),
     ),
     "Zero-distance edge measurements should omit collapsed connector and marker feedback.",
-  );
+  ).toBeTruthy();
 
   const projectedMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
@@ -884,21 +883,21 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     snapshot,
   });
-  expectTrue(
+  expect(
     projectedMeasurement?.rows.some(
       (row) => row.label === "Radius" && row.value === "1 mm",
     ),
     "Projected circles should expose single-target circular properties.",
-  );
+  ).toBeTruthy();
 
-  expectTrue(
+  expect(
     isMeasureSelectableTarget(snapshot, {
       kind: "sketchEntity",
       sketchId: "sketch_measure",
       entityId: "arc_primary",
     }),
     "Supported sketch arcs should be accepted by the measure selection filter.",
-  );
+  ).toBeTruthy();
 
   const pairCandidate = resolveMeasureSelectionCandidate(
     snapshot,
@@ -911,20 +910,20 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ],
     { kind: "face", bodyId: "body_measure", faceId: "face_bottom" },
   );
-  expectTrue(
+  expect(
     pairCandidate.accepted && pairCandidate.nextSelection.length === 2,
     "Compatible measure targets should build a pair.",
-  );
+  ).toBeTruthy();
 
   const replacementCandidate = resolveMeasureSelectionCandidate(
     snapshot,
     [{ kind: "body", bodyId: "body_measure" }],
     { kind: "edge", bodyId: "body_measure", edgeId: "edge_top_front" },
   );
-  expectTrue(
+  expect(
     replacementCandidate.accepted &&
       replacementCandidate.nextSelection.length === 1 &&
       replacementCandidate.nextSelection[0]?.kind === "edge",
     "Unsupported second targets should replace the prior selection with a fresh measurement seed.",
-  );
+  ).toBeTruthy();
 });

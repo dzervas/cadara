@@ -1,4 +1,21 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function evaluateAfterNavigation<T>(
+  page: Page,
+  callback: () => T,
+  fallback: T,
+) {
+  try {
+    return await page.evaluate(callback);
+  } catch (error) {
+    if (!isNavigationContextError(error)) {
+      throw error;
+    }
+
+    await page.waitForLoadState("domcontentloaded");
+    return fallback;
+  }
+}
 
 test("dev debug namespace exposes structured state, trace, and session export", async ({
   page,
@@ -8,8 +25,10 @@ test("dev debug namespace exposes structured state, trace, and session export", 
   await expect
     .poll(
       () =>
-        page.evaluate(
+        evaluateAfterNavigation(
+          page,
           () => window.__cadaraDebug?.getState()?.machineState ?? "",
+          "",
         ),
       { timeout: 10_000 },
     )
@@ -18,8 +37,10 @@ test("dev debug namespace exposes structured state, trace, and session export", 
   await expect
     .poll(
       () =>
-        page.evaluate(
+        evaluateAfterNavigation(
+          page,
           () => window.__cadaraDebug?.getTrace().entries.length ?? 0,
+          0,
         ),
       { timeout: 10_000 },
     )
@@ -36,3 +57,15 @@ test("dev debug namespace exposes structured state, trace, and session export", 
     "browser-coordination-not-captured",
   );
 });
+
+function isNavigationContextError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return [
+    "Execution context was destroyed",
+    "Cannot find context with specified id",
+    "Frame was detached",
+  ].some((message) => error.message.includes(message));
+}

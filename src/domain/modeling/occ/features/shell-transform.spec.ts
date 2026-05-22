@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
@@ -18,7 +18,6 @@ import {
   trackNewSolidBody,
   type OccReferenceInvalidationRecord,
 } from "@/domain/modeling/occ/topology";
-import { expectTrue } from "@/testing/expect.spec";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,
@@ -44,7 +43,7 @@ function makeTrackedBox(
 ) {
   const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 4, 4, 4);
   box.Build(new oc.Message_ProgressRange_1());
-  expectTrue(box.IsDone(), `Expected ${bodyId} box to build.`);
+  expect(box.IsDone(), `Expected ${bodyId} box to build.`).toBeTruthy();
 
   return trackNewSolidBody(oc, {
     bodyId,
@@ -59,16 +58,14 @@ function assertNativeHistoryDidNotFallBack(
   label: string,
 ) {
   for (const invalidation of invalidations.values()) {
-    expectTrue(
-      invalidation.reason !==
-        OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory,
+    expect(
+      invalidation.reason,
       `${label} should use native history instead of unsupported-history invalidations.`,
-    );
-    expectTrue(
-      invalidation.reason !==
-        OCC_REFERENCE_INVALIDATION_REASONS.topologyModified,
+    ).not.toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory);
+    expect(
+      invalidation.reason,
       `${label} should use native successor classifications instead of JS-side modified-history invalidations.`,
-    );
+    ).not.toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyModified);
   }
 }
 
@@ -105,16 +102,16 @@ test("executeTransformFeature uses native transaction history for replacement to
     (candidate) => candidate.bodyId === body.bodyId,
   );
 
-  expectTrue(
+  expect(
     replacement != null,
     "Native transform should replace the selected body.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     body.topology.faceIds.every((faceId) =>
       replacement?.topology.faceIds.includes(faceId),
     ),
     "Native transform should preserve previous face ids with unique successors.",
-  );
+  ).toBeTruthy();
   assertNativeHistoryDidNotFallBack(
     result.historyInvalidations,
     "Native transform",
@@ -133,20 +130,20 @@ test("executeShellFeature uses native shell transaction before replacement boole
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildShellCommittedShapeTransactionWithHistory;
   let nativeCallCount = 0;
-  expectTrue(
-    typeof nativeBuilder === "function",
+  expect(
+    typeof nativeBuilder,
     "Expected custom OCC runtime to expose native shell transactions.",
-  );
+  ).toBe("function");
   nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildShellCommittedShapeTransactionWithHistory =
     (...args) => {
       nativeCallCount += 1;
       return nativeBuilder(...args);
     };
   const faceId = body.topology.faceIds[0];
-  expectTrue(
+  expect(
     faceId != null,
     "Expected the tracked box to expose a shell removable face target.",
-  );
+  ).toBeTruthy();
   const context = createOccAuthoringState(oc, { bodies: [body] });
 
   const result = executeShellFeature(
@@ -164,14 +161,14 @@ test("executeShellFeature uses native shell transaction before replacement boole
     (candidate) => candidate.bodyId === body.bodyId,
   );
 
-  expectTrue(
+  expect(
     replacement != null,
     "Native shell composition should replace the selected body.",
-  );
-  expectTrue(
-    nativeCallCount === 1,
+  ).toBeTruthy();
+  expect(
+    nativeCallCount,
     "Shell feature execution should use the native shell transaction when available.",
-  );
+  ).toBe(1);
   assertNativeHistoryDidNotFallBack(
     result.historyInvalidations,
     "Native shell composition",
@@ -190,10 +187,10 @@ test("executeMirrorFeature uses native transform transaction for copied topology
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildTransformCommittedShapeTransactionWithHistory;
   let nativeCallCount = 0;
-  expectTrue(
-    typeof nativeBuilder === "function",
+  expect(
+    typeof nativeBuilder,
     "Expected custom OCC runtime to expose native transform transactions.",
-  );
+  ).toBe("function");
   nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildTransformCommittedShapeTransactionWithHistory =
     (...args) => {
       nativeCallCount += 1;
@@ -225,16 +222,16 @@ test("executeMirrorFeature uses native transform transaction for copied topology
     (candidate) => candidate.bodyId !== body.bodyId,
   );
 
-  expectTrue(
+  expect(
     mirroredBody != null,
     "Native mirror should append a copied body.",
-  );
-  expectTrue(
-    nativeCallCount === 1,
+  ).toBeTruthy();
+  expect(
+    nativeCallCount,
     "Mirror feature execution should use the native transform transaction when available.",
-  );
-  expectTrue(
-    result.historyInvalidations.size === 0,
+  ).toBe(1);
+  expect(
+    result.historyInvalidations.size,
     "Mirror copy should keep source topology live and create fresh copied topology.",
-  );
+  ).toBe(0);
 });

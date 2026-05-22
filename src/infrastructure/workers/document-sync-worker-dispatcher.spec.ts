@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect, assert } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { DocumentSyncWorkerRequest } from "@/domain/modeling/document-sync-worker-protocol";
 import { createDocumentSyncWorkerDispatcher } from "@/infrastructure/workers/document-sync-worker-dispatcher";
 
@@ -11,6 +10,7 @@ test("src/infrastructure/workers/document-sync-worker-dispatcher.spec.ts", async
     const dispatcher = createDocumentSyncWorkerDispatcher((search) => {
       observedSearches.push(search);
       return (request) => {
+        assert("documentId" in request);
         handledRequests.push(`${search}:${request.kind}:${request.documentId}`);
       };
     });
@@ -23,10 +23,10 @@ test("src/infrastructure/workers/document-sync-worker-dispatcher.spec.ts", async
       documentId: "doc_workspace",
     });
 
-    expectTrue(
-      handledRequests.length === 0,
+    expect(
+      handledRequests.length,
       "Document sync worker requests should wait until bootstrap configuration is available.",
-    );
+    ).toBe(0);
 
     dispatcher({
       kind: "bootstrap",
@@ -34,15 +34,17 @@ test("src/infrastructure/workers/document-sync-worker-dispatcher.spec.ts", async
         "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a",
     });
 
-    expectTrue(
-      observedSearches.join(",") ===
-        "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a",
+    expect(
+      observedSearches.join(","),
       "The worker dispatcher should initialize the worker message handler from the bootstrap search string.",
+    ).toBe(
+      "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a",
     );
-    expectTrue(
-      handledRequests.join(",") ===
-        "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a:subscribe:doc_workspace",
+    expect(
+      handledRequests.join(","),
       "Requests queued before bootstrap should be replayed through the configured worker handler.",
+    ).toBe(
+      "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=peer-a&cadRepositoryDbName=repo-a:subscribe:doc_workspace",
     );
   }
 
@@ -50,6 +52,7 @@ test("src/infrastructure/workers/document-sync-worker-dispatcher.spec.ts", async
     const handledRequests: string[] = [];
     const dispatcher = createDocumentSyncWorkerDispatcher((search) => {
       return (request) => {
+        assert("documentId" in request);
         handledRequests.push(`${search}:${request.kind}:${request.documentId}`);
       };
     });
@@ -66,11 +69,10 @@ test("src/infrastructure/workers/document-sync-worker-dispatcher.spec.ts", async
       >["seedDocument"],
     });
 
-    expectTrue(
-      handledRequests.join(",") ===
-        "?cadRepositoryDbName=repo-b:load:doc_workspace",
+    expect(
+      handledRequests.join(","),
       "Once bootstrapped, later worker requests should run immediately through the configured handler.",
-    );
+    ).toBe("?cadRepositoryDbName=repo-b:load:doc_workspace");
   }
 
   await testRequestsWaitForBootstrapConfiguration();

@@ -365,9 +365,13 @@ export function createSeedFeatureDefinitions(
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 12 },
+            end: {
+              kind: "blind",
+              direction: "positive",
+              distance: { source: "literal", value: 12 },
+            },
           },
-          operation: "newBody",
+          operation: { source: "literal", value: "newBody" },
           booleanScope: { kind: "standalone" },
         },
       },
@@ -379,7 +383,7 @@ export function createSeedFeatureDefinitions(
         kind: "fillet",
         featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
         parameters: {
-          radius: 1.5,
+          radius: { source: "literal", value: 1.5 },
           edgeTargets: [],
         },
       },

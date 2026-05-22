@@ -1,13 +1,12 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
-import { geometryAssetRecordSchema } from "@/contracts/modeling/geometry-assets.runtime-schema";
+import { validateGeometryAssetRecord } from "@/contracts/modeling/geometry-assets.runtime-schema";
 import { IMPORT_CONTRACT_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
 
 test("src/contracts/modeling/geometry-assets-import-binding.spec.ts", async () => {
   const { asset } = await createDeterministicGeometryAsset();
-  const importedAssetResult = geometryAssetRecordSchema.safeParse({
+  const importedAssetResult = validateGeometryAssetRecord({
     ...asset,
     provenance: {
       ...asset.provenance,
@@ -21,8 +20,8 @@ test("src/contracts/modeling/geometry-assets-import-binding.spec.ts", async () =
     },
   });
 
-  expectTrue(
+  expect(
     importedAssetResult.success,
     "Geometry asset runtime validation should accept persisted import binding metadata.",
-  );
+  ).toBeTruthy();
 });

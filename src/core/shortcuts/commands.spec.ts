@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createShortcutCommandRegistry,
   getShortcutCommandDefinitions,
@@ -10,22 +9,22 @@ import {
 test("src/core/shortcuts/commands.spec.ts", () => {
   const registry = createShortcutCommandRegistry();
 
-  expectTrue(
-    registry.get(getToolCommandId("line"))?.label === "Line",
+  expect(
+    registry.get(getToolCommandId("line"))?.label,
     "Tool commands should derive labels from tool definitions.",
-  );
-  expectTrue(
-    registry.get(getToolCommandId("line"))?.scope === "sketch",
+  ).toBe("Line");
+  expect(
+    registry.get(getToolCommandId("line"))?.scope,
     "Tool commands should derive sketch scope from tool modes.",
-  );
-  expectTrue(
+  ).toBe("sketch");
+  expect(
     registry.get("editor.cancel")?.defaultShortcuts.includes("escape"),
     "Non-tool editor commands should be declared independently from tools.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getShortcutCommandDefinitions().some(
       (command) => command.id === "context.rename",
     ),
     "Context menu actions should be addressable as commands for shortcut reference coverage.",
-  );
+  ).toBeTruthy();
 });

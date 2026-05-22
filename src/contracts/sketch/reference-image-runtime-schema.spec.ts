@@ -1,8 +1,7 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 
 test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
   const baseDefinition: SketchDefinition = {
@@ -54,12 +53,12 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
     ],
   };
 
-  expectTrue(
-    sketchDefinitionSchema.safeParse(baseDefinition).success,
+  expect(
+    validateSketchDefinition(baseDefinition).success,
     "Runtime schema should accept valid committed reference-image operations.",
-  );
+  ).toBeTruthy();
 
-  const missingPayload = sketchDefinitionSchema.safeParse({
+  const missingPayload = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -74,12 +73,12 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
-    !missingPayload.success,
+  expect(
+    missingPayload.success,
     "Runtime schema should reject empty inline image payloads.",
-  );
+  ).toBeFalsy();
 
-  const zeroDimensions = sketchDefinitionSchema.safeParse({
+  const zeroDimensions = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -94,12 +93,12 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
-    !zeroDimensions.success,
+  expect(
+    zeroDimensions.success,
     "Runtime schema should reject non-positive reference-image pixel dimensions.",
-  );
+  ).toBeFalsy();
 
-  const missingPlacement = sketchDefinitionSchema.safeParse({
+  const missingPlacement = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -114,12 +113,12 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
-    !missingPlacement.success,
+  expect(
+    missingPlacement.success,
     "Runtime schema should reject non-positive placement extents.",
-  );
+  ).toBeFalsy();
 
-  const legacyAnchor = sketchDefinitionSchema.safeParse({
+  const legacyAnchor = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -142,12 +141,12 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
-    !legacyAnchor.success,
+  expect(
+    legacyAnchor.success,
     "Runtime schema should reject calibration anchors that omit a sketch point binding.",
-  );
+  ).toBeFalsy();
 
-  const legacyConstraints = sketchDefinitionSchema.safeParse({
+  const legacyConstraints = validateSketchDefinition({
     ...baseDefinition,
     authoringOperations: [
       {
@@ -180,8 +179,8 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
-    !legacyConstraints.success,
+  expect(
+    legacyConstraints.success,
     "Runtime schema should reject deprecated calibration-only constraint payloads.",
-  );
+  ).toBeFalsy();
 });

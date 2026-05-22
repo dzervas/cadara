@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect, assert } from "vitest";
 import * as THREE from "three";
 
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
@@ -58,18 +57,18 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
     const positive = createSectionClippingPlane(createSection("positive"));
     const negative = createSectionClippingPlane(createSection("negative"));
 
-    expectTrue(
+    expect(
       positive.distanceToPoint(new THREE.Vector3(0, 0, 1)) > 0,
       "Positive retained side should keep positive-Z points.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       positive.distanceToPoint(new THREE.Vector3(0, 0, -1)) < 0,
       "Positive retained side should clip negative-Z points.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       negative.distanceToPoint(new THREE.Vector3(0, 0, -1)) > 0,
       "Negative retained side should keep negative-Z points.",
-    );
+    ).toBeTruthy();
   }
 
   {
@@ -132,11 +131,11 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
       createSection("positive"),
     );
 
-    expectTrue(
+    expect(
       caps.length > 0,
       "Intersecting the visible box faces should derive at least one transient section cap.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       caps.every(
         (cap) =>
           cap.vertexPositions.length === cap.vertexNormals.length &&
@@ -144,7 +143,7 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
           cap.triangleIndices.length > 0,
       ),
       "Derived section caps should carry positions, normals, texture coordinates, and triangulation.",
-    );
+    ).toBeTruthy();
   }
 
   {
@@ -157,13 +156,13 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
       },
     });
 
-    expectTrue(
+    assert(
       offset !== null,
       "Section drag should resolve an offset from a non-parallel pointer ray.",
     );
-    expectTrue(
+    expect(
       Math.abs(offset - 4) < 0.05,
       "Section drag should stay constrained to the section normal axis.",
-    );
+    ).toBeTruthy();
   }
 });

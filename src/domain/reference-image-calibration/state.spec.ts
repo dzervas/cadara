@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import {
   createReferenceImageCalibrationAnchor,
@@ -28,9 +27,9 @@ test("src/domain/reference-image-calibration/state.spec.ts preserves anchor UVs 
 
   const calibrated = solveReferenceImageOperationState(
     {
-      ...operation.ownedState,
+      ...operation.ownedState!,
       calibration: {
-        ...operation.ownedState.calibration!,
+        ...operation.ownedState!.calibration!,
         anchors: [
           createReferenceImageCalibrationAnchor({
             anchorId: "anchor_a",
@@ -61,20 +60,21 @@ test("src/domain/reference-image-calibration/state.spec.ts preserves anchor UVs 
     pointPositionsById,
   });
 
-  expectTrue(
-    JSON.stringify(replaced.calibration?.anchors.map((anchor) => anchor.uv)) ===
-      JSON.stringify([
-        [0.2, 0.8],
-        [0.8, 0.2],
-      ]),
+  expect(
+    JSON.stringify(replaced.calibration?.anchors.map((anchor) => anchor.uv)),
     "Replacing the inline image payload should preserve anchor UV coordinates.",
+  ).toBe(
+    JSON.stringify([
+      [0.2, 0.8],
+      [0.8, 0.2],
+    ]),
   );
-  expectTrue(
+  expect(
     JSON.stringify(
       replaced.calibration?.anchors.map((anchor) => anchor.pointId),
-    ) === JSON.stringify(["sketch_point_anchor_a", "sketch_point_anchor_b"]),
+    ),
     "Replacing the inline image payload should preserve the local point bindings.",
-  );
+  ).toBe(JSON.stringify(["sketch_point_anchor_a", "sketch_point_anchor_b"]));
 });
 
 test("src/domain/reference-image-calibration/state.spec.ts preserves the last stable placement when bound anchors are insufficient", () => {
@@ -90,12 +90,12 @@ test("src/domain/reference-image-calibration/state.spec.ts preserves the last st
     },
   });
 
-  const initialPlacement = operation.ownedState.placement;
+  const initialPlacement = operation.ownedState!.placement;
   const solved = solveReferenceImageOperationState(
     {
-      ...operation.ownedState,
+      ...operation.ownedState!,
       calibration: {
-        ...operation.ownedState.calibration!,
+        ...operation.ownedState!.calibration!,
         scaleMode: "independent",
         anchors: [
           createReferenceImageCalibrationAnchor({
@@ -114,14 +114,14 @@ test("src/domain/reference-image-calibration/state.spec.ts preserves the last st
     },
   );
 
-  expectTrue(
+  expect(
     solved.calibration.solveResult.diagnostics.some(
       (diagnostic) => diagnostic.code === "underconstrained-calibration",
     ),
     "A single bound anchor should leave the independent fit underconstrained.",
-  );
-  expectTrue(
-    JSON.stringify(solved.placement) === JSON.stringify(initialPlacement),
+  ).toBeTruthy();
+  expect(
+    JSON.stringify(solved.placement),
     "Ambiguous calibration should not overwrite the last stable reference-image placement.",
-  );
+  ).toBe(JSON.stringify(initialPlacement));
 });

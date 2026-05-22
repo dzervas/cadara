@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   ConstructionSnapshotRecord,
   FeatureDefinition,
@@ -207,10 +206,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       dimensions[2],
     );
     builder.Build(new oc.Message_ProgressRange_1());
-    expectTrue(
+    expect(
       builder.IsDone(),
       "Expected OCC box builder to succeed in topology test.",
-    );
+    ).toBeTruthy();
 
     let body = trackNewSolidBody(oc, {
       bodyId: "body_seed",
@@ -254,10 +253,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
         };
       }
     ).CadaraBuildNativeTopologyPayload?.BuildJson;
-    expectTrue(
-      typeof nativeBuildJson === "function",
+    expect(
+      typeof nativeBuildJson,
       "Default OCC build must expose native topology payloads for tracked solid identity.",
-    );
+    ).toBe("function");
 
     const builder = new oc.BRepPrimAPI_MakeBox_3(
       toGpPnt(oc, [0, 0, 0]),
@@ -266,10 +265,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       6,
     );
     builder.Build(new oc.Message_ProgressRange_1());
-    expectTrue(
+    expect(
       builder.IsDone(),
       "Expected OCC box builder to succeed in native identity topology test.",
-    );
+    ).toBeTruthy();
 
     const body = trackNewSolidBody(oc, {
       bodyId: "body_native_identity",
@@ -279,20 +278,20 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
     });
     const tokenSegment = `_${body.topologyToken}_`;
 
-    expectTrue(
+    expect(
       body.topology.faceIds.every((faceId) => !faceId.includes(tokenSegment)),
       "New tracked bodies must not expose traversal-token face ids when native topology payloads are available.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       body.topology.edgeIds.every((edgeId) => !edgeId.includes(tokenSegment)),
       "New tracked bodies must not expose traversal-token edge ids when native topology payloads are available.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       body.topology.vertexIds.every(
         (vertexId) => !vertexId.includes(tokenSegment),
       ),
       "New tracked bodies must not expose traversal-token vertex ids when native topology payloads are available.",
-    );
+    ).toBeTruthy();
 
     builder.delete?.();
   }
@@ -302,10 +301,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
     const nativeHost = oc as OpenCascadeNativeTopologyKernelHost;
     const originalBuildJson =
       nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson;
-    expectTrue(
-      typeof originalBuildJson === "function",
+    expect(
+      typeof originalBuildJson,
       "Native topology fallback test requires the native build entrypoint.",
-    );
+    ).toBe("function");
     const builder = new oc.BRepPrimAPI_MakeBox_3(
       toGpPnt(oc, [0, 0, 0]),
       10,
@@ -313,10 +312,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       6,
     );
     builder.Build(new oc.Message_ProgressRange_1());
-    expectTrue(
+    expect(
       builder.IsDone(),
       "Expected OCC box builder to succeed in native fallback topology test.",
-    );
+    ).toBeTruthy();
     nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = undefined;
 
     try {
@@ -326,16 +325,16 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
         ownerFeatureId: "feature_native_required",
         shape: builder.Shape(),
       });
-      expectTrue(
+      expect(
         false,
         "Committed body tracking must fail when the native topology payload entrypoint is missing.",
-      );
+      ).toBeTruthy();
     } catch (error) {
-      expectTrue(
+      expect(
         error instanceof Error &&
           error.message.includes("required native topology payload support"),
         "Missing native topology support should fail at body commit time instead of falling back to TS enumeration.",
-      );
+      ).toBeTruthy();
     } finally {
       nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson =
         originalBuildJson;
@@ -348,10 +347,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
     const nativeHost = oc as OpenCascadeNativeTopologyKernelHost;
     const originalBuildJson =
       nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson;
-    expectTrue(
-      typeof originalBuildJson === "function",
+    expect(
+      typeof originalBuildJson,
       "Native payload release gate test requires the native build entrypoint.",
-    );
+    ).toBe("function");
     const builder = new oc.BRepPrimAPI_MakeBox_3(
       toGpPnt(oc, [0, 0, 0]),
       10,
@@ -359,10 +358,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       6,
     );
     builder.Build(new oc.Message_ProgressRange_1());
-    expectTrue(
+    expect(
       builder.IsDone(),
       "Expected OCC box builder to succeed in native payload release gate test.",
-    );
+    ).toBeTruthy();
 
     nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = (...args) => {
       const payload = JSON.parse(originalBuildJson(...args)) as {
@@ -386,16 +385,16 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
         ownerFeatureId: "feature_native_payload_error",
         shape: builder.Shape(),
       });
-      expectTrue(
+      expect(
         false,
         "Committed body tracking must reject native topology payload error diagnostics.",
-      );
+      ).toBeTruthy();
     } catch (error) {
-      expectTrue(
+      expect(
         error instanceof Error &&
           error.message.includes("Injected native topology validation error."),
         "Native topology payload error diagnostics should gate committed body state.",
-      );
+      ).toBeTruthy();
     }
 
     nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = (...args) => {
@@ -431,14 +430,14 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       });
       const faceIds = body.topology.faceIds;
 
-      expectTrue(
-        new Set(faceIds).size === faceIds.length,
+      expect(
+        new Set(faceIds).size,
         "Duplicate native topology identity should be deterministically disambiguated before ids are inserted into topology maps.",
-      );
-      expectTrue(
+      ).toBe(faceIds.length);
+      expect(
         faceIds.some((faceId) => faceId.includes("_i")),
         "Disambiguated native topology ids should retain a deterministic collision suffix.",
-      );
+      ).toBeTruthy();
     } finally {
       nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson =
         originalBuildJson;
@@ -450,14 +449,14 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
     const initial = createInitialTopologyToken();
     const next = advanceTopologyToken(initial);
 
-    expectTrue(
-      initial === "t0001",
+    expect(
+      initial,
       "Initial topology token must start at t0001 for the first body state.",
-    );
-    expectTrue(
-      next === "t0002",
+    ).toBe("t0001");
+    expect(
+      next,
       "Topology token advancement must produce a stable incremented token.",
-    );
+    ).toBe("t0002");
   }
 
   async function testBodySnapshotsAndReferenceStateExposeLiveTopology() {
@@ -506,22 +505,22 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
     const entity = sketch.sketch.definition.entities[0];
     const region = sketch.sketch.regions[0];
 
-    expectTrue(
-      snapshot.topology.faceIds[0] === faceId,
+    expect(
+      snapshot.topology.faceIds[0],
       "Body snapshot must preserve committed native face ids.",
-    );
-    expectTrue(
-      snapshot.topology.edgeIds[0] === edgeId,
+    ).toBe(faceId);
+    expect(
+      snapshot.topology.edgeIds[0],
       "Body snapshot must preserve committed native edge ids.",
-    );
-    expectTrue(
-      !faceId.includes("_t0001_"),
+    ).toBe(edgeId);
+    expect(
+      faceId.includes("_t0001_"),
       "Face ids must not fall back to topology-token traversal ids.",
-    );
-    expectTrue(
-      !edgeId.includes("_t0001_"),
+    ).toBeFalsy();
+    expect(
+      edgeId.includes("_t0001_"),
       "Edge ids must not fall back to topology-token traversal ids.",
-    );
+    ).toBeFalsy();
 
     const liveFaceResolution = resolveOccReference(
       {
@@ -532,14 +531,14 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       { kind: "face", bodyId: body.bodyId, faceId },
     );
 
-    expectTrue(
-      liveFaceResolution.resolution.invalidation === null,
+    expect(
+      liveFaceResolution.resolution.invalidation,
       "Live topology references must resolve without invalidation.",
-    );
-    expectTrue(
-      liveFaceResolution.resolution.ownerBodyId === body.bodyId,
+    ).toBe(null);
+    expect(
+      liveFaceResolution.resolution.ownerBodyId,
       "Live topology references must retain owning body metadata.",
-    );
+    ).toBe(body.bodyId);
 
     const liveSketchPointResolution = resolveOccReference(
       {
@@ -554,14 +553,14 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      liveSketchPointResolution.resolution.invalidation === null,
+    expect(
+      liveSketchPointResolution.resolution.invalidation,
       "Live sketch points must resolve without invalidation.",
-    );
-    expectTrue(
-      liveSketchPointResolution.resolution.ownerSketchId === sketch.sketchId,
+    ).toBe(null);
+    expect(
+      liveSketchPointResolution.resolution.ownerSketchId,
       "Live sketch-point references must retain owning sketch metadata.",
-    );
+    ).toBe(sketch.sketchId);
 
     const liveSketchEntityResolution = resolveOccReference(
       {
@@ -576,10 +575,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      liveSketchEntityResolution.resolution.invalidation === null,
+    expect(
+      liveSketchEntityResolution.resolution.invalidation,
       "Live sketch entities must resolve without invalidation.",
-    );
+    ).toBe(null);
 
     const liveRegionResolution = resolveOccReference(
       {
@@ -590,10 +589,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       { kind: "region", sketchId: sketch.sketchId, regionId: region.regionId },
     );
 
-    expectTrue(
-      liveRegionResolution.resolution.invalidation === null,
+    expect(
+      liveRegionResolution.resolution.invalidation,
       "Live region references must resolve without invalidation.",
-    );
+    ).toBe(null);
 
     const liveFeatureResolution = resolveOccReference(
       {
@@ -604,10 +603,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       { kind: "feature", featureId: feature.featureId },
     );
 
-    expectTrue(
-      liveFeatureResolution.resolution.invalidation === null,
+    expect(
+      liveFeatureResolution.resolution.invalidation,
       "Live feature references must resolve without invalidation.",
-    );
+    ).toBe(null);
   }
 
   async function testMissingTopologyReferencesInvalidateAgainstPriorState() {
@@ -682,24 +681,22 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       { kind: "face", bodyId: original.bodyId, faceId: staleFaceId },
     );
 
-    expectTrue(
-      missingFaceResolution.resolution.invalidation?.reason ===
-        OCC_REFERENCE_INVALIDATION_REASONS.topologyModified,
+    expect(
+      missingFaceResolution.resolution.invalidation?.reason,
       "Modified topology references must preserve the history-driven invalidation reason.",
-    );
-    expectTrue(
-      missingFaceResolution.resolution.invalidation?.sourceTarget?.kind ===
-        "body",
+    ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyModified);
+    expect(
+      missingFaceResolution.resolution.invalidation?.sourceTarget?.kind,
       "Missing topology references must point back to the owning body as the invalidation source.",
-    );
-    expectTrue(
-      missingFaceResolution.resolution.ownerRevisionId === nextRevisionId,
+    ).toBe("body");
+    expect(
+      missingFaceResolution.resolution.ownerRevisionId,
       "Invalidated references must be restamped to the revision that observed the invalidation.",
-    );
-    expectTrue(
-      missingFaceResolution.diagnostics[0]?.detail?.kind === "invalidReference",
+    ).toBe(nextRevisionId);
+    expect(
+      missingFaceResolution.diagnostics[0]?.detail?.kind,
       "Missing topology references must surface a structured invalidReference diagnostic.",
-    );
+    ).toBe("invalidReference");
 
     const missingEdgeResolution = resolveOccReference(
       {
@@ -710,11 +707,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       { kind: "edge", bodyId: original.bodyId, edgeId: staleEdgeId },
     );
 
-    expectTrue(
-      missingEdgeResolution.resolution.invalidation?.reason ===
-        OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+    expect(
+      missingEdgeResolution.resolution.invalidation?.reason,
       "Deleted edge references must preserve the history-driven invalidation reason.",
-    );
+    ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted);
 
     const missingVertexResolution = resolveOccReference(
       {
@@ -725,11 +721,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       { kind: "vertex", bodyId: original.bodyId, vertexId: staleVertexId },
     );
 
-    expectTrue(
-      missingVertexResolution.resolution.invalidation?.sourceTarget?.kind ===
-        "body",
+    expect(
+      missingVertexResolution.resolution.invalidation?.sourceTarget?.kind,
       "Missing vertex references must point back to the owning body as the invalidation source.",
-    );
+    ).toBe("body");
 
     const neverExistedResolution = resolveOccReference(
       {
@@ -744,10 +739,10 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       },
     );
 
-    expectTrue(
-      neverExistedResolution.resolution.invalidation?.sourceTarget === null,
+    expect(
+      neverExistedResolution.resolution.invalidation?.sourceTarget,
       "Never-seen references must not fabricate an owning source target.",
-    );
+    ).toBe(null);
   }
 
   await testTopologyTokensAdvanceForReplacementBodies();

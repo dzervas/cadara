@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
@@ -16,7 +16,6 @@ import {
   OCC_REFERENCE_INVALIDATION_REASONS,
   trackNewSolidBody,
 } from "@/domain/modeling/occ/topology";
-import { expectTrue } from "@/testing/expect.spec";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,
@@ -43,7 +42,7 @@ function makeTrackedBox(
 ) {
   const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, origin), 4, 4, 4);
   box.Build(new oc.Message_ProgressRange_1());
-  expectTrue(box.IsDone(), `Expected ${bodyId} box to build.`);
+  expect(box.IsDone(), `Expected ${bodyId} box to build.`).toBeTruthy();
 
   return trackNewSolidBody(oc, {
     bodyId,
@@ -72,10 +71,10 @@ test("executeSplitFeature uses native split transaction for ambiguous/deleted to
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildSplitCommittedShapeTransactionWithHistory;
   let nativeCallCount = 0;
-  expectTrue(
-    typeof nativeBuilder === "function",
+  expect(
+    typeof nativeBuilder,
     "Expected custom OCC runtime to expose native split transactions.",
-  );
+  ).toBe("function");
   nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildSplitCommittedShapeTransactionWithHistory =
     (...args) => {
       nativeCallCount += 1;
@@ -104,32 +103,32 @@ test("executeSplitFeature uses native split transaction for ambiguous/deleted to
     } satisfies AdvancedSolidFeatureDefinition & { kind: "split" },
   );
 
-  expectTrue(
-    nativeCallCount === 1,
+  expect(
+    nativeCallCount,
     "Split feature execution should use the native split transaction when available.",
-  );
-  expectTrue(
-    !result.bodies.some((body) => body.bodyId === target.bodyId),
+  ).toBe(1);
+  expect(
+    result.bodies.some((body) => body.bodyId === target.bodyId),
     "Split should remove the original target body.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     result.bodies.some((body) => body.bodyId === tool.bodyId),
     "Split should keep the tool body live.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     result.producedTargets.length > 0,
     "Native split should produce replacement split result bodies.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     [...result.historyInvalidations.values()].some(
       (invalidation) =>
         invalidation.reason ===
         OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
     ),
     "Native split should report ambiguous topology instead of choosing traversal-order successors.",
-  );
-  expectTrue(
-    ![...result.historyInvalidations.values()].some(
+  ).toBeTruthy();
+  expect(
+    [...result.historyInvalidations.values()].some(
       (invalidation) =>
         invalidation.reason ===
           OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory ||
@@ -137,7 +136,7 @@ test("executeSplitFeature uses native split transaction for ambiguous/deleted to
           OCC_REFERENCE_INVALIDATION_REASONS.topologyModified,
     ),
     "Native split should not fall back to unsupported or JS-side modified-history invalidations.",
-  );
+  ).toBeFalsy();
 });
 
 test("executeCombineFeature uses native boolean transaction for single-tool subtraction history", async () => {
@@ -159,10 +158,10 @@ test("executeCombineFeature uses native boolean transaction for single-tool subt
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildBooleanCommittedShapeTransactionWithHistory;
   let nativeCallCount = 0;
-  expectTrue(
-    typeof nativeBuilder === "function",
+  expect(
+    typeof nativeBuilder,
     "Expected custom OCC runtime to expose native boolean transactions.",
-  );
+  ).toBe("function");
   nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildBooleanCommittedShapeTransactionWithHistory =
     (...args) => {
       nativeCallCount += 1;
@@ -195,20 +194,20 @@ test("executeCombineFeature uses native boolean transaction for single-tool subt
     (body) => body.bodyId === target.bodyId,
   );
 
-  expectTrue(
-    nativeCallCount === 1,
+  expect(
+    nativeCallCount,
     "Combine subtraction should use the native boolean transaction when available.",
-  );
-  expectTrue(
+  ).toBe(1);
+  expect(
     replacement != null,
     "Combine subtraction should keep a replacement target body.",
-  );
-  expectTrue(
-    !result.bodies.some((body) => body.bodyId === tool.bodyId),
+  ).toBeTruthy();
+  expect(
+    result.bodies.some((body) => body.bodyId === tool.bodyId),
     "Combine subtraction should consume the tool body.",
-  );
-  expectTrue(
-    ![...result.historyInvalidations.values()].some(
+  ).toBeFalsy();
+  expect(
+    [...result.historyInvalidations.values()].some(
       (invalidation) =>
         invalidation.reason ===
           OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory ||
@@ -216,5 +215,5 @@ test("executeCombineFeature uses native boolean transaction for single-tool subt
           OCC_REFERENCE_INVALIDATION_REASONS.topologyModified,
     ),
     "Native combine should not fall back to unsupported or JS-side modified-history invalidations.",
-  );
+  ).toBeFalsy();
 });

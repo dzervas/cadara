@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -18,15 +17,15 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     expected: readonly [number, number],
     message: string,
   ) {
-    expectTrue(actual, `${message} Missing point.`);
+    expect(actual, `${message} Missing point.`).toBeTruthy();
     const distance = Math.hypot(
       actual[0] - expected[0],
       actual[1] - expected[1],
     );
-    expectTrue(
+    expect(
       distance < 1e-6,
       `${message} Expected ${expected.join(", ")}, received ${actual.join(", ")}.`,
-    );
+    ).toBeTruthy();
   }
 
   function createSketchLineSession() {
@@ -73,28 +72,28 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     let session = createSketchLineSession();
 
     session = startSketchDraw(session, [1, 0.04]);
-    expectTrue(
-      session.activeSnap?.kind === "midpoint",
+    expect(
+      session.activeSnap?.kind,
       "Starting a new line near an existing line midpoint should activate midpoint snap.",
-    );
+    ).toBe("midpoint");
     assertClosePoint(
       session.pointerDownPoint,
       [1, 0],
       "Line start should use the snapped midpoint coordinate.",
     );
-    expectTrue(
+    expect(
       session.toolPresentation?.overlays?.some(
         (overlay) =>
           overlay.kind === "snapIndicator" && overlay.label === "Midpoint",
       ),
       "Active snap should be exposed as transient viewport feedback.",
-    );
+    ).toBeTruthy();
 
     session = updateSketchPointer(session, [3, 0.04]);
-    expectTrue(
-      session.activeSnap?.kind === "horizontalAlignment",
+    expect(
+      session.activeSnap?.kind,
       "Line preview should snap horizontally from the snapped start.",
-    );
+    ).toBe("horizontalAlignment");
     assertClosePoint(
       session.livePoint,
       [3, 0],
@@ -104,7 +103,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     const preview = deriveSketchDisplayEntities(session).find(
       (entity) => entity.status === "preview",
     );
-    expectTrue(preview?.kind === "line", "Expected a transient preview line.");
+    expect(preview?.kind, "Expected a transient preview line.").toBe("line");
     assertClosePoint(
       preview.start,
       [1, 0],
@@ -118,10 +117,10 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
 
     session = acceptSketchDraw(session, [3, 0.04]);
     const committed = session.definition.entities.at(-1);
-    expectTrue(
-      committed?.kind === "lineSegment",
+    expect(
+      committed?.kind,
       "Snapped commit should author the normal line entity.",
-    );
+    ).toBe("lineSegment");
     const start = session.definition.points.find(
       (point) => point.pointId === committed.startPointId,
     );
@@ -138,22 +137,22 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       [3, 0],
       "Committed line end should use the snapped horizontal point.",
     );
-    expectTrue(
+    expect(
       session.definition.constraints.some(
         (constraint) => constraint.kind === "midpoint",
       ),
       "Accepted midpoint snap should append a durable midpoint constraint.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       session.definition.constraints.some(
         (constraint) => constraint.kind === "horizontal",
       ),
       "Accepted horizontal snap should append a durable horizontal constraint.",
-    );
-    expectTrue(
-      session.activeSnap === null,
+    ).toBeTruthy();
+    expect(
+      session.activeSnap,
       "Accepted draw commits should clear transient snap state.",
-    );
+    ).toBe(null);
   }
 
   function testEndpointSnapReusesExistingLocalPointIds() {
@@ -161,41 +160,40 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     const baseLine = session.definition.entities.find(
       (entity) => entity.kind === "lineSegment",
     );
-    expectTrue(
-      baseLine?.kind === "lineSegment",
-      "Expected a committed baseline line.",
+    expect(baseLine?.kind, "Expected a committed baseline line.").toBe(
+      "lineSegment",
     );
 
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [2.04, 0.02]);
-    expectTrue(
-      session.activeSnap?.kind === "endpoint",
+    expect(
+      session.activeSnap?.kind,
       "Starting near an existing endpoint should activate endpoint snap.",
-    );
+    ).toBe("endpoint");
     session = updateSketchPointer(session, [3, 1]);
     session = acceptSketchDraw(session, [3, 1]);
 
     const committed = session.definition.entities.at(-1);
-    expectTrue(
-      committed?.kind === "lineSegment",
+    expect(
+      committed?.kind,
       "Snapped endpoint commit should author a line entity.",
-    );
-    expectTrue(
-      committed.startPointId === baseLine.endPointId,
+    ).toBe("lineSegment");
+    expect(
+      committed.startPointId,
       "Snapped line start should reuse the existing endpoint point id instead of creating a duplicate point.",
-    );
-    expectTrue(
-      session.definition.points.length === 3,
+    ).toBe(baseLine.endPointId);
+    expect(
+      session.definition.points.length,
       "Endpoint snap should only add the one unsnapped endpoint point.",
-    );
-    expectTrue(
-      !session.definition.constraints.some(
+    ).toBe(3);
+    expect(
+      session.definition.constraints.some(
         (constraint) =>
           constraint.kind === "coincident" &&
           constraint.pointIds.includes(baseLine.endPointId),
       ),
       "Reused local endpoints should not need an extra inferred coincident constraint.",
-    );
+    ).toBeFalsy();
   }
 
   function testProjectedSnapPreviewWithoutCopyingReferenceGeometry() {
@@ -225,29 +223,29 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [1.08, 0.3]);
 
-    expectTrue(
-      session.activeSnap?.kind === "nearestOnLine",
+    expect(
+      session.activeSnap?.kind,
       "Projected reference geometry should feed snap candidates.",
-    );
+    ).toBe("nearestOnLine");
     assertClosePoint(
       session.pointerDownPoint,
       [1, 0.3],
       "Line start should snap onto projected reference geometry.",
     );
-    expectTrue(
+    expect(
       session.activeSnap.sources.some(
         (source) => source.kind === "projectedGeometry",
       ),
       "Projected snap metadata should identify the derived reference geometry source.",
-    );
-    expectTrue(
-      session.definition.references.length === 0,
+    ).toBeTruthy();
+    expect(
+      session.definition.references.length,
       "Snapping to projected geometry should not author or copy reference records.",
-    );
-    expectTrue(
-      session.definition.entities.length === 0,
+    ).toBe(0);
+    expect(
+      session.definition.entities.length,
       "Starting from a projected snap should not copy projected geometry into entities.",
-    );
+    ).toBe(0);
   }
 
   function testProjectedSnapCommitsReferenceConstraintWithoutCopyingGeometry() {
@@ -296,16 +294,16 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     session = updateSketchPointer(session, [2, 0.3]);
     session = acceptSketchDraw(session, [2, 0.3]);
 
-    expectTrue(
+    expect(
       session.definition.constraints.some(
         (constraint) => constraint.kind === "pointOnProjectedCurve",
       ),
       "Accepted projected line snap should append a durable point-on-projected-curve constraint.",
-    );
-    expectTrue(
-      session.definition.entities.length === 1,
+    ).toBeTruthy();
+    expect(
+      session.definition.entities.length,
       "Snapping to projected geometry should only author the requested local line entity.",
-    );
+    ).toBe(1);
   }
 
   function testBothEndpointsSnappedToSameLineUseUniqueConstraintIds() {
@@ -319,24 +317,24 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
 
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0.54, 0.23]);
-    expectTrue(
-      session.activeSnap?.kind === "nearestOnLine",
+    expect(
+      session.activeSnap?.kind,
       "Line start should snap onto the existing line.",
-    );
+    ).toBe("nearestOnLine");
     session = updateSketchPointer(session, [1.48, 0.76]);
-    expectTrue(
-      session.activeSnap?.kind === "nearestOnLine",
+    expect(
+      session.activeSnap?.kind,
       "Line end should snap onto the same existing line.",
-    );
+    ).toBe("nearestOnLine");
     session = acceptSketchDraw(session, [1.48, 0.76]);
 
     const constraintIds = session.definition.constraints.map(
       (constraint) => constraint.constraintId,
     );
-    expectTrue(
-      new Set(constraintIds).size === constraintIds.length,
+    expect(
+      new Set(constraintIds).size,
       "Accepted start/end snaps against the same source should create unique durable constraint IDs.",
-    );
+    ).toBe(constraintIds.length);
 
     const solved = solveSketchDefinitionCore({
       definition: session.definition,
@@ -347,12 +345,12 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       },
       partialSolvePolicy: "bestEffort",
     });
-    expectTrue(
-      !solved.diagnostics.some(
+    expect(
+      solved.diagnostics.some(
         (diagnostic) => diagnostic.code === "duplicate-constraint-id",
       ),
       "Solved snapped sketch should not report duplicate inferred constraint IDs.",
-    );
+    ).toBeFalsy();
   }
 
   function testProjectedMidpointSnapCommitsDerivedReferenceConstraint() {
@@ -384,16 +382,16 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     session = updateSketchPointer(session, [2, 1]);
     session = acceptSketchDraw(session, [2, 1]);
 
-    expectTrue(
+    expect(
       session.definition.constraints.some(
         (constraint) => constraint.kind === "midpointProjectedLine",
       ),
       "Accepted projected midpoint snap should append a durable midpoint-to-projected-line constraint.",
-    );
-    expectTrue(
-      session.definition.entities.length === 1,
+    ).toBeTruthy();
+    expect(
+      session.definition.entities.length,
       "Projected midpoint snapping should not copy reference geometry.",
-    );
+    ).toBe(1);
   }
 
   function testProjectedConcentricSnapCommitsDerivedReferenceConstraint() {
@@ -425,16 +423,16 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     session = updateSketchPointer(session, [3, 2]);
     session = acceptSketchDraw(session, [3, 2]);
 
-    expectTrue(
+    expect(
       session.definition.constraints.some(
         (constraint) => constraint.kind === "concentricProjectedCurve",
       ),
       "Accepted projected center snap while drawing a circle should append a durable concentric projected constraint.",
-    );
-    expectTrue(
-      session.definition.entities.length === 1,
+    ).toBeTruthy();
+    expect(
+      session.definition.entities.length,
       "Projected concentric snapping should only author the requested local circle.",
-    );
+    ).toBe(1);
   }
 
   function testProjectedPointCenterSnapCommitsDerivedReferenceConstraint() {
@@ -465,16 +463,16 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     session = updateSketchPointer(session, [3, 2]);
     session = acceptSketchDraw(session, [3, 2]);
 
-    expectTrue(
+    expect(
       session.definition.constraints.some(
         (constraint) => constraint.kind === "coincidentProjectedPoint",
       ),
       "Accepted projected point center snap while drawing a circle should constrain the circle center to the projected point.",
-    );
-    expectTrue(
-      session.definition.entities.length === 1,
+    ).toBeTruthy();
+    expect(
+      session.definition.entities.length,
       "Projected point center snapping should only author the requested local circle.",
-    );
+    ).toBe(1);
   }
 
   function testSketchDatumSnapsCommitDerivedReferenceConstraints() {
@@ -484,10 +482,10 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     });
     originSession = beginSketchTool(originSession, "line");
     originSession = startSketchDraw(originSession, [0.04, 0.03]);
-    expectTrue(
-      originSession.activeSnap?.kind === "endpoint",
+    expect(
+      originSession.activeSnap?.kind,
       "Starting near the sketch origin should activate datum-origin snap.",
-    );
+    ).toBe("endpoint");
     assertClosePoint(
       originSession.pointerDownPoint,
       [0, 0],
@@ -502,10 +500,10 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
         constraint.projectedPoint.kind === "sketchDatum" &&
         constraint.projectedPoint.datum === "origin",
     );
-    expectTrue(
+    expect(
       originConstraint,
       "Accepted datum-origin snap should constrain the authored endpoint to the sketch origin.",
-    );
+    ).toBeTruthy();
 
     let axisSession = createNewSketchSessionFromSupport({
       kind: "construction",
@@ -514,10 +512,10 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     axisSession = beginSketchTool(axisSession, "line");
     axisSession = startSketchDraw(axisSession, [2, 1]);
     axisSession = updateSketchPointer(axisSession, [4, 0.04]);
-    expectTrue(
-      axisSession.activeSnap?.kind === "nearestOnLine",
+    expect(
+      axisSession.activeSnap?.kind,
       "Moving near a sketch datum axis should activate an on-axis snap.",
-    );
+    ).toBe("nearestOnLine");
     assertClosePoint(
       axisSession.livePoint,
       [4, 0],
@@ -531,10 +529,10 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
         constraint.projectedCurve.kind === "sketchDatum" &&
         constraint.projectedCurve.datum === "xAxis",
     );
-    expectTrue(
+    expect(
       axisConstraint,
       "Accepted datum-axis snap should constrain the authored endpoint onto the sketch axis.",
-    );
+    ).toBeTruthy();
   }
 
   function testProjectedPerpendicularAndTangentSnapsCommitDerivedReferenceConstraints() {
@@ -564,24 +562,24 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     perpendicularSession = beginSketchTool(perpendicularSession, "line");
     perpendicularSession = startSketchDraw(perpendicularSession, [0, 0]);
     perpendicularSession = updateSketchPointer(perpendicularSession, [1, 0]);
-    expectTrue(
-      perpendicularSession.activeSnap?.kind === "perpendicularFoot",
+    expect(
+      perpendicularSession.activeSnap?.kind,
       "Projected line should provide a perpendicular-foot snap.",
-    );
+    ).toBe("perpendicularFoot");
     perpendicularSession = acceptSketchDraw(perpendicularSession, [1, 0]);
 
-    expectTrue(
+    expect(
       perpendicularSession.definition.constraints.some(
         (constraint) => constraint.kind === "perpendicularProjectedLine",
       ),
       "Accepted projected perpendicular snap should append a durable perpendicular projected constraint.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       perpendicularSession.definition.constraints.some(
         (constraint) => constraint.kind === "pointOnProjectedCurve",
       ),
       "Accepted projected perpendicular snap should keep the foot point on the projected line.",
-    );
+    ).toBeTruthy();
 
     const projectedCircleReferences: ProjectedSketchReferenceRecord[] = [
       {
@@ -612,31 +610,31 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       tangentSession,
       [0.9428090415820634, 0.33333333333333337],
     );
-    expectTrue(
-      tangentSession.activeSnap?.kind === "tangent",
+    expect(
+      tangentSession.activeSnap?.kind,
       "Projected circle should provide a tangent snap.",
-    );
+    ).toBe("tangent");
     tangentSession = acceptSketchDraw(
       tangentSession,
       [0.9428090415820634, 0.33333333333333337],
     );
 
-    expectTrue(
+    expect(
       tangentSession.definition.constraints.some(
         (constraint) => constraint.kind === "tangentProjectedCurve",
       ),
       "Accepted projected tangent snap should append a durable tangent projected constraint.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       tangentSession.definition.constraints.some(
         (constraint) => constraint.kind === "pointOnProjectedCurve",
       ),
       "Accepted projected tangent snap should keep the tangent endpoint on the projected curve.",
-    );
-    expectTrue(
-      tangentSession.definition.entities.length === 1,
+    ).toBeTruthy();
+    expect(
+      tangentSession.definition.entities.length,
       "Projected tangent snapping should only author the requested local line.",
-    );
+    ).toBe(1);
   }
 
   testLocalSnapPreviewAndCommit();

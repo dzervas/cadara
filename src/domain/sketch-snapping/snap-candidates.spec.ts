@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect, assert } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import {
@@ -15,15 +14,15 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     expected: readonly [number, number],
     message: string,
   ) {
-    expectTrue(actual, `${message} Missing point.`);
+    assert(actual, `${message} Missing point.`);
     const distance = Math.hypot(
       actual[0] - expected[0],
       actual[1] - expected[1],
     );
-    expectTrue(
+    expect(
       distance < 1e-6,
       `${message} Expected ${expected.join(", ")}, received ${actual.join(", ")}.`,
-    );
+    ).toBeTruthy();
   }
 
   const definition: SketchDefinition = {
@@ -195,18 +194,18 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       tolerance: 0.2,
       activeTool: "line",
     });
-    expectTrue(
-      circleCenter.activeCandidate?.kind === "center",
+    expect(
+      circleCenter.activeCandidate?.kind,
       "Pointer near a circle center should prefer a center snap.",
-    );
-    expectTrue(
-      circleCenter.activeCandidate.preview.label === "Center",
+    ).toBe("center");
+    expect(
+      circleCenter.activeCandidate?.preview.label,
       "Circle center snap should expose center preview metadata.",
-    );
-    expectTrue(
-      circleCenter.activeCandidate.preview.glyph === "center",
+    ).toBe("Center");
+    expect(
+      circleCenter.activeCandidate?.preview.glyph,
       "Circle center snap should expose the center glyph.",
-    );
+    ).toBe("center");
     assertClosePoint(
       circleCenter.snappedPoint,
       [4, 0],
@@ -219,10 +218,10 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       tolerance: 0.2,
       activeTool: "line",
     });
-    expectTrue(
-      arcCenter.activeCandidate?.kind === "center",
+    expect(
+      arcCenter.activeCandidate?.kind,
       "Pointer near an arc center should prefer a center snap.",
-    );
+    ).toBe("center");
     assertClosePoint(
       arcCenter.snappedPoint,
       [8, 0],
@@ -238,21 +237,21 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       activeTool: "line",
     });
 
-    expectTrue(
-      result.activeCandidate?.kind === "midpoint",
+    expect(
+      result.activeCandidate?.kind,
       "Pointer near a line midpoint should prefer midpoint snap.",
-    );
+    ).toBe("midpoint");
     assertClosePoint(
       result.snappedPoint,
       [1, 0],
       "Midpoint snap should return the exact line midpoint.",
     );
-    expectTrue(
-      result.activeCandidate.sources.some(
+    expect(
+      result.activeCandidate?.sources.some(
         (source) => source.kind === "localEntity",
       ),
       "Midpoint snap should carry the source line reference.",
-    );
+    ).toBeTruthy();
   }
 
   function testProjectedGeometryCandidate() {
@@ -263,21 +262,21 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       activeTool: "line",
     });
 
-    expectTrue(
-      result.activeCandidate?.kind === "nearestOnLine",
+    expect(
+      result.activeCandidate?.kind,
       "Pointer near a projected line should snap onto it.",
-    );
+    ).toBe("nearestOnLine");
     assertClosePoint(
       result.snappedPoint,
       [1, 0.5],
       "Projected line snap should use derived projected coordinates.",
     );
-    expectTrue(
-      result.activeCandidate.sources.some(
+    expect(
+      result.activeCandidate?.sources.some(
         (source) => source.kind === "projectedGeometry",
       ),
       "Projected snap should reference projected geometry without creating local geometry.",
-    );
+    ).toBeTruthy();
   }
 
   function testSketchDatumCandidates() {
@@ -296,22 +295,22 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       tolerance: 0.2,
       activeTool: "line",
     });
-    expectTrue(
-      origin.activeCandidate?.kind === "endpoint",
+    expect(
+      origin.activeCandidate?.kind,
       "Pointer near the sketch origin should snap to the datum origin.",
-    );
+    ).toBe("endpoint");
     assertClosePoint(
       origin.snappedPoint,
       [0, 0],
       "Datum origin snap should use exact local origin coordinates.",
     );
-    expectTrue(
-      origin.activeCandidate.sources.some(
+    expect(
+      origin.activeCandidate?.sources.some(
         (source) =>
           source.kind === "sketchDatum" && source.datumId === "origin",
       ),
       "Datum origin snap should carry a sketch-datum source.",
-    );
+    ).toBeTruthy();
 
     const axis = resolveSketchSnap({
       pointer: [3, 0.04],
@@ -319,21 +318,21 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       tolerance: 0.2,
       activeTool: "line",
     });
-    expectTrue(
-      axis.activeCandidate?.kind === "nearestOnLine",
+    expect(
+      axis.activeCandidate?.kind,
       "Pointer near a datum axis should snap onto that axis.",
-    );
+    ).toBe("nearestOnLine");
     assertClosePoint(
       axis.snappedPoint,
       [3, 0],
       "Datum axis snap should project to the nearest axis point.",
     );
-    expectTrue(
-      axis.activeCandidate.sources.some(
+    expect(
+      axis.activeCandidate?.sources.some(
         (source) => source.kind === "sketchDatum" && source.datumId === "xAxis",
       ),
       "Datum axis snap should carry a sketch-datum source.",
-    );
+    ).toBeTruthy();
   }
 
   function testCurveCandidates() {
@@ -343,10 +342,10 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       tolerance: 0.2,
       activeTool: "line",
     });
-    expectTrue(
-      circle.activeCandidate?.kind === "nearestOnCircle",
+    expect(
+      circle.activeCandidate?.kind,
       "Pointer near a circle should snap onto the circle.",
-    );
+    ).toBe("nearestOnCircle");
     assertClosePoint(
       circle.snappedPoint,
       [4.044598829122584, 0.9990057739466971],
@@ -359,10 +358,10 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       tolerance: 0.2,
       activeTool: "line",
     });
-    expectTrue(
-      arc.activeCandidate?.kind === "nearestOnArc",
+    expect(
+      arc.activeCandidate?.kind,
       "Pointer near an arc should snap onto the finite arc.",
-    );
+    ).toBe("nearestOnArc");
     assertClosePoint(
       arc.snappedPoint,
       [6.707106781186548, 0.7071067811865475],
@@ -378,10 +377,10 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       activeTool: "line",
       tolerance: 0.2,
     });
-    expectTrue(
-      horizontal.activeCandidate?.kind === "horizontalAlignment",
+    expect(
+      horizontal.activeCandidate?.kind,
       "Line drawing should infer horizontal alignment from the active start.",
-    );
+    ).toBe("horizontalAlignment");
     assertClosePoint(
       horizontal.snappedPoint,
       [2.5, 0],
@@ -395,10 +394,10 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       activeTool: "line",
       tolerance: 0.2,
     });
-    expectTrue(
-      vertical.activeCandidate?.kind === "verticalAlignment",
+    expect(
+      vertical.activeCandidate?.kind,
       "Line drawing should infer vertical alignment from the active start.",
-    );
+    ).toBe("verticalAlignment");
     assertClosePoint(
       vertical.snappedPoint,
       [0, 2.5],
@@ -412,10 +411,10 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       activeTool: "line",
       tolerance: 0.2,
     });
-    expectTrue(
-      tangent.activeCandidate?.kind === "tangent",
+    expect(
+      tangent.activeCandidate?.kind,
       "Line drawing should expose deterministic circle tangent candidates.",
-    );
+    ).toBe("tangent");
     assertClosePoint(
       tangent.snappedPoint,
       [3.5, 0.8660254037844387],
@@ -442,10 +441,10 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       activeTool: "line",
       tolerance: 0.2,
     });
-    expectTrue(
-      valid.activeCandidate?.kind === "perpendicularFoot",
+    expect(
+      valid.activeCandidate?.kind,
       "True finite-segment perpendicular foot should be emitted.",
-    );
+    ).toBe("perpendicularFoot");
     assertClosePoint(
       valid.snappedPoint,
       [1, 1],
@@ -459,12 +458,12 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       activeTool: "line",
       tolerance: 0.2,
     });
-    expectTrue(
+    expect(
       outside.candidates.every(
         (candidate) => candidate.kind !== "perpendicularFoot",
       ),
       "Out-of-segment perpendicular projections should not be labeled as perpendicular-foot snaps.",
-    );
+    ).toBeTruthy();
   }
 
   function testIntersectionsAndHysteresis() {
@@ -474,12 +473,12 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
       tolerance: 0.2,
       activeTool: "line",
     });
-    expectTrue(
+    expect(
       intersections.candidates.some(
         (candidate) => candidate.kind === "intersection",
       ),
       "Candidate list should include curve intersections within tolerance.",
-    );
+    ).toBeTruthy();
   }
 
   function testHysteresisKeepsNearbyPreviousCandidate() {
@@ -518,22 +517,22 @@ test("src/domain/sketch-snapping/snap-candidates.spec.ts", () => {
     const previous = baseline.candidates.find(
       (candidate) => candidate.point[0] === 0.1,
     );
-    expectTrue(
+    expect(
       previous,
       "Expected a nearby previous candidate for hysteresis.",
-    );
+    ).toBeTruthy();
 
     const hysteresis = resolveSketchSnap({
       pointer: [0.04, 0],
       geometries: competingPoints,
       tolerance: 0.2,
       activeTool: "line",
-      activeCandidateKey: previous.key,
+      activeCandidateKey: previous?.key,
     });
-    expectTrue(
-      hysteresis.activeCandidate?.key === previous.key,
+    expect(
+      hysteresis.activeCandidate?.key,
       "Active candidate hysteresis should keep a nearby previous candidate stable.",
-    );
+    ).toBe(previous?.key);
   }
 
   testCenterCandidates();

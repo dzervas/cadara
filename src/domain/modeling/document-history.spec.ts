@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   getAppliedDocumentHistoryItemsForDocumentCursor,
   getDocumentHistoryCursorBeforeTarget,
@@ -25,61 +24,61 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
   ).snapshot;
   const items = snapshot.presentation.documentHistory;
 
-  expectTrue(
+  expect(
     items.length >= 2,
     "Seed document should expose multiple document history items.",
-  );
+  ).toBeTruthy();
   const firstItem = items[0];
   const seedSketchItem = items.find((item) => item.kind === "sketch");
   const seedFeatureItem = items.find((item) => item.kind === "feature");
 
-  expectTrue(
+  expect(
     firstItem,
     "Seed document should expose a first document history item.",
-  );
-  expectTrue(
-    seedSketchItem?.kind === "sketch",
+  ).toBeTruthy();
+  expect(
+    seedSketchItem?.kind,
     "Seed document should expose a sketch history item.",
-  );
-  expectTrue(
-    seedFeatureItem?.kind === "feature",
+  ).toBe("sketch");
+  expect(
+    seedFeatureItem?.kind,
     "Seed document should expose a feature history item.",
-  );
+  ).toBe("feature");
 
   const featureRollback = getDocumentHistoryCursorBeforeTarget(items, {
     kind: "feature",
     featureId: seedFeatureItem.featureId,
   });
-  expectTrue(
-    featureRollback !== null,
+  expect(
+    featureRollback,
     "Feature targets should resolve to a rollback cursor.",
-  );
-  expectTrue(
-    getDocumentHistoryCursorIndex(items, featureRollback) ===
-      getDocumentHistoryCursorIndex(items, {
-        kind: "feature",
-        featureId: seedFeatureItem.featureId,
-      }) -
-        1,
+  ).not.toBe(null);
+  expect(
+    getDocumentHistoryCursorIndex(items, featureRollback),
     "Feature rollback cursor should point immediately before the target feature.",
+  ).toBe(
+    getDocumentHistoryCursorIndex(items, {
+      kind: "feature",
+      featureId: seedFeatureItem.featureId,
+    }) - 1,
   );
 
   const sketchRollback = getDocumentHistoryCursorBeforeTarget(items, {
     kind: "sketch",
     sketchId: seedSketchItem.sketchId,
   });
-  expectTrue(
-    sketchRollback !== null,
+  expect(
+    sketchRollback,
     "Sketch targets should resolve to a rollback cursor.",
-  );
-  expectTrue(
-    getDocumentHistoryCursorIndex(items, sketchRollback) ===
-      getDocumentHistoryCursorIndex(items, {
-        kind: "sketch",
-        sketchId: seedSketchItem.sketchId,
-      }) -
-        1,
+  ).not.toBe(null);
+  expect(
+    getDocumentHistoryCursorIndex(items, sketchRollback),
     "Sketch rollback cursor should point immediately before the target sketch.",
+  ).toBe(
+    getDocumentHistoryCursorIndex(items, {
+      kind: "sketch",
+      sketchId: seedSketchItem.sketchId,
+    }) - 1,
   );
 
   const firstRollback = getDocumentHistoryCursorBeforeTarget(
@@ -88,70 +87,69 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
       ? { kind: "sketch", sketchId: firstItem.sketchId }
       : { kind: "feature", featureId: firstItem.featureId },
   );
-  expectTrue(
-    firstRollback?.kind === "empty",
+  expect(
+    firstRollback?.kind,
     "The first history item should roll back to the empty cursor.",
-  );
-  expectTrue(
+  ).toBe("empty");
+  expect(
     getDocumentHistoryCursorBeforeTarget(items, {
       kind: "feature",
       featureId: "feature_missing",
-    }) === null,
+    }),
     "Missing feature targets should not resolve to a rollback cursor.",
-  );
-  expectTrue(
+  ).toBe(null);
+  expect(
     getDocumentHistoryCursorBeforeTarget(items, {
       kind: "sketch",
       sketchId: "sketch_missing",
-    }) === null,
+    }),
     "Missing sketch targets should not resolve to a rollback cursor.",
-  );
+  ).toBe(null);
 
-  expectTrue(
-    getDocumentHistoryCursorIndex(items, snapshot.document.cursor) ===
-      items.length - 1,
+  expect(
+    getDocumentHistoryCursorIndex(items, snapshot.document.cursor),
     "Seed document cursor should start at the document history tail.",
-  );
-  expectTrue(
+  ).toBe(items.length - 1);
+  expect(
     getAppliedDocumentHistoryItemsForDocumentCursor(items, { kind: "empty" })
-      .length === 0,
+      .length,
     "Applied document history before the first item should be empty.",
-  );
-  expectTrue(
+  ).toBe(0);
+  expect(
     getAppliedSketchIdsForDocumentCursor(items, {
       kind: "sketch",
       sketchId: seedSketchItem.sketchId,
     }).has(seedSketchItem.sketchId),
     "Applied sketch ids should include a sketch cursor target.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getAppliedFeatureIdsForDocumentCursor(items, {
       kind: "sketch",
       sketchId: seedSketchItem.sketchId,
-    }).size === 0,
+    }).size,
     "A cursor on the seed sketch should not include later feature ids.",
-  );
-  expectTrue(
+  ).toBe(0);
+  expect(
     getAppliedFeatureIdsForDocumentCursor(items, {
       kind: "feature",
       featureId: seedFeatureItem.featureId,
     }).has(seedFeatureItem.featureId),
     "Applied feature ids should include a feature cursor target.",
-  );
+  ).toBeTruthy();
 
   const previous = getPreviousDocumentHistoryCursor(snapshot);
-  expectTrue(
-    previous !== null,
+  expect(
+    previous,
     "Undo should be available at the document history tail.",
-  );
-  expectTrue(
-    getDocumentHistoryCursorIndex(items, previous) === items.length - 2,
+  ).not.toBe(null);
+  expect(
+    getDocumentHistoryCursorIndex(items, previous),
     "Previous document cursor should step back one history item.",
-  );
-  expectTrue(
-    getNextDocumentHistoryCursor(snapshot) === null,
+  ).toBe(items.length - 2);
+  expect(
+    getNextDocumentHistoryCursor(snapshot),
     "Redo should be unavailable at the document history tail.",
-  );
+  ).toBe(null);
 
   const rolledBackSnapshot = {
     ...snapshot,
@@ -163,14 +161,14 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
   };
   const next = getNextDocumentHistoryCursor(rolledBackSnapshot);
 
-  expectTrue(
-    next !== null,
+  expect(
+    next,
     "Redo should be available after a document cursor rollback.",
-  );
-  expectTrue(
-    getDocumentHistoryCursorIndex(items, next) === items.length - 1,
+  ).not.toBe(null);
+  expect(
+    getDocumentHistoryCursorIndex(items, next),
     "Next document cursor should step forward one history item.",
-  );
+  ).toBe(items.length - 1);
 
   const beforeFirstSnapshot = {
     ...snapshot,
@@ -181,25 +179,25 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
     cursor: { kind: "empty" as const },
   };
 
-  expectTrue(
-    getPreviousDocumentHistoryCursor(beforeFirstSnapshot) === null,
+  expect(
+    getPreviousDocumentHistoryCursor(beforeFirstSnapshot),
     "Undo should be unavailable before the first document history item.",
-  );
-  expectTrue(
-    getNextDocumentHistoryCursor(beforeFirstSnapshot)?.kind === items[0]?.kind,
+  ).toBe(null);
+  expect(
+    getNextDocumentHistoryCursor(beforeFirstSnapshot)?.kind,
     "Redo should be available from the before-first document cursor position.",
-  );
+  ).toBe(items[0]?.kind);
 
   const insertedBeforeFirst = insertDocumentHistoryOrderEntryAfterCursor(
     items,
     { kind: "empty" },
     { kind: "sketch", sketchId: "sketch_before_first" },
   );
-  expectTrue(
+  expect(
     insertedBeforeFirst[0]?.kind === "sketch" &&
       insertedBeforeFirst[0].sketchId === "sketch_before_first",
     "New document-history entries inserted after the empty cursor should become the first item.",
-  );
+  ).toBeTruthy();
 
   const committed = await adapter.commitSketch({
     contractVersion: "modeling-contract/v1alpha1",
@@ -231,10 +229,10 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
       dimensions: [],
     },
   });
-  expectTrue(
-    committed.revisionState.kind === "accepted",
+  expect(
+    committed.revisionState.kind,
     "History-order sketch commit should be accepted.",
-  );
+  ).toBe("accepted");
 
   const interleaved = (
     await adapter.getDocumentSnapshot({
@@ -245,20 +243,20 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
   const order = interleaved.presentation.documentHistory.map((item) =>
     item.kind === "sketch" ? item.sketchId : item.featureId,
   );
-  expectTrue(
+  expect(
     order.indexOf("feature_extrude-1") <
       order.indexOf("sketch_after_seed_feature"),
     "Sketches committed after a feature must remain after that feature in document history.",
-  );
+  ).toBeTruthy();
 
   const authored = createAuthoredModelDocumentFromSnapshot(interleaved);
   const authoredOrder =
     authored.historyOrder?.map((item) =>
       item.kind === "sketch" ? item.sketchId : item.featureId,
     ) ?? [];
-  expectTrue(
+  expect(
     authoredOrder.indexOf("feature_extrude-1") <
       authoredOrder.indexOf("sketch_after_seed_feature"),
     "Authored document persistence must preserve interleaved sketch/feature history order.",
-  );
+  ).toBeTruthy();
 });

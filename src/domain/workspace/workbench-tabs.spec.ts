@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 
 import type { DocumentId } from "@/contracts/shared/ids";
 
@@ -16,7 +16,7 @@ const docC = "doc_c" as DocumentId;
 
 function tab(
   documentId: DocumentId,
-  title = documentId,
+  title: string = documentId,
   storageKind: WorkbenchTab["storageKind"] = "browser",
 ): WorkbenchTab {
   return { documentId, title, storageKind, storageDescriptor: null };

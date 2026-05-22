@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { DocumentExportSuccessResult } from "@/contracts/modeling/export";
 import {
   downloadDocumentExportResult,
@@ -54,24 +53,23 @@ test("src/lib/download-export.spec.ts", () => {
 
   downloadDocumentExportResult(result, environment);
 
-  expectTrue(
-    clicked.length === 1,
+  expect(
+    clicked.length,
     "Successful exports should trigger one download click.",
+  ).toBe(1);
+  expect(clicked[0], "Download should use the returned filename.").toBe(
+    "part-1.step",
   );
-  expectTrue(
-    clicked[0] === "part-1.step",
-    "Download should use the returned filename.",
-  );
-  expectTrue(
-    capturedBlob?.type === "model/step",
+  expect(
+    capturedBlob!.type,
     "Download should use the returned MIME type.",
-  );
-  expectTrue(
+  ).toBe("model/step");
+  expect(
     appended.includes("part-1.step"),
     "Download anchor should be attached before clicking.",
-  );
-  expectTrue(
-    revoked[0] === "blob:export",
+  ).toBeTruthy();
+  expect(
+    revoked[0],
     "Download object URL should be revoked after clicking.",
-  );
+  ).toBe("blob:export");
 });

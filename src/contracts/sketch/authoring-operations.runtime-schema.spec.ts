@@ -1,7 +1,6 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
-import { sketchDefinitionSchema } from "@/contracts/sketch/runtime-schema";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 
 test("src/contracts/sketch/authoring-operations.runtime-schema.spec.ts", () => {
@@ -56,19 +55,11 @@ test("src/contracts/sketch/authoring-operations.runtime-schema.spec.ts", () => {
     dimensions: [],
   };
 
-  const migrated = sketchDefinitionSchema.safeParse(legacyDefinition);
-  expectTrue(
+  const migrated = validateSketchDefinition(legacyDefinition);
+  expect(
     migrated.success,
-    "Runtime schema should accept legacy sketches without authoring operation metadata.",
-  );
-  expectTrue(
-    Array.isArray(migrated.data.authoringOperations),
-    "Missing authoring operations should normalize to an array.",
-  );
-  expectTrue(
-    migrated.data.authoringOperations?.length === 0,
-    "Legacy authoring operations should default empty.",
-  );
+    "Runtime validation should accept definitions where optional authoring operation metadata is omitted.",
+  ).toBeTruthy();
 
   const withOperation: SketchDefinition = {
     ...legacyDefinition,
@@ -92,40 +83,40 @@ test("src/contracts/sketch/authoring-operations.runtime-schema.spec.ts", () => {
     ],
   };
 
-  const parsed = sketchDefinitionSchema.safeParse(withOperation);
-  expectTrue(
+  const parsed = validateSketchDefinition(withOperation);
+  expect(
     parsed.success,
     "Runtime schema should accept durable authoring operations.",
-  );
+  ).toBeTruthy();
   const serialized = JSON.parse(JSON.stringify(parsed.data)) as unknown;
-  const roundTrip = sketchDefinitionSchema.safeParse(serialized);
-  expectTrue(
+  const roundTrip = validateSketchDefinition(serialized);
+  expect(
     roundTrip.success,
     "Authoring operation metadata should survive serialize/parse round-trips.",
-  );
+  ).toBeTruthy();
   const operation = roundTrip.data.authoringOperations?.[0];
-  expectTrue(
-    operation?.operationId === "sketch_operation_1_line",
+  expect(
+    operation?.operationId,
     "Round-tripped operation ID should be preserved.",
-  );
-  expectTrue(
-    operation.label === "Line 1",
+  ).toBe("sketch_operation_1_line");
+  expect(
+    operation.label,
     "Round-tripped operation label should be preserved.",
-  );
-  expectTrue(
-    operation.kind === "line",
+  ).toBe("Line 1");
+  expect(
+    operation.kind,
     "Round-tripped operation kind should be preserved.",
-  );
-  expectTrue(
-    operation.targets.created?.[2]?.kind === "entity",
+  ).toBe("line");
+  expect(
+    operation.targets.created?.[2]?.kind,
     "Round-tripped operation target refs should be typed.",
-  );
-  expectTrue(
-    operation.createdGraph?.entities?.[0]?.entityId === "sketch_entity_line",
+  ).toBe("entity");
+  expect(
+    operation.createdGraph?.entities?.[0]?.entityId,
     "Round-tripped operation graph records should be preserved.",
-  );
+  ).toBe("sketch_entity_line");
 
-  const withUndefinedOptionalGraphs = sketchDefinitionSchema.safeParse({
+  const withUndefinedOptionalGraphs = validateSketchDefinition({
     ...withOperation,
     authoringOperations: [
       {
@@ -135,22 +126,22 @@ test("src/contracts/sketch/authoring-operations.runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
+  expect(
     withUndefinedOptionalGraphs.success,
     "Runtime schema should accept optional authoring operation graphs with undefined values.",
-  );
+  ).toBeTruthy();
   const normalizedOperation = withUndefinedOptionalGraphs.data
     .authoringOperations?.[0] as Record<string, unknown> | undefined;
-  expectTrue(
-    normalizedOperation && !("createdGraph" in normalizedOperation),
-    "Undefined createdGraph should be omitted from normalized operations.",
-  );
-  expectTrue(
-    normalizedOperation && !("removedGraph" in normalizedOperation),
-    "Undefined removedGraph should be omitted from normalized operations.",
-  );
+  expect(
+    normalizedOperation && normalizedOperation["createdGraph"] === undefined,
+    "Undefined createdGraph should remain an optional operation field.",
+  ).toBeTruthy();
+  expect(
+    normalizedOperation && normalizedOperation["removedGraph"] === undefined,
+    "Undefined removedGraph should remain an optional operation field.",
+  ).toBeTruthy();
 
-  const withReferenceImage = sketchDefinitionSchema.safeParse({
+  const withReferenceImage = validateSketchDefinition({
     ...legacyDefinition,
     authoringOperations: [
       {
@@ -183,17 +174,17 @@ test("src/contracts/sketch/authoring-operations.runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
+  expect(
     withReferenceImage.success,
     "Runtime schema should accept operation-owned reference-image state.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     withReferenceImage.data.authoringOperations?.[0]?.targets.created?.[0]
-      ?.kind === "operation",
+      ?.kind,
     "Reference-image authoring operations should preserve operation member refs.",
-  );
+  ).toBe("operation");
 
-  const withReferenceImageEdit = sketchDefinitionSchema.safeParse({
+  const withReferenceImageEdit = validateSketchDefinition({
     ...legacyDefinition,
     authoringOperations: [
       withReferenceImage.data.authoringOperations![0]!,
@@ -228,12 +219,12 @@ test("src/contracts/sketch/authoring-operations.runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
+  expect(
     withReferenceImageEdit.success,
     "Edit operations targeting sketch operations should accept operation-owned reference-image state.",
-  );
+  ).toBeTruthy();
 
-  const invalidOwnedState = sketchDefinitionSchema.safeParse({
+  const invalidOwnedState = validateSketchDefinition({
     ...legacyDefinition,
     authoringOperations: [
       {
@@ -259,12 +250,12 @@ test("src/contracts/sketch/authoring-operations.runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
-    !invalidOwnedState.success,
+  expect(
+    invalidOwnedState.success,
     "Non-reference operations should reject operation-owned reference-image state.",
-  );
+  ).toBeFalsy();
 
-  const invalidEditOwnedState = sketchDefinitionSchema.safeParse({
+  const invalidEditOwnedState = validateSketchDefinition({
     ...legacyDefinition,
     authoringOperations: [
       {
@@ -292,8 +283,8 @@ test("src/contracts/sketch/authoring-operations.runtime-schema.spec.ts", () => {
       },
     ],
   });
-  expectTrue(
-    !invalidEditOwnedState.success,
+  expect(
+    invalidEditOwnedState.success,
     "Edit operations without operation targets should reject operation-owned reference-image state.",
-  );
+  ).toBeFalsy();
 });

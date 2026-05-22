@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   EditorEffectRuntime,
   EditorState,
@@ -81,12 +80,14 @@ test("src/domain/editor/runtime-machine.spec.ts", async () => {
     actor.dispatch({ type: "sketch.pointerReleased", point: [1, 0.3] });
 
     const beforeDrag = actor.getState();
-    expectTrue(
-      beforeDrag.kind === "editingSketch",
-      "Expected active sketch session before drag.",
+    expect(beforeDrag.kind, "Expected active sketch session before drag.").toBe(
+      "editingSketch",
     );
     const point = beforeDrag.session.definition.points[0];
-    expectTrue(point, "Expected a point to drag after drawing a line.");
+    expect(
+      point,
+      "Expected a point to drag after drawing a line.",
+    ).toBeTruthy();
 
     actor.dispatch({
       type: "sketch.geometryDragStarted",
@@ -97,26 +98,26 @@ test("src/domain/editor/runtime-machine.spec.ts", async () => {
     actor.dispatch({ type: "sketch.geometryDragEnded", point: [2, 3] });
 
     const afterDrag = actor.getState();
-    expectTrue(
-      afterDrag.kind === "editingSketch",
+    expect(
+      afterDrag.kind,
       "Expected sketch session to remain active after drag.",
-    );
+    ).toBe("editingSketch");
 
     const movedPoint = afterDrag.session.definition.points.find(
       (entry) => entry.pointId === point.pointId,
     );
-    expectTrue(
+    expect(
       movedPoint,
       "Expected dragged point to remain in the sketch definition.",
-    );
-    expectTrue(
-      movedPoint.position[0] === 2,
+    ).toBeTruthy();
+    expect(
+      movedPoint.position[0],
       "Runtime should forward geometry drag move events to the editor reducer.",
-    );
-    expectTrue(
-      movedPoint.position[1] === 3,
+    ).toBe(2);
+    expect(
+      movedPoint.position[1],
       "Runtime should forward geometry drag end events to the editor reducer.",
-    );
+    ).toBe(3);
   } finally {
     actor.stop();
   }
@@ -181,22 +182,22 @@ test("src/domain/editor/runtime-machine.spec.ts reports escaped effect invocatio
       (candidate) => candidate.pendingSnapshotRequestId === null,
     );
 
-    expectTrue(
-      reporter.reports.length === 1,
+    expect(
+      reporter.reports.length,
       "Escaped invocation failures should be reported.",
-    );
-    expectTrue(
-      reporter.reports[0]?.error.code === "editor/invocation-failed",
+    ).toBe(1);
+    expect(
+      reporter.reports[0]?.error.code,
       "Escaped failures should use invocation failure codes.",
-    );
-    expectTrue(
-      reporter.reports[0]?.metadata.source === "editor-runtime",
+    ).toBe("editor/invocation-failed");
+    expect(
+      reporter.reports[0]?.metadata.source,
       "Escaped failures should identify the runtime source.",
-    );
-    expectTrue(
-      state.preview?.kind === "selection",
+    ).toBe("editor-runtime");
+    expect(
+      state.preview?.kind,
       "Escaped failures should become UI-visible editor failure state.",
-    );
+    ).toBe("selection");
   } finally {
     actor.stop();
   }
@@ -271,10 +272,10 @@ test("src/domain/editor/runtime-machine.spec.ts forwards selection clear events"
       (state) => state.selection.length === 0,
     );
 
-    expectTrue(
-      cleared.hoverTarget === null,
+    expect(
+      cleared.hoverTarget,
       "Runtime should forward selection clear events to the editor reducer.",
-    );
+    ).toBe(null);
   } finally {
     actor.stop();
   }
@@ -352,14 +353,14 @@ test("src/domain/editor/runtime-machine.spec.ts forwards direct snapshot load ev
       (state) => state.document.revisionId === "rev_imported",
     );
 
-    expectTrue(
-      loaded.snapshot?.document.revisionId === "rev_imported",
+    expect(
+      loaded.snapshot?.document.revisionId,
       "Runtime should forward direct snapshot loads to the editor reducer.",
-    );
-    expectTrue(
-      loaded.selectionCatalog !== null,
+    ).toBe("rev_imported");
+    expect(
+      loaded.selectionCatalog,
       "Direct snapshot loads should rebuild the selection catalog.",
-    );
+    ).not.toBe(null);
   } finally {
     actor.stop();
   }
@@ -439,14 +440,13 @@ test("src/domain/editor/runtime-machine.spec.ts forwards connected sketch select
         state.kind === "editingSketch" &&
         state.session.definition.entities.length === 4,
     );
-    expectTrue(
-      rectangleState.kind === "editingSketch",
+    expect(
+      rectangleState.kind,
       "Expected sketch session after rectangle creation.",
-    );
+    ).toBe("editingSketch");
     const rectangleEdge = rectangleState.session.definition.entities[0]?.target;
-    expectTrue(
-      rectangleEdge?.kind === "sketchEntity",
-      "Expected a selectable rectangle edge.",
+    expect(rectangleEdge?.kind, "Expected a selectable rectangle edge.").toBe(
+      "sketchEntity",
     );
 
     actor.dispatch({
@@ -458,10 +458,10 @@ test("src/domain/editor/runtime-machine.spec.ts forwards connected sketch select
       (state) => state.selection.length === 4,
     );
 
-    expectTrue(
+    expect(
       connected.selection.every((target) => target.kind === "sketchEntity"),
       "Runtime should forward connected sketch selection events to the editor reducer.",
-    );
+    ).toBeTruthy();
   } finally {
     actor.stop();
   }
@@ -535,10 +535,10 @@ test("src/domain/editor/runtime-machine.spec.ts forwards active section offset u
       actor,
       (state) => state.kind === "inspectingSection",
     );
-    expectTrue(
-      selected.kind === "inspectingSection",
+    expect(
+      selected.kind,
       "Expected an active section after picking a valid section seed.",
-    );
+    ).toBe("inspectingSection");
 
     actor.dispatch({
       type: "section.offsetUpdated",
@@ -552,14 +552,14 @@ test("src/domain/editor/runtime-machine.spec.ts forwards active section offset u
         state.kind === "inspectingSection" && state.section.offset === 6,
     );
 
-    expectTrue(
-      moved.kind === "inspectingSection",
+    expect(
+      moved.kind,
       "Section offset forwarding should keep the section workflow active.",
-    );
-    expectTrue(
-      moved.section.offset === 6,
+    ).toBe("inspectingSection");
+    expect(
+      moved.section.offset,
       "Runtime should forward section offset updates to the editor reducer.",
-    );
+    ).toBe(6);
   } finally {
     actor.stop();
   }

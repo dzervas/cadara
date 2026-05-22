@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import { strFromU8, unzipSync } from "fflate";
 
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
@@ -135,32 +134,31 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
     },
   });
 
-  expectTrue(
-    payloadResult.payload.authoredDocument.status === "included",
+  expect(
+    payloadResult.payload.authoredDocument.status,
     "Authored document should be included when it fits.",
-  );
-  expectTrue(
-    JSON.stringify(payloadResult.payload.authoredDocument.value) ===
-      JSON.stringify(authoredDocument),
+  ).toBe("included");
+  expect(
+    JSON.stringify(payloadResult.payload.authoredDocument.value),
     "Bug reports should reuse createAuthoredModelDocumentFromSnapshot for document reproduction data.",
-  );
-  expectTrue(
-    !("render" in payloadResult.payload.authoredDocument.value),
+  ).toBe(JSON.stringify(authoredDocument));
+  expect(
+    "render" in payloadResult.payload.authoredDocument.value,
     "Authored debug data should exclude render exports.",
-  );
-  expectTrue(
-    !("presentation" in payloadResult.payload.authoredDocument.value),
+  ).toBeFalsy();
+  expect(
+    "presentation" in payloadResult.payload.authoredDocument.value,
     "Authored debug data should exclude presentation state.",
-  );
-  expectTrue(
-    payloadResult.payload.operationHistory.status === "included",
+  ).toBeFalsy();
+  expect(
+    payloadResult.payload.operationHistory.status,
     "Valid stored operation history should be included.",
-  );
-  expectTrue(
-    payloadResult.payload.runtimeTrace.status === "included",
+  ).toBe("included");
+  expect(
+    payloadResult.payload.runtimeTrace.status,
     "Available runtime trace data should be included when it fits.",
-  );
-  expectTrue(
+  ).toBe("included");
+  expect(
     payloadResult.payload.editor.activeSketch?.entityCount === 0 &&
       payloadResult.payload.editor.activeFeatureEdit?.featureType ===
         "extrude" &&
@@ -168,7 +166,7 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
         "profiles" &&
       payloadResult.payload.editor.selectedTargets.length === 1,
     "Payload should include compact transient editor context.",
-  );
+  ).toBeTruthy();
 
   const asset = await createDeterministicGeometryAsset({
     ownerFeatureIds: [snapshot.document.features[0]!.featureId],
@@ -187,15 +185,14 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
     snapshot: assetDiagnosticSnapshot,
     storage: null,
   });
-  expectTrue(
-    assetPayload.payload.documentSummary.assetDiagnostics?.[0]?.hashPrefix ===
-      asset.asset.hash.replace(/^sha256:/, "").slice(0, 12),
+  expect(
+    assetPayload.payload.documentSummary.assetDiagnostics?.[0]?.hashPrefix,
     "Bug report document summaries should include compact geometry asset diagnostic context.",
-  );
-  expectTrue(
-    !("bytes" in assetPayload.payload.documentSummary.assetDiagnostics![0]!),
+  ).toBe(asset.asset.hash.replace(/^sha256:/, "").slice(0, 12));
+  expect(
+    "bytes" in assetPayload.payload.documentSummary.assetDiagnostics![0]!,
     "Bug report geometry asset summaries should not include raw asset bytes.",
-  );
+  ).toBeFalsy();
 
   const invalidHistory = createBugReportPayload({
     build: { version: "0.0.1", commit: "abc1234", mode: "test" },
@@ -203,10 +200,10 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
     snapshot,
     storage: createStorage("{"),
   });
-  expectTrue(
-    invalidHistory.payload.operationHistory.status === "invalid",
+  expect(
+    invalidHistory.payload.operationHistory.status,
     "Invalid operation history should be recorded without throwing.",
-  );
+  ).toBe("invalid");
 
   const unavailableHistory = createBugReportPayload({
     build: { version: "0.0.1", commit: "abc1234", mode: "test" },
@@ -214,10 +211,10 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
     snapshot,
     storage: null,
   });
-  expectTrue(
-    unavailableHistory.payload.operationHistory.status === "unavailable",
+  expect(
+    unavailableHistory.payload.operationHistory.status,
     "Unavailable local storage should be recorded without throwing.",
-  );
+  ).toBe("unavailable");
 
   const omittedSections = createBugReportPayload(
     {
@@ -229,36 +226,36 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
     },
     { sectionByteLimit: 8 },
   );
-  expectTrue(
-    omittedSections.payload.authoredDocument.status === "omitted-too-large",
+  expect(
+    omittedSections.payload.authoredDocument.status,
     "Large authored documents should be omitted from inline payloads.",
-  );
-  expectTrue(
-    omittedSections.payload.operationHistory.status === "omitted-too-large",
+  ).toBe("omitted-too-large");
+  expect(
+    omittedSections.payload.operationHistory.status,
     "Large operation histories should be omitted from inline payloads.",
-  );
-  expectTrue(
-    omittedSections.payload.runtimeTrace.status === "omitted-too-large",
+  ).toBe("omitted-too-large");
+  expect(
+    omittedSections.payload.runtimeTrace.status,
     "Large runtime traces should be omitted from inline payloads.",
-  );
-  expectTrue(
+  ).toBe("omitted-too-large");
+  expect(
     omittedSections.artifactSections.authoredDocument &&
       omittedSections.artifactSections.operationHistory &&
       omittedSections.artifactSections.runtimeTrace,
     "Omitted high-value sections should be available for the debug artifact.",
-  );
+  ).toBeTruthy();
 
   const disclosure = formatMarkdownJsonDisclosure("Debug <section>", {
     ok: true,
   });
-  expectTrue(
+  expect(
     disclosure.includes("<details>") && disclosure.includes("&lt;section&gt;"),
     "Debug JSON should be wrapped in a safe Markdown disclosure.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     disclosure.includes("````json"),
     "Debug JSON should use a fenced code block.",
-  );
+  ).toBeTruthy();
 
   const bounded = createBoundedMarkdownSections(
     [
@@ -275,40 +272,40 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
       attachmentFilename: "cadara-bug-report-20260102T030405Z.json",
     },
   );
-  expectTrue(
+  expect(
     bounded.omittedSectionIds.includes("authoredDocument"),
     "Large inline sections should be omitted by section limit.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     bounded.markdown.includes("cadara-bug-report-20260102T030405Z.json"),
     "Omitted markers should point reporters at the generated artifact.",
-  );
+  ).toBeTruthy();
 
   const filename = createBugReportArtifactFilename(
     new Date("2026-01-02T03:04:05.000Z"),
   );
-  expectTrue(
-    filename === "cadara-bug-report-20260102T030405Z.json",
+  expect(
+    filename,
     "Artifact filenames should be deterministic and timestamped.",
-  );
+  ).toBe("cadara-bug-report-20260102T030405Z.json");
   const artifact = createBugReportDebugArtifact(
     omittedSections,
     new Date("2026-01-02T03:04:05.000Z"),
   );
-  expectTrue(
+  expect(
     artifact?.filename === filename &&
       typeof artifact.payload === "string" &&
       artifact.payload.includes("omittedSections"),
     "Debug artifact should include omitted high-value sections.",
-  );
+  ).toBeTruthy();
 
   const archiveFilename = createBugReportStateArchiveFilename(
     new Date("2026-01-02T03:04:05.000Z"),
   );
-  expectTrue(
-    archiveFilename === "cadara-state-20260102T030405Z.zip",
+  expect(
+    archiveFilename,
     "State archive filenames should be deterministic and timestamped.",
-  );
+  ).toBe("cadara-state-20260102T030405Z.zip");
   const stateStorage = {
     getItem: (key: string) => {
       if (key === MODELING_OPERATION_HISTORY_STORAGE_KEY) {
@@ -352,98 +349,96 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
     strFromU8(stateArchiveEntries["state/indexeddb.json"]!),
   ) as { status: string };
 
-  expectTrue(
+  expect(
     stateArchive.filename.startsWith("cadara-state-") &&
       stateArchive.filename.endsWith(".zip"),
     "State archive should use a timestamped zip filename.",
+  ).toBeTruthy();
+  expect(stateArchive.mimeType, "State archive should download as a zip.").toBe(
+    "application/zip",
   );
-  expectTrue(
-    stateArchive.mimeType === "application/zip",
-    "State archive should download as a zip.",
-  );
-  expectTrue(
-    compactReport.generatedAt === payloadResult.payload.generatedAt,
+  expect(
+    compactReport.generatedAt,
     "State archive should include the compact report payload.",
-  );
-  expectTrue(
+  ).toBe(payloadResult.payload.generatedAt);
+  expect(
     stateArchiveEntries["README.txt"],
     "State archive should include a brief manifest.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     stateArchiveEntries["state/authored-document.json"],
     "State archive should include the full authored document when available.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     stateArchiveEntries["state/operation-history.json"],
     "State archive should include operation history when available.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     stateArchiveEntries["state/runtime-trace.json"],
     "State archive should include runtime trace data when available.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     localStorageState.entries[
       "cad.documentRepository.automergeUrls.v1"
     ]?.includes("automerge:debug") &&
       localStorageState.entries["cad.extraDebugKey"] === "extra",
     "State archive should include known and enumerable Cadara localStorage entries.",
-  );
-  expectTrue(
-    indexedDbState.status === "unavailable",
+  ).toBeTruthy();
+  expect(
+    indexedDbState.status,
     "State archive should record unavailable IndexedDB without throwing.",
-  );
+  ).toBe("unavailable");
 
   const issueDraft = createBugReportIssueDraft(omittedSections, {
     artifactStatus: { kind: "downloaded", filename },
     queryFieldByteLimit: 500,
     totalQueryByteLimit: 2_500,
   });
-  expectTrue(
+  expect(
     issueDraft.url.includes(`template=${CADARA_GITHUB_BUG_REPORT_TEMPLATE}`),
     "Issue URL should select the bug-report issue form.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     issueDraft.url.includes(BUG_REPORT_FIELD_IDS.document),
     "Issue URL should prefill the document field by id.",
-  );
-  expectTrue(
-    !issueDraft.url.includes("presentation"),
+  ).toBeTruthy();
+  expect(
+    issueDraft.url.includes("presentation"),
     "Issue URL should not encode complete derived snapshot data.",
-  );
+  ).toBeFalsy();
 
   const defaultIssueDraft = createBugReportIssueDraft(omittedSections, {
     artifactStatus: { kind: "downloaded", filename },
   });
   const defaultIssueUrl = new URL(defaultIssueDraft.url);
-  expectTrue(
+  expect(
     defaultIssueDraft.url.length < 8_000,
     "Default bug-report issue URLs should stay below GitHub practical URL limits.",
-  );
-  expectTrue(
-    defaultIssueUrl.searchParams.get(BUG_REPORT_FIELD_IDS.environment) ===
-      defaultIssueDraft.fields[BUG_REPORT_FIELD_IDS.environment],
+  ).toBeTruthy();
+  expect(
+    defaultIssueUrl.searchParams.get(BUG_REPORT_FIELD_IDS.environment),
     "Default bounded issue URLs should include the full environment payload.",
-  );
-  expectTrue(
+  ).toBe(defaultIssueDraft.fields[BUG_REPORT_FIELD_IDS.environment]);
+  expect(
     defaultIssueDraft.fields[BUG_REPORT_FIELD_IDS.environment].startsWith(
       "<details>\n<summary>Environment</summary>",
     ),
     "Environment metadata should be hidden behind a disclosure block.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     defaultIssueUrl.searchParams
       .get(BUG_REPORT_FIELD_IDS.document)
       ?.includes("place the json you downloaded here"),
     "Oversized debug payload prefills should include a downloaded JSON placeholder.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     defaultIssueUrl.searchParams
       .get(BUG_REPORT_FIELD_IDS.document)
       ?.includes(
         "<!-- A debug artifact was downloaded as cadara-bug-report-20260102T030405Z.json. Please attach it to this issue. -->",
       ),
     "Downloaded artifact instructions should be an issue-form comment.",
-  );
+  ).toBeTruthy();
 
   const boundedUrl = createGithubBugReportUrl(
     {
@@ -453,14 +448,14 @@ test("src/domain/bug-reporting/report.spec.ts", async () => {
     { queryFieldByteLimit: 80, totalQueryByteLimit: 600 },
   );
   const parsedBoundedUrl = new URL(boundedUrl);
-  expectTrue(
-    !parsedBoundedUrl.searchParams.has("unexpected_field"),
+  expect(
+    parsedBoundedUrl.searchParams.has("unexpected_field"),
     "Issue URLs should only include known issue-form field ids.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     parsedBoundedUrl.searchParams
       .get(BUG_REPORT_FIELD_IDS.description)
       ?.includes("Omitted from URL prefill"),
     "Oversized issue-form query values should be bounded with explicit markers.",
-  );
+  ).toBeTruthy();
 });

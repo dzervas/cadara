@@ -1,7 +1,6 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { BodyId, FaceId, FeatureId } from "@/contracts/shared/ids";
 import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
@@ -44,10 +43,10 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
       3,
     );
     builder.Build(new oc.Message_ProgressRange_1());
-    expectTrue(
+    expect(
       builder.IsDone(),
       "Expected OCC box builder to produce a native render test body.",
-    );
+    ).toBeTruthy();
 
     const body = trackNewSolidBody(oc, {
       bodyId: "body_native_render_mesh" as BodyId,
@@ -63,10 +62,10 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
       0.5,
     );
 
-    expectTrue(
-      typeof nativeJson === "string",
+    expect(
+      typeof nativeJson,
       "Custom OCC build should expose native topology payload JSON.",
-    );
+    ).toBe("string");
 
     const state = createOccAuthoringState(oc, { bodies: [body] });
     const nativeTopologyPayload =
@@ -109,18 +108,18 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
         0,
       );
 
-      expectTrue(
-        triangulationCallCount === 0,
+      expect(
+        triangulationCallCount,
         "Native body render export must not call the JS BRep_Tool.Triangulation binding.",
-      );
-      expectTrue(
-        faceMeshRecords.length === 6,
+      ).toBe(0);
+      expect(
+        faceMeshRecords.length,
         "Native body render export should produce one mesh record per box face.",
-      );
-      expectTrue(
-        triangleCount === 12,
+      ).toBe(6);
+      expect(
+        triangleCount,
         "Native body render export should preserve all twelve box render triangles.",
-      );
+      ).toBe(12);
     } finally {
       oc.BRep_Tool.Triangulation = originalTriangulation;
       builder.delete?.();
@@ -136,10 +135,10 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
       3,
     );
     builder.Build(new oc.Message_ProgressRange_1());
-    expectTrue(
+    expect(
       builder.IsDone(),
       "Expected OCC box builder to produce a native render alias test body.",
-    );
+    ).toBeTruthy();
 
     const body = trackNewSolidBody(oc, {
       bodyId: "body_native_render_alias" as BodyId,
@@ -156,10 +155,10 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
       0.5,
     );
 
-    expectTrue(
-      typeof nativeJson === "string",
+    expect(
+      typeof nativeJson,
       "Custom OCC build should expose native topology payload JSON.",
-    );
+    ).toBe("string");
 
     const nativePayload = parseNativeShimPayloadJson(nativeJson);
     const nativeFaceIds = nativePayload.topology
@@ -207,14 +206,14 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
       0,
     );
 
-    expectTrue(
-      faceMeshRecords.length === 6,
+    expect(
+      faceMeshRecords.length,
       "Native render export should keep preserved durable face ids visible when mesh bindings use fresh native ids.",
-    );
-    expectTrue(
-      triangleCount === 12,
+    ).toBe(6);
+    expect(
+      triangleCount,
       "Native render export should not drop triangles whose native face binding aliases to a preserved durable face id.",
-    );
+    ).toBe(12);
 
     builder.delete?.();
   }

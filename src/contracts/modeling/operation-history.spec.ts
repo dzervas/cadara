@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   createAddDocumentVariableHistoryEntry,
   createCommitSketchHistoryEntry,
@@ -10,9 +9,9 @@ import {
   createReorderFeatureHistoryEntry,
   createSetFeatureSuppressionHistoryEntry,
   createUpdateDocumentVariableHistoryEntry,
-  validateOperationHistoryPayload,
   type ModelingOperationHistoryPayload,
 } from "@/contracts/modeling/operation-history";
+import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import type {
   AddDocumentVariableRequest,
   CommitSketchRequest,
@@ -42,6 +41,7 @@ import {
 } from "@/contracts/modeling/advanced-solid";
 import {
   createExpressionAuthoredValue,
+  createLiteralAuthoredValue,
   getAuthoredLiteralValue,
   isExpressionAuthoredValue,
 } from "@/contracts/modeling/authored-values";
@@ -110,9 +110,13 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 10 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: createLiteralAuthoredValue(10),
+          },
         },
-        operation: "newBody",
+        operation: createLiteralAuthoredValue("newBody"),
         booleanScope: { kind: "standalone" },
       },
     },
@@ -349,43 +353,43 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Representative sketch and feature operation history should validate.",
-    );
-    expectTrue(
-      result.payload.entries[0]?.kind === "commitSketch",
+    ).toBeTruthy();
+    expect(
+      result.payload.entries[0]?.kind,
       "Commit sketch entry kind must be preserved.",
-    );
-    expectTrue(
-      !("solverCorrelation" in result.payload.entries[0]!.payload),
+    ).toBe("commitSketch");
+    expect(
+      "solverCorrelation" in result.payload.entries[0]!.payload,
       "Persisted sketch entries must omit solver request correlation metadata.",
-    );
-    expectTrue(
-      !("baseRevisionId" in result.payload.entries[1]!.payload),
+    ).toBeFalsy();
+    expect(
+      "baseRevisionId" in result.payload.entries[1]!.payload,
       "Persisted feature entries must omit replay-derived base revision metadata.",
-    );
-    expectTrue(
-      result.payload.entries[2]?.kind === "deleteTarget",
+    ).toBeFalsy();
+    expect(
+      result.payload.entries[2]?.kind,
       "Generic delete entry kind must be preserved.",
-    );
-    expectTrue(
+    ).toBe("deleteTarget");
+    expect(
       result.payload.entries[2]?.kind === "deleteTarget" &&
         result.payload.entries[2].payload.target.kind === "feature",
       "Generic delete entries should preserve the accepted durable target.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.entries[4]?.kind === "reorderDocumentHistory" &&
         result.payload.entries[4].payload.item.kind === "sketch" &&
         result.payload.entries[4].payload.beforeItem?.kind === "feature",
       "Persisted document history reorder entries must preserve mixed sketch/feature identities.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.payload.entries[5]?.kind === "setFeatureSuppression" &&
         result.payload.entries[5].payload.featureId === "feature_extrude-1" &&
         result.payload.entries[5].payload.suppressed === true,
       "Persisted feature suppression entries should preserve the requested state without transport metadata.",
-    );
+    ).toBeTruthy();
   }
 
   function testRejectsInvalidDocumentHistoryReorderEntries() {
@@ -414,14 +418,14 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      !missingItem.ok,
+    expect(
+      missingItem.ok,
       "Document history reorder entries missing the moved item should be rejected.",
-    );
-    expectTrue(
-      !missingAnchorShape.ok,
+    ).toBeFalsy();
+    expect(
+      missingAnchorShape.ok,
       "Document history reorder entries with malformed anchors should be rejected.",
-    );
+    ).toBeFalsy();
   }
 
   function testRejectsInvalidGenericDeleteEntries() {
@@ -435,10 +439,10 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      !result.ok,
+    expect(
+      result.ok,
       "Generic delete entries with malformed targets should be rejected.",
-    );
+    ).toBeFalsy();
   }
 
   function testNormalizesCommittedCommitSketchTargets() {
@@ -453,26 +457,26 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       committedSketchId,
     );
 
-    expectTrue(
-      entry.kind === "commitSketch",
+    expect(
+      entry.kind,
       "Commit sketch history entry should preserve its kind.",
-    );
-    expectTrue(
-      entry.payload.sketchId === committedSketchId,
+    ).toBe("commitSketch");
+    expect(
+      entry.payload.sketchId,
       "Persisted commitSketch entries must store the committed sketch id.",
-    );
-    expectTrue(
+    ).toBe(committedSketchId);
+    expect(
       entry.payload.definition.points.every(
         (point) => point.target.sketchId === committedSketchId,
       ),
       "Persisted commitSketch point targets must be normalized to the committed sketch id.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       entry.payload.definition.entities.every(
         (entity) => entity.target.sketchId === committedSketchId,
       ),
       "Persisted commitSketch entity targets must be normalized to the committed sketch id.",
-    );
+    ).toBeTruthy();
   }
 
   function testCanCompactCommitSketchAuthoringOperations() {
@@ -518,20 +522,20 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       { includeAuthoringOperations: false },
     );
 
-    expectTrue(
+    expect(
       fullEntry.kind === "commitSketch" &&
         fullEntry.payload.definition.authoringOperations?.length === 1,
       "Full commit history should preserve authoring operations by default.",
-    );
-    expectTrue(
-      compactEntry.kind === "commitSketch",
+    ).toBeTruthy();
+    expect(
+      compactEntry.kind,
       "Compact commit history should preserve the commitSketch entry kind.",
-    );
-    expectTrue(
-      compactEntry.payload.definition.authoringOperations === undefined,
+    ).toBe("commitSketch");
+    expect(
+      compactEntry.payload.definition.authoringOperations,
       "Compact commit history should omit sketch-local authoring operations.",
-    );
-    expectTrue(
+    ).toBe(undefined);
+    expect(
       compactEntry.payload.definition.points.every(
         (point) => point.target.sketchId === committedSketchId,
       ) &&
@@ -539,7 +543,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
           (entity) => entity.target.sketchId === committedSketchId,
         ),
       "Compact commit history should still normalize the live sketch graph targets.",
-    );
+    ).toBeTruthy();
   }
 
   function testCompactHistoryPreservesReferenceImageOperations() {
@@ -603,21 +607,21 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       { includeAuthoringOperations: false },
     );
 
-    expectTrue(
-      compactEntry.kind === "commitSketch",
+    expect(
+      compactEntry.kind,
       "Compact commit history should preserve reference-image commit entries.",
-    );
-    expectTrue(
-      compactEntry.payload.definition.authoringOperations?.length === 2,
+    ).toBe("commitSketch");
+    expect(
+      compactEntry.payload.definition.authoringOperations?.length,
       "Compact commit history should retain reference-image operations and their deletes.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       compactEntry.payload.definition.authoringOperations?.[0]?.kind ===
         "referenceImage" &&
         compactEntry.payload.definition.authoringOperations?.[1]?.targets
           .removed?.[0]?.kind === "operation",
       "Compact commit history should preserve operation-owned image state and operation-target deletes.",
-    );
+    ).toBeTruthy();
   }
 
   function testAcceptsLegacyDraftCommitSketchTargets() {
@@ -636,10 +640,10 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
+    expect(
       result.ok,
       "Legacy commitSketch histories with draft sketch ids should remain loadable.",
-    );
+    ).toBeTruthy();
   }
 
   function testRejectsUnsupportedVersion() {
@@ -648,14 +652,14 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       schemaVersion: "modeling-operation-history/v0",
     });
 
-    expectTrue(
-      !result.ok,
+    expect(
+      result.ok,
       "Unsupported history schema versions must fail validation.",
-    );
-    expectTrue(
-      !result.ok && result.reasonCode === "unsupported-schema-version",
+    ).toBeFalsy();
+    expect(
+      result.ok && result.reasonCode === "unsupported-schema-version",
       "Unsupported history schema versions must report a stable reason code.",
-    );
+    ).toBeFalsy();
   }
 
   function testRejectsTransportMetadataLeak() {
@@ -672,14 +676,14 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      !result.ok,
+    expect(
+      result.ok,
       "Operation entries with transport metadata must fail validation.",
-    );
-    expectTrue(
-      !result.ok && result.reasonCode === "transport-field-leak",
+    ).toBeFalsy();
+    expect(
+      result.ok && result.reasonCode === "transport-field-leak",
       "Transport metadata leaks must report a stable reason code.",
-    );
+    ).toBeFalsy();
   }
 
   function testRejectsInconsistentCommitSketchTargets() {
@@ -714,14 +718,14 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      !result.ok,
+    expect(
+      result.ok,
       "Inconsistent commitSketch target sketch ids must fail validation.",
-    );
-    expectTrue(
-      !result.ok && result.reasonCode === "inconsistent-commit-sketch-targets",
+    ).toBeFalsy();
+    expect(
+      result.ok && result.reasonCode === "inconsistent-commit-sketch-targets",
       "Inconsistent commitSketch target sketch ids must report a stable reason code.",
-    );
+    ).toBeFalsy();
   }
 
   function testValidatesProfileCollectionFeaturePayloads() {
@@ -750,10 +754,10 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(multiProfilePayload);
 
-    expectTrue(
+    expect(
       result.ok,
       "One-profile and multi-profile extrude history payloads should validate.",
-    );
+    ).toBeTruthy();
   }
 
   function testPreservesFeatureExpressionAuthoredValues() {
@@ -780,31 +784,31 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       entries: [entry],
     });
 
-    expectTrue(
+    expect(
       result.ok,
       "Feature expression-authored history payloads should validate.",
-    );
-    expectTrue(
-      result.payload.entries[0]?.kind === "createFeature",
+    ).toBeTruthy();
+    expect(
+      result.payload.entries[0]?.kind,
       "Feature expression history entry kind should be preserved.",
-    );
+    ).toBe("createFeature");
     const definition = result.payload.entries[0].payload.definition;
-    expectTrue(
-      definition.kind === "extrude",
+    expect(
+      definition.kind,
       "Feature expression history entry should preserve the extrude definition.",
-    );
+    ).toBe("extrude");
     const distance =
       definition.parameters.extent.end.kind === "blind"
         ? definition.parameters.extent.end.distance
         : null;
-    expectTrue(
+    expect(
       isExpressionAuthoredValue(distance),
       "Feature expression history should preserve authored expression text.",
-    );
-    expectTrue(
-      distance.valueText === "depth + 3",
+    ).toBeTruthy();
+    expect(
+      distance.valueText,
       "Feature expression history should not persist resolved runtime values.",
-    );
+    ).toBe("depth + 3");
   }
 
   function testRejectsLegacyAndInvalidProfileCollections() {
@@ -865,21 +869,21 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      !legacyPayload.ok &&
+    expect(
+      legacyPayload.ok &&
         legacyPayload.reasonCode === "legacy-profile-parameter",
       "Legacy singular profile history payloads should be rejected.",
-    );
-    expectTrue(
-      !emptyPayload.ok &&
+    ).toBeFalsy();
+    expect(
+      emptyPayload.ok &&
         emptyPayload.reasonCode === "invalid-profile-collection",
       "Empty profile collection history payloads should be rejected.",
-    );
-    expectTrue(
-      !duplicatePayload.ok &&
+    ).toBeFalsy();
+    expect(
+      duplicatePayload.ok &&
         duplicatePayload.reasonCode === "duplicate-profile-reference",
       "Duplicate profile collection history payloads should be rejected.",
-    );
+    ).toBeFalsy();
   }
 
   function testValidatesAdvancedExtentContractsAndRejectsInvalidSymmetricModes() {
@@ -905,26 +909,29 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
                 firstEnd: {
                   kind: "blind",
                   direction: "positive",
-                  distance: 10,
-                  draftAngle: 0.1,
+                  distance: createLiteralAuthoredValue(10),
+                  draftAngle: createLiteralAuthoredValue(0.1),
                 },
                 secondEnd: {
                   kind: "upToNext",
                   direction: "negative",
-                  offset: { distance: 0.5, direction: "shorten" },
+                  offset: {
+                    distance: createLiteralAuthoredValue(0.5),
+                    direction: "shorten",
+                  },
                 },
               },
-              operation: "newBody",
+              operation: createLiteralAuthoredValue("newBody"),
               booleanScope: { kind: "standalone" },
             },
           },
         }),
       ],
     });
-    expectTrue(
+    expect(
       advancedExtrudeResult.ok,
       "Operation history should preserve advanced two-side extrude extent contracts.",
-    );
+    ).toBeTruthy();
 
     const invalidSymmetricExtrude = validateOperationHistoryPayload({
       ...createEmptyOperationHistory("doc_workspace"),
@@ -947,17 +954,17 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
                 mode: "symmetric",
                 end: { kind: "upToNext", direction: "positive" },
               },
-              operation: "newBody",
+              operation: createLiteralAuthoredValue("newBody"),
               booleanScope: { kind: "standalone" },
             },
           },
         }),
       ],
     });
-    expectTrue(
-      !invalidSymmetricExtrude.ok,
+    expect(
+      invalidSymmetricExtrude.ok,
       "Symmetric extrudes should reject non-blind/non-throughAll end conditions.",
-    );
+    ).toBeFalsy();
 
     const invalidSymmetricRevolve = validateOperationHistoryPayload({
       ...createEmptyOperationHistory("doc_workspace"),
@@ -976,19 +983,19 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
                 },
               ],
               axis: { kind: "edge", bodyId: "body_axis", edgeId: "edge_axis" },
-              startAngle: 0,
+              startAngle: createLiteralAuthoredValue(0),
               extent: { mode: "symmetric", end: { kind: "full" } },
-              operation: "newBody",
+              operation: createLiteralAuthoredValue("newBody"),
               booleanScope: { kind: "standalone" },
             },
           },
         }),
       ],
     });
-    expectTrue(
-      !invalidSymmetricRevolve.ok,
+    expect(
+      invalidSymmetricRevolve.ok,
       "Symmetric revolve should reject full and up-to end conditions.",
-    );
+    ).toBeFalsy();
   }
 
   function testPreservesAdvancedParticipantsAndOperationIntent() {
@@ -996,7 +1003,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ...sweepAdvancedFeatureExample,
       parameters: {
         ...sweepAdvancedFeatureExample.parameters,
-        operationIntent: "subtract" as const,
+        operationIntent: createLiteralAuthoredValue("subtract"),
         participants: [
           ...sweepAdvancedFeatureExample.parameters.participants,
           {
@@ -1027,11 +1034,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "createFeature" &&
         result.payload.entries[0].payload.definition.kind === "sweep" &&
@@ -1045,7 +1052,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
           (participant) => participant.role === "targetBody",
         ),
       "Sweep operation history must preserve participant roles and operation intent across create and update entries.",
-    );
+    ).toBeTruthy();
   }
 
   function testPreservesChamferParticipantsAndDistanceOptions() {
@@ -1074,11 +1081,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Chamfer advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "createFeature" &&
         result.payload.entries[0].payload.definition.kind === "chamfer" &&
@@ -1092,7 +1099,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
             ?.distance,
         ) === 2,
       "Chamfer operation history must preserve edge participant roles and distance options across create and update entries.",
-    );
+    ).toBeTruthy();
   }
 
   function testPreservesSplitParticipantsAcrossCreateAndUpdateEntries() {
@@ -1129,11 +1136,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Split advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "createFeature" &&
         result.payload.entries[0].payload.definition.kind === "split" &&
@@ -1146,7 +1153,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
           (participant) => participant.role === "targetBody",
         ),
       "Split operation history must preserve explicit targetBody and toolBody participants across create and update entries.",
-    );
+    ).toBeTruthy();
   }
 
   function testPreservesDeleteSolidParticipantsAcrossCreateAndUpdateEntries() {
@@ -1182,11 +1189,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Delete-solid advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "createFeature" &&
         result.payload.entries[0].payload.definition.kind === "deleteSolid" &&
@@ -1195,7 +1202,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
         result.payload.entries[1].payload.definition.parameters.participants[0]
           ?.targets.length === 2,
       "Delete-solid operation history must preserve explicit body participants across create and update entries.",
-    );
+    ).toBeTruthy();
   }
 
   function testPreservesLoftParticipantOrderAndGuideCurves() {
@@ -1270,11 +1277,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Loft advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[1]?.kind === "updateFeature" &&
         result.payload.entries[1].payload.definition.kind === "loft" &&
@@ -1289,7 +1296,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
           (participant) => participant.role === "guideCurve",
         ),
       "Loft operation history must preserve ordered profile participants, path, and guide curves across updates.",
-    );
+    ).toBeTruthy();
   }
 
   function testRejectsInvalidAdvancedParticipants() {
@@ -1311,10 +1318,10 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      !result.ok && result.reasonCode === "invalid-advanced-participant",
+    expect(
+      result.ok && result.reasonCode === "invalid-advanced-participant",
       "Invalid advanced participants should report a stable reason code.",
-    );
+    ).toBeFalsy();
   }
 
   function testPreservesCombineParticipantsAndOperationIntentAcrossCreateAndUpdateEntries() {
@@ -1333,7 +1340,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
               ...combineAdvancedFeatureExample,
               parameters: {
                 ...combineAdvancedFeatureExample.parameters,
-                operationIntent: "intersect",
+                operationIntent: createLiteralAuthoredValue("intersect"),
                 participants: [
                   {
                     role: "targetBody",
@@ -1353,11 +1360,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Combine advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "createFeature" &&
         result.payload.entries[0].payload.definition.kind === "combine" &&
@@ -1378,7 +1385,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
           (participant) => participant.role === "toolBody",
         ),
       "Combine operation history must preserve participant roles and operation intent across create and update entries.",
-    );
+    ).toBeTruthy();
   }
 
   function testPreservesThickenParticipantsAndOptions() {
@@ -1407,11 +1414,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Thicken advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "createFeature" &&
         result.payload.entries[0].payload.definition.kind === "thicken" &&
@@ -1428,7 +1435,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
           result.payload.entries[1].payload.definition.parameters.options?.side,
         ) === "symmetric",
       "Thicken operation history must preserve face participants and option payloads across updates.",
-    );
+    ).toBeTruthy();
   }
 
   function testPreservesMirrorParticipantsAndCopyOptionAcrossCreateAndUpdateEntries() {
@@ -1457,11 +1464,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Mirror advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "createFeature" &&
         result.payload.entries[0].payload.definition.kind === "mirror" &&
@@ -1474,7 +1481,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
           result.payload.entries[1].payload.definition.parameters.options?.copy,
         ) === false,
       "Mirror operation history must preserve explicit plane participants and copy policy options across updates.",
-    );
+    ).toBeTruthy();
   }
 
   function testPreservesTransformParticipantsAndDistanceOptionAcrossCreateAndUpdateEntries() {
@@ -1503,11 +1510,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Transform advanced solid feature history payloads should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "createFeature" &&
         result.payload.entries[0].payload.definition.kind === "transform" &&
@@ -1521,7 +1528,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
             ?.distance,
         ) === 7.5,
       "Transform operation history must preserve explicit transform references and distance options across updates.",
-    );
+    ).toBeTruthy();
   }
 
   function testValidatesDocumentVariableHistoryWithoutRuntimeState() {
@@ -1553,11 +1560,11 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
 
     const result = validateOperationHistoryPayload(payload);
 
-    expectTrue(
+    expect(
       result.ok,
       "Document variable add/update history entries should validate.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "addDocumentVariable" &&
         result.payload.entries[0].payload.variableId === "variable_width" &&
@@ -1565,7 +1572,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
         result.payload.entries[1].payload.valueText === "width + 6" &&
         !("calculatedValue" in result.payload.entries[1].payload),
       "Document variable history should preserve stable id, name, and raw value text.",
-    );
+    ).toBeTruthy();
 
     const invalidRuntimeStatePayload = validateOperationHistoryPayload({
       ...payload,
@@ -1582,10 +1589,10 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       ],
     });
 
-    expectTrue(
-      !invalidRuntimeStatePayload.ok,
+    expect(
+      invalidRuntimeStatePayload.ok,
       "Document variable history should reject persisted runtime calculation state.",
-    );
+    ).toBeFalsy();
   }
 
   function testPreservesDerivedSketchRelationshipsInCommitHistory() {
@@ -1704,17 +1711,17 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       entries: [derivedCommit],
     });
 
-    expectTrue(
+    expect(
       result.ok,
       "Operation history should validate commitSketch entries with derived sketch relationships.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       result.ok &&
         result.payload.entries[0]?.kind === "commitSketch" &&
         result.payload.entries[0].payload.definition.derivedRelationships?.[0]
           ?.kind === "linearPattern",
       "Operation history should preserve durable derived sketch relationship payloads.",
-    );
+    ).toBeTruthy();
   }
 
   testValidatesRepresentativeHistory();

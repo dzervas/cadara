@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   initialEditorState,
   transitionEditorState,
@@ -108,11 +107,10 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts only places
     point: [200, 200],
     target: operationTarget,
   });
-  expectTrue(
-    getModeState(outsideBounds.state).draftState.calibration.anchors.length ===
-      0,
+  expect(
+    getModeState(outsideBounds.state).draftState.calibration.anchors.length,
     "Clicking outside the image bounds should not create a calibration anchor.",
-  );
+  ).toBe(0);
 
   const placed = transitionEditorState(outsideBounds.state, {
     type: "sketch.specialModeClickRequested",
@@ -120,19 +118,18 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts only places
     target: operationTarget,
   });
   const modeState = getModeState(placed.state);
-  expectTrue(
-    modeState.draftState.calibration.anchors.length === 1,
+  expect(
+    modeState.draftState.calibration.anchors.length,
     "Clicking the active image within bounds should create a calibration anchor.",
-  );
-  expectTrue(
-    modeState.draftPoints.length === 1,
+  ).toBe(1);
+  expect(
+    modeState.draftPoints.length,
     "Creating an anchor should stage a bound construction point for commit.",
-  );
-  expectTrue(
-    modeState.draftState.calibration.anchors[0]?.pointId ===
-      modeState.draftPoints[0]?.pointId,
+  ).toBe(1);
+  expect(
+    modeState.draftState.calibration.anchors[0]?.pointId,
     "The authored anchor should bind to the staged sketch point.",
-  );
+  ).toBe(modeState.draftPoints[0]?.pointId);
 });
 
 test("src/domain/reference-image-calibration/mode/definition.spec.ts lists authored anchors in the panel and removes the selected one", () => {
@@ -165,14 +162,11 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
   const panel = state.session.activeSpecialMode
     ? state.session.activeSpecialMode
     : null;
-  expectTrue(
-    anchorIds.length === 2,
-    "Fixture should create two bound anchors.",
-  );
-  expectTrue(
-    panel !== null,
+  expect(anchorIds.length, "Fixture should create two bound anchors.").toBe(2);
+  expect(
+    panel,
     "Calibration mode should remain active while editing anchors.",
-  );
+  ).not.toBe(null);
 
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
@@ -190,14 +184,14 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
   }).state;
 
   const remainingAnchors = getModeState(state).draftState.calibration.anchors;
-  expectTrue(
-    remainingAnchors.length === 1,
+  expect(
+    remainingAnchors.length,
     "Removing a panel-selected anchor should update the authored anchor list.",
-  );
-  expectTrue(
-    remainingAnchors[0]?.anchorId === anchorIds[1],
+  ).toBe(1);
+  expect(
+    remainingAnchors[0]?.anchorId,
     "Removing a panel-selected anchor should remove the chosen anchor instead of a different one.",
-  );
+  ).toBe(anchorIds[1]);
 });
 
 test("src/domain/reference-image-calibration/mode/definition.spec.ts allocates a fresh anchor id after removing an earlier anchor", () => {
@@ -253,22 +247,22 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts allocates a
   const nextAnchorIds = getModeState(state).draftState.calibration.anchors.map(
     (anchor) => anchor.anchorId,
   );
-  expectTrue(
-    nextAnchorIds.length === 2,
+  expect(
+    nextAnchorIds.length,
     "The replacement fixture should still contain two anchors after remove-and-add.",
-  );
-  expectTrue(
-    new Set(nextAnchorIds).size === nextAnchorIds.length,
+  ).toBe(2);
+  expect(
+    new Set(nextAnchorIds).size,
     "Remove-and-add should not reuse an anchor id that is still present.",
-  );
-  expectTrue(
+  ).toBe(nextAnchorIds.length);
+  expect(
     nextAnchorIds.includes(originalAnchorIds[1]!),
     "Remove-and-add should preserve the untouched anchor id.",
-  );
-  expectTrue(
-    !nextAnchorIds.includes(originalAnchorIds[0]!),
+  ).toBeTruthy();
+  expect(
+    nextAnchorIds.includes(originalAnchorIds[0]!),
     "Remove-and-add should not resurrect the removed anchor id when a newer anchor already exists.",
-  );
+  ).toBeFalsy();
 });
 
 test("src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a selected anchor to an existing sketch point", () => {
@@ -366,14 +360,14 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a s
   }).state;
 
   const reboundAnchor = getModeState(state).draftState.calibration.anchors[0];
-  expectTrue(
-    reboundAnchor?.pointId === "sketch_point_anchor",
+  expect(
+    reboundAnchor?.pointId,
     "Rebinding should target the explicitly selected sketch point.",
-  );
-  expectTrue(
-    reboundAnchor?.pointId !== initialBinding,
+  ).toBe("sketch_point_anchor");
+  expect(
+    reboundAnchor?.pointId,
     "Rebinding should replace the previous construction-point binding.",
-  );
+  ).not.toBe(initialBinding);
 });
 
 test("src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode prioritizes the clicked sketch point over anchor hit-testing", () => {
@@ -468,8 +462,8 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode
   }).state;
 
   const reboundAnchor = getModeState(state).draftState.calibration.anchors[0];
-  expectTrue(
-    reboundAnchor?.pointId === "sketch_point_overlap",
+  expect(
+    reboundAnchor?.pointId,
     "Rebind mode should honor the clicked sketch point even when it overlaps the anchor handle.",
-  );
+  ).toBe("sketch_point_overlap");
 });

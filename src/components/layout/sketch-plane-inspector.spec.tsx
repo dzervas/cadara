@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -11,7 +11,6 @@ import {
 } from "@/domain/editor/state-machine";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { hydrateSketchPlaneEditSession } from "@/domain/editor/sketch-plane-editing";
-import { expectTrue } from "@/testing/expect.spec";
 import { SketchPlaneInspector } from "./sketch-plane-inspector";
 
 function InspectorHarness() {
@@ -36,10 +35,10 @@ test("src/components/layout/sketch-plane-inspector.spec.tsx renders the shared s
     snapshot.document.sketches[0]!.sketchId,
   );
 
-  expectTrue(
+  expect(
     session,
     "Sketch-plane inspector coverage needs a committed sketch-plane edit session.",
-  );
+  ).toBeTruthy();
 
   const viewState: EditorViewState = {
     mode: "part",
@@ -81,13 +80,13 @@ test("src/components/layout/sketch-plane-inspector.spec.tsx renders the shared s
     </MantineProvider>,
   );
 
-  expectTrue(
+  expect(
     markup.includes("Support plane") &&
       markup.includes("construction_plane-xy"),
     "Sketch-plane inspector should render the support-plane picker label and the current committed support target.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('aria-pressed="true"'),
     "Sketch-plane inspector should expose the active support-plane picker as pressed when the shared picker state is active.",
-  );
+  ).toBeTruthy();
 });

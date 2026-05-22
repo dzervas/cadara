@@ -14,7 +14,7 @@ import {
 } from "@/domain/modeling/occ/native-topology-payload";
 import {
   normalizeOccWorkerFailure,
-  occWorkerRequestEnvelopeSchema,
+  validateOccWorkerRequestEnvelope,
   type OccWorkerAssetConfig,
   type OccWorkerOperation,
   type OccWorkerRequest,
@@ -414,7 +414,7 @@ function enqueueOccWorkerRequest(request: OccWorkerRequest) {
 workerScope.addEventListener(
   "message",
   (event: MessageEvent<OccWorkerRequest>) => {
-    const parsed = occWorkerRequestEnvelopeSchema.safeParse(event.data);
+    const parsed = validateOccWorkerRequestEnvelope(event.data);
     const requestId =
       typeof event.data?.requestId === "string"
         ? event.data.requestId
@@ -424,13 +424,13 @@ workerScope.addEventListener(
       postOccWorkerMessage(
         normalizeOccWorkerFailure(
           requestId,
-          parsed.error,
+          parsed.errors[0]?.description ?? parsed.errors[0]?.expected,
           "occ-worker-request-failed",
         ),
       );
       return;
     }
 
-    enqueueOccWorkerRequest(parsed.data as OccWorkerRequest);
+    enqueueOccWorkerRequest(parsed.data);
   },
 );

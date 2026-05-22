@@ -1,14 +1,20 @@
 import {
   ensureLiteralAuthoredValue,
+  isAuthoredValue,
+  isExpressionAuthoredValue,
+  isLiteralAuthoredValue,
+  validateFeatureValueKind,
   type FeatureValueKindDescriptor,
 } from "@/contracts/modeling/authored-values";
 import {
   getFeatureValueKindDescriptor,
   LOFT_ADVANCED_OPTION_DESCRIPTORS,
+  SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   type AdvancedFeatureOptionDescriptor,
   type AdvancedFeatureScalarOptionDescriptor,
 } from "@/contracts/modeling/advanced-solid";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
+import type { ContractValidationIssue } from "@/contracts/shared/validation";
 
 type MutableRecord = Record<string, unknown>;
 
@@ -51,6 +57,24 @@ export function normalizeFeatureDefinitionAuthoredValues(
   }
 
   return normalized;
+}
+
+export function validateFeatureDefinitionAuthoredValueInvariants(
+  definition: FeatureDefinition,
+): ContractValidationIssue[] {
+  const issues: ContractValidationIssue[] = [];
+  const record = definition as unknown as MutableRecord;
+
+  for (const field of getFeatureValueExpressionFields(definition)) {
+    const value = getPathValue(record, field.path);
+    if (value === undefined) {
+      continue;
+    }
+
+    issues.push(...validateFeatureValueField(value, field));
+  }
+
+  return issues;
 }
 
 export function getFeatureValueExpressionFields(
@@ -240,6 +264,10 @@ export function getFeatureValueExpressionFields(
             options: ADVANCED_OPERATION_INTENT_OPTIONS,
           },
         },
+        ...getAdvancedFeatureOptionExpressionFields(
+          ["parameters", "options"],
+          SWEEP_ADVANCED_OPTION_DESCRIPTORS,
+        ),
       ];
     case "loft":
       return [
@@ -286,19 +314,9 @@ function getAdvancedFeatureOptionExpressionField(
   }
 
   if (descriptor.valueKind === "discriminatedGroup") {
-    return [
-      {
-        path: [...basePath, descriptor.discriminantKey],
-        label: descriptor.label,
-        valueKind: {
-          kind: "enumString",
-          options: descriptor.variants.map((variant) => variant.value),
-        },
-      },
-      ...descriptor.variants.flatMap((variant) =>
-        getAdvancedFeatureOptionExpressionFields(basePath, variant.options),
-      ),
-    ];
+    return descriptor.variants.flatMap((variant) =>
+      getAdvancedFeatureOptionExpressionFields(basePath, variant.options),
+    );
   }
 
   return [getScalarAdvancedFeatureOptionExpressionField(basePath, descriptor)];
@@ -313,6 +331,61 @@ function getScalarAdvancedFeatureOptionExpressionField(
     label: descriptor.label,
     valueKind: getFeatureValueKindDescriptor(descriptor),
   };
+}
+
+function validateFeatureValueField(
+  value: unknown,
+  field: FeatureValueExpressionFieldDescriptor,
+): ContractValidationIssue[] {
+  const path = formatPath(field.path);
+
+  if (!isAuthoredValue(value)) {
+    return [
+      {
+        path,
+        expected: "authored value wrapper",
+        value,
+        message: `${field.label} must use an authored value wrapper.`,
+      },
+    ];
+  }
+
+  if (isExpressionAuthoredValue(value)) {
+    return value.valueText.trim().length > 0
+      ? []
+      : [
+          {
+            path: `${path}.valueText`,
+            expected: "non-empty expression text",
+            value: value.valueText,
+            message: `${field.label} expression text is required.`,
+          },
+        ];
+  }
+
+  if (isLiteralAuthoredValue(value)) {
+    const validation = validateFeatureValueKind(value.value, field.valueKind);
+    return validation.ok
+      ? []
+      : [
+          {
+            path: `${path}.value`,
+            expected: field.valueKind.kind,
+            value: value.value,
+            message: `${field.label}: ${validation.failure.message}`,
+          },
+        ];
+  }
+
+  return [];
+}
+
+function formatPath(path: readonly (string | number)[]) {
+  return path
+    .map((segment) =>
+      typeof segment === "number" ? `[${segment}]` : String(segment),
+    )
+    .join(".");
 }
 
 function getPathValue(

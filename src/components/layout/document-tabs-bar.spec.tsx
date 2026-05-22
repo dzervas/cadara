@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -9,7 +9,6 @@ import type {
   WorkbenchTabsState,
 } from "@/domain/workspace/workbench-tabs";
 import { workbenchTheme } from "@/theme/workbench-theme";
-import { expectTrue } from "@/testing/expect.spec";
 
 const docA = "doc_a" as DocumentId;
 const docB = "doc_b" as DocumentId;
@@ -56,26 +55,26 @@ test("document-tabs-bar renders one tab per document with role=tab and the tabli
 
   const markup = renderBar(state);
 
-  expectTrue(
+  expect(
     markup.includes('aria-label="Open documents"'),
     "tablist should expose accessible label.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('role="tablist"'),
     "strip should declare role=tablist.",
-  );
-  expectTrue(
-    markup.split('role="tab"').length - 1 === 2,
+  ).toBeTruthy();
+  expect(
+    markup.split('role="tab"').length - 1,
     "one role=tab element per open document.",
-  );
-  expectTrue(
+  ).toBe(2);
+  expect(
     markup.includes("Bracket v3"),
     "tab labels should render verbatim.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes("shaft.cadara"),
     "second tab label should render verbatim.",
-  );
+  ).toBeTruthy();
 });
 
 test("document-tabs-bar marks the active tab with aria-selected=true and the active hairline", () => {
@@ -86,18 +85,18 @@ test("document-tabs-bar marks the active tab with aria-selected=true and the act
 
   const markup = renderBar(state);
 
-  expectTrue(
+  expect(
     markup.includes('aria-selected="true"'),
     "active tab should advertise aria-selected=true.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('data-tab-hairline="active"'),
     "active tab should render the static active hairline.",
-  );
-  expectTrue(
-    !markup.includes('data-tab-hairline="pending"'),
+  ).toBeTruthy();
+  expect(
+    markup.includes('data-tab-hairline="pending"'),
     "no pending sweep should render when no document is mid-recompute.",
-  );
+  ).toBeFalsy();
 });
 
 test("document-tabs-bar replaces the active hairline with the loading sweep while pending", () => {
@@ -108,14 +107,14 @@ test("document-tabs-bar replaces the active hairline with the loading sweep whil
 
   const markup = renderBar(state, { pendingDocumentId: docA });
 
-  expectTrue(
+  expect(
     markup.includes('data-tab-hairline="pending"'),
     "pending tab should render the loading sweep.",
-  );
-  expectTrue(
-    !markup.includes('data-tab-hairline="active"'),
+  ).toBeTruthy();
+  expect(
+    markup.includes('data-tab-hairline="active"'),
     "pending sweep should replace the static active hairline rather than coexist.",
-  );
+  ).toBeFalsy();
 });
 
 test("document-tabs-bar surfaces the error hairline when an activation failed", () => {
@@ -126,10 +125,10 @@ test("document-tabs-bar surfaces the error hairline when an activation failed", 
 
   const markup = renderBar(state, { errorDocumentId: docA });
 
-  expectTrue(
+  expect(
     markup.includes('data-tab-hairline="error"'),
     "error state should swap the hairline to the error variant.",
-  );
+  ).toBeTruthy();
 });
 
 test("document-tabs-bar hides the close affordance when only one tab is open", () => {
@@ -140,10 +139,10 @@ test("document-tabs-bar hides the close affordance when only one tab is open", (
 
   const markup = renderBar(state);
 
-  expectTrue(
-    !markup.includes("Close Untitled"),
+  expect(
+    markup.includes("Close Untitled"),
     "close button should be omitted when closing would leave the strip empty.",
-  );
+  ).toBeFalsy();
 });
 
 test("document-tabs-bar renders the storage glyph corresponding to each tab", () => {
@@ -160,14 +159,14 @@ test("document-tabs-bar renders the storage glyph corresponding to each tab", ()
 
   const markup = renderBar(state);
 
-  expectTrue(
+  expect(
     markup.includes('data-storage-glyph="browser"'),
     "browser storage glyph should render for browser-only tabs.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     markup.includes('data-storage-glyph="filesystem"'),
     "filesystem storage glyph should render for filesystem-bound tabs.",
-  );
+  ).toBeTruthy();
 });
 
 test("document-tabs-bar surfaces the storage descriptor in the accessible label", () => {
@@ -184,10 +183,10 @@ test("document-tabs-bar surfaces the storage descriptor in the accessible label"
 
   const markup = renderBar(state);
 
-  expectTrue(
+  expect(
     markup.includes('aria-label="shaft (Synced to shaft.cadara)"'),
     "tab aria-label should include the storage descriptor for screen readers.",
-  );
+  ).toBeTruthy();
 });
 
 test("document-tabs-bar marks tabs draggable when more than one tab is open", () => {
@@ -198,10 +197,10 @@ test("document-tabs-bar marks tabs draggable when more than one tab is open", ()
 
   const markup = renderBar(state);
 
-  expectTrue(
+  expect(
     markup.includes('draggable="true"'),
     "multi-tab strips should let users drag to reorder.",
-  );
+  ).toBeTruthy();
 });
 
 test("document-tabs-bar does not let the only tab be dragged or closed", () => {
@@ -212,14 +211,14 @@ test("document-tabs-bar does not let the only tab be dragged or closed", () => {
 
   const markup = renderBar(state);
 
-  expectTrue(
-    !markup.includes('draggable="true"'),
+  expect(
+    markup.includes('draggable="true"'),
     "single tab should not be draggable.",
-  );
-  expectTrue(
-    !markup.includes("data-document-tab-close"),
+  ).toBeFalsy();
+  expect(
+    markup.includes("data-document-tab-close"),
     "single tab should not show close.",
-  );
+  ).toBeFalsy();
 });
 
 test("document-tabs-bar exposes a title-editing seam for double-click rename", () => {
@@ -230,8 +229,8 @@ test("document-tabs-bar exposes a title-editing seam for double-click rename", (
 
   const markup = renderBar(state);
 
-  expectTrue(
+  expect(
     markup.includes("data-document-tab-title"),
     "tab title should expose a stable hook the rename interaction can attach to.",
-  );
+  ).toBeTruthy();
 });

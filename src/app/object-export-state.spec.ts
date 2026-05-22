@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import { createObjectExportModalState } from "@/domain/export/object-export-state";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 
@@ -19,20 +18,20 @@ test("src/app/object-export-state.spec.ts", async () => {
     "Part 1",
   );
 
-  expectTrue(
-    modalState !== null,
+  expect(
+    modalState,
     "Export should produce modal-opening state for a selected row.",
-  );
-  expectTrue(
-    modalState.label === "Part 1",
+  ).not.toBe(null);
+  expect(
+    modalState.label,
     "Export modal state should preserve the selected row label.",
-  );
-  expectTrue(
-    modalState.baseRevisionId === snapshot.document.revisionId,
+  ).toBe("Part 1");
+  expect(
+    modalState.baseRevisionId,
     "Export modal state should capture the current revision.",
-  );
-  expectTrue(
-    !JSON.stringify(modalState).includes("not implemented"),
+  ).toBe(snapshot.document.revisionId);
+  expect(
+    JSON.stringify(modalState).includes("not implemented"),
     "Export should not produce the previous placeholder status message.",
-  );
+  ).toBeFalsy();
 });

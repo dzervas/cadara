@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   SOLVER_SCHEMA_VERSION,
   type ProjectSketchExternalReferencesRequest,
@@ -9,11 +8,11 @@ import {
   type ValidateSketchRequest,
 } from "./schema";
 import {
-  disposeInteractiveSketchSolveSessionRequestSchema,
-  finalizeInteractiveSketchSolveSessionRequestSchema,
-  solveSketchRequestSchema,
-  startInteractiveSketchSolveSessionRequestSchema,
-  updateInteractiveSketchSolveSessionRequestSchema,
+  validateDisposeInteractiveSketchSolveSessionRequest,
+  validateFinalizeInteractiveSketchSolveSessionRequest,
+  validateSolveSketchRequest,
+  validateStartInteractiveSketchSolveSessionRequest,
+  validateUpdateInteractiveSketchSolveSessionRequest,
 } from "./runtime-schema";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
@@ -229,16 +228,15 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       createProjectRequest(),
     );
 
-    expectTrue(
-      projection.requestId === "request_project_1",
+    expect(
+      projection.requestId,
       "Projection must echo the originating request ID.",
-    );
-    expectTrue(
-      projection.projectedReferences.length ===
-        sketchDefinition.references.length,
+    ).toBe("request_project_1");
+    expect(
+      projection.projectedReferences.length,
       "Projection should return one record per authored external reference.",
-    );
-    expectTrue(
+    ).toBe(sketchDefinition.references.length);
+    expect(
       projection.projectedReferences.every(
         (reference) =>
           reference.status === "unsupportedSource" &&
@@ -249,53 +247,53 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
           ),
       ),
       "Projection must report unresolved model sources as unsupported instead of fabricating geometry.",
-    );
+    ).toBeTruthy();
 
     const validation = await adapter.validateSketch({
       ...createValidateRequest(),
       projectedReferences: projection.projectedReferences,
     });
-    expectTrue(
+    expect(
       validation.isValid,
       "Well-formed sketch definition should validate successfully.",
-    );
+    ).toBeTruthy();
 
     const solved = await adapter.solveSketch(
       createSolveRequest(projection.projectedReferences),
     );
-    expectTrue(
+    expect(
       solved.status.solveState === "solved" &&
         solved.status.constraintState === "wellConstrained",
       "Solve should return a machine-readable solved and constrained status.",
-    );
-    expectTrue(
-      solved.solvedSnapshot.solvedEntities.length === 4,
+    ).toBeTruthy();
+    expect(
+      solved.solvedSnapshot.solvedEntities.length,
       "Solve should return solved entity geometry.",
-    );
-    expectTrue(
-      !solved.regionResult,
+    ).toBe(4);
+    expect(
+      solved.regionResult,
       "Normal solve responses should not derive regions unless the caller requests them.",
-    );
-    expectTrue(
-      solveSketchRequestSchema.safeParse(
+    ).toBeFalsy();
+    expect(
+      validateSolveSketchRequest(
         createSolveRequest(projection.projectedReferences),
       ).success,
       "Solve request runtime schema should accept solve-without-regions requests.",
-    );
+    ).toBeTruthy();
 
     const solvedWithRegions = await adapter.solveSketch({
       ...createSolveRequest(projection.projectedReferences),
       requestId: "request_solve_with_regions_1",
       includeRegions: true,
     });
-    expectTrue(
-      solvedWithRegions.regionResult?.regions.length === 1,
+    expect(
+      solvedWithRegions.regionResult?.regions.length,
       "Caller-selected solve region extraction should return regions explicitly.",
-    );
-    expectTrue(
-      solvedWithRegions.diagnostics.length === solved.diagnostics.length,
+    ).toBe(1);
+    expect(
+      solvedWithRegions.diagnostics.length,
       "Caller-selected region extraction diagnostics should stay scoped to the region result.",
-    );
+    ).toBe(solved.diagnostics.length);
 
     const regions = await adapter.deriveSketchRegions({
       contractVersion: CONTRACT_VERSION,
@@ -309,10 +307,10 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       projectedReferences: projection.projectedReferences,
     });
 
-    expectTrue(
-      regions.regions.length === 1,
+    expect(
+      regions.regions.length,
       "Region derivation should return an explicit derived region.",
-    );
+    ).toBe(1);
 
     const resolutionRequest: ResolveSketchReferenceRequest = {
       contractVersion: CONTRACT_VERSION,
@@ -332,15 +330,15 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
     };
 
     const resolution = await adapter.resolveSketchReference(resolutionRequest);
-    expectTrue(
+    expect(
       "kind" in resolution.resolution.target &&
         resolution.resolution.target.kind === "region",
       "Solver reference resolution should be explicit for derived regions.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       resolution.resolution.isValid,
       "Derived regions returned by the solver should resolve as valid.",
-    );
+    ).toBeTruthy();
 
     const projectedResolution = await adapter.resolveSketchReference({
       contractVersion: CONTRACT_VERSION,
@@ -358,14 +356,14 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       regions: regions.regions,
     });
 
-    expectTrue(
+    expect(
       "geometryId" in projectedResolution.resolution.target,
       "Projected-geometry resolution should preserve the explicit projected target.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       projectedResolution.resolution.isValid,
       "Projected geometry targets should resolve when their authored reference still exists.",
-    );
+    ).toBeTruthy();
   }
 
   async function testInteractiveSolveLifecycleIsExplicit() {
@@ -382,32 +380,32 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       priorSolvedSnapshot: solved.solvedSnapshot,
     };
     const startParse =
-      startInteractiveSketchSolveSessionRequestSchema.safeParse(startRequest);
-    expectTrue(
+      validateStartInteractiveSketchSolveSessionRequest(startRequest);
+    expect(
       startParse.success,
       "Interactive session start request should validate at the contract boundary.",
-    );
-    expectTrue(
-      !startInteractiveSketchSolveSessionRequestSchema.safeParse({
+    ).toBeTruthy();
+    expect(
+      validateStartInteractiveSketchSolveSessionRequest({
         ...startRequest,
         plane: undefined,
       }).success,
       "Interactive session start request should require the sketch plane at the runtime boundary.",
-    );
+    ).toBeFalsy();
 
     const started = await adapter.startInteractiveSolveSession(startRequest);
-    expectTrue(
+    expect(
       started.sessionId.startsWith("interactive_sketch_solve_"),
       "Interactive start should return an opaque session id.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       started.programId.startsWith("compiled_sketch_solve_"),
       "Interactive start should expose the compiled solve basis id.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       started.warmStarted,
       "Interactive start should warm-start from the compatible solved snapshot.",
-    );
+    ).toBeTruthy();
 
     const updateRequest = {
       contractVersion: CONTRACT_VERSION,
@@ -423,13 +421,12 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
         position: [2, -1] as const,
       },
     };
-    expectTrue(
-      updateInteractiveSketchSolveSessionRequestSchema.safeParse(updateRequest)
-        .success,
+    expect(
+      validateUpdateInteractiveSketchSolveSessionRequest(updateRequest).success,
       "Interactive update request should validate at the contract boundary.",
-    );
-    expectTrue(
-      !updateInteractiveSketchSolveSessionRequestSchema.safeParse({
+    ).toBeTruthy();
+    expect(
+      validateUpdateInteractiveSketchSolveSessionRequest({
         ...updateRequest,
         dragTarget: {
           kind: "sketchPoint",
@@ -438,14 +435,14 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
         },
       }).success,
       "Interactive update request should validate the dragged point target shape.",
-    );
+    ).toBeFalsy();
 
     const staleBasis = await adapter.updateInteractiveSolveSession({
       ...updateRequest,
       requestId: "request_interactive_update_stale_basis_1",
       revisionId: "rev_0002",
     });
-    expectTrue(
+    expect(
       staleBasis.result.kind === "blocked" &&
         staleBasis.result.reason === "staleRevision" &&
         staleBasis.result.diagnostics.some(
@@ -453,13 +450,13 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
             diagnostic.code === "stale-interactive-solve-session-basis",
         ),
       "Interactive updates with a mismatched request basis should be rejected without mutating the active session.",
-    );
+    ).toBeTruthy();
 
     const updated = await adapter.updateInteractiveSolveSession(updateRequest);
-    expectTrue(
-      updated.result.kind === "accepted",
+    expect(
+      updated.result.kind,
       "Compatible interactive drag updates should return an accepted frame.",
-    );
+    ).toBe("accepted");
 
     const finalizeRequest = {
       contractVersion: CONTRACT_VERSION,
@@ -470,48 +467,46 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       sketchId: "sketch_primary",
       sessionId: started.sessionId,
     };
-    expectTrue(
-      finalizeInteractiveSketchSolveSessionRequestSchema.safeParse(
-        finalizeRequest,
-      ).success,
+    expect(
+      validateFinalizeInteractiveSketchSolveSessionRequest(finalizeRequest)
+        .success,
       "Interactive finalize request should validate at the contract boundary.",
-    );
+    ).toBeTruthy();
     const finalized =
       await adapter.finalizeInteractiveSolveSession(finalizeRequest);
-    expectTrue(
-      finalized.solvedSnapshot !== null,
+    expect(
+      finalized.solvedSnapshot,
       "Interactive finalize should return the latest accepted solved state.",
-    );
+    ).not.toBe(null);
 
     const stale = await adapter.updateInteractiveSolveSession({
       ...updateRequest,
       requestId: "request_interactive_update_stale_1",
     });
-    expectTrue(
+    expect(
       stale.result.kind === "blocked" && stale.result.reason === "staleSession",
       "Updating a finalized session should return a stale-session result.",
-    );
+    ).toBeTruthy();
 
     const disposeRequest = {
       ...finalizeRequest,
       requestId: "request_interactive_dispose_1",
       sessionId: "interactive_sketch_solve_unknown" as const,
     };
-    expectTrue(
-      disposeInteractiveSketchSolveSessionRequestSchema.safeParse(
-        disposeRequest,
-      ).success,
+    expect(
+      validateDisposeInteractiveSketchSolveSessionRequest(disposeRequest)
+        .success,
       "Interactive dispose request should validate at the contract boundary.",
-    );
+    ).toBeTruthy();
     const disposed =
       await adapter.disposeInteractiveSolveSession(disposeRequest);
-    expectTrue(
-      !disposed.disposed &&
+    expect(
+      disposed.disposed &&
         disposed.diagnostics.some(
           (diagnostic) => diagnostic.code === "stale-interactive-solve-session",
         ),
       "Disposing an unknown session should report a stale-session diagnostic.",
-    );
+    ).toBeFalsy();
   }
 
   async function testRevisionDiagnosticsAreExplicit() {
@@ -528,10 +523,10 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       didThrow = error instanceof Error && error.message.includes("rev_stale");
     }
 
-    expectTrue(
+    expect(
       didThrow,
       "Stale revision validation must reject the request instead of returning authoritative output.",
-    );
+    ).toBeTruthy();
   }
 
   async function testMockProjectionDoesNotFabricateExternalGeometry() {
@@ -540,7 +535,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       createProjectRequest(),
     );
 
-    expectTrue(
+    expect(
       projection.projectedReferences.every(
         (reference) =>
           reference.status === "unsupportedSource" &&
@@ -551,7 +546,7 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
           ),
       ),
       "Mock projection must report unresolved external sources instead of returning placeholder geometry.",
-    );
+    ).toBeTruthy();
   }
 
   async function testVersioningAndIdBijectionAreEnforced() {
@@ -569,10 +564,10 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
         error.message.includes("Unsupported solver schema version");
     }
 
-    expectTrue(
+    expect(
       versionRejected,
       "Solver must reject unsupported solver schema versions.",
-    );
+    ).toBeTruthy();
 
     const projected = await adapter.projectExternalReferences(
       createProjectRequest(),
@@ -586,12 +581,12 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
       },
     });
 
-    expectTrue(
+    expect(
       invalid.diagnostics.some(
         (diagnostic) => diagnostic.code === "point-missing-from-records",
       ),
       "Validation must reject ID arrays that reference records that do not exist.",
-    );
+    ).toBeTruthy();
   }
 
   await testProjectionAndSolveFlow();

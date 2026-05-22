@@ -1,8 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 const ROOT = process.cwd();
 const CONTRACTS_ROOT = join(ROOT, "src/contracts");
 
@@ -29,10 +28,10 @@ test("src/contracts/contracts-domain-boundary.spec.ts", () => {
     }
   }
 
-  expectTrue(
+  expect(
     offenders.length === 0,
     `Contracts modules must not import implementation-layer modules.\n${offenders.join("\n")}`,
-  );
+  ).toBeTruthy();
 });
 
 function walk(directory: string): string[] {

@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import type {
   FeatureBooleanScope,
   RevolveAxisRef,
@@ -41,25 +40,24 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
       edgeId: "edge_axis",
     };
 
-    expectTrue(
-      !isConstructionBackedRevolveAxisSupported(constructionAxis),
+    expect(
+      isConstructionBackedRevolveAxisSupported(constructionAxis),
       "Phase 0 policy must reject construction-backed revolve axes instead of inventing axis semantics from planes.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       isConstructionBackedRevolveAxisSupported(edgeAxis),
       "Phase 0 policy must preserve explicit edge-backed revolve axes.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getConstructionBackedRevolveAxisRejectionReason().includes(
         "public construction contract currently exposes only planes",
       ),
       "Construction-axis rejection reason must explain the underlying contract gap.",
-    );
-    expectTrue(
-      OCC_CONTRACT_GAP_CODES.constructionRevolveAxisUnsupported ===
-        "occ-contract-gap-revolve-construction-axis",
+    ).toBeTruthy();
+    expect(
+      OCC_CONTRACT_GAP_CODES.constructionRevolveAxisUnsupported,
       "Construction-axis contract-gap code must remain stable for downstream diagnostics.",
-    );
+    ).toBe("occ-contract-gap-revolve-construction-axis");
   }
 
   function testProjectedRegionLoopsRequireLiveProjectionData() {
@@ -75,41 +73,38 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
       },
     };
 
-    expectTrue(
+    expect(
       isProjectedRegionSegmentSourceSupported(entitySource),
       "Phase 0 policy must continue to allow entity-backed region loops.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       isProjectedRegionSegmentSourceSupported(projectedSource),
       "Projected-geometry region loop sources are supported when backed by live projection data.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getProjectedRegionLoopRejectionReason().includes(
         "active solver-owned projection data",
       ),
       "Projected-geometry rejection reason must explain that live projection data is required.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       getProjectedRegionLoopRejectionMessage(projectedSource).includes(
         "projected_geometry_edge",
       ),
       "Projected-geometry rejection messaging must preserve the failing projected geometry ID.",
-    );
-    expectTrue(
-      createProjectedRegionLoopRejection(projectedSource).code ===
-        OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable,
+    ).toBeTruthy();
+    expect(
+      createProjectedRegionLoopRejection(projectedSource).code,
       "Projected-region rejection payloads must reuse the stable contract-gap code.",
-    );
-    expectTrue(
-      createProjectedRegionLoopRejection(projectedSource).reasonCode ===
-        "missingLiveProjectedGeometry",
+    ).toBe(OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable);
+    expect(
+      createProjectedRegionLoopRejection(projectedSource).reasonCode,
       "Projected-region rejection payloads must expose a stable machine-readable reason code.",
-    );
-    expectTrue(
-      OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable ===
-        "occ-contract-gap-projected-region-loop",
+    ).toBe("missingLiveProjectedGeometry");
+    expect(
+      OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable,
       "Projected-region contract-gap code must remain stable for downstream diagnostics.",
-    );
+    ).toBe("occ-contract-gap-projected-region-loop");
   }
 
   function testMultiBodyBooleanPolicyIsWrittenAndOperationSpecific() {
@@ -118,107 +113,95 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
       bodyIds: ["body_a", "body_b", "body_c"],
     };
 
-    expectTrue(
-      getMultiBodyBooleanPolicy("join", orderedTargets)?.application ===
-        "sequential",
+    expect(
+      getMultiBodyBooleanPolicy("join", orderedTargets)?.application,
       "Join policy must preserve the documented sequential application behavior for ordered targetBodies input.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("join", orderedTargets)?.kernelOperation ===
-        "fuse",
+    ).toBe("sequential");
+    expect(
+      getMultiBodyBooleanPolicy("join", orderedTargets)?.kernelOperation,
       "Join policy must explicitly use fuse semantics.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("join", orderedTargets)
-        ?.preservesSuppliedOrder === true,
+    ).toBe("fuse");
+    expect(
+      getMultiBodyBooleanPolicy("join", orderedTargets)?.preservesSuppliedOrder,
       "Join policy must preserve caller order rather than inheriting OCC defaults silently.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("join", orderedTargets)?.precombineTargets ===
-        false,
+    ).toBeTruthy();
+    expect(
+      getMultiBodyBooleanPolicy("join", orderedTargets)?.precombineTargets,
       "Join policy must not pre-combine the selected target bodies before sequential application.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("cut", orderedTargets)?.application ===
-        "perTarget",
+    ).toBeFalsy();
+    expect(
+      getMultiBodyBooleanPolicy("cut", orderedTargets)?.application,
       "Cut policy must stay explicitly per-target-body.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("cut", orderedTargets)?.kernelOperation ===
-        "cut",
+    ).toBe("perTarget");
+    expect(
+      getMultiBodyBooleanPolicy("cut", orderedTargets)?.kernelOperation,
       "Cut policy must explicitly use subtraction semantics.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("cut", orderedTargets)?.precombineTargets ===
-        false,
+    ).toBe("cut");
+    expect(
+      getMultiBodyBooleanPolicy("cut", orderedTargets)?.precombineTargets,
       "Cut policy must not pre-combine target bodies together.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("intersect", orderedTargets)?.application ===
-        "perTarget",
+    ).toBeFalsy();
+    expect(
+      getMultiBodyBooleanPolicy("intersect", orderedTargets)?.application,
       "Intersect policy must stay explicitly per-target-body.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("intersect", orderedTargets)
-        ?.kernelOperation === "intersect",
+    ).toBe("perTarget");
+    expect(
+      getMultiBodyBooleanPolicy("intersect", orderedTargets)?.kernelOperation,
       "Intersect policy must explicitly use per-target intersection semantics.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("intersect", orderedTargets)
-        ?.precombineTargets === false,
+    ).toBe("intersect");
+    expect(
+      getMultiBodyBooleanPolicy("intersect", orderedTargets)?.precombineTargets,
       "Intersect policy must not invent an up-front target merge before each per-body intersection.",
-    );
-    expectTrue(
-      OCC_MULTI_BODY_BOOLEAN_POLICIES.join.targetSelection ===
-        "orderedTargetBodies",
+    ).toBeFalsy();
+    expect(
+      OCC_MULTI_BODY_BOOLEAN_POLICIES.join.targetSelection,
       "Structured join policy must keep ordered target-bodies semantics machine-readable.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("newBody", orderedTargets) === null,
+    ).toBe("orderedTargetBodies");
+    expect(
+      getMultiBodyBooleanPolicy("newBody", orderedTargets),
       "New-body operations must not claim a multi-body boolean policy.",
-    );
-    expectTrue(
-      getMultiBodyBooleanPolicy("join", { kind: "standalone" }) === null,
+    ).toBe(null);
+    expect(
+      getMultiBodyBooleanPolicy("join", { kind: "standalone" }),
       "Single-body and standalone scopes must not be misclassified as multi-body policy decisions.",
-    );
+    ).toBe(null);
   }
 
   function testImplementationNotesCapturePhase0RedLines() {
-    expectTrue(
+    expect(
       OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
         "not the explicit plane frame required",
       ),
       "Phase 0 notes must record that construction snapshots lack reconstructible plane geometry.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
         "must keep feature-authored plane geometry internally",
       ),
       "Phase 0 notes must freeze the requirement to keep construction-plane geometry internally in the OCC adapter.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
         "must not change the public contract",
       ),
       "Phase 0 notes must freeze the requirement not to change the contract to work around the construction-plane gap.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
         "must not treat public construction snapshots as independently reconstructible",
       ),
       "Phase 0 notes must state that public construction snapshots alone are insufficient reconstruction inputs.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       OCC_PHASE0_IMPLEMENTATION_NOTES.solverBoundary.includes(
         "remain owned by the SketchSolverAdapter boundary",
       ),
       "Phase 0 notes must preserve the solver/kernel split explicitly.",
-    );
-    expectTrue(
-      OCC_CONTRACT_GAP_CODES.constructionPlaneGeometryUnavailable ===
-        "occ-contract-gap-construction-plane-geometry",
+    ).toBeTruthy();
+    expect(
+      OCC_CONTRACT_GAP_CODES.constructionPlaneGeometryUnavailable,
       "Construction-plane geometry contract-gap code must remain stable for downstream diagnostics.",
-    );
+    ).toBe("occ-contract-gap-construction-plane-geometry");
   }
 
   function createSketchPlane(): SketchPlaneDefinition {
@@ -379,11 +362,10 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
       thrownMessage = error instanceof Error ? error.message : String(error);
     }
 
-    expectTrue(
-      thrownMessage ===
-        createProjectedRegionLoopRejection(projectedSource).message,
+    expect(
+      thrownMessage,
       "The actual OCC profile-building path must reject unresolved projected-geometry loops with the shared message.",
-    );
+    ).toBe(createProjectedRegionLoopRejection(projectedSource).message);
   }
 
   testConstructionBackedRevolveAxesAreExplicitlyRejected();

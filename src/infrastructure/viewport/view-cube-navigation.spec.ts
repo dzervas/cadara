@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 
 import {
   VIEW_CUBE_CORNER_TARGETS,
@@ -21,7 +21,7 @@ test("src/infrastructure/viewport/view-cube-navigation.spec.ts", async () => {
     ).every(
       ({ labelUp }) => labelUp[0] === 0 && labelUp[1] === 0 && labelUp[2] === 1,
     ),
-  ).toBe(true);
+  ).toBeTruthy();
   expect(
     VIEW_CUBE_FACE_TARGETS.find(({ presetId }) => presetId === "top")?.labelUp,
   ).toEqual([0, 1, 0]);
@@ -41,10 +41,10 @@ test("src/infrastructure/viewport/view-cube-navigation.spec.ts", async () => {
         position[1] < 0 &&
         position[2] > 0,
     ),
-  ).toBe(true);
+  ).toBeTruthy();
   expect(
     VIEW_CUBE_CORNER_TARGETS.every(({ position }) =>
       position.every((value) => Math.abs(value) < 0.62),
     ),
-  ).toBe(true);
+  ).toBeTruthy();
 });

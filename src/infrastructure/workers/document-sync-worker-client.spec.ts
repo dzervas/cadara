@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect, assert } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { GeometryAssetAvailability } from "@/contracts/modeling/geometry-assets";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
@@ -34,6 +33,7 @@ import {
   createLocalAuthoredDocumentPayload,
   type LocalFileSystemFileHandle,
 } from "@/lib/local-file-system-access";
+import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 
 test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () => {
   async function testRequestOrderingAndStructuredFailures() {
@@ -57,14 +57,14 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       status: { kind: "idle", documentId: seed.documentId, sequence: 1 },
     });
 
-    expectTrue(
-      (await first).sequence === 1,
+    expect(
+      (await first).sequence,
       "First request should resolve from its own response even when responses arrive out of order.",
-    );
-    expectTrue(
-      (await second).sequence === 2,
+    ).toBe(1);
+    expect(
+      (await second).sequence,
       "Second request should resolve from its own response even when it arrives first.",
-    );
+    ).toBe(2);
 
     const failed = client.getWriteStatus({ documentId: seed.documentId });
     const failedRequest = worker.posted[2]!;
@@ -83,10 +83,10 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
     } catch (error: unknown) {
       rejected = error instanceof Error && error.message === "worker exploded";
     }
-    expectTrue(
+    expect(
       rejected,
       "Structured worker failures should reject the matching request with the worker message.",
-    );
+    ).toBeTruthy();
     client.dispose();
   }
 
@@ -100,10 +100,11 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       observedDocuments.push(event.document);
     });
     const subscribeRequest = worker.posted[0]!;
-    expectTrue(
-      subscribeRequest.kind === "subscribe",
+    expect(
+      subscribeRequest.kind,
       "Client should post a subscribe request.",
-    );
+    ).toBe("subscribe");
+    assert("subscriptionId" in subscribeRequest);
     worker.emit({
       kind: "subscribed",
       requestId: subscribeRequest.requestId,
@@ -124,16 +125,16 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         },
       },
     });
-    expectTrue(
-      observedDocuments.length === 1,
+    expect(
+      observedDocuments.length,
       "Active subscriptions should receive worker document change events.",
-    );
+    ).toBe(1);
 
     unsubscribe();
-    expectTrue(
-      worker.posted[1]?.kind === "unsubscribe",
+    expect(
+      worker.posted[1]?.kind,
       "Disposing a subscription should post an unsubscribe request.",
-    );
+    ).toBe("unsubscribe");
     worker.emit({
       kind: "documentChanged",
       subscriptionId: subscribeRequest.subscriptionId,
@@ -147,10 +148,10 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         },
       },
     });
-    expectTrue(
-      observedDocuments.length === 1,
+    expect(
+      observedDocuments.length,
       "Disposed subscriptions should ignore later worker change events.",
-    );
+    ).toBe(1);
 
     const statuses: DocumentSyncWriteStatus[] = [];
     client.subscribeToWriteStatus((status) => statuses.push(status));
@@ -166,10 +167,10 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       kind: "writeStatusChanged",
       status: { kind: "idle", documentId: seed.documentId, sequence: 3 },
     });
-    expectTrue(
-      statuses.map((status) => status.sequence).join(",") === "2,3",
+    expect(
+      statuses.map((status) => status.sequence).join(","),
       "Stale write status messages should be ignored by document id and sequence.",
-    );
+    ).toBe("2,3");
     client.dispose();
   }
 
@@ -189,10 +190,10 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       documentId: seed.documentId,
       seedDocument: seed,
     });
-    expectTrue(
-      posted[0]?.kind === "loaded",
+    expect(
+      posted[0]?.kind,
       "Worker shell should route repository load requests.",
-    );
+    ).toBe("loaded");
 
     await handle({
       kind: "subscribe",
@@ -201,10 +202,10 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       subscriptionId: "subscription_document_sync_test",
       documentId: seed.documentId,
     });
-    expectTrue(
-      posted[1]?.kind === "subscribed",
+    expect(
+      posted[1]?.kind,
       "Worker shell should acknowledge repository subscriptions.",
-    );
+    ).toBe("subscribed");
 
     await handle({
       kind: "unsubscribe",
@@ -212,10 +213,10 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_unsubscribe" as DocumentSyncWorkerRequest["requestId"],
       subscriptionId: "subscription_document_sync_test",
     });
-    expectTrue(
-      posted[2]?.kind === "unsubscribed",
+    expect(
+      posted[2]?.kind,
       "Worker shell should acknowledge repository unsubscriptions.",
-    );
+    ).toBe("unsubscribed");
 
     await handle({
       kind: "mutate",
@@ -230,14 +231,14 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         })),
       },
     });
-    expectTrue(
-      !posted.some((message) => message.kind === "documentChanged"),
+    expect(
+      posted.some((message) => message.kind === "documentChanged"),
       "Unsubscribed listeners should not receive later repository change events.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       posted.some((message) => message.kind === "mutated"),
       "Worker shell should respond to repository mutations.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "normalize",
@@ -250,10 +251,10 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         source: "restore",
       },
     });
-    expectTrue(
+    expect(
       posted.some((message) => message.kind === "normalized"),
       "Worker shell should own authored document normalization requests.",
-    );
+    ).toBeTruthy();
 
     const asset = await createDeterministicGeometryAsset({
       ownerFeatureIds: [seed.features[0]!.featureId],
@@ -272,7 +273,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       documentId: seed.documentId,
       document: documentWithAsset,
     });
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "mutated" &&
@@ -280,7 +281,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
           message.result.ok,
       ),
       "Worker shell should mutate documents with embedded geometry asset data.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "getGeometryAssetRecord",
@@ -288,14 +289,14 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_asset_record" as DocumentSyncWorkerRequest["requestId"],
       asset: asset.asset,
     });
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "geometryAssetRecord" &&
           message.bytes?.byteLength === asset.bytes.byteLength,
       ),
       "Worker shell should proxy verified embedded asset bytes from the repository.",
-    );
+    ).toBeTruthy();
   }
 
   async function testWorkerRuntimeStorageResetAndBindingFailures() {
@@ -321,11 +322,11 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       storageKey: "automerge:stored-url",
       seedDocument: seed,
     });
-    expectTrue(
+    expect(
       urlStore.values.get(seed.documentId) === "automerge:stored-url" &&
         posted[0]?.kind === "loaded",
       "Load should persist the provided repository storage key before delegating to the repository.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "getWriteStatus",
@@ -333,7 +334,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_idle_status" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
     });
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "writeStatus" &&
@@ -341,7 +342,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
           message.status.sequence === 0,
       ),
       "Write-status requests should default to an idle status before any sync activity has occurred.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "getGeometryAssetBytes",
@@ -351,13 +352,13 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         ? never
         : never,
     });
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "geometryAssetBytes" && message.bytes === null,
       ),
       "Repositories without geometry-asset support should return null asset bytes cleanly.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "restoreBinding",
@@ -365,7 +366,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_restore_failure" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
     });
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "failure" &&
@@ -373,7 +374,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
             "Persistent local file binding storage is unavailable.",
       ),
       "Unsupported persistent binding storage should surface a structured worker failure during binding restore.",
-    );
+    ).toBeTruthy();
 
     const writableHandle = createWritableHandle({
       name: "persist-unavailable.cadara",
@@ -392,7 +393,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         storedAt: "2026-04-23T00:00:00.000Z",
       },
     });
-    expectTrue(
+    expect(
       posted.some((message) => message.kind === "fileHandleBound") &&
         posted.some(
           (message) =>
@@ -405,7 +406,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
             message.status.kind === "synced",
         ),
       "Unsupported binding persistence should still bind the handle, publish persistence-unavailable status, and keep sync active.",
-    );
+    ).toBeTruthy();
 
     failingBindingStore.failSave = true;
     await handle({
@@ -420,7 +421,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         storedAt: "2026-04-23T00:01:00.000Z",
       },
     });
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "failure" &&
@@ -428,7 +429,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
             "Local file binding could not be persisted.",
       ),
       "Persisted binding failures should surface a structured worker failure.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "reset",
@@ -436,14 +437,14 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_storage_reset" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
     });
-    expectTrue(
+    expect(
       urlStore.deleted.includes(seed.documentId) &&
         posted.some(
           (message) =>
             message.kind === "reset" && message.status.kind === "reset",
         ),
       "Reset should clear the stored repository url and return the repository reset status.",
-    );
+    ).toBeTruthy();
   }
 
   async function testWorkerRuntimeFileBindingAutosyncAndPermissionFailures() {
@@ -482,14 +483,14 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         storedAt: "2026-04-22T00:00:00.000Z",
       },
     });
-    expectTrue(
-      bindingStore.saved.length === 1,
+    expect(
+      bindingStore.saved.length,
       "Binding file handles should be persisted outside the authored document.",
-    );
-    expectTrue(
+    ).toBe(1);
+    expect(
       posted.some((message) => message.kind === "fileHandleBound"),
       "Binding a file handle should acknowledge the active sync target.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "mutate",
@@ -516,19 +517,19 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
     writeGate.resolve();
     await flushAsync();
 
-    expectTrue(
-      writableHandle.writes.length === 2,
+    expect(
+      writableHandle.writes.length,
       "Rapid accepted changes should coalesce while a direct write is in flight.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       writableHandle.writes[0]?.includes("Autosync One"),
       "The in-flight write should complete the first accepted state.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       writableHandle.writes[1]?.includes("Autosync Three"),
       "The coalesced follow-up write should persist the latest accepted state.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       posted.some(
         (message) =>
           message.kind === "writeStatusChanged" &&
@@ -540,7 +541,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
             message.status.kind === "synced",
         ),
       "Autosync writes should publish visible syncing and synced statuses.",
-    );
+    ).toBeTruthy();
 
     const deniedHandle = createWritableHandle({
       name: "denied.cadara",
@@ -567,14 +568,14 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       document: withBodyLabel(seed, "Permission Denied"),
     });
     await flushAsync();
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "writeStatusChanged" &&
           message.status.kind === "permission-denied",
       ),
       "Denied write permission should publish a permission-denied sync status without clearing repository state.",
-    );
+    ).toBeTruthy();
 
     const failingHandle = createFailingWritableHandle("failed.cadara");
     await handle({
@@ -597,14 +598,14 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       document: withBodyLabel(seed, "Write Failed"),
     });
     await flushAsync();
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "writeStatusChanged" &&
           message.status.kind === "failed",
       ),
       "Direct write failures should publish a failed sync status without clearing repository state.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "restoreBinding",
@@ -612,7 +613,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_file_restore" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
     });
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "writeStatusChanged" &&
@@ -624,7 +625,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
             message.record?.metadata.fileName === "failed.cadara",
         ),
       "Restoring a persisted binding should publish binding-restored status before returning the restored record.",
-    );
+    ).toBeTruthy();
 
     await handle({
       kind: "getWriteStatus",
@@ -632,22 +633,22 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_file_status_after_restore" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
     });
-    expectTrue(
+    expect(
       posted.some(
         (message) =>
           message.kind === "writeStatus" &&
           message.status.kind === "binding-restored",
       ),
       "The latest write status should report the restored binding after a successful binding restore.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       posted.some(
         (message) =>
           message.kind === "bindingRestored" &&
           message.record?.metadata.fileName === "failed.cadara",
       ),
       "Persisted local file bindings should restore through the worker binding store.",
-    );
+    ).toBeTruthy();
   }
 
   async function testWorkerRuntimeLoadReReadsBoundFilesystemFile() {
@@ -694,29 +695,28 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         message.kind === "loaded" &&
         message.requestId === "request_document_sync_file_backed_load",
     );
-    expectTrue(
+    expect(
       loaded?.result.ok === true &&
         loaded.result.document.bodyLabels[0]?.label ===
           "Authoritative File State",
       "File-backed document loads should use the current linked filesystem file instead of stale browser repository state.",
-    );
-    expectTrue(
-      repository.savedDocuments.at(-1)?.bodyLabels[0]?.label ===
-        "Authoritative File State",
+    ).toBeTruthy();
+    expect(
+      repository.savedDocuments.at(-1)?.bodyLabels[0]?.label,
       "The repository should be refreshed from the bound file during initialization.",
-    );
-    expectTrue(
-      writes.length === 0,
+    ).toBe("Authoritative File State");
+    expect(
+      writes.length,
       "Re-reading a bound filesystem file during load should not autosync-write back to the same file.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       posted.some(
         (message) =>
           message.kind === "writeStatusChanged" &&
           message.status.kind === "binding-restored",
       ),
       "File-backed document loads should restore the persisted binding while initializing.",
-    );
+    ).toBeTruthy();
   }
 
   async function testMatchingLinkedFileReusesCachedLoadResult() {
@@ -758,27 +758,27 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       posted,
       "request_document_sync_matching_linked_load",
     );
-    expectTrue(
+    assert(loaded?.result.ok);
+    expect(
       loaded?.result === repository.lastLoadResult &&
-        loaded.result.ok &&
         loaded.result.metadata === repository.lastLoadResult?.metadata &&
         loaded.result.diagnostics === repository.lastLoadResult?.diagnostics &&
         loaded.result.assetAvailability ===
           repository.lastLoadResult?.assetAvailability,
       "Matching linked-file loads should return the exact cached repository load result and preserve metadata, diagnostics, and asset availability.",
-    );
-    expectTrue(
-      repository.mutations.length === 0,
+    ).toBeTruthy();
+    expect(
+      repository.mutations.length,
       "Matching linked-file loads should not perform a no-op repository mutation.",
-    );
-    expectTrue(
-      repository.notifications.length === 0,
+    ).toBe(0);
+    expect(
+      repository.notifications.length,
       "Matching linked-file loads should not emit repository mutation notifications.",
-    );
-    expectTrue(
-      writes.length === 0,
+    ).toBe(0);
+    expect(
+      writes.length,
       "Matching linked-file initialization should not autosync-write back to the same file.",
-    );
+    ).toBe(0);
   }
 
   async function testMatchingLinkedFileIgnoresSerializationDifferences() {
@@ -788,10 +788,10 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
     const posted: DocumentSyncWorkerResponse[] = [];
     const writes: string[] = [];
     const serializedDifferently = JSON.stringify(seed);
-    expectTrue(
-      serializedDifferently !== createLocalAuthoredDocumentPayload(seed),
+    expect(
+      serializedDifferently,
       "The fixture should exercise a linked file whose JSON serialization differs from the repository serializer.",
-    );
+    ).not.toBe(createLocalAuthoredDocumentPayload(seed));
     await saveBinding(
       bindingStore,
       seed,
@@ -815,15 +815,15 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       posted,
       "request_document_sync_serialized_linked_load",
     );
-    expectTrue(
+    expect(
       loaded?.result === repository.lastLoadResult &&
         repository.mutations.length === 0,
       "Linked-file equality should compare parsed authored documents instead of raw serialized JSON.",
-    );
-    expectTrue(
-      writes.length === 0,
+    ).toBeTruthy();
+    expect(
+      writes.length,
       "Serialization-only matches should not enqueue initialization autosync writes.",
-    );
+    ).toBe(0);
   }
 
   async function testMatchingLinkedFileNormalizesDocumentIdBeforeComparison() {
@@ -862,11 +862,11 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       posted,
       "request_document_sync_id_normalized_linked_load",
     );
-    expectTrue(
+    expect(
       loaded?.result === repository.lastLoadResult &&
         repository.mutations.length === 0,
       "Linked-file equality should normalize the disk document id to the active document id before comparing with cache.",
-    );
+    ).toBeTruthy();
   }
 
   async function testChangedLinkedFileRefreshesRepositoryWithoutAutosyncWrite() {
@@ -902,17 +902,17 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       posted,
       "request_document_sync_changed_linked_load",
     );
-    expectTrue(
+    expect(
       loaded?.result.ok === true &&
         loaded.result.document.bodyLabels[0]?.label ===
           "Changed Authoritative File" &&
         repository.mutations.length === 1,
       "Changed linked-file loads should refresh repository state from the authoritative file document.",
-    );
-    expectTrue(
-      writes.length === 0,
+    ).toBeTruthy();
+    expect(
+      writes.length,
       "Changed linked-file initialization should not autosync-write back to the same file.",
-    );
+    ).toBe(0);
   }
 
   async function testInvalidAndUnreadableLinkedFilesDoNotReuseCache() {
@@ -943,13 +943,13 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       invalidPosted,
       "request_document_sync_invalid_linked_load",
     );
-    expectTrue(
+    expect(
       invalidLoaded?.result.ok === false &&
         invalidLoaded.result.status.diagnostic.reasonCode ===
           "invalid-authored-document" &&
         invalidRepository.mutations.length === 0,
       "Invalid linked files should fail explicitly without mutating or returning stale cached authored state.",
-    );
+    ).toBeTruthy();
 
     const unreadableRepository = new TrackingMemoryDocumentRepository([
       staleBrowserDocument,
@@ -974,13 +974,13 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       unreadablePosted,
       "request_document_sync_unreadable_linked_load",
     );
-    expectTrue(
+    expect(
       unreadableLoaded?.result.ok === false &&
         unreadableLoaded.result.status.diagnostic.reasonCode ===
           "local-file-read-failed" &&
         unreadableRepository.mutations.length === 0,
       "Unreadable linked files should fail explicitly without mutating or returning stale cached authored state.",
-    );
+    ).toBeTruthy();
   }
 
   async function testBrowserOnlyLoadBypassesLinkedFileComparison() {
@@ -1007,7 +1007,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       posted,
       "request_document_sync_browser_only_load",
     );
-    expectTrue(
+    expect(
       loaded?.result === repository.lastLoadResult &&
         loaded.result.ok &&
         loaded.result.document.bodyLabels[0]?.label ===
@@ -1019,7 +1019,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
             message.status.kind === "binding-restored",
         ),
       "Browser-only loads should return repository load results without linked-file reads, comparisons, or mutations.",
-    );
+    ).toBeTruthy();
   }
 
   async function testRepositoryLoadFailureDoesNotFallBackToLinkedCache() {
@@ -1051,14 +1051,14 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       posted,
       "request_document_sync_repository_failed_load",
     );
-    expectTrue(
+    expect(
       loaded?.result.ok === false &&
         loaded.result.status.diagnostic.reasonCode ===
           "repository-load-failed-for-test" &&
         fileRead === false &&
         repository.mutations.length === 0,
       "Repository load failures should return explicitly without reading linked files or falling back to stale cache.",
-    );
+    ).toBeTruthy();
   }
 
   await testRequestOrderingAndStructuredFailures();
@@ -1156,7 +1156,7 @@ class FailingLocalFileBindingStore implements LocalFileBindingStore {
 
   async save(_record: LocalFileBindingRecord) {
     return this.failSave
-      ? { ok: false as const, reason: "failed" as const }
+      ? { ok: false as const, reason: "failed" as const, error: "test fixture" }
       : { ok: false as const, reason: "unsupported-storage" as const };
   }
 
@@ -1170,7 +1170,7 @@ class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
   deleted: string[] = [];
 
   get(documentId: string) {
-    return this.values.get(documentId) ?? null;
+    return (this.values.get(documentId) as AutomergeUrl) ?? null;
   }
 
   set(documentId: string, url: string) {
@@ -1183,20 +1183,24 @@ class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
   }
 }
 
+interface TrackingMemoryDocumentRepositoryLoadOverrides {
+  metadata?: DocumentRepositoryMetadata;
+  diagnostics?: ModelingDiagnostic[];
+  assetAvailability?: GeometryAssetAvailability[];
+}
+
 class TrackingMemoryDocumentRepository extends MemoryDocumentRepository {
   lastLoadResult: DocumentRepositoryLoadResult | null = null;
+  loadOverrides: TrackingMemoryDocumentRepositoryLoadOverrides = {};
   readonly mutations: AuthoredModelDocument[] = [];
   readonly notifications: DocumentRepositoryChangeEvent[] = [];
 
   constructor(
     initialDocuments: AuthoredModelDocument[],
-    private readonly loadOverrides: {
-      metadata?: DocumentRepositoryMetadata;
-      diagnostics?: ModelingDiagnostic[];
-      assetAvailability?: GeometryAssetAvailability[];
-    } = {},
+    loadOverrides: TrackingMemoryDocumentRepositoryLoadOverrides = {},
   ) {
     super(initialDocuments);
+    this.loadOverrides = loadOverrides;
   }
 
   async load(input: Parameters<MemoryDocumentRepository["load"]>[0]) {

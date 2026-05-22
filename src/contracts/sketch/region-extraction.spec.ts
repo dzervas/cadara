@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import {
   deriveSketchRegionsCore,
   findSketchRings,
@@ -230,14 +229,11 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     };
 
     const found = findSketchRings(definition, makeSolvedSnapshot(definition));
-    expectTrue(
-      found.rings.length === 0,
-      "Open chains should not produce rings.",
-    );
-    expectTrue(
-      found.unusedSegments.length === 2,
+    expect(found.rings.length, "Open chains should not produce rings.").toBe(0);
+    expect(
+      found.unusedSegments.length,
       "All open segments should remain unused.",
-    );
+    ).toBe(2);
   }
 
   async function testFindRingsOne() {
@@ -276,18 +272,17 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     };
 
     const found = findSketchRings(definition, makeSolvedSnapshot(definition));
-    expectTrue(
-      found.rings.length === 1,
-      "One rectangle should produce one ring.",
+    expect(found.rings.length, "One rectangle should produce one ring.").toBe(
+      1,
     );
-    expectTrue(
-      found.unusedSegments.length === 0,
+    expect(
+      found.unusedSegments.length,
       "Closed rectangle should consume all segments.",
-    );
-    expectTrue(
-      found.rings[0]?.boundaryEntityIds.length === 4,
+    ).toBe(0);
+    expect(
+      found.rings[0]?.boundaryEntityIds.length,
       "The ring should contain four edges.",
-    );
+    ).toBe(4);
   }
 
   async function testJiggledRectangleRegionsStayStableAndPositioned() {
@@ -354,14 +349,14 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
         solvedSnapshot,
       });
 
-      expectTrue(
-        found.rings.length === 1,
+      expect(
+        found.rings.length,
         "Jiggled rectangle should keep producing exactly one ring.",
-      );
-      expectTrue(
-        derived.regions.length === 1,
+      ).toBe(1);
+      expect(
+        derived.regions.length,
         "Jiggled rectangle should keep producing exactly one region.",
-      );
+      ).toBe(1);
 
       const ring = found.rings[0]!;
       const region = derived.regions[0]!;
@@ -376,14 +371,14 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       expectedRegionId ??= region.regionId;
       expectedLoopSignature ??= loopSignature;
 
-      expectTrue(
-        region.regionId === expectedRegionId,
+      expect(
+        region.regionId,
         "Region id should remain stable while the profile is jiggled.",
-      );
-      expectTrue(
-        loopSignature === expectedLoopSignature,
+      ).toBe(expectedRegionId);
+      expect(
+        loopSignature,
         "Region boundary sources should remain stable while the profile is jiggled.",
-      );
+      ).toBe(expectedLoopSignature);
       assertNear(
         Math.min(...xs),
         dx,
@@ -552,14 +547,14 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
 
     const solvedSnapshot = makeSolvedSnapshot(definition);
     const found = findSketchRings(definition, solvedSnapshot);
-    expectTrue(
-      found.rings.length === 2,
+    expect(
+      found.rings.length,
       "Endpoint selections with floating-point residuals should produce both adjacent rings.",
-    );
-    expectTrue(
-      found.unusedSegments.length === 0,
+    ).toBe(2);
+    expect(
+      found.unusedSegments.length,
       "Endpoint-selection residuals should not leave profile segments unused.",
-    );
+    ).toBe(0);
 
     const derived = deriveSketchRegionsCore({
       documentId: "doc_workspace",
@@ -569,11 +564,11 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot,
     });
 
-    expectTrue(
-      derived.regions.length === 2,
+    expect(
+      derived.regions.length,
       "Endpoint selections from existing vertices should derive both selectable profiles.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       derived.regions.some((region) =>
         region.loops[0]?.segments.some(
           (segment) =>
@@ -582,7 +577,7 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
         ),
       ),
       "Derived profiles should include the second loop bounded by the referenced line endpoints.",
-    );
+    ).toBeTruthy();
   }
 
   async function testRegionIdsSurviveSortOrderChanges() {
@@ -677,7 +672,7 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
             segment.source.entityId === entityId,
         ),
       );
-      expectTrue(region, `Expected a region containing ${entityId}.`);
+      expect(region, `Expected a region containing ${entityId}.`).toBeTruthy();
       return region.regionId;
     }
 
@@ -690,10 +685,10 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       "sketch_entity_a_bottom",
     );
 
-    expectTrue(
-      stableRegionId === resortedRegionId,
+    expect(
+      stableRegionId,
       "Region ids should be based on boundary content, not sorted position.",
-    );
+    ).toBe(resortedRegionId);
   }
 
   async function testFindRingsMultipleAndDeriveRegions() {
@@ -749,10 +744,10 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
 
     const solvedSnapshot = makeSolvedSnapshot(definition);
     const found = findSketchRings(definition, solvedSnapshot);
-    expectTrue(
-      found.rings.length === 2,
+    expect(
+      found.rings.length,
       "Nested rectangles should produce two rings.",
-    );
+    ).toBe(2);
 
     const derived = deriveSketchRegionsCore({
       documentId: "doc_workspace",
@@ -762,26 +757,26 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot,
     });
 
-    expectTrue(
-      derived.diagnostics.length === 0,
+    expect(
+      derived.diagnostics.length,
       "Region derivation should not emit diagnostics for solved nested rectangles.",
-    );
-    expectTrue(
-      derived.regions.length === 1,
+    ).toBe(0);
+    expect(
+      derived.regions.length,
       "Nested rectangles should derive one even-parity solid region.",
-    );
-    expectTrue(
-      derived.regions[0]?.loops.length === 2,
+    ).toBe(1);
+    expect(
+      derived.regions[0]?.loops.length,
       "Derived region should contain outer and inner loops.",
-    );
-    expectTrue(
-      derived.regions[0]?.loops[0]?.role === "outer",
+    ).toBe(2);
+    expect(
+      derived.regions[0]?.loops[0]?.role,
       "First loop should be outer.",
-    );
-    expectTrue(
-      derived.regions[0]?.loops[1]?.role === "inner",
+    ).toBe("outer");
+    expect(
+      derived.regions[0]?.loops[1]?.role,
       "Second loop should be inner.",
-    );
+    ).toBe("inner");
   }
 
   async function testThreeLevelNestingKeepsIslandSolid() {
@@ -860,26 +855,26 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot,
     });
 
-    expectTrue(
-      derived.regions.length === 2,
+    expect(
+      derived.regions.length,
       "Outer/hole/island nesting should derive the outer solid and island solid.",
-    );
-    expectTrue(
-      derived.regions[0]?.loops.length === 2,
+    ).toBe(2);
+    expect(
+      derived.regions[0]?.loops.length,
       "Outer solid should use the middle loop as a hole.",
-    );
-    expectTrue(
-      derived.regions[1]?.loops.length === 1,
+    ).toBe(2);
+    expect(
+      derived.regions[1]?.loops.length,
       "Island solid should not be treated as an inner loop of the hole.",
-    );
-    expectTrue(
+    ).toBe(1);
+    expect(
       derived.regions[1]?.loops[0]?.segments.some(
         (segment) =>
           segment.source.kind === "entity" &&
           segment.source.entityId === "sketch_entity_ij",
       ),
       "Island region should be bounded by the innermost loop.",
-    );
+    ).toBeTruthy();
   }
 
   async function testMixedLocalAndProjectedLoopPreservesProjectedIdentity() {
@@ -931,31 +926,30 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       projectedReferences,
     });
 
-    expectTrue(
-      derived.regions.length === 1,
+    expect(
+      derived.regions.length,
       "Mixed local/projected edges should close one region.",
-    );
+    ).toBe(1);
     const loop = derived.regions[0]!.loops[0]!;
     const projectedSegment = loop.segments.find(
       (segment) => segment.source.kind === "projectedGeometry",
     );
-    expectTrue(
-      projectedSegment?.source.kind === "projectedGeometry",
+    expect(
+      projectedSegment?.source.kind,
       "Loop should include projected boundary identity.",
-    );
-    expectTrue(
-      projectedSegment.source.reference.referenceId === "ref_projected_profile",
+    ).toBe("projectedGeometry");
+    expect(
+      projectedSegment.source.reference.referenceId,
       "Projected segment must preserve authored reference ID.",
-    );
-    expectTrue(
-      projectedSegment.source.reference.geometryId ===
-        "projected_geometry_left",
+    ).toBe("ref_projected_profile");
+    expect(
+      projectedSegment.source.reference.geometryId,
       "Projected segment must preserve projected geometry ID.",
-    );
-    expectTrue(
-      definition.entityIds.length === 3,
+    ).toBe("projected_geometry_left");
+    expect(
+      definition.entityIds.length,
       "Projected boundaries must not be copied into sketch-owned entity IDs.",
-    );
+    ).toBe(3);
   }
 
   async function testProjectedOnlyCircleLoopPreservesProjectedIdentity() {
@@ -992,23 +986,23 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       projectedReferences,
     });
 
-    expectTrue(
-      derived.regions.length === 1,
+    expect(
+      derived.regions.length,
       "Projected-only circles should derive profile regions.",
-    );
+    ).toBe(1);
     const segment = derived.regions[0]!.loops[0]!.segments[0];
-    expectTrue(
-      segment?.source.kind === "projectedGeometry",
+    expect(
+      segment?.source.kind,
       "Projected-only loop should stay projected-sourced.",
-    );
-    expectTrue(
-      segment.source.reference.geometryId === "projected_geometry_circle",
+    ).toBe("projectedGeometry");
+    expect(
+      segment.source.reference.geometryId,
       "Projected circle identity should survive region derivation.",
-    );
-    expectTrue(
+    ).toBe("projected_geometry_circle");
+    expect(
       definition.points.length === 0 && definition.entities.length === 0,
       "Projected-only regions must not author copied sketch geometry.",
-    );
+    ).toBeTruthy();
   }
 
   async function testMissingProjectedReferencesReportDiagnosticsWithoutInventingGeometry() {
@@ -1035,17 +1029,17 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       projectedReferences: [],
     });
 
-    expectTrue(
-      derived.regions.length === 0,
+    expect(
+      derived.regions.length,
       "Missing projected data must not invent profile regions.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       derived.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "projected-region-reference-unresolved",
       ),
       "Missing projected data should report a machine-readable diagnostic.",
-    );
+    ).toBeTruthy();
   }
 
   async function testUnauthoredProjectedReferencesReportDiagnosticsWithoutInventingGeometry() {
@@ -1085,21 +1079,21 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       projectedReferences,
     });
 
-    expectTrue(
-      derived.regions.length === 0,
+    expect(
+      derived.regions.length,
       "Unauthored projected data must not create profile regions.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       derived.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "projected-region-reference-unauthored",
       ),
       "Unauthored projected data should report a machine-readable diagnostic.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       definition.points.length === 0 && definition.entities.length === 0,
       "Rejected projected regions must not copy geometry into the sketch.",
-    );
+    ).toBeTruthy();
   }
 
   async function testProjectedReferenceMissingAuthoredRecordIsRejected() {
@@ -1136,17 +1130,17 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       projectedReferences,
     });
 
-    expectTrue(
-      derived.regions.length === 0,
+    expect(
+      derived.regions.length,
       "Projection data without an authored reference record must not create profile regions.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       derived.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "projected-region-reference-unauthored",
       ),
       "Missing authored reference records should report a machine-readable diagnostic.",
-    );
+    ).toBeTruthy();
   }
 
   async function testFindCircleRegion() {
@@ -1168,10 +1162,10 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
 
     const solvedSnapshot = makeSolvedSnapshot(definition);
     const found = findSketchRings(definition, solvedSnapshot);
-    expectTrue(
-      found.rings.length === 1,
+    expect(
+      found.rings.length,
       "A standalone circle should produce one ring.",
-    );
+    ).toBe(1);
 
     const derived = deriveSketchRegionsCore({
       documentId: "doc_workspace",
@@ -1181,18 +1175,18 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot,
     });
 
-    expectTrue(
-      derived.regions.length === 1,
+    expect(
+      derived.regions.length,
       "A standalone circle should derive one selectable region.",
-    );
-    expectTrue(
-      derived.regions[0]?.loops[0]?.segments.length === 1,
+    ).toBe(1);
+    expect(
+      derived.regions[0]?.loops[0]?.segments.length,
       "Circle regions should use the circle entity as one closed segment.",
-    );
-    expectTrue(
-      derived.regions[0]?.loops[0]?.segments[0]?.startPointId === null,
+    ).toBe(1);
+    expect(
+      derived.regions[0]?.loops[0]?.segments[0]?.startPointId,
       "Circle region segments should not invent boundary points.",
-    );
+    ).toBe(null);
   }
 
   async function testSquareWithInnerCircleDerivesAllBoundedCells() {
@@ -1243,20 +1237,20 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot,
     });
 
-    expectTrue(
-      derived.regions.length === 1,
+    expect(
+      derived.regions.length,
       "A square with an inner circle should derive one even-parity solid region.",
-    );
-    expectTrue(
-      derived.regions[0]?.loops.length === 2,
+    ).toBe(1);
+    expect(
+      derived.regions[0]?.loops.length,
       "Outer cell should include the circle as an inner loop.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       derived.regions[0]?.loops[1]?.segments[0]?.source.kind === "entity" &&
         derived.regions[0]?.loops[1]?.segments[0]?.source.entityId ===
           "sketch_entity_circle",
       "The inner loop should be bounded by the circle entity.",
-    );
+    ).toBeTruthy();
   }
 
   async function testConstructionGeometryDoesNotSplitNormalProfile() {
@@ -1341,11 +1335,11 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot: makeSolvedSnapshot(definition),
     });
 
-    expectTrue(
-      derived.regions.length === 1,
+    expect(
+      derived.regions.length,
       "Construction line, arc, and circle geometry must not split or remove a normal profile.",
-    );
-    expectTrue(
+    ).toBe(1);
+    expect(
       derived.regions[0]?.loops[0]?.segments.every(
         (segment) =>
           segment.source.kind === "entity" &&
@@ -1354,7 +1348,7 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
           segment.source.entityId !== "sketch_entity_circle",
       ),
       "Construction line, arc, and circle entities must be excluded from profile boundaries.",
-    );
+    ).toBeTruthy();
   }
 
   async function testClosedConstructionCircleDoesNotCreateRegion() {
@@ -1391,14 +1385,14 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot: makeSolvedSnapshot(definition),
     });
 
-    expectTrue(
-      found.rings.length === 0,
+    expect(
+      found.rings.length,
       "Closed construction circles should not produce sketch rings.",
-    );
-    expectTrue(
-      derived.regions.length === 0,
+    ).toBe(0);
+    expect(
+      derived.regions.length,
       "Closed construction circles should not create selectable profile regions.",
-    );
+    ).toBe(0);
   }
 
   async function testSelfIntersectingProfileIsRejectedWithDiagnostic() {
@@ -1446,20 +1440,20 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot,
     });
 
-    expectTrue(
-      found.rings.length === 0,
+    expect(
+      found.rings.length,
       "Self-intersecting profile loops should not produce valid rings.",
-    );
-    expectTrue(
-      derived.regions.length === 0,
+    ).toBe(0);
+    expect(
+      derived.regions.length,
       "Self-intersecting profile loops should not become selectable regions.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       derived.diagnostics.some(
         (diagnostic) => diagnostic.code === "profile-invalid-ring",
       ),
       "Rejected self-intersections should emit a diagnostic before reaching OCC.",
-    );
+    ).toBeTruthy();
   }
 
   async function testOpenAndDegenerateSegmentsAreSurfacedAsDiagnostics() {
@@ -1502,22 +1496,22 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot: makeSolvedSnapshot(definition),
     });
 
-    expectTrue(
-      derived.regions.length === 0,
+    expect(
+      derived.regions.length,
       "Open and degenerate profile segments should not create regions.",
-    );
-    expectTrue(
+    ).toBe(0);
+    expect(
       derived.diagnostics.some(
         (diagnostic) => diagnostic.code === "profile-open-segment",
       ),
       "Open profile segments should be reported as diagnostics.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       derived.diagnostics.some(
         (diagnostic) => diagnostic.code === "profile-degenerate-segment",
       ),
       "Degenerate profile segments should be reported as diagnostics.",
-    );
+    ).toBeTruthy();
   }
 
   async function testArcAndChordDeriveSingleClosedRegion() {
@@ -1565,29 +1559,29 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       solvedSnapshot: makeSolvedSnapshot(definition),
     });
 
-    expectTrue(
-      derived.regions.length === 1,
+    expect(
+      derived.regions.length,
       "An arc and its chord should derive one closed D-shaped region.",
-    );
+    ).toBe(1);
     const outerLoop = derived.regions[0]?.loops[0];
-    expectTrue(
-      !!outerLoop,
+    expect(
+      !outerLoop,
       "Derived arc-chord region should include an outer loop.",
-    );
-    expectTrue(
-      outerLoop?.segments.length === 2,
+    ).toBeFalsy();
+    expect(
+      outerLoop?.segments.length,
       "Derived arc-chord loop should preserve the two authored boundary segments.",
-    );
-    expectTrue(
+    ).toBe(2);
+    expect(
       outerLoop?.segments[0]?.source.kind === "entity" &&
         outerLoop.segments[0].source.entityId === "sketch_entity_arc",
       "Derived arc-chord loop should keep the arc as the first boundary segment.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       outerLoop?.segments[1]?.source.kind === "entity" &&
         outerLoop.segments[1].source.entityId === "sketch_entity_chord",
       "Derived arc-chord loop should keep the chord as the second boundary segment.",
-    );
+    ).toBeTruthy();
   }
 
   async function run() {

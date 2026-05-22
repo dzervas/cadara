@@ -1,6 +1,5 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   createLocalShortcutProfileRepository,
   disableCommandShortcut,
@@ -24,34 +23,31 @@ test("src/core/shortcuts/profile-repository.spec.ts", async () => {
     "test-shortcuts",
   );
 
-  expectTrue(
-    Object.keys(await repository.load()).length === 0,
+  expect(
+    Object.keys(await repository.load()).length,
     "Profile repository should load empty overrides by default.",
-  );
+  ).toBe(0);
 
   const remapped = setCommandShortcutOverride({}, "editor.undo", ["u"]);
   await repository.save(remapped);
-  expectTrue(
-    (await repository.load())["editor.undo"]?.shortcuts[0] === "u",
+  expect(
+    (await repository.load())["editor.undo"]?.shortcuts[0],
     "Profile repository should persist shortcut overrides.",
-  );
+  ).toBe("u");
 
   const disabled = disableCommandShortcut(remapped, "editor.undo");
   await repository.save(disabled);
-  expectTrue(
-    (await repository.load())["editor.undo"]?.shortcuts.length === 0,
+  expect(
+    (await repository.load())["editor.undo"]?.shortcuts.length,
     "Profile repository should preserve empty shortcut lists as disabled overrides.",
-  );
+  ).toBe(0);
 
   await repository.save(resetCommandShortcut(disabled, "editor.undo"));
-  expectTrue(
-    Object.keys(await repository.load()).length === 0,
+  expect(
+    Object.keys(await repository.load()).length,
     "Resetting a command should remove its override so defaults apply.",
-  );
+  ).toBe(0);
 
   await repository.save(resetAllShortcutOverrides());
-  expectTrue(
-    values.size === 0,
-    "Reset all should clear stored shortcut overrides.",
-  );
+  expect(values.size, "Reset all should clear stored shortcut overrides.").toBe(0);
 });

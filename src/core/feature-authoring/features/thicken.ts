@@ -123,7 +123,7 @@ function buildThickenDefinition(draft: ThickenFeatureParameterDraft) {
       operationIntent: authoredDefinitionValue(
         draft.operationIntent,
         "create",
-      ) as AdvancedSolidOperationIntent,
+      ),
       participants: buildThickenParticipants(draft),
       options: {
         thickness: authoredDefinitionValue(draft.options.thickness, 1),

@@ -1,4 +1,11 @@
+preload = ["./typia-preload.ts"]
+
+[install]
+minimumReleaseAge = 604800  # 1 week
+ignoreScripts = true
+
 [test]
+preload = ["./typia-preload.ts"]
 coveragePathIgnorePatterns = [
   "**/*.spec.ts",
   "**/*.test.ts",

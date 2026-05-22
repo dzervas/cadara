@@ -1,7 +1,6 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
 import { ResultAsync, createAppError } from "@/contracts/errors";
-import { expectTrue } from "@/testing/expect.spec";
 import type {
   PerformanceSpanAttributes,
   PerformanceTelemetry,
@@ -41,35 +40,35 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts preserves OCC w
   );
 
   const snapshotResult = await client?.getDocumentSnapshot({} as never);
-  expectTrue(
-    snapshotResult?.snapshot.document.bodies.length === 1,
+  expect(
+    snapshotResult?.snapshot.document.bodies.length,
     "The OCC wrapper should preserve successful payloads.",
-  );
-  expectTrue(
+  ).toBe(1);
+  expect(
     telemetry.finished.some(
       (span) =>
         span.attributes["cadara.operation"] === "getDocumentSnapshot" &&
         span.attributes["cadara.render_record_count"] === 2,
     ),
     "The OCC wrapper should record cheap snapshot counts.",
-  );
+  ).toBeTruthy();
 
   try {
     await client?.createFeature({} as never);
   } catch (error) {
-    expectTrue(
-      error === failure,
+    expect(
+      error,
       "The OCC wrapper should preserve the exact rejection error.",
-    );
+    ).toBe(failure);
   }
-  expectTrue(
+  expect(
     telemetry.finished.some(
       (span) =>
         span.attributes["cadara.operation"] === "createFeature" &&
         span.attributes["cadara.result"] === "failure",
     ),
     "The OCC wrapper should classify rejected operations as failures.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/domain/modeling/performance-telemetry-wrappers.spec.ts records repository source and heads without changing results", async () => {
@@ -102,11 +101,11 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts records reposit
     documentId: "doc_1",
     seedDocument: {} as never,
   });
-  expectTrue(
-    result.ok === true,
+  expect(
+    result.ok,
     "The repository wrapper should preserve load results.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     telemetry.finished.some(
       (span) =>
         span.attributes["cadara.operation"] === "load" &&
@@ -114,7 +113,7 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts records reposit
         span.attributes["cadara.repository_source"] === "local",
     ),
     "Repository telemetry should use cheap metadata from the repository seam.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/domain/modeling/performance-telemetry-wrappers.spec.ts preserves modeling AppResultAsync behavior", async () => {
@@ -138,18 +137,18 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts preserves model
   );
 
   const result = await service.createFeature({} as never);
-  expectTrue(
+  expect(
     result.isErr(),
     "The modeling wrapper should preserve AppResultAsync failures.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     telemetry.finished.some(
       (span) =>
         span.attributes["cadara.operation"] === "createFeature" &&
         span.attributes["cadara.result"] === "rejected",
     ),
     "The modeling wrapper should classify contract-level rejections.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/domain/modeling/performance-telemetry-wrappers.spec.ts aggregates sketch interactive drag telemetry", async () => {
@@ -196,7 +195,7 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts aggregates sket
     sessionId: "interactive_sketch_solve_1",
   } as never);
 
-  expectTrue(
+  expect(
     telemetry.finished.some(
       (span) =>
         span.attributes["cadara.operation"] === "interactiveDragGesture" &&
@@ -204,7 +203,7 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts aggregates sket
         span.attributes["cadara.drag_blocked_update_count"] === 1,
     ),
     "Sketch drag telemetry should emit one aggregate span for the gesture.",
-  );
+  ).toBeTruthy();
 });
 
 function makeSketchRequest() {

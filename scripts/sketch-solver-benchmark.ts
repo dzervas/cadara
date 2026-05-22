@@ -1,3 +1,4 @@
+// TODO: Turn into a vitest benchmark
 import { bench, run, summary } from "mitata";
 
 import {

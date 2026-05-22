@@ -1,5 +1,4 @@
-import { test } from "bun:test";
-import { expectTrue } from "@/testing/expect.spec";
+import { test, expect } from "vitest";
 import * as THREE from "three";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
@@ -126,25 +125,24 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       edgeId: "edge_seed",
     });
 
-    expectTrue(
-      session.definition.referenceIds.length === 1,
+    expect(
+      session.definition.referenceIds.length,
       "Accepted edge references should be authored on the sketch definition.",
-    );
-    expectTrue(
-      session.definition.references[0]?.kind === "modelReference",
+    ).toBe(1);
+    expect(
+      session.definition.references[0]?.kind,
       "Model topology should create a model reference record.",
-    );
-    expectTrue(
-      session.commitRequest?.definition.references[0]?.referenceId ===
-        session.definition.references[0]?.referenceId,
+    ).toBe("modelReference");
+    expect(
+      session.commitRequest?.definition.references[0]?.referenceId,
       "Reference additions should flow into the sketch commit payload.",
-    );
+    ).toBe(session.definition.references[0]?.referenceId);
 
     const reopened = createSession(session.commitRequest!.definition);
-    expectTrue(
-      reopened.definition.references.length === 1,
+    expect(
+      reopened.definition.references.length,
       "Reopened sketch sessions should preserve authored references.",
-    );
+    ).toBe(1);
   }
 
   function testFaceBackedReopenPreservesNullPlaneKeyInCommitRequest() {
@@ -190,14 +188,14 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       },
     } satisfies SketchSnapshotRecord);
 
-    expectTrue(
-      session.plane.key === null,
+    expect(
+      session.plane.key,
       "Face-backed reopened sketches should preserve a null authored plane key.",
-    );
-    expectTrue(
-      session.commitRequest?.plane.key === null,
+    ).toBe(null);
+    expect(
+      session.commitRequest?.plane.key,
       "Face-backed reopened sketch commits should not default planeKey to XY.",
-    );
+    ).toBe(null);
   }
 
   function testDuplicateReferencesAreRejected() {
@@ -212,14 +210,14 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
     session = beginSketchTool(session, "projectReference");
     session = selectSketchReferenceTarget(session, target);
 
-    expectTrue(
-      session.definition.references.length === 1,
+    expect(
+      session.definition.references.length,
       "Duplicate external references should not be appended.",
-    );
-    expectTrue(
+    ).toBe(1);
+    expect(
       session.validationMessage?.includes("already authored"),
       "Duplicate rejection should surface explicit feedback.",
-    );
+    ).toBeTruthy();
   }
 
   function testInvalidReferenceDiagnosticsStayExplicit() {
@@ -237,16 +235,16 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       },
     });
 
-    expectTrue(
-      !validation.isValid,
+    expect(
+      validation.isValid,
       "Invalid reference order should fail validation.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       validation.diagnostics.some(
         (diagnostic) => diagnostic.code === "reference-missing-from-records",
       ),
       "Invalid references should report a stable diagnostic code.",
-    );
+    ).toBeTruthy();
   }
 
   function testDuplicateReferenceRecordsAreRejected() {
@@ -270,16 +268,16 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       },
     });
 
-    expectTrue(
-      !validation.isValid,
+    expect(
+      validation.isValid,
       "Duplicate reference records should fail validation.",
-    );
-    expectTrue(
+    ).toBeFalsy();
+    expect(
       validation.diagnostics.some(
         (diagnostic) => diagnostic.code === "duplicate-reference-record",
       ),
       "Duplicate reference records should report a stable diagnostic code.",
-    );
+    ).toBeTruthy();
   }
 
   function testProjectionRenderablesAreReadOnlyReferenceTargets() {
@@ -305,30 +303,29 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       (entry) => entry.target?.kind === "projectedReferenceGeometry",
     );
 
-    expectTrue(
+    expect(
       renderable,
       "Projected reference geometry should produce a viewport renderable.",
-    );
-    expectTrue(
-      renderable.role === "reference",
+    ).toBeTruthy();
+    expect(
+      renderable.role,
       "Projected reference renderables should use read-only reference styling.",
-    );
+    ).toBe("reference");
 
     session = beginSketchGeometryDrag(session, renderable.target!, [0, 0]);
-    expectTrue(
-      session.activeDrag === null,
+    expect(
+      session.activeDrag,
       "Projected reference geometry should not start direct sketch dragging.",
-    );
+    ).toBe(null);
 
     const toggled = toggleSketchConstructionTarget(
       beginSketchTool(session, "construction"),
       renderable.target!,
     );
-    expectTrue(
-      toggled.definition.references.length ===
-        session.definition.references.length,
+    expect(
+      toggled.definition.references.length,
       "Projected reference geometry should not be toggled into sketch-owned construction geometry.",
-    );
+    ).toBe(session.definition.references.length);
   }
 
   function testFailedProjectionReferencesProduceDeletableMarkers() {
@@ -362,24 +359,24 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       (entry) => entry.target?.kind === "sketchExternalReference",
     );
 
-    expectTrue(
+    expect(
       marker,
       "Failed or empty reference projections should produce a selectable reference marker.",
-    );
-    expectTrue(
-      marker.role === "reference",
+    ).toBeTruthy();
+    expect(
+      marker.role,
       "Reference markers should use read-only reference styling.",
-    );
+    ).toBe("reference");
 
     const deleted = deleteSketchReferenceTarget(session, marker.target!);
-    expectTrue(
-      deleted.definition.references.length === 0,
+    expect(
+      deleted.definition.references.length,
       "Deleting a reference marker should remove the authored reference.",
-    );
-    expectTrue(
-      deleted.commitRequest?.definition.references.length === 0,
+    ).toBe(0);
+    expect(
+      deleted.commitRequest?.definition.references.length,
       "Reference marker deletion should flow into the sketch commit payload.",
-    );
+    ).toBe(0);
   }
 
   function testReferenceHighlightRefreshKeepsReferenceColor() {
@@ -399,20 +396,23 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
     bindRenderableObject(line, null, target, "sketchReference", "document");
 
     const bindings = collectBindings(root);
-    expectTrue(bindings, "Reference style test should collect the bound line.");
+    expect(
+      bindings,
+      "Reference style test should collect the bound line.",
+    ).toBeTruthy();
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], target);
     updateWorkspaceHighlight(bindings.targetToObjects, [], null);
 
     const material = line.material;
-    expectTrue(
-      !Array.isArray(material),
+    expect(
+      Array.isArray(material),
       "Reference style test line should have one material.",
-    );
-    expectTrue(
-      material.color.getHex() === SURFACE_COLORS.sketchReference,
+    ).toBeFalsy();
+    expect(
+      material.color.getHex(),
       "Reference geometry should keep its distinct inactive color after highlight refresh.",
-    );
+    ).toBe(SURFACE_COLORS.sketchReference);
 
     line.geometry.dispose();
     material.dispose();
@@ -437,31 +437,31 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         entry.target.datumId === "yAxis",
     );
 
-    expectTrue(
+    expect(
       origin && xAxis && yAxis,
       "Active sketch sessions should expose origin, X-axis, and Y-axis datum renderables.",
-    );
-    expectTrue(
+    ).toBeTruthy();
+    expect(
       origin.role === "reference" &&
         xAxis.role === "reference" &&
         yAxis.role === "reference",
       "Sketch datum renderables should use read-only reference styling.",
-    );
+    ).toBeTruthy();
 
     const dragged = beginSketchGeometryDrag(session, origin.target!, [0, 0]);
-    expectTrue(
-      dragged.activeDrag === null,
+    expect(
+      dragged.activeDrag,
       "Sketch datum origin should not start direct sketch dragging.",
-    );
+    ).toBe(null);
 
     const toggled = toggleSketchConstructionTarget(
       beginSketchTool(session, "construction"),
       xAxis.target!,
     );
-    expectTrue(
-      toggled.definition.entities.length === session.definition.entities.length,
+    expect(
+      toggled.definition.entities.length,
       "Sketch datum axes should not toggle into authored construction geometry.",
-    );
+    ).toBe(session.definition.entities.length);
   }
 
   testReferenceAuthoringPersistsInCommitRequest();

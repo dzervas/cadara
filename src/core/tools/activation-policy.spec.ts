@@ -1,55 +1,54 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   getToolCommandBehavior,
   resolveToolActivationMode,
 } from "@/core/tools/activation-policy";
 
 test("src/core/tools/activation-policy.spec.ts", () => {
-  expectTrue(
-    getToolCommandBehavior("undo") === "undo",
+  expect(
+    getToolCommandBehavior("undo"),
     "Undo should declare undo behavior through tool metadata.",
-  );
-  expectTrue(
-    getToolCommandBehavior("redo") === "redo",
+  ).toBe("undo");
+  expect(
+    getToolCommandBehavior("redo"),
     "Redo should declare redo behavior through tool metadata.",
-  );
-  expectTrue(
-    getToolCommandBehavior("import") === "partImport",
+  ).toBe("redo");
+  expect(
+    getToolCommandBehavior("import"),
     "Part import should declare import behavior through tool metadata.",
-  );
-  expectTrue(
-    getToolCommandBehavior("importImage") === "sketchReferenceImageImport",
+  ).toBe("partImport");
+  expect(
+    getToolCommandBehavior("importImage"),
     "Sketch reference-image import should declare image-import behavior through tool metadata.",
-  );
-  expectTrue(
-    getToolCommandBehavior("line") === null,
+  ).toBe("sketchReferenceImageImport");
+  expect(
+    getToolCommandBehavior("line"),
     "Ordinary modeling tools should not declare special command behavior.",
-  );
+  ).toBe(null);
 
-  expectTrue(
-    resolveToolActivationMode("undo", "part") === "part",
+  expect(
+    resolveToolActivationMode("undo", "part"),
     "Undo should preserve the current toolbar mode.",
-  );
-  expectTrue(
-    resolveToolActivationMode("redo", "sketch") === "sketch",
+  ).toBe("part");
+  expect(
+    resolveToolActivationMode("redo", "sketch"),
     "Redo should preserve the current toolbar mode.",
-  );
-  expectTrue(
-    resolveToolActivationMode("sketch", "part") === "part",
+  ).toBe("sketch");
+  expect(
+    resolveToolActivationMode("sketch", "part"),
     "Sketch should log and route activation from part mode.",
-  );
-  expectTrue(
-    resolveToolActivationMode("finishSketch", "sketch") === "sketch",
+  ).toBe("part");
+  expect(
+    resolveToolActivationMode("finishSketch", "sketch"),
     "Finish Sketch should remain a sketch-mode activation.",
-  );
-  expectTrue(
-    resolveToolActivationMode("line", "part") === "sketch",
+  ).toBe("sketch");
+  expect(
+    resolveToolActivationMode("line", "part"),
     "Sketch-only tools should resolve to sketch mode from metadata alone.",
-  );
-  expectTrue(
-    resolveToolActivationMode("extrude", "sketch") === "part",
+  ).toBe("sketch");
+  expect(
+    resolveToolActivationMode("extrude", "sketch"),
     "Part-only tools should resolve to part mode from metadata alone.",
-  );
+  ).toBe("part");
 });

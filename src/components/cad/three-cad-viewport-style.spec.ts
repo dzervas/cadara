@@ -1,7 +1,6 @@
-import { test } from "bun:test";
+import { test, expect } from "vitest";
 import * as THREE from "three";
 
-import { expectTrue } from "@/testing/expect.spec";
 import {
   ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS,
   buildSketchGradientMeshMaterial,
@@ -98,121 +97,121 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     },
   } as const;
 
-  expectTrue(
+  expect(
     shouldApplySketchDisplayStyles("sketch", true),
     "Sketch display styling should be enabled while an active sketch session is being edited.",
-  );
-  expectTrue(
-    !shouldApplySketchDisplayStyles("part", true),
+  ).toBeTruthy();
+  expect(
+    shouldApplySketchDisplayStyles("part", true),
     "Sketch display styling should be disabled in part mode, even if a sketch session object exists.",
-  );
+  ).toBeFalsy();
 
   const styledLineConfig = getSketchDisplayPolylineMaterialConfig(
     styledPolylineRenderable,
     true,
     palette,
   );
-  expectTrue(
-    styledLineConfig.color === 0x33ffaa,
+  expect(
+    styledLineConfig.color,
     "Sketch mode should apply stroke color from renderable style metadata.",
-  );
-  expectTrue(
-    styledLineConfig.opacity === 0.5,
+  ).toBe(0x33ffaa);
+  expect(
+    styledLineConfig.opacity,
     "Sketch mode should apply stroke opacity from renderable style metadata.",
-  );
-  expectTrue(
-    styledLineConfig.lineWidth === 3,
+  ).toBe(0.5);
+  expect(
+    styledLineConfig.lineWidth,
     "Sketch mode should apply stroke width from renderable style metadata.",
-  );
-  expectTrue(
-    styledLineConfig.linePattern === "dashed",
+  ).toBe(3);
+  expect(
+    styledLineConfig.linePattern,
     "Sketch mode should use dashed materials for authored dash patterns.",
-  );
-  expectTrue(
-    styledLineConfig.dashSize === 0.5,
+  ).toBe("dashed");
+  expect(
+    styledLineConfig.dashSize,
     "Sketch mode should apply authored dash size.",
-  );
-  expectTrue(
-    styledLineConfig.gapSize === 0.2,
+  ).toBe(0.5);
+  expect(
+    styledLineConfig.gapSize,
     "Sketch mode should apply authored gap size.",
-  );
-  expectTrue(
-    styledLineConfig.lineJoin === "miter",
+  ).toBe(0.2);
+  expect(
+    styledLineConfig.lineJoin,
     "Sketch mode should preserve authored line join in material config.",
-  );
-  expectTrue(
-    styledLineConfig.miterLimit === 7,
+  ).toBe("miter");
+  expect(
+    styledLineConfig.miterLimit,
     "Sketch mode should preserve authored miter limit in material config.",
-  );
-  expectTrue(
+  ).toBe(7);
+  expect(
     shouldUseSketchStrokeMeshGeometry(
       styledPolylineRenderable,
       styledLineConfig,
       true,
     ),
     "Authored SVG stroke style should use mesh stroke geometry instead of native Three line primitives.",
-  );
+  ).toBeTruthy();
 
   const partModeLineConfig = getSketchDisplayPolylineMaterialConfig(
     styledPolylineRenderable,
     false,
     palette,
   );
-  expectTrue(
-    partModeLineConfig.color !== 0x33ffaa,
+  expect(
+    partModeLineConfig.color,
     "Part mode should fall back to neutral CAD stroke colors instead of sketch-authored style metadata.",
-  );
-  expectTrue(
-    partModeLineConfig.opacity === 0.95,
+  ).not.toBe(0x33ffaa);
+  expect(
+    partModeLineConfig.opacity,
     "Part mode should use the existing neutral solid-line opacity.",
-  );
-  expectTrue(
-    partModeLineConfig.lineWidth === 1,
+  ).toBe(0.95);
+  expect(
+    partModeLineConfig.lineWidth,
     "Part mode should preserve default line-width behavior for picking stability.",
-  );
+  ).toBe(1);
 
   const styledMeshConfig = getSketchDisplayMeshMaterialConfig(
     styledMeshRenderable,
     true,
     palette,
   );
-  expectTrue(
-    styledMeshConfig.color === 0xaa33ff,
+  expect(
+    styledMeshConfig.color,
     "Sketch mode should apply paint color from renderable style metadata.",
-  );
-  expectTrue(
-    styledMeshConfig.opacity === 0.44,
+  ).toBe(0xaa33ff);
+  expect(
+    styledMeshConfig.opacity,
     "Sketch mode should apply paint opacity from renderable style metadata.",
-  );
-  expectTrue(
-    styledMeshConfig.fill.kind === "solid",
+  ).toBe(0.44);
+  expect(
+    styledMeshConfig.fill.kind,
     "Solid sketch fills should remain explicit material input.",
-  );
+  ).toBe("solid");
 
   const gradientMeshConfig = getSketchDisplayMeshMaterialConfig(
     gradientMeshRenderable,
     true,
     palette,
   );
-  expectTrue(
-    gradientMeshConfig.fill.kind === "linearGradient",
+  expect(
+    gradientMeshConfig.fill.kind,
     "Sketch mode should preserve linear-gradient fill material input instead of collapsing it to a solid color.",
-  );
-  expectTrue(
+  ).toBe("linearGradient");
+  expect(
     gradientMeshConfig.fill.startColor === 0x2266ff &&
       gradientMeshConfig.fill.startOpacity === 0.2 &&
       gradientMeshConfig.fill.endColor === 0xffaa33 &&
       gradientMeshConfig.fill.endOpacity === 0.72 &&
       gradientMeshConfig.fill.angleRadians === Math.PI / 4,
     "Gradient material input should preserve start/end color, opacity, and angle.",
-  );
+  ).toBeTruthy();
   const gradientMaterial = buildSketchGradientMeshMaterial(gradientMeshConfig);
-  expectTrue(
+  expect(
     gradientMaterial instanceof THREE.ShaderMaterial &&
       gradientMaterial.uniforms.startColor.value instanceof THREE.Color &&
       gradientMaterial.uniforms.endColor.value instanceof THREE.Color,
     "Gradient region fills should build a gradient-capable shader material.",
-  );
+  ).toBeTruthy();
   gradientMaterial.dispose();
 
   const partModeMeshConfig = getSketchDisplayMeshMaterialConfig(
@@ -220,20 +219,20 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     false,
     palette,
   );
-  expectTrue(
-    partModeMeshConfig.color !== 0xaa33ff,
+  expect(
+    partModeMeshConfig.color,
     "Part mode should not apply sketch paint styles to display mesh renderables.",
-  );
+  ).not.toBe(0xaa33ff);
   const disabledGradientMeshConfig = getSketchDisplayMeshMaterialConfig(
     gradientMeshRenderable,
     false,
     palette,
   );
-  expectTrue(
+  expect(
     disabledGradientMeshConfig.fill.kind === "solid" &&
       gradientMeshRenderable.paintStyle.kind === "linearGradient",
     "Disabling SVG rendering should suppress visual gradient effects without deleting authored gradient style data.",
-  );
+  ).toBeTruthy();
 
   const regionMeshConfig = getSketchDisplayMeshMaterialConfig(
     {
@@ -243,17 +242,17 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     false,
     palette,
   );
-  expectTrue(
+  expect(
     regionMeshConfig.polygonOffset,
     "Sketch-owned region fills should use polygon offset.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     regionMeshConfig.polygonOffsetFactor < 0 &&
       regionMeshConfig.polygonOffsetUnits < 0,
     "Sketch-owned region fills should be biased toward the camera to avoid coplanar flicker.",
-  );
+  ).toBeTruthy();
 
-  expectTrue(
+  expect(
     getSketchRenderingPaletteToken("constrained") ===
       "--workbench-tooltip-description" &&
       getSketchRenderingPaletteToken("underconstrained") ===
@@ -263,8 +262,8 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
       getSketchRenderingPaletteToken("regionFill") ===
         "--workbench-shell-border",
     "Sketch palette roles should map to exact existing theme tokens.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     Object.values(SKETCH_RENDERING_PALETTE_TOKENS).every((token) =>
       [
         "--workbench-tooltip-description",
@@ -274,7 +273,7 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
       ].includes(token),
     ),
     "Sketch palette resolver should not introduce non-theme color tokens.",
-  );
+  ).toBeTruthy();
 
   const resolvedPalette = resolveSketchRenderingPalette((token) => {
     const values: Record<string, string> = {
@@ -285,10 +284,10 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     };
     return values[token] ?? "";
   });
-  expectTrue(
-    resolvedPalette.underconstrained === 0x1651b0,
+  expect(
+    resolvedPalette.underconstrained,
     "Palette resolver should convert theme CSS values for Three materials.",
-  );
+  ).toBe(0x1651b0);
 
   const constrainedLineConfig = getSketchDisplayPolylineMaterialConfig(
     {
@@ -302,10 +301,10 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     true,
     palette,
   );
-  expectTrue(
-    constrainedLineConfig.color === palette.constrained,
+  expect(
+    constrainedLineConfig.color,
     "Fully constrained sketch lines should default to the constrained theme color.",
-  );
+  ).toBe(palette.constrained);
 
   const diagnosticLineConfig = getSketchDisplayPolylineMaterialConfig(
     {
@@ -319,18 +318,18 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     true,
     palette,
   );
-  expectTrue(
-    diagnosticLineConfig.color === palette.overconstrained,
+  expect(
+    diagnosticLineConfig.color,
     "Affected overconstrained edge diagnostics should use the error color.",
-  );
-  expectTrue(
-    diagnosticLineConfig.lineWidth === 1,
+  ).toBe(palette.overconstrained);
+  expect(
+    diagnosticLineConfig.lineWidth,
     "Affected overconstrained edge diagnostics should stay thin.",
-  );
-  expectTrue(
-    diagnosticLineConfig.color !== styledPolylineRenderable.strokeStyle.color,
+  ).toBe(1);
+  expect(
+    diagnosticLineConfig.color,
     "Diagnostic edge overlays may override authored stroke color without replacing the base authored stroke.",
-  );
+  ).not.toBe(styledPolylineRenderable.strokeStyle.color);
 
   const affectedMarkerConfig = getSketchDisplayMarkerMaterialConfig(
     {
@@ -345,28 +344,28 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     true,
     palette,
   );
-  expectTrue(
-    affectedMarkerConfig.color === palette.overconstrained,
+  expect(
+    affectedMarkerConfig.color,
     "Affected overconstrained sketch vertices should use the error color family.",
-  );
+  ).toBe(palette.overconstrained);
 
   const overlayMarkerRenderable = {
     ...styledPolylineRenderable,
     geometry: { kind: "marker", position: [0, 0, 0], displayRadius: 0.4 },
     markerLayer: "overlay" as const,
   };
-  expectTrue(
-    !shouldDepthTestSketchDisplayMarker(overlayMarkerRenderable),
+  expect(
+    shouldDepthTestSketchDisplayMarker(overlayMarkerRenderable),
     "Overlay sketch markers should ignore depth so image-bound anchors remain visible above reference-image quads.",
-  );
-  expectTrue(
+  ).toBeFalsy();
+  expect(
     getSketchDisplayMarkerRenderOrder(overlayMarkerRenderable) >
       getSketchDisplayMarkerRenderOrder({
         ...overlayMarkerRenderable,
         markerLayer: "default" as const,
       }),
     "Overlay sketch markers should render after default sketch points.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/components/cad/three-cad-viewport-style.spec.ts active sketch feedback world units per pixel", () => {
@@ -380,23 +379,23 @@ test("src/components/cad/three-cad-viewport-style.spec.ts active sketch feedback
   );
   orthographic.zoom = 1;
   orthographic.updateProjectionMatrix();
-  expectTrue(
+  expect(
     nearlyEqual(
       getSketchFeedbackWorldUnitsPerPixel(orthographic, 1000, [[0, 0, 0]]),
       0.02,
     ),
     "Orthographic active sketch feedback scale should derive from camera span and viewport height.",
-  );
+  ).toBeTruthy();
 
   orthographic.zoom = 4;
   orthographic.updateProjectionMatrix();
-  expectTrue(
+  expect(
     nearlyEqual(
       getSketchFeedbackWorldUnitsPerPixel(orthographic, 1000, [[0, 0, 0]]),
       0.005,
     ),
     "Orthographic active sketch feedback scale should shrink as zoom increases.",
-  );
+  ).toBeTruthy();
 
   const perspective = new THREE.PerspectiveCamera(90, 1, 0.1, 1000);
   perspective.position.set(0, 0, 10);
@@ -410,14 +409,14 @@ test("src/components/cad/three-cad-viewport-style.spec.ts active sketch feedback
     [0, 0, 0],
   ]);
 
-  expectTrue(
+  expect(
     nearlyEqual(nearScale, 0.02),
     "Perspective active sketch feedback scale should use camera distance to the anchor.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     nearlyEqual(farScale, 0.2),
     "Perspective active sketch feedback scale should grow as the camera moves away.",
-  );
+  ).toBeTruthy();
 });
 
 test("src/components/cad/three-cad-viewport-style.spec.ts active sketch marker screen-space radii", () => {
@@ -442,29 +441,29 @@ test("src/components/cad/three-cad-viewport-style.spec.ts active sketch marker s
   camera.updateProjectionMatrix();
   const zoomedIn = getActiveSketchMarkerWorldRadii(renderable, camera, 1000);
 
-  expectTrue(
-    zoomedOut.visiblePixelRadius === zoomedIn.visiblePixelRadius,
+  expect(
+    zoomedOut.visiblePixelRadius,
     "Active sketch marker visible pixel radius should stay stable after camera zoom changes.",
-  );
-  expectTrue(
-    zoomedOut.pickPixelRadius === zoomedIn.pickPixelRadius,
+  ).toBe(zoomedIn.visiblePixelRadius);
+  expect(
+    zoomedOut.pickPixelRadius,
     "Active sketch marker pick proxy pixel radius should stay stable after camera zoom changes.",
-  );
-  expectTrue(
+  ).toBe(zoomedIn.pickPixelRadius);
+  expect(
     zoomedOut.pickPixelRadius >= zoomedOut.visiblePixelRadius &&
       zoomedOut.pickPixelRadius >=
         ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.pickProxy.min,
     "Active sketch marker pick proxy should remain at least as reachable as the visible marker.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     zoomedIn.visibleRadius < zoomedOut.visibleRadius &&
       zoomedIn.pickRadius < zoomedOut.pickRadius,
     "Active sketch marker world radii should change with camera scale to preserve screen-space size.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     zoomedOut.visiblePixelRadius <= 5.1,
     "Default active sketch vertices should stay compact while remaining screen-space stabilized.",
-  );
+  ).toBeTruthy();
 
   const overlay = getActiveSketchMarkerWorldRadii(
     {
@@ -475,11 +474,10 @@ test("src/components/cad/three-cad-viewport-style.spec.ts active sketch marker s
     camera,
     1000,
   );
-  expectTrue(
-    overlay.visiblePixelRadius ===
-      ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.overlay.max,
+  expect(
+    overlay.visiblePixelRadius,
     "Overlay active sketch markers should clamp to the overlay marker pixel bounds.",
-  );
+  ).toBe(ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.marker.overlay.max);
 });
 
 test("src/components/cad/three-cad-viewport-style.spec.ts active sketch stroke geometry screen-space sizing", () => {
@@ -533,27 +531,26 @@ test("src/components/cad/three-cad-viewport-style.spec.ts active sketch stroke g
   const wideBounds = getGeometryBounds(wideWorld);
   const narrowBounds = getGeometryBounds(narrowWorld);
 
-  expectTrue(
+  expect(
     shouldUseSketchStrokeMeshGeometry(renderable, materialConfig, true),
     "Default active sketch wires should use mesh stroke geometry instead of native line width.",
-  );
-  expectTrue(
-    geometryConfig.lineWidth ===
-      ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.default.min,
+  ).toBeTruthy();
+  expect(
+    geometryConfig.lineWidth,
     "Default active sketch wires should use the default wire pixel-size bounds.",
-  );
-  expectTrue(
+  ).toBe(ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.default.min);
+  expect(
     materialConfig.color === geometryConfig.color &&
       materialConfig.opacity === geometryConfig.opacity &&
       materialConfig.lineCap === geometryConfig.lineCap &&
       materialConfig.lineJoin === geometryConfig.lineJoin &&
       materialConfig.linePattern === geometryConfig.linePattern,
     "Active sketch stroke sizing should preserve existing wire color, opacity, cap, join, and pattern styling.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     getStrokeWorldHeight(wideBounds) > getStrokeWorldHeight(narrowBounds),
     "Active sketch stroke geometry world thickness should change as the camera-derived pixel scale changes.",
-  );
+  ).toBeTruthy();
 
   wideWorld.dispose();
   narrowWorld.dispose();
@@ -598,20 +595,20 @@ test("src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geomet
   const squareBounds = getGeometryBounds(square);
   const roundBounds = getGeometryBounds(round);
 
-  expectTrue(
+  expect(
     nearlyEqual(buttBounds.min.x, 0) && nearlyEqual(buttBounds.max.x, 10),
     "Butt caps should not extend stroke mesh bounds past open line endpoints.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     nearlyEqual(squareBounds.min.x, -1) && nearlyEqual(squareBounds.max.x, 11),
     "Square caps should extend by half the stroke width past open line endpoints.",
-  );
-  expectTrue(
+  ).toBeTruthy();
+  expect(
     roundBounds.min.x < 0 &&
       roundBounds.max.x > 10 &&
       getPositionCount(round) > getPositionCount(butt),
     "Round caps should add cap geometry beyond open line endpoints.",
-  );
+  ).toBeTruthy();
 
   const closedButt = buildSketchPolylineStrokeGeometry({
     points: [
@@ -633,7 +630,7 @@ test("src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geomet
     materialConfig: { ...baseConfig, lineCap: "square" },
     worldUnitsPerPixel: 1,
   });
-  expectTrue(
+  expect(
     getPositionCount(closedButt) === getPositionCount(closedSquare) &&
       getGeometryBounds(closedButt).min.distanceTo(
         getGeometryBounds(closedSquare).min,
@@ -642,7 +639,7 @@ test("src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geomet
         getGeometryBounds(closedSquare).max,
       ) < 1e-6,
     "Closed polylines should ignore endcap style and use join geometry.",
-  );
+  ).toBeTruthy();
 
   const cornerPoints = [
     [0, 0, 0],
@@ -674,18 +671,18 @@ test("src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geomet
     worldUnitsPerPixel: 1,
   });
 
-  expectTrue(
+  expect(
     getPositionCount(roundJoin) > getPositionCount(bevel),
     "Round joins should create more corner geometry than bevel joins.",
-  );
-  expectTrue(
-    getPositionCount(miter) !== getPositionCount(bevel),
+  ).toBeTruthy();
+  expect(
+    getPositionCount(miter),
     "Miter joins should produce distinct corner geometry from bevel joins.",
-  );
-  expectTrue(
-    getPositionCount(clippedMiter) !== getPositionCount(miter),
+  ).not.toBe(getPositionCount(bevel));
+  expect(
+    getPositionCount(clippedMiter),
     "Miter limit should safely fall back instead of emitting the full miter corner.",
-  );
+  ).not.toBe(getPositionCount(miter));
 
   const dashedSegments = splitSketchPolylineDashSegments(
     [new THREE.Vector2(0, 0), new THREE.Vector2(10, 0)],
@@ -693,14 +690,14 @@ test("src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geomet
     2,
     false,
   );
-  expectTrue(
+  expect(
     dashedSegments.length === 3 &&
       dashedSegments[0]?.[0]?.x === 0 &&
       dashedSegments[0]?.at(-1)?.x === 2 &&
       dashedSegments[1]?.[0]?.x === 4 &&
       dashedSegments[2]?.at(-1)?.x === 10,
     "Dashed SVG strokes should split the path into dash subsegments before tessellation.",
-  );
+  ).toBeTruthy();
   const dashedSquare = buildSketchPolylineStrokeGeometry({
     points: linePoints,
     isClosed: false,
@@ -713,12 +710,12 @@ test("src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geomet
     },
     worldUnitsPerPixel: 1,
   });
-  expectTrue(
+  expect(
     hasPositionX(dashedSquare, 3) &&
       hasPositionX(dashedSquare, 7) &&
       getPositionCount(dashedSquare) > getPositionCount(square),
     "Dashed strokes should apply caps to every dash segment, not only to the whole path.",
-  );
+  ).toBeTruthy();
 
   const longDatumGuideStroke = buildSketchPolylineStrokeGeometry({
     points: [
@@ -736,15 +733,18 @@ test("src/components/cad/three-cad-viewport-style.spec.ts SVG stroke mesh geomet
     },
     worldUnitsPerPixel: 0.02,
   });
-  expectTrue(
+  expect(
     getPositionCount(longDatumGuideStroke) <= 13_200,
     "Long active sketch dashed guides should cap mesh dash tessellation instead of emitting thousands of tiny dash strokes.",
-  );
+  ).toBeTruthy();
 });
 
 function getGeometryBounds(geometry: THREE.BufferGeometry) {
   geometry.computeBoundingBox();
-  expectTrue(geometry.boundingBox, "Expected stroke geometry to have bounds.");
+  expect(
+    geometry.boundingBox,
+    "Expected stroke geometry to have bounds.",
+  ).toBeTruthy();
   return geometry.boundingBox;
 }
 

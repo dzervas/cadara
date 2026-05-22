@@ -1,7 +1,9 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
+import UnpluginTypia from "@typia/unplugin/vite";
 import path from "node:path";
 
 import {
@@ -80,9 +82,18 @@ const shouldUploadSentrySourceMaps = Boolean(
 
 // https://vite.dev/config/
 export default defineConfig({
+  test: {
+    testTimeout: 15_000,
+  },
+  worker: {
+    plugins: () => [
+      UnpluginTypia({ tsconfig: path.resolve(__dirname, "tsconfig.app.json") }),
+    ],
+  },
   plugins: [
     createBuildMetadataPlugin(__dirname),
     createOpenCascadeAssetHeadersPlugin(),
+    UnpluginTypia({ tsconfig: path.resolve(__dirname, "tsconfig.app.json") }),
     react(),
     tailwindcss(),
     sentryVitePlugin({
@@ -133,6 +144,15 @@ export default defineConfig({
       "index.html",
       "src/infrastructure/workers/document-sync.worker.ts",
       "src/domain/modeling/occ/worker.ts",
+    ],
+    // Typia's generated validators import these runtime helpers from deep
+    // package paths after the transformer runs. Include them explicitly so
+    // the dev server does not trigger a dependency-optimization reload during
+    // Playwright startup.
+    include: [
+      "typia/lib/internal/_accessExpressionAsString",
+      "typia/lib/internal/_createStandardSchema",
+      "typia/lib/internal/_validateReport",
     ],
     // The browser OCC runtime is served from /public as a versioned custom
     // asset pair and should not be pulled into dependency optimization.

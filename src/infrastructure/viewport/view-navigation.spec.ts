@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 
 import * as THREE from "three";
 
@@ -36,6 +36,8 @@ test("src/infrastructure/viewport/view-navigation.spec.ts", async () => {
       update: () => {
         updateCalls += 1;
       },
+      addEventListener: () => {},
+      removeEventListener: () => {},
     };
 
     snapCameraToVector({
@@ -70,6 +72,8 @@ test("src/infrastructure/viewport/view-navigation.spec.ts", async () => {
       update: () => {
         updateCalls += 1;
       },
+      addEventListener: () => {},
+      removeEventListener: () => {},
     };
 
     snapCameraToPreset({
@@ -102,6 +106,8 @@ test("src/infrastructure/viewport/view-navigation.spec.ts", async () => {
       update: () => {
         updateCalls += 1;
       },
+      addEventListener: () => {},
+      removeEventListener: () => {},
     };
 
     const expectedDistance = Math.max(
