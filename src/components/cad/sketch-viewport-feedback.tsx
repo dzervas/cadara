@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 
 import type {
   SketchToolOverlayDragHandle,
@@ -12,6 +12,14 @@ import {
   getOverlayProjectionId,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
+
+const VIEWPORT_FLOATING_INPUT_WIDTH_PX = 220;
+const VIEWPORT_FLOATING_INPUT_ESTIMATED_HEIGHT_PX = 132;
+const VIEWPORT_FLOATING_INPUT_MARGIN_PX = 12;
+const VIEWPORT_FLOATING_INPUT_RIGHT_EDGE_PX =
+  VIEWPORT_FLOATING_INPUT_WIDTH_PX + VIEWPORT_FLOATING_INPUT_MARGIN_PX;
+const VIEWPORT_FLOATING_INPUT_TOP_EDGE_PX =
+  VIEWPORT_FLOATING_INPUT_ESTIMATED_HEIGHT_PX + VIEWPORT_FLOATING_INPUT_MARGIN_PX;
 
 interface SketchViewportFeedbackLayerProps {
   schema: SketchToolPresentationSchema | null;
@@ -605,25 +613,33 @@ function ViewportFloatingInput({
   projection: SketchViewportFeedbackProjection | undefined;
   onPatch: (patch: Record<string, unknown>) => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, [descriptor.id]);
+
   if (!projection) {
     return null;
   }
+
+  const clampedLeft = `clamp(${VIEWPORT_FLOATING_INPUT_MARGIN_PX}px, ${projection.x}px, calc(100% - ${VIEWPORT_FLOATING_INPUT_RIGHT_EDGE_PX}px))`;
+  const clampedBottom = `clamp(${VIEWPORT_FLOATING_INPUT_MARGIN_PX}px, calc(100% - ${projection.y}px), calc(100% - ${VIEWPORT_FLOATING_INPUT_TOP_EDGE_PX}px))`;
 
   return (
     <div
       className="pointer-events-auto absolute w-[220px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]"
       data-sketch-viewport-floating-input={descriptor.id}
       style={{
-        left: projection.x,
-        top: projection.y,
-        transform: "translate(0, -100%)",
+        left: clampedLeft,
+        bottom: clampedBottom,
       }}
     >
       <div className="text-sm font-medium text-[var(--cad-foreground)]">
         {descriptor.label}
       </div>
       <input
-        autoFocus
+        ref={inputRef}
         className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 font-mono text-[13px] text-[var(--cad-foreground)] outline-none focus-visible:border-[var(--cad-accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
         defaultValue={descriptor.value?.toString() ?? ""}
         key={descriptor.id}
