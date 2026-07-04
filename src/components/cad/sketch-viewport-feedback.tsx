@@ -25,6 +25,7 @@ interface SketchViewportFeedbackLayerProps {
   schema: SketchToolPresentationSchema | null;
   projections: readonly SketchViewportFeedbackProjection[];
   onPatch: (patch: Record<string, unknown>) => void;
+  documentVariableNames?: readonly string[];
   onDragHandle?: (
     handle: SketchToolOverlayDragHandle,
     clientX: number,
@@ -37,6 +38,7 @@ export function SketchViewportFeedbackLayer({
   projections,
   onPatch,
   onDragHandle,
+  documentVariableNames = [],
 }: SketchViewportFeedbackLayerProps) {
   const dragCallbacks = {
     onDragStart(
@@ -132,6 +134,7 @@ export function SketchViewportFeedbackLayer({
               getFloatingInputProjectionId(schema.floatingInput.id),
             )}
             onPatch={onPatch}
+            documentVariableNames={documentVariableNames}
           />
         </div>
       ) : null}
@@ -608,12 +611,16 @@ function ViewportFloatingInput({
   descriptor,
   projection,
   onPatch,
+  documentVariableNames,
 }: {
   descriptor: SketchToolFloatingInputDescriptor;
   projection: SketchViewportFeedbackProjection | undefined;
   onPatch: (patch: Record<string, unknown>) => void;
+  documentVariableNames: readonly string[];
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const variableNames = documentVariableNames;
+  const suggestionsId = `${descriptor.id}-variables`;
 
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
@@ -641,18 +648,20 @@ function ViewportFloatingInput({
       <input
         ref={inputRef}
         className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 font-mono text-[13px] text-[var(--cad-foreground)] outline-none focus-visible:border-[var(--cad-accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
-        defaultValue={descriptor.value?.toString() ?? ""}
+        list={variableNames.length > 0 ? suggestionsId : undefined}
+        defaultValue={descriptor.value ?? ""}
         key={descriptor.id}
-        min={descriptor.min}
-        step="any"
-        type="number"
         onChange={(event) => {
-          const nextValue = parseFloatingInputNumber(event.currentTarget.value);
-          onPatch({
-            value: nextValue,
-          });
+          onPatch({ value: event.currentTarget.value });
         }}
       />
+      {variableNames.length > 0 ? (
+        <datalist id={suggestionsId}>
+          {variableNames.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+      ) : null}
       <div className="mt-3 flex items-center justify-between gap-2">
         <button
           type="button"
@@ -673,11 +682,3 @@ function ViewportFloatingInput({
   );
 }
 
-function parseFloatingInputNumber(value: string) {
-  if (value.trim() === "") {
-    return null;
-  }
-
-  const parsed = Number(value);
-  return Number.isNaN(parsed) ? null : parsed;
-}

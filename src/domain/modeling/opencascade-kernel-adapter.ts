@@ -54,6 +54,7 @@ import type {
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
 import { type AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
@@ -1603,6 +1604,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       structuredClone(sketch.definition),
       sketchId,
     );
+    const resolvedDefinition = resolveSketchDimensionValues({
+      definition,
+      variables: document.variables,
+    });
+    if (!resolvedDefinition.ok) {
+      throw new Error(
+        `Authored sketch ${sketchId} dimensions could not be resolved: ${resolvedDefinition.diagnostics
+          .map((diagnostic) => diagnostic.message)
+          .join("; ")}`,
+      );
+    }
     const correlation = createRestoreSolverCorrelation(
       sketchId,
       document.revisionId,
@@ -1635,7 +1647,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       plane: sketch.plane.frame,
       tolerances,
-      definition,
+      definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
     });
     const solved = await solverAdapter.solveSketch({
@@ -1648,7 +1660,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       plane: sketch.plane.frame,
       tolerances,
       partialSolvePolicy: "bestEffort",
-      definition,
+      definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
     });
     const regions = await solverAdapter.deriveSketchRegions({
@@ -1659,7 +1671,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionId: document.revisionId,
       sketchId,
       solvedSnapshot: solved.solvedSnapshot,
-      definition,
+      definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
     });
 
@@ -3160,6 +3172,26 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       request.definition,
       sketchId,
     );
+    const resolvedDefinition = resolveSketchDimensionValues({
+      definition: normalizedDefinition,
+      variables: runtimeState.authoringState.variables,
+    });
+    if (!resolvedDefinition.ok) {
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        resolvedDefinition.diagnostics,
+        resolvedDefinition.diagnostics[0]?.code ?? "sketch-dimension-expression",
+      );
+
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        sketchId,
+        changedTargets: [],
+        ...rejected,
+      };
+    }
+    const solverDefinition = resolvedDefinition.definition;
     const correlation =
       request.solverCorrelation ??
       createDefaultSolverCorrelation(sketchId, request.baseRevisionId);
@@ -3188,7 +3220,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       plane: request.plane.frame,
       tolerances: this.tolerances,
-      definition: normalizedDefinition,
+      definition: solverDefinition,
       projectedReferences: projection.projectedReferences,
     });
     const solved = await solverAdapter.solveSketch({
@@ -3201,7 +3233,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       plane: request.plane.frame,
       tolerances: this.tolerances,
       partialSolvePolicy: "bestEffort",
-      definition: normalizedDefinition,
+      definition: solverDefinition,
       projectedReferences: projection.projectedReferences,
     });
     const regions = await solverAdapter.deriveSketchRegions({
@@ -3212,7 +3244,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       revisionId: request.baseRevisionId,
       sketchId,
       solvedSnapshot: solved.solvedSnapshot,
-      definition: normalizedDefinition,
+      definition: solverDefinition,
       projectedReferences: projection.projectedReferences,
     });
 

@@ -1,4 +1,8 @@
 import type { PrimitiveRef } from "@/core/editor/schema";
+import {
+  createLiteralAuthoredValue,
+  getAuthoredLiteralValue,
+} from "@/contracts/modeling/authored-values";
 import type {
   ConstraintDefinition,
   DimensionAnnotationPlacement,
@@ -2785,7 +2789,7 @@ const sketchConstraintDefinitions = [
               kind: "lineAngle",
               label: `Line angle ${input.sequence}`,
               lines: [firstLine, secondLine],
-              valueRadians: (input.value * Math.PI) / 180,
+              valueRadians: getAuthoredLiteralValue(input.value) === null ? input.value : createLiteralAuthoredValue((getAuthoredLiteralValue(input.value)! * Math.PI) / 180),
               annotationPlacement:
                 input.annotationPlacement?.kind === "angleArc"
                   ? input.annotationPlacement

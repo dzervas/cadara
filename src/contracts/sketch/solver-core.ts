@@ -1,11 +1,11 @@
 import type {
   ConstraintDefinition,
   ConstraintStatusRecord,
-  DimensionDefinition,
+  NumericDimensionDefinition as DimensionDefinition,
   DimensionStatusRecord,
   LocalCollinearTargetOperand,
   ProjectedSketchGeometryRef,
-  SketchDefinition,
+  NumericSketchDefinition as SketchDefinition,
   SketchCurveConstraintOperand,
   SketchEntityDefinition,
   SketchPointConstraintOperand,

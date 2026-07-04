@@ -1,4 +1,11 @@
-import type { SketchPoint } from "@/contracts/modeling/schema";
+import type {
+  DocumentVariableRecord,
+  SketchPoint,
+} from "@/contracts/modeling/schema";
+import {
+  getAuthoredFormText,
+  getAuthoredLiteralValue,
+} from "@/contracts/modeling/authored-values";
 import type { DimensionId } from "@/contracts/shared/ids";
 import type {
   SketchDefinition,
@@ -35,6 +42,7 @@ import {
   createDimensionId,
   createSketchDimensionRef,
   deriveSolvedRegionsForSession,
+  resolveSketchDefinitionForSolve,
   filterSketchDefinitionThroughCursor,
   getSessionSketchId,
   getTargetKey,
@@ -88,7 +96,7 @@ export function buildConstraintToolPresentation(
     selectedTargets: authoring.selectedTargets,
     hoverTarget: authoring.hoverTarget,
     pointer: authoring.pointer,
-    value: authoring.pendingValue,
+    value: getAuthoredLiteralValue(authoring.pendingValue),
     annotationPlacement: authoring.pendingAnnotationPlacement,
   });
   const needsValue =
@@ -105,7 +113,7 @@ export function buildConstraintToolPresentation(
       ? {
           id: `${authoring.toolId}-value-input`,
           label: valueSpec.label,
-          value: authoring.pendingValue,
+          value: authoring.pendingValue === null ? null : getAuthoredFormText(authoring.pendingValue),
           unit: valueSpec.unit,
           min: valueSpec.min,
           confirmLabel: "Commit",
@@ -295,7 +303,7 @@ export function activateSketchConstraintTool(
     hoverTarget: null,
     pointer: null,
     isPreviewPinned: false,
-    pendingValue: definition.valueSpec?.defaultValue ?? null,
+    pendingValue: normalizeConstraintValue(definition.valueSpec?.defaultValue),
     pendingAnnotationPlacement: null,
   };
 
@@ -532,9 +540,7 @@ export function patchSketchConstraintValue(
   if ("value" in patch) {
     const nextAuthoring = {
       ...authoring,
-      pendingValue: normalizeConstraintValue(
-        patch.value as number | null | undefined,
-      ),
+      pendingValue: normalizeConstraintValue(patch.value),
     };
 
     return {
@@ -607,9 +613,10 @@ export function patchSketchDimensionAnnotationPlacement(
 export function solveCommittedConstraintDefinition(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  documentVariables: readonly DocumentVariableRecord[] = [],
 ): { definition: SketchDefinition; solvedSnapshot?: SolvedSketchSnapshot } {
   const solved = solveSketchDefinitionCore({
-    definition,
+    definition: resolveSketchDefinitionForSolve(definition, documentVariables),
     projectedReferences,
     tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
     partialSolvePolicy: "bestEffort",
@@ -695,10 +702,12 @@ export function commitSketchConstraintAuthoring(
   const solvedDefinition = solveCommittedConstraintDefinition(
     history.definition,
     session.projectedReferences,
+    session.documentVariables,
   );
   const solvedFullDefinition = solveCommittedConstraintDefinition(
     history.fullDefinition,
     session.projectedReferences,
+    session.documentVariables,
   );
 
   return {

@@ -240,7 +240,7 @@ export type SketchToolOverlayDescriptor =
 export interface SketchToolFloatingInputDescriptor {
   id: string;
   label: string;
-  value: number | null;
+  value: string | null;
   unit?: string;
   confirmLabel: string;
   cancelLabel: string;

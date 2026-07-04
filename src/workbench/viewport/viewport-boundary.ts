@@ -31,6 +31,7 @@ export interface ViewportModel {
   sketchAnnotations: SketchAnnotationDescriptor[];
   selection: PrimitiveRef[];
   sketchToolPresentation: SketchToolPresentationSchema | null;
+  documentVariableNames: readonly string[];
   specialModePresentation: SketchSpecialModeViewportPresentation | null;
   hasNonEmptyCommittedGeometry: boolean;
   interaction: {

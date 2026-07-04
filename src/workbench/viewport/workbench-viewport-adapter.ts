@@ -31,6 +31,7 @@ interface WorkbenchViewportModelInput {
   sketchAnnotations: SketchAnnotationDescriptor[];
   selection: PrimitiveRef[];
   sketchToolPresentation: SketchToolPresentationSchema | null;
+  documentVariableNames: readonly string[];
   specialModePresentation: SketchSpecialModeViewportPresentation | null;
   hasNonEmptyCommittedGeometry: boolean;
   mode: EditorViewState["mode"];
@@ -50,6 +51,7 @@ export function createWorkbenchViewportModel({
   sketchAnnotations,
   selection,
   sketchToolPresentation,
+  documentVariableNames,
   specialModePresentation,
   hasNonEmptyCommittedGeometry,
   mode,
@@ -68,6 +70,7 @@ export function createWorkbenchViewportModel({
     sketchAnnotations,
     selection,
     sketchToolPresentation,
+    documentVariableNames,
     specialModePresentation,
     hasNonEmptyCommittedGeometry,
     interaction: {

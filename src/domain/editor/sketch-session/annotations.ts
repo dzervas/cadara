@@ -1,4 +1,14 @@
-import type { SketchPoint } from "@/contracts/modeling/schema";
+import type {
+  DocumentVariableRecord,
+  SketchPoint,
+} from "@/contracts/modeling/schema";
+import {
+  createLiteralAuthoredValue,
+  getAuthoredFormText,
+  getAuthoredLiteralValue,
+  isExpressionAuthoredValue,
+  type MaybeAuthoredValue,
+} from "@/contracts/modeling/authored-values";
 import type {
   SketchEntityId,
   SketchId,
@@ -22,6 +32,7 @@ import type {
   SketchStyleRecord,
 } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type {
@@ -47,6 +58,7 @@ import {
   deriveSolvedRegionsForSession,
   filterSketchDefinitionThroughCursor,
   getAppendBaseAuthoringOperations,
+  resolveSketchDefinitionForSolve,
   getTargetKey,
   normalizeConstraintValue,
   rebuildSessionCommitRequest,
@@ -509,7 +521,7 @@ export function clearSketchAnnotationEdit(
 
 export function commitSketchAnnotationEditValue(
   session: SketchSessionState,
-  edit: SketchAnnotationEditState & { pendingValue: number },
+  edit: SketchAnnotationEditState & { pendingValue: MaybeAuthoredValue<number> },
 ): SketchSessionState {
   const updatedFullDefinition = updateAnnotationValueInDefinition(
     session.fullDefinition,
@@ -524,6 +536,7 @@ export function commitSketchAnnotationEditValue(
   const solved = solveEditedAnnotationDefinition(
     updatedFullDefinition,
     session.projectedReferences,
+    session.documentVariables,
   );
 
   if (solved.kind === "blocked") {
@@ -567,9 +580,18 @@ export function commitSketchAnnotationEditValue(
 export function solveEditedAnnotationDefinition(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  documentVariables: readonly DocumentVariableRecord[] = [],
 ) {
-  const solved = solveSketchDefinitionCore({
+  const resolvedDefinition = resolveSketchDimensionValues({
     definition,
+    variables: documentVariables,
+  });
+  if (!resolvedDefinition.ok) {
+    return { kind: "blocked" as const, message: resolvedDefinition.diagnostics[0]?.message ?? "Dimension value could not be resolved." };
+  }
+
+  const solved = solveSketchDefinitionCore({
+    definition: resolvedDefinition.definition,
     projectedReferences,
     tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
     partialSolvePolicy: "failOnConflict",
@@ -715,7 +737,7 @@ export function updateAuthoringOperationsForAnnotationEdit(
 export function updateAnnotationValueInDefinition(
   definition: SketchDefinition,
   target: SketchConstraintRef | SketchDimensionRef,
-  value: number,
+  value: MaybeAuthoredValue<number>,
 ): SketchDefinition {
   if (target.kind === "constraint") {
     const constraints = definition.constraints.map((constraint) => {
@@ -726,9 +748,14 @@ export function updateAnnotationValueInDefinition(
         return constraint;
       }
 
+      const literalValue = getAuthoredLiteralValue(value);
+      if (literalValue === null) {
+        return constraint;
+      }
+
       return {
         ...constraint,
-        valueRadians: (value * Math.PI) / 180,
+        valueRadians: (literalValue * Math.PI) / 180,
       };
     });
     const edited = constraints.some(
@@ -772,11 +799,13 @@ export function updateAnnotationValueInDefinition(
           ...dimension,
           value,
         };
-      case "lineAngle":
+      case "lineAngle": {
+        const literalValue = getAuthoredLiteralValue(value);
         return {
           ...dimension,
-          valueRadians: (value * Math.PI) / 180,
+          valueRadians: literalValue === null ? value : (literalValue * Math.PI) / 180,
         };
+      }
       case "arcStartPointCoincident":
       case "arcEndPointCoincident":
         return dimension;
@@ -793,14 +822,15 @@ export function updateAnnotationValueInDefinition(
   return edited
     ? {
         ...definition,
-        entities: editedCircleRadiusEntityId
-          ? definition.entities.map((entity) =>
-              entity.entityId === editedCircleRadiusEntityId &&
-              entity.kind === "circle"
-                ? { ...entity, radius: value }
-                : entity,
-            )
-          : definition.entities,
+        entities:
+          editedCircleRadiusEntityId && getAuthoredLiteralValue(value) !== null
+            ? definition.entities.map((entity) =>
+                entity.entityId === editedCircleRadiusEntityId &&
+                entity.kind === "circle"
+                  ? { ...entity, radius: getAuthoredLiteralValue(value)! }
+                  : entity,
+              )
+            : definition.entities,
         dimensions,
         authoringOperations: updateAuthoringOperationsForAnnotationEdit(
           definition.authoringOperations,
@@ -811,7 +841,7 @@ export function updateAnnotationValueInDefinition(
               ? definition.entities.map((entity) =>
                   entity.entityId === editedCircleRadiusEntityId &&
                   entity.kind === "circle"
-                    ? { ...entity, radius: value }
+                    ? { ...entity, radius: getAuthoredLiteralValue(value)! }
                     : entity,
                 )
               : definition.entities,
@@ -1026,7 +1056,7 @@ export function buildAnnotationEditPresentation(
     floatingInput: {
       id: `annotation-edit-${getTargetKey(edit.target)}`,
       label,
-      value: edit.pendingValue,
+      value: edit.pendingValue === null ? null : getAuthoredFormText(edit.pendingValue),
       unit: editable?.unit,
       min: editable?.min,
       confirmLabel: "Save",
@@ -1059,7 +1089,7 @@ export function getEditableAnnotationValue(
   target: SketchConstraintRef | SketchDimensionRef,
 ): {
   label: string;
-  value: number;
+  value: MaybeAuthoredValue<number>;
   unit?: string;
   min?: number;
   anchor?: SketchToolAnchorDescriptor;
@@ -1173,16 +1203,21 @@ export function getEditableAnnotationValue(
           ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
           : undefined,
       };
-    case "lineAngle":
+    case "lineAngle": {
+      const literalRadians = getAuthoredLiteralValue(dimension.valueRadians);
       return {
         label: "Angle",
-        value: (dimension.valueRadians * 180) / Math.PI,
+        value:
+          literalRadians === null
+            ? dimension.valueRadians
+            : createLiteralAuthoredValue((literalRadians * 180) / Math.PI),
         unit: "deg",
         min: 0.1,
         anchor: annotation
           ? addAnchorOffset(annotation.anchor, { x: 18, y: -18 })
           : undefined,
       };
+    }
     case "arcStartPointCoincident":
     case "arcEndPointCoincident":
       return null;
@@ -1282,12 +1317,39 @@ export function deleteSelectedSketchAnnotation(
   };
 }
 
+function resolveDimensionEffectiveValues(
+  session: SketchSessionState,
+): Map<DimensionDefinition["dimensionId"], number> {
+  const effectiveValues = new Map<DimensionDefinition["dimensionId"], number>();
+  const resolved = resolveSketchDimensionValues({
+    definition: session.definition,
+    variables: session.documentVariables,
+  });
+  if (!resolved.ok) {
+    return effectiveValues;
+  }
+
+  for (const dimension of resolved.definition.dimensions) {
+    if (dimension.kind === "lineAngle") {
+      effectiveValues.set(dimension.dimensionId, dimension.valueRadians);
+    } else if ("value" in dimension) {
+      effectiveValues.set(dimension.dimensionId, dimension.value);
+    }
+  }
+
+  return effectiveValues;
+}
+
 export function getSketchAnnotationDescriptors(
   session: SketchSessionState,
 ): SketchAnnotationDescriptor[] {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
+  const resolvedDimensionValues = resolveDimensionEffectiveValues(session);
   const solved = solveSketchDefinitionCore({
-    definition: session.definition,
+    definition: resolveSketchDefinitionForSolve(
+      session.definition,
+      session.documentVariables,
+    ),
     projectedReferences: session.projectedReferences,
     tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
     partialSolvePolicy: "bestEffort",
@@ -1334,9 +1396,15 @@ export function getSketchAnnotationDescriptors(
         constraintDisplaySummary,
       ),
       label: dimension.label,
-      detail: describeDimension(dimension),
+      detail: describeDimension(
+        dimension,
+        resolvedDimensionValues.get(dimension.dimensionId),
+      ),
       status: "dimension" as const,
-      visibleLabel: formatDimensionVisibleLabel(dimension),
+      visibleLabel: formatDimensionVisibleLabel(
+        dimension,
+        resolvedDimensionValues.get(dimension.dimensionId),
+      ),
       dragHandle: createDimensionAnnotationDragHandle(dimension),
     })),
   ];
@@ -3080,25 +3148,61 @@ export function describeConstraint(constraint: ConstraintDefinition) {
   }
 }
 
-export function describeDimension(dimension: DimensionDefinition) {
+const CALCULATED_DIMENSION_SYMBOL = "\u0192"; // ƒ denotes an expression-driven value.
+
+function formatAuthoredDimensionNumber(
+  value: MaybeAuthoredValue<number>,
+  digits: number,
+  resolvedValue?: number,
+) {
+  if (isExpressionAuthoredValue(value)) {
+    return resolvedValue === undefined
+      ? `${CALCULATED_DIMENSION_SYMBOL} ${getAuthoredFormText(value)}`
+      : `${CALCULATED_DIMENSION_SYMBOL} ${resolvedValue.toFixed(digits)}`;
+  }
+
+  const literal = getAuthoredLiteralValue(value);
+  return literal === null ? getAuthoredFormText(value) : literal.toFixed(digits);
+}
+
+function formatAuthoredDimensionDegrees(
+  value: MaybeAuthoredValue<number>,
+  digits: number,
+  resolvedRadians?: number,
+) {
+  if (isExpressionAuthoredValue(value)) {
+    return resolvedRadians === undefined
+      ? `${CALCULATED_DIMENSION_SYMBOL} ${getAuthoredFormText(value)}`
+      : `${CALCULATED_DIMENSION_SYMBOL} ${((resolvedRadians * 180) / Math.PI).toFixed(digits)}`;
+  }
+
+  const literal = getAuthoredLiteralValue(value);
+  return literal === null
+    ? getAuthoredFormText(value)
+    : ((literal * 180) / Math.PI).toFixed(digits);
+}
+export function describeDimension(
+  dimension: DimensionDefinition,
+  resolvedValue?: number,
+) {
   switch (dimension.kind) {
     case "distance":
     case "pointDatumDistance":
-      return `${dimension.value.toFixed(2)} mm distance`;
+      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm distance`;
     case "horizontalDistance":
     case "verticalDistance":
-      return `${dimension.value.toFixed(2)} mm distance`;
+      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm distance`;
     case "circleRadius":
-      return `${dimension.value.toFixed(2)} mm radius`;
+      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm radius`;
     case "diameter":
-      return `${dimension.value.toFixed(2)} mm diameter`;
+      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm diameter`;
     case "lineLength":
-      return `${dimension.value.toFixed(2)} mm length`;
+      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm length`;
     case "lineDistance":
     case "linePointDistance":
-      return `${dimension.value.toFixed(2)} mm distance`;
+      return `${formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue)} mm distance`;
     case "lineAngle":
-      return `${((dimension.valueRadians * 180) / Math.PI).toFixed(1)} deg angle`;
+      return `${formatAuthoredDimensionDegrees(dimension.valueRadians, 1, resolvedValue)} deg angle`;
     case "arcStartPointCoincident":
       return "Arc start coincident";
     case "arcEndPointCoincident":
@@ -3106,7 +3210,10 @@ export function describeDimension(dimension: DimensionDefinition) {
   }
 }
 
-export function formatDimensionVisibleLabel(dimension: DimensionDefinition) {
+export function formatDimensionVisibleLabel(
+  dimension: DimensionDefinition,
+  resolvedValue?: number,
+) {
   switch (dimension.kind) {
     case "distance":
     case "pointDatumDistance":
@@ -3117,9 +3224,9 @@ export function formatDimensionVisibleLabel(dimension: DimensionDefinition) {
     case "lineLength":
     case "lineDistance":
     case "linePointDistance":
-      return dimension.value.toFixed(2);
+      return formatAuthoredDimensionNumber(dimension.value, 2, resolvedValue);
     case "lineAngle":
-      return `${((dimension.valueRadians * 180) / Math.PI).toFixed(1)}°`;
+      return `${formatAuthoredDimensionDegrees(dimension.valueRadians, 1, resolvedValue)}°`;
     case "arcStartPointCoincident":
     case "arcEndPointCoincident":
       return "Coincident";

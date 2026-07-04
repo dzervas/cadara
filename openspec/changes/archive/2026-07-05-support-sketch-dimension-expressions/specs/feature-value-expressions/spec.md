@@ -1,32 +1,4 @@
-# feature-value-expressions Specification
-
-## Purpose
-TBD - created by archiving change use-expression-values-in-feature-editor. Update Purpose after archive.
-## Requirements
-### Requirement: Feature editor values SHALL support authored literal and expression sources
-The system SHALL represent expression-capable feature editor values with an authored value wrapper that distinguishes typed literals from raw expression text.
-
-#### Scenario: Literal feature value is authored
-- **WHEN** a feature editor value is entered as a typed literal
-- **THEN** the authored feature definition stores that value as a literal source
-- **AND** the value remains eligible for the same domain validation as the pre-expression typed value
-
-#### Scenario: Expression feature value is authored
-- **WHEN** a feature editor value is entered as expression text
-- **THEN** the authored feature definition stores the raw expression text
-- **AND** the authored feature definition does not store the parsed expression tree or calculated result
-
-### Requirement: Feature value expressions SHALL be limited to non-reference feature editor fields
-The system SHALL allow expression sources only for non-reference values surfaced by feature editor forms, and MUST reject expression sources for reference pickers, reference collections, durable references, IDs, feature discriminants, and selection targets.
-
-#### Scenario: Numeric field accepts an expression source
-- **WHEN** a feature editor numeric value such as depth, radius, angle, distance, or thickness is authored as expression text
-- **THEN** the authored feature definition preserves the expression source for that value
-
-#### Scenario: Reference field rejects an expression source
-- **WHEN** a reference picker or reference collection value is provided as expression text
-- **THEN** validation rejects the payload with an error diagnostic
-- **AND** the reference value is not coerced from the expression result
+## MODIFIED Requirements
 
 ### Requirement: Feature value expressions SHALL resolve before modeling execution
 The system SHALL resolve authored feature value expressions and other supported authored modeling value expressions into concrete typed values before preview, commit, rebuild, solver calls, mock kernel execution, or OpenCascade execution.
@@ -45,29 +17,6 @@ The system SHALL resolve authored feature value expressions and other supported 
 - **WHEN** an authored expression value cannot be parsed, references an unknown symbol, or resolves to an unsupported type
 - **THEN** the preview, commit, rebuild, or solve request reports diagnostics before the affected execution boundary consumes the value
 - **AND** the response includes an error diagnostic for the affected authored value
-
-### Requirement: Feature value expressions SHALL validate against value-specific result kinds
-The resolver SHALL validate each expression result against the feature field's declared value kind, including finite float, positive finite float, integer, boolean, string, enum string, and angle values.
-
-#### Scenario: Positive number expression resolves
-- **WHEN** a positive-number feature value expression evaluates to a finite number greater than zero
-- **THEN** the resolver returns that number as the resolved feature value
-
-#### Scenario: Positive number expression fails domain validation
-- **WHEN** a positive-number feature value expression evaluates to zero, a negative number, a non-number, or a non-finite number
-- **THEN** the resolver rejects the feature value with an error diagnostic
-
-#### Scenario: Boolean expression resolves
-- **WHEN** a boolean feature value expression evaluates to a boolean
-- **THEN** the resolver returns that boolean as the resolved feature value
-
-#### Scenario: Enum expression resolves
-- **WHEN** an enum feature value expression evaluates to a string that matches one of the field's declared options
-- **THEN** the resolver returns that string as the resolved feature value
-
-#### Scenario: Enum expression fails option validation
-- **WHEN** an enum feature value expression evaluates to a string that is not one of the field's declared options
-- **THEN** the resolver rejects the feature value with an error diagnostic
 
 ### Requirement: Feature value expression persistence MUST exclude runtime resolution state
 The system MUST persist only authored value sources for expression-capable modeling values and MUST NOT persist evaluated values, parsed math.js ASTs, dependency graphs, or expression diagnostics on durable feature definitions, sketch dimension definitions, or operation-history entries.
@@ -116,22 +65,3 @@ The system SHALL resolve expression-authored modeling values from the current do
 - **WHEN** a valid document variable mutation causes a dependent committed sketch dimension expression to resolve to an invalid value for its dimension kind
 - **THEN** the variable mutation remains authored as requested
 - **AND** solve or rebuild reports diagnostics for the affected sketch dimension without rewriting the authored dimension expression
-
-### Requirement: Advanced option values SHALL preserve authored expressions
-Expression-capable advanced option values SHALL preserve authored literal and expression sources through draft lifecycle, durable feature definitions, operation history, preview, commit, and rebuild.
-
-#### Scenario: Angle option is expression-authored
-- **WHEN** a user authors an advanced angle option such as draft angle or sweep twist angle as expression text
-- **THEN** the feature definition preserves the raw expression text until the shared resolver produces a concrete angle for execution
-
-#### Scenario: Integer option is expression-authored
-- **WHEN** a user authors a positive integer option such as loft path section count as expression text
-- **THEN** the resolver validates that the expression result is a positive integer before geometry execution
-
-### Requirement: Advanced reference options MUST remain durable references
-Advanced feature references MUST remain durable reference values through participant or reference field contracts and MUST NOT be expression-authored.
-
-#### Scenario: Reference-like option receives expression text
-- **WHEN** a feature option that selects a face, body, vertex, path, guide, or direction target receives expression text
-- **THEN** validation rejects the value and does not coerce the expression result into a durable reference
-

@@ -2155,6 +2155,7 @@ export function ThreeCadViewport({
       <SketchViewportFeedbackLayer
         schema={sketchToolPresentation}
         projections={sketchFeedbackProjections}
+        documentVariableNames={model.documentVariableNames}
         onPatch={(patch) => sketchToolPatchRef.current(patch)}
         onDragHandle={(handle, clientX, clientY) => {
           const point = projectSketchClientPointRef.current(clientX, clientY);

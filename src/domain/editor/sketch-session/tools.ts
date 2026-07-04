@@ -377,7 +377,7 @@ export function buildSketchEditToolPresentation(
         ? {
             id: "offset-distance-input",
             label: "Offset distance",
-            value: state.offsetDistance,
+            value: state.offsetDistance === null ? null : String(state.offsetDistance),
             unit: "mm",
             min: 0,
             confirmLabel: "Create",
@@ -411,7 +411,7 @@ export function buildSketchEditToolPresentation(
           ? {
               id: `${state.toolId}-value-input`,
               label: numericLabel,
-              value: state.toolValue,
+              value: state.toolValue === null ? null : String(state.toolValue),
               unit: numericUnit,
               min: 0,
               confirmLabel: "Create",

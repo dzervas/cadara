@@ -62,6 +62,7 @@ export function restorePersistedSketchDraftSession(
     projectedReferences: [],
     projectionDiagnostics: [],
     commitRequest: structuredClone(session.commitRequest),
+    documentVariables: session.documentVariables ?? [],
     validationMessage: null,
   };
 

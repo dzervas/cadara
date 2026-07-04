@@ -499,6 +499,43 @@ export type DimensionAngleAnnotationPlacement = {
 export type DimensionAnnotationPlacement =
   | DimensionLineAnnotationPlacement
   | DimensionAngleAnnotationPlacement;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- transitional authored dimension values must remain assignable to numeric solver-era call sites while normalization canonicalizes wrappers.
+export type SketchDimensionAuthoredValue = any;
+export type SketchDimensionNumericValue = number;
+
+type NumericDimensionWithValue<TKind extends DimensionDefinition["kind"]> = Omit<
+  Extract<DimensionDefinition, { kind: TKind }>,
+  "value"
+> & {
+  value: SketchDimensionNumericValue;
+};
+
+type NumericDimensionWithRadians<TKind extends DimensionDefinition["kind"]> = Omit<
+  Extract<DimensionDefinition, { kind: TKind }>,
+  "valueRadians"
+> & {
+  valueRadians: SketchDimensionNumericValue;
+};
+
+export type NumericDimensionDefinition =
+  | NumericDimensionWithValue<"distance">
+  | NumericDimensionWithValue<"pointDatumDistance">
+  | NumericDimensionWithValue<"circleRadius">
+  | NumericDimensionWithValue<"diameter">
+  | NumericDimensionWithValue<"lineLength">
+  | NumericDimensionWithValue<"lineDistance">
+  | NumericDimensionWithValue<"linePointDistance">
+  | NumericDimensionWithRadians<"lineAngle">
+  | NumericDimensionWithValue<"horizontalDistance">
+  | NumericDimensionWithValue<"verticalDistance">
+  | Extract<
+      DimensionDefinition,
+      { kind: "arcStartPointCoincident" | "arcEndPointCoincident" }
+    >;
+
+export type NumericSketchDefinition = Omit<SketchDefinition, "dimensions"> & {
+  dimensions: NumericDimensionDefinition[];
+};
 
 /**
  * Authorable fill payload for sketch styles.
@@ -817,7 +854,7 @@ export type DimensionDefinition =
       /** Two referenced points whose solved separation must match `value`. */
       pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested dimension value in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -833,7 +870,7 @@ export type DimensionDefinition =
       /** Sketch origin datum referenced by the dimension. */
       datum: SketchDatumConstraintOperand;
       /** Requested dimension value in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -845,7 +882,7 @@ export type DimensionDefinition =
       /** Referenced circle entity whose solved radius must match `value`. */
       entityId: SketchEntityId;
       /** Requested radius value in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -857,7 +894,7 @@ export type DimensionDefinition =
       /** Referenced circle or arc entity whose solved diameter must match `value`. */
       entityId: SketchEntityId;
       /** Requested diameter value in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -869,7 +906,7 @@ export type DimensionDefinition =
       /** Referenced local line segment whose solved endpoint separation must match `value`. */
       entityId: SketchEntityId;
       /** Requested line length in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -884,7 +921,7 @@ export type DimensionDefinition =
         SketchCurveConstraintOperand,
       ];
       /** Requested perpendicular distance in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -898,7 +935,7 @@ export type DimensionDefinition =
       /** Sketch-space point reference. */
       point: SketchPointConstraintOperand;
       /** Requested perpendicular distance in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -913,7 +950,7 @@ export type DimensionDefinition =
         SketchCurveConstraintOperand,
       ];
       /** Requested enclosed angle in radians. */
-      valueRadians: number;
+      valueRadians: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionAngleAnnotationPlacement;
     }
@@ -925,7 +962,7 @@ export type DimensionDefinition =
       /** Two referenced points whose solved horizontal separation must match `value`. */
       pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested signed horizontal distance in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
@@ -937,7 +974,7 @@ export type DimensionDefinition =
       /** Two referenced points whose solved vertical separation must match `value`. */
       pointIds: readonly [SketchPointId, SketchPointId];
       /** Requested signed vertical distance in sketch-plane units. */
-      value: number;
+      value: SketchDimensionAuthoredValue;
       /** Optional persisted sketch-plane annotation placement. */
       annotationPlacement?: DimensionLineAnnotationPlacement;
     }
