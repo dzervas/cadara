@@ -254,6 +254,7 @@ export function createSketchSessionFromSnapshot(
       plane: sketch.plane,
       definition,
     }),
+    documentVariables: [],
     validationMessage: null,
   };
 }
@@ -300,6 +301,7 @@ export function createNewSketchSession(
     projectedReferences: [],
     projectionDiagnostics: [],
     commitRequest: null,
+    documentVariables: [],
     validationMessage: null,
   };
 }

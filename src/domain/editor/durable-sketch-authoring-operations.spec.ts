@@ -133,13 +133,13 @@ test("src/domain/editor/durable-sketch-authoring-operations.spec.ts", () => {
       (dimension) => dimension.dimensionId === widthDimension.dimensionId,
     )?.value,
     "Explicit dimension edit should update the live graph value.",
-  ).toBe(6);
+  ).toEqual({ source: "literal", value: 6 });
   expect(
     edited.fullDefinition.authoringOperations?.[0]?.createdGraph?.dimensions?.find(
       (dimension) => dimension.dimensionId === widthDimension.dimensionId,
     )?.value,
     "Explicit dimension edit should update the original operation metadata.",
-  ).toBe(6);
+  ).toEqual({ source: "literal", value: 6 });
 
   const graphWithMetadata = rectangle.fullDefinition;
   const graphWithDifferentMetadata = {

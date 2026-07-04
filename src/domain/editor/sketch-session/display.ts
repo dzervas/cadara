@@ -52,6 +52,7 @@ import {
   getSketchSessionDisplayProjectedReferences,
   getSketchSessionSolvedSnapshot,
   mapDefinitionEntityToDraftEntity,
+  resolveSketchDefinitionForSolve,
 } from "./internals";
 import { mapSketchPointToWorld } from "./state";
 import {
@@ -148,7 +149,10 @@ export function getStableSketchSessionDisplayRenderables(
   const solved = cachedSnapshot
     ? { solvedSnapshot: cachedSnapshot }
     : solveSketchDefinitionCore({
-        definition: displayDefinition,
+        definition: resolveSketchDefinitionForSolve(
+          displayDefinition,
+          session.documentVariables,
+        ),
         projectedReferences: displayProjectedReferences,
         tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
         partialSolvePolicy: "bestEffort",

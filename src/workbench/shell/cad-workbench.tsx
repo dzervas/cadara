@@ -1260,6 +1260,8 @@ export function CadWorkbench({
         sketchAnnotations,
         selection: visibleSelection,
         sketchToolPresentation,
+        documentVariableNames:
+          snapshot?.document.variables.map((variable) => variable.name) ?? [],
         specialModePresentation: sketchSpecialModeViewportPresentation,
         hasNonEmptyCommittedGeometry: hasNonEmptyCommittedGeometry(
           viewportRenderables.documentRenderables,
@@ -1282,6 +1284,7 @@ export function CadWorkbench({
       sketchAnnotations,
       sketchSession,
       sketchSpecialModeViewportPresentation,
+      snapshot?.document.variables,
       sketchToolPresentation,
       viewportRenderables.documentRenderables,
       viewportRenderables.sketchDisplayRenderables,

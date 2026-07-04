@@ -21,16 +21,10 @@ export function SketchFloatingInput({
       <input
         autoFocus
         className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 font-mono text-[13px] text-[var(--cad-foreground)] outline-none focus-visible:border-[var(--cad-accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
-        defaultValue={descriptor.value?.toString() ?? ""}
+        defaultValue={descriptor.value ?? ""}
         key={descriptor.id}
-        min={descriptor.min}
-        step="any"
-        type="number"
         onChange={(event) => {
-          const nextValue = Number(event.currentTarget.value);
-          onPatch({
-            value: Number.isNaN(nextValue) ? null : nextValue,
-          });
+          onPatch({ value: event.currentTarget.value });
         }}
       />
       <div className="mt-3 flex items-center justify-between gap-2">

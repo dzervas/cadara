@@ -1,4 +1,5 @@
-import type {
+import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
+  import type {
   ConstraintDefinition,
   DimensionDefinition,
   DimensionAnnotationPlacement,
@@ -102,7 +103,7 @@ export interface SketchConstraintCommitInput {
   selectedTargets: readonly SketchConstraintTargetRecord[];
   pointer: SketchPoint2D | null;
   referenceKind?: SketchToolDimensionReferenceKind | null;
-  value: number | null;
+  value: MaybeAuthoredValue<number> | null;
   annotationPlacement?: DimensionAnnotationPlacement | null;
   createConstraintId(
     suffix: string,

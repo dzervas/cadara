@@ -26,6 +26,21 @@ export function openSketchSessionFromSelection(
   selection: PrimitiveRef[],
   snapshot: WorkspaceSnapshot | null,
 ): SketchSessionState | null {
+  const session = createSketchSessionForSelection(selection, snapshot);
+  if (!session) {
+    return null;
+  }
+
+  return {
+    ...session,
+    documentVariables: snapshot?.document.variables ?? [],
+  };
+}
+
+function createSketchSessionForSelection(
+  selection: PrimitiveRef[],
+  snapshot: WorkspaceSnapshot | null,
+): SketchSessionState | null {
   const primary = selection[0];
 
   if (!primary) {

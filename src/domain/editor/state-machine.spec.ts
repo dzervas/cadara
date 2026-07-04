@@ -5017,7 +5017,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     expect(
       opened.state.session.toolPresentation?.floatingInput?.value,
       "Committed dimension edit form should open with the durable dimension value.",
-    ).toBe(24);
+    ).toBe("24");
 
     const changed = transitionEditorState(opened.state, {
       type: "sketch.toolPatched",
@@ -5034,7 +5034,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     ).toBe("editingSketch");
     expect(
       committed.state.session.definition.dimensions[0]?.kind === "distance" &&
-        committed.state.session.definition.dimensions[0].value === 33,
+        committed.state.session.definition.dimensions[0].value.source === "literal" &&
+        committed.state.session.definition.dimensions[0].value.value === 33,
       "Committed dimension edit should update the existing durable dimension record.",
     ).toBeTruthy();
   }

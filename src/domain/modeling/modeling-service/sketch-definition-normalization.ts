@@ -3,6 +3,11 @@ import type {
   DimensionDefinition,
 } from "@/contracts/sketch/schema";
 import {
+  createLiteralAuthoredValue,
+  isAuthoredValue,
+  type AuthoredValue,
+} from "@/contracts/modeling/authored-values";
+import {
   normalizeDimensionAngleAnnotationPlacement,
   normalizeDimensionLineAnnotationPlacement,
   normalizeLocalEntityConstraintOperand,
@@ -19,6 +24,29 @@ import {
   isRecord,
   isString,
 } from "./validation";
+
+function normalizeSketchDimensionAuthoredValue(value: unknown): AuthoredValue<number> {
+  if (typeof value === "number") {
+    return createLiteralAuthoredValue(value);
+  }
+
+  if (!isAuthoredValue(value)) {
+    throw new Error("Invalid sketch dimension authored value payload.");
+  }
+
+  if (value.source === "literal") {
+    if (typeof value.value !== "number") {
+      throw new Error("Invalid sketch dimension literal value payload.");
+    }
+    return createLiteralAuthoredValue(value.value);
+  }
+
+  if (typeof value.valueText !== "string") {
+    throw new Error("Invalid sketch dimension expression value payload.");
+  }
+
+  return { source: "expression", valueText: value.valueText };
+}
 
 export function normalizeConstraintDefinitionCore(
   value: unknown,
@@ -385,7 +413,7 @@ export function normalizeDimensionDefinitionCore(
         value.axis !== "vertical") ||
       !Array.isArray(value.pointIds) ||
       value.pointIds.length !== 2 ||
-      typeof value.value !== "number"
+      !isAuthoredValue(value.value) && typeof value.value !== "number"
     ) {
       throw new Error("Invalid distance dimension payload.");
     }
@@ -399,7 +427,7 @@ export function normalizeDimensionDefinitionCore(
         assertSketchPointId(value.pointIds[0]),
         assertSketchPointId(value.pointIds[1]),
       ],
-      value: value.value,
+      value: normalizeSketchDimensionAuthoredValue(value.value),
       annotationPlacement: normalizeDimensionLineAnnotationPlacement(
         value.annotationPlacement,
       ),
@@ -407,7 +435,7 @@ export function normalizeDimensionDefinitionCore(
   }
 
   if (value.kind === "circleRadius") {
-    if (!isString(value.entityId) || typeof value.value !== "number") {
+    if (!isString(value.entityId) || !isAuthoredValue(value.value) && typeof value.value !== "number") {
       throw new Error("Invalid circle radius dimension payload.");
     }
 
@@ -416,7 +444,7 @@ export function normalizeDimensionDefinitionCore(
       kind: "circleRadius",
       label: value.label,
       entityId: assertSketchEntityId(value.entityId),
-      value: value.value,
+      value: normalizeSketchDimensionAuthoredValue(value.value),
       annotationPlacement: normalizeDimensionLineAnnotationPlacement(
         value.annotationPlacement,
       ),
@@ -424,7 +452,7 @@ export function normalizeDimensionDefinitionCore(
   }
 
   if (value.kind === "diameter") {
-    if (!isString(value.entityId) || typeof value.value !== "number") {
+    if (!isString(value.entityId) || !isAuthoredValue(value.value) && typeof value.value !== "number") {
       throw new Error("Invalid diameter dimension payload.");
     }
 
@@ -433,7 +461,7 @@ export function normalizeDimensionDefinitionCore(
       kind: "diameter",
       label: value.label,
       entityId: assertSketchEntityId(value.entityId),
-      value: value.value,
+      value: normalizeSketchDimensionAuthoredValue(value.value),
       annotationPlacement: normalizeDimensionLineAnnotationPlacement(
         value.annotationPlacement,
       ),
@@ -441,7 +469,7 @@ export function normalizeDimensionDefinitionCore(
   }
 
   if (value.kind === "lineLength") {
-    if (!isString(value.entityId) || typeof value.value !== "number") {
+    if (!isString(value.entityId) || !isAuthoredValue(value.value) && typeof value.value !== "number") {
       throw new Error("Invalid line length dimension payload.");
     }
 
@@ -450,7 +478,7 @@ export function normalizeDimensionDefinitionCore(
       kind: "lineLength",
       label: value.label,
       entityId: assertSketchEntityId(value.entityId),
-      value: value.value,
+      value: normalizeSketchDimensionAuthoredValue(value.value),
       annotationPlacement: normalizeDimensionLineAnnotationPlacement(
         value.annotationPlacement,
       ),
@@ -463,7 +491,7 @@ export function normalizeDimensionDefinitionCore(
     }
 
     if (value.kind === "lineDistance") {
-      if (typeof value.value !== "number") {
+      if (!isAuthoredValue(value.value) && typeof value.value !== "number") {
         throw new Error("Invalid line distance dimension payload.");
       }
 
@@ -475,14 +503,14 @@ export function normalizeDimensionDefinitionCore(
           normalizeSketchCurveConstraintOperand(value.lines[0]),
           normalizeSketchCurveConstraintOperand(value.lines[1]),
         ],
-        value: value.value,
+        value: normalizeSketchDimensionAuthoredValue(value.value),
         annotationPlacement: normalizeDimensionLineAnnotationPlacement(
           value.annotationPlacement,
         ),
       };
     }
 
-    if (typeof value.valueRadians !== "number") {
+    if (!isAuthoredValue(value.valueRadians) && typeof value.valueRadians !== "number") {
       throw new Error("Invalid line angle dimension payload.");
     }
 
@@ -494,7 +522,7 @@ export function normalizeDimensionDefinitionCore(
         normalizeSketchCurveConstraintOperand(value.lines[0]),
         normalizeSketchCurveConstraintOperand(value.lines[1]),
       ],
-      valueRadians: value.valueRadians,
+      valueRadians: normalizeSketchDimensionAuthoredValue(value.valueRadians),
       annotationPlacement: normalizeDimensionAngleAnnotationPlacement(
         value.annotationPlacement,
       ),
@@ -505,7 +533,7 @@ export function normalizeDimensionDefinitionCore(
     if (
       !isRecord(value.line) ||
       !isRecord(value.point) ||
-      typeof value.value !== "number"
+      !isAuthoredValue(value.value) && typeof value.value !== "number"
     ) {
       throw new Error("Invalid point-line distance dimension payload.");
     }
@@ -516,7 +544,7 @@ export function normalizeDimensionDefinitionCore(
       label: value.label,
       line: normalizeSketchCurveConstraintOperand(value.line),
       point: normalizeSketchPointConstraintOperand(value.point),
-      value: value.value,
+      value: normalizeSketchDimensionAuthoredValue(value.value),
       annotationPlacement: normalizeDimensionLineAnnotationPlacement(
         value.annotationPlacement,
       ),
@@ -530,7 +558,7 @@ export function normalizeDimensionDefinitionCore(
     if (
       !Array.isArray(value.pointIds) ||
       value.pointIds.length !== 2 ||
-      typeof value.value !== "number"
+      !isAuthoredValue(value.value) && typeof value.value !== "number"
     ) {
       throw new Error("Invalid directional distance dimension payload.");
     }
@@ -543,7 +571,7 @@ export function normalizeDimensionDefinitionCore(
         assertSketchPointId(value.pointIds[0]),
         assertSketchPointId(value.pointIds[1]),
       ],
-      value: value.value,
+      value: normalizeSketchDimensionAuthoredValue(value.value),
       annotationPlacement: normalizeDimensionLineAnnotationPlacement(
         value.annotationPlacement,
       ),

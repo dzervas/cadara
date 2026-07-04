@@ -47,6 +47,7 @@ import {
   evaluateDocumentVariableExpressions,
 } from "@/domain/modeling/document-variable-expressions";
 import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
+import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import {
   getExtrudeFeatureExtent,
   getRevolveFeatureExtent,
@@ -4330,6 +4331,31 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       request.definition,
       sketchId,
     );
+    const resolvedDefinition = resolveSketchDimensionValues({
+      definition: normalizedDefinition,
+      variables: snapshot.document.variables,
+    });
+    if (!resolvedDefinition.ok) {
+      const diagnostics = resolvedDefinition.diagnostics;
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        sketchId,
+        revisionState: {
+          kind: "rejected",
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: "mock-invalid-sketch",
+        },
+        rebuildResult: createRebuildResult({
+          kind: "skipped",
+          reasonCode: "validationRejected",
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      };
+    }
     const projection = await this.projectSketchExternalReferences({
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
@@ -4353,7 +4379,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       plane: referenceFrame,
       tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-      definition: normalizedDefinition,
+      definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
     });
     const solved = await this.solverAdapter.solveSketch({
@@ -4366,7 +4392,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       plane: referenceFrame,
       tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
       partialSolvePolicy: "bestEffort",
-      definition: normalizedDefinition,
+      definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
     });
     const regions = await this.solverAdapter.deriveSketchRegions({
@@ -4377,7 +4403,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       revisionId: request.baseRevisionId,
       sketchId,
       solvedSnapshot: solved.solvedSnapshot,
-      definition: normalizedDefinition,
+      definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
     });
 

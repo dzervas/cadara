@@ -6,6 +6,7 @@ import type {
   SketchEntityId,
   SketchId,
 } from "@/contracts/shared/ids";
+import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   SketchAuthoringOperation,
   SketchDefinition,
@@ -23,6 +24,7 @@ import type {
 import type { SketchPlaneFrame } from "@/contracts/shared/sketch-plane";
 import type {
   CommitSketchRequest,
+  DocumentVariableRecord,
   SketchPlaneKey,
   SketchPoint,
 } from "@/contracts/modeling/schema";
@@ -72,13 +74,13 @@ export interface SketchConstraintAuthoringState {
     | null;
   pointer: SketchPoint | null;
   isPreviewPinned: boolean;
-  pendingValue: number | null;
+  pendingValue: MaybeAuthoredValue<number> | null;
   pendingAnnotationPlacement: DimensionAnnotationPlacement | null;
 }
 
 export interface SketchAnnotationEditState {
   target: SketchConstraintRef | SketchDimensionRef;
-  pendingValue: number | null;
+  pendingValue: MaybeAuthoredValue<number> | null;
 }
 
 export interface SketchAnnotationDescriptor {
@@ -158,6 +160,7 @@ export interface SketchSessionState {
   planeKey: SketchPlaneKey | null;
   toolStagedEntities: readonly import("@/core/sketch-tools/definition").SketchDraftEntity[];
   definition: SketchDefinition;
+  documentVariables: readonly DocumentVariableRecord[];
   fullDefinition: SketchDefinition;
   historyCursor: SketchHistoryCursor;
   historyOperations: SketchHistoryOperation[];

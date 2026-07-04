@@ -1,4 +1,11 @@
-import type { SketchPoint } from "@/contracts/modeling/schema";
+import type {
+  DocumentVariableRecord,
+  SketchPoint,
+} from "@/contracts/modeling/schema";
+import {
+  createExpressionAuthoredValue,
+  createLiteralAuthoredValue,
+} from "@/contracts/modeling/authored-values";
 import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
 import type {
   ConstraintId,
@@ -36,6 +43,7 @@ import {
   SKETCH_SCHEMA_VERSION,
 } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
@@ -361,13 +369,36 @@ let cachedSolveDefinition: SketchDefinition | null = null;
 let cachedSolveProjectedRefs: ProjectedSketchReferenceRecord[] | null = null;
 let cachedSolveResult: SolvedSketchSnapshot | null = null;
 
+/**
+ * Resolves expression-authored sketch dimensions against the session's document
+ * variables so the numeric solver only ever receives concrete numbers. Falls
+ * back to the authored definition when resolution fails so preview solving stays
+ * best-effort instead of throwing.
+ */
+export function resolveSketchDefinitionForSolve(
+  definition: SketchDefinition,
+  documentVariables: readonly DocumentVariableRecord[] = [],
+): SketchDefinition {
+  const resolved = resolveSketchDimensionValues({
+    definition,
+    variables: documentVariables,
+  });
+  return resolved.ok ? resolved.definition : definition;
+}
+
 export function deriveSolvedRegionsForSession(
-  session: Pick<SketchSessionState, "projectedReferences" | "sketchId">,
+  session: Pick<
+    SketchSessionState,
+    "projectedReferences" | "sketchId" | "documentVariables"
+  >,
   definition: SketchDefinition,
   solvedSnapshot?: SolvedSketchSnapshot,
 ): RegionRecord[] {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const evaluatedDefinition = evaluateSketchDerivations(definition).definition;
+  const evaluatedDefinition = resolveSketchDefinitionForSolve(
+    evaluateSketchDerivations(definition).definition,
+    session.documentVariables,
+  );
   let usableSolvedSnapshot = solvedSnapshot;
   if (!usableSolvedSnapshot) {
     if (
@@ -1693,12 +1724,24 @@ export function rebuildSessionCommitRequest(
   });
 }
 
-export function normalizeConstraintValue(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
+export function normalizeConstraintValue(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isNaN(value) ? null : createLiteralAuthoredValue(value);
+  }
+
+  if (typeof value !== "string") {
     return null;
   }
 
-  return value;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const numericValue = Number(trimmed);
+  return Number.isFinite(numericValue)
+    ? createLiteralAuthoredValue(numericValue)
+    : createExpressionAuthoredValue(trimmed);
 }
 
 export function getTargetKey(target: PrimitiveRef) {
