@@ -749,23 +749,28 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
     );
   }
 
-  function testDraggedPointFlipsLogoLikeAnchoredComponent() {
+  function testDraggedPointDoesNotFlipLogoLikeAnchoredComponent() {
+    // Regression fixture (minimum-motion-sketch-drag): these drags used to be
+    // "accepted" by seeding a reflected (orientation -1) isometry branch and
+    // snapping the whole component to its mirror image. Reflected branch search
+    // is removed, so the drag frame must stay continuous with the previous frame
+    // and must NOT teleport the dragged point onto the mirrored configuration.
     const cases = [
       {
         pointId:
           "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
         cursor: [5, 25],
-        expected: [0, 20],
+        flipped: [0, 20],
       },
       {
         pointId: "sketch_point_8_line-end",
         cursor: [-40, 25],
-        expected: [-32.39551360005226, 21.414418708092832],
+        flipped: [-32.39551360005226, 21.414418708092832],
       },
       {
         pointId: "sketch_point_21_line-end",
         cursor: [-22, 33],
-        expected: [-15.974774547466922, 25.81434244596269],
+        flipped: [-15.974774547466922, 25.81434244596269],
       },
     ] as const;
 
@@ -782,32 +787,45 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
         targetTolerance: 1e-4,
       });
 
+      // Whether the frame is `solved` (continuous lag) or `blocked`
+      // (non-convergent, keep last accepted), a snapshot of the last continuous
+      // frame is available and must never show the reflected configuration.
+      const snapshot = result.solvedSnapshot;
       expect(
-        result.kind,
-        `Dragged-point solver should accept a logo-like flip from ${entry.pointId}.`,
-      ).toBe("solved");
+        snapshot,
+        `Drag from ${entry.pointId} should retain a continuous snapshot.`,
+      ).toBeTruthy();
       const points = new Map(
-        result.solvedSnapshot.solvedPoints.map((point) => [
+        snapshot.solvedPoints.map((point) => [
           point.pointId,
           point.solvedPosition,
         ]),
       );
-      assertClosePoint(
-        points.get(entry.pointId),
-        entry.expected,
-        "Logo-like dragged point should move to the nearest valid flipped branch.",
+      const solvedDragged = points.get(entry.pointId)!;
+      const distanceToFlip = Math.hypot(
+        solvedDragged[0] - entry.flipped[0],
+        solvedDragged[1] - entry.flipped[1],
       );
+      expect(
+        distanceToFlip > 1,
+        `Drag from ${entry.pointId} must not snap to the reflected branch ${entry.flipped.join(", ")}; received ${solvedDragged.join(", ")}.`,
+      ).toBeTruthy();
       assertClosePoint(
         points.get(
           "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
         ),
         [0, 0],
-        "Logo-like origin anchor should stay fixed during the flip.",
+        "Logo-like origin anchor should stay fixed.",
       );
     }
   }
 
-  function testDraggedPointBlocksFixedGeometry() {
+  function testDraggedPointHoldsFixedGeometryWithoutMoving() {
+    // Regression fixture (minimum-motion-sketch-drag): a fixed point has no free
+    // degree of freedom, so the drag is satisfiable only at its current
+    // position. It is no longer refused as `blocked`; the solve keeps the hard
+    // constraints satisfied and simply does not move the point toward the
+    // unreachable cursor.
     const result = solveSketchDefinitionWithDraggedPointTarget({
       definition: createSquareDefinition(true),
       dragTarget: {
@@ -822,19 +840,24 @@ test("src/contracts/sketch/solver-drag-target.spec.ts", () => {
 
     expect(
       result.kind,
-      "Dragged-point solver should block an unsatisfied fixed-point drag.",
-    ).toBe("blocked");
-    expect(
-      result.diagnostics.some(
-        (diagnostic) => diagnostic.code === "drag-target-unsatisfied",
-      ),
-      "Blocked dragged-point solve should report a machine-readable diagnostic.",
-    ).toBeTruthy();
+      "A satisfiable fixed-point drag should not be refused.",
+    ).toBe("solved");
+    const points = new Map(
+      result.solvedSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+    assertClosePoint(
+      points.get("sketch_point_a"),
+      [0, 0],
+      "Fixed point should stay at its constrained position instead of moving.",
+    );
   }
 
   testDraggedPointSolvesFreeSquareTranslation();
   testDraggedPointSolvesRectangleToolTranslation();
   testDraggedPointSolvesLogoLikeFreeEndpoint();
-  testDraggedPointFlipsLogoLikeAnchoredComponent();
-  testDraggedPointBlocksFixedGeometry();
+  testDraggedPointDoesNotFlipLogoLikeAnchoredComponent();
+  testDraggedPointHoldsFixedGeometryWithoutMoving();
 });

@@ -913,7 +913,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     ).toBe(null);
   }
 
-  function testAnchoredBranchDragChoosesAlternateValidPosition() {
+  function testAnchoredBranchDragStaysContinuousWithoutFlipping() {
+    // Regression fixture (minimum-motion-sketch-drag): the tip is pinned to the
+    // y-axis at length 20 from the anchored origin, so its only other valid
+    // configuration ([0, 20]) is a reflected branch reachable solely by crossing
+    // the zero-length singularity. Dragging toward [4, 26] must NOT flip to that
+    // mirrored branch; the drag frame stays continuous with the previous frame,
+    // so the tip keeps its [0, -20] position and shows constrained feedback.
     let session = createSessionFromDefinition(
       createAnchoredBranchDragDefinition(),
     );
@@ -939,13 +945,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     );
     assertClosePoint(
       points.get("sketch_point_tip"),
-      [0, 20],
-      "Anchored branch drag should choose the alternate valid branch.",
+      [0, -20],
+      "Anchored branch drag must not flip to the reflected branch.",
     );
     expect(
       session.validationMessage,
-      "Accepted branch drag should not leave constrained feedback.",
-    ).toBe(null);
+      "A tip that cannot move continuously should show constrained feedback.",
+    ).toBe("Geometry is constrained and cannot move to that position.");
   }
 
   function testLiveRegionRenderableTracksJiggledSketchDrag() {
@@ -1308,6 +1314,62 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       session.validationMessage,
       "Blocked fixed logo-like endpoint drag should leave constrained feedback.",
     ).toBe("Geometry is constrained and cannot move to that position.");
+  }
+
+  function testPerpendicularSlideShowsNoConstrainedFeedback() {
+    // Regression (minimum-motion-sketch-drag, D6): a horizontal line pinned at
+    // the origin lets its free endpoint slide along x only. Dragging straight up
+    // (x unchanged) barely moves the endpoint, but the endpoint still has a free
+    // DOF, so this reachable-limit lag must NOT show constrained feedback. This
+    // is the axis-aligned case a moved-vs-requested ratio would misclassify.
+    const definition = makeDefinition({
+      pointIds: ["sketch_point_pin", "sketch_point_slide"],
+      points: [
+        makePoint("sketch_point_pin", "Pin", 0, 0),
+        makePoint("sketch_point_slide", "Slide", 2, 0),
+      ],
+      entityIds: ["sketch_entity_slider"],
+      entities: [
+        makeLine(
+          "sketch_entity_slider",
+          "Slider",
+          "sketch_point_pin",
+          "sketch_point_slide",
+        ),
+      ],
+    });
+    const withConstraints: SketchDefinition = {
+      ...definition,
+      constraintIds: ["constraint_pin", "constraint_slider_horizontal"],
+      constraints: [
+        {
+          constraintId: "constraint_pin",
+          kind: "fixPoint",
+          label: "Pin origin",
+          pointId: "sketch_point_pin",
+          position: [0, 0],
+        },
+        {
+          constraintId: "constraint_slider_horizontal",
+          kind: "horizontal",
+          label: "Slider horizontal",
+          entityId: "sketch_entity_slider",
+        },
+      ],
+    };
+    let session = createSessionFromDefinition(withConstraints);
+    const target = session.definition.points.find(
+      (point) => point.pointId === "sketch_point_slide",
+    )?.target;
+    expect(target, "Expected slider endpoint.").toBeTruthy();
+
+    session = beginSketchGeometryDrag(session, target, [2, 0]);
+    session = finishSketchGeometryDrag(session, [2, 6]);
+
+    expect(
+      session.validationMessage,
+      "A perpendicular pull on a point with a free sliding DOF must not show constrained feedback.",
+    ).toBe(null);
   }
 
   function testSelectedEntityDeletionRemovesDependentAnnotations() {
@@ -2982,7 +3044,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   testUnconstrainedPointDragUpdatesAuthoredDefinition();
   testConstrainedSquareDragTranslatesSolvedShape();
   testLogoLikeFreeEndpointDragClearsValidationFeedback();
-  testAnchoredBranchDragChoosesAlternateValidPosition();
+  testAnchoredBranchDragStaysContinuousWithoutFlipping();
   testLiveRegionRenderableTracksJiggledSketchDrag();
   testLiveRegionRenderablePreservesInnerLoopHole();
   testLiveRegionRenderableTriangulatesConcaveRegion();
@@ -2995,6 +3057,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   testRectangleToolDragTranslatesWholeRectangle();
   testImmovableConstrainedDragBlocksWithoutChangingDraft();
   testFixedLogoLikeEndpointDragBlocksWithConstrainedFeedback();
+  testPerpendicularSlideShowsNoConstrainedFeedback();
   testSelectedEntityDeletionRemovesDependentAnnotations();
   testSelectedPointDeletionRemovesDependentGeometryAndAnnotations();
   testLocalSketchStylePatchUpdatesCommitRequestAndIgnoresExternalTargets();
