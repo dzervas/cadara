@@ -13,6 +13,7 @@ import type {
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
+  sketchDraggedPointHasFreeDof,
   solveSketchDefinitionWithDraggedPointTarget,
   updateCompiledSketchSolveSession,
   type SketchCompiledSolveSession,
@@ -46,6 +47,8 @@ import type {
 } from "./types";
 import {
   CONSTRAINED_DRAG_BLOCKED_MESSAGE,
+  CONSTRAINED_DRAG_MOVE_FRACTION,
+  CONSTRAINED_DRAG_REQUEST_EPSILON,
   SKETCH_DIRECT_EDIT_TOLERANCES,
   applySketchHistoryContribution,
   cloneDefinition,
@@ -1264,6 +1267,41 @@ export function solveDraggedPointEdit(
 
   if (solved.kind !== "solved") {
     return { kind: "blocked", message: CONSTRAINED_DRAG_BLOCKED_MESSAGE };
+  }
+
+  // D6 (minimum-motion-sketch-drag): constrained-movement feedback follows the
+  // grabbed target's available degrees of freedom, not cursor reachability. If
+  // the target clearly moved it plainly has a free DOF, so there is no feedback.
+  // If it barely moved despite a real requested motion, it is either fully
+  // constrained (no DOF -> no-op with feedback, draft untouched) or merely lagged
+  // because the pointer pulled across its remaining DOF (still successful, no
+  // feedback). We distinguish the two by probing the target's actual mobility in
+  // the solver rather than by the pull direction.
+  const draggedSolvedPoint = solved.solvedSnapshot.solvedPoints.find(
+    (point) => point.pointId === pointId,
+  );
+  const previousPosition = definition.points.find(
+    (point) => point.pointId === pointId,
+  )?.position;
+  if (draggedSolvedPoint && previousPosition) {
+    const requestedDistance = Math.hypot(
+      position[0] - previousPosition[0],
+      position[1] - previousPosition[1],
+    );
+    const movedDistance = Math.hypot(
+      draggedSolvedPoint.solvedPosition[0] - previousPosition[0],
+      draggedSolvedPoint.solvedPosition[1] - previousPosition[1],
+    );
+    const barelyMoved =
+      requestedDistance > CONSTRAINED_DRAG_REQUEST_EPSILON &&
+      movedDistance < requestedDistance * CONSTRAINED_DRAG_MOVE_FRACTION;
+    if (
+      barelyMoved &&
+      solveSession !== null &&
+      !sketchDraggedPointHasFreeDof(solveSession, pointId)
+    ) {
+      return { kind: "blocked", message: CONSTRAINED_DRAG_BLOCKED_MESSAGE };
+    }
   }
 
   return {

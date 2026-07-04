@@ -185,6 +185,22 @@ const BFGS_MIN_LOSS = 1e-12;
 const DEGENERATE_NORM_EPSILON = 1e-6;
 const EQUATION_SUPPORT_PERTURBATION = 1e-3;
 const EQUATION_SUPPORT_LOSS_EPSILON = 1e-18;
+// Interactive drag tuning (minimum-motion-sketch-drag).
+// DRAG_MINIMUM_MOTION_EPSILON is the uniform previous-frame anchoring weight
+// (policy 1); it must stay far below the drag-target weight so a reachable
+// cursor is still reached, while remaining large enough to break under-
+// constrained null spaces. DRAG_* substep bounds keep large per-frame cursor
+// deltas continuous by subdividing them (D3) instead of teleporting past
+// singularities, with the last accepted frame as the lag fallback.
+const DRAG_MINIMUM_MOTION_EPSILON = 1e-6;
+// The soft cursor objective is weighted BELOW the hard constraints (weight 1) so
+// that authored constraints keep geometry on their manifold during a drag frame
+// (it slides along remaining DOF) instead of being pulled off it or through a
+// singularity, while staying far above the minimum-motion epsilon so a reachable
+// cursor is still reached.
+const DRAG_TARGET_WEIGHT = 1e-2;
+const DRAG_MAX_SUBSTEPS = 8;
+const DRAG_SUBSTEP_LIMIT = 4;
 
 function cloneValues(values: Float64Array) {
   return new Float64Array(values);
@@ -5571,9 +5587,24 @@ export function createCompiledSketchSolveSession(input: {
   };
 }
 
+// Drag solution selection policy (see openspec/changes/minimum-motion-sketch-drag):
+//
+// Policy 1 (adopted): the drag target is a soft objective and every non-dragged
+// free point gets a weak UNIFORM previous-frame anchoring term
+// (epsilon * ||p_i - p_i_prevFrame||^2, epsilon << drag weight). Under-constrained
+// null spaces then resolve to the minimum-motion solution: nothing moves unless a
+// hard constraint forces it, and forced motion is minimal.
+//
+// Policy 2 (considered, not implemented): weight each anchoring term by
+// constraint-graph distance from the dragged point, making nearby geometry
+// cheaper to move so linkages "swing" rather than stretch. Feels more physical
+// but adds a tunable and mild unpredictability; revisit only if user feedback
+// shows policy 1 reads as too "stiff". The per-point weight would replace the
+// uniform epsilon where the anchoring residuals are constructed.
 function createDragTargetConstraint(
   system: BuildSystemResult,
   dragTarget: SketchDraggedPointTarget,
+  weight = 1,
 ): ScalarConstraintRecord | null {
   const point = system.pointRecords.get(dragTarget.pointId);
   if (!point) {
@@ -5587,9 +5618,9 @@ function createDragTargetConstraint(
       const gradient = zeroVector(system.parameterCount);
       const actual = getPoint(values, point);
       const delta = subtract(actual, dragTarget.position);
-      addPointGradient(gradient, point, delta[0], delta[1]);
+      addPointGradient(gradient, point, weight * delta[0], weight * delta[1]);
       return {
-        residual: 0.5 * (delta[0] * delta[0] + delta[1] * delta[1]),
+        residual: 0.5 * weight * (delta[0] * delta[0] + delta[1] * delta[1]),
         gradient,
       };
     },
@@ -5692,16 +5723,7 @@ function tryTranslateDraggedComponent(
 function createDraggedPointAcceptance(input: {
   program: SketchCompiledSolveProgram;
   materialized: SketchCoreSolveResult;
-  dragTarget: SketchDraggedPointTarget;
-  targetTolerance: number;
-  loss: number;
 }) {
-  const solvedPoint = input.materialized.solvedSnapshot.solvedPoints.find(
-    (point) => point.pointId === input.dragTarget.pointId,
-  );
-  const targetDistance = solvedPoint
-    ? length(subtract(solvedPoint.solvedPosition, input.dragTarget.position))
-    : Number.POSITIVE_INFINITY;
   const constraintsSatisfied =
     input.materialized.solvedSnapshot.constraintStatuses.every(
       (status) => status.status === "satisfied",
@@ -5710,14 +5732,18 @@ function createDraggedPointAcceptance(input: {
     input.materialized.solvedSnapshot.dimensionStatuses.every(
       (status) => status.status !== "unsatisfied",
     );
+  // D1 (minimum-motion-sketch-drag): the cursor is a SOFT objective and is never
+  // part of frame acceptance. A frame is accepted whenever the authored (hard)
+  // constraints and dimensions are satisfied within tolerance, regardless of how
+  // close the dragged point reached the cursor. `targetDistance` is intentionally
+  // dropped from acceptance so a feasible-but-lagging frame is `solved`, not
+  // `blocked`; `blocked` is reserved for invalid/non-convergent solves.
   const accepted =
     input.program.validation.isValid &&
-    input.loss < SOLVED_LOSS_THRESHOLD &&
-    targetDistance <= input.targetTolerance &&
     constraintsSatisfied &&
     dimensionsSatisfied;
 
-  return { accepted, targetDistance };
+  return { accepted };
 }
 
 function materializeDraggedPointCandidate(
@@ -5747,278 +5773,196 @@ function acceptDraggedPointCandidate(
   };
 }
 
-function tryPolishDraggedComponent(input: {
-  session: SketchCompiledSolveSession;
-  constraints: ScalarConstraintRecord[];
-  candidateValues: Float64Array;
-  affectedVariables: Set<number>;
-  dragTarget: SketchDraggedPointTarget;
-  targetTolerance: number;
-  targetDistance: number;
-  loss: number;
-}): SketchDraggedPointSolveResult | null {
-  if (
-    input.targetDistance > input.targetTolerance ||
-    input.loss >= SOLVED_LOSS_THRESHOLD
-  ) {
-    return null;
-  }
-
-  const polished = solveSystemValues(
-    input.candidateValues,
-    input.constraints,
-    "gradientDescent",
-  );
-  const polishedValues = cloneValues(input.session.values);
-  for (const index of input.affectedVariables) {
-    polishedValues[index] = polished.values[index]!;
-  }
-
-  const { state, materialized } = materializeDraggedPointCandidate(
-    input.session,
-    polishedValues,
-  );
-  const acceptance = createDraggedPointAcceptance({
-    program: input.session.program,
-    materialized,
-    dragTarget: input.dragTarget,
-    targetTolerance: input.targetTolerance,
-    loss: state.loss,
-  });
-
-  return acceptance.accepted
-    ? acceptDraggedPointCandidate(input.session, polishedValues, materialized)
-    : null;
-}
-
-function createTwoPointIsometryBranchValues(input: {
-  session: SketchCompiledSolveSession;
-  component: SketchCompiledSolveComponent;
-  fromAnchor: SketchPoint2D;
-  toAnchor: SketchPoint2D;
-  fromDragged: SketchPoint2D;
-  toDragged: SketchPoint2D;
-  orientation: 1 | -1;
-  targetTolerance: number;
-}): Float64Array | null {
-  const fromAxis = subtract(input.fromDragged, input.fromAnchor);
-  const toAxis = subtract(input.toDragged, input.toAnchor);
-  const fromLength = length(fromAxis);
-  const toLength = length(toAxis);
-  if (
-    fromLength <= input.session.program.tolerances.minimumSegmentLength ||
-    toLength <= input.session.program.tolerances.minimumSegmentLength
-  ) {
-    return null;
-  }
-
-  const fromUnit: SketchPoint2D = [
-    fromAxis[0] / fromLength,
-    fromAxis[1] / fromLength,
-  ];
-  const fromPerp: SketchPoint2D = [-fromUnit[1], fromUnit[0]];
-  const toUnit: SketchPoint2D = [toAxis[0] / toLength, toAxis[1] / toLength];
-  const toPerp: SketchPoint2D = [-toUnit[1], toUnit[0]];
-  const values = cloneValues(input.session.values);
-
-  for (const pointId of input.component.pointIds) {
-    const point = input.session.program.system.pointRecords.get(pointId);
-    if (!point) {
-      continue;
-    }
-
-    const relative = subtract(
-      getPoint(input.session.values, point),
-      input.fromAnchor,
-    );
-    const along = dot2(relative, fromUnit);
-    const across = dot2(relative, fromPerp);
-    values[point.baseIndex] =
-      input.toAnchor[0] +
-      along * toUnit[0] +
-      input.orientation * across * toPerp[0];
-    values[point.baseIndex + 1] =
-      input.toAnchor[1] +
-      along * toUnit[1] +
-      input.orientation * across * toPerp[1];
-  }
-
-  return values;
-}
-
-function createDraggedComponentBranchSeeds(input: {
-  session: SketchCompiledSolveSession;
-  component: SketchCompiledSolveComponent | null;
-  dragTarget: SketchDraggedPointTarget;
-  targetTolerance: number;
-}) {
-  const { session, component, dragTarget, targetTolerance } = input;
-  if (!component) {
-    return [];
-  }
-
-  const draggedPoint = session.program.system.pointRecords.get(
-    dragTarget.pointId,
-  );
-  if (!draggedPoint) {
-    return [];
-  }
-
-  const seeds: Float64Array[] = [];
-  const componentPointIds = new Set(component.pointIds);
-  const draggedCurrent = getPoint(session.values, draggedPoint);
-  for (const constraint of session.program.definition.constraints) {
-    const anchor = resolvePointConstraintTarget(
-      constraint,
-      session.program.projectedReferences,
-    );
-    if (
-      !anchor ||
-      anchor.pointId === dragTarget.pointId ||
-      !componentPointIds.has(anchor.pointId)
-    ) {
-      continue;
-    }
-
-    const anchorPoint = session.program.system.pointRecords.get(anchor.pointId);
-    if (!anchorPoint) {
-      continue;
-    }
-
-    const cursorVector = subtract(dragTarget.position, anchor.target);
-    const cursorDistance = length(cursorVector);
-    const currentDistance = length(
-      subtract(draggedCurrent, getPoint(session.values, anchorPoint)),
-    );
-    if (
-      cursorDistance <= session.program.tolerances.minimumSegmentLength ||
-      currentDistance <= session.program.tolerances.minimumSegmentLength
-    ) {
-      continue;
-    }
-
-    const projectedDragTarget: SketchPoint2D = [
-      anchor.target[0] + (cursorVector[0] / cursorDistance) * currentDistance,
-      anchor.target[1] + (cursorVector[1] / cursorDistance) * currentDistance,
-    ];
-
-    for (const orientation of [1, -1] as const) {
-      const values = createTwoPointIsometryBranchValues({
-        session,
-        component,
-        fromAnchor: getPoint(session.values, anchorPoint),
-        toAnchor: anchor.target,
-        fromDragged: draggedCurrent,
-        toDragged: projectedDragTarget,
-        orientation,
-        targetTolerance,
-      });
-      if (values) {
-        seeds.push(values);
+// D2 (minimum-motion-sketch-drag): uniform previous-frame anchoring residual.
+// For every non-dragged free variable in the affected component this adds a weak
+// quadratic term (0.5 * weight * (v - anchor)^2, weight << drag weight) so that
+// under-constrained null spaces resolve to the minimum-motion solution: nothing
+// moves unless a hard constraint forces it, and forced motion is minimal.
+//
+// Policy 2 (considered, not implemented) would replace the single uniform
+// `weight` here with a per-index weight derived from constraint-graph distance to
+// the dragged point. See the policy note above createDragTargetConstraint.
+function createMinimumMotionAnchorConstraint(input: {
+  id: ConstraintId;
+  parameterCount: number;
+  anchorValues: Float64Array;
+  variableIndices: readonly number[];
+  weight: number;
+}): ScalarConstraintRecord {
+  const indices = [...input.variableIndices];
+  return {
+    id: input.id,
+    targetKind: "constraint",
+    evaluate(values) {
+      const gradient = zeroVector(input.parameterCount);
+      let residual = 0;
+      for (const index of indices) {
+        const delta = values[index]! - input.anchorValues[index]!;
+        residual += 0.5 * input.weight * delta * delta;
+        gradient[index] += input.weight * delta;
       }
-    }
-  }
-
-  return seeds;
+      return { residual, gradient };
+    },
+  };
 }
 
-function createDraggedBranchAcceptance(input: {
-  session: SketchCompiledSolveSession;
-  materialized: SketchCoreSolveResult;
-  dragTarget: SketchDraggedPointTarget;
-  targetTolerance: number;
-  loss: number;
-}) {
-  const draggedPoint = input.session.program.system.pointRecords.get(
-    input.dragTarget.pointId,
-  );
-  const solvedPoint = input.materialized.solvedSnapshot.solvedPoints.find(
-    (point) => point.pointId === input.dragTarget.pointId,
-  );
-  const currentDistance = draggedPoint
-    ? length(
-        subtract(
-          getPoint(input.session.values, draggedPoint),
-          input.dragTarget.position,
-        ),
-      )
-    : Number.POSITIVE_INFINITY;
-  const targetDistance = solvedPoint
-    ? length(subtract(solvedPoint.solvedPosition, input.dragTarget.position))
-    : Number.POSITIVE_INFINITY;
-  const constraintsSatisfied =
-    input.materialized.solvedSnapshot.constraintStatuses.every(
-      (status) => status.status === "satisfied",
-    );
-  const dimensionsSatisfied =
-    input.materialized.solvedSnapshot.dimensionStatuses.every(
-      (status) => status.status !== "unsatisfied",
-    );
-  const accepted =
-    input.session.program.validation.isValid &&
-    input.loss < SOLVED_LOSS_THRESHOLD &&
-    constraintsSatisfied &&
-    dimensionsSatisfied &&
-    (targetDistance <= input.targetTolerance ||
-      targetDistance + input.targetTolerance < currentDistance);
-
-  return { accepted, targetDistance };
-}
-
-function tryExploreDraggedComponentBranches(input: {
+// D1/D2/D4: solve a single continuous drag frame for one cursor position.
+//
+// Phase A minimizes the hard constraints together with the soft drag objective
+// and the uniform minimum-motion term (anchored to the previous accepted frame).
+// If the hard constraints are satisfied, the frame is accepted directly (this is
+// the feasible/reachable case, including rigid translation).
+//
+// Phase B (the sliding case) projects the phase-A candidate back onto the
+// hard-constraint manifold by minimizing displacement FROM the phase-A position,
+// with no drag term. This settles the dragged point at the closest feasible
+// position instead of returning a compromise that violates authored constraints.
+// Neither phase seeds or accepts reflected/discontinuous branches (D4): the frame
+// is solved purely by continuous iteration from the previous accepted values.
+function solveDraggedPointFrame(input: {
   session: SketchCompiledSolveSession;
   component: SketchCompiledSolveComponent | null;
-  constraints: ScalarConstraintRecord[];
-  affectedVariables: Set<number>;
   dragTarget: SketchDraggedPointTarget;
-  targetTolerance: number;
-}): SketchDraggedPointSolveResult | null {
-  const seeds = createDraggedComponentBranchSeeds({
-    session: input.session,
-    component: input.component,
-    dragTarget: input.dragTarget,
-    targetTolerance: input.targetTolerance,
-  }).slice(0, 8);
-  const branchConstraints = input.constraints.filter(
-    (constraint) =>
-      !constraint.id.startsWith(
-        `constraint_drag_target_${input.dragTarget.pointId}`,
-      ),
+}): { accepted: boolean; values: Float64Array; materialized: SketchCoreSolveResult } | null {
+  const { session, component, dragTarget } = input;
+  const program = session.program;
+  const parameterCount = program.system.parameterCount;
+
+  const dragConstraint = createDragTargetConstraint(
+    program.system,
+    dragTarget,
+    DRAG_TARGET_WEIGHT,
   );
-
-  for (const seed of seeds) {
-    const solved = solveSystemValues(
-      seed,
-      branchConstraints,
-      input.session.program.strategy,
-    );
-    const candidateValues = cloneValues(input.session.values);
-    for (const index of input.affectedVariables) {
-      candidateValues[index] = solved.values[index]!;
-    }
-
-    const { state, materialized } = materializeDraggedPointCandidate(
-      input.session,
-      candidateValues,
-    );
-    const acceptance = createDraggedBranchAcceptance({
-      session: input.session,
-      materialized,
-      dragTarget: input.dragTarget,
-      targetTolerance: input.targetTolerance,
-      loss: state.loss,
-    });
-
-    if (acceptance.accepted) {
-      return acceptDraggedPointCandidate(
-        input.session,
-        candidateValues,
-        materialized,
-      );
-    }
+  if (!dragConstraint) {
+    return null;
   }
 
-  return null;
+  const componentConstraintSet = new Set(component?.equationIndices ?? []);
+  const hardConstraints = program.system.scalarConstraints.filter((_, index) =>
+    component ? componentConstraintSet.has(index) : true,
+  );
+  const affectedVariables = Array.from(
+    component?.variableIndices ??
+      Array.from({ length: parameterCount }, (_, index) => index),
+  );
+  const draggedRecord = program.system.pointRecords.get(dragTarget.pointId);
+  const draggedVariableIndices = draggedRecord
+    ? [draggedRecord.baseIndex, draggedRecord.baseIndex + 1]
+    : [];
+  const nonDraggedVariableIndices = affectedVariables.filter(
+    (index) => !draggedVariableIndices.includes(index),
+  );
+
+  const previousFrame = cloneValues(session.values);
+
+  // Phase A: hard constraints + soft cursor target + uniform minimum motion.
+  const phaseAConstraints: ScalarConstraintRecord[] = [
+    ...hardConstraints,
+    dragConstraint,
+    createMinimumMotionAnchorConstraint({
+      id: `constraint_drag_minimum_motion_${dragTarget.pointId}` as ConstraintId,
+      parameterCount,
+      anchorValues: previousFrame,
+      variableIndices: nonDraggedVariableIndices,
+      weight: DRAG_MINIMUM_MOTION_EPSILON,
+    }),
+  ];
+  const solvedA = solveSystemValues(
+    cloneValues(session.values),
+    phaseAConstraints,
+    program.strategy,
+  );
+  const candidateA = cloneValues(session.values);
+  for (const index of affectedVariables) {
+    candidateA[index] = solvedA.values[index]!;
+  }
+  const evalA = materializeDraggedPointCandidate(session, candidateA);
+  if (
+    createDraggedPointAcceptance({ program, materialized: evalA.materialized })
+      .accepted
+  ) {
+    return { accepted: true, values: candidateA, materialized: evalA.materialized };
+  }
+
+  // Phase B: project the phase-A candidate onto the hard-constraint manifold by
+  // solving the hard constraints ALONE, warm-started from the phase-A
+  // (cursor-pulled) position. Continuous local convergence from that warm start
+  // settles at the nearest feasible configuration, so the dragged point lands at
+  // the closest feasible position instead of the phase-A compromise that
+  // violates authored constraints. No anchor term is used here: a penalty anchor
+  // would bias the solution off the constraint manifold by more than tolerance;
+  // the warm start alone supplies the minimum-motion projection.
+  const phaseBConstraints: ScalarConstraintRecord[] = [...hardConstraints];
+  const solvedB = solveSystemValues(
+    cloneValues(candidateA),
+    phaseBConstraints,
+    program.strategy,
+  );
+  const candidateB = cloneValues(session.values);
+  for (const index of affectedVariables) {
+    candidateB[index] = solvedB.values[index]!;
+  }
+  const evalB = materializeDraggedPointCandidate(session, candidateB);
+  return {
+    accepted: createDraggedPointAcceptance({
+      program,
+      materialized: evalB.materialized,
+    }).accepted,
+    values: candidateB,
+    materialized: evalB.materialized,
+  };
+}
+
+// D6 (minimum-motion-sketch-drag): decide constrained-movement feedback from the
+// grabbed target's available degrees of freedom, not from cursor reachability.
+// The dragged point has a free DOF iff it can be moved in SOME direction while
+// the hard constraints stay satisfied. We probe the four axis directions with
+// tiny throwaway drag frames (no session mutation): in 2D any non-degenerate DOF
+// line has a component along +x or +y, so an axis probe that moves the point
+// proves mobility. A fully constrained target moves in none of them.
+const DRAG_DOF_PROBE_DISTANCE = 1e-2;
+const DRAG_DOF_PROBE_MOVE_FRACTION = 0.25;
+export function sketchDraggedPointHasFreeDof(
+  session: SketchCompiledSolveSession,
+  pointId: SketchPointId,
+): boolean {
+  if (session.disposed) {
+    return false;
+  }
+  const record = session.program.system.pointRecords.get(pointId);
+  if (!record) {
+    return false;
+  }
+  const component = findComponentForPoint(session.program, pointId);
+  const current = getPoint(session.values, record);
+  const probe = DRAG_DOF_PROBE_DISTANCE;
+  const moveThreshold = probe * DRAG_DOF_PROBE_MOVE_FRACTION;
+  const directions: readonly SketchPoint2D[] = [
+    [probe, 0],
+    [-probe, 0],
+    [0, probe],
+    [0, -probe],
+  ];
+  for (const direction of directions) {
+    const frame = solveDraggedPointFrame({
+      session,
+      component,
+      dragTarget: {
+        kind: "sketchPoint",
+        pointId,
+        position: [current[0] + direction[0], current[1] + direction[1]],
+      },
+    });
+    if (!frame || !frame.accepted) {
+      continue;
+    }
+    if (
+      length(subtract(getPoint(frame.values, record), current)) > moveThreshold
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function updateCompiledSketchSolveSession(
@@ -6062,99 +6006,107 @@ export function updateCompiledSketchSolveSession(
     };
   }
 
-  const dragConstraint = createDragTargetConstraint(
-    session.program.system,
-    dragTarget,
-  );
   const component = findComponentForPoint(session.program, dragTarget.pointId);
-  const translated = tryTranslateDraggedComponent(
-    session,
-    component,
-    dragTarget,
-    targetTolerance,
+  const draggedRecord = session.program.system.pointRecords.get(
+    dragTarget.pointId,
   );
-  if (translated) {
-    return translated;
+  if (!draggedRecord) {
+    return {
+      kind: "blocked",
+      reason: "missingPoint",
+      solvedSnapshot: session.lastAcceptedSnapshot,
+      diagnostics: [
+        makeDiagnostic(
+          "drag-target-missing-point",
+          "error",
+          `Dragged point ${dragTarget.pointId} does not exist in the compiled solve program.`,
+          { kind: "point", pointId: dragTarget.pointId },
+        ),
+      ],
+    };
   }
 
-  const componentConstraintSet = new Set(component?.equationIndices ?? []);
-  const constraints = [
-    ...session.program.system.scalarConstraints.filter((_, index) =>
-      component ? componentConstraintSet.has(index) : true,
-    ),
-    ...(dragConstraint ? [dragConstraint] : []),
-  ];
-  const candidateInitialValues = cloneValues(session.values);
-  const solved = solveSystemValues(
-    candidateInitialValues,
-    constraints,
-    session.program.strategy,
+  // D3 (minimum-motion-sketch-drag): subdivide large cursor deltas into bounded
+  // substeps solved continuously from the previous accepted frame, so the
+  // solution tracks the constraint manifold instead of teleporting past
+  // singularities. A non-convergent substep keeps the last accepted frame
+  // (geometry lags the cursor) rather than escalating to a discontinuous search.
+  const startPosition = getPoint(session.values, draggedRecord);
+  const totalDelta = subtract(dragTarget.position, startPosition);
+  const distance = length(totalDelta);
+  const substeps = Math.max(
+    1,
+    Math.min(DRAG_MAX_SUBSTEPS, Math.ceil(distance / DRAG_SUBSTEP_LIMIT)),
   );
-  const candidateValues = cloneValues(session.values);
-  const affectedVariables = new Set(
-    component?.variableIndices ??
-      Array.from({ length: candidateValues.length }, (_, index) => index),
-  );
-  for (const index of affectedVariables) {
-    candidateValues[index] = solved.values[index]!;
-  }
 
-  const { state: fullState, materialized } = materializeDraggedPointCandidate(
-    session,
-    candidateValues,
-  );
-  const acceptance = createDraggedPointAcceptance({
-    program: session.program,
-    materialized,
-    dragTarget,
-    targetTolerance,
-    loss: fullState.loss,
-  });
+  let lastAccepted: SketchCoreSolveResult | null = null;
 
-  if (acceptance.accepted) {
-    return acceptDraggedPointCandidate(session, candidateValues, materialized);
-  }
+  for (let step = 1; step <= substeps; step += 1) {
+    const fraction = step / substeps;
+    const stepTarget: SketchDraggedPointTarget = {
+      kind: "sketchPoint",
+      pointId: dragTarget.pointId,
+      position: [
+        startPosition[0] + totalDelta[0] * fraction,
+        startPosition[1] + totalDelta[1] * fraction,
+      ],
+    };
 
-  const polished = tryPolishDraggedComponent({
-    session,
-    constraints,
-    candidateValues,
-    affectedVariables,
-    dragTarget,
-    targetTolerance,
-    targetDistance: acceptance.targetDistance,
-    loss: fullState.loss,
-  });
-  if (polished) {
-    return polished;
-  }
+    // Rigid-translation fast path (D5): a verified optimization only. It succeeds
+    // exclusively when translating the whole component satisfies every authored
+    // constraint, i.e. the component is internally rigid and translation is the
+    // minimum-motion solution, so its result equals the general solve.
+    const translated = tryTranslateDraggedComponent(
+      session,
+      component,
+      stepTarget,
+      targetTolerance,
+    );
+    if (translated && translated.kind === "solved") {
+      lastAccepted = {
+        status: translated.solvedSnapshot.status,
+        solvedSnapshot: translated.solvedSnapshot,
+        diagnostics: translated.diagnostics,
+      };
+      continue;
+    }
 
-  const branched = tryExploreDraggedComponentBranches({
-    session,
-    component,
-    constraints,
-    affectedVariables,
-    dragTarget,
-    targetTolerance,
-  });
-  if (branched) {
-    return branched;
+    const frame = solveDraggedPointFrame({
+      session,
+      component,
+      dragTarget: stepTarget,
+    });
+    if (frame && frame.accepted) {
+      acceptDraggedPointCandidate(session, frame.values, frame.materialized);
+      lastAccepted = frame.materialized;
+      continue;
+    }
+
+    // Non-convergent substep: keep the last accepted frame and stop advancing.
+    // The last accepted values (never the failed candidate) are preserved so the
+    // reported snapshot is always a valid continuous frame (D3).
+    if (!lastAccepted) {
+      return {
+        kind: "blocked",
+        reason: "nonConvergent",
+        solvedSnapshot: session.lastAcceptedSnapshot,
+        diagnostics: [
+          makeDiagnostic(
+            "drag-target-nonconvergent",
+            "warning",
+            "Dragged point frame could not converge to a valid constrained solution.",
+            { kind: "point", pointId: dragTarget.pointId },
+          ),
+        ],
+      };
+    }
+    break;
   }
 
   return {
-    kind: "blocked",
-    reason:
-      fullState.loss < SOLVED_LOSS_THRESHOLD ? "unsatisfied" : "nonConvergent",
-    solvedSnapshot: materialized.solvedSnapshot,
-    diagnostics: [
-      ...materialized.diagnostics,
-      makeDiagnostic(
-        "drag-target-unsatisfied",
-        "warning",
-        "Dragged point target could not be satisfied without violating sketch constraints.",
-        { kind: "point", pointId: dragTarget.pointId },
-      ),
-    ],
+    kind: "solved",
+    solvedSnapshot: session.lastAcceptedSnapshot,
+    diagnostics: lastAccepted?.diagnostics ?? session.lastAcceptedSnapshot.diagnostics,
   };
 }
 
@@ -6823,27 +6775,8 @@ function buildDimensionStatuses(
   });
 }
 
-function getLineEntityPoints(
-  definition: SketchDefinition,
-  entityId: SketchEntityId,
-): readonly SketchPointId[] {
-  const entity = definition.entities.find(
-    (candidate) => candidate.entityId === entityId,
-  );
-
-  return entity?.kind === "lineSegment"
-    ? [entity.startPointId, entity.endPointId]
-    : [];
-}
-
-function getCollinearTargetPointIds(
-  definition: SketchDefinition,
-  target: LocalCollinearTargetOperand,
-): readonly SketchPointId[] {
-  return target.kind === "localPoint"
-    ? [target.pointId]
-    : getLineEntityPoints(definition, target.entityId);
-}
+// getLineEntityPoints / getCollinearTargetPointIds were only used by the removed
+// rigid-translation fallback cluster and were deleted with it.
 
 function getEntityPoints(
   entity: SketchEntityDefinition,
@@ -6877,388 +6810,12 @@ function getEntityPoints(
   }
 }
 
-function connectPoints(
-  graph: Map<SketchPointId, Set<SketchPointId>>,
-  pointIds: readonly SketchPointId[],
-) {
-  for (const pointId of pointIds) {
-    if (!graph.has(pointId)) {
-      graph.set(pointId, new Set());
-    }
-  }
-
-  for (const left of pointIds) {
-    const leftNeighbors = graph.get(left)!;
-    for (const right of pointIds) {
-      if (left !== right) {
-        leftNeighbors.add(right);
-      }
-    }
-  }
-}
-
-function collectTranslationComponent(
-  definition: SketchDefinition,
-  pointId: SketchPointId,
-) {
-  const graph = new Map<SketchPointId, Set<SketchPointId>>();
-
-  for (const point of definition.points) {
-    graph.set(point.pointId, new Set());
-  }
-
-  for (const entity of definition.entities) {
-    connectPoints(graph, getEntityPoints(entity));
-  }
-
-  for (const constraint of definition.constraints) {
-    switch (constraint.kind) {
-      case "coincident":
-      case "angle":
-        connectPoints(graph, constraint.pointIds);
-        break;
-      case "horizontal":
-      case "vertical":
-        connectPoints(
-          graph,
-          getLineEntityPoints(definition, constraint.entityId),
-        );
-        break;
-      case "parallel":
-      case "perpendicular":
-      case "equalLength":
-        connectPoints(
-          graph,
-          constraint.entityIds.flatMap((entityId) =>
-            getLineEntityPoints(definition, entityId),
-          ),
-        );
-        break;
-      case "coincidentProjectedPoint":
-      case "pointOnProjectedCurve":
-      case "midpointProjectedLine":
-        connectPoints(graph, [constraint.point.pointId]);
-        break;
-      case "midpoint":
-        connectPoints(graph, [
-          constraint.point.pointId,
-          ...getLineEntityPoints(definition, constraint.line.entityId),
-        ]);
-        break;
-      case "pointOnCurve":
-        {
-          const entity = definition.entities.find(
-            (candidate) => candidate.entityId === constraint.curve.entityId,
-          );
-          connectPoints(graph, [
-            constraint.point.pointId,
-            ...(entity ? getEntityPoints(entity) : []),
-          ]);
-        }
-        break;
-      case "collinear":
-        {
-          connectPoints(graph, [
-            ...getCollinearTargetPointIds(definition, constraint.target),
-            ...getLineEntityPoints(definition, constraint.line.entityId),
-          ]);
-        }
-        break;
-      case "collinearProjectedLine":
-        connectPoints(
-          graph,
-          getCollinearTargetPointIds(definition, constraint.target),
-        );
-        break;
-      case "parallelProjectedLine":
-      case "perpendicularProjectedLine":
-        connectPoints(
-          graph,
-          getLineEntityPoints(definition, constraint.line.entityId),
-        );
-        break;
-      case "tangentProjectedCurve":
-        {
-          const entity = definition.entities.find(
-            (candidate) => candidate.entityId === constraint.curve.entityId,
-          );
-          connectPoints(graph, entity ? getEntityPoints(entity) : []);
-        }
-        break;
-      case "tangent":
-      case "concentric":
-        connectPoints(
-          graph,
-          constraint.entityIds.flatMap((entityId) => {
-            const entity = definition.entities.find(
-              (candidate) => candidate.entityId === entityId,
-            );
-            return entity ? getEntityPoints(entity) : [];
-          }),
-        );
-        break;
-      case "concentricProjectedCurve":
-        {
-          const entity = definition.entities.find(
-            (candidate) => candidate.entityId === constraint.curve.entityId,
-          );
-          connectPoints(graph, entity ? getEntityPoints(entity) : []);
-        }
-        break;
-      case "normal":
-        {
-          const line = definition.entities.find(
-            (candidate) => candidate.entityId === constraint.line.entityId,
-          );
-          const curve = definition.entities.find(
-            (candidate) => candidate.entityId === constraint.curve.entityId,
-          );
-          connectPoints(graph, [
-            constraint.point.pointId,
-            ...(line ? getEntityPoints(line) : []),
-            ...(curve ? getEntityPoints(curve) : []),
-          ]);
-        }
-        break;
-      case "normalProjectedCurve":
-        {
-          const line = definition.entities.find(
-            (candidate) => candidate.entityId === constraint.line.entityId,
-          );
-          connectPoints(graph, [
-            constraint.point.pointId,
-            ...(line ? getEntityPoints(line) : []),
-          ]);
-        }
-        break;
-      case "symmetric":
-        {
-          const axis = definition.entities.find(
-            (candidate) => candidate.entityId === constraint.axis.entityId,
-          );
-          connectPoints(graph, [
-            ...constraint.pointIds,
-            ...(axis ? getEntityPoints(axis) : []),
-          ]);
-        }
-        break;
-      case "symmetricProjectedLine":
-        connectPoints(graph, constraint.pointIds);
-        break;
-      case "fixPoint":
-        break;
-    }
-  }
-
-  for (const dimension of definition.dimensions) {
-    switch (dimension.kind) {
-      case "distance":
-      case "horizontalDistance":
-      case "verticalDistance":
-        connectPoints(graph, dimension.pointIds);
-        break;
-      case "arcStartPointCoincident":
-      case "arcEndPointCoincident": {
-        const arc = definition.entities.find(
-          (entity) => entity.entityId === dimension.entityId,
-        );
-        connectPoints(graph, [
-          dimension.pointId,
-          ...(arc ? getEntityPoints(arc) : []),
-        ]);
-        break;
-      }
-      case "circleRadius":
-      case "diameter":
-        break;
-      case "lineLength":
-        connectPoints(
-          graph,
-          getLineEntityPoints(definition, dimension.entityId),
-        );
-        break;
-      case "lineDistance":
-      case "lineAngle":
-        for (const line of dimension.lines) {
-          if (line.kind === "localEntity") {
-            connectPoints(
-              graph,
-              getLineEntityPoints(definition, line.entityId),
-            );
-          }
-        }
-        break;
-      case "linePointDistance":
-        connectPoints(graph, [
-          ...(dimension.line.kind === "localEntity"
-            ? getLineEntityPoints(definition, dimension.line.entityId)
-            : []),
-          ...(dimension.point.kind === "localPoint"
-            ? [dimension.point.pointId]
-            : []),
-        ]);
-        break;
-    }
-  }
-
-  const visited = new Set<SketchPointId>();
-  const stack = [pointId];
-
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-
-    if (visited.has(current)) {
-      continue;
-    }
-
-    visited.add(current);
-    for (const next of graph.get(current) ?? []) {
-      stack.push(next);
-    }
-  }
-
-  return visited;
-}
-
-function trySolveDraggedPointAsComponentTranslation(input: {
-  definition: SketchDefinition;
-  projectedReferences?: readonly ProjectedSketchReferenceRecord[];
-  dragTarget: SketchDraggedPointTarget;
-  tolerances: SketchSolveTolerancePolicy;
-  partialSolvePolicy: SolverPartialSolvePolicy;
-  strategy?: SketchSolveStrategy;
-  targetTolerance: number;
-}): SketchDraggedPointSolveResult | null {
-  const draggedPoint = input.definition.points.find(
-    (point) => point.pointId === input.dragTarget.pointId,
-  );
-
-  if (!draggedPoint) {
-    return null;
-  }
-
-  const component = collectTranslationComponent(
-    input.definition,
-    input.dragTarget.pointId,
-  );
-
-  if (
-    input.definition.constraints.some(
-      (constraint) =>
-        constraint.kind === "fixPoint" && component.has(constraint.pointId),
-    )
-  ) {
-    return null;
-  }
-
-  if (
-    input.definition.constraints.some((constraint) => {
-      if (
-        constraint.kind === "coincidentProjectedPoint" ||
-        constraint.kind === "pointOnProjectedCurve" ||
-        constraint.kind === "midpointProjectedLine" ||
-        constraint.kind === "symmetricProjectedLine"
-      ) {
-        return constraint.kind === "symmetricProjectedLine"
-          ? constraint.pointIds.some((pointId) => component.has(pointId))
-          : component.has(constraint.point.pointId);
-      }
-
-      if (
-        constraint.kind === "parallelProjectedLine" ||
-        constraint.kind === "perpendicularProjectedLine"
-      ) {
-        return getLineEntityPoints(
-          input.definition,
-          constraint.line.entityId,
-        ).some((pointId) => component.has(pointId));
-      }
-
-      if (constraint.kind === "collinearProjectedLine") {
-        if (constraint.target.kind === "localPoint") {
-          return component.has(constraint.target.pointId);
-        }
-
-        return getLineEntityPoints(
-          input.definition,
-          constraint.target.entityId,
-        ).some((pointId) => component.has(pointId));
-      }
-
-      if (
-        constraint.kind === "tangentProjectedCurve" ||
-        constraint.kind === "concentricProjectedCurve"
-      ) {
-        const entity = input.definition.entities.find(
-          (candidate) => candidate.entityId === constraint.curve.entityId,
-        );
-        return entity
-          ? getEntityPoints(entity).some((pointId) => component.has(pointId))
-          : false;
-      }
-
-      if (constraint.kind === "normalProjectedCurve") {
-        const line = input.definition.entities.find(
-          (candidate) => candidate.entityId === constraint.line.entityId,
-        );
-        return (
-          component.has(constraint.point.pointId) ||
-          (line
-            ? getEntityPoints(line).some((pointId) => component.has(pointId))
-            : false)
-        );
-      }
-
-      return false;
-    })
-  ) {
-    return null;
-  }
-
-  const delta = subtract(input.dragTarget.position, draggedPoint.position);
-  const translatedDefinition: SketchDefinition = {
-    ...input.definition,
-    points: input.definition.points.map((point) =>
-      component.has(point.pointId)
-        ? { ...point, position: add(point.position, delta) }
-        : point,
-    ),
-  };
-  const solved = solveSketchDefinitionCore({
-    definition: translatedDefinition,
-    projectedReferences: input.projectedReferences,
-    tolerances: input.tolerances,
-    partialSolvePolicy: input.partialSolvePolicy,
-    strategy: input.strategy,
-  });
-  const solvedPoint = solved.solvedSnapshot.solvedPoints.find(
-    (point) => point.pointId === input.dragTarget.pointId,
-  );
-  const targetDistance = solvedPoint
-    ? length(subtract(solvedPoint.solvedPosition, input.dragTarget.position))
-    : Number.POSITIVE_INFINITY;
-  const constraintsSatisfied = solved.solvedSnapshot.constraintStatuses.every(
-    (status) => status.status === "satisfied",
-  );
-  const dimensionsSatisfied = solved.solvedSnapshot.dimensionStatuses.every(
-    (status) => status.status !== "unsatisfied",
-  );
-
-  if (
-    solved.status.solveState === "solved" &&
-    targetDistance <= input.targetTolerance &&
-    constraintsSatisfied &&
-    dimensionsSatisfied
-  ) {
-    return {
-      kind: "solved",
-      solvedSnapshot: solved.solvedSnapshot,
-      diagnostics: solved.diagnostics,
-    };
-  }
-
-  return null;
-}
+// (removed) connectPoints / collectTranslationComponent /
+// trySolveDraggedPointAsComponentTranslation: the standalone rigid-translation
+// fallback with its own targetDistance-based acceptance model was retired by
+// minimum-motion-sketch-drag. Interactive drag solving
+// (updateCompiledSketchSolveSession) is now the single authority; rigid
+// translation survives only as its internal verified fast path.
 
 export function solveSketchDefinitionCore(input: {
   definition: SketchDefinition;
@@ -7317,30 +6874,13 @@ export function solveSketchDefinitionWithDraggedPointTarget(input: {
     targetTolerance,
   );
 
-  if (interactive.kind === "solved") {
-    return interactive;
-  }
-
-  const translated = trySolveDraggedPointAsComponentTranslation({
-    definition: program.definition,
-    projectedReferences: program.projectedReferences,
-    dragTarget: input.dragTarget,
-    tolerances: input.tolerances,
-    partialSolvePolicy: input.partialSolvePolicy,
-    strategy: input.strategy,
-    targetTolerance,
-  });
-
-  if (translated) {
-    return translated;
-  }
-
-  return {
-    kind: "blocked",
-    reason: interactive.reason,
-    solvedSnapshot: interactive.solvedSnapshot,
-    diagnostics: interactive.diagnostics,
-  };
+  // The interactive session is the single authority for drag results
+  // (minimum-motion-sketch-drag). It already returns `solved` for every
+  // satisfiable sketch (sliding to the closest feasible position, or translating
+  // rigid components via its verified fast path) and reserves `blocked` for
+  // non-convergent/invalid frames. No separate translation fallback with its own
+  // acceptance model runs here — that invisible second mechanism was removed.
+  return interactive;
 }
 
 export function validateSketchDefinitionCore(input: {

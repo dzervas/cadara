@@ -79,6 +79,14 @@ export const SKETCH_DIRECT_EDIT_TOLERANCES = {
 
 export const CONSTRAINED_DRAG_BLOCKED_MESSAGE =
   "Geometry is constrained and cannot move to that position.";
+// D6 constrained-drag feedback gate (minimum-motion-sketch-drag). A drag frame
+// is only a candidate for constrained-movement feedback when a meaningful move
+// was requested (> CONSTRAINED_DRAG_REQUEST_EPSILON world units) yet the target
+// barely followed (< CONSTRAINED_DRAG_MOVE_FRACTION of the request). Whether
+// that barely-moved frame is truly constrained (feedback) or just lagged along a
+// free DOF (no feedback) is then decided by a solver mobility probe.
+export const CONSTRAINED_DRAG_REQUEST_EPSILON = 1e-3;
+export const CONSTRAINED_DRAG_MOVE_FRACTION = 0.01;
 export const ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE =
   "Could not solve the edited constraint value.";
 export const LIVE_REGION_DOCUMENT_ID = "doc_live_sketch" as DocumentId;

@@ -37,6 +37,12 @@ export {
   normalizeSketchConstraintDisplayState,
 } from "./annotation-display";
 
+export type { SketchDragHandle, SketchDragIntent } from "./drag-intent";
+export {
+  getSketchEntityDefiningPointIds,
+  resolveSketchDragIntent,
+} from "./drag-intent";
+
 export {
   createProjectedPrimitiveRef,
   createReferencePrimitiveRef,
