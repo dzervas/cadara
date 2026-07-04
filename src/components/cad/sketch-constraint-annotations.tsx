@@ -12,7 +12,12 @@ import type {
   SketchConstraintRef,
   SketchDimensionRef,
 } from "@/contracts/shared/references";
+import type { PrimitiveRef } from "@/core/editor/schema";
 import { getToolIconSrc } from "@/core/tools/tool-icons";
+import {
+  annotationTargetsEqual,
+  resolveSketchAnnotationVisibility,
+} from "@/components/cad/sketch-constraint-annotation-visibility";
 import {
   getAnnotationProjectionId,
   layoutSketchAnnotationProjections,
@@ -25,6 +30,8 @@ interface SketchConstraintAnnotationsProps {
   projections: readonly SketchViewportFeedbackProjection[];
   hoveredAnnotation: SketchConstraintRef | SketchDimensionRef | null;
   selectedAnnotation: SketchConstraintRef | SketchDimensionRef | null;
+  hoverTarget: PrimitiveRef | null;
+  selection: readonly PrimitiveRef[];
   onHover: (target: SketchConstraintRef | SketchDimensionRef) => void;
   onClearHover: () => void;
   onSelect: (target: SketchConstraintRef | SketchDimensionRef) => void;
@@ -43,6 +50,8 @@ export function SketchConstraintAnnotations({
   projections,
   hoveredAnnotation,
   selectedAnnotation,
+  hoverTarget,
+  selection,
   onHover,
   onClearHover,
   onSelect,
@@ -59,20 +68,37 @@ export function SketchConstraintAnnotations({
   } | null>(null);
   const suppressClickHandleIdRef = useRef<string | null>(null);
 
-  if (annotations.length === 0) {
+  const visibleAnnotations = annotations.flatMap((annotation) => {
+    const visibility = resolveSketchAnnotationVisibility(annotation, {
+      hoveredAnnotation,
+      selectedAnnotation,
+      hoverTarget,
+      selection,
+    });
+
+    return visibility === "hidden" ? [] : [{ annotation, visibility }];
+  });
+
+  if (visibleAnnotations.length === 0) {
     return null;
   }
 
+  const visibleProjectionIds = new Set(
+    visibleAnnotations.map(({ annotation }) =>
+      getAnnotationProjectionId(annotation.id),
+    ),
+  );
   const projectionById = new Map(
-    layoutSketchAnnotationProjections(projections).map((projection) => [
-      projection.id,
-      projection,
-    ]),
+    layoutSketchAnnotationProjections(
+      projections.filter((projection) =>
+        visibleProjectionIds.has(projection.id),
+      ),
+    ).map((projection) => [projection.id, projection]),
   );
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
-      {annotations.map((annotation) => {
+      {visibleAnnotations.map(({ annotation, visibility }) => {
         const projection = projectionById.get(
           getAnnotationProjectionId(annotation.id),
         );
@@ -100,6 +126,8 @@ export function SketchConstraintAnnotations({
                   : "border-[var(--cad-border)] bg-[var(--cad-surface-overlay)] hover:border-[var(--cad-border-strong)]"
             }`
           : `pointer-events-auto absolute flex h-8 w-8 items-center justify-center rounded border p-1 shadow-[var(--cad-panel-shadow)] transition ${
+              visibility === "faded" ? "opacity-60 hover:opacity-100 " : ""
+            }${
               isSelected
                 ? "border-[var(--cad-accent)] bg-[var(--cad-surface-elevated)]"
                 : isHovered
@@ -113,6 +141,7 @@ export function SketchConstraintAnnotations({
             type="button"
             data-sketch-annotation-glyph={annotation.glyphKind}
             data-sketch-annotation-kind={annotation.status}
+            data-sketch-annotation-visibility={visibility}
             className={baseClassName}
             style={{
               left: projection.x,
@@ -314,19 +343,6 @@ function getAnnotationConstraintColor(annotation: SketchAnnotationDescriptor) {
   }
 
   return `var(${getSketchRenderingPaletteToken("underconstrained")})`;
-}
-
-function annotationTargetsEqual(
-  left: SketchConstraintRef | SketchDimensionRef | null,
-  right: SketchConstraintRef | SketchDimensionRef,
-) {
-  if (!left || left.kind !== right.kind || left.sketchId !== right.sketchId) {
-    return false;
-  }
-
-  return left.kind === "constraint"
-    ? right.kind === "constraint" && left.constraintId === right.constraintId
-    : right.kind === "dimension" && left.dimensionId === right.dimensionId;
 }
 
 function getAnnotationGlyphIconSrc(

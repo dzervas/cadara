@@ -2202,6 +2202,8 @@ export function ThreeCadViewport({
             ? (selection[0] as SketchConstraintRef | SketchDimensionRef)
             : null
         }
+        hoverTarget={hoverTarget}
+        selection={selection}
         onHover={(target) => {
           hoverTargetRef.current = target;
           hoverRef.current(target);

@@ -2,6 +2,7 @@ import { test, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { SketchConstraintAnnotations } from "@/components/cad/sketch-constraint-annotations";
+import { resolveSketchAnnotationVisibility } from "@/components/cad/sketch-constraint-annotation-visibility";
 import { getAnnotationProjectionId } from "@/components/cad/sketch-viewport-feedback-model";
 import type { SketchAnnotationDescriptor } from "@/domain/editor/sketch-session";
 
@@ -162,6 +163,8 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
       ]}
       hoveredAnnotation={annotation.target}
       selectedAnnotation={annotation.target}
+      hoverTarget={null}
+      selection={[]}
       onHover={() => undefined}
       onClearHover={() => undefined}
       onSelect={() => undefined}
@@ -219,5 +222,144 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
   expect(
     markup.includes("var(--workbench-shell-danger-text)"),
     "Affected overconstrained annotation glyphs should use the shared danger theme token.",
+  ).toBeTruthy();
+});
+
+test("src/components/cad/sketch-constraint-annotations.spec.tsx visibility", () => {
+  const lineRef = {
+    kind: "sketchEntity",
+    sketchId: "sketch_draft",
+    entityId: "sketch_entity_1_line",
+  } as const;
+  const otherLineRef = {
+    kind: "sketchEntity",
+    sketchId: "sketch_draft",
+    entityId: "sketch_entity_9_line",
+  } as const;
+  const constraintAnnotation: SketchAnnotationDescriptor = {
+    id: "constraint_1_parallel",
+    target: {
+      kind: "constraint",
+      sketchId: "sketch_draft",
+      constraintId: "constraint_1_parallel",
+    },
+    glyphKind: "constraintParallel",
+    anchor: { kind: "sketchPoint", point: [5, 2], offset: { x: 18, y: -18 } },
+    affectedGeometryRefs: [lineRef],
+    constraintDisplay: {
+      state: "underconstrained",
+      isAffectedOverconstraint: false,
+    },
+    label: "Parallel",
+    detail: "Parallel lines",
+    status: "constraint",
+  };
+  const dimensionAnnotation: SketchAnnotationDescriptor = {
+    id: "dimension_1_distance",
+    target: {
+      kind: "dimension",
+      sketchId: "sketch_draft",
+      dimensionId: "dimension_1_distance",
+    },
+    glyphKind: "dimensionDistance",
+    anchor: { kind: "sketchPoint", point: [5, 2], offset: { x: 0, y: -28 } },
+    affectedGeometryRefs: [lineRef],
+    label: "Distance",
+    detail: "10.00 mm distance",
+    status: "dimension",
+    visibleLabel: "10.00",
+  };
+  const idleContext = {
+    hoveredAnnotation: null,
+    selectedAnnotation: null,
+    hoverTarget: null,
+    selection: [],
+  } as const;
+
+  expect(
+    resolveSketchAnnotationVisibility(constraintAnnotation, idleContext),
+    "Constraint annotations should be hidden while no related geometry is hovered or selected.",
+  ).toBe("hidden");
+  expect(
+    resolveSketchAnnotationVisibility(dimensionAnnotation, idleContext),
+    "Dimension annotations should stay visible regardless of hover or selection.",
+  ).toBe("visible");
+  expect(
+    resolveSketchAnnotationVisibility(constraintAnnotation, {
+      ...idleContext,
+      hoverTarget: lineRef,
+    }),
+    "Constraint annotations should fade in while their affected geometry is hovered.",
+  ).toBe("faded");
+  expect(
+    resolveSketchAnnotationVisibility(constraintAnnotation, {
+      ...idleContext,
+      hoverTarget: otherLineRef,
+    }),
+    "Constraint annotations should stay hidden while unrelated geometry is hovered.",
+  ).toBe("hidden");
+  expect(
+    resolveSketchAnnotationVisibility(constraintAnnotation, {
+      ...idleContext,
+      selection: [lineRef],
+    }),
+    "Constraint annotations should be fully visible while their affected geometry is selected.",
+  ).toBe("visible");
+  expect(
+    resolveSketchAnnotationVisibility(constraintAnnotation, {
+      ...idleContext,
+      hoveredAnnotation: constraintAnnotation.target,
+    }),
+    "Constraint annotations should stay fully visible while the annotation itself is hovered.",
+  ).toBe("visible");
+  expect(
+    resolveSketchAnnotationVisibility(
+      {
+        ...constraintAnnotation,
+        constraintDisplay: {
+          state: "overconstrained",
+          isAffectedOverconstraint: true,
+        },
+      },
+      idleContext,
+    ),
+    "Overconstrained constraint annotations should always stay visible.",
+  ).toBe("visible");
+
+  const markup = renderToStaticMarkup(
+    <SketchConstraintAnnotations
+      annotations={[constraintAnnotation, dimensionAnnotation]}
+      projections={[
+        {
+          id: getAnnotationProjectionId(constraintAnnotation.id),
+          x: 120,
+          y: 80,
+        },
+        {
+          id: getAnnotationProjectionId(dimensionAnnotation.id),
+          x: 160,
+          y: 80,
+        },
+      ]}
+      hoveredAnnotation={null}
+      selectedAnnotation={null}
+      hoverTarget={lineRef}
+      selection={[]}
+      onHover={() => undefined}
+      onClearHover={() => undefined}
+      onSelect={() => undefined}
+      onEdit={() => undefined}
+    />,
+  );
+
+  expect(
+    markup.includes('data-sketch-annotation-visibility="faded"') &&
+      markup.includes("opacity-60"),
+    "Hover-revealed constraint annotations should render semi-transparent.",
+  ).toBeTruthy();
+  expect(
+    markup.includes('data-sketch-annotation-visibility="visible"') &&
+      markup.includes(">10.00<"),
+    "Dimension annotations should render fully visible alongside faded constraints.",
   ).toBeTruthy();
 });
