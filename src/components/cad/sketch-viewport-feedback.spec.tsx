@@ -256,6 +256,17 @@ test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
     "Viewport feedback should preserve numeric input controls.",
   ).toBeTruthy();
   expect(
+    markup.includes("left:clamp(12px, 180px, calc(100% - 232px))") &&
+      markup.includes(
+        "bottom:clamp(12px, calc(100% - 90px), calc(100% - 144px))",
+      ),
+    "Viewport feedback should clamp floating numeric input inside the viewport overlay before focusing it.",
+  ).toBeTruthy();
+  expect(
+    markup.includes("autofocus"),
+    "Viewport feedback should focus numeric input with preventScroll instead of React autoFocus so offscreen bubbles do not scroll the workbench.",
+  ).toBeFalsy();
+  expect(
     markup.includes('data-sketch-viewport-geometry="dimensionLine"') &&
       markup.includes('x1="100"'),
     "Viewport feedback should render dimension preview line geometry from projected endpoints.",
