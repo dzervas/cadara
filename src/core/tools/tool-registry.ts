@@ -486,7 +486,10 @@ export function getToolbarSectionsForMode(mode: "part" | "sketch") {
   );
 }
 
-export function searchToolDefinitions(query: string) {
+export function searchToolDefinitions(
+  query: string,
+  mode?: "part" | "sketch",
+) {
   const trimmedQuery = query.trim().toLowerCase();
 
   if (!trimmedQuery) {
@@ -495,6 +498,11 @@ export function searchToolDefinitions(query: string) {
 
   return toolDefinitions
     .filter((tool) => tool.id !== "pattern")
+    .filter(
+      (tool) =>
+        mode === undefined ||
+        (tool.modes as readonly ("part" | "sketch")[]).includes(mode),
+    )
     .filter((tool) => {
       const haystack =
         `${tool.name} ${tool.tooltip} ${tool.group}`.toLowerCase();

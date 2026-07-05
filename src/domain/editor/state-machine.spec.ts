@@ -3886,6 +3886,75 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     }
   }
 
+  function testPartOnlyToolActivationDuringSketchIsSilentlyIgnored() {
+    const activated = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: "doc_workspace",
+          revisionId: "rev_1",
+        },
+        snapshot: createSnapshot(),
+        selectionCatalog: createSelectionCatalog(),
+      },
+      {
+        type: "tool.activated",
+        toolId: "sketch",
+      },
+    );
+
+    const openRequested = transitionEditorState(activated.state, {
+      type: "viewport.selectionRequested",
+      target: { kind: "construction", constructionId: "construction_plane-xy" },
+    });
+    const openEffect = openRequested.effects[0];
+
+    expectTrue(
+      openEffect?.type === "sketch.openSession",
+      "Sketch fixture should emit an open-session effect.",
+    );
+
+    const opened = transitionEditorState(openRequested.state, {
+      type: "effect.sketchSessionOpened",
+      requestId: openEffect.requestId,
+      documentId: "doc_workspace",
+      revisionId: "rev_1",
+      commandSessionId: openEffect.commandSessionId,
+      session: createNewSketchSession(createStandardPlaneDefinition("xy")),
+    });
+
+    expectTrue(
+      opened.state.kind === "editingSketch",
+      "Sketch fixture should enter sketch editing.",
+    );
+
+    const partOnlyToolIds = [
+      "measure",
+      "sectionView",
+      "extrude",
+      "linearPattern",
+      "moveFace",
+      "import",
+      "sketch",
+    ] as const satisfies readonly ToolId[];
+
+    for (const toolId of partOnlyToolIds) {
+      const result = transitionEditorState(opened.state, {
+        type: "tool.activated",
+        toolId,
+      });
+
+      expectTrue(
+        result.state === opened.state,
+        `${toolId} should leave the sketch state untouched during sketch editing.`,
+      );
+      expectTrue(
+        result.effects.length === 0,
+        `${toolId} should not emit effects while editing a sketch.`,
+      );
+    }
+  }
+
   function testSketchEditToolActivationReusesCompatibleSelectionAndClearsInvalidSelection() {
     const session = createOffsetFixtureSketchSession();
     const selectedTargets = session.definition.entities.map(
@@ -5617,6 +5686,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   testSelectionClearEventClearsSelectionAndPreservesActiveState();
   testSketchToolClearStaysInSketchEditing();
   testRemainingSketchToolsActivateWithoutDroppingSketchSession();
+  testPartOnlyToolActivationDuringSketchIsSilentlyIgnored();
   testSketchEditToolActivationReusesCompatibleSelectionAndClearsInvalidSelection();
   testPassiveSketchStyleToolsDoNotDropSketchSession();
   testConstraintAuthoringReceivesViewportHoverAndSelection();

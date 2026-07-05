@@ -124,8 +124,8 @@ export function WorkspaceToolbar({
   );
   const visibleSectionKey = visibleSectionIds.join("|");
   const searchResults = useMemo(
-    () => searchToolDefinitions(searchQuery),
-    [searchQuery],
+    () => searchToolDefinitions(searchQuery, mode),
+    [searchQuery, mode],
   );
   const clampedHighlightedSearchResultIndex =
     searchResults.length === 0

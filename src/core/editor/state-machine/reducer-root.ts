@@ -1,5 +1,8 @@
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
-import { getToolCommandBehavior } from "@/core/tools/activation-policy";
+import {
+  getToolCommandBehavior,
+  resolveToolActivationMode,
+} from "@/core/tools/activation-policy";
 import {
   getSelectionFilterForCommand,
   selectionFilterAllowsTarget,
@@ -413,22 +416,15 @@ function handleSharedToolActivated(
     return handleImportImageToolActivation(state);
   }
 
-  if (event.toolId === "sketch") {
-    return handleSketchToolActivation(state);
+  if (
+    state.mode === "sketch" &&
+    resolveToolActivationMode(event.toolId, state.mode) === "part"
+  ) {
+    return { state, effects: [] };
   }
 
-  if (event.toolId === "sectionView" || event.toolId === "measure") {
-    const selectionFilter = getSelectionFilterForCommand(event.toolId, "part");
-    return {
-      state: createCommandState(
-        state,
-        event.toolId,
-        "part",
-        selectionFilter,
-        createSelectionPreview(state, selectionFilter),
-      ),
-      effects: [],
-    };
+  if (event.toolId === "sketch") {
+    return handleSketchToolActivation(state);
   }
 
   if (isFeatureTool(event.toolId)) {
