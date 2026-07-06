@@ -10,6 +10,8 @@ import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-sche
 import {
   createAppError,
   errorContext,
+  isAppError,
+  normalizeUnknownError,
   type ErrorReporter,
 } from "@/contracts/errors";
 import {
@@ -21,8 +23,41 @@ import type { ImportProviderRegistry } from "@/domain/import/provider-registry";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
+import { useDurableHistory } from "@/hooks/use-durable-history";
+import type { DurableHistoryService } from "@/workbench/history/durable-history";
 import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";
 import { showOpenImportFilePicker } from "@/lib/import-file-picker";
+
+/**
+ * Extract a human-readable message from an unknown thrown value by walking the
+ * AppError message/cause chain instead of relying on an `instanceof Error`
+ * guard (which silently drops AppError context and nested causes).
+ */
+function describeImportError(error: unknown, fallback: string): string {
+  const appError = normalizeUnknownError(error, { fallbackMessage: fallback });
+  const parts: string[] = [appError.message];
+  const seen = new Set<unknown>();
+  let cause: unknown = appError.cause;
+
+  while (cause && !seen.has(cause)) {
+    seen.add(cause);
+    let message: string | null = null;
+    if (isAppError(cause)) {
+      message = cause.message;
+      cause = cause.cause;
+    } else if (cause instanceof Error) {
+      message = cause.message;
+      cause = (cause as { cause?: unknown }).cause;
+    } else {
+      break;
+    }
+    if (message && message.trim() && message !== parts[parts.length - 1]) {
+      parts.push(message);
+    }
+  }
+
+  return parts.join(": ");
+}
 
 function promptForImportProvider(
   providers: readonly ImportProvider<
@@ -74,6 +109,7 @@ interface WorkbenchPartImportDependencies {
     ReturnType<typeof useWorkbenchDocumentOwner>,
     "commitPartImport"
   >;
+  durableHistory: Pick<DurableHistoryService, "undo">;
   importProviders: ImportProviderRegistry;
   openImportFilePicker: typeof showOpenImportFilePicker;
   promptForProvider: typeof promptForImportProvider;
@@ -94,7 +130,9 @@ export function useWorkbenchPartImport({
 }: WorkbenchPartImportControllerInput) {
   const hookDocumentOwner = useWorkbenchDocumentOwner();
   const runtimeExtensionRegistry = useRuntimeExtensionRegistry();
+  const contextDurableHistory = useDurableHistory();
   const documentOwner = deps?.documentOwner ?? hookDocumentOwner;
+  const durableHistory = deps?.durableHistory ?? contextDurableHistory;
   const importProviders =
     deps?.importProviders ?? runtimeExtensionRegistry.importProviders;
   const openImportFilePicker =
@@ -114,7 +152,18 @@ export function useWorkbenchPartImport({
     dispatch({ type: "import.commitRequested" });
 
     try {
-      const result = await documentOwner.commitPartImport(activeImportSession);
+      const documentId = snapshot.document.documentId;
+      // Atomic rollback: revert every operation the import committed before a
+      // mid-sequence failure, using the durable-history revert (the only path
+      // that reverses document variables too).
+      const rollback = async (appliedOperationCount: number) => {
+        for (let index = 0; index < appliedOperationCount; index += 1) {
+          await durableHistory.undo({ documentId, sketchSession: null });
+        }
+      };
+      const result = await documentOwner.commitPartImport(activeImportSession, {
+        rollback,
+      });
       if (!result.ok) {
         dispatch({ type: "import.failed", diagnostics: result.diagnostics });
         showWorkbenchError(result.diagnostics[0]?.message ?? "Import failed.");
@@ -134,7 +183,7 @@ export function useWorkbenchPartImport({
       }
       showWorkbenchInfo(`Imported ${activeImportSession.resolvedSource.name}.`);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Import failed.";
+      const message = describeImportError(error, "Import failed.");
       dispatch({
         type: "import.failed",
         diagnostics: [
@@ -169,6 +218,7 @@ export function useWorkbenchPartImport({
     activeImportSession,
     dispatch,
     documentOwner,
+    durableHistory,
     errorReporter,
     showWorkbenchError,
     showWorkbenchInfo,
@@ -239,8 +289,7 @@ export function useWorkbenchPartImport({
       });
       dispatch({ type: "import.fileSelected", session });
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : "Import review failed.";
+      const message = describeImportError(error, "Import review failed.");
       handleWorkbenchFailure({
         appError: createAppError({
           code: "workbench/action-failed",

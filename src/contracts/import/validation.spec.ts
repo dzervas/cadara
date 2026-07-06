@@ -130,4 +130,51 @@ test("src/contracts/import/validation.spec.ts", async () => {
     }).success,
     "Prepared action validation should reject invalid nested import bindings.",
   ).toBeFalsy();
+
+  const variableRequest = (name: string) => ({
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    variableId: `variable_${name}`,
+    name,
+    valueText: "10 mm",
+  });
+
+  expect(
+    validateImportPreparedActions({
+      addDocumentVariables: [variableRequest("a"), variableRequest("b")],
+      orderedActions: [
+        { kind: "addDocumentVariable", index: 1 },
+        { kind: "addDocumentVariable", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should accept an ordered sequence that permutes every prepared action once.",
+  ).toBeTruthy();
+
+  expect(
+    validateImportPreparedActions({
+      addDocumentVariables: [variableRequest("a"), variableRequest("b")],
+      orderedActions: [{ kind: "addDocumentVariable", index: 0 }],
+    }).success,
+    "Prepared action validation should reject an ordered sequence that omits a prepared action.",
+  ).toBeFalsy();
+
+  expect(
+    validateImportPreparedActions({
+      addDocumentVariables: [variableRequest("a")],
+      orderedActions: [
+        { kind: "addDocumentVariable", index: 0 },
+        { kind: "addDocumentVariable", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should reject an ordered sequence that duplicates a prepared action.",
+  ).toBeFalsy();
+
+  expect(
+    validateImportPreparedActions({
+      addDocumentVariables: [variableRequest("a")],
+      orderedActions: [{ kind: "addDocumentVariable", index: 5 }],
+    }).success,
+    "Prepared action validation should reject an ordered sequence with an out-of-range index.",
+  ).toBeFalsy();
 });
