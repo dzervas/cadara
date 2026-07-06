@@ -3,9 +3,18 @@ import type {
   SketchDerivationDefinition,
   SketchDerivedEntityOutput,
   SketchEntityDefinition,
+  SketchOffsetJointOutput,
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import {
+  computeOffsetChain,
+  offsetLinePoints,
+  offsetPolylinePoints,
+  offsetSeedCurveFromEntity,
+  scalePointFromCenter,
+  type OffsetSeedCurve,
+} from "@/contracts/sketch/offset-geometry";
 import type { ProjectedSketchReferenceGeometry } from "@/contracts/solver/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
@@ -177,11 +186,6 @@ function scale(vector: SketchPoint, scalar: number): SketchPoint {
 function normalize(vector: SketchPoint): SketchPoint | null {
   const length = Math.hypot(vector[0], vector[1]);
   return length <= EPSILON ? null : [vector[0] / length, vector[1] / length];
-}
-
-function leftNormal(vector: SketchPoint): SketchPoint | null {
-  const unit = normalize(vector);
-  return unit ? [-unit[1], unit[0]] : null;
 }
 
 function getPoint(definition: SketchDefinition, pointId: SketchPointId) {
@@ -868,13 +872,7 @@ function offsetSplinePoints(
   distance: number,
   side: OffsetSide,
 ) {
-  const sideFactor = side === "left" ? 1 : -1;
-  return points.map((point, index) => {
-    const previous = points[Math.max(0, index - 1)]!;
-    const next = points[Math.min(points.length - 1, index + 1)]!;
-    const normal = leftNormal(subtract(next, previous));
-    return normal ? add(point, scale(normal, distance * sideFactor)) : point;
-  });
+  return offsetPolylinePoints(points, side === "left" ? distance : -distance);
 }
 
 type LineChainRecord = {
@@ -1767,17 +1765,14 @@ function createContinuousLineOffsetContribution(input: {
   }
 
   const offsetLines = chain.ordered.map((line) => {
-    const normal = leftNormal(subtract(line.end, line.start));
-    if (!normal) {
-      return null;
-    }
-
-    const offset = scale(normal, input.distance * sideFactor);
-    return {
-      ...line,
-      offsetStart: add(line.start, offset),
-      offsetEnd: add(line.end, offset),
-    };
+    const offset = offsetLinePoints(
+      line.start,
+      line.end,
+      input.distance * sideFactor,
+    );
+    return offset
+      ? { ...line, offsetStart: offset.start, offsetEnd: offset.end }
+      : null;
   });
 
   if (offsetLines.some((line) => line === null)) {
@@ -1887,18 +1882,25 @@ function createLineSlotContribution(input: {
   sequence: number;
   factories: SketchEditOperationFactories;
 }): SketchEditOperationResult {
-  const direction = normalize(subtract(input.curve.end, input.curve.start));
-  const normal = direction ? leftNormal(direction) : null;
-  if (!normal) {
+  const halfWidth = input.width / 2;
+  const leftOffset = offsetLinePoints(
+    input.curve.start,
+    input.curve.end,
+    halfWidth,
+  );
+  const rightOffset = offsetLinePoints(
+    input.curve.start,
+    input.curve.end,
+    -halfWidth,
+  );
+  if (!leftOffset || !rightOffset) {
     return createInvalidOperationResult("Slot reference is too short.");
   }
 
-  const halfWidth = input.width / 2;
-  const offset = scale(normal, halfWidth);
-  const leftStart = add(input.curve.start, offset);
-  const leftEnd = add(input.curve.end, offset);
-  const rightEnd = subtract(input.curve.end, offset);
-  const rightStart = subtract(input.curve.start, offset);
+  const leftStart = leftOffset.start;
+  const leftEnd = leftOffset.end;
+  const rightEnd = rightOffset.end;
+  const rightStart = rightOffset.start;
   const leftStartPointId = input.factories.createPointId("slot-left-start");
   const leftEndPointId = input.factories.createPointId("slot-left-end");
   const rightEndPointId = input.factories.createPointId("slot-right-end");
@@ -2003,21 +2005,31 @@ function createArcSlotContribution(input: {
   const halfWidth = input.width / 2;
   const innerRadius = baseRadius - halfWidth;
   const outerRadius = baseRadius + halfWidth;
-  const startVector = normalize(
-    subtract(input.curve.start, input.curve.center),
+  const outerStart =
+    innerRadius > EPSILON
+      ? scalePointFromCenter(input.curve.center, input.curve.start, outerRadius)
+      : null;
+  const outerEnd = scalePointFromCenter(
+    input.curve.center,
+    input.curve.end,
+    outerRadius,
   );
-  const endVector = normalize(subtract(input.curve.end, input.curve.center));
+  const innerStart = scalePointFromCenter(
+    input.curve.center,
+    input.curve.start,
+    innerRadius,
+  );
+  const innerEnd = scalePointFromCenter(
+    input.curve.center,
+    input.curve.end,
+    innerRadius,
+  );
 
-  if (innerRadius <= EPSILON || !startVector || !endVector) {
+  if (!outerStart || !outerEnd || !innerStart || !innerEnd) {
     return createInvalidOperationResult(
       "Slot width would create an invalid arc slot.",
     );
   }
-
-  const outerStart = add(input.curve.center, scale(startVector, outerRadius));
-  const outerEnd = add(input.curve.center, scale(endVector, outerRadius));
-  const innerStart = add(input.curve.center, scale(startVector, innerRadius));
-  const innerEnd = add(input.curve.center, scale(endVector, innerRadius));
   const outerStartId = input.factories.createPointId("slot-outer-start");
   const outerEndId = input.factories.createPointId("slot-outer-end");
   const innerStartId = input.factories.createPointId("slot-inner-start");
@@ -2440,8 +2452,13 @@ export function createOffsetContribution(input: {
       };
     }
 
-    const normal = leftNormal(subtract(curve.end, curve.start));
-    if (!normal) {
+    const sideFactor = input.side === "left" ? 1 : -1;
+    const offset = offsetLinePoints(
+      curve.start,
+      curve.end,
+      input.distance * sideFactor,
+    );
+    if (!offset) {
       return {
         valid: false,
         message: "Offset target is too short.",
@@ -2450,10 +2467,8 @@ export function createOffsetContribution(input: {
       };
     }
 
-    const sideFactor = input.side === "left" ? 1 : -1;
-    const offset = scale(normal, input.distance * sideFactor);
-    const offsetStart = add(curve.start, offset);
-    const offsetEnd = add(curve.end, offset);
+    const offsetStart = offset.start;
+    const offsetEnd = offset.end;
     const startPointId = input.factories.createPointId("offset-start");
     const endPointId = input.factories.createPointId("offset-end");
     const entityId = input.factories.createEntityId("offset-line");
@@ -2569,9 +2584,9 @@ export function createOffsetContribution(input: {
       };
     }
 
-    const startVector = normalize(subtract(curve.start, curve.center));
-    const endVector = normalize(subtract(curve.end, curve.center));
-    if (!startVector || !endVector) {
+    const offsetStart = scalePointFromCenter(curve.center, curve.start, radius);
+    const offsetEnd = scalePointFromCenter(curve.center, curve.end, radius);
+    if (!offsetStart || !offsetEnd) {
       return {
         valid: false,
         message: "Offset target has invalid arc geometry.",
@@ -2584,8 +2599,6 @@ export function createOffsetContribution(input: {
     const startPointId = input.factories.createPointId("offset-arc-start");
     const endPointId = input.factories.createPointId("offset-arc-end");
     const entityId = input.factories.createEntityId("offset-arc");
-    const offsetStart = add(curve.center, scale(startVector, radius));
-    const offsetEnd = add(curve.center, scale(endVector, radius));
 
     return {
       valid: true,
@@ -2674,6 +2687,341 @@ export function createOffsetContribution(input: {
 
 function safeSuffix(value: string) {
   return value.replaceAll(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+/**
+ * Authors a durable offset derivation from a connected seed chain: derived
+ * output geometry per seed segment, joint arcs with stable identities, and
+ * the offset relationship record consumed by the derivation recompute.
+ */
+export function createSketchOffsetDerivationContribution(input: {
+  definition: SketchDefinition;
+  entityIds: readonly SketchEntityId[];
+  distance: number | null;
+  side: OffsetSide;
+  sequence: number;
+  factories: SketchEditOperationFactories;
+}): SketchEditOperationResult {
+  if (input.entityIds.length === 0) {
+    return createInvalidOperationResult(
+      "Select a connected chain of entities to offset.",
+    );
+  }
+
+  if (input.distance === null || input.distance <= EPSILON) {
+    return createInvalidOperationResult(
+      "Offset distance must be greater than zero.",
+    );
+  }
+
+  const entitiesById = new Map(
+    input.definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const pointsById = new Map(
+    input.definition.points.map((point) => [point.pointId, point]),
+  );
+  const curves: OffsetSeedCurve[] = [];
+  for (const entityId of input.entityIds) {
+    const entity = entitiesById.get(entityId);
+    const curve = entity
+      ? offsetSeedCurveFromEntity(
+          entity,
+          (pointId) => pointsById.get(pointId)?.position ?? null,
+        )
+      : null;
+    if (!curve) {
+      return createInvalidOperationResult(
+        "Offset supports line, circle, arc, and spline entities.",
+      );
+    }
+    curves.push(curve);
+  }
+
+  const signedDistance =
+    input.side === "left" ? input.distance : -input.distance;
+  const chain = computeOffsetChain({ curves, distance: signedDistance });
+  if (!chain.ok) {
+    return createInvalidOperationResult(chain.message);
+  }
+
+  const points: SketchPointDefinition[] = [];
+  const entities: SketchEntityDefinition[] = [];
+  const outputs: SketchDerivedEntityOutput[] = [];
+  const segmentBySeed = new Map(
+    chain.segments.map((segment) => [segment.seedEntityId, segment] as const),
+  );
+  const traversalEndpoints = new Map<
+    SketchEntityId,
+    { start: SketchPointId; end: SketchPointId }
+  >();
+
+  // Trimmed joints share one corner point between the adjacent outputs so
+  // derived chains stay topologically closed for selection and profile
+  // extraction; arc joints keep separate endpoints bridged by the joint arc.
+  const arcJointPairs = new Set(
+    chain.joints.map(
+      (joint) => `${joint.firstSeedEntityId} ${joint.secondSeedEntityId}`,
+    ),
+  );
+  const jointCount = chain.closed ? chain.order.length : chain.order.length - 1;
+  const sharedJunctionIds = new Map<number, SketchPointId>();
+  if (chain.order.length > 1) {
+    for (let index = 0; index < jointCount; index += 1) {
+      const firstEntry = chain.order[index]!;
+      const secondEntry = chain.order[(index + 1) % chain.order.length]!;
+      if (
+        arcJointPairs.has(
+          `${firstEntry.seedEntityId} ${secondEntry.seedEntityId}`,
+        )
+      ) {
+        continue;
+      }
+
+      const segment = segmentBySeed.get(firstEntry.seedEntityId)!;
+      const position =
+        segment.kind === "spline"
+          ? firstEntry.reversed
+            ? segment.points[0]!
+            : segment.points.at(-1)!
+          : segment.kind === "circle"
+            ? null
+            : firstEntry.reversed
+              ? segment.start
+              : segment.end;
+      if (!position) {
+        continue;
+      }
+
+      const pointId = input.factories.createPointId(
+        `offset-corner-${index + 1}`,
+      );
+      points.push(
+        input.factories.createPoint(
+          `Offset ${input.sequence} corner ${index + 1}`,
+          pointId,
+          position,
+        ),
+      );
+      sharedJunctionIds.set(index, pointId);
+    }
+  }
+
+  for (const [entryIndex, entry] of chain.order.entries()) {
+    const previousJointIndex =
+      entryIndex > 0 ? entryIndex - 1 : chain.closed ? jointCount - 1 : null;
+    const nextJointIndex = entryIndex < jointCount ? entryIndex : null;
+    const traversalStartSharedId =
+      previousJointIndex !== null
+        ? sharedJunctionIds.get(previousJointIndex)
+        : undefined;
+    const traversalEndSharedId =
+      nextJointIndex !== null
+        ? sharedJunctionIds.get(nextJointIndex)
+        : undefined;
+    const naturalStartSharedId = entry.reversed
+      ? traversalEndSharedId
+      : traversalStartSharedId;
+    const naturalEndSharedId = entry.reversed
+      ? traversalStartSharedId
+      : traversalEndSharedId;
+    const seed = entitiesById.get(entry.seedEntityId)!;
+    const segment = segmentBySeed.get(entry.seedEntityId)!;
+    const seedPointIds = getPointIdsForSupportedDerivedEntity(seed) ?? [];
+    const suffix = safeSuffix(entry.seedEntityId);
+    const label = `${seed.label} offset`;
+    const isConstruction = seed.isConstruction;
+    const style = seed.style;
+    const outputEntityId = input.factories.createEntityId(`offset-${suffix}`);
+    const outputPointIds: SketchPointId[] = [];
+
+    const createOutputPoint = (
+      role: string,
+      position: SketchPoint,
+    ): SketchPointId => {
+      const pointId = input.factories.createPointId(
+        `offset-${suffix}-${role}`,
+      );
+      points.push(
+        input.factories.createPoint(
+          `Offset ${input.sequence} ${seed.label} ${role}`,
+          pointId,
+          position,
+        ),
+      );
+      return pointId;
+    };
+
+    switch (segment.kind) {
+      case "lineSegment": {
+        const startPointId =
+          naturalStartSharedId ?? createOutputPoint("start", segment.start);
+        const endPointId =
+          naturalEndSharedId ?? createOutputPoint("end", segment.end);
+        outputPointIds.push(startPointId, endPointId);
+        entities.push({
+          ...input.factories.createLineEntity(
+            label,
+            outputEntityId,
+            startPointId,
+            endPointId,
+          ),
+          isConstruction,
+          style,
+        });
+        traversalEndpoints.set(entry.seedEntityId, {
+          start: entry.reversed ? endPointId : startPointId,
+          end: entry.reversed ? startPointId : endPointId,
+        });
+        break;
+      }
+      case "circle": {
+        const centerPointId = createOutputPoint("center", segment.center);
+        outputPointIds.push(centerPointId);
+        entities.push({
+          ...input.factories.createCircleEntity(
+            label,
+            outputEntityId,
+            centerPointId,
+            segment.radius,
+          ),
+          isConstruction,
+          style,
+        });
+        break;
+      }
+      case "arc": {
+        const centerPointId = createOutputPoint("center", segment.center);
+        const startPointId =
+          naturalStartSharedId ?? createOutputPoint("start", segment.start);
+        const endPointId =
+          naturalEndSharedId ?? createOutputPoint("end", segment.end);
+        outputPointIds.push(centerPointId, startPointId, endPointId);
+        entities.push({
+          ...input.factories.createArcEntity(
+            label,
+            outputEntityId,
+            centerPointId,
+            startPointId,
+            endPointId,
+            segment.sweepDirection,
+          ),
+          isConstruction,
+          style,
+        });
+        traversalEndpoints.set(entry.seedEntityId, {
+          start: entry.reversed ? endPointId : startPointId,
+          end: entry.reversed ? startPointId : endPointId,
+        });
+        break;
+      }
+      case "spline": {
+        const fitPointIds = segment.points.map((position, index) =>
+          index === 0 && naturalStartSharedId
+            ? naturalStartSharedId
+            : index === segment.points.length - 1 && naturalEndSharedId
+              ? naturalEndSharedId
+              : createOutputPoint(`fit-${index + 1}`, position),
+        );
+        outputPointIds.push(...fitPointIds);
+        entities.push({
+          ...input.factories.createSplineEntity(
+            label,
+            outputEntityId,
+            fitPointIds,
+          ),
+          isConstruction,
+          style,
+        });
+        traversalEndpoints.set(entry.seedEntityId, {
+          start: entry.reversed ? fitPointIds.at(-1)! : fitPointIds[0]!,
+          end: entry.reversed ? fitPointIds[0]! : fitPointIds.at(-1)!,
+        });
+        break;
+      }
+    }
+
+    outputs.push({
+      seedEntityId: entry.seedEntityId,
+      outputEntityId,
+      instanceIndex: 1,
+      seedPointIds,
+      outputPointIds,
+    });
+  }
+
+  const jointOutputs: SketchOffsetJointOutput[] = [];
+  for (const joint of chain.joints) {
+    const first = traversalEndpoints.get(joint.firstSeedEntityId);
+    const second = traversalEndpoints.get(joint.secondSeedEntityId);
+    const firstSeed = entitiesById.get(joint.firstSeedEntityId);
+    if (!first || !second || !firstSeed) {
+      return createInvalidOperationResult(
+        "Offset joint could not resolve its adjacent segment endpoints.",
+      );
+    }
+
+    const suffix = `${safeSuffix(joint.firstSeedEntityId)}-${safeSuffix(joint.secondSeedEntityId)}`;
+    const centerPointId = input.factories.createPointId(
+      `offset-joint-${suffix}`,
+    );
+    points.push(
+      input.factories.createPoint(
+        `Offset ${input.sequence} joint center`,
+        centerPointId,
+        joint.center,
+      ),
+    );
+    const outputEntityId = input.factories.createEntityId(
+      `offset-joint-${suffix}`,
+    );
+    entities.push({
+      ...input.factories.createArcEntity(
+        `Offset ${input.sequence} joint`,
+        outputEntityId,
+        centerPointId,
+        first.end,
+        second.start,
+        joint.sweepDirection,
+      ),
+      isConstruction: firstSeed.isConstruction,
+      style: firstSeed.style,
+    });
+    jointOutputs.push({
+      firstSeedEntityId: joint.firstSeedEntityId,
+      secondSeedEntityId: joint.secondSeedEntityId,
+      outputEntityId,
+      centerPointId,
+      startPointId: first.end,
+      endPointId: second.start,
+    });
+  }
+
+  const relationship: SketchDerivationDefinition = {
+    derivationId: `sketch_derivation_${input.sequence}_offset`,
+    label: `offset ${input.sequence}`,
+    kind: "offset",
+    seedEntityIds: chain.order.map((entry) => entry.seedEntityId),
+    distance: signedDistance,
+    jointPolicy: "trimExtendArcFallback",
+    outputs,
+    jointOutputs,
+  };
+  const contribution: SketchToolCommitContribution = {
+    points,
+    entities,
+    derivedRelationships: [relationship],
+  };
+
+  return {
+    valid: true,
+    message: null,
+    definition: null,
+    contribution,
+    previewEntities: createPreviewEntitiesFromContribution(
+      input.definition,
+      contribution,
+    ),
+  };
 }
 
 function getPointIdsForSupportedDerivedEntity(

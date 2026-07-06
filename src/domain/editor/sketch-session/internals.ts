@@ -43,7 +43,10 @@ import {
   SKETCH_SCHEMA_VERSION,
 } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
-import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import {
+  resolveSketchDerivationDistances,
+  resolveSketchDimensionValues,
+} from "@/domain/modeling/sketch-dimension-expressions";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
@@ -345,7 +348,10 @@ export function mergeDerivedProjectedReferences(
 export function getSketchSessionDisplayDefinition(session: SketchSessionState) {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
   const evaluatedDefinition = evaluateSketchDerivations(
-    session.definition,
+    resolveSketchDerivationDistances({
+      definition: session.definition,
+      variables: session.documentVariables,
+    }),
   ).definition;
   return mergeReferenceImageAnchorReferences(
     evaluatedDefinition,
@@ -379,11 +385,15 @@ export function resolveSketchDefinitionForSolve(
   definition: SketchDefinition,
   documentVariables: readonly DocumentVariableRecord[] = [],
 ): SketchDefinition {
-  const resolved = resolveSketchDimensionValues({
+  const withDerivationDistances = resolveSketchDerivationDistances({
     definition,
     variables: documentVariables,
   });
-  return resolved.ok ? resolved.definition : definition;
+  const resolved = resolveSketchDimensionValues({
+    definition: withDerivationDistances,
+    variables: documentVariables,
+  });
+  return resolved.ok ? resolved.definition : withDerivationDistances;
 }
 
 export function deriveSolvedRegionsForSession(
@@ -395,10 +405,9 @@ export function deriveSolvedRegionsForSession(
   solvedSnapshot?: SolvedSketchSnapshot,
 ): RegionRecord[] {
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  const evaluatedDefinition = resolveSketchDefinitionForSolve(
-    evaluateSketchDerivations(definition).definition,
-    session.documentVariables,
-  );
+  const evaluatedDefinition = evaluateSketchDerivations(
+    resolveSketchDefinitionForSolve(definition, session.documentVariables),
+  ).definition;
   let usableSolvedSnapshot = solvedSnapshot;
   if (!usableSolvedSnapshot) {
     if (
@@ -1715,7 +1724,18 @@ export function rebuildSessionCommitRequest(
   session: SketchSessionState,
   definition: SketchDefinition,
 ) {
-  const evaluatedDefinition = evaluateSketchDerivations(definition).definition;
+  // Evaluate with resolved derivation distances so committed geometry is
+  // current, but persist the authored relationship records so expression
+  // distances survive the round-trip.
+  const evaluatedDefinition = {
+    ...evaluateSketchDerivations(
+      resolveSketchDerivationDistances({
+        definition,
+        variables: session.documentVariables,
+      }),
+    ).definition,
+    derivedRelationships: definition.derivedRelationships,
+  };
   return buildCommitRequest({
     sketchId: session.sketchId,
     sketchLabel: session.sketchLabel,

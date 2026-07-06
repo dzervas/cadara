@@ -15,7 +15,7 @@ export type SketchEditToolId =
 
 export type SketchEditMutationContract =
   | "trimAtIntersections"
-  | "createOffsetGeometry"
+  | "createDerivedOffset"
   | "replaceCornerWithFilletArc"
   | "replaceCornerWithChamferLine"
   | "extendCurveToBoundary"

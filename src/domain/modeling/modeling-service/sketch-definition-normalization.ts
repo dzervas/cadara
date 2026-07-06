@@ -25,7 +25,9 @@ import {
   isString,
 } from "./validation";
 
-function normalizeSketchDimensionAuthoredValue(value: unknown): AuthoredValue<number> {
+export function normalizeSketchDimensionAuthoredValue(
+  value: unknown,
+): AuthoredValue<number> {
   if (typeof value === "number") {
     return createLiteralAuthoredValue(value);
   }

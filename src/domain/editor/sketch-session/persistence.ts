@@ -20,6 +20,7 @@ export function persistSketchDraftSession(
       session.historyOperations as PersistedSketchHistoryOperation[],
     sequence: session.sequence,
     commitRequest: session.commitRequest,
+    documentVariables: session.documentVariables,
   };
 }
 

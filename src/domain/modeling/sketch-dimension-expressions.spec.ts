@@ -8,7 +8,10 @@ import {
 import type { DocumentVariableRecord } from "@/contracts/modeling/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { normalizeDimensionDefinitionCore } from "@/domain/modeling/modeling-service/sketch-definition-normalization";
-import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import {
+  resolveSketchDerivationDistances,
+  resolveSketchDimensionValues,
+} from "@/domain/modeling/sketch-dimension-expressions";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 
 test("src/domain/modeling/sketch-dimension-expressions.spec.ts", () => {
@@ -151,6 +154,58 @@ test("src/domain/modeling/sketch-dimension-expressions.spec.ts solver boundary r
     ),
     "Resolved dimensions must not produce a NaN solver residual.",
   ).toBe(false);
+});
+
+test("src/domain/modeling/sketch-dimension-expressions.spec.ts offset derivation distances", () => {
+  const variables: DocumentVariableRecord[] = [
+    { variableId: "variable_wall", name: "wall", valueText: "3" },
+  ];
+  const definition: SketchDefinition = {
+    ...createSketchDefinition({ dimensions: [] }),
+    derivedRelationships: [
+      {
+        derivationId: "sketch_derivation_1_offset",
+        label: "offset 1",
+        kind: "offset",
+        seedEntityIds: ["entity_line" as never],
+        distance: createExpressionAuthoredValue("wall / 2"),
+        jointPolicy: "trimExtendArcFallback",
+        jointOutputs: [],
+        outputs: [],
+      },
+    ],
+  };
+
+  const resolved = resolveSketchDerivationDistances({ definition, variables });
+  const relationship = resolved.derivedRelationships?.[0];
+  expect(
+    relationship?.kind === "offset" && relationship.distance,
+    "Offset derivation expression distances should resolve against document variables.",
+  ).toBe(1.5);
+  expect(
+    definition.derivedRelationships?.[0]?.kind === "offset" &&
+      isExpressionAuthoredValue(definition.derivedRelationships[0].distance),
+    "Resolution should not mutate the authored definition.",
+  ).toBeTruthy();
+
+  const unresolved = resolveSketchDerivationDistances({
+    definition,
+    variables: [],
+  });
+  const unresolvedRelationship = unresolved.derivedRelationships?.[0];
+  expect(
+    unresolvedRelationship?.kind === "offset" &&
+      isExpressionAuthoredValue(unresolvedRelationship.distance),
+    "Distances that fail to resolve should stay authored so the evaluator can diagnose them.",
+  ).toBeTruthy();
+
+  const composed = resolveSketchDimensionValues({ definition, variables });
+  expect(
+    composed.ok &&
+      composed.definition.derivedRelationships?.[0]?.kind === "offset" &&
+      composed.definition.derivedRelationships[0].distance,
+    "The dimension resolution path should also resolve derivation distances.",
+  ).toBe(1.5);
 });
 
 function createSketchDefinition(input: {

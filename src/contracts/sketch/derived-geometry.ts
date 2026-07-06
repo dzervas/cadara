@@ -7,6 +7,13 @@ import type {
   SketchSolveDiagnostic,
 } from "@/contracts/sketch/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
+import {
+  OFFSET_DIAGNOSTIC_CODES,
+  computeOffsetChain,
+  offsetSeedCurveFromEntity,
+  type OffsetSeedCurve,
+} from "@/contracts/sketch/offset-geometry";
 
 interface SketchDerivationEvaluationResult {
   definition: SketchDefinition;
@@ -149,6 +156,10 @@ function getRelationshipTransform(
   diagnostics: SketchSolveDiagnostic[],
 ): TransformPoint | null {
   switch (relationship.kind) {
+    case "offset":
+      // Offset relationships recompute per-segment geometry rather than a
+      // point transform; they are evaluated by evaluateOffsetRelationship.
+      return null;
     case "mirror":
       return getMirrorTransform(
         relationship,
@@ -214,6 +225,183 @@ function transformedEntity(
   return output;
 }
 
+interface OffsetPointUpdate {
+  pointId: SketchPointId;
+  position: SketchPoint2D;
+}
+
+/**
+ * Recomputes an offset relationship's derived geometry from its seed chain.
+ * All updates are collected before any is applied so a diagnostic failure
+ * keeps the outputs in their last resolvable state.
+ */
+function evaluateOffsetRelationship(
+  relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>,
+  entityById: Map<SketchEntityId, SketchEntityDefinition>,
+  pointById: Map<SketchPointId, SketchPointDefinition>,
+  diagnostics: SketchSolveDiagnostic[],
+  replacePoint: (pointId: SketchPointId, position: SketchPoint2D) => void,
+  replaceEntity: (entity: SketchEntityDefinition) => void,
+) {
+  const fail = (
+    code: string,
+    message: string,
+    entityId: SketchEntityId | null = null,
+  ) => {
+    diagnostics.push(
+      diagnostic(
+        code,
+        "error",
+        `Offset relationship ${relationship.derivationId}: ${message}`,
+        entityId ? { kind: "entity", entityId } : null,
+      ),
+    );
+  };
+
+  const distance = getAuthoredLiteralValue<number>(relationship.distance);
+  if (typeof distance !== "number" || !Number.isFinite(distance)) {
+    fail(
+      OFFSET_DIAGNOSTIC_CODES.unresolvedDistance,
+      "distance is unresolved; resolve expressions before evaluating derivations.",
+    );
+    return;
+  }
+
+  const curves: OffsetSeedCurve[] = [];
+  const splineFitPointCounts = new Map<SketchEntityId, number>();
+  for (const seedEntityId of relationship.seedEntityIds) {
+    const seed = entityById.get(seedEntityId);
+    const curve = seed
+      ? offsetSeedCurveFromEntity(
+          seed,
+          (pointId) => pointById.get(pointId)?.position ?? null,
+        )
+      : null;
+    if (!curve) {
+      fail(
+        OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+        `seed entity ${seedEntityId} is missing or unsupported.`,
+        seedEntityId,
+      );
+      return;
+    }
+
+    curves.push(curve);
+    if (curve.kind === "spline") {
+      const output = relationship.outputs.find(
+        (candidate) => candidate.seedEntityId === seedEntityId,
+      );
+      if (output) {
+        splineFitPointCounts.set(seedEntityId, output.outputPointIds.length);
+      }
+    }
+  }
+
+  const result = computeOffsetChain({ curves, distance, splineFitPointCounts });
+  if (!result.ok) {
+    fail(result.code, result.message, result.seedEntityId);
+    return;
+  }
+
+  const segmentBySeed = new Map(
+    result.segments.map((segment) => [segment.seedEntityId, segment] as const),
+  );
+  const pointUpdates: OffsetPointUpdate[] = [];
+  const entityUpdates: SketchEntityDefinition[] = [];
+
+  for (const output of relationship.outputs) {
+    const target = entityById.get(output.outputEntityId);
+    const segment = segmentBySeed.get(output.seedEntityId);
+    if (!target || !segment || target.kind !== segment.kind) {
+      fail(
+        OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+        `output entity ${output.outputEntityId} no longer matches its seed segment.`,
+        output.seedEntityId,
+      );
+      return;
+    }
+
+    const positions: SketchPoint2D[] = [];
+    switch (segment.kind) {
+      case "lineSegment":
+        positions.push(segment.start, segment.end);
+        break;
+      case "circle":
+        positions.push(segment.center);
+        if (target.kind === "circle") {
+          entityUpdates.push({ ...target, radius: segment.radius });
+        }
+        break;
+      case "arc":
+        positions.push(segment.center, segment.start, segment.end);
+        break;
+      case "spline":
+        positions.push(...segment.points);
+        break;
+    }
+
+    if (positions.length !== output.outputPointIds.length) {
+      fail(
+        OFFSET_DIAGNOSTIC_CODES.splineFitFailure,
+        `output entity ${output.outputEntityId} has a stale point map.`,
+        output.seedEntityId,
+      );
+      return;
+    }
+
+    output.outputPointIds.forEach((pointId, index) => {
+      pointUpdates.push({ pointId, position: positions[index]! });
+    });
+  }
+
+  const jointKey = (first: SketchEntityId, second: SketchEntityId) =>
+    `${first} ${second}`;
+  const geometryJoints = new Map(
+    result.joints.map(
+      (joint) =>
+        [jointKey(joint.firstSeedEntityId, joint.secondSeedEntityId), joint] as const,
+    ),
+  );
+
+  if (geometryJoints.size !== relationship.jointOutputs.length) {
+    fail(
+      OFFSET_DIAGNOSTIC_CODES.jointUnsatisfied,
+      "the joint topology changed; the committed joints no longer match the recomputed chain.",
+    );
+    return;
+  }
+
+  for (const jointOutput of relationship.jointOutputs) {
+    const joint = geometryJoints.get(
+      jointKey(jointOutput.firstSeedEntityId, jointOutput.secondSeedEntityId),
+    );
+    const target = entityById.get(jointOutput.outputEntityId);
+    if (!joint || !target || target.kind !== "arc") {
+      fail(
+        OFFSET_DIAGNOSTIC_CODES.jointUnsatisfied,
+        `joint arc ${jointOutput.outputEntityId} cannot be maintained.`,
+        jointOutput.outputEntityId,
+      );
+      return;
+    }
+
+    pointUpdates.push({
+      pointId: jointOutput.centerPointId,
+      position: joint.center,
+    });
+    if (target.sweepDirection !== joint.sweepDirection) {
+      entityUpdates.push({ ...target, sweepDirection: joint.sweepDirection });
+    }
+  }
+
+  for (const update of pointUpdates) {
+    replacePoint(update.pointId, update.position);
+  }
+  for (const entity of entityUpdates) {
+    replaceEntity(entity);
+  }
+}
+
 let cachedDerivationInput: SketchDefinition | null = null;
 let cachedDerivationResult: SketchDerivationEvaluationResult | null = null;
 
@@ -262,6 +450,18 @@ export function evaluateSketchDerivations(
   };
 
   for (const relationship of relationships) {
+    if (relationship.kind === "offset") {
+      evaluateOffsetRelationship(
+        relationship,
+        entityById,
+        pointById,
+        diagnostics,
+        replacePoint,
+        replaceEntity,
+      );
+      continue;
+    }
+
     for (const output of relationship.outputs) {
       const seed = entityById.get(output.seedEntityId);
       const target = entityById.get(output.outputEntityId);

@@ -33,11 +33,16 @@ import {
   createSketchDerivedTransformContribution,
   createSketchExtendMutation,
   createSketchFilletMutation,
+  createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
   createSketchSplitMutation,
   offsetCurveDescriptorFromProjectedGeometry,
   trimLineSegmentAtIntersections,
 } from "@/domain/sketch-editing/operations";
+import {
+  offsetSeedCurveFromEntity,
+  offsetSideForPoint,
+} from "@/contracts/sketch/offset-geometry";
 import type {
   SketchEditToolState,
   SketchHistoryCursor,
@@ -436,7 +441,7 @@ export function deleteSketchHistoryOperation(
 export function getOffsetPreview(
   session: SketchSessionState,
   activeEditTool: SketchEditToolState,
-) {
+): SketchEditOperationResult {
   const selectedTargets = activeEditTool.selectedTargets;
   const sketchEntityTargets = selectedTargets.filter(
     (target): target is Extract<PrimitiveRef, { kind: "sketchEntity" }> =>
@@ -450,34 +455,98 @@ export function getOffsetPreview(
   const projectedCurve = projectedTarget
     ? getOffsetCurveForProjectedTarget(session, projectedTarget)
     : null;
-
-  if (selectedTargets.length === 0) {
-    return createOffsetContribution({
-      definition: session.definition,
-      entityIds: [],
-      distance: null,
-      side: activeEditTool.offsetSide,
-      sequence: session.sequence + 1,
-      factories: createSessionCommitFactories(
-        session.sequence + 1,
-        session.sketchId ?? ("sketch_draft" as SketchId),
-      ),
-    });
-  }
-
   const nextSequence = session.sequence + 1;
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
-  return createOffsetContribution({
+
+  if (projectedCurve) {
+    // Projected reference geometry cannot be a derivation master yet, so it
+    // keeps the static one-shot offset path.
+    const staticResult = createOffsetContribution({
+      definition: session.definition,
+      entityIds: [],
+      curve: projectedCurve,
+      distance: activeEditTool.offsetDistance,
+      side: activeEditTool.offsetSide,
+      sequence: nextSequence,
+      factories: createSessionCommitFactories(nextSequence, sketchId),
+    });
+    return {
+      valid: staticResult.valid,
+      message: staticResult.message,
+      definition: null,
+      contribution: staticResult.contribution,
+      previewEntities: staticResult.previewEntities,
+    };
+  }
+
+  return createSketchOffsetDerivationContribution({
     definition: session.definition,
-    entityIds: projectedCurve
-      ? []
-      : sketchEntityTargets.map((target) => target.entityId),
-    curve: projectedCurve ?? undefined,
+    entityIds: sketchEntityTargets.map((target) => target.entityId),
     distance: activeEditTool.offsetDistance,
     side: activeEditTool.offsetSide,
     sequence: nextSequence,
     factories: createSessionCommitFactories(nextSequence, sketchId),
   });
+}
+
+/**
+ * Follows the pointer across the selected chain so the staged offset preview
+ * lands on the pointer's side before commit.
+ */
+export function updateSketchOffsetPointer(
+  session: SketchSessionState,
+  point: SketchPoint | null,
+): SketchSessionState {
+  const activeEditTool = session.activeEditTool;
+  if (!activeEditTool || activeEditTool.toolId !== "offset" || !point) {
+    return session;
+  }
+
+  const entityIds = getSelectedSketchEntityIds(activeEditTool);
+  if (entityIds.length === 0) {
+    return session;
+  }
+
+  const entitiesById = new Map(
+    session.definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const pointsById = new Map(
+    session.definition.points.map((entry) => [entry.pointId, entry]),
+  );
+  const curves = entityIds.map((entityId) => {
+    const entity = entitiesById.get(entityId);
+    return entity
+      ? offsetSeedCurveFromEntity(
+          entity,
+          (pointId) => pointsById.get(pointId)?.position ?? null,
+        )
+      : null;
+  });
+  if (curves.some((curve) => curve === null)) {
+    return session;
+  }
+
+  const side = offsetSideForPoint({
+    curves: curves as NonNullable<(typeof curves)[number]>[],
+    point,
+  });
+  if (!side || side === activeEditTool.offsetSide) {
+    return session;
+  }
+
+  const nextEditTool = { ...activeEditTool, offsetSide: side };
+  const preview = getOffsetPreview(session, nextEditTool);
+  return {
+    ...session,
+    activeEditTool: nextEditTool,
+    toolStagedEntities: preview.previewEntities,
+    validationMessage: preview.valid ? null : preview.message,
+    toolPresentation: buildSketchEditToolPresentation(
+      nextEditTool,
+      preview.message,
+      preview.previewEntities,
+    ),
+  };
 }
 
 export function getOffsetCurveForProjectedTarget(

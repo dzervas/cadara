@@ -32,22 +32,22 @@ export const sketchEditToolDefinitions = [
       id: "offset",
       group: "sketchOps",
       name: "Offset",
-      tooltip: "Offset sketch entities.",
+      tooltip: "Offset a connected chain with a durable offset relationship.",
       icon: "offset",
       modes: ["sketch"],
       selection: {
-        label: "Offset target",
+        label: "Offset chain",
         acceptedKinds: ["line", "circle", "arc", "spline"],
         requiredCount: 1,
         allowsMultiple: true,
       },
       previewLabel: "Offset preview",
       validationMessages: {
-        emptySelection: "Select entities to offset.",
+        emptySelection: "Select a connected chain of entities to offset.",
         unsupportedTarget:
           "Offset supports line, circle, arc, and spline entities.",
       },
-      mutationContract: "createOffsetGeometry",
+      mutationContract: "createDerivedOffset",
     },
   },
   {
