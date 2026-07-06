@@ -111,10 +111,26 @@ const SKETCHES_RESPONSE = {
   jsonType: "sketchInfo",
   sketches: [
     {
+      // Real Onshape solved-sketch shape: a closed circle on the Top (XY) datum
+      // at the world origin, so the importer can translate, project, and solve
+      // it into a usable region. Positions are in meters.
       featureId: "FOoap8tw3jKAJf5_0",
-      geomEntities: [
-        { entityId: "line1", entityType: "lineSegment" },
-        { entityId: "circle1", entityType: "circle" },
+      name: "Sketch 1",
+      sketchSolveStatus: "WELL_DEFINED",
+      entities: [
+        {
+          jsonType: "BTSketchCurveSegmentInfo",
+          sketchEntityId: "circle1",
+          sketchEntityType: "skCircle",
+          isConstruction: false,
+          centerId: "circle1.center",
+          geometry: {
+            btType: "BTCurveGeometryCircle-115",
+            center3d: { btType: "BTVector3d-389", x: 0, y: 0, z: 0 },
+            radius: 0.005,
+            clockWise: false,
+          },
+        },
       ],
     },
   ],

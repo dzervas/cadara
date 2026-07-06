@@ -6,6 +6,8 @@ import type {
 import type { GeometryAssetId } from "@/contracts/shared/ids";
 import type { ContractVersion } from "@/contracts/shared/versioning";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
+import type { ImportPreparedActions } from "@/contracts/import/actions";
 
 /**
  * TODO: replace `unknown` with a shared neutral vector primitive union once
@@ -85,9 +87,80 @@ export interface ImportMutationContextCapabilities {
   baseRevisionId: RevisionId;
 }
 
+/**
+ * Per-entity topology signature returned by the history probe. Mirrors the
+ * geometric-signature shape providers capture so a matcher can rank captured
+ * signatures against staged-rebuild topology.
+ */
+export interface HistoryProbeTopologySignature {
+  entityClass: "face" | "edge" | "vertex" | "body";
+  /** Geometry type such as `plane`, `cylinder`, `line`, `circle`. */
+  geometryType: string;
+  /** Defining data where cheap to compute for the entity class. */
+  definingData?: Record<string, unknown>;
+  /** Centroid in document units. */
+  centroid?: [number, number, number];
+  /** Axis-aligned bounding box, `[low, high]` corner points. */
+  boundingBox?: {
+    low: [number, number, number];
+    high: [number, number, number];
+  };
+  /** Durable reference resolving to this entity for downstream feature use. */
+  reference: DurableRef;
+}
+
+export interface HistoryProbeStepDiagnostic {
+  severity: "info" | "warning" | "error";
+  message: string;
+  code?: string;
+}
+
+/**
+ * Result for a single probed step. A failed step carries structured
+ * diagnostics rather than throwing them away.
+ */
+export type HistoryProbeStepResult =
+  | {
+      status: "rebuilt";
+      signatures: HistoryProbeTopologySignature[];
+    }
+  | {
+      status: "failed";
+      diagnostics: HistoryProbeStepDiagnostic[];
+    };
+
+export interface HistoryProbeResult {
+  /** One entry per applied step, in the order of the candidate sequence. */
+  steps: HistoryProbeStepResult[];
+}
+
+export interface HistoryProbeInput {
+  /**
+   * Candidate prepared actions to rebuild in a sandboxed kernel session. When
+   * `orderedActions` is present the probe follows that order; otherwise the
+   * grouped order is used, mirroring the orchestrator.
+   */
+  actions: ImportPreparedActions;
+}
+
+/**
+ * Sandboxed history evaluation probe. Executing a candidate ordered sequence in
+ * an isolated kernel session returns per-step topology signatures without
+ * mutating any document, history, or persistent state.
+ */
+export interface ImportHistoryProbeCapabilities {
+  evaluateHistoryProbe(input: HistoryProbeInput): Promise<HistoryProbeResult>;
+}
+
 export interface ImportCapabilities {
   context: ImportMutationContextCapabilities;
   modeling: ImportModelingCapabilities;
   sketch: ImportSketchCapabilities;
   assets: ImportAssetCapabilities;
+  /**
+   * Optional history evaluation probe. Absence is explicit: when the platform
+   * cannot probe intermediate topology this field is `undefined` rather than a
+   * stub that fabricates signatures, so providers can degrade planning.
+   */
+  history?: ImportHistoryProbeCapabilities;
 }

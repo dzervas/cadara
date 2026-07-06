@@ -25,6 +25,15 @@ vi.mock("@/hooks/use-workbench-document-owner", () => ({
     };
   },
 }));
+vi.mock("@/hooks/use-durable-history", () => ({
+  useDurableHistory() {
+    return {
+      async undo() {
+        return null;
+      },
+    };
+  },
+}));
 
 const { useWorkbenchPartImport } = await import("./use-workbench-part-import");
 

@@ -310,3 +310,217 @@ test("src/domain/import/orchestrator.spec.ts", async () => {
     "Prepared import actions should come directly from the provider and preserve provider diagnostics.",
   ).toBeTruthy();
 });
+
+function makeRecordingModelingService(calls: string[]) {
+  let counter = 1;
+  const advance = () => {
+    counter += 1;
+    return `rev_${counter}`;
+  };
+  return {
+    addDocumentVariable(input: { name: string }) {
+      calls.push(`variable:${input.name}`);
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          revisionId: advance(),
+          variableId: `var_${input.name}`,
+          revisionState: "advanced",
+          rebuildResult: "reused",
+          changedTargets: [],
+          diagnostics: [],
+        }),
+        (error) =>
+          createAppError({ code: "test/add-variable", message: String(error) }),
+      );
+    },
+    createFeature(input: { featureLabel: string }) {
+      calls.push(`feature:${input.featureLabel}`);
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          revisionId: advance(),
+          featureId: `feature_${input.featureLabel}`,
+          revisionState: "advanced",
+          rebuildResult: "reused",
+          changedTargets: [],
+          diagnostics: [],
+        }),
+        (error) =>
+          createAppError({ code: "test/create-feature", message: String(error) }),
+      );
+    },
+    commitSketch(input: { sketchLabel: string }) {
+      calls.push(`sketch:${input.sketchLabel}`);
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          revisionId: advance(),
+          sketchId: `sketch_${input.sketchLabel}`,
+          revisionState: "advanced",
+          rebuildResult: "reused",
+          changedTargets: [],
+          diagnostics: [],
+        }),
+        (error) =>
+          createAppError({ code: "test/commit-sketch", message: String(error) }),
+      );
+    },
+  } as unknown as ModelingService;
+}
+
+test("applyImportPreparedActions honors an explicit interleaved order", async () => {
+  const calls: string[] = [];
+  await applyImportPreparedActions({
+    modelingService: makeRecordingModelingService(calls),
+    baseRevisionId: "rev_1",
+    actions: {
+      addDocumentVariables: [{ name: "scale", valueText: "10 mm" }],
+      createFeatures: [
+        {
+          featureType: "plane",
+          featureLabel: "F1",
+          participantTargets: [],
+          parameterValues: {},
+        },
+      ],
+      commitSketches: [
+        {
+          sketchLabel: "S1",
+          plane: null,
+          definition: null,
+        } as never,
+      ],
+      orderedActions: [
+        { kind: "addDocumentVariable", index: 0 },
+        { kind: "createFeature", index: 0 },
+        { kind: "commitSketch", index: 0 },
+      ],
+    },
+  });
+
+  expect(
+    calls.join(","),
+    "Ordered application should apply actions in exactly the provider-specified sequence across kinds.",
+  ).toBe("variable:scale,feature:F1,sketch:S1");
+});
+
+test("applyImportPreparedActions falls back to grouped order without a sequence", async () => {
+  const calls: string[] = [];
+  await applyImportPreparedActions({
+    modelingService: makeRecordingModelingService(calls),
+    baseRevisionId: "rev_1",
+    actions: {
+      commitSketches: [{ sketchLabel: "S1", plane: null, definition: null } as never],
+      createFeatures: [
+        {
+          featureType: "plane",
+          featureLabel: "F1",
+          participantTargets: [],
+          parameterValues: {},
+        },
+      ],
+      addDocumentVariables: [{ name: "scale", valueText: "10 mm" }],
+    },
+  });
+
+  expect(
+    calls.join(","),
+    "Grouped fallback should apply variables, then features, then sketches, preserving existing provider behavior.",
+  ).toBe("variable:scale,feature:F1,sketch:S1");
+});
+
+test("applyImportPreparedActions rejects an invalid ordered sequence before mutating", async () => {
+  const calls: string[] = [];
+  await expect(
+    applyImportPreparedActions({
+      modelingService: makeRecordingModelingService(calls),
+      baseRevisionId: "rev_1",
+      actions: {
+        createFeatures: [
+          {
+            featureType: "plane",
+            featureLabel: "F1",
+            participantTargets: [],
+            parameterValues: {},
+          },
+        ],
+        // Omits the feature entirely -> invalid permutation.
+        orderedActions: [],
+      },
+    }),
+  ).rejects.toThrow();
+
+  expect(
+    calls.length,
+    "An invalid ordered sequence must be rejected before any action is applied.",
+  ).toBe(0);
+});
+
+test("applyImportPreparedActions rolls back applied operations on mid-sequence failure", async () => {
+  const calls: string[] = [];
+  let counter = 1;
+  const advance = () => {
+    counter += 1;
+    return `rev_${counter}`;
+  };
+  const service = {
+    addDocumentVariable(input: { name: string }) {
+      calls.push(`variable:${input.name}`);
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          revisionId: advance(),
+          variableId: `var_${input.name}`,
+          revisionState: "advanced",
+          rebuildResult: "reused",
+          changedTargets: [],
+          diagnostics: [],
+        }),
+        (error) => createAppError({ code: "test/var", message: String(error) }),
+      );
+    },
+    commitSketch() {
+      calls.push("sketch");
+      // The second operation fails, forcing atomic rollback of the first.
+      return ResultAsync.fromPromise(
+        Promise.reject(new Error("kernel rejected the sketch")),
+        () =>
+          createAppError({
+            code: "test/commit-sketch",
+            message: "kernel rejected the sketch",
+          }),
+      );
+    },
+  } as unknown as ModelingService;
+
+  const rolledBackCounts: number[] = [];
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: "rev_1",
+    actions: {
+      addDocumentVariables: [{ name: "scale", valueText: "10" }],
+      commitSketches: [{ sketchLabel: "S1", plane: null, definition: null } as never],
+      orderedActions: [
+        { kind: "addDocumentVariable", index: 0 },
+        { kind: "commitSketch", index: 0 },
+      ],
+    },
+    rollback: async (count) => {
+      rolledBackCounts.push(count);
+    },
+  });
+
+  expect(
+    calls.join(","),
+    "Application should stop at the failing operation.",
+  ).toBe("variable:scale,sketch");
+  expect(
+    rolledBackCounts,
+    "Rollback should be invoked once with the number of operations already applied.",
+  ).toEqual([1]);
+  expect(
+    result.rolledBack &&
+      result.createdEntityIds.variableIds.length === 0 &&
+      result.diagnostics.some(
+        (diagnostic) => diagnostic.code === "import-apply-failed",
+      ),
+    "A rolled-back import must report no created entities and an atomic-failure diagnostic, without throwing.",
+  ).toBeTruthy();
+});

@@ -1,5 +1,9 @@
 import type { ImportCapabilities } from "@/contracts/import/capabilities";
-import type { ImportPreparedActions } from "@/contracts/import/actions";
+import type {
+  ImportPreparedActions,
+  ImportPreparedActionRef,
+} from "@/contracts/import/actions";
+import { validateImportOrderedActionsInvariants } from "@/contracts/import/validation";
 import type { ImportProvider } from "@/contracts/import/provider";
 import type { ImportResult } from "@/contracts/import/result";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
@@ -70,6 +74,11 @@ export function createImportCapabilities(
         return assetId;
       },
     },
+    // The sandboxed kernel history probe is intentionally absent: the platform
+    // has no per-entity geometric-signature extraction yet. Absence is
+    // explicit (`history` omitted) so providers detect it and degrade
+    // topological reference resolution to the baked tier rather than relying on
+    // a stub that fabricates signatures. Deferred to add-kernel-topology-signatures.
   };
 }
 
@@ -114,6 +123,13 @@ export async function applyImportPreparedActions(input: {
   modelingService: ModelingService;
   baseRevisionId: WorkspaceSnapshot["document"]["revisionId"];
   actions: ImportPreparedActions;
+  /**
+   * Reverts the last `appliedOperationCount` committed operations to keep the
+   * import atomic on mid-sequence failure. Injected by the caller because the
+   * durable-history revert lives at the repository layer; called once with the
+   * number of operations that were applied before the failure.
+   */
+  rollback?: (appliedOperationCount: number) => Promise<void>;
 }) {
   let revisionId = input.baseRevisionId;
   const diagnostics: ModelingDiagnostic[] = [
@@ -124,56 +140,142 @@ export async function applyImportPreparedActions(input: {
     sketchIds: [],
     variableIds: [],
   };
+  let appliedOperationCount = 0;
 
-  for (const request of input.actions.addDocumentVariables ?? []) {
+  const applyVariable = async (index: number) => {
+    const request = (input.actions.addDocumentVariables ?? [])[index];
     const result = await input.modelingService.addDocumentVariable({
       ...request,
       baseRevisionId: revisionId,
     });
-
     if (result.isErr()) {
       throw result.error;
     }
-
     revisionId = result.value.revisionId;
     createdEntityIds.variableIds.push(result.value.variableId);
     diagnostics.push(...result.value.diagnostics);
-  }
+    appliedOperationCount += 1;
+  };
 
-  for (const request of input.actions.createFeatures ?? []) {
+  const applyFeature = async (index: number) => {
+    const request = (input.actions.createFeatures ?? [])[index];
     const result = await input.modelingService.createFeature({
       ...request,
       baseRevisionId: revisionId,
     });
-
     if (result.isErr()) {
       throw result.error;
     }
-
     revisionId = result.value.revisionId;
     createdEntityIds.featureIds.push(result.value.featureId);
     diagnostics.push(...result.value.diagnostics);
-  }
+    appliedOperationCount += 1;
+  };
 
-  for (const request of input.actions.commitSketches ?? []) {
+  const applySketch = async (index: number) => {
+    const request = (input.actions.commitSketches ?? [])[index];
     const result = await input.modelingService.commitSketch({
       ...request,
       baseRevisionId: revisionId,
     });
-
     if (result.isErr()) {
       throw result.error;
     }
-
     revisionId = result.value.revisionId;
     createdEntityIds.sketchIds.push(result.value.sketchId);
     diagnostics.push(...result.value.diagnostics);
+    appliedOperationCount += 1;
+  };
+
+  const applyByKind = async (ref: ImportPreparedActionRef) => {
+    switch (ref.kind) {
+      case "addDocumentVariable":
+        return applyVariable(ref.index);
+      case "createFeature":
+        return applyFeature(ref.index);
+      case "commitSketch":
+        return applySketch(ref.index);
+    }
+  };
+
+  // Build the ordered ref list for both the explicit and grouped paths, so a
+  // single application loop can enforce atomic rollback uniformly.
+  let refs: ImportPreparedActionRef[];
+  if (input.actions.orderedActions) {
+    // Reject omissions/duplicates before applying any action, keeping the
+    // import atomic. Only the ordered-sequence permutation invariant is checked
+    // here; per-request structural validity is the adapter's responsibility, as
+    // in the grouped path.
+    const issues = validateImportOrderedActionsInvariants(input.actions);
+    if (issues.length > 0) {
+      throw new Error(
+        issues[0]?.message ?? "Invalid ordered import action sequence.",
+      );
+    }
+    refs = input.actions.orderedActions;
+  } else {
+    refs = [
+      ...(input.actions.addDocumentVariables ?? []).map(
+        (_request, index): ImportPreparedActionRef => ({
+          kind: "addDocumentVariable",
+          index,
+        }),
+      ),
+      ...(input.actions.createFeatures ?? []).map(
+        (_request, index): ImportPreparedActionRef => ({
+          kind: "createFeature",
+          index,
+        }),
+      ),
+      ...(input.actions.commitSketches ?? []).map(
+        (_request, index): ImportPreparedActionRef => ({
+          kind: "commitSketch",
+          index,
+        }),
+      ),
+    ];
+  }
+
+  let failure: unknown = null;
+  for (const ref of refs) {
+    try {
+      await applyByKind(ref);
+    } catch (error) {
+      failure = error;
+      break;
+    }
+  }
+
+  if (failure) {
+    // Atomic failure: revert every already-applied operation so no partial
+    // import is committed. Rollback errors are surfaced, never swallowed.
+    if (appliedOperationCount > 0 && input.rollback) {
+      await input.rollback(appliedOperationCount);
+    }
+    const message =
+      failure instanceof Error ? failure.message : String(failure);
+    diagnostics.push({
+      code: "import-apply-failed",
+      severity: "error",
+      message: `Import failed and was rolled back: ${message}`,
+      target: null,
+      detail: null,
+    });
+    return {
+      revisionId: input.baseRevisionId,
+      createdEntityIds: { featureIds: [], sketchIds: [], variableIds: [] },
+      diagnostics,
+      appliedOperationCount,
+      rolledBack: appliedOperationCount > 0,
+    };
   }
 
   return {
     revisionId,
     createdEntityIds,
     diagnostics,
+    appliedOperationCount,
+    rolledBack: false,
   };
 }
 

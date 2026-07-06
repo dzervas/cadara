@@ -254,7 +254,13 @@ export function createWorkbenchDocumentOwner({
     }
   }
 
-  async function commitPartImport(activeImportSession: ImportSessionState) {
+  async function commitPartImport(
+    activeImportSession: ImportSessionState,
+    options?: {
+      /** Reverts the last N committed operations to keep the import atomic. */
+      rollback?: (appliedOperationCount: number) => Promise<void>;
+    },
+  ) {
     const currentSnapshot = requireSnapshot();
     const provider = runtimeExtensionRegistries.importProviders.getById(
       activeImportSession.providerId,
@@ -278,14 +284,23 @@ export function createWorkbenchDocumentOwner({
       modelingService,
       baseRevisionId: currentSnapshot.document.revisionId,
       actions,
+      rollback: options?.rollback,
     });
 
     if (
       result.diagnostics.some((diagnostic) => diagnostic.severity === "error")
     ) {
+      // Only reconcile the workbench snapshot when operations were actually
+      // applied and rolled back; a failure before any mutation (e.g. a
+      // provider prepare error) must not refresh the snapshot.
+      const snapshot = result.rolledBack
+        ? await replaceActiveDocumentBasis()
+        : undefined;
       return {
         ok: false as const,
         diagnostics: result.diagnostics,
+        rolledBack: result.rolledBack,
+        ...(snapshot ? { snapshot } : {}),
       };
     }
 

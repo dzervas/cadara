@@ -39,27 +39,27 @@ The provider SHALL assign each Onshape history entry a translation tier — `par
 - **THEN** the resulting diagnostics summarize counts per tier and every degradation reason
 - **AND** no degraded feature appears as successfully parametric
 
-### Requirement: Sketches SHALL import with entities, constraints, derivations, and Onshape's solved state
-The provider SHALL translate sketch entities and constraints into the cadara sketch contract, map MIRROR/LINEAR_PATTERN/OFFSET records onto sketch derivations, and seed entity geometry from Onshape's solved positions.
+### Requirement: Sketches SHALL import entities seeded from Onshape's solved state
+The provider SHALL translate supported sketch entity kinds (line, circle, arc, point) into the cadara sketch contract, seed entity geometry from Onshape's captured solved positions (projected onto the target datum plane), and preserve construction flags.
 
-#### Scenario: Sketch entities and constraints translate
-- **WHEN** a captured sketch contains supported entities and constraints
-- **THEN** the committed sketch contains the corresponding cadara entities (including construction flags) and constraint definitions with correctly parsed operand references
+> **v1 scope amendment (2026-07-06):** constraint and derivation (MIRROR/LINEAR_PATTERN/OFFSET) translation is **deferred**. v1 imports entities at their solved positions as the correctness floor (the sketch is geometrically correct but under-constrained). Carrying constraints/derivations across requires operand-reference resolution and is tracked as a fast-follow; until then the imported sketch's relationships are not reconstructed.
+
+#### Scenario: Sketch entities translate at solved positions
+- **WHEN** a captured sketch contains supported entity kinds
+- **THEN** the committed sketch contains the corresponding cadara entities (including construction flags) with geometry seeded from Onshape's solved positions
 
 #### Scenario: Solved state seeds the solver
 - **WHEN** a translated sketch is committed and solved
 - **THEN** entity geometry is initialized from Onshape's captured solved positions
 - **AND** a solved-state deviation beyond tolerance is reported as a sketch diagnostic in the fidelity report
 
-#### Scenario: Offset derivation unavailable
-- **WHEN** an OFFSET record is translated before the offset sketch derivation capability exists
-- **THEN** the offset outputs import as plain entities at their captured solved positions
-- **AND** a structured diagnostic records the lost associativity
+#### Scenario: Derivations deferred (v1)
+- **WHEN** a captured sketch contains MIRROR/LINEAR_PATTERN/OFFSET records
+- **THEN** their output geometry imports as plain entities at the captured solved positions (deferred: the associative relationship is not reconstructed in v1)
 
 #### Scenario: Unsupported entity kind
 - **WHEN** a captured sketch contains an entity kind outside the cadara vocabulary
 - **THEN** the sketch imports without it, with a structured diagnostic naming the entity and kind
-- **AND** constraints referencing it are dropped with linked diagnostics rather than left dangling
 
 ### Requirement: Variables and expressions SHALL translate with literal fallback
 The provider SHALL import `assignVariable` features as document variables before dependent actions, and SHALL translate unit-bearing Onshape expressions into cadara's expression grammar, falling back to the captured evaluated literal with a diagnostic when translation is impossible.
@@ -95,7 +95,7 @@ The provider SHALL resolve captured deterministic-ID signatures against staged-r
 - **AND** features without topological references still plan as `parametric`
 
 ### Requirement: Imported results SHALL be verified against captured ground truth
-The provider SHALL compare the staged rebuild of the planned import against the bundle's captured tessellation and report the deviation in the review form before commit.
+The provider SHALL compare the staged rebuild of the planned import against the bundle's captured tessellation and report the deviation in the review form before commit, when the platform provides the sandboxed history evaluation capability; when it does not, the review SHALL state that verification is unavailable rather than implying it passed.
 
 #### Scenario: Rebuild matches ground truth
 - **WHEN** the staged rebuild deviates from captured tessellation within tolerance
@@ -105,6 +105,11 @@ The provider SHALL compare the staged rebuild of the planned import against the 
 - **WHEN** the staged rebuild deviates beyond tolerance or a feature fails to rebuild
 - **THEN** the review identifies the diverging features and their deviation
 - **AND** the user can demote them to `baked` or abort before any commit
+
+#### Scenario: Verification capability unavailable
+- **WHEN** the platform capabilities lack the sandboxed history evaluation probe
+- **THEN** the review reports ground-truth verification as explicitly unavailable
+- **AND** no deviation result is fabricated or implied as passing
 
 ### Requirement: Onshape imports SHALL emit history-ordered actions and standard bindings
 The provider SHALL emit prepared actions in Onshape history order using the ordered action sequence, preserve suppression state, and attach a standard local-file binding with the bundle fingerprint and capture provenance.
