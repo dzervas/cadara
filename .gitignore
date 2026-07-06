@@ -39,3 +39,7 @@ tmp-*
 !public/**/*.cadara
 .fallow/
 /coverage
+*-capture.json
+
+# Onshape capture bundles (user-owned, may contain proprietary geometry)
+*.onshape-capture.json
