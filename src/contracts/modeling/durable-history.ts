@@ -1,5 +1,8 @@
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import type { CommitSketchRequest } from "@/contracts/modeling/schema";
+import type {
+  CommitSketchRequest,
+  DocumentVariableRecord,
+} from "@/contracts/modeling/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import type { SketchId } from "@/contracts/shared/ids";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
@@ -33,6 +36,8 @@ export interface PersistedSketchDraftSession {
     CommitSketchRequest,
     "contractVersion" | "documentId" | "baseRevisionId"
   > | null;
+  /** Document variables captured so expression-authored values resolve on restore. */
+  documentVariables?: readonly DocumentVariableRecord[];
 }
 
 export interface DraftHistoryEntry<TSession> {

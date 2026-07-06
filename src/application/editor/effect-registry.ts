@@ -23,6 +23,7 @@ import type {
   RevisionId,
 } from "@/contracts/shared/ids";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { AppResultAsync } from "@/contracts/errors";
@@ -555,9 +556,18 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     getCurrentDocumentSnapshot: () =>
       modelingService.getCurrentDocumentSnapshot(),
     async commitSketch(input) {
-      const commitDefinition = evaluateSketchDerivations(
-        input.session.fullDefinition,
-      ).definition;
+      // Evaluate with resolved derivation distances so committed geometry is
+      // current, while the persisted relationships keep authored expressions.
+      const commitDefinition = {
+        ...evaluateSketchDerivations(
+          resolveSketchDerivationDistances({
+            definition: input.session.fullDefinition,
+            variables: input.session.documentVariables,
+          }),
+        ).definition,
+        derivedRelationships:
+          input.session.fullDefinition.derivedRelationships,
+      };
       const result = await modelingService.commitSketch({
         requestId: input.requestId,
         baseRevisionId: input.baseRevisionId,

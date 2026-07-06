@@ -62,7 +62,8 @@ export type SketchDerivedTransformKind =
   | "mirror"
   | "linearPattern"
   | "circularPattern"
-  | "transform";
+  | "transform"
+  | "offset";
 export type SketchAuthoringOperationKind =
   | "referenceImage"
   | "point"
@@ -176,6 +177,34 @@ interface SketchDerivationDefinitionBase {
   outputs: readonly SketchDerivedEntityOutput[];
 }
 
+/**
+ * Joint resolution policy between adjacent derived offset segments.
+ * `trimExtendArcFallback` trims or extends intersecting neighbors and inserts
+ * an arc join centered on the shared seed vertex when no intersection exists
+ * on the offset side.
+ */
+export type SketchOffsetJointPolicy = "trimExtendArcFallback";
+
+/**
+ * Stable derived identity for an arc join generated between two adjacent
+ * offset segments. The joint arc references the adjacent segment outputs'
+ * endpoint points as its start and end, and owns only its center point.
+ */
+export interface SketchOffsetJointOutput {
+  /** Seed entity whose offset segment ends at this joint, in chain order. */
+  firstSeedEntityId: SketchEntityId;
+  /** Seed entity whose offset segment starts at this joint, in chain order. */
+  secondSeedEntityId: SketchEntityId;
+  /** Stable derived arc entity joining the two offset segments. */
+  outputEntityId: SketchEntityId;
+  /** Joint-owned center point tracking the shared seed vertex. */
+  centerPointId: SketchPointId;
+  /** Endpoint of the first segment's output, reused as the arc start. */
+  startPointId: SketchPointId;
+  /** Endpoint of the second segment's output, reused as the arc end. */
+  endPointId: SketchPointId;
+}
+
 export type SketchDerivationDefinition =
   | (SketchDerivationDefinitionBase & {
       kind: "mirror";
@@ -201,6 +230,19 @@ export type SketchDerivationDefinition =
       translation: SketchPoint2D;
       rotationRadians: number;
       scale: number;
+    })
+  | (SketchDerivationDefinitionBase & {
+      kind: "offset";
+      /**
+       * Signed offset distance in sketch-plane units. Positive offsets to the
+       * left of the chain traversal, which is anchored to the first seed
+       * entity's natural direction. Accepts the same literal-or-expression
+       * authored values as sketch dimensions.
+       */
+      distance: SketchDimensionAuthoredValue;
+      jointPolicy: SketchOffsetJointPolicy;
+      /** Stable identities for generated arc joins, keyed by adjacent seed pair. */
+      jointOutputs: readonly SketchOffsetJointOutput[];
     });
 
 export interface SketchStyleDefinition {

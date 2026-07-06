@@ -28,6 +28,63 @@ export type SketchDimensionExpressionResolution =
   | { ok: true; definition: NumericSketchDefinition }
   | { ok: false; diagnostics: ModelingDiagnostic[] };
 
+/**
+ * Resolves expression-authored offset derivation distances to numeric
+ * literals so derivation evaluation sees concrete values. Best-effort: an
+ * unresolvable distance stays authored and the derivation evaluator reports
+ * the structured unresolved-distance diagnostic while outputs keep their last
+ * resolvable state.
+ */
+export function resolveSketchDerivationDistances(input: {
+  definition: SketchDefinition;
+  variables: readonly DocumentVariableRecord[];
+}): SketchDefinition {
+  const relationships = input.definition.derivedRelationships ?? [];
+  if (
+    !relationships.some(
+      (relationship) =>
+        relationship.kind === "offset" &&
+        typeof relationship.distance !== "number",
+    )
+  ) {
+    return input.definition;
+  }
+
+  const variableEvaluation = evaluateDocumentVariableExpressions(
+    input.variables,
+  );
+  if (!variableEvaluation.ok) {
+    return input.definition;
+  }
+
+  let changed = false;
+  const resolvedRelationships = relationships.map((relationship) => {
+    if (
+      relationship.kind !== "offset" ||
+      typeof relationship.distance === "number"
+    ) {
+      return relationship;
+    }
+
+    const resolved = resolveAuthoredNumber({
+      value: relationship.distance,
+      label: relationship.label,
+      valueKind: { kind: "finiteNumber" },
+      variablesByName: variableEvaluation.valuesByName,
+    });
+    if (!resolved.ok) {
+      return relationship;
+    }
+
+    changed = true;
+    return { ...relationship, distance: resolved.value };
+  });
+
+  return changed
+    ? { ...input.definition, derivedRelationships: resolvedRelationships }
+    : input.definition;
+}
+
 export function resolveSketchDimensionValues(input: {
   definition: SketchDefinition;
   variables: readonly DocumentVariableRecord[];
@@ -59,7 +116,7 @@ export function resolveSketchDimensionValues(input: {
     : {
         ok: true,
         definition: {
-          ...input.definition,
+          ...resolveSketchDerivationDistances(input),
           dimensions,
         },
       };

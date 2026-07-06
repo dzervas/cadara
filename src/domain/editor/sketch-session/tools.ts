@@ -87,7 +87,10 @@ import {
   buildConstraintToolPresentation,
   isSketchConstraintReadyForValue,
 } from "./constraints";
-import { selectSketchEditToolTarget } from "./editing";
+import {
+  selectSketchEditToolTarget,
+  updateSketchOffsetPointer,
+} from "./editing";
 import { isSketchConstructionSelected } from "./state";
 import { getSketchStyleTargetDefinition } from "./styles";
 import { buildCommitRequest } from "./history";
@@ -331,8 +334,8 @@ export function buildSketchEditToolPresentation(
               label: "Side",
               value: state.offsetSide,
               options: [
-                { value: "left", label: "Left / outward" },
-                { value: "right", label: "Right / inward" },
+                { value: "left", label: "Left of chain" },
+                { value: "right", label: "Right of chain" },
               ],
               disabled: !hasSelection,
               action: {
@@ -770,6 +773,10 @@ export function updateSketchPointer(
   session: SketchSessionState,
   point: SketchPoint | null,
 ): SketchSessionState {
+  if (session.activeEditTool?.toolId === "offset") {
+    return updateSketchOffsetPointer(session, point);
+  }
+
   if (
     session.activeTool !== null &&
     isRegisteredSketchConstraintToolId(session.activeTool)

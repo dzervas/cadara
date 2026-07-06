@@ -2086,8 +2086,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       activated.activeEditTool?.selectedTargets.length,
       "Offset activation should seed compatible preselected targets into the edit tool state.",
     ).toBe(selectedTargets.length);
+    // The default distance (1) collapses an inward offset of this unit
+    // square, so a satisfiable distance is set before expecting a preview.
+    const previewed = patchSketchEditToolValue(activated, { value: 0.25 });
     expect(
-      activated.toolStagedEntities.some(
+      previewed.toolStagedEntities.some(
         (entity) => entity.status === "preview",
       ),
       "Offset activation should build preview geometry from compatible preselection.",
@@ -2110,6 +2113,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   }
 
   function testOffsetCreatesContinuousOuterAndInnerSquares() {
+    // The square traverses counter-clockwise from AB, so "left" offsets
+    // inward and "right" offsets outward with arc joins at the corners.
     const definition = createSquareDefinition(false);
     let outerSession = beginSketchTool(
       createSessionFromDefinition(definition),
@@ -2124,11 +2129,16 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       outerSession.activeEditTool?.selectedTargets.length,
       "Offset should collect multiple selected square edges.",
     ).toBe(4);
+
+    outerSession = patchSketchEditToolValue(outerSession, {
+      intent: "setOffsetSide",
+      value: "right",
+    });
     expect(
       outerSession.toolStagedEntities.filter(
         (entity) => entity.status === "preview" && entity.kind === "line",
       ).length,
-      "Continuous square offset should preview one joined line per selected edge.",
+      "Continuous square offset should preview one derived line per selected edge.",
     ).toBe(4);
 
     outerSession = patchSketchEditToolValue(outerSession, { value: 1 });
@@ -2141,37 +2151,44 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         entity.kind === "lineSegment" &&
         !definition.entityIds.includes(entity.entityId),
     );
+    const outerArcs = outerSession.definition.entities.filter(
+      (entity) => entity.kind === "arc",
+    );
     const outerPoints = outerSession.definition.points.filter(
       (point) => !definition.pointIds.includes(point.pointId),
     );
 
     expect(
       outerLines.length,
-      "Outer square offset should create four joined line entities.",
+      "Outer square offset should create four derived line entities.",
     ).toBe(4);
     expect(
-      outerPoints.length,
-      "Outer square offset should create four joined corner points.",
+      outerArcs.length,
+      "Outer square offset should join every convex corner with an arc.",
+    ).toBe(4);
+    const outerRelationship =
+      outerSession.definition.derivedRelationships?.find(
+        (relationship) => relationship.kind === "offset",
+      );
+    expect(
+      outerRelationship?.kind === "offset" &&
+        outerRelationship.jointOutputs.length,
+      "Outer square offset should record stable joint identities.",
     ).toBe(4);
     assertIncludesPoint(
       outerPoints,
-      [-1, -1],
-      "Outer square offset should extend the bottom-left corner.",
+      [0, -1],
+      "Outer square offset should move the bottom edge outward.",
     );
     assertIncludesPoint(
       outerPoints,
-      [2, -1],
-      "Outer square offset should extend the bottom-right corner.",
+      [2, 0],
+      "Outer square offset should move the right edge outward.",
     );
     assertIncludesPoint(
       outerPoints,
-      [2, 2],
-      "Outer square offset should extend the top-right corner.",
-    );
-    assertIncludesPoint(
-      outerPoints,
-      [-1, 2],
-      "Outer square offset should extend the top-left corner.",
+      [1, 0],
+      "Outer square joint arcs should center on the seed corners.",
     );
 
     let innerSession = beginSketchTool(
@@ -2182,10 +2199,6 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       innerSession = selectSketchEditToolTarget(innerSession, entity.target);
     }
 
-    innerSession = patchSketchEditToolValue(innerSession, {
-      intent: "setOffsetSide",
-      value: "right",
-    });
     innerSession = patchSketchEditToolValue(innerSession, { value: 0.25 });
     innerSession = patchSketchEditToolValue(innerSession, {
       intent: "commitOffset",
@@ -2197,23 +2210,76 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     assertIncludesPoint(
       innerPoints,
       [0.25, 0.25],
-      "Inner square offset should miter the bottom-left corner inward.",
+      "Inner square offset should trim the bottom-left corner inward.",
     );
     assertIncludesPoint(
       innerPoints,
       [0.75, 0.25],
-      "Inner square offset should miter the bottom-right corner inward.",
+      "Inner square offset should trim the bottom-right corner inward.",
     );
     assertIncludesPoint(
       innerPoints,
       [0.75, 0.75],
-      "Inner square offset should miter the top-right corner inward.",
+      "Inner square offset should trim the top-right corner inward.",
     );
     assertIncludesPoint(
       innerPoints,
       [0.25, 0.75],
-      "Inner square offset should miter the top-left corner inward.",
+      "Inner square offset should trim the top-left corner inward.",
     );
+  }
+
+  function testOffsetPreviewFollowsPointerSide() {
+    const definition = makeDefinition({
+      pointIds: ["sketch_point_a", "sketch_point_b"],
+      points: [
+        makePoint("sketch_point_a", "A", 0, 0),
+        makePoint("sketch_point_b", "B", 4, 0),
+      ],
+      entityIds: ["sketch_entity_ab"],
+      entities: [
+        makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b"),
+      ],
+    });
+    let session = beginSketchTool(
+      createSessionFromDefinition(definition),
+      "offset",
+    );
+    session = selectSketchEditToolTarget(session, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary",
+      entityId: "sketch_entity_ab",
+    });
+
+    const above = updateSketchPointer(session, [2, 3]);
+    expect(
+      above.activeEditTool?.offsetSide,
+      "Moving the pointer above the chain should preview the left side.",
+    ).toBe("left");
+    expect(
+      above.toolStagedEntities.some(
+        (entity) =>
+          entity.kind === "line" &&
+          entity.status === "preview" &&
+          entity.start[1] > 0,
+      ),
+      "The staged preview should sit on the pointer's side of the chain.",
+    ).toBeTruthy();
+
+    const below = updateSketchPointer(above, [2, -3]);
+    expect(
+      below.activeEditTool?.offsetSide,
+      "Moving the pointer across the chain should flip the previewed side.",
+    ).toBe("right");
+    expect(
+      below.toolStagedEntities.some(
+        (entity) =>
+          entity.kind === "line" &&
+          entity.status === "preview" &&
+          entity.start[1] < 0,
+      ),
+      "The staged preview should follow the pointer across the chain.",
+    ).toBeTruthy();
   }
 
   function testOffsetCreatesContinuousOpenAngle() {
@@ -2256,7 +2322,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     ).toBe(2);
     expect(
       offsetPoints.length,
-      "Open angle offset should share the mitered corner point.",
+      "Open angle offset should share the trimmed corner point.",
     ).toBe(3);
     assertIncludesPoint(
       offsetPoints,
@@ -2324,6 +2390,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       sketchId: "sketch_primary",
       entityId: "sketch_entity_circle",
     });
+    // Circles traverse counter-clockwise, so the outward side is "right".
+    circleSession = patchSketchEditToolValue(circleSession, {
+      intent: "setOffsetSide",
+      value: "right",
+    });
     circleSession = patchSketchEditToolValue(circleSession, { value: 1 });
     circleSession = patchSketchEditToolValue(circleSession, {
       intent: "commitOffset",
@@ -2334,7 +2405,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     );
     expect(
       offsetCircle?.kind === "circle" && offsetCircle.radius === 3,
-      "Circle offset should add a copied circle at the requested radius.",
+      "Circle offset should add a derived circle at the requested radius.",
     ).toBeTruthy();
 
     let arcSession = beginSketchTool(
@@ -3067,6 +3138,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   testOffsetAddsLineCopyAndRejectsInvalidDistance();
   testOffsetActivationSeedsCompatiblePreselectionAndClearsInvalidSelection();
   testOffsetCreatesContinuousOuterAndInnerSquares();
+  testOffsetPreviewFollowsPointerSide();
   testOffsetCreatesContinuousOpenAngle();
   testOffsetAddsCircleArcAndSplineCopies();
   testOffsetAddsProjectedCircleAndSplineCopies();

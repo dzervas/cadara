@@ -90,6 +90,7 @@ import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import {
   normalizeConstraintDefinitionCore,
   normalizeDimensionDefinitionCore,
+  normalizeSketchDimensionAuthoredValue,
 } from "./sketch-definition-normalization";
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -2216,6 +2217,44 @@ export function normalizeSketchDerivationDefinition(
           ? value.rotationRadians
           : Number.NaN,
       scale: typeof value.scale === "number" ? value.scale : Number.NaN,
+    };
+  }
+
+  if (value.kind === "offset") {
+    if (
+      value.jointPolicy !== "trimExtendArcFallback" ||
+      !Array.isArray(value.jointOutputs)
+    ) {
+      throw new Error("Invalid sketch offset derivation payload.");
+    }
+
+    return {
+      ...base,
+      kind: "offset",
+      distance: normalizeSketchDimensionAuthoredValue(value.distance),
+      jointPolicy: "trimExtendArcFallback",
+      jointOutputs: value.jointOutputs.map((joint) => {
+        if (
+          !isRecord(joint) ||
+          !isString(joint.firstSeedEntityId) ||
+          !isString(joint.secondSeedEntityId) ||
+          !isString(joint.outputEntityId) ||
+          !isString(joint.centerPointId) ||
+          !isString(joint.startPointId) ||
+          !isString(joint.endPointId)
+        ) {
+          throw new Error("Invalid sketch offset joint output payload.");
+        }
+
+        return {
+          firstSeedEntityId: assertSketchEntityId(joint.firstSeedEntityId),
+          secondSeedEntityId: assertSketchEntityId(joint.secondSeedEntityId),
+          outputEntityId: assertSketchEntityId(joint.outputEntityId),
+          centerPointId: assertSketchPointId(joint.centerPointId),
+          startPointId: assertSketchPointId(joint.startPointId),
+          endPointId: assertSketchPointId(joint.endPointId),
+        };
+      }),
     };
   }
 

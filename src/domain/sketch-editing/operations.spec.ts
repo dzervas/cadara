@@ -12,9 +12,11 @@ import type {
   SketchPointId,
 } from "@/contracts/shared/ids";
 import {
+  createOffsetContribution,
   createSketchChamferMutation,
   createSketchExtendMutation,
   createSketchFilletMutation,
+  createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
   createSketchSplitMutation,
   type SketchEditOperationFactories,
@@ -444,8 +446,490 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     ).toBe(8);
   }
 
+  function expectPointCloseTo(
+    actual: SketchPoint | undefined,
+    expected: SketchPoint,
+    label: string,
+  ) {
+    expect(actual, `${label} should exist.`).toBeTruthy();
+    expect(actual![0], `${label} x`).toBeCloseTo(expected[0], 6);
+    expect(actual![1], `${label} y`).toBeCloseTo(expected[1], 6);
+  }
+
+  function testOffsetCharacterizationSingleCurves() {
+    const lineDefinition = makeDefinition(
+      [
+        makePoint("sketch_point_a", "A", [0, 0]),
+        makePoint("sketch_point_b", "B", [4, 0]),
+      ],
+      [makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b")],
+    );
+    const leftLine = createOffsetContribution({
+      definition: lineDefinition,
+      entityIds: ["sketch_entity_ab"] as SketchEntityId[],
+      distance: 1,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(leftLine.valid, "Left line offset should be valid.").toBeTruthy();
+    expectPointCloseTo(
+      leftLine.contribution?.points[0]?.position,
+      [0, 1],
+      "Left line offset start",
+    );
+    expectPointCloseTo(
+      leftLine.contribution?.points[1]?.position,
+      [4, 1],
+      "Left line offset end",
+    );
+
+    const rightLine = createOffsetContribution({
+      definition: lineDefinition,
+      entityIds: ["sketch_entity_ab"] as SketchEntityId[],
+      distance: 1,
+      side: "right",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expectPointCloseTo(
+      rightLine.contribution?.points[0]?.position,
+      [0, -1],
+      "Right line offset start",
+    );
+
+    const circleDefinition = makeDefinition(
+      [makePoint("sketch_point_center", "Center", [1, 1])],
+      [
+        {
+          kind: "circle",
+          entityId: "sketch_entity_circle" as SketchEntityId,
+          label: "Circle",
+          target: {
+            kind: "sketchEntity",
+            sketchId: "sketch_primary" as SketchId,
+            entityId: "sketch_entity_circle" as SketchEntityId,
+          },
+          isConstruction: false,
+          centerPointId: "sketch_point_center" as SketchPointId,
+          radius: 2,
+        },
+      ],
+    );
+    const grownCircle = createOffsetContribution({
+      definition: circleDefinition,
+      entityIds: ["sketch_entity_circle"] as SketchEntityId[],
+      distance: 0.5,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    const grownEntity = grownCircle.contribution?.entities[0];
+    expect(
+      grownEntity?.kind === "circle" && grownEntity.radius,
+      "Left circle offset should grow the radius.",
+    ).toBe(2.5);
+
+    const collapsedCircle = createOffsetContribution({
+      definition: circleDefinition,
+      entityIds: ["sketch_entity_circle"] as SketchEntityId[],
+      distance: 2,
+      side: "right",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(
+      collapsedCircle.valid,
+      "Circle offset collapsing the radius should be rejected.",
+    ).toBeFalsy();
+
+    const arcDefinition = makeDefinition(
+      [
+        makePoint("sketch_point_center", "Center", [0, 0]),
+        makePoint("sketch_point_start", "Start", [2, 0]),
+        makePoint("sketch_point_end", "End", [0, 2]),
+      ],
+      [
+        makeArc(
+          "sketch_entity_arc",
+          "Arc",
+          "sketch_point_center",
+          "sketch_point_start",
+          "sketch_point_end",
+        ),
+      ],
+    );
+    const grownArc = createOffsetContribution({
+      definition: arcDefinition,
+      entityIds: ["sketch_entity_arc"] as SketchEntityId[],
+      distance: 1,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(grownArc.valid, "Left arc offset should be valid.").toBeTruthy();
+    expectPointCloseTo(
+      grownArc.contribution?.points[1]?.position,
+      [3, 0],
+      "Left arc offset start",
+    );
+    expectPointCloseTo(
+      grownArc.contribution?.points[2]?.position,
+      [0, 3],
+      "Left arc offset end",
+    );
+
+    const collapsedArc = createOffsetContribution({
+      definition: arcDefinition,
+      entityIds: ["sketch_entity_arc"] as SketchEntityId[],
+      distance: 2,
+      side: "right",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(
+      collapsedArc.valid,
+      "Arc offset collapsing the radius should be rejected.",
+    ).toBeFalsy();
+
+    const splineDefinition = makeDefinition(
+      [
+        makePoint("sketch_point_s0", "S0", [0, 0]),
+        makePoint("sketch_point_s1", "S1", [1, 2]),
+        makePoint("sketch_point_s2", "S2", [2, 0]),
+      ],
+      [
+        makeSpline("sketch_entity_spline", "Spline", [
+          "sketch_point_s0",
+          "sketch_point_s1",
+          "sketch_point_s2",
+        ]),
+      ],
+    );
+    const splineOffset = createOffsetContribution({
+      definition: splineDefinition,
+      entityIds: ["sketch_entity_spline"] as SketchEntityId[],
+      distance: 1,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(splineOffset.valid, "Spline offset should be valid.").toBeTruthy();
+    const sqrt5 = Math.sqrt(5);
+    expectPointCloseTo(
+      splineOffset.contribution?.points[0]?.position,
+      [-2 / sqrt5, 1 / sqrt5],
+      "Spline offset first point",
+    );
+    expectPointCloseTo(
+      splineOffset.contribution?.points[1]?.position,
+      [1, 3],
+      "Spline offset middle point",
+    );
+    expectPointCloseTo(
+      splineOffset.contribution?.points[2]?.position,
+      [2 + 2 / sqrt5, 1 / sqrt5],
+      "Spline offset last point",
+    );
+  }
+
+  function testOffsetCharacterizationChains() {
+    const openChain = makeDefinition(
+      [
+        makePoint("sketch_point_a", "A", [0, 0]),
+        makePoint("sketch_point_b", "B", [4, 0]),
+        makePoint("sketch_point_c", "C", [4, 4]),
+      ],
+      [
+        makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b"),
+        makeLine("sketch_entity_bc", "BC", "sketch_point_b", "sketch_point_c"),
+      ],
+    );
+    const openOffset = createOffsetContribution({
+      definition: openChain,
+      entityIds: ["sketch_entity_ab", "sketch_entity_bc"] as SketchEntityId[],
+      distance: 1,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(openOffset.valid, "Open chain offset should be valid.").toBeTruthy();
+    expect(
+      openOffset.contribution?.entities.length,
+      "Open two-line chain offset should keep two line entities.",
+    ).toBe(2);
+    expectPointCloseTo(
+      openOffset.contribution?.points[0]?.position,
+      [0, 1],
+      "Open chain offset start",
+    );
+    expectPointCloseTo(
+      openOffset.contribution?.points[1]?.position,
+      [3, 1],
+      "Open chain offset corner",
+    );
+    expectPointCloseTo(
+      openOffset.contribution?.points[2]?.position,
+      [3, 4],
+      "Open chain offset end",
+    );
+
+    const closedChain = makeDefinition(
+      [
+        makePoint("sketch_point_a", "A", [0, 0]),
+        makePoint("sketch_point_b", "B", [4, 0]),
+        makePoint("sketch_point_c", "C", [4, 4]),
+        makePoint("sketch_point_d", "D", [0, 4]),
+      ],
+      [
+        makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b"),
+        makeLine("sketch_entity_bc", "BC", "sketch_point_b", "sketch_point_c"),
+        makeLine("sketch_entity_cd", "CD", "sketch_point_c", "sketch_point_d"),
+        makeLine("sketch_entity_da", "DA", "sketch_point_d", "sketch_point_a"),
+      ],
+    );
+    const closedOffset = createOffsetContribution({
+      definition: closedChain,
+      entityIds: [
+        "sketch_entity_ab",
+        "sketch_entity_bc",
+        "sketch_entity_cd",
+        "sketch_entity_da",
+      ] as SketchEntityId[],
+      distance: 1,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(
+      closedOffset.valid,
+      "Closed loop offset should be valid.",
+    ).toBeTruthy();
+    expect(
+      closedOffset.contribution?.entities.length,
+      "Closed square loop offset should keep four line entities.",
+    ).toBe(4);
+    const closedPositions = closedOffset.contribution?.points.map(
+      (point) => point.position,
+    );
+    expect(
+      closedPositions?.some(
+        (position) =>
+          Math.abs(position[0] - -1) < 1e-6 && Math.abs(position[1] - -1) < 1e-6,
+      ),
+      "Left offset of a counter-clockwise loop should expand outward.",
+    ).toBeTruthy();
+  }
+
+  function testSlotOffsetCharacterization() {
+    const lineDefinition = makeDefinition(
+      [
+        makePoint("sketch_point_a", "A", [0, 0]),
+        makePoint("sketch_point_b", "B", [4, 0]),
+      ],
+      [makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b")],
+    );
+    const lineSlot = createSketchSlotContribution({
+      definition: lineDefinition,
+      entityIds: ["sketch_entity_ab"] as SketchEntityId[],
+      width: 2,
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expectPointCloseTo(
+      lineSlot.contribution?.points[0]?.position,
+      [0, 1],
+      "Line slot left start",
+    );
+    expectPointCloseTo(
+      lineSlot.contribution?.points[1]?.position,
+      [4, 1],
+      "Line slot left end",
+    );
+    expectPointCloseTo(
+      lineSlot.contribution?.points[2]?.position,
+      [4, -1],
+      "Line slot right end",
+    );
+    expectPointCloseTo(
+      lineSlot.contribution?.points[3]?.position,
+      [0, -1],
+      "Line slot right start",
+    );
+
+    const arcDefinition = makeDefinition(
+      [
+        makePoint("sketch_point_center", "Center", [0, 0]),
+        makePoint("sketch_point_start", "Start", [2, 0]),
+        makePoint("sketch_point_end", "End", [0, 2]),
+      ],
+      [
+        makeArc(
+          "sketch_entity_arc",
+          "Arc",
+          "sketch_point_center",
+          "sketch_point_start",
+          "sketch_point_end",
+        ),
+      ],
+    );
+    const arcSlot = createSketchSlotContribution({
+      definition: arcDefinition,
+      entityIds: ["sketch_entity_arc"] as SketchEntityId[],
+      width: 1,
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expectPointCloseTo(
+      arcSlot.contribution?.points[0]?.position,
+      [2.5, 0],
+      "Arc slot outer start",
+    );
+    expectPointCloseTo(
+      arcSlot.contribution?.points[1]?.position,
+      [0, 2.5],
+      "Arc slot outer end",
+    );
+    expectPointCloseTo(
+      arcSlot.contribution?.points[2]?.position,
+      [1.5, 0],
+      "Arc slot inner start",
+    );
+    expectPointCloseTo(
+      arcSlot.contribution?.points[3]?.position,
+      [0, 1.5],
+      "Arc slot inner end",
+    );
+  }
+
+  function testOffsetDerivationValidationAndCommitPreparation() {
+    const chainDefinition = makeDefinition(
+      [
+        makePoint("sketch_point_a", "A", [0, 0]),
+        makePoint("sketch_point_b", "B", [4, 0]),
+        makePoint("sketch_point_c", "C", [4, 4]),
+        makePoint("sketch_point_far", "Far", [20, 20]),
+        makePoint("sketch_point_far_end", "Far end", [24, 20]),
+      ],
+      [
+        makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b"),
+        makeLine("sketch_entity_bc", "BC", "sketch_point_b", "sketch_point_c"),
+        makeLine(
+          "sketch_entity_far",
+          "Far",
+          "sketch_point_far",
+          "sketch_point_far_end",
+        ),
+      ],
+    );
+
+    const emptySelection = createSketchOffsetDerivationContribution({
+      definition: chainDefinition,
+      entityIds: [],
+      distance: 1,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(
+      emptySelection.valid,
+      "Empty selections should be rejected before mutation.",
+    ).toBeFalsy();
+    expect(
+      emptySelection.contribution,
+      "Rejected offsets should not stage a contribution.",
+    ).toBeNull();
+
+    const disconnected = createSketchOffsetDerivationContribution({
+      definition: chainDefinition,
+      entityIds: [
+        "sketch_entity_ab",
+        "sketch_entity_far",
+      ] as SketchEntityId[],
+      distance: 1,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(
+      disconnected.valid,
+      "Disconnected selections should be rejected before mutation.",
+    ).toBeFalsy();
+    expect(
+      disconnected.contribution,
+      "Disconnected selections should not stage a contribution.",
+    ).toBeNull();
+
+    const missingEntity = createSketchOffsetDerivationContribution({
+      definition: chainDefinition,
+      entityIds: ["sketch_entity_missing"] as SketchEntityId[],
+      distance: 1,
+      side: "left",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(
+      missingEntity.valid,
+      "Unsupported or missing targets should be rejected before mutation.",
+    ).toBeFalsy();
+
+    const committed = createSketchOffsetDerivationContribution({
+      definition: chainDefinition,
+      entityIds: ["sketch_entity_ab", "sketch_entity_bc"] as SketchEntityId[],
+      distance: 1,
+      side: "right",
+      sequence: 10,
+      factories: createFactories(),
+    });
+    expect(
+      committed.valid,
+      "A connected chain should produce a valid derivation contribution.",
+    ).toBeTruthy();
+    const relationship = committed.contribution?.derivedRelationships?.[0];
+    expect(
+      relationship?.kind,
+      "Offset commit should author an offset relationship.",
+    ).toBe("offset");
+    if (relationship?.kind === "offset") {
+      expect(
+        relationship.seedEntityIds,
+        "The relationship should record the seed chain in traversal order.",
+      ).toEqual(["sketch_entity_ab", "sketch_entity_bc"] as SketchEntityId[]);
+      expect(
+        relationship.distance,
+        "The right side should store a negative signed distance.",
+      ).toBe(-1);
+      expect(
+        relationship.jointPolicy,
+        "The relationship should record the joint policy.",
+      ).toBe("trimExtendArcFallback");
+      expect(
+        relationship.jointOutputs.length,
+        "The convex corner should record one stable joint identity.",
+      ).toBe(1);
+      expect(
+        relationship.outputs.length,
+        "Each seed segment should map to one stable output.",
+      ).toBe(2);
+    }
+    expect(
+      committed.contribution?.entities.filter(
+        (entity) => entity.kind === "arc",
+      ).length,
+      "The convex corner should stage a joint arc entity.",
+    ).toBe(1);
+    expect(
+      committed.previewEntities.length > 0,
+      "A valid offset derivation should stage preview geometry.",
+    ).toBeTruthy();
+  }
+
   testFilletAndChamferMutateAdjacentLines();
   testExtendAndSplitMutateOnlySelectedLine();
   testSlotCreatesDurableGeometryForSupportedReferences();
   testSlotCreatesProfileOffsetsForClosedLineLoops();
+  testOffsetCharacterizationSingleCurves();
+  testOffsetCharacterizationChains();
+  testSlotOffsetCharacterization();
+  testOffsetDerivationValidationAndCommitPreparation();
 });

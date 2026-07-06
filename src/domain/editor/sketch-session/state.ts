@@ -13,6 +13,7 @@ import type {
   SketchPlaneSupportRef,
 } from "@/contracts/shared/sketch-plane";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
 import type {
   ConstraintDefinition,
   DimensionDefinition,
@@ -311,7 +312,10 @@ export function deriveSketchDisplayEntities(
 ): readonly SketchDraftEntity[] {
   const sketchId = getSessionSketchId(session);
   const displayDefinition = evaluateSketchDerivations(
-    session.definition,
+    resolveSketchDerivationDistances({
+      definition: session.definition,
+      variables: session.documentVariables,
+    }),
   ).definition;
   const acceptedEntities = displayDefinition.entities.flatMap((entity) =>
     mapDefinitionEntityToDraftEntity(

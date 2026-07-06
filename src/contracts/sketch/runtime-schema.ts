@@ -19,6 +19,7 @@ import {
   type ContractValidationResult,
 } from "@/contracts/shared/validation";
 import { validateReferenceImageOperationStateInvariants } from "@/contracts/reference-image/runtime-schema";
+import { isAuthoredValue } from "@/contracts/modeling/authored-values";
 
 export type ProjectedReferenceRequestTarget =
   | ProjectedSketchGeometryRef
@@ -196,6 +197,31 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
           message: "Sketch profile text height must be positive.",
         });
       }
+    }
+  });
+
+  definition.derivedRelationships?.forEach((relationship, index) => {
+    if (relationship.kind !== "offset") {
+      return;
+    }
+
+    const distance: unknown = relationship.distance;
+    const isNumericDistance =
+      typeof distance === "number" && Number.isFinite(distance);
+    const isAuthoredDistance =
+      isAuthoredValue(distance) &&
+      (distance.source === "expression"
+        ? typeof distance.valueText === "string"
+        : typeof distance.value === "number" &&
+          Number.isFinite(distance.value));
+    if (!isNumericDistance && !isAuthoredDistance) {
+      issues.push({
+        path: `derivedRelationships.${index}.distance`,
+        expected: "finite number or authored literal/expression value",
+        value: distance,
+        message:
+          "Offset derivation distance must be a finite number or an authored literal/expression value.",
+      });
     }
   });
 

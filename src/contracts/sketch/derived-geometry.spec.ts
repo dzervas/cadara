@@ -326,6 +326,297 @@ test("evaluateSketchDerivations emits diagnostics for missing seed, missing outp
   ).toBeTruthy();
 });
 
+test("evaluateSketchDerivations recomputes offset chains from seed edits with stable output identities", () => {
+  function makeOffsetDefinition(input: {
+    bX: number;
+    distance: SketchDerivationDefinition extends { distance: infer T }
+      ? T
+      : never;
+  }) {
+    return makeSketchDefinition({
+      points: [
+        makePoint("a", [0, 0]),
+        makePoint("b", [input.bX, 0]),
+        makePoint("c", [input.bX, 4]),
+        makePoint("o1s", [0, 0]),
+        makePoint("o1e", [0, 0]),
+        makePoint("o2s", [0, 0]),
+        makePoint("o2e", [0, 0]),
+      ],
+      entities: [
+        makeLine("seed_ab", "a", "b"),
+        makeLine("seed_bc", "b", "c"),
+        makeLine("out_ab", "o1s", "o1e"),
+        makeLine("out_bc", "o2s", "o2e"),
+      ],
+      derivedRelationships: [
+        makeRelationship({
+          kind: "offset",
+          derivationId: "sketch_derivation_1_offset",
+          label: "offset 1",
+          seedEntityIds: [
+            "seed_ab",
+            "seed_bc",
+          ] as unknown as SketchDerivationDefinition["seedEntityIds"],
+          distance: input.distance,
+          jointPolicy: "trimExtendArcFallback",
+          jointOutputs: [],
+          outputs: [
+            {
+              seedEntityId: "seed_ab",
+              outputEntityId: "out_ab",
+              instanceIndex: 1,
+              seedPointIds: ["a", "b"],
+              outputPointIds: ["o1s", "o1e"],
+            },
+            {
+              seedEntityId: "seed_bc",
+              outputEntityId: "out_bc",
+              instanceIndex: 1,
+              seedPointIds: ["b", "c"],
+              outputPointIds: ["o2s", "o2e"],
+            },
+          ],
+        } as SketchDerivationDefinition),
+      ],
+    });
+  }
+
+  const initial = evaluateSketchDerivations(
+    makeOffsetDefinition({ bX: 4, distance: 1 }),
+  );
+  expect(
+    initial.diagnostics.length,
+    "A resolvable offset chain should not emit diagnostics.",
+  ).toBe(0);
+  assertPoint(
+    pointPosition(initial.definition, "o1s"),
+    [0, 1],
+    "Offset recompute should place the chain start on the offset side.",
+  );
+  assertPoint(
+    pointPosition(initial.definition, "o1e"),
+    [3, 1],
+    "Offset recompute should trim the inside corner.",
+  );
+  assertPoint(
+    pointPosition(initial.definition, "o2s"),
+    [3, 1],
+    "Adjacent trimmed outputs should share the corner position.",
+  );
+  assertPoint(
+    pointPosition(initial.definition, "o2e"),
+    [3, 4],
+    "Offset recompute should keep the natural direction of each seed.",
+  );
+
+  const seedEdited = evaluateSketchDerivations(
+    makeOffsetDefinition({ bX: 6, distance: 1 }),
+  );
+  expect(
+    seedEdited.diagnostics.length,
+    "Seed edits should recompute without diagnostics.",
+  ).toBe(0);
+  assertPoint(
+    pointPosition(seedEdited.definition, "o1e"),
+    [5, 1],
+    "Seed edits should propagate into derived offset outputs.",
+  );
+  expect(
+    seedEdited.definition.entities.map((entry) => entry.entityId),
+    "Recompute should keep output entity identities stable.",
+  ).toEqual(initial.definition.entities.map((entry) => entry.entityId));
+
+  const distanceEdited = evaluateSketchDerivations(
+    makeOffsetDefinition({ bX: 4, distance: 0.5 }),
+  );
+  assertPoint(
+    pointPosition(distanceEdited.definition, "o1s"),
+    [0, 0.5],
+    "Distance edits should recompute the derived chain.",
+  );
+
+  const literalAuthored = evaluateSketchDerivations(
+    makeOffsetDefinition({
+      bX: 4,
+      distance: { source: "literal", value: 1 },
+    }),
+  );
+  assertPoint(
+    pointPosition(literalAuthored.definition, "o1s"),
+    [0, 1],
+    "Authored literal distances should evaluate like plain numbers.",
+  );
+
+  const unresolvedExpression = evaluateSketchDerivations(
+    makeOffsetDefinition({
+      bX: 4,
+      distance: { source: "expression", valueText: "wall / 2" },
+    }),
+  );
+  expect(
+    unresolvedExpression.diagnostics.some(
+      (diagnostic) => diagnostic.code === "derived-offset-unresolved-distance",
+    ),
+    "Unresolved expression distances should emit the unresolved-distance diagnostic.",
+  ).toBeTruthy();
+  assertPoint(
+    pointPosition(unresolvedExpression.definition, "o1s"),
+    [0, 0],
+    "Unresolved distances should keep outputs in their last resolvable state.",
+  );
+});
+
+test("evaluateSketchDerivations maintains offset joint arcs and reports structured offset diagnostics", () => {
+  function makeJointDefinition(distance: number) {
+    return makeSketchDefinition({
+      points: [
+        makePoint("a", [0, 0]),
+        makePoint("b", [4, 0]),
+        makePoint("c", [4, 4]),
+        makePoint("o1s", [9, 9]),
+        makePoint("o1e", [9, 9]),
+        makePoint("o2s", [9, 9]),
+        makePoint("o2e", [9, 9]),
+        makePoint("joint_center", [9, 9]),
+      ],
+      entities: [
+        makeLine("seed_ab", "a", "b"),
+        makeLine("seed_bc", "b", "c"),
+        makeLine("out_ab", "o1s", "o1e"),
+        makeLine("out_bc", "o2s", "o2e"),
+        makeArc("joint_arc", "joint_center", "o1e", "o2s", "counterClockwise"),
+      ],
+      derivedRelationships: [
+        makeRelationship({
+          kind: "offset",
+          derivationId: "sketch_derivation_2_offset",
+          label: "offset 2",
+          seedEntityIds: [
+            "seed_ab",
+            "seed_bc",
+          ] as unknown as SketchDerivationDefinition["seedEntityIds"],
+          distance,
+          jointPolicy: "trimExtendArcFallback",
+          jointOutputs: [
+            {
+              firstSeedEntityId: "seed_ab",
+              secondSeedEntityId: "seed_bc",
+              outputEntityId: "joint_arc",
+              centerPointId: "joint_center",
+              startPointId: "o1e",
+              endPointId: "o2s",
+            },
+          ] as unknown as Extract<
+            SketchDerivationDefinition,
+            { kind: "offset" }
+          >["jointOutputs"],
+          outputs: [
+            {
+              seedEntityId: "seed_ab",
+              outputEntityId: "out_ab",
+              instanceIndex: 1,
+              seedPointIds: ["a", "b"],
+              outputPointIds: ["o1s", "o1e"],
+            },
+            {
+              seedEntityId: "seed_bc",
+              outputEntityId: "out_bc",
+              instanceIndex: 1,
+              seedPointIds: ["b", "c"],
+              outputPointIds: ["o2s", "o2e"],
+            },
+          ],
+        } as SketchDerivationDefinition),
+      ],
+    });
+  }
+
+  const arcJoined = evaluateSketchDerivations(makeJointDefinition(-1));
+  expect(
+    arcJoined.diagnostics.length,
+    "A satisfiable arc-joined offset should not emit diagnostics.",
+  ).toBe(0);
+  assertPoint(
+    pointPosition(arcJoined.definition, "joint_center"),
+    [4, 0],
+    "Joint arcs should track the shared seed vertex.",
+  );
+  assertPoint(
+    pointPosition(arcJoined.definition, "o1e"),
+    [4, -1],
+    "The joint arc start should sit at the first segment's offset end.",
+  );
+  assertPoint(
+    pointPosition(arcJoined.definition, "o2s"),
+    [5, 0],
+    "The joint arc end should sit at the second segment's offset start.",
+  );
+
+  const topologyFlip = evaluateSketchDerivations(makeJointDefinition(1));
+  expect(
+    topologyFlip.diagnostics.some(
+      (diagnostic) => diagnostic.code === "derived-offset-joint-unsatisfied",
+    ),
+    "A joint topology change should emit the joint-unsatisfied diagnostic.",
+  ).toBeTruthy();
+  assertPoint(
+    pointPosition(topologyFlip.definition, "o1e"),
+    [9, 9],
+    "Joint topology changes should keep outputs in their last resolvable state.",
+  );
+
+  const collapsed = evaluateSketchDerivations(
+    makeSketchDefinition({
+      points: [
+        makePoint("arc_center", [0, 0]),
+        makePoint("arc_start", [2, 0]),
+        makePoint("arc_end", [0, 2]),
+        makePoint("out_center", [9, 9]),
+        makePoint("out_start", [9, 9]),
+        makePoint("out_end", [9, 9]),
+      ],
+      entities: [
+        makeArc("seed_arc", "arc_center", "arc_start", "arc_end", "counterClockwise"),
+        makeArc("out_arc", "out_center", "out_start", "out_end", "counterClockwise"),
+      ],
+      derivedRelationships: [
+        makeRelationship({
+          kind: "offset",
+          derivationId: "sketch_derivation_3_offset",
+          label: "offset 3",
+          seedEntityIds: [
+            "seed_arc",
+          ] as unknown as SketchDerivationDefinition["seedEntityIds"],
+          distance: 3,
+          jointPolicy: "trimExtendArcFallback",
+          jointOutputs: [],
+          outputs: [
+            {
+              seedEntityId: "seed_arc",
+              outputEntityId: "out_arc",
+              instanceIndex: 1,
+              seedPointIds: ["arc_center", "arc_start", "arc_end"],
+              outputPointIds: ["out_center", "out_start", "out_end"],
+            },
+          ],
+        } as SketchDerivationDefinition),
+      ],
+    }),
+  );
+  expect(
+    collapsed.diagnostics.some(
+      (diagnostic) => diagnostic.code === "derived-offset-arc-collapse",
+    ),
+    "Arc collapse should emit the structured arc-collapse diagnostic.",
+  ).toBeTruthy();
+  assertPoint(
+    pointPosition(collapsed.definition, "out_start"),
+    [9, 9],
+    "Arc collapse should keep outputs in their last resolvable state instead of detaching.",
+  );
+});
+
 function assertPoint(
   actual: SketchPoint2D,
   expected: SketchPoint2D,
