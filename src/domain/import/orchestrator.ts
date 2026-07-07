@@ -1,5 +1,6 @@
 import type { ImportCapabilities } from "@/contracts/import/capabilities";
 import type {
+  ImportDeferredValue,
   ImportPreparedActions,
   ImportPreparedActionRef,
 } from "@/contracts/import/actions";
@@ -9,9 +10,12 @@ import type { ImportResult } from "@/contracts/import/result";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import type {
+  CreateFeatureRequest,
   ModelingDiagnostic,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
+import type { BodyId, SketchId } from "@/contracts/shared/ids";
+import type { RegionRecord, SketchRecord } from "@/contracts/sketch/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
@@ -119,6 +123,198 @@ export async function createImportSession(input: {
   };
 }
 
+interface ImportActionOutputRecord {
+  sketchId?: SketchId;
+  bodyIds?: BodyId[];
+}
+
+type ImportRegionSketchSource =
+  | SketchRecord
+  | WorkspaceSnapshot["document"]["sketches"][number];
+
+function orderedOutputKey(actionIndex: number) {
+  return `ordered:${actionIndex}`;
+}
+
+function isDeferredValue(value: unknown): value is ImportDeferredValue {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const kind = (value as { kind?: unknown }).kind;
+  return kind === "sketchIdOf" || kind === "regionOf" || kind === "bodyOf";
+}
+
+function getSketchRegions(sketch: ImportRegionSketchSource): readonly RegionRecord[] {
+  const candidate = sketch as ImportRegionSketchSource & { regions?: RegionRecord[]; sketch?: { regions?: RegionRecord[] } };
+  return candidate.regions ?? candidate.sketch?.regions ?? [];
+}
+
+function getSketchSolvedPoints(sketch: ImportRegionSketchSource) {
+  const candidate = sketch as ImportRegionSketchSource & {
+    sketch?: { solvedSnapshot?: SketchRecord["solvedSnapshot"] };
+    solvedSnapshot?: SketchRecord["solvedSnapshot"];
+  };
+  return (
+    candidate.solvedSnapshot?.solvedPoints ??
+    candidate.sketch?.solvedSnapshot?.solvedPoints ??
+    []
+  );
+}
+
+function getSketchDefinition(sketch: ImportRegionSketchSource): SketchRecord["definition"] {
+  const candidate = sketch as ImportRegionSketchSource & {
+    sketch?: { definition?: SketchRecord["definition"] };
+    definition?: SketchRecord["definition"];
+  };
+  return candidate.definition ?? candidate.sketch?.definition ?? {
+    schemaVersion: "sketch-definition/v1alpha1",
+    referenceIds: [],
+    references: [],
+    pointIds: [],
+    points: [],
+    entityIds: [],
+    entities: [],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+    styleIds: [],
+    styles: [],
+    svgRenderingEnabled: true,
+    derivedRelationships: [],
+    authoringOperations: [],
+  };
+}
+
+function pointForId(sketch: ImportRegionSketchSource, pointId: string) {
+  const solved = getSketchSolvedPoints(sketch).find(
+    (point) => point.pointId === pointId,
+  );
+  if (solved) {
+    return solved.solvedPosition;
+  }
+  return getSketchDefinition(sketch).points.find((point) => point.pointId === pointId)
+    ?.position;
+}
+
+function circleLoopContainsPoint(
+  sketch: ImportRegionSketchSource,
+  loop: RegionRecord["loops"][number],
+  point: readonly [number, number],
+) {
+  if (loop.segments.length !== 1) {
+    return false;
+  }
+  const source = loop.segments[0]?.source;
+  if (!source || source.kind !== "entity") {
+    return false;
+  }
+  const entity = getSketchDefinition(sketch).entities.find(
+    (candidate) => candidate.entityId === source.entityId,
+  );
+  if (!entity || entity.kind !== "circle") {
+    return false;
+  }
+  const center = pointForId(sketch, entity.centerPointId);
+  if (!center) {
+    return false;
+  }
+  const dx = point[0] - center[0];
+  const dy = point[1] - center[1];
+  return Math.hypot(dx, dy) < entity.radius;
+}
+
+function pointInPolygon(point: readonly [number, number], polygon: readonly (readonly [number, number])[]) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const xi = polygon[i]![0];
+    const yi = polygon[i]![1];
+    const xj = polygon[j]![0];
+    const yj = polygon[j]![1];
+    const intersects =
+      yi > point[1] !== yj > point[1] &&
+      point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi || Number.EPSILON) + xi;
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function loopPolygon(
+  sketch: ImportRegionSketchSource,
+  region: RegionRecord,
+  loopRole: "outer" | "inner",
+) {
+  const loop = region.loops.find((candidate) => candidate.role === loopRole);
+  if (!loop) {
+    return [] as readonly (readonly [number, number])[];
+  }
+  const solvedPoints = new Map(
+    getSketchSolvedPoints(sketch).map(
+      (point) => [point.pointId, point.solvedPosition] as const,
+    ),
+  );
+  return loop.boundaryPointIds.flatMap((pointId) => {
+    const point = solvedPoints.get(pointId);
+    return point ? [point] : [];
+  });
+}
+
+function estimateRegionArea(sketch: ImportRegionSketchSource, region: RegionRecord) {
+  const polygon = loopPolygon(sketch, region, "outer");
+  let area = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    area += polygon[j]![0] * polygon[i]![1] - polygon[i]![0] * polygon[j]![1];
+  }
+  return Math.abs(area) / 2;
+}
+
+function regionContainsPoint(
+  sketch: ImportRegionSketchSource,
+  region: RegionRecord,
+  point: readonly [number, number],
+) {
+  const outer = loopPolygon(sketch, region, "outer");
+  const outerLoop = region.loops.find((loop) => loop.role === "outer");
+  const outerContains =
+    outer.length >= 3
+      ? pointInPolygon(point, outer)
+      : outerLoop
+        ? circleLoopContainsPoint(sketch, outerLoop, point)
+        : false;
+  if (!outerContains) {
+    return false;
+  }
+  return !region.loops
+    .filter((loop) => loop.role === "inner")
+    .some((loop) => {
+      const solvedPoints = new Map(
+        getSketchSolvedPoints(sketch).map(
+          (entry) => [entry.pointId, entry.solvedPosition] as const,
+        ),
+      );
+      const polygon = loop.boundaryPointIds.flatMap((pointId) => {
+        const solved = solvedPoints.get(pointId);
+        return solved ? [solved] : [];
+      });
+      return polygon.length >= 3
+        ? pointInPolygon(point, polygon)
+        : circleLoopContainsPoint(sketch, loop, point);
+    });
+}
+
+function selectInnermostContainingRegion(
+  sketch: ImportRegionSketchSource,
+  point: readonly [number, number],
+): RegionRecord | null {
+  return getSketchRegions(sketch)
+    .filter((region) => region.isClosed && regionContainsPoint(sketch, region, point))
+    .sort(
+      (left, right) => estimateRegionArea(sketch, left) - estimateRegionArea(sketch, right),
+    )[0] ?? null;
+}
+
 export async function applyImportPreparedActions(input: {
   modelingService: ModelingService;
   baseRevisionId: WorkspaceSnapshot["document"]["revisionId"];
@@ -141,6 +337,97 @@ export async function applyImportPreparedActions(input: {
     variableIds: [],
   };
   let appliedOperationCount = 0;
+  const outputRecords = new Map<string, ImportActionOutputRecord>();
+  let currentOrderedPosition = -1;
+
+  const resolveDeferredValue = async (
+    value: ImportDeferredValue,
+    consumer: ImportPreparedActionRef,
+  ) => {
+    const output = outputRecords.get(orderedOutputKey(value.actionIndex));
+    if (!output) {
+      throw new Error(
+        `Unable to resolve deferred ${value.kind} for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} has no recorded output.`,
+      );
+    }
+
+    switch (value.kind) {
+      case "sketchIdOf": {
+        if (!output.sketchId) {
+          throw new Error(
+            `Unable to resolve deferred sketchIdOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced no sketch id.`,
+          );
+        }
+        return output.sketchId;
+      }
+      case "bodyOf": {
+        const bodyId = output.bodyIds?.[0];
+        if (!bodyId) {
+          throw new Error(
+            `Unable to resolve deferred bodyOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced no body id.`,
+          );
+        }
+        return bodyId;
+      }
+      case "regionOf": {
+        if (!output.sketchId) {
+          throw new Error(
+            `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced no sketch id; selector ${JSON.stringify(value.selector)}.`,
+          );
+        }
+        const snapshot = await input.modelingService.getCurrentDocumentSnapshot();
+        const sketch = snapshot.document.sketches.find(
+          (candidate) => candidate.sketchId === output.sketchId,
+        );
+        const region = sketch
+          ? selectInnermostContainingRegion(sketch, value.selector.point)
+          : null;
+        if (!region) {
+          throw new Error(
+            `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; reference action ${value.actionIndex}, sketch ${output.sketchId}, selector ${JSON.stringify(value.selector)}.`,
+          );
+        }
+        return { kind: "region" as const, sketchId: output.sketchId, regionId: region.regionId };
+      }
+    }
+  };
+
+  const materializeFeatureRequest = async (
+    request: ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+    consumer: ImportPreparedActionRef,
+  ): Promise<CreateFeatureRequest> => {
+    if (!request.definition || request.definition.kind !== "extrude") {
+      return request as CreateFeatureRequest;
+    }
+
+    const profiles = await Promise.all(
+      request.definition.parameters.profiles.map(async (profile) =>
+        isDeferredValue(profile)
+          ? await resolveDeferredValue(profile, consumer)
+          : profile,
+      ),
+    );
+    const booleanScope = request.definition.parameters.booleanScope;
+    const materializedBooleanScope =
+      booleanScope.kind === "targetBody" && isDeferredValue(booleanScope.bodyId)
+        ? {
+            ...booleanScope,
+            bodyId: await resolveDeferredValue(booleanScope.bodyId, consumer),
+          }
+        : booleanScope;
+
+    return {
+      ...request,
+      definition: {
+        ...request.definition,
+        parameters: {
+          ...request.definition.parameters,
+          profiles,
+          booleanScope: materializedBooleanScope,
+        },
+      },
+    } as unknown as CreateFeatureRequest;
+  };
 
   const applyVariable = async (index: number) => {
     const request = (input.actions.addDocumentVariables ?? [])[index];
@@ -159,8 +446,9 @@ export async function applyImportPreparedActions(input: {
 
   const applyFeature = async (index: number) => {
     const request = (input.actions.createFeatures ?? [])[index];
+    const consumer = { kind: "createFeature" as const, index };
     const result = await input.modelingService.createFeature({
-      ...request,
+      ...(await materializeFeatureRequest(request, consumer)),
       baseRevisionId: revisionId,
     });
     if (result.isErr()) {
@@ -168,6 +456,12 @@ export async function applyImportPreparedActions(input: {
     }
     revisionId = result.value.revisionId;
     createdEntityIds.featureIds.push(result.value.featureId);
+    const bodyIds = result.value.changedTargets.flatMap((target) =>
+      target.kind === "body" ? [target.bodyId] : [],
+    );
+    if (currentOrderedPosition >= 0) {
+      outputRecords.set(orderedOutputKey(currentOrderedPosition), { bodyIds });
+    }
     diagnostics.push(...result.value.diagnostics);
     appliedOperationCount += 1;
   };
@@ -183,6 +477,11 @@ export async function applyImportPreparedActions(input: {
     }
     revisionId = result.value.revisionId;
     createdEntityIds.sketchIds.push(result.value.sketchId);
+    if (currentOrderedPosition >= 0) {
+      outputRecords.set(orderedOutputKey(currentOrderedPosition), {
+        sketchId: result.value.sketchId,
+      });
+    }
     diagnostics.push(...result.value.diagnostics);
     appliedOperationCount += 1;
   };
@@ -237,7 +536,9 @@ export async function applyImportPreparedActions(input: {
   }
 
   let failure: unknown = null;
-  for (const ref of refs) {
+  for (let orderedPosition = 0; orderedPosition < refs.length; orderedPosition += 1) {
+    const ref = refs[orderedPosition]!;
+    currentOrderedPosition = orderedPosition;
     try {
       await applyByKind(ref);
     } catch (error) {
