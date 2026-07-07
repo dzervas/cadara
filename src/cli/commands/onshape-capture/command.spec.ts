@@ -62,3 +62,20 @@ test("command.spec.ts reports a usage error for a bad url before any network wor
   expect(result.ok === false && result.kind).toBe("usage");
   expect(result.ok === false && result.message).toContain("Expected");
 });
+
+test("command.spec.ts reports a usage error for an invalid translation poll budget", async () => {
+  const result = await onshapeCaptureCommand.run(
+    [FIXTURE_DOCUMENT_URL],
+    envFrom({
+      ONSHAPE_ACCESS_KEY: "access",
+      ONSHAPE_SECRET_KEY: "secret",
+      ONSHAPE_TRANSLATION_MAX_POLLS: "0",
+    }),
+    makeIO(),
+  );
+
+  expect(result.ok === false && result.kind).toBe("usage");
+  expect(result.ok === false && result.message).toContain(
+    "ONSHAPE_TRANSLATION_MAX_POLLS",
+  );
+});

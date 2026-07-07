@@ -5,8 +5,8 @@ import type { OnshapeClient } from "@/cli/commands/onshape-capture/client";
 /** Default chord tolerance (meters) for final-state tessellation. */
 export const DEFAULT_TESSELLATION_TOLERANCE = 0.001;
 
-/** Max translation status polls before treating the STEP export as failed. */
-const MAX_TRANSLATION_POLLS = 30;
+/** Default translation status poll budget before treating STEP export as failed. */
+export const DEFAULT_MAX_TRANSLATION_POLLS = 120;
 
 /**
  * Decide whether a Part Studio produced any solid bodies from its raw parts
@@ -30,6 +30,7 @@ export async function captureGroundTruth(
     studioPath: string;
     parts: unknown;
     sleep: (ms: number) => Promise<void>;
+    maxTranslationPolls?: number;
   },
 ): Promise<OnshapeGroundTruth> {
   if (!partsHaveBodies(context.parts)) {
@@ -58,6 +59,7 @@ async function exportStep(
     wvmId: string;
     studioPath: string;
     sleep: (ms: number) => Promise<void>;
+    maxTranslationPolls?: number;
   },
 ): Promise<string> {
   const requested = (await client.postJson(`${context.studioPath}/translations`, {
@@ -76,9 +78,10 @@ async function exportStep(
     if (state.requestState === "FAILED") {
       throw new Error("Onshape STEP translation reported FAILED.");
     }
-    if (polls >= MAX_TRANSLATION_POLLS) {
+    const maxPolls = context.maxTranslationPolls ?? DEFAULT_MAX_TRANSLATION_POLLS;
+    if (polls >= maxPolls) {
       throw new Error(
-        `Onshape STEP translation did not finish after ${MAX_TRANSLATION_POLLS} polls.`,
+        `Onshape STEP translation did not finish after ${maxPolls} polls.`,
       );
     }
     polls += 1;

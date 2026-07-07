@@ -103,10 +103,28 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
   const orderedCount = actions.orderedActions?.length ?? 0;
   const totalActions =
     (actions.addDocumentVariables?.length ?? 0) +
-    (actions.commitSketches?.length ?? 0);
+    (actions.commitSketches?.length ?? 0) +
+    (actions.createFeatures?.length ?? 0);
   expect(
     orderedCount === totalActions,
     "Every emitted parametric action should appear in the ordered sequence.",
+  ).toBeTruthy();
+
+  // The fixture extrude consumes a parametric sketch region and must now plan
+  // parametric: a createFeature carrying a deferred regionOf profile that points
+  // back at the sketch commit's ordered position.
+  const extrudeAction = actions.createFeatures?.[0];
+  const regionProfile =
+    extrudeAction?.definition.kind === "extrude"
+      ? extrudeAction.definition.parameters.profiles[0]
+      : undefined;
+  expect(
+    regionProfile !== undefined &&
+      "kind" in regionProfile &&
+      regionProfile.kind === "regionOf" &&
+      actions.orderedActions?.[regionProfile.actionIndex]?.kind ===
+        "commitSketch",
+    "The fixture extrude should emit a deferred regionOf profile referencing the sketch commit action.",
   ).toBeTruthy();
 
   expect(

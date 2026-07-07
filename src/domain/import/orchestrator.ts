@@ -21,6 +21,10 @@ import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-sche
 import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
 import { registerEmbeddedBinaryAsset } from "@/domain/modeling/embedded-binary-asset-registry";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
+import {
+  selectInnermostContainingRegion,
+  type RegionSelectionSketch,
+} from "@/domain/import/region-containment";
 
 export async function resolveLocalFileImportSource(
   file: File,
@@ -186,133 +190,16 @@ function getSketchDefinition(sketch: ImportRegionSketchSource): SketchRecord["de
   };
 }
 
-function pointForId(sketch: ImportRegionSketchSource, pointId: string) {
-  const solved = getSketchSolvedPoints(sketch).find(
-    (point) => point.pointId === pointId,
-  );
-  if (solved) {
-    return solved.solvedPosition;
-  }
-  return getSketchDefinition(sketch).points.find((point) => point.pointId === pointId)
-    ?.position;
-}
-
-function circleLoopContainsPoint(
-  sketch: ImportRegionSketchSource,
-  loop: RegionRecord["loops"][number],
-  point: readonly [number, number],
-) {
-  if (loop.segments.length !== 1) {
-    return false;
-  }
-  const source = loop.segments[0]?.source;
-  if (!source || source.kind !== "entity") {
-    return false;
-  }
-  const entity = getSketchDefinition(sketch).entities.find(
-    (candidate) => candidate.entityId === source.entityId,
-  );
-  if (!entity || entity.kind !== "circle") {
-    return false;
-  }
-  const center = pointForId(sketch, entity.centerPointId);
-  if (!center) {
-    return false;
-  }
-  const dx = point[0] - center[0];
-  const dy = point[1] - center[1];
-  return Math.hypot(dx, dy) < entity.radius;
-}
-
-function pointInPolygon(point: readonly [number, number], polygon: readonly (readonly [number, number])[]) {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const xi = polygon[i]![0];
-    const yi = polygon[i]![1];
-    const xj = polygon[j]![0];
-    const yj = polygon[j]![1];
-    const intersects =
-      yi > point[1] !== yj > point[1] &&
-      point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi || Number.EPSILON) + xi;
-    if (intersects) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function loopPolygon(
-  sketch: ImportRegionSketchSource,
-  region: RegionRecord,
-  loopRole: "outer" | "inner",
-) {
-  const loop = region.loops.find((candidate) => candidate.role === loopRole);
-  if (!loop) {
-    return [] as readonly (readonly [number, number])[];
-  }
-  const solvedPoints = new Map(
-    getSketchSolvedPoints(sketch).map(
-      (point) => [point.pointId, point.solvedPosition] as const,
+function toSelectionSketch(sketch: ImportRegionSketchSource): RegionSelectionSketch {
+  return {
+    regions: getSketchRegions(sketch),
+    solvedPoints: new Map(
+      getSketchSolvedPoints(sketch).map(
+        (point) => [point.pointId, point.solvedPosition] as const,
+      ),
     ),
-  );
-  return loop.boundaryPointIds.flatMap((pointId) => {
-    const point = solvedPoints.get(pointId);
-    return point ? [point] : [];
-  });
-}
-
-function estimateRegionArea(sketch: ImportRegionSketchSource, region: RegionRecord) {
-  const polygon = loopPolygon(sketch, region, "outer");
-  let area = 0;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    area += polygon[j]![0] * polygon[i]![1] - polygon[i]![0] * polygon[j]![1];
-  }
-  return Math.abs(area) / 2;
-}
-
-function regionContainsPoint(
-  sketch: ImportRegionSketchSource,
-  region: RegionRecord,
-  point: readonly [number, number],
-) {
-  const outer = loopPolygon(sketch, region, "outer");
-  const outerLoop = region.loops.find((loop) => loop.role === "outer");
-  const outerContains =
-    outer.length >= 3
-      ? pointInPolygon(point, outer)
-      : outerLoop
-        ? circleLoopContainsPoint(sketch, outerLoop, point)
-        : false;
-  if (!outerContains) {
-    return false;
-  }
-  return !region.loops
-    .filter((loop) => loop.role === "inner")
-    .some((loop) => {
-      const solvedPoints = new Map(
-        getSketchSolvedPoints(sketch).map(
-          (entry) => [entry.pointId, entry.solvedPosition] as const,
-        ),
-      );
-      const polygon = loop.boundaryPointIds.flatMap((pointId) => {
-        const solved = solvedPoints.get(pointId);
-        return solved ? [solved] : [];
-      });
-      return polygon.length >= 3
-        ? pointInPolygon(point, polygon)
-        : circleLoopContainsPoint(sketch, loop, point);
-    });
-}
-
-function selectInnermostContainingRegion(
-  sketch: ImportRegionSketchSource,
-  point: readonly [number, number],
-): RegionRecord | null {
-  return getSketchRegions(sketch)
-    .filter((region) => region.isClosed && regionContainsPoint(sketch, region, point))
-    .sort(
-      (left, right) => estimateRegionArea(sketch, left) - estimateRegionArea(sketch, right),
-    )[0] ?? null;
+    definition: getSketchDefinition(sketch),
+  };
 }
 
 export async function applyImportPreparedActions(input: {
@@ -380,7 +267,10 @@ export async function applyImportPreparedActions(input: {
           (candidate) => candidate.sketchId === output.sketchId,
         );
         const region = sketch
-          ? selectInnermostContainingRegion(sketch, value.selector.point)
+          ? selectInnermostContainingRegion(
+              toSelectionSketch(sketch),
+              value.selector.point,
+            )
           : null;
         if (!region) {
           throw new Error(

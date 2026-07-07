@@ -59,6 +59,14 @@ Generate a key pair at <https://dev-portal.onshape.com/keys>. Capture is
 read-only against documents the key owner can access; the client backs off on
 HTTP 429 and caps concurrent in-flight requests.
 
+Long-running STEP exports can exceed the default poll budget on larger
+studios. Set `ONSHAPE_TRANSLATION_MAX_POLLS` to a positive integer to extend
+translation polling (500ms between polls):
+
+```bash
+export ONSHAPE_TRANSLATION_MAX_POLLS=180
+```
+
 ## Manual live smoke test (not run in CI)
 
 Automated tests use recorded fixture transcripts with an injected fetch — no

@@ -34,6 +34,7 @@ export interface CaptureOptions {
   baseUrl?: string;
   apiVersion?: string;
   concurrency?: number;
+  maxTranslationPolls?: number;
 }
 
 interface RawElement {
@@ -85,7 +86,7 @@ export async function captureBundle(
 
   const capturedStudios: OnshapePartStudioCapture[] = [];
   for (const studio of partStudios) {
-    capturedStudios.push(await captureStudio(client, ref, studio, runtime));
+    capturedStudios.push(await captureStudio(client, ref, studio, runtime, options));
   }
 
   const bundle: OnshapeCaptureBundle = {
@@ -128,6 +129,7 @@ async function captureStudio(
   ref: OnshapeDocumentRef,
   studio: RawElement,
   runtime: CaptureRuntime,
+  options: Pick<CaptureOptions, "maxTranslationPolls">,
 ): Promise<OnshapePartStudioCapture> {
   const studioPath = `/partstudios/d/${ref.documentId}/${ref.wvm}/${ref.wvmId}/e/${studio.id}`;
   const partsPath = `/parts/d/${ref.documentId}/${ref.wvm}/${ref.wvmId}/e/${studio.id}`;
@@ -154,6 +156,7 @@ async function captureStudio(
     studioPath,
     parts,
     sleep: runtime.sleep,
+    maxTranslationPolls: options.maxTranslationPolls,
   });
 
   return {

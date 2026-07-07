@@ -12,6 +12,7 @@ export const ONSHAPE_CAPTURE_CLI_VERSION = "0.0.1";
 
 const ACCESS_KEY_VAR = "ONSHAPE_ACCESS_KEY";
 const SECRET_KEY_VAR = "ONSHAPE_SECRET_KEY";
+const TRANSLATION_MAX_POLLS_VAR = "ONSHAPE_TRANSLATION_MAX_POLLS";
 
 const USAGE =
   "Usage: cadara onshape capture <onshape-document-url> [output-file]\n" +
@@ -19,6 +20,17 @@ const USAGE =
 
 function defaultOutputPath(documentId: string): string {
   return `${documentId}.onshape-capture.json`;
+}
+
+function parsePositiveIntegerEnv(value: string | undefined, variableName: string): number | null {
+  if (value === undefined || value.trim() === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${variableName} must be a positive integer when set.`);
+  }
+  return parsed;
 }
 
 /**
@@ -72,10 +84,24 @@ export const onshapeCaptureCommand: CommandModule = {
       cliVersion: ONSHAPE_CAPTURE_CLI_VERSION,
     };
 
+    let maxTranslationPolls: number | null;
+    try {
+      maxTranslationPolls = parsePositiveIntegerEnv(
+        env(TRANSLATION_MAX_POLLS_VAR),
+        TRANSLATION_MAX_POLLS_VAR,
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        kind: "usage",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+
     try {
       const bundle = await captureBundle(
         ref,
-        { accessKey, secretKey },
+        { accessKey, secretKey, maxTranslationPolls: maxTranslationPolls ?? undefined },
         runtime,
       );
       const outputPath = outArg ?? defaultOutputPath(ref.documentId);

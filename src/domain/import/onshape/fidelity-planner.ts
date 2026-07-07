@@ -23,7 +23,11 @@ import type {
   StudioReadResult,
 } from "@/domain/import/onshape/bundle-reader";
 import { interpretResolvedReference } from "@/domain/import/onshape/signature-interpreter";
-
+import {
+  planExtrudeFeature,
+  referencedSketchFeatureIds,
+  type PlannedExtrude,
+} from "@/domain/import/onshape/extrude-planner";
 export type FidelityTier = "parametric" | "baked" | "geometryOnly";
 
 export type PlanReasonCode =
@@ -42,6 +46,7 @@ export type PlanReasonCode =
 export type PlannedTarget =
   | { kind: "sketch"; planeKey: SketchPlaneKey }
   | { kind: "variable" }
+  | { kind: "feature" }
   | { kind: "bakedBody" }
   | { kind: "suppressed" };
 
@@ -54,6 +59,8 @@ export interface FeaturePlan {
   reasonCodes: PlanReasonCode[];
   /** True when the feature was suppressed in Onshape or degraded downstream. */
   suppressed: boolean;
+  /** Present when a region-consuming solid feature planned parametric (task 3). */
+  plannedExtrude?: PlannedExtrude;
 }
 
 export interface StudioPlan {
@@ -207,6 +214,14 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
   const refs = referenceMap(studio.resolvedReferences);
   const featurePlans: FeaturePlan[] = [];
   let sawBaked = false;
+  // Tier + plane of each parametric sketch, so region consumers can locate their
+  // owning sketch. Onshape feature ids of prior parametric NEW-body extrudes,
+  // for narrow default-scope boolean lineage inference.
+  const sketchPlansByFeatureId = new Map<
+    string,
+    { tier: FidelityTier; planeKey: SketchPlaneKey }
+  >();
+  const bodyProducingFeatureIds: string[] = [];
 
   for (const feature of read.features) {
     const label = feature.name ?? feature.featureId;
@@ -231,6 +246,12 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
       if (sketchPlan.tier === "baked") {
         sawBaked = true;
       }
+      if (sketchPlan.target.kind === "sketch") {
+        sketchPlansByFeatureId.set(feature.featureId, {
+          tier: sketchPlan.tier,
+          planeKey: sketchPlan.target.planeKey,
+        });
+      }
       featurePlans.push({
         onshapeFeatureId: feature.featureId,
         featureType: feature.featureType,
@@ -243,10 +264,49 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
       continue;
     }
 
+    // Extrudes consuming a parametric sketch's regions can plan parametric when
+    // their interior-point selectors verify at review time (task 3). Everything
+    // else — other region consumers, topology consumers, custom features, and
+    // anything downstream of a bake — degrades with an honest reason code.
+    let extrudeReason: PlanReasonCode | null = null;
+    if (feature.featureType === "extrude" && !sawBaked) {
+      const referencedIds = referencedSketchFeatureIds(feature);
+      const referenced = referencedIds
+        .map((id) => sketchPlansByFeatureId.get(id))
+        .find((plan) => plan !== undefined);
+      const solvedSketch = referencedIds
+        .map((id) => read.solvedSketchesByFeatureId.get(id))
+        .find((solved) => solved !== undefined);
+      const extrudePlan = planExtrudeFeature({
+        feature,
+        solvedSketch,
+        referencedSketch: referenced,
+        priorBodyProducingFeatureIds: bodyProducingFeatureIds,
+      });
+      if (extrudePlan.tier === "parametric") {
+        if (extrudePlan.plannedExtrude.boolean.kind === "standalone") {
+          bodyProducingFeatureIds.push(feature.featureId);
+        }
+        featurePlans.push({
+          onshapeFeatureId: feature.featureId,
+          featureType: feature.featureType,
+          label,
+          tier: "parametric",
+          target: { kind: "feature" },
+          reasonCodes: [],
+          suppressed: onshapeSuppressed,
+          plannedExtrude: extrudePlan.plannedExtrude,
+        });
+        continue;
+      }
+      extrudeReason = extrudePlan.reason;
+    }
+
     // Any recognized-or-unknown solid feature degrades in probe-less v1, with a
     // reason code that distinguishes region-resolution blockers from true
     // topology-probe blockers and custom features.
-    const reason: PlanReasonCode = degradationReason(feature.featureType);
+    const reason: PlanReasonCode =
+      extrudeReason ?? degradationReason(feature.featureType);
     const downstream = sawBaked;
     sawBaked = true;
     featurePlans.push({

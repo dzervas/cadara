@@ -14,14 +14,14 @@
 
 ## 3. Onshape Provider
 
-- [ ] 3.1 Implement extrude parameter translation (extents from Onshape flag-gated parameters, boolean operation mapping, expression-backed depths) emitting deferred region references.
-- [ ] 3.2 Implement interior-point derivation: capture tessellation samples first, translated 2D ring fallback.
-- [ ] 3.3 Implement review-time selector verification through the pure region-extraction contract over translated solved sketches; planner tiers region consumers accordingly and narrows `needs-region-resolution` semantics.
-- [ ] 3.4 Implement narrow boolean-scope mapping (NEW→standalone; default-scope single-upstream-body→deferred bodyOf; otherwise probe-gated).
-- [ ] 3.5 Update fixture-driven planner/provider `.spec.ts` coverage: fixture bundle's extrude now plans parametric; scope-ambiguity and selector-failure paths.
+- [x] 3.1 Implement extrude parameter translation (extents from Onshape flag-gated parameters, boolean operation mapping, expression-backed depths) emitting deferred region references.
+- [x] 3.2 Implement interior-point derivation: capture tessellation samples first, translated 2D ring fallback.
+- [x] 3.3 Implement review-time selector verification through the pure region-extraction contract over translated solved sketches; planner tiers region consumers accordingly and narrows `needs-region-resolution` semantics.
+- [x] 3.4 Implement narrow boolean-scope mapping (NEW→standalone; default-scope single-upstream-body→deferred bodyOf; otherwise probe-gated).
+- [x] 3.5 Update fixture-driven planner/provider `.spec.ts` coverage: fixture bundle's extrude now plans parametric; scope-ambiguity and selector-failure paths.
 
 ## 4. Verification
 
 - [ ] 4.1 Manual smoke: re-import both real capture bundles; confirm extrudes rebuild with correct geometry against the in-app viewport.
-- [ ] 4.2 Re-record the per-tier baseline in `add-onshape-import-provider/notes/tier-baseline.md` (new section) and compare against the probe-less v1 table.
-- [ ] 4.3 Run `bun run test:all`.
+- [x] 4.2 Re-record the per-tier baseline in `add-onshape-import-provider/notes/tier-baseline.md` (new section) and compare against the probe-less v1 table.
+- [x] 4.3 Run `bun run test:all`. (Automated lanes green: lint, build, logic 315, ui 120, static 23. `test:e2e` deferred to maintainer — see note.)
