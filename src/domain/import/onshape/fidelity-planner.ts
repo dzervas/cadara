@@ -38,13 +38,15 @@ export type PlanReasonCode =
   | "needs-region-resolution"
   // Consumes body faces/edges/bodies mid-history; needs the sandboxed probe.
   | "needs-history-probe"
+  | "sketch-on-probed-face"
+  | "translator-unavailable"
   | "custom-feature"
   | "unsupported-feature"
   | "downstream-of-baked"
   | "unreadable-feature";
 
 export type PlannedTarget =
-  | { kind: "sketch"; planeKey: SketchPlaneKey }
+  | { kind: "sketch"; planeKey: SketchPlaneKey; plane?: import("@/contracts/shared/sketch-plane").SketchPlaneDefinition }
   | { kind: "variable" }
   | { kind: "feature" }
   | { kind: "bakedBody" }
@@ -61,6 +63,8 @@ export interface FeaturePlan {
   suppressed: boolean;
   /** Present when a region-consuming solid feature planned parametric (task 3). */
   plannedExtrude?: PlannedExtrude;
+  /** Onshape feature ids that this plan consumes directly. */
+  inputFeatureIds: string[];
 }
 
 export interface StudioPlan {
@@ -106,6 +110,19 @@ function degradationReason(featureType: string): PlanReasonCode {
     return "needs-history-probe";
   }
   return "custom-feature";
+}
+
+    function isNewBodyExtrude(feature: OnshapeFeatureNode): boolean {
+  if (feature.featureType !== "extrude") {
+    return false;
+  }
+  const operationType = feature.parameters?.find(
+    (parameter) =>
+      typeof parameter === "object" &&
+      parameter !== null &&
+      (parameter as { parameterId?: unknown }).parameterId === "operationType",
+  ) as { value?: unknown } | undefined;
+  return operationType?.value === undefined || operationType.value === "NEW";
 }
 
 function referenceMap(
@@ -213,7 +230,7 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
   const studio: OnshapePartStudioCapture = read.studio;
   const refs = referenceMap(studio.resolvedReferences);
   const featurePlans: FeaturePlan[] = [];
-  let sawBaked = false;
+  const bakedLineageFeatureIds = new Set<string>();
   // Tier + plane of each parametric sketch, so region consumers can locate their
   // owning sketch. Onshape feature ids of prior parametric NEW-body extrudes,
   // for narrow default-scope boolean lineage inference.
@@ -237,6 +254,7 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
         target: { kind: "variable" },
         reasonCodes: ["document-variable"],
         suppressed: onshapeSuppressed,
+        inputFeatureIds: [],
       });
       continue;
     }
@@ -244,7 +262,7 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
     if (feature.featureType === "newSketch") {
       const sketchPlan = planSketch(feature, refs);
       if (sketchPlan.tier === "baked") {
-        sawBaked = true;
+        bakedLineageFeatureIds.add(feature.featureId);
       }
       if (sketchPlan.target.kind === "sketch") {
         sketchPlansByFeatureId.set(feature.featureId, {
@@ -260,17 +278,24 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
         target: sketchPlan.target,
         reasonCodes: [sketchPlan.reason],
         suppressed: onshapeSuppressed || sketchPlan.tier === "baked",
+        inputFeatureIds: [],
       });
       continue;
     }
 
     // Extrudes consuming a parametric sketch's regions can plan parametric when
-    // their interior-point selectors verify at review time (task 3). Everything
-    // else — other region consumers, topology consumers, custom features, and
-    // anything downstream of a bake — degrades with an honest reason code.
+    // their interior-point selectors verify at review time. Baked lineages stay
+    // visible to boolean-scope candidate counting, but only true dependents carry
+    // `downstream-of-baked`.
     let extrudeReason: PlanReasonCode | null = null;
-    if (feature.featureType === "extrude" && !sawBaked) {
+    let inputFeatureIds: string[] = [];
+    let dependsOnBakedLineage = false;
+    if (feature.featureType === "extrude") {
       const referencedIds = referencedSketchFeatureIds(feature);
+      inputFeatureIds = [...referencedIds];
+      dependsOnBakedLineage = referencedIds.some((id) =>
+        bakedLineageFeatureIds.has(id),
+      );
       const referenced = referencedIds
         .map((id) => sketchPlansByFeatureId.get(id))
         .find((plan) => plan !== undefined);
@@ -284,39 +309,58 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
         priorBodyProducingFeatureIds: bodyProducingFeatureIds,
       });
       if (extrudePlan.tier === "parametric") {
-        if (extrudePlan.plannedExtrude.boolean.kind === "standalone") {
-          bodyProducingFeatureIds.push(feature.featureId);
+        if (extrudePlan.plannedExtrude.boolean.kind === "deferredBody") {
+          const sourceFeatureId = extrudePlan.plannedExtrude.boolean.sourceFeatureId;
+          inputFeatureIds = [...inputFeatureIds, sourceFeatureId];
+          dependsOnBakedLineage =
+            dependsOnBakedLineage || bakedLineageFeatureIds.has(sourceFeatureId);
         }
-        featurePlans.push({
-          onshapeFeatureId: feature.featureId,
-          featureType: feature.featureType,
-          label,
-          tier: "parametric",
-          target: { kind: "feature" },
-          reasonCodes: [],
-          suppressed: onshapeSuppressed,
-          plannedExtrude: extrudePlan.plannedExtrude,
-        });
-        continue;
+
+        if (!dependsOnBakedLineage) {
+          if (extrudePlan.plannedExtrude.boolean.kind === "standalone") {
+            bodyProducingFeatureIds.push(feature.featureId);
+          }
+          featurePlans.push({
+            onshapeFeatureId: feature.featureId,
+            featureType: feature.featureType,
+            label,
+            tier: "parametric",
+            target: { kind: "feature" },
+            reasonCodes: [],
+            suppressed: onshapeSuppressed,
+            plannedExtrude: extrudePlan.plannedExtrude,
+            inputFeatureIds,
+          });
+          continue;
+        }
+      } else {
+        extrudeReason = extrudePlan.reason;
       }
-      extrudeReason = extrudePlan.reason;
     }
 
-    // Any recognized-or-unknown solid feature degrades in probe-less v1, with a
-    // reason code that distinguishes region-resolution blockers from true
-    // topology-probe blockers and custom features.
+    // Any recognized-or-unknown solid feature degrades with a reason code that
+    // distinguishes region blockers, probe-gated scope/topology blockers, custom
+    // features, and true dependency cascades.
     const reason: PlanReasonCode =
       extrudeReason ?? degradationReason(feature.featureType);
-    const downstream = sawBaked;
-    sawBaked = true;
+    if (feature.featureType === "extrude" && isNewBodyExtrude(feature)) {
+      bodyProducingFeatureIds.push(feature.featureId);
+    }
+    const reasonCodes: PlanReasonCode[] = dependsOnBakedLineage
+      ? extrudeReason
+        ? [extrudeReason, "downstream-of-baked"]
+        : ["downstream-of-baked"]
+      : [reason];
+    bakedLineageFeatureIds.add(feature.featureId);
     featurePlans.push({
       onshapeFeatureId: feature.featureId,
       featureType: feature.featureType,
       label,
       tier: "baked",
-      target: { kind: downstream ? "suppressed" : "bakedBody" },
-      reasonCodes: downstream ? [reason, "downstream-of-baked"] : [reason],
+      target: { kind: dependsOnBakedLineage ? "suppressed" : "bakedBody" },
+      reasonCodes,
       suppressed: true,
+      inputFeatureIds,
     });
   }
 
@@ -331,7 +375,7 @@ export function planStudioFidelity(read: StudioReadResult): StudioPlan {
 
   return {
     featurePlans,
-    requiresStudioBake: sawBaked && studio.groundTruth.hasBodies,
+    requiresStudioBake: bakedLineageFeatureIds.size > 0 && studio.groundTruth.hasBodies,
     tierCounts,
   };
 }

@@ -1243,6 +1243,28 @@ export function createModelingService(
         validateSnapshotResponse(response, currentDocumentId),
       );
     },
+    async buildNativeExactBrepPayload(input) {
+      await restorePromise;
+      await repositoryChangePromise;
+      if (!adapter.buildNativeExactBrepPayload) {
+        return {
+          kind: "nativeTopologyUnavailable",
+          diagnostics: [],
+          capability: {
+            kind: "missing",
+            requiredEntrypoints: ["CadaraBuildNativeExactBrepPayload"],
+            missingEntrypoints: ["CadaraBuildNativeExactBrepPayload"],
+            diagnostics: [],
+          },
+        };
+      }
+
+      return adapter.buildNativeExactBrepPayload(
+        currentDocumentId,
+        input.baseRevisionId,
+        input.target,
+      );
+    },
     async createNewDocument() {
       await restorePromise;
       await repositoryChangePromise;

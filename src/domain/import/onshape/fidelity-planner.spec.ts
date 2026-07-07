@@ -179,6 +179,138 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts selector that verifies 
   ).toBeTruthy();
 });
 
+function makeTwoBranchStudioRead(): StudioReadResult {
+  const sketchFeature = (
+    featureId: string,
+    name: string,
+  ) => ({ featureType: "newSketch", featureId, name });
+  const extrudeFeature = (
+    featureId: string,
+    sketchFeatureId: string,
+    operation: string,
+  ) => ({
+    featureType: "extrude",
+    featureId,
+    name: featureId,
+    parameters: [
+      {
+        parameterId: "entities",
+        queries: [
+          {
+            queryString: `query = qSketchRegion(id + "${sketchFeatureId}", true);`,
+          },
+        ],
+      },
+      { parameterId: "endBound", value: "BLIND" },
+      { parameterId: "depth", expression: "10 mm", value: 0.01 },
+      { parameterId: "operationType", value: operation },
+    ],
+  });
+
+  return {
+    studio: {
+      elementId: "e1",
+      name: "Two branch",
+      features: null,
+      sketches: null,
+      parts: null,
+      featureSpecs: { present: false, reason: "n/a" },
+      resolvedReferences: [],
+      groundTruth: { hasBodies: true },
+      rollbackSnapshots: null,
+    },
+    features: [
+      sketchFeature("S_BAD", "Baked sketch source"),
+      extrudeFeature("E_BAD", "S_BAD", "NEW"),
+      sketchFeature("S_GOOD", "Independent sketch"),
+      extrudeFeature("E_GOOD", "S_GOOD", "NEW"),
+      extrudeFeature("E_CUT", "S_GOOD", "REMOVE"),
+    ],
+    solvedSketchesByFeatureId: new Map([
+      [
+        "S_BAD",
+        {
+          featureId: "S_BAD",
+          entities: [
+            {
+              entityId: "bad_line",
+              entityType: "lineSegment",
+              onshapeEntityType: "skLineSegment",
+              isConstruction: false,
+              start3d: [0, 0, 0],
+              end3d: [0.01, 0, 0],
+            },
+          ],
+        },
+      ],
+      [
+        "S_GOOD",
+        {
+          featureId: "S_GOOD",
+          entities: [
+            {
+              entityId: "good_circle",
+              entityType: "circle",
+              onshapeEntityType: "skCircle",
+              isConstruction: false,
+              center3d: [0.05, 0.05, 0],
+              radius: 0.005,
+            },
+          ],
+        },
+      ],
+    ]),
+    diagnostics: [],
+  };
+}
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts independent branch stays parametric after a baked branch", () => {
+  const plan = planStudioFidelity(makeTwoBranchStudioRead());
+  const byId = new Map(plan.featurePlans.map((entry) => [entry.onshapeFeatureId, entry]));
+  const baked = byId.get("E_BAD");
+  const independent = byId.get("E_GOOD");
+
+  expect(
+    baked?.tier === "baked" &&
+      baked.reasonCodes.includes("needs-region-resolution") &&
+      !baked.reasonCodes.includes("downstream-of-baked"),
+    "The first branch should bake for its own selector failure, not because of cascade.",
+  ).toBeTruthy();
+  expect(
+    independent?.tier === "parametric" &&
+      independent.target.kind === "feature" &&
+      !independent.reasonCodes.includes("downstream-of-baked"),
+    "An independent sketch/extrude branch after a baked branch should remain live.",
+  ).toBeTruthy();
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts true dependent of baked body lineage still bakes", () => {
+  const plan = planStudioFidelity(makeTwoBranchStudioRead());
+  const cut = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_CUT");
+
+  expect(
+    cut?.tier === "baked" &&
+      cut.reasonCodes.includes("needs-history-probe") &&
+      !cut.reasonCodes.includes("needs-region-resolution") &&
+      !cut.reasonCodes.includes("downstream-of-baked"),
+    "A default-scope boolean with a baked body candidate should stay probe-gated for scope ambiguity rather than silently targeting the visible parametric body.",
+  ).toBeTruthy();
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts deferred body from a baked lineage propagates downstream-of-baked", () => {
+  const read = makeTwoBranchStudioRead();
+  read.features = read.features.filter((feature) => feature.featureId !== "E_GOOD");
+  const plan = planStudioFidelity(read);
+  const cut = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_CUT");
+
+  expect(
+    cut?.tier === "baked" &&
+      cut.reasonCodes.includes("downstream-of-baked") &&
+      cut.inputFeatureIds.includes("E_BAD"),
+    "When the only body lineage candidate is baked, the consuming boolean is a true dependent and carries downstream-of-baked.",
+  ).toBeTruthy();
+});
+
 test("src/domain/import/onshape/fidelity-planner.spec.ts assignVariable label", () => {
   const read: StudioReadResult = {
     studio: {

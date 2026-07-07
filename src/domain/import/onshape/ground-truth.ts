@@ -17,6 +17,11 @@ export type GroundTruthVerification =
       reason: string;
     }
   | {
+      status: "partial";
+      bakedFeatureCount: number;
+      reason: string;
+    }
+  | {
       status: "passing";
       maxDeviation: number;
     }
@@ -50,6 +55,14 @@ export function verificationUnavailable(
     status: "unavailable",
     reason:
       "Ground-truth verification requires the sandboxed history evaluation capability, which is not available on this platform. The import was not verified against the captured geometry.",
+  };
+}
+
+export function verificationPartial(bakedFeatureCount: number): GroundTruthVerification {
+  return {
+    status: "partial",
+    bakedFeatureCount,
+    reason: `Ground-truth deviation comparison is not applicable while ${bakedFeatureCount} feature(s) remain baked; the staged rebuild contains only the parametric plan.`,
   };
 }
 

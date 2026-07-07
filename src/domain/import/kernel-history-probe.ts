@@ -1,0 +1,219 @@
+import type {
+  HistoryProbeInput,
+  HistoryProbeResult,
+  HistoryProbeStepDiagnostic,
+  ImportHistoryProbeCapabilities,
+} from "@/contracts/import/capabilities";
+import type {
+  ImportPreparedActionRef,
+  ImportPreparedActions,
+} from "@/contracts/import/actions";
+import type { BodyId, RevisionId } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
+import type { ModelingService } from "@/domain/modeling/modeling-service";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+
+type KernelHistoryProbeService = Pick<
+  ModelingService,
+  | "addDocumentVariable"
+  | "buildNativeExactBrepPayload"
+  | "commitSketch"
+  | "createFeature"
+  | "getCurrentDocumentSnapshot"
+>;
+
+export interface KernelHistoryProbeSessionOptions {
+  /** Must be an isolated modeling service/session owned by the probe caller. */
+  service?: KernelHistoryProbeService;
+  /** Creates a fresh isolated session for each probe evaluation. */
+  createService?: () => KernelHistoryProbeService & { dispose?: () => void };
+}
+
+export function createKernelHistoryProbeSession(
+  options: KernelHistoryProbeSessionOptions,
+): ImportHistoryProbeCapabilities {
+  return {
+    async evaluateHistoryProbe(input) {
+      const service = (options.createService?.() ?? options.service) as
+        | (KernelHistoryProbeService & { dispose?: () => void })
+        | undefined;
+      if (!service) {
+        return {
+          steps: [
+            {
+              status: "failed",
+              diagnostics: [
+                {
+                  severity: "error",
+                  code: "kernel-history-probe-missing-session",
+                  message: "Kernel history probe requires an isolated modeling session.",
+                },
+              ],
+            },
+          ],
+        };
+      }
+
+      try {
+        return await evaluateHistoryProbeInKernelSession(input, service);
+      } finally {
+        service.dispose?.();
+      }
+    },
+  };
+}
+
+async function evaluateHistoryProbeInKernelSession(
+  input: HistoryProbeInput,
+  service: KernelHistoryProbeService,
+): Promise<HistoryProbeResult> {
+  const actionRefs = getOrderedActionRefs(input.actions);
+  const steps: HistoryProbeResult["steps"] = [];
+
+  for (const [stepIndex, actionRef] of actionRefs.entries()) {
+    const applyResult = await applyProbeAction(service, input.actions, actionRef);
+    if (!applyResult.ok) {
+      steps.push({
+        status: "failed",
+        diagnostics: [
+          {
+            severity: "error",
+            code: "kernel-history-probe-step-failed",
+            message: `History probe failed at step ${stepIndex + 1}: ${applyResult.message}`,
+          },
+        ],
+      });
+      return { steps };
+    }
+
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const signatures = [];
+    const diagnostics: HistoryProbeStepDiagnostic[] = [];
+
+    for (const body of snapshot.document.bodies) {
+      const result = await service.buildNativeExactBrepPayload({
+        baseRevisionId: snapshot.document.revisionId,
+        target: { kind: "body", bodyId: body.bodyId as BodyId },
+      });
+
+      if (result.kind !== "nativeTopologyPayload") {
+        steps.push({
+          status: "failed",
+          diagnostics: result.diagnostics.map((diagnostic) => ({
+            severity: diagnostic.severity,
+            code: diagnostic.code,
+            message: diagnostic.message,
+          })),
+        });
+        return { steps };
+      }
+
+      const signatureResult = deriveKernelTopologySignaturesFromExactBrepPayload(
+        result.payload,
+      );
+      if (signatureResult.status === "unavailable") {
+        steps.push({
+          status: "failed",
+          diagnostics: signatureResult.diagnostics.map((diagnostic) => ({
+            severity: diagnostic.severity,
+            code: diagnostic.code,
+            message: diagnostic.message,
+          })),
+        });
+        return { steps };
+      }
+
+      signatures.push(...signatureResult.signatures);
+      diagnostics.push(
+        ...signatureResult.diagnostics.map((diagnostic) => ({
+          severity: diagnostic.severity,
+          code: diagnostic.code,
+          message: diagnostic.message,
+        })),
+      );
+    }
+
+    steps.push(
+      diagnostics.some((diagnostic) => diagnostic.severity === "error")
+        ? { status: "failed", diagnostics }
+        : { status: "rebuilt", signatures },
+    );
+
+    if (steps[steps.length - 1]?.status === "failed") {
+      return { steps };
+    }
+  }
+
+  return { steps };
+}
+
+function getOrderedActionRefs(actions: ImportPreparedActions): ImportPreparedActionRef[] {
+  if (actions.orderedActions) {
+    return [...actions.orderedActions];
+  }
+
+  return [
+    ...(actions.addDocumentVariables ?? []).map((_, index) => ({
+      kind: "addDocumentVariable" as const,
+      index,
+    })),
+    ...(actions.commitSketches ?? []).map((_, index) => ({
+      kind: "commitSketch" as const,
+      index,
+    })),
+    ...(actions.createFeatures ?? []).map((_, index) => ({
+      kind: "createFeature" as const,
+      index,
+    })),
+  ];
+}
+
+async function applyProbeAction(
+  service: KernelHistoryProbeService,
+  actions: ImportPreparedActions,
+  actionRef: ImportPreparedActionRef,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const basis = {
+    documentId: snapshot.document.documentId,
+    baseRevisionId: snapshot.document.revisionId as RevisionId,
+  };
+
+  switch (actionRef.kind) {
+    case "addDocumentVariable": {
+      const request = actions.addDocumentVariables?.[actionRef.index];
+      if (!request) {
+        return missingAction(actionRef);
+      }
+      const result = await service.addDocumentVariable({ ...basis, ...request });
+      return result.isOk() ? { ok: true } : { ok: false, message: result.error.message };
+    }
+    case "commitSketch": {
+      const request = actions.commitSketches?.[actionRef.index];
+      if (!request) {
+        return missingAction(actionRef);
+      }
+      const result = await service.commitSketch({ ...basis, ...request });
+      return result.isOk() ? { ok: true } : { ok: false, message: result.error.message };
+    }
+    case "createFeature": {
+      const request = actions.createFeatures?.[actionRef.index];
+      if (!request) {
+        return missingAction(actionRef);
+      }
+      const result = await service.createFeature({ ...basis, ...request } as never);
+      return result.isOk() ? { ok: true } : { ok: false, message: result.error.message };
+    }
+  }
+}
+
+function missingAction(actionRef: ImportPreparedActionRef) {
+  return {
+    ok: false as const,
+    message: `Missing prepared action ${actionRef.kind}[${actionRef.index}].`,
+  };
+}
+
+export function bodyRef(bodyId: BodyId): DurableRef {
+  return { kind: "body", bodyId };
+}

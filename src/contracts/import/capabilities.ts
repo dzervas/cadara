@@ -129,9 +129,16 @@ export type HistoryProbeStepResult =
       diagnostics: HistoryProbeStepDiagnostic[];
     };
 
+export interface HistoryProbeTessellationSample {
+  /** Flattened xyz triples from the final staged rebuild, in document units. */
+  points: readonly number[];
+}
+
 export interface HistoryProbeResult {
   /** One entry per applied step, in the order of the candidate sequence. */
   steps: HistoryProbeStepResult[];
+  /** Optional final-state tessellation, requested only by verification callers. */
+  finalTessellation?: HistoryProbeTessellationSample;
 }
 
 export interface HistoryProbeInput {
@@ -141,6 +148,8 @@ export interface HistoryProbeInput {
    * grouped order is used, mirroring the orchestrator.
    */
   actions: ImportPreparedActions;
+  /** Request final-state tessellation for ground-truth verification. */
+  includeFinalTessellation?: boolean;
 }
 
 /**

@@ -15,7 +15,8 @@ import {
   applyImportPreparedActions,
   createImportCapabilities,
   prepareImportActions,
-} from "@/domain/import/orchestrator";
+  } from "@/domain/import/orchestrator";
+import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser-import-history-probe";
 import { isDurablePrimitiveRef, type PrimitiveRef } from "@/core/editor/schema";
 import { requireAcceptedModelingResult } from "@/lib/reported-action";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
@@ -272,6 +273,7 @@ export function createWorkbenchDocumentOwner({
     const capabilities = createImportCapabilities(
       modelingService,
       currentSnapshot,
+      { history: createBrowserOccImportHistoryProbe() },
     );
     const actions = await prepareImportActions({
       provider,

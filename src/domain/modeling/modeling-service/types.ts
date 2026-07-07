@@ -33,6 +33,9 @@ import type { OperationHistoryStore } from "@/domain/modeling/modeling-history-p
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
 import type { AppResultAsync } from "@/contracts/errors";
 import type { ExportProviderRegistry } from "@/domain/export/provider-registry";
+import type { DurableRef } from "@/contracts/shared/references";
+import type { OccNativeExactBrepPayload } from "@/domain/modeling/occ/native-topology-payload";
+import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
 
 export interface ModelingService {
   readonly currentDocumentId: DocumentId;
@@ -46,6 +49,10 @@ export interface ModelingService {
   resetOperationHistory(): void;
   setViewportLodTier(tierId: OccTessellationTierId): boolean;
   getCurrentDocumentSnapshot(): Promise<schema.WorkspaceSnapshot>;
+  buildNativeExactBrepPayload(input: {
+    baseRevisionId: RevisionId;
+    target: DurableRef;
+  }): Promise<OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>>;
   createNewDocument(): Promise<ModelingDocumentFileMutationResult>;
   importDocument(
     input: ModelingImportDocumentInput,

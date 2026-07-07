@@ -1,4 +1,7 @@
-import type { ImportCapabilities } from "@/contracts/import/capabilities";
+import type {
+  ImportCapabilities,
+  ImportHistoryProbeCapabilities,
+} from "@/contracts/import/capabilities";
 import type {
   ImportDeferredValue,
   ImportPreparedActions,
@@ -47,6 +50,7 @@ export async function resolveLocalFileImportSource(
 export function createImportCapabilities(
   _modelingService: ModelingService,
   snapshot: WorkspaceSnapshot,
+  options: { history?: ImportHistoryProbeCapabilities } = {},
 ): ImportCapabilities {
   return {
     context: {
@@ -82,11 +86,7 @@ export function createImportCapabilities(
         return assetId;
       },
     },
-    // The sandboxed kernel history probe is intentionally absent: the platform
-    // has no per-entity geometric-signature extraction yet. Absence is
-    // explicit (`history` omitted) so providers detect it and degrade
-    // topological reference resolution to the baked tier rather than relying on
-    // a stub that fabricates signatures. Deferred to add-kernel-topology-signatures.
+    ...(options.history ? { history: options.history } : {}),
   };
 }
 

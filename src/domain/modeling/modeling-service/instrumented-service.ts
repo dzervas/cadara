@@ -99,6 +99,20 @@ class InstrumentedModelingService implements ModelingService {
     );
   }
 
+  buildNativeExactBrepPayload(
+    input: Parameters<ModelingService["buildNativeExactBrepPayload"]>[0],
+  ) {
+    return this.measure(
+      "buildNativeExactBrepPayload",
+      () => this.inner.buildNativeExactBrepPayload(input),
+      (result) => ({
+        "cadara.result":
+          result.kind === "nativeTopologyPayload" ? "success" : "failure",
+        "cadara.diagnostic_count": result.diagnostics.length,
+      }),
+    );
+  }
+
   createNewDocument() {
     return this.measure(
       "createNewDocument",

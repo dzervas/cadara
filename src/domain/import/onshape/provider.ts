@@ -33,6 +33,8 @@ import type {
   AddDocumentVariableRequest,
   CommitSketchRequest,
 } from "@/contracts/modeling/schema";
+import type { HistoryProbeTopologySignature, ImportCapabilities } from "@/contracts/import/capabilities";
+import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import type { RequestId } from "@/contracts/shared/ids";
 import type {
   FeatureEditorFormSchema,
@@ -49,15 +51,20 @@ import {
   type FidelityTier,
 } from "@/domain/import/onshape/fidelity-planner";
 import {
+  verificationPartial,
   verificationUnavailable,
   type GroundTruthVerification,
 } from "@/domain/import/onshape/ground-truth";
 import {
   projectPointToPlane,
+  projectPointToSketchPlane,
   translateSketch,
   type SolvedSketchEntityGeometry,
 } from "@/domain/import/onshape/sketch-translator";
 import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
+import { matchSignature } from "@/domain/import/onshape/signature-matcher";
+import { extractSketchPlaneDeterministicId } from "@/domain/import/onshape/fidelity-planner";
+import type { OnshapeGeometricSignature } from "@/contracts/import/onshape-capture-bundle";
 
 const ACCEPTED_EXTENSION = ".onshape-capture.json";
 
@@ -67,6 +74,7 @@ export interface OnshapeStudioReview {
   hasBodies: boolean;
   featurePlans: FeaturePlan[];
   tierCounts: Record<FidelityTier, number>;
+  requiresStudioBake: boolean;
   verification: GroundTruthVerification;
 }
 
@@ -93,19 +101,202 @@ function decodeBundle(source: ResolvedImportSource): OnshapeCaptureBundle | null
   return result.success ? result.data : null;
 }
 
-function reviewStudio(
+function referenceKey(reference: HistoryProbeTopologySignature["reference"]): string {
+  switch (reference.kind) {
+    case "body":
+      return `body:${reference.bodyId}`;
+    case "face":
+      return `face:${reference.bodyId}:${reference.faceId}`;
+    case "edge":
+      return `edge:${reference.bodyId}:${reference.edgeId}`;
+    case "vertex":
+      return `vertex:${reference.bodyId}:${reference.vertexId}`;
+    default:
+      return JSON.stringify(reference);
+  }
+}
+
+function scaleCapturedSignatureToDocumentUnits(
+  signature: OnshapeGeometricSignature,
+): OnshapeGeometricSignature {
+  const scalePoint = (point: [number, number, number]): [number, number, number] => [
+    point[0] * 1000,
+    point[1] * 1000,
+    point[2] * 1000,
+  ];
+  return {
+    ...signature,
+    centroid: signature.centroid ? scalePoint(signature.centroid) : undefined,
+    boundingBox: signature.boundingBox
+      ? {
+          low: scalePoint(signature.boundingBox.low),
+          high: scalePoint(signature.boundingBox.high),
+        }
+      : undefined,
+  };
+}
+
+function readPoint3(value: unknown): [number, number, number] | null {
+  return Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((component) => typeof component === "number")
+    ? [value[0] as number, value[1] as number, value[2] as number]
+    : null;
+}
+
+function cross(
+  left: readonly [number, number, number],
+  right: readonly [number, number, number],
+): [number, number, number] {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ];
+}
+
+function planeFromProbeSignature(
+  signature: HistoryProbeTopologySignature,
+): SketchPlaneDefinition | null {
+  if (signature.reference.kind !== "face" || signature.geometryType !== "plane") {
+    return null;
+  }
+  const origin = readPoint3(signature.definingData?.origin);
+  const normal = readPoint3(signature.definingData?.normal);
+  const xAxis = readPoint3(signature.definingData?.xDirection);
+  if (!origin || !normal || !xAxis) {
+    return null;
+  }
+  return {
+    support: signature.reference,
+    frame: {
+      origin,
+      xAxis,
+      yAxis: cross(normal, xAxis),
+      normal,
+      linearUnit: "documentLength",
+      handedness: "rightHanded",
+    },
+    key: null,
+  };
+}
+
+async function activateProbeBackedPlanning(input: {
+  read: ReturnType<typeof readPartStudio>;
+  plan: ReturnType<typeof planStudioFidelity>;
+  capabilities: ImportCapabilities;
+}) {
+  if (!input.capabilities.history) {
+    return input.plan;
+  }
+
+  const probeResult = await input.capabilities.history.evaluateHistoryProbe({
+    actions: {},
+    includeFinalTessellation: true,
+  });
+  const probeSignatures = probeResult.steps.flatMap((step) =>
+    step.status === "rebuilt" ? step.signatures : [],
+  );
+  if (probeSignatures.length === 0) {
+    return input.plan;
+  }
+
+  const references = new Map(
+    input.read.studio.resolvedReferences.map((reference) => [
+      reference.deterministicId,
+      reference,
+    ]),
+  );
+  const nextPlans: FeaturePlan[] = input.plan.featurePlans.map((featurePlan) => {
+    if (
+      featurePlan.featureType !== "newSketch" ||
+      featurePlan.tier !== "baked" ||
+      !featurePlan.reasonCodes.includes("needs-history-probe")
+    ) {
+      if (
+        featurePlan.reasonCodes.includes("needs-history-probe") &&
+        featurePlan.featureType !== "newSketch"
+      ) {
+        return {
+          ...featurePlan,
+          reasonCodes: featurePlan.reasonCodes.map((reason) =>
+            reason === "needs-history-probe" ? "translator-unavailable" : reason,
+          ),
+        };
+      }
+      return featurePlan;
+    }
+
+    const feature = input.read.features.find(
+      (entry) => entry.featureId === featurePlan.onshapeFeatureId,
+    );
+    const deterministicId = feature ? extractSketchPlaneDeterministicId(feature) : null;
+    const reference = deterministicId ? references.get(deterministicId) : undefined;
+    if (!reference || !("signature" in reference)) {
+      return featurePlan;
+    }
+
+    const match = matchSignature(
+      scaleCapturedSignatureToDocumentUnits(reference.signature),
+      probeSignatures,
+    );
+    if (match.kind !== "unique") {
+      return featurePlan;
+    }
+
+    const probeSignature = probeSignatures.find(
+      (signature) => referenceKey(signature.reference) === referenceKey(match.reference),
+    );
+    const plane = probeSignature ? planeFromProbeSignature(probeSignature) : null;
+    if (!plane) {
+      return featurePlan;
+    }
+
+    return {
+      ...featurePlan,
+      tier: "parametric" as const,
+      target: { kind: "sketch" as const, planeKey: "xy" as const, plane },
+      reasonCodes: ["sketch-on-probed-face" as const],
+      suppressed: false,
+    };
+  });
+
+  const tierCounts = { parametric: 0, baked: 0, geometryOnly: 0 };
+  for (const plan of nextPlans) {
+    tierCounts[plan.tier] += 1;
+  }
+  return {
+    ...input.plan,
+    featurePlans: nextPlans,
+    tierCounts,
+    requiresStudioBake:
+      nextPlans.some((plan) => plan.tier === "baked") &&
+      input.read.studio.groundTruth.hasBodies,
+  };
+}
+
+async function reviewStudio(
   bundle: OnshapeCaptureBundle,
   elementId: string,
-): OnshapeStudioReview {
+  capabilities: ImportCapabilities,
+): Promise<OnshapeStudioReview> {
   const read = readPartStudio(bundle, elementId);
-  const plan = planStudioFidelity(read);
+  const plan = await activateProbeBackedPlanning({
+    read,
+    plan: planStudioFidelity(read),
+    capabilities,
+  });
+  const bakedCount = plan.featurePlans.filter((entry) => entry.tier === "baked").length;
   return {
     elementId: read.studio.elementId,
     name: read.studio.name,
     hasBodies: read.studio.groundTruth.hasBodies,
     featurePlans: plan.featurePlans,
     tierCounts: plan.tierCounts,
-    verification: verificationUnavailable(read.studio.groundTruth.hasBodies),
+    requiresStudioBake: plan.requiresStudioBake,
+    verification: bakedCount > 0
+      ? verificationPartial(bakedCount)
+      : verificationUnavailable(read.studio.groundTruth.hasBodies),
   };
 }
 
@@ -155,7 +346,7 @@ export const onshapeImportProvider: ImportProvider<
     return source.name.toLowerCase().endsWith(ACCEPTED_EXTENSION);
   },
 
-  async review({ source }) {
+  async review({ source, capabilities }) {
     const bundle = decodeBundle(source);
     if (!bundle) {
       const envelope: ImportReviewEnvelope<OnshapeImportReview> = {
@@ -174,23 +365,33 @@ export const onshapeImportProvider: ImportProvider<
     }
 
     const studioList = listPartStudios(bundle);
-    const studios = studioList.map((entry) =>
-      reviewStudio(bundle, entry.elementId),
+    const studios = await Promise.all(
+      studioList.map((entry) => reviewStudio(bundle, entry.elementId, capabilities)),
     );
     const defaultStudio =
       studios.find((studio) => studio.hasBodies) ?? studios[0] ?? null;
 
-    const diagnostics: ImportDiagnostic[] = studios.flatMap((studio) =>
-      studio.verification.status === "unavailable"
-        ? [
-            {
-              severity: "warning" as const,
-              message: `Ground-truth verification is unavailable for "${studio.name}"; imported geometry was not checked against the captured model.`,
-              code: "onshape-verification-unavailable",
-            },
-          ]
-        : [],
-    );
+    const diagnostics: ImportDiagnostic[] = studios.flatMap((studio) => {
+      if (studio.verification.status === "unavailable") {
+        return [
+          {
+            severity: "warning" as const,
+            message: `Ground-truth verification is unavailable for "${studio.name}"; imported geometry was not checked against the captured model.`,
+            code: "onshape-verification-unavailable",
+          },
+        ];
+      }
+      if (studio.verification.status === "partial") {
+        return [
+          {
+            severity: "warning" as const,
+            message: studio.verification.reason,
+            code: "onshape-verification-partial",
+          },
+        ];
+      }
+      return [];
+    });
 
     return {
       providerReview: {
@@ -280,7 +481,7 @@ export const onshapeImportProvider: ImportProvider<
     return next;
   },
 
-  async prepare({ source, selections, capabilities }) {
+  async prepare({ source, review, selections, capabilities }) {
     const bundle = decodeBundle(source);
     if (!bundle) {
       return {
@@ -297,7 +498,16 @@ export const onshapeImportProvider: ImportProvider<
     const elementId =
       selections.studioElementId ?? bundle.partStudios[0]?.elementId ?? "";
     const read = readPartStudio(bundle, elementId);
-    const plan = planStudioFidelity(read);
+    const reviewedStudio = review.providerReview.studios.find(
+      (studio) => studio.elementId === elementId,
+    );
+    const plan = reviewedStudio
+      ? {
+          featurePlans: reviewedStudio.featurePlans,
+          tierCounts: reviewedStudio.tierCounts,
+          requiresStudioBake: reviewedStudio.requiresStudioBake,
+        }
+      : planStudioFidelity(read);
     const demoted = new Set(selections.demotedFeatureIds);
     const featuresById = new Map(read.features.map((f) => [f.featureId, f]));
 
@@ -368,6 +578,7 @@ export const onshapeImportProvider: ImportProvider<
 
       if (featurePlan.target.kind === "sketch") {
         const planeKey = featurePlan.target.planeKey;
+        const plane = featurePlan.target.plane;
         const solved = read.solvedSketchesByFeatureId.get(
           featurePlan.onshapeFeatureId,
         );
@@ -378,13 +589,19 @@ export const onshapeImportProvider: ImportProvider<
           entityType: curve.entityType,
           isConstruction: curve.isConstruction,
           start: curve.start3d
-            ? projectPointToPlane(curve.start3d, planeKey)
+            ? plane
+              ? projectPointToSketchPlane(curve.start3d, plane)
+              : projectPointToPlane(curve.start3d, planeKey)
             : undefined,
           end: curve.end3d
-            ? projectPointToPlane(curve.end3d, planeKey)
+            ? plane
+              ? projectPointToSketchPlane(curve.end3d, plane)
+              : projectPointToPlane(curve.end3d, planeKey)
             : undefined,
           center: curve.center3d
-            ? projectPointToPlane(curve.center3d, planeKey)
+            ? plane
+              ? projectPointToSketchPlane(curve.center3d, plane)
+              : projectPointToPlane(curve.center3d, planeKey)
             : undefined,
           // Onshape radii are in meters; sketch units are millimeters.
           radius: curve.radius === undefined ? undefined : curve.radius * 1000,
@@ -393,6 +610,7 @@ export const onshapeImportProvider: ImportProvider<
           featureId: featurePlan.onshapeFeatureId,
           label: featurePlan.label,
           planeKey,
+          plane,
           entities,
         });
         for (const sketchDiagnostic of translation.diagnostics) {

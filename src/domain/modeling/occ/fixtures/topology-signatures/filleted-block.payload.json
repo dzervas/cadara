@@ -1,0 +1,3019 @@
+{
+  "topology": {
+    "schemaVersion": "occ-native-topology-payload/v1alpha1",
+    "source": "occt7-shim",
+    "bodyId": "body_signature_fixture_filleted_block",
+    "topologyToken": "t_body_signature_fixture_filleted_block_topology",
+    "counts": {
+      "faces": 7,
+      "edges": 15,
+      "vertices": 10
+    },
+    "topology": [
+      {
+        "id": "face_body_signature_fixture_filleted_block_gd94eee09a3a6b064",
+        "kernelUid": "occt7-shim:face:face:type:0:area:1.800000:center:0.000000,1.100000,0.500000",
+        "kind": "face",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 1
+      },
+      {
+        "id": "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "kernelUid": "occt7-shim:face:face:type:0:area:3.991416:center:1.002055,1.002055,1.000000",
+        "kind": "face",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 2
+      },
+      {
+        "id": "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "kernelUid": "occt7-shim:face:face:type:1:area:0.314159:center:0.072676,0.072676,0.500000",
+        "kind": "face",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 3
+      },
+      {
+        "id": "face_body_signature_fixture_filleted_block_g76b063b2cbc22dc8",
+        "kernelUid": "occt7-shim:face:face:type:0:area:2.000000:center:1.000000,2.000000,0.500000",
+        "kind": "face",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 4
+      },
+      {
+        "id": "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "kernelUid": "occt7-shim:face:face:type:0:area:3.991416:center:1.002055,1.002055,0.000000",
+        "kind": "face",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 5
+      },
+      {
+        "id": "face_body_signature_fixture_filleted_block_gc8e02afaa429247c",
+        "kernelUid": "occt7-shim:face:face:type:0:area:1.800000:center:1.100000,0.000000,0.500000",
+        "kind": "face",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 6
+      },
+      {
+        "id": "face_body_signature_fixture_filleted_block_ge33ee800774dfede",
+        "kernelUid": "occt7-shim:face:face:type:0:area:2.000000:center:2.000000,1.000000,0.500000",
+        "kind": "face",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 7
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_gc97c1897a0f8a611",
+        "kernelUid": "occt7-shim:edge:edge:0.000000,0.200000,1.000000:0.000000,2.000000,1.000000:length:1.800000:center:0.000000,1.100000,1.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 1
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_g141d98db50e3454",
+        "kernelUid": "occt7-shim:edge:edge:0.000000,0.200000,0.000000:0.000000,0.200000,1.000000:length:1.000000:center:0.000000,0.200000,0.500000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 2
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_gf137a963bfcea8a4",
+        "kernelUid": "occt7-shim:edge:edge:0.000000,2.000000,0.000000:0.000000,2.000000,1.000000:length:1.000000:center:0.000000,2.000000,0.500000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 3
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_ge542c04c46d48d1a",
+        "kernelUid": "occt7-shim:edge:edge:0.000000,0.200000,0.000000:0.000000,2.000000,0.000000:length:1.800000:center:0.000000,1.100000,0.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 4
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_g9b2d1030759f7699",
+        "kernelUid": "occt7-shim:edge:edge:0.000000,0.200000,1.000000:0.200000,0.000000,1.000000:length:0.314159:center:0.072676,0.072676,1.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 5
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_geb9df8773e5cd0cb",
+        "kernelUid": "occt7-shim:edge:edge:0.000000,2.000000,1.000000:2.000000,2.000000,1.000000:length:2.000000:center:1.000000,2.000000,1.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 6
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_gffa9e425a4bc37ed",
+        "kernelUid": "occt7-shim:edge:edge:0.200000,0.000000,1.000000:2.000000,0.000000,1.000000:length:1.800000:center:1.100000,0.000000,1.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 7
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_g205fad29180c6b1d",
+        "kernelUid": "occt7-shim:edge:edge:2.000000,0.000000,1.000000:2.000000,2.000000,1.000000:length:2.000000:center:2.000000,1.000000,1.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 8
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_g5c3ec0d4ed592e2",
+        "kernelUid": "occt7-shim:edge:edge:0.000000,0.200000,0.000000:0.200000,0.000000,0.000000:length:0.314159:center:0.072676,0.072676,0.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 9
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_gb453463bfd970d3c",
+        "kernelUid": "occt7-shim:edge:edge:0.200000,0.000000,0.000000:0.200000,0.000000,1.000000:length:1.000000:center:0.200000,0.000000,0.500000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 10
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_g33538ff0a65c1d40",
+        "kernelUid": "occt7-shim:edge:edge:0.000000,2.000000,0.000000:2.000000,2.000000,0.000000:length:2.000000:center:1.000000,2.000000,0.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 11
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_ga53e29c93405ac52",
+        "kernelUid": "occt7-shim:edge:edge:2.000000,2.000000,0.000000:2.000000,2.000000,1.000000:length:1.000000:center:2.000000,2.000000,0.500000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 12
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_g709fda05df65adb2",
+        "kernelUid": "occt7-shim:edge:edge:0.200000,0.000000,0.000000:2.000000,0.000000,0.000000:length:1.800000:center:1.100000,0.000000,0.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 13
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_gd2a85219fd6c8d82",
+        "kernelUid": "occt7-shim:edge:edge:2.000000,0.000000,0.000000:2.000000,2.000000,0.000000:length:2.000000:center:2.000000,1.000000,0.000000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 14
+      },
+      {
+        "id": "edge_body_signature_fixture_filleted_block_gee0f1d924c41f18c",
+        "kernelUid": "occt7-shim:edge:edge:2.000000,0.000000,0.000000:2.000000,0.000000,1.000000:length:1.000000:center:2.000000,0.000000,0.500000",
+        "kind": "edge",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 15
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_g410c1f9bf9c5820e",
+        "kernelUid": "occt7-shim:vertex:vertex:0.000000,0.200000,1.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 1
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_gdb0fba4fe1445dde",
+        "kernelUid": "occt7-shim:vertex:vertex:0.000000,2.000000,1.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 2
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_g661e62d295b60063",
+        "kernelUid": "occt7-shim:vertex:vertex:0.000000,0.200000,0.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 3
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_g9e4a12f9382f3f73",
+        "kernelUid": "occt7-shim:vertex:vertex:0.000000,2.000000,0.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 4
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_g614d989511f9ce76",
+        "kernelUid": "occt7-shim:vertex:vertex:0.200000,0.000000,1.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 5
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_g14338d43a626462c",
+        "kernelUid": "occt7-shim:vertex:vertex:2.000000,2.000000,1.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 6
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_g21523c94d29c71a6",
+        "kernelUid": "occt7-shim:vertex:vertex:2.000000,0.000000,1.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 7
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_gbae63eadfe7bdd6b",
+        "kernelUid": "occt7-shim:vertex:vertex:0.200000,0.000000,0.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 8
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_gedc77155379e7fc1",
+        "kernelUid": "occt7-shim:vertex:vertex:2.000000,2.000000,0.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 9
+      },
+      {
+        "id": "vertex_body_signature_fixture_filleted_block_gdccd66a252b91b5b",
+        "kernelUid": "occt7-shim:vertex:vertex:2.000000,0.000000,0.000000",
+        "kind": "vertex",
+        "bodyId": "body_signature_fixture_filleted_block",
+        "index": 10
+      }
+    ],
+    "edgeVertices": [
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_gc97c1897a0f8a611",
+        "start": [
+          -2.77556e-17,
+          0.2,
+          1
+        ],
+        "end": [
+          0,
+          2,
+          1
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_g141d98db50e3454",
+        "start": [
+          -2.77556e-17,
+          0.2,
+          0
+        ],
+        "end": [
+          -2.77556e-17,
+          0.2,
+          1
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_gf137a963bfcea8a4",
+        "start": [
+          0,
+          2,
+          1
+        ],
+        "end": [
+          0,
+          2,
+          0
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_ge542c04c46d48d1a",
+        "start": [
+          0,
+          2,
+          0
+        ],
+        "end": [
+          -2.77556e-17,
+          0.2,
+          0
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_g9b2d1030759f7699",
+        "start": [
+          -2.77556e-17,
+          0.2,
+          1
+        ],
+        "end": [
+          0.2,
+          -2.77556e-17,
+          1
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_geb9df8773e5cd0cb",
+        "start": [
+          2,
+          2,
+          1
+        ],
+        "end": [
+          0,
+          2,
+          1
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_gffa9e425a4bc37ed",
+        "start": [
+          0.2,
+          -2.77556e-17,
+          1
+        ],
+        "end": [
+          2,
+          0,
+          1
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_g205fad29180c6b1d",
+        "start": [
+          2,
+          0,
+          1
+        ],
+        "end": [
+          2,
+          2,
+          1
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_g5c3ec0d4ed592e2",
+        "start": [
+          -2.77556e-17,
+          0.2,
+          0
+        ],
+        "end": [
+          0.2,
+          -2.77556e-17,
+          0
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_gb453463bfd970d3c",
+        "start": [
+          0.2,
+          -2.77556e-17,
+          0
+        ],
+        "end": [
+          0.2,
+          -2.77556e-17,
+          1
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_g33538ff0a65c1d40",
+        "start": [
+          2,
+          2,
+          0
+        ],
+        "end": [
+          0,
+          2,
+          0
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_ga53e29c93405ac52",
+        "start": [
+          2,
+          2,
+          1
+        ],
+        "end": [
+          2,
+          2,
+          0
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_g709fda05df65adb2",
+        "start": [
+          2,
+          0,
+          0
+        ],
+        "end": [
+          0.2,
+          -2.77556e-17,
+          0
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_gd2a85219fd6c8d82",
+        "start": [
+          2,
+          2,
+          0
+        ],
+        "end": [
+          2,
+          0,
+          0
+        ]
+      },
+      {
+        "edgeId": "edge_body_signature_fixture_filleted_block_gee0f1d924c41f18c",
+        "start": [
+          2,
+          0,
+          0
+        ],
+        "end": [
+          2,
+          0,
+          1
+        ]
+      }
+    ],
+    "vertexPoints": [
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_g410c1f9bf9c5820e",
+        "point": [
+          -2.77556e-17,
+          0.2,
+          1
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_gdb0fba4fe1445dde",
+        "point": [
+          0,
+          2,
+          1
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_g661e62d295b60063",
+        "point": [
+          -2.77556e-17,
+          0.2,
+          0
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_g9e4a12f9382f3f73",
+        "point": [
+          0,
+          2,
+          0
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_g614d989511f9ce76",
+        "point": [
+          0.2,
+          -2.77556e-17,
+          1
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_g14338d43a626462c",
+        "point": [
+          2,
+          2,
+          1
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_g21523c94d29c71a6",
+        "point": [
+          2,
+          0,
+          1
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_gbae63eadfe7bdd6b",
+        "point": [
+          0.2,
+          -2.77556e-17,
+          0
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_gedc77155379e7fc1",
+        "point": [
+          2,
+          2,
+          0
+        ]
+      },
+      {
+        "vertexId": "vertex_body_signature_fixture_filleted_block_gdccd66a252b91b5b",
+        "point": [
+          2,
+          0,
+          0
+        ]
+      }
+    ],
+    "faceEdges": [
+      {
+        "faceId": "face_body_signature_fixture_filleted_block_gd94eee09a3a6b064",
+        "edgeIds": [
+          "edge_body_signature_fixture_filleted_block_gc97c1897a0f8a611",
+          "edge_body_signature_fixture_filleted_block_g141d98db50e3454",
+          "edge_body_signature_fixture_filleted_block_gf137a963bfcea8a4",
+          "edge_body_signature_fixture_filleted_block_ge542c04c46d48d1a"
+        ]
+      },
+      {
+        "faceId": "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "edgeIds": [
+          "edge_body_signature_fixture_filleted_block_gc97c1897a0f8a611",
+          "edge_body_signature_fixture_filleted_block_g9b2d1030759f7699",
+          "edge_body_signature_fixture_filleted_block_geb9df8773e5cd0cb",
+          "edge_body_signature_fixture_filleted_block_gffa9e425a4bc37ed",
+          "edge_body_signature_fixture_filleted_block_g205fad29180c6b1d"
+        ]
+      },
+      {
+        "faceId": "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "edgeIds": [
+          "edge_body_signature_fixture_filleted_block_g5c3ec0d4ed592e2",
+          "edge_body_signature_fixture_filleted_block_g141d98db50e3454",
+          "edge_body_signature_fixture_filleted_block_gb453463bfd970d3c",
+          "edge_body_signature_fixture_filleted_block_g9b2d1030759f7699"
+        ]
+      },
+      {
+        "faceId": "face_body_signature_fixture_filleted_block_g76b063b2cbc22dc8",
+        "edgeIds": [
+          "edge_body_signature_fixture_filleted_block_g33538ff0a65c1d40",
+          "edge_body_signature_fixture_filleted_block_ga53e29c93405ac52",
+          "edge_body_signature_fixture_filleted_block_geb9df8773e5cd0cb",
+          "edge_body_signature_fixture_filleted_block_gf137a963bfcea8a4"
+        ]
+      },
+      {
+        "faceId": "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "edgeIds": [
+          "edge_body_signature_fixture_filleted_block_ge542c04c46d48d1a",
+          "edge_body_signature_fixture_filleted_block_g5c3ec0d4ed592e2",
+          "edge_body_signature_fixture_filleted_block_g33538ff0a65c1d40",
+          "edge_body_signature_fixture_filleted_block_g709fda05df65adb2",
+          "edge_body_signature_fixture_filleted_block_gd2a85219fd6c8d82"
+        ]
+      },
+      {
+        "faceId": "face_body_signature_fixture_filleted_block_gc8e02afaa429247c",
+        "edgeIds": [
+          "edge_body_signature_fixture_filleted_block_g709fda05df65adb2",
+          "edge_body_signature_fixture_filleted_block_gb453463bfd970d3c",
+          "edge_body_signature_fixture_filleted_block_gee0f1d924c41f18c",
+          "edge_body_signature_fixture_filleted_block_gffa9e425a4bc37ed"
+        ]
+      },
+      {
+        "faceId": "face_body_signature_fixture_filleted_block_ge33ee800774dfede",
+        "edgeIds": [
+          "edge_body_signature_fixture_filleted_block_gee0f1d924c41f18c",
+          "edge_body_signature_fixture_filleted_block_g205fad29180c6b1d",
+          "edge_body_signature_fixture_filleted_block_ga53e29c93405ac52",
+          "edge_body_signature_fixture_filleted_block_gd2a85219fd6c8d82"
+        ]
+      }
+    ],
+    "mesh": {
+      "nodeCount": 54,
+      "triangleCount": 40,
+      "linearDeflection": 0.1,
+      "angularDeflection": 0.5,
+      "positions": [
+        [
+          -2.77556e-17,
+          0.2,
+          1
+        ],
+        [
+          0,
+          2,
+          1
+        ],
+        [
+          -2.77556e-17,
+          0.2,
+          0
+        ],
+        [
+          0,
+          2,
+          0
+        ],
+        [
+          -2.77556e-17,
+          0.2,
+          1
+        ],
+        [
+          0,
+          2,
+          1
+        ],
+        [
+          0.00501442,
+          0.155496,
+          1
+        ],
+        [
+          0.0198062,
+          0.113223,
+          1
+        ],
+        [
+          0.0436337,
+          0.075302,
+          1
+        ],
+        [
+          0.075302,
+          0.0436337,
+          1
+        ],
+        [
+          0.113223,
+          0.0198062,
+          1
+        ],
+        [
+          0.155496,
+          0.00501442,
+          1
+        ],
+        [
+          0.2,
+          -2.77556e-17,
+          1
+        ],
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ],
+        [
+          -2.77556e-17,
+          0.2,
+          0
+        ],
+        [
+          0.00501442,
+          0.155496,
+          0
+        ],
+        [
+          0.0198062,
+          0.113223,
+          0
+        ],
+        [
+          0.0436337,
+          0.075302,
+          0
+        ],
+        [
+          0.075302,
+          0.0436337,
+          0
+        ],
+        [
+          0.113223,
+          0.0198062,
+          0
+        ],
+        [
+          0.155496,
+          0.00501442,
+          0
+        ],
+        [
+          0.2,
+          -2.77556e-17,
+          0
+        ],
+        [
+          0.2,
+          -2.77556e-17,
+          1
+        ],
+        [
+          -2.77556e-17,
+          0.2,
+          1
+        ],
+        [
+          0.00501442,
+          0.155496,
+          1
+        ],
+        [
+          0.0198062,
+          0.113223,
+          1
+        ],
+        [
+          0.0436337,
+          0.075302,
+          1
+        ],
+        [
+          0.075302,
+          0.0436337,
+          1
+        ],
+        [
+          0.113223,
+          0.0198062,
+          1
+        ],
+        [
+          0.155496,
+          0.00501442,
+          1
+        ],
+        [
+          0,
+          2,
+          0
+        ],
+        [
+          2,
+          2,
+          0
+        ],
+        [
+          0,
+          2,
+          1
+        ],
+        [
+          2,
+          2,
+          1
+        ],
+        [
+          -2.77556e-17,
+          0.2,
+          0
+        ],
+        [
+          0,
+          2,
+          0
+        ],
+        [
+          0.00501442,
+          0.155496,
+          0
+        ],
+        [
+          0.0198062,
+          0.113223,
+          0
+        ],
+        [
+          0.0436337,
+          0.075302,
+          0
+        ],
+        [
+          0.075302,
+          0.0436337,
+          0
+        ],
+        [
+          0.113223,
+          0.0198062,
+          0
+        ],
+        [
+          0.155496,
+          0.00501442,
+          0
+        ],
+        [
+          0.2,
+          -2.77556e-17,
+          0
+        ],
+        [
+          2,
+          0,
+          0
+        ],
+        [
+          2,
+          2,
+          0
+        ],
+        [
+          0.2,
+          -2.77556e-17,
+          0
+        ],
+        [
+          2,
+          0,
+          0
+        ],
+        [
+          0.2,
+          -2.77556e-17,
+          1
+        ],
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          0,
+          0
+        ],
+        [
+          2,
+          0,
+          1
+        ],
+        [
+          2,
+          2,
+          0
+        ],
+        [
+          2,
+          2,
+          1
+        ]
+      ],
+      "triangleIndices": [
+        [
+          0,
+          3,
+          2
+        ],
+        [
+          0,
+          1,
+          3
+        ],
+        [
+          12,
+          4,
+          6
+        ],
+        [
+          12,
+          6,
+          7
+        ],
+        [
+          12,
+          7,
+          8
+        ],
+        [
+          12,
+          8,
+          9
+        ],
+        [
+          12,
+          9,
+          10
+        ],
+        [
+          12,
+          10,
+          11
+        ],
+        [
+          14,
+          5,
+          4
+        ],
+        [
+          14,
+          12,
+          13
+        ],
+        [
+          14,
+          4,
+          12
+        ],
+        [
+          25,
+          15,
+          16
+        ],
+        [
+          25,
+          24,
+          15
+        ],
+        [
+          26,
+          16,
+          17
+        ],
+        [
+          26,
+          25,
+          16
+        ],
+        [
+          27,
+          17,
+          18
+        ],
+        [
+          27,
+          26,
+          17
+        ],
+        [
+          28,
+          18,
+          19
+        ],
+        [
+          28,
+          27,
+          18
+        ],
+        [
+          29,
+          19,
+          20
+        ],
+        [
+          29,
+          28,
+          19
+        ],
+        [
+          30,
+          20,
+          21
+        ],
+        [
+          30,
+          29,
+          20
+        ],
+        [
+          23,
+          21,
+          22
+        ],
+        [
+          23,
+          30,
+          21
+        ],
+        [
+          34,
+          32,
+          31
+        ],
+        [
+          34,
+          31,
+          33
+        ],
+        [
+          43,
+          37,
+          35
+        ],
+        [
+          43,
+          38,
+          37
+        ],
+        [
+          43,
+          39,
+          38
+        ],
+        [
+          43,
+          40,
+          39
+        ],
+        [
+          43,
+          41,
+          40
+        ],
+        [
+          43,
+          42,
+          41
+        ],
+        [
+          45,
+          35,
+          36
+        ],
+        [
+          45,
+          44,
+          43
+        ],
+        [
+          45,
+          43,
+          35
+        ],
+        [
+          49,
+          46,
+          47
+        ],
+        [
+          49,
+          48,
+          46
+        ],
+        [
+          51,
+          50,
+          52
+        ],
+        [
+          51,
+          52,
+          53
+        ]
+      ],
+      "triangleFaceBindings": [
+        "face_body_signature_fixture_filleted_block_gd94eee09a3a6b064",
+        "face_body_signature_fixture_filleted_block_gd94eee09a3a6b064",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g75ac9e2c5e4a8fa4",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g29ea601975245b7f",
+        "face_body_signature_fixture_filleted_block_g76b063b2cbc22dc8",
+        "face_body_signature_fixture_filleted_block_g76b063b2cbc22dc8",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gbabdd64b10bc5359",
+        "face_body_signature_fixture_filleted_block_gc8e02afaa429247c",
+        "face_body_signature_fixture_filleted_block_gc8e02afaa429247c",
+        "face_body_signature_fixture_filleted_block_ge33ee800774dfede",
+        "face_body_signature_fixture_filleted_block_ge33ee800774dfede"
+      ]
+    },
+    "diagnostics": []
+  },
+  "exactBrep": {
+    "schemaVersion": "occ-native-topology-payload/v1alpha1",
+    "source": "occt7-shim",
+    "bodyId": "body_signature_fixture_filleted_block",
+    "topologyToken": "t_body_signature_fixture_filleted_block_exact",
+    "counts": {
+      "faces": 7,
+      "edges": 15,
+      "vertices": 10
+    },
+    "topology": [],
+    "edgeVertices": [],
+    "vertexPoints": [],
+    "faceEdges": [],
+    "cadaraBrep": {
+      "kind": "cadaraBrep",
+      "schemaVersion": "cadara-brep/v1alpha1",
+      "source": {
+        "importedFormat": "step",
+        "sourceStored": false
+      },
+      "bodies": [
+        {
+          "bodyKey": "body_signature_fixture_filleted_block",
+          "label": "body_signature_fixture_filleted_block",
+          "solidKey": "solid_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_1",
+          "topology": {
+            "vertices": [
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_1",
+                "point": [
+                  -2.77556e-17,
+                  0.2,
+                  1
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_2",
+                "point": [
+                  0,
+                  2,
+                  1
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_3",
+                "point": [
+                  -2.77556e-17,
+                  0.2,
+                  0
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_4",
+                "point": [
+                  0,
+                  2,
+                  0
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_5",
+                "point": [
+                  0.2,
+                  -2.77556e-17,
+                  1
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_6",
+                "point": [
+                  2,
+                  2,
+                  1
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_7",
+                "point": [
+                  2,
+                  0,
+                  1
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_8",
+                "point": [
+                  0.2,
+                  -2.77556e-17,
+                  0
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_9",
+                "point": [
+                  2,
+                  2,
+                  0
+                ]
+              },
+              {
+                "vertexKey": "vertex_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_10",
+                "point": [
+                  2,
+                  0,
+                  0
+                ]
+              }
+            ],
+            "edges": [
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_1",
+                "vertices": [
+                  0,
+                  1
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "direction": [
+                    0,
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_2",
+                "vertices": [
+                  2,
+                  0
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    -2.77556e-17,
+                    0.2,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_3",
+                "vertices": [
+                  3,
+                  1
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    2,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_4",
+                "vertices": [
+                  2,
+                  3
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_5",
+                "vertices": [
+                  0,
+                  4
+                ],
+                "curve": {
+                  "kind": "circle",
+                  "center": [
+                    0.2,
+                    0.2,
+                    1
+                  ],
+                  "axisDirection": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "xDirection": [
+                    0,
+                    -1,
+                    0
+                  ],
+                  "radius": 0.2,
+                  "parameterRange": [
+                    4.71239,
+                    6.28319
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_6",
+                "vertices": [
+                  1,
+                  5
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    2,
+                    1
+                  ],
+                  "direction": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_7",
+                "vertices": [
+                  4,
+                  6
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "direction": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_8",
+                "vertices": [
+                  6,
+                  5
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    2,
+                    0,
+                    1
+                  ],
+                  "direction": [
+                    0,
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_9",
+                "vertices": [
+                  2,
+                  7
+                ],
+                "curve": {
+                  "kind": "circle",
+                  "center": [
+                    0.2,
+                    0.2,
+                    0
+                  ],
+                  "axisDirection": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "xDirection": [
+                    0,
+                    -1,
+                    0
+                  ],
+                  "radius": 0.2,
+                  "parameterRange": [
+                    4.71239,
+                    6.28319
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_10",
+                "vertices": [
+                  7,
+                  4
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    0.2,
+                    -2.77556e-17,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_11",
+                "vertices": [
+                  3,
+                  8
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    2,
+                    0
+                  ],
+                  "direction": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_12",
+                "vertices": [
+                  8,
+                  5
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    2,
+                    2,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_13",
+                "vertices": [
+                  7,
+                  9
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    1,
+                    0,
+                    0
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_14",
+                "vertices": [
+                  9,
+                  8
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    2,
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "edgeKey": "edge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_15",
+                "vertices": [
+                  9,
+                  6
+                ],
+                "curve": {
+                  "kind": "line",
+                  "origin": [
+                    2,
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              }
+            ],
+            "coedges": [
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_1",
+                "edgeIndex": 0,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    1,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    -1
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_2",
+                "edgeIndex": 2,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    -2
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_3",
+                "edgeIndex": 3,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    -1
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_4",
+                "edgeIndex": 1,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    -0.2
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_5",
+                "edgeIndex": 0,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_6",
+                "edgeIndex": 4,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "circle",
+                  "center": [
+                    0.2,
+                    0.2
+                  ],
+                  "xDirection": [
+                    0,
+                    -1
+                  ],
+                  "radius": 0.2,
+                  "parameterRange": [
+                    4.71239,
+                    6.28319
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_7",
+                "edgeIndex": 6,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_8",
+                "edgeIndex": 7,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    2,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_9",
+                "edgeIndex": 5,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    2
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_10",
+                "edgeIndex": 8,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    -4.71239,
+                    0
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    4.71239,
+                    6.28319
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_11",
+                "edgeIndex": 9,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    1.5708,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_12",
+                "edgeIndex": 4,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    -4.71239,
+                    1
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    4.71239,
+                    6.28319
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_13",
+                "edgeIndex": 1,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_14",
+                "edgeIndex": 10,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_15",
+                "edgeIndex": 2,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_16",
+                "edgeIndex": 5,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    1,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_17",
+                "edgeIndex": 11,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    2
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_18",
+                "edgeIndex": 3,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_19",
+                "edgeIndex": 10,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    2
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_20",
+                "edgeIndex": 13,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    2,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_21",
+                "edgeIndex": 12,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_22",
+                "edgeIndex": 8,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "circle",
+                  "center": [
+                    0.2,
+                    0.2
+                  ],
+                  "xDirection": [
+                    0,
+                    -1
+                  ],
+                  "radius": 0.2,
+                  "parameterRange": [
+                    4.71239,
+                    6.28319
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_23",
+                "edgeIndex": 12,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_24",
+                "edgeIndex": 14,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    2
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_25",
+                "edgeIndex": 6,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    1,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    1
+                  ],
+                  "parameterRange": [
+                    0.2,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_26",
+                "edgeIndex": 9,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0.2
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_27",
+                "edgeIndex": 14,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_28",
+                "edgeIndex": 13,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    -1
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_29",
+                "edgeIndex": 11,
+                "reversed": false,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    0,
+                    -2
+                  ],
+                  "direction": [
+                    1,
+                    0
+                  ],
+                  "parameterRange": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              {
+                "coedgeKey": "coedge_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_30",
+                "edgeIndex": 7,
+                "reversed": true,
+                "curve2d": {
+                  "kind": "line",
+                  "origin": [
+                    1,
+                    0
+                  ],
+                  "direction": [
+                    0,
+                    -1
+                  ],
+                  "parameterRange": [
+                    0,
+                    2
+                  ]
+                }
+              }
+            ],
+            "loops": [
+              {
+                "loopKey": "loop_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_1",
+                "coedgeIndices": [
+                  0,
+                  1,
+                  2,
+                  3
+                ]
+              },
+              {
+                "loopKey": "loop_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_2",
+                "coedgeIndices": [
+                  4,
+                  5,
+                  6,
+                  7,
+                  8
+                ]
+              },
+              {
+                "loopKey": "loop_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_3",
+                "coedgeIndices": [
+                  9,
+                  10,
+                  11,
+                  12
+                ]
+              },
+              {
+                "loopKey": "loop_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_4",
+                "coedgeIndices": [
+                  13,
+                  14,
+                  15,
+                  16
+                ]
+              },
+              {
+                "loopKey": "loop_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_5",
+                "coedgeIndices": [
+                  17,
+                  18,
+                  19,
+                  20,
+                  21
+                ]
+              },
+              {
+                "loopKey": "loop_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_6",
+                "coedgeIndices": [
+                  22,
+                  23,
+                  24,
+                  25
+                ]
+              },
+              {
+                "loopKey": "loop_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_7",
+                "coedgeIndices": [
+                  26,
+                  27,
+                  28,
+                  29
+                ]
+              }
+            ],
+            "faces": [
+              {
+                "faceKey": "face_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_1",
+                "loopIndices": [
+                  0
+                ],
+                "surface": {
+                  "kind": "plane",
+                  "frame": {
+                    "origin": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "zDirection": [
+                      1,
+                      0,
+                      0
+                    ],
+                    "xDirection": [
+                      0,
+                      0,
+                      1
+                    ]
+                  }
+                },
+                "meshVertices": [
+                  [
+                    -2.77556e-17,
+                    0.2,
+                    1
+                  ],
+                  [
+                    0,
+                    2,
+                    1
+                  ],
+                  [
+                    -2.77556e-17,
+                    0.2,
+                    0
+                  ],
+                  [
+                    0,
+                    2,
+                    0
+                  ]
+                ],
+                "triangles": [
+                  [
+                    0,
+                    3,
+                    2
+                  ],
+                  [
+                    0,
+                    1,
+                    3
+                  ]
+                ]
+              },
+              {
+                "faceKey": "face_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_2",
+                "loopIndices": [
+                  1
+                ],
+                "surface": {
+                  "kind": "plane",
+                  "frame": {
+                    "origin": [
+                      0,
+                      0,
+                      1
+                    ],
+                    "zDirection": [
+                      0,
+                      0,
+                      1
+                    ],
+                    "xDirection": [
+                      1,
+                      0,
+                      0
+                    ]
+                  }
+                },
+                "meshVertices": [
+                  [
+                    -2.77556e-17,
+                    0.2,
+                    1
+                  ],
+                  [
+                    0,
+                    2,
+                    1
+                  ],
+                  [
+                    0.00501442,
+                    0.155496,
+                    1
+                  ],
+                  [
+                    0.0198062,
+                    0.113223,
+                    1
+                  ],
+                  [
+                    0.0436337,
+                    0.075302,
+                    1
+                  ],
+                  [
+                    0.075302,
+                    0.0436337,
+                    1
+                  ],
+                  [
+                    0.113223,
+                    0.0198062,
+                    1
+                  ],
+                  [
+                    0.155496,
+                    0.00501442,
+                    1
+                  ],
+                  [
+                    0.2,
+                    -2.77556e-17,
+                    1
+                  ],
+                  [
+                    2,
+                    0,
+                    1
+                  ],
+                  [
+                    2,
+                    2,
+                    1
+                  ]
+                ],
+                "triangles": [
+                  [
+                    8,
+                    0,
+                    2
+                  ],
+                  [
+                    8,
+                    2,
+                    3
+                  ],
+                  [
+                    8,
+                    3,
+                    4
+                  ],
+                  [
+                    8,
+                    4,
+                    5
+                  ],
+                  [
+                    8,
+                    5,
+                    6
+                  ],
+                  [
+                    8,
+                    6,
+                    7
+                  ],
+                  [
+                    10,
+                    1,
+                    0
+                  ],
+                  [
+                    10,
+                    8,
+                    9
+                  ],
+                  [
+                    10,
+                    0,
+                    8
+                  ]
+                ]
+              },
+              {
+                "faceKey": "face_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_3",
+                "loopIndices": [
+                  2
+                ],
+                "surface": {
+                  "kind": "cylinder",
+                  "frame": {
+                    "origin": [
+                      0.2,
+                      0.2,
+                      0
+                    ],
+                    "zDirection": [
+                      0,
+                      0,
+                      1
+                    ],
+                    "xDirection": [
+                      -1,
+                      0,
+                      0
+                    ]
+                  },
+                  "radius": 0.2
+                },
+                "meshVertices": [
+                  [
+                    -2.77556e-17,
+                    0.2,
+                    0
+                  ],
+                  [
+                    0.00501442,
+                    0.155496,
+                    0
+                  ],
+                  [
+                    0.0198062,
+                    0.113223,
+                    0
+                  ],
+                  [
+                    0.0436337,
+                    0.075302,
+                    0
+                  ],
+                  [
+                    0.075302,
+                    0.0436337,
+                    0
+                  ],
+                  [
+                    0.113223,
+                    0.0198062,
+                    0
+                  ],
+                  [
+                    0.155496,
+                    0.00501442,
+                    0
+                  ],
+                  [
+                    0.2,
+                    -2.77556e-17,
+                    0
+                  ],
+                  [
+                    0.2,
+                    -2.77556e-17,
+                    1
+                  ],
+                  [
+                    -2.77556e-17,
+                    0.2,
+                    1
+                  ],
+                  [
+                    0.00501442,
+                    0.155496,
+                    1
+                  ],
+                  [
+                    0.0198062,
+                    0.113223,
+                    1
+                  ],
+                  [
+                    0.0436337,
+                    0.075302,
+                    1
+                  ],
+                  [
+                    0.075302,
+                    0.0436337,
+                    1
+                  ],
+                  [
+                    0.113223,
+                    0.0198062,
+                    1
+                  ],
+                  [
+                    0.155496,
+                    0.00501442,
+                    1
+                  ]
+                ],
+                "triangles": [
+                  [
+                    10,
+                    0,
+                    1
+                  ],
+                  [
+                    10,
+                    9,
+                    0
+                  ],
+                  [
+                    11,
+                    1,
+                    2
+                  ],
+                  [
+                    11,
+                    10,
+                    1
+                  ],
+                  [
+                    12,
+                    2,
+                    3
+                  ],
+                  [
+                    12,
+                    11,
+                    2
+                  ],
+                  [
+                    13,
+                    3,
+                    4
+                  ],
+                  [
+                    13,
+                    12,
+                    3
+                  ],
+                  [
+                    14,
+                    4,
+                    5
+                  ],
+                  [
+                    14,
+                    13,
+                    4
+                  ],
+                  [
+                    15,
+                    5,
+                    6
+                  ],
+                  [
+                    15,
+                    14,
+                    5
+                  ],
+                  [
+                    8,
+                    6,
+                    7
+                  ],
+                  [
+                    8,
+                    15,
+                    6
+                  ]
+                ]
+              },
+              {
+                "faceKey": "face_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_4",
+                "loopIndices": [
+                  3
+                ],
+                "surface": {
+                  "kind": "plane",
+                  "frame": {
+                    "origin": [
+                      0,
+                      2,
+                      0
+                    ],
+                    "zDirection": [
+                      0,
+                      1,
+                      0
+                    ],
+                    "xDirection": [
+                      0,
+                      0,
+                      1
+                    ]
+                  }
+                },
+                "meshVertices": [
+                  [
+                    0,
+                    2,
+                    0
+                  ],
+                  [
+                    2,
+                    2,
+                    0
+                  ],
+                  [
+                    0,
+                    2,
+                    1
+                  ],
+                  [
+                    2,
+                    2,
+                    1
+                  ]
+                ],
+                "triangles": [
+                  [
+                    3,
+                    1,
+                    0
+                  ],
+                  [
+                    3,
+                    0,
+                    2
+                  ]
+                ]
+              },
+              {
+                "faceKey": "face_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_5",
+                "loopIndices": [
+                  4
+                ],
+                "surface": {
+                  "kind": "plane",
+                  "frame": {
+                    "origin": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "zDirection": [
+                      0,
+                      0,
+                      1
+                    ],
+                    "xDirection": [
+                      1,
+                      0,
+                      0
+                    ]
+                  }
+                },
+                "meshVertices": [
+                  [
+                    -2.77556e-17,
+                    0.2,
+                    0
+                  ],
+                  [
+                    0,
+                    2,
+                    0
+                  ],
+                  [
+                    0.00501442,
+                    0.155496,
+                    0
+                  ],
+                  [
+                    0.0198062,
+                    0.113223,
+                    0
+                  ],
+                  [
+                    0.0436337,
+                    0.075302,
+                    0
+                  ],
+                  [
+                    0.075302,
+                    0.0436337,
+                    0
+                  ],
+                  [
+                    0.113223,
+                    0.0198062,
+                    0
+                  ],
+                  [
+                    0.155496,
+                    0.00501442,
+                    0
+                  ],
+                  [
+                    0.2,
+                    -2.77556e-17,
+                    0
+                  ],
+                  [
+                    2,
+                    0,
+                    0
+                  ],
+                  [
+                    2,
+                    2,
+                    0
+                  ]
+                ],
+                "triangles": [
+                  [
+                    8,
+                    2,
+                    0
+                  ],
+                  [
+                    8,
+                    3,
+                    2
+                  ],
+                  [
+                    8,
+                    4,
+                    3
+                  ],
+                  [
+                    8,
+                    5,
+                    4
+                  ],
+                  [
+                    8,
+                    6,
+                    5
+                  ],
+                  [
+                    8,
+                    7,
+                    6
+                  ],
+                  [
+                    10,
+                    0,
+                    1
+                  ],
+                  [
+                    10,
+                    9,
+                    8
+                  ],
+                  [
+                    10,
+                    8,
+                    0
+                  ]
+                ]
+              },
+              {
+                "faceKey": "face_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_6",
+                "loopIndices": [
+                  5
+                ],
+                "surface": {
+                  "kind": "plane",
+                  "frame": {
+                    "origin": [
+                      0,
+                      0,
+                      0
+                    ],
+                    "zDirection": [
+                      0,
+                      1,
+                      0
+                    ],
+                    "xDirection": [
+                      0,
+                      0,
+                      1
+                    ]
+                  }
+                },
+                "meshVertices": [
+                  [
+                    0.2,
+                    -2.77556e-17,
+                    0
+                  ],
+                  [
+                    2,
+                    0,
+                    0
+                  ],
+                  [
+                    0.2,
+                    -2.77556e-17,
+                    1
+                  ],
+                  [
+                    2,
+                    0,
+                    1
+                  ]
+                ],
+                "triangles": [
+                  [
+                    3,
+                    0,
+                    1
+                  ],
+                  [
+                    3,
+                    2,
+                    0
+                  ]
+                ]
+              },
+              {
+                "faceKey": "face_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_7",
+                "loopIndices": [
+                  6
+                ],
+                "surface": {
+                  "kind": "plane",
+                  "frame": {
+                    "origin": [
+                      2,
+                      0,
+                      0
+                    ],
+                    "zDirection": [
+                      1,
+                      0,
+                      0
+                    ],
+                    "xDirection": [
+                      0,
+                      0,
+                      1
+                    ]
+                  }
+                },
+                "meshVertices": [
+                  [
+                    2,
+                    0,
+                    0
+                  ],
+                  [
+                    2,
+                    0,
+                    1
+                  ],
+                  [
+                    2,
+                    2,
+                    0
+                  ],
+                  [
+                    2,
+                    2,
+                    1
+                  ]
+                ],
+                "triangles": [
+                  [
+                    1,
+                    0,
+                    2
+                  ],
+                  [
+                    1,
+                    2,
+                    3
+                  ]
+                ]
+              }
+            ],
+            "shells": [
+              {
+                "shellKey": "shell_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_1",
+                "faceIndices": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6
+                ],
+                "closed": true
+              }
+            ],
+            "solids": [
+              {
+                "solidKey": "solid_body_signature_fixture_filleted_block_t_body_signature_fixture_filleted_block_exact_1",
+                "shellIndices": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "diagnostics": []
+  },
+  "summary": {
+    "topology": {
+      "source": "occt7-shim",
+      "counts": {
+        "faces": 7,
+        "edges": 15,
+        "vertices": 10
+      },
+      "diagnostics": [],
+      "topologyKinds": {
+        "face": 7,
+        "edge": 15,
+        "vertex": 10
+      },
+      "exactBrep": null
+    },
+    "exactBrep": {
+      "source": "occt7-shim",
+      "counts": {
+        "faces": 7,
+        "edges": 15,
+        "vertices": 10
+      },
+      "diagnostics": [],
+      "topologyKinds": {
+        "face": 0,
+        "edge": 0,
+        "vertex": 0
+      },
+      "exactBrep": {
+        "bodyKey": "body_signature_fixture_filleted_block",
+        "faceCount": 7,
+        "edgeCount": 15,
+        "vertexCount": 10,
+        "surfaceKinds": [
+          "cylinder",
+          "plane"
+        ],
+        "curveKinds": [
+          "circle",
+          "line"
+        ]
+      }
+    }
+  }
+}
