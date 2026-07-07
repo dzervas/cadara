@@ -1,6 +1,7 @@
 import type { ExportCapabilities } from "@/contracts/export/capabilities";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import type { RevisionId } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
 import type {
   ProjectSketchExternalReferencesRequest,
   ProjectSketchExternalReferencesResponse,
@@ -40,6 +41,10 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { AuthoredModelDocument as AuthoredDocument } from "@/contracts/modeling/authored-document";
 import type { GeometryAssetHash } from "@/contracts/modeling/geometry-assets";
+import type {
+  OccNativeExactBrepPayload,
+} from "@/domain/modeling/occ/native-topology-payload";
+import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
 
 export interface GeometryAssetResolver {
   getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>;
@@ -74,6 +79,12 @@ export interface ModelingKernelAdapter {
   getDocumentSnapshot(
     request: GetDocumentSnapshotRequest,
   ): Promise<GetDocumentSnapshotResponse>;
+  /** Builds native exact-B-rep payloads for kernel-owned topology when supported. */
+  buildNativeExactBrepPayload?(
+    documentId: AuthoredDocument["documentId"],
+    baseRevisionId: RevisionId,
+    target: DurableRef,
+  ): Promise<OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>>;
   /** Commits a durable sketch definition against an explicit base revision. */
   commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse>;
   /** Projects active-sketch external references against the requested document revision. */

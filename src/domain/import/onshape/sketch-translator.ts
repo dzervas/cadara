@@ -54,7 +54,8 @@ export interface SolvedSketchEntityGeometry {
 export interface SketchTranslationInput {
   featureId: string;
   label: string;
-  planeKey: SketchPlaneKey;
+  planeKey?: SketchPlaneKey;
+  plane?: SketchPlaneDefinition;
   entities: readonly SolvedSketchEntityGeometry[];
 }
 
@@ -122,19 +123,32 @@ function dot3(
 }
 
 /**
- * Project a world-space point (meters) onto a canonical datum plane, returning
- * 2D sketch-plane coordinates in document millimeters. Valid for the canonical
- * planes (origin at world zero) this v1 supports.
+ * Project a world-space point (meters) onto a sketch plane, returning 2D
+ * sketch-plane coordinates in document millimeters.
  */
+export function projectPointToSketchPlane(
+  point3d: readonly [number, number, number],
+  plane: SketchPlaneDefinition,
+): SketchPoint2D {
+  const pointMm: readonly [number, number, number] = [
+    point3d[0] * METERS_TO_MM,
+    point3d[1] * METERS_TO_MM,
+    point3d[2] * METERS_TO_MM,
+  ];
+  const delta: readonly [number, number, number] = [
+    pointMm[0] - plane.frame.origin[0],
+    pointMm[1] - plane.frame.origin[1],
+    pointMm[2] - plane.frame.origin[2],
+  ];
+  return [dot3(delta, plane.frame.xAxis), dot3(delta, plane.frame.yAxis)];
+}
+
+/** Project a world-space point (meters) onto a canonical datum plane. */
 export function projectPointToPlane(
   point3d: readonly [number, number, number],
   planeKey: SketchPlaneKey,
 ): SketchPoint2D {
-  const frame = CANONICAL_PLANE_SPECS[planeKey].frame;
-  return [
-    dot3(point3d, frame.xAxis) * METERS_TO_MM,
-    dot3(point3d, frame.yAxis) * METERS_TO_MM,
-  ];
+  return projectPointToSketchPlane(point3d, planeDefinition(planeKey));
 }
 
 function planeDefinition(planeKey: SketchPlaneKey): SketchPlaneDefinition {
@@ -166,6 +180,11 @@ export function translateSketch(
   const entities: SketchEntityDefinition[] = [];
   const constraints: ConstraintDefinition[] = [];
   const diagnostics: SketchTranslationDiagnostic[] = [];
+  const plane =
+    input.plane ?? (input.planeKey ? planeDefinition(input.planeKey) : null);
+  if (!plane) {
+    throw new Error("Sketch translation requires a datum or probed face plane.");
+  }
 
   // Placeholder owning-sketch id; the commit path remaps every entity/point
   // target sketchId to the durable sketch id it allocates on commit.
@@ -321,7 +340,7 @@ export function translateSketch(
     authoringOperations: [],
   };
 
-  return { plane: planeDefinition(input.planeKey), definition, diagnostics };
+  return { plane, definition, diagnostics };
 }
 
 // Referenced only to keep the exhaustive kind list discoverable for reviewers.

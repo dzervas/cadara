@@ -14,10 +14,20 @@ import {
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
 
+type NativeShapeForTest = { delete?: () => void };
+
 type NativeBoxBuilderForTest = {
-  Shape(): unknown;
+  Shape(): NativeShapeForTest;
   delete?: () => void;
 };
+
+type NativeFaceBuilderForTest = {
+  Face(): NativeShapeForTest;
+  IsDone?(): boolean;
+  delete?: () => void;
+};
+
+type NativeDisposableForTest = { delete?: () => void };
 
 type NativeOpenCascadeForTest = OpenCascadeNativeTopologyKernelHost & {
   BRepPrimAPI_MakeBox_2: new (
@@ -29,6 +39,30 @@ type NativeOpenCascadeForTest = OpenCascadeNativeTopologyKernelHost & {
     radius: number,
     height: number,
   ) => NativeBoxBuilderForTest;
+  BRepBuilderAPI_MakeFace_11: new (
+    cone: NativeDisposableForTest,
+    uMin: number,
+    uMax: number,
+    vMin: number,
+    vMax: number,
+  ) => NativeFaceBuilderForTest;
+  BRepBuilderAPI_MakeFace_12: new (
+    sphere: NativeDisposableForTest,
+    uMin: number,
+    uMax: number,
+    vMin: number,
+    vMax: number,
+  ) => NativeFaceBuilderForTest;
+  gp_Ax3_1: new () => NativeDisposableForTest;
+  gp_Cone_2: new (
+    axis: NativeDisposableForTest,
+    semiAngleRadians: number,
+    radius: number,
+  ) => NativeDisposableForTest;
+  gp_Sphere_2: new (
+    axis: NativeDisposableForTest,
+    radius: number,
+  ) => NativeDisposableForTest;
   TopoDS_Shape: new () => { delete?: () => void };
 };
 
@@ -514,6 +548,100 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     cylinderBuilder.delete?.();
   }
 
+
+  async function testNativeExactBrepExtractsConeAndSphereSurfaceRecords() {
+    const oc = await loadNativeOpenCascadeForTest();
+
+    const coneAxis = new oc.gp_Ax3_1();
+    const cone = new oc.gp_Cone_2(coneAxis, 0.35, 1);
+    const coneFaceBuilder = new oc.BRepBuilderAPI_MakeFace_11(
+      cone,
+      0,
+      Math.PI * 2,
+      0,
+      2,
+    );
+    const coneShape = coneFaceBuilder.Face();
+    const coneBodyId = "body_native_exact_cone_probe" as BodyId;
+    const conePayload = createOccNativeExactBrepPayloadFromShimPayload({
+      revisionId: "rev_native_exact_cone_probe" as RevisionId,
+      target: { kind: "body", bodyId: coneBodyId },
+      bodyId: coneBodyId,
+      bodyLabel: "Native exact cone probe",
+      nativePayload: parseNativeShimPayloadJson(
+        oc.CadaraBuildNativeExactBrepPayload.BuildJson(
+          coneShape,
+          coneBodyId,
+          "t_native_cone",
+        ),
+      ),
+    });
+
+    expect(
+      coneFaceBuilder.IsDone?.() ?? true,
+      "Native cone face builder should produce a committed cone face for exact-B-rep probing.",
+    ).toBeTruthy();
+    expect(
+      conePayload.brep.bodies[0]?.topology.faces.some(
+        (face) => face.surface.kind === "cone",
+      ),
+      "Native exact B-rep payload should preserve cone faces as analytic cone surfaces.",
+    ).toBeTruthy();
+    expect(
+      conePayload.tables.surfaces.rowCount,
+      "Native exact B-rep table metadata should count cone surface records.",
+    ).toBeGreaterThan(0);
+
+    const sphereAxis = new oc.gp_Ax3_1();
+    const sphere = new oc.gp_Sphere_2(sphereAxis, 1);
+    const sphereFaceBuilder = new oc.BRepBuilderAPI_MakeFace_12(
+      sphere,
+      0,
+      Math.PI * 2,
+      -Math.PI / 2,
+      Math.PI / 2,
+    );
+    const sphereShape = sphereFaceBuilder.Face();
+    const sphereBodyId = "body_native_exact_sphere_probe" as BodyId;
+    const spherePayload = createOccNativeExactBrepPayloadFromShimPayload({
+      revisionId: "rev_native_exact_sphere_probe" as RevisionId,
+      target: { kind: "body", bodyId: sphereBodyId },
+      bodyId: sphereBodyId,
+      bodyLabel: "Native exact sphere probe",
+      nativePayload: parseNativeShimPayloadJson(
+        oc.CadaraBuildNativeExactBrepPayload.BuildJson(
+          sphereShape,
+          sphereBodyId,
+          "t_native_sphere",
+        ),
+      ),
+    });
+
+    expect(
+      sphereFaceBuilder.IsDone?.() ?? true,
+      "Native sphere face builder should produce a committed sphere face for exact-B-rep probing.",
+    ).toBeTruthy();
+    expect(
+      spherePayload.brep.bodies[0]?.topology.faces.some(
+        (face) => face.surface.kind === "sphere",
+      ),
+      "Native exact B-rep payload should preserve sphere faces as analytic sphere surfaces.",
+    ).toBeTruthy();
+    expect(
+      spherePayload.tables.surfaces.rowCount,
+      "Native exact B-rep table metadata should count sphere surface records.",
+    ).toBeGreaterThan(0);
+
+    coneShape.delete?.();
+    coneFaceBuilder.delete?.();
+    cone.delete?.();
+    coneAxis.delete?.();
+    sphereShape.delete?.();
+    sphereFaceBuilder.delete?.();
+    sphere.delete?.();
+    sphereAxis.delete?.();
+  }
+
   function testConvertedPayloadPreservesKernelOwnedIdentity() {
     const bodyId = "body_kernel_identity_probe" as BodyId;
     const payload = createOccNativeTopologyPayloadFromShimPayloads({
@@ -772,6 +900,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
   await testNativeShimReturnsFlatTopologyAndMeshPayloads();
   await testNativeShimReturnsStructuredDiagnosticsForInvalidCommittedShapes();
   await testNativeExactBrepExtractsCurvedTopologyInsteadOfFlatteningIt();
+  await testNativeExactBrepExtractsConeAndSphereSurfaceRecords();
   testConvertedPayloadPreservesKernelOwnedIdentity();
   await testNativeFeatureTransactionPreparesCommittedShapePayload();
   await testNativeBooleanTransactionBuildsCommittedPayload();
