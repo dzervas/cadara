@@ -2,7 +2,13 @@ import type {
   AddDocumentVariableRequest,
   CommitSketchRequest,
   CreateFeatureRequest,
-} from "@/contracts/modeling/schema";
+  ExtrudeFeatureParameters,
+  ExtrudeProfileRef,
+  FeatureBooleanScope,
+  FeatureDefinition,
+  } from "@/contracts/modeling/schema";
+  import type { BodyId } from "@/contracts/shared/ids";
+import type { SketchPoint2D } from "@/contracts/sketch/schema";
 import type { ImportBinding } from "@/contracts/import/binding";
 import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
 
@@ -20,11 +26,68 @@ export interface ImportPreparedActionRef {
   index: number;
 }
 
+export interface ImportDeferredActionOutputRef {
+  actionIndex: number;
+}
+
+export type ImportDeferredValue =
+  | ({ kind: "sketchIdOf" } & ImportDeferredActionOutputRef)
+  | ({
+      kind: "regionOf";
+      selector: {
+        kind: "interiorPoint";
+        point: SketchPoint2D;
+      };
+    } & ImportDeferredActionOutputRef)
+  | ({ kind: "bodyOf" } & ImportDeferredActionOutputRef);
+
+export type ImportDeferredExtrudeProfileRef =
+  | ExtrudeProfileRef
+  | Extract<ImportDeferredValue, { kind: "regionOf" }>;
+
+export type ImportDeferredFeatureBooleanScope =
+  | FeatureBooleanScope
+  | {
+      kind: "targetBody";
+      bodyId: BodyId | Extract<ImportDeferredValue, { kind: "bodyOf" }>;
+    };
+
+export interface ImportDeferredExtrudeFeatureParameters
+  extends Omit<ExtrudeFeatureParameters, "profiles" | "booleanScope"> {
+  profiles: readonly [
+    ImportDeferredExtrudeProfileRef,
+    ...ImportDeferredExtrudeProfileRef[],
+  ];
+  booleanScope: ImportDeferredFeatureBooleanScope;
+}
+
+export type ImportDeferredFeatureDefinition =
+  | Exclude<FeatureDefinition, { kind: "extrude" }>
+  | {
+      kind: "extrude";
+      featureTypeVersion: Extract<
+        FeatureDefinition,
+        { kind: "extrude" }
+      >["featureTypeVersion"];
+      parameters: ImportDeferredExtrudeFeatureParameters;
+    };
+
+export interface ImportCreateFeatureRequest
+  extends Omit<CreateFeatureRequest, "definition"> {
+  definition: ImportDeferredFeatureDefinition;
+}
+
+export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
+  regionOf: ["createFeatures[].definition.parameters.profiles[]"],
+  bodyOf: ["createFeatures[].definition.parameters.booleanScope.bodyId"],
+  sketchIdOf: [],
+} as const satisfies Record<ImportDeferredValue["kind"], readonly string[]>;
+
 /**
  * The orchestrator applies these through existing adapter methods.
  */
 export interface ImportPreparedActions {
-  createFeatures?: CreateFeatureRequest[];
+  createFeatures?: ImportCreateFeatureRequest[];
   commitSketches?: CommitSketchRequest[];
   addDocumentVariables?: AddDocumentVariableRequest[];
   /**

@@ -1,6 +1,10 @@
 import typia from "typia";
 
-import type { ImportPreparedActions } from "@/contracts/import/actions";
+import type {
+  ImportDeferredValue,
+  ImportPreparedActions,
+  ImportPreparedActionRef,
+} from "@/contracts/import/actions";
 import {
   validateImportBindingInvariants,
   validateImportDiagnosticInvariants,
@@ -25,6 +29,188 @@ export {
 const importPreparedActionsValidator =
   typia.createValidateEquals<ImportPreparedActions>();
 
+function getActionAtOrderedPosition(
+  actions: ImportPreparedActions,
+  actionIndex: number,
+): ImportPreparedActionRef | null {
+  return actions.orderedActions?.[actionIndex] ?? null;
+}
+
+function isDeferredValue(value: unknown): value is ImportDeferredValue {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const kind = (value as { kind?: unknown }).kind;
+  return kind === "sketchIdOf" || kind === "regionOf" || kind === "bodyOf";
+}
+
+function expectedProducerKind(
+  value: ImportDeferredValue,
+): ImportPreparedActionRef["kind"] {
+  switch (value.kind) {
+    case "sketchIdOf":
+    case "regionOf":
+      return "commitSketch";
+    case "bodyOf":
+      return "createFeature";
+  }
+}
+
+function validateDeferredReference(
+  actions: ImportPreparedActions,
+  value: ImportDeferredValue,
+  consumerPosition: number,
+  path: string,
+): ContractValidationIssue[] {
+  const issues: ContractValidationIssue[] = [];
+  if (!Number.isInteger(value.actionIndex)) {
+    return [
+      {
+        path: `${path}.actionIndex`,
+        expected: "integer ordered action index",
+        value: value.actionIndex,
+        message: `Deferred ${value.kind} reference must use an integer actionIndex.`,
+      },
+    ];
+  }
+
+  if (value.actionIndex < 0 || value.actionIndex >= (actions.orderedActions?.length ?? 0)) {
+    issues.push({
+      path: `${path}.actionIndex`,
+      expected: `ordered action index in [0, ${actions.orderedActions?.length ?? 0})`,
+      value: value.actionIndex,
+      message: `Deferred ${value.kind} reference points outside the ordered action sequence at index ${value.actionIndex}.`,
+    });
+    return issues;
+  }
+
+  if (value.actionIndex >= consumerPosition) {
+    issues.push({
+      path: `${path}.actionIndex`,
+      expected: `backward reference before ordered position ${consumerPosition}`,
+      value: value.actionIndex,
+      message: `Deferred ${value.kind} reference must point backward from consuming action ${consumerPosition}.`,
+    });
+  }
+
+  const producer = getActionAtOrderedPosition(actions, value.actionIndex);
+  const expectedKind = expectedProducerKind(value);
+  if (producer?.kind !== expectedKind) {
+    issues.push({
+      path: `${path}.actionIndex`,
+      expected: `${expectedKind} producer`,
+      value: producer?.kind ?? null,
+      message: `Deferred ${value.kind} reference at ${path} must point to an earlier ${expectedKind} action.`,
+    });
+  }
+
+  return issues;
+}
+
+function collectUnblessedDeferredValues(
+  value: unknown,
+  path: string,
+  blessed: ReadonlySet<unknown>,
+  issues: ContractValidationIssue[],
+) {
+  if (isDeferredValue(value)) {
+    if (!blessed.has(value)) {
+      issues.push({
+        path,
+        expected: "deferred value only at import contract blessed positions",
+        value,
+        message: `Deferred ${value.kind} reference is not allowed at ${path}.`,
+      });
+    }
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) =>
+      collectUnblessedDeferredValues(entry, `${path}.${index}`, blessed, issues),
+    );
+    return;
+  }
+
+  Object.entries(value).forEach(([key, entry]) =>
+    collectUnblessedDeferredValues(entry, path ? `${path}.${key}` : key, blessed, issues),
+  );
+}
+
+function validateImportDeferredValueInvariants(
+  actions: ImportPreparedActions,
+): ContractValidationIssue[] {
+  const issues: ContractValidationIssue[] = [];
+  const blessed = new Set<unknown>();
+
+  actions.orderedActions?.forEach((ref, orderedPosition) => {
+    if (ref.kind !== "createFeature") {
+      return;
+    }
+    const request = actions.createFeatures?.[ref.index];
+    if (!request?.definition || request.definition.kind !== "extrude") {
+      return;
+    }
+
+    request.definition.parameters.profiles.forEach((profile, profileIndex) => {
+      if (isDeferredValue(profile)) {
+        blessed.add(profile);
+        // ImportDeferredExtrudeProfileRef only permits regionOf at profile
+        // positions; Typia enforces that structural union before invariants run.
+        issues.push(
+          ...validateDeferredReference(
+            actions,
+            profile,
+            orderedPosition,
+            `createFeatures.${ref.index}.definition.parameters.profiles.${profileIndex}`,
+          ),
+        );
+      }
+    });
+
+    const scope = request.definition.parameters.booleanScope;
+    if (
+      scope.kind === "targetBody" &&
+      isDeferredValue(scope.bodyId)
+    ) {
+      blessed.add(scope.bodyId);
+      if (scope.bodyId.kind !== "bodyOf") {
+        issues.push({
+          path: `createFeatures.${ref.index}.definition.parameters.booleanScope.bodyId`,
+          expected: "bodyOf deferred reference",
+          value: scope.bodyId.kind,
+          message: "Only bodyOf deferred references are allowed in boolean target body positions.",
+        });
+      } else {
+        issues.push(
+          ...validateDeferredReference(
+            actions,
+            scope.bodyId,
+            orderedPosition,
+            `createFeatures.${ref.index}.definition.parameters.booleanScope.bodyId`,
+          ),
+        );
+      }
+    }
+  });
+
+  collectUnblessedDeferredValues(actions, "", blessed, issues);
+
+  if (blessed.size > 0 && !actions.orderedActions) {
+    issues.push({
+      path: "orderedActions",
+      expected: "ordered action sequence for deferred references",
+      value: null,
+      message: "Deferred import references require orderedActions so actionIndex is unambiguous.",
+    });
+  }
+
+  return issues;
+}
 export function validateImportOrderedActionsInvariants(
   actions: ImportPreparedActions,
 ): ContractValidationIssue[] {
@@ -102,6 +288,7 @@ function validateImportPreparedActionsInvariants(
       ),
     ),
     ...validateImportOrderedActionsInvariants(actions),
+    ...validateImportDeferredValueInvariants(actions),
   ];
 }
 

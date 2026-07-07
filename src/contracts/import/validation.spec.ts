@@ -140,6 +140,83 @@ test("src/contracts/import/validation.spec.ts", async () => {
     valueText: "10 mm",
   });
 
+
+  const sketchRequest = () => ({
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    solverCorrelation: null,
+    sketchId: null,
+    sketchLabel: "Imported sketch",
+    plane: {
+      support: { kind: "construction" as const, constructionId: "construction_plane-xy" },
+      frame: {
+        origin: [0, 0, 0] as const,
+        xAxis: [1, 0, 0] as const,
+        yAxis: [0, 1, 0] as const,
+        normal: [0, 0, 1] as const,
+        linearUnit: "documentLength" as const,
+        handedness: "rightHanded" as const,
+      },
+      key: "xy",
+    },
+    definition: {
+      schemaVersion: "sketch-definition/v1alpha1" as const,
+      referenceIds: [],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+      styleIds: [],
+      styles: [],
+      svgRenderingEnabled: true,
+      derivedRelationships: [],
+      authoringOperations: [],
+    },
+  });
+
+  const extrudeRequest = (profileActionIndex: number, bodyActionIndex?: number) => ({
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Imported extrude",
+    definition: {
+      kind: "extrude" as const,
+      featureTypeVersion: "feature-type/extrude/v1alpha1" as const,
+      parameters: {
+        profiles: [
+          {
+            kind: "regionOf" as const,
+            actionIndex: profileActionIndex,
+            selector: { kind: "interiorPoint" as const, point: [0.5, 0.5] as const },
+          },
+        ],
+        startExtent: { kind: "profilePlane" as const },
+        extent: {
+          mode: "oneSide" as const,
+          end: {
+            kind: "blind" as const,
+            direction: "positive" as const,
+            distance: { source: "literal" as const, value: 10 },
+          },
+        },
+        operation: { source: "literal" as const, value: bodyActionIndex === undefined ? "newBody" as const : "cut" as const },
+        booleanScope:
+          bodyActionIndex === undefined
+            ? { kind: "standalone" as const }
+            : {
+                kind: "targetBody" as const,
+                bodyId: { kind: "bodyOf" as const, actionIndex: bodyActionIndex },
+              },
+      },
+    },
+  });
+
   expect(
     validateImportPreparedActions({
       addDocumentVariables: [variableRequest("a"), variableRequest("b")],
@@ -177,4 +254,90 @@ test("src/contracts/import/validation.spec.ts", async () => {
     }).success,
     "Prepared action validation should reject an ordered sequence with an out-of-range index.",
   ).toBeFalsy();
+
+
+  const deferredRegionResult = validateImportPreparedActions({
+    commitSketches: [sketchRequest()],
+    createFeatures: [extrudeRequest(0)],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+    ],
+  });
+  expect(
+    deferredRegionResult.success,
+    "Prepared action validation should accept blessed deferred region references to earlier sketch commits.",
+  ).toBeTruthy();
+
+  expect(
+    validateImportPreparedActions({
+      commitSketches: [sketchRequest()],
+      createFeatures: [extrudeRequest(1)],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "createFeature", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should reject forward deferred references.",
+  ).toBeFalsy();
+
+  expect(
+    validateImportPreparedActions({
+      addDocumentVariables: [variableRequest("producer")],
+      createFeatures: [extrudeRequest(0)],
+      orderedActions: [
+        { kind: "addDocumentVariable", index: 0 },
+        { kind: "createFeature", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should reject deferred references to the wrong producer kind.",
+  ).toBeFalsy();
+
+  expect(
+    validateImportPreparedActions({
+      commitSketches: [sketchRequest()],
+      createFeatures: [extrudeRequest(5)],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "createFeature", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should reject deferred references outside the ordered sequence.",
+  ).toBeFalsy();
+
+  expect(
+    validateImportPreparedActions({
+      commitSketches: [sketchRequest()],
+      createFeatures: [
+        {
+          ...extrudeRequest(0),
+          definition: {
+            ...extrudeRequest(0).definition,
+            parameters: {
+              ...extrudeRequest(0).definition.parameters,
+              profiles: [{ kind: "sketchIdOf" as const, actionIndex: 0 }],
+            },
+          },
+        },
+      ],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "createFeature", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should reject deferred values at non-blessed positions for their kind.",
+  ).toBeFalsy();
+
+  expect(
+    validateImportPreparedActions({
+      commitSketches: [sketchRequest()],
+      createFeatures: [extrudeRequest(0), extrudeRequest(0, 1)],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "createFeature", index: 0 },
+        { kind: "createFeature", index: 1 },
+      ],
+    }).success,
+    "Prepared action validation should accept blessed deferred body references to earlier feature actions.",
+  ).toBeTruthy();
 });
