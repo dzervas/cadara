@@ -9,13 +9,22 @@
  * fidelity report. Solid features degrade to `baked` with capability reason
  * codes while the history probe is absent.
  */
-import type { ImportPreparedActions, ImportPreparedActionRef } from "@/contracts/import/actions";
+import type {
+  ImportCreateFeatureRequest,
+  ImportDeferredExtrudeProfileRef,
+  ImportDeferredFeatureBooleanScope,
+  ImportPreparedActions,
+  ImportPreparedActionRef,
+} from "@/contracts/import/actions";
 import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
 import type { ImportProvider } from "@/contracts/import/provider";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import type { LocalFileImportBinding } from "@/contracts/import/binding";
-import { IMPORT_CONTRACT_SCHEMA_VERSION } from "@/contracts/shared/versioning";
+import {
+  EXTRUDE_FEATURE_SCHEMA_VERSION,
+  IMPORT_CONTRACT_SCHEMA_VERSION,
+} from "@/contracts/shared/versioning";
 import {
   validateOnshapeCaptureBundle,
   type OnshapeCaptureBundle,
@@ -189,7 +198,7 @@ export const onshapeImportProvider: ImportProvider<
         studios,
         defaultStudioId: defaultStudio?.elementId ?? null,
       },
-      proposedActionKinds: ["addDocumentVariable", "commitSketch"],
+      proposedActionKinds: ["addDocumentVariable", "commitSketch", "createFeature"],
       diagnostics,
     };
   },
@@ -295,8 +304,13 @@ export const onshapeImportProvider: ImportProvider<
     const context = capabilities.context;
     const addDocumentVariables: AddDocumentVariableRequest[] = [];
     const commitSketches: CommitSketchRequest[] = [];
+    const createFeatures: ImportCreateFeatureRequest[] = [];
     const orderedActions: ImportPreparedActionRef[] = [];
     const diagnostics: ImportDiagnostic[] = [];
+    // Onshape feature id -> its position in `orderedActions`, so deferred
+    // references can address producing actions by ordered-sequence position
+    // (the index the orchestrator records outputs under).
+    const orderedIndexByFeatureId = new Map<string, number>();
 
     for (const featurePlan of plan.featurePlans) {
       const demotedByUser = demoted.has(featurePlan.onshapeFeatureId);
@@ -413,6 +427,87 @@ export const onshapeImportProvider: ImportProvider<
           kind: "commitSketch",
           index: commitSketches.length - 1,
         });
+        orderedIndexByFeatureId.set(
+          featurePlan.onshapeFeatureId,
+          orderedActions.length - 1,
+        );
+        continue;
+      }
+
+      if (featurePlan.target.kind === "feature" && featurePlan.plannedExtrude) {
+        const extrude = featurePlan.plannedExtrude;
+        const sketchOrderedIndex = orderedIndexByFeatureId.get(
+          extrude.sketchFeatureId,
+        );
+        if (sketchOrderedIndex === undefined) {
+          diagnostics.push({
+            severity: "warning",
+            message: `Extrude "${featurePlan.label}" referenced sketch ${extrude.sketchFeatureId}, which was not committed; the extrude was skipped.`,
+            code: "onshape-extrude-missing-sketch",
+          });
+          continue;
+        }
+
+        const profiles = extrude.profiles.map(
+          (profile): ImportDeferredExtrudeProfileRef => ({
+            kind: "regionOf",
+            actionIndex: sketchOrderedIndex,
+            selector: { kind: "interiorPoint", point: profile.interiorPoint },
+          }),
+        );
+        if (profiles.length === 0) {
+          continue;
+        }
+
+        let booleanScope: ImportDeferredFeatureBooleanScope;
+        if (extrude.boolean.kind === "standalone") {
+          booleanScope = { kind: "standalone" };
+        } else {
+          const bodyOrderedIndex = orderedIndexByFeatureId.get(
+            extrude.boolean.sourceFeatureId,
+          );
+          if (bodyOrderedIndex === undefined) {
+            diagnostics.push({
+              severity: "warning",
+              message: `Extrude "${featurePlan.label}" referenced an upstream body from ${extrude.boolean.sourceFeatureId}, which was not emitted; the extrude was skipped.`,
+              code: "onshape-extrude-missing-body",
+            });
+            continue;
+          }
+          booleanScope = {
+            kind: "targetBody",
+            bodyId: { kind: "bodyOf", actionIndex: bodyOrderedIndex },
+          };
+        }
+
+        createFeatures.push({
+          contractVersion: context.contractVersion,
+          documentId: context.documentId,
+          baseRevisionId: context.baseRevisionId,
+          featureLabel: featurePlan.label,
+          definition: {
+            kind: "extrude",
+            featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              profiles: profiles as [
+                ImportDeferredExtrudeProfileRef,
+                ...ImportDeferredExtrudeProfileRef[],
+              ],
+              startExtent: { kind: "profilePlane" },
+              extent: extrude.extent,
+              operation: extrude.operation,
+              booleanScope,
+            },
+          },
+        });
+        orderedActions.push({
+          kind: "createFeature",
+          index: createFeatures.length - 1,
+        });
+        orderedIndexByFeatureId.set(
+          featurePlan.onshapeFeatureId,
+          orderedActions.length - 1,
+        );
       }
     }
 
@@ -442,6 +537,7 @@ export const onshapeImportProvider: ImportProvider<
     const actions: ImportPreparedActions = {
       addDocumentVariables,
       commitSketches,
+      createFeatures,
       orderedActions,
       binding,
       diagnostics,

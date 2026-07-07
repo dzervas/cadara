@@ -5,6 +5,7 @@ import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture
 import { captureBundle } from "@/cli/commands/onshape-capture/capture";
 import { OnshapeRequestError } from "@/cli/commands/onshape-capture/client";
 import { parseDocumentUrl } from "@/cli/commands/onshape-capture/url";
+import { captureGroundTruth } from "@/cli/commands/onshape-capture/ground-truth";
 import {
   buildDefaultRoutes,
   createFixtureFetch,
@@ -184,4 +185,40 @@ test("capture.spec.ts retries with backoff on HTTP 429 before succeeding", async
     calls.filter((call) => call.url.includes("/features")).length,
   ).toBeGreaterThanOrEqual(3);
   expect(validateOnshapeCaptureBundle(bundle).success).toBeTruthy();
+});
+
+test("capture.spec.ts uses an overrideable STEP translation poll budget", async () => {
+  let translationPolls = 0;
+  const client = {
+    async getJson(path: string) {
+      if (path.includes("tessellatedfaces")) {
+        return { bodies: [] };
+      }
+      if (path === "/translations/translation_1") {
+        translationPolls += 1;
+        return { requestState: "ACTIVE" };
+      }
+      throw new Error(`Unexpected GET ${path}`);
+    },
+    async postJson() {
+      return { id: "translation_1", requestState: "ACTIVE" };
+    },
+    async getText() {
+      throw new Error("STEP text should not be requested before timeout.");
+    },
+  };
+
+  await expect(
+    captureGroundTruth(client as never, {
+      documentId: "doc",
+      wvm: "w",
+      wvmId: "workspace",
+      elementId: "element",
+      studioPath: "/partstudios/d/doc/w/workspace/e/element",
+      parts: [{ partId: "part" }],
+      sleep: () => Promise.resolve(),
+      maxTranslationPolls: 2,
+    }),
+  ).rejects.toThrow("after 2 polls");
+  expect(translationPolls).toBe(2);
 });

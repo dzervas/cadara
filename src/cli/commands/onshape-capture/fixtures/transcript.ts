@@ -69,6 +69,24 @@ const FEATURES_WITH_REFERENCES = {
             },
           ],
         },
+        {
+          btType: "BTMParameterEnum-145",
+          parameterId: "endBound",
+          enumName: "BoundingType",
+          value: "BLIND",
+        },
+        {
+          btType: "BTMParameterQuantity-147",
+          parameterId: "depth",
+          expression: "10 mm",
+          value: 0.01,
+        },
+        {
+          btType: "BTMParameterEnum-145",
+          parameterId: "operationType",
+          enumName: "NewBodyOperationType",
+          value: "NEW",
+        },
       ],
     },
     {

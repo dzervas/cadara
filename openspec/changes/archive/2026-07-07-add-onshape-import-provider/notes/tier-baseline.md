@@ -78,3 +78,58 @@ Reading for the fast-follows:
 - Baked-tier geometry is not yet materialized (`onshape-bake-unavailable`);
   the baked substrate fast-follow turns the suppressed features into
   visible geometry.
+
+## Post-correlation baseline (add-import-action-correlation, 2026-07-07)
+
+After action correlation landed, region-consuming extrudes on parametric
+sketches plan `parametric` via deferred region references verified at review
+time. The comparison below is against the probe-less v1 tables above.
+
+### Fixture bundle (deterministic, re-recorded)
+
+The fixture transcript's `extrude` now carries real `endBound=BLIND`,
+`depth=10 mm`, `operationType=NEW` parameters, so it plans parametric.
+
+| Part Studio | Features | parametric | baked | geometryOnly | Studio bake needed |
+| ----------- | -------- | ---------- | ----- | ------------ | ------------------ |
+| Mounts      | 3        | 3          | 0     | 0            | no                 |
+| Empty       | 0        | 0          | 0     | 0            | no                 |
+
+Shift vs. probe-less v1: Mounts moves from 2/3 to **3/3 parametric**; the single
+`needs-region-resolution` bake is eliminated and the studio no longer needs the
+whole-body bake. Per-feature:
+
+1. `newSketch` → **parametric** (`sketch-on-canonical-plane`)
+2. `extrude` → **parametric** (deferred standalone region profile, verified)
+3. `newSketch` → **parametric** (`sketch-on-canonical-plane`)
+
+### Real spike documents (headless smoke, local bundles)
+
+Re-imported the two local proprietary capture bundles through the headless
+provider → prepare → apply pipeline using the real sketch solver and mock kernel
+adapter. `.envrc` was sourced for the shell environment without printing or
+inspecting its contents. Both imports applied without rollback or error
+diagnostics. This is a headless smoke only; it does not replace visual viewport
+confirmation in the running app.
+
+| Document | Part Studio | Features | parametric | baked | geometryOnly | Applied ops | Created features |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `40a51fb8fa82fd4565151114` (HackerBoard) | Mounts | 10 | 6 | 4 | 0 | 6 | 1 |
+| `9841e486906fa2ce62d74d8e` (Taskariki) | Part Studio 1 | 41 | 6 | 35 | 0 | 6 | 0 |
+
+Degradation reason breakdown after correlation:
+
+| Document | `needs-region-resolution` | `needs-history-probe` | `downstream-of-baked` |
+| --- | --- | --- | --- |
+| HackerBoard / Mounts | 1 | 3 | 3 |
+| Taskariki / Part Studio 1 | 16 | 19 | 24 |
+
+Shift vs. probe-less v1: HackerBoard improves from 5/10 to **6/10** parametric
+with one extrude emitted and applied as a native feature. Taskariki remains
+unchanged in the current local bundle: its remaining region consumers do not yet
+verify into deferred extrudes under the narrow v1 rules (selector verification,
+supported extents, and boolean-scope mapping), so they continue to report
+`needs-region-resolution` honestly.
+
+`needs-region-resolution` now means only "the interior-point selector could not
+be verified at review" — no longer "regions are categorically unresolvable".
