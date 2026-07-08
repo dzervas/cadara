@@ -20,7 +20,6 @@ import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
 import type { ImportProvider } from "@/contracts/import/provider";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
-import type { LocalFileImportBinding } from "@/contracts/import/binding";
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   IMPORT_CONTRACT_SCHEMA_VERSION,
@@ -33,9 +32,13 @@ import type {
   AddDocumentVariableRequest,
   CommitSketchRequest,
 } from "@/contracts/modeling/schema";
-import type { HistoryProbeTopologySignature, ImportCapabilities } from "@/contracts/import/capabilities";
+import type {
+  HistoryProbeResult,
+  HistoryProbeTopologySignature,
+  ImportCapabilities,
+} from "@/contracts/import/capabilities";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
-import type { RequestId } from "@/contracts/shared/ids";
+import type { ConstructionId, RequestId } from "@/contracts/shared/ids";
 import type {
   FeatureEditorFormSchema,
   FeatureEditorFormField,
@@ -51,6 +54,7 @@ import {
   type FidelityTier,
 } from "@/domain/import/onshape/fidelity-planner";
 import {
+  compareTessellation,
   verificationPartial,
   verificationUnavailable,
   type GroundTruthVerification,
@@ -181,24 +185,361 @@ function planeFromProbeSignature(
   };
 }
 
+function arbitraryXAxisForNormal(
+  normal: readonly [number, number, number],
+): [number, number, number] | null {
+  const seed: [number, number, number] = Math.abs(normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const seedDotNormal = seed[0] * normal[0] + seed[1] * normal[1] + seed[2] * normal[2];
+  const projected: [number, number, number] = [
+    seed[0] - normal[0] * seedDotNormal,
+    seed[1] - normal[1] * seedDotNormal,
+    seed[2] - normal[2] * seedDotNormal,
+  ];
+  return normalizeVector(projected);
+}
+
+function planeFromCapturedSignature(input: {
+  deterministicId: string;
+  signature: OnshapeGeometricSignature;
+}): SketchPlaneDefinition | null {
+  if (input.signature.entityClass !== "face" || input.signature.geometryType !== "plane") {
+    return null;
+  }
+  const originMeters = readPoint3(input.signature.definingData?.origin);
+  const normal = normalizeVector(readPoint3(input.signature.definingData?.normal) ?? [0, 0, 0]);
+  if (!originMeters || !normal) {
+    return null;
+  }
+  const xAxis =
+    normalizeVector(readPoint3(input.signature.definingData?.xDirection) ?? [0, 0, 0]) ??
+    arbitraryXAxisForNormal(normal);
+  if (!xAxis) {
+    return null;
+  }
+  const origin: [number, number, number] = [
+    originMeters[0] * 1000,
+    originMeters[1] * 1000,
+    originMeters[2] * 1000,
+  ];
+  return {
+    support: {
+      kind: "construction",
+      constructionId: `construction_import_captured_${input.deterministicId}` as ConstructionId,
+    },
+    frame: {
+      origin,
+      xAxis,
+      yAxis: cross(normal, xAxis),
+      normal,
+      linearUnit: "documentLength",
+      handedness: "rightHanded",
+    },
+    key: null,
+  };
+}
+
+function queryStringsForFeature(feature: ReturnType<typeof readPartStudio>["features"][number]) {
+  const values: string[] = [];
+  for (const parameter of feature.parameters ?? []) {
+    if (typeof parameter !== "object" || parameter === null) {
+      continue;
+    }
+    const queries = (parameter as { queries?: unknown }).queries;
+    if (!Array.isArray(queries)) {
+      continue;
+    }
+    for (const query of queries) {
+      if (typeof query !== "object" || query === null) {
+        continue;
+      }
+      const queryString = (query as { queryString?: unknown }).queryString;
+      if (typeof queryString === "string") {
+        values.push(queryString);
+      }
+    }
+  }
+  return values;
+}
+
+function readEvaluatedDepthMm(
+  feature: ReturnType<typeof readPartStudio>["features"][number] | undefined,
+): number | null {
+  for (const parameter of feature?.parameters ?? []) {
+    if (typeof parameter !== "object" || parameter === null) {
+      continue;
+    }
+    const record = parameter as { parameterId?: unknown; value?: unknown };
+    if (record.parameterId === "depth" && typeof record.value === "number") {
+      return record.value * 1000;
+    }
+  }
+  return null;
+}
+
+function extractSweptFaceQuery(input: string) {
+  const sketchEntityId = input.match(/sketchEntityIdS[a-z]\$([^$]+)/)?.[1] ?? null;
+  const extrudeFeatureId = input.match(/S\d+\.\d+\$([^$]+)opExtrude/)?.[1] ?? null;
+  return sketchEntityId && extrudeFeatureId
+    ? { sketchEntityId, extrudeFeatureId }
+    : null;
+}
+
+function normalizeVector(
+  vector: readonly [number, number, number],
+): [number, number, number] | null {
+  const length = Math.hypot(vector[0], vector[1], vector[2]);
+  if (length === 0) {
+    return null;
+  }
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function inferredSweptFaceSignature(input: {
+  feature: ReturnType<typeof readPartStudio>["features"][number];
+  read: ReturnType<typeof readPartStudio>;
+  plan: OnshapeStudioPlan;
+}): OnshapeGeometricSignature | null {
+  const query = queryStringsForFeature(input.feature)
+    .map(extractSweptFaceQuery)
+    .find((candidate): candidate is NonNullable<typeof candidate> => candidate != null);
+  if (!query) {
+    return null;
+  }
+  const extrudeFeature = input.read.features.find(
+    (entry) => entry.featureId === query.extrudeFeatureId,
+  );
+
+  const extrudePlan = input.plan.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === query.extrudeFeatureId,
+  );
+  const extrude = extrudePlan?.plannedExtrude;
+  if (!extrude || extrude.extent.mode !== "oneSide" || extrude.extent.end.kind !== "blind") {
+    return null;
+  }
+
+  const solved = input.read.solvedSketchesByFeatureId.get(extrude.sketchFeatureId);
+  const queryEntityBaseId = query.sketchEntityId.match(/^(.+?)R\d+C\d+S\d+$/)?.[1] ?? query.sketchEntityId;
+  const curve = solved?.entities.find(
+    (entity) =>
+      entity.entityId === query.sketchEntityId ||
+      entity.entityId === queryEntityBaseId,
+  );
+  if (!curve?.start3d || !curve.end3d) {
+    return null;
+  }
+
+  const start: [number, number, number] = curve.start3d.map((component) => component * 1000) as [number, number, number];
+  const end: [number, number, number] = curve.end3d.map((component) => component * 1000) as [number, number, number];
+  const distanceValue = extrude.extent.end.distance;
+  const distance =
+    distanceValue.source === "literal"
+      ? distanceValue.value
+      : readEvaluatedDepthMm(extrudeFeature);
+  if (distance == null) {
+    return null;
+  }
+  const direction = extrude.extent.end.direction === "negative" ? -distance : distance;
+  const extrudeVector: [number, number, number] = [0, 0, direction];
+  const extrudedStart: [number, number, number] = [
+    start[0] + extrudeVector[0],
+    start[1] + extrudeVector[1],
+    start[2] + extrudeVector[2],
+  ];
+  const extrudedEnd: [number, number, number] = [
+    end[0] + extrudeVector[0],
+    end[1] + extrudeVector[1],
+    end[2] + extrudeVector[2],
+  ];
+  const edgeVector: [number, number, number] = [
+    end[0] - start[0],
+    end[1] - start[1],
+    end[2] - start[2],
+  ];
+  const normal = normalizeVector(cross(edgeVector, extrudeVector));
+  const xDirection = normalizeVector(edgeVector);
+  if (!normal || !xDirection) {
+    return null;
+  }
+  const points = [start, end, extrudedStart, extrudedEnd];
+  const low: [number, number, number] = [
+    Math.min(...points.map((point) => point[0])),
+    Math.min(...points.map((point) => point[1])),
+    Math.min(...points.map((point) => point[2])),
+  ];
+  const high: [number, number, number] = [
+    Math.max(...points.map((point) => point[0])),
+    Math.max(...points.map((point) => point[1])),
+    Math.max(...points.map((point) => point[2])),
+  ];
+  return {
+    entityClass: "face",
+    geometryType: "plane",
+    definingData: { origin: start, normal, xDirection },
+    boundingBox: { low, high },
+    centroid: [(low[0] + high[0]) / 2, (low[1] + high[1]) / 2, (low[2] + high[2]) / 2],
+  };
+}
+
+function readCapturedPoint(value: unknown): [number, number, number] | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as { x?: unknown; y?: unknown; z?: unknown };
+  return typeof record.x === "number" &&
+    typeof record.y === "number" &&
+    typeof record.z === "number"
+    ? [record.x * 1000, record.y * 1000, record.z * 1000]
+    : null;
+}
+
+function extractCapturedTessellationPoints(tessellatedFaces: unknown): number[] {
+  if (typeof tessellatedFaces !== "object" || tessellatedFaces === null) {
+    return [];
+  }
+  const bodies = (tessellatedFaces as { bodies?: unknown }).bodies;
+  if (!Array.isArray(bodies)) {
+    return [];
+  }
+  const points: number[] = [];
+  for (const body of bodies) {
+    const faces = (body as { faces?: unknown }).faces;
+    if (!Array.isArray(faces)) {
+      continue;
+    }
+    for (const face of faces) {
+      const facets = (face as { facets?: unknown }).facets;
+      if (!Array.isArray(facets)) {
+        continue;
+      }
+      for (const facet of facets) {
+        const vertices = (facet as { vertices?: unknown }).vertices;
+        if (!Array.isArray(vertices)) {
+          continue;
+        }
+        for (const vertex of vertices) {
+          const point = readCapturedPoint(vertex);
+          if (point) {
+            points.push(...point);
+          }
+        }
+      }
+    }
+  }
+  return points;
+}
+
+function verifyGroundTruth(input: {
+  hasHistoryCapability: boolean;
+  groundTruth: ReturnType<typeof readPartStudio>["studio"]["groundTruth"];
+  bakedCount: number;
+  probeResult: HistoryProbeResult | null;
+}): GroundTruthVerification {
+  if (!input.groundTruth.hasBodies) {
+    return { status: "noGroundTruth" };
+  }
+  if (input.bakedCount > 0) {
+    return verificationPartial(input.bakedCount);
+  }
+  if (!input.hasHistoryCapability) {
+    return verificationUnavailable(true);
+  }
+  return compareTessellation(
+    { points: input.probeResult?.finalTessellation?.points ?? [] },
+    { points: extractCapturedTessellationPoints(input.groundTruth.tessellatedFaces) },
+    input.groundTruth.tessellationTolerance * 1000,
+  );
+}
+
+function recomputePlanWithFeaturePlans(
+  basePlan: OnshapeStudioPlan,
+  featurePlans: FeaturePlan[],
+  hasBodies: boolean,
+): OnshapeStudioPlan {
+  const tierCounts = { parametric: 0, baked: 0, geometryOnly: 0 };
+  for (const plan of featurePlans) {
+    tierCounts[plan.tier] += 1;
+  }
+  return {
+    ...basePlan,
+    featurePlans,
+    tierCounts,
+    requiresStudioBake:
+      featurePlans.some((plan) => plan.tier === "baked") && hasBodies,
+  };
+}
+
+function activateCapturedFramePlanning(input: {
+  read: ReturnType<typeof readPartStudio>;
+  plan: OnshapeStudioPlan;
+}): OnshapeStudioPlan {
+  const references = new Map(
+    input.read.studio.resolvedReferences.map((reference) => [
+      reference.deterministicId,
+      reference,
+    ]),
+  );
+  const nextPlans = input.plan.featurePlans.map((featurePlan) => {
+    if (
+      featurePlan.featureType !== "newSketch" ||
+      featurePlan.tier !== "baked" ||
+      !featurePlan.reasonCodes.includes("needs-history-probe")
+    ) {
+      return featurePlan;
+    }
+    const feature = input.read.features.find(
+      (entry) => entry.featureId === featurePlan.onshapeFeatureId,
+    );
+    const deterministicId = feature ? extractSketchPlaneDeterministicId(feature) : null;
+    const reference = deterministicId ? references.get(deterministicId) : undefined;
+    if (!reference || !("signature" in reference)) {
+      return featurePlan;
+    }
+    const plane = planeFromCapturedSignature({
+      deterministicId: reference.deterministicId,
+      signature: reference.signature,
+    });
+    if (!plane) {
+      return featurePlan;
+    }
+    return {
+      ...featurePlan,
+      tier: "parametric" as const,
+      target: { kind: "sketch" as const, planeKey: "xy" as const, plane },
+      reasonCodes: ["sketch-on-captured-frame" as const],
+      suppressed: false,
+    };
+  });
+  return recomputePlanWithFeaturePlans(
+    input.plan,
+    nextPlans,
+    input.read.studio.groundTruth.hasBodies,
+  );
+}
+
 async function activateProbeBackedPlanning(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: ReturnType<typeof planStudioFidelity>;
   capabilities: ImportCapabilities;
 }) {
   if (!input.capabilities.history) {
-    return input.plan;
+    return { plan: input.plan, probeResult: null };
   }
 
+  const candidatePrefix = buildPreparedActions({
+    read: input.read,
+    plan: input.plan,
+    capabilities: input.capabilities,
+  });
   const probeResult = await input.capabilities.history.evaluateHistoryProbe({
-    actions: {},
+    actions: candidatePrefix,
     includeFinalTessellation: true,
   });
-  const probeSignatures = probeResult.steps.flatMap((step) =>
-    step.status === "rebuilt" ? step.signatures : [],
-  );
+  const finalRebuiltStep = [...probeResult.steps]
+    .reverse()
+    .find((step) => step.status === "rebuilt");
+  const probeSignatures = finalRebuiltStep?.status === "rebuilt" ? finalRebuiltStep.signatures : [];
   if (probeSignatures.length === 0) {
-    return input.plan;
+    return { plan: input.plan, probeResult };
   }
 
   const references = new Map(
@@ -232,14 +573,21 @@ async function activateProbeBackedPlanning(input: {
     );
     const deterministicId = feature ? extractSketchPlaneDeterministicId(feature) : null;
     const reference = deterministicId ? references.get(deterministicId) : undefined;
-    if (!reference || !("signature" in reference)) {
+    const capturedSignature =
+      reference && "signature" in reference
+        ? scaleCapturedSignatureToDocumentUnits(reference.signature)
+        : feature
+          ? inferredSweptFaceSignature({
+              feature,
+              read: input.read,
+              plan: input.plan,
+            })
+          : null;
+    if (!capturedSignature) {
       return featurePlan;
     }
 
-    const match = matchSignature(
-      scaleCapturedSignatureToDocumentUnits(reference.signature),
-      probeSignatures,
-    );
+    const match = matchSignature(capturedSignature, probeSignatures);
     if (match.kind !== "unique") {
       return featurePlan;
     }
@@ -266,12 +614,15 @@ async function activateProbeBackedPlanning(input: {
     tierCounts[plan.tier] += 1;
   }
   return {
-    ...input.plan,
-    featurePlans: nextPlans,
-    tierCounts,
-    requiresStudioBake:
-      nextPlans.some((plan) => plan.tier === "baked") &&
-      input.read.studio.groundTruth.hasBodies,
+    plan: {
+      ...input.plan,
+      featurePlans: nextPlans,
+      tierCounts,
+      requiresStudioBake:
+        nextPlans.some((plan) => plan.tier === "baked") &&
+        input.read.studio.groundTruth.hasBodies,
+    },
+    probeResult,
   };
 }
 
@@ -281,11 +632,16 @@ async function reviewStudio(
   capabilities: ImportCapabilities,
 ): Promise<OnshapeStudioReview> {
   const read = readPartStudio(bundle, elementId);
-  const plan = await activateProbeBackedPlanning({
+  const capturedFramePlan = activateCapturedFramePlanning({
     read,
     plan: planStudioFidelity(read),
+  });
+  const activation = await activateProbeBackedPlanning({
+    read,
+    plan: capturedFramePlan,
     capabilities,
   });
+  const { plan, probeResult } = activation;
   const bakedCount = plan.featurePlans.filter((entry) => entry.tier === "baked").length;
   return {
     elementId: read.studio.elementId,
@@ -294,9 +650,12 @@ async function reviewStudio(
     featurePlans: plan.featurePlans,
     tierCounts: plan.tierCounts,
     requiresStudioBake: plan.requiresStudioBake,
-    verification: bakedCount > 0
-      ? verificationPartial(bakedCount)
-      : verificationUnavailable(read.studio.groundTruth.hasBodies),
+    verification: verifyGroundTruth({
+      hasHistoryCapability: capabilities.history != null,
+      groundTruth: read.studio.groundTruth,
+      bakedCount,
+      probeResult,
+    }),
   };
 }
 
@@ -329,6 +688,275 @@ function summaryField(id: string, label: string, value: string): FeatureEditorFo
 
 function sanitizeCorrelationPart(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+type OnshapeStudioPlan = Pick<
+  ReturnType<typeof planStudioFidelity>,
+  "featurePlans" | "tierCounts" | "requiresStudioBake"
+>;
+
+function buildPreparedActions(input: {
+  source?: ResolvedImportSource;
+  read: ReturnType<typeof readPartStudio>;
+  plan: OnshapeStudioPlan;
+  capabilities: ImportCapabilities;
+  demotedFeatureIds?: Iterable<string>;
+  includeBinding?: boolean;
+}): ImportPreparedActions {
+  const demoted = new Set(input.demotedFeatureIds ?? []);
+  const featuresById = new Map(input.read.features.map((f) => [f.featureId, f]));
+  const context = input.capabilities.context;
+  const addDocumentVariables: AddDocumentVariableRequest[] = [];
+  const commitSketches: CommitSketchRequest[] = [];
+  const createFeatures: ImportCreateFeatureRequest[] = [];
+  const orderedActions: ImportPreparedActionRef[] = [];
+  const diagnostics: ImportDiagnostic[] = [];
+  // Onshape feature id -> its position in `orderedActions`, so deferred
+  // references can address producing actions by ordered-sequence position
+  // (the index the orchestrator records outputs under).
+  const orderedIndexByFeatureId = new Map<string, number>();
+
+  for (const featurePlan of input.plan.featurePlans) {
+    const demotedByUser = demoted.has(featurePlan.onshapeFeatureId);
+    if (featurePlan.tier !== "parametric" || demotedByUser) {
+      if (demotedByUser) {
+        diagnostics.push({
+          severity: "info",
+          message: `"${featurePlan.label}" was demoted to baked by the reviewer.`,
+          code: "onshape-feature-demoted",
+        });
+      } else {
+        diagnostics.push({
+          severity: "warning",
+          message: `"${featurePlan.label}" (${featurePlan.featureType}) imported as ${featurePlan.tier}: ${featurePlan.reasonCodes.join(", ")}.`,
+          code: "onshape-feature-degraded",
+        });
+      }
+      continue;
+    }
+
+    if (featurePlan.target.kind === "variable") {
+      const feature = featuresById.get(featurePlan.onshapeFeatureId);
+      const variable = extractVariable(feature?.parameters);
+      if (!variable) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Variable feature "${featurePlan.label}" had no readable name/value and was skipped.`,
+          code: "onshape-variable-unreadable",
+        });
+        continue;
+      }
+      const translated = translateOnshapeExpression({
+        expression: variable.expression,
+      });
+      if (translated.diagnostic) {
+        diagnostics.push({
+          severity: "warning",
+          message: translated.diagnostic.message,
+          code: translated.diagnostic.code,
+        });
+      }
+      addDocumentVariables.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        name: variable.name,
+        valueText: translated.valueText,
+      });
+      orderedActions.push({
+        kind: "addDocumentVariable",
+        index: addDocumentVariables.length - 1,
+      });
+      continue;
+    }
+
+    if (featurePlan.target.kind === "sketch") {
+      const planeKey = featurePlan.target.planeKey;
+      const plane = featurePlan.target.plane;
+      const solved = input.read.solvedSketchesByFeatureId.get(
+        featurePlan.onshapeFeatureId,
+      );
+      const entities: SolvedSketchEntityGeometry[] = (solved?.entities ?? []).map(
+        (curve) => ({
+          entityId: curve.entityId,
+          entityType: curve.entityType,
+          isConstruction: curve.isConstruction,
+          start: curve.start3d
+            ? plane
+              ? projectPointToSketchPlane(curve.start3d, plane)
+              : projectPointToPlane(curve.start3d, planeKey)
+            : undefined,
+          end: curve.end3d
+            ? plane
+              ? projectPointToSketchPlane(curve.end3d, plane)
+              : projectPointToPlane(curve.end3d, planeKey)
+            : undefined,
+          center: curve.center3d
+            ? plane
+              ? projectPointToSketchPlane(curve.center3d, plane)
+              : projectPointToPlane(curve.center3d, planeKey)
+            : undefined,
+          // Onshape radii are in meters; sketch units are millimeters.
+          radius: curve.radius === undefined ? undefined : curve.radius * 1000,
+        }),
+      );
+      const translation = translateSketch({
+        featureId: featurePlan.onshapeFeatureId,
+        label: featurePlan.label,
+        planeKey,
+        plane,
+        entities,
+      });
+      for (const sketchDiagnostic of translation.diagnostics) {
+        diagnostics.push({
+          severity: "info",
+          message: sketchDiagnostic.message,
+          code: sketchDiagnostic.code,
+        });
+      }
+      // The provider owns solver correlation ids per the commit contract
+      // ("Editor- or orchestrator-owned correlation IDs"); a null correlation
+      // skips projection/solve/region derivation, which the mock and real
+      // kernel lanes require for a committed import sketch.
+      const correlationRoot = `request_import_${sanitizeCorrelationPart(featurePlan.onshapeFeatureId)}`;
+      commitSketches.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        solverCorrelation: {
+          requestId: correlationRoot as RequestId,
+          projectionRequestId: `${correlationRoot}_project` as RequestId,
+          validationRequestId: `${correlationRoot}_validate` as RequestId,
+          solveRequestId: `${correlationRoot}_solve` as RequestId,
+          regionRequestId: `${correlationRoot}_regions` as RequestId,
+        },
+        sketchId: null,
+        sketchLabel: featurePlan.label,
+        plane: translation.plane,
+        definition: translation.definition,
+      });
+      orderedActions.push({
+        kind: "commitSketch",
+        index: commitSketches.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+      continue;
+    }
+
+    if (featurePlan.target.kind === "feature" && featurePlan.plannedExtrude) {
+      const extrude = featurePlan.plannedExtrude;
+      const sketchOrderedIndex = orderedIndexByFeatureId.get(
+        extrude.sketchFeatureId,
+      );
+      if (sketchOrderedIndex === undefined) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Extrude "${featurePlan.label}" referenced sketch ${extrude.sketchFeatureId}, which was not committed; the extrude was skipped.`,
+          code: "onshape-extrude-missing-sketch",
+        });
+        continue;
+      }
+
+      const profiles = extrude.profiles.map(
+        (profile): ImportDeferredExtrudeProfileRef => ({
+          kind: "regionOf",
+          actionIndex: sketchOrderedIndex,
+          selector: { kind: "interiorPoint", point: profile.interiorPoint },
+        }),
+      );
+      if (profiles.length === 0) {
+        continue;
+      }
+
+      let booleanScope: ImportDeferredFeatureBooleanScope;
+      if (extrude.boolean.kind === "standalone") {
+        booleanScope = { kind: "standalone" };
+      } else {
+        const bodyOrderedIndex = orderedIndexByFeatureId.get(
+          extrude.boolean.sourceFeatureId,
+        );
+        if (bodyOrderedIndex === undefined) {
+          diagnostics.push({
+            severity: "warning",
+            message: `Extrude "${featurePlan.label}" referenced an upstream body from ${extrude.boolean.sourceFeatureId}, which was not emitted; the extrude was skipped.`,
+            code: "onshape-extrude-missing-body",
+          });
+          continue;
+        }
+        booleanScope = {
+          kind: "targetBody",
+          bodyId: { kind: "bodyOf", actionIndex: bodyOrderedIndex },
+        };
+      }
+
+      createFeatures.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: profiles as [
+              ImportDeferredExtrudeProfileRef,
+              ...ImportDeferredExtrudeProfileRef[],
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: extrude.extent,
+            operation: extrude.operation,
+            booleanScope,
+          },
+        },
+      });
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+    }
+  }
+
+  if (input.plan.requiresStudioBake) {
+    diagnostics.push({
+      severity: "warning",
+      message:
+        "Non-parametric solid geometry could not be materialized: baking requires the geometry-import capability, which is not available. The final-state body was not imported.",
+      code: "onshape-bake-unavailable",
+    });
+  }
+
+  diagnostics.push({
+    severity: "info",
+    message: `Fidelity: ${input.plan.tierCounts.parametric} parametric, ${input.plan.tierCounts.baked} baked, ${input.plan.tierCounts.geometryOnly} geometry-only.`,
+    code: "onshape-fidelity-summary",
+  });
+
+  const actions: ImportPreparedActions = {
+    addDocumentVariables,
+    commitSketches,
+    createFeatures,
+    orderedActions,
+    diagnostics,
+  };
+
+  if (input.includeBinding && input.source) {
+    actions.binding = {
+      schemaVersion: IMPORT_CONTRACT_SCHEMA_VERSION,
+      kind: "localFile",
+      fileName: input.source.name,
+      fingerprint: input.source.fingerprint,
+      refreshPolicy: "manual",
+    };
+  }
+
+  return actions;
 }
 
 export const onshapeImportProvider: ImportProvider<
@@ -508,258 +1136,13 @@ export const onshapeImportProvider: ImportProvider<
           requiresStudioBake: reviewedStudio.requiresStudioBake,
         }
       : planStudioFidelity(read);
-    const demoted = new Set(selections.demotedFeatureIds);
-    const featuresById = new Map(read.features.map((f) => [f.featureId, f]));
-
-    const context = capabilities.context;
-    const addDocumentVariables: AddDocumentVariableRequest[] = [];
-    const commitSketches: CommitSketchRequest[] = [];
-    const createFeatures: ImportCreateFeatureRequest[] = [];
-    const orderedActions: ImportPreparedActionRef[] = [];
-    const diagnostics: ImportDiagnostic[] = [];
-    // Onshape feature id -> its position in `orderedActions`, so deferred
-    // references can address producing actions by ordered-sequence position
-    // (the index the orchestrator records outputs under).
-    const orderedIndexByFeatureId = new Map<string, number>();
-
-    for (const featurePlan of plan.featurePlans) {
-      const demotedByUser = demoted.has(featurePlan.onshapeFeatureId);
-      if (featurePlan.tier !== "parametric" || demotedByUser) {
-        if (demotedByUser) {
-          diagnostics.push({
-            severity: "info",
-            message: `"${featurePlan.label}" was demoted to baked by the reviewer.`,
-            code: "onshape-feature-demoted",
-          });
-        } else {
-          diagnostics.push({
-            severity: "warning",
-            message: `"${featurePlan.label}" (${featurePlan.featureType}) imported as ${featurePlan.tier}: ${featurePlan.reasonCodes.join(", ")}.`,
-            code: "onshape-feature-degraded",
-          });
-        }
-        continue;
-      }
-
-      if (featurePlan.target.kind === "variable") {
-        const feature = featuresById.get(featurePlan.onshapeFeatureId);
-        const variable = extractVariable(feature?.parameters);
-        if (!variable) {
-          diagnostics.push({
-            severity: "warning",
-            message: `Variable feature "${featurePlan.label}" had no readable name/value and was skipped.`,
-            code: "onshape-variable-unreadable",
-          });
-          continue;
-        }
-        const translated = translateOnshapeExpression({
-          expression: variable.expression,
-        });
-        if (translated.diagnostic) {
-          diagnostics.push({
-            severity: "warning",
-            message: translated.diagnostic.message,
-            code: translated.diagnostic.code,
-          });
-        }
-        addDocumentVariables.push({
-          contractVersion: context.contractVersion,
-          documentId: context.documentId,
-          baseRevisionId: context.baseRevisionId,
-          name: variable.name,
-          valueText: translated.valueText,
-        });
-        orderedActions.push({
-          kind: "addDocumentVariable",
-          index: addDocumentVariables.length - 1,
-        });
-        continue;
-      }
-
-      if (featurePlan.target.kind === "sketch") {
-        const planeKey = featurePlan.target.planeKey;
-        const plane = featurePlan.target.plane;
-        const solved = read.solvedSketchesByFeatureId.get(
-          featurePlan.onshapeFeatureId,
-        );
-        const entities: SolvedSketchEntityGeometry[] = (
-          solved?.entities ?? []
-        ).map((curve) => ({
-          entityId: curve.entityId,
-          entityType: curve.entityType,
-          isConstruction: curve.isConstruction,
-          start: curve.start3d
-            ? plane
-              ? projectPointToSketchPlane(curve.start3d, plane)
-              : projectPointToPlane(curve.start3d, planeKey)
-            : undefined,
-          end: curve.end3d
-            ? plane
-              ? projectPointToSketchPlane(curve.end3d, plane)
-              : projectPointToPlane(curve.end3d, planeKey)
-            : undefined,
-          center: curve.center3d
-            ? plane
-              ? projectPointToSketchPlane(curve.center3d, plane)
-              : projectPointToPlane(curve.center3d, planeKey)
-            : undefined,
-          // Onshape radii are in meters; sketch units are millimeters.
-          radius: curve.radius === undefined ? undefined : curve.radius * 1000,
-        }));
-        const translation = translateSketch({
-          featureId: featurePlan.onshapeFeatureId,
-          label: featurePlan.label,
-          planeKey,
-          plane,
-          entities,
-        });
-        for (const sketchDiagnostic of translation.diagnostics) {
-          diagnostics.push({
-            severity: "info",
-            message: sketchDiagnostic.message,
-            code: sketchDiagnostic.code,
-          });
-        }
-        // The provider owns solver correlation ids per the commit contract
-        // ("Editor- or orchestrator-owned correlation IDs"); a null correlation
-        // skips projection/solve/region derivation, which the mock and real
-        // kernel lanes require for a committed import sketch.
-        const correlationRoot = `request_import_${sanitizeCorrelationPart(featurePlan.onshapeFeatureId)}`;
-        commitSketches.push({
-          contractVersion: context.contractVersion,
-          documentId: context.documentId,
-          baseRevisionId: context.baseRevisionId,
-          solverCorrelation: {
-            requestId: correlationRoot as RequestId,
-            projectionRequestId: `${correlationRoot}_project` as RequestId,
-            validationRequestId: `${correlationRoot}_validate` as RequestId,
-            solveRequestId: `${correlationRoot}_solve` as RequestId,
-            regionRequestId: `${correlationRoot}_regions` as RequestId,
-          },
-          sketchId: null,
-          sketchLabel: featurePlan.label,
-          plane: translation.plane,
-          definition: translation.definition,
-        });
-        orderedActions.push({
-          kind: "commitSketch",
-          index: commitSketches.length - 1,
-        });
-        orderedIndexByFeatureId.set(
-          featurePlan.onshapeFeatureId,
-          orderedActions.length - 1,
-        );
-        continue;
-      }
-
-      if (featurePlan.target.kind === "feature" && featurePlan.plannedExtrude) {
-        const extrude = featurePlan.plannedExtrude;
-        const sketchOrderedIndex = orderedIndexByFeatureId.get(
-          extrude.sketchFeatureId,
-        );
-        if (sketchOrderedIndex === undefined) {
-          diagnostics.push({
-            severity: "warning",
-            message: `Extrude "${featurePlan.label}" referenced sketch ${extrude.sketchFeatureId}, which was not committed; the extrude was skipped.`,
-            code: "onshape-extrude-missing-sketch",
-          });
-          continue;
-        }
-
-        const profiles = extrude.profiles.map(
-          (profile): ImportDeferredExtrudeProfileRef => ({
-            kind: "regionOf",
-            actionIndex: sketchOrderedIndex,
-            selector: { kind: "interiorPoint", point: profile.interiorPoint },
-          }),
-        );
-        if (profiles.length === 0) {
-          continue;
-        }
-
-        let booleanScope: ImportDeferredFeatureBooleanScope;
-        if (extrude.boolean.kind === "standalone") {
-          booleanScope = { kind: "standalone" };
-        } else {
-          const bodyOrderedIndex = orderedIndexByFeatureId.get(
-            extrude.boolean.sourceFeatureId,
-          );
-          if (bodyOrderedIndex === undefined) {
-            diagnostics.push({
-              severity: "warning",
-              message: `Extrude "${featurePlan.label}" referenced an upstream body from ${extrude.boolean.sourceFeatureId}, which was not emitted; the extrude was skipped.`,
-              code: "onshape-extrude-missing-body",
-            });
-            continue;
-          }
-          booleanScope = {
-            kind: "targetBody",
-            bodyId: { kind: "bodyOf", actionIndex: bodyOrderedIndex },
-          };
-        }
-
-        createFeatures.push({
-          contractVersion: context.contractVersion,
-          documentId: context.documentId,
-          baseRevisionId: context.baseRevisionId,
-          featureLabel: featurePlan.label,
-          definition: {
-            kind: "extrude",
-            featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-            parameters: {
-              profiles: profiles as [
-                ImportDeferredExtrudeProfileRef,
-                ...ImportDeferredExtrudeProfileRef[],
-              ],
-              startExtent: { kind: "profilePlane" },
-              extent: extrude.extent,
-              operation: extrude.operation,
-              booleanScope,
-            },
-          },
-        });
-        orderedActions.push({
-          kind: "createFeature",
-          index: createFeatures.length - 1,
-        });
-        orderedIndexByFeatureId.set(
-          featurePlan.onshapeFeatureId,
-          orderedActions.length - 1,
-        );
-      }
-    }
-
-    if (plan.requiresStudioBake) {
-      diagnostics.push({
-        severity: "warning",
-        message:
-          "Non-parametric solid geometry could not be materialized: baking requires the geometry-import capability, which is not available. The final-state body was not imported.",
-        code: "onshape-bake-unavailable",
-      });
-    }
-
-    diagnostics.push({
-      severity: "info",
-      message: `Fidelity: ${plan.tierCounts.parametric} parametric, ${plan.tierCounts.baked} baked, ${plan.tierCounts.geometryOnly} geometry-only.`,
-      code: "onshape-fidelity-summary",
+    return buildPreparedActions({
+      source,
+      read,
+      plan,
+      capabilities,
+      demotedFeatureIds: selections.demotedFeatureIds,
+      includeBinding: true,
     });
-
-    const binding: LocalFileImportBinding = {
-      schemaVersion: IMPORT_CONTRACT_SCHEMA_VERSION,
-      kind: "localFile",
-      fileName: source.name,
-      fingerprint: source.fingerprint,
-      refreshPolicy: "manual",
-    };
-
-    const actions: ImportPreparedActions = {
-      addDocumentVariables,
-      commitSketches,
-      createFeatures,
-      orderedActions,
-      binding,
-      diagnostics,
-    };
-    return actions;
   },
 };

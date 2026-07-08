@@ -39,6 +39,7 @@ export type PlanReasonCode =
   // Consumes body faces/edges/bodies mid-history; needs the sandboxed probe.
   | "needs-history-probe"
   | "sketch-on-probed-face"
+  | "sketch-on-captured-frame"
   | "translator-unavailable"
   | "custom-feature"
   | "unsupported-feature"

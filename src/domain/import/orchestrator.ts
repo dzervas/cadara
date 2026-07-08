@@ -127,7 +127,7 @@ export async function createImportSession(input: {
   };
 }
 
-interface ImportActionOutputRecord {
+export interface ImportActionOutputRecord {
   sketchId?: SketchId;
   bodyIds?: BodyId[];
 }
@@ -136,7 +136,7 @@ type ImportRegionSketchSource =
   | SketchRecord
   | WorkspaceSnapshot["document"]["sketches"][number];
 
-function orderedOutputKey(actionIndex: number) {
+export function orderedOutputKey(actionIndex: number) {
   return `ordered:${actionIndex}`;
 }
 
@@ -202,36 +202,32 @@ function toSelectionSketch(sketch: ImportRegionSketchSource): RegionSelectionSke
   };
 }
 
-export async function applyImportPreparedActions(input: {
-  modelingService: ModelingService;
-  baseRevisionId: WorkspaceSnapshot["document"]["revisionId"];
-  actions: ImportPreparedActions;
-  /**
-   * Reverts the last `appliedOperationCount` committed operations to keep the
-   * import atomic on mid-sequence failure. Injected by the caller because the
-   * durable-history revert lives at the repository layer; called once with the
-   * number of operations that were applied before the failure.
-   */
-  rollback?: (appliedOperationCount: number) => Promise<void>;
-}) {
-  let revisionId = input.baseRevisionId;
-  const diagnostics: ModelingDiagnostic[] = [
-    ...toImportModelingDiagnostics(input.actions.diagnostics ?? []),
-  ];
-  const createdEntityIds: ImportResult["createdEntityIds"] = {
-    featureIds: [],
-    sketchIds: [],
-    variableIds: [],
+export class ImportDeferredMaterializer {
+  private readonly input: {
+    modelingService: Pick<ModelingService, "getCurrentDocumentSnapshot">;
+    outputRecords: Map<string, ImportActionOutputRecord>;
   };
-  let appliedOperationCount = 0;
-  const outputRecords = new Map<string, ImportActionOutputRecord>();
-  let currentOrderedPosition = -1;
 
-  const resolveDeferredValue = async (
+  constructor(input: {
+    modelingService: Pick<ModelingService, "getCurrentDocumentSnapshot">;
+    outputRecords: Map<string, ImportActionOutputRecord>;
+  }) {
+    this.input = input;
+  }
+
+  recordSketchOutput(orderedPosition: number, sketchId: SketchId) {
+    this.input.outputRecords.set(orderedOutputKey(orderedPosition), { sketchId });
+  }
+
+  recordBodyOutput(orderedPosition: number, bodyIds: BodyId[]) {
+    this.input.outputRecords.set(orderedOutputKey(orderedPosition), { bodyIds });
+  }
+
+  async resolveDeferredValue(
     value: ImportDeferredValue,
     consumer: ImportPreparedActionRef,
-  ) => {
-    const output = outputRecords.get(orderedOutputKey(value.actionIndex));
+  ) {
+    const output = this.input.outputRecords.get(orderedOutputKey(value.actionIndex));
     if (!output) {
       throw new Error(
         `Unable to resolve deferred ${value.kind} for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} has no recorded output.`,
@@ -262,7 +258,7 @@ export async function applyImportPreparedActions(input: {
             `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced no sketch id; selector ${JSON.stringify(value.selector)}.`,
           );
         }
-        const snapshot = await input.modelingService.getCurrentDocumentSnapshot();
+        const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
         const sketch = snapshot.document.sketches.find(
           (candidate) => candidate.sketchId === output.sketchId,
         );
@@ -280,12 +276,12 @@ export async function applyImportPreparedActions(input: {
         return { kind: "region" as const, sketchId: output.sketchId, regionId: region.regionId };
       }
     }
-  };
+  }
 
-  const materializeFeatureRequest = async (
+  async materializeFeatureRequest(
     request: ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
     consumer: ImportPreparedActionRef,
-  ): Promise<CreateFeatureRequest> => {
+  ): Promise<CreateFeatureRequest> {
     if (!request.definition || request.definition.kind !== "extrude") {
       return request as CreateFeatureRequest;
     }
@@ -293,7 +289,7 @@ export async function applyImportPreparedActions(input: {
     const profiles = await Promise.all(
       request.definition.parameters.profiles.map(async (profile) =>
         isDeferredValue(profile)
-          ? await resolveDeferredValue(profile, consumer)
+          ? await this.resolveDeferredValue(profile, consumer)
           : profile,
       ),
     );
@@ -302,7 +298,7 @@ export async function applyImportPreparedActions(input: {
       booleanScope.kind === "targetBody" && isDeferredValue(booleanScope.bodyId)
         ? {
             ...booleanScope,
-            bodyId: await resolveDeferredValue(booleanScope.bodyId, consumer),
+            bodyId: await this.resolveDeferredValue(booleanScope.bodyId, consumer),
           }
         : booleanScope;
 
@@ -317,7 +313,38 @@ export async function applyImportPreparedActions(input: {
         },
       },
     } as unknown as CreateFeatureRequest;
+  }
+}
+
+export async function applyImportPreparedActions(input: {
+  modelingService: ModelingService;
+  baseRevisionId: WorkspaceSnapshot["document"]["revisionId"];
+  actions: ImportPreparedActions;
+  /**
+   * Reverts the last `appliedOperationCount` committed operations to keep the
+   * import atomic on mid-sequence failure. Injected by the caller because the
+   * durable-history revert lives at the repository layer; called once with the
+   * number of operations that were applied before the failure.
+   */
+  rollback?: (appliedOperationCount: number) => Promise<void>;
+}) {
+  let revisionId = input.baseRevisionId;
+  const diagnostics: ModelingDiagnostic[] = [
+    ...toImportModelingDiagnostics(input.actions.diagnostics ?? []),
+  ];
+  const createdEntityIds: ImportResult["createdEntityIds"] = {
+    featureIds: [],
+    sketchIds: [],
+    variableIds: [],
   };
+  let appliedOperationCount = 0;
+  const outputRecords = new Map<string, ImportActionOutputRecord>();
+  let currentOrderedPosition = -1;
+
+  const materializer = new ImportDeferredMaterializer({
+    modelingService: input.modelingService,
+    outputRecords,
+  });
 
   const applyVariable = async (index: number) => {
     const request = (input.actions.addDocumentVariables ?? [])[index];
@@ -338,7 +365,7 @@ export async function applyImportPreparedActions(input: {
     const request = (input.actions.createFeatures ?? [])[index];
     const consumer = { kind: "createFeature" as const, index };
     const result = await input.modelingService.createFeature({
-      ...(await materializeFeatureRequest(request, consumer)),
+      ...(await materializer.materializeFeatureRequest(request, consumer)),
       baseRevisionId: revisionId,
     });
     if (result.isErr()) {
@@ -350,7 +377,7 @@ export async function applyImportPreparedActions(input: {
       target.kind === "body" ? [target.bodyId] : [],
     );
     if (currentOrderedPosition >= 0) {
-      outputRecords.set(orderedOutputKey(currentOrderedPosition), { bodyIds });
+      materializer.recordBodyOutput(currentOrderedPosition, bodyIds);
     }
     diagnostics.push(...result.value.diagnostics);
     appliedOperationCount += 1;
@@ -368,9 +395,7 @@ export async function applyImportPreparedActions(input: {
     revisionId = result.value.revisionId;
     createdEntityIds.sketchIds.push(result.value.sketchId);
     if (currentOrderedPosition >= 0) {
-      outputRecords.set(orderedOutputKey(currentOrderedPosition), {
-        sketchId: result.value.sketchId,
-      });
+      materializer.recordSketchOutput(currentOrderedPosition, result.value.sketchId);
     }
     diagnostics.push(...result.value.diagnostics);
     appliedOperationCount += 1;

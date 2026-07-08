@@ -41,10 +41,27 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { AuthoredModelDocument as AuthoredDocument } from "@/contracts/modeling/authored-document";
 import type { GeometryAssetHash } from "@/contracts/modeling/geometry-assets";
-import type {
-  OccNativeExactBrepPayload,
-} from "@/domain/modeling/occ/native-topology-payload";
-import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
+export interface ModelingNativeTopologyDiagnostic {
+  severity: "info" | "warning" | "error";
+  code: string;
+  message: string;
+  target?: DurableRef | null;
+  detail?: unknown;
+}
+
+export interface ModelingNativeTopologyUnavailableResult {
+  kind: "nativeTopologyUnavailable";
+  diagnostics: readonly ModelingNativeTopologyDiagnostic[];
+  capability: unknown;
+}
+
+export type ModelingNativeTopologyResult<TPayload = unknown> =
+  | {
+      kind: "nativeTopologyPayload";
+      payload: TPayload;
+      diagnostics: readonly ModelingNativeTopologyDiagnostic[];
+    }
+  | ModelingNativeTopologyUnavailableResult;
 
 export interface GeometryAssetResolver {
   getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>;
@@ -84,7 +101,7 @@ export interface ModelingKernelAdapter {
     documentId: AuthoredDocument["documentId"],
     baseRevisionId: RevisionId,
     target: DurableRef,
-  ): Promise<OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>>;
+  ): Promise<ModelingNativeTopologyResult>;
   /** Commits a durable sketch definition against an explicit base revision. */
   commitSketch(request: CommitSketchRequest): Promise<CommitSketchResponse>;
   /** Projects active-sketch external references against the requested document revision. */

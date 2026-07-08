@@ -7,4 +7,4 @@
 ## 2. Verification
 
 - [x] 2.1 Manual smoke: re-import both real bundles; record the new per-tier baseline section and deltas (expect Taskariki's independent chains — e.g. Sketch 8 → Extrude 13 — to go live).
-- [ ] 2.2 Run `bun run test:all`.
+- [x] 2.2 Run `bun run test:all`.

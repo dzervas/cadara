@@ -19,4 +19,4 @@
 
 - [x] 4.1 Flip the Onshape provider's probe-dependent suites from the mock probe to the real capability; confirm matcher and deviation verification behave per the probe-present scenarios without provider code changes.
 - [x] 4.2 Manual smoke: re-import both reference capture bundles; record per-tier counts and deviation results, compared against the probe-less baseline from `add-onshape-import-provider` change notes.
-- [ ] 4.3 Run `bun run test:all`.
+- [x] 4.3 Run `bun run test:all`.

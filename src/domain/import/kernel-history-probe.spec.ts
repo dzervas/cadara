@@ -10,6 +10,13 @@ import {
 import { createImportCapabilities } from "@/domain/import/orchestrator";
 import type { BodyId, DocumentId, RevisionId } from "@/contracts/shared/ids";
 
+import type { ImportPreparedActions } from "@/contracts/import/actions";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { createModelingService } from "@/domain/modeling/modeling-service";
+import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
+import { translateSketch } from "@/domain/import/onshape/sketch-translator";
 function makeSnapshot(revisionId: RevisionId, bodies: readonly { bodyId: BodyId }[]) {
   return {
     document: {
@@ -29,6 +36,127 @@ function makeExactPayload(bodyId: BodyId) {
     nativePayload: parseNativeShimPayloadJson(JSON.stringify(boxFixture.exactBrep)),
   });
 }
+
+function createRevisionAgnosticRealSolver(): SketchSolverAdapter {
+  return new Proxy({} as SketchSolverAdapter, {
+    get(_target, property) {
+      return (request: { documentId: DocumentId; revisionId: RevisionId }) => {
+        const adapter = new SketchConstraintSolverAdapter({
+          documentId: request.documentId,
+          revisionId: request.revisionId,
+        });
+        const method = (adapter as unknown as Record<string, unknown>)[
+          property as string
+        ] as (input: unknown) => unknown;
+        return method.call(adapter, request);
+      };
+    },
+  });
+}
+
+function sketchExtrudeCandidate(documentId: DocumentId): ImportPreparedActions {
+  const translation = translateSketch({
+    featureId: "probe_square",
+    label: "Probe square",
+    planeKey: "xy",
+    entities: [
+      { entityId: "e1", entityType: "lineSegment", start: [-1, -1], end: [1, -1] },
+      { entityId: "e2", entityType: "lineSegment", start: [1, -1], end: [1, 1] },
+      { entityId: "e3", entityType: "lineSegment", start: [1, 1], end: [-1, 1] },
+      { entityId: "e4", entityType: "lineSegment", start: [-1, 1], end: [-1, -1] },
+    ],
+  });
+  return {
+    commitSketches: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        solverCorrelation: {
+          requestId: "request_probe_sketch" as never,
+          projectionRequestId: "request_probe_sketch_project" as never,
+          validationRequestId: "request_probe_sketch_validate" as never,
+          solveRequestId: "request_probe_sketch_solve" as never,
+          regionRequestId: "request_probe_sketch_regions" as never,
+        },
+        sketchId: null,
+        sketchLabel: "Probe square",
+        plane: translation.plane,
+        definition: translation.definition,
+      },
+    ],
+    createFeatures: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Probe extrude",
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          parameters: {
+            profiles: [
+              {
+                kind: "regionOf",
+                actionIndex: 0,
+                selector: { kind: "interiorPoint", point: [0, 0] },
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "blind",
+                direction: "positive",
+                distance: { source: "literal", value: 1 },
+              },
+            },
+            operation: { source: "literal", value: "newBody" },
+            booleanScope: { kind: "standalone" },
+          },
+        },
+      },
+    ],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+    ],
+  };
+}
+
+
+test("kernel history probe materializes deferred sketch-region extrudes", async () => {
+  const documentId = "doc_workspace" as DocumentId;
+  const service = createModelingService(
+    new MockKernelAdapter({ solverAdapter: createRevisionAgnosticRealSolver() }),
+    { currentDocumentId: documentId },
+  );
+  const probe = createKernelHistoryProbeSession({
+    service: {
+      ...service,
+      async buildNativeExactBrepPayload(_input) {
+        return {
+          kind: "nativeTopologyPayload" as const,
+          payload: makeExactPayload("body_signature_fixture_box" as BodyId),
+          diagnostics: [],
+        };
+      },
+    },
+  });
+
+  const result = await probe.evaluateHistoryProbe({
+    actions: sketchExtrudeCandidate(documentId),
+  });
+
+  expect(result.steps).toHaveLength(2);
+  expect(result.steps[0]?.status).toBe("rebuilt");
+  expect(result.steps[1]?.status).toBe("rebuilt");
+  expect(
+    result.steps[1]?.status === "rebuilt" &&
+      result.steps[1].signatures.some((signature) => signature.entityClass === "face"),
+    "The extrude step should materialize regionOf inside the probe and contribute solid topology signatures.",
+  ).toBeTruthy();
+});
 
 test("kernel history probe rebuilds in the provided isolated session without touching an open document", async () => {
   const openDocumentState = structuredClone(
