@@ -3,6 +3,8 @@ import type {
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
 import type { DocumentExportResult } from "@/contracts/modeling/export";
+import type { OccNativeExactBrepPayload } from "@/domain/modeling/occ/native-topology-payload";
+import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
 import { orchestrateGeometryExport } from "@/domain/export/export-orchestrator";
 import { createExportProviderRegistry } from "@/domain/export/provider-registry";
 import type { PrimitiveRef, RevisionId } from "@/core/editor/schema";
@@ -1259,11 +1261,12 @@ export function createModelingService(
         };
       }
 
-      return adapter.buildNativeExactBrepPayload(
+      const result = await adapter.buildNativeExactBrepPayload(
         currentDocumentId,
         input.baseRevisionId,
         input.target,
       );
+      return result as OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>;
     },
     async createNewDocument() {
       await restorePromise;

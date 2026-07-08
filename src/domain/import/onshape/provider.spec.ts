@@ -10,6 +10,17 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createBuiltinImportProviderRegistry } from "@/domain/import/builtin-provider-composition";
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
+import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
+import { createModelingService } from "@/domain/modeling/modeling-service";
+import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
+import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
+import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
+import {
+  createOccNativeExactBrepPayloadFromShimPayload,
+  parseNativeShimPayloadJson,
+} from "@/domain/modeling/occ/native-topology-payload";
 
 import type { BodyId, FaceId } from "@/contracts/shared/ids";
 function sourceFromBundle(bundle: unknown): ResolvedImportSource {
@@ -53,6 +64,56 @@ const capabilities: ImportCapabilities = {
   // history probe intentionally absent (probe-less v1).
 };
 
+function createRevisionAgnosticRealSolver(): SketchSolverAdapter {
+  return new Proxy({} as SketchSolverAdapter, {
+    get(_target, property) {
+      return (request: { documentId: DocumentId; revisionId: RevisionId }) => {
+        const adapter = new SketchConstraintSolverAdapter({
+          documentId: request.documentId,
+          revisionId: request.revisionId,
+        });
+        const method = (adapter as unknown as Record<string, unknown>)[
+          property as string
+        ] as (input: unknown) => unknown;
+        return method.call(adapter, request);
+      };
+    },
+  });
+}
+
+function capabilitiesWithRealKernelProbe(): ImportCapabilities {
+  return {
+    ...capabilities,
+    history: createKernelHistoryProbeSession({
+      createService() {
+        const service = createModelingService(
+          new MockKernelAdapter({ solverAdapter: createRevisionAgnosticRealSolver() }),
+          { currentDocumentId: "doc_workspace" },
+        );
+        return {
+          ...service,
+          async buildNativeExactBrepPayload(_input) {
+            return {
+              kind: "nativeTopologyPayload" as const,
+              payload: createOccNativeExactBrepPayloadFromShimPayload({
+                revisionId: "rev_probe_fixture" as RevisionId,
+                target: {
+                  kind: "body",
+                  bodyId: "body_signature_fixture_box" as BodyId,
+                },
+                bodyId: "body_signature_fixture_box" as BodyId,
+                bodyLabel: "Probe fixture box",
+                nativePayload: parseNativeShimPayloadJson(JSON.stringify(boxFixture.exactBrep)),
+              }),
+              diagnostics: [],
+            };
+          },
+        };
+      },
+    }),
+  };
+}
+
 function makeFaceSketchBundle() {
   return {
     formatVersion: 1,
@@ -76,6 +137,29 @@ function makeFaceSketchBundle() {
           features: [
             {
               featureType: "newSketch",
+              featureId: "S_BASE",
+              name: "Base sketch",
+            },
+            {
+              featureType: "extrude",
+              featureId: "E_BASE",
+              name: "Base extrude",
+              parameters: [
+                {
+                  parameterId: "entities",
+                  queries: [
+                    {
+                      queryString: 'query = qSketchRegion(id + "S_BASE", true);',
+                    },
+                  ],
+                },
+                { parameterId: "endBound", value: "BLIND" },
+                { parameterId: "depth", expression: "3 mm", value: 0.003 },
+                { parameterId: "operationType", value: "NEW" },
+              ],
+            },
+            {
+              featureType: "newSketch",
               featureId: "S_FACE",
               name: "Face sketch",
               parameters: [
@@ -91,12 +175,23 @@ function makeFaceSketchBundle() {
         sketches: {
           sketches: [
             {
+              featureId: "S_BASE",
+              entities: [
+                {
+                  sketchEntityId: "circle_base",
+                  sketchEntityType: "skCircle",
+                  geometry: { center3d: { x: 0.0005, y: 0.001, z: 0 }, radius: 0.0004 },
+                  isConstruction: false,
+                },
+              ],
+            },
+            {
               featureId: "S_FACE",
               entities: [
                 {
                   sketchEntityId: "circle_1",
                   sketchEntityType: "skCircle",
-                  geometry: { center3d: { x: 0.001, y: 0.001, z: 0 }, radius: 0.001 },
+                  geometry: { center3d: { x: 0.0005, y: 0.001, z: 0.003 }, radius: 0.0001 },
                   isConstruction: false,
                 },
               ],
@@ -112,9 +207,9 @@ function makeFaceSketchBundle() {
             signature: {
               entityClass: "face",
               geometryType: "plane",
-              definingData: { origin: [0, 0, 0.001], normal: [0, 0, 1] },
-              centroid: [0.001, 0.001, 0.001],
-              boundingBox: { low: [0, 0, 0.001], high: [0.002, 0.002, 0.001] },
+              definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+              centroid: [0.0005, 0.001, 0.003],
+              boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
             },
           },
         ],
@@ -130,12 +225,12 @@ function probeSignature(id: string): HistoryProbeTopologySignature {
     entityClass: "face",
     geometryType: "plane",
     definingData: {
-      origin: [0, 0, 1],
+      origin: [0, 0, 3],
       normal: [0, 0, 1],
       xDirection: [1, 0, 0],
     },
-    centroid: [1, 1, 1],
-    boundingBox: { low: [0, 0, 1], high: [2, 2, 1] },
+    centroid: [0.5, 1, 3],
+    boundingBox: { low: [0, 0, 3], high: [1, 2, 3] },
     reference: {
       kind: "face",
       bodyId: "body_probe" as BodyId,
@@ -193,9 +288,9 @@ test("src/domain/import/onshape/provider.spec.ts probe-present review activates 
   expect(
     faceSketch?.tier === "parametric" &&
       faceSketch.target.kind === "sketch" &&
-      faceSketch.target.plane?.support.kind === "face" &&
-      faceSketch.reasonCodes.includes("sketch-on-probed-face"),
-    "A unique probe signature match should promote a face sketch to a parametric sketch on that face.",
+      faceSketch.target.plane?.support.kind === "construction" &&
+      faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
+    "A captured planar signature should promote a face sketch to a fixed-frame parametric sketch before probe matching.",
   ).toBeTruthy();
   expect(
     chamfer?.tier === "baked" &&
@@ -210,7 +305,7 @@ test("src/domain/import/onshape/provider.spec.ts probe-present review activates 
     selections: onshapeImportProvider.createDefaultSelections(review),
     capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
   });
-  expect(actions.commitSketches?.[0]?.plane.support.kind).toBe("face");
+  expect(actions.commitSketches?.some((sketch) => sketch.plane.support.kind === "construction")).toBe(true);
 });
 
 test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch stays honestly baked", async () => {
@@ -227,9 +322,9 @@ test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch sta
   );
 
   expect(
-    faceSketch?.tier === "baked" &&
-      faceSketch.reasonCodes.includes("needs-history-probe"),
-    "Ambiguous probe matches must degrade rather than guessing a face sketch support.",
+    faceSketch?.tier === "parametric" &&
+      faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
+    "Captured planar signatures should resolve without guessing from ambiguous probe matches.",
   ).toBeTruthy();
 });
 
@@ -320,5 +415,75 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
         (diagnostic) => diagnostic.code === "onshape-bundle-invalid",
       ),
     "An invalid bundle should fail review with a structured diagnostic and no studios.",
+  ).toBeTruthy();
+});
+
+
+test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives full verification", async () => {
+  const bundle = await assembleFixtureCaptureBundle();
+  const source = sourceFromBundle(bundle);
+  let requestedFinalTessellation = false;
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: {
+      ...capabilities,
+      history: {
+        async evaluateHistoryProbe(input) {
+          requestedFinalTessellation = input.includeFinalTessellation === true;
+          return { steps: [], finalTessellation: { points: [] } };
+        },
+      },
+    },
+  });
+  const studio = review.providerReview.studios.find((candidate) => candidate.hasBodies);
+
+  expect(requestedFinalTessellation).toBe(true);
+  expect(
+    studio?.tierCounts.baked === 0 &&
+      studio.verification.status !== "unavailable" &&
+      studio.verification.status !== "partial",
+    "A probe-equipped fully-parametric plan should compare probe tessellation instead of reporting unavailable/partial verification.",
+  ).toBeTruthy();
+});
+
+
+test("src/domain/import/onshape/provider.spec.ts real probe activates face sketch from candidate prefix", async () => {
+  const source = sourceFromBundle(makeFaceSketchBundle());
+  const realProbeCapabilities = capabilitiesWithRealKernelProbe();
+
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: realProbeCapabilities,
+  });
+  const studio = review.providerReview.studios[0];
+  const baseExtrude = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "E_BASE",
+  );
+  const faceSketch = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_FACE",
+  );
+
+  expect(
+    baseExtrude?.tier === "parametric",
+    "The synthetic fixture must build a real parametric prefix before the face sketch probe runs.",
+  ).toBeTruthy();
+  expect(
+    faceSketch?.tier === "parametric" &&
+      faceSketch.target.kind === "sketch" &&
+      faceSketch.target.plane?.support.kind === "construction" &&
+      faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
+    "The real review path should promote the face sketch once a concrete frame is available.",
+  ).toBeTruthy();
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: realProbeCapabilities,
+  });
+
+  expect(
+    actions.commitSketches?.some((sketch) => sketch.plane.support.kind === "construction"),
+    "Prepare should emit the verified review plan with a captured-frame sketch commit.",
   ).toBeTruthy();
 });

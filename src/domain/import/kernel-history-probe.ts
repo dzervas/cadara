@@ -12,6 +12,10 @@ import type { BodyId, RevisionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+import {
+  ImportDeferredMaterializer,
+  type ImportActionOutputRecord,
+} from "@/domain/import/orchestrator";
 
 type KernelHistoryProbeService = Pick<
   ModelingService,
@@ -69,9 +73,19 @@ async function evaluateHistoryProbeInKernelSession(
 ): Promise<HistoryProbeResult> {
   const actionRefs = getOrderedActionRefs(input.actions);
   const steps: HistoryProbeResult["steps"] = [];
+  const materializer = new ImportDeferredMaterializer({
+    modelingService: service,
+    outputRecords: new Map<string, ImportActionOutputRecord>(),
+  });
 
-  for (const [stepIndex, actionRef] of actionRefs.entries()) {
-    const applyResult = await applyProbeAction(service, input.actions, actionRef);
+  for (const [orderedPosition, actionRef] of actionRefs.entries()) {
+    const applyResult = await applyProbeAction(
+      service,
+      input.actions,
+      actionRef,
+      orderedPosition,
+      materializer,
+    );
     if (!applyResult.ok) {
       steps.push({
         status: "failed",
@@ -79,7 +93,7 @@ async function evaluateHistoryProbeInKernelSession(
           {
             severity: "error",
             code: "kernel-history-probe-step-failed",
-            message: `History probe failed at step ${stepIndex + 1}: ${applyResult.message}`,
+            message: `History probe failed at step ${orderedPosition + 1}: ${applyResult.message}`,
           },
         ],
       });
@@ -144,7 +158,21 @@ async function evaluateHistoryProbeInKernelSession(
     }
   }
 
-  return { steps };
+  if (!input.includeFinalTessellation) {
+    return { steps };
+  }
+
+  const finalSnapshot = await service.getCurrentDocumentSnapshot();
+  return {
+    steps,
+    finalTessellation: {
+      points: finalSnapshot.document.render.records.flatMap((record) =>
+        record.geometry.kind === "mesh"
+          ? record.geometry.vertexPositions.flatMap((point) => [...point])
+          : [],
+      ),
+    },
+  };
 }
 
 function getOrderedActionRefs(actions: ImportPreparedActions): ImportPreparedActionRef[] {
@@ -172,6 +200,8 @@ async function applyProbeAction(
   service: KernelHistoryProbeService,
   actions: ImportPreparedActions,
   actionRef: ImportPreparedActionRef,
+  orderedPosition: number,
+  materializer: ImportDeferredMaterializer,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const snapshot = await service.getCurrentDocumentSnapshot();
   const basis = {
@@ -185,7 +215,7 @@ async function applyProbeAction(
       if (!request) {
         return missingAction(actionRef);
       }
-      const result = await service.addDocumentVariable({ ...basis, ...request });
+      const result = await service.addDocumentVariable({ ...request, ...basis });
       return result.isOk() ? { ok: true } : { ok: false, message: result.error.message };
     }
     case "commitSketch": {
@@ -193,16 +223,33 @@ async function applyProbeAction(
       if (!request) {
         return missingAction(actionRef);
       }
-      const result = await service.commitSketch({ ...basis, ...request });
-      return result.isOk() ? { ok: true } : { ok: false, message: result.error.message };
+      const result = await service.commitSketch({ ...request, ...basis });
+      if (result.isOk()) {
+        materializer.recordSketchOutput(orderedPosition, result.value.sketchId);
+        return { ok: true };
+      }
+      return { ok: false, message: result.error.message };
     }
     case "createFeature": {
       const request = actions.createFeatures?.[actionRef.index];
       if (!request) {
         return missingAction(actionRef);
       }
-      const result = await service.createFeature({ ...basis, ...request } as never);
-      return result.isOk() ? { ok: true } : { ok: false, message: result.error.message };
+      const materialized = await materializer.materializeFeatureRequest(
+        request,
+        actionRef,
+      );
+      const result = await service.createFeature({ ...materialized, ...basis });
+      if (result.isOk()) {
+        materializer.recordBodyOutput(
+          orderedPosition,
+          (result.value.changedTargets ?? []).flatMap((target) =>
+            target.kind === "body" ? [target.bodyId] : [],
+          ),
+        );
+        return { ok: true };
+      }
+      return { ok: false, message: result.error.message };
     }
   }
 }
