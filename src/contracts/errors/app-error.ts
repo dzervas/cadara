@@ -136,6 +136,27 @@ export function normalizeUnknownError(
   });
 }
 
+/**
+ * Produce a stable human-readable message for any thrown value, AppError-aware.
+ * Prefer this over `error instanceof Error ? error.message : String(error)`,
+ * which drops AppError messages (they surface as `[object Object]`).
+ */
+export function describeUnknownError(
+  value: unknown,
+  fallbackMessage = "Unknown error.",
+): string {
+  if (isAppError(value)) {
+    return value.message;
+  }
+  if (value instanceof Error && value.message.trim()) {
+    return value.message;
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  return fallbackMessage;
+}
+
 export function appErrorFromValidationIssues(
   issues: readonly ContractValidationIssue[],
   input: {

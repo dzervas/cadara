@@ -1,5 +1,6 @@
 import type { CommitSketchRequest } from "@/contracts/modeling/schema";
 import type {
+  BakedGeometryAssetReference,
   GeometryAssetFormat,
   GeometryAssetProvenance,
 } from "@/contracts/modeling/geometry-assets";
@@ -31,12 +32,14 @@ export interface ImportModelingCapabilities {
   /**
    * Bakes external geometry into a Cadara-owned geometry asset for downstream
    * feature creation without providers importing kernel internals directly.
+   * Returns a self-describing asset reference (id, format, content hash, byte
+   * length) sufficient to reconstruct the store record without session state.
    */
   bakeGeometry(input: {
     bytes: Uint8Array;
     format: GeometryAssetFormat;
     options?: Record<string, unknown>;
-  }): Promise<GeometryAssetId>;
+  }): Promise<BakedGeometryAssetReference>;
 
   /**
    * Reconstructs mesh-backed geometry into a native B-rep asset when a

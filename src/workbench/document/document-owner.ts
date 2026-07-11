@@ -20,6 +20,8 @@ import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser
 import { isDurablePrimitiveRef, type PrimitiveRef } from "@/core/editor/schema";
 import { requireAcceptedModelingResult } from "@/lib/reported-action";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { GeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 import type { EditorEvent, EditorState } from "@/domain/editor/state-machine";
 
@@ -44,6 +46,14 @@ interface WorkbenchDocumentOwnerDependencies {
     RuntimeExtensionRegistryComposition,
     "importProviders"
   >;
+  /**
+   * App-level geometry asset store shared with the kernel resolver so baked
+   * import bytes are the same bytes the kernel materializes. Omitted in tests,
+   * where the import capability falls back to an in-memory store.
+   */
+  geometryAssetStore?: GeometryAssetStore;
+  /** History probe factory; overridable in tests. */
+  createImportHistoryProbe?: () => ImportHistoryProbeCapabilities;
 }
 
 function createWorkbenchRequestId(scope: string) {
@@ -55,6 +65,8 @@ export function createWorkbenchDocumentOwner({
   dispatch,
   modelingService,
   runtimeExtensionRegistries,
+  geometryAssetStore,
+  createImportHistoryProbe = createBrowserOccImportHistoryProbe,
 }: WorkbenchDocumentOwnerDependencies) {
   const snapshot = machineState.snapshot;
 
@@ -273,7 +285,10 @@ export function createWorkbenchDocumentOwner({
     const capabilities = createImportCapabilities(
       modelingService,
       currentSnapshot,
-      { history: createBrowserOccImportHistoryProbe() },
+      {
+        history: createImportHistoryProbe(),
+        ...(geometryAssetStore ? { assetStore: geometryAssetStore } : {}),
+      },
     );
     const actions = await prepareImportActions({
       provider,

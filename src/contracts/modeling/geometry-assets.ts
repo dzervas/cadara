@@ -317,6 +317,58 @@ export interface GeometryAssetRecord {
   ownerFeatureIds: FeatureId[];
 }
 
+/**
+ * Self-describing reference to a stored geometry asset, sufficient to
+ * reconstruct a {@link GeometryAssetRecord} for `GeometryAssetStore.get` without
+ * any session-scoped registry. Carried by `bakedBody` feature definitions so
+ * kernel adapters can resolve bytes by-reference after reload.
+ */
+export interface BakedGeometryAssetReference {
+  assetId: GeometryAssetId;
+  format: GeometryAssetFormat;
+  hash: GeometryAssetHash;
+  byteLength: number;
+}
+
+/** Canonical media type for a stored geometry asset format. */
+export function getGeometryAssetMediaType(format: GeometryAssetFormat): string {
+  switch (format) {
+    case "baked-mesh":
+      return "application/vnd.cadara-baked-mesh+json";
+    case "cadara-brep":
+      return "application/vnd.cadara-brep+json";
+    case "step":
+      return "model/step";
+    case "stl":
+      return "model/stl";
+    case "3mf":
+      return "model/3mf";
+    case "baked-occ":
+      return "application/vnd.cadara-baked-occ";
+  }
+}
+
+/**
+ * Rebuilds a minimal {@link GeometryAssetRecord} from a self-describing
+ * reference. The record carries no embedded `data`; store reads validate bytes
+ * by hash/byteLength, so a missing store copy yields the honest missing-asset
+ * diagnostic rather than fabricated geometry.
+ */
+export function createGeometryAssetRecordFromReference(
+  reference: BakedGeometryAssetReference,
+): GeometryAssetRecord {
+  return {
+    schemaVersion: GEOMETRY_ASSET_SCHEMA_VERSION,
+    assetId: reference.assetId,
+    hash: reference.hash,
+    byteLength: reference.byteLength,
+    format: reference.format,
+    mediaType: getGeometryAssetMediaType(reference.format),
+    provenance: { kind: "generated" },
+    ownerFeatureIds: [],
+  };
+}
+
 export interface GeometryAssetManifest {
   schemaVersion: GeometryAssetManifestSchemaVersion;
   records: GeometryAssetRecord[];

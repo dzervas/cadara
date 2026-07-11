@@ -62,6 +62,9 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   features: readonly OccAuthoringFeatureRecord[];
   assets: GeometryAssetManifest;
   assetBlobs: ReadonlyMap<GeometryAssetHash, Uint8Array>;
+  assetResolver?: OccFeatureExecutionContext["assetResolver"];
+  resolvedGeometryAssets: OccFeatureExecutionContext["resolvedGeometryAssets"];
+  bakedShapeCache: OccFeatureExecutionContext["bakedShapeCache"];
   embeddedBinaryAssets: readonly EmbeddedBinaryAssetRecord[];
   historyOrder: readonly DocumentHistoryOrderEntry[];
   cursor: DocumentFeatureCursor;
@@ -189,6 +192,9 @@ export function createOccAuthoringState(
     features?: readonly OccAuthoringFeatureRecord[];
     assets?: GeometryAssetManifest;
     assetBlobs?: ReadonlyMap<GeometryAssetHash, Uint8Array>;
+    assetResolver?: OccFeatureExecutionContext["assetResolver"];
+    resolvedGeometryAssets?: OccFeatureExecutionContext["resolvedGeometryAssets"];
+    bakedShapeCache?: OccFeatureExecutionContext["bakedShapeCache"];
     embeddedBinaryAssets?: readonly EmbeddedBinaryAssetRecord[];
     historyOrder?: readonly DocumentHistoryOrderEntry[];
     cursor?: DocumentFeatureCursor;
@@ -233,6 +239,8 @@ export function createOccAuthoringState(
     input.assets ?? createEmptyGeometryAssetManifest(),
   );
   const assetBlobs = new Map(input.assetBlobs ?? []);
+  const resolvedGeometryAssets = new Map(input.resolvedGeometryAssets ?? []);
+  const bakedShapeCache = input.bakedShapeCache ?? new Map();
   const embeddedBinaryAssets = structuredClone(
     input.embeddedBinaryAssets ?? [],
   );
@@ -277,6 +285,9 @@ export function createOccAuthoringState(
     features,
     assets,
     assetBlobs,
+    assetResolver: input.assetResolver,
+    resolvedGeometryAssets,
+    bakedShapeCache,
     embeddedBinaryAssets,
     historyOrder,
     cursor,
@@ -371,7 +382,10 @@ export function rebuildOccAuthoringState(
     features: [],
     assets: state.assets,
     cursor: { kind: "empty" },
+    assetResolver: state.assetResolver,
     previousReferenceState: state.referenceState,
+    resolvedGeometryAssets: state.resolvedGeometryAssets,
+    bakedShapeCache: state.bakedShapeCache,
   });
 
   for (const feature of features) {

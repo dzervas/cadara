@@ -320,7 +320,7 @@ export function createModelingService(
     await adapter.restoreAuthoredModelDocument?.(
       document,
       diagnostics,
-      createLocalAssetResolver(assets),
+      createLocalAssetResolver(document, assets),
     );
   }
 
@@ -375,12 +375,16 @@ export function createModelingService(
   }
 
   function createLocalAssetResolver(
+    document: AuthoredModelDocument,
     assets: readonly GeometryAssetBlobInput[],
   ): GeometryAssetResolver | undefined {
-    const transientAssetBytes = new Map<GeometryAssetHash, Uint8Array>();
-    for (const asset of assets) {
-      transientAssetBytes.set(asset.asset.hash, asset.bytes.slice());
-    }
+    const transientAssetBytesByHash = new Map<GeometryAssetHash, Uint8Array>();
+    const transientAssetsById = new Map(
+      assets.map((asset) => {
+        transientAssetBytesByHash.set(asset.asset.hash, asset.bytes.slice());
+        return [asset.asset.assetId, asset] as const;
+      }),
+    );
 
     const repositoryResolver = isGeometryAssetDocumentRepository(
       documentRepository,
@@ -388,13 +392,32 @@ export function createModelingService(
       ? documentRepository
       : undefined;
 
-    if (transientAssetBytes.size === 0) {
-      return repositoryResolver;
+    if (transientAssetsById.size === 0 && !repositoryResolver) {
+      return undefined;
     }
 
     return {
+      async resolveGeometryAsset(reference) {
+        const transient = transientAssetsById.get(reference.assetId);
+        if (transient) {
+          return {
+            bytes: transient.bytes.slice(),
+            format: transient.asset.format,
+          };
+        }
+
+        const record = document.assets.records.find(
+          (asset) => asset.assetId === reference.assetId,
+        );
+        if (!record || !repositoryResolver) {
+          return null;
+        }
+
+        const bytes = await repositoryResolver.getGeometryAssetRecord(record);
+        return bytes ? { bytes: bytes.slice(), format: record.format } : null;
+      },
       async getGeometryAssetBytes(hash) {
-        const bytes = transientAssetBytes.get(hash);
+        const bytes = transientAssetBytesByHash.get(hash);
         if (bytes) {
           return bytes.slice();
         }
@@ -542,7 +565,7 @@ export function createModelingService(
       await (adapter.validateAuthoredModelDocument?.(
         activeDocument,
         restoreDiagnostics,
-        createLocalAssetResolver(assets),
+        createLocalAssetResolver(activeDocument, assets),
       ) ?? restoreActiveDocument());
     };
 

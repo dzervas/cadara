@@ -35,8 +35,12 @@ import type {
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
-import type { BodyId, RequestId, RevisionId } from "@/contracts/shared/ids";
+import type {
+  BakedGeometryAssetReference,
+  GeometryAssetBlobInput,
+  GeometryAssetFormat,
+} from "@/contracts/modeling/geometry-assets";
+import type { BodyId, GeometryAssetId, RequestId, RevisionId } from "@/contracts/shared/ids";
 import type {
   MeshExportAccuracy,
   MeshTriangle,
@@ -268,6 +272,12 @@ export type OccWorkerRequest =
       kind: "cancel";
       requestId: RequestId;
       cancelsRequestId: RequestId;
+    }
+  | {
+      kind: "resolveGeometryAssetResult";
+      requestId: RequestId;
+      assetId: GeometryAssetId;
+      asset: { bytes: Uint8Array; format: GeometryAssetFormat } | null;
     };
 
 export type OccWorkerResponse =
@@ -276,6 +286,11 @@ export type OccWorkerResponse =
       requestId: RequestId;
       operation: OccWorkerOperation["kind"];
       payload?: OccWorkerResponsePayload;
+    }
+  | {
+      kind: "resolveGeometryAsset";
+      requestId: RequestId;
+      reference: BakedGeometryAssetReference;
     }
   | OccWorkerFailureMessage;
 

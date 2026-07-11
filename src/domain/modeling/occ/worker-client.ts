@@ -32,6 +32,7 @@ import type {
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
+import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
 import type { BodyId, RequestId, RevisionId } from "@/contracts/shared/ids";
@@ -85,6 +86,7 @@ type PendingRequest = {
 
 export interface OccWorkerClientOptions {
   worker: OccWorkerLike;
+  assetResolver?: GeometryAssetResolver;
 }
 
 export interface OccWorkerSnapshotClient {
@@ -183,11 +185,13 @@ export interface OccWorkerSnapshotClient {
 
 export class OccWorkerClient implements OccWorkerSnapshotClient {
   private readonly worker: OccWorkerLike;
+  private readonly assetResolver: GeometryAssetResolver | undefined;
   private readonly pending = new Map<RequestId, PendingRequest>();
   private requestSequence = 0;
 
   constructor(options: OccWorkerClientOptions) {
     this.worker = options.worker;
+    this.assetResolver = options.assetResolver;
     this.worker.addEventListener("message", this.handleMessage);
   }
 
@@ -519,6 +523,12 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
 
   private readonly handleMessage = (event: MessageEvent<OccWorkerResponse>) => {
     const message = event.data;
+
+    if (message.kind === "resolveGeometryAsset") {
+      void this.answerGeometryAssetRequest(message.requestId, message.reference);
+      return;
+    }
+
     const pending = this.pending.get(message.requestId);
 
     if (!pending) {
@@ -541,6 +551,23 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
 
     pending.resolve(message.payload);
   };
+
+  private async answerGeometryAssetRequest(
+    requestId: RequestId,
+    reference: Parameters<GeometryAssetResolver["resolveGeometryAsset"]>[0],
+  ) {
+    const resolved =
+      (await this.assetResolver?.resolveGeometryAsset(reference)) ?? null;
+    this.worker.postMessage(
+      {
+        kind: "resolveGeometryAssetResult",
+        requestId,
+        assetId: reference.assetId,
+        asset: resolved,
+      },
+      resolved ? [resolved.bytes.buffer as ArrayBuffer] : [],
+    );
+  }
 
   private rejectPending(requestId: RequestId, error: Error) {
     const pending = this.pending.get(requestId);

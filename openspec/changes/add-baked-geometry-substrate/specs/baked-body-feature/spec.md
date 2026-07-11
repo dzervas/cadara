@@ -18,8 +18,23 @@ The system SHALL provide a `bakedBody` feature definition referencing a register
 - **THEN** its parameters expose the asset reference and provenance, not pseudo-parametric geometry controls
 - **AND** downstream features referencing the body rebuild normally
 
+### Requirement: Kernel adapters SHALL resolve baked geometry assets through an injected seam
+Kernel adapters SHALL materialize `bakedBody` features by resolving the feature definition's self-describing asset reference (asset id, format, content hash, byte length) through an injected geometry asset source rather than embedding bytes in create-feature requests, relying on session-scoped registries, or fabricating fallback geometry. The reference SHALL be sufficient to reconstruct the store record without any session state, so resolution is a pure store read that succeeds after reload.
+
+#### Scenario: Reopened document rebuilds baked body from persisted asset
+- **GIVEN** `bakeGeometry` persisted a valid `baked-mesh` asset through the platform `GeometryAssetStore`
+- **AND** a document history contains a `bakedBody` feature referencing that asset id
+- **WHEN** the document is reopened and rebuilt with a kernel adapter wired to the persisted asset resolver
+- **THEN** the baked body is materialized from the persisted asset bytes
+- **AND** the create-feature request/history entry remains by-reference and does not contain the blob
+
+#### Scenario: Resolver unavailable or asset missing
+- **WHEN** a `bakedBody` feature is rebuilt without a resolver or the resolver cannot find the referenced asset
+- **THEN** the rebuild reports a structured baked-body diagnostic naming the asset id and reason
+- **AND** no placeholder geometry is fabricated
+
 ### Requirement: Geometry baking SHALL be implemented through the asset store
-`ImportCapabilities.bakeGeometry` SHALL validate input bytes for the declared format, deduplicate by content hash, persist through the existing `GeometryAssetStore`, and return the asset id; failures SHALL surface as structured errors, never as silently absent assets.
+`ImportCapabilities.bakeGeometry` SHALL validate input bytes for the declared format, deduplicate by content hash, persist through the existing `GeometryAssetStore`, and return a self-describing asset reference (asset id, format, content hash, byte length); failures SHALL surface as structured errors, never as silently absent assets. The import baking capability (writer) and the kernel asset resolver (reader) SHALL be composed from one shared `GeometryAssetStore` through a single composition seam.
 
 #### Scenario: Duplicate bake
 - **WHEN** the same bytes are baked twice

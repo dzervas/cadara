@@ -1,6 +1,12 @@
-import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
-import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
-import type { DocumentId } from "@/contracts/shared/ids";
+import type {
+  GeometryAssetResolver,
+  ResolvedGeometryAssetBytes,
+} from "@/contracts/modeling/adapter";
+import type {
+  BakedGeometryAssetReference,
+  GeometryAssetBlobInput,
+} from "@/contracts/modeling/geometry-assets";
+import type { DocumentId, GeometryAssetId, RequestId } from "@/contracts/shared/ids";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { packWorkspaceSnapshotRenderMeshes } from "@/domain/modeling/occ/mesh-transport";
 import {
@@ -30,6 +36,16 @@ let openCascadePromise: Promise<OpenCascadeInstance> | null = null;
 let lastAssets: OccWorkerAssetConfig | undefined;
 const adapters = new Map<string, OpenCascadeKernelAdapter>();
 let requestQueue: Promise<void> = Promise.resolve();
+let assetRequestSequence = 0;
+const pendingAssetRequests = new Map<
+  RequestId,
+  {
+    assetId: GeometryAssetId;
+    resolve: (value: ResolvedGeometryAssetBytes | null) => void;
+    reject: (error: Error) => void;
+  }
+>();
+const resolvedAssetCache = new Map<GeometryAssetId, ResolvedGeometryAssetBytes>();
 
 interface OccWorkerGlobalScope {
   postMessage(message: OccWorkerResponse, transfer?: Transferable[]): void;
@@ -95,10 +111,59 @@ function getWorkerAdapter(documentId: DocumentId) {
       }),
     getOpenCascadeInstance: () => getWorkerOpenCascadeInstance(),
     initialSnapshotRequiresRuntime: true,
+    assetResolver: createWorkerAssetResolver(undefined),
   });
   adapters.set(documentId, adapter);
 
   return adapter;
+}
+
+function requestMainThreadGeometryAsset(
+  reference: BakedGeometryAssetReference,
+): Promise<ResolvedGeometryAssetBytes | null> {
+  const cached = resolvedAssetCache.get(reference.assetId);
+  if (cached) {
+    return Promise.resolve({ bytes: cached.bytes.slice(), format: cached.format });
+  }
+  assetRequestSequence += 1;
+  const requestId =
+    `request_occ_resolve_geometry_asset_${assetRequestSequence}` as RequestId;
+
+  return new Promise((resolve, reject) => {
+    pendingAssetRequests.set(requestId, {
+      assetId: reference.assetId,
+      resolve,
+      reject,
+    });
+    postOccWorkerMessage({
+      kind: "resolveGeometryAsset",
+      requestId,
+      reference,
+    });
+  });
+}
+
+function handleGeometryAssetResult(
+  request: Extract<OccWorkerRequest, { kind: "resolveGeometryAssetResult" }>,
+) {
+  const pending = pendingAssetRequests.get(request.requestId);
+  if (!pending) {
+    return;
+  }
+
+  pendingAssetRequests.delete(request.requestId);
+  if (pending.assetId !== request.assetId) {
+    pending.reject(new Error("OCC worker geometry asset response id mismatch."));
+    return;
+  }
+
+  if (request.asset) {
+    resolvedAssetCache.set(request.assetId, {
+      bytes: request.asset.bytes.slice(),
+      format: request.asset.format,
+    });
+  }
+  pending.resolve(request.asset);
 }
 
 async function getWorkerExportCapabilities(
@@ -380,17 +445,24 @@ async function handleOccWorkerRequest(request: OccWorkerRequest) {
 
 function createWorkerAssetResolver(
   assets: readonly GeometryAssetBlobInput[] | undefined,
-): GeometryAssetResolver | undefined {
-  if (!assets || assets.length === 0) {
-    return undefined;
-  }
-
-  const blobs = new Map(
-    assets.map((asset) => [asset.asset.hash, asset.bytes.slice()] as const),
+): GeometryAssetResolver {
+  const blobsByHash = new Map(
+    (assets ?? []).map((asset) => [asset.asset.hash, asset.bytes.slice()] as const),
   );
+  const blobsById = new Map(
+    (assets ?? []).map((asset) => [asset.asset.assetId, asset] as const),
+  );
+
   return {
+    async resolveGeometryAsset(reference) {
+      const local = blobsById.get(reference.assetId);
+      if (local) {
+        return { bytes: local.bytes.slice(), format: local.asset.format };
+      }
+      return requestMainThreadGeometryAsset(reference);
+    },
     async getGeometryAssetBytes(hash) {
-      return blobs.get(hash)?.slice() ?? null;
+      return blobsByHash.get(hash)?.slice() ?? null;
     },
   };
 }
@@ -414,6 +486,10 @@ function enqueueOccWorkerRequest(request: OccWorkerRequest) {
 workerScope.addEventListener(
   "message",
   (event: MessageEvent<OccWorkerRequest>) => {
+    if (event.data?.kind === "resolveGeometryAssetResult") {
+      handleGeometryAssetResult(event.data);
+      return;
+    }
     const parsed = validateOccWorkerRequestEnvelope(event.data);
     const requestId =
       typeof event.data?.requestId === "string"

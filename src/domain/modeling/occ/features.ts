@@ -26,6 +26,7 @@ import {
 } from "@/domain/modeling/occ/features/mirror-transform";
 import { executeShellFeature } from "@/domain/modeling/occ/features/shell";
 import { executePlaneFeature } from "@/domain/modeling/occ/features/plane";
+import { executeBakedBodyFeature } from "@/domain/modeling/occ/features/baked-body";
 
 // Re-export public API
 export type {
@@ -71,6 +72,12 @@ export function executeOccFeature(
       );
     case "shell":
       return executeShellFeature(
+        context,
+        ownerFeatureId,
+        definition.parameters,
+      );
+    case "bakedBody":
+      return executeBakedBodyFeature(
         context,
         ownerFeatureId,
         definition.parameters,

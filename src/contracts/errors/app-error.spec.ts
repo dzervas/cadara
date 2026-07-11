@@ -9,6 +9,7 @@ import {
   createConsoleErrorReporter,
   createTestErrorReporter,
   normalizeUnknownError,
+  describeUnknownError,
 } from "@/contracts/errors";
 
 test("src/contracts/errors/app-error.spec.ts", () => {
@@ -65,6 +66,21 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     malformed.cause,
     "Malformed marked objects should still be retained as causes.",
   ).toBe(malformedMarkedValue);
+
+  expect(
+    describeUnknownError(
+      createAppError({ code: "app/unknown", message: "App error message." }),
+    ),
+    "describeUnknownError should surface AppError messages, not [object Object].",
+  ).toBe("App error message.");
+  expect(
+    describeUnknownError(new Error("Plain error.")),
+    "describeUnknownError should surface Error messages.",
+  ).toBe("Plain error.");
+  expect(
+    describeUnknownError({ weird: true }, "Custom fallback."),
+    "describeUnknownError should fall back for non-Error, non-string values.",
+  ).toBe("Custom fallback.");
 
   const validationError = appErrorFromValidationIssues(
     [

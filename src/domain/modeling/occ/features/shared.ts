@@ -1,15 +1,23 @@
+import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
 import type {
   ConstructionSnapshotRecord,
   FeatureDefinition,
   ModelingDiagnostic,
   SketchSnapshotRecord,
+  SnapshotEntityRecord,
 } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { RegionRecord } from "@/contracts/sketch/schema";
-import type { BodyId, ConstructionId, FeatureId } from "@/contracts/shared/ids";
+import type {
+  BodyId,
+  ConstructionId,
+  FeatureId,
+  GeometryAssetId,
+} from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import type {
+  GeometryAssetFormat,
   GeometryAssetHash,
   GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
@@ -21,7 +29,16 @@ import {
   type OccTrackedBody,
   type OccReferenceInvalidationRecord,
 } from "@/domain/modeling/occ/topology";
-import type { SnapshotEntityRecord } from "@/contracts/modeling/schema";
+
+export interface OccResolvedGeometryAsset {
+  bytes: Uint8Array;
+  format: GeometryAssetFormat;
+}
+
+export interface OccMaterializedBakedShape {
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+  meshTriangles: NonNullable<OccTrackedBody["meshExportFallback"]>;
+}
 
 export interface OccFeatureExecutionContext {
   oc: OpenCascadeInstance;
@@ -34,6 +51,9 @@ export interface OccFeatureExecutionContext {
   bodies: readonly OccTrackedBody[];
   assets: { records: readonly GeometryAssetRecord[] };
   assetBlobs: ReadonlyMap<GeometryAssetHash, Uint8Array>;
+  assetResolver?: GeometryAssetResolver;
+  resolvedGeometryAssets: Map<GeometryAssetId, OccResolvedGeometryAsset>;
+  bakedShapeCache: Map<GeometryAssetId, OccMaterializedBakedShape>;
 }
 
 export interface OccFeatureExecutionResult {

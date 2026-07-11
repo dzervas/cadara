@@ -18,6 +18,7 @@ import type {
   RenderableEntityRecord,
 } from "@/contracts/render/schema";
 import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
+import { describeFeatureTreeNode } from "@/domain/modeling/feature-description";
 import type {
   BodyId,
   EdgeId,
@@ -253,6 +254,8 @@ function collectFeatureConsumedTargets(
       );
       booleanScope = definition.parameters.booleanScope;
       break;
+    case "bakedBody":
+      break;
     default:
       targets.push(
         ...definition.parameters.participants.flatMap((participant) => [
@@ -401,6 +404,19 @@ function createSnapshotFeatureDefinition(
           booleanScope: definition.parameters.booleanScope,
         },
       };
+    case "bakedBody":
+      return {
+        kind: "bakedBody",
+        featureTypeVersion: definition.featureTypeVersion,
+        parameters: {
+          assetId: definition.parameters.assetId,
+          format: definition.parameters.format,
+          hash: definition.parameters.hash,
+          byteLength: definition.parameters.byteLength,
+          label: definition.parameters.label,
+          provenance: structuredClone(definition.parameters.provenance),
+        },
+      };
     default:
       return {
         kind: definition.kind,
@@ -488,7 +504,7 @@ function buildSnapshotPresentationRecords(
         featureId: snapshot.featureId,
       }),
       label: snapshot.label,
-      description: `${snapshot.definition.kind} feature`,
+      description: describeFeatureTreeNode(snapshot.definition),
       kind: "feature",
       target: { kind: "feature", featureId: snapshot.featureId },
       ownerFeatureId: snapshot.featureId,

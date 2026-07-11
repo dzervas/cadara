@@ -40,7 +40,11 @@ import type {
   ModelingDiagnostic,
 } from "@/contracts/modeling/schema";
 import type { AuthoredModelDocument as AuthoredDocument } from "@/contracts/modeling/authored-document";
-import type { GeometryAssetHash } from "@/contracts/modeling/geometry-assets";
+import type {
+  BakedGeometryAssetReference,
+  GeometryAssetFormat,
+  GeometryAssetHash,
+  } from "@/contracts/modeling/geometry-assets";
 export interface ModelingNativeTopologyDiagnostic {
   severity: "info" | "warning" | "error";
   code: string;
@@ -63,8 +67,20 @@ export type ModelingNativeTopologyResult<TPayload = unknown> =
     }
   | ModelingNativeTopologyUnavailableResult;
 
+export interface ResolvedGeometryAssetBytes {
+  bytes: Uint8Array;
+  format: GeometryAssetFormat;
+}
 export interface GeometryAssetResolver {
-  getGeometryAssetBytes(hash: GeometryAssetHash): Promise<Uint8Array | null>;
+  /**
+   * Resolves geometry asset bytes from a self-describing reference (assetId,
+   * format, content hash, byte length). The reference is sufficient to read the
+   * backing store without any session-scoped registry.
+   */
+  resolveGeometryAsset(
+    reference: BakedGeometryAssetReference,
+  ): Promise<ResolvedGeometryAssetBytes | null>;
+  getGeometryAssetBytes?(hash: GeometryAssetHash): Promise<Uint8Array | null>;
 }
 
 /**
