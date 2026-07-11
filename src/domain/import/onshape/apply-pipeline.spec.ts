@@ -16,6 +16,8 @@ import {
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import { projectPointToPlane, translateSketch } from "@/domain/import/onshape/sketch-translator";
 import { createModelingService } from "@/domain/modeling/modeling-service";
+import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
@@ -568,4 +570,110 @@ test("applyImportPreparedActions keeps the no-deferred-reference path unchanged"
 
   expect(result.appliedOperationCount).toBe(0);
   expect(result.rolledBack).toBe(false);
+});
+
+// Composition-seam test: both the import baking capability (writer) and the
+// kernel asset resolver (reader) are obtained from the SAME production
+// composition helper against one store. The definition-carried asset reference
+// is what threads writer output to reader input, so the baked body materializes
+// without an assetMissing diagnostic and without any session registry.
+test("applyImportPreparedActions applies a baked body through the shared composition seam", async () => {
+  const { assetStore, resolver } = createGeometryAssetComposition(
+    createMemoryGeometryAssetStore(),
+  );
+  const adapter = new MockKernelAdapter({
+    solverAdapter: createRevisionAgnosticRealSolver(),
+    assetResolver: resolver,
+  });
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+  });
+  const snapshot = (
+    await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace",
+    })
+  ).snapshot;
+  const capabilities = createImportCapabilities(service, snapshot, {
+    assetStore,
+  });
+
+  // Writer end: bake bytes through the capability into the shared store.
+  const bakedMeshBytes = new TextEncoder().encode(
+    JSON.stringify({
+      kind: "bakedMeshGeometry",
+      schemaVersion: "baked-mesh-geometry/v1alpha1",
+      vertices: [
+        [0, 0, 0],
+        [10, 0, 0],
+        [0, 10, 0],
+        [0, 0, 10],
+      ],
+      indices: [
+        [0, 2, 1],
+        [0, 1, 3],
+        [1, 2, 3],
+        [2, 0, 3],
+      ],
+    }),
+  );
+  const reference = await capabilities.modeling.bakeGeometry({
+    bytes: bakedMeshBytes,
+    format: "baked-mesh",
+  });
+  expect(reference.hash.startsWith("sha256:")).toBeTruthy();
+  expect(reference.byteLength).toBe(bakedMeshBytes.byteLength);
+
+  // The definition carries the full reference (id, format, hash, byteLength):
+  // the reader end resolves it from the same store with no session registry.
+  const actions: ImportPreparedActions = {
+    createFeatures: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Imported baked body",
+        definition: {
+          kind: "bakedBody",
+          featureTypeVersion: "feature-type/baked-body/v1alpha1",
+          parameters: {
+            ...reference,
+            label: "Imported baked body",
+            provenance: {
+              source: "onshape",
+              sourceName: "Pipeline studio",
+              reason: "onshape-studio-bake-required",
+            },
+          },
+        },
+      } as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined
+        ? Entry
+        : never,
+    ],
+    orderedActions: [{ kind: "createFeature", index: 0 }],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+
+  expect(
+    result.diagnostics.every(
+      (diagnostic) => diagnostic.code !== "baked-body-assetMissing",
+    ),
+    `No assetMissing diagnostic should appear when writer and reader share the store; diagnostics: ${JSON.stringify(
+      result.diagnostics.map((diagnostic) => diagnostic.code),
+    )}`,
+  ).toBeTruthy();
+  expect(result.rolledBack).toBe(false);
+  expect(result.createdEntityIds.featureIds.length).toBe(1);
+  const finalSnapshot = await service.getCurrentDocumentSnapshot();
+  expect(
+    finalSnapshot.document.bodies.some(
+      (body) => body.label === "Imported baked body",
+    ),
+    "A baked body should be materialized in the final snapshot.",
+  ).toBeTruthy();
 });

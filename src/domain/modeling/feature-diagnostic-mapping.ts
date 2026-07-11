@@ -87,7 +87,8 @@ function advancedParticipantField(
     definition.kind === "fillet" ||
     definition.kind === "plane" ||
     definition.kind === "revolve" ||
-    definition.kind === "shell"
+    definition.kind === "shell" ||
+    definition.kind === "bakedBody"
   ) {
     return null;
   }

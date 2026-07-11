@@ -55,7 +55,10 @@ import type {
 } from "@/contracts/modeling/schema";
 import { type AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
-import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
+import type {
+  BakedGeometryAssetReference,
+  GeometryAssetBlobInput,
+} from "@/contracts/modeling/geometry-assets";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   isAdvancedSolidFeatureKind,
@@ -68,6 +71,7 @@ import type {
   RegionId,
   RequestId,
   RevisionId,
+  GeometryAssetId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -161,6 +165,7 @@ interface OpenCascadeKernelAdapterOptions {
   getOpenCascadeInstance?: () => Promise<OpenCascadeInstance>;
   initialSnapshotRequiresRuntime?: boolean;
   workerSnapshotClient?: OccWorkerSnapshotClient | null;
+  assetResolver?: GeometryAssetResolver;
   documentId?: DocumentId;
   tolerances?: SolverTolerancePolicy;
 }
@@ -791,7 +796,7 @@ async function resolveGeometryAssetBlobs(
   }
 
   for (const asset of document.assets.records) {
-    const bytes = await assetResolver.getGeometryAssetBytes(asset.hash);
+    const bytes = await assetResolver.getGeometryAssetBytes?.(asset.hash);
     if (bytes) {
       assetBlobs.set(asset.hash, bytes.slice());
     }
@@ -824,14 +829,44 @@ function createInMemoryGeometryAssetResolver(
     return undefined;
   }
 
-  const blobs = new Map(
+  const blobsByHash = new Map(
     assets.map((asset) => [asset.asset.hash, asset.bytes.slice()] as const),
   );
+  const blobsById = new Map(
+    assets.map((asset) => [asset.asset.assetId, asset] as const),
+  );
   return {
+    async resolveGeometryAsset(reference) {
+      const asset = blobsById.get(reference.assetId);
+      return asset
+        ? { bytes: asset.bytes.slice(), format: asset.asset.format }
+        : null;
+    },
     async getGeometryAssetBytes(hash) {
-      return blobs.get(hash)?.slice() ?? null;
+      return blobsByHash.get(hash)?.slice() ?? null;
     },
   };
+}
+
+function collectBakedBodyAssetReferences(
+  features: readonly Pick<OccAuthoringFeatureRecord, "definition">[],
+  extraDefinitions: readonly FeatureDefinition[] = [],
+) {
+  const referencesById = new Map<GeometryAssetId, BakedGeometryAssetReference>();
+  for (const definition of [
+    ...features.map((feature) => feature.definition),
+    ...extraDefinitions,
+  ]) {
+    if (definition.kind === "bakedBody") {
+      referencesById.set(definition.parameters.assetId, {
+        assetId: definition.parameters.assetId,
+        format: definition.parameters.format,
+        hash: definition.parameters.hash,
+        byteLength: definition.parameters.byteLength,
+      });
+    }
+  }
+  return referencesById;
 }
 
 function capitalizeFeatureKind(kind: FeatureDefinition["kind"]) {
@@ -1429,6 +1464,7 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
     }
     case "split":
     case "deleteSolid":
+    case "bakedBody":
       return [];
     default:
       return definition.parameters.participants.flatMap((participant) => [
@@ -1500,6 +1536,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly loadOpenCascadeInstance: () => Promise<OpenCascadeInstance>;
   private readonly initialSnapshotRequiresRuntime: boolean;
   private readonly workerSnapshotClient: OccWorkerSnapshotClient | null;
+  private assetResolver: GeometryAssetResolver | undefined;
   private readonly documentId: DocumentId;
   private readonly tolerances: SolverTolerancePolicy;
 
@@ -1520,6 +1557,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.initialSnapshotRequiresRuntime =
       options.initialSnapshotRequiresRuntime ?? false;
     this.workerSnapshotClient = options.workerSnapshotClient ?? null;
+    this.assetResolver = options.assetResolver;
     this.documentId = options.documentId ?? OCC_KERNEL_DOCUMENT_ID;
     this.tolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES;
   }
@@ -1530,6 +1568,35 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     return this.getRuntimeState().then(() => undefined);
+  }
+
+  private async preResolveBakedBodyAssets(
+    state: OccAuthoringState,
+    extraDefinitions: readonly FeatureDefinition[] = [],
+  ) {
+    const resolver = state.assetResolver ?? this.assetResolver;
+    if (!resolver) {
+      return;
+    }
+
+    for (const reference of collectBakedBodyAssetReferences(
+      state.features,
+      extraDefinitions,
+    ).values()) {
+      if (state.resolvedGeometryAssets.has(reference.assetId)) {
+        continue;
+      }
+
+      const resolved = await resolver.resolveGeometryAsset(reference);
+      if (!resolved) {
+        continue;
+      }
+
+      state.resolvedGeometryAssets.set(reference.assetId, {
+        bytes: resolved.bytes.slice(),
+        format: resolved.format,
+      });
+    }
   }
 
   setSnapshotLodTier(tierId: OccTessellationTierId) {
@@ -1586,6 +1653,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: OCC_KERNEL_DOCUMENT_NAME,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      assetResolver: this.assetResolver,
     });
 
     return {
@@ -1713,6 +1781,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
   ): Promise<void> {
+    this.assetResolver = assetResolver ?? this.assetResolver;
     const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver);
     const assets = createGeometryAssetBlobInputs(document, assetBlobs);
 
@@ -1733,7 +1802,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     await this.restoreAuthoredModelDocumentOnMainThread(
       document,
       diagnostics,
-      createInMemoryGeometryAssetResolver(assets),
+      assetResolver ?? createInMemoryGeometryAssetResolver(assets),
     );
   }
 
@@ -1742,6 +1811,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
   ): Promise<void> {
+    this.assetResolver = assetResolver ?? this.assetResolver;
     if (this.workerSnapshotClient) {
       const assetBlobs = await resolveGeometryAssetBlobs(
         document,
@@ -1806,6 +1876,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: document.name,
       revisionId: document.revisionId,
       modelingTolerance: document.settings.modelingTolerance,
+      assetResolver,
       variables: structuredClone(document.variables),
       bodyLabels: new Map(
         document.bodyLabels.map((label) => [label.bodyId, label.label]),
@@ -1817,6 +1888,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       diagnostics: restoreDiagnostics,
       cursor: { kind: "empty" },
     });
+    await this.preResolveBakedBodyAssets(
+      projectionState,
+      features.map((feature) => feature.definition),
+    );
     const pendingProjectionFeatures: OccAuthoringFeatureRecord[] = [];
     const failedProjectionFeatures: FailedFeatureRecord[] = [];
 
@@ -1877,6 +1952,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: document.name,
       revisionId: document.revisionId,
       modelingTolerance: document.settings.modelingTolerance,
+      assetResolver,
       sketches,
       variables: structuredClone(document.variables),
       bodyLabels: new Map(
@@ -1889,6 +1965,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       diagnostics: restoreDiagnostics,
       cursor: { kind: "empty" },
     });
+    authoringState = {
+      ...authoringState,
+      resolvedGeometryAssets: projectionState.resolvedGeometryAssets,
+      bakedShapeCache: projectionState.bakedShapeCache,
+    };
 
     const rebuiltAuthoringState = this.tryBuildNextAuthoringState(
       {
@@ -1955,6 +2036,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: OCC_KERNEL_DOCUMENT_NAME,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      assetResolver: this.assetResolver,
     });
 
     return buildOccWorkspaceSnapshot(authoringState);
@@ -2014,6 +2096,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: runtimeState.authoringState.name,
       revisionId: input.revisionId,
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
+      assetResolver: runtimeState.authoringState.assetResolver,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
       variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
@@ -2250,12 +2333,15 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: runtimeState.authoringState.name,
       revisionId: input.revisionId,
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
+      assetResolver: runtimeState.authoringState.assetResolver,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
       variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
+      resolvedGeometryAssets: runtimeState.authoringState.resolvedGeometryAssets,
+      bakedShapeCache: runtimeState.authoringState.bakedShapeCache,
       embeddedBinaryAssets: runtimeState.authoringState.embeddedBinaryAssets,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
@@ -3391,6 +3477,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
     const nextFeatures = [...runtimeState.authoringState.features];
     nextFeatures.splice(insertionIndex, 0, feature);
+    await this.preResolveBakedBodyAssets(
+      runtimeState.authoringState,
+      nextFeatures.map((entry) => entry.definition),
+    );
 
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
       revisionId: nextRevisionId,
@@ -3507,6 +3597,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             definition: request.definition,
           }
         : feature,
+    );
+    await this.preResolveBakedBodyAssets(
+      runtimeState.authoringState,
+      nextFeatures.map((entry) => entry.definition),
     );
 
     const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {

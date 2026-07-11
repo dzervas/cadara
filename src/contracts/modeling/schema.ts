@@ -8,6 +8,7 @@ import type {
   FaceId,
   FeatureId,
   FeatureTreeNodeId,
+  GeometryAssetId,
   ObjectTreeNodeId,
   PreviewId,
   ReferenceId,
@@ -28,6 +29,7 @@ import type {
 import type { SketchPoint2D, SketchRecord } from "@/contracts/sketch/schema";
 import type { RenderExport } from "@/contracts/render/schema";
 import type {
+  BakedBodyFeatureSchemaVersion,
   ContractVersion,
   ExtrudeFeatureSchemaVersion,
   FilletFeatureSchemaVersion,
@@ -42,7 +44,11 @@ import type {
   AdvancedSolidFeatureKind,
 } from "@/contracts/modeling/advanced-solid";
 import type { AuthoredValue } from "@/contracts/modeling/authored-values";
-import type { GeometryAssetDiagnosticDetail } from "@/contracts/modeling/geometry-assets";
+import type {
+  GeometryAssetDiagnosticDetail,
+  GeometryAssetFormat,
+  GeometryAssetHash,
+} from "@/contracts/modeling/geometry-assets";
 
 export interface DocumentSnapshotProvenance {
   repositoryHeads: readonly string[];
@@ -111,6 +117,7 @@ export type SketchPoint = SketchPoint2D;
  * This union is closed so callers cannot invent feature types ad hoc.
  */
 export type FeatureKind = "extrude" | "fillet" | "plane" | "revolve" | "shell";
+export type BakedBodyFeatureKind = "bakedBody";
 export type AuthoredFeatureKind =
   | FeatureKind
   | "sweep"
@@ -122,7 +129,10 @@ export type AuthoredFeatureKind =
   | "deleteSolid"
   | "mirror"
   | "transform";
-export type ModelingFeatureKind = FeatureKind | AdvancedSolidFeatureKind;
+export type ModelingFeatureKind =
+  | FeatureKind
+  | AdvancedSolidFeatureKind
+  | BakedBodyFeatureKind;
 
 /** Ordered collection that must contain at least one entry. */
 export type NonEmptyReadonlyArray<T> = readonly [T, ...T[]];
@@ -451,6 +461,51 @@ export interface ShellFeatureParameters {
   booleanScope: FeatureBooleanScope;
 }
 
+/** Provenance exposed by baked-body features for honest non-parametric editing. */
+export interface BakedBodyFeatureProvenance {
+  /** Source system that produced the baked geometry. */
+  source: "onshape" | "fileImport" | "generated";
+  /** Stable source document/studio identifier when known. */
+  sourceId?: string;
+  /** Human-readable source name used in labels and repair surfaces. */
+  sourceName?: string;
+  /** Inclusive authored feature span represented by this baked body when known. */
+  featureSpan?: { fromFeatureId: string; toFeatureId: string };
+  /** Machine-readable reason the source geometry was baked instead of authored parametrically. */
+  reason?: string;
+}
+
+/** Fully typed baked-body parameters. */
+export interface BakedBodyFeatureParameters {
+  /** Immutable geometry asset to materialize. */
+  assetId: GeometryAssetId;
+  /** Declared asset format expected by the materializer. */
+  format: GeometryAssetFormat;
+  /** Content hash of the referenced asset, so the store record is reconstructable without session state. */
+  hash: GeometryAssetHash;
+  /** Byte length of the referenced asset bytes, validated on store reads. */
+  byteLength: number;
+  /** User-facing body/feature label. */
+  label: string;
+  /** External provenance exposed instead of pseudo-parametric controls. */
+  provenance: BakedBodyFeatureProvenance;
+}
+
+/** Machine-readable baked-body rebuild failure reasons. */
+export type BakedBodyDiagnosticReason =
+  | "assetMissing"
+  | "formatInvalid"
+  | "materializationFailed";
+
+/** Structured baked-body diagnostic payload emitted during rebuild/materialization. */
+export interface BakedBodyDiagnosticDetail {
+  kind: "bakedBody";
+  reason: BakedBodyDiagnosticReason;
+  assetId: GeometryAssetId;
+  format: GeometryAssetFormat;
+  message: string;
+}
+
 /**
  * Canonical typed feature definitions used across requests and snapshots.
  * Each variant owns its required references and parameters directly.
@@ -495,6 +550,14 @@ export type FeatureDefinition =
       featureTypeVersion: ShellFeatureSchemaVersion;
       /** Exact rebuild inputs owned by this shell feature instance. */
       parameters: ShellFeatureParameters;
+    }
+  | {
+      /** Stable discriminant for externally materialized baked bodies. */
+      kind: "bakedBody";
+      /** Per-variant schema version owned by the baked-body contract family. */
+      featureTypeVersion: BakedBodyFeatureSchemaVersion;
+      /** Asset reference and provenance for this non-parametric body. */
+      parameters: BakedBodyFeatureParameters;
     }
   | AdvancedSolidFeatureDefinition;
 
@@ -564,7 +627,8 @@ export type ModelingDiagnosticDetail =
       /** Role-specific validation or unsupported-case diagnostic. */
       diagnostic: AdvancedFeatureValidationDiagnostic;
     }
-  | GeometryAssetDiagnosticDetail;
+  | GeometryAssetDiagnosticDetail
+  | BakedBodyDiagnosticDetail;
 
 /**
  * Top-level diagnostic record returned by the modeling boundary.

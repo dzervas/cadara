@@ -19,6 +19,7 @@ import type {
   PickId,
   RegionId,
   RenderableId,
+  EdgeId,
   RequestId,
   RevisionId,
   SketchId,
@@ -52,7 +53,10 @@ import {
   getExtrudeFeatureExtent,
   getRevolveFeatureExtent,
 } from "@/contracts/modeling/feature-extents";
-import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
+import type {
+  GeometryAssetResolver,
+  ModelingKernelAdapter,
+} from "@/contracts/modeling/adapter";
 import type {
   ExportCapabilities,
   MeshExportAccuracy,
@@ -126,6 +130,7 @@ import {
 } from "@/domain/solver/mock-sketch-solver-adapter";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import { projectSketchExternalReferencesFromSnapshot } from "@/domain/modeling/sketch-reference-projection";
+import { describeFeatureTreeNode } from "@/domain/modeling/feature-description";
 
 const CONTRACT_VERSION = "modeling-contract/v1alpha1" as const;
 const REVISION_ID = "rev_0001" as const;
@@ -542,11 +547,108 @@ function getFeatureDefinitionChangedTargets(definition: FeatureDefinition) {
         definition.parameters.bodyTarget,
         ...definition.parameters.faceTargets,
       ];
+    case "bakedBody":
+      return [];
     default:
       return definition.parameters.participants.flatMap((participant) => [
         ...participant.targets,
       ]);
   }
+}
+
+function createMockBakedBodyArtifacts(input: {
+  featureId: FeatureId;
+  featureLabel: string;
+  revisionId: RevisionId;
+}) {
+  const suffix = input.featureId.replace(/^feature_/, "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const bodyId = `body_baked_${suffix}` as BodyId;
+  const faceId = `face_baked_${suffix}_mesh` as FaceId;
+  const edgeIds = [0, 1, 2].map((index) =>
+    `edge_baked_${suffix}_${index}` as EdgeId,
+  );
+  const vertexIds = [0, 1, 2].map((index) =>
+    `vertex_baked_${suffix}_${index}` as VertexId,
+  );
+  const bodyTarget = { kind: "body" as const, bodyId };
+  const faceTarget = { kind: "face" as const, bodyId, faceId };
+
+  return {
+    bodyId,
+    producedTargets: [bodyTarget],
+    body: {
+      ownerDocumentId: DOCUMENT_ID,
+      ownerRevisionId: input.revisionId,
+      ownerFeatureId: input.featureId,
+      ownerSketchId: null,
+      ownerBodyId: bodyId,
+      bodyId,
+      label: input.featureLabel,
+      topology: {
+        faceIds: [faceId],
+        edgeIds,
+        vertexIds,
+      },
+    },
+    entity: entity({
+      ownerFeatureId: input.featureId,
+      ownerSketchId: null,
+      ownerBodyId: bodyId,
+      id: `snapshot_entity_${bodyId}` as SnapshotEntityId,
+      label: input.featureLabel,
+      target: bodyTarget,
+      relatedTargets: [faceTarget],
+      consumedByFeatureIds: [],
+      selectionSemantics: ["body"],
+    }),
+    renderRecord: {
+      id: `renderable_${bodyId}` as RenderableId,
+      label: input.featureLabel,
+      ownerBodyId: bodyId,
+      ownerFeatureId: input.featureId,
+      binding: {
+        pickId: `pick_${bodyId}` as PickId,
+        pickPriority: 30,
+        target: faceTarget,
+        topology: "face" as const,
+        semanticClass: "bodyFace" as const,
+      },
+      geometry: {
+        kind: "mesh" as const,
+        vertexPositions: [
+          [0, 0, 0],
+          [10, 0, 0],
+          [0, 10, 0],
+        ],
+        vertexNormals: [
+          [0, 0, 1],
+          [0, 0, 1],
+          [0, 0, 1],
+        ],
+        triangleIndices: [[0, 1, 2]],
+      },
+    } satisfies RenderableEntityRecord,
+  };
+}
+
+function createBakedBodyDiagnostic(
+  definition: Extract<FeatureDefinition, { kind: "bakedBody" }>,
+  reason: "assetMissing" | "formatInvalid" | "materializationFailed",
+  message: string,
+): ModelingDiagnostic {
+  return {
+    code: `baked-body-${reason}`,
+    severity: "error",
+    message,
+    target: null,
+    detail: {
+      kind: "bakedBody",
+      reason,
+      assetId: definition.parameters.assetId,
+      format: definition.parameters.format,
+      message,
+    },
+  };
 }
 
 function getConsumedEntityKeysForTarget(target: DurableRef) {
@@ -2183,6 +2285,8 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       return { accepted: true as const, diagnostics: [] };
     }
+    case "bakedBody":
+      return { accepted: true as const, diagnostics: [] };
     default:
       return {
         accepted: false as const,
@@ -3615,7 +3719,7 @@ function rebuildFeatureTree(snapshot: WorkspaceSnapshot) {
       {
         id: `feature_tree_node_${feature.featureId}` as FeatureTreeNodeId,
         label: feature.label,
-        description: `${feature.definition.kind} feature`,
+        description: describeFeatureTreeNode(feature.definition),
         kind: "feature" as const,
         target: { kind: "feature" as const, featureId: feature.featureId },
         ownerFeatureId: feature.featureId,
@@ -3842,10 +3946,15 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
   private revisionSequence = 1;
   private authoredAssets = createEmptyGeometryAssetManifest();
   private authoredEmbeddedBinaryAssets: EmbeddedBinaryAssetRecord[] = [];
+  private readonly assetResolver: GeometryAssetResolver | undefined;
 
-  constructor(options?: { solverAdapter?: SketchSolverAdapter }) {
+  constructor(options?: {
+    solverAdapter?: SketchSolverAdapter;
+    assetResolver?: GeometryAssetResolver;
+  }) {
     this.solverAdapter =
       options?.solverAdapter ?? new MockSketchSolverAdapter();
+    this.assetResolver = options?.assetResolver;
   }
 
   private async getSnapshot() {
@@ -4095,6 +4204,50 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       };
     }
 
+    if (resolvedDefinition.definition.kind === "bakedBody") {
+      const resolvedAsset = await this.assetResolver?.resolveGeometryAsset({
+        assetId: resolvedDefinition.definition.parameters.assetId,
+        format: resolvedDefinition.definition.parameters.format,
+        hash: resolvedDefinition.definition.parameters.hash,
+        byteLength: resolvedDefinition.definition.parameters.byteLength,
+      });
+      const diagnostic =
+        !resolvedAsset
+          ? createBakedBodyDiagnostic(
+              resolvedDefinition.definition,
+              "assetMissing",
+              `Baked geometry asset ${resolvedDefinition.definition.parameters.assetId} is unavailable.`,
+            )
+          : resolvedAsset.format !== resolvedDefinition.definition.parameters.format
+          ? createBakedBodyDiagnostic(
+              resolvedDefinition.definition,
+              "formatInvalid",
+              `Baked geometry asset ${resolvedDefinition.definition.parameters.assetId} resolved as ${resolvedAsset.format}, expected ${resolvedDefinition.definition.parameters.format}.`,
+            )
+          : null;
+
+      if (diagnostic) {
+        return {
+          contractVersion: CONTRACT_VERSION,
+          documentId: request.documentId,
+          revisionId: request.baseRevisionId,
+          featureId: `feature_${getFeatureDefinitionLabel(request.definition)}-preview`,
+          revisionState: {
+            kind: "rejected" as const,
+            baseRevisionId: request.baseRevisionId,
+            reasonCode: diagnostic.code,
+          },
+          rebuildResult: createRebuildResult({
+            kind: "skipped",
+            reasonCode: "validationRejected",
+            diagnostics: [diagnostic],
+          }),
+          changedTargets: [],
+          diagnostics: [diagnostic],
+        };
+      }
+    }
+
     const validation = validateFeatureDefinitionAgainstSnapshot(
       resolvedDefinition.definition,
       snapshot,
@@ -4130,13 +4283,20 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         mutableSnapshot.document.features.filter(
           (feature) => feature.definition.kind === request.definition.kind,
         ).length + 1;
-      const changedTargets = getFeatureDefinitionChangedTargets(
-        resolvedDefinition.definition,
-      );
-
       const featureLabel =
         request.featureLabel ??
         `${request.definition.kind[0]!.toUpperCase()}${request.definition.kind.slice(1)} ${featureIndex}`;
+      const bakedBodyArtifacts =
+        resolvedDefinition.definition.kind === "bakedBody"
+          ? createMockBakedBodyArtifacts({
+              featureId,
+              featureLabel,
+              revisionId: nextRevisionId,
+            })
+          : null;
+      const changedTargets =
+        bakedBodyArtifacts?.producedTargets ??
+        getFeatureDefinitionChangedTargets(resolvedDefinition.definition);
       const nextFeature = {
         ownerDocumentId: DOCUMENT_ID,
         ownerRevisionId: nextRevisionId,
@@ -4183,6 +4343,12 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           consumedByFeatureIds: [],
         }),
       );
+
+      if (bakedBodyArtifacts) {
+        mutableSnapshot.document.bodies.push(bakedBodyArtifacts.body);
+        mutableSnapshot.presentation.entities.push(bakedBodyArtifacts.entity);
+        mutableSnapshot.document.render.records.push(bakedBodyArtifacts.renderRecord);
+      }
 
       updateFeatureEntityRelationship(
         mutableSnapshot,

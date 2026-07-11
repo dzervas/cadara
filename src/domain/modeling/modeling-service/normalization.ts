@@ -19,6 +19,8 @@ import type {
   ExtrudeFeatureParameters,
   FeatureBooleanOperation,
   FeatureDefinition,
+  BakedBodyFeatureParameters,
+  BakedBodyFeatureProvenance,
   FeatureSnapshotRecord,
   FilletFeatureParameters,
   InvalidReferenceDetailPayload,
@@ -98,6 +100,7 @@ import {
   PLANE_FEATURE_SCHEMA_VERSION,
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
+  BAKED_BODY_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 import {
   isRecord,
@@ -698,6 +701,63 @@ export function normalizeAdvancedSolidFeatureParameters(
   };
 }
 
+function normalizeBakedBodyProvenance(value: unknown): BakedBodyFeatureProvenance {
+  if (!isRecord(value) || !isString(value.source)) {
+    throw new Error("Invalid baked-body provenance payload.");
+  }
+  if (
+    value.source !== "onshape" &&
+    value.source !== "fileImport" &&
+    value.source !== "generated"
+  ) {
+    throw new Error("Invalid baked-body provenance source.");
+  }
+  const provenance: BakedBodyFeatureProvenance = { source: value.source };
+  if (isString(value.sourceId)) {
+    provenance.sourceId = value.sourceId;
+  }
+  if (isString(value.sourceName)) {
+    provenance.sourceName = value.sourceName;
+  }
+  if (isString(value.reason)) {
+    provenance.reason = value.reason;
+  }
+  if (
+    isRecord(value.featureSpan) &&
+    isString(value.featureSpan.fromFeatureId) &&
+    isString(value.featureSpan.toFeatureId)
+  ) {
+    provenance.featureSpan = {
+      fromFeatureId: value.featureSpan.fromFeatureId,
+      toFeatureId: value.featureSpan.toFeatureId,
+    };
+  }
+  return provenance;
+}
+
+function normalizeBakedBodyFeatureParameters(
+  value: unknown,
+): BakedBodyFeatureParameters {
+  if (
+    !isRecord(value) ||
+    !isString(value.assetId) ||
+    !isString(value.format) ||
+    !isString(value.hash) ||
+    typeof value.byteLength !== "number" ||
+    !isString(value.label)
+  ) {
+    throw new Error("Invalid baked-body feature parameters payload.");
+  }
+  return {
+    assetId: value.assetId as BakedBodyFeatureParameters["assetId"],
+    format: value.format as BakedBodyFeatureParameters["format"],
+    hash: value.hash as BakedBodyFeatureParameters["hash"],
+    byteLength: value.byteLength,
+    label: value.label,
+    provenance: normalizeBakedBodyProvenance(value.provenance),
+  };
+}
+
 export function normalizeFeatureDefinition(value: unknown): FeatureDefinition {
   if (
     !isRecord(value) ||
@@ -752,6 +812,15 @@ export function normalizeFeatureDefinition(value: unknown): FeatureDefinition {
             ? value.featureTypeVersion
             : SHELL_FEATURE_SCHEMA_VERSION,
         parameters: normalizeShellFeatureParameters(value.parameters),
+      };
+    case "bakedBody":
+      return {
+        kind: "bakedBody",
+        featureTypeVersion:
+          value.featureTypeVersion === BAKED_BODY_FEATURE_SCHEMA_VERSION
+            ? value.featureTypeVersion
+            : BAKED_BODY_FEATURE_SCHEMA_VERSION,
+        parameters: normalizeBakedBodyFeatureParameters(value.parameters),
       };
     default:
       if (isAdvancedSolidFeatureKind(value.kind)) {

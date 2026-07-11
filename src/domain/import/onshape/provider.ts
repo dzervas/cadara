@@ -17,10 +17,12 @@ import type {
   ImportPreparedActionRef,
 } from "@/contracts/import/actions";
 import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
+import { describeUnknownError } from "@/contracts/errors";
 import type { ImportProvider } from "@/contracts/import/provider";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import {
+  BAKED_BODY_FEATURE_SCHEMA_VERSION,
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   IMPORT_CONTRACT_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
@@ -428,6 +430,59 @@ function extractCapturedTessellationPoints(tessellatedFaces: unknown): number[] 
   return points;
 }
 
+function encodeCapturedTessellationAsBakedMeshBytes(
+  tessellatedFaces: unknown,
+): Uint8Array | null {
+  if (typeof tessellatedFaces !== "object" || tessellatedFaces === null) {
+    return null;
+  }
+  const bodies = (tessellatedFaces as { bodies?: unknown }).bodies;
+  if (!Array.isArray(bodies)) {
+    return null;
+  }
+
+  const vertices: [number, number, number][] = [];
+  const indices: [number, number, number][] = [];
+  for (const body of bodies) {
+    const faces = (body as { faces?: unknown }).faces;
+    if (!Array.isArray(faces)) {
+      continue;
+    }
+    for (const face of faces) {
+      const facets = (face as { facets?: unknown }).facets;
+      if (!Array.isArray(facets)) {
+        continue;
+      }
+      for (const facet of facets) {
+        const facetVertices = (facet as { vertices?: unknown }).vertices;
+        if (!Array.isArray(facetVertices) || facetVertices.length < 3) {
+          continue;
+        }
+        const trianglePoints = facetVertices.slice(0, 3).map(readCapturedPoint);
+        if (trianglePoints.some((point) => point === null)) {
+          continue;
+        }
+        const start = vertices.length;
+        vertices.push(...(trianglePoints as [number, number, number][]));
+        indices.push([start, start + 1, start + 2]);
+      }
+    }
+  }
+
+  if (vertices.length === 0 || indices.length === 0) {
+    return null;
+  }
+
+  return new TextEncoder().encode(
+    JSON.stringify({
+      kind: "bakedMeshGeometry",
+      schemaVersion: "baked-mesh-geometry/v1alpha1",
+      vertices,
+      indices,
+    }),
+  );
+}
+
 function verifyGroundTruth(input: {
   hasHistoryCapability: boolean;
   groundTruth: ReturnType<typeof readPartStudio>["studio"]["groundTruth"];
@@ -525,10 +580,11 @@ async function activateProbeBackedPlanning(input: {
     return { plan: input.plan, probeResult: null };
   }
 
-  const candidatePrefix = buildPreparedActions({
+  const candidatePrefix = await buildPreparedActions({
     read: input.read,
     plan: input.plan,
     capabilities: input.capabilities,
+    materializeBake: false,
   });
   const probeResult = await input.capabilities.history.evaluateHistoryProbe({
     actions: candidatePrefix,
@@ -695,14 +751,15 @@ type OnshapeStudioPlan = Pick<
   "featurePlans" | "tierCounts" | "requiresStudioBake"
 >;
 
-function buildPreparedActions(input: {
+async function buildPreparedActions(input: {
   source?: ResolvedImportSource;
   read: ReturnType<typeof readPartStudio>;
   plan: OnshapeStudioPlan;
   capabilities: ImportCapabilities;
   demotedFeatureIds?: Iterable<string>;
   includeBinding?: boolean;
-}): ImportPreparedActions {
+  materializeBake?: boolean;
+}): Promise<ImportPreparedActions> {
   const demoted = new Set(input.demotedFeatureIds ?? []);
   const featuresById = new Map(input.read.features.map((f) => [f.featureId, f]));
   const context = input.capabilities.context;
@@ -924,12 +981,76 @@ function buildPreparedActions(input: {
   }
 
   if (input.plan.requiresStudioBake) {
-    diagnostics.push({
-      severity: "warning",
-      message:
-        "Non-parametric solid geometry could not be materialized: baking requires the geometry-import capability, which is not available. The final-state body was not imported.",
-      code: "onshape-bake-unavailable",
-    });
+    const bakedMeshBytes =
+      input.materializeBake && input.read.studio.groundTruth.hasBodies
+        ? encodeCapturedTessellationAsBakedMeshBytes(
+            input.read.studio.groundTruth.tessellatedFaces,
+          )
+        : null;
+    let bakedAsset: Awaited<
+      ReturnType<ImportCapabilities["modeling"]["bakeGeometry"]>
+    > | null = null;
+    if (bakedMeshBytes) {
+      try {
+        bakedAsset = await input.capabilities.modeling.bakeGeometry({
+          bytes: bakedMeshBytes,
+          format: "baked-mesh",
+        });
+      } catch (error) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Onshape baked geometry could not be persisted: ${describeUnknownError(
+            error,
+            "unknown error",
+          )}`,
+          code: "onshape-bake-failed",
+        });
+        bakedAsset = null;
+      }
+    }
+
+    if (bakedAsset) {
+      const bakedFeatureIds = input.plan.featurePlans
+        .filter((featurePlan) => featurePlan.tier === "baked")
+        .map((featurePlan) => featurePlan.onshapeFeatureId);
+      const fromFeatureId = bakedFeatureIds[0] ?? "unknown";
+      const toFeatureId = bakedFeatureIds.at(-1) ?? fromFeatureId;
+      createFeatures.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: `${input.read.studio.name} baked body`,
+        definition: {
+          kind: "bakedBody",
+          featureTypeVersion: BAKED_BODY_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            assetId: bakedAsset.assetId,
+            format: bakedAsset.format,
+            hash: bakedAsset.hash,
+            byteLength: bakedAsset.byteLength,
+            label: `${input.read.studio.name} baked body`,
+            provenance: {
+              source: "onshape",
+              sourceId: input.read.studio.elementId,
+              sourceName: input.read.studio.name,
+              featureSpan: { fromFeatureId, toFeatureId },
+              reason: "onshape-studio-bake-required",
+            },
+          },
+        },
+      });
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+    } else {
+      diagnostics.push({
+        severity: "warning",
+        message:
+          "Non-parametric solid geometry could not be materialized: baking requires the geometry-import capability, which is not available. The final-state body was not imported.",
+        code: "onshape-bake-unavailable",
+      });
+    }
   }
 
   diagnostics.push({
@@ -1136,13 +1257,14 @@ export const onshapeImportProvider: ImportProvider<
           requiresStudioBake: reviewedStudio.requiresStudioBake,
         }
       : planStudioFidelity(read);
-    return buildPreparedActions({
+    return await buildPreparedActions({
       source,
       read,
       plan,
       capabilities,
       demotedFeatureIds: selections.demotedFeatureIds,
       includeBinding: true,
+      materializeBake: true,
     });
   },
 };

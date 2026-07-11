@@ -13,21 +13,36 @@ import type { ImportResult } from "@/contracts/import/result";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import type {
+  BakedMeshGeometryAssetData,
+  GeometryAssetFormat,
+  GeometryAssetRecord,
+  GeometryAssetProvenance,
+} from "@/contracts/modeling/geometry-assets";
+import type {
   CreateFeatureRequest,
   ModelingDiagnostic,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
 import type { BodyId, SketchId } from "@/contracts/shared/ids";
 import type { RegionRecord, SketchRecord } from "@/contracts/sketch/schema";
-import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import {
+  CONTRACT_VERSION,
+  GEOMETRY_ASSET_SCHEMA_VERSION,
+} from "@/contracts/shared/versioning";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
-import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
+import {
+  createMemoryGeometryAssetStore,
+  hashGeometryAssetBytes,
+  type GeometryAssetStore,
+} from "@/domain/modeling/geometry-asset-store";
+import { validateGeometryAssetRecord } from "@/contracts/modeling/geometry-assets.runtime-schema";
 import { registerEmbeddedBinaryAsset } from "@/domain/modeling/embedded-binary-asset-registry";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import {
   selectInnermostContainingRegion,
   type RegionSelectionSketch,
 } from "@/domain/import/region-containment";
+import { describeUnknownError } from "@/contracts/errors";
 
 export async function resolveLocalFileImportSource(
   file: File,
@@ -47,11 +62,94 @@ export async function resolveLocalFileImportSource(
   };
 }
 
+export type ImportCapabilityErrorCode =
+  | "import-capability-unsupported-format"
+  | "import-capability-invalid-geometry"
+  | "import-capability-storage-failed";
+
+export class ImportCapabilityError extends Error {
+  readonly code: ImportCapabilityErrorCode;
+  readonly format?: GeometryAssetFormat;
+  readonly diagnostic?: ModelingDiagnostic;
+
+  constructor(input: {
+    code: ImportCapabilityErrorCode;
+    message: string;
+    format?: GeometryAssetFormat;
+    diagnostic?: ModelingDiagnostic;
+    cause?: unknown;
+  }) {
+    super(input.message, { cause: input.cause });
+    this.name = "ImportCapabilityError";
+    this.code = input.code;
+    this.format = input.format;
+    this.diagnostic = input.diagnostic;
+  }
+}
+
+const bakeableGeometryFormats = new Set<GeometryAssetFormat>(["baked-mesh"]);
+
+function parseBakedMeshGeometry(
+  bytes: Uint8Array,
+  format: GeometryAssetFormat,
+): BakedMeshGeometryAssetData {
+  if (format !== "baked-mesh") {
+    throw new ImportCapabilityError({
+      code: "import-capability-unsupported-format",
+      format,
+      message: `Geometry baking cannot parse ${format} as baked mesh geometry.`,
+    });
+  }
+
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Baked mesh payload must be a JSON object.");
+    }
+    return {
+      ...(parsed as BakedMeshGeometryAssetData),
+      kind: "bakedMeshGeometry",
+      schemaVersion: "baked-mesh-geometry/v1alpha1",
+    };
+  } catch (error) {
+    if (error instanceof ImportCapabilityError) {
+      throw error;
+    }
+    throw new ImportCapabilityError({
+      code: "import-capability-invalid-geometry",
+      format,
+      message: "Baked mesh geometry bytes must be valid baked-mesh JSON.",
+      cause: error,
+    });
+  }
+}
+
+function mediaTypeForGeometryFormat(format: GeometryAssetFormat) {
+  switch (format) {
+    case "baked-mesh":
+      return "application/vnd.cadara-baked-mesh+json";
+    case "cadara-brep":
+      return "application/vnd.cadara-brep+json";
+    case "step":
+      return "model/step";
+    case "stl":
+      return "model/stl";
+    case "3mf":
+      return "model/3mf";
+    case "baked-occ":
+      return "application/vnd.cadara-baked-occ";
+  }
+}
+
 export function createImportCapabilities(
   _modelingService: ModelingService,
   snapshot: WorkspaceSnapshot,
-  options: { history?: ImportHistoryProbeCapabilities } = {},
+  options: {
+    history?: ImportHistoryProbeCapabilities;
+    assetStore?: GeometryAssetStore;
+  } = {},
 ): ImportCapabilities {
+  const assetStore = options.assetStore ?? createMemoryGeometryAssetStore();
   return {
     context: {
       contractVersion: CONTRACT_VERSION,
@@ -59,8 +157,65 @@ export function createImportCapabilities(
       baseRevisionId: snapshot.document.revisionId,
     },
     modeling: {
-      async bakeGeometry() {
-        throw new Error("Geometry import baking is not implemented yet.");
+      async bakeGeometry(input) {
+        if (!bakeableGeometryFormats.has(input.format)) {
+          throw new ImportCapabilityError({
+            code: "import-capability-unsupported-format",
+            format: input.format,
+            message: `Geometry baking does not support ${input.format} assets on this platform.`,
+          });
+        }
+
+        const hash = await hashGeometryAssetBytes(input.bytes);
+        const assetId = `asset_baked_${hash.slice("sha256:".length, "sha256:".length + 16)}` as const;
+        const data = parseBakedMeshGeometry(input.bytes, input.format);
+        const provenance: GeometryAssetProvenance = {
+          kind: "generated",
+          generator: "cadara-import-bakeGeometry",
+          sourceHash: hash,
+        };
+        const asset: GeometryAssetRecord = {
+          schemaVersion: GEOMETRY_ASSET_SCHEMA_VERSION,
+          assetId,
+          hash,
+          byteLength: input.bytes.byteLength,
+          format: input.format,
+          mediaType: mediaTypeForGeometryFormat(input.format),
+          provenance,
+          data,
+          ownerFeatureIds: [],
+        };
+
+        const validation = validateGeometryAssetRecord(asset);
+        if (!validation.success) {
+          throw new ImportCapabilityError({
+            code: "import-capability-invalid-geometry",
+            format: input.format,
+            message:
+              validation.issues[0]?.message ??
+              `Invalid ${input.format} geometry asset payload.`,
+          });
+        }
+
+        const stored = await assetStore.put({ asset, bytes: input.bytes });
+        if (!stored.ok) {
+          throw new ImportCapabilityError({
+            code: "import-capability-storage-failed",
+            format: input.format,
+            diagnostic: stored.diagnostic,
+            message: stored.diagnostic.message,
+          });
+        }
+
+        // Return a self-describing reference: the definition that will carry it
+        // must be sufficient to reconstruct the store record on reload, with no
+        // session-scoped registry.
+        return {
+          assetId: asset.assetId,
+          format: asset.format,
+          hash: asset.hash,
+          byteLength: asset.byteLength,
+        };
       },
       async reconstructMeshToBrep() {
         throw new Error("Mesh-to-B-rep reconstruction is not implemented yet.");
@@ -468,8 +623,7 @@ export async function applyImportPreparedActions(input: {
     if (appliedOperationCount > 0 && input.rollback) {
       await input.rollback(appliedOperationCount);
     }
-    const message =
-      failure instanceof Error ? failure.message : String(failure);
+    const message = describeUnknownError(failure, "Import failed.");
     diagnostics.push({
       code: "import-apply-failed",
       severity: "error",

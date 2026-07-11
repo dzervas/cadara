@@ -1,4 +1,5 @@
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
 import type { PerformanceTelemetry } from "@/contracts/performance/telemetry";
 import {
   noopPerformanceTelemetry,
@@ -11,14 +12,23 @@ import {
 } from "@/domain/modeling/occ/preload";
 import { createBrowserOccWorkerClient } from "@/domain/modeling/occ/worker-runtime";
 import {
+  getBrowserGeometryAssetComposition,
+} from "@/infrastructure/modeling/browser-geometry-asset-store";
+import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 
+const browserGeometryAssetResolver =
+  getBrowserGeometryAssetComposition().resolver;
 const browserOccWorkerClient =
-  typeof window === "undefined" ? null : createBrowserOccWorkerClient();
+  typeof window === "undefined"
+    ? null
+    : createBrowserOccWorkerClient({
+        assetResolver: browserGeometryAssetResolver,
+      });
 let browserOccKernelAdapter: OpenCascadeKernelAdapter | null = null;
 let browserOccWarmupController: OccPreloadController | null = null;
 let browserOccWarmupPromise: Promise<void> | null = null;
@@ -54,6 +64,7 @@ export function getBrowserOccWorkerClient() {
 export function createBrowserOccKernelAdapter(
   documentId: DocumentId = OCC_KERNEL_DOCUMENT_ID,
   performanceTelemetry: PerformanceTelemetry = noopPerformanceTelemetry,
+  assetResolver: GeometryAssetResolver = browserGeometryAssetResolver,
 ) {
   return new OpenCascadeKernelAdapter({
     solverAdapter: createKernelSketchSolver(
@@ -67,6 +78,7 @@ export function createBrowserOccKernelAdapter(
       browserOccWorkerClient,
       performanceTelemetry,
     ),
+    assetResolver,
     documentId,
   });
 }

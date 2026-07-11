@@ -4,6 +4,7 @@ import { createWorkbenchDocumentOwner } from "@/workbench/document/document-owne
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useModelingService } from "@/hooks/use-modeling-service";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
+import { getBrowserGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
 
 export function useWorkbenchDocumentOwner() {
   const { machineState, dispatch } = useEditorState();
@@ -17,6 +18,7 @@ export function useWorkbenchDocumentOwner() {
         dispatch,
         modelingService,
         runtimeExtensionRegistries,
+        geometryAssetStore: getBrowserGeometryAssetComposition().assetStore,
       }),
     [dispatch, machineState, modelingService, runtimeExtensionRegistries],
   );

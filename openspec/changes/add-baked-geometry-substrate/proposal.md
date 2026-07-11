@@ -14,7 +14,7 @@ This substrate is deliberately generic: the archived `mesh-baked-geometry-import
 - Update the **Onshape provider**: studios requiring a bake emit a `bakedBody` feature from the bundle's ground-truth tessellation (whole-studio final body in v1; per-feature deltas when capture v2 lands), replacing the `onshape-bake-unavailable` warning. Baked features appear in the feature tree suppressed-but-visible with their reason codes; the baked body itself is live geometry.
 - Gate (not implement) **exact STEP baking**: a task verifies the effort to add `STEPControl_Reader` to `opencascade-recipe.yaml`; if cheap it lands as a follow-up format, otherwise it is documented and deferred.
 
-Out of scope: mesh→B-rep reconstruction (`reconstructMeshToBrep` stays a stub), STL/3MF file import providers (enabled by this substrate, drafted separately if wanted), per-feature bake deltas (capture v2).
+Out of scope: mesh→B-rep reconstruction (`reconstructMeshToBrep` stays a stub), STL/3MF file import providers (enabled by this substrate, drafted separately if wanted), per-feature bake deltas (capture v2), and full portable embedding of baked assets in single-file Cadara exports. Minimum guard for portable export in this change: exporting a document whose `bakedBody` asset cannot be embedded must emit a loud diagnostic rather than silently producing a geometry-less file.
 
 ## Capabilities
 

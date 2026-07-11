@@ -10,6 +10,8 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createBuiltinImportProviderRegistry } from "@/domain/import/builtin-provider-composition";
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
+import { createImportCapabilities } from "@/domain/import/orchestrator";
+import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
@@ -485,5 +487,70 @@ test("src/domain/import/onshape/provider.spec.ts real probe activates face sketc
   expect(
     actions.commitSketches?.some((sketch) => sketch.plane.support.kind === "construction"),
     "Prepare should emit the verified review plan with a captured-frame sketch commit.",
+  ).toBeTruthy();
+});
+
+test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body from ground-truth tessellation", async () => {
+  const bundle = makeFaceSketchBundle();
+  const studio = bundle.partStudios[0]!;
+  studio.groundTruth = {
+    hasBodies: true,
+    tessellationTolerance: 0.001,
+    step: "",
+    tessellatedFaces: {
+      bodies: [
+        {
+          faces: [
+            {
+              facets: [
+                {
+                  vertices: [
+                    { x: 0, y: 0, z: 0 },
+                    { x: 0.01, y: 0, z: 0 },
+                    { x: 0, y: 0.01, z: 0 },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  } as never;
+  const source = sourceFromBundle(bundle);
+
+  const bakeCapabilities = createImportCapabilities(
+    {} as never,
+    {
+      document: { documentId: "doc_workspace", revisionId: "rev_1" },
+    } as never,
+    { assetStore: createMemoryGeometryAssetStore() },
+  );
+
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: bakeCapabilities,
+  });
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: bakeCapabilities,
+  });
+
+  const bakedBody = actions.createFeatures?.find(
+    (feature) => feature.definition.kind === "bakedBody",
+  );
+  expect(
+    bakedBody?.definition.kind === "bakedBody" &&
+      bakedBody.definition.parameters.format === "baked-mesh" &&
+      bakedBody.definition.parameters.provenance.source === "onshape",
+    "A studio bake should emit a bakedBody action with onshape provenance when baking succeeds.",
+  ).toBeTruthy();
+  expect(
+    actions.diagnostics?.every(
+      (diagnostic) => diagnostic.code !== "onshape-bake-unavailable",
+    ),
+    "Successful baking should not emit the bake-unavailable fallback.",
   ).toBeTruthy();
 });
