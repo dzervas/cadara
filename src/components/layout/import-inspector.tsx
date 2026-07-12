@@ -69,7 +69,7 @@ export function ImportInspector({ onCommit }: ImportInspectorProps) {
   return (
     <Paper
       component="aside"
-      className="flex h-full max-h-full w-[320px] min-w-0 max-w-full flex-col overflow-hidden"
+      className="flex max-h-[70vh] w-[320px] min-w-0 max-w-full flex-col overflow-hidden"
       style={{
         background: "var(--workbench-shell-surface-panel)",
         border: "1px solid var(--workbench-shell-border)",

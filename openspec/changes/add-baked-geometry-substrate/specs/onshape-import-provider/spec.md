@@ -16,3 +16,9 @@ When a studio plan contains baked-tier features, the provider SHALL bake the bun
 #### Scenario: Bake provenance is recorded
 - **WHEN** a baked body is emitted
 - **THEN** its label and provenance identify the source Onshape studio and the feature span it stands in for
+
+### Scenario: Ground-truth body membership is preserved
+- **GIVEN** captured tessellation provides multiple `bodies[]` groups
+- **WHEN** the provider bakes the studio geometry
+- **THEN** the baked asset contains one explicit, ordered triangle range per captured body group
+- **AND** body membership is not reconstructed from mesh geometry

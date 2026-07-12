@@ -437,40 +437,52 @@ function encodeCapturedTessellationAsBakedMeshBytes(
     return null;
   }
   const bodies = (tessellatedFaces as { bodies?: unknown }).bodies;
-  if (!Array.isArray(bodies)) {
+  if (!Array.isArray(bodies) || bodies.length === 0) {
     return null;
   }
 
   const vertices: [number, number, number][] = [];
   const indices: [number, number, number][] = [];
-  for (const body of bodies) {
+  const components: {
+    sourceComponentKey: string;
+    indexStart: number;
+    indexCount: number;
+  }[] = [];
+  for (const [bodyIndex, body] of bodies.entries()) {
     const faces = (body as { faces?: unknown }).faces;
     if (!Array.isArray(faces)) {
-      continue;
+      return null;
     }
+    const indexStart = indices.length;
     for (const face of faces) {
       const facets = (face as { facets?: unknown }).facets;
       if (!Array.isArray(facets)) {
-        continue;
+        return null;
       }
       for (const facet of facets) {
         const facetVertices = (facet as { vertices?: unknown }).vertices;
-        if (!Array.isArray(facetVertices) || facetVertices.length < 3) {
-          continue;
+        if (!Array.isArray(facetVertices) || facetVertices.length !== 3) {
+          return null;
         }
-        const trianglePoints = facetVertices.slice(0, 3).map(readCapturedPoint);
+        const trianglePoints = facetVertices.map(readCapturedPoint);
         if (trianglePoints.some((point) => point === null)) {
-          continue;
+          return null;
         }
         const start = vertices.length;
         vertices.push(...(trianglePoints as [number, number, number][]));
         indices.push([start, start + 1, start + 2]);
       }
     }
-  }
-
-  if (vertices.length === 0 || indices.length === 0) {
-    return null;
+    const indexCount = indices.length - indexStart;
+    if (indexCount === 0) {
+      return null;
+    }
+    // `bodies[]` is the source authority; geometry never changes membership.
+    components.push({
+      sourceComponentKey: `onshape-tessellation-body-${bodyIndex}`,
+      indexStart,
+      indexCount,
+    });
   }
 
   return new TextEncoder().encode(
@@ -479,6 +491,7 @@ function encodeCapturedTessellationAsBakedMeshBytes(
       schemaVersion: "baked-mesh-geometry/v1alpha1",
       vertices,
       indices,
+      components,
     }),
   );
 }

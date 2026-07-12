@@ -4,10 +4,18 @@ import {
   probeNativeTopologyKernelCapabilities,
   type OccNativeTopologyCapabilityProbeResult,
 } from "@/domain/modeling/occ/native-topology-payload";
+import {
+  OCC_ASSET_VERSION,
+  getVersionedOpenCascadeAssetUrl,
+  getVersionedOpenCascadeRuntimeAssetUrls,
+} from "@/domain/modeling/occ/assets";
 
-const DEFAULT_CUSTOM_OPENCASCADE_MAIN_JS_URL = "/cadara-occ.js";
-const DEFAULT_CUSTOM_OPENCASCADE_WASM_URL = "/cadara-occ.wasm";
+export function getOpenCascadeRuntimeAssetVersion() {
+  return OCC_ASSET_VERSION;
+}
 
+export const getVersionedOpenCascadeRuntimeAssetUrl =
+  getVersionedOpenCascadeAssetUrl;
 type OpenCascadeMainJS = new (
   module: Record<string, unknown>,
 ) => Promise<OpenCascadeInstance>;
@@ -51,12 +59,6 @@ interface OpenCascadeFactoryLoadOptions {
   loadNodeModule?: () => Promise<OpenCascadeFactoryModule>;
 }
 
-interface RuntimeAssetVersionDocumentLike {
-  querySelector(selector: string): null | {
-    getAttribute(name: string): string | null;
-  };
-}
-
 function isNodeRuntime() {
   const processLike = (
     globalThis as typeof globalThis & {
@@ -78,54 +80,11 @@ export function getDefaultOpenCascadeEntrySpecifier(
     : "opencascade.js";
 }
 
-function getRuntimeAbsoluteAssetUrl(path: string) {
-  const locationLike = globalThis.location;
-
-  if (locationLike?.origin) {
-    return new URL(path, locationLike.origin).href;
-  }
-
-  return path;
-}
-
-export function getOpenCascadeRuntimeAssetVersion(
-  documentLike: RuntimeAssetVersionDocumentLike | null = typeof document ===
-  "undefined"
-    ? null
-    : document,
-) {
-  const moduleScriptSrc = documentLike
-    ?.querySelector('script[type="module"][src]')
-    ?.getAttribute("src")
-    ?.trim();
-
-  return moduleScriptSrc && moduleScriptSrc.length > 0 ? moduleScriptSrc : null;
-}
-
-export function getVersionedOpenCascadeRuntimeAssetUrl(
-  path: string,
-  documentLike: RuntimeAssetVersionDocumentLike | null = typeof document ===
-  "undefined"
-    ? null
-    : document,
-) {
-  const assetUrl = new URL(
-    getRuntimeAbsoluteAssetUrl(path),
-    globalThis.location?.origin ?? "https://cadara.local",
-  );
-  const version = getOpenCascadeRuntimeAssetVersion(documentLike);
-
-  if (version) {
-    assetUrl.searchParams.set("v", version);
-  }
-
-  return assetUrl.href;
-}
 
 export function createOpenCascadeInitializerFromMainJS(
   defaultMainJS: OpenCascadeMainJS,
   getDefaultMainWasm = () =>
-    getVersionedOpenCascadeRuntimeAssetUrl(DEFAULT_CUSTOM_OPENCASCADE_WASM_URL),
+    getVersionedOpenCascadeRuntimeAssetUrls().mainWasm,
 ): OpenCascadeInitializer {
   return async ({
     mainJS = defaultMainJS,
@@ -260,9 +219,7 @@ export function assertOpenCascadeNativeTopologyKernelCapabilities(
 }
 
 async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
-  const customMainJSImportUrl = getVersionedOpenCascadeRuntimeAssetUrl(
-    DEFAULT_CUSTOM_OPENCASCADE_MAIN_JS_URL,
-  );
+  const customMainJSImportUrl = getVersionedOpenCascadeRuntimeAssetUrls().mainJS;
   const customMainJSModule = (await import(
     /* @vite-ignore */
     customMainJSImportUrl
@@ -278,9 +235,7 @@ async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule>
   const customInitializer = createOpenCascadeInitializerFromMainJS(
     customMainJS,
     () =>
-      getVersionedOpenCascadeRuntimeAssetUrl(
-        DEFAULT_CUSTOM_OPENCASCADE_WASM_URL,
-      ),
+      getVersionedOpenCascadeRuntimeAssetUrls().mainWasm,
   );
 
   return {

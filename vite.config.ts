@@ -12,8 +12,10 @@ import {
 } from "./build-metadata";
 
 export function getOpenCascadeAssetHeaders(
-  pathname: string,
+  value: string,
 ): Record<string, string> {
+  const pathname = new URL(value, "https://cadara.local").pathname;
+
   if (!/cadara-occ\.(?:js|wasm)$/.test(pathname)) {
     return {};
   }

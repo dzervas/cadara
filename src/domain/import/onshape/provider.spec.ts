@@ -12,6 +12,7 @@ import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fix
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
 import { createImportCapabilities } from "@/domain/import/orchestrator";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import { createGeometryAssetRecordFromReference } from "@/contracts/modeling/geometry-assets";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
@@ -89,7 +90,9 @@ function capabilitiesWithRealKernelProbe(): ImportCapabilities {
     history: createKernelHistoryProbeSession({
       createService() {
         const service = createModelingService(
-          new MockKernelAdapter({ solverAdapter: createRevisionAgnosticRealSolver() }),
+          new MockKernelAdapter({
+            solverAdapter: createRevisionAgnosticRealSolver(),
+          }),
           { currentDocumentId: "doc_workspace" },
         );
         return {
@@ -105,7 +108,9 @@ function capabilitiesWithRealKernelProbe(): ImportCapabilities {
                 },
                 bodyId: "body_signature_fixture_box" as BodyId,
                 bodyLabel: "Probe fixture box",
-                nativePayload: parseNativeShimPayloadJson(JSON.stringify(boxFixture.exactBrep)),
+                nativePayload: parseNativeShimPayloadJson(
+                  JSON.stringify(boxFixture.exactBrep),
+                ),
               }),
               diagnostics: [],
             };
@@ -151,7 +156,8 @@ function makeFaceSketchBundle() {
                   parameterId: "entities",
                   queries: [
                     {
-                      queryString: 'query = qSketchRegion(id + "S_BASE", true);',
+                      queryString:
+                        'query = qSketchRegion(id + "S_BASE", true);',
                     },
                   ],
                 },
@@ -182,7 +188,10 @@ function makeFaceSketchBundle() {
                 {
                   sketchEntityId: "circle_base",
                   sketchEntityType: "skCircle",
-                  geometry: { center3d: { x: 0.0005, y: 0.001, z: 0 }, radius: 0.0004 },
+                  geometry: {
+                    center3d: { x: 0.0005, y: 0.001, z: 0 },
+                    radius: 0.0004,
+                  },
                   isConstruction: false,
                 },
               ],
@@ -193,7 +202,10 @@ function makeFaceSketchBundle() {
                 {
                   sketchEntityId: "circle_1",
                   sketchEntityType: "skCircle",
-                  geometry: { center3d: { x: 0.0005, y: 0.001, z: 0.003 }, radius: 0.0001 },
+                  geometry: {
+                    center3d: { x: 0.0005, y: 0.001, z: 0.003 },
+                    radius: 0.0001,
+                  },
                   isConstruction: false,
                 },
               ],
@@ -215,7 +227,12 @@ function makeFaceSketchBundle() {
             },
           },
         ],
-        groundTruth: { hasBodies: true, tessellationTolerance: 0.001, tessellatedFaces: {}, step: "" },
+        groundTruth: {
+          hasBodies: true,
+          tessellationTolerance: 0.001,
+          tessellatedFaces: {},
+          step: "",
+        },
         rollbackSnapshots: null,
       },
     ],
@@ -272,7 +289,6 @@ test("src/domain/import/onshape/provider.spec.ts registration and acceptance", a
   ).toBeTruthy();
 });
 
-
 test("src/domain/import/onshape/provider.spec.ts probe-present review activates unique face sketches", async () => {
   const source = sourceFromBundle(makeFaceSketchBundle());
   const review = await onshapeImportProvider.review({
@@ -307,7 +323,11 @@ test("src/domain/import/onshape/provider.spec.ts probe-present review activates 
     selections: onshapeImportProvider.createDefaultSelections(review),
     capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
   });
-  expect(actions.commitSketches?.some((sketch) => sketch.plane.support.kind === "construction")).toBe(true);
+  expect(
+    actions.commitSketches?.some(
+      (sketch) => sketch.plane.support.kind === "construction",
+    ),
+  ).toBe(true);
 });
 
 test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch stays honestly baked", async () => {
@@ -420,7 +440,6 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
   ).toBeTruthy();
 });
 
-
 test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives full verification", async () => {
   const bundle = await assembleFixtureCaptureBundle();
   const source = sourceFromBundle(bundle);
@@ -437,7 +456,9 @@ test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives
       },
     },
   });
-  const studio = review.providerReview.studios.find((candidate) => candidate.hasBodies);
+  const studio = review.providerReview.studios.find(
+    (candidate) => candidate.hasBodies,
+  );
 
   expect(requestedFinalTessellation).toBe(true);
   expect(
@@ -447,7 +468,6 @@ test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives
     "A probe-equipped fully-parametric plan should compare probe tessellation instead of reporting unavailable/partial verification.",
   ).toBeTruthy();
 });
-
 
 test("src/domain/import/onshape/provider.spec.ts real probe activates face sketch from candidate prefix", async () => {
   const source = sourceFromBundle(makeFaceSketchBundle());
@@ -485,7 +505,9 @@ test("src/domain/import/onshape/provider.spec.ts real probe activates face sketc
   });
 
   expect(
-    actions.commitSketches?.some((sketch) => sketch.plane.support.kind === "construction"),
+    actions.commitSketches?.some(
+      (sketch) => sketch.plane.support.kind === "construction",
+    ),
     "Prepare should emit the verified review plan with a captured-frame sketch commit.",
   ).toBeTruthy();
 });
@@ -518,13 +540,14 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
     },
   } as never;
   const source = sourceFromBundle(bundle);
+  const assetStore = createMemoryGeometryAssetStore();
 
   const bakeCapabilities = createImportCapabilities(
     {} as never,
     {
       document: { documentId: "doc_workspace", revisionId: "rev_1" },
     } as never,
-    { assetStore: createMemoryGeometryAssetStore() },
+    { assetStore },
   );
 
   const review = await onshapeImportProvider.review({
@@ -547,6 +570,30 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
       bakedBody.definition.parameters.provenance.source === "onshape",
     "A studio bake should emit a bakedBody action with onshape provenance when baking succeeds.",
   ).toBeTruthy();
+  if (!bakedBody || bakedBody.definition.kind !== "bakedBody") {
+    throw new Error("Expected studio bake to create a bakedBody feature.");
+  }
+  const storedBake = await assetStore.get(
+    createGeometryAssetRecordFromReference(bakedBody.definition.parameters),
+  );
+  expect(storedBake.ok).toBeTruthy();
+  if (!storedBake.ok)
+    throw new Error("Expected baked asset bytes in the shared store.");
+  expect(
+    (
+      JSON.parse(new TextDecoder().decode(storedBake.bytes)) as {
+        components?: unknown[];
+      }
+    ).components,
+    "Provider must preserve each raw tessellation body as an explicit source component.",
+  ).toEqual([
+    expect.objectContaining({
+      sourceComponentKey: "onshape-tessellation-body-0",
+      indexStart: 0,
+      indexCount: 1,
+    }),
+  ]);
+
   expect(
     actions.diagnostics?.every(
       (diagnostic) => diagnostic.code !== "onshape-bake-unavailable",

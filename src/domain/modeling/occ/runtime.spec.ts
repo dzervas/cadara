@@ -4,9 +4,9 @@ import {
   createOpenCascadeInstanceLoader,
   getDefaultOpenCascadeEntrySpecifier,
   getDefaultOpenCascadeInstance,
+  loadDefaultOpenCascadeFactory,
   getOpenCascadeRuntimeAssetVersion,
   getVersionedOpenCascadeRuntimeAssetUrl,
-  loadDefaultOpenCascadeFactory,
   resetDefaultOpenCascadeInstanceForTests,
   type OpenCascadeInitializer,
   type OpenCascadeInstance,
@@ -230,35 +230,20 @@ test("src/domain/modeling/occ/runtime.spec.ts", async () => {
     ).toBe("opencascade.full.worker.js");
   }
 
-  function testRuntimeAssetVersioningUsesCurrentBuildScriptUrl() {
-    const documentLike = {
-      querySelector(selector: string) {
-        return selector === 'script[type="module"][src]'
-          ? {
-              getAttribute(name: string) {
-                return name === "src" ? "/assets/index-prod-build.js" : null;
-              },
-            }
-          : null;
-      },
-    };
+  function testRuntimeAssetVersioningPairsTheCustomModuleAndWasm() {
+    const jsUrl = getVersionedOpenCascadeRuntimeAssetUrl("/cadara-occ.js");
+    const wasmUrl = getVersionedOpenCascadeRuntimeAssetUrl("/cadara-occ.wasm");
+    const jsVersion = new URL(jsUrl).searchParams.get("v");
+    const wasmVersion = new URL(wasmUrl).searchParams.get("v");
 
     expect(
-      getOpenCascadeRuntimeAssetVersion(documentLike),
-      "Browser OCC runtime assets should derive their version token from the current build script URL.",
-    ).toBe("/assets/index-prod-build.js");
+      jsVersion,
+      "Browser OCC runtime should use a deterministic artifact version for its custom module URL.",
+    ).toBe(getOpenCascadeRuntimeAssetVersion());
     expect(
-      getVersionedOpenCascadeRuntimeAssetUrl("/cadara-occ.js", documentLike),
-      "Browser OCC runtime should request the custom module with a build-specific cache-busting token.",
-    ).toBe(
-      "https://cadara.local/cadara-occ.js?v=%2Fassets%2Findex-prod-build.js",
-    );
-    expect(
-      getVersionedOpenCascadeRuntimeAssetUrl("/cadara-occ.wasm", documentLike),
-      "Browser OCC runtime should request the custom wasm asset with a build-specific cache-busting token.",
-    ).toBe(
-      "https://cadara.local/cadara-occ.wasm?v=%2Fassets%2Findex-prod-build.js",
-    );
+      wasmVersion,
+      "Browser OCC runtime should use the same deterministic artifact version for its wasm URL.",
+    ).toBe(jsVersion);
   }
 
   async function testGetDefaultOpenCascadeInstanceInitializesNodeOpenCascade() {
@@ -289,7 +274,7 @@ test("src/domain/modeling/occ/runtime.spec.ts", async () => {
   await testCreateOpenCascadeInstanceLoaderCachesTheInitializedInstance();
   await testCreateOpenCascadeInstanceLoaderRetriesAfterInitializationFailure();
   await testBrowserOpenCascadeInitializerUsesProvidedWasmUrl();
-  testRuntimeAssetVersioningUsesCurrentBuildScriptUrl();
+  testRuntimeAssetVersioningPairsTheCustomModuleAndWasm();
   await testGetDefaultOpenCascadeInstanceInitializesNodeOpenCascade();
 
   console.log("OCC phase 1 runtime bootstrap tests passed.");

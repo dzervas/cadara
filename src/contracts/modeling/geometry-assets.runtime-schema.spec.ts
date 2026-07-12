@@ -1,9 +1,11 @@
 import { test, expect } from "vitest";
+import { encodeGeometryAssetData } from "@/contracts/modeling/geometry-assets";
 
 import {
   validateGeometryAssetHash,
   validateGeometryAssetManifest,
   validateGeometryAssetRecord,
+  validateBakedMeshGeometryAssetData,
 } from "@/contracts/modeling/geometry-assets.runtime-schema";
 
 test("geometry asset schema entrypoints accept structured Cadara B-rep and baked mesh records", () => {
@@ -26,6 +28,67 @@ test("geometry asset schema entrypoints accept structured Cadara B-rep and baked
       bakedMeshParsed.data.data?.kind === "bakedMeshGeometry",
     "Record entrypoints should preserve the structured asset data discriminants.",
   ).toBeTruthy();
+});
+
+test("baked mesh component ranges are deterministic, complete, and non-overlapping", () => {
+  const valid = validateBakedMeshGeometryAssetData({
+    kind: "bakedMeshGeometry",
+    schemaVersion: "baked-mesh-geometry/v1alpha1",
+    vertices: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ],
+    indices: [[0, 1, 2]],
+    components: [
+      { sourceComponentKey: "onshape-body-0", indexStart: 0, indexCount: 1 },
+    ],
+  });
+  expect(valid.success).toBeTruthy();
+
+  const invalid = validateBakedMeshGeometryAssetData({
+    kind: "bakedMeshGeometry",
+    schemaVersion: "baked-mesh-geometry/v1alpha1",
+    vertices: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ],
+    indices: [[0, 1, 2]],
+    components: [
+      { sourceComponentKey: "onshape-body-0", indexStart: 1, indexCount: 1 },
+    ],
+  });
+  expect(invalid.success).toBeFalsy();
+  expect(formatIssues(invalid)).toContain(
+    "component ranges must be contiguous and ordered",
+  );
+});
+
+test("baked mesh serialization preserves authoritative component ranges", () => {
+  const bytes = encodeGeometryAssetData({
+    kind: "bakedMeshGeometry",
+    schemaVersion: "baked-mesh-geometry/v1alpha1",
+    vertices: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ],
+    indices: [[0, 1, 2]],
+    components: [
+      { sourceComponentKey: "onshape-body-0", indexStart: 0, indexCount: 1 },
+    ],
+  });
+  const decoded = JSON.parse(new TextDecoder().decode(bytes));
+  expect(validateBakedMeshGeometryAssetData(decoded).success).toBeTruthy();
+  expect(decoded).toEqual(
+    expect.objectContaining({
+      kind: "bakedMeshGeometry",
+      components: [
+        { sourceComponentKey: "onshape-body-0", indexStart: 0, indexCount: 1 },
+      ],
+    }),
+  );
 });
 
 test("geometry asset schema rejects malformed sha256 hash payloads", () => {

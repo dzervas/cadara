@@ -5,8 +5,9 @@ import type {
   CadaraBrepCurve3Record,
   CadaraBrepGeometryAssetData,
   CadaraBrepSurfaceRecord,
-  CadaraBrepTopologyRecord,
+  BakedMeshGeometryAssetData,
   GeometryAssetHash,
+  CadaraBrepTopologyRecord,
   GeometryAssetManifest,
   GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
@@ -29,6 +30,8 @@ const geometryAssetManifestValidator =
   typia.createValidateEquals<GeometryAssetManifest>();
 const geometryAssetHashValidator =
   typia.createValidateEquals<GeometryAssetHash>();
+const bakedMeshGeometryValidator =
+  typia.createValidateEquals<BakedMeshGeometryAssetData>();
 const GEOMETRY_ASSET_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 export function validateGeometryAssetHash(
@@ -154,10 +157,7 @@ function validateSurfaceInvariants(
         ),
       );
     }
-    if (
-      surface.weights &&
-      surface.weights.length !== expectedPoleCount
-    ) {
+    if (surface.weights && surface.weights.length !== expectedPoleCount) {
       issues.push(
         invariantIssue(
           path,
@@ -276,6 +276,128 @@ function validateCadaraBrepInvariants(
   return issues;
 }
 
+function validateBakedMeshGeometryInvariants(
+  data: BakedMeshGeometryAssetData,
+): ContractValidationIssue[] {
+  const issues: ContractValidationIssue[] = [];
+  for (const [index, point] of data.vertices.entries()) {
+    if (point.some((coordinate) => !Number.isFinite(coordinate))) {
+      issues.push(
+        invariantIssue(
+          `vertices[${index}]`,
+          "Baked mesh vertices must be finite.",
+        ),
+      );
+    }
+  }
+  for (const [index, triangle] of data.indices.entries()) {
+    if (
+      !triangle.every(
+        (vertex) =>
+          Number.isInteger(vertex) &&
+          vertex >= 0 &&
+          vertex < data.vertices.length,
+      )
+    ) {
+      issues.push(
+        invariantIssue(
+          `indices[${index}]`,
+          "Baked mesh triangles must reference existing vertices.",
+        ),
+      );
+    }
+  }
+
+  if (!data.components) {
+    return issues;
+  }
+  if (data.components.length === 0) {
+    issues.push(
+      invariantIssue(
+        "components",
+        "Baked mesh component metadata must declare at least one component.",
+      ),
+    );
+    return issues;
+  }
+
+  let expectedStart = 0;
+  const componentKeys = new Set<string>();
+  for (const [index, component] of data.components.entries()) {
+    const path = `components[${index}]`;
+    if (!component.sourceComponentKey) {
+      issues.push(
+        invariantIssue(
+          `${path}.sourceComponentKey`,
+          "Baked mesh component keys must be non-empty.",
+        ),
+      );
+    } else if (componentKeys.has(component.sourceComponentKey)) {
+      issues.push(
+        invariantIssue(
+          `${path}.sourceComponentKey`,
+          "Baked mesh component keys must be unique.",
+        ),
+      );
+    }
+    componentKeys.add(component.sourceComponentKey);
+    if (
+      !Number.isInteger(component.indexStart) ||
+      component.indexStart !== expectedStart
+    ) {
+      issues.push(
+        invariantIssue(
+          `${path}.indexStart`,
+          "Baked mesh component ranges must be contiguous and ordered.",
+        ),
+      );
+    }
+    if (!Number.isInteger(component.indexCount) || component.indexCount <= 0) {
+      issues.push(
+        invariantIssue(
+          `${path}.indexCount`,
+          "Baked mesh component ranges must contain at least one triangle.",
+        ),
+      );
+    }
+    expectedStart = component.indexStart + component.indexCount;
+  }
+  if (expectedStart !== data.indices.length) {
+    issues.push(
+      invariantIssue(
+        "components",
+        "Baked mesh component ranges must cover every triangle exactly once.",
+      ),
+    );
+  }
+  return issues;
+}
+
+export function validateBakedMeshGeometryAssetData(
+  value: unknown,
+): ContractValidationResult<BakedMeshGeometryAssetData> {
+  const structuralResult = validateContract(bakedMeshGeometryValidator, value);
+  if (!structuralResult.success) return structuralResult;
+  const issues = validateBakedMeshGeometryInvariants(structuralResult.data);
+  return issues.length === 0
+    ? structuralResult
+    : { success: false, data: structuralResult.data, issues };
+}
+
+export function requireBakedMeshGeometryAssetData(
+  value: unknown,
+): BakedMeshGeometryAssetData {
+  const result = validateBakedMeshGeometryAssetData(value);
+  if (!result.success) {
+    throw new ContractValidationError(
+      result.issues[0]?.message ?? "Baked mesh geometry validation failed.",
+      value,
+      result.issues,
+    );
+  }
+  return result.data;
+}
+
 function validateRecordFormatInvariants(
   record: GeometryAssetRecord,
 ): ContractValidationIssue[] {
@@ -291,10 +413,7 @@ function validateRecordFormatInvariants(
     );
   }
 
-  if (
-    record.format !== "cadara-brep" &&
-    record.format !== "baked-mesh"
-  ) {
+  if (record.format !== "cadara-brep" && record.format !== "baked-mesh") {
     issues.push(
       invariantIssue(
         "format",
@@ -327,6 +446,9 @@ function validateRecordFormatInvariants(
 
   if (record.data?.kind === "cadaraBrep") {
     issues.push(...validateCadaraBrepInvariants(record.data));
+  }
+  if (record.data?.kind === "bakedMeshGeometry") {
+    issues.push(...validateBakedMeshGeometryInvariants(record.data));
   }
 
   return issues;

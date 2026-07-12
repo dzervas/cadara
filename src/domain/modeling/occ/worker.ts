@@ -14,6 +14,7 @@ import {
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
 } from "@/domain/modeling/occ/runtime";
+import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/domain/modeling/occ/assets";
 import {
   getOccNativeTopologyTransferList,
   type OccNativeTopologyWorkerResultWithBuffers,
@@ -71,7 +72,9 @@ function postOccWorkerMessage(
 }
 
 function getWorkerOpenCascadeInstance(assets?: OccWorkerAssetConfig) {
-  lastAssets = assets ?? lastAssets;
+  lastAssets = assets ?? lastAssets ?? {
+    mainWasm: getVersionedOpenCascadeRuntimeAssetUrls().mainWasm,
+  };
 
   if (!openCascadePromise) {
     openCascadePromise = loadDefaultOpenCascadeFactory({ isNodeRuntime: false })

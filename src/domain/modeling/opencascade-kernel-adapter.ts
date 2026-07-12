@@ -96,6 +96,7 @@ import {
   type OccAuthoringState,
 } from "@/domain/modeling/occ/authoring-state";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
+import { releaseReplacedOccBakedShapeCache } from "@/domain/modeling/occ/memory";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import {
   getOpenCascadeInstance,
@@ -2043,10 +2044,15 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   private replaceRuntimeState(runtimeState: OccKernelRuntimeState) {
+    const previousRuntimeState = this.runtimeState;
     this.workerRestoredDocument = null;
     this.pruneNativeTopologyBodyPayloadCache(runtimeState.authoringState);
     this.runtimeState = runtimeState;
     this.initializationPromise = Promise.resolve(runtimeState);
+    releaseReplacedOccBakedShapeCache(
+      previousRuntimeState?.authoringState.bakedShapeCache,
+      runtimeState.authoringState.bakedShapeCache,
+    );
   }
 
   private createNativeTopologyBodyPayloadCacheKey(input: {
