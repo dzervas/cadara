@@ -61,8 +61,19 @@ export interface ImportDeferredExtrudeFeatureParameters
   booleanScope: ImportDeferredFeatureBooleanScope;
 }
 
+/** Deferred replacement scope for a baked checkpoint emitted inside one import. */
+export type ImportDeferredBakedBodyReplacement = {
+  kind: "replaceBodyOutputs";
+  actionIndexes: readonly number[];
+};
+
+export type ImportDeferredBakedBodyFeatureParameters = Omit<
+  Extract<FeatureDefinition, { kind: "bakedBody" }>["parameters"],
+  "replacement"
+> & { replacement: ImportDeferredBakedBodyReplacement };
+
 export type ImportDeferredFeatureDefinition =
-  | Exclude<FeatureDefinition, { kind: "extrude" }>
+  | Exclude<FeatureDefinition, { kind: "extrude" | "bakedBody" }>
   | {
       kind: "extrude";
       featureTypeVersion: Extract<
@@ -70,6 +81,14 @@ export type ImportDeferredFeatureDefinition =
         { kind: "extrude" }
       >["featureTypeVersion"];
       parameters: ImportDeferredExtrudeFeatureParameters;
+    }
+  | {
+      kind: "bakedBody";
+      featureTypeVersion: Extract<
+        FeatureDefinition,
+        { kind: "bakedBody" }
+      >["featureTypeVersion"];
+      parameters: ImportDeferredBakedBodyFeatureParameters;
     };
 
 export interface ImportCreateFeatureRequest

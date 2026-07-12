@@ -18,6 +18,22 @@ The system SHALL provide a `bakedBody` feature definition referencing a register
 - **THEN** its parameters expose the asset reference and provenance, not pseudo-parametric geometry controls
 - **AND** downstream features referencing the body rebuild normally
 
+### Requirement: Baked-body checkpoints SHALL declare body replacement scope
+A `bakedBody` definition SHALL explicitly declare whether it appends geometry or replaces an exact list of prior durable body outputs. A replacement SHALL remove only its declared current bodies at that feature-history point, retain the superseded features and their history/produced-target records, and expose the baked outputs to all later features. The system SHALL NOT infer replacement scope from geometry or silently remove unrelated bodies.
+
+#### Scenario: Final checkpoint replaces imported parametric output
+- **GIVEN** an import applies a parametric extrude that produces a body
+- **AND** a following baked checkpoint resolves that action's body output through the deferred import output seam
+- **WHEN** the baked feature is applied
+- **THEN** the final body set contains the baked output rather than the superseded parametric body
+- **AND** the extrude and baked features remain in history with stable produced-target records
+- **AND** a later feature resolves bodies from the baked checkpoint
+
+#### Scenario: Unrelated bodies survive a checkpoint
+- **GIVEN** a document contains a body outside the checkpoint's declared replacement list
+- **WHEN** the checkpoint is applied
+- **THEN** that unrelated body remains in the document.
+
 ### Requirement: Baked mesh body membership SHALL be explicit or conservatively singular
 
 A newly baked mesh asset SHALL carry ordered, contiguous component triangle ranges from its authoritative source body/component grouping. OCC SHALL materialize only those declared components and SHALL NOT infer source identity from coincident vertices, shared edges, orientation, or spatial connectivity. A legacy v1 asset without component metadata SHALL be treated as exactly one declared component; it SHALL fail materialization unless that complete buffer is one connected, closed, orientable two-manifold shell.

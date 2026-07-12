@@ -457,6 +457,33 @@ export class ImportDeferredMaterializer {
       : never,
     consumer: ImportPreparedActionRef,
   ): Promise<CreateFeatureRequest> {
+    if (request.definition?.kind === "bakedBody") {
+      const replacement = request.definition.parameters.replacement;
+      const bodyIds = Array.from(
+        new Set(
+          replacement.actionIndexes.flatMap((actionIndex) => {
+            const output = this.input.outputRecords.get(orderedOutputKey(actionIndex));
+            if (!output) {
+              throw new Error(
+                `Unable to resolve baked checkpoint replacement for ${consumer.kind}:${consumer.index}; producer action ${actionIndex} has no recorded output.`,
+              );
+            }
+            return output.bodyIds ?? [];
+          }),
+        ),
+      );
+      return {
+        ...request,
+        definition: {
+          ...request.definition,
+          parameters: {
+            ...request.definition.parameters,
+            replacement: { kind: "replaceBodies", bodyIds },
+          },
+        },
+      };
+    }
+
     if (!request.definition || request.definition.kind !== "extrude") {
       return request as CreateFeatureRequest;
     }
@@ -649,24 +676,44 @@ export async function applyImportPreparedActions(input: {
 
   if (failure) {
     // Atomic failure: revert every already-applied operation so no partial
-    // import is committed. Rollback errors are surfaced, never swallowed.
+    // import is committed. A rollback failure is also actionable, but it must
+    // not hide the operation that made the import fail in the first place.
+    let rollbackFailure: unknown = null;
     if (appliedOperationCount > 0 && input.rollback) {
-      await input.rollback(appliedOperationCount);
+      try {
+        await input.rollback(appliedOperationCount);
+      } catch (error) {
+        rollbackFailure = error;
+      }
     }
+
     const message = describeUnknownError(failure, "Import failed.");
     diagnostics.push({
       code: "import-apply-failed",
       severity: "error",
-      message: `Import failed and was rolled back: ${message}`,
+      message: `Import failed: ${message}`,
       target: null,
       detail: null,
     });
+    if (rollbackFailure) {
+      diagnostics.push({
+        code: "import-rollback-failed",
+        severity: "error",
+        message: `Import rollback after the apply failure also failed: ${describeUnknownError(
+          rollbackFailure,
+          "Rollback failed.",
+        )}`,
+        target: null,
+        detail: null,
+      });
+    }
     return {
       revisionId: input.baseRevisionId,
       createdEntityIds: { featureIds: [], sketchIds: [], variableIds: [] },
       diagnostics,
       appliedOperationCount,
-      rolledBack: appliedOperationCount > 0,
+      rolledBack: appliedOperationCount > 0 && rollbackFailure === null,
+      rollbackAttempted: appliedOperationCount > 0 && input.rollback !== undefined,
     };
   }
 
@@ -676,6 +723,7 @@ export async function applyImportPreparedActions(input: {
     diagnostics,
     appliedOperationCount,
     rolledBack: false,
+    rollbackAttempted: false,
   };
 }
 

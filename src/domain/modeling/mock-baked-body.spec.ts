@@ -17,6 +17,7 @@ function bakedBodyDefinition(assetId: GeometryAssetId): FeatureDefinition {
       byteLength: 3,
       label: "Mock baked body",
       provenance: { source: "generated", reason: "test-bake" },
+      replacement: { kind: "append" },
     },
   };
 }

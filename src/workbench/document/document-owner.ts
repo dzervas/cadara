@@ -7,6 +7,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { FeatureId, RequestId } from "@/contracts/shared/ids";
 import {
+  describeUnknownError,
   ok,
   type AppErrorContextEntry,
   type AppResult,
@@ -307,15 +308,34 @@ export function createWorkbenchDocumentOwner({
     if (
       result.diagnostics.some((diagnostic) => diagnostic.severity === "error")
     ) {
-      // Only reconcile the workbench snapshot when operations were actually
-      // applied and rolled back; a failure before any mutation (e.g. a
-      // provider prepare error) must not refresh the snapshot.
-      const snapshot = result.rolledBack
-        ? await replaceActiveDocumentBasis()
-        : undefined;
+      // Reconcile after a failed import with committed work. A failed or absent
+      // rollback may leave partial state; retaining the old snapshot would be
+      // less honest than refreshing it. Reconciliation is supplementary: it
+      // must not replace the original apply/rollback diagnostics.
+      let snapshot: WorkspaceSnapshot | undefined;
+      let failureDiagnostics = result.diagnostics;
+      if (result.appliedOperationCount > 0) {
+        try {
+          snapshot = await replaceActiveDocumentBasis();
+        } catch (error) {
+          failureDiagnostics = [
+            ...failureDiagnostics,
+            {
+              code: "import-reconciliation-failed",
+              severity: "error",
+              message: `Import reconciliation after rollback failed: ${describeUnknownError(
+                error,
+                "Snapshot reconciliation failed.",
+              )}`,
+              target: null,
+              detail: null,
+            },
+          ];
+        }
+      }
       return {
         ok: false as const,
-        diagnostics: result.diagnostics,
+        diagnostics: failureDiagnostics,
         rolledBack: result.rolledBack,
         ...(snapshot ? { snapshot } : {}),
       };

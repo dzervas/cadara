@@ -57,11 +57,23 @@ export interface DurableHistoryService {
   getSketchDraftKey(session: SketchSessionState): string;
 }
 
+export const DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS = 90_000;
+
 export function createDurableHistoryService(input: {
   documentRepository: DocumentRepository | null;
   modelingService: ModelingService;
+  /**
+   * Repository notifications are emitted only after the receiving modeling
+   * service has rebuilt the document. This is deliberately separate from OCC
+   * worker requests, which have no client deadline because materialization is
+   * synchronous and can legitimately exceed a minute.
+   */
+  repositorySynchronizationTimeoutMs?: number;
 }): DurableHistoryService {
   const { documentRepository, modelingService } = input;
+  const repositorySynchronizationTimeoutMs =
+    input.repositorySynchronizationTimeoutMs ??
+    DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS;
   const draftAvailabilityCache = new Map<
     string,
     {
@@ -197,10 +209,10 @@ export function createDurableHistoryService(input: {
               pendingWaits.delete(pending);
               reject(
                 new Error(
-                  `Timed out waiting for repository ${metadata.source} synchronization.`,
+                  `Timed out waiting for repository ${metadata.source} synchronization after ${repositorySynchronizationTimeoutMs}ms.`,
                 ),
               );
-            }, 2_000),
+            }, repositorySynchronizationTimeoutMs),
           };
           pendingWaits.add(pending);
         });

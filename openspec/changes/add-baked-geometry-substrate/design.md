@@ -45,6 +45,12 @@ The original 3a/3b resolver seam took only an `assetId`, so the resolver needed 
 
 The Onshape provider bakes ground-truth tessellation only when the capability reports the format supported; the existing suppressed+diagnostic fallback remains for capability-absent platforms. The spec encodes both paths so honesty does not regress.
 
+## Decision 4a: Final-studio bakes are explicit body-output checkpoints (2026-07-12 amendment)
+
+A `bakedBody` definition declares `replacement`: either `append` for ordinary independently imported geometry, or `replaceBodies` with exact durable body IDs. Kernels remove only the declared current bodies before adding the baked materialization; they retain prior feature/history records and their produced-target provenance. No geometry comparison, spatial matching, or hidden all-body deletion is permitted.
+
+Onshape final-studio tessellation is ground truth, so its prepared action uses the import-only deferred form `replaceBodyOutputs(actionIndexes)`. The provider records every prior `createFeature` action in the same ordered import span; `ImportDeferredMaterializer` resolves their returned body outputs at apply time into the durable `replaceBodies` list. This uses the existing deferred-output seam rather than predicting IDs, scopes replacement to import-owned outputs, and leaves pre-existing/unrelated user bodies untouched. A baked checkpoint appears after those actions, so subsequent actions receive the baked body set.
+
 ## Decision 5: Testing (per docs/testing.md)
 
 Lane: **logic** for the contract variant, capability implementation, mock-kernel materialization, provider emission, and the apply-pipeline chain ending in a baked body; OCC materialization lands beside the existing OCC feature specs (same lane they use). In-app Taskariki smoke recorded in change notes. No new UI-lane tests unless feature-tree presentation needs bespoke logic.

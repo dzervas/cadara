@@ -68,6 +68,7 @@ test("baked import bytes resolve through the shared app geometry-asset store int
         ...reference,
         label: "Composed baked body",
         provenance: { source: "onshape", reason: "onshape-studio-bake-required" },
+        replacement: { kind: "append" },
       },
     },
   } satisfies CreateFeatureRequest);

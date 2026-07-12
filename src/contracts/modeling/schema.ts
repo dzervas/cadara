@@ -475,6 +475,11 @@ export interface BakedBodyFeatureProvenance {
   reason?: string;
 }
 
+/** Explicit disposition of bodies that existed before a baked-body checkpoint. */
+export type BakedBodyReplacement =
+  | { kind: "append" }
+  | { kind: "replaceBodies"; bodyIds: readonly BodyId[] };
+
 /** Fully typed baked-body parameters. */
 export interface BakedBodyFeatureParameters {
   /** Immutable geometry asset to materialize. */
@@ -489,6 +494,8 @@ export interface BakedBodyFeatureParameters {
   label: string;
   /** External provenance exposed instead of pseudo-parametric controls. */
   provenance: BakedBodyFeatureProvenance;
+  /** Explicit body-output scope this checkpoint supersedes; never inferred from geometry. */
+  replacement: BakedBodyReplacement;
 }
 
 /** Machine-readable baked-body rebuild failure reasons. */
