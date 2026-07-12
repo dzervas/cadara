@@ -53,7 +53,7 @@ export interface OccFeatureExecutionContext {
   assetBlobs: ReadonlyMap<GeometryAssetHash, Uint8Array>;
   assetResolver?: GeometryAssetResolver;
   resolvedGeometryAssets: Map<GeometryAssetId, OccResolvedGeometryAsset>;
-  bakedShapeCache: Map<GeometryAssetId, OccMaterializedBakedShape>;
+  bakedShapeCache: Map<GeometryAssetId, OccMaterializedBakedShape[]>;
 }
 
 export interface OccFeatureExecutionResult {

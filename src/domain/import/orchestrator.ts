@@ -18,6 +18,7 @@ import type {
   GeometryAssetRecord,
   GeometryAssetProvenance,
 } from "@/contracts/modeling/geometry-assets";
+import { requireBakedMeshGeometryAssetData } from "@/contracts/modeling/geometry-assets.runtime-schema";
 import type {
   CreateFeatureRequest,
   ModelingDiagnostic,
@@ -103,22 +104,13 @@ function parseBakedMeshGeometry(
 
   try {
     const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Baked mesh payload must be a JSON object.");
-    }
-    return {
-      ...(parsed as BakedMeshGeometryAssetData),
-      kind: "bakedMeshGeometry",
-      schemaVersion: "baked-mesh-geometry/v1alpha1",
-    };
+    return requireBakedMeshGeometryAssetData(parsed);
   } catch (error) {
-    if (error instanceof ImportCapabilityError) {
-      throw error;
-    }
     throw new ImportCapabilityError({
       code: "import-capability-invalid-geometry",
       format,
-      message: "Baked mesh geometry bytes must be valid baked-mesh JSON.",
+      message:
+        "Baked mesh geometry bytes must be valid, partitioned baked-mesh JSON.",
       cause: error,
     });
   }
@@ -167,7 +159,8 @@ export function createImportCapabilities(
         }
 
         const hash = await hashGeometryAssetBytes(input.bytes);
-        const assetId = `asset_baked_${hash.slice("sha256:".length, "sha256:".length + 16)}` as const;
+        const assetId =
+          `asset_baked_${hash.slice("sha256:".length, "sha256:".length + 16)}` as const;
         const data = parseBakedMeshGeometry(input.bytes, input.format);
         const provenance: GeometryAssetProvenance = {
           kind: "generated",
@@ -303,8 +296,13 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
   return kind === "sketchIdOf" || kind === "regionOf" || kind === "bodyOf";
 }
 
-function getSketchRegions(sketch: ImportRegionSketchSource): readonly RegionRecord[] {
-  const candidate = sketch as ImportRegionSketchSource & { regions?: RegionRecord[]; sketch?: { regions?: RegionRecord[] } };
+function getSketchRegions(
+  sketch: ImportRegionSketchSource,
+): readonly RegionRecord[] {
+  const candidate = sketch as ImportRegionSketchSource & {
+    regions?: RegionRecord[];
+    sketch?: { regions?: RegionRecord[] };
+  };
   return candidate.regions ?? candidate.sketch?.regions ?? [];
 }
 
@@ -320,32 +318,39 @@ function getSketchSolvedPoints(sketch: ImportRegionSketchSource) {
   );
 }
 
-function getSketchDefinition(sketch: ImportRegionSketchSource): SketchRecord["definition"] {
+function getSketchDefinition(
+  sketch: ImportRegionSketchSource,
+): SketchRecord["definition"] {
   const candidate = sketch as ImportRegionSketchSource & {
     sketch?: { definition?: SketchRecord["definition"] };
     definition?: SketchRecord["definition"];
   };
-  return candidate.definition ?? candidate.sketch?.definition ?? {
-    schemaVersion: "sketch-definition/v1alpha1",
-    referenceIds: [],
-    references: [],
-    pointIds: [],
-    points: [],
-    entityIds: [],
-    entities: [],
-    constraintIds: [],
-    constraints: [],
-    dimensionIds: [],
-    dimensions: [],
-    styleIds: [],
-    styles: [],
-    svgRenderingEnabled: true,
-    derivedRelationships: [],
-    authoringOperations: [],
-  };
+  return (
+    candidate.definition ??
+    candidate.sketch?.definition ?? {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+      styleIds: [],
+      styles: [],
+      svgRenderingEnabled: true,
+      derivedRelationships: [],
+      authoringOperations: [],
+    }
+  );
 }
 
-function toSelectionSketch(sketch: ImportRegionSketchSource): RegionSelectionSketch {
+function toSelectionSketch(
+  sketch: ImportRegionSketchSource,
+): RegionSelectionSketch {
   return {
     regions: getSketchRegions(sketch),
     solvedPoints: new Map(
@@ -371,18 +376,24 @@ export class ImportDeferredMaterializer {
   }
 
   recordSketchOutput(orderedPosition: number, sketchId: SketchId) {
-    this.input.outputRecords.set(orderedOutputKey(orderedPosition), { sketchId });
+    this.input.outputRecords.set(orderedOutputKey(orderedPosition), {
+      sketchId,
+    });
   }
 
   recordBodyOutput(orderedPosition: number, bodyIds: BodyId[]) {
-    this.input.outputRecords.set(orderedOutputKey(orderedPosition), { bodyIds });
+    this.input.outputRecords.set(orderedOutputKey(orderedPosition), {
+      bodyIds,
+    });
   }
 
   async resolveDeferredValue(
     value: ImportDeferredValue,
     consumer: ImportPreparedActionRef,
   ) {
-    const output = this.input.outputRecords.get(orderedOutputKey(value.actionIndex));
+    const output = this.input.outputRecords.get(
+      orderedOutputKey(value.actionIndex),
+    );
     if (!output) {
       throw new Error(
         `Unable to resolve deferred ${value.kind} for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} has no recorded output.`,
@@ -413,7 +424,8 @@ export class ImportDeferredMaterializer {
             `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced no sketch id; selector ${JSON.stringify(value.selector)}.`,
           );
         }
-        const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+        const snapshot =
+          await this.input.modelingService.getCurrentDocumentSnapshot();
         const sketch = snapshot.document.sketches.find(
           (candidate) => candidate.sketchId === output.sketchId,
         );
@@ -428,13 +440,21 @@ export class ImportDeferredMaterializer {
             `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; reference action ${value.actionIndex}, sketch ${output.sketchId}, selector ${JSON.stringify(value.selector)}.`,
           );
         }
-        return { kind: "region" as const, sketchId: output.sketchId, regionId: region.regionId };
+        return {
+          kind: "region" as const,
+          sketchId: output.sketchId,
+          regionId: region.regionId,
+        };
       }
     }
   }
 
   async materializeFeatureRequest(
-    request: ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+    request: ImportPreparedActions["createFeatures"] extends
+      | (infer Entry)[]
+      | undefined
+      ? Entry
+      : never,
     consumer: ImportPreparedActionRef,
   ): Promise<CreateFeatureRequest> {
     if (!request.definition || request.definition.kind !== "extrude") {
@@ -453,7 +473,10 @@ export class ImportDeferredMaterializer {
       booleanScope.kind === "targetBody" && isDeferredValue(booleanScope.bodyId)
         ? {
             ...booleanScope,
-            bodyId: await this.resolveDeferredValue(booleanScope.bodyId, consumer),
+            bodyId: await this.resolveDeferredValue(
+              booleanScope.bodyId,
+              consumer,
+            ),
           }
         : booleanScope;
 
@@ -550,7 +573,10 @@ export async function applyImportPreparedActions(input: {
     revisionId = result.value.revisionId;
     createdEntityIds.sketchIds.push(result.value.sketchId);
     if (currentOrderedPosition >= 0) {
-      materializer.recordSketchOutput(currentOrderedPosition, result.value.sketchId);
+      materializer.recordSketchOutput(
+        currentOrderedPosition,
+        result.value.sketchId,
+      );
     }
     diagnostics.push(...result.value.diagnostics);
     appliedOperationCount += 1;
@@ -606,7 +632,11 @@ export async function applyImportPreparedActions(input: {
   }
 
   let failure: unknown = null;
-  for (let orderedPosition = 0; orderedPosition < refs.length; orderedPosition += 1) {
+  for (
+    let orderedPosition = 0;
+    orderedPosition < refs.length;
+    orderedPosition += 1
+  ) {
     const ref = refs[orderedPosition]!;
     currentOrderedPosition = orderedPosition;
     try {

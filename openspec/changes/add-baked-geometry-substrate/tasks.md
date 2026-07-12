@@ -17,6 +17,7 @@
 - [x] 3.7 **(2026-07-11 Option B)** Make the document self-describing: carry the full `BakedGeometryAssetReference` (assetId/format/hash/byteLength) in the `bakedBody` definition; change the resolver seam (contract, OCC worker pair, mock, pre-resolution) to take the reference; delete the module-level `bakedGeometryAssetRecords` registry; add one shared `createGeometryAssetComposition` seam wired into browser composition and the composition-seam spec.
 - [x] 3.5 Cache worker-side resolved bytes and materialized faceted OCC shapes by immutable asset id; add a byte-budget/LRU follow-up note rather than blocking this change.
 - [x] 3.6 **Gate:** assess adding `STEPControl_Reader` to `opencascade-recipe.yaml`; record findings (binary-size and effort) in change notes; implement `step` format only if cheap, otherwise document deferral.
+- [x] 3.8 Preserve authoritative baked-mesh source-component ranges from Onshape tessellation; materialize declared ranges only, conservatively reject ambiguous legacy/unpartitioned meshes and disconnected undeclared shells, and cover coincident-body/invalid-group cases.
 
 ## 4. Onshape Provider Integration
 
@@ -27,4 +28,6 @@
 ## 5. Verification
 
 - [ ] 5.1 Manual smoke: re-import Taskariki — a correct solid must be visible; record in change notes with the per-tier table (unchanged tiers, new materialization column).
+  - 2026-07-12: headless real-OCC repro passed (Taskariki 2 bodies); browser visual/reload smoke remains required.
 - [ ] 5.2 Run `bun run test:all`.
+  - Blocked in this environment: Bun is unavailable; equivalent Vitest/lint commands were run, and `tsc -b tsconfig.app.json` has unrelated baseline failures recorded in notes.

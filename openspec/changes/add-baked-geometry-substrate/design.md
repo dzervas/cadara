@@ -14,6 +14,12 @@ Baked geometry enters through the normal feature pipeline (`CreateFeatureRequest
 
 Bundle ground truth is tessellation; the OCC path sews triangles into a faceted shape with durable topology ids (consistent with the native payload contract). Accepted trade-off: mesh-precision booleans and heavy topology for dense meshes. Exact geometry arrives later via STEP reader or `cadara-brep` assets without changing the feature contract — the format field is the extension point.
 
+### 2026-07-12 deterministic component-partition amendment
+
+`BakedMeshGeometryAssetData.components` carries ordered, contiguous triangle ranges keyed by the authoritative Onshape tessellation body. The provider writes one range directly from each source `bodies[]` entry; it never derives membership from coordinates, edge pairing, or spatial separation. OCC materializes exactly those declared components.
+
+For compatibility, a v1 asset with no `components` is conservatively one declared component, never a soup to split. It must be one connected, closed, orientable two-manifold shell or materialization emits `baked-body-materializationFailed`. A declared source component with disconnected shells fails identically and requests one explicit source component per solid; this avoids inventing identity for compounds when the capture supplied no per-solid group. Edge pairing remains only a within-declared-component manifold/connectivity validation, never a source-body classifier.
+
 ## Decision 3: Assets are content-addressed
 
 `bakeGeometry` deduplicates by content hash before storing, so re-imports and multi-studio bundles do not balloon storage; asset ids are derived from the hash (consistent with the existing embedded-binary registry pattern).

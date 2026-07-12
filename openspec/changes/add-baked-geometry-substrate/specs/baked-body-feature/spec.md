@@ -18,6 +18,26 @@ The system SHALL provide a `bakedBody` feature definition referencing a register
 - **THEN** its parameters expose the asset reference and provenance, not pseudo-parametric geometry controls
 - **AND** downstream features referencing the body rebuild normally
 
+### Requirement: Baked mesh body membership SHALL be explicit or conservatively singular
+
+A newly baked mesh asset SHALL carry ordered, contiguous component triangle ranges from its authoritative source body/component grouping. OCC SHALL materialize only those declared components and SHALL NOT infer source identity from coincident vertices, shared edges, orientation, or spatial connectivity. A legacy v1 asset without component metadata SHALL be treated as exactly one declared component; it SHALL fail materialization unless that complete buffer is one connected, closed, orientable two-manifold shell.
+
+#### Scenario: Coincident source bodies remain distinct
+- **GIVEN** a baked mesh declares two component ranges whose geometry shares an edge or is coincident
+- **WHEN** the baked body is rebuilt
+- **THEN** OCC materializes two durable bodies in declared component order
+- **AND** it does not merge them from geometric coincidence
+
+#### Scenario: Declared membership cannot make a solid
+- **WHEN** a declared component is open, non-manifold, inconsistently oriented, or contains disconnected shells without explicit per-solid groups
+- **THEN** rebuild reports `baked-body-materializationFailed` with the structured feature diagnostic
+- **AND** no partial or guessed body is fabricated
+
+#### Scenario: Legacy unpartitioned mesh is ambiguous
+- **WHEN** a legacy v1 baked mesh without components contains multiple disconnected closed shells
+- **THEN** rebuild fails with `baked-body-materializationFailed`
+- **AND** the system does not split the soup into inferred bodies
+
 ### Requirement: Kernel adapters SHALL resolve baked geometry assets through an injected seam
 Kernel adapters SHALL materialize `bakedBody` features by resolving the feature definition's self-describing asset reference (asset id, format, content hash, byte length) through an injected geometry asset source rather than embedding bytes in create-feature requests, relying on session-scoped registries, or fabricating fallback geometry. The reference SHALL be sufficient to reconstruct the store record without any session state, so resolution is a pure store read that succeeds after reload.
 

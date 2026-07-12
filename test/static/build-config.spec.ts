@@ -60,4 +60,10 @@ test("test/static/build-config.spec.ts", async () => {
     ),
     "The custom OpenCascade bootstrap module should be eligible for immutable repeat-load caching.",
   ).toBeTruthy();
+  expect(
+    getOpenCascadeAssetHeaders("/cadara-occ.wasm?v=paired-artifact")[
+      "Cache-Control"
+    ]?.includes("immutable"),
+    "Versioned custom OpenCascade requests should retain immutable cache headers.",
+  ).toBeTruthy();
 });

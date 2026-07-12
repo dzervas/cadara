@@ -294,11 +294,26 @@ export interface CadaraBrepGeometryAssetData {
   bodies: CadaraBrepGeometryAssetBody[];
 }
 
+export interface BakedMeshGeometryAssetComponent {
+  /** Stable key from the authoritative source tessellation body/component. */
+  sourceComponentKey: string;
+  /** First triangle in the shared `indices` buffer. */
+  indexStart: number;
+  /** Number of consecutive triangles owned by this source component. */
+  indexCount: number;
+}
+
 export interface BakedMeshGeometryAssetData {
   kind: "bakedMeshGeometry";
   schemaVersion: "baked-mesh-geometry/v1alpha1";
   vertices: GeometryAssetPoint3[];
   indices: GeometryAssetTriangle[];
+  /**
+   * Authoritative source-component partition. New assets MUST carry this.
+   * Missing metadata is legacy v1: materializers conservatively treat its entire
+   * triangle buffer as exactly one component and never derive more bodies.
+   */
+  components?: BakedMeshGeometryAssetComponent[];
 }
 
 export type GeometryAssetData =
@@ -507,9 +522,11 @@ export function encodeGeometryAssetData(data: GeometryAssetData): Uint8Array {
     case "bakedMeshGeometry":
       return new TextEncoder().encode(
         JSON.stringify({
+          kind: data.kind,
           schemaVersion: data.schemaVersion,
           vertices: data.vertices,
           indices: data.indices,
+          ...(data.components ? { components: data.components } : {}),
         }),
       );
   }
