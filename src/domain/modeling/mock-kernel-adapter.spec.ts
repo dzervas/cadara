@@ -17,6 +17,7 @@ import {
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import type {
   BodyId,
+  ConstructionId,
   FeatureId,
   ObjectTreeNodeId,
 } from "@/contracts/shared/ids";
@@ -3082,6 +3083,66 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBeTruthy();
   }
 
+  async function testSketchCommitRejectsUnresolvableConstructionSupport() {
+    const adapter = new MockKernelAdapter();
+    const before = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const sourceSketch = before.snapshot.document.sketches[0];
+    if (!sourceSketch) {
+      throw new Error(
+        "Seed sketch must exist for construction-support validation coverage.",
+      );
+    }
+
+    const phantomPlane = {
+      ...sourceSketch.plane,
+      support: {
+        kind: "construction" as const,
+        constructionId:
+          "construction_import_captured_phantom" as ConstructionId,
+      },
+    };
+
+    const rejected = await adapter.commitSketch({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: before.snapshot.document.revisionId,
+      solverCorrelation: {
+        requestId: "request_commit_phantom_support",
+        projectionRequestId: "request_commit_phantom_support:project",
+        validationRequestId: "request_commit_phantom_support:validate",
+        solveRequestId: "request_commit_phantom_support:solve",
+        regionRequestId: "request_commit_phantom_support:regions",
+      },
+      sketchId: null,
+      sketchLabel: "Phantom Support Sketch",
+      plane: phantomPlane,
+      definition: sourceSketch.sketch.definition,
+    });
+
+    expect(
+      rejected.revisionState.kind,
+      "A sketch commit whose construction support does not resolve to a live construction target must be rejected, matching OCC kernel validation.",
+    ).toBe("rejected");
+    expect(
+      rejected.diagnostics.some(
+        (diagnostic) => diagnostic.code === "mock-invalid-sketch-plane",
+      ),
+      "The rejection must carry an explicit unresolvable-sketch-plane diagnostic.",
+    ).toBeTruthy();
+
+    const after = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    expect(
+      after.snapshot.document.revisionId,
+      "A rejected sketch commit must not advance the authored revision.",
+    ).toBe(before.snapshot.document.revisionId);
+  }
+
   await testExtrudePreviewDependsOnDefinition();
   await testProfileCollectionContractBoundaryRejectsInvalidPayloads();
   await testUnsupportedFeatureDefinitionsAreRejectedByMock();
@@ -3118,4 +3179,5 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions();
   await testMockSnapshotSurfacesSketchNavigationAndHistory();
   await testDocumentVariableExpressionsValidateBeforeMutation();
+  await testSketchCommitRejectsUnresolvableConstructionSupport();
 });

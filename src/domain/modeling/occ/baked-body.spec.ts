@@ -14,6 +14,7 @@ import {
   createOccAuthoringState,
   type OccAuthoringFeatureRecord,
 } from "@/domain/modeling/occ/authoring-state";
+import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import {
@@ -210,14 +211,27 @@ test("OCC bakedBody materializes resolved baked-mesh assets as durable bodies an
   const rebuiltAgain = applyOccFeatureToAuthoringState(state, feature);
 
   expect(rebuilt.bodies[0]?.bodyId).toBe("body_feature_occ_baked");
-  expect(rebuilt.bodies[0]?.topology.faceIds.length).toBeGreaterThan(0);
+  expect(rebuilt.bodies[0]?.topology.faceIds).toEqual([]);
+  expect(rebuilt.bodies[0]?.topologyPresentation).toBe("bodyOnlyMesh");
   expect(rebuilt.features[0]?.producedTargets).toEqual([
     { kind: "body", bodyId: "body_feature_occ_baked" },
   ]);
   expect(state.bakedShapeCache.has(assetId)).toBeTruthy();
-  expect(rebuiltAgain.bodies[0]?.topology.faceIds.length).toBe(
-    rebuilt.bodies[0]?.topology.faceIds.length,
+  expect(rebuiltAgain.bodies[0]?.topologyPresentation).toBe("bodyOnlyMesh");
+  const snapshot = buildOccWorkspaceSnapshot(rebuilt);
+  const bodyRecords = snapshot.document.render.records.filter(
+    (record) => record.binding.target.kind === "body",
   );
+  expect(bodyRecords).toHaveLength(1);
+  expect(
+    bodyRecords[0]?.geometry.kind === "mesh" &&
+      bodyRecords[0].geometry.triangleIndices.length,
+  ).toBe(4);
+  expect(
+    snapshot.document.references.filter((reference) =>
+      ["face", "edge", "vertex"].includes(reference.target.kind),
+    ),
+  ).toHaveLength(0);
 });
 
 test("OCC bakedBody materializes every disjoint solid in the browser-native OCC build", async () => {
@@ -239,8 +253,10 @@ test("OCC bakedBody materializes every disjoint solid in the browser-native OCC 
 
   expect(rebuilt.diagnostics).toEqual([]);
   expect(rebuilt.bodies).toHaveLength(2);
-  expect(rebuilt.bodies[0]?.topology.faceIds.length).toBeGreaterThan(0);
-  expect(rebuilt.bodies[1]?.topology.faceIds.length).toBeGreaterThan(0);
+  expect(rebuilt.bodies[0]?.topology.faceIds).toEqual([]);
+  expect(rebuilt.bodies[0]?.topologyPresentation).toBe("bodyOnlyMesh");
+  expect(rebuilt.bodies[1]?.topology.faceIds).toEqual([]);
+  expect(rebuilt.bodies[1]?.topologyPresentation).toBe("bodyOnlyMesh");
 });
 
 test("OCC bakedBody materializes declared source components without topology inference", async () => {
@@ -276,12 +292,51 @@ test("OCC bakedBody materializes declared source components without topology inf
     },
   ]);
   // Both bodies come from authoritative source ranges, not geometry-based splitting.
-  expect(rebuilt.bodies[0]?.topology.faceIds.length).toBeGreaterThan(0);
-  expect(rebuilt.bodies[1]?.topology.faceIds.length).toBeGreaterThan(0);
+  expect(rebuilt.bodies[0]?.topology.faceIds).toEqual([]);
+  expect(rebuilt.bodies[0]?.topologyPresentation).toBe("bodyOnlyMesh");
+  expect(rebuilt.bodies[1]?.topology.faceIds).toEqual([]);
+  expect(rebuilt.bodies[1]?.topologyPresentation).toBe("bodyOnlyMesh");
   expect(rebuilt.features[0]?.producedTargets).toEqual([
     { kind: "body", bodyId: "body_feature_occ_multi_solid_1" },
     { kind: "body", bodyId: "body_feature_occ_multi_solid_2" },
   ]);
+
+  const snapshot = buildOccWorkspaceSnapshot(rebuilt);
+  const bodyRecords = snapshot.document.render.records.filter(
+    (record) => record.binding.target.kind === "body",
+  );
+  expect(
+    bodyRecords.map((record) => ({
+      bodyId:
+        record.binding.target.kind === "body"
+          ? record.binding.target.bodyId
+          : null,
+      triangleCount:
+        record.geometry.kind === "mesh"
+          ? record.geometry.triangleIndices.length
+          : null,
+      vertexNormals:
+        record.geometry.kind === "mesh"
+          ? record.geometry.vertexNormals
+          : undefined,
+    })),
+  ).toEqual([
+    {
+      bodyId: "body_feature_occ_multi_solid_1",
+      triangleCount: 12,
+      vertexNormals: null,
+    },
+    {
+      bodyId: "body_feature_occ_multi_solid_2",
+      triangleCount: 12,
+      vertexNormals: null,
+    },
+  ]);
+  expect(
+    snapshot.document.references.some((reference) =>
+      ["face", "edge", "vertex"].includes(reference.target.kind),
+    ),
+  ).toBeFalsy();
 });
 
 test("OCC bakedBody keeps coincident source bodies separate when component metadata declares them", async () => {

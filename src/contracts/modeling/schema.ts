@@ -956,6 +956,13 @@ export interface BodyTopologySnapshotRecord {
   vertexIds: VertexId[];
 }
 
+
+/**
+ * Presentation/topology availability for bodies whose authoritative geometry is
+ * intentionally exposed only as a body mesh.
+ */
+export type BodyTopologyPresentation = "bodyOnlyMesh";
+
 /**
  * Durable body snapshot record.
  */
@@ -966,6 +973,11 @@ export interface BodySnapshotRecord extends SnapshotOwnershipRecord {
   label: string;
   /** Explicit topology membership owned by the body snapshot. */
   topology: BodyTopologySnapshotRecord;
+  /**
+   * Present only when subtopology is intentionally unavailable and the body
+   * must be rendered and selected exclusively as one authoritative mesh.
+   */
+  topologyPresentation?: BodyTopologyPresentation;
 }
 
 /**

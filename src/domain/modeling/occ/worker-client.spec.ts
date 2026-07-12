@@ -242,16 +242,24 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     await promise;
   }
 
-  function testWorkerFailureNormalizerPreservesValidationMessages() {
-    const failure = normalizeOccWorkerFailure(
+  function testWorkerFailureNormalizerPreservesUsefulMessages() {
+    const validation = normalizeOccWorkerFailure(
       "request_occ_worker_invalid",
       "requestId must be a RequestId.",
     );
+    const plainObject = normalizeOccWorkerFailure(
+      "request_occ_worker_plain",
+      { message: "DataCloneError: render snapshot is too large." },
+    );
 
     expect(
-      failure.error.message,
+      validation.error.message,
       "OCC worker failure normalization should preserve validation strings.",
     ).toBe("requestId must be a RequestId.");
+    expect(
+      plainObject.error.message,
+      "OCC worker failure normalization should preserve message-bearing structured-clone failures.",
+    ).toBe("DataCloneError: render snapshot is too large.");
   }
 
   await testWarmupInvokesWorkerOperation();
@@ -259,5 +267,5 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
   await testWarmupFailuresSurfaceToCaller();
   await testExportCapabilitiesCreateCloneSafeWorkerRequests();
   await testSynchronousKernelWorkHasNoClientRequestDeadline();
-  testWorkerFailureNormalizerPreservesValidationMessages();
+  testWorkerFailureNormalizerPreservesUsefulMessages();
 });

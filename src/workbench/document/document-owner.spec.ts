@@ -807,15 +807,66 @@ test("document owner handles import provider lookup, diagnostic failures, and su
     },
   });
 
-  let missingProviderMessage: string | null = null;
-  try {
-    await missingProviderOwner.commitPartImport(activeImportSession);
-  } catch (error: unknown) {
-    missingProviderMessage =
-      error instanceof Error ? error.message : String(error);
-  }
+  const missingProvider = await missingProviderOwner.commitPartImport(
+    activeImportSession,
+  );
   expect(
-    missingProviderMessage,
-    "Import commit should fail when the selected provider is no longer registered.",
-  ).toBe("The selected import provider is no longer registered.");
+    missingProvider.ok,
+    "Import commit should return a visible diagnostic when the provider is no longer registered.",
+  ).toBeFalsy();
+  expect(
+    !missingProvider.ok &&
+      missingProvider.diagnostics[0]?.code === "import-prepare-failed" &&
+      missingProvider.diagnostics[0]?.message ===
+        "The selected import provider is no longer registered.",
+    "Provider lookup failures should retain their precise message and prepare stage.",
+  ).toBeTruthy();
+});
+
+
+test("document owner returns delayed plain-object post-commit failures as import diagnostics", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const provider = createImportProvider();
+  const owner = createOwner({
+    machineState: { snapshot } as EditorState,
+    importProvider: provider,
+    modelingService: {
+      currentDocumentId: snapshot.document.documentId,
+      sketchSolver: null,
+      async addDocumentVariable() {
+        return ok({
+          revisionId: "rev_after_import",
+          variableId: "variable_scale",
+          revisionState: "advanced" as const,
+          rebuildResult: "reused" as const,
+          changedTargets: [],
+          diagnostics: [],
+        });
+      },
+      async getCurrentDocumentSnapshot() {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        throw {
+          message: "Browser worker could not clone the 18 MB render snapshot.",
+          context: [{ key: "stage", value: "post-commit-handoff" }],
+        };
+      },
+    },
+  });
+
+  const result = await owner.commitPartImport({
+    providerId: provider.id,
+    resolvedSource: createResolvedImportSource(),
+    review: createImportReview(),
+    selections: { enabled: true },
+    formSchema: {} as FeatureEditorFormSchema,
+    diagnostics: [],
+  });
+
+  expect(
+    !result.ok &&
+      result.diagnostics[0]?.code === "import-post-commit-handoff-failed" &&
+      result.diagnostics[0]?.message ===
+        "Browser worker could not clone the 18 MB render snapshot.",
+    "Delayed browser-adjacent handoff failures should be retained as exact active-session diagnostics.",
+  ).toBeTruthy();
 });

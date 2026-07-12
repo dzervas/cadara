@@ -76,6 +76,7 @@ const PICK_DISTANCE_EPSILON = 1e-9;
 
 export const SURFACE_COLORS = {
   bodyFace: 0xf1eee4,
+  body: 0xf1eee4,
   planarFace: 0xf1eee4,
   region: 0x93dff2,
   featureEdge: 0x86b6da,
@@ -550,6 +551,8 @@ function getHighlightMaterialBaseline(
 
 function getRenderableBaseColor(semanticClass: WorkspaceSemanticClass) {
   switch (semanticClass) {
+    case "body":
+      return SURFACE_COLORS.body;
     case "bodyFace":
       return SURFACE_COLORS.bodyFace;
     case "planarFace":
@@ -613,11 +616,11 @@ function isWireSemanticClass(semanticClass: WorkspaceSemanticClass) {
 }
 
 function isFaceSemanticClass(semanticClass: WorkspaceSemanticClass) {
-  return semanticClass === "bodyFace" || semanticClass === "planarFace";
+  return semanticClass === "body" || semanticClass === "bodyFace" || semanticClass === "planarFace";
 }
 
 function isOccludingFaceSemanticClass(semanticClass: WorkspaceSemanticClass) {
-  return semanticClass === "bodyFace" || semanticClass === "planarFace";
+  return semanticClass === "body" || semanticClass === "bodyFace" || semanticClass === "planarFace";
 }
 
 function getInteractionSortRank(semanticClass: WorkspaceSemanticClass) {
@@ -631,6 +634,7 @@ function getInteractionSortRank(semanticClass: WorkspaceSemanticClass) {
       return 1;
     case "region":
       return 2;
+    case "body":
     case "bodyFace":
     case "planarFace":
       return 3;

@@ -76,4 +76,34 @@ test("src/domain/modeling/occ/mesh-transport.spec.ts", () => {
       unpackedGeometry.triangleIndices[0]?.[2] === 2,
     "Reconstructed mesh geometry should preserve positions and triangle indices.",
   ).toBeTruthy();
+
+
+  const denseBodyRecord: RenderableEntityRecord = {
+    ...meshRecord,
+    id: "renderable_body_only_dense",
+    binding: {
+      pickId: "pick_body_only_dense",
+      pickPriority: 20,
+      target: { kind: "body", bodyId: "body_dense" },
+      topology: null,
+      semanticClass: "body",
+    },
+    geometry: {
+      kind: "mesh",
+      vertexPositions: Array.from({ length: 30_000 }, (_, index) => [index, 0, 0] as const),
+      vertexNormals: null,
+      triangleIndices: Array.from({ length: 10_000 }, (_, index) => [index * 3, index * 3 + 1, index * 3 + 2] as const),
+    },
+  };
+  const densePacked = packWorkspaceSnapshotRenderMeshes({
+    ...snapshot,
+    document: {
+      ...snapshot.document,
+      render: { records: [denseBodyRecord, { ...denseBodyRecord, id: "renderable_body_only_dense_2" }] },
+    },
+  });
+  expect(
+    densePacked.transferList.length,
+    "Body-only meshes must transfer one positions and one indices buffer per body, not per triangle.",
+  ).toBe(4);
 });

@@ -29,6 +29,7 @@ export type RenderPoint3D = readonly [number, number, number];
  * inferred by the viewport from geometry representation details.
  */
 export type RenderSemanticClass =
+  | "body"
   | "bodyFace"
   | "planarFace"
   | "featureEdge"
@@ -59,6 +60,16 @@ export interface RenderFaceBinding extends RenderBindingBase {
   topology: "face";
   /** Explicit face semantic class consumed by editor selection rules. */
   semanticClass: "bodyFace" | "planarFace";
+}
+
+/** Body binding used when an authoritative mesh intentionally exposes no subtopology. */
+export interface RenderBodyBinding extends RenderBindingBase {
+  /** Durable body selected when this render record is picked. */
+  target: import("@/contracts/shared/references").BodyRef;
+  /** Body-only meshes do not advertise face, edge, or vertex topology. */
+  topology: null;
+  /** Explicit body-level selection semantic. */
+  semanticClass: "body";
 }
 
 /**
@@ -137,6 +148,7 @@ export interface RenderSketchPointBinding extends RenderBindingBase {
  * Explicit semantic binding for one render export record.
  */
 export type RenderSemanticBinding =
+  | RenderBodyBinding
   | RenderFaceBinding
   | RenderEdgeBinding
   | RenderVertexBinding

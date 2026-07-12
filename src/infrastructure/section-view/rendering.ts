@@ -46,7 +46,8 @@ export function createSectionCapRenderables(
   const faceRenderables = renderables.filter(
     (renderable) =>
       renderable.geometry.kind === "mesh" &&
-      (renderable.binding.semanticClass === "bodyFace" ||
+      (renderable.binding.semanticClass === "body" ||
+        renderable.binding.semanticClass === "bodyFace" ||
         renderable.binding.semanticClass === "planarFace"),
   );
 

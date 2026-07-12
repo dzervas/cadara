@@ -86,6 +86,7 @@ import type {
 } from "@/domain/modeling/occ/native-topology-payload";
 
 const FACE_PICK_PRIORITY = 20;
+const BODY_PICK_PRIORITY = 20;
 const SKETCH_CURVE_PICK_PRIORITY = 12;
 const EDGE_PICK_PRIORITY = 10;
 const REGION_PICK_PRIORITY = 8;
@@ -1109,6 +1110,36 @@ function buildFaceRenderRecord(
   };
 }
 
+function buildBodyOnlyMeshRenderRecord(body: OccTrackedBody): RenderableEntityRecord {
+  const meshTriangles = body.meshExportFallback;
+  if (!meshTriangles || meshTriangles.length === 0) {
+    throw new Error(`Body-only mesh ${body.bodyId} has no authoritative baked mesh fallback.`);
+  }
+  const vertexIndexByPoint = new Map<(typeof meshTriangles)[number][number], number>();
+  const vertexPositions: RenderPoint3D[] = [];
+  const triangleIndices: Array<readonly [number, number, number]> = [];
+  const indexPoint = (point: (typeof meshTriangles)[number][number]) => {
+    const existing = vertexIndexByPoint.get(point);
+    if (existing !== undefined) return existing;
+    const index = vertexPositions.length;
+    vertexIndexByPoint.set(point, index);
+    vertexPositions.push([point[0], point[1], point[2]]);
+    return index;
+  };
+  for (const triangle of meshTriangles) {
+    triangleIndices.push([indexPoint(triangle[0]), indexPoint(triangle[1]), indexPoint(triangle[2])]);
+  }
+  const target = { kind: "body", bodyId: body.bodyId } as const;
+  return {
+    id: createRenderableId(target),
+    label: body.label,
+    ownerBodyId: body.bodyId,
+    ownerFeatureId: body.ownerFeatureId,
+    binding: { pickId: createPickId(target), pickPriority: BODY_PICK_PRIORITY, target, topology: null, semanticClass: "body" },
+    geometry: { kind: "mesh", vertexPositions, vertexNormals: null, triangleIndices },
+  };
+}
+
 function getNativeTopologyBodyPayload(
   body: OccTrackedBody,
   options: OccSnapshotBuildOptions,
@@ -1146,70 +1177,85 @@ function createNativeFaceIdAliasMap(
   return aliases;
 }
 
-function buildNativeFaceMeshGeometry(
+function buildNativeFaceMeshGeometries(
   mesh: OccNativeShimMeshSummary,
-  faceId: FaceId,
-  nativeFaceIdsByDurableFaceId: ReadonlyMap<string, FaceId>,
-): RenderMeshGeometry | null {
+  durableFaceIdByNativeFaceId: ReadonlyMap<string, FaceId>,
+) {
   const positions = mesh.positions;
   const triangleIndices = mesh.triangleIndices;
   const triangleFaceBindings = mesh.triangleFaceBindings;
 
   if (!positions || !triangleIndices || !triangleFaceBindings) {
-    return null;
+    return new Map<FaceId, RenderMeshGeometry>();
   }
 
-  const vertexPositions: RenderPoint3D[] = [];
-  const nativeVertexToLocalIndex = new Map<number, number>();
-  const localTriangleIndices: Array<readonly [number, number, number]> = [];
-
-  const getLocalVertexIndex = (nativeIndex: number) => {
-    const existing = nativeVertexToLocalIndex.get(nativeIndex);
-    if (existing !== undefined) {
-      return existing;
+  const geometryByFaceId = new Map<
+    FaceId,
+    {
+      vertexPositions: RenderPoint3D[];
+      nativeVertexToLocalIndex: Map<number, number>;
+      triangleIndices: Array<readonly [number, number, number]>;
     }
-
-    const position = positions[nativeIndex];
-    if (!position) {
-      throw new Error(
-        `Native render mesh triangle references missing vertex index ${nativeIndex}.`,
-      );
-    }
-
-    const localIndex = vertexPositions.length;
-    nativeVertexToLocalIndex.set(nativeIndex, localIndex);
-    vertexPositions.push([position[0], position[1], position[2]]);
-    return localIndex;
-  };
+  >();
 
   for (let index = 0; index < triangleIndices.length; index += 1) {
     const nativeFaceId = triangleFaceBindings[index];
-    if (nativeFaceIdsByDurableFaceId.get(nativeFaceId) !== faceId) {
-      continue;
-    }
-
+    const faceId = nativeFaceId
+      ? durableFaceIdByNativeFaceId.get(nativeFaceId)
+      : undefined;
     const triangle = triangleIndices[index];
-    if (!triangle) {
+    if (!faceId || !triangle) {
       continue;
     }
 
-    localTriangleIndices.push([
+    const geometry =
+      geometryByFaceId.get(faceId) ??
+      (() => {
+        const next = {
+          vertexPositions: [] as RenderPoint3D[],
+          nativeVertexToLocalIndex: new Map<number, number>(),
+          triangleIndices: [] as Array<readonly [number, number, number]>,
+        };
+        geometryByFaceId.set(faceId, next);
+        return next;
+      })();
+    const getLocalVertexIndex = (nativeIndex: number) => {
+      const existing = geometry.nativeVertexToLocalIndex.get(nativeIndex);
+      if (existing !== undefined) {
+        return existing;
+      }
+
+      const position = positions[nativeIndex];
+      if (!position) {
+        throw new Error(
+          `Native render mesh triangle references missing vertex index ${nativeIndex}.`,
+        );
+      }
+
+      const localIndex = geometry.vertexPositions.length;
+      geometry.nativeVertexToLocalIndex.set(nativeIndex, localIndex);
+      geometry.vertexPositions.push([position[0], position[1], position[2]]);
+      return localIndex;
+    };
+
+    geometry.triangleIndices.push([
       getLocalVertexIndex(triangle[0]),
       getLocalVertexIndex(triangle[1]),
       getLocalVertexIndex(triangle[2]),
     ]);
   }
 
-  if (localTriangleIndices.length === 0) {
-    return null;
-  }
-
-  return {
-    kind: "mesh",
-    vertexPositions,
-    vertexNormals: null,
-    triangleIndices: localTriangleIndices,
-  };
+  return new Map(
+    [...geometryByFaceId].map(([faceId, geometry]) => [
+      faceId,
+      {
+        kind: "mesh" as const,
+        vertexPositions: geometry.vertexPositions,
+        vertexNormals: null,
+        triangleIndices: geometry.triangleIndices,
+      },
+    ]),
+  );
 }
 
 function buildNativeFaceRenderRecords(
@@ -1220,18 +1266,17 @@ function buildNativeFaceRenderRecords(
   nativeBodyPayload: OccNativeTopologyBodyPayload | undefined,
 ) {
   const records: RenderableEntityRecord[] = [];
-  const nativeFaceIdsByDurableFaceId = createNativeFaceIdAliasMap(
+  const durableFaceIdByNativeFaceId = createNativeFaceIdAliasMap(
     body,
     nativeBodyPayload,
   );
+  const geometryByFaceId = buildNativeFaceMeshGeometries(
+    mesh,
+    durableFaceIdByNativeFaceId,
+  );
 
   for (const faceId of body.topology.faceIds) {
-    const geometry = buildNativeFaceMeshGeometry(
-      mesh,
-      faceId,
-      nativeFaceIdsByDurableFaceId,
-    );
-
+    const geometry = geometryByFaceId.get(faceId);
     if (!geometry) {
       continue;
     }
@@ -1243,7 +1288,6 @@ function buildNativeFaceRenderRecords(
       (face
         ? getFaceSemanticClasses(state, face)
         : { entity: ["face"] as const, render: "bodyFace" as const });
-
     records.push({
       id: createRenderableId(target),
       label: `${body.label} ${faceId}`,
@@ -1589,6 +1633,10 @@ function buildBodyRenderRecords(
   const records: RenderableEntityRecord[] = [];
   const nativeBodyPayload = getNativeTopologyBodyPayload(body, options);
   const nativeRenderMesh = nativeBodyPayload?.renderMeshSummary ?? null;
+
+  if (body.topologyPresentation === "bodyOnlyMesh") {
+    return [buildBodyOnlyMeshRenderRecord(body)];
+  }
 
   if (nativeRenderMesh) {
     records.push(

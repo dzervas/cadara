@@ -275,77 +275,102 @@ export function createWorkbenchDocumentOwner({
       rollback?: (appliedOperationCount: number) => Promise<void>;
     },
   ) {
-    const currentSnapshot = requireSnapshot();
-    const provider = runtimeExtensionRegistries.importProviders.getById(
-      activeImportSession.providerId,
-    );
-    if (!provider) {
-      throw new Error("The selected import provider is no longer registered.");
-    }
+    type ImportCommitStage = "prepare" | "apply" | "post-commit-handoff";
+    let stage: ImportCommitStage = "prepare";
 
-    const capabilities = createImportCapabilities(
-      modelingService,
-      currentSnapshot,
-      {
-        history: createImportHistoryProbe(),
-        ...(geometryAssetStore ? { assetStore: geometryAssetStore } : {}),
-      },
-    );
-    const actions = await prepareImportActions({
-      provider,
-      source: activeImportSession.resolvedSource,
-      review: activeImportSession.review,
-      selections: activeImportSession.selections,
-      capabilities,
-    });
-    const result = await applyImportPreparedActions({
-      modelingService,
-      baseRevisionId: currentSnapshot.document.revisionId,
-      actions,
-      rollback: options?.rollback,
-    });
-
-    if (
-      result.diagnostics.some((diagnostic) => diagnostic.severity === "error")
-    ) {
-      // Reconcile after a failed import with committed work. A failed or absent
-      // rollback may leave partial state; retaining the old snapshot would be
-      // less honest than refreshing it. Reconciliation is supplementary: it
-      // must not replace the original apply/rollback diagnostics.
-      let snapshot: WorkspaceSnapshot | undefined;
-      let failureDiagnostics = result.diagnostics;
-      if (result.appliedOperationCount > 0) {
-        try {
-          snapshot = await replaceActiveDocumentBasis();
-        } catch (error) {
-          failureDiagnostics = [
-            ...failureDiagnostics,
-            {
-              code: "import-reconciliation-failed",
-              severity: "error",
-              message: `Import reconciliation after rollback failed: ${describeUnknownError(
-                error,
-                "Snapshot reconciliation failed.",
-              )}`,
-              target: null,
-              detail: null,
-            },
-          ];
-        }
+    try {
+      const currentSnapshot = requireSnapshot();
+      const provider = runtimeExtensionRegistries.importProviders.getById(
+        activeImportSession.providerId,
+      );
+      if (!provider) {
+        throw new Error("The selected import provider is no longer registered.");
       }
+
+      const capabilities = createImportCapabilities(
+        modelingService,
+        currentSnapshot,
+        {
+          history: createImportHistoryProbe(),
+          ...(geometryAssetStore ? { assetStore: geometryAssetStore } : {}),
+        },
+      );
+      const actions = await prepareImportActions({
+        provider,
+        source: activeImportSession.resolvedSource,
+        review: activeImportSession.review,
+        selections: activeImportSession.selections,
+        capabilities,
+      });
+
+      stage = "apply";
+      const result = await applyImportPreparedActions({
+        modelingService,
+        baseRevisionId: currentSnapshot.document.revisionId,
+        actions,
+        rollback: options?.rollback,
+      });
+
+      if (
+        result.diagnostics.some((diagnostic) => diagnostic.severity === "error")
+      ) {
+        // Reconcile after a failed import with committed work. A failed or absent
+        // rollback may leave partial state; retaining the old snapshot would be
+        // less honest than refreshing it. Reconciliation is supplementary: it
+        // must not replace the original apply/rollback diagnostics.
+        let snapshot: WorkspaceSnapshot | undefined;
+        let failureDiagnostics = result.diagnostics;
+        if (result.appliedOperationCount > 0) {
+          try {
+            snapshot = await replaceActiveDocumentBasis();
+          } catch (error) {
+            failureDiagnostics = [
+              ...failureDiagnostics,
+              {
+                code: "import-reconciliation-failed",
+                severity: "error",
+                message: `Import reconciliation after rollback failed: ${describeUnknownError(
+                  error,
+                  "Snapshot reconciliation failed.",
+                )}`,
+                target: null,
+                detail: null,
+              },
+            ];
+          }
+        }
+        return {
+          ok: false as const,
+          diagnostics: failureDiagnostics,
+          rolledBack: result.rolledBack,
+          ...(snapshot ? { snapshot } : {}),
+        };
+      }
+
+      stage = "post-commit-handoff";
+      return {
+        ok: true as const,
+        createdEntityIds: result.createdEntityIds,
+        snapshot: await loadAcceptedMutationSnapshot(),
+      };
+    } catch (error) {
+      // This boundary owns the import session. Convert every thrown prepare,
+      // apply, and post-commit handoff failure into its visible diagnostics so
+      // callers never have to replace a useful error with a generic toast.
       return {
         ok: false as const,
-        diagnostics: failureDiagnostics,
-        rolledBack: result.rolledBack,
-        ...(snapshot ? { snapshot } : {}),
+        diagnostics: [
+          {
+            code: `import-${stage}-failed`,
+            severity: "error" as const,
+            message: describeUnknownError(error, "Import failed."),
+            target: null,
+            detail: null,
+          },
+        ],
+        rolledBack: false,
       };
     }
-
-    return {
-      ok: true as const,
-      createdEntityIds: result.createdEntityIds,
-      snapshot: await loadAcceptedMutationSnapshot(),
-    };
   }
 
   return {

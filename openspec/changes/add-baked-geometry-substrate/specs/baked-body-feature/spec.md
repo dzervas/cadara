@@ -18,6 +18,20 @@ The system SHALL provide a `bakedBody` feature definition referencing a register
 - **THEN** its parameters expose the asset reference and provenance, not pseudo-parametric geometry controls
 - **AND** downstream features referencing the body rebuild normally
 
+### Requirement: Baked-body snapshots SHALL explicitly expose body-only mesh presentation
+A `bakedBody` materialized from a baked mesh SHALL set `topologyPresentation: "bodyOnlyMesh"` only when no downstream face, edge, or vertex identities are promised. It SHALL retain its authoritative faceted OCC shape and source mesh for body-level operations and export, while its snapshot topology arrays are empty and it emits exactly one body-targeted mesh render record per baked component. The snapshot path SHALL omit subtopology extraction, native topology payload generation, naming signatures, references, and per-subtopology render records for such a body.
+
+#### Scenario: Dense baked mesh is rendered as body only
+- **WHEN** a dense baked mesh materializes into two declared source components
+- **THEN** the snapshot exposes two body render/reference records and no face, edge, or vertex records for those bodies
+- **AND** each record retains the complete authoritative mesh triangle count in contiguous transport buffers
+- **AND** face/edge/vertex targets are unavailable while each body remains selectable and exportable
+
+#### Scenario: Ordinary body presentation is unchanged
+- **WHEN** a non-baked parametric or derived body is snapshotted
+- **THEN** it retains its normal face/edge/vertex topology presentation
+- **AND** the system SHALL NOT infer or silently apply body-only presentation.
+
 ### Requirement: Baked-body checkpoints SHALL declare body replacement scope
 A `bakedBody` definition SHALL explicitly declare whether it appends geometry or replaces an exact list of prior durable body outputs. A replacement SHALL remove only its declared current bodies at that feature-history point, retain the superseded features and their history/produced-target records, and expose the baked outputs to all later features. The system SHALL NOT infer replacement scope from geometry or silently remove unrelated bodies.
 

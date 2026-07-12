@@ -1386,6 +1386,7 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
         entry.binding.topology === "vertex"
       ) ||
       (entry.binding.semanticClass !== "bodyFace" &&
+        entry.binding.semanticClass !== "body" &&
         entry.binding.semanticClass !== "planarFace" &&
         entry.binding.semanticClass !== "featureEdge" &&
         entry.binding.semanticClass !== "featureVertex" &&
@@ -1585,13 +1586,14 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
 
     if (
       entry.binding.topology === null &&
+      target.kind !== "body" &&
       target.kind !== "construction" &&
       target.kind !== "region" &&
       target.kind !== "sketchEntity" &&
       target.kind !== "sketchPoint"
     ) {
       throw new Error(
-        "Non-topological render bindings must target durable construction, region, or sketch refs.",
+        "Non-topological render bindings must target durable body, construction, region, or sketch refs.",
       );
     }
 
@@ -1601,6 +1603,13 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
       (entry.binding.topology !== "face" || target.kind !== "face")
     ) {
       throw new Error("Face semantic classes must bind to durable faces.");
+    }
+
+    if (
+      entry.binding.semanticClass === "body" &&
+      (entry.binding.topology !== null || target.kind !== "body")
+    ) {
+      throw new Error("body bindings must target durable bodies without subtopology.");
     }
 
     if (
@@ -1655,6 +1664,14 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
 
     const binding: RenderableEntityRecord["binding"] = (() => {
       switch (entry.binding.semanticClass) {
+        case "body":
+          return {
+            pickId: entry.binding.pickId as PickId,
+            pickPriority: entry.binding.pickPriority,
+            target: target as Extract<PrimitiveRef, { kind: "body" }>,
+            topology: null,
+            semanticClass: "body",
+          };
         case "bodyFace":
         case "planarFace":
           return {
@@ -3255,7 +3272,13 @@ export function normalizeBodies(value: unknown): BodySnapshotRecord[] {
       !isRecord(entry.topology) ||
       !Array.isArray(entry.topology.faceIds) ||
       !Array.isArray(entry.topology.edgeIds) ||
-      !Array.isArray(entry.topology.vertexIds)
+      !Array.isArray(entry.topology.vertexIds) ||
+      (entry.topologyPresentation !== undefined &&
+        entry.topologyPresentation !== "bodyOnlyMesh") ||
+      (entry.topologyPresentation === "bodyOnlyMesh" &&
+        (entry.topology.faceIds.length !== 0 ||
+          entry.topology.edgeIds.length !== 0 ||
+          entry.topology.vertexIds.length !== 0))
     ) {
       throw new Error("Invalid body snapshot record.");
     }
@@ -3287,6 +3310,10 @@ export function normalizeBodies(value: unknown): BodySnapshotRecord[] {
           return vertexId as BodySnapshotRecord["topology"]["vertexIds"][number];
         }),
       },
+      topologyPresentation:
+        entry.topologyPresentation === "bodyOnlyMesh"
+          ? "bodyOnlyMesh"
+          : undefined,
     };
   });
 }

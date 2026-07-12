@@ -586,7 +586,11 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
       deps: {
         documentOwner: {
           async commitPartImport() {
-            throw new Error("Import transaction rolled back.");
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            throw {
+              message: "Browser worker rejected the render snapshot handoff.",
+              context: [{ key: "stage", value: "post-commit-handoff" }],
+            };
           },
         },
         importProviders: createImportProviderRegistry([]),
@@ -647,7 +651,8 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
         thrownEvents[1] as {
           diagnostics: Array<{ code: string; message: string }>;
         }
-      ).diagnostics[0]?.message === "Import transaction rolled back.",
+      ).diagnostics[0]?.message ===
+        "Browser worker rejected the render snapshot handoff.",
     "Thrown commit failures should be normalized into an import.failed event.",
   ).toBeTruthy();
   expect(
@@ -656,7 +661,7 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
   ).toBe(
     JSON.stringify([
       "Import surface is self-intersecting.",
-      "Import transaction rolled back.",
+      "Browser worker rejected the render snapshot handoff.",
     ]),
   );
 });

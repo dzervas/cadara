@@ -88,3 +88,21 @@ Focused logic/OCC validation passed: 34 tests across runtime schema, import vali
 - Policy: `DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS` is now 90,000 ms, independently injectable for tests. This is deliberately a repository-rebuild synchronization budget, not an OCC client request timeout; worker errors and disposal remain observable without adding a kernel deadline.
 - Import application now retains `import-apply-failed` as the first diagnostic and appends `import-rollback-failed` with the rollback cause. Any failed import with committed work refreshes the workbench basis; reconciliation failure is appended as `import-reconciliation-failed` rather than hiding the original causes.
 - Focused checks: the delayed-worker protocol client test proves a late response completes; the durable-history test compresses a delayed rebuild through injected timeout configuration; the import pipeline test proves both structured causes survive. `tsc -b tsconfig.app.json` and changed-file eslint pass. The broader selected import pipeline currently has one separate in-progress baked-checkpoint assertion failure (two bodies instead of one); it is outside the timeout/rollback seam. Browser visual/reload smoke remains required.
+
+## 2026-07-12 baked body-only snapshot measurement
+
+`bakedBody` now sets `topologyPresentation: "bodyOnlyMesh"` only at its OCC materialization seam. The OCC faceted shape and mesh fallback remain authoritative for STEP/export and body operations; snapshots deliberately publish no face/edge/vertex IDs, references, signatures, native topology payload, or subtopology render records. One body-targeted mesh record is emitted per source component, so face/edge picking is not advertised.
+
+Browser-native `tmp-repro/taskariki-snapshot-performance.spec.ts` (custom `public/cadara-occ.js/.wasm`) results:
+
+| Bundle | triangles | components | materialization | native snapshot export | snapshot | records | refs | transfer buffers / bytes | JSON-equivalent snapshot | RSS / V8 heap delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| HackerBoard | 464 | 1 | 329 ms | 0 ms | 8 ms | 7 (1 body + 6 construction) | 5 | 11 / 22,632 | 97,805 B | +6,443,008 / +6,462,776 B |
+| Taskariki | 27,114 | 2 | 15,756 ms | 0 ms | 16 ms | 8 (2 body + 6 construction) | 6 | 13 / 1,301,832 | 5,201,384 B | +62,050,304 / +125,804,304 B |
+
+Taskariki therefore has exactly **2 body records**, zero baked face/edge/vertex records, and four body mesh transfer buffers (positions + indices for each component); the remaining nine transfer buffers are existing construction render records. This replaces the measured 81,314 topology/render references, 54,237 buffers, ~277 MB snapshot object, ~66 s native snapshot export, and ~2.95 GB RSS/~1.83 GB V8 growth. The JSON-equivalent snapshot still expands mesh coordinate arrays by contract; transport uses contiguous typed arrays.
+
+Browser retry: start the app with the project’s normal browser runtime, import the proprietary Taskariki capture, wait for the baked materialization, confirm exactly two selectable body meshes are visible, confirm face/edge selection is unavailable, reload and confirm both bodies rebuild, then export STEP to verify the retained OCC shapes. Do not run Playwright/e2e for this change.
+
+
+Validation: focused specs passed; full non-E2E Node Vitest passed (**355 logic**, **121 UI**, **24 static**); `node node_modules/typescript/bin/tsc -b tsconfig.app.json --pretty false` passed; changed-file ESLint passed. Repository-wide ESLint is blocked only by pre-existing unused imports in gitignored `tmp-repro/baked-import-real-occ.spec.ts` and `tmp-repro/hackerboard-live-vs-restored.spec.ts`. Bun is unavailable, so `bun run test:all` could not be invoked; browser/E2E was intentionally not run.

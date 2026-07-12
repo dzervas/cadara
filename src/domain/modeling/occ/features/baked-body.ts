@@ -503,6 +503,7 @@ export function executeBakedBodyFeature(
           // that makes dense studio bakes (tens of thousands of faces)
           // untrackable; skipping it keeps materialization linear.
           seedNaming: false,
+          topologyPresentation: "bodyOnlyMesh",
         }),
     );
     const producedTargets: DurableRef[] = newBodies.map((body) => ({
