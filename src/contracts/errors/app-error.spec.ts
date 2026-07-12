@@ -51,21 +51,25 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     "Non-Error throws should still be retained as causes.",
   ).toBe("bad value");
 
-  const malformedMarkedValue = {
-    [Symbol.for("cadara.appError")]: true,
-    message: "Malformed app error.",
+  const plainObjectFailure = {
+    message: "Browser worker could not clone the render snapshot.",
+    context: [{ key: "stage", value: "post-commit-handoff" }],
   };
-  const malformed = normalizeUnknownError(malformedMarkedValue, {
-    fallbackMessage: "Malformed marker fell back.",
+  const malformed = normalizeUnknownError(plainObjectFailure, {
+    fallbackMessage: "Plain object failure fell back.",
   });
   expect(
     malformed.message,
-    "Malformed marked objects should not escape normalization.",
-  ).toBe("Malformed marker fell back.");
+    "Plain object failures with messages should not be replaced by a generic fallback.",
+  ).toBe("Browser worker could not clone the render snapshot.");
+  expect(
+    malformed.context,
+    "Plain object failure context should survive normalization for reporting.",
+  ).toEqual([{ key: "stage", value: "post-commit-handoff" }]);
   expect(
     malformed.cause,
-    "Malformed marked objects should still be retained as causes.",
-  ).toBe(malformedMarkedValue);
+    "Plain object failures should still be retained as causes.",
+  ).toBe(plainObjectFailure);
 
   expect(
     describeUnknownError(
@@ -78,8 +82,12 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     "describeUnknownError should surface Error messages.",
   ).toBe("Plain error.");
   expect(
+    describeUnknownError(plainObjectFailure, "Custom fallback."),
+    "describeUnknownError should surface message-bearing plain objects.",
+  ).toBe("Browser worker could not clone the render snapshot.");
+  expect(
     describeUnknownError({ weird: true }, "Custom fallback."),
-    "describeUnknownError should fall back for non-Error, non-string values.",
+    "describeUnknownError should fall back for non-message-bearing values.",
   ).toBe("Custom fallback.");
 
   const validationError = appErrorFromValidationIssues(

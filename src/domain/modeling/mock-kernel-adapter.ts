@@ -4513,6 +4513,43 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       });
     }
 
+    // A construction-plane support must resolve to a live construction target,
+    // matching the OCC kernel's sketch-plane validation. This rejects phantom
+    // construction supports (e.g. synthetic import frames) instead of silently
+    // accepting an unresolvable placement.
+    if (
+      request.plane.support.kind === "construction" &&
+      !hasConstructionTarget(snapshot, request.plane.support.constructionId)
+    ) {
+      const diagnostics: ModelingDiagnostic[] = [
+        {
+          code: "mock-invalid-sketch-plane",
+          severity: "error",
+          message: `Sketch plane construction support ${request.plane.support.constructionId} does not resolve to a live construction target.`,
+          target: createSketchTarget(sketchId),
+          detail: null,
+        },
+      ];
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        sketchId,
+        revisionState: {
+          kind: "rejected",
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: "mock-invalid-sketch",
+        },
+        rebuildResult: createRebuildResult({
+          kind: "skipped",
+          reasonCode: "validationRejected",
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      };
+    }
+
     const normalizedDefinition = normalizeSketchDefinitionForSketchId(
       request.definition,
       sketchId,

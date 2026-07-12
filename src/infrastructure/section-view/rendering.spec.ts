@@ -144,8 +144,46 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
       ),
       "Derived section caps should carry positions, normals, texture coordinates, and triangulation.",
     ).toBeTruthy();
-  }
 
+    const vertexPositions: Array<readonly [number, number, number]> = [];
+    const triangleIndices: Array<readonly [number, number, number]> = [];
+    for (const face of boxFaces) {
+      if (face.geometry.kind !== "mesh") continue;
+      const vertexOffset = vertexPositions.length;
+      vertexPositions.push(...face.geometry.vertexPositions);
+      triangleIndices.push(
+        ...face.geometry.triangleIndices.map(
+          (triangle) =>
+            [
+              triangle[0] + vertexOffset,
+              triangle[1] + vertexOffset,
+              triangle[2] + vertexOffset,
+            ] as const,
+        ),
+      );
+    }
+    const bodyOnlyMesh: RenderableEntityRecord = {
+      ...boxFaces[0]!,
+      id: "baked-box" as RenderableId,
+      binding: {
+        pickId: "pick_baked-box" as PickId,
+        pickPriority: 5,
+        target: { kind: "body", bodyId: "body_box" },
+        topology: null,
+        semanticClass: "body",
+      },
+      geometry: {
+        kind: "mesh",
+        vertexPositions,
+        vertexNormals: null,
+        triangleIndices,
+      },
+    };
+    expect(
+      createSectionCapRenderables([bodyOnlyMesh], createSection("positive")).length > 0,
+      "Body-only baked meshes should participate in section-cap generation.",
+    ).toBeTruthy();
+  }
   {
     const offset = resolveSectionDragOffset({
       pointerRayOrigin: [10, 0, 10],

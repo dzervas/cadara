@@ -51,9 +51,13 @@ A `bakedBody` definition declares `replacement`: either `append` for ordinary in
 
 Onshape final-studio tessellation is ground truth, so its prepared action uses the import-only deferred form `replaceBodyOutputs(actionIndexes)`. The provider records every prior `createFeature` action in the same ordered import span; `ImportDeferredMaterializer` resolves their returned body outputs at apply time into the durable `replaceBodies` list. This uses the existing deferred-output seam rather than predicting IDs, scopes replacement to import-owned outputs, and leaves pre-existing/unrelated user bodies untouched. A baked checkpoint appears after those actions, so subsequent actions receive the baked body set.
 
+## Decision 4b: Baked bodies use explicit body-only topology presentation (2026-07-12 amendment)
+
+A baked mesh materialization sets `topologyPresentation: "bodyOnlyMesh"` on its tracked and snapshot body. This mode is exclusive to `bakedBody`: it retains the authoritative faceted OCC solid and the source mesh fallback for export and body-level operations, but intentionally exposes empty face/edge/vertex lists, no subtopology references or naming signatures, and one body-targeted mesh render record. Snapshot and native-payload construction must skip these bodies entirely; their one contiguous positions/index buffer pair is transferred per body rather than per triangle. A later derived normal body is not implicitly put in this mode. Face/edge/vertex operations therefore fail by ordinary missing-reference semantics, while body targets remain valid.
+
 ## Decision 5: Testing (per docs/testing.md)
 
-Lane: **logic** for the contract variant, capability implementation, mock-kernel materialization, provider emission, and the apply-pipeline chain ending in a baked body; OCC materialization lands beside the existing OCC feature specs (same lane they use). In-app Taskariki smoke recorded in change notes. No new UI-lane tests unless feature-tree presentation needs bespoke logic.
+Lane: **logic** for the contract variant, capability implementation, mock-kernel materialization, provider emission, OCC snapshot/transfer behavior, and the apply-pipeline chain ending in a baked body; OCC materialization lands beside the existing OCC feature specs. **UI** covers only the existing viewport render/pick binding seam for a body-level record. In-app Taskariki smoke is recorded in change notes.
 
 ## Risks
 

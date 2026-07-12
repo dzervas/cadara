@@ -119,16 +119,37 @@ export function normalizeUnknownError(
     });
   }
 
+  const errorLike =
+    typeof value === "object" && value !== null
+      ? (value as {
+          message?: unknown;
+          context?: unknown;
+        })
+      : null;
   const message =
     value instanceof Error && value.message.trim()
       ? value.message
-      : input.fallbackMessage;
+      : typeof errorLike?.message === "string" && errorLike.message.trim()
+        ? errorLike.message
+        : input.fallbackMessage;
+  const inheritedContext = Array.isArray(errorLike?.context)
+    ? errorLike.context.filter(
+        (entry): entry is AppErrorContextEntry =>
+          typeof entry === "object" &&
+          entry !== null &&
+          typeof (entry as AppErrorContextEntry).key === "string" &&
+          ((entry as AppErrorContextEntry).value === null ||
+            ["string", "number", "boolean"].includes(
+              typeof (entry as AppErrorContextEntry).value,
+            )),
+      )
+    : [];
 
   return createAppError({
     code: input.code ?? "app/unknown",
     severity: input.severity ?? "error",
     message,
-    context: input.context,
+    context: [...inheritedContext, ...(input.context ?? [])],
     cause: value,
     requestId: input.requestId,
     target: input.target,
@@ -150,6 +171,14 @@ export function describeUnknownError(
   }
   if (value instanceof Error && value.message.trim()) {
     return value.message;
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { message?: unknown }).message === "string" &&
+    (value as { message: string }).message.trim()
+  ) {
+    return (value as { message: string }).message;
   }
   if (typeof value === "string" && value.trim()) {
     return value;

@@ -10,6 +10,7 @@ import type {
 } from "@/contracts/shared/ids";
 import type {
   BodySnapshotRecord,
+  BodyTopologyPresentation,
   ConstructionSnapshotRecord,
   FeatureDefinition,
   ModelingDiagnostic,
@@ -87,6 +88,8 @@ export interface OccTrackedBody {
   >;
   vertexContributingFeatureIdsById: Map<VertexId, FeatureId[]>;
   naming?: OccTopologyNamingBodyState;
+  /** Explicitly suppresses face/edge/vertex extraction and presentation. */
+  topologyPresentation?: BodyTopologyPresentation;
 }
 
 export interface OccAuthoringFeatureRecordLike {
@@ -781,6 +784,7 @@ function buildTrackedSolidBody(
     naming?: OccTopologyNamingBodyState;
     seedNaming?: boolean;
     meshExportFallback?: OccTrackedBody["meshExportFallback"];
+    topologyPresentation?: BodyTopologyPresentation;
   },
 ): OccTrackedBody {
   const solids = extractSolidShapes(oc, input.shape);
@@ -793,20 +797,32 @@ function buildTrackedSolidBody(
 
   const [solid] = solids;
   const topologyToken = input.topologyToken;
-  const nativePayload = buildNativeTopologyPayloadForTrackedSolid(oc, {
-    bodyId: input.bodyId,
-    topologyToken,
-    solid,
-  });
-  const faces = nativePayload
-    ? indexFacesByNativePayload(oc, input.bodyId, solid, nativePayload)
-    : enumerateFaces(oc, input.bodyId, topologyToken, solid);
-  const edges = nativePayload
-    ? indexEdgesByNativePayload(oc, input.bodyId, solid, nativePayload)
-    : enumerateEdges(oc, input.bodyId, topologyToken, solid);
-  const vertices = nativePayload
-    ? indexVerticesByNativePayload(oc, input.bodyId, solid, nativePayload)
-    : enumerateVertices(oc, input.bodyId, topologyToken, solid);
+  const bodyOnlyMesh = input.topologyPresentation === "bodyOnlyMesh";
+  // Baked body-only meshes retain their authoritative OCC shape and source mesh,
+  // but deliberately do not enumerate subtopology or invoke the native topology
+  // exporter. No face/edge/vertex ids are promised for this presentation mode.
+  const nativePayload = bodyOnlyMesh
+    ? undefined
+    : buildNativeTopologyPayloadForTrackedSolid(oc, {
+        bodyId: input.bodyId,
+        topologyToken,
+        solid,
+      });
+  const faces = bodyOnlyMesh
+    ? { faceIds: [], facesById: new Map() }
+    : nativePayload
+      ? indexFacesByNativePayload(oc, input.bodyId, solid, nativePayload)
+      : enumerateFaces(oc, input.bodyId, topologyToken, solid);
+  const edges = bodyOnlyMesh
+    ? { edgeIds: [], edgesById: new Map() }
+    : nativePayload
+      ? indexEdgesByNativePayload(oc, input.bodyId, solid, nativePayload)
+      : enumerateEdges(oc, input.bodyId, topologyToken, solid);
+  const vertices = bodyOnlyMesh
+    ? { vertexIds: [], verticesById: new Map() }
+    : nativePayload
+      ? indexVerticesByNativePayload(oc, input.bodyId, solid, nativePayload)
+      : enumerateVertices(oc, input.bodyId, topologyToken, solid);
 
   const body = {
     bodyId: input.bodyId,
@@ -814,6 +830,7 @@ function buildTrackedSolidBody(
     ownerFeatureId: input.ownerFeatureId,
     topologyToken,
     shape: solid,
+    topologyPresentation: input.topologyPresentation,
     meshExportFallback: input.meshExportFallback,
     nativeTopologyPayload: nativePayload ?? undefined,
     topology: {
@@ -867,6 +884,7 @@ export function trackNewSolidBody(
     shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
     seedNaming?: boolean;
     meshExportFallback?: OccTrackedBody["meshExportFallback"];
+    topologyPresentation?: BodyTopologyPresentation;
   },
 ) {
   return buildTrackedSolidBody(oc, {
@@ -1082,6 +1100,7 @@ export function createBodySnapshotRecord(
       edgeIds: [...body.topology.edgeIds],
       vertexIds: [...body.topology.vertexIds],
     },
+    topologyPresentation: body.topologyPresentation,
   };
 }
 

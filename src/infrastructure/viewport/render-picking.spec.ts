@@ -1328,5 +1328,26 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     );
   }
 
+  {
+    const bodyRenderable: RenderableEntityRecord = {
+      ...faceRenderable,
+      id: "renderable_body_only",
+      label: "Baked body",
+      binding: {
+        pickId: "pick_body_only",
+        pickPriority: 20,
+        target: { kind: "body", bodyId: "body_a" },
+        topology: null,
+        semanticClass: "body",
+      },
+    };
+    const resolved = resolvePickTarget([createIntersection(createBoundMesh(bodyRenderable), 1)]);
+    assertDeepEqual(
+      resolved?.target,
+      bodyRenderable.binding.target,
+      "Body-only mesh render records must remain viewport-selectable as bodies.",
+    );
+  }
+
   console.log("All render-picking tests passed.");
 });

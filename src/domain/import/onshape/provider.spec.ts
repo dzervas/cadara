@@ -469,7 +469,7 @@ test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/provider.spec.ts real probe activates face sketch from candidate prefix", async () => {
+test("src/domain/import/onshape/provider.spec.ts real probe demotes an unresolvable captured-frame sketch to baked", async () => {
   const source = sourceFromBundle(makeFaceSketchBundle());
   const realProbeCapabilities = capabilitiesWithRealKernelProbe();
 
@@ -490,11 +490,10 @@ test("src/domain/import/onshape/provider.spec.ts real probe activates face sketc
     "The synthetic fixture must build a real parametric prefix before the face sketch probe runs.",
   ).toBeTruthy();
   expect(
-    faceSketch?.tier === "parametric" &&
-      faceSketch.target.kind === "sketch" &&
-      faceSketch.target.plane?.support.kind === "construction" &&
-      faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
-    "The real review path should promote the face sketch once a concrete frame is available.",
+    faceSketch?.tier === "baked" &&
+      faceSketch.reasonCodes.includes("captured-frame-unresolvable") &&
+      !faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
+    "A captured-frame sketch whose fabricated construction support fails the real kernel probe must demote to baked with an honest reason code instead of shipping an unresolvable plan.",
   ).toBeTruthy();
 
   const actions = await onshapeImportProvider.prepare({
@@ -505,10 +504,14 @@ test("src/domain/import/onshape/provider.spec.ts real probe activates face sketc
   });
 
   expect(
-    actions.commitSketches?.some(
-      (sketch) => sketch.plane.support.kind === "construction",
+    (actions.commitSketches ?? []).every(
+      (sketch) =>
+        sketch.plane.support.kind !== "construction" ||
+        !sketch.plane.support.constructionId.startsWith(
+          "construction_import_captured_",
+        ),
     ),
-    "Prepare should emit the verified review plan with a captured-frame sketch commit.",
+    "After demotion the prepared actions must not carry an unresolvable synthetic captured-frame construction support.",
   ).toBeTruthy();
 });
 

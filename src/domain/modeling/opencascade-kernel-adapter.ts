@@ -2590,7 +2590,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const transactionMode = options.useCommittedShapeTransaction
       ? "committedShape"
       : "snapshot";
-    const nativeBodies = state.bodies.map((body) => {
+    const nativeBodies = state.bodies
+      .filter((body) => body.topologyPresentation !== "bodyOnlyMesh")
+      .map((body) => {
       const cacheKey = this.createNativeTopologyBodyPayloadCacheKey({
         bodyId: body.bodyId,
         topologyToken: body.topologyToken,
@@ -2732,7 +2734,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     if (
       nativeTopologyResult.kind !== "nativeTopologyPayload" &&
-      runtimeState.authoringState.bodies.length > 0
+      runtimeState.authoringState.bodies.some(
+        (body) => body.topologyPresentation !== "bodyOnlyMesh",
+      )
     ) {
       throw this.createNativeTopologyUnavailableError(nativeTopologyResult);
     }

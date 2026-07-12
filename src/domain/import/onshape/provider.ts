@@ -584,6 +584,24 @@ function activateCapturedFramePlanning(input: {
   );
 }
 
+function isCapturedFramePromotion(plan: FeaturePlan): boolean {
+  return (
+    plan.featureType === "newSketch" &&
+    plan.tier === "parametric" &&
+    plan.reasonCodes.includes("sketch-on-captured-frame")
+  );
+}
+
+function demoteCapturedFrameToBaked(plan: FeaturePlan): FeaturePlan {
+  return {
+    ...plan,
+    tier: "baked",
+    target: { kind: "suppressed" },
+    reasonCodes: ["captured-frame-unresolvable"],
+    suppressed: true,
+  };
+}
+
 async function activateProbeBackedPlanning(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: ReturnType<typeof planStudioFidelity>;
@@ -593,22 +611,69 @@ async function activateProbeBackedPlanning(input: {
     return { plan: input.plan, probeResult: null };
   }
 
-  const candidatePrefix = await buildPreparedActions({
-    read: input.read,
-    plan: input.plan,
-    capabilities: input.capabilities,
-    materializeBake: false,
-  });
-  const probeResult = await input.capabilities.history.evaluateHistoryProbe({
-    actions: candidatePrefix,
-    includeFinalTessellation: true,
-  });
+  // A captured-frame promotion fabricates a construction support that no
+  // prepared action ever creates, so a real kernel probe aborts at that
+  // sketch's commit step. Use the probe as the oracle: when a captured-frame
+  // sketch fails its probe step, demote it back to baked and re-probe so the
+  // downstream steps still get evaluated. Bounded by the number of captured
+  // frame promotions to avoid re-probing indefinitely.
+  let workingPlan: OnshapeStudioPlan = input.plan;
+  let probeResult: HistoryProbeResult;
+  const maxDemotions = input.plan.featurePlans.filter(
+    isCapturedFramePromotion,
+  ).length;
+  for (let attempt = 0; ; attempt += 1) {
+    const orderedPositionToFeatureId = new Map<number, string>();
+    const candidatePrefix = await buildPreparedActions({
+      read: input.read,
+      plan: workingPlan,
+      capabilities: input.capabilities,
+      materializeBake: false,
+      orderedPositionToFeatureId,
+    });
+    probeResult = await input.capabilities.history.evaluateHistoryProbe({
+      actions: candidatePrefix,
+      includeFinalTessellation: true,
+    });
+
+    const failedOrdinal = probeResult.steps.findIndex(
+      (step) => step.status === "failed",
+    );
+    if (failedOrdinal < 0 || attempt > maxDemotions) {
+      break;
+    }
+    const failedFeatureId = orderedPositionToFeatureId.get(failedOrdinal);
+    const demotable = failedFeatureId
+      ? workingPlan.featurePlans.find(
+          (plan) =>
+            plan.onshapeFeatureId === failedFeatureId &&
+            isCapturedFramePromotion(plan),
+        )
+      : undefined;
+    if (!demotable) {
+      // The failure is not attributable to a demotable captured-frame
+      // promotion; leave the plan so the honest degradation path applies.
+      break;
+    }
+    // Every captured-frame promotion carries the same fabricated construction
+    // support that no prepared action creates, so if one fails its probe step
+    // they all would. Demote them together to bound re-probing to a single
+    // confirming pass instead of one full OCC replay per captured frame.
+    workingPlan = recomputePlanWithFeaturePlans(
+      workingPlan,
+      workingPlan.featurePlans.map((plan) =>
+        isCapturedFramePromotion(plan) ? demoteCapturedFrameToBaked(plan) : plan,
+      ),
+      input.read.studio.groundTruth.hasBodies,
+    );
+  }
+
   const finalRebuiltStep = [...probeResult.steps]
     .reverse()
     .find((step) => step.status === "rebuilt");
   const probeSignatures = finalRebuiltStep?.status === "rebuilt" ? finalRebuiltStep.signatures : [];
   if (probeSignatures.length === 0) {
-    return { plan: input.plan, probeResult };
+    return { plan: workingPlan, probeResult };
   }
 
   const references = new Map(
@@ -617,7 +682,7 @@ async function activateProbeBackedPlanning(input: {
       reference,
     ]),
   );
-  const nextPlans: FeaturePlan[] = input.plan.featurePlans.map((featurePlan) => {
+  const nextPlans: FeaturePlan[] = workingPlan.featurePlans.map((featurePlan) => {
     if (
       featurePlan.featureType !== "newSketch" ||
       featurePlan.tier !== "baked" ||
@@ -649,7 +714,7 @@ async function activateProbeBackedPlanning(input: {
           ? inferredSweptFaceSignature({
               feature,
               read: input.read,
-              plan: input.plan,
+              plan: workingPlan,
             })
           : null;
     if (!capturedSignature) {
@@ -684,7 +749,7 @@ async function activateProbeBackedPlanning(input: {
   }
   return {
     plan: {
-      ...input.plan,
+      ...workingPlan,
       featurePlans: nextPlans,
       tierCounts,
       requiresStudioBake:
@@ -701,10 +766,15 @@ async function reviewStudio(
   capabilities: ImportCapabilities,
 ): Promise<OnshapeStudioReview> {
   const read = readPartStudio(bundle, elementId);
-  const capturedFramePlan = activateCapturedFramePlanning({
-    read,
-    plan: planStudioFidelity(read),
-  });
+  const basePlan = planStudioFidelity(read);
+  // Captured-frame promotion fabricates a construction support that only a
+  // history probe can validate against the real kernel. Without a probe we
+  // cannot verify it resolves (the real OCC kernel rejects the synthetic
+  // support), so keep those sketches baked rather than shipping an
+  // unresolvable plan the apply step would fail on.
+  const capturedFramePlan = capabilities.history
+    ? activateCapturedFramePlanning({ read, plan: basePlan })
+    : basePlan;
   const activation = await activateProbeBackedPlanning({
     read,
     plan: capturedFramePlan,
@@ -772,6 +842,12 @@ async function buildPreparedActions(input: {
   demotedFeatureIds?: Iterable<string>;
   includeBinding?: boolean;
   materializeBake?: boolean;
+  /**
+   * Optional sink recording, per ordered-action position, the Onshape feature id
+   * that produced it. The probe-backed planner uses it to correlate a failed
+   * probe step back to the feature plan that must be demoted.
+   */
+  orderedPositionToFeatureId?: Map<number, string>;
 }): Promise<ImportPreparedActions> {
   const demoted = new Set(input.demotedFeatureIds ?? []);
   const featuresById = new Map(input.read.features.map((f) => [f.featureId, f]));
@@ -837,6 +913,10 @@ async function buildPreparedActions(input: {
         kind: "addDocumentVariable",
         index: addDocumentVariables.length - 1,
       });
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
       continue;
     }
 
@@ -912,6 +992,10 @@ async function buildPreparedActions(input: {
       orderedIndexByFeatureId.set(
         featurePlan.onshapeFeatureId,
         orderedActions.length - 1,
+      );
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
       );
       continue;
     }
@@ -989,6 +1073,10 @@ async function buildPreparedActions(input: {
       orderedIndexByFeatureId.set(
         featurePlan.onshapeFeatureId,
         orderedActions.length - 1,
+      );
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
       );
     }
   }

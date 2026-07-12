@@ -1,4 +1,5 @@
 import typia from "typia";
+import { describeUnknownError } from "@/contracts/errors";
 
 import type {
   AddDocumentVariableRequest,
@@ -323,12 +324,7 @@ export function normalizeOccWorkerFailure(
     requestId,
     error: {
       code,
-      message:
-        typeof error === "string" && error.trim()
-          ? error
-          : error instanceof Error && error.message.trim()
-          ? error.message
-          : "OCC worker request failed.",
+      message: describeUnknownError(error, "OCC worker request failed."),
     },
   };
 }

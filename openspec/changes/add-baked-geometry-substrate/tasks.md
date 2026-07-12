@@ -18,6 +18,7 @@
 - [x] 3.5 Cache worker-side resolved bytes and materialized faceted OCC shapes by immutable asset id; add a byte-budget/LRU follow-up note rather than blocking this change.
 - [x] 3.6 **Gate:** assess adding `STEPControl_Reader` to `opencascade-recipe.yaml`; record findings (binary-size and effort) in change notes; implement `step` format only if cheap, otherwise document deferral.
 - [x] 3.8 Preserve authoritative baked-mesh source-component ranges from Onshape tessellation; materialize declared ranges only, conservatively reject ambiguous legacy/unpartitioned meshes and disconnected undeclared shells, and cover coincident-body/invalid-group cases.
+- [x] 3.9 Add explicit `bodyOnlyMesh` baked-body topology presentation: retain OCC shape/source mesh, omit subtopology/native payload/naming/render records, render/select only the body mesh, and cover snapshot/transfer/viewport seams.
 
 ## 4. Onshape Provider Integration
 
@@ -30,6 +31,8 @@
 - [ ] 5.1 Manual smoke: re-import Taskariki — a correct solid must be visible; record in change notes with the per-tier table (unchanged tiers, new materialization column).
   - 2026-07-12: headless real-OCC repro passed (Taskariki 2 bodies); browser visual/reload smoke remains required.
   - 2026-07-12: browser retry must run after this timeout policy change; Taskariki’s measured ~65 s synchronous materialization is below the new 90 s repository synchronization budget.
+  - 2026-07-12: browser-native OCC performance repro now reports Taskariki 2 body records (8 total including 6 construction records), zero face/edge/vertex records, 13 transferable buffers total (4 body-mesh buffers; two position/index pairs), and no native topology buffers.
 - [ ] 5.2 Run `bun run test:all`.
   - Blocked in this environment: Bun is unavailable; equivalent Vitest/lint commands were run, and `tsc -b tsconfig.app.json` has unrelated baseline failures recorded in notes.
   - 2026-07-12: targeted timeout/rollback logic and durable-history UI-local tests pass through direct Node Vitest invocation; do not run Playwright for this change.
+  - 2026-07-12: focused OCC snapshot, mesh-transport, and viewport-picking specs pass through direct Node Vitest; `tsc -b tsconfig.app.json` passes. User requested no browser/e2e run.

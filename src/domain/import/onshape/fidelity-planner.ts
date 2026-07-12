@@ -40,6 +40,9 @@ export type PlanReasonCode =
   | "needs-history-probe"
   | "sketch-on-probed-face"
   | "sketch-on-captured-frame"
+  // A captured-frame sketch promotion whose fabricated construction support did
+  // not survive a real kernel history probe; demoted back to baked.
+  | "captured-frame-unresolvable"
   | "translator-unavailable"
   | "custom-feature"
   | "unsupported-feature"

@@ -166,7 +166,13 @@ export function useWorkbenchPartImport({
       });
       if (!result.ok) {
         dispatch({ type: "import.failed", diagnostics: result.diagnostics });
-        showWorkbenchError(result.diagnostics[0]?.message ?? "Import failed.");
+        showWorkbenchError(
+          result.diagnostics.find(
+            (diagnostic) => diagnostic.severity === "error",
+          )?.message ??
+            result.diagnostics[0]?.message ??
+            "Import failed.",
+        );
         return;
       }
 
