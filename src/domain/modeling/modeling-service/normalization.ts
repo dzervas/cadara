@@ -748,6 +748,20 @@ function normalizeBakedBodyFeatureParameters(
   ) {
     throw new Error("Invalid baked-body feature parameters payload.");
   }
+  const replacement = value.replacement;
+  if (!isRecord(replacement) || !isString(replacement.kind)) {
+    throw new Error("Invalid baked-body replacement payload.");
+  }
+  const normalizedReplacement: BakedBodyFeatureParameters["replacement"] =
+    replacement.kind === "append"
+      ? { kind: "append" }
+      : replacement.kind === "replaceBodies" &&
+          Array.isArray(replacement.bodyIds) &&
+          replacement.bodyIds.every(isString)
+        ? { kind: "replaceBodies", bodyIds: replacement.bodyIds as BodyId[] }
+        : (() => {
+            throw new Error("Invalid baked-body replacement payload.");
+          })();
   return {
     assetId: value.assetId as BakedBodyFeatureParameters["assetId"],
     format: value.format as BakedBodyFeatureParameters["format"],
@@ -755,6 +769,7 @@ function normalizeBakedBodyFeatureParameters(
     byteLength: value.byteLength,
     label: value.label,
     provenance: normalizeBakedBodyProvenance(value.provenance),
+    replacement: normalizedReplacement,
   };
 }
 

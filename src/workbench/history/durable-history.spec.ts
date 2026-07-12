@@ -1,6 +1,9 @@
 import { test, expect } from "vitest";
 
-import { createDurableHistoryService } from "@/workbench/history/durable-history";
+import {
+  createDurableHistoryService,
+  DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS,
+} from "@/workbench/history/durable-history";
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
 import {
   createModelingService,
@@ -394,11 +397,55 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
     ).toBeTruthy();
   }
 
+
+  async function testUndoAllowsSlowKernelBackedRepositorySynchronization() {
+    const { documentRepository, modelingService } =
+      await createBackgroundDurableHistoryFixture(
+        createDelayedUndoNotificationRepository(15),
+      );
+    const durableHistory = createDurableHistoryService({
+      documentRepository,
+      modelingService,
+      // Synthetic Taskariki-scale rebuild: longer than the former 2s policy,
+      // compressed to milliseconds so this seam stays fast.
+      repositorySynchronizationTimeoutMs: 30,
+    });
+    const initial = await modelingService.getCurrentDocumentSnapshot();
+    const added = await unwrapModelingResult(
+      modelingService.addDocumentVariable({
+        baseRevisionId: initial.document.revisionId,
+        name: "SlowSync",
+        valueText: "1",
+      }),
+    );
+    await modelingService.waitForPersistence();
+
+    await unwrapModelingResult(
+      modelingService.updateDocumentVariable({
+        baseRevisionId: added.revisionId,
+        variableId: added.variableId,
+        name: "SlowSync",
+        valueText: "2",
+      }),
+    );
+    await modelingService.waitForPersistence();
+
+    const undone = await durableHistory.undo({
+      documentId: initial.document.documentId,
+      sketchSession: null,
+    });
+    expect(undone?.context).toBe("document");
+    expect(DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS).toBeGreaterThan(
+      65_000,
+    );
+  }
+
   await testImmediateUndoAfterBackgroundVariableUpdate();
   await testImmediateUndoAfterBackgroundExtrudeUpdate();
   await testImmediateUndoAfterBackgroundSketchPlaneCommit();
   await testImmediateUndoWaitsForDelayedRepositoryUndoEvent();
   await testImmediateUndoDoesNotRequireLatestEventReplay();
+  await testUndoAllowsSlowKernelBackedRepositorySynchronization();
 });
 
 function createNoReplayModelingService(
@@ -420,7 +467,9 @@ function createNoReplayModelingService(
   };
 }
 
-function createDelayedUndoNotificationRepository(): DocumentRepository {
+function createDelayedUndoNotificationRepository(
+  delayMs = 0,
+): DocumentRepository {
   const repository = createMemoryDocumentRepository();
 
   return {
@@ -438,7 +487,7 @@ function createDelayedUndoNotificationRepository(): DocumentRepository {
         ) {
           setTimeout(() => {
             listener(event);
-          }, 0);
+          }, delayMs);
           return;
         }
 

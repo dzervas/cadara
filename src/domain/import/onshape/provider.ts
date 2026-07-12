@@ -1049,6 +1049,12 @@ async function buildPreparedActions(input: {
               featureSpan: { fromFeatureId, toFeatureId },
               reason: "onshape-studio-bake-required",
             },
+            replacement: {
+              kind: "replaceBodyOutputs",
+              actionIndexes: orderedActions.flatMap((action, actionIndex) =>
+                action.kind === "createFeature" ? [actionIndex] : [],
+              ),
+            },
           },
         },
       });

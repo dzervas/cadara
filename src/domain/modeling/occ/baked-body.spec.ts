@@ -185,6 +185,7 @@ function bakedBodyDefinition(
         sourceName: "Reopened studio",
         reason: "test-bake",
       },
+      replacement: { kind: "append" },
     },
   };
 }

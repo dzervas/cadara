@@ -510,8 +510,15 @@ export function executeBakedBodyFeature(
       bodyId: body.bodyId,
     }));
 
+    const replacedBodyIds =
+      parameters.replacement.kind === "replaceBodies"
+        ? new Set(parameters.replacement.bodyIds)
+        : null;
     return {
-      bodies: [...context.bodies, ...newBodies],
+      bodies: [
+        ...context.bodies.filter((body) => !replacedBodyIds?.has(body.bodyId)),
+        ...newBodies,
+      ],
       constructions: [...context.constructions],
       constructionPlanes: new Map(context.constructionPlanes),
       producedTargets,

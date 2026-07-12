@@ -4344,7 +4344,27 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         }),
       );
 
-      if (bakedBodyArtifacts) {
+      if (bakedBodyArtifacts && resolvedDefinition.definition.kind === "bakedBody") {
+        const replacement = resolvedDefinition.definition.parameters.replacement;
+        const replacedBodyIds =
+          replacement.kind === "replaceBodies"
+            ? new Set(replacement.bodyIds)
+            : null;
+        if (replacedBodyIds) {
+          mutableSnapshot.document.bodies = mutableSnapshot.document.bodies.filter(
+            (body) => !replacedBodyIds.has(body.bodyId),
+          );
+          mutableSnapshot.presentation.entities =
+            mutableSnapshot.presentation.entities.filter(
+              (entry) =>
+                entry.ownerBodyId === null || !replacedBodyIds.has(entry.ownerBodyId),
+            );
+          mutableSnapshot.document.render.records =
+            mutableSnapshot.document.render.records.filter(
+              (record) =>
+                record.ownerBodyId === null || !replacedBodyIds.has(record.ownerBodyId),
+            );
+        }
         mutableSnapshot.document.bodies.push(bakedBodyArtifacts.body);
         mutableSnapshot.presentation.entities.push(bakedBodyArtifacts.entity);
         mutableSnapshot.document.render.records.push(bakedBodyArtifacts.renderRecord);

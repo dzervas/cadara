@@ -415,6 +415,7 @@ function createSnapshotFeatureDefinition(
           byteLength: definition.parameters.byteLength,
           label: definition.parameters.label,
           provenance: structuredClone(definition.parameters.provenance),
+          replacement: structuredClone(definition.parameters.replacement),
         },
       };
     default:

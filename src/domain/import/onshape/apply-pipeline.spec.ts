@@ -423,6 +423,80 @@ test("applyImportPreparedActions resolves bodyOf scope for a sketch-extrude-cut 
   ).toBeTruthy();
 });
 
+test("applyImportPreparedActions materializes a baked checkpoint that supersedes prior parametric body outputs", async () => {
+  const { assetStore, resolver } = createGeometryAssetComposition(
+    createMemoryGeometryAssetStore(),
+  );
+  const adapter = new MockKernelAdapter({
+    solverAdapter: createRevisionAgnosticRealSolver(),
+    assetResolver: resolver,
+  });
+  const service = createModelingService(adapter, { currentDocumentId: "doc_workspace" });
+  const snapshot = (await service.getCurrentDocumentSnapshot());
+  const { action: sketchAction, selectorPoint } = await translatedFixtureSketchAction();
+  const requests = recordCreateFeatureInputsWithCreatedBody(service);
+  const bytes = new TextEncoder().encode(JSON.stringify({
+    kind: "bakedMeshGeometry",
+    schemaVersion: "baked-mesh-geometry/v1alpha1",
+    vertices: [[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 10]],
+    indices: [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]],
+  }));
+  const reference = await createImportCapabilities(service, snapshot, { assetStore })
+    .modeling.bakeGeometry({ bytes, format: "baked-mesh" });
+  const actions: ImportPreparedActions = {
+    commitSketches: [sketchAction],
+    createFeatures: [
+      extrudeRequest({
+        featureLabel: "Parametric source body",
+        profileActionIndex: 0,
+        selectorPoint,
+      }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Final studio checkpoint",
+        definition: {
+          kind: "bakedBody",
+          featureTypeVersion: "feature-type/baked-body/v1alpha1",
+          parameters: {
+            ...reference,
+            label: "Final studio checkpoint",
+            provenance: { source: "onshape", reason: "onshape-studio-bake-required" },
+            replacement: { kind: "replaceBodyOutputs", actionIndexes: [1] },
+          },
+        },
+      },
+    ],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+      { kind: "createFeature", index: 1 },
+    ],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+  const finalSnapshot = await service.getCurrentDocumentSnapshot();
+  expect(result.rolledBack).toBe(false);
+  expect(finalSnapshot.document.bodies).toHaveLength(2);
+  expect(finalSnapshot.document.bodies.filter((body) =>
+    body.label === "Final studio checkpoint",
+  )).toHaveLength(1);
+  expect(finalSnapshot.document.features).toHaveLength(
+    snapshot.document.features.length + 2,
+  );
+  expect(finalSnapshot.document.features.at(-2)?.producedTargets).toHaveLength(1);
+  expect(finalSnapshot.document.features.at(-1)?.producedTargets).toHaveLength(1);
+  expect(
+    requests[1]?.definition.kind === "bakedBody" &&
+      requests[1].definition.parameters.replacement,
+  ).toEqual({ kind: "replaceBodies", bodyIds: ["body_imported_base"] });
+});
+
 test("applyImportPreparedActions rolls back when a deferred region selector cannot resolve", async () => {
   const { adapter, service } = createTestModelingService();
   const snapshot = (await adapter.getDocumentSnapshot({
@@ -466,6 +540,59 @@ test("applyImportPreparedActions rolls back when a deferred region selector cann
     ),
     "Unresolvable deferred region failures should name the reference and selector in rollback diagnostics.",
   ).toBeTruthy();
+});
+
+
+test("applyImportPreparedActions preserves the apply failure when rollback also fails", async () => {
+  const { adapter, service } = createTestModelingService();
+  const snapshot = (await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+  })).snapshot;
+  const { action: sketchAction } = await translatedFixtureSketchAction();
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions: {
+      commitSketches: [sketchAction],
+      createFeatures: [
+        extrudeRequest({
+          featureLabel: "Unresolvable region extrude",
+          profileActionIndex: 0,
+          selectorPoint: [1_000_000, 1_000_000],
+        }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined
+          ? Entry
+          : never,
+      ],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "createFeature", index: 0 },
+      ],
+    },
+    rollback: async () => {
+      throw new Error("repository undo synchronization failed");
+    },
+  });
+
+  expect(result.rolledBack).toBe(false);
+  expect(result.rollbackAttempted).toBe(true);
+  expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    "import-apply-failed",
+  );
+  expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    "import-rollback-failed",
+  );
+  expect(
+    result.diagnostics.find(
+      (diagnostic) => diagnostic.code === "import-apply-failed",
+    )?.message,
+  ).toContain("regionOf");
+  expect(
+    result.diagnostics.find(
+      (diagnostic) => diagnostic.code === "import-rollback-failed",
+    )?.message,
+  ).toContain("repository undo synchronization failed");
 });
 
 test("applyImportPreparedActions uses innermost containment for nested region selectors", async () => {
@@ -644,6 +771,7 @@ test("applyImportPreparedActions applies a baked body through the shared composi
               sourceName: "Pipeline studio",
               reason: "onshape-studio-bake-required",
             },
+            replacement: { kind: "replaceBodyOutputs", actionIndexes: [] },
           },
         },
       } as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined

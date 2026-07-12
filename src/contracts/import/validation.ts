@@ -152,7 +152,31 @@ function validateImportDeferredValueInvariants(
       return;
     }
     const request = actions.createFeatures?.[ref.index];
-    if (!request?.definition || request.definition.kind !== "extrude") {
+    if (!request?.definition) {
+      return;
+    }
+    if (request.definition.kind === "bakedBody") {
+      const replacement = request.definition.parameters.replacement;
+      replacement.actionIndexes.forEach((actionIndex, replacementIndex) => {
+        const producer = actions.orderedActions?.[actionIndex];
+        if (
+          !Number.isInteger(actionIndex) ||
+          actionIndex < 0 ||
+          actionIndex >= orderedPosition ||
+          producer?.kind !== "createFeature"
+        ) {
+          issues.push({
+            path: `createFeatures.${ref.index}.definition.parameters.replacement.actionIndexes.${replacementIndex}`,
+            expected: "a prior createFeature ordered action position",
+            value: actionIndex,
+            message:
+              "Baked checkpoint replacement scope must name only prior imported feature outputs.",
+          });
+        }
+      });
+      return;
+    }
+    if (request.definition.kind !== "extrude") {
       return;
     }
 

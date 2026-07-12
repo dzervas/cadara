@@ -26,6 +26,7 @@ test("bakedBody feature definitions validate asset references and provenance", (
         },
         reason: "onshape-studio-bake-required",
       },
+      replacement: { kind: "append" },
     },
   });
 
@@ -44,6 +45,7 @@ test("bakedBody feature definitions reject malformed asset ids", () => {
       format: "baked-mesh",
       label: "Bad baked body",
       provenance: { source: "onshape" },
+      replacement: { kind: "append" },
     },
   });
 
@@ -61,6 +63,7 @@ test("bakedBody feature definitions reject missing provenance", () => {
       assetId: "asset_without_provenance",
       format: "baked-mesh",
       label: "No provenance",
+      replacement: { kind: "append" },
     },
   });
 

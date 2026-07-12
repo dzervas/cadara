@@ -222,6 +222,26 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     await promise;
   }
 
+
+  async function testSynchronousKernelWorkHasNoClientRequestDeadline() {
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const promise = client.warmup();
+    const request = worker.posted[0];
+
+    // Real baked-body materialization can take about 65 seconds. This
+    // compressed delay proves the client stays pending for synchronous kernel
+    // work and still observes the eventual worker response.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    worker.emit({
+      kind: "invoked",
+      requestId: request.requestId,
+      operation: "warmup",
+    });
+
+    await promise;
+  }
+
   function testWorkerFailureNormalizerPreservesValidationMessages() {
     const failure = normalizeOccWorkerFailure(
       "request_occ_worker_invalid",
@@ -238,5 +258,6 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
   await testSnapshotResponsesAreUnpacked();
   await testWarmupFailuresSurfaceToCaller();
   await testExportCapabilitiesCreateCloneSafeWorkerRequests();
+  await testSynchronousKernelWorkHasNoClientRequestDeadline();
   testWorkerFailureNormalizerPreservesValidationMessages();
 });

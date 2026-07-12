@@ -573,6 +573,10 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
   if (!bakedBody || bakedBody.definition.kind !== "bakedBody") {
     throw new Error("Expected studio bake to create a bakedBody feature.");
   }
+  expect(
+    bakedBody.definition.parameters.replacement,
+    "A final-studio bake must explicitly supersede preceding imported body outputs.",
+  ).toMatchObject({ kind: "replaceBodyOutputs" });
   const storedBake = await assetStore.get(
     createGeometryAssetRecordFromReference(bakedBody.definition.parameters),
   );
