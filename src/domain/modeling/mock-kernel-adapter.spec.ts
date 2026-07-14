@@ -400,7 +400,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     }
   }
 
-  async function testUnsupportedFeatureDefinitionsAreRejectedByMock() {
+  async function testCoplanarPlaneCreationIsAcceptedByMock() {
     const adapter = new MockKernelAdapter();
 
     const plane = await adapter.createFeature({
@@ -423,19 +423,20 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     });
 
     expect(
-      plane.diagnostics.some(
-        (diagnostic) => diagnostic.code === "mock-unsupported-plane",
-      ),
-      "Unsupported plane features must report explicit mock diagnostics.",
-    ).toBeTruthy();
+      plane.revisionState.kind,
+      "A coplanar plane seeded from a live construction must be accepted by the mock kernel.",
+    ).toBe("accepted");
     expect(
       plane.changedTargets.length,
-      "Unsupported plane features must not report changed targets.",
-    ).toBe(0);
+      "An accepted plane feature must produce exactly one construction target.",
+    ).toBe(1);
     expect(
-      plane.rebuildResult.kind === "skipped" &&
-        plane.rebuildResult.reasonCode === "validationRejected",
-      "Rejected feature requests must report an explicit skipped rebuild result.",
+      plane.changedTargets[0]?.kind === "construction",
+      "The produced target must be a durable construction reference.",
+    ).toBeTruthy();
+    expect(
+      plane.rebuildResult.kind === "rebuilt",
+      "An accepted plane feature must report a rebuilt rebuild result.",
     ).toBeTruthy();
   }
 
@@ -3143,9 +3144,104 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBe(before.snapshot.document.revisionId);
   }
 
+  async function testExplicitFramePlaneCreationAndSketchSupportResolution() {
+    const adapter = new MockKernelAdapter();
+    const before = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const sourceSketch = before.snapshot.document.sketches[0];
+    if (!sourceSketch) {
+      throw new Error(
+        "Seed sketch must exist for explicit-frame plane coverage.",
+      );
+    }
+
+    const plane = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: before.snapshot.document.revisionId,
+      definition: {
+        kind: "plane",
+        featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          mode: "explicitFrame",
+          frame: {
+            origin: [0, 0, 12],
+            xAxis: [1, 0, 0],
+            yAxis: [0, 1, 0],
+            normal: [0, 0, 1],
+            linearUnit: "documentLength",
+            handedness: "rightHanded",
+          },
+        },
+      },
+    });
+    expect(
+      plane.revisionState.kind,
+      "An explicit-frame plane with an orthonormal frame must be accepted by the mock kernel.",
+    ).toBe("accepted");
+    const producedConstruction = plane.changedTargets[0];
+    expect(
+      producedConstruction?.kind === "construction",
+      "An explicit-frame plane must produce a durable construction target.",
+    ).toBeTruthy();
+
+    const constructionId =
+      producedConstruction?.kind === "construction"
+        ? producedConstruction.constructionId
+        : "construction_missing";
+
+    // The produced construction is live in the snapshot, so a sketch support
+    // pointing at it resolves through the same check that rejects phantom ids.
+    const after = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    expect(
+      after.snapshot.document.constructions.some(
+        (construction) => construction.constructionId === constructionId,
+      ),
+      "An explicit-frame plane must publish a live construction target for sketch support resolution.",
+    ).toBeTruthy();
+    const publishedConstruction = after.snapshot.document.constructions.find(
+      (construction) => construction.constructionId === constructionId,
+    );
+    expect(
+      publishedConstruction?.plane.frame.origin[2],
+      "The published construction must embed the provided explicit frame origin.",
+    ).toBe(12);
+
+    const degenerate = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: plane.revisionId,
+      definition: {
+        kind: "plane",
+        featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          mode: "explicitFrame",
+          frame: {
+            origin: [0, 0, 0],
+            xAxis: [1, 0, 0],
+            yAxis: [1, 0, 0],
+            normal: [0, 0, 1],
+            linearUnit: "documentLength",
+            handedness: "rightHanded",
+          },
+        },
+      },
+    });
+    expect(
+      degenerate.revisionState.kind,
+      "A degenerate explicit-frame plane must be rejected by the mock kernel.",
+    ).toBe("rejected");
+  }
+
   await testExtrudePreviewDependsOnDefinition();
   await testProfileCollectionContractBoundaryRejectsInvalidPayloads();
-  await testUnsupportedFeatureDefinitionsAreRejectedByMock();
+  await testCoplanarPlaneCreationIsAcceptedByMock();
+  await testExplicitFramePlaneCreationAndSketchSupportResolution();
   await testMutationResponsesReportRebuildResults();
   await testAcceptedCreateMutatesCommittedSnapshot();
   await testSourceBackedSketchReferenceProjection();

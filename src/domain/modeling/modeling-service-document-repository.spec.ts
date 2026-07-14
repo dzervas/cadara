@@ -174,7 +174,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
             reference: {
               target: {
                 kind: "construction",
-                constructionId: "construction_plane-xy",
+                constructionId: "construction_nonexistent",
               },
             },
           },

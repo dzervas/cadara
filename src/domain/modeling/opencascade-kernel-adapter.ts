@@ -1420,7 +1420,9 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
     case "fillet":
       return [...definition.parameters.edgeTargets];
     case "plane":
-      return [definition.parameters.reference.target];
+      return definition.parameters.mode === "coplanar"
+        ? [definition.parameters.reference.target]
+        : [];
     case "revolve": {
       const targets: NonNullable<ModelingDiagnostic["target"]>[] = [
         ...definition.parameters.profiles,

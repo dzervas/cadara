@@ -28,7 +28,10 @@ export const planeAuthoringDefinition = {
   },
   hydrateDraft(feature) {
     return {
-      referenceTarget: feature.parameters.reference.target,
+      referenceTarget:
+        feature.parameters.mode === "coplanar"
+          ? feature.parameters.reference.target
+          : null,
     };
   },
   applyPatch(draft, patch) {

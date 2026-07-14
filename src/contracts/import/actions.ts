@@ -9,6 +9,10 @@ import type {
   } from "@/contracts/modeling/schema";
   import type { BodyId } from "@/contracts/shared/ids";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
+import type {
+  SketchPlaneDefinition,
+  SketchPlaneSupportRef,
+} from "@/contracts/shared/sketch-plane";
 import type { ImportBinding } from "@/contracts/import/binding";
 import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
 
@@ -39,7 +43,8 @@ export type ImportDeferredValue =
         point: SketchPoint2D;
       };
     } & ImportDeferredActionOutputRef)
-  | ({ kind: "bodyOf" } & ImportDeferredActionOutputRef);
+  | ({ kind: "bodyOf" } & ImportDeferredActionOutputRef)
+  | ({ kind: "constructionOf" } & ImportDeferredActionOutputRef);
 
 export type ImportDeferredExtrudeProfileRef =
   | ExtrudeProfileRef
@@ -96,10 +101,29 @@ export interface ImportCreateFeatureRequest
   definition: ImportDeferredFeatureDefinition;
 }
 
+/**
+ * Sketch-plane support that may defer to a construction produced by an earlier
+ * ordered `createFeature` action, resolved by the orchestrator at apply time.
+ */
+export type ImportDeferredSketchPlaneSupportRef =
+  | SketchPlaneSupportRef
+  | Extract<ImportDeferredValue, { kind: "constructionOf" }>;
+
+export interface ImportDeferredSketchPlaneDefinition
+  extends Omit<SketchPlaneDefinition, "support"> {
+  support: ImportDeferredSketchPlaneSupportRef;
+}
+
+export interface ImportCommitSketchRequest
+  extends Omit<CommitSketchRequest, "plane"> {
+  plane: ImportDeferredSketchPlaneDefinition;
+}
+
 export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
   regionOf: ["createFeatures[].definition.parameters.profiles[]"],
   bodyOf: ["createFeatures[].definition.parameters.booleanScope.bodyId"],
   sketchIdOf: [],
+  constructionOf: ["commitSketches[].plane.support"],
 } as const satisfies Record<ImportDeferredValue["kind"], readonly string[]>;
 
 /**
@@ -107,7 +131,7 @@ export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
  */
 export interface ImportPreparedActions {
   createFeatures?: ImportCreateFeatureRequest[];
-  commitSketches?: CommitSketchRequest[];
+  commitSketches?: ImportCommitSketchRequest[];
   addDocumentVariables?: AddDocumentVariableRequest[];
   /**
    * Optional explicit interleaved order across the kind arrays. When present,

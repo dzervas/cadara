@@ -106,9 +106,12 @@ test("useWorkbenchPartImport starts an import session for a matching provider", 
       activeEditSession: null,
       activeImportSession: null,
       deps: {
-        createCapabilities(modelingService, snapshot) {
-          createCapabilitiesCalls.push({ modelingService, snapshot });
+        createCapabilities(modelingService, snapshot, options) {
+          createCapabilitiesCalls.push({ modelingService, snapshot, options });
           return { capabilities: true } as never;
+        },
+        createImportHistoryProbe() {
+          return { evaluateHistoryProbe: async () => ({ steps: [] }) };
         },
         async createSession(input) {
           createSessionCalls.push(input);
@@ -164,6 +167,13 @@ test("useWorkbenchPartImport starts an import session for a matching provider", 
     createCapabilitiesCalls.length,
     "Import review should build capabilities once from the controller seam.",
   ).toBe(1);
+  expect(
+    Boolean(
+      (createCapabilitiesCalls[0] as { options?: { history?: unknown } })
+        .options?.history,
+    ),
+    "Import review must wire the kernel history probe so cPlane translation runs before tiers are assigned.",
+  ).toBe(true);
   expect(
     createSessionCalls.length,
     "Import review should create exactly one import session.",

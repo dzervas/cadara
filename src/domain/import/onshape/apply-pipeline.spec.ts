@@ -4,7 +4,7 @@ import { ResultAsync, createAppError } from "@/contracts/errors";
 import type { ImportPreparedActions } from "@/contracts/import/actions";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import type { CreateFeatureRequest } from "@/contracts/modeling/schema";
-import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { CONTRACT_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { FIXTURE_PART_STUDIO_ID } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
@@ -804,4 +804,160 @@ test("applyImportPreparedActions applies a baked body through the shared composi
     ),
     "A baked body should be materialized in the final snapshot.",
   ).toBeTruthy();
+});
+
+function explicitFramePlaneAction() {
+  return {
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace" as DocumentId,
+    baseRevisionId: "rev_ignored" as RevisionId,
+    featureLabel: "Imported datum plane",
+    definition: {
+      kind: "plane" as const,
+      featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        mode: "explicitFrame" as const,
+        frame: {
+          origin: [0, 0, 0] as const,
+          xAxis: [1, 0, 0] as const,
+          yAxis: [0, 1, 0] as const,
+          normal: [0, 0, 1] as const,
+          linearUnit: "documentLength" as const,
+          handedness: "rightHanded" as const,
+        },
+      },
+    },
+  };
+}
+
+test("applyImportPreparedActions applies a plane -> sketch -> extrude chain via constructionOf and regionOf", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const { action: sketchAction, selectorPoint } =
+    await translatedFixtureSketchAction();
+  const actions: ImportPreparedActions = {
+    createFeatures: [
+      explicitFramePlaneAction() as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
+      extrudeRequest({
+        featureLabel: "Extrude on translated plane",
+        profileActionIndex: 1,
+        selectorPoint,
+      }) as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
+    ],
+    commitSketches: [
+      {
+        ...sketchAction,
+        plane: {
+          ...sketchAction.plane,
+          support: { kind: "constructionOf" as const, actionIndex: 0 },
+        },
+      },
+    ],
+    orderedActions: [
+      { kind: "createFeature", index: 0 },
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 1 },
+    ],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    `A plane\u2192sketch\u2192extrude chain must apply cleanly; diagnostics: ${JSON.stringify(
+      result.diagnostics.map((diagnostic) => diagnostic.message),
+    )}`,
+  ).toBeTruthy();
+  expect(
+    result.createdEntityIds.featureIds.length,
+    "The plane feature and the extrude feature must both be created.",
+  ).toBe(2);
+  expect(
+    result.createdEntityIds.sketchIds.length,
+    "The dependent sketch must commit on the resolved construction support.",
+  ).toBe(1);
+  expect(result.rolledBack).toBe(false);
+
+  const finalSnapshot = await service.getCurrentDocumentSnapshot();
+  const committed = finalSnapshot.document.sketches.find(
+    (entry) => entry.sketchId === result.createdEntityIds.sketchIds[0],
+  );
+  expect(
+    committed?.plane.support.kind === "construction",
+    "The committed sketch's support must be a concrete construction the plane feature produced.",
+  ).toBeTruthy();
+  expect(
+    finalSnapshot.document.bodies.length,
+    "The extrude on the translated plane's sketch must produce a solid body.",
+  ).toBeGreaterThanOrEqual(1);
+});
+
+test("applyImportPreparedActions rolls back atomically when a constructionOf producer emits no construction", async () => {
+  const { service } = createTestModelingService();
+  // Stub createFeature to succeed but produce no construction target, so the
+  // deferred constructionOf reference cannot resolve at apply time.
+  recordSuccessfulCreateFeatureInputs(service);
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const { action: sketchAction } = await translatedFixtureSketchAction();
+  let rolledBackCount: number | null = null;
+  const actions: ImportPreparedActions = {
+    createFeatures: [
+      explicitFramePlaneAction() as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
+    ],
+    commitSketches: [
+      {
+        ...sketchAction,
+        plane: {
+          ...sketchAction.plane,
+          support: { kind: "constructionOf" as const, actionIndex: 0 },
+        },
+      },
+    ],
+    orderedActions: [
+      { kind: "createFeature", index: 0 },
+      { kind: "commitSketch", index: 0 },
+    ],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+    rollback: async (count) => {
+      rolledBackCount = count;
+    },
+  });
+
+  expect(
+    result.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === "import-apply-failed" &&
+        diagnostic.message.includes("produced no construction id"),
+    ),
+    `The failure must name the unresolvable construction producer; diagnostics: ${JSON.stringify(
+      result.diagnostics.map((diagnostic) => diagnostic.message),
+    )}`,
+  ).toBeTruthy();
+  expect(
+    rolledBackCount,
+    "The applied plane-feature operation must be rolled back atomically.",
+  ).toBe(1);
+  expect(result.rolledBack).toBe(true);
+  expect(result.createdEntityIds.sketchIds.length).toBe(0);
 });

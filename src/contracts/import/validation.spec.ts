@@ -340,4 +340,72 @@ test("src/contracts/import/validation.spec.ts", async () => {
     }).success,
     "Prepared action validation should accept blessed deferred body references to earlier feature actions.",
   ).toBeTruthy();
+
+  const planeRequest = () => ({
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Imported plane",
+    definition: {
+      kind: "plane" as const,
+      featureTypeVersion: "feature-type/plane/v1alpha1" as const,
+      parameters: {
+        mode: "explicitFrame" as const,
+        frame: {
+          origin: [0, 0, 5] as const,
+          xAxis: [1, 0, 0] as const,
+          yAxis: [0, 1, 0] as const,
+          normal: [0, 0, 1] as const,
+          linearUnit: "documentLength" as const,
+          handedness: "rightHanded" as const,
+        },
+      },
+    },
+  });
+
+  const sketchOnConstruction = (actionIndex: number) => ({
+    ...sketchRequest(),
+    plane: {
+      ...sketchRequest().plane,
+      support: { kind: "constructionOf" as const, actionIndex },
+    },
+  });
+
+  // Happy path: a plane feature followed by a sketch whose support defers to it.
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [planeRequest()],
+      commitSketches: [sketchOnConstruction(0)],
+      orderedActions: [
+        { kind: "createFeature", index: 0 },
+        { kind: "commitSketch", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should accept a sketch whose plane support defers to an earlier plane feature.",
+  ).toBeTruthy();
+
+  // Forward reference is rejected.
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [planeRequest()],
+      commitSketches: [sketchOnConstruction(1)],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "createFeature", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should reject a constructionOf reference that points forward.",
+  ).toBeFalsy();
+
+  // Wrong producer kind (points at a sketch commit, not a feature) is rejected.
+  expect(
+    validateImportPreparedActions({
+      commitSketches: [sketchRequest(), sketchOnConstruction(0)],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "commitSketch", index: 1 },
+      ],
+    }).success,
+    "Prepared action validation should reject a constructionOf reference to a non-feature producer.",
+  ).toBeFalsy();
 });

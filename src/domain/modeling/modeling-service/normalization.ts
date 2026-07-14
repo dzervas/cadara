@@ -144,6 +144,32 @@ export function normalizeSketchPlaneKey(
   throw new Error("Invalid sketch plane key payload.");
 }
 
+export function normalizeSketchPlaneFrame(
+  value: unknown,
+): SketchPlaneDefinition["frame"] {
+  if (!isRecord(value)) {
+    throw new Error("Invalid sketch plane frame payload.");
+  }
+  return {
+    origin: normalizePoint3(value.origin),
+    xAxis: normalizePoint3(value.xAxis),
+    yAxis: normalizePoint3(value.yAxis),
+    normal: normalizePoint3(value.normal),
+    linearUnit:
+      value.linearUnit === "documentLength"
+        ? value.linearUnit
+        : (() => {
+            throw new Error("Invalid sketch plane linear unit payload.");
+          })(),
+    handedness:
+      value.handedness === "rightHanded"
+        ? value.handedness
+        : (() => {
+            throw new Error("Invalid sketch plane handedness payload.");
+          })(),
+  };
+}
+
 export function normalizeSketchPlaneDefinition(
   value: unknown,
 ): SketchPlaneDefinition {
@@ -153,24 +179,7 @@ export function normalizeSketchPlaneDefinition(
 
   return {
     support: assertSketchPlaneSupportRef(value.support),
-    frame: {
-      origin: normalizePoint3(value.frame.origin),
-      xAxis: normalizePoint3(value.frame.xAxis),
-      yAxis: normalizePoint3(value.frame.yAxis),
-      normal: normalizePoint3(value.frame.normal),
-      linearUnit:
-        value.frame.linearUnit === "documentLength"
-          ? value.frame.linearUnit
-          : (() => {
-              throw new Error("Invalid sketch plane linear unit payload.");
-            })(),
-      handedness:
-        value.frame.handedness === "rightHanded"
-          ? value.frame.handedness
-          : (() => {
-              throw new Error("Invalid sketch plane handedness payload.");
-            })(),
-    },
+    frame: normalizeSketchPlaneFrame(value.frame),
     key: normalizeSketchPlaneKey(value.key),
   };
 }
@@ -406,11 +415,18 @@ export function normalizeFilletFeatureParameters(
 export function normalizePlaneFeatureParameters(
   value: unknown,
 ): PlaneFeatureParameters {
-  if (
-    !isRecord(value) ||
-    value.mode !== "coplanar" ||
-    !isRecord(value.reference)
-  ) {
+  if (!isRecord(value)) {
+    throw new Error("Invalid plane feature parameters payload.");
+  }
+
+  if (value.mode === "explicitFrame") {
+    return {
+      mode: "explicitFrame",
+      frame: normalizeSketchPlaneFrame(value.frame),
+    };
+  }
+
+  if (value.mode !== "coplanar" || !isRecord(value.reference)) {
     throw new Error("Invalid plane feature parameters payload.");
   }
 

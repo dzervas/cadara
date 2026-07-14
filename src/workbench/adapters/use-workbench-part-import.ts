@@ -20,6 +20,8 @@ import {
   resolveLocalFileImportSource,
 } from "@/domain/import/orchestrator";
 import type { ImportProviderRegistry } from "@/domain/import/provider-registry";
+import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
+import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser-import-history-probe";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
@@ -104,6 +106,7 @@ interface WorkbenchPartImportControllerInput {
 
 interface WorkbenchPartImportDependencies {
   createCapabilities: typeof createImportCapabilities;
+  createImportHistoryProbe: () => ImportHistoryProbeCapabilities;
   createSession: typeof createImportSession;
   documentOwner: Pick<
     ReturnType<typeof useWorkbenchDocumentOwner>,
@@ -141,6 +144,8 @@ export function useWorkbenchPartImport({
     deps?.resolveImportSource ?? resolveLocalFileImportSource;
   const createCapabilities =
     deps?.createCapabilities ?? createImportCapabilities;
+  const createImportHistoryProbe =
+    deps?.createImportHistoryProbe ?? createBrowserOccImportHistoryProbe;
   const createSession = deps?.createSession ?? createImportSession;
   const promptForProvider = deps?.promptForProvider ?? promptForImportProvider;
 
@@ -291,7 +296,9 @@ export function useWorkbenchPartImport({
       const session = await createSession({
         provider,
         source: resolvedSource,
-        capabilities: createCapabilities(modelingService, snapshot),
+        capabilities: createCapabilities(modelingService, snapshot, {
+          history: createImportHistoryProbe(),
+        }),
       });
       dispatch({ type: "import.fileSelected", session });
     } catch (error: unknown) {
@@ -319,6 +326,7 @@ export function useWorkbenchPartImport({
     activeSketchPlaneEditSession,
     activeImportSession,
     createCapabilities,
+    createImportHistoryProbe,
     createSession,
     dispatch,
     errorReporter,
