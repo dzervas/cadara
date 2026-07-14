@@ -41,7 +41,12 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
     return false;
   }
   const kind = (value as { kind?: unknown }).kind;
-  return kind === "sketchIdOf" || kind === "regionOf" || kind === "bodyOf";
+  return (
+    kind === "sketchIdOf" ||
+    kind === "regionOf" ||
+    kind === "bodyOf" ||
+    kind === "constructionOf"
+  );
 }
 
 function expectedProducerKind(
@@ -52,6 +57,7 @@ function expectedProducerKind(
     case "regionOf":
       return "commitSketch";
     case "bodyOf":
+    case "constructionOf":
       return "createFeature";
   }
 }
@@ -220,6 +226,25 @@ function validateImportDeferredValueInvariants(
         );
       }
     }
+  });
+
+  actions.orderedActions?.forEach((ref, orderedPosition) => {
+    if (ref.kind !== "commitSketch") {
+      return;
+    }
+    const request = actions.commitSketches?.[ref.index];
+    const support = request?.plane?.support;
+    if (!support || !isDeferredValue(support)) {
+      return;
+    }
+    // The contract only permits `constructionOf` at sketch-plane support
+    // positions (Typia enforces the structural union); here we enforce the
+    // ordered backward-reference-to-a-createFeature invariant.
+    blessed.add(support);
+    const path = `commitSketches.${ref.index}.plane.support`;
+    issues.push(
+      ...validateDeferredReference(actions, support, orderedPosition, path),
+    );
   });
 
   collectUnblessedDeferredValues(actions, "", blessed, issues);

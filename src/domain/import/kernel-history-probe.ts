@@ -223,7 +223,11 @@ async function applyProbeAction(
       if (!request) {
         return missingAction(actionRef);
       }
-      const result = await service.commitSketch({ ...request, ...basis });
+      const materialized = await materializer.materializeCommitSketchRequest(
+        request,
+        actionRef,
+      );
+      const result = await service.commitSketch({ ...materialized, ...basis });
       if (result.isOk()) {
         materializer.recordSketchOutput(orderedPosition, result.value.sketchId);
         return { ok: true };
@@ -247,6 +251,13 @@ async function applyProbeAction(
             target.kind === "body" ? [target.bodyId] : [],
           ),
         );
+        const constructionIds = (result.value.changedTargets ?? []).flatMap(
+          (target) =>
+            target.kind === "construction" ? [target.constructionId] : [],
+        );
+        if (constructionIds.length > 0) {
+          materializer.recordConstructionOutput(orderedPosition, constructionIds);
+        }
         return { ok: true };
       }
       return { ok: false, message: result.error.message };

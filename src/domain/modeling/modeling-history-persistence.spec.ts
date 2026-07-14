@@ -109,7 +109,7 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
             reference: {
               target: {
                 kind: "construction",
-                constructionId: "construction_plane-xy",
+                constructionId: "construction_nonexistent",
               },
             },
           },
@@ -118,7 +118,7 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
     );
     expect(
       rejected.code,
-      "Unsupported mock plane create should be rejected.",
+      "A plane create whose construction reference does not resolve should be rejected.",
     ).toBe("modeling/diagnostic");
 
     const accepted = await unwrapModelingResult(

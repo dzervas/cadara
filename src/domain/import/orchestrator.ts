@@ -6,6 +6,7 @@ import type {
   ImportDeferredValue,
   ImportPreparedActions,
   ImportPreparedActionRef,
+  ImportCommitSketchRequest,
 } from "@/contracts/import/actions";
 import { validateImportOrderedActionsInvariants } from "@/contracts/import/validation";
 import type { ImportProvider } from "@/contracts/import/provider";
@@ -20,11 +21,12 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 import { requireBakedMeshGeometryAssetData } from "@/contracts/modeling/geometry-assets.runtime-schema";
 import type {
+  CommitSketchRequest,
   CreateFeatureRequest,
   ModelingDiagnostic,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
-import type { BodyId, SketchId } from "@/contracts/shared/ids";
+import type { BodyId, ConstructionId, SketchId } from "@/contracts/shared/ids";
 import type { RegionRecord, SketchRecord } from "@/contracts/sketch/schema";
 import {
   CONTRACT_VERSION,
@@ -278,6 +280,7 @@ export async function createImportSession(input: {
 export interface ImportActionOutputRecord {
   sketchId?: SketchId;
   bodyIds?: BodyId[];
+  constructionIds?: ConstructionId[];
 }
 
 type ImportRegionSketchSource =
@@ -293,7 +296,12 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
     return false;
   }
   const kind = (value as { kind?: unknown }).kind;
-  return kind === "sketchIdOf" || kind === "regionOf" || kind === "bodyOf";
+  return (
+    kind === "sketchIdOf" ||
+    kind === "regionOf" ||
+    kind === "bodyOf" ||
+    kind === "constructionOf"
+  );
 }
 
 function getSketchRegions(
@@ -387,6 +395,15 @@ export class ImportDeferredMaterializer {
     });
   }
 
+  recordConstructionOutput(
+    orderedPosition: number,
+    constructionIds: ConstructionId[],
+  ) {
+    const key = orderedOutputKey(orderedPosition);
+    const existing = this.input.outputRecords.get(key) ?? {};
+    this.input.outputRecords.set(key, { ...existing, constructionIds });
+  }
+
   async resolveDeferredValue(
     value: ImportDeferredValue,
     consumer: ImportPreparedActionRef,
@@ -417,6 +434,15 @@ export class ImportDeferredMaterializer {
           );
         }
         return bodyId;
+      }
+      case "constructionOf": {
+        const constructionId = output.constructionIds?.[0];
+        if (!constructionId) {
+          throw new Error(
+            `Unable to resolve deferred constructionOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced no construction id.`,
+          );
+        }
+        return { kind: "construction" as const, constructionId };
       }
       case "regionOf": {
         if (!output.sketchId) {
@@ -519,6 +545,24 @@ export class ImportDeferredMaterializer {
       },
     } as unknown as CreateFeatureRequest;
   }
+
+  async materializeCommitSketchRequest(
+    request: ImportCommitSketchRequest,
+    consumer: ImportPreparedActionRef,
+  ): Promise<CommitSketchRequest> {
+    const support = request.plane.support;
+    if (!isDeferredValue(support)) {
+      return request as unknown as CommitSketchRequest;
+    }
+    const resolvedSupport = await this.resolveDeferredValue(support, consumer);
+    return {
+      ...request,
+      plane: {
+        ...request.plane,
+        support: resolvedSupport,
+      },
+    } as unknown as CommitSketchRequest;
+  }
 }
 
 export async function applyImportPreparedActions(input: {
@@ -581,8 +625,17 @@ export async function applyImportPreparedActions(input: {
     const bodyIds = result.value.changedTargets.flatMap((target) =>
       target.kind === "body" ? [target.bodyId] : [],
     );
+    const constructionIds = result.value.changedTargets.flatMap((target) =>
+      target.kind === "construction" ? [target.constructionId] : [],
+    );
     if (currentOrderedPosition >= 0) {
       materializer.recordBodyOutput(currentOrderedPosition, bodyIds);
+      if (constructionIds.length > 0) {
+        materializer.recordConstructionOutput(
+          currentOrderedPosition,
+          constructionIds,
+        );
+      }
     }
     diagnostics.push(...result.value.diagnostics);
     appliedOperationCount += 1;
@@ -590,8 +643,9 @@ export async function applyImportPreparedActions(input: {
 
   const applySketch = async (index: number) => {
     const request = (input.actions.commitSketches ?? [])[index];
+    const consumer = { kind: "commitSketch" as const, index };
     const result = await input.modelingService.commitSketch({
-      ...request,
+      ...(await materializer.materializeCommitSketchRequest(request, consumer)),
       baseRevisionId: revisionId,
     });
     if (result.isErr()) {

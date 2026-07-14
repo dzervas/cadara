@@ -40,6 +40,10 @@ export type PlanReasonCode =
   | "needs-history-probe"
   | "sketch-on-probed-face"
   | "sketch-on-captured-frame"
+  // A cPlane translated to a parametric plane feature from its captured frame.
+  | "plane-from-captured-frame"
+  // A sketch rewired onto a translated plane feature via a deferred construction.
+  | "sketch-on-translated-plane"
   // A captured-frame sketch promotion whose fabricated construction support did
   // not survive a real kernel history probe; demoted back to baked.
   | "captured-frame-unresolvable"
@@ -50,7 +54,21 @@ export type PlanReasonCode =
   | "unreadable-feature";
 
 export type PlannedTarget =
-  | { kind: "sketch"; planeKey: SketchPlaneKey; plane?: import("@/contracts/shared/sketch-plane").SketchPlaneDefinition }
+  | {
+      kind: "sketch";
+      planeKey: SketchPlaneKey;
+      plane?: import("@/contracts/shared/sketch-plane").SketchPlaneDefinition;
+      /**
+       * Onshape feature id of a translated plane feature whose produced
+       * construction this sketch defers its support to (resolved to a
+       * `constructionOf` reference by the provider at prepare time).
+       */
+      constructionFromFeatureId?: string;
+    }
+  | {
+      kind: "plane";
+      frame: import("@/contracts/shared/sketch-plane").SketchPlaneFrame;
+    }
   | { kind: "variable" }
   | { kind: "feature" }
   | { kind: "bakedBody" }

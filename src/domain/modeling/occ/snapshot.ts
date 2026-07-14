@@ -239,7 +239,9 @@ function collectFeatureConsumedTargets(
       targets.push(...definition.parameters.edgeTargets);
       break;
     case "plane":
-      targets.push(definition.parameters.reference.target);
+      if (definition.parameters.mode === "coplanar") {
+        targets.push(definition.parameters.reference.target);
+      }
       break;
     case "revolve":
       targets.push(
@@ -373,10 +375,7 @@ function createSnapshotFeatureDefinition(
       return {
         kind: "plane",
         featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          mode: "coplanar",
-          reference: definition.parameters.reference,
-        },
+        parameters: definition.parameters,
       };
     case "revolve": {
       return {

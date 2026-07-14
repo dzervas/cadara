@@ -6,6 +6,7 @@ import {
   type ProjectSketchExternalReferencesResponse,
 } from "@/contracts/solver/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
+import { validateSketchPlaneFrameInvariants } from "@/contracts/shared/sketch-plane-frame-invariants";
 import type {
   ConstraintId,
   BodyId,
@@ -98,6 +99,7 @@ import type {
   SetFeatureSuppressionRequest,
   SetFeatureSuppressionResponse,
   SnapshotEntityRecord,
+  ConstructionSnapshotRecord,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
   UpdateDocumentVariableRequest,
@@ -535,7 +537,9 @@ function getFeatureDefinitionChangedTargets(definition: FeatureDefinition) {
     case "fillet":
       return [...definition.parameters.edgeTargets];
     case "plane":
-      return [definition.parameters.reference.target];
+      return definition.parameters.mode === "coplanar"
+        ? [definition.parameters.reference.target]
+        : [];
     case "revolve":
       return [
         ...definition.parameters.profiles,
@@ -628,6 +632,83 @@ function createMockBakedBodyArtifacts(input: {
         triangleIndices: [[0, 1, 2]],
       },
     } satisfies RenderableEntityRecord,
+  };
+}
+
+function resolveMockPlaneFrame(input: {
+  definition: Extract<FeatureDefinition, { kind: "plane" }>;
+  constructions: readonly ConstructionSnapshotRecord[];
+}): SketchPlaneDefinition["frame"] {
+  const { definition } = input;
+  if (definition.parameters.mode === "explicitFrame") {
+    return definition.parameters.frame;
+  }
+  if (definition.parameters.reference.target.kind === "construction") {
+    const source = input.constructions.find(
+      (entry) =>
+        entry.constructionId ===
+        (definition.parameters as { reference: { target: { constructionId: ConstructionId } } })
+          .reference.target.constructionId,
+    );
+    if (source) {
+      return source.plane.frame;
+    }
+  }
+  // Coplanar-from-face has no captured mock geometry; fall back to the Top datum
+  // frame so the produced construction is still a well-formed plane.
+  return createStandardPlaneDefinition("xy").frame;
+}
+
+function createMockPlaneArtifacts(input: {
+  featureId: FeatureId;
+  featureLabel: string;
+  revisionId: RevisionId;
+  definition: Extract<FeatureDefinition, { kind: "plane" }>;
+  constructions: readonly ConstructionSnapshotRecord[];
+}) {
+  const constructionId = `construction_${input.featureId}` as ConstructionId;
+  const frame = resolveMockPlaneFrame({
+    definition: input.definition,
+    constructions: input.constructions,
+  });
+  const plane: SketchPlaneDefinition = {
+    support: { kind: "construction", constructionId },
+    frame,
+    key: null,
+  };
+  const target = { kind: "construction" as const, constructionId };
+  const construction: ConstructionSnapshotRecord = {
+    ownerDocumentId: DOCUMENT_ID,
+    ownerRevisionId: input.revisionId,
+    ownerFeatureId: input.featureId,
+    ownerSketchId: null,
+    ownerBodyId: null,
+    constructionId,
+    label: input.featureLabel,
+    constructionType: "plane",
+    plane,
+    target,
+  };
+  const entity: SnapshotEntityRecord = {
+    ownerDocumentId: DOCUMENT_ID,
+    ownerRevisionId: input.revisionId,
+    ownerFeatureId: input.featureId,
+    ownerSketchId: null,
+    ownerBodyId: null,
+    id: `snapshot_entity_${constructionId}` as SnapshotEntityId,
+    label: input.featureLabel,
+    target,
+    relatedTargets: [],
+    contributingFeatureIds: [input.featureId],
+    consumedByFeatureIds: [],
+    selectionSemantics: ["constructionPlane", "planarReference"],
+  };
+  return {
+    constructionId,
+    plane,
+    producedTargets: [target],
+    construction,
+    entity,
   };
 }
 
@@ -1278,7 +1359,28 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       return { accepted: true as const, diagnostics: [] };
     }
-    case "plane":
+    case "plane": {
+      if (definition.parameters.mode === "explicitFrame") {
+        const frameResult = validateSketchPlaneFrameInvariants(
+          definition.parameters.frame,
+        );
+        if (!frameResult.ok) {
+          return {
+            accepted: false as const,
+            reasonCode: "mock-invalid-plane-frame",
+            diagnostics: [
+              {
+                code: "mock-invalid-plane-frame",
+                severity: "error" as const,
+                message: `Explicit plane frame is degenerate (${frameResult.reason}).`,
+                target: null,
+                detail: null,
+              },
+            ],
+          };
+        }
+        return { accepted: true as const, diagnostics: [] };
+      }
       if (
         (definition.parameters.reference.target.kind === "construction" &&
           !hasConstructionTarget(
@@ -1305,16 +1407,8 @@ function validateFeatureDefinitionAgainstSnapshot(
         };
       }
 
-      return {
-        accepted: false as const,
-        reasonCode: "mock-unsupported-plane",
-        diagnostics: [
-          createUnsupportedFeatureDiagnostic(
-            definition,
-            "Mock kernel does not implement plane creation yet.",
-          ),
-        ],
-      };
+      return { accepted: true as const, diagnostics: [] };
+    }
     case "revolve": {
       if (definition.parameters.profiles.length > 1) {
         return {
@@ -3152,6 +3246,7 @@ async function buildSnapshot(
       supportedFeatureKinds: [
         "extrude",
         "fillet",
+        "plane",
         "sweep",
         "loft",
         "chamfer",
@@ -4294,8 +4389,19 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
               revisionId: nextRevisionId,
             })
           : null;
+      const planeArtifacts =
+        resolvedDefinition.definition.kind === "plane"
+          ? createMockPlaneArtifacts({
+              featureId,
+              featureLabel,
+              revisionId: nextRevisionId,
+              definition: resolvedDefinition.definition,
+              constructions: mutableSnapshot.document.constructions,
+            })
+          : null;
       const changedTargets =
         bakedBodyArtifacts?.producedTargets ??
+        planeArtifacts?.producedTargets ??
         getFeatureDefinitionChangedTargets(resolvedDefinition.definition);
       const nextFeature = {
         ownerDocumentId: DOCUMENT_ID,
@@ -4368,6 +4474,11 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         mutableSnapshot.document.bodies.push(bakedBodyArtifacts.body);
         mutableSnapshot.presentation.entities.push(bakedBodyArtifacts.entity);
         mutableSnapshot.document.render.records.push(bakedBodyArtifacts.renderRecord);
+      }
+
+      if (planeArtifacts) {
+        mutableSnapshot.document.constructions.push(planeArtifacts.construction);
+        mutableSnapshot.presentation.entities.push(planeArtifacts.entity);
       }
 
       updateFeatureEntityRelationship(

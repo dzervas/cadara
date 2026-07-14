@@ -23,6 +23,7 @@ import type { OwnershipRecord } from "@/contracts/shared/diagnostics";
 import type { DurableRef } from "@/contracts/shared/references";
 import type {
   SketchPlaneDefinition,
+  SketchPlaneFrame,
   SketchPlaneKey,
   SketchPlaneSupportRef,
 } from "@/contracts/shared/sketch-plane";
@@ -384,15 +385,26 @@ export interface PlaneReferenceTarget {
 
 /**
  * Fully typed plane parameters.
- * This placeholder contract intentionally supports only a single coplanar seed so
- * later extensions can add offset/angle variants without weakening current typing.
+ * `coplanar` creates the plane from a single durable coplanar seed reference.
+ * `explicitFrame` creates a standalone datum plane from a fully-defined
+ * right-handed world-space frame, used when no parametric parent reference can
+ * be recovered (for example, importing an Onshape construction plane from its
+ * captured world-space geometry). Later extensions can add offset/angle variants
+ * without weakening current typing.
  */
-export interface PlaneFeatureParameters {
-  /** Plane creation mode for this schema version. */
-  mode: "coplanar";
-  /** Single coplanar reference used to define the resulting plane. */
-  reference: PlaneReferenceTarget;
-}
+export type PlaneFeatureParameters =
+  | {
+      /** Plane created from a single coplanar seed reference. */
+      mode: "coplanar";
+      /** Single coplanar reference used to define the resulting plane. */
+      reference: PlaneReferenceTarget;
+    }
+  | {
+      /** Plane created from an explicit world-space frame snapshot. */
+      mode: "explicitFrame";
+      /** Fully-defined right-handed frame that embeds the resulting plane. */
+      frame: SketchPlaneFrame;
+    };
 
 /**
  * Placeholder revolve profile reference.

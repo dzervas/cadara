@@ -10,6 +10,7 @@
  * codes while the history probe is absent.
  */
 import type {
+  ImportCommitSketchRequest,
   ImportCreateFeatureRequest,
   ImportDeferredExtrudeProfileRef,
   ImportDeferredFeatureBooleanScope,
@@ -25,6 +26,7 @@ import {
   BAKED_BODY_FEATURE_SCHEMA_VERSION,
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   IMPORT_CONTRACT_SCHEMA_VERSION,
+  PLANE_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 import {
   validateOnshapeCaptureBundle,
@@ -32,14 +34,16 @@ import {
 } from "@/contracts/import/onshape-capture-bundle";
 import type {
   AddDocumentVariableRequest,
-  CommitSketchRequest,
 } from "@/contracts/modeling/schema";
 import type {
   HistoryProbeResult,
   HistoryProbeTopologySignature,
   ImportCapabilities,
 } from "@/contracts/import/capabilities";
-import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
+import type {
+  SketchPlaneDefinition,
+  SketchPlaneFrame,
+} from "@/contracts/shared/sketch-plane";
 import type { ConstructionId, RequestId } from "@/contracts/shared/ids";
 import type {
   FeatureEditorFormSchema,
@@ -200,20 +204,19 @@ function arbitraryXAxisForNormal(
   return normalizeVector(projected);
 }
 
-function planeFromCapturedSignature(input: {
-  deterministicId: string;
-  signature: OnshapeGeometricSignature;
-}): SketchPlaneDefinition | null {
-  if (input.signature.entityClass !== "face" || input.signature.geometryType !== "plane") {
+function frameFromCapturedSignature(
+  signature: OnshapeGeometricSignature,
+): SketchPlaneFrame | null {
+  if (signature.entityClass !== "face" || signature.geometryType !== "plane") {
     return null;
   }
-  const originMeters = readPoint3(input.signature.definingData?.origin);
-  const normal = normalizeVector(readPoint3(input.signature.definingData?.normal) ?? [0, 0, 0]);
+  const originMeters = readPoint3(signature.definingData?.origin);
+  const normal = normalizeVector(readPoint3(signature.definingData?.normal) ?? [0, 0, 0]);
   if (!originMeters || !normal) {
     return null;
   }
   const xAxis =
-    normalizeVector(readPoint3(input.signature.definingData?.xDirection) ?? [0, 0, 0]) ??
+    normalizeVector(readPoint3(signature.definingData?.xDirection) ?? [0, 0, 0]) ??
     arbitraryXAxisForNormal(normal);
   if (!xAxis) {
     return null;
@@ -224,20 +227,30 @@ function planeFromCapturedSignature(input: {
     originMeters[2] * 1000,
   ];
   return {
-    support: {
-      kind: "construction",
-      constructionId: `construction_import_captured_${input.deterministicId}` as ConstructionId,
-    },
-    frame: {
-      origin,
-      xAxis,
-      yAxis: cross(normal, xAxis),
-      normal,
-      linearUnit: "documentLength",
-      handedness: "rightHanded",
-    },
-    key: null,
+    origin,
+    xAxis,
+    yAxis: cross(normal, xAxis),
+    normal,
+    linearUnit: "documentLength",
+    handedness: "rightHanded",
   };
+}
+
+/**
+ * Extract the producing feature id from a `newSketch`'s sketchPlane query string.
+ * Onshape encodes the plane's operation id as `<featureId>planeOp`, so a sketch
+ * drawn on a construction plane names the `cPlane` feature that created it.
+ */
+function extractSketchPlaneProducingFeatureId(
+  feature: ReturnType<typeof readPartStudio>["features"][number],
+): string | null {
+  for (const queryString of queryStringsForFeature(feature)) {
+    const match = queryString.match(/\$([A-Za-z0-9_]+)planeOp/);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return null;
 }
 
 function queryStringsForFeature(feature: ReturnType<typeof readPartStudio>["features"][number]) {
@@ -536,7 +549,7 @@ function recomputePlanWithFeaturePlans(
   };
 }
 
-function activateCapturedFramePlanning(input: {
+function activateCapturedFrameTranslation(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: OnshapeStudioPlan;
 }): OnshapeStudioPlan {
@@ -546,36 +559,94 @@ function activateCapturedFramePlanning(input: {
       reference,
     ]),
   );
-  const nextPlans = input.plan.featurePlans.map((featurePlan) => {
+  const featuresById = new Map(
+    input.read.features.map((feature) => [feature.featureId, feature]),
+  );
+
+  // Recover, per cPlane feature, the captured world-space frame of the
+  // construction it produced, discovered through dependent sketches that name
+  // `<cPlaneFeatureId>planeOp` in their sketchPlane query. Also record which
+  // sketches must rewire their support onto the translated plane.
+  const framesByCPlaneFeatureId = new Map<string, SketchPlaneFrame>();
+  const cPlaneBySketchFeatureId = new Map<string, string>();
+  for (const featurePlan of input.plan.featurePlans) {
     if (
       featurePlan.featureType !== "newSketch" ||
       featurePlan.tier !== "baked" ||
       !featurePlan.reasonCodes.includes("needs-history-probe")
     ) {
-      return featurePlan;
+      continue;
     }
-    const feature = input.read.features.find(
-      (entry) => entry.featureId === featurePlan.onshapeFeatureId,
-    );
-    const deterministicId = feature ? extractSketchPlaneDeterministicId(feature) : null;
+    const feature = featuresById.get(featurePlan.onshapeFeatureId);
+    if (!feature) {
+      continue;
+    }
+    const producingFeatureId = extractSketchPlaneProducingFeatureId(feature);
+    const producer = producingFeatureId
+      ? featuresById.get(producingFeatureId)
+      : undefined;
+    if (!producingFeatureId || producer?.featureType !== "cPlane") {
+      continue;
+    }
+    const deterministicId = extractSketchPlaneDeterministicId(feature);
     const reference = deterministicId ? references.get(deterministicId) : undefined;
     if (!reference || !("signature" in reference)) {
-      return featurePlan;
+      continue;
     }
-    const plane = planeFromCapturedSignature({
-      deterministicId: reference.deterministicId,
-      signature: reference.signature,
-    });
-    if (!plane) {
-      return featurePlan;
+    const frame = frameFromCapturedSignature(reference.signature);
+    if (!frame) {
+      continue;
     }
-    return {
-      ...featurePlan,
-      tier: "parametric" as const,
-      target: { kind: "sketch" as const, planeKey: "xy" as const, plane },
-      reasonCodes: ["sketch-on-captured-frame" as const],
-      suppressed: false,
-    };
+    framesByCPlaneFeatureId.set(producingFeatureId, frame);
+    cPlaneBySketchFeatureId.set(featurePlan.onshapeFeatureId, producingFeatureId);
+  }
+
+  const nextPlans = input.plan.featurePlans.map((featurePlan) => {
+    // Translate a recoverable cPlane into a parametric plane feature.
+    if (
+      featurePlan.featureType === "cPlane" &&
+      framesByCPlaneFeatureId.has(featurePlan.onshapeFeatureId)
+    ) {
+      const frame = framesByCPlaneFeatureId.get(featurePlan.onshapeFeatureId)!;
+      return {
+        ...featurePlan,
+        tier: "parametric" as const,
+        target: { kind: "plane" as const, frame },
+        reasonCodes: ["plane-from-captured-frame" as const],
+        suppressed: false,
+      };
+    }
+    // Rewire a sketch onto the translated plane through a deferred construction.
+    const cPlaneFeatureId = cPlaneBySketchFeatureId.get(
+      featurePlan.onshapeFeatureId,
+    );
+    if (cPlaneFeatureId) {
+      const frame = framesByCPlaneFeatureId.get(cPlaneFeatureId)!;
+      const plane: SketchPlaneDefinition = {
+        // Placeholder support: the provider substitutes a `constructionOf`
+        // reference to the translated plane feature at prepare time. This id is
+        // never emitted in a prepared action.
+        support: {
+          kind: "construction",
+          constructionId: `construction_pending_${cPlaneFeatureId}` as ConstructionId,
+        },
+        frame,
+        key: null,
+      };
+      return {
+        ...featurePlan,
+        tier: "parametric" as const,
+        target: {
+          kind: "sketch" as const,
+          planeKey: "xy" as const,
+          plane,
+          constructionFromFeatureId: cPlaneFeatureId,
+        },
+        reasonCodes: ["sketch-on-translated-plane" as const],
+        suppressed: false,
+      };
+    }
+    return featurePlan;
   });
   return recomputePlanWithFeaturePlans(
     input.plan,
@@ -584,11 +655,11 @@ function activateCapturedFramePlanning(input: {
   );
 }
 
-function isCapturedFramePromotion(plan: FeaturePlan): boolean {
+function isCapturedFrameTranslation(plan: FeaturePlan): boolean {
   return (
-    plan.featureType === "newSketch" &&
     plan.tier === "parametric" &&
-    plan.reasonCodes.includes("sketch-on-captured-frame")
+    (plan.reasonCodes.includes("plane-from-captured-frame") ||
+      plan.reasonCodes.includes("sketch-on-translated-plane"))
   );
 }
 
@@ -620,7 +691,7 @@ async function activateProbeBackedPlanning(input: {
   let workingPlan: OnshapeStudioPlan = input.plan;
   let probeResult: HistoryProbeResult;
   const maxDemotions = input.plan.featurePlans.filter(
-    isCapturedFramePromotion,
+    isCapturedFrameTranslation,
   ).length;
   for (let attempt = 0; ; attempt += 1) {
     const orderedPositionToFeatureId = new Map<number, string>();
@@ -647,7 +718,7 @@ async function activateProbeBackedPlanning(input: {
       ? workingPlan.featurePlans.find(
           (plan) =>
             plan.onshapeFeatureId === failedFeatureId &&
-            isCapturedFramePromotion(plan),
+            isCapturedFrameTranslation(plan),
         )
       : undefined;
     if (!demotable) {
@@ -655,14 +726,14 @@ async function activateProbeBackedPlanning(input: {
       // promotion; leave the plan so the honest degradation path applies.
       break;
     }
-    // Every captured-frame promotion carries the same fabricated construction
-    // support that no prepared action creates, so if one fails its probe step
-    // they all would. Demote them together to bound re-probing to a single
-    // confirming pass instead of one full OCC replay per captured frame.
+    // A failed captured-frame translation (a plane feature or a sketch rewired
+    // onto it) demotes the whole captured-frame set together, bounding
+    // re-probing to a single confirming pass instead of one OCC replay per
+    // translated plane. Dependent sketches degrade with their plane.
     workingPlan = recomputePlanWithFeaturePlans(
       workingPlan,
       workingPlan.featurePlans.map((plan) =>
-        isCapturedFramePromotion(plan) ? demoteCapturedFrameToBaked(plan) : plan,
+        isCapturedFrameTranslation(plan) ? demoteCapturedFrameToBaked(plan) : plan,
       ),
       input.read.studio.groundTruth.hasBodies,
     );
@@ -767,13 +838,12 @@ async function reviewStudio(
 ): Promise<OnshapeStudioReview> {
   const read = readPartStudio(bundle, elementId);
   const basePlan = planStudioFidelity(read);
-  // Captured-frame promotion fabricates a construction support that only a
-  // history probe can validate against the real kernel. Without a probe we
-  // cannot verify it resolves (the real OCC kernel rejects the synthetic
-  // support), so keep those sketches baked rather than shipping an
-  // unresolvable plan the apply step would fail on.
+  // Captured-frame translation emits a real plane feature and rewires dependent
+  // sketches onto it through a deferred construction reference. A history probe
+  // validates the plane→sketch chain against the real kernel and demotes it back
+  // to baked if it does not resolve, so we only translate when a probe exists.
   const capturedFramePlan = capabilities.history
-    ? activateCapturedFramePlanning({ read, plan: basePlan })
+    ? activateCapturedFrameTranslation({ read, plan: basePlan })
     : basePlan;
   const activation = await activateProbeBackedPlanning({
     read,
@@ -853,7 +923,7 @@ async function buildPreparedActions(input: {
   const featuresById = new Map(input.read.features.map((f) => [f.featureId, f]));
   const context = input.capabilities.context;
   const addDocumentVariables: AddDocumentVariableRequest[] = [];
-  const commitSketches: CommitSketchRequest[] = [];
+  const commitSketches: ImportCommitSketchRequest[] = [];
   const createFeatures: ImportCreateFeatureRequest[] = [];
   const orderedActions: ImportPreparedActionRef[] = [];
   const diagnostics: ImportDiagnostic[] = [];
@@ -920,6 +990,36 @@ async function buildPreparedActions(input: {
       continue;
     }
 
+    if (featurePlan.target.kind === "plane") {
+      createFeatures.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "plane",
+          featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            mode: "explicitFrame",
+            frame: featurePlan.target.frame,
+          },
+        },
+      });
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
+      continue;
+    }
+
     if (featurePlan.target.kind === "sketch") {
       const planeKey = featurePlan.target.planeKey;
       const plane = featurePlan.target.plane;
@@ -969,6 +1069,25 @@ async function buildPreparedActions(input: {
       // skips projection/solve/region derivation, which the mock and real
       // kernel lanes require for a committed import sketch.
       const correlationRoot = `request_import_${sanitizeCorrelationPart(featurePlan.onshapeFeatureId)}`;
+      let planeSupport: ImportCommitSketchRequest["plane"]["support"] =
+        translation.plane.support;
+      if (featurePlan.target.constructionFromFeatureId) {
+        const planeOrderedIndex = orderedIndexByFeatureId.get(
+          featurePlan.target.constructionFromFeatureId,
+        );
+        if (planeOrderedIndex === undefined) {
+          diagnostics.push({
+            severity: "warning",
+            message: `Sketch "${featurePlan.label}" referenced translated plane ${featurePlan.target.constructionFromFeatureId}, which was not emitted; the sketch was skipped.`,
+            code: "onshape-sketch-missing-plane",
+          });
+          continue;
+        }
+        planeSupport = {
+          kind: "constructionOf",
+          actionIndex: planeOrderedIndex,
+        };
+      }
       commitSketches.push({
         contractVersion: context.contractVersion,
         documentId: context.documentId,
@@ -982,7 +1101,7 @@ async function buildPreparedActions(input: {
         },
         sketchId: null,
         sketchLabel: featurePlan.label,
-        plane: translation.plane,
+        plane: { ...translation.plane, support: planeSupport },
         definition: translation.definition,
       });
       orderedActions.push({

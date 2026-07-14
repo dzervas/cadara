@@ -35,6 +35,25 @@ import {
   type ContractValidationResult,
 } from "@/contracts/shared/validation";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
+import { validateSketchPlaneFrameContractInvariants } from "@/contracts/shared/sketch-plane-frame-invariants";
+
+function validateFeatureDefinitionStructuralInvariants(
+  definition: FeatureDefinition,
+): ContractValidationIssue[] {
+  const issues = validateFeatureDefinitionAuthoredValueInvariants(definition);
+  if (
+    definition.kind === "plane" &&
+    definition.parameters.mode === "explicitFrame"
+  ) {
+    issues.push(
+      ...validateSketchPlaneFrameContractInvariants(
+        definition.parameters.frame,
+        "parameters.frame",
+      ),
+    );
+  }
+  return issues;
+}
 
 const featureDefinitionValidator =
   typia.createValidateEquals<FeatureDefinition>();
@@ -92,7 +111,7 @@ export function validateFeatureDefinition(
     return structuralResult;
   }
 
-  const invariantIssues = validateFeatureDefinitionAuthoredValueInvariants(
+  const invariantIssues = validateFeatureDefinitionStructuralInvariants(
     structuralResult.data,
   );
   return invariantIssues.length === 0
@@ -511,7 +530,7 @@ function validateKernelDocumentSnapshotInvariants(
   return snapshot.features.flatMap((feature, index) =>
     prefixIssues(
       `features.${index}.definition`,
-      validateFeatureDefinitionAuthoredValueInvariants(feature.definition),
+      validateFeatureDefinitionStructuralInvariants(feature.definition),
     ),
   );
 }

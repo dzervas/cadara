@@ -239,6 +239,106 @@ function makeFaceSketchBundle() {
   };
 }
 
+function makeCPlaneSketchBundle(options: { recoverable: boolean }) {
+  return {
+    formatVersion: 1,
+    provenance: {
+      capturedAt: "2026-07-08T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "d".repeat(24),
+      wvm: "w",
+      wvmId: "w".repeat(24),
+      microversion: "m".repeat(24),
+    },
+    document: {},
+    elements: {},
+    partStudios: [
+      {
+        elementId: "e1",
+        name: "Incline",
+        features: {
+          features: [
+            {
+              featureType: "cPlane",
+              featureId: "C_PLANE",
+              name: "Incline",
+            },
+            {
+              featureType: "newSketch",
+              featureId: "S_INCLINE",
+              name: "Screen Outline",
+              parameters: [
+                {
+                  parameterId: "sketchPlane",
+                  queries: [
+                    {
+                      queryString:
+                        'query=qCompressed(1.0,"$operationIdB2$IdA1$C_PLANEplaneOpS9",id);',
+                      deterministicIds: ["incline_ref"],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        sketches: {
+          sketches: [
+            {
+              featureId: "S_INCLINE",
+              entities: [
+                {
+                  sketchEntityId: "circle_incline",
+                  sketchEntityType: "skCircle",
+                  geometry: {
+                    center3d: { x: 0.0005, y: 0.001, z: 0.01 },
+                    radius: 0.0002,
+                  },
+                  isConstruction: false,
+                },
+              ],
+            },
+          ],
+        },
+        parts: null,
+        featureSpecs: { present: false, reason: "n/a" },
+        resolvedReferences: [
+          options.recoverable
+            ? {
+                deterministicId: "incline_ref",
+                evaluatedAt: "finalState",
+                signature: {
+                  entityClass: "face",
+                  geometryType: "plane",
+                  definingData: {
+                    origin: [0, 0, 0.01],
+                    normal: [0, 0, 1],
+                    xDirection: [1, 0, 0],
+                  },
+                  centroid: [0.0005, 0.001, 0.01],
+                  boundingBox: {
+                    low: [0, 0, 0.01],
+                    high: [0.001, 0.002, 0.01],
+                  },
+                },
+              }
+            : {
+                deterministicId: "incline_ref",
+                evaluatedAt: "finalState",
+                unresolved: { reason: "mid-history-geometry-unavailable" },
+              },
+        ],
+        groundTruth: {
+          hasBodies: false,
+        },
+        rollbackSnapshots: null,
+      },
+    ],
+  };
+}
+
 function probeSignature(id: string): HistoryProbeTopologySignature {
   return {
     entityClass: "face",
@@ -306,9 +406,9 @@ test("src/domain/import/onshape/provider.spec.ts probe-present review activates 
   expect(
     faceSketch?.tier === "parametric" &&
       faceSketch.target.kind === "sketch" &&
-      faceSketch.target.plane?.support.kind === "construction" &&
-      faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
-    "A captured planar signature should promote a face sketch to a fixed-frame parametric sketch before probe matching.",
+      faceSketch.target.plane?.support.kind === "face" &&
+      faceSketch.reasonCodes.includes("sketch-on-probed-face"),
+    "A unique probe face match should promote a face sketch to a probe-backed parametric sketch with a resolvable face support.",
   ).toBeTruthy();
   expect(
     chamfer?.tier === "baked" &&
@@ -325,7 +425,7 @@ test("src/domain/import/onshape/provider.spec.ts probe-present review activates 
   });
   expect(
     actions.commitSketches?.some(
-      (sketch) => sketch.plane.support.kind === "construction",
+      (sketch) => sketch.plane.support.kind === "face",
     ),
   ).toBe(true);
 });
@@ -344,9 +444,9 @@ test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch sta
   );
 
   expect(
-    faceSketch?.tier === "parametric" &&
-      faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
-    "Captured planar signatures should resolve without guessing from ambiguous probe matches.",
+    faceSketch?.tier === "baked" &&
+      !faceSketch.reasonCodes.includes("sketch-on-probed-face"),
+    "Ambiguous probe matches must not promote the face sketch; it stays honestly baked.",
   ).toBeTruthy();
 });
 
@@ -469,7 +569,7 @@ test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/provider.spec.ts real probe demotes an unresolvable captured-frame sketch to baked", async () => {
+test("src/domain/import/onshape/provider.spec.ts no fabricated construction supports ship for a face sketch", async () => {
   const source = sourceFromBundle(makeFaceSketchBundle());
   const realProbeCapabilities = capabilitiesWithRealKernelProbe();
 
@@ -490,10 +590,12 @@ test("src/domain/import/onshape/provider.spec.ts real probe demotes an unresolva
     "The synthetic fixture must build a real parametric prefix before the face sketch probe runs.",
   ).toBeTruthy();
   expect(
-    faceSketch?.tier === "baked" &&
-      faceSketch.reasonCodes.includes("captured-frame-unresolvable") &&
+    faceSketch?.tier === "parametric" &&
+      faceSketch.target.kind === "sketch" &&
+      faceSketch.target.plane?.support.kind === "face" &&
+      faceSketch.reasonCodes.includes("sketch-on-probed-face") &&
       !faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
-    "A captured-frame sketch whose fabricated construction support fails the real kernel probe must demote to baked with an honest reason code instead of shipping an unresolvable plan.",
+    "A face sketch must resolve through the probe onto a real, resolvable face support instead of a fabricated construction.",
   ).toBeTruthy();
 
   const actions = await onshapeImportProvider.prepare({
@@ -507,11 +609,14 @@ test("src/domain/import/onshape/provider.spec.ts real probe demotes an unresolva
     (actions.commitSketches ?? []).every(
       (sketch) =>
         sketch.plane.support.kind !== "construction" ||
-        !sketch.plane.support.constructionId.startsWith(
+        (!sketch.plane.support.constructionId.startsWith(
           "construction_import_captured_",
-        ),
+        ) &&
+          !sketch.plane.support.constructionId.startsWith(
+            "construction_pending_",
+          )),
     ),
-    "After demotion the prepared actions must not carry an unresolvable synthetic captured-frame construction support.",
+    "Prepared actions must never carry a fabricated captured-frame or pending construction support.",
   ).toBeTruthy();
 });
 
@@ -606,5 +711,118 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
       (diagnostic) => diagnostic.code !== "onshape-bake-unavailable",
     ),
     "Successful baking should not emit the bake-unavailable fallback.",
+  ).toBeTruthy();
+});
+
+test("src/domain/import/onshape/provider.spec.ts translates a recoverable cPlane to a parametric plane feature with a deferred sketch support", async () => {
+  const source = sourceFromBundle(makeCPlaneSketchBundle({ recoverable: true }));
+  const probeCapabilities = capabilitiesWithProbe([]);
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: probeCapabilities,
+  });
+  const studio = review.providerReview.studios[0];
+  const cPlane = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "C_PLANE",
+  );
+  const sketch = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_INCLINE",
+  );
+
+  expect(
+    cPlane?.tier === "parametric" &&
+      cPlane.target.kind === "plane" &&
+      cPlane.reasonCodes.includes("plane-from-captured-frame"),
+    "A recoverable cPlane must translate to a parametric plane feature with the captured-frame reason code.",
+  ).toBeTruthy();
+  expect(
+    sketch?.tier === "parametric" &&
+      sketch.reasonCodes.includes("sketch-on-translated-plane"),
+    "A sketch on a translated cPlane must plan parametric and reference the translated plane.",
+  ).toBeTruthy();
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: probeCapabilities,
+  });
+
+  const planeAction = (actions.createFeatures ?? []).find(
+    (feature) => feature.definition?.kind === "plane",
+  );
+  expect(
+    planeAction?.definition?.kind === "plane" &&
+      planeAction.definition.parameters.mode === "explicitFrame",
+    "Prepare must emit an explicit-frame plane feature for the translated cPlane.",
+  ).toBeTruthy();
+  const commit = actions.commitSketches?.[0];
+  expect(
+    commit?.plane.support.kind === "constructionOf",
+    "The dependent sketch must defer its support to the plane feature via constructionOf.",
+  ).toBeTruthy();
+
+  // No prepared sketch may carry a support that no prepared action produces.
+  expect(
+    (actions.commitSketches ?? []).every(
+      (entry) =>
+        entry.plane.support.kind !== "construction" ||
+        (!entry.plane.support.constructionId.startsWith(
+          "construction_import_captured_",
+        ) &&
+          !entry.plane.support.constructionId.startsWith(
+            "construction_pending_",
+          )),
+    ),
+    "No prepared sketch may carry a fabricated construction support.",
+  ).toBeTruthy();
+
+  // The prepared actions must pass full contract validation, proving the
+  // deferred constructionOf reference is legal and ordered.
+  expect(
+    validateImportPreparedActions(actions).success,
+    "The translated plane + deferred sketch prepared actions must satisfy the import contract.",
+  ).toBeTruthy();
+});
+
+test("src/domain/import/onshape/provider.spec.ts leaves an unrecoverable cPlane baked and cascades to its dependent sketch", async () => {
+  const source = sourceFromBundle(
+    makeCPlaneSketchBundle({ recoverable: false }),
+  );
+  const probeCapabilities = capabilitiesWithProbe([]);
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: probeCapabilities,
+  });
+  const studio = review.providerReview.studios[0];
+  const cPlane = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "C_PLANE",
+  );
+  const sketch = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_INCLINE",
+  );
+
+  expect(
+    cPlane?.tier === "baked" &&
+      !cPlane.reasonCodes.includes("plane-from-captured-frame"),
+    "A cPlane whose geometry cannot be recovered must stay baked.",
+  ).toBeTruthy();
+  expect(
+    sketch?.tier === "baked" &&
+      !sketch.reasonCodes.includes("sketch-on-translated-plane"),
+    "A sketch on an unrecoverable cPlane must degrade with it instead of shipping a fabricated support.",
+  ).toBeTruthy();
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: probeCapabilities,
+  });
+  expect(
+    (actions.commitSketches ?? []).every(
+      (entry) => entry.plane.support.kind !== "constructionOf",
+    ),
+    "An unrecoverable cPlane must not leave a dangling constructionOf sketch support.",
   ).toBeTruthy();
 });

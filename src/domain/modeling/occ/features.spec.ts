@@ -612,6 +612,102 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     );
   }
 
+  async function testPlaneFeatureBuildsExplicitFrameConstructionPlane() {
+    const makeContext = createContext();
+    const context = await makeContext();
+    const featureId = "feature_phase4_plane_explicit_frame" as FeatureId;
+    const result = executeOccFeature(context, featureId, {
+      kind: "plane",
+      featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        mode: "explicitFrame",
+        frame: {
+          origin: [1, 2, 5],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 1, 0],
+          normal: [0, 0, 1],
+          linearUnit: "documentLength",
+          handedness: "rightHanded",
+        },
+      },
+    });
+
+    const target = result.producedTargets[0];
+    expect(
+      target?.kind,
+      "Explicit-frame plane feature must produce a construction target.",
+    ).toBe("construction");
+    const plane = result.constructionPlanes.get(target.constructionId);
+    expect(
+      plane != null,
+      "Explicit-frame plane must be resolvable in the OCC construction-plane map so sketch supports resolve.",
+    ).toBeTruthy();
+    assertClose(
+      plane.frame.origin[2],
+      5,
+      1e-9,
+      "Explicit-frame plane must embed the provided world-space origin.",
+    );
+    assertClose(
+      plane.frame.normal[2],
+      1,
+      1e-9,
+      "Explicit-frame plane must embed the provided normal.",
+    );
+
+    // A sketch committed on the produced construction resolves its support.
+    const { sketch } = createRectangleSketch(
+      "sketch_phase4_explicit_frame" as SketchId,
+      plane,
+    );
+    const initialState = createOccAuthoringState(context.oc, {
+      sketches: [sketch],
+    });
+    const rebuilt = rebuildOccAuthoringState(initialState, [
+      {
+        featureId,
+        definition: {
+          kind: "plane",
+          featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            mode: "explicitFrame",
+            frame: plane.frame,
+          },
+        },
+      },
+    ]);
+    expect(
+      rebuilt.constructionPlanes.has(target.constructionId),
+      "After rebuild, the explicit-frame construction must remain live for sketch support resolution.",
+    ).toBeTruthy();
+
+    // A degenerate frame is rejected loudly.
+    let degenerate: string | null = null;
+    try {
+      executeOccFeature(context, "feature_phase4_plane_degenerate" as FeatureId, {
+        kind: "plane",
+        featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          mode: "explicitFrame",
+          frame: {
+            origin: [0, 0, 0],
+            xAxis: [1, 0, 0],
+            yAxis: [1, 0, 0],
+            normal: [0, 0, 1],
+            linearUnit: "documentLength",
+            handedness: "rightHanded",
+          },
+        },
+      });
+    } catch (error) {
+      degenerate = error instanceof Error ? error.message : String(error);
+    }
+    expect(
+      degenerate?.includes("degenerate") === true,
+      "A degenerate explicit frame must be rejected with a structured error.",
+    ).toBeTruthy();
+  }
+
   async function testExtrudeFeatureCreatesStandaloneBodyFromRegion() {
     const plane = createStandardPlaneDefinition("xy");
     const { sketch, region } = createRectangleSketch(
@@ -3388,6 +3484,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
 
   await testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts();
   await testPlaneFeatureBuildsFaceBackedConstructionPlane();
+  await testPlaneFeatureBuildsExplicitFrameConstructionPlane();
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion();
   await testExtrudeUpToNextSkipsCoplanarStartFace();
   await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds();

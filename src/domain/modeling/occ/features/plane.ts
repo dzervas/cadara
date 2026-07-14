@@ -11,6 +11,7 @@ import type {
   SnapshotEntityId,
 } from "@/contracts/shared/ids";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
+import { validateSketchPlaneFrameInvariants } from "@/contracts/shared/sketch-plane-frame-invariants";
 import { RENDER_EXPORT_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { SnapshotEntityRecord } from "@/contracts/modeling/schema";
 import type { OccReferenceInvalidationRecord } from "@/domain/modeling/occ/topology";
@@ -121,8 +122,21 @@ export function executePlaneFeature(
   ownerFeatureId: FeatureId,
   parameters: PlaneFeatureParameters,
 ): OccFeatureExecutionResult {
-  if (parameters.mode !== "coplanar") {
-    throw new Error("Plane feature mode must be coplanar.");
+  const constructionId = `construction_${ownerFeatureId}` as ConstructionId;
+
+  if (parameters.mode === "explicitFrame") {
+    const frameResult = validateSketchPlaneFrameInvariants(parameters.frame);
+    if (!frameResult.ok) {
+      throw new Error(
+        `Explicit plane frame is degenerate (${frameResult.reason}).`,
+      );
+    }
+    const plane: SketchPlaneDefinition = {
+      support: { kind: "construction", constructionId },
+      frame: parameters.frame,
+      key: null,
+    };
+    return buildPlaneFeatureResult(context, ownerFeatureId, constructionId, plane);
   }
 
   if (parameters.reference.target.kind === "construction") {
@@ -138,7 +152,6 @@ export function executePlaneFeature(
     }
   }
 
-  const constructionId = `construction_${ownerFeatureId}` as ConstructionId;
   const plane: SketchPlaneDefinition =
     parameters.reference.target.kind === "construction"
       ? {
@@ -158,6 +171,16 @@ export function executePlaneFeature(
           parameters.reference.target.faceId,
           { kind: "construction", constructionId },
         );
+
+  return buildPlaneFeatureResult(context, ownerFeatureId, constructionId, plane);
+}
+
+function buildPlaneFeatureResult(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  constructionId: ConstructionId,
+  plane: SketchPlaneDefinition,
+): OccFeatureExecutionResult {
 
   const construction = {
     ownerDocumentId: context.documentId,

@@ -247,7 +247,7 @@ Tests for import-provider behavior SHALL compose temporary provider membership w
 - **AND** the provider does not leak into other tests through global mutation
 
 ### Requirement: Prepared actions MAY carry deferred output references resolved at apply time
-The import contract SHALL support typed deferred references inside prepared actions that stand in for apply-time outputs of earlier actions in the ordered sequence: the sketch id allocated by an earlier sketch commit, a region of that committed sketch selected by an interior-point selector, and a body created by an earlier feature action. The orchestrator SHALL substitute concrete values before applying each consuming action. Providers that emit no deferred references SHALL observe no behavior change.
+The import contract SHALL support typed deferred references inside prepared actions that stand in for apply-time outputs of earlier actions in the ordered sequence: the sketch id allocated by an earlier sketch commit, a region of that committed sketch selected by an interior-point selector, a body created by an earlier feature action, and a construction created by an earlier feature action. The orchestrator SHALL substitute concrete values before applying each consuming action. Providers that emit no deferred references SHALL observe no behavior change.
 
 #### Scenario: Extrude consumes a region of an earlier sketch commit
 - **WHEN** an ordered sequence contains a sketch commit followed by a feature action whose profile is a deferred region reference to that commit with an interior-point selector
@@ -257,6 +257,10 @@ The import contract SHALL support typed deferred references inside prepared acti
 #### Scenario: Boolean scope consumes an earlier created body
 - **WHEN** a feature action's boolean scope is a deferred body reference to an earlier feature action in the sequence
 - **THEN** the orchestrator substitutes the body id that action's application created before applying the consumer
+
+#### Scenario: Sketch plane support consumes an earlier created construction
+- **WHEN** a sketch commit's plane support is a deferred construction reference to an earlier feature action that produces a construction target
+- **THEN** the orchestrator substitutes the construction id that action's application created before applying the sketch commit
 
 #### Scenario: Invalid deferred reference is rejected before any mutation
 - **WHEN** a deferred reference points forward in the sequence, at an action of the wrong kind, or out of bounds

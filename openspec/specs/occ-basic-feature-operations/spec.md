@@ -34,7 +34,7 @@ The system SHALL allow fillet features backed by the OpenCascade adapter to prev
 - **THEN** the adapter rebuilds the feature and the resulting body topology reflects the new radius
 
 ### Requirement: OCC-backed plane features create durable construction planes from supported references
-The system SHALL allow plane features backed by the OpenCascade adapter to create durable construction planes from supported coplanar reference seeds.
+The system SHALL allow plane features backed by the OpenCascade adapter to create durable construction planes from supported coplanar reference seeds and from explicit world-space frames.
 
 #### Scenario: Create a plane from a construction plane
 - **WHEN** the user creates a coplanar plane from an existing durable construction plane reference
@@ -43,6 +43,11 @@ The system SHALL allow plane features backed by the OpenCascade adapter to creat
 #### Scenario: Create a plane from a planar face
 - **WHEN** the user creates a coplanar plane from a valid planar face reference
 - **THEN** the adapter accepts the feature and produces a new durable construction target for the resulting plane
+
+#### Scenario: Create a plane from an explicit frame
+- **WHEN** a plane feature carries `mode: "explicitFrame"` with a valid orthonormal right-handed frame
+- **THEN** the adapter accepts the feature and produces a new durable construction target whose plane embeds the provided frame
+- **AND** sketches committed on that construction target resolve their support in the OCC authoring state
 
 ### Requirement: Shell features are part of the typed feature contract and OCC pipeline
 The system SHALL expose shell as a typed feature definition and SHALL allow the OpenCascade-backed adapter to preview and commit shell operations against explicit durable face references and positive thickness inputs.
@@ -170,3 +175,4 @@ Advanced extrude and revolve previews, commits, rebuilds, snapshots, and edit hy
 #### Scenario: Advanced extent feature rebuilds after history replay
 - **WHEN** operation history replays an advanced extrude or revolve feature
 - **THEN** the adapter rebuilds from the authored extent contract rather than inferred UI state
+
