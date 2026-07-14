@@ -19,6 +19,7 @@ export const FIXTURE_DOCUMENT_ID = "40a51fb8fa82fd4565151114";
 export const FIXTURE_WVM = "w";
 export const FIXTURE_WVM_ID = "a14bbd18c43e1cd99d2cfc48";
 export const FIXTURE_MICROVERSION = "c34b869c9f096a9a8bf455e6";
+export const FIXTURE_TEMP_WORKSPACE_ID = "temp-cadara-capture-workspace";
 export const FIXTURE_PART_STUDIO_ID = "865452a3e2270f0ebca3ce63";
 export const FIXTURE_EMPTY_STUDIO_ID = "00f6d47c1d4c79c1000000eb";
 export const FIXTURE_ASSEMBLY_ID = "00f6d47c1d4c79c1d5ad060b";
@@ -209,6 +210,17 @@ const ENTITY_RECORDS = [
   },
 ];
 
+const HISTORY_ENTITY_RECORDS = [
+  {
+    id: "ZZZ",
+    entityClass: "face",
+    geometryType: "PLANE",
+    box: [0, 0, 0, 0.02, 0.02, 0],
+    origin: [0, 0, 0],
+    normal: [0, 0, 1],
+  },
+];
+
 // Encode a plain JS value as Onshape's BTFSValue tree, mirroring what the eval
 // endpoint returns (map -> object, array -> array, scalar -> value).
 function fsEncode(value: unknown): unknown {
@@ -257,6 +269,12 @@ const FEATURESCRIPT_RESPONSE = {
   notices: [],
 };
 
+const HISTORY_FEATURESCRIPT_RESPONSE = {
+  btType: "BTFeatureScriptEvalResponse-1859",
+  result: fsEncode(HISTORY_ENTITY_RECORDS),
+  notices: [],
+};
+
 function json(status: number, body: unknown): FetchResponse {
   const text = typeof body === "string" ? body : JSON.stringify(body);
   return {
@@ -268,7 +286,7 @@ function json(status: number, body: unknown): FetchResponse {
 
 /** A single recorded route: method + URL predicate + response factory. */
 export interface FixtureRoute {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "DELETE";
   match: (url: string) => boolean;
   respond: () => FetchResponse;
 }
@@ -290,6 +308,17 @@ export function buildDefaultRoutes(): FixtureRoute[] {
       method: "GET",
       match: includes("/currentmicroversion"),
       respond: () => json(200, { microversion: FIXTURE_MICROVERSION }),
+    },
+    {
+      method: "POST",
+      match: (url) => url.includes(`/documents/d/${FIXTURE_DOCUMENT_ID}/workspaces`),
+      respond: () => json(200, { id: FIXTURE_TEMP_WORKSPACE_ID }),
+    },
+    {
+      method: "DELETE",
+      match: (url) =>
+        url.includes(`/documents/d/${FIXTURE_DOCUMENT_ID}/workspaces/${FIXTURE_TEMP_WORKSPACE_ID}`),
+      respond: () => json(200, {}),
     },
     {
       method: "GET",
@@ -337,6 +366,19 @@ export function buildDefaultRoutes(): FixtureRoute[] {
       match: (url) =>
         url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/featurespecs`),
       respond: () => json(200, FEATURESPECS_RESPONSE),
+    },
+    {
+      method: "POST",
+      match: (url) =>
+        url.includes(`/w/${FIXTURE_TEMP_WORKSPACE_ID}/e/${FIXTURE_PART_STUDIO_ID}/features/rollback`),
+      respond: () => json(200, { rollbackIndex: 2 }),
+    },
+    {
+      method: "POST",
+      match: (url) =>
+        url.includes(`/w/${FIXTURE_TEMP_WORKSPACE_ID}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
+        url.includes("rollbackBarIndex=2"),
+      respond: () => json(200, HISTORY_FEATURESCRIPT_RESPONSE),
     },
     {
       method: "POST",

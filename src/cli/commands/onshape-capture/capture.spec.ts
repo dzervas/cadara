@@ -16,6 +16,7 @@ import {
   FIXTURE_ELEMENT_URL,
   FIXTURE_MICROVERSION,
   FIXTURE_PART_STUDIO_ID,
+  FIXTURE_TEMP_WORKSPACE_ID,
   type FetchResponseStub,
 } from "@/cli/commands/onshape-capture/fixtures/transcript";
 
@@ -43,6 +44,8 @@ test("capture.spec.ts full capture happy path produces a valid bundle", async ()
   );
   expect(mounts?.groundTruth.hasBodies).toBe(true);
   expect(mounts?.featureSpecs.present).toBe(true);
+  expect(bundle.formatVersion).toBe(2);
+  expect(bundle.diagnostics).toEqual([]);
 });
 
 test("capture.spec.ts element-scoped capture keeps one studio but full element list", async () => {
@@ -59,27 +62,137 @@ test("capture.spec.ts element-scoped capture keeps one studio but full element l
   ).toBe(3);
 });
 
-test("capture.spec.ts records unresolved deterministic references without fabricating signatures", async () => {
-  const { fetch } = createFixtureFetch();
+test("capture.spec.ts records final-state and history-point deterministic reference results", async () => {
+  const { fetch, calls } = createFixtureFetch();
   const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
 
   const bundle = await captureBundle(ref, CREDENTIALS, createFixtureRuntime(fetch));
   const references = bundle.partStudios[0]!.resolvedReferences;
 
   expect(
-    references.map((reference) => reference.deterministicId).sort(),
-    "Every referenced deterministic ID should appear in the resolution table.",
-  ).toEqual(["JDC", "JGC", "ZZZ"]);
+    references.map((reference) => `${reference.deterministicId}:${reference.evaluatedAt}`).sort(),
+    "Every final-state reference should be present, with failed IDs re-evaluated at their history point.",
+  ).toEqual(["JDC:finalState", "JGC:finalState", "ZZZ:finalState", "ZZZ:historyPoint"]);
 
-  const unresolved = references.find(
-    (reference) => reference.deterministicId === "ZZZ",
+  const finalUnresolved = references.find(
+    (reference) => reference.deterministicId === "ZZZ" && reference.evaluatedAt === "finalState",
   );
-  expect(unresolved && "unresolved" in unresolved).toBeTruthy();
+  expect(finalUnresolved && "unresolved" in finalUnresolved).toBeTruthy();
 
-  const resolved = references.find(
-    (reference) => reference.deterministicId === "JDC",
+  const historyResolved = references.find(
+    (reference) => reference.deterministicId === "ZZZ" && reference.evaluatedAt === "historyPoint",
   );
-  expect(resolved && "signature" in resolved).toBeTruthy();
+  expect(historyResolved && "signature" in historyResolved).toBeTruthy();
+  expect(
+    historyResolved && "consumingFeatureId" in historyResolved
+      ? historyResolved.consumingFeatureId
+      : null,
+  ).toBe("FkkBVfXRKopMlIW_1");
+  expect(
+    calls.filter((call) => call.url.includes("/features/rollback")).length,
+    "Failed IDs at the same rollback index should share one rollback move.",
+  ).toBe(1);
+});
+
+test("capture.spec.ts creates and deletes a temporary rollback workspace", async () => {
+  const { fetch, calls } = createFixtureFetch();
+  const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
+
+  await captureBundle(ref, CREDENTIALS, createFixtureRuntime(fetch));
+
+  expect(
+    calls.some(
+      (call) => call.method === "POST" && call.url.includes(`/documents/d/${FIXTURE_DOCUMENT_ID}/workspaces`),
+    ),
+  ).toBeTruthy();
+  expect(
+    calls.some(
+      (call) =>
+        call.method === "DELETE" &&
+        call.url.includes(`/documents/d/${FIXTURE_DOCUMENT_ID}/workspaces/${FIXTURE_TEMP_WORKSPACE_ID}`),
+    ),
+  ).toBeTruthy();
+});
+
+test("capture.spec.ts reports an undeleted rollback workspace after capture failure", async () => {
+  const routes = buildDefaultRoutes();
+  routes.unshift({
+    method: "DELETE",
+    match: (url) => url.includes(`/workspaces/${FIXTURE_TEMP_WORKSPACE_ID}`),
+    respond: (): FetchResponseStub => ({
+      ok: false,
+      status: 403,
+      text: () => Promise.resolve("delete forbidden"),
+    }),
+  });
+  routes.unshift({
+    method: "GET",
+    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/sketches`),
+    respond: (): FetchResponseStub => ({
+      ok: false,
+      status: 500,
+      text: () => Promise.resolve("sketch failure"),
+    }),
+  });
+  const { fetch } = createFixtureFetch(routes);
+  const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
+
+  await expect(
+    captureBundle(ref, CREDENTIALS, createFixtureRuntime(fetch)),
+  ).rejects.toThrow(FIXTURE_TEMP_WORKSPACE_ID);
+});
+
+test("capture.spec.ts degrades to final-state capture with a bundle diagnostic on workspace create 403", async () => {
+  const routes = buildDefaultRoutes();
+  routes.unshift({
+    method: "POST",
+    match: (url) => url.includes(`/documents/d/${FIXTURE_DOCUMENT_ID}/workspaces`),
+    respond: (): FetchResponseStub => ({
+      ok: false,
+      status: 403,
+      text: () => Promise.resolve("branch rights unavailable"),
+    }),
+  });
+  const { fetch, calls } = createFixtureFetch(routes);
+  const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
+
+  const bundle = await captureBundle(ref, CREDENTIALS, createFixtureRuntime(fetch));
+
+  expect(bundle.diagnostics?.[0]?.code).toBe("onshape-rollback-workspace-unavailable");
+  expect(bundle.partStudios[0]!.rollbackSnapshots).toBeNull();
+  expect(
+    bundle.partStudios[0]!.resolvedReferences.some(
+      (reference) => reference.evaluatedAt === "historyPoint",
+    ),
+  ).toBe(false);
+  expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+});
+
+test("capture.spec.ts captures rollback snapshots only when requested", async () => {
+  const { fetch } = createFixtureFetch();
+  const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
+
+  const withoutSnapshots = await captureBundle(
+    ref,
+    CREDENTIALS,
+    createFixtureRuntime(fetch),
+  );
+  expect(withoutSnapshots.partStudios[0]!.rollbackSnapshots).toBeNull();
+
+  const { fetch: snapshotFetch } = createFixtureFetch();
+  const withSnapshots = await captureBundle(
+    ref,
+    { ...CREDENTIALS, rollbackSnapshots: true },
+    createFixtureRuntime(snapshotFetch),
+  );
+
+  expect(withSnapshots.partStudios[0]!.rollbackSnapshots).toEqual([
+    expect.objectContaining({
+      featureId: "FG094ehBlsq34dl_0",
+      tessellationTolerance: 0.001,
+      step: expect.stringContaining("ISO-10303-21"),
+    }),
+  ]);
 });
 
 test("capture.spec.ts empty Part Studio records absence of bodies explicitly", async () => {

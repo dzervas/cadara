@@ -15,7 +15,7 @@ const SECRET_KEY_VAR = "ONSHAPE_SECRET_KEY";
 const TRANSLATION_MAX_POLLS_VAR = "ONSHAPE_TRANSLATION_MAX_POLLS";
 
 const USAGE =
-  "Usage: cadara onshape capture <onshape-document-url> [output-file]\n" +
+  "Usage: cadara onshape capture [--rollback-snapshots] <onshape-document-url> [output-file]\n" +
   `Requires ${ACCESS_KEY_VAR} and ${SECRET_KEY_VAR} in the environment.`;
 
 function defaultOutputPath(documentId: string): string {
@@ -44,8 +44,10 @@ export const onshapeCaptureCommand: CommandModule = {
   description: "Capture an Onshape document into an offline import bundle.",
 
   async run(argv: string[], env: CliEnv, io: CliIO): Promise<CommandResult> {
-    const [url, outArg] = argv;
-    if (!url) {
+    const rollbackSnapshots = argv.includes("--rollback-snapshots");
+    const positional = argv.filter((arg) => arg !== "--rollback-snapshots");
+    const [url, outArg, extraArg] = positional;
+    if (!url || extraArg) {
       return { ok: false, kind: "usage", message: USAGE };
     }
 
@@ -101,7 +103,12 @@ export const onshapeCaptureCommand: CommandModule = {
     try {
       const bundle = await captureBundle(
         ref,
-        { accessKey, secretKey, maxTranslationPolls: maxTranslationPolls ?? undefined },
+        {
+          accessKey,
+          secretKey,
+          maxTranslationPolls: maxTranslationPolls ?? undefined,
+          rollbackSnapshots,
+        },
         runtime,
       );
       const outputPath = outArg ?? defaultOutputPath(ref.documentId);

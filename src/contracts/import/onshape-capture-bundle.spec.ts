@@ -22,6 +22,7 @@ function makeValidBundle(): OnshapeCaptureBundle {
     },
     document: { jsonType: "document" },
     elements: [{ id: "865452a3e2270f0ebca3ce63", elementType: "PARTSTUDIO" }],
+    diagnostics: [],
     partStudios: [
       {
         elementId: "865452a3e2270f0ebca3ce63",
@@ -69,7 +70,7 @@ test("src/contracts/import/onshape-capture-bundle.spec.ts accepts a well-formed 
   expect(
     ONSHAPE_CAPTURE_BUNDLE_FORMAT_VERSION,
     "Format version constant should match the accepted envelope version.",
-  ).toBe(1);
+  ).toBe(2);
 });
 
 test("src/contracts/import/onshape-capture-bundle.spec.ts accepts an empty Part Studio ground truth", () => {
@@ -86,12 +87,39 @@ test("src/contracts/import/onshape-capture-bundle.spec.ts accepts an empty Part 
   ).toBeTruthy();
 });
 
-test("src/contracts/import/onshape-capture-bundle.spec.ts rejects wrong format version", () => {
-  const bundle = { ...makeValidBundle(), formatVersion: 2 };
-  expect(
-    validateOnshapeCaptureBundle(bundle).success,
-    "Envelope schema should reject an unsupported format version.",
-  ).toBeFalsy();
+test("src/contracts/import/onshape-capture-bundle.spec.ts accepts v2 history-point records and snapshots", () => {
+  const bundle = {
+    ...makeValidBundle(),
+    formatVersion: 2,
+    partStudios: [
+      {
+        ...makeValidBundle().partStudios[0]!,
+        resolvedReferences: [
+          {
+            deterministicId: "BTMIndividualQuery-999",
+            evaluatedAt: "historyPoint",
+            consumingFeatureId: "chamfer-1",
+            signature: { entityClass: "face", geometryType: "plane" },
+          },
+        ],
+        rollbackSnapshots: [
+          {
+            featureId: "extrude-1",
+            tessellationTolerance: 0.0001,
+            tessellatedFaces: { faces: [] },
+            step: "ISO-10303-21;",
+          },
+        ],
+      },
+    ],
+  };
+
+  expect(validateOnshapeCaptureBundle(bundle).success).toBeTruthy();
+});
+
+test("src/contracts/import/onshape-capture-bundle.spec.ts rejects unknown format versions", () => {
+  const bundle = { ...makeValidBundle(), formatVersion: 3 };
+  expect(validateOnshapeCaptureBundle(bundle).success).toBeFalsy();
 });
 
 test("src/contracts/import/onshape-capture-bundle.spec.ts rejects missing provenance fields", () => {
@@ -117,6 +145,28 @@ test("src/contracts/import/onshape-capture-bundle.spec.ts rejects a resolved ref
     validateOnshapeCaptureBundle(bundle).success,
     "Envelope schema should reject a reference carrying both a signature and an unresolved reason.",
   ).toBeFalsy();
+});
+
+
+test("src/contracts/import/onshape-capture-bundle.spec.ts rejects history-point records without their consumer", () => {
+  const bundle = {
+    ...makeValidBundle(),
+    formatVersion: 2,
+    partStudios: [
+      {
+        ...makeValidBundle().partStudios[0]!,
+        resolvedReferences: [
+          {
+            deterministicId: "BTMIndividualQuery-999",
+            evaluatedAt: "historyPoint",
+            signature: { entityClass: "face", geometryType: "plane" },
+          },
+        ],
+      },
+    ],
+  };
+
+  expect(validateOnshapeCaptureBundle(bundle).success).toBeFalsy();
 });
 
 test("src/contracts/import/onshape-capture-bundle.spec.ts requireOnshapeCaptureBundle throws with issues", () => {

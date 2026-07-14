@@ -14,7 +14,7 @@ import {
  * are archived verbatim as opaque payloads; only the envelope is validated
  * structurally so captures never decay as the translator improves.
  */
-export const ONSHAPE_CAPTURE_BUNDLE_FORMAT_VERSION = 1;
+export const ONSHAPE_CAPTURE_BUNDLE_FORMAT_VERSION = 2;
 
 /**
  * Workspace / version / microversion selector segment of an Onshape document URL.
@@ -53,6 +53,13 @@ export type OnshapeOptionalSection =
   | { present: true; response: unknown }
   | { present: false; reason: string };
 
+/** Bundle-level capture diagnostic for degraded optional capture behavior. */
+export interface OnshapeCaptureDiagnostic {
+  severity: "info" | "warning" | "error";
+  code: string;
+  message: string;
+}
+
 /**
  * Geometric signature for a resolved deterministic ID, produced by server-side
  * FeatureScript evaluation against the captured microversion. Defining data is
@@ -80,19 +87,22 @@ export interface OnshapeGeometricSignature {
 }
 
 /**
- * Resolution record for a single deterministic ID referenced by the feature
- * list. Either a geometric signature or a structured unresolved reason — never
- * a fabricated signature.
+ * Resolution record for a deterministic ID. History-point records retain the
+ * consuming feature so the provider can prefer the authored-state signature.
  */
 export type OnshapeResolvedReference =
+  | { deterministicId: string; evaluatedAt: "finalState"; signature: OnshapeGeometricSignature }
+  | { deterministicId: string; evaluatedAt: "finalState"; unresolved: { reason: string } }
   | {
       deterministicId: string;
-      evaluatedAt: "finalState";
+      evaluatedAt: "historyPoint";
+      consumingFeatureId: string;
       signature: OnshapeGeometricSignature;
     }
   | {
       deterministicId: string;
-      evaluatedAt: "finalState";
+      evaluatedAt: "historyPoint";
+      consumingFeatureId: string;
       unresolved: { reason: string };
     };
 
@@ -111,6 +121,21 @@ export type OnshapeGroundTruth =
       step: string;
     }
   | { hasBodies: false };
+
+
+/** Geometry captured after a solid feature at its rollback position. */
+export interface OnshapeRollbackSnapshot {
+  featureId: string;
+  /** Chord tolerance used for tessellation, in meters. */
+  tessellationTolerance: number;
+  /** Raw tessellated-faces response, archived verbatim. */
+  tessellatedFaces: unknown;
+  /** STEP export when the Onshape export endpoint made one available. */
+  step?: string;
+}
+
+/** Per-feature rollback snapshots are a v2 opt-in section. */
+export type OnshapeRollbackSnapshots = OnshapeRollbackSnapshot[] | null;
 
 /**
  * Per-Part-Studio capture section. Raw Onshape responses are stored verbatim as
@@ -131,27 +156,34 @@ export interface OnshapePartStudioCapture {
   resolvedReferences: OnshapeResolvedReference[];
   /** Final-state ground-truth geometry. */
   groundTruth: OnshapeGroundTruth;
-  /**
-   * Reserved for per-feature rollback B-rep snapshots. v1 of the CLI never
-   * populates this; it always writes `null`.
-   */
-  rollbackSnapshots: null;
+  /** `null` unless v2 snapshot capture was explicitly requested. */
+  rollbackSnapshots: OnshapeRollbackSnapshots;
 }
 
-/**
- * Versioned, self-contained Onshape capture bundle. Everything a later offline
- * import needs lives here: provenance, raw document/element responses, and one
- * capture section per Part Studio.
- */
-export interface OnshapeCaptureBundle {
-  formatVersion: 1;
+/** Fields shared by v1 and v2 capture envelopes. */
+export interface OnshapeCaptureBundleBase {
   provenance: OnshapeCaptureProvenance;
   /** Raw `/documents/{did}` response. */
   document: unknown;
   /** Raw element-list response. */
   elements: unknown;
+  /** Bundle-level diagnostics for degraded optional capture behavior. */
+  diagnostics?: OnshapeCaptureDiagnostic[];
   partStudios: OnshapePartStudioCapture[];
 }
+
+/** Original final-state-only capture envelope. */
+export interface OnshapeCaptureBundleV1 extends OnshapeCaptureBundleBase {
+  formatVersion: 1;
+}
+
+/** Capture v2 adds history-point resolutions and optional rollback snapshots. */
+export interface OnshapeCaptureBundleV2 extends OnshapeCaptureBundleBase {
+  formatVersion: 2;
+}
+
+/** Versioned, self-contained Onshape capture bundle. */
+export type OnshapeCaptureBundle = OnshapeCaptureBundleV1 | OnshapeCaptureBundleV2;
 
 const onshapeCaptureBundleValidator =
   typia.createValidateEquals<OnshapeCaptureBundle>();

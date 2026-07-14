@@ -149,12 +149,29 @@ function degradationReason(featureType: string): PlanReasonCode {
 
 function referenceMap(
   references: readonly OnshapeResolvedReference[],
-): ReadonlyMap<string, OnshapeResolvedReference> {
-  const map = new Map<string, OnshapeResolvedReference>();
+): ReadonlyMap<string, readonly OnshapeResolvedReference[]> {
+  const map = new Map<string, OnshapeResolvedReference[]>();
   for (const reference of references) {
-    map.set(reference.deterministicId, reference);
+    const records = map.get(reference.deterministicId) ?? [];
+    records.push(reference);
+    map.set(reference.deterministicId, records);
   }
   return map;
+}
+
+function referenceForConsumer(
+  refs: ReadonlyMap<string, readonly OnshapeResolvedReference[]>,
+  deterministicId: string,
+  featureId: string,
+): OnshapeResolvedReference | undefined {
+  const records = refs.get(deterministicId) ?? [];
+  return (
+    records.find(
+      (record) =>
+        record.evaluatedAt === "historyPoint" &&
+        record.consumingFeatureId === featureId,
+    ) ?? records.find((record) => record.evaluatedAt === "finalState")
+  );
 }
 
 /**
@@ -212,11 +229,12 @@ export function extractVariableName(
 
 function planSketch(
   feature: OnshapeFeatureNode,
-  refs: ReadonlyMap<string, OnshapeResolvedReference>,
+  refs: ReadonlyMap<string, readonly OnshapeResolvedReference[]>,
 ): { target: PlannedTarget; tier: FidelityTier; reason: PlanReasonCode } {
   const planeId = extractSketchPlaneDeterministicId(feature);
-  const reference = planeId ? refs.get(planeId) : undefined;
-
+  const reference = planeId
+    ? referenceForConsumer(refs, planeId, feature.featureId)
+    : undefined;
   if (reference) {
     const resolution = interpretResolvedReference(reference);
     if (resolution.kind === "canonicalPlane") {

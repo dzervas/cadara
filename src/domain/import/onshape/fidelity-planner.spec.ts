@@ -46,6 +46,67 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
   ).toBeTruthy();
 });
 
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts prefers the consuming feature's history-point record", () => {
+  const read: StudioReadResult = {
+    studio: {
+      elementId: "e1",
+      name: "History point",
+      features: null,
+      sketches: null,
+      parts: null,
+      featureSpecs: { present: false, reason: "n/a" },
+      resolvedReferences: [
+        {
+          deterministicId: "plane-id",
+          evaluatedAt: "finalState",
+          unresolved: { reason: "consumed later" },
+        },
+        {
+          deterministicId: "plane-id",
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: "S1",
+          signature: {
+            entityClass: "face",
+            geometryType: "PLANE",
+            definingData: { normal: [0, 0, 1] },
+            isDefaultPlane: true,
+          },
+        },
+      ],
+      groundTruth: { hasBodies: false },
+      rollbackSnapshots: null,
+    },
+    features: [
+      {
+        featureType: "newSketch",
+        featureId: "S1",
+        parameters: [
+          {
+            parameterId: "sketchPlane",
+            queries: [{ deterministicIds: ["plane-id"] }],
+          },
+        ],
+      },
+    ],
+    solvedSketchesByFeatureId: new Map(),
+    diagnostics: [],
+  };
+
+  const plan = planStudioFidelity(read);
+  expect(plan.featurePlans[0]?.tier).toBe("parametric");
+  expect(plan.featurePlans[0]?.target).toMatchObject({ kind: "sketch", planeKey: "xy" });
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts retains v1 final-state planning", () => {
+  const read = makeStudioRead({
+    sketchEntities: [{ entityId: "c1", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 }],
+    extrudeOperation: "NEW",
+  });
+  const plan = planStudioFidelity(read);
+  expect(plan.featurePlans[0]?.tier).toBe("parametric");
+});
+
 // ---- Synthetic seam coverage for scope-ambiguity and selector-failure -----
 
 function makeStudioRead(input: {
