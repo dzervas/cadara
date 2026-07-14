@@ -691,6 +691,47 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     ).toBe(resortedRegionId);
   }
 
+  async function testRegionIdsUseCanonicalBoundarySource() {
+    const points = [
+      makePoint("sketch_point_0", "P0", 0, 0),
+      makePoint("sketch_point_1", "P1", 2, 0),
+      makePoint("sketch_point_2", "P2", 2, 2),
+      makePoint("sketch_point_3", "P3", 0, 2),
+    ];
+    const entities = [
+      makeLine("sketch_entity_z_bottom", "Bottom", "sketch_point_0", "sketch_point_1"),
+      makeLine("sketch_entity_a_right", "Right", "sketch_point_1", "sketch_point_2"),
+      makeLine("sketch_entity_b_top", "Top", "sketch_point_2", "sketch_point_3"),
+      makeLine("sketch_entity_c_left", "Left", "sketch_point_3", "sketch_point_0"),
+    ];
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: points.map((point) => point.pointId),
+      points,
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+
+    const derived = deriveSketchRegionsCore({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_primary",
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+    });
+
+    expect(
+      derived.regions[0]?.regionId,
+      "Region identity should use the canonical boundary source rather than traversal start.",
+    ).toMatch(/^region_primary-sketch_entity_a_right-/);
+  }
+
   async function testFindRingsMultipleAndDeriveRegions() {
     const definition: SketchDefinition = {
       schemaVersion: "sketch-definition/v1alpha1",
@@ -1590,6 +1631,7 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     await testJiggledRectangleRegionsStayStableAndPositioned();
     await testEndpointSelectionResidualsDeriveAdjacentProfiles();
     await testRegionIdsSurviveSortOrderChanges();
+    await testRegionIdsUseCanonicalBoundarySource();
     await testFindRingsMultipleAndDeriveRegions();
     await testThreeLevelNestingKeepsIslandSolid();
     await testMixedLocalAndProjectedLoopPreservesProjectedIdentity();

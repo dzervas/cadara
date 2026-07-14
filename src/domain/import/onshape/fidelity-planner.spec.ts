@@ -120,6 +120,7 @@ function makeStudioRead(input: {
   }[];
   extrudeOperation: string;
   priorExtrudes?: { featureId: string; operation: string }[];
+  sketchConstraints?: StudioReadResult["features"][number]["constraints"];
 }): StudioReadResult {
   const sketchFeatureId = "S1";
   const makeExtrude = (featureId: string, operation: string) => ({
@@ -140,8 +141,13 @@ function makeStudioRead(input: {
       { parameterId: "operationType", value: operation },
     ],
   });
-  const features = [
-    { featureType: "newSketch", featureId: sketchFeatureId, name: "Sketch 1" },
+  const features: StudioReadResult["features"] = [
+    {
+      featureType: "newSketch",
+      featureId: sketchFeatureId,
+      name: "Sketch 1",
+      constraints: input.sketchConstraints,
+    },
     ...(input.priorExtrudes ?? []).map((prior) =>
       makeExtrude(prior.featureId, prior.operation),
     ),
@@ -182,6 +188,59 @@ function makeStudioRead(input: {
     diagnostics: [],
   };
 }
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts relationship-bearing fixture sketch remains parametric", () => {
+  const read = makeStudioRead({
+    sketchEntities: [
+      {
+        entityId: "seed_line",
+        entityType: "lineSegment",
+        start3d: [0, 0, 0],
+        end3d: [0.01, 0, 0],
+      },
+      {
+        entityId: "offset_line",
+        entityType: "lineSegment",
+        start3d: [0, 0.002, 0],
+        end3d: [0.01, 0.002, 0],
+      },
+      { entityId: "profile", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 },
+    ],
+    sketchConstraints: [
+      {
+        constraintType: "HORIZONTAL",
+        entityId: "seed-horizontal",
+        parameters: [{ parameterId: "localFirst", value: "seed_line", hasExternalQuery: false }],
+      },
+      {
+        constraintType: "LENGTH",
+        entityId: "seed-length",
+        parameters: [
+          { parameterId: "localFirst", value: "seed_line", hasExternalQuery: false },
+          { parameterId: "length", expression: "10 mm", hasExternalQuery: false },
+        ],
+      },
+      {
+        constraintType: "OFFSET",
+        entityId: "seed-offset",
+        parameters: [
+          { parameterId: "localMaster", value: "seed_line", hasExternalQuery: false },
+          { parameterId: "localOffset", value: "offset_line", hasExternalQuery: false },
+          { parameterId: "halfSpace0", value: "RIGHT", hasExternalQuery: false },
+        ],
+      },
+    ],
+    extrudeOperation: "NEW",
+  });
+
+  const plan = planStudioFidelity(read);
+  const sketch = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "S1");
+  const extrude = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_TARGET");
+  expect(
+    sketch?.tier === "parametric" && extrude?.tier === "parametric",
+    "Constraint/dimension/derivation records on a fixture sketch should not demote otherwise translatable sketch/extrude planning.",
+  ).toBeTruthy();
+});
 
 test("src/domain/import/onshape/fidelity-planner.spec.ts default-scope cut with a single upstream body plans parametric", () => {
   const read = makeStudioRead({

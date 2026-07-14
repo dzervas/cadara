@@ -22,10 +22,34 @@ export interface OnshapeFeatureNode {
   suppressed?: boolean;
   /** Raw parameter records, interpreted defensively by translators. */
   parameters?: readonly unknown[];
+  /** Raw sketch relationship records normalized by this reader. */
+  constraints?: readonly OnshapeSketchConstraint[];
+}
+
+export interface OnshapeSketchParameter {
+  parameterId: string;
+  value?: string | number | boolean;
+  expression?: string;
+  hasExternalQuery: boolean;
+}
+
+export interface OnshapeSketchConstraint {
+  constraintType: string;
+  entityId: string;
+  parameters: readonly OnshapeSketchParameter[];
+}
+
+interface RawOnshapeFeatureNode {
+  featureType: string;
+  featureId: string;
+  name?: string;
+  suppressed?: boolean;
+  parameters?: readonly unknown[];
+  constraints?: unknown;
 }
 
 interface OnshapeFeatureListPayload {
-  features: OnshapeFeatureNode[];
+  features: RawOnshapeFeatureNode[];
 }
 
 /** Normalized solved-sketch curve/point with 3D positions in meters. */
@@ -67,6 +91,54 @@ export interface StudioReadResult {
 const validateFeatureList = typia.createValidate<OnshapeFeatureListPayload>();
 const validateSolvedSketches = typia.createValidate<RawSolvedSketchPayload>();
 
+function normalizeSketchParameter(raw: unknown): OnshapeSketchParameter | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  if (typeof record.parameterId !== "string") {
+    return null;
+  }
+  const value = record.value;
+  const normalized: OnshapeSketchParameter = {
+    parameterId: record.parameterId,
+    hasExternalQuery: Array.isArray(record.queries),
+  };
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    normalized.value = value;
+  }
+  if (typeof record.expression === "string") {
+    normalized.expression = record.expression;
+  }
+  return normalized;
+}
+
+function normalizeSketchConstraint(raw: unknown): OnshapeSketchConstraint | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  if (typeof record.constraintType !== "string") {
+    return null;
+  }
+  const parameters = Array.isArray(record.parameters)
+    ? record.parameters
+        .map(normalizeSketchParameter)
+        .filter((parameter): parameter is OnshapeSketchParameter => parameter !== null)
+    : [];
+  return {
+    constraintType: record.constraintType,
+    entityId:
+      typeof record.entityId === "string"
+        ? record.entityId
+        : `${record.constraintType}-${String(record.index ?? "unknown")}`,
+    parameters,
+  };
+}
 function readVector3(value: unknown): [number, number, number] | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;
@@ -105,9 +177,13 @@ function normalizeSolvedEntity(raw: unknown): OnshapeSolvedCurve | null {
   if (typeof entityId !== "string" || typeof onshapeEntityType !== "string") {
     return null;
   }
-  // Endpoint points are represented on their owning curves; skip standalone
-  // point rows to avoid duplicate zero-length geometry.
-  if (onshapeEntityType === "skPoint") {
+  // Endpoint and center points are represented on their owning curves; skip only
+  // those duplicate rows. Other sketch points (for example rectangle midpoints)
+  // are real constraint operands and must be available to the translator.
+  if (
+    onshapeEntityType === "skPoint" &&
+    /\.(start|end|center)$/.test(entityId)
+  ) {
     return null;
   }
 
@@ -122,7 +198,10 @@ function normalizeSolvedEntity(raw: unknown): OnshapeSolvedCurve | null {
     isConstruction,
     start3d: readVector3(record.startPosition3d),
     end3d: readVector3(record.endPosition3d),
-    center3d: readVector3(geometry.center3d) ?? readVector3(record.center3d),
+    center3d:
+      readVector3(geometry.center3d) ??
+      readVector3(record.center3d) ??
+      readVector3(record.position3d),
     radius:
       typeof geometry.radius === "number"
         ? geometry.radius
@@ -185,7 +264,20 @@ export function readPartStudio(
   const diagnostics: BundleReadDiagnostic[] = [];
 
   const featureResult = validateFeatureList(studio.features);
-  const features = featureResult.success ? featureResult.data.features : [];
+  const features = featureResult.success
+    ? featureResult.data.features.map((feature) => {
+        const rawFeature = feature;
+        const constraints = Array.isArray(rawFeature.constraints)
+          ? rawFeature.constraints
+              .map(normalizeSketchConstraint)
+              .filter(
+                (constraint): constraint is OnshapeSketchConstraint =>
+                  constraint !== null,
+              )
+          : [];
+        return { ...feature, constraints } satisfies OnshapeFeatureNode;
+      })
+    : [];
   if (!featureResult.success) {
     diagnostics.push({
       code: "onshape-features-unreadable",

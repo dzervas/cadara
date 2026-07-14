@@ -1184,11 +1184,9 @@ function createRegionId(
   const suffix = sketchId.startsWith("sketch_")
     ? sketchId.slice("sketch_".length)
     : sketchId;
-  const sourceLabel = ring.boundarySegments[0]
-    ? (getSegmentSourceKey(ring.boundarySegments[0].source).split(":").at(-1) ??
-      "profile")
-    : "profile";
-  return `region_${sanitizeRegionIdPart(suffix)}-${sanitizeRegionIdPart(sourceLabel)}-${hashStableString(getRegionStableKey(ring))}` as RegionId;
+  const stableKey = getRegionStableKey(ring);
+  const sourceLabel = stableKey.split("|")[0]?.split(":").at(-1) ?? "profile";
+  return `region_${sanitizeRegionIdPart(suffix)}-${sanitizeRegionIdPart(sourceLabel)}-${hashStableString(stableKey)}` as RegionId;
 }
 
 function createRegionLoopId(regionId: RegionId, ordinal: number): RegionLoopId {

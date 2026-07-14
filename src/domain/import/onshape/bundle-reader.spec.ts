@@ -40,3 +40,32 @@ test("src/domain/import/onshape/bundle-reader.spec.ts", async () => {
     "Reading an absent studio should yield an explicit not-found diagnostic.",
   ).toBe("onshape-studio-not-found");
 });
+
+
+test("normalizes raw sketch relationship records", async () => {
+  const bundle = await assembleFixtureCaptureBundle();
+  const studio = bundle.partStudios[0]!;
+  const features = studio.features as { features: Array<Record<string, unknown>> };
+  features.features[0]!.constraints = [
+    {
+      constraintType: "COINCIDENT",
+      entityId: "line1.startSnap",
+      parameters: [
+        { parameterId: "localFirst", value: "line1.start" },
+        { parameterId: "localSecond", value: "line2.end" },
+      ],
+    },
+  ];
+
+  const read = readPartStudio(bundle, studio.elementId);
+  expect(read.features[0]?.constraints).toEqual([
+    {
+      constraintType: "COINCIDENT",
+      entityId: "line1.startSnap",
+      parameters: [
+        { parameterId: "localFirst", value: "line1.start", hasExternalQuery: false },
+        { parameterId: "localSecond", value: "line2.end", hasExternalQuery: false },
+      ],
+    },
+  ]);
+});
