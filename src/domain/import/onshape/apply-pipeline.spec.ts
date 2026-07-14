@@ -336,7 +336,6 @@ test("src/domain/import/onshape/apply-pipeline.spec.ts", async () => {
   ).toBeTruthy();
 });
 
-
 test("applyImportPreparedActions resolves a fixture sketch region into a concrete extrude profile", async () => {
   const { adapter, service } = createTestModelingService();
   const snapshot = (await adapter.getDocumentSnapshot({

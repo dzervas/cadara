@@ -7,7 +7,10 @@
  */
 import type { SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 
-import type { OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
+import type {
+  OnshapeSketchConstraint,
+  OnshapeSolvedSketch,
+} from "@/domain/import/onshape/bundle-reader";
 import {
   projectPointToPlane,
   translateSketch,
@@ -23,6 +26,7 @@ export function translateSolvedSketch(input: {
   featureId: string;
   label: string;
   planeKey: SketchPlaneKey;
+  constraints?: readonly OnshapeSketchConstraint[];
 }): SketchTranslationResult {
   const entities: SolvedSketchEntityGeometry[] = input.solved.entities.map(
     (curve) => ({
@@ -46,5 +50,6 @@ export function translateSolvedSketch(input: {
     label: input.label,
     planeKey: input.planeKey,
     entities,
+    constraints: input.constraints,
   });
 }

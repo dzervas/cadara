@@ -281,6 +281,38 @@ function createAuthoredModelDocumentFromAuthoringState(
   };
 }
 
+
+function getVariableMutationChangedTargetsFromOccState(
+  state: OccAuthoringState,
+): DurableRef[] {
+  const targets = new Map<string, DurableRef>();
+  const addTarget = (target: DurableRef) => {
+    targets.set(getOccDurableRefKey(target), target);
+  };
+
+  for (const sketch of state.sketches) {
+    addTarget({ kind: "sketch", sketchId: sketch.sketchId });
+    for (const region of sketch.sketch.regions) {
+      addTarget(region.target);
+    }
+    for (const entity of sketch.sketch.definition.entities) {
+      addTarget(entity.target);
+    }
+    for (const point of sketch.sketch.definition.points) {
+      addTarget(point.target);
+    }
+  }
+
+  for (const feature of state.features) {
+    addTarget({ kind: "feature", featureId: feature.featureId });
+    for (const target of feature.producedTargets ?? []) {
+      addTarget(target);
+    }
+  }
+
+  return [...targets.values()];
+}
+
 function createRevisionConflictDiagnostic(
   expectedRevisionId: RevisionId,
   actualRevisionId: RevisionId,
@@ -693,7 +725,10 @@ function canPersistSketchSolveState(
   definition: SketchDefinition,
   solvedSnapshot: SketchRecord["solvedSnapshot"],
 ) {
-  if (solvedSnapshot.status.solveState === "solved") {
+  if (
+    solvedSnapshot.status.solveState === "solved" ||
+    solvedSnapshot.status.solveState === "partiallySolved"
+  ) {
     return true;
   }
 
@@ -4672,27 +4707,41 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     const nextSequence = runtimeState.revisionSequence + 1;
     const nextRevisionId = createRevisionId(nextSequence);
-    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+    const candidateDocument = {
+      ...createAuthoredModelDocumentFromAuthoringState(runtimeState.authoringState),
       revisionId: nextRevisionId,
       variables: candidateVariables,
-    });
+    } satisfies AuthoredModelDocument;
+    const nextRuntimeState = await this.restoreAuthoredModelDocumentOnMainThread(
+      candidateDocument,
+      [],
+      runtimeState.authoringState.assetResolver,
+      { replaceRuntimeState: false },
+    );
 
-    this.replaceRuntimeState({
-      authoringState: nextAuthoringState.state,
-      revisionSequence: nextSequence,
-    });
+    this.replaceRuntimeState(nextRuntimeState);
 
     const accepted = this.buildAcceptedResult(
       runtimeState.authoringState,
-      nextAuthoringState.state,
+      nextRuntimeState.authoringState,
       [],
-      nextAuthoringState.partial,
+      false,
+    );
+    const changedTargets = getVariableMutationChangedTargetsFromOccState(
+      nextRuntimeState.authoringState,
     );
 
     return this.withOperationEnvelope({
       variableId: request.variableId,
-      changedTargets: [],
+      changedTargets,
       ...accepted,
+      rebuildResult:
+        accepted.rebuildResult.kind === "rebuilt"
+          ? {
+              ...accepted.rebuildResult,
+              invalidatedTargets: changedTargets,
+            }
+          : accepted.rebuildResult,
     });
   }
 

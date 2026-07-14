@@ -30,6 +30,10 @@ import {
   transformAdvancedFeatureExample,
 } from "@/contracts/modeling/advanced-solid";
 
+import {
+  createExpressionAuthoredValue,
+  isExpressionAuthoredValue,
+} from "@/contracts/modeling/authored-values";
 test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   function getPrimaryRegionTarget(snapshot: WorkspaceSnapshot) {
     const sketch = snapshot.document.sketches.find(
@@ -3084,6 +3088,134 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBeTruthy();
   }
 
+
+  async function testDocumentVariableUpdateRebuildsImportedExpressionSketch() {
+    class VariableRebuildSolverAdapter extends MockSketchSolverAdapter {
+      readonly solvedWidthValues: number[] = [];
+
+      override async solveSketch(
+        request: Parameters<MockSketchSolverAdapter["solveSketch"]>[0],
+      ) {
+        const response = await super.solveSketch(request);
+        const width = request.definition.dimensions.find(
+          (dimension) => dimension.dimensionId === "dimension_1_width",
+        );
+        const solvedValue =
+          width?.kind === "distance" && typeof width.value === "number"
+            ? width.value
+            : null;
+
+        if (solvedValue !== null) {
+          this.solvedWidthValues.push(solvedValue);
+        }
+
+        return solvedValue === null
+          ? response
+          : {
+              ...response,
+              solvedSnapshot: {
+                ...response.solvedSnapshot,
+                dimensionStatuses: response.solvedSnapshot.dimensionStatuses.map(
+                  (status) =>
+                    status.dimensionId === "dimension_1_width"
+                      ? { ...status, solvedValue }
+                      : status,
+                ),
+              },
+            };
+      }
+    }
+
+    const solverAdapter = new VariableRebuildSolverAdapter();
+    const adapter = new MockKernelAdapter({ solverAdapter });
+    const imported = await adapter.exportAuthoredModelDocument("doc_workspace");
+    const variableId = "variable_import_width" as const;
+    const sketch = imported.sketches.find(
+      (entry) => entry.sketchId === "sketch_primary",
+    );
+    expect(sketch, "Seed authored sketch should be available for import-style restore.").toBeTruthy();
+    if (!sketch) return;
+
+    const widthDimension = sketch.definition.dimensions.find(
+      (dimension) => dimension.dimensionId === "dimension_1_width",
+    );
+    expect(
+      widthDimension?.kind,
+      "Seed sketch should expose a width dimension for expression rebuild coverage.",
+    ).toBe("distance");
+    if (widthDimension?.kind !== "distance") return;
+
+    widthDimension.value = createExpressionAuthoredValue("importWidth");
+    imported.variables = [
+      ...imported.variables,
+      {
+        variableId,
+        name: "importWidth",
+        valueText: "8",
+      },
+    ];
+
+    await adapter.restoreAuthoredModelDocument(imported);
+    const before = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const beforeSketch = before.snapshot.document.sketches.find(
+      (entry) => entry.sketchId === "sketch_primary",
+    );
+    const beforeWidthStatus = beforeSketch?.sketch.solvedSnapshot.dimensionStatuses.find(
+      (status) => status.dimensionId === "dimension_1_width",
+    );
+    expect(beforeWidthStatus?.solvedValue).toBe(8);
+
+    const updated = await adapter.updateDocumentVariable({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: before.snapshot.document.revisionId,
+      variableId,
+      name: "importWidth",
+      valueText: "12",
+    });
+
+    expect(updated.revisionState.kind).toBe("accepted");
+    expect(
+      updated.changedTargets.some(
+        (target) => target.kind === "sketch" && target.sketchId === "sketch_primary",
+      ),
+      "Variable edits should invalidate the expression-backed imported sketch.",
+    ).toBe(true);
+    expect(
+      updated.changedTargets.some(
+        (target) => target.kind === "feature" && target.featureId === "feature_extrude-1",
+      ),
+      "Variable edits should invalidate dependent solid features that consume the rebuilt sketch.",
+    ).toBe(true);
+
+    const after = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const afterSketch = after.snapshot.document.sketches.find(
+      (entry) => entry.sketchId === "sketch_primary",
+    );
+    const afterWidthStatus = afterSketch?.sketch.solvedSnapshot.dimensionStatuses.find(
+      (status) => status.dimensionId === "dimension_1_width",
+    );
+    expect(
+      solverAdapter.solvedWidthValues.at(-1),
+      "Variable rebuild should send the recalculated numeric dimension to the solver boundary.",
+    ).toBe(12);
+    expect(afterWidthStatus?.solvedValue).toBe(12);
+
+    const storedWidth = afterSketch?.sketch.definition.dimensions.find(
+      (dimension) => dimension.dimensionId === "dimension_1_width",
+    );
+    expect(
+      storedWidth?.kind === "distance" && isExpressionAuthoredValue(storedWidth.value),
+      "Rebuild should keep the imported authored expression instead of replacing it with a literal.",
+    ).toBe(true);
+  }
+
   async function testSketchCommitRejectsUnresolvableConstructionSupport() {
     const adapter = new MockKernelAdapter();
     const before = await adapter.getDocumentSnapshot({
@@ -3275,5 +3407,6 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions();
   await testMockSnapshotSurfacesSketchNavigationAndHistory();
   await testDocumentVariableExpressionsValidateBeforeMutation();
+  await testDocumentVariableUpdateRebuildsImportedExpressionSketch();
   await testSketchCommitRejectsUnresolvableConstructionSupport();
 });

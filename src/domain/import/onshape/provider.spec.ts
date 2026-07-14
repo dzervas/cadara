@@ -473,6 +473,14 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
     "The review form should surface verification status.",
   ).toBeTruthy();
 
+  const relationshipSection = schema.sections.find(
+    (section) => section.id === "sketch-relationships",
+  );
+  expect(
+    relationshipSection,
+    "The review form should include a sketch relationship carried/dropped summary section.",
+  ).toBeDefined();
+
   const actions = await onshapeImportProvider.prepare({
     source,
     review,

@@ -69,12 +69,14 @@ import {
   projectPointToPlane,
   projectPointToSketchPlane,
   translateSketch,
+  verifySketchTranslationSolveConsistency,
   type SolvedSketchEntityGeometry,
 } from "@/domain/import/onshape/sketch-translator";
 import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
 import { matchSignature } from "@/domain/import/onshape/signature-matcher";
 import { extractSketchPlaneDeterministicId } from "@/domain/import/onshape/fidelity-planner";
 import type { OnshapeGeometricSignature } from "@/contracts/import/onshape-capture-bundle";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 const ACCEPTED_EXTENSION = ".onshape-capture.json";
 
@@ -86,6 +88,13 @@ export interface OnshapeStudioReview {
   tierCounts: Record<FidelityTier, number>;
   requiresStudioBake: boolean;
   verification: GroundTruthVerification;
+  sketchRelationshipSummaries: OnshapeSketchRelationshipReview[];
+}
+
+export interface OnshapeSketchRelationshipReview {
+  featureId: string;
+  label: string;
+  summary: import("@/domain/import/onshape/sketch-translator").SketchRelationshipSummary;
 }
 
 export interface OnshapeImportReview {
@@ -851,6 +860,20 @@ async function reviewStudio(
     capabilities,
   });
   const { plan, probeResult } = activation;
+  const sketchRelationshipSummaries = plan.featurePlans
+    .map((featurePlan) => {
+      const translation = projectSketchForPlan({ read, featurePlan });
+      return translation
+        ? {
+            featureId: featurePlan.onshapeFeatureId,
+            label: featurePlan.label,
+            summary: translation.relationshipSummary,
+          }
+        : null;
+    })
+    .filter(
+      (summary): summary is OnshapeSketchRelationshipReview => summary !== null,
+    );
   const bakedCount = plan.featurePlans.filter((entry) => entry.tier === "baked").length;
   return {
     elementId: read.studio.elementId,
@@ -859,6 +882,7 @@ async function reviewStudio(
     featurePlans: plan.featurePlans,
     tierCounts: plan.tierCounts,
     requiresStudioBake: plan.requiresStudioBake,
+    sketchRelationshipSummaries,
     verification: verifyGroundTruth({
       hasHistoryCapability: capabilities.history != null,
       groundTruth: read.studio.groundTruth,
@@ -899,6 +923,54 @@ function sanitizeCorrelationPart(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_]/g, "_");
 }
 
+function projectSketchForPlan(input: {
+  read: ReturnType<typeof readPartStudio>;
+  featurePlan: FeaturePlan;
+}): ReturnType<typeof translateSketch> | null {
+  if (input.featurePlan.target.kind !== "sketch") {
+    return null;
+  }
+  const feature = input.read.features.find(
+    (candidate) => candidate.featureId === input.featurePlan.onshapeFeatureId,
+  );
+  const planeKey = input.featurePlan.target.planeKey;
+  const plane = input.featurePlan.target.plane;
+  const solved = input.read.solvedSketchesByFeatureId.get(
+    input.featurePlan.onshapeFeatureId,
+  );
+  const entities: SolvedSketchEntityGeometry[] = (solved?.entities ?? []).map(
+    (curve) => ({
+      entityId: curve.entityId,
+      entityType: curve.entityType,
+      isConstruction: curve.isConstruction,
+      start: curve.start3d
+        ? plane
+          ? projectPointToSketchPlane(curve.start3d, plane)
+          : projectPointToPlane(curve.start3d, planeKey)
+        : undefined,
+      end: curve.end3d
+        ? plane
+          ? projectPointToSketchPlane(curve.end3d, plane)
+          : projectPointToPlane(curve.end3d, planeKey)
+        : undefined,
+      center: curve.center3d
+        ? plane
+          ? projectPointToSketchPlane(curve.center3d, plane)
+          : projectPointToPlane(curve.center3d, planeKey)
+        : undefined,
+      radius: curve.radius === undefined ? undefined : curve.radius * 1000,
+    }),
+  );
+  return translateSketch({
+    featureId: input.featurePlan.onshapeFeatureId,
+    label: input.featurePlan.label,
+    planeKey,
+    plane,
+    entities,
+    constraints: feature?.constraints,
+  });
+}
+
 type OnshapeStudioPlan = Pick<
   ReturnType<typeof planStudioFidelity>,
   "featurePlans" | "tierCounts" | "requiresStudioBake"
@@ -922,6 +994,10 @@ async function buildPreparedActions(input: {
   const demoted = new Set(input.demotedFeatureIds ?? []);
   const featuresById = new Map(input.read.features.map((f) => [f.featureId, f]));
   const context = input.capabilities.context;
+  const solveConsistencySolver = new SketchConstraintSolverAdapter({
+    documentId: context.documentId,
+    revisionId: context.baseRevisionId,
+  });
   const addDocumentVariables: AddDocumentVariableRequest[] = [];
   const commitSketches: ImportCommitSketchRequest[] = [];
   const createFeatures: ImportCreateFeatureRequest[] = [];
@@ -1021,47 +1097,57 @@ async function buildPreparedActions(input: {
     }
 
     if (featurePlan.target.kind === "sketch") {
-      const planeKey = featurePlan.target.planeKey;
-      const plane = featurePlan.target.plane;
-      const solved = input.read.solvedSketchesByFeatureId.get(
-        featurePlan.onshapeFeatureId,
-      );
-      const entities: SolvedSketchEntityGeometry[] = (solved?.entities ?? []).map(
-        (curve) => ({
-          entityId: curve.entityId,
-          entityType: curve.entityType,
-          isConstruction: curve.isConstruction,
-          start: curve.start3d
-            ? plane
-              ? projectPointToSketchPlane(curve.start3d, plane)
-              : projectPointToPlane(curve.start3d, planeKey)
-            : undefined,
-          end: curve.end3d
-            ? plane
-              ? projectPointToSketchPlane(curve.end3d, plane)
-              : projectPointToPlane(curve.end3d, planeKey)
-            : undefined,
-          center: curve.center3d
-            ? plane
-              ? projectPointToSketchPlane(curve.center3d, plane)
-              : projectPointToPlane(curve.center3d, planeKey)
-            : undefined,
-          // Onshape radii are in meters; sketch units are millimeters.
-          radius: curve.radius === undefined ? undefined : curve.radius * 1000,
-        }),
-      );
-      const translation = translateSketch({
-        featureId: featurePlan.onshapeFeatureId,
-        label: featurePlan.label,
-        planeKey,
-        plane,
-        entities,
-      });
+      let translation = projectSketchForPlan({ read: input.read, featurePlan });
+      if (!translation) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Sketch "${featurePlan.label}" had no readable solved sketch payload and was skipped.`,
+          code: "onshape-sketch-unreadable",
+        });
+        continue;
+      }
+      const verificationSketchId = translation.definition.points[0]?.target.sketchId;
+      if (
+        verificationSketchId &&
+        (translation.relationshipSummary.constraints.carried > 0 ||
+          translation.relationshipSummary.dimensions.carried > 0)
+      ) {
+        const verified = await verifySketchTranslationSolveConsistency({
+          solver: solveConsistencySolver,
+          contractVersion: context.contractVersion,
+          documentId: context.documentId,
+          revisionId: context.baseRevisionId,
+          sketchId: verificationSketchId,
+          plane: translation.plane,
+          definition: translation.definition,
+          relationshipSummary: translation.relationshipSummary,
+        });
+        translation = {
+          ...translation,
+          definition: verified.definition,
+          diagnostics: [...translation.diagnostics, ...verified.diagnostics],
+          relationshipSummary: verified.relationshipSummary,
+        };
+      }
       for (const sketchDiagnostic of translation.diagnostics) {
         diagnostics.push({
           severity: "info",
           message: sketchDiagnostic.message,
           code: sketchDiagnostic.code,
+        });
+      }
+      if (
+        translation.relationshipSummary.constraints.carried > 0 ||
+        translation.relationshipSummary.dimensions.carried > 0 ||
+        translation.relationshipSummary.derivations.carried > 0 ||
+        translation.relationshipSummary.constraints.dropped > 0 ||
+        translation.relationshipSummary.dimensions.dropped > 0 ||
+        translation.relationshipSummary.derivations.dropped > 0
+      ) {
+        diagnostics.push({
+          severity: "info",
+          code: "onshape-sketch-relationship-summary",
+          message: `Sketch "${featurePlan.label}" relationships carried/dropped — constraints ${translation.relationshipSummary.constraints.carried}/${translation.relationshipSummary.constraints.dropped}, dimensions ${translation.relationshipSummary.dimensions.carried}/${translation.relationshipSummary.dimensions.dropped}, derivations ${translation.relationshipSummary.derivations.carried}/${translation.relationshipSummary.derivations.dropped}.`,
         });
       }
       // The provider owns solver correlation ids per the commit contract
@@ -1415,6 +1501,16 @@ export const onshapeImportProvider: ImportProvider<
         )
       : [];
 
+    const relationshipFields: FeatureEditorFormField[] = selected
+      ? selected.sketchRelationshipSummaries.map((entry) =>
+          summaryField(
+            `sketch-relationships-${entry.featureId}`,
+            entry.label,
+            `constraints ${entry.summary.constraints.carried}/${entry.summary.constraints.dropped}, dimensions ${entry.summary.dimensions.carried}/${entry.summary.dimensions.dropped}, derivations ${entry.summary.derivations.carried}/${entry.summary.derivations.dropped}`,
+          ),
+        )
+      : [];
+
     const verificationValue = selected
       ? selected.verification.status === "unavailable"
         ? "Unavailable — geometry was not verified against the captured model."
@@ -1430,6 +1526,11 @@ export const onshapeImportProvider: ImportProvider<
           id: "fidelity-report",
           title: "Per-feature fidelity",
           fields: reportFields,
+        },
+        {
+          id: "sketch-relationships",
+          title: "Sketch relationships carried/dropped",
+          fields: relationshipFields,
         },
         {
           id: "verification",
