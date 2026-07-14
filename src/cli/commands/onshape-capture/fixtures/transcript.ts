@@ -52,6 +52,35 @@ const FEATURES_WITH_REFERENCES = {
           ],
         },
       ],
+      constraints: [
+        {
+          btType: "BTMSketchConstraint-2",
+          constraintType: "HORIZONTAL",
+          entityId: "seed-horizontal",
+          parameters: [
+            { parameterId: "localFirst", value: "seed_line" },
+          ],
+        },
+        {
+          btType: "BTMSketchConstraint-2",
+          constraintType: "LENGTH",
+          entityId: "seed-length",
+          parameters: [
+            { parameterId: "localFirst", value: "seed_line" },
+            { parameterId: "length", expression: "10 mm" },
+          ],
+        },
+        {
+          btType: "BTMSketchConstraint-2",
+          constraintType: "OFFSET",
+          entityId: "seed-offset",
+          parameters: [
+            { parameterId: "localMaster", value: "seed_line" },
+            { parameterId: "localOffset", value: "offset_line" },
+            { parameterId: "halfSpace0", value: "RIGHT" },
+          ],
+        },
+      ],
     },
     {
       btType: "BTMFeature-134",
@@ -149,6 +178,22 @@ const SKETCHES_RESPONSE = {
             radius: 0.005,
             clockWise: false,
           },
+        },
+        {
+          jsonType: "BTSketchCurveSegmentInfo",
+          sketchEntityId: "seed_line",
+          sketchEntityType: "skLineSegment",
+          isConstruction: true,
+          startPosition3d: { btType: "BTVector3d-389", x: 0, y: 0, z: 0 },
+          endPosition3d: { btType: "BTVector3d-389", x: 0.01, y: 0, z: 0 },
+        },
+        {
+          jsonType: "BTSketchCurveSegmentInfo",
+          sketchEntityId: "offset_line",
+          sketchEntityType: "skLineSegment",
+          isConstruction: true,
+          startPosition3d: { btType: "BTVector3d-389", x: 0, y: -0.002, z: 0 },
+          endPosition3d: { btType: "BTVector3d-389", x: 0.01, y: -0.002, z: 0 },
         },
       ],
     },

@@ -104,6 +104,66 @@ export interface SketchTranslationResult {
   relationshipSummary: SketchRelationshipSummary;
 }
 
+function normalizeCoincidentPointTopology(definition: SketchDefinition) {
+  const parentByPointId = new Map<SketchPointId, SketchPointId>(
+    definition.pointIds.map((pointId) => [pointId, pointId]),
+  );
+
+  const findRoot = (pointId: SketchPointId): SketchPointId => {
+    const parent = parentByPointId.get(pointId);
+    if (!parent || parent === pointId) return pointId;
+    const root = findRoot(parent);
+    parentByPointId.set(pointId, root);
+    return root;
+  };
+  const pointOrder = new Map(
+    definition.pointIds.map((pointId, index) => [pointId, index]),
+  );
+
+  for (const constraint of definition.constraints) {
+    if (constraint.kind !== "coincident") continue;
+    const left = findRoot(constraint.pointIds[0]);
+    const right = findRoot(constraint.pointIds[1]);
+    if (left === right) continue;
+    const leftOrder = pointOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = pointOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
+    parentByPointId.set(
+      leftOrder <= rightOrder ? right : left,
+      leftOrder <= rightOrder ? left : right,
+    );
+  }
+
+  const replacements = new Map<SketchPointId, SketchPointId>();
+  for (const pointId of definition.pointIds) {
+    const root = findRoot(pointId);
+    if (root !== pointId) replacements.set(pointId, root);
+  }
+  if (replacements.size === 0) return definition;
+
+  const replacePointIds = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      return replacements.get(value as SketchPointId) ?? value;
+    }
+    if (Array.isArray(value)) return value.map(replacePointIds);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, entry]) => [key, replacePointIds(entry)]),
+      );
+    }
+    return value;
+  };
+
+  const normalized = replacePointIds(
+    structuredClone(definition),
+  ) as SketchDefinition;
+  normalized.points = normalized.points.filter(
+    (point, index, all) =>
+      all.findIndex((candidate) => candidate.pointId === point.pointId) === index,
+  );
+  normalized.pointIds = normalized.points.map((point) => point.pointId);
+  return normalized;
+}
+
 export interface SketchSolveConsistencyInput {
   solver: SketchSolverAdapter;
   contractVersion: ContractVersion;
@@ -1396,7 +1456,7 @@ export function translateSketch(
     }
   }
 
-  const definition: SketchDefinition = {
+  const definition = normalizeCoincidentPointTopology({
     schemaVersion: SKETCH_SCHEMA_VERSION,
     referenceIds: [],
     references: [],
@@ -1413,7 +1473,7 @@ export function translateSketch(
     svgRenderingEnabled: true,
     derivedRelationships,
     authoringOperations: [],
-  };
+  });
 
   return { plane, definition, diagnostics, relationshipSummary };
 }

@@ -12,6 +12,11 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
   const bundle = await assembleFixtureMountsBundle();
   const read = readPartStudio(bundle, FIXTURE_PART_STUDIO_ID);
   const plan = planStudioFidelity(read);
+  expect(read.features[0]?.constraints?.map((entry) => entry.constraintType)).toEqual([
+    "HORIZONTAL",
+    "LENGTH",
+    "OFFSET",
+  ]);
 
   const byId = new Map(
     plan.featurePlans.map((entry) => [entry.onshapeFeatureId, entry]),

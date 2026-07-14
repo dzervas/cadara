@@ -13,8 +13,15 @@ import {
   createImportCapabilities,
   prepareImportActions,
 } from "@/domain/import/orchestrator";
-import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
-import { projectPointToPlane, translateSketch } from "@/domain/import/onshape/sketch-translator";
+import {
+  readPartStudio,
+  type OnshapeSketchConstraint,
+} from "@/domain/import/onshape/bundle-reader";
+import {
+  projectPointToPlane,
+  translateSketch,
+  verifySketchTranslationSolveConsistency,
+} from "@/domain/import/onshape/sketch-translator";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
@@ -43,6 +50,70 @@ function createRevisionAgnosticRealSolver(): SketchSolverAdapter {
       };
     },
   });
+}
+
+function fixtureRelationship(
+  constraintType: string,
+  entityId: string,
+  parameters: OnshapeSketchConstraint["parameters"],
+): OnshapeSketchConstraint {
+  return { constraintType, entityId, parameters };
+}
+
+async function verifiedConstrainedLineAction(length: number) {
+  const translation = translateSketch({
+    featureId: "fixture_constrained_line",
+    label: "Constrained fixture line",
+    planeKey: "xy",
+    entities: [
+      {
+        entityId: "line",
+        entityType: "lineSegment",
+        start: [0, 0],
+        end: [10, 0],
+      },
+    ],
+    constraints: [
+      fixtureRelationship("HORIZONTAL", "horizontal", [
+        { parameterId: "localFirst", value: "line", hasExternalQuery: false },
+      ]),
+      fixtureRelationship("LENGTH", "length", [
+        { parameterId: "localFirst", value: "line", hasExternalQuery: false },
+        { parameterId: "length", value: length, hasExternalQuery: false },
+      ]),
+    ],
+  });
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: createRevisionAgnosticRealSolver(),
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace" as DocumentId,
+    revisionId: "rev_0001" as RevisionId,
+    sketchId: "sketch_import_consistency" as never,
+    plane: translation.plane,
+    definition: translation.definition,
+    relationshipSummary: translation.relationshipSummary,
+  });
+
+  return {
+    translation,
+    verified,
+    action: {
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace" as DocumentId,
+      baseRevisionId: "rev_ignored" as RevisionId,
+      solverCorrelation: {
+        requestId: "request_import_consistency",
+        projectionRequestId: "request_import_consistency_project",
+        validationRequestId: "request_import_consistency_validate",
+        solveRequestId: "request_import_consistency_solve",
+        regionRequestId: "request_import_consistency_regions",
+      },
+      sketchId: null,
+      sketchLabel: "Constrained fixture line",
+      plane: translation.plane,
+      definition: verified.definition,
+    },
+  };
 }
 
 function sourceFromBundle(bundle: unknown): ResolvedImportSource {
@@ -119,6 +190,9 @@ async function translatedFixtureSketchAction() {
   const bundle = await assembleFixtureCaptureBundle();
   const mounts = readPartStudio(bundle, FIXTURE_PART_STUDIO_ID);
   for (const solved of mounts.solvedSketchesByFeatureId.values()) {
+    const feature = mounts.features.find(
+      (entry) => entry.featureId === solved.featureId,
+    );
     const entities = solved.entities.map((curve) => ({
       entityId: curve.entityId,
       entityType: curve.entityType,
@@ -133,6 +207,7 @@ async function translatedFixtureSketchAction() {
       label: "Fixture sketch",
       planeKey: "xy",
       entities,
+      constraints: feature?.constraints,
     });
     const circle = translation.definition.entities.find(
       (entity) => entity.kind === "circle",
@@ -334,6 +409,74 @@ test("src/domain/import/onshape/apply-pipeline.spec.ts", async () => {
     hasCircle,
     "The translated sketch should contain the circle parsed from the real solved-sketch payload.",
   ).toBeTruthy();
+});
+
+test("applyImportPreparedActions keeps a faithful constrained fixture position-stable with the real solver", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const { translation, verified, action } =
+    await verifiedConstrainedLineAction(10);
+
+  expect(verified.diagnostics).toEqual([]);
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions: { commitSketches: [action] },
+  });
+  const committedId = result.createdEntityIds.sketchIds[0];
+  const committed = (await service.getCurrentDocumentSnapshot()).document.sketches.find(
+    (sketch) => sketch.sketchId === committedId,
+  );
+  const solvedById = new Map(
+    committed?.sketch.solvedSnapshot.solvedPoints.map((point) => [
+      point.pointId,
+      point.solvedPosition,
+    ]),
+  );
+  for (const seeded of translation.definition.points) {
+    const solved = solvedById.get(seeded.pointId);
+    expect(solved?.[0]).toBeCloseTo(seeded.position[0], 6);
+    expect(solved?.[1]).toBeCloseTo(seeded.position[1], 6);
+  }
+});
+
+test("applyImportPreparedActions commits seeded geometry after isolating a broken translated dimension", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const { translation, verified, action } =
+    await verifiedConstrainedLineAction(20);
+
+  expect(verified.diagnostics).toHaveLength(1);
+  expect(verified.diagnostics[0]).toMatchObject({
+    code: "onshape-sketch-solve-consistency-failed",
+    relationshipKind: "lineLength",
+    reason: "solve-consistency",
+  });
+  expect(verified.definition.dimensions).toEqual([]);
+  expect(verified.definition.constraints.map((constraint) => constraint.kind)).toEqual([
+    "horizontal",
+  ]);
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions: { commitSketches: [action] },
+  });
+  const committedId = result.createdEntityIds.sketchIds[0];
+  const committed = (await service.getCurrentDocumentSnapshot()).document.sketches.find(
+    (sketch) => sketch.sketchId === committedId,
+  );
+  const solvedById = new Map(
+    committed?.sketch.solvedSnapshot.solvedPoints.map((point) => [
+      point.pointId,
+      point.solvedPosition,
+    ]),
+  );
+  for (const seeded of translation.definition.points) {
+    const solved = solvedById.get(seeded.pointId);
+    expect(solved?.[0]).toBeCloseTo(seeded.position[0], 6);
+    expect(solved?.[1]).toBeCloseTo(seeded.position[1], 6);
+  }
 });
 
 test("applyImportPreparedActions resolves a fixture sketch region into a concrete extrude profile", async () => {

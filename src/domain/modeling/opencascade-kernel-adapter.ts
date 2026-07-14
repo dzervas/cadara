@@ -103,6 +103,7 @@ import {
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
 } from "@/domain/modeling/occ/runtime";
+import { resolveCompatibleRegion } from "@/domain/modeling/occ/features/shared";
 import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
@@ -1521,13 +1522,24 @@ type RebuildAttempt = {
 function collectInvalidConsumedTargetDiagnostics(
   state: Pick<
     OccAuthoringState,
-    "documentId" | "revisionId" | "referenceState"
+    "documentId" | "revisionId" | "referenceState" | "sketches"
   >,
   feature: OccAuthoringFeatureRecord,
 ) {
   const diagnostics: ModelingDiagnostic[] = [];
 
   for (const target of getFeatureConsumedTargets(feature.definition)) {
+    if (target.kind === "region") {
+      const sketch = state.sketches.find(
+        (entry) => entry.sketchId === target.sketchId,
+      );
+      if (
+        sketch &&
+        resolveCompatibleRegion(sketch.sketch.regions, target.regionId)
+      ) {
+        continue;
+      }
+    }
     const resolved = resolveOccReference(
       {
         documentId: state.documentId,
