@@ -52,6 +52,17 @@ test("command.spec.ts reports a usage error for a missing url argument", async (
   expect(result.ok === false && result.kind).toBe("usage");
 });
 
+test("command.spec.ts accepts rollback-snapshots as an option before requiring the url", async () => {
+  const result = await onshapeCaptureCommand.run(
+    ["--rollback-snapshots"],
+    envFrom({ ONSHAPE_ACCESS_KEY: "access", ONSHAPE_SECRET_KEY: "secret" }),
+    makeIO(),
+  );
+
+  expect(result.ok === false && result.kind).toBe("usage");
+  expect(result.ok === false && result.message).toContain("<onshape-document-url>");
+});
+
 test("command.spec.ts reports a usage error for a bad url before any network work", async () => {
   const result = await onshapeCaptureCommand.run(
     ["not-a-url"],

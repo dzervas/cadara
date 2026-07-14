@@ -51,7 +51,7 @@ export async function captureGroundTruth(
   };
 }
 
-async function exportStep(
+export async function exportStep(
   client: OnshapeClient,
   context: {
     documentId: string;

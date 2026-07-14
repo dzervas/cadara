@@ -5,6 +5,12 @@ import type {
 
 import type { OnshapeClient } from "@/cli/commands/onshape-capture/client";
 
+export interface DeterministicIdConsumer {
+  deterministicId: string;
+  consumingFeatureId: string;
+  rollbackIndex: number;
+}
+
 /**
  * Collect every deterministic ID referenced anywhere in a raw `getFeatures`
  * response. Deterministic IDs live in `deterministicIds` arrays on query
@@ -14,33 +20,70 @@ import type { OnshapeClient } from "@/cli/commands/onshape-capture/client";
  * walk collects all of them regardless of nesting.
  */
 export function collectDeterministicIds(features: unknown): string[] {
-  const ids = new Set<string>();
+  return [
+    ...new Set(
+      collectDeterministicIdConsumers(features).map(
+        (consumer) => consumer.deterministicId,
+      ),
+    ),
+  ];
+}
 
-  const visit = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) {
-        visit(item);
-      }
+export function collectDeterministicIdConsumers(
+  features: unknown,
+): DeterministicIdConsumer[] {
+  const featureList = (features as { features?: unknown }).features;
+  if (!Array.isArray(featureList)) {
+    return [];
+  }
+
+  const consumers: DeterministicIdConsumer[] = [];
+  const seen = new Set<string>();
+
+  featureList.forEach((feature, rollbackIndex) => {
+    if (!feature || typeof feature !== "object") {
       return;
     }
-    if (node && typeof node === "object") {
-      const record = node as Record<string, unknown>;
-      const deterministicIds = record.deterministicIds;
-      if (Array.isArray(deterministicIds)) {
-        for (const id of deterministicIds) {
-          if (typeof id === "string" && id.length > 0) {
-            ids.add(id);
+    const consumingFeatureId = (feature as { featureId?: unknown }).featureId;
+    if (typeof consumingFeatureId !== "string" || consumingFeatureId.length === 0) {
+      return;
+    }
+
+    const ids = new Set<string>();
+    const visit = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const item of node) {
+          visit(item);
+        }
+        return;
+      }
+      if (node && typeof node === "object") {
+        const record = node as Record<string, unknown>;
+        const deterministicIds = record.deterministicIds;
+        if (Array.isArray(deterministicIds)) {
+          for (const id of deterministicIds) {
+            if (typeof id === "string" && id.length > 0) {
+              ids.add(id);
+            }
           }
         }
+        for (const value of Object.values(record)) {
+          visit(value);
+        }
       }
-      for (const value of Object.values(record)) {
-        visit(value);
+    };
+
+    visit(feature);
+    for (const deterministicId of ids) {
+      const key = `${deterministicId}\u0000${consumingFeatureId}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        consumers.push({ deterministicId, consumingFeatureId, rollbackIndex });
       }
     }
-  };
+  });
 
-  visit(features);
-  return [...ids];
+  return consumers;
 }
 
 /**
@@ -145,12 +188,99 @@ export async function resolveDeterministicIds(
   partStudioPath: string,
   deterministicIds: readonly string[],
 ): Promise<OnshapeResolvedReference[]> {
+  return resolveAtState(client, partStudioPath, deterministicIds, "finalState");
+}
+
+export async function resolveDeterministicIdsWithHistory(
+  client: OnshapeClient,
+  finalPartStudioPath: string,
+  rollbackPartStudioPath: string,
+  consumers: readonly DeterministicIdConsumer[],
+): Promise<OnshapeResolvedReference[]> {
+  const deterministicIds = [
+    ...new Set(consumers.map((consumer) => consumer.deterministicId)),
+  ];
+  const finalRecords = await resolveDeterministicIds(
+    client,
+    finalPartStudioPath,
+    deterministicIds,
+  );
+  const unresolvedFinalIds = new Set(
+    finalRecords
+      .filter((record) => "unresolved" in record)
+      .map((record) => record.deterministicId),
+  );
+
+  if (unresolvedFinalIds.size === 0) {
+    return finalRecords;
+  }
+
+  const byRollbackIndex = new Map<number, DeterministicIdConsumer[]>();
+  for (const consumer of consumers) {
+    if (!unresolvedFinalIds.has(consumer.deterministicId)) {
+      continue;
+    }
+    const group = byRollbackIndex.get(consumer.rollbackIndex) ?? [];
+    group.push(consumer);
+    byRollbackIndex.set(consumer.rollbackIndex, group);
+  }
+
+  const historyRecords: OnshapeResolvedReference[] = [];
+  for (const [rollbackIndex, group] of byRollbackIndex) {
+    await client.postJson(`${rollbackPartStudioPath}/features/rollback`, {
+      rollbackIndex,
+    });
+    const idsAtPoint = [...new Set(group.map((consumer) => consumer.deterministicId))];
+    const recordsAtPoint = await resolveAtState(
+      client,
+      rollbackPartStudioPath,
+      idsAtPoint,
+      "historyPoint",
+      rollbackIndex,
+    );
+
+    for (const consumer of group) {
+      const resolved = recordsAtPoint.find(
+        (record) => record.deterministicId === consumer.deterministicId,
+      );
+      if (resolved && "signature" in resolved) {
+        historyRecords.push({
+          deterministicId: consumer.deterministicId,
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: consumer.consumingFeatureId,
+          signature: resolved.signature,
+        });
+      } else {
+        const reason =
+          resolved && "unresolved" in resolved
+            ? resolved.unresolved.reason
+            : "entity is not present at the consuming history point";
+        historyRecords.push({
+          deterministicId: consumer.deterministicId,
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: consumer.consumingFeatureId,
+          unresolved: { reason },
+        });
+      }
+    }
+  }
+
+  return [...finalRecords, ...historyRecords];
+}
+
+async function resolveAtState(
+  client: OnshapeClient,
+  partStudioPath: string,
+  deterministicIds: readonly string[],
+  evaluatedAt: "finalState" | "historyPoint",
+  rollbackBarIndex = -1,
+): Promise<OnshapeResolvedReference[]> {
   if (deterministicIds.length === 0) {
     return [];
   }
 
   const response = await client.postJson(
-    `${partStudioPath}/featurescript?rollbackBarIndex=-1`,
+    `${partStudioPath}/featurescript?rollbackBarIndex=${rollbackBarIndex}`,
     { script: buildResolutionScript() },
   );
 
@@ -165,17 +295,21 @@ export async function resolveDeterministicIds(
     if (!record) {
       return {
         deterministicId,
-        evaluatedAt: "finalState",
+        evaluatedAt,
         unresolved: {
-          reason: parseError ?? "entity is not present in the final model state",
+          reason:
+            parseError ??
+            (evaluatedAt === "finalState"
+              ? "entity is not present in the final model state"
+              : "entity is not present at the consuming history point"),
         },
-      };
+      } as OnshapeResolvedReference;
     }
     return {
       deterministicId,
-      evaluatedAt: "finalState",
+      evaluatedAt,
       signature: toSignature(record),
-    };
+    } as OnshapeResolvedReference;
   });
 }
 

@@ -136,6 +136,7 @@ function makeFaceSketchBundle() {
     },
     document: {},
     elements: {},
+    diagnostics: [],
     partStudios: [
       {
         elementId: "e1",
@@ -254,6 +255,7 @@ function makeCPlaneSketchBundle(options: { recoverable: boolean }) {
     },
     document: {},
     elements: {},
+    diagnostics: [],
     partStudios: [
       {
         elementId: "e1",

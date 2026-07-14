@@ -85,6 +85,11 @@ export class OnshapeClient {
     return JSON.parse(text);
   }
 
+  /** DELETE an endpoint, ignoring any response body. */
+  async delete(path: string): Promise<void> {
+    await this.request("DELETE", path);
+  }
+
   /** GET raw text (e.g. an exported STEP document). */
   async getText(path: string): Promise<string> {
     return this.request("GET", path);
