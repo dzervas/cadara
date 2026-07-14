@@ -8,7 +8,10 @@ import type { ResolvedImportSource } from "@/contracts/import/source";
 import { validateImportPreparedActions } from "@/contracts/import/validation";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createBuiltinImportProviderRegistry } from "@/domain/import/builtin-provider-composition";
-import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
+import {
+  assembleFixtureCaptureBundle,
+  FIXTURE_PART_STUDIO_ID,
+} from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
 import { createImportCapabilities } from "@/domain/import/orchestrator";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
@@ -461,6 +464,16 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
     review.providerReview.valid && review.providerReview.studios.length === 2,
     "Review should validate the bundle and surface both Part Studios.",
   ).toBeTruthy();
+  const fixtureRelationships = review.providerReview.studios
+    .find((studio) => studio.elementId === FIXTURE_PART_STUDIO_ID)
+    ?.sketchRelationshipSummaries.find(
+      (entry) => entry.featureId === "FOoap8tw3jKAJf5_0",
+    );
+  expect(fixtureRelationships?.summary).toEqual({
+    constraints: { carried: 1, dropped: 0 },
+    dimensions: { carried: 1, dropped: 0 },
+    derivations: { carried: 1, dropped: 0 },
+  });
 
   const selections = onshapeImportProvider.createDefaultSelections(review);
   const schema = onshapeImportProvider.getReviewFormSchema(review, selections);
@@ -502,6 +515,18 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
     orderedCount === totalActions,
     "Every emitted parametric action should appear in the ordered sequence.",
   ).toBeTruthy();
+  const preparedFixtureSketch = actions.commitSketches?.find(
+    (commit) => commit.sketchLabel === "Sketch 1",
+  );
+  expect(preparedFixtureSketch?.definition.constraints.map((entry) => entry.kind)).toEqual([
+    "horizontal",
+  ]);
+  expect(preparedFixtureSketch?.definition.dimensions.map((entry) => entry.kind)).toEqual([
+    "lineLength",
+  ]);
+  expect(
+    preparedFixtureSketch?.definition.derivedRelationships?.map((entry) => entry.kind),
+  ).toEqual(["offset"]);
 
   // The fixture extrude consumes a parametric sketch region and must now plan
   // parametric: a createFeature carrying a deferred regionOf profile that points

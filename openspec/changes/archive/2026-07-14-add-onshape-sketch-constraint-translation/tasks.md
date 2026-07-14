@@ -9,15 +9,15 @@
 ## 2. Verification Machinery
 
 - [x] 2.1 Implement post-translation solve-consistency check against seeded positions with tolerance, and bisection isolation of offending records on failure.
-- [ ] 2.2 Extend `apply-pipeline.spec.ts` (real solver): constrained fixture sketch commits position-stable; a deliberately-broken table entry triggers isolation + degradation, not a wrong commit.
+- [x] 2.2 Extend `apply-pipeline.spec.ts` (real solver): constrained fixture sketch commits position-stable; a deliberately-broken table entry triggers isolation + degradation, not a wrong commit.
 
 ## 3. Integration
 
 - [x] 3.1 Update sketch-translator module docs and remove the "constraints deferred" amendment notes; update the provider spec-delta bookkeeping.
-- [ ] 3.2 Update fixture-driven provider/planner specs (fixture sketches now carry constraints/dimensions/derivations).
+- [x] 3.2 Update fixture-driven provider/planner specs (fixture sketches now carry constraints/dimensions/derivations).
 - [x] 3.3 Update the review form's sketch diagnostics to summarize carried vs dropped relationship counts per sketch.
 
 ## 4. Verification
 
-- [ ] 4.1 Manual smoke: import both real bundles; in-app, drag constrained geometry and edit a variable-driven dimension; record carried/dropped relationship counts per sketch in change notes.
-- [ ] 4.2 Run `bun run test:all`.
+- [x] 4.1 Manual smoke: import both real bundles; in-app, drag constrained geometry and edit a variable-driven dimension; record carried/dropped relationship counts per sketch in change notes.
+- [x] 4.2 Run `bun run test:all`.

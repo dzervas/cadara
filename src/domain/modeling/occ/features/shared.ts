@@ -130,21 +130,38 @@ export function describeOccEnumValue(
   return String(numericValue);
 }
 
+export function resolveCompatibleRegion(
+  regions: readonly RegionRecord[],
+  regionId: RegionRecord["regionId"],
+) {
+  const exact = regions.find((entry) => entry.regionId === regionId);
+  if (exact) {
+    return exact;
+  }
+
+  // Region labels before canonical boundary naming used the traversal-start
+  // segment. The stable boundary hash suffix did not change, so accept a unique
+  // hash match when replaying persisted features authored with the old label.
+  const separatorIndex = regionId.lastIndexOf("-");
+  const stableHash = separatorIndex >= 0 ? regionId.slice(separatorIndex + 1) : "";
+  const compatible = stableHash
+    ? regions.filter((entry) => entry.regionId.endsWith(`-${stableHash}`))
+    : [];
+  return compatible.length === 1 ? compatible[0]! : null;
+}
+
 export function requireRegion(
   sketch: SketchSnapshotRecord,
   regionId: RegionRecord["regionId"],
 ) {
-  const region = sketch.sketch.regions.find(
-    (entry) => entry.regionId === regionId,
-  );
-
-  if (!region) {
-    throw new Error(
-      `Sketch region ${regionId} does not resolve on sketch ${sketch.sketchId}.`,
-    );
+  const region = resolveCompatibleRegion(sketch.sketch.regions, regionId);
+  if (region) {
+    return region;
   }
 
-  return region;
+  throw new Error(
+    `Sketch region ${regionId} does not resolve on sketch ${sketch.sketchId}.`,
+  );
 }
 
 export function requireBody(

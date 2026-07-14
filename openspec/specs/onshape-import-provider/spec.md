@@ -55,8 +55,6 @@ The provider SHALL assign each Onshape history entry a translation tier — `par
 ### Requirement: Sketches SHALL import entities seeded from Onshape's solved state
 The provider SHALL translate supported sketch entity kinds (line, circle, arc, point) into the cadara sketch contract, seed entity geometry from Onshape's captured solved positions (projected onto the target datum plane), and preserve construction flags.
 
-> **v1 scope amendment (2026-07-06):** constraint and derivation (MIRROR/LINEAR_PATTERN/OFFSET) translation is **deferred**. v1 imports entities at their solved positions as the correctness floor (the sketch is geometrically correct but under-constrained). Carrying constraints/derivations across requires operand-reference resolution and is tracked as a fast-follow; until then the imported sketch's relationships are not reconstructed.
-
 #### Scenario: Sketch entities translate at solved positions
 - **WHEN** a captured sketch contains supported entity kinds
 - **THEN** the committed sketch contains the corresponding cadara entities (including construction flags) with geometry seeded from Onshape's solved positions
@@ -66,13 +64,43 @@ The provider SHALL translate supported sketch entity kinds (line, circle, arc, p
 - **THEN** entity geometry is initialized from Onshape's captured solved positions
 - **AND** a solved-state deviation beyond tolerance is reported as a sketch diagnostic in the fidelity report
 
-#### Scenario: Derivations deferred (v1)
-- **WHEN** a captured sketch contains MIRROR/LINEAR_PATTERN/OFFSET records
-- **THEN** their output geometry imports as plain entities at the captured solved positions (deferred: the associative relationship is not reconstructed in v1)
-
 #### Scenario: Unsupported entity kind
 - **WHEN** a captured sketch contains an entity kind outside the cadara vocabulary
 - **THEN** the sketch imports without it, with a structured diagnostic naming the entity and kind
+
+### Requirement: Local sketch constraints, dimensions, and derivations SHALL translate
+The sketch translator SHALL map local Onshape constraint records to `ConstraintDefinition` kinds with parsed operands, dimensional records to cadara dimensions with expression-backed values, and MIRROR/LINEAR_PATTERN/OFFSET records to sketch derivations; the previously-amended "constraints deferred" behavior is replaced.
+
+#### Scenario: Local constraints survive import
+- **WHEN** a captured sketch carries local COINCIDENT, MIDPOINT, HORIZONTAL, VERTICAL, PARALLEL, PERPENDICULAR, or EQUAL records between translated entities
+- **THEN** the committed sketch contains the corresponding constraint definitions with correctly parsed point/entity operands
+- **AND** dragging constrained geometry in cadara preserves the translated relationships
+
+#### Scenario: Dimensions re-drive from variables
+- **WHEN** a captured DISTANCE/LENGTH/DIAMETER/ANGLE record carries an expression referencing an imported document variable
+- **THEN** the committed dimension's value is expression-backed
+- **AND** changing the variable re-solves the sketch
+
+#### Scenario: Derivations translate
+- **WHEN** a captured sketch carries MIRROR, LINEAR_PATTERN, or OFFSET records over translated entities
+- **THEN** the committed sketch contains the corresponding `mirror`, `linearPattern`, or `offset` derivation with master and derived sets mapped
+
+#### Scenario: Untranslatable record degrades alone
+- **WHEN** a constraint record cannot be translated (unsupported kind, operand referencing a dropped entity, external operand without imported projection geometry)
+- **THEN** that record is dropped with a structured diagnostic naming kind, operands, and reason
+- **AND** the sketch and its remaining constraints still import
+
+### Requirement: Translated constraint sets SHALL be verified against the seeded solved state
+After translation, the sketch SHALL solve to the seeded Onshape positions within tolerance; a beyond-tolerance solve SHALL be reported per-sketch with diagnostics isolating the offending records, and the import SHALL NOT silently ship geometry that the translated constraints move.
+
+#### Scenario: Faithful translation is position-stable
+- **WHEN** a translated sketch solves
+- **THEN** solved positions match the seeded state within tolerance
+
+#### Scenario: Translation bug detected
+- **WHEN** the translated constraint set moves geometry beyond tolerance
+- **THEN** the sketch's fidelity report identifies the deviation and the isolated offending records
+- **AND** the affected records are dropped with diagnostics rather than committed wrong
 
 ### Requirement: Variables and expressions SHALL translate with literal fallback
 The provider SHALL import `assignVariable` features as document variables before dependent actions, and SHALL translate unit-bearing Onshape expressions into cadara's expression grammar, falling back to the captured evaluated literal with a diagnostic when translation is impossible.

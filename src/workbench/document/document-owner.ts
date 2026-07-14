@@ -134,7 +134,8 @@ export function createWorkbenchDocumentOwner({
     next: VariablePatch,
     options: AcceptedMutationOptions,
   ) {
-    const currentSnapshot = requireSnapshot();
+    requireSnapshot();
+    const currentSnapshot = await modelingService.getCurrentDocumentSnapshot();
     const result = await modelingService.updateDocumentVariable({
       baseRevisionId: currentSnapshot.document.revisionId,
       variableId,

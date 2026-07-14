@@ -133,6 +133,26 @@ test("translates local Onshape constraints and expression-backed dimensions", ()
     "midpoint",
     "parallel",
   ]);
+  const left = result.definition.entities.find(
+    (entity) => entity.entityId.endsWith("_left"),
+  );
+  const right = result.definition.entities.find(
+    (entity) => entity.entityId.endsWith("_right"),
+  );
+  expect(
+    left?.kind === "lineSegment" &&
+      right?.kind === "lineSegment" &&
+      left.startPointId === right.startPointId,
+    "Coincident imported endpoints should share topology so variable rebuilds cannot open the loop while solving.",
+  ).toBe(true);
+  const coincident = result.definition.constraints.find(
+    (constraint) => constraint.kind === "coincident",
+  );
+  expect(
+    coincident?.kind === "coincident" &&
+      coincident.pointIds[0] === coincident.pointIds[1],
+    "The translated coincidence record should remain present after topology normalization.",
+  ).toBe(true);
   const length = result.definition.dimensions.find(
     (dimension) => dimension.kind === "lineLength",
   );

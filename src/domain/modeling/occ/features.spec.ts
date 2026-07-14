@@ -9,6 +9,7 @@ import {
   executeOccFeature,
   type OccFeatureExecutionContext,
 } from "@/domain/modeling/occ/features";
+import { requireRegion } from "@/domain/modeling/occ/features/shared";
 import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
@@ -337,6 +338,26 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     );
 
     return { sketch, region };
+  }
+
+  async function testRegionResolutionAcceptsLegacyTraversalLabel() {
+    const sketchId = "sketch_legacy_region" as SketchId;
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(sketchId, plane);
+    const canonicalRegionId =
+      "region_legacy_region-sketch_entity_a_right-3h5wtq1po7fut" as RegionRecord["regionId"];
+    region.regionId = canonicalRegionId;
+    region.target = { kind: "region", sketchId, regionId: canonicalRegionId };
+
+    const resolved = requireRegion(
+      sketch,
+      "region_legacy_region-sketch_entity_z_bottom-3h5wtq1po7fut" as RegionRecord["regionId"],
+    );
+
+    expect(
+      resolved.regionId,
+      "Persisted pre-canonical region references should resolve by their unchanged stable boundary hash.",
+    ).toBe(canonicalRegionId);
   }
 
   async function makeBoxBody(
@@ -3485,6 +3506,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts();
   await testPlaneFeatureBuildsFaceBackedConstructionPlane();
   await testPlaneFeatureBuildsExplicitFrameConstructionPlane();
+  await testRegionResolutionAcceptsLegacyTraversalLabel();
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion();
   await testExtrudeUpToNextSkipsCoplanarStartFace();
   await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds();

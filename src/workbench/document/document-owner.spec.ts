@@ -17,6 +17,7 @@ import type {
   ModelingCommitSketchCorrelation,
   ModelingService,
 } from "@/domain/modeling/modeling-service";
+import type { DocumentVariableId, RevisionId } from "@/contracts/shared/ids";
 
 function createDiagnostic(
   message: string,
@@ -153,6 +154,57 @@ test("document owner accepts variable mutations and refreshes the snapshot", asy
       dispatched[0].snapshot === nextSnapshot,
     "Accepted variable mutations should refresh and dispatch the next snapshot.",
   ).toBeTruthy();
+});
+
+test("document owner updates variables against the modeling service's latest revision", async () => {
+  const staleSnapshot = await createSeedDocumentSnapshot();
+  staleSnapshot.document.revisionId = "rev_0010" as RevisionId;
+  const currentSnapshot = await createSeedDocumentSnapshot();
+  currentSnapshot.document.revisionId = "rev_0011" as RevisionId;
+  const variable = {
+    variableId: "variable_walls" as DocumentVariableId,
+    name: "walls",
+    valueText: "2",
+  };
+  staleSnapshot.document.variables = [variable];
+  currentSnapshot.document.variables = [variable];
+
+  const updateBaseRevisions: string[] = [];
+  let snapshotReads = 0;
+  const owner = createOwner({
+    machineState: { snapshot: staleSnapshot } as EditorState,
+    modelingService: {
+      currentDocumentId: staleSnapshot.document.documentId,
+      sketchSolver: null,
+      async getCurrentDocumentSnapshot() {
+        snapshotReads += 1;
+        return currentSnapshot;
+      },
+      async updateDocumentVariable(input) {
+        updateBaseRevisions.push(input.baseRevisionId);
+        return ok({
+          revisionState: { kind: "accepted" as const },
+          diagnostics: [],
+        });
+      },
+    },
+  });
+
+  const result = await owner.updateDocumentVariable(
+    variable.variableId,
+    { name: variable.name, valueText: "3" },
+    {
+      operation: "Update walls",
+      fallbackMessage: "Update walls failed.",
+    },
+  );
+
+  expect(result.isOk()).toBe(true);
+  expect(updateBaseRevisions).toEqual(["rev_0011"]);
+  expect(
+    snapshotReads,
+    "The owner should fetch once before mutation and once after acceptance.",
+  ).toBe(2);
 });
 
 test("document owner preserves rejected and errored variable mutations without refreshing", async () => {

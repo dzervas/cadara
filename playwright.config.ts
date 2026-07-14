@@ -1,7 +1,27 @@
 import { defineConfig } from "@playwright/test";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 const shouldStartWebServer = (process.env.PLAYWRIGHT_WEB_SERVER ?? "1") !== "0";
+
+function findFontconfigFile() {
+  if (process.env.FONTCONFIG_FILE) return process.env.FONTCONFIG_FILE;
+  const systemConfig = "/etc/fonts/fonts.conf";
+  if (existsSync(systemConfig)) return systemConfig;
+
+  const nixStore = "/nix/store";
+  if (!existsSync(nixStore)) return null;
+  for (const entry of readdirSync(nixStore)) {
+    if (!entry.includes("-fontconfig-")) continue;
+    const candidate = join(nixStore, entry, "etc/fonts/fonts.conf");
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+const fontconfigFile = findFontconfigFile();
+if (fontconfigFile) process.env.FONTCONFIG_FILE = fontconfigFile;
 
 export default defineConfig({
   testDir: "./e2e",
