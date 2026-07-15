@@ -333,6 +333,18 @@ function getTransformDirection(
   );
 }
 
+function getTransformVector(
+  definition: AdvancedSolidFeatureDefinition & { kind: "transform" },
+): [number, number, number] | null {
+  const vector = definition.parameters.options?.vector;
+  return Array.isArray(vector) &&
+    vector.length === 3 &&
+    vector.every((component) => typeof component === "number" && Number.isFinite(component)) &&
+    vector.some((component) => component !== 0)
+    ? [vector[0] as number, vector[1] as number, vector[2] as number]
+    : null;
+}
+
 export function executeTransformFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -346,18 +358,25 @@ export function executeTransformFeature(
 
   const bodyTargets = getTransformBodyTargets(definition);
   requireUniqueTargetBodies(bodyTargets.map((target) => target.bodyId));
-  const referenceTarget = getTransformReferenceTarget(definition);
-  const distance = getTransformDistance(definition);
-  const direction = getTransformDirection(definition);
-  const plane = resolvePlanarReferencePlane(
-    context,
-    referenceTarget,
-    `construction_${ownerFeatureId}_transform` as ConstructionId,
-  );
-  const signedDistance = direction === "positive" ? distance : -distance;
+  const vector = getTransformVector(definition);
+  let translationVector: readonly [number, number, number];
+  if (vector) {
+    translationVector = vector;
+  } else {
+    const referenceTarget = getTransformReferenceTarget(definition);
+    const distance = getTransformDistance(definition);
+    const direction = getTransformDirection(definition);
+    const plane = resolvePlanarReferencePlane(
+      context,
+      referenceTarget,
+      `construction_${ownerFeatureId}_transform` as ConstructionId,
+    );
+    const signedDistance = direction === "positive" ? distance : -distance;
+    translationVector = scale(normalize(plane.frame.normal), signedDistance);
+  }
   const translation = new context.oc.gp_Trsf_1();
   translation.SetTranslation_1(
-    toGpVec(context.oc, scale(normalize(plane.frame.normal), signedDistance)),
+    toGpVec(context.oc, translationVector),
   );
 
   const nextBodies = [...context.bodies];

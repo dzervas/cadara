@@ -73,6 +73,7 @@ export interface SketchTranslationInput {
   plane?: SketchPlaneDefinition;
   entities: readonly SolvedSketchEntityGeometry[];
   constraints?: readonly OnshapeSketchConstraint[];
+  sourceSolveStatus?: string;
 }
 
 export interface SketchRelationshipSummary {
@@ -88,7 +89,9 @@ export interface SketchTranslationDiagnostic {
     | "onshape-sketch-relationship-dropped"
     | "onshape-sketch-external-reference-dropped"
     | "onshape-sketch-expression-degraded"
-    | "onshape-sketch-solve-consistency-failed";
+    | "onshape-sketch-solve-consistency-failed"
+    | "onshape-sketch-residual-mobility"
+    | "onshape-sketch-residual-mobility-grounded";
   message: string;
   entityId?: string;
   entityType?: string;
@@ -102,6 +105,7 @@ export interface SketchTranslationResult {
   definition: SketchDefinition;
   diagnostics: SketchTranslationDiagnostic[];
   relationshipSummary: SketchRelationshipSummary;
+  sourceSolveStatus?: string;
 }
 
 function normalizeCoincidentPointTopology(definition: SketchDefinition) {
@@ -173,6 +177,7 @@ export interface SketchSolveConsistencyInput {
   plane: SketchPlaneDefinition;
   definition: SketchDefinition;
   relationshipSummary: SketchRelationshipSummary;
+  sourceSolveStatus?: string;
   tolerance?: number;
 }
 
@@ -1155,19 +1160,11 @@ export async function verifySketchTranslationSolveConsistency(
 ): Promise<SketchSolveConsistencyResult> {
   const tolerance = input.tolerance ?? 1e-3;
   const relationships = verifiableRelationships(input.definition);
-  if (relationships.length === 0) {
-    return {
-      definition: input.definition,
-      diagnostics: [],
-      relationshipSummary: input.relationshipSummary,
-    };
-  }
-
   let requestSequence = 0;
-  const isBad = async (candidate: readonly VerifiableRelationship[]) => {
-    const definition = definitionWithRelationships(input.definition, candidate);
+
+  const solveDefinition = async (definition: SketchDefinition) => {
     requestSequence += 1;
-    const response = await input.solver.solveSketch({
+    return input.solver.solveSketch({
       contractVersion: input.contractVersion,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
       requestId: `request_import_solve_consistency_${sanitizeId(input.sketchId)}_${requestSequence}` as RequestId,
@@ -1184,64 +1181,167 @@ export async function verifySketchTranslationSolveConsistency(
       definition,
       projectedReferences: [],
     });
+  };
+
+  const isBad = async (candidate: readonly VerifiableRelationship[]) => {
+    const definition = definitionWithRelationships(input.definition, candidate);
+    const response = await solveDefinition(definition);
     return (
       response.status.solveState === "failed" ||
       solvedDeviation(definition, response.solvedSnapshot.solvedPoints) > tolerance
     );
   };
 
-  if (!(await isBad(relationships))) {
-    return {
-      definition: input.definition,
-      diagnostics: [],
-      relationshipSummary: input.relationshipSummary,
+  let definition = input.definition;
+  let diagnostics: SketchTranslationDiagnostic[] = [];
+  let relationshipSummary = input.relationshipSummary;
+
+  if (relationships.length > 0 && (await isBad(relationships))) {
+    const isolate = async (
+      candidate: readonly VerifiableRelationship[],
+    ): Promise<VerifiableRelationship[]> => {
+      if (candidate.length <= 1) {
+        return [...candidate];
+      }
+      const midpoint = Math.floor(candidate.length / 2);
+      const left = candidate.slice(0, midpoint);
+      const right = candidate.slice(midpoint);
+      const offenders: VerifiableRelationship[] = [];
+      if (left.length > 0 && (await isBad(left))) {
+        offenders.push(...(await isolate(left)));
+      }
+      if (right.length > 0 && (await isBad(right))) {
+        offenders.push(...(await isolate(right)));
+      }
+      return offenders.length > 0 ? offenders : [...candidate];
     };
-  }
 
-  const isolate = async (
-    candidate: readonly VerifiableRelationship[],
-  ): Promise<VerifiableRelationship[]> => {
-    if (candidate.length <= 1) {
-      return [...candidate];
-    }
-    const midpoint = Math.floor(candidate.length / 2);
-    const left = candidate.slice(0, midpoint);
-    const right = candidate.slice(midpoint);
-    const offenders: VerifiableRelationship[] = [];
-    if (left.length > 0 && (await isBad(left))) {
-      offenders.push(...(await isolate(left)));
-    }
-    if (right.length > 0 && (await isBad(right))) {
-      offenders.push(...(await isolate(right)));
-    }
-    return offenders.length > 0 ? offenders : [...candidate];
-  };
-
-  const isolated = await isolate(relationships);
-  const definition = definitionWithoutRelationships(input.definition, isolated);
-  const droppedConstraints = isolated.filter((relationship) => relationship.kind === "constraint").length;
-  const droppedDimensions = isolated.filter((relationship) => relationship.kind === "dimension").length;
-  return {
-    definition,
-    diagnostics: isolated.map((relationship) => ({
+    const isolated = await isolate(relationships);
+    definition = definitionWithoutRelationships(input.definition, isolated);
+    const droppedConstraints = isolated.filter(
+      (relationship) => relationship.kind === "constraint",
+    ).length;
+    const droppedDimensions = isolated.filter(
+      (relationship) => relationship.kind === "dimension",
+    ).length;
+    diagnostics = isolated.map((relationship) => ({
       code: "onshape-sketch-solve-consistency-failed" as const,
       message: `Sketch relationship "${relationship.id}" (${relationship.relationshipKind}) was dropped: solve consistency moved seeded geometry beyond tolerance.`,
       relationshipKind: relationship.relationshipKind,
       operands: [relationship.id],
       reason: "solve-consistency",
-    })),
-    relationshipSummary: {
+    }));
+    relationshipSummary = {
       constraints: {
-        carried: Math.max(0, input.relationshipSummary.constraints.carried - droppedConstraints),
-        dropped: input.relationshipSummary.constraints.dropped + droppedConstraints,
+        carried: Math.max(
+          0,
+          input.relationshipSummary.constraints.carried - droppedConstraints,
+        ),
+        dropped:
+          input.relationshipSummary.constraints.dropped + droppedConstraints,
       },
       dimensions: {
-        carried: Math.max(0, input.relationshipSummary.dimensions.carried - droppedDimensions),
+        carried: Math.max(
+          0,
+          input.relationshipSummary.dimensions.carried - droppedDimensions,
+        ),
         dropped: input.relationshipSummary.dimensions.dropped + droppedDimensions,
       },
       derivations: input.relationshipSummary.derivations,
-    },
-  };
+    };
+  }
+
+  if (input.sourceSolveStatus === "WELL_DEFINED" && definition.points.length > 0) {
+    const perturbDistance = Math.max(1, tolerance * 100);
+    const hasResidualMobility = async (candidate: SketchDefinition) => {
+      const solveReady = definitionWithRelationships(
+        candidate,
+        verifiableRelationships(candidate),
+      );
+      const perturbed: SketchDefinition = {
+        ...solveReady,
+        points: solveReady.points.map((point) => ({
+          ...point,
+          position: [
+            point.position[0] + perturbDistance,
+            point.position[1] + perturbDistance * 0.75,
+          ],
+        })),
+      };
+      const response = await solveDefinition(perturbed);
+      return (
+        response.status.solveState !== "failed" &&
+        solvedDeviation(candidate, response.solvedSnapshot.solvedPoints) > tolerance
+      );
+    };
+
+    if (await hasResidualMobility(definition)) {
+      const preferredPoints = definition.points.filter(
+        (point) => !point.isConstruction,
+      );
+      const candidates = preferredPoints.length > 0 ? preferredPoints : definition.points;
+      const first = candidates[0]!;
+      const second = candidates
+        .slice(1)
+        .sort(
+          (left, right) =>
+            Math.hypot(
+              right.position[0] - first.position[0],
+              right.position[1] - first.position[1],
+            ) -
+            Math.hypot(
+              left.position[0] - first.position[0],
+              left.position[1] - first.position[1],
+            ),
+        )[0];
+      const groundingPoints = second ? [first, second] : [first];
+      let remainsMobile = true;
+      let groundedPointCount = 0;
+
+      for (const point of groundingPoints) {
+        groundedPointCount += 1;
+        const groundingConstraint: ConstraintDefinition = {
+          constraintId:
+            `constraint_${sanitizeId(input.sketchId)}_import_ground_${groundedPointCount}` as ConstraintId,
+          kind: "fixPoint",
+          label: `Imported source anchor ${groundedPointCount}`,
+          pointId: point.pointId,
+          position: point.position,
+        };
+        definition = {
+          ...definition,
+          constraintIds: [
+            ...definition.constraintIds,
+            groundingConstraint.constraintId,
+          ],
+          constraints: [...definition.constraints, groundingConstraint],
+        };
+        remainsMobile = await hasResidualMobility(definition);
+        if (!remainsMobile) {
+          break;
+        }
+      }
+
+      diagnostics.push({
+        code: remainsMobile
+          ? "onshape-sketch-residual-mobility"
+          : "onshape-sketch-residual-mobility-grounded",
+        message: remainsMobile
+          ? `Source sketch ${input.sketchId} was WELL_DEFINED, but translated geometry remained mobile after grounding ${groundedPointCount} suitable points.`
+          : `Source sketch ${input.sketchId} was WELL_DEFINED; ${groundedPointCount} suitable point anchor${groundedPointCount === 1 ? " was" : "s were"} carried to replace residual rigid motion from unavailable external references.`,
+        relationshipKind: "fixPoint",
+        operands: definition.constraints
+          .filter((constraint) => constraint.kind === "fixPoint")
+          .slice(-groundedPointCount)
+          .map((constraint) => constraint.constraintId),
+        reason: remainsMobile
+          ? "residual-mobility-after-grounding"
+          : "source-well-defined-residual-mobility-grounded",
+      });
+    }
+  }
+
+  return { definition, diagnostics, relationshipSummary };
 }
 
 /** Translate one Onshape solved sketch into a cadara sketch commit definition. */
@@ -1475,7 +1575,13 @@ export function translateSketch(
     authoringOperations: [],
   });
 
-  return { plane, definition, diagnostics, relationshipSummary };
+  return {
+    plane,
+    definition,
+    diagnostics,
+    relationshipSummary,
+    sourceSolveStatus: input.sourceSolveStatus,
+  };
 }
 
 // Referenced only to keep the exhaustive kind list discoverable for reviewers.

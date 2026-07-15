@@ -7,6 +7,7 @@ import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/adva
 import type {
   BodyId,
   ConstructionId,
+  DimensionId,
   EdgeId,
   FaceId,
   FeatureId,
@@ -301,6 +302,234 @@ function createRectangleSketch(
   );
 
   return { sketch, region };
+}
+
+function createDimensionedRectangleSketch(
+  sketchId: SketchId,
+  plane: SketchPlaneDefinition,
+  width: number,
+  height = 8,
+) {
+  const rectangle = createRectangleSketch(sketchId, plane, { width, height });
+  const dimensionId = `dimension_${sketchId}_width` as DimensionId;
+  const definition: SketchDefinition = {
+    ...rectangle.sketch.sketch.definition,
+    dimensionIds: [dimensionId],
+    dimensions: [
+      {
+        dimensionId,
+        kind: "distance",
+        label: "Width",
+        axis: "horizontal",
+        pointIds: [
+          pointId(`${sketchId}_bottom_left`),
+          pointId(`${sketchId}_bottom_right`),
+        ],
+        value: width,
+      },
+    ],
+  };
+
+  return {
+    ...rectangle,
+    sketch: {
+      ...rectangle.sketch,
+      sketch: {
+        ...rectangle.sketch.sketch,
+        definition,
+      },
+    },
+  };
+}
+
+function createTriangleTopologyEdit(
+  sketchId: SketchId,
+  plane: SketchPlaneDefinition,
+) {
+  const points = [
+    { id: pointId(`${sketchId}_bottom_left`), position: [0, 0] as const },
+    { id: pointId(`${sketchId}_top_right`), position: [10, 8] as const },
+    { id: pointId(`${sketchId}_top_left`), position: [0, 8] as const },
+  ];
+  const entities = [
+    {
+      kind: "lineSegment" as const,
+      entityId: entityId(`${sketchId}_diagonal`),
+      label: "diagonal",
+      target: {
+        kind: "sketchEntity" as const,
+        sketchId,
+        entityId: entityId(`${sketchId}_diagonal`),
+      },
+      isConstruction: false,
+      startPointId: points[0]!.id,
+      endPointId: points[1]!.id,
+    },
+    {
+      kind: "lineSegment" as const,
+      entityId: entityId(`${sketchId}_top`),
+      label: "top",
+      target: {
+        kind: "sketchEntity" as const,
+        sketchId,
+        entityId: entityId(`${sketchId}_top`),
+      },
+      isConstruction: false,
+      startPointId: points[1]!.id,
+      endPointId: points[2]!.id,
+    },
+    {
+      kind: "lineSegment" as const,
+      entityId: entityId(`${sketchId}_left`),
+      label: "left",
+      target: {
+        kind: "sketchEntity" as const,
+        sketchId,
+        entityId: entityId(`${sketchId}_left`),
+      },
+      isConstruction: false,
+      startPointId: points[2]!.id,
+      endPointId: points[0]!.id,
+    },
+  ];
+  const definition = createSketchDefinition(sketchId, points, entities);
+  const regionId = `region_${sketchId}_outer` as const;
+  const region: RegionRecord = {
+    ownerDocumentId: "doc_workspace",
+    ownerRevisionId: "rev_0001",
+    ownerFeatureId: null,
+    ownerSketchId: sketchId,
+    ownerBodyId: null,
+    regionId,
+    label: regionId,
+    target: { kind: "region", sketchId, regionId },
+    sourceSketch: { kind: "sketch", sketchId },
+    loops: [
+      {
+        loopId: `region_loop_${sketchId}_outer` as const,
+        role: "outer",
+        orientation: "counterClockwise",
+        segments: entities.map((entity, index) => ({
+          source: { kind: "entity" as const, entityId: entity.entityId },
+          startPointId: points[index]!.id,
+          endPointId: points[(index + 1) % points.length]!.id,
+        })),
+        boundaryPointIds: points.map((point) => point.id),
+        isClosed: true,
+      },
+    ],
+    isClosed: true,
+  };
+
+  return {
+    sketch: createSketchRecord(
+      sketchId,
+      plane,
+      definition,
+      entities.map((entity, index) => ({
+        kind: "lineSegment" as const,
+        entityId: entity.entityId,
+        startPosition: points[index]!.position,
+        endPosition: points[(index + 1) % points.length]!.position,
+      })),
+      [region],
+    ),
+    region,
+  };
+}
+
+async function rebuildAfterDimensionEdit(
+  consumer: "fillet" | "chamfer" | "shell",
+) {
+  const oc = await getDefaultOpenCascadeInstance();
+  const baseFeatureId = featureId(`dimension_${consumer}_base`);
+  const sketchId = `sketch_occ_dimension_${consumer}` as SketchId;
+  const bodyId = bodyIdForFeature(baseFeatureId);
+  const plane = createStandardPlaneDefinition("xy");
+  const original = createDimensionedRectangleSketch(sketchId, plane, 10);
+  const edited = createDimensionedRectangleSketch(sketchId, plane, 12);
+  const initial = createOccAuthoringState(oc, { sketches: [original.sketch] });
+  const baseFeature = {
+    featureId: baseFeatureId,
+    definition: createExtrudeDefinition(original.sketch, original.region, 6, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const afterBase = applyFeature(initial, baseFeature);
+  const baseBody = requireBody(afterBase, bodyId);
+  const selectedTarget =
+    consumer === "shell"
+      ? ({
+          kind: "face",
+          bodyId,
+          faceId: findPlanarFaceAtZ(oc, baseBody, 6),
+        } as const)
+      : ({
+          kind: "edge",
+          bodyId,
+          edgeId: findEdgeByEndpoints(
+            oc,
+            baseBody,
+            [10, 0, 0],
+            [10, 0, 6],
+          ),
+        } as const);
+  const consumerFeature =
+    selectedTarget.kind === "face"
+      ? ({
+          featureId: featureId("dimension_shell_consumer"),
+          definition: createShellJoinDefinition(bodyId, selectedTarget.faceId),
+          suppressed: false,
+        } satisfies OccAuthoringFeatureRecord)
+      : ({
+          featureId: featureId(`dimension_${consumer}_consumer`),
+          definition:
+            consumer === "fillet"
+              ? createFilletDefinition(bodyId, selectedTarget.edgeId)
+              : createChamferDefinition(bodyId, selectedTarget.edgeId),
+          suppressed: false,
+        } satisfies OccAuthoringFeatureRecord);
+  const afterConsumer = applyFeature(afterBase, consumerFeature);
+  const editedState = {
+    ...afterConsumer,
+    sketches: [edited.sketch],
+  };
+
+  expect(
+    original.sketch.sketch.definition.dimensions[0]?.dimensionId,
+    "A dimension edit must retain the authored dimension identity.",
+  ).toBe(edited.sketch.sketch.definition.dimensions[0]?.dimensionId);
+
+  const rebuiltPrefix = rebuildOccAuthoringState(editedState, [baseFeature]);
+  const editedBody = requireBody(rebuiltPrefix, bodyId);
+  const semanticTargetId =
+    selectedTarget.kind === "edge"
+      ? findEdgeByEndpoints(oc, editedBody, [12, 0, 0], [12, 0, 6])
+      : findPlanarFaceAtZ(oc, editedBody, 6);
+  expect(
+    semanticTargetId,
+    "The old durable id must follow the same moving semantic target, not another surviving subshape.",
+  ).toBe(
+    selectedTarget.kind === "edge"
+      ? selectedTarget.edgeId
+      : selectedTarget.faceId,
+  );
+  const resolution = resolveOccReference(
+    {
+      documentId: rebuiltPrefix.documentId,
+      revisionId: rebuiltPrefix.revisionId,
+      referenceState: rebuiltPrefix.referenceState,
+    },
+    selectedTarget,
+  );
+  expect(
+    resolution.resolution.invalidation,
+    "The edited prefix must expose the authored subtopology reference as live.",
+  ).toBe(null);
+
+  return rebuildOccAuthoringState(editedState, [baseFeature, consumerFeature]);
 }
 
 function createExtrudeDefinition(
@@ -1334,3 +1563,278 @@ test("proper naming should invalidate consumed Combine tool-body topology", asyn
     "Consumed Combine tool body must not remain live after add.",
   ).toBeFalsy();
 });
+
+
+test(
+  "durable naming qualification preserves a moving fillet edge through a dimension-only sketch edit",
+  async () => {
+    const rebuilt = await rebuildAfterDimensionEdit("fillet");
+    expect(rebuilt.features.at(-1)?.definition.kind).toBe("fillet");
+  },
+  15000,
+);
+
+test(
+  "durable naming qualification preserves a moving chamfer edge through a dimension-only sketch edit",
+  async () => {
+    const rebuilt = await rebuildAfterDimensionEdit("chamfer");
+    expect(rebuilt.features.at(-1)?.definition.kind).toBe("chamfer");
+  },
+  15000,
+);
+
+
+test.fails(
+  "durable naming qualification invalidates an edge deleted by an upstream sketch topology edit instead of silently remapping",
+  async () => {
+    const oc = await getDefaultOpenCascadeInstance();
+    const baseFeatureId = featureId("qualification_sketch_deleted_edge_base");
+    const sketchId = "sketch_occ_qualification_deleted_profile_edge" as SketchId;
+    const bodyId = bodyIdForFeature(baseFeatureId);
+    const plane = createStandardPlaneDefinition("xy");
+    const original = createDimensionedRectangleSketch(sketchId, plane, 10);
+    const edited = createTriangleTopologyEdit(sketchId, plane);
+    const initial = createOccAuthoringState(oc, { sketches: [original.sketch] });
+    const baseFeature = {
+      featureId: baseFeatureId,
+      definition: createExtrudeDefinition(original.sketch, original.region, 6, {
+        operation: "newBody",
+        booleanScope: { kind: "standalone" },
+      }),
+      suppressed: false,
+    } satisfies OccAuthoringFeatureRecord;
+    const afterBase = applyFeature(initial, baseFeature);
+    const deletedEdgeId = findEdgeByEndpoints(
+      oc,
+      requireBody(afterBase, bodyId),
+      [10, 0, 0],
+      [10, 0, 6],
+    );
+    const filletFeature = {
+      featureId: featureId("qualification_sketch_deleted_edge_fillet"),
+      definition: createFilletDefinition(bodyId, deletedEdgeId),
+      suppressed: false,
+    } satisfies OccAuthoringFeatureRecord;
+    const authored = applyFeature(afterBase, filletFeature);
+    const editedState = { ...authored, sketches: [edited.sketch] };
+    const rebuiltPrefix = rebuildOccAuthoringState(editedState, [baseFeature]);
+    const resolved = resolveOccReference(
+      {
+        documentId: rebuiltPrefix.documentId,
+        revisionId: rebuiltPrefix.revisionId,
+        referenceState: rebuiltPrefix.referenceState,
+      },
+      { kind: "edge", bodyId, edgeId: deletedEdgeId },
+    );
+
+    expect([
+      OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+      OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
+      OCC_REFERENCE_INVALIDATION_REASONS.missing,
+    ]).toContain(resolved.resolution.invalidation?.reason);
+    expect(resolved.diagnostics[0]?.detail?.kind).toBe("invalidReference");
+  },
+  15000,
+);
+
+test(
+  "durable naming qualification preserves a changed shell face through a dimension-only sketch edit",
+  async () => {
+    const rebuilt = await rebuildAfterDimensionEdit("shell");
+    expect(rebuilt.features.at(-1)?.definition.kind).toBe("shell");
+  },
+  15000,
+);
+
+test("durable naming qualification explicitly invalidates a deleted edge without remapping", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const baseFeatureId = featureId("qualification_deleted_edge_base");
+  const bodyId = bodyIdForFeature(baseFeatureId);
+  const plane = createStandardPlaneDefinition("xy");
+  const base = createRectangleSketch(
+    "sketch_occ_qualification_deleted_edge" as SketchId,
+    plane,
+    { width: 4, height: 3 },
+  );
+  const initial = createOccAuthoringState(oc, { sketches: [base.sketch] });
+  const afterBase = applyFeature(initial, {
+    featureId: baseFeatureId,
+    definition: createExtrudeDefinition(base.sketch, base.region, 4, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  });
+  const deletedEdgeId = findEdgeByEndpoints(
+    oc,
+    requireBody(afterBase, bodyId),
+    [4, 0, 0],
+    [4, 0, 4],
+  );
+  const afterCut = applyFeature(afterBase, {
+    featureId: featureId("qualification_deleted_edge_cut"),
+    definition: createExtrudeDefinition(base.sketch, base.region, 4, {
+      operation: "cut",
+      booleanScope: { kind: "targetBody", bodyId },
+    }),
+    suppressed: false,
+  });
+  const resolved = resolveOccReference(
+    {
+      documentId: afterCut.documentId,
+      revisionId: afterCut.revisionId,
+      referenceState: afterCut.referenceState,
+    },
+    { kind: "edge", bodyId, edgeId: deletedEdgeId },
+  );
+
+  expect(resolved.resolution.invalidation?.reason).toBe(
+    OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+  );
+  expect(resolved.diagnostics[0]?.detail?.kind).toBe("invalidReference");
+  expect(resolved.resolution.target).toEqual({
+    kind: "edge",
+    bodyId,
+    edgeId: deletedEdgeId,
+  });
+});
+
+test("durable naming qualification explicitly invalidates a split edge as ambiguous", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const targetFeatureId = featureId("qualification_split_edge_target");
+  const toolFeatureId = featureId("qualification_split_edge_tool");
+  const targetBodyId = bodyIdForFeature(targetFeatureId);
+  const toolBodyId = bodyIdForFeature(toolFeatureId);
+  const plane = createStandardPlaneDefinition("xy");
+  const target = createRectangleSketch(
+    "sketch_occ_qualification_split_edge_target" as SketchId,
+    plane,
+    { width: 6, height: 4 },
+  );
+  const tool = createRectangleSketch(
+    "sketch_occ_qualification_split_edge_tool" as SketchId,
+    plane,
+    { origin: [2, 0], width: 2, height: 4 },
+  );
+  const initial = createOccAuthoringState(oc, {
+    sketches: [target.sketch, tool.sketch],
+  });
+  const afterTarget = applyFeature(initial, {
+    featureId: targetFeatureId,
+    definition: createExtrudeDefinition(target.sketch, target.region, 4, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  });
+  const splitEdgeId = findEdgeByEndpoints(
+    oc,
+    requireBody(afterTarget, targetBodyId),
+    [0, 4, 4],
+    [6, 4, 4],
+  );
+  const afterTool = applyFeature(afterTarget, {
+    featureId: toolFeatureId,
+    definition: createExtrudeDefinition(tool.sketch, tool.region, 4, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  });
+  const afterSplit = applyFeature(afterTool, {
+    featureId: featureId("qualification_split_edge"),
+    definition: createSplitDefinition(targetBodyId, toolBodyId),
+    suppressed: false,
+  });
+  const resolved = resolveOccReference(
+    {
+      documentId: afterSplit.documentId,
+      revisionId: afterSplit.revisionId,
+      referenceState: afterSplit.referenceState,
+    },
+    { kind: "edge", bodyId: targetBodyId, edgeId: splitEdgeId },
+  );
+
+  expect(resolved.resolution.invalidation?.reason).toBe(
+    OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
+  );
+  expect(resolved.diagnostics[0]?.detail?.kind).toBe("invalidReference");
+  expect(resolved.resolution.target).toEqual({
+    kind: "edge",
+    bodyId: targetBodyId,
+    edgeId: splitEdgeId,
+  });
+});
+
+test("durable naming qualification survives legal independent feature reorder and suppression", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const targetFeatureId = featureId("qualification_reorder_target");
+  const independentFeatureId = featureId("qualification_reorder_independent");
+  const targetBodyId = bodyIdForFeature(targetFeatureId);
+  const plane = createStandardPlaneDefinition("xy");
+  const target = createRectangleSketch(
+    "sketch_occ_qualification_reorder_target" as SketchId,
+    plane,
+    { width: 10, height: 8 },
+  );
+  const independent = createRectangleSketch(
+    "sketch_occ_qualification_reorder_independent" as SketchId,
+    plane,
+    { origin: [20, 0], width: 2, height: 2 },
+  );
+  const initial = createOccAuthoringState(oc, {
+    sketches: [target.sketch, independent.sketch],
+  });
+  const targetFeature = {
+    featureId: targetFeatureId,
+    definition: createExtrudeDefinition(target.sketch, target.region, 6, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const independentFeature = {
+    featureId: independentFeatureId,
+    definition: createExtrudeDefinition(
+      independent.sketch,
+      independent.region,
+      3,
+      { operation: "newBody", booleanScope: { kind: "standalone" } },
+    ),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const afterTarget = applyFeature(initial, targetFeature);
+  const targetEdgeId = findEdgeByEndpoints(
+    oc,
+    requireBody(afterTarget, targetBodyId),
+    [10, 0, 0],
+    [10, 0, 6],
+  );
+  const afterIndependent = applyFeature(afterTarget, independentFeature);
+  const filletFeature = {
+    featureId: featureId("qualification_reorder_fillet"),
+    definition: createFilletDefinition(targetBodyId, targetEdgeId),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const authored = applyFeature(afterIndependent, filletFeature);
+  const reordered = rebuildOccAuthoringState(authored, [
+    independentFeature,
+    targetFeature,
+    filletFeature,
+  ]);
+  const suppressed = rebuildOccAuthoringState(reordered, [
+    { ...independentFeature, suppressed: true },
+    targetFeature,
+    filletFeature,
+  ]);
+  const reenabled = rebuildOccAuthoringState(suppressed, [
+    independentFeature,
+    targetFeature,
+    filletFeature,
+  ]);
+
+  expect(reordered.features.at(-1)?.definition.kind).toBe("fillet");
+  expect(suppressed.features.at(-1)?.definition.kind).toBe("fillet");
+  expect(reenabled.features.at(-1)?.definition.kind).toBe("fillet");
+  expect(requireBody(reenabled, targetBodyId)).toBeTruthy();
+}, 15000);

@@ -14,7 +14,7 @@ import type { ProjectedGeometryId } from "@/contracts/shared/ids";
 export const OCC_PHASE0_IMPLEMENTATION_NOTES = {
   contractGaps: {
     constructionSnapshots:
-      "ConstructionSnapshotRecord exposes plane identity and ownership, but not the explicit plane frame required to reconstruct a feature-created construction plane from public snapshot data alone. The OCC adapter must keep feature-authored plane geometry internally, must not change the public contract to smuggle extra data through Phase 0, and must not treat public construction snapshots as independently reconstructible.",
+      "ConstructionSnapshotRecord exposes each plane's explicit support and frame, so feature-created construction planes are reconstructible from public snapshot data. The OCC adapter also retains the same definition internally for in-history consumers.",
     constructionRevolveAxis:
       "RevolveAxisRef allows { kind: 'construction' }, but the public construction contract currently exposes only planes, not durable axis or line constructions. The OCC adapter must reject this variant explicitly instead of inventing hidden axis semantics.",
     projectedGeometryRegionLoops:

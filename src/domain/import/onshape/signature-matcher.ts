@@ -1,132 +1,257 @@
-/**
- * Signature matcher (probe-present path).
- *
- * Ranks a captured Onshape geometric signature against the per-step topology
- * signatures returned by the sandboxed history probe. This path is inert while
- * the probe is absent (v1 ships probe-less), but it is implemented and tested
- * against a mock probe so `add-kernel-topology-signatures` activates reference
- * resolution without provider changes.
- *
- * Policy: entity class + geometry type must match; among survivors, rank by
- * centroid and bounding-box proximity. A unique in-tolerance winner resolves;
- * multiple in-tolerance candidates are ambiguous; none is a miss. Never guess.
- */
-import type {
-  HistoryProbeTopologySignature,
-} from "@/contracts/import/capabilities";
+import type { HistoryProbeTopologySignature } from "@/contracts/import/capabilities";
 import type { OnshapeGeometricSignature } from "@/contracts/import/onshape-capture-bundle";
 import type { DurableRef } from "@/contracts/shared/references";
 
-export interface SignatureMatchTolerance {
-  /** Max centroid distance (document units) to consider a candidate. */
-  centroid: number;
-  /** Max per-axis bounding-box corner distance (document units). */
-  boundingBox: number;
+export interface TopologyMatchTolerance {
+  linear: number;
+  angularRadians: number;
+  relative: number;
+  ambiguityMargin: number;
 }
 
-export const DEFAULT_MATCH_TOLERANCE: SignatureMatchTolerance = {
-  centroid: 1e-4,
-  boundingBox: 1e-4,
+/** @deprecated Use TopologyMatchTolerance. */
+export type SignatureMatchTolerance = TopologyMatchTolerance;
+
+export const DEFAULT_MATCH_TOLERANCE: TopologyMatchTolerance = {
+  linear: 1e-4,
+  angularRadians: 1e-6,
+  relative: 1e-6,
+  ambiguityMargin: 1e-6,
 };
 
-export type SignatureMatchOutcome =
-  | { kind: "unique"; reference: DurableRef; score: number }
-  | {
-      kind: "ambiguous";
-      candidates: readonly { reference: DurableRef; score: number }[];
+export interface MatchCandidate {
+  reference: DurableRef;
+  score: number;
+  evidence: readonly string[];
+}
+
+export interface MatchRejection {
+  reference: DurableRef;
+  reasons: readonly string[];
+}
+
+export type TopologyMatchOutcome =
+  | { kind: "unique"; reference: DurableRef; score: number; evidence: readonly string[] }
+  | { kind: "ambiguous"; candidates: readonly MatchCandidate[] }
+  | { kind: "noMatch"; rejected: readonly MatchRejection[] };
+
+/** @deprecated Use TopologyMatchOutcome. */
+export type SignatureMatchOutcome = TopologyMatchOutcome;
+
+type Point = readonly [number, number, number];
+
+function point(value: unknown): Point | null {
+  return Array.isArray(value) && value.length === 3 && value.every((entry) => typeof entry === "number")
+    ? (value as unknown as Point)
+    : null;
+}
+
+function scalar(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function sub(a: Point, b: Point): Point {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function dot(a: Point, b: Point): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function cross(a: Point, b: Point): Point {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+function norm(value: Point): number {
+  return Math.sqrt(dot(value, value));
+}
+
+function distance(a: Point, b: Point): number {
+  return norm(sub(a, b));
+}
+
+function unorientedAngle(a: Point, b: Point): number {
+  const denominator = norm(a) * norm(b);
+  if (denominator === 0) return Number.POSITIVE_INFINITY;
+  return Math.acos(Math.min(1, Math.max(-1, Math.abs(dot(a, b) / denominator))));
+}
+
+function allowedLinear(a: number, b: number, tolerance: TopologyMatchTolerance): number {
+  return tolerance.linear + tolerance.relative * Math.max(Math.abs(a), Math.abs(b));
+}
+
+function geometryCompatible(captured: OnshapeGeometricSignature, probe: HistoryProbeTopologySignature): boolean {
+  const left = captured.geometryType.toLowerCase();
+  const right = probe.geometryType.toLowerCase();
+  if (left === "unknown" || right === "unknown") return true;
+  if (captured.entityClass === "body") return left === right || right === "solid";
+  return left === right;
+}
+
+function boxCenter(box: { low: Point; high: Point }): Point {
+  return [(box.low[0] + box.high[0]) / 2, (box.low[1] + box.high[1]) / 2, (box.low[2] + box.high[2]) / 2];
+}
+
+function boxExtent(box: { low: Point; high: Point }): Point {
+  return sub(box.high, box.low);
+}
+
+function addVectorGate(input: {
+  name: string;
+  captured: Point | null;
+  probe: Point | null;
+  tolerance: TopologyMatchTolerance;
+  evidence: string[];
+  reasons: string[];
+}): number {
+  if (!input.captured || !input.probe) return 0;
+  const delta = distance(input.captured, input.probe);
+  const limit = input.tolerance.linear + input.tolerance.relative * Math.max(norm(input.captured), norm(input.probe));
+  if (delta > limit) input.reasons.push(`${input.name}-out-of-tolerance`);
+  else input.evidence.push(input.name);
+  return delta;
+}
+
+function analyticEvidence(
+  captured: OnshapeGeometricSignature,
+  probe: HistoryProbeTopologySignature,
+  tolerance: TopologyMatchTolerance,
+  evidence: string[],
+  reasons: string[],
+): number {
+  const left = captured.definingData ?? {};
+  const right = probe.definingData ?? {};
+  const type = captured.geometryType.toLowerCase();
+  let score = 0;
+
+  const directionKeys = type === "plane" ? ["normal"] : type === "line" ? ["direction"] : ["axisDirection"];
+  for (const key of directionKeys) {
+    const a = point(left[key]);
+    const b = point(right[key]);
+    if (a && b) {
+      const angle = unorientedAngle(a, b);
+      if (angle > tolerance.angularRadians) reasons.push(`${key}-angle-out-of-tolerance`);
+      else evidence.push(`${key}-angle`);
+      score += angle;
     }
-  | { kind: "noMatch" };
+  }
 
-function classForGeometry(
-  entityClass: OnshapeGeometricSignature["entityClass"],
-): HistoryProbeTopologySignature["entityClass"] {
-  return entityClass;
+  if (type === "plane") {
+    const aOrigin = point(left.origin);
+    const bOrigin = point(right.origin);
+    const normal = point(left.normal) ?? point(right.normal);
+    // Legacy callers scaled bbox/centroid but not definingData. Ignore an internally
+    // inconsistent plane origin; normalized resolver inputs always take the hard gate.
+    const capturedPlaneCoherent = !aOrigin || !captured.centroid || !normal ||
+      Math.abs(dot(sub(aOrigin, captured.centroid), normal) / norm(normal)) <= tolerance.linear;
+    if (aOrigin && bOrigin && normal && norm(normal) > 0 && capturedPlaneCoherent) {
+      const offset = Math.abs(dot(sub(aOrigin, bOrigin), normal) / norm(normal));
+      if (offset > tolerance.linear) reasons.push("plane-offset-out-of-tolerance");
+      else evidence.push("plane-offset");
+      score += offset;
+    }
+  } else if (type === "line") {
+    const aOrigin = point(left.origin);
+    const bOrigin = point(right.origin);
+    const direction = point(left.direction) ?? point(right.direction);
+    if (aOrigin && bOrigin && direction && norm(direction) > 0) {
+      const supportDistance = norm(cross(sub(aOrigin, bOrigin), direction)) / norm(direction);
+      if (supportDistance > tolerance.linear) reasons.push("line-support-out-of-tolerance");
+      else evidence.push("line-support");
+      score += supportDistance;
+    }
+  } else {
+    const centerKey = type === "cylinder" || type === "cone" ? "axisOrigin" : "center";
+    score += addVectorGate({
+      name: centerKey,
+      captured: point(left[centerKey]),
+      probe: point(right[centerKey]),
+      tolerance,
+      evidence,
+      reasons,
+    });
+  }
+
+  const aRadius = scalar(left.radius);
+  const bRadius = scalar(right.radius);
+  if (aRadius !== null && bRadius !== null) {
+    const delta = Math.abs(aRadius - bRadius);
+    if (delta > allowedLinear(aRadius, bRadius, tolerance)) reasons.push("radius-out-of-tolerance");
+    else evidence.push("radius");
+    score += delta;
+  }
+  if (type === "point") {
+    score += addVectorGate({
+      name: "point",
+      captured: point(left.point) ?? captured.centroid ?? null,
+      probe: point(right.point) ?? probe.centroid ?? null,
+      tolerance,
+      evidence,
+      reasons,
+    });
+  }
+  return score;
 }
 
-function distance(
-  a: readonly [number, number, number],
-  b: readonly [number, number, number],
+function bboxEvidence(
+  captured: OnshapeGeometricSignature,
+  probe: HistoryProbeTopologySignature,
+  tolerance: TopologyMatchTolerance,
+  evidence: string[],
+  reasons: string[],
+  soft: boolean,
 ): number {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  const dz = a[2] - b[2];
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (!captured.boundingBox || !probe.boundingBox) return 0;
+  const centerDistance = distance(boxCenter(captured.boundingBox), boxCenter(probe.boundingBox));
+  const capturedExtent = boxExtent(captured.boundingBox);
+  const probeExtent = boxExtent(probe.boundingBox);
+  const extentDistance = distance(capturedExtent, probeExtent);
+  const scale = Math.max(norm(capturedExtent), norm(probeExtent));
+  const limit = tolerance.linear + tolerance.relative * scale;
+  if (!soft && (centerDistance > limit || extentDistance > limit)) reasons.push("bounding-box-out-of-tolerance");
+  else evidence.push(soft ? "bounding-box-soft" : "bounding-box");
+  return centerDistance + extentDistance;
 }
 
-function boundingBoxDistance(
-  a: { low: [number, number, number]; high: [number, number, number] },
-  b: { low: [number, number, number]; high: [number, number, number] },
-): number {
-  return Math.max(distance(a.low, b.low), distance(a.high, b.high));
-}
-
-/**
- * Match one captured signature against a set of probe signatures. Deterministic:
- * candidates are ranked by combined centroid + bbox score; ties within
- * tolerance are ambiguous rather than arbitrarily resolved.
- */
+/** Match one normalized captured signature. Every plausible tie remains ambiguous. */
 export function matchSignature(
   captured: OnshapeGeometricSignature,
   probeSignatures: readonly HistoryProbeTopologySignature[],
-  tolerance: SignatureMatchTolerance = DEFAULT_MATCH_TOLERANCE,
-): SignatureMatchOutcome {
-  const targetClass = classForGeometry(captured.entityClass);
-  const targetType = captured.geometryType.toUpperCase();
-
-  const candidates: { reference: DurableRef; score: number }[] = [];
+  tolerance: TopologyMatchTolerance = DEFAULT_MATCH_TOLERANCE,
+): TopologyMatchOutcome {
+  const candidates: MatchCandidate[] = [];
+  const rejected: MatchRejection[] = [];
 
   for (const probe of probeSignatures) {
-    if (probe.entityClass !== targetClass) {
-      continue;
-    }
-    if (probe.geometryType.toUpperCase() !== targetType) {
-      continue;
-    }
+    const reasons: string[] = [];
+    const evidence: string[] = [];
+    if (probe.entityClass !== captured.entityClass) reasons.push("entity-class-mismatch");
+    if (probe.reference.kind !== captured.entityClass) reasons.push("durable-ref-kind-mismatch");
+    if (!geometryCompatible(captured, probe)) reasons.push("geometry-family-mismatch");
 
-    let score = 0;
-    let withinTolerance = true;
-
-    if (captured.centroid && probe.centroid) {
-      const centroidDistance = distance(captured.centroid, probe.centroid);
-      if (centroidDistance > tolerance.centroid) {
-        withinTolerance = false;
-      }
-      score += centroidDistance;
+    let score = analyticEvidence(captured, probe, tolerance, evidence, reasons);
+    const analyticCircle = captured.geometryType.toLowerCase() === "circle" &&
+      scalar(captured.definingData?.radius) !== null && scalar(probe.definingData?.radius) !== null;
+    score += bboxEvidence(captured, probe, tolerance, evidence, reasons, analyticCircle);
+    if (captured.centroid && probe.centroid && !captured.boundingBox) {
+      score += addVectorGate({ name: "centroid", captured: captured.centroid, probe: probe.centroid, tolerance, evidence, reasons });
     }
+    if (evidence.length === 0) reasons.push("insufficient-geometric-evidence");
 
-    if (captured.boundingBox && probe.boundingBox) {
-      const bboxDistance = boundingBoxDistance(
-        captured.boundingBox,
-        probe.boundingBox,
-      );
-      if (bboxDistance > tolerance.boundingBox) {
-        withinTolerance = false;
-      }
-      score += bboxDistance;
-    }
-
-    if (withinTolerance) {
-      candidates.push({ reference: probe.reference, score });
-    }
-  }
-
-  if (candidates.length === 0) {
-    return { kind: "noMatch" };
+    if (reasons.length > 0) rejected.push({ reference: probe.reference, reasons });
+    else candidates.push({ reference: probe.reference, score, evidence });
   }
 
   candidates.sort((a, b) => a.score - b.score);
-
-  // A clear unique winner requires the runner-up to be outside tolerance
-  // margin; otherwise symmetric/dense geometry is genuinely ambiguous.
+  if (candidates.length === 0) return { kind: "noMatch", rejected };
   if (candidates.length === 1) {
-    return { kind: "unique", reference: candidates[0]!.reference, score: candidates[0]!.score };
+    const winner = candidates[0]!;
+    return { kind: "unique", reference: winner.reference, score: winner.score, evidence: winner.evidence };
   }
-
-  const [best, second] = candidates;
-  const margin = tolerance.centroid + tolerance.boundingBox;
-  if (best && second && second.score - best.score > margin) {
-    return { kind: "unique", reference: best.reference, score: best.score };
+  const best = candidates[0]!;
+  const second = candidates[1]!;
+  if (second.score - best.score > tolerance.ambiguityMargin) {
+    return { kind: "unique", reference: best.reference, score: best.score, evidence: best.evidence };
   }
-
   return { kind: "ambiguous", candidates };
 }

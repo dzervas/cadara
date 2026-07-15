@@ -19,9 +19,12 @@ import {
   cross,
   dot,
   magnitude,
+  mapSketchPointToWorld,
   normalize,
   scale,
   subtract,
+  toGpDir,
+  toGpPnt,
   toVec3FromGpPoint,
 } from "@/domain/modeling/occ/geometry";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
@@ -36,6 +39,30 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
 import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
+
+function buildAxisFromSketchLine(
+  context: OccFeatureExecutionContext,
+  sketchId: import("@/contracts/shared/ids").SketchId,
+  entityId: import("@/contracts/shared/ids").SketchEntityId,
+) {
+  const sketch = requireSketchSnapshot(context, sketchId);
+  const entity = sketch.sketch.solvedSnapshot.solvedEntities.find(
+    (candidate) => candidate.entityId === entityId,
+  );
+  if (!entity || entity.kind !== "lineSegment") {
+    throw new Error("Revolve sketch axis must reference a solved line segment.");
+  }
+  const start = mapSketchPointToWorld(sketch.plane, entity.startPosition);
+  const end = mapSketchPointToWorld(sketch.plane, entity.endPosition);
+  const delta = subtract(end, start);
+  if (magnitude(delta) <= context.modelingTolerance) {
+    throw new Error("Revolve sketch axis line must have non-zero length.");
+  }
+  return new context.oc.gp_Ax1_2(
+    toGpPnt(context.oc, start),
+    toGpDir(context.oc, normalize(delta)),
+  );
+}
 
 function buildRevolveFeatureShape(
   context: OccFeatureExecutionContext,
@@ -71,9 +98,12 @@ function buildRevolveFeatureShape(
     profileShape = face;
   }
 
-  const axisBody = requireBody(context, parameters.axis.bodyId);
-  const axisEdge = requireEdge(axisBody, parameters.axis.edgeId);
-  const axis = buildAxisFromLineEdge(context.oc, axisEdge);
+  const axis = parameters.axis.kind === "sketchEntity"
+    ? buildAxisFromSketchLine(context, parameters.axis.sketchId, parameters.axis.entityId)
+    : buildAxisFromLineEdge(
+        context.oc,
+        requireEdge(requireBody(context, parameters.axis.bodyId), parameters.axis.edgeId),
+      );
 
   const resolvedStartAngle = getAuthoredLiteralValue(parameters.startAngle) ?? 0;
   if (resolvedStartAngle !== 0) {

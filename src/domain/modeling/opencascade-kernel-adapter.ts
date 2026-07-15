@@ -2158,6 +2158,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
+      resolvedGeometryAssets: runtimeState.authoringState.resolvedGeometryAssets,
+      bakedShapeCache: runtimeState.authoringState.bakedShapeCache,
       embeddedBinaryAssets: runtimeState.authoringState.embeddedBinaryAssets,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
@@ -4786,6 +4788,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       previewFeature,
       ...runtimeState.authoringState.features.slice(previewInsertionIndex),
     ];
+
+    await this.preResolveBakedBodyAssets(
+      runtimeState.authoringState,
+      previewFeatures.map((feature) => feature.definition),
+    );
 
     try {
       const previewState = this.buildNextAuthoringState(runtimeState, {

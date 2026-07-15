@@ -55,6 +55,18 @@ test("derives supported topology signatures from native exact-B-rep payload fixt
   expect(
     boxResult.signatures.some(
       (signature) =>
+        signature.entityClass === "body" &&
+        signature.geometryType === "solid" &&
+        signature.reference.kind === "body" &&
+        signature.boundingBox != null &&
+        signature.centroid != null,
+    ),
+    "Body signatures should carry a BodyRef plus bbox center/extent evidence.",
+  ).toBeTruthy();
+
+  expect(
+    boxResult.signatures.some(
+      (signature) =>
         signature.entityClass === "face" &&
         signature.geometryType === "plane" &&
         signature.reference.kind === "face" &&

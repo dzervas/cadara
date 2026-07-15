@@ -28,6 +28,25 @@ import { fallbackFeatureTranslator, planeFeatureTranslator } from "@/domain/impo
 import { sketchFeatureTranslator } from "@/domain/import/onshape/sketch-feature-translator";
 import { variableFeatureTranslator } from "@/domain/import/onshape/variable-feature-translator";
 import type { PlannedExtrude } from "@/domain/import/onshape/extrude-planner";
+import type { PlannedRevolve } from "@/domain/import/onshape/wave-a-feature-translators";
+import {
+  loftFeatureTranslator,
+  revolveFeatureTranslator,
+  sweepFeatureTranslator,
+  thickenFeatureTranslator,
+} from "@/domain/import/onshape/wave-a-feature-translators";
+import {
+  booleanBodiesFeatureTranslator,
+  chamferFeatureTranslator,
+  deleteBodiesFeatureTranslator,
+  filletFeatureTranslator,
+  holeFeatureTranslator,
+  mirrorFeatureTranslator,
+  shellFeatureTranslator,
+  splitFeatureTranslator,
+  transformFeatureTranslator,
+  type PlannedBodyTopologyConsumer,
+} from "@/domain/import/onshape/wave-b-body-feature-translators";
 
 export const onshapeFeatureTranslatorRegistry = createOnshapeFeatureTranslatorRegistry({
   translators: [
@@ -35,6 +54,19 @@ export const onshapeFeatureTranslatorRegistry = createOnshapeFeatureTranslatorRe
     sketchFeatureTranslator,
     planeFeatureTranslator,
     extrudeFeatureTranslator,
+    revolveFeatureTranslator,
+    thickenFeatureTranslator,
+    sweepFeatureTranslator,
+    loftFeatureTranslator,
+    booleanBodiesFeatureTranslator,
+    deleteBodiesFeatureTranslator,
+    filletFeatureTranslator,
+    chamferFeatureTranslator,
+    shellFeatureTranslator,
+    holeFeatureTranslator,
+    mirrorFeatureTranslator,
+    transformFeatureTranslator,
+    splitFeatureTranslator,
   ],
   fallback: fallbackFeatureTranslator,
 });
@@ -61,7 +93,51 @@ export type PlanReasonCode =
   | "custom-feature"
   | "unsupported-feature"
   | "downstream-of-baked"
-  | "unreadable-feature";
+  | "unreadable-feature"
+  | "revolve-axis-unresolved"
+  | "thicken-requires-topology"
+  | "sweep-path-unresolved"
+  | "loft-profile-unresolved"
+  | "boolean-offset-unsupported"
+  | "boolean-operation-unsupported"
+  | "mirror-operation-unsupported"
+  | "mirror-plane-unresolved"
+  | "transform-copy-unsupported"
+  | "transform-rotation-unsupported"
+  | "transform-translation-unreadable"
+  | "transform-reference-unresolved"
+  | "transform-type-unsupported"
+  | "split-face-tool-unsupported"
+  | "split-one-side-unsupported"
+  | "topology-query-unreadable"
+  | "topology-history-evidence-missing"
+  | "topology-source-query-unresolved"
+  | "topology-source-kind-mismatch"
+  | "topology-reference-no-match"
+  | "topology-reference-ambiguous"
+  | "topology-durable-naming-unavailable"
+  | "topology-upstream-baked"
+  | "topology-apply-rematch-failed"
+  | "topology-bake-snapshot-missing"
+  | "fillet-radius-unreadable"
+  | "chamfer-method-unsupported"
+  | "chamfer-style-unsupported"
+  | "chamfer-direction-overrides-unsupported"
+  | "chamfer-width-unreadable"
+  | "shell-non-hollow-unsupported"
+  | "shell-hollow-without-openings"
+  | "shell-thickness-unreadable"
+  | "hole-style-unsupported"
+  | "hole-diameter-unreadable"
+  | "hole-executor-unavailable"
+  | "sheet-metal-unsupported"
+  | "surface-modeling-unsupported"
+  | "curve-modeling-unsupported"
+  | "primitive-unsupported"
+  | "annotation-meta-unsupported"
+  | "part-operation-unsupported"
+  | "pattern-unsupported"
+  | "tolerance-unsupported";
 
 export type PlannedTarget =
   | {
@@ -95,6 +171,12 @@ export interface FeaturePlan {
   suppressed: boolean;
   /** Present when a region-consuming solid feature planned parametric (task 3). */
   plannedExtrude?: PlannedExtrude;
+  /** Present when a sketch-region revolve with a local sketch-line axis plans parametric. */
+  plannedRevolve?: PlannedRevolve;
+  /** Body-only topology consumer declaration populated by Wave B translators. */
+  plannedBodyTopologyConsumer?: PlannedBodyTopologyConsumer;
+  /** Resolved deferred definition, rematched to live durable refs by the orchestrator. */
+  plannedAdvancedSolid?: import("@/contracts/import/actions").ImportDeferredFeatureDefinition;
   /** Onshape feature ids that this plan consumes directly. */
   inputFeatureIds: string[];
 }

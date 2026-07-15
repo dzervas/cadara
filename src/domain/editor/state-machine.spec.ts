@@ -3194,7 +3194,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-  async function testFeatureEditCommitRestoresNonTailCursor() {
+  async function testFeatureEditCommitRebuildsToTail() {
     const tailSnapshot = await createSketchExtrudeSketchRevolveSnapshot();
     const entryCursor = {
       kind: "sketch" as const,
@@ -3234,12 +3234,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     ).toBe(1);
     expect(
       cursorMoves.length,
-      "Feature edit commit should restore the captured entry cursor.",
+      "Feature edit commit should roll back for editing and rebuild through the history tail after acceptance.",
     ).toBe(2);
     expect(
-      cursorMoves[1]?.cursor.kind === "sketch" &&
-        cursorMoves[1].cursor.sketchId === "sketch_second",
-      "Feature edit commit should restore the captured non-tail cursor instead of the history tail.",
+      cursorMoves[1]?.cursor.kind === "feature" &&
+        cursorMoves[1].cursor.featureId === "feature_revolve-1",
+      "Feature edit commit should rebuild downstream history instead of leaving the document at the captured non-tail cursor.",
     ).toBeTruthy();
   }
 
@@ -5649,7 +5649,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   await testSketchEditEntryRollsBackBeforeOpenFromTail();
   await testTailSketchReopenSkipsRollbackAndOpensImmediately();
   await testFeatureEditCancelRestoresTailCursor();
-  await testFeatureEditCommitRestoresNonTailCursor();
+  await testFeatureEditCommitRebuildsToTail();
   await testSketchAbortRestoresTailCursor();
   await testFinishSketchAtCurrentSketchCursorSkipsRestore();
   await testRepositoryBackedFeatureEditCommitRefreshesBeforeRestore();

@@ -5,6 +5,7 @@ import {
   AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   BAKED_BODY_FEATURE_SCHEMA_VERSION,
   CONTRACT_VERSION,
+  PLANE_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
 import type { FeatureId, GeometryAssetId } from "@/contracts/shared/ids";
@@ -580,4 +581,142 @@ test("OCC adapter rebuilds a reopened bakedBody document from the persisted asse
       ],
     }),
   ]);
+});
+
+
+test("OCC preview pre-resolves a persistent baked asset when editing upstream history", async () => {
+  const assetId = "asset_preview_baked_mesh" as GeometryAssetId;
+  const bytes = makeBakedMeshBytes();
+  const hash = await hashGeometryAssetBytes(bytes);
+  const reference: BakedGeometryAssetReference = {
+    assetId,
+    format: "baked-mesh",
+    hash,
+    byteLength: bytes.byteLength,
+  };
+  const store = createMemoryGeometryAssetStore();
+  const putResult = await store.put({
+    asset: createGeometryAssetRecordFromReference(reference),
+    bytes,
+  });
+  expect(putResult.ok).toBe(true);
+
+  const persistentStoreAvailable = true;
+  let resolverCalls = 0;
+  const document: AuthoredModelDocument = {
+    contractVersion: CONTRACT_VERSION,
+    schemaVersion: AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
+    documentId: OCC_KERNEL_DOCUMENT_ID,
+    name: "Preview baked document",
+    revisionId: "rev_0002" as never,
+    settings: OCC_KERNEL_SETTINGS,
+    variables: [],
+    sketches: [],
+    features: [
+      {
+        featureId: "feature_preview_baked" as FeatureId,
+        label: "Persistent baked body",
+        suppressed: false,
+        definition: bakedBodyDefinition(assetId, hash, bytes.byteLength),
+      },
+    ],
+    featureOrder: ["feature_preview_baked" as FeatureId],
+    historyOrder: [
+      { kind: "feature", featureId: "feature_preview_baked" as FeatureId },
+    ],
+    cursor: { kind: "feature", featureId: "feature_preview_baked" as FeatureId },
+    bodyLabels: [],
+    assets: {
+      schemaVersion: "geometry-asset-manifest/v1alpha1",
+      records: [createGeometryAssetRecordFromReference(reference)],
+    },
+    embeddedBinaryAssets: [],
+  };
+  const adapter = new OpenCascadeKernelAdapter({
+    solverAdapter: new SketchConstraintSolverAdapter({
+      documentId: OCC_KERNEL_DOCUMENT_ID,
+      revisionId: document.revisionId,
+    }),
+    getOpenCascadeInstance: getBrowserOpenCascadeInstance,
+    assetResolver: {
+      async resolveGeometryAsset(requestedReference) {
+        resolverCalls += 1;
+        if (!persistentStoreAvailable) return null;
+        const stored = await store.get(
+          createGeometryAssetRecordFromReference(requestedReference),
+        );
+        return stored.ok
+          ? { bytes: stored.bytes.slice(), format: requestedReference.format }
+          : null;
+      },
+    },
+  });
+
+  await adapter.restoreAuthoredModelDocument(document);
+  const rolledBack = await adapter.setFeatureCursor({
+    contractVersion: CONTRACT_VERSION,
+    documentId: OCC_KERNEL_DOCUMENT_ID,
+    baseRevisionId: document.revisionId,
+    cursor: { kind: "empty" },
+  });
+  const runtimeState = (
+    adapter as unknown as {
+      runtimeState: {
+        authoringState: {
+          resolvedGeometryAssets: Map<GeometryAssetId, unknown>;
+        };
+      };
+    }
+  ).runtimeState;
+  runtimeState.authoringState.resolvedGeometryAssets.clear();
+
+  const preview = await adapter.evaluatePreview({
+    contractVersion: CONTRACT_VERSION,
+    documentId: OCC_KERNEL_DOCUMENT_ID,
+    baseRevisionId: rolledBack.revisionId,
+    previewId: "preview_upstream_of_baked",
+    definition: {
+      kind: "plane",
+      featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        mode: "explicitFrame",
+        frame: {
+          origin: [0, 0, 5],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 1, 0],
+          normal: [0, 0, 1],
+          linearUnit: "documentLength",
+          handedness: "rightHanded",
+        },
+      },
+    },
+  });
+
+  expect(
+    preview.diagnostics.some((diagnostic) =>
+      diagnostic.message.includes(`asset ${assetId} is unavailable`),
+    ),
+  ).toBe(false);
+  expect(resolverCalls).toBeGreaterThanOrEqual(2);
+
+  const rolledToEnd = await adapter.setFeatureCursor({
+    contractVersion: CONTRACT_VERSION,
+    documentId: OCC_KERNEL_DOCUMENT_ID,
+    baseRevisionId: rolledBack.revisionId,
+    cursor: {
+      kind: "feature",
+      featureId: "feature_preview_baked" as FeatureId,
+    },
+  });
+  expect(rolledToEnd.revisionState.kind).toBe("accepted");
+  const snapshot = await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: OCC_KERNEL_DOCUMENT_ID,
+  });
+  expect(
+    snapshot.snapshot.document.bodies.some(
+      (body) => body.bodyId === "body_feature_preview_baked",
+    ),
+    "After an upstream preview, rolling history forward should retain the baked body loaded from the persistent asset store.",
+  ).toBe(true);
 });

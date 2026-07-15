@@ -170,27 +170,12 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
   function testImplementationNotesCapturePhase0RedLines() {
     expect(
       OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
-        "not the explicit plane frame required",
-      ),
-      "Phase 0 notes must record that construction snapshots lack reconstructible plane geometry.",
-    ).toBeTruthy();
-    expect(
-      OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
-        "must keep feature-authored plane geometry internally",
-      ),
-      "Phase 0 notes must freeze the requirement to keep construction-plane geometry internally in the OCC adapter.",
-    ).toBeTruthy();
-    expect(
-      OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
-        "must not change the public contract",
-      ),
-      "Phase 0 notes must freeze the requirement not to change the contract to work around the construction-plane gap.",
-    ).toBeTruthy();
-    expect(
-      OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
-        "must not treat public construction snapshots as independently reconstructible",
-      ),
-      "Phase 0 notes must state that public construction snapshots alone are insufficient reconstruction inputs.",
+        "explicit support and frame",
+      ) &&
+        OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots.includes(
+          "reconstructible from public snapshot data",
+        ),
+      "Implementation notes must record that construction snapshots now carry reconstructible plane frames.",
     ).toBeTruthy();
     expect(
       OCC_PHASE0_IMPLEMENTATION_NOTES.solverBoundary.includes(

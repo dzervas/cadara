@@ -96,6 +96,15 @@ function deriveBodySignatures(
   const bodyId = body.bodyKey as BodyId;
   const topology = body.topology;
   const signatures: HistoryProbeTopologySignature[] = [];
+  const bodyPoints = topology.faces.flatMap((face) => face.meshVertices);
+  const bodyBox = boundingBox(bodyPoints);
+  signatures.push({
+    entityClass: "body",
+    geometryType: "solid",
+    boundingBox: bodyBox,
+    centroid: bodyBox ? centerOfBoundingBox(bodyBox) : undefined,
+    reference: { kind: "body", bodyId },
+  });
 
   for (const face of topology.faces) {
     const bbox = boundingBox(face.meshVertices);

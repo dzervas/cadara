@@ -367,7 +367,11 @@ export function assertShellFaceRef(
 export function assertRevolveAxisRef(value: unknown): RevolveAxisRef {
   const target = assertPrimitiveRef(value);
 
-  if (target.kind !== "edge" && target.kind !== "construction") {
+  if (
+    target.kind !== "edge" &&
+    target.kind !== "construction" &&
+    target.kind !== "sketchEntity"
+  ) {
     throw new Error("Invalid revolve axis reference payload.");
   }
 

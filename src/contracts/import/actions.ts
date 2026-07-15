@@ -6,8 +6,14 @@ import type {
   ExtrudeProfileRef,
   FeatureBooleanScope,
   FeatureDefinition,
-  } from "@/contracts/modeling/schema";
-  import type { BodyId } from "@/contracts/shared/ids";
+  FilletFeatureParameters,
+  PlaneFeatureParameters,
+  RevolveAxisRef,
+  RevolveFeatureParameters,
+  ShellFeatureParameters,
+} from "@/contracts/modeling/schema";
+import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
+import type { BodyId, SketchId } from "@/contracts/shared/ids";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
 import type {
   SketchPlaneDefinition,
@@ -15,6 +21,8 @@ import type {
 } from "@/contracts/shared/sketch-plane";
 import type { ImportBinding } from "@/contracts/import/binding";
 import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
+import type { OnshapeGeometricSignature } from "@/contracts/import/onshape-capture-bundle";
+import type { DurableRef } from "@/contracts/shared/references";
 
 export type ImportPreparedActionKind =
   | "createFeature"
@@ -46,9 +54,74 @@ export type ImportDeferredValue =
   | ({ kind: "bodyOf" } & ImportDeferredActionOutputRef)
   | ({ kind: "constructionOf" } & ImportDeferredActionOutputRef);
 
-export type ImportDeferredExtrudeProfileRef =
+/** Selector rematched against live topology immediately before its consumer applies. */
+export interface ImportDeferredTopologyRef {
+  kind: "topologyOf";
+  expectedKind: "body" | "face" | "edge" | "vertex";
+  capturedSignature: OnshapeGeometricSignature;
+  tolerance: {
+    linear: number;
+    angularRadians: number;
+    relative: number;
+    ambiguityMargin: number;
+  };
+  source: {
+    consumerFeatureId: string;
+    parameterId: string;
+    deterministicId: string;
+  };
+}
+
+export type ImportDeferredDurableRef = DurableRef | ImportDeferredTopologyRef;
+
+export interface ImportDeferredFilletFeatureParameters
+  extends Omit<FilletFeatureParameters, "edgeTargets"> {
+  edgeTargets: readonly (
+    | FilletFeatureParameters["edgeTargets"][number]
+    | ImportDeferredTopologyRef
+  )[];
+}
+
+export interface ImportDeferredShellFeatureParameters
+  extends Omit<ShellFeatureParameters, "bodyTarget" | "faceTargets"> {
+  bodyTarget: ShellFeatureParameters["bodyTarget"] | ImportDeferredTopologyRef;
+  faceTargets: readonly (
+    | ShellFeatureParameters["faceTargets"][number]
+    | ImportDeferredTopologyRef
+  )[];
+}
+
+export type ImportDeferredAdvancedSolidFeatureDefinition =
+  AdvancedSolidFeatureDefinition extends infer Definition
+    ? Definition extends AdvancedSolidFeatureDefinition
+      ? Omit<Definition, "parameters"> & {
+          parameters: Omit<Definition["parameters"], "participants"> & {
+            participants: readonly {
+              role: Definition["parameters"]["participants"][number]["role"];
+              targets: readonly ImportDeferredDurableRef[];
+            }[];
+          };
+        }
+      : never
+    : never;
+
+export type ImportDeferredPlaneFeatureParameters =
+  | Exclude<PlaneFeatureParameters, { mode: "coplanar" }>
+  | {
+      mode: "coplanar";
+      reference: {
+        target:
+          | Extract<PlaneFeatureParameters, { mode: "coplanar" }>["reference"]["target"]
+          | ImportDeferredTopologyRef;
+      };
+    };
+
+export type ImportDeferredProfileRef =
   | ExtrudeProfileRef
   | Extract<ImportDeferredValue, { kind: "regionOf" }>;
+
+/** @deprecated Prefer the feature-agnostic ImportDeferredProfileRef. */
+export type ImportDeferredExtrudeProfileRef = ImportDeferredProfileRef;
 
 export type ImportDeferredFeatureBooleanScope =
   | FeatureBooleanScope
@@ -66,6 +139,20 @@ export interface ImportDeferredExtrudeFeatureParameters
   booleanScope: ImportDeferredFeatureBooleanScope;
 }
 
+export type ImportDeferredRevolveAxisRef =
+  | Exclude<RevolveAxisRef, { kind: "sketchEntity" }>
+  | {
+      kind: "sketchEntity";
+      sketchId: SketchId | Extract<ImportDeferredValue, { kind: "sketchIdOf" }>;
+      entityId: Extract<RevolveAxisRef, { kind: "sketchEntity" }>["entityId"];
+    };
+
+export interface ImportDeferredRevolveFeatureParameters
+  extends Omit<RevolveFeatureParameters, "profiles" | "axis"> {
+  profiles: readonly [ImportDeferredProfileRef, ...ImportDeferredProfileRef[]];
+  axis: ImportDeferredRevolveAxisRef;
+}
+
 /** Deferred replacement scope for a baked checkpoint emitted inside one import. */
 export type ImportDeferredBakedBodyReplacement = {
   kind: "replaceBodyOutputs";
@@ -78,27 +165,55 @@ export type ImportDeferredBakedBodyFeatureParameters = Omit<
 > & { replacement: ImportDeferredBakedBodyReplacement };
 
 export type ImportDeferredFeatureDefinition =
-  | Exclude<FeatureDefinition, { kind: "extrude" | "bakedBody" }>
+  | Exclude<
+      FeatureDefinition,
+      | { kind: "extrude" | "revolve" | "bakedBody" | "fillet" | "shell" | "plane" }
+      | AdvancedSolidFeatureDefinition
+    >
   | {
       kind: "extrude";
-      featureTypeVersion: Extract<
-        FeatureDefinition,
-        { kind: "extrude" }
-      >["featureTypeVersion"];
+      featureTypeVersion: Extract<FeatureDefinition, { kind: "extrude" }>["featureTypeVersion"];
       parameters: ImportDeferredExtrudeFeatureParameters;
     }
   | {
+      kind: "revolve";
+      featureTypeVersion: Extract<FeatureDefinition, { kind: "revolve" }>["featureTypeVersion"];
+      parameters: ImportDeferredRevolveFeatureParameters;
+    }
+  | {
+      kind: "fillet";
+      featureTypeVersion: Extract<FeatureDefinition, { kind: "fillet" }>["featureTypeVersion"];
+      parameters: ImportDeferredFilletFeatureParameters;
+    }
+  | {
+      kind: "shell";
+      featureTypeVersion: Extract<FeatureDefinition, { kind: "shell" }>["featureTypeVersion"];
+      parameters: ImportDeferredShellFeatureParameters;
+    }
+  | {
+      kind: "plane";
+      featureTypeVersion: Extract<FeatureDefinition, { kind: "plane" }>["featureTypeVersion"];
+      parameters: ImportDeferredPlaneFeatureParameters;
+    }
+  | ImportDeferredAdvancedSolidFeatureDefinition
+  | {
       kind: "bakedBody";
-      featureTypeVersion: Extract<
-        FeatureDefinition,
-        { kind: "bakedBody" }
-      >["featureTypeVersion"];
+      featureTypeVersion: Extract<FeatureDefinition, { kind: "bakedBody" }>["featureTypeVersion"];
       parameters: ImportDeferredBakedBodyFeatureParameters;
     };
+
+export type ImportTopologyFallbackCreateFeatureRequest = Omit<
+  CreateFeatureRequest,
+  "definition"
+> & {
+  definition: Extract<ImportDeferredFeatureDefinition, { kind: "bakedBody" }>;
+};
 
 export interface ImportCreateFeatureRequest
   extends Omit<CreateFeatureRequest, "definition"> {
   definition: ImportDeferredFeatureDefinition;
+  /** Post-feature v2 checkpoint used only if live topology rematching fails. */
+  topologyFallback?: ImportTopologyFallbackCreateFeatureRequest;
 }
 
 /**
@@ -107,6 +222,7 @@ export interface ImportCreateFeatureRequest
  */
 export type ImportDeferredSketchPlaneSupportRef =
   | SketchPlaneSupportRef
+  | ImportDeferredTopologyRef
   | Extract<ImportDeferredValue, { kind: "constructionOf" }>;
 
 export interface ImportDeferredSketchPlaneDefinition
@@ -122,9 +238,18 @@ export interface ImportCommitSketchRequest
 export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
   regionOf: ["createFeatures[].definition.parameters.profiles[]"],
   bodyOf: ["createFeatures[].definition.parameters.booleanScope.bodyId"],
-  sketchIdOf: [],
+  sketchIdOf: ["createFeatures[].definition.parameters.axis.sketchId"],
   constructionOf: ["commitSketches[].plane.support"],
 } as const satisfies Record<ImportDeferredValue["kind"], readonly string[]>;
+
+export const IMPORT_DEFERRED_TOPOLOGY_BLESSED_POSITIONS = [
+  "createFeatures[].definition.parameters.edgeTargets[]",
+  "createFeatures[].definition.parameters.bodyTarget",
+  "createFeatures[].definition.parameters.faceTargets[]",
+  "createFeatures[].definition.parameters.participants[].targets[]",
+  "createFeatures[].definition.parameters.reference.target",
+  "commitSketches[].plane.support",
+] as const;
 
 /**
  * The orchestrator applies these through existing adapter methods.
