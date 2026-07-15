@@ -115,6 +115,7 @@ export function executeCombineFeature(
   const targetBodies = getCombineBodyTargets(definition, "targetBody");
   const toolBodies = getCombineBodyTargets(definition, "toolBody");
   const operation = getCombineBooleanOperation(definition);
+  const keepTools = definition.parameters.options?.keepTools === true;
   const targetBodyIds = targetBodies.map((target) => target.bodyId);
   const toolBodyIds = toolBodies.map((target) => target.bodyId);
   requireUniqueTargetBodies(targetBodyIds);
@@ -201,16 +202,14 @@ export function executeCombineFeature(
       replacementResult.historyInvalidations,
     );
 
-    for (const bodyId of [...remainingTargetBodyIds, ...toolBodyIds]) {
+    for (const bodyId of [
+      ...remainingTargetBodyIds,
+      ...(keepTools ? [] : toolBodyIds),
+    ]) {
       const body = requireBody(context, bodyId);
       const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId);
-      if (index >= 0) {
-        nextBodies.splice(index, 1);
-      }
-      mergeHistoryInvalidations(
-        historyInvalidations,
-        createDeletedBodyInvalidations(body),
-      );
+      if (index >= 0) nextBodies.splice(index, 1);
+      mergeHistoryInvalidations(historyInvalidations, createDeletedBodyInvalidations(body));
     }
 
     for (const replacement of replacementResult.replacements) {
@@ -289,18 +288,16 @@ export function executeCombineFeature(
       }
     }
 
-    for (const toolBodyId of toolBodyIds) {
-      const toolBody = requireBody(context, toolBodyId);
-      const index = nextBodies.findIndex(
-        (entry) => entry.bodyId === toolBodyId,
-      );
-      if (index >= 0) {
-        nextBodies.splice(index, 1);
+    if (!keepTools) {
+      for (const toolBodyId of toolBodyIds) {
+        const toolBody = requireBody(context, toolBodyId);
+        const index = nextBodies.findIndex((entry) => entry.bodyId === toolBodyId);
+        if (index >= 0) nextBodies.splice(index, 1);
+        mergeHistoryInvalidations(
+          historyInvalidations,
+          createDeletedBodyInvalidations(toolBody),
+        );
       }
-      mergeHistoryInvalidations(
-        historyInvalidations,
-        createDeletedBodyInvalidations(toolBody),
-      );
     }
   }
 
@@ -371,6 +368,7 @@ export function executeSplitFeature(
 
   const targetBodyRef = getSplitTargetBody(definition);
   const toolBodyRef = getSplitToolBody(definition);
+  const keepTool = definition.parameters.options?.keepTools !== false;
 
   if (targetBodyRef.bodyId === toolBodyRef.bodyId) {
     throw new Error(
@@ -410,7 +408,11 @@ export function executeSplitFeature(
       "split",
     );
     const nextBodies = context.bodies
-      .filter((body) => body.bodyId !== targetBody.bodyId)
+      .filter(
+        (body) =>
+          body.bodyId !== targetBody.bodyId &&
+          (keepTool || body.bodyId !== toolBody.bodyId),
+      )
       .concat(splitBodies);
     const historyInvalidations = createDeletedBodyInvalidations(targetBody);
     mergeHistoryInvalidations(
@@ -459,7 +461,11 @@ export function executeSplitFeature(
     "tool-side",
   );
   const nextBodies = context.bodies
-    .filter((body) => body.bodyId !== targetBody.bodyId)
+    .filter(
+      (body) =>
+        body.bodyId !== targetBody.bodyId &&
+        (keepTool || body.bodyId !== toolBody.bodyId),
+    )
     .concat([...remainderBodies, ...toolSideBodies]);
   const historyInvalidations = createDeletedBodyInvalidations(targetBody);
 

@@ -1,8 +1,10 @@
 import type {
   ImportCapabilities,
   ImportHistoryProbeCapabilities,
+  HistoryProbeTopologySignature,
 } from "@/contracts/import/capabilities";
 import type {
+  ImportDeferredTopologyRef,
   ImportDeferredValue,
   ImportPreparedActions,
   ImportPreparedActionRef,
@@ -46,6 +48,9 @@ import {
   type RegionSelectionSketch,
 } from "@/domain/import/region-containment";
 import { describeUnknownError } from "@/contracts/errors";
+import { matchSignature } from "@/domain/import/onshape/signature-matcher";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+import type { DurableRef } from "@/contracts/shared/references";
 
 export async function resolveLocalFileImportSource(
   file: File,
@@ -304,6 +309,25 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
   );
 }
 
+function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologyRef {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { kind?: unknown }).kind === "topologyOf",
+  );
+}
+
+class TopologyApplyRematchError extends Error {
+  readonly selector: ImportDeferredTopologyRef;
+
+  constructor(selector: ImportDeferredTopologyRef) {
+    super(
+      `Live topology rematch failed for ${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}.`,
+    );
+    this.selector = selector;
+  }
+}
+
 function getSketchRegions(
   sketch: ImportRegionSketchSource,
 ): readonly RegionRecord[] {
@@ -372,12 +396,19 @@ function toSelectionSketch(
 
 export class ImportDeferredMaterializer {
   private readonly input: {
-    modelingService: Pick<ModelingService, "getCurrentDocumentSnapshot">;
+    modelingService: Pick<
+      ModelingService,
+      "getCurrentDocumentSnapshot" | "buildNativeExactBrepPayload"
+    >;
     outputRecords: Map<string, ImportActionOutputRecord>;
   };
+  private topologyFallbackSource: ImportDeferredTopologyRef["source"] | null = null;
 
   constructor(input: {
-    modelingService: Pick<ModelingService, "getCurrentDocumentSnapshot">;
+    modelingService: Pick<
+      ModelingService,
+      "getCurrentDocumentSnapshot" | "buildNativeExactBrepPayload"
+    >;
     outputRecords: Map<string, ImportActionOutputRecord>;
   }) {
     this.input = input;
@@ -402,6 +433,74 @@ export class ImportDeferredMaterializer {
     const key = orderedOutputKey(orderedPosition);
     const existing = this.input.outputRecords.get(key) ?? {};
     this.input.outputRecords.set(key, { ...existing, constructionIds });
+  }
+
+  takeTopologyFallbackSource() {
+    const source = this.topologyFallbackSource;
+    this.topologyFallbackSource = null;
+    return source;
+  }
+
+  async resolveDeferredTopologyRef(
+    selector: ImportDeferredTopologyRef,
+  ): Promise<DurableRef> {
+    const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+    const signatures: HistoryProbeTopologySignature[] = [];
+    for (const body of snapshot.document.bodies) {
+      const payload = await this.input.modelingService.buildNativeExactBrepPayload({
+        baseRevisionId: snapshot.document.revisionId,
+        target: { kind: "body", bodyId: body.bodyId },
+      });
+      if (payload.kind !== "nativeTopologyPayload") continue;
+      const derived = deriveKernelTopologySignaturesFromExactBrepPayload(payload.payload);
+      if (derived.status === "available") signatures.push(...derived.signatures);
+    }
+    if (selector.expectedKind === "body") {
+      for (const body of snapshot.document.bodies) {
+        if (signatures.some((signature) => signature.reference.kind === "body" && signature.reference.bodyId === body.bodyId)) continue;
+        const points = snapshot.document.render.records.flatMap((record) =>
+          record.ownerBodyId === body.bodyId && record.geometry.kind === "mesh"
+            ? record.geometry.vertexPositions
+            : [],
+        );
+        if (points.length === 0) {
+          signatures.push({
+            entityClass: "body",
+            geometryType: "solid",
+            reference: { kind: "body", bodyId: body.bodyId },
+          });
+          continue;
+        }
+        const low: [number, number, number] = [Infinity, Infinity, Infinity];
+        const high: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+        for (const point of points) {
+          for (const axis of [0, 1, 2] as const) {
+            low[axis] = Math.min(low[axis], point[axis]);
+            high[axis] = Math.max(high[axis], point[axis]);
+          }
+        }
+        signatures.push({
+          entityClass: "body",
+          geometryType: "solid",
+          boundingBox: { low, high },
+          centroid: [
+            (low[0] + high[0]) / 2,
+            (low[1] + high[1]) / 2,
+            (low[2] + high[2]) / 2,
+          ],
+          reference: { kind: "body", bodyId: body.bodyId },
+        });
+      }
+    }
+    const match = matchSignature(
+      selector.capturedSignature,
+      signatures,
+      selector.tolerance,
+    );
+    if (match.kind !== "unique" || match.reference.kind !== selector.expectedKind) {
+      throw new TopologyApplyRematchError(selector);
+    }
+    return match.reference;
   }
 
   async resolveDeferredValue(
@@ -483,6 +582,28 @@ export class ImportDeferredMaterializer {
       : never,
     consumer: ImportPreparedActionRef,
   ): Promise<CreateFeatureRequest> {
+    try {
+      return await this.materializeFeatureRequestUnchecked(request, consumer);
+    } catch (error) {
+      if (!(error instanceof TopologyApplyRematchError) || !request.topologyFallback) {
+        throw error;
+      }
+      this.topologyFallbackSource = error.selector.source;
+      return this.materializeFeatureRequestUnchecked(
+        request.topologyFallback,
+        consumer,
+      );
+    }
+  }
+
+  private async materializeFeatureRequestUnchecked(
+    request: ImportPreparedActions["createFeatures"] extends
+      | (infer Entry)[]
+      | undefined
+      ? Entry
+      : never,
+    consumer: ImportPreparedActionRef,
+  ): Promise<CreateFeatureRequest> {
     if (request.definition?.kind === "bakedBody") {
       const replacement = request.definition.parameters.replacement;
       const bodyIds = Array.from(
@@ -510,7 +631,106 @@ export class ImportDeferredMaterializer {
       };
     }
 
-    if (!request.definition || request.definition.kind !== "extrude") {
+    if (!request.definition) {
+      return request as CreateFeatureRequest;
+    }
+
+    if (request.definition.kind === "fillet") {
+      const edgeTargets = await Promise.all(
+        request.definition.parameters.edgeTargets.map((target) =>
+          isDeferredTopologyRef(target)
+            ? this.resolveDeferredTopologyRef(target)
+            : target,
+        ),
+      );
+      return {
+        ...request,
+        topologyFallback: undefined,
+        definition: {
+          ...request.definition,
+          parameters: { ...request.definition.parameters, edgeTargets },
+        },
+      } as CreateFeatureRequest;
+    }
+
+    if (request.definition.kind === "shell") {
+      const parameters = request.definition.parameters;
+      const bodyTarget = isDeferredTopologyRef(parameters.bodyTarget)
+        ? await this.resolveDeferredTopologyRef(parameters.bodyTarget)
+        : parameters.bodyTarget;
+      const faceTargets = await Promise.all(
+        parameters.faceTargets.map((target) =>
+          isDeferredTopologyRef(target)
+            ? this.resolveDeferredTopologyRef(target)
+            : target,
+        ),
+      );
+      return {
+        ...request,
+        topologyFallback: undefined,
+        definition: {
+          ...request.definition,
+          parameters: { ...parameters, bodyTarget, faceTargets },
+        },
+      } as CreateFeatureRequest;
+    }
+
+    if (
+      request.definition.kind === "plane" &&
+      request.definition.parameters.mode === "coplanar"
+    ) {
+      const target = request.definition.parameters.reference.target;
+      const materialized = isDeferredTopologyRef(target)
+        ? await this.resolveDeferredTopologyRef(target)
+        : target;
+      return {
+        ...request,
+        topologyFallback: undefined,
+        definition: {
+          ...request.definition,
+          parameters: {
+            ...request.definition.parameters,
+            reference: { target: materialized },
+          },
+        },
+      } as CreateFeatureRequest;
+    }
+
+    const advancedParameters = request.definition.parameters as
+      | {
+          participants?: readonly {
+            role: string;
+            targets: readonly (DurableRef | ImportDeferredTopologyRef)[];
+          }[];
+        }
+      | undefined;
+    if (advancedParameters?.participants) {
+      const participants = await Promise.all(
+        advancedParameters.participants.map(async (participant) => ({
+          ...participant,
+          targets: await Promise.all(
+            participant.targets.map((target) =>
+              isDeferredTopologyRef(target)
+                ? this.resolveDeferredTopologyRef(target)
+                : target,
+            ),
+          ),
+        })),
+      );
+      return {
+        ...request,
+        topologyFallback: undefined,
+        definition: {
+          ...request.definition,
+          parameters: { ...request.definition.parameters, participants },
+        },
+      } as CreateFeatureRequest;
+    }
+
+    if (
+      request.definition.kind !== "extrude" &&
+      request.definition.kind !== "revolve"
+    ) {
       return request as CreateFeatureRequest;
     }
 
@@ -521,6 +741,29 @@ export class ImportDeferredMaterializer {
           : profile,
       ),
     );
+
+    if (request.definition.kind === "revolve") {
+      const axis = request.definition.parameters.axis;
+      const materializedAxis =
+        axis.kind === "sketchEntity" && isDeferredValue(axis.sketchId)
+          ? {
+              ...axis,
+              sketchId: await this.resolveDeferredValue(axis.sketchId, consumer),
+            }
+          : axis;
+      return {
+        ...request,
+        definition: {
+          ...request.definition,
+          parameters: {
+            ...request.definition.parameters,
+            profiles,
+            axis: materializedAxis,
+          },
+        },
+      } as unknown as CreateFeatureRequest;
+    }
+
     const booleanScope = request.definition.parameters.booleanScope;
     const materializedBooleanScope =
       booleanScope.kind === "targetBody" && isDeferredValue(booleanScope.bodyId)
@@ -551,6 +794,13 @@ export class ImportDeferredMaterializer {
     consumer: ImportPreparedActionRef,
   ): Promise<CommitSketchRequest> {
     const support = request.plane.support;
+    if (isDeferredTopologyRef(support)) {
+      const resolvedSupport = await this.resolveDeferredTopologyRef(support);
+      return {
+        ...request,
+        plane: { ...request.plane, support: resolvedSupport },
+      } as CommitSketchRequest;
+    }
     if (!isDeferredValue(support)) {
       return request as unknown as CommitSketchRequest;
     }
@@ -613,10 +863,21 @@ export async function applyImportPreparedActions(input: {
   const applyFeature = async (index: number) => {
     const request = (input.actions.createFeatures ?? [])[index];
     const consumer = { kind: "createFeature" as const, index };
+    const materialized = await materializer.materializeFeatureRequest(request, consumer);
+    const fallbackSource = materializer.takeTopologyFallbackSource();
     const result = await input.modelingService.createFeature({
-      ...(await materializer.materializeFeatureRequest(request, consumer)),
+      ...materialized,
       baseRevisionId: revisionId,
     });
+    if (fallbackSource) {
+      diagnostics.push({
+        code: "topology-apply-rematch-failed",
+        severity: "warning",
+        message: `Topology rematch changed before apply for ${fallbackSource.consumerFeatureId}:${fallbackSource.parameterId}:${fallbackSource.deterministicId}; the captured post-feature checkpoint was used.`,
+        target: null,
+        detail: null,
+      });
+    }
     if (result.isErr()) {
       throw result.error;
     }

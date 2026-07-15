@@ -16,6 +16,7 @@ import {
 } from "@/core/sketch-special-modes/presentation";
 import { isFeatureScopedModelingDiagnostic } from "@/contracts/modeling/diagnostics";
 import type { SketchId } from "@/contracts/shared/ids";
+import { createTailDocumentCursor } from "@/domain/modeling/document-history";
 import type {
   EditorEvent,
   EditorTransitionResult,
@@ -413,11 +414,17 @@ export function handleEffectFeatureCommitted(
     );
 
     if (state.editSessionCursorContext?.phase === "active") {
+      const committedContext = {
+        ...state.editSessionCursorContext,
+        restoreCursor: createTailDocumentCursor(
+          state.snapshot?.presentation.documentHistory ?? [],
+        ),
+      };
       return emitSnapshotFetch(
         {
           ...idleState,
           editSessionCursorContext: advanceCursorPhase(
-            state.editSessionCursorContext,
+            committedContext,
             "commitCompleted",
           ),
         },

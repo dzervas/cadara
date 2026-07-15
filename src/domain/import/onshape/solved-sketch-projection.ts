@@ -51,5 +51,6 @@ export function translateSolvedSketch(input: {
     planeKey: input.planeKey,
     entities,
     constraints: input.constraints,
+    sourceSolveStatus: input.solved.sketchSolveStatus,
   });
 }

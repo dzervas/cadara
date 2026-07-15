@@ -18,6 +18,8 @@ import {
 } from "@/domain/modeling/occ/sketch-profile";
 import {
   magnitude,
+  mapSketchPointToWorld,
+  midpointOnArc,
   normalize,
   subtract,
   toGpDir,
@@ -79,26 +81,76 @@ function buildSweepPathWire(
   context: OccFeatureExecutionContext,
   path: DurableRef,
 ) {
+  let edge: InstanceType<OpenCascadeInstance["TopoDS_Edge"]>;
   if (path.kind === "sketchEntity") {
+    const sketch = requireSketchSnapshot(context, path.sketchId);
+    const geometry = sketch.sketch.solvedSnapshot.solvedEntities.find(
+      (candidate) => candidate.entityId === path.entityId,
+    );
+    if (!geometry) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC sweep sketch path did not resolve in solved geometry.",
+      );
+    }
+    if (geometry.kind === "lineSegment") {
+      edge = new context.oc.BRepBuilderAPI_MakeEdge_3(
+        toGpPnt(context.oc, mapSketchPointToWorld(sketch.plane, geometry.startPosition)),
+        toGpPnt(context.oc, mapSketchPointToWorld(sketch.plane, geometry.endPosition)),
+      ).Edge();
+    } else if (geometry.kind === "circle") {
+      const axis = new context.oc.gp_Ax2_2(
+        toGpPnt(
+          context.oc,
+          mapSketchPointToWorld(sketch.plane, geometry.centerPosition),
+        ),
+        toGpDir(context.oc, sketch.plane.frame.normal),
+        toGpDir(context.oc, sketch.plane.frame.xAxis),
+      );
+      edge = new context.oc.BRepBuilderAPI_MakeEdge_8(
+        new context.oc.gp_Circ_2(axis, geometry.solvedRadius),
+      ).Edge();
+    } else if (geometry.kind === "arc") {
+      const start = mapSketchPointToWorld(sketch.plane, geometry.startPosition);
+      const end = mapSketchPointToWorld(sketch.plane, geometry.endPosition);
+      const midpoint = midpointOnArc(
+        start,
+        end,
+        mapSketchPointToWorld(sketch.plane, geometry.centerPosition),
+        sketch.plane.frame.normal,
+        geometry.sweepDirection,
+      );
+      const arc = new context.oc.GC_MakeArcOfCircle_4(
+        toGpPnt(context.oc, start),
+        toGpPnt(context.oc, midpoint),
+        toGpPnt(context.oc, end),
+      );
+      if (!arc.IsDone()) {
+        throw new Error(
+          "advanced-feature-unsupported-kernel-case: OCC sweep failed to build the solved sketch arc path.",
+        );
+      }
+      const value = arc.Value();
+      const handle = new context.oc.Handle_Geom_Curve_2(value.get());
+      edge = new context.oc.BRepBuilderAPI_MakeEdge_24(handle).Edge();
+    } else {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC sweep path must be a solved line, arc, or circle sketch curve.",
+      );
+    }
+  } else if (path.kind === "edge") {
+    edge = requireEdge(requireBody(context, path.bodyId), path.edgeId);
+  } else {
     throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC sweep does not support sketch-entity paths yet.",
+      "advanced-feature-unsupported-kernel-case: OCC sweep path must be a durable edge or sketch-entity target.",
     );
   }
 
-  if (path.kind !== "edge") {
-    throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC sweep path must be a durable edge target.",
-    );
-  }
-
-  const body = requireBody(context, path.bodyId);
-  const edge = requireEdge(body, path.edgeId);
   const wireBuilder = new context.oc.BRepBuilderAPI_MakeWire_1();
   wireBuilder.Add_1(edge);
 
   if (!wireBuilder.IsDone()) {
     throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC sweep failed to build a path wire from the selected edge.",
+      "advanced-feature-unsupported-kernel-case: OCC sweep failed to build a path wire from the selected curve.",
     );
   }
 

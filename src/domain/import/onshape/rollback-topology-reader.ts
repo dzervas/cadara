@@ -1,0 +1,159 @@
+import type { OnshapeRollbackSnapshot } from "@/contracts/import/onshape-capture-bundle";
+
+export type RollbackTopologyDiagnosticCode =
+  | "rollback-tessellation-unreadable"
+  | "rollback-feature-order-unreadable";
+
+export interface RollbackTopologyDiagnostic {
+  code: RollbackTopologyDiagnosticCode;
+  message: string;
+  featureId?: string;
+}
+
+export interface RollbackFacet {
+  vertices: readonly [number, number, number][];
+}
+
+export interface RollbackFaceTopology {
+  id: string;
+  facets: readonly RollbackFacet[];
+}
+
+export interface RollbackBodyTopology {
+  id: string;
+  faces: readonly RollbackFaceTopology[];
+}
+
+export interface RollbackTopologySnapshot {
+  featureId: string;
+  tessellationTolerance: number;
+  bodies: readonly RollbackBodyTopology[];
+  diagnostics: readonly RollbackTopologyDiagnostic[];
+  source: OnshapeRollbackSnapshot;
+}
+
+export interface RollbackTopologyTimeline {
+  readonly diagnostics: readonly RollbackTopologyDiagnostic[];
+  snapshotBeforeFeature(featureId: string): RollbackTopologySnapshot | null;
+  snapshotAfterFeature(featureId: string): RollbackTopologySnapshot | null;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readPoint(value: unknown): [number, number, number] | null {
+  const point = record(value);
+  return point &&
+    typeof point.x === "number" &&
+    typeof point.y === "number" &&
+    typeof point.z === "number"
+    ? [point.x, point.y, point.z]
+    : null;
+}
+
+/** Read only body/face IDs and facet vertices. Surplus Onshape fields are ignored. */
+export function readRollbackTopologySnapshot(
+  snapshot: OnshapeRollbackSnapshot,
+): RollbackTopologySnapshot {
+  const diagnostics: RollbackTopologyDiagnostic[] = [];
+  const payload = record(snapshot.tessellatedFaces);
+  if (!payload || !Array.isArray(payload.bodies)) {
+    diagnostics.push({
+      code: "rollback-tessellation-unreadable",
+      featureId: snapshot.featureId,
+      message: `Rollback snapshot ${snapshot.featureId} has no readable tessellation bodies.`,
+    });
+    return { ...snapshot, bodies: [], diagnostics, source: snapshot };
+  }
+
+  const bodies: RollbackBodyTopology[] = [];
+  for (const rawBody of payload.bodies) {
+    const body = record(rawBody);
+    if (!body || typeof body.id !== "string" || !Array.isArray(body.faces)) {
+      diagnostics.push({
+        code: "rollback-tessellation-unreadable",
+        featureId: snapshot.featureId,
+        message: `Rollback snapshot ${snapshot.featureId} contains a malformed body.`,
+      });
+      continue;
+    }
+    const faces: RollbackFaceTopology[] = [];
+    for (const rawFace of body.faces) {
+      const face = record(rawFace);
+      if (!face || typeof face.id !== "string" || !Array.isArray(face.facets)) {
+        diagnostics.push({
+          code: "rollback-tessellation-unreadable",
+          featureId: snapshot.featureId,
+          message: `Rollback body ${body.id} contains a malformed face.`,
+        });
+        continue;
+      }
+      const facets: RollbackFacet[] = [];
+      for (const rawFacet of face.facets) {
+        const facet = record(rawFacet);
+        if (!facet || !Array.isArray(facet.vertices)) {
+          diagnostics.push({
+            code: "rollback-tessellation-unreadable",
+            featureId: snapshot.featureId,
+            message: `Rollback face ${face.id} contains a malformed facet.`,
+          });
+          continue;
+        }
+        const vertices = facet.vertices.map(readPoint);
+        if (vertices.some((point) => point === null)) {
+          diagnostics.push({
+            code: "rollback-tessellation-unreadable",
+            featureId: snapshot.featureId,
+            message: `Rollback face ${face.id} contains a malformed facet vertex.`,
+          });
+          continue;
+        }
+        facets.push({ vertices: vertices as [number, number, number][] });
+      }
+      faces.push({ id: face.id, facets });
+    }
+    bodies.push({ id: body.id, faces });
+  }
+
+  return { ...snapshot, bodies, diagnostics, source: snapshot };
+}
+
+/** Build feature-order lookup. STEP text is intentionally never inspected for identity. */
+export function createRollbackTopologyTimeline(input: {
+  featureIds: readonly string[];
+  snapshots: readonly OnshapeRollbackSnapshot[] | null;
+}): RollbackTopologyTimeline {
+  const diagnostics: RollbackTopologyDiagnostic[] = [];
+  const featureIndex = new Map(input.featureIds.map((id, index) => [id, index]));
+  const snapshots = new Map<string, RollbackTopologySnapshot>();
+  for (const snapshot of input.snapshots ?? []) {
+    if (!featureIndex.has(snapshot.featureId)) {
+      diagnostics.push({
+        code: "rollback-feature-order-unreadable",
+        featureId: snapshot.featureId,
+        message: `Rollback snapshot ${snapshot.featureId} is not present in feature-list order.`,
+      });
+      continue;
+    }
+    snapshots.set(snapshot.featureId, readRollbackTopologySnapshot(snapshot));
+  }
+
+  return {
+    diagnostics,
+    snapshotAfterFeature(featureId) {
+      return snapshots.get(featureId) ?? null;
+    },
+    snapshotBeforeFeature(featureId) {
+      const consumerIndex = featureIndex.get(featureId);
+      if (consumerIndex === undefined) return null;
+      for (let index = consumerIndex - 1; index >= 0; index -= 1) {
+        const snapshot = snapshots.get(input.featureIds[index]!);
+        if (snapshot) return snapshot;
+      }
+      return null;
+    },
+  };
+}

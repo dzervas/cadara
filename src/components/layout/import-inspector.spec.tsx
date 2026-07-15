@@ -20,12 +20,24 @@ function createDenseImportFormSchema(): FeatureEditorFormSchema {
     sections: Array.from({ length: 6 }, (_, sectionIndex) => ({
       id: `section-${sectionIndex}`,
       title: `Imported studio ${sectionIndex}`,
-      fields: Array.from({ length: 8 }, (_, fieldIndex) => ({
-        kind: "summary" as const,
-        id: `field-${sectionIndex}-${fieldIndex}`,
-        label: `Feature ${sectionIndex}.${fieldIndex}`,
-        value: `baked/degraded feature ${sectionIndex}.${fieldIndex}`,
-      })),
+      fields: [
+        ...(sectionIndex === 0
+          ? [
+              {
+                kind: "summary" as const,
+                id: "feature-diagnostic",
+                label: "Shell",
+                value: "baked (suppressed) — hollow shell without removed faces is not supported — carried/dropped: constraints 2/1, dimensions 1/0, derivations 0/0",
+              },
+            ]
+          : []),
+        ...Array.from({ length: 8 }, (_, fieldIndex) => ({
+          kind: "summary" as const,
+          id: `field-${sectionIndex}-${fieldIndex}`,
+          label: `Feature ${sectionIndex}.${fieldIndex}`,
+          value: `baked/degraded feature ${sectionIndex}.${fieldIndex}`,
+        })),
+      ],
     })),
   };
 }
@@ -107,4 +119,12 @@ test("src/components/layout/import-inspector.spec.tsx keeps the commit and cance
     markup.includes(">Commit</") && markup.includes(">Cancel</"),
     "Commit and cancel footer actions must remain rendered even when the import fidelity report is dense.",
   ).toBe(true);
+});
+
+test("src/components/layout/import-inspector.spec.tsx renders per-feature import diagnostics", () => {
+  const markup = renderDenseImportInspector();
+
+  expect(markup).toContain("baked (suppressed)");
+  expect(markup).toContain("hollow shell without removed faces is not supported");
+  expect(markup).toContain("carried/dropped: constraints 2/1, dimensions 1/0, derivations 0/0");
 });

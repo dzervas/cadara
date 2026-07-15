@@ -66,11 +66,12 @@ export interface OnshapeSolvedCurve {
 
 export interface OnshapeSolvedSketch {
   featureId: string;
+  sketchSolveStatus?: string;
   entities: OnshapeSolvedCurve[];
 }
 
 interface RawSolvedSketchPayload {
-  sketches: { featureId: string; entities?: readonly unknown[] }[];
+  sketches: { featureId: string; sketchSolveStatus?: string; entities?: readonly unknown[] }[];
 }
 
 export interface BundleReadDiagnostic {
@@ -298,6 +299,7 @@ export function readPartStudio(
       }
       solvedSketchesByFeatureId.set(solved.featureId, {
         featureId: solved.featureId,
+        sketchSolveStatus: solved.sketchSolveStatus,
         entities,
       });
     }

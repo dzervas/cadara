@@ -419,7 +419,8 @@ export type RevolveProfileRef = ExtrudeProfileRef;
  */
 export type RevolveAxisRef =
   | { kind: "edge"; bodyId: BodyId; edgeId: EdgeId }
-  | { kind: "construction"; constructionId: ConstructionId };
+  | { kind: "construction"; constructionId: ConstructionId }
+  | { kind: "sketchEntity"; sketchId: SketchId; entityId: import("@/contracts/shared/ids").SketchEntityId };
 
 /**
  * Placeholder revolve parameters.

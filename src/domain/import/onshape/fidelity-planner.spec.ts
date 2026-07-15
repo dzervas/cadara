@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import {
   assembleFixtureMountsBundle,
@@ -7,6 +8,7 @@ import {
 import type { StudioReadResult } from "@/domain/import/onshape/bundle-reader";
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
+import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
 
 test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
   const bundle = await assembleFixtureMountsBundle();
@@ -49,6 +51,26 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
     plan.tierCounts.parametric === 3 && plan.tierCounts.baked === 0,
     "Tier counts should reflect the fully-parametric plan (two sketches + one extrude).",
   ).toBeTruthy();
+});
+
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts real bundles contain no Wave A features and retain baseline counts", async () => {
+  const cases = [
+    ["40a51fb8fa82fd4565151114.onshape-capture.json", { parametric: 6, baked: 4, geometryOnly: 0 }],
+    ["9841e486906fa2ce62d74d8e.onshape-capture.json", { parametric: 6, baked: 35, geometryOnly: 0 }],
+  ] as const;
+  for (const [fileName, expected] of cases) {
+    const parsed = validateOnshapeCaptureBundle(JSON.parse(await readFile(fileName, "utf8")));
+    if (!parsed.success) throw new Error(`Real capture ${fileName} must validate.`);
+    const studio = parsed.data.partStudios[0]!;
+    const read = readPartStudio(parsed.data, studio.elementId);
+    expect(
+      read.features.some((feature) =>
+        ["revolve", "thicken", "sweep", "loft"].includes(feature.featureType),
+      ),
+    ).toBe(false);
+    expect(planStudioFidelity(read).tierCounts).toEqual(expected);
+  }
 });
 
 

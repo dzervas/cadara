@@ -1,6 +1,5 @@
 import type {
   BodySnapshotRecord,
-  ConstructionSnapshotRecord,
   DocumentPresentationSnapshot,
   FeatureSnapshotRecord,
   FeatureTreeNodeRecord,
@@ -53,10 +52,7 @@ import {
   SHELL_FEATURE_SCHEMA_VERSION,
   SNAPSHOT_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
-import {
-  OCC_CONTRACT_GAP_CODES,
-  OCC_PHASE0_IMPLEMENTATION_NOTES,
-} from "@/domain/modeling/occ/implementation-policy";
+import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import { mapSketchPointToWorld } from "@/domain/modeling/occ/geometry";
 import type { OccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import {
@@ -178,19 +174,6 @@ function toRenderPoint(point: {
 function buildFeatureLabel(featureId: FeatureId, explicitLabel?: string) {
   return explicitLabel ?? featureId;
 }
-
-function createConstructionPlaneGapDiagnostic(
-  construction: ConstructionSnapshotRecord,
-): ModelingDiagnostic {
-  return {
-    code: OCC_CONTRACT_GAP_CODES.constructionPlaneGeometryUnavailable,
-    severity: "warning",
-    message: OCC_PHASE0_IMPLEMENTATION_NOTES.contractGaps.constructionSnapshots,
-    target: construction.target,
-    detail: null,
-  };
-}
-
 function getFaceSemanticClasses(
   state: OccAuthoringState,
   face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
@@ -887,15 +870,7 @@ export function buildOccSnapshotDiagnostics(
   state: OccAuthoringState,
   extraDiagnostics: readonly ModelingDiagnostic[],
 ): ModelingDiagnostic[] {
-  const diagnostics = [...state.diagnostics, ...extraDiagnostics];
-
-  for (const construction of state.constructions) {
-    if (construction.ownerFeatureId !== null) {
-      diagnostics.push(createConstructionPlaneGapDiagnostic(construction));
-    }
-  }
-
-  return diagnostics;
+  return [...state.diagnostics, ...extraDiagnostics];
 }
 
 function buildConstructionRenderRecords(

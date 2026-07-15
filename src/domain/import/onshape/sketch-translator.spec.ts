@@ -367,3 +367,65 @@ test("solve-consistency verification isolates and drops a bad translated relatio
   expect(verified.relationshipSummary.constraints).toEqual({ carried: 0, dropped: 1 });
   expect(verified.diagnostics[0]?.code).toBe("onshape-sketch-solve-consistency-failed");
 });
+
+
+test("grounds residual rigid motion from dropped external anchors on a WELL_DEFINED source sketch", async () => {
+  const translation = translateSketch({
+    featureId: "sketch_well_defined_external_anchor",
+    label: "Well-defined imported line",
+    planeKey: "xy",
+    sourceSolveStatus: "WELL_DEFINED",
+    entities: [
+      {
+        entityId: "line",
+        entityType: "lineSegment",
+        start: [0, 0],
+        end: [10, 0],
+      },
+    ],
+    constraints: [
+      relationship("HORIZONTAL", "horizontal", [
+        { parameterId: "localFirst", value: "line" },
+      ]),
+      relationship("LENGTH", "length", [
+        { parameterId: "localFirst", value: "line" },
+        { parameterId: "length", value: 10 },
+      ]),
+      relationship("COINCIDENT", "external-anchor", [
+        { parameterId: "externalFirst", hasExternalQuery: true },
+        { parameterId: "localSecond", value: "line.start" },
+      ]),
+    ],
+  });
+  const sketchId = translation.definition.points[0]?.target.sketchId;
+  expect(sketchId).toBeTruthy();
+
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: new SketchConstraintSolverAdapter({
+      documentId: "doc_well_defined_anchor",
+      revisionId: "rev_well_defined_anchor",
+    }),
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_well_defined_anchor",
+    revisionId: "rev_well_defined_anchor",
+    sketchId: sketchId!,
+    plane: translation.plane,
+    definition: translation.definition,
+    relationshipSummary: translation.relationshipSummary,
+    sourceSolveStatus: translation.sourceSolveStatus,
+  });
+
+  expect(
+    verified.definition.constraints.filter(
+      (constraint) => constraint.kind === "fixPoint",
+    ),
+    "A single suitable point should ground this connected rigid sketch without blanket-fixing every point.",
+  ).toHaveLength(1);
+  expect(verified.diagnostics).toEqual([
+    expect.objectContaining({
+      code: "onshape-sketch-residual-mobility-grounded",
+      reason: "source-well-defined-residual-mobility-grounded",
+    }),
+  ]);
+  expect(validateSketchDefinition(verified.definition).success).toBe(true);
+});

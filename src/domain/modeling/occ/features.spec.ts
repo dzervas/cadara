@@ -1929,6 +1929,44 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       },
     );
 
+    const sketchAxisEntity = sketch.sketch.definition.entities.find(
+      (entity) => entity.kind === "lineSegment" && entity.label === "bottom",
+    );
+    expect(sketchAxisEntity?.kind).toBe("lineSegment");
+    const sketchAxisResult = executeOccFeature(
+      context,
+      "feature_phase4_revolve_sketch_axis" as FeatureId,
+      {
+        kind: "revolve",
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: sketch.sketchId,
+              regionId: region.regionId,
+            },
+          ],
+          axis: {
+            kind: "sketchEntity",
+            sketchId: sketch.sketchId,
+            entityId: sketchAxisEntity!.entityId,
+          },
+          startAngle: 0,
+          extent: {
+            mode: "oneSide",
+            end: {
+              kind: "blind",
+              direction: "counterClockwise",
+              angle: Math.PI,
+            },
+          },
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
+        },
+      },
+    );
+
     expect(
       constructionAxisError?.includes(
         "occ-contract-gap-revolve-construction-axis",
@@ -1938,6 +1976,10 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     expect(
       result.producedTargets[0]?.kind,
       "Edge-backed revolve should produce a solid body.",
+    ).toBe("body");
+    expect(
+      sketchAxisResult.producedTargets[0]?.kind,
+      "A solved same-sketch line axis should produce a revolve body.",
     ).toBe("body");
   }
 
@@ -2322,6 +2364,99 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     expect(
       (await bodyVolume(context.oc, producedBody.shape)) > 0,
       "Standalone sweep should produce non-empty solid geometry.",
+    ).toBeTruthy();
+  }
+
+
+  async function testSweepBuildsFromSolvedSketchEntityPath() {
+    const profilePlane = createStandardPlaneDefinition("xy");
+    const profile = createRectangleSketch(
+      "sketch_phase4_sweep_sketch_profile" as SketchId,
+      profilePlane,
+      { origin: [-0.2, -0.2], width: 0.4, height: 0.4 },
+    );
+    const pathPlane = createStandardPlaneDefinition("xz");
+    const pathSketchId = "sketch_phase4_sweep_sketch_path" as SketchId;
+    const startId = pointId("sweep_path_start");
+    const endId = pointId("sweep_path_end");
+    const pathEntityId = entityId("sweep_path_line");
+    const pathDefinition = createSketchDefinition(
+      pathSketchId,
+      [
+        { id: startId, position: [0, 0] },
+        { id: endId, position: [0, 4] },
+      ],
+      [
+        {
+          kind: "lineSegment",
+          entityId: pathEntityId,
+          label: "Sweep path",
+          target: { kind: "sketchEntity", sketchId: pathSketchId, entityId: pathEntityId },
+          isConstruction: false,
+          startPointId: startId,
+          endPointId: endId,
+        },
+      ],
+    );
+    const pathSketch = createSketchRecord(
+      pathSketchId,
+      pathPlane,
+      pathDefinition,
+      [
+        {
+          kind: "lineSegment",
+          entityId: pathEntityId,
+          startPosition: [0, 0],
+          endPosition: [0, 4],
+        },
+      ],
+      [],
+    );
+    const context = await createContext({
+      sketches: [profile.sketch, pathSketch],
+    })();
+
+    const result = executeOccFeature(
+      context,
+      "feature_phase4_sweep_sketch_path" as FeatureId,
+      {
+        kind: "sweep",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "create",
+          participants: [
+            {
+              role: "profile",
+              targets: [
+                {
+                  kind: "region",
+                  sketchId: profile.sketch.sketchId,
+                  regionId: profile.region.regionId,
+                },
+              ],
+            },
+            {
+              role: "path",
+              targets: [
+                {
+                  kind: "sketchEntity",
+                  sketchId: pathSketchId,
+                  entityId: pathEntityId,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(
+      result.producedTargets[0]?.kind,
+      "A solved sketch-line sweep path should build a standalone body.",
+    ).toBe("body");
+    expect(
+      (await producedBodyVolume(context, result)) > 0,
+      "The sketch-entity path sweep should produce non-empty solid geometry.",
     ).toBeTruthy();
   }
 
@@ -3520,6 +3655,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testCombineExecutesBodyBooleansAndConsumesTools();
   await testCombineRejectsEmptyAndMalformedBodyRoles();
   await testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid();
+  await testSweepBuildsFromSolvedSketchEntityPath();
   await testRevolveBuildsFullAndUpToPartWithOffsets();
   await testRevolveRejectsImpossibleUpToOffset();
   await testRevolveRejectsNonPlanarFaceProfilesExplicitly();

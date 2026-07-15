@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import type {
   HistoryProbeTopologySignature,
@@ -13,6 +14,7 @@ import {
   FIXTURE_PART_STUDIO_ID,
 } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
+import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-capture-fixtures";
 import { createImportCapabilities } from "@/domain/import/orchestrator";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { createGeometryAssetRecordFromReference } from "@/contracts/modeling/geometry-assets";
@@ -394,7 +396,60 @@ test("src/domain/import/onshape/provider.spec.ts registration and acceptance", a
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/provider.spec.ts probe-present review activates unique face sketches", async () => {
+
+test("src/domain/import/onshape/provider.spec.ts emits a deferred parametric revolve action", async () => {
+  const source = sourceFromBundle(makeWaveARevolveCaptureBundle());
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const revolvePlan = review.providerReview.studios[0]?.featurePlans.find(
+    (entry) => entry.onshapeFeatureId === "F_REVOLVE",
+  );
+  expect(revolvePlan?.tier).toBe("parametric");
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  const revolve = actions.createFeatures?.find(
+    (entry) => entry.definition.kind === "revolve",
+  );
+  expect(revolve?.definition.kind).toBe("revolve");
+  if (revolve?.definition.kind !== "revolve") {
+    throw new Error("Expected a prepared revolve feature.");
+  }
+  expect(revolve.definition.parameters.profiles[0]).toMatchObject({
+    kind: "regionOf",
+    actionIndex: 1,
+  });
+  expect(revolve.definition.parameters.axis).toMatchObject({
+    kind: "sketchEntity",
+    sketchId: { kind: "sketchIdOf", actionIndex: 1 },
+  });
+  expect(validateImportPreparedActions(actions).success).toBe(true);
+});
+
+test("src/domain/import/onshape/provider.spec.ts real-bundle Wave A tier counts remain unchanged", async () => {
+  const cases = [
+    ["40a51fb8fa82fd4565151114.onshape-capture.json", { parametric: 6, baked: 4, geometryOnly: 0 }],
+    ["9841e486906fa2ce62d74d8e.onshape-capture.json", { parametric: 6, baked: 35, geometryOnly: 0 }],
+  ] as const;
+  for (const [fileName, expected] of cases) {
+    const bundle = JSON.parse(await readFile(fileName, "utf8"));
+    const review = await onshapeImportProvider.review({
+      source: sourceFromBundle(bundle),
+      capabilities,
+    });
+    expect(review.providerReview.studios[0]?.tierCounts).toEqual(expected);
+    expect(
+      review.providerReview.studios[0]?.featurePlans.some((entry) =>
+        ["revolve", "thicken", "sweep", "loft"].includes(entry.featureType),
+      ),
+    ).toBe(false);
+  }
+});
+
+test("src/domain/import/onshape/provider.spec.ts durable naming gate blocks unique face sketches", async () => {
   const source = sourceFromBundle(makeFaceSketchBundle());
   const review = await onshapeImportProvider.review({
     source,
@@ -409,17 +464,15 @@ test("src/domain/import/onshape/provider.spec.ts probe-present review activates 
   );
 
   expect(
-    faceSketch?.tier === "parametric" &&
-      faceSketch.target.kind === "sketch" &&
-      faceSketch.target.plane?.support.kind === "face" &&
-      faceSketch.reasonCodes.includes("sketch-on-probed-face"),
-    "A unique probe face match should promote a face sketch to a probe-backed parametric sketch with a resolvable face support.",
+    faceSketch?.tier === "baked" &&
+      faceSketch.reasonCodes.includes("topology-durable-naming-unavailable"),
+    "A unique face match must remain baked while durable subtopology naming is disabled.",
   ).toBeTruthy();
   expect(
     chamfer?.tier === "baked" &&
-      chamfer.reasonCodes.includes("translator-unavailable") &&
+      chamfer.reasonCodes.includes("chamfer-width-unreadable") &&
       !chamfer.reasonCodes.includes("needs-history-probe"),
-    "Once the probe is present, unsupported topology feature kinds should report translator-unavailable instead of blaming probe absence.",
+    "A malformed chamfer must report its parameter mapping failure before topology resolution.",
   ).toBeTruthy();
 
   const actions = await onshapeImportProvider.prepare({
@@ -429,10 +482,8 @@ test("src/domain/import/onshape/provider.spec.ts probe-present review activates 
     capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
   });
   expect(
-    actions.commitSketches?.some(
-      (sketch) => sketch.plane.support.kind === "face",
-    ),
-  ).toBe(true);
+    actions.commitSketches?.some((sketch) => sketch.plane.support.kind === "face"),
+  ).toBe(false);
 });
 
 test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch stays honestly baked", async () => {
@@ -493,6 +544,36 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
     relationshipSection,
     "The review form should include a sketch relationship carried/dropped summary section.",
   ).toBeDefined();
+  const fidelitySection = schema.sections.find(
+    (section) => section.id === "fidelity-report",
+  );
+  const selectedStudio = review.providerReview.studios.find(
+    (studio) => studio.elementId === selections.studioElementId,
+  );
+  expect(fidelitySection).toBeDefined();
+  for (const plan of selectedStudio?.featurePlans ?? []) {
+    const field = fidelitySection?.fields.find(
+      (candidate) => candidate.id === `feature-${plan.onshapeFeatureId}`,
+    );
+    expect(field?.kind).toBe("summary");
+    const value = field?.kind === "summary" ? field.value : "";
+    expect(value).toContain(`${plan.tier}`);
+    for (const reason of plan.reasonCodes) {
+      expect(
+        value.includes(reason),
+        `Review diagnostics must present ${reason} as human-readable copy.`,
+      ).toBe(false);
+    }
+  }
+  const sketchPlan = selectedStudio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "FOoap8tw3jKAJf5_0",
+  );
+  const sketchField = fidelitySection?.fields.find(
+    (candidate) => candidate.id === `feature-${sketchPlan?.onshapeFeatureId}`,
+  );
+  expect(sketchField?.kind === "summary" && sketchField.value).toContain(
+    "carried/dropped: constraints 1/0, dimensions 1/0, derivations 1/0",
+  );
 
   const actions = await onshapeImportProvider.prepare({
     source,
@@ -520,6 +601,7 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
   );
   expect(preparedFixtureSketch?.definition.constraints.map((entry) => entry.kind)).toEqual([
     "horizontal",
+    "fixPoint",
   ]);
   expect(preparedFixtureSketch?.definition.dimensions.map((entry) => entry.kind)).toEqual([
     "lineLength",
@@ -625,12 +707,9 @@ test("src/domain/import/onshape/provider.spec.ts no fabricated construction supp
     "The synthetic fixture must build a real parametric prefix before the face sketch probe runs.",
   ).toBeTruthy();
   expect(
-    faceSketch?.tier === "parametric" &&
-      faceSketch.target.kind === "sketch" &&
-      faceSketch.target.plane?.support.kind === "face" &&
-      faceSketch.reasonCodes.includes("sketch-on-probed-face") &&
-      !faceSketch.reasonCodes.includes("sketch-on-captured-frame"),
-    "A face sketch must resolve through the probe onto a real, resolvable face support instead of a fabricated construction.",
+    faceSketch?.tier === "baked" &&
+      faceSketch.reasonCodes.includes("topology-durable-naming-unavailable"),
+    "A face sketch must not ship a subtopology support while durable naming is disabled.",
   ).toBeTruthy();
 
   const actions = await onshapeImportProvider.prepare({

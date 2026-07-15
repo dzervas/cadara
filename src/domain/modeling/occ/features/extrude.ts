@@ -152,6 +152,7 @@ function getExtrudeTargetProjection(
     return getShapeProjectionRange(context.oc, body.shape, direction).max;
   }
 
+
   if (end.kind === "upToVertex") {
     const body = requireBody(context, end.target.bodyId);
     const vertex = body.verticesById.get(end.target.vertexId);

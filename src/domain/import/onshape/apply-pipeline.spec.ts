@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { readFile } from "node:fs/promises";
 import { ResultAsync, createAppError } from "@/contracts/errors";
 
 import type { ImportPreparedActions } from "@/contracts/import/actions";
@@ -8,11 +9,14 @@ import { CONTRACT_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from "@/contracts/shar
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { FIXTURE_PART_STUDIO_ID } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
+import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-capture-fixtures";
+import { makeWaveBBodyCaptureBundle } from "@/domain/import/onshape/wave-b-capture-fixtures";
 import {
   applyImportPreparedActions,
   createImportCapabilities,
   prepareImportActions,
 } from "@/domain/import/orchestrator";
+import { prepareRollbackCheckpointBake } from "@/domain/import/onshape/rollback-bake";
 import {
   readPartStudio,
   type OnshapeSketchConstraint,
@@ -409,6 +413,270 @@ test("src/domain/import/onshape/apply-pipeline.spec.ts", async () => {
     hasCircle,
     "The translated sketch should contain the circle parsed from the real solved-sketch payload.",
   ).toBeTruthy();
+});
+
+test("compact v2 checkpoint replaces an apply-ambiguous topology consumer exactly once", async () => {
+  const created: CreateFeatureRequest[] = [];
+  const snapshot = {
+    document: {
+      documentId: "doc_workspace",
+      revisionId: "rev_v2",
+      bodies: [],
+    },
+  } as never;
+  const service = {
+    async getCurrentDocumentSnapshot() {
+      return snapshot;
+    },
+    async buildNativeExactBrepPayload() {
+      throw new Error("No live bodies should require payload derivation.");
+    },
+    createFeature(request: CreateFeatureRequest) {
+      created.push(request);
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          revisionId: "rev_v2_next" as RevisionId,
+          featureId: "feature_checkpoint" as const,
+          revisionState: "advanced" as const,
+          rebuildResult: "rebuilt" as const,
+          changedTargets: [],
+          diagnostics: [],
+        }),
+        (error) => createAppError({ code: "unknown", message: String(error) }),
+      );
+    },
+  } as ModelingService;
+  const capabilities = createImportCapabilities(service, snapshot);
+  const checkpoint = await prepareRollbackCheckpointBake({
+    snapshot: {
+      featureId: "F_CHAMFER",
+      tessellationTolerance: 0.001,
+      tessellatedFaces: {
+        bodies: [{
+          faces: [{
+            facets: [{
+              vertices: [
+                { x: 0, y: 0, z: 0 },
+                { x: 0.001, y: 0, z: 0 },
+                { x: 0, y: 0.001, z: 0 },
+              ],
+            }],
+          }],
+        }],
+      },
+    },
+    capabilities,
+    featureLabel: "Chamfer checkpoint",
+    studioElementId: "studio-v2",
+    studioName: "Synthetic v2",
+    replacementActionIndexes: [],
+  });
+  if (checkpoint.kind !== "ready") throw new Error("Expected a v2 checkpoint.");
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: "rev_v2" as RevisionId,
+    actions: {
+      createFeatures: [{
+        ...checkpoint.request,
+        featureLabel: "Deferred combine",
+        definition: {
+          kind: "combine",
+          featureTypeVersion: "advanced-solid-feature/v0",
+          parameters: {
+            participants: [{
+              role: "targetBody",
+              targets: [{
+                kind: "topologyOf",
+                expectedKind: "body",
+                capturedSignature: { entityClass: "body", geometryType: "unknown" },
+                tolerance: {
+                  linear: 0.001,
+                  angularRadians: 0.001,
+                  relative: 0.000001,
+                  ambiguityMargin: 0.000001,
+                },
+                source: {
+                  consumerFeatureId: "F_CHAMFER",
+                  parameterId: "targets",
+                  deterministicId: "J_BODY",
+                },
+              }],
+            }],
+          },
+        },
+        topologyFallback: checkpoint.request,
+      }],
+    },
+  });
+
+  expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    "topology-apply-rematch-failed",
+  );
+  expect(created).toHaveLength(1);
+  expect(created[0]?.definition.kind).toBe("bakedBody");
+  expect(JSON.stringify(created)).not.toContain("topologyOf");
+});
+
+test("root v1 bundles retain tier counts and expose legacy topology checkpoint degradation", async () => {
+  const cases = [
+    [
+      "40a51fb8fa82fd4565151114.onshape-capture.json",
+      { parametric: 6, baked: 4, geometryOnly: 0 },
+    ],
+    [
+      "9841e486906fa2ce62d74d8e.onshape-capture.json",
+      { parametric: 6, baked: 35, geometryOnly: 0 },
+    ],
+  ] as const;
+
+  for (const [fileName, expectedCounts] of cases) {
+    const bundle = JSON.parse(await readFile(fileName, "utf8"));
+    expect(bundle.formatVersion).toBe(1);
+    expect(bundle.partStudios[0]?.rollbackSnapshots).toBeNull();
+    const { service } = createTestModelingService();
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const capabilities = createImportCapabilities(service, snapshot);
+    const source = sourceFromBundle(bundle);
+    const review = await onshapeImportProvider.review({ source, capabilities });
+    expect(review.providerReview.studios[0]?.tierCounts).toEqual(expectedCounts);
+    expect(
+      review.providerReview.studios[0]?.featurePlans.some(
+        (plan) =>
+          plan.reasonCodes.includes("topology-history-evidence-missing") &&
+          plan.reasonCodes.includes("topology-bake-snapshot-missing"),
+      ),
+    ).toBe(true);
+    const legacyConsumers = review.providerReview.studios[0]?.featurePlans.filter((plan) =>
+      ["booleanBodies", "deleteBodies", "transform", "splitPart", "split"].includes(plan.featureType),
+    ) ?? [];
+    for (const consumer of legacyConsumers) {
+      expect(consumer.tier).toBe("baked");
+      if (consumer.featureType === "transform") {
+        expect(consumer.reasonCodes).toContain("transform-rotation-unsupported");
+      } else {
+        expect(consumer.reasonCodes).toContain("topology-history-evidence-missing");
+        expect(consumer.reasonCodes).toContain("topology-bake-snapshot-missing");
+      }
+    }
+    const actions = await onshapeImportProvider.prepare({
+      source,
+      review,
+      selections: onshapeImportProvider.createDefaultSelections(review),
+      capabilities,
+    });
+    expect(
+      actions.createFeatures?.some((request) => request.definition.kind === "bakedBody"),
+    ).toBe(true);
+  }
+});
+
+test.each([
+  ["boolean", "combine"],
+  ["transform", "transform"],
+  ["split", "split"],
+  ["delete", "deleteSolid"],
+] as const)("applies synthetic v2 extrude topology path for %s with only live durable refs", async (fixtureKind, expectedKind) => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, snapshot, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        const count = input.actions.orderedActions?.length ?? 0;
+        return {
+          steps: Array.from({ length: count }, (_, index) => ({
+            status: "rebuilt" as const,
+            signatures: [
+              ...(index >= 1 ? [{
+                entityClass: "body" as const,
+                geometryType: "solid",
+                boundingBox: { low: [-4, -3, 12] as [number, number, number], high: [4, 3, 12] as [number, number, number] },
+                centroid: [0, 0, 12] as [number, number, number],
+                reference: { kind: "body" as const, bodyId: "probe_body_1" as never },
+              }] : []),
+              ...(index >= 3 ? [{
+                entityClass: "body" as const,
+                geometryType: "solid",
+                boundingBox: { low: [-2, -3, 12] as [number, number, number], high: [6, 3, 12] as [number, number, number] },
+                centroid: [2, 0, 12] as [number, number, number],
+                reference: { kind: "body" as const, bodyId: "probe_body_2" as never },
+              }] : []),
+            ],
+          })),
+        };
+      },
+    },
+  });
+  const source = sourceFromBundle(makeWaveBBodyCaptureBundle(fixtureKind));
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const studio = review.providerReview.studios[0];
+  expect(studio?.featurePlans.at(-1), JSON.stringify(studio?.featurePlans)).toMatchObject({ tier: "parametric", reasonCodes: [] });
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  if (fixtureKind === "boolean" || fixtureKind === "split") {
+    const preparedConsumer = actions.createFeatures?.find((request) => request.definition.kind === expectedKind);
+    expect(preparedConsumer?.definition.kind).toBe(expectedKind);
+    expect(preparedConsumer?.topologyFallback?.definition.kind).toBe("bakedBody");
+    expect(JSON.stringify(preparedConsumer)).toContain("topologyOf");
+    return;
+  }
+  const requests = recordSuccessfulCreateFeatureInputs(service);
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
+  const consumer = requests.find((request) => request.definition.kind === expectedKind);
+  expect(consumer?.definition.kind).toBe(expectedKind);
+  expect(JSON.stringify(consumer)).not.toContain("topologyOf");
+  if (consumer?.definition.kind === "combine" || consumer?.definition.kind === "split") {
+    expect(consumer.definition.parameters.participants.map((participant) => participant.role)).toEqual(["targetBody", "toolBody"]);
+  }
+  if (consumer?.definition.kind === "deleteSolid" || consumer?.definition.kind === "transform") {
+    expect(consumer.definition.parameters.participants[0]?.targets[0]?.kind).toBe("body");
+  }
+});
+
+
+test("apply pipeline materializes the provider-produced parametric revolve profile and local axis", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, snapshot);
+  const source = sourceFromBundle(makeWaveARevolveCaptureBundle());
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  const requests = recordSuccessfulCreateFeatureInputs(service);
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify({ diagnostics: result.diagnostics, requests }),
+  ).toBe(true);
+  const revolve = requests.find((request) => request.definition.kind === "revolve");
+  expect(revolve?.definition.kind).toBe("revolve");
+  if (revolve?.definition.kind !== "revolve") {
+    throw new Error("Expected the apply pipeline to receive a revolve request.");
+  }
+  expect(revolve.definition.parameters.profiles[0]?.kind).toBe("region");
+  expect(revolve.definition.parameters.axis.kind).toBe("sketchEntity");
+  if (revolve.definition.parameters.axis.kind === "sketchEntity") {
+    expect(typeof revolve.definition.parameters.axis.sketchId).toBe("string");
+  }
 });
 
 test("applyImportPreparedActions keeps a faithful constrained fixture position-stable with the real solver", async () => {

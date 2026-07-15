@@ -182,15 +182,16 @@ function validateImportDeferredValueInvariants(
       });
       return;
     }
-    if (request.definition.kind !== "extrude") {
+    if (
+      request.definition.kind !== "extrude" &&
+      request.definition.kind !== "revolve"
+    ) {
       return;
     }
 
     request.definition.parameters.profiles.forEach((profile, profileIndex) => {
       if (isDeferredValue(profile)) {
         blessed.add(profile);
-        // ImportDeferredExtrudeProfileRef only permits regionOf at profile
-        // positions; Typia enforces that structural union before invariants run.
         issues.push(
           ...validateDeferredReference(
             actions,
@@ -201,6 +202,22 @@ function validateImportDeferredValueInvariants(
         );
       }
     });
+
+    if (request.definition.kind === "revolve") {
+      const axis = request.definition.parameters.axis;
+      if (axis.kind === "sketchEntity" && isDeferredValue(axis.sketchId)) {
+        blessed.add(axis.sketchId);
+        issues.push(
+          ...validateDeferredReference(
+            actions,
+            axis.sketchId,
+            orderedPosition,
+            `createFeatures.${ref.index}.definition.parameters.axis.sketchId`,
+          ),
+        );
+      }
+      return;
+    }
 
     const scope = request.definition.parameters.booleanScope;
     if (
