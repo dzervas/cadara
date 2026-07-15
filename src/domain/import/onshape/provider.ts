@@ -55,6 +55,7 @@ import {
   readPartStudio,
 } from "@/domain/import/onshape/bundle-reader";
 import {
+  onshapeFeatureTranslatorRegistry,
   planStudioFidelity,
   type FeaturePlan,
   type FidelityTier,
@@ -1024,6 +1025,12 @@ async function buildPreparedActions(input: {
           code: "onshape-feature-degraded",
         });
       }
+      continue;
+    }
+
+    // Feature-specific translators own whether a parametric plan can be applied;
+    // the provider retains the shared action-buffer mechanics.
+    if (!onshapeFeatureTranslatorRegistry.forFeatureType(featurePlan.featureType).apply) {
       continue;
     }
 
