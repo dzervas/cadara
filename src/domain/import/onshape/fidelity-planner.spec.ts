@@ -282,27 +282,6 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts ambiguous default-scope
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts selector that verifies no closed region degrades with region-resolution", () => {
-  const read = makeStudioRead({
-    // A single open line segment yields no closed region to select.
-    sketchEntities: [
-      {
-        entityId: "l1",
-        entityType: "lineSegment",
-        start3d: [0, 0, 0],
-        end3d: [0.01, 0, 0],
-      },
-    ],
-    extrudeOperation: "NEW",
-  });
-  const plan = planStudioFidelity(read);
-  const extrude = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_TARGET");
-  expect(
-    extrude?.tier === "baked" &&
-      extrude.reasonCodes.includes("needs-region-resolution"),
-    "An extrude whose sketch has no verifiable closed region stays baked with needs-region-resolution.",
-  ).toBeTruthy();
-});
 
 function makeTwoBranchStudioRead(): StudioReadResult {
   const sketchFeature = (

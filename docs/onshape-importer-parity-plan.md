@@ -38,7 +38,7 @@ hole (see `src/contracts/modeling/schema.ts`, `advanced-solid.ts`).
       change: identical tier counts + diagnostics on both capture bundles,
       existing specs green. This makes Phase 2 additive (new files, no shared
       hot-spot edits).
-- [ ] 1.2 **Shared profile/region resolver.** Extract the region verification,
+- [x] 1.2 **Shared profile/region resolver.** Extract the region verification,
       interior-point derivation, and deferred-profile machinery from
       `extrude-planner.ts` into a reusable module usable by revolve, sweep,
       loft, thicken. Extrude re-implemented on top of it; no behavior change.
