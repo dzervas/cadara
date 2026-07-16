@@ -46,23 +46,31 @@ function sketch(id: string) {
   };
 }
 
-function extrude(id: string, sketchId: string) {
+function extrude(id: string, sketchId: string, endBound = "BLIND") {
   return {
     featureType: "extrude",
     featureId: id,
     name: id,
     parameters: [
       { ...query("entities", []), queries: [{ queryString: `query = qSketchRegion(id + "${sketchId}", true);` }] },
-      { parameterId: "endBound", value: "BLIND" },
+      { parameterId: "endBound", value: endBound },
       { parameterId: "depth", expression: "10 mm", value: 0.01 },
       { parameterId: "operationType", value: "NEW" },
     ],
   };
 }
 
-export function makeWaveBBodyCaptureBundle(kind: ConsumerKind) {
+export function makeWaveBBodyCaptureBundle(
+  kind: ConsumerKind,
+  options: { bakedProducer?: boolean } = {},
+) {
   const needsTwo = kind === "boolean" || kind === "split";
-  const features: Record<string, unknown>[] = [sketch("S1"), extrude("E1", "S1")];
+  // An unsupported end bound keeps E1 honestly baked so its body only ever
+  // exists in rollback snapshots, never in the parametric prefix.
+  const features: Record<string, unknown>[] = [
+    sketch("S1"),
+    extrude("E1", "S1", options.bakedProducer ? "UP_TO_SURFACE" : "BLIND"),
+  ];
   if (needsTwo) features.push(sketch("S2"), extrude("E2", "S2"));
   const consumer = kind === "boolean"
     ? { featureType: "booleanBodies", featureId: "C", name: "Boolean", parameters: [

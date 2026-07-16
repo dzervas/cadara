@@ -518,46 +518,57 @@ test("compact v2 checkpoint replaces an apply-ambiguous topology consumer exactl
   expect(JSON.stringify(created)).not.toContain("topologyOf");
 });
 
-test("root v1 bundles retain tier counts and expose legacy topology checkpoint degradation", async () => {
+test("root capture bundles degrade honestly without a history capability", async () => {
+  // Mounts is a v2 capture without rollback snapshots: the legacy probe-less
+  // path applies and topology consumers carry both evidence-missing codes.
+  // Part Studio 1 is a full v2 capture with snapshots: without a history
+  // capability the static plan keeps the honest needs-history-probe reason.
   const cases = [
     [
       "40a51fb8fa82fd4565151114.onshape-capture.json",
       { parametric: 6, baked: 4, geometryOnly: 0 },
+      true,
     ],
     [
       "9841e486906fa2ce62d74d8e.onshape-capture.json",
       { parametric: 6, baked: 35, geometryOnly: 0 },
+      false,
     ],
   ] as const;
 
-  for (const [fileName, expectedCounts] of cases) {
+  for (const [fileName, expectedCounts, legacySnapshotless] of cases) {
     const bundle = JSON.parse(await readFile(fileName, "utf8"));
-    expect(bundle.formatVersion).toBe(1);
-    expect(bundle.partStudios[0]?.rollbackSnapshots).toBeNull();
+    expect(bundle.formatVersion).toBe(2);
+    expect(bundle.partStudios[0]?.rollbackSnapshots === null).toBe(legacySnapshotless);
     const { service } = createTestModelingService();
     const snapshot = await service.getCurrentDocumentSnapshot();
     const capabilities = createImportCapabilities(service, snapshot);
     const source = sourceFromBundle(bundle);
     const review = await onshapeImportProvider.review({ source, capabilities });
     expect(review.providerReview.studios[0]?.tierCounts).toEqual(expectedCounts);
-    expect(
-      review.providerReview.studios[0]?.featurePlans.some(
-        (plan) =>
-          plan.reasonCodes.includes("topology-history-evidence-missing") &&
-          plan.reasonCodes.includes("topology-bake-snapshot-missing"),
-      ),
-    ).toBe(true);
-    const legacyConsumers = review.providerReview.studios[0]?.featurePlans.filter((plan) =>
+    const consumers = review.providerReview.studios[0]?.featurePlans.filter((plan) =>
       ["booleanBodies", "deleteBodies", "transform", "splitPart", "split"].includes(plan.featureType),
     ) ?? [];
-    for (const consumer of legacyConsumers) {
+    expect(consumers.length).toBeGreaterThan(0);
+    for (const consumer of consumers) {
       expect(consumer.tier).toBe("baked");
       if (consumer.featureType === "transform") {
         expect(consumer.reasonCodes).toContain("transform-rotation-unsupported");
-      } else {
+      } else if (legacySnapshotless) {
         expect(consumer.reasonCodes).toContain("topology-history-evidence-missing");
         expect(consumer.reasonCodes).toContain("topology-bake-snapshot-missing");
+      } else {
+        expect(consumer.reasonCodes).toContain("needs-history-probe");
       }
+    }
+    if (legacySnapshotless) {
+      expect(
+        review.providerReview.studios[0]?.featurePlans.some(
+          (plan) =>
+            plan.reasonCodes.includes("topology-history-evidence-missing") &&
+            plan.reasonCodes.includes("topology-bake-snapshot-missing"),
+        ),
+      ).toBe(true);
     }
     const actions = await onshapeImportProvider.prepare({
       source,
@@ -640,6 +651,65 @@ test.each([
   if (consumer?.definition.kind === "deleteSolid" || consumer?.definition.kind === "transform") {
     expect(consumer.definition.parameters.participants[0]?.targets[0]?.kind).toBe("body");
   }
+});
+
+test("a body consumer over a baked producer reports topology-upstream-baked, not a matching failure", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, snapshot, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        const count = input.actions.orderedActions?.length ?? 0;
+        return {
+          steps: Array.from({ length: count }, () => ({
+            status: "rebuilt" as const,
+            signatures: [],
+          })),
+        };
+      },
+    },
+  });
+  const source = sourceFromBundle(makeWaveBBodyCaptureBundle("delete", { bakedProducer: true }));
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const studio = review.providerReview.studios[0];
+  const producer = studio?.featurePlans.find((plan) => plan.onshapeFeatureId === "E1");
+  const consumer = studio?.featurePlans.find((plan) => plan.onshapeFeatureId === "C");
+  expect(producer?.tier).toBe("baked");
+  expect(consumer, JSON.stringify(studio?.featurePlans)).toMatchObject({
+    tier: "baked",
+    reasonCodes: ["topology-upstream-baked"],
+  });
+});
+
+test("a failed pre-consumer prefix probe degrades to topology-history-evidence-missing", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, snapshot, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        const count = input.actions.orderedActions?.length ?? 0;
+        // Prefix probes (no final tessellation) fail; the whole-plan probe rebuilds.
+        if (!input.includeFinalTessellation) {
+          return { steps: [{ status: "failed" as const, diagnostics: [] }] };
+        }
+        return {
+          steps: Array.from({ length: count }, () => ({
+            status: "rebuilt" as const,
+            signatures: [],
+          })),
+        };
+      },
+    },
+  });
+  const source = sourceFromBundle(makeWaveBBodyCaptureBundle("delete"));
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const consumer = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "C",
+  );
+  expect(consumer).toMatchObject({
+    tier: "baked",
+    reasonCodes: ["topology-history-evidence-missing"],
+  });
 });
 
 
