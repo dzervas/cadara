@@ -432,7 +432,7 @@ Proposed planner reason codes are:
 | `topology-reference-no-match` | No Cadara entity passes the gates/tolerance at that prefix. |
 | `topology-reference-ambiguous` | More than one Cadara entity remains plausible. |
 | `topology-durable-naming-unavailable` | A subtopology ref is required but the kernel does not advertise durable naming. |
-| `topology-upstream-baked` | The necessary subtopology belongs to a body-only baked checkpoint. |
+| `topology-upstream-baked` | A queried entity was produced or reshaped by a non-parametric (baked) upstream feature, so it cannot exist in the parametric prefix. Attribution uses the rollback-snapshot timeline (`featuresModifyingBody`). |
 | `topology-apply-rematch-failed` | Review was unique, but the real apply-state rematch was not. |
 | `topology-bake-snapshot-missing` | The feature failed and no post-feature rollback snapshot exists for an honest checkpoint. |
 

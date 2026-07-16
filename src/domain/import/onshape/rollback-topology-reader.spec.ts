@@ -39,6 +39,26 @@ test("uses feature-list order for before/after snapshots and reads exact tessell
   expect(timeline.snapshotBeforeFeature("transform")?.bodies[0]).toMatchObject({ id: "JHD", faces: [{ id: "JNC" }] });
 });
 
+test("attributes a body to every feature that introduced or reshaped it before the consumer", () => {
+  const unchanged = tessellation("JHD", "face-a");
+  const timeline = createRollbackTopologyTimeline({
+    featureIds: ["extrude", "sketch", "chamfer", "transform", "boolean"],
+    snapshots: [
+      { featureId: "extrude", tessellationTolerance: 0.0001, tessellatedFaces: unchanged },
+      // sketch has no snapshot (non-solid features are skipped by capture).
+      { featureId: "chamfer", tessellationTolerance: 0.0001, tessellatedFaces: tessellation("JHD", "face-b") },
+      { featureId: "transform", tessellationTolerance: 0.0001, tessellatedFaces: tessellation("JHD", "face-b") },
+      { featureId: "boolean", tessellationTolerance: 0.0001, tessellatedFaces: tessellation("other", "face-c") },
+    ],
+  });
+
+  // extrude introduced JHD, chamfer reshaped it, transform left it identical.
+  expect(timeline.featuresModifyingBody("JHD", "boolean")).toEqual(["extrude", "chamfer"]);
+  // Bodies born later are not attributed to earlier features; disappearance counts as a change.
+  expect(timeline.featuresModifyingBody("other", "boolean")).toEqual([]);
+  expect(timeline.featuresModifyingBody("JHD", "unknown-consumer")).toEqual(["extrude", "chamfer", "boolean"]);
+});
+
 test("selects the nearest available preceding snapshot and diagnoses malformed payloads", () => {
   const timeline = createRollbackTopologyTimeline({
     featureIds: ["a", "b", "c"],

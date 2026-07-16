@@ -145,3 +145,40 @@ Wave C (cheap long tail, needs 1.1 only):
   - Resolved defect 2 — baked body loss during extrude edit: preview pre-resolved the persistent asset but its transient `buildNextAuthoringState` omitted `resolvedGeometryAssets` and `bakedShapeCache`, so the full preview chain reported the baked asset unavailable. Preview now shares the create/update pre-resolution path and carries both maps into rebuild state. Successful feature-edit cursor restoration advances to the document tail, rebuilding downstream baked history; `body_feature_bakedBody-1` survives preview and commit.
   - Resolved defect 3 — probe-backed construction plane: the construction-plane frame gap in the probe-backed path was fixed through snapshot and implementation-policy changes, restoring Part Studio 1's parametric plane/sketch/extrude chain and variable rebuild behavior.
 - Wave B3–B5 verification (2026-07-15): registered body-only translators now emit normal advanced-solid definitions after exact-prefix body resolution. Boolean maps `UNION`/`SUBTRACTION`/`INTERSECTION` to `add`/`subtract`/`intersect`, preserves `keepTools`, ignores inactive offset selections, and delete deduplicates `entities`/`nonCompositeEntities`. Transform supports XYZ translation vectors and canonical-plane normal distance; rotation/copy/unknown modes degrade specifically. Mirror supports part/new-body copies across canonical datum planes. Split supports one target body plus one body tool with both sides and explicit tool retention/consumption; face tools and one-side modes degrade. The narrowly bridged kernel options are transform `vector`, combine `keepTools`, and split `keepTools`. Compact v2 fixtures cover extrude→transform and extrude→delete through live apply rematching, and two-extrude boolean/split planning through deferred participant emission; all stored applied definitions contain live body refs and no `topologyOf`. Root v1 fixtures explicitly remain legacy-degraded with unchanged **6/4/0** and **6/35/0** counts.
+- Real v2 re-capture root-cause audit (2026-07-16): `9841e486…` was re-captured
+  as a true formatVersion-2 bundle (28 rollback snapshots, 328 resolved
+  references, 105 history-point records). The body-only consumers (Boolean 1,
+  Delete part 1, Split 1) still do not promote — and that is **correct by
+  design**, not a resolver defect. Root cause per consumer, from the rollback
+  timeline: Split 1 targets body `JND` (shaped by Extrude 1 → Chamfer 1/2 →
+  Shell 1 → Extrude 2/3, all baked: region-degraded extrudes and gated
+  chamfers/shell) with tool `JaD` (Extrude 4, baked); Boolean 1 targets `JbH`
+  and Delete part 1 removes `J5D`/`J5H`, all downstream of the baked Split 1.
+  Every queried body exists only in baked history segments, so the parametric
+  prefix can never contain it. Two diagnostics bugs were fixed so the review
+  tells this truth:
+  1. Body-consumer resolution now attributes each queried body to every
+     rollback-snapshot segment that introduced or reshaped it
+     (`featuresModifyingBody` on the rollback timeline). When any such segment
+     is non-parametric the consumer reports `topology-upstream-baked` instead
+     of the misleading `topology-reference-no-match` (real-OCC path) or
+     `translator-unavailable` (logic-lane path where the mock prefix probe
+     yields no signatures).
+  2. A failed pre-consumer prefix probe no longer silently falls through to the
+     `translator-unavailable` rewrite; it reports
+     `topology-history-evidence-missing`.
+  With a history capability the re-captured Part Studio 1 now reviews at
+  **9 parametric / 32 baked / 0 geometry-only** (unchanged by this audit —
+  gains come from the captured-frame plane/sketch/extrude chain), with honest
+  consumer reasons: Boolean 1 / Delete part 1 / Split 1 →
+  `topology-upstream-baked`; Chamfer 1/2/4 → `topology-durable-naming-unavailable`
+  (real kernel) as the durable-naming gate requires. Probe-less review of both
+  root bundles remains **6/4/0** and **6/35/0**; Mounts (v2 without snapshots)
+  keeps the legacy `topology-history-evidence-missing` +
+  `topology-bake-snapshot-missing` pair, while snapshot-backed Part Studio 1
+  keeps the static `needs-history-probe` reason. What must change before these
+  three consumers can genuinely promote: their upstream body producers
+  (region-degraded extrudes, gated chamfers, hollow shell) must first become
+  parametric — the consumers resolve automatically once the prefix carries the
+  bodies, as proven by the synthetic v2 promote paths plus the new
+  baked-producer and failed-prefix specs in `apply-pipeline.spec.ts`.

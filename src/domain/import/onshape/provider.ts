@@ -931,6 +931,36 @@ async function activateProbeBackedPlanning(input: {
   // before probing the next one, so every probe observes the exact growing prefix.
   for (const candidate of [...workingPlan.featurePlans]) {
     if (!candidate.plannedBodyTopologyConsumer) continue;
+    const feature = input.read.features.find((entry) => entry.featureId === candidate.onshapeFeatureId);
+    if (!feature) continue;
+    const queryRead = readTopologyQueryRefs(feature, candidate.plannedBodyTopologyConsumer.slots);
+    // Onshape's rollback timeline names every feature that produced or reshaped
+    // each queried body before the consumer. When any of them is not parametric,
+    // the body as consumed cannot exist in the parametric prefix: the consumer
+    // is baked by design, not by a matching failure.
+    const plansById = new Map(
+      workingPlan.featurePlans.map((plan) => [plan.onshapeFeatureId, plan]),
+    );
+    const consumesBakedUpstreamBody = queryRead.refs.some((query) =>
+      topologyTimeline
+        .featuresModifyingBody(query.deterministicId, candidate.onshapeFeatureId)
+        .some((featureId) => plansById.get(featureId)?.tier !== "parametric"),
+    );
+    const degradeConsumer = (reason: PlanReasonCode) => {
+      workingPlan = recomputePlanWithFeaturePlans(
+        workingPlan,
+        workingPlan.featurePlans.map((plan) =>
+          plan.onshapeFeatureId === candidate.onshapeFeatureId
+            ? { ...plan, reasonCodes: [reason], suppressed: true }
+            : plan,
+        ),
+        input.read.studio.groundTruth.hasBodies,
+      );
+    };
+    if (consumesBakedUpstreamBody) {
+      degradeConsumer("topology-upstream-baked");
+      continue;
+    }
     const featureIdToOrderedPrefixPosition = new Map<string, number>();
     const prefixActions = await buildPreparedActions({
       read: input.read,
@@ -945,9 +975,13 @@ async function activateProbeBackedPlanning(input: {
       consumerFeatureIds: [candidate.onshapeFeatureId],
       history: input.capabilities.history,
     });
-    const feature = input.read.features.find((entry) => entry.featureId === candidate.onshapeFeatureId);
-    if (!feature || !prefix || prefix.status === "failed") continue;
-    const queryRead = readTopologyQueryRefs(feature, candidate.plannedBodyTopologyConsumer.slots);
+    if (!prefix || prefix.status === "failed") {
+      // The parametric prefix itself did not rebuild in the probe session, so no
+      // safe pre-consumer evidence exists in the Cadara prefix. Report that
+      // instead of silently falling through to the translator-unavailable rewrite.
+      degradeConsumer("topology-history-evidence-missing");
+      continue;
+    }
     const resolution = resolveTopologyReferences({
       consumerFeatureId: candidate.onshapeFeatureId,
       queries: queryRead.refs,

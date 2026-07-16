@@ -36,6 +36,16 @@ export interface RollbackTopologyTimeline {
   readonly diagnostics: readonly RollbackTopologyDiagnostic[];
   snapshotBeforeFeature(featureId: string): RollbackTopologySnapshot | null;
   snapshotAfterFeature(featureId: string): RollbackTopologySnapshot | null;
+  /**
+   * Features strictly before `beforeFeatureId` whose post-feature snapshot
+   * introduced the body or changed its topology/tessellation relative to the
+   * previous snapshot. Attributes a consumed body to every history segment
+   * that shaped it.
+   */
+  featuresModifyingBody(
+    bodyDeterministicId: string,
+    beforeFeatureId: string,
+  ): readonly string[];
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -129,6 +139,16 @@ export function createRollbackTopologyTimeline(input: {
   const diagnostics: RollbackTopologyDiagnostic[] = [];
   const featureIndex = new Map(input.featureIds.map((id, index) => [id, index]));
   const snapshots = new Map<string, RollbackTopologySnapshot>();
+  const shapeKeyCache = new Map<string, string>();
+  function bodyShapeKey(featureId: string, body: RollbackBodyTopology): string {
+    const cacheKey = `${featureId}\u0000${body.id}`;
+    let key = shapeKeyCache.get(cacheKey);
+    if (key === undefined) {
+      key = JSON.stringify(body);
+      shapeKeyCache.set(cacheKey, key);
+    }
+    return key;
+  }
   for (const snapshot of input.snapshots ?? []) {
     if (!featureIndex.has(snapshot.featureId)) {
       diagnostics.push({
@@ -154,6 +174,22 @@ export function createRollbackTopologyTimeline(input: {
         if (snapshot) return snapshot;
       }
       return null;
+    },
+    featuresModifyingBody(bodyDeterministicId, beforeFeatureId) {
+      const limit = featureIndex.get(beforeFeatureId) ?? input.featureIds.length;
+      const modifiers: string[] = [];
+      let previousShape: string | null = null;
+      for (let index = 0; index < limit; index += 1) {
+        const snapshot = snapshots.get(input.featureIds[index]!);
+        if (!snapshot) continue;
+        const body = snapshot.bodies.find(
+          (candidate) => candidate.id === bodyDeterministicId,
+        );
+        const shape = body ? bodyShapeKey(snapshot.featureId, body) : null;
+        if (shape !== previousShape) modifiers.push(snapshot.featureId);
+        previousShape = shape;
+      }
+      return modifiers;
     },
   };
 }
