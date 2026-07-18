@@ -409,3 +409,91 @@ test("src/contracts/import/validation.spec.ts", async () => {
     "Prepared action validation should reject a constructionOf reference to a non-feature producer.",
   ).toBeFalsy();
 });
+
+
+test("validates deferred revolve boolean scope and advanced construction participants", () => {
+  const planeRequest = {
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Plane",
+    definition: {
+      kind: "plane" as const,
+      featureTypeVersion: "feature-type/plane/v1alpha1" as const,
+      parameters: {
+        mode: "explicitFrame" as const,
+        frame: {
+          origin: [0, 0, 0] as const,
+          xAxis: [1, 0, 0] as const,
+          yAxis: [0, 1, 0] as const,
+          normal: [0, 0, 1] as const,
+          linearUnit: "documentLength" as const,
+          handedness: "rightHanded" as const,
+        },
+      },
+    },
+  };
+  const sketchRequest = {
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    solverCorrelation: null,
+    sketchId: null,
+    sketchLabel: "Sketch",
+    plane: {
+      support: { kind: "construction" as const, constructionId: "construction_plane-xy" },
+      frame: planeRequest.definition.parameters.frame,
+      key: "xy" as const,
+    },
+    definition: {
+      schemaVersion: "sketch-definition/v1alpha1" as const,
+      referenceIds: [], references: [], pointIds: [], points: [], entityIds: [], entities: [],
+      constraintIds: [], constraints: [], dimensionIds: [], dimensions: [], styleIds: [], styles: [],
+      svgRenderingEnabled: true, derivedRelationships: [], authoringOperations: [],
+    },
+  };
+  const revolve = {
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Cut revolve",
+    definition: {
+      kind: "revolve" as const,
+      featureTypeVersion: "feature-type/revolve/v1alpha1" as const,
+      parameters: {
+        profiles: [{ kind: "regionOf" as const, actionIndex: 0, selector: { kind: "interiorPoint" as const, point: [0, 0] as const } }],
+        axis: { kind: "sketchEntity" as const, sketchId: { kind: "sketchIdOf" as const, actionIndex: 0 }, entityId: "sketch_entity_axis" },
+        startAngle: { source: "literal" as const, value: 0 },
+        extent: { mode: "oneSide" as const, end: { kind: "full" as const } },
+        operation: { source: "literal" as const, value: "cut" as const },
+        booleanScope: { kind: "targetBody" as const, bodyId: { kind: "bodyOf" as const, actionIndex: 1 } },
+      },
+    },
+  };
+  const mirror = {
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Mirror",
+    definition: {
+      kind: "mirror" as const,
+      featureTypeVersion: "advanced-solid-feature/v0" as const,
+      parameters: {
+        participants: [{ role: "plane" as const, targets: [{ kind: "constructionOf" as const, actionIndex: 1 }] }],
+        options: { copy: true },
+      },
+    },
+  };
+
+  const result = validateImportPreparedActions({
+    commitSketches: [sketchRequest],
+    createFeatures: [planeRequest, revolve, mirror],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+      { kind: "createFeature", index: 1 },
+      { kind: "createFeature", index: 2 },
+    ],
+  });
+  expect(result.success, JSON.stringify(result.issues)).toBe(true);
+});

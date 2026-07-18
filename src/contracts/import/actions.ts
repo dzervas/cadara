@@ -72,7 +72,18 @@ export interface ImportDeferredTopologyRef {
   };
 }
 
-export type ImportDeferredDurableRef = DurableRef | ImportDeferredTopologyRef;
+export type ImportDeferredSketchEntityRef = Omit<
+  Extract<DurableRef, { kind: "sketchEntity" }>,
+  "sketchId"
+> & {
+  sketchId: SketchId | Extract<ImportDeferredValue, { kind: "sketchIdOf" }>;
+};
+
+export type ImportDeferredDurableRef =
+  | DurableRef
+  | ImportDeferredTopologyRef
+  | ImportDeferredSketchEntityRef
+  | Extract<ImportDeferredValue, { kind: "regionOf" | "constructionOf" }>;
 
 export interface ImportDeferredFilletFeatureParameters
   extends Omit<FilletFeatureParameters, "edgeTargets"> {
@@ -124,10 +135,17 @@ export type ImportDeferredProfileRef =
 export type ImportDeferredExtrudeProfileRef = ImportDeferredProfileRef;
 
 export type ImportDeferredFeatureBooleanScope =
-  | FeatureBooleanScope
+  | Exclude<FeatureBooleanScope, { kind: "targetBody" | "targetBodies" }>
   | {
       kind: "targetBody";
-      bodyId: BodyId | Extract<ImportDeferredValue, { kind: "bodyOf" }>;
+      bodyId:
+        | BodyId
+        | Extract<ImportDeferredValue, { kind: "bodyOf" }>
+        | ImportDeferredTopologyRef;
+    }
+  | {
+      kind: "targetBodies";
+      bodyIds: readonly (BodyId | ImportDeferredTopologyRef)[];
     };
 
 export interface ImportDeferredExtrudeFeatureParameters
@@ -148,9 +166,10 @@ export type ImportDeferredRevolveAxisRef =
     };
 
 export interface ImportDeferredRevolveFeatureParameters
-  extends Omit<RevolveFeatureParameters, "profiles" | "axis"> {
+  extends Omit<RevolveFeatureParameters, "profiles" | "axis" | "booleanScope"> {
   profiles: readonly [ImportDeferredProfileRef, ...ImportDeferredProfileRef[]];
   axis: ImportDeferredRevolveAxisRef;
+  booleanScope: ImportDeferredFeatureBooleanScope;
 }
 
 /** Deferred replacement scope for a baked checkpoint emitted inside one import. */
@@ -236,10 +255,19 @@ export interface ImportCommitSketchRequest
 }
 
 export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
-  regionOf: ["createFeatures[].definition.parameters.profiles[]"],
+  regionOf: [
+    "createFeatures[].definition.parameters.profiles[]",
+    "createFeatures[].definition.parameters.participants[].targets[]",
+  ],
   bodyOf: ["createFeatures[].definition.parameters.booleanScope.bodyId"],
-  sketchIdOf: ["createFeatures[].definition.parameters.axis.sketchId"],
-  constructionOf: ["commitSketches[].plane.support"],
+  sketchIdOf: [
+    "createFeatures[].definition.parameters.axis.sketchId",
+    "createFeatures[].definition.parameters.participants[].targets[].sketchId",
+  ],
+  constructionOf: [
+    "createFeatures[].definition.parameters.participants[].targets[]",
+    "commitSketches[].plane.support",
+  ],
 } as const satisfies Record<ImportDeferredValue["kind"], readonly string[]>;
 
 export const IMPORT_DEFERRED_TOPOLOGY_BLESSED_POSITIONS = [
@@ -248,6 +276,8 @@ export const IMPORT_DEFERRED_TOPOLOGY_BLESSED_POSITIONS = [
   "createFeatures[].definition.parameters.faceTargets[]",
   "createFeatures[].definition.parameters.participants[].targets[]",
   "createFeatures[].definition.parameters.reference.target",
+  "createFeatures[].definition.parameters.booleanScope.bodyId",
+  "createFeatures[].definition.parameters.booleanScope.bodyIds[]",
   "commitSketches[].plane.support",
 ] as const;
 

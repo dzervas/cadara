@@ -4,6 +4,7 @@ import type {
   HistoryProbeTopologySignature,
 } from "@/contracts/import/capabilities";
 import type {
+  ImportDeferredSketchEntityRef,
   ImportDeferredTopologyRef,
   ImportDeferredValue,
   ImportPreparedActions,
@@ -49,7 +50,7 @@ import {
 } from "@/domain/import/region-containment";
 import { describeUnknownError } from "@/contracts/errors";
 import { matchSignature } from "@/domain/import/onshape/signature-matcher";
-import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import type { DurableRef } from "@/contracts/shared/references";
 
 export async function resolveLocalFileImportSource(
@@ -317,6 +318,19 @@ function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologyR
   );
 }
 
+function isDeferredSketchEntityRef(
+  value: unknown,
+): value is ImportDeferredSketchEntityRef & {
+  sketchId: Extract<ImportDeferredValue, { kind: "sketchIdOf" }>;
+} {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { kind?: unknown }).kind === "sketchEntity" &&
+      isDeferredValue((value as { sketchId?: unknown }).sketchId),
+  );
+}
+
 class TopologyApplyRematchError extends Error {
   readonly selector: ImportDeferredTopologyRef;
 
@@ -445,53 +459,12 @@ export class ImportDeferredMaterializer {
     selector: ImportDeferredTopologyRef,
   ): Promise<DurableRef> {
     const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
-    const signatures: HistoryProbeTopologySignature[] = [];
-    for (const body of snapshot.document.bodies) {
-      const payload = await this.input.modelingService.buildNativeExactBrepPayload({
-        baseRevisionId: snapshot.document.revisionId,
-        target: { kind: "body", bodyId: body.bodyId },
-      });
-      if (payload.kind !== "nativeTopologyPayload") continue;
-      const derived = deriveKernelTopologySignaturesFromExactBrepPayload(payload.payload);
-      if (derived.status === "available") signatures.push(...derived.signatures);
-    }
-    if (selector.expectedKind === "body") {
-      for (const body of snapshot.document.bodies) {
-        if (signatures.some((signature) => signature.reference.kind === "body" && signature.reference.bodyId === body.bodyId)) continue;
-        const points = snapshot.document.render.records.flatMap((record) =>
-          record.ownerBodyId === body.bodyId && record.geometry.kind === "mesh"
-            ? record.geometry.vertexPositions
-            : [],
-        );
-        if (points.length === 0) {
-          signatures.push({
-            entityClass: "body",
-            geometryType: "solid",
-            reference: { kind: "body", bodyId: body.bodyId },
-          });
-          continue;
-        }
-        const low: [number, number, number] = [Infinity, Infinity, Infinity];
-        const high: [number, number, number] = [-Infinity, -Infinity, -Infinity];
-        for (const point of points) {
-          for (const axis of [0, 1, 2] as const) {
-            low[axis] = Math.min(low[axis], point[axis]);
-            high[axis] = Math.max(high[axis], point[axis]);
-          }
-        }
-        signatures.push({
-          entityClass: "body",
-          geometryType: "solid",
-          boundingBox: { low, high },
-          centroid: [
-            (low[0] + high[0]) / 2,
-            (low[1] + high[1]) / 2,
-            (low[2] + high[2]) / 2,
-          ],
-          reference: { kind: "body", bodyId: body.bodyId },
-        });
-      }
-    }
+    const signatureResult = await deriveLiveBodySignatures({
+      snapshot,
+      service: this.input.modelingService,
+    });
+    const signatures: HistoryProbeTopologySignature[] =
+      signatureResult.status === "available" ? signatureResult.signatures : [];
     const match = matchSignature(
       selector.capturedSignature,
       signatures,
@@ -501,6 +474,14 @@ export class ImportDeferredMaterializer {
       throw new TopologyApplyRematchError(selector);
     }
     return match.reference;
+  }
+
+  async resolveDeferredBodyId(selector: ImportDeferredTopologyRef): Promise<BodyId> {
+    const reference = await this.resolveDeferredTopologyRef(selector);
+    if (reference.kind !== "body") {
+      throw new TopologyApplyRematchError(selector);
+    }
+    return reference.bodyId;
   }
 
   async resolveDeferredValue(
@@ -526,13 +507,13 @@ export class ImportDeferredMaterializer {
         return output.sketchId;
       }
       case "bodyOf": {
-        const bodyId = output.bodyIds?.[0];
-        if (!bodyId) {
+        const bodyIds = output.bodyIds ?? [];
+        if (bodyIds.length !== 1) {
           throw new Error(
-            `Unable to resolve deferred bodyOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced no body id.`,
+            `Unable to resolve deferred bodyOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced ${bodyIds.length} body ids, expected exactly one.`,
           );
         }
-        return bodyId;
+        return bodyIds[0]!;
       }
       case "constructionOf": {
         const constructionId = output.constructionIds?.[0];
@@ -604,6 +585,7 @@ export class ImportDeferredMaterializer {
       : never,
     consumer: ImportPreparedActionRef,
   ): Promise<CreateFeatureRequest> {
+    const { topologyFallback: _topologyFallback, ...requestWithoutFallback } = request;
     if (request.definition?.kind === "bakedBody") {
       const replacement = request.definition.parameters.replacement;
       const bodyIds = Array.from(
@@ -620,7 +602,7 @@ export class ImportDeferredMaterializer {
         ),
       );
       return {
-        ...request,
+        ...requestWithoutFallback,
         definition: {
           ...request.definition,
           parameters: {
@@ -632,7 +614,7 @@ export class ImportDeferredMaterializer {
     }
 
     if (!request.definition) {
-      return request as CreateFeatureRequest;
+      return requestWithoutFallback as CreateFeatureRequest;
     }
 
     if (request.definition.kind === "fillet") {
@@ -644,8 +626,7 @@ export class ImportDeferredMaterializer {
         ),
       );
       return {
-        ...request,
-        topologyFallback: undefined,
+        ...requestWithoutFallback,
         definition: {
           ...request.definition,
           parameters: { ...request.definition.parameters, edgeTargets },
@@ -666,8 +647,7 @@ export class ImportDeferredMaterializer {
         ),
       );
       return {
-        ...request,
-        topologyFallback: undefined,
+        ...requestWithoutFallback,
         definition: {
           ...request.definition,
           parameters: { ...parameters, bodyTarget, faceTargets },
@@ -684,8 +664,7 @@ export class ImportDeferredMaterializer {
         ? await this.resolveDeferredTopologyRef(target)
         : target;
       return {
-        ...request,
-        topologyFallback: undefined,
+        ...requestWithoutFallback,
         definition: {
           ...request.definition,
           parameters: {
@@ -700,7 +679,12 @@ export class ImportDeferredMaterializer {
       | {
           participants?: readonly {
             role: string;
-            targets: readonly (DurableRef | ImportDeferredTopologyRef)[];
+            targets: readonly (
+              | DurableRef
+              | ImportDeferredTopologyRef
+              | ImportDeferredSketchEntityRef
+              | Extract<ImportDeferredValue, { kind: "regionOf" | "constructionOf" }>
+            )[];
           }[];
         }
       | undefined;
@@ -709,17 +693,29 @@ export class ImportDeferredMaterializer {
         advancedParameters.participants.map(async (participant) => ({
           ...participant,
           targets: await Promise.all(
-            participant.targets.map((target) =>
-              isDeferredTopologyRef(target)
-                ? this.resolveDeferredTopologyRef(target)
-                : target,
-            ),
+            participant.targets.map(async (target) => {
+              if (isDeferredTopologyRef(target)) {
+                return this.resolveDeferredTopologyRef(target);
+              }
+              if (isDeferredSketchEntityRef(target)) {
+                return {
+                  ...target,
+                  sketchId: await this.resolveDeferredValue(
+                    target.sketchId,
+                    consumer,
+                  ),
+                };
+              }
+              if (isDeferredValue(target)) {
+                return this.resolveDeferredValue(target, consumer);
+              }
+              return target;
+            }),
           ),
         })),
       );
       return {
-        ...request,
-        topologyFallback: undefined,
+        ...requestWithoutFallback,
         definition: {
           ...request.definition,
           parameters: { ...request.definition.parameters, participants },
@@ -731,7 +727,7 @@ export class ImportDeferredMaterializer {
       request.definition.kind !== "extrude" &&
       request.definition.kind !== "revolve"
     ) {
-      return request as CreateFeatureRequest;
+      return requestWithoutFallback as CreateFeatureRequest;
     }
 
     const profiles = await Promise.all(
@@ -741,6 +737,29 @@ export class ImportDeferredMaterializer {
           : profile,
       ),
     );
+    const booleanScope = request.definition.parameters.booleanScope;
+    const materializedBooleanScope =
+      booleanScope.kind === "targetBody"
+        ? {
+            ...booleanScope,
+            bodyId: isDeferredTopologyRef(booleanScope.bodyId)
+              ? await this.resolveDeferredBodyId(booleanScope.bodyId)
+              : isDeferredValue(booleanScope.bodyId)
+                ? await this.resolveDeferredValue(booleanScope.bodyId, consumer)
+                : booleanScope.bodyId,
+          }
+        : booleanScope.kind === "targetBodies"
+          ? {
+              ...booleanScope,
+              bodyIds: await Promise.all(
+                booleanScope.bodyIds.map((bodyId) =>
+                  isDeferredTopologyRef(bodyId)
+                    ? this.resolveDeferredBodyId(bodyId)
+                    : bodyId,
+                ),
+              ),
+            }
+          : booleanScope;
 
     if (request.definition.kind === "revolve") {
       const axis = request.definition.parameters.axis;
@@ -752,32 +771,20 @@ export class ImportDeferredMaterializer {
             }
           : axis;
       return {
-        ...request,
+        ...requestWithoutFallback,
         definition: {
           ...request.definition,
           parameters: {
             ...request.definition.parameters,
             profiles,
             axis: materializedAxis,
+            booleanScope: materializedBooleanScope,
           },
         },
       } as unknown as CreateFeatureRequest;
     }
-
-    const booleanScope = request.definition.parameters.booleanScope;
-    const materializedBooleanScope =
-      booleanScope.kind === "targetBody" && isDeferredValue(booleanScope.bodyId)
-        ? {
-            ...booleanScope,
-            bodyId: await this.resolveDeferredValue(
-              booleanScope.bodyId,
-              consumer,
-            ),
-          }
-        : booleanScope;
-
     return {
-      ...request,
+      ...requestWithoutFallback,
       definition: {
         ...request.definition,
         parameters: {

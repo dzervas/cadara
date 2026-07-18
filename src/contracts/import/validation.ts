@@ -1,6 +1,7 @@
 import typia from "typia";
 
 import type {
+  ImportDeferredTopologyRef,
   ImportDeferredValue,
   ImportPreparedActions,
   ImportPreparedActionRef,
@@ -46,6 +47,14 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
     kind === "regionOf" ||
     kind === "bodyOf" ||
     kind === "constructionOf"
+  );
+}
+
+function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologyRef {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { kind?: unknown }).kind === "topologyOf",
   );
 }
 
@@ -186,6 +195,67 @@ function validateImportDeferredValueInvariants(
       request.definition.kind !== "extrude" &&
       request.definition.kind !== "revolve"
     ) {
+      const parameters = request.definition.parameters as {
+        participants?: readonly {
+          targets: readonly unknown[];
+        }[];
+      };
+      parameters.participants?.forEach((participant, participantIndex) => {
+        participant.targets.forEach((target, targetIndex) => {
+          const targetPath = `createFeatures.${ref.index}.definition.parameters.participants.${participantIndex}.targets.${targetIndex}`;
+          if (isDeferredValue(target)) {
+            blessed.add(target);
+            if (target.kind !== "regionOf" && target.kind !== "constructionOf") {
+              issues.push({
+                path: targetPath,
+                expected: "regionOf or constructionOf deferred reference",
+                value: target.kind,
+                message:
+                  "Only regionOf and constructionOf deferred references are allowed as direct advanced participant targets.",
+              });
+            } else {
+              issues.push(
+                ...validateDeferredReference(
+                  actions,
+                  target,
+                  orderedPosition,
+                  targetPath,
+                ),
+              );
+            }
+            return;
+          }
+          if (
+            !target ||
+            typeof target !== "object" ||
+            (target as { kind?: unknown }).kind !== "sketchEntity"
+          ) {
+            return;
+          }
+          const sketchId = (target as { sketchId?: unknown }).sketchId;
+          if (!isDeferredValue(sketchId)) return;
+          blessed.add(sketchId);
+          const path = `${targetPath}.sketchId`;
+          if (sketchId.kind !== "sketchIdOf") {
+            issues.push({
+              path,
+              expected: "sketchIdOf deferred reference",
+              value: sketchId.kind,
+              message:
+                "Only sketchIdOf deferred references are allowed in advanced sketch-entity target positions.",
+            });
+          } else {
+            issues.push(
+              ...validateDeferredReference(
+                actions,
+                sketchId,
+                orderedPosition,
+                path,
+              ),
+            );
+          }
+        });
+      });
       return;
     }
 
@@ -216,32 +286,43 @@ function validateImportDeferredValueInvariants(
           ),
         );
       }
-      return;
     }
 
     const scope = request.definition.parameters.booleanScope;
+    if (scope.kind === "targetBody" && isDeferredValue(scope.bodyId)) {
+      blessed.add(scope.bodyId);
+      issues.push(
+        ...validateDeferredReference(
+          actions,
+          scope.bodyId,
+          orderedPosition,
+          `createFeatures.${ref.index}.definition.parameters.booleanScope.bodyId`,
+        ),
+      );
+    }
     if (
       scope.kind === "targetBody" &&
-      isDeferredValue(scope.bodyId)
+      isDeferredTopologyRef(scope.bodyId) &&
+      scope.bodyId.expectedKind !== "body"
     ) {
-      blessed.add(scope.bodyId);
-      if (scope.bodyId.kind !== "bodyOf") {
-        issues.push({
-          path: `createFeatures.${ref.index}.definition.parameters.booleanScope.bodyId`,
-          expected: "bodyOf deferred reference",
-          value: scope.bodyId.kind,
-          message: "Only bodyOf deferred references are allowed in boolean target body positions.",
-        });
-      } else {
-        issues.push(
-          ...validateDeferredReference(
-            actions,
-            scope.bodyId,
-            orderedPosition,
-            `createFeatures.${ref.index}.definition.parameters.booleanScope.bodyId`,
-          ),
-        );
-      }
+      issues.push({
+        path: `createFeatures.${ref.index}.definition.parameters.booleanScope.bodyId.expectedKind`,
+        expected: "body",
+        value: scope.bodyId.expectedKind,
+        message: "Boolean target topologyOf selectors must resolve a body.",
+      });
+    }
+    if (scope.kind === "targetBodies") {
+      scope.bodyIds.forEach((bodyId, bodyIndex) => {
+        if (isDeferredTopologyRef(bodyId) && bodyId.expectedKind !== "body") {
+          issues.push({
+            path: `createFeatures.${ref.index}.definition.parameters.booleanScope.bodyIds.${bodyIndex}.expectedKind`,
+            expected: "body",
+            value: bodyId.expectedKind,
+            message: "Boolean target topologyOf selectors must resolve bodies.",
+          });
+        }
+      });
     }
   });
 
