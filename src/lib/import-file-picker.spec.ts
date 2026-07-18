@@ -35,6 +35,20 @@ test("src/lib/import-file-picker.spec.ts", async () => {
     "Import picker configuration should forward the multiple-selection flag.",
   ).toBeTruthy();
 
+  const compoundConfiguration = buildImportFilePickerConfiguration([
+    { extension: ".onshape-capture.json", mediaType: "application/json" },
+  ]);
+  expect(
+    compoundConfiguration.openPickerOptions.types[0]?.accept[
+      "application/json"
+    ],
+    "Native picker accept entries must use the final suffix only; Chromium rejects compound extensions like '.onshape-capture.json'.",
+  ).toEqual([".json"]);
+  expect(
+    compoundConfiguration.inputAccept.includes(".onshape-capture.json"),
+    "Fallback input accept should keep the full compound extension for suffix matching.",
+  ).toBeTruthy();
+
   const pngFile = new File(["png"], "reference.png", { type: "image/png" });
   const pickerResult = await showOpenImportFilePicker({
     acceptedFileTypes: [{ extension: "png", mediaType: "image/png" }],
