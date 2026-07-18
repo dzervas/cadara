@@ -23,13 +23,38 @@ const USAGE =
 
 function printPlan(
   title: string,
-  plan: Pick<StudioPlan, "featurePlans" | "tierCounts" | "requiresStudioBake">,
+  plan: Pick<StudioPlan, "featurePlans" | "tierCounts" | "requiresStudioBake"> &
+    Partial<Pick<StudioPlan, "bakeStrategy" | "bakeDiagnostics">>,
 ) {
   console.log(`\n${title}`);
   console.log(
     `tiers: parametric=${plan.tierCounts.parametric} baked=${plan.tierCounts.baked} geometryOnly=${plan.tierCounts.geometryOnly}`,
   );
   console.log(`requiresStudioBake: ${plan.requiresStudioBake}`);
+  if (plan.bakeStrategy) {
+    const checkpointCount = plan.bakeStrategy.kind === "segments"
+      ? plan.bakeStrategy.segments.length
+      : 0;
+    console.log(`bakeStrategy: ${plan.bakeStrategy.kind}`);
+    console.log(`checkpointCount: ${checkpointCount}`);
+    if (plan.bakeStrategy.kind === "wholeStudioLegacy") {
+      console.log(`legacyReason: ${plan.bakeStrategy.reason}`);
+    }
+    if (plan.bakeStrategy.kind === "segments") {
+      for (const segment of plan.bakeStrategy.segments) {
+        console.log(
+          `segment ${segment.segmentId}: ${segment.fromFeatureId} -> ${segment.boundaryFeatureId}` +
+            ` outputs=[${segment.checkpointBodyDeterministicIds.join(",")}]` +
+            ` consumed=[${segment.consumedBodyDeterministicIds.join(",")}]` +
+            ` carried=[${segment.carriedBodyDeterministicIds.join(",")}]` +
+            ` replaces=[${segment.replacementProducerFeatureIds.join(",")}]`,
+        );
+      }
+    }
+    for (const diagnostic of plan.bakeDiagnostics ?? []) {
+      console.log(`segmentDiagnostic: ${diagnostic.code}: ${diagnostic.message}`);
+    }
+  }
 
   const headings = ["tier", "featureType", "label", "reasonCodes"];
   const rows = plan.featurePlans.map((feature) => [
@@ -64,13 +89,64 @@ function scalePoint(point: [number, number, number]): [number, number, number] {
   return [point[0] * 1000, point[1] * 1000, point[2] * 1000];
 }
 
+function rollbackBodySignatures(
+  snapshots: ReturnType<typeof readPartStudio>["studio"]["rollbackSnapshots"],
+): HistoryProbeTopologySignature[] {
+  const signatures = new Map<string, HistoryProbeTopologySignature>();
+  for (const snapshot of snapshots ?? []) {
+    const bodies = (snapshot.tessellatedFaces as {
+      bodies?: Array<{
+        id?: string;
+        faces?: Array<{
+          facets?: Array<{ vertices?: Array<{ x: number; y: number; z: number }> }>;
+        }>;
+      }>;
+    }).bodies ?? [];
+    for (const body of bodies) {
+      if (!body.id) continue;
+      const vertices = (body.faces ?? []).flatMap((face) =>
+        (face.facets ?? []).flatMap((facet) => facet.vertices ?? []),
+      );
+      if (vertices.length === 0) continue;
+      const low: [number, number, number] = [Infinity, Infinity, Infinity];
+      const high: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+      const centroid: [number, number, number] = [0, 0, 0];
+      for (const vertex of vertices) {
+        const point = [vertex.x, vertex.y, vertex.z] as const;
+        for (const axis of [0, 1, 2] as const) {
+          low[axis] = Math.min(low[axis], point[axis]);
+          high[axis] = Math.max(high[axis], point[axis]);
+          centroid[axis] += point[axis];
+        }
+      }
+      for (const axis of [0, 1, 2] as const) centroid[axis] /= vertices.length;
+      const normalizedLow = scalePoint(low);
+      const normalizedHigh = scalePoint(high);
+      const normalizedCentroid = scalePoint(centroid);
+      const key = JSON.stringify([body.id, normalizedLow, normalizedHigh, normalizedCentroid]);
+      signatures.set(key, {
+        entityClass: "body",
+        geometryType: "solid",
+        boundingBox: { low: normalizedLow, high: normalizedHigh },
+        centroid: normalizedCentroid,
+        reference: {
+          kind: "body",
+          bodyId: `body_review_${body.id}_${signatures.size}` as never,
+        },
+      });
+    }
+  }
+  return [...signatures.values()];
+}
+
 function createLogicLaneReviewCapabilities(
   featurePlans: FeaturePlan[],
   resolvedReferences: ReturnType<typeof readPartStudio>["studio"]["resolvedReferences"],
+  rollbackSnapshots: ReturnType<typeof readPartStudio>["studio"]["rollbackSnapshots"],
 ): ImportCapabilities {
-  const signatures: HistoryProbeTopologySignature[] = resolvedReferences.flatMap(
+  const nonBodySignatures: HistoryProbeTopologySignature[] = resolvedReferences.flatMap(
     (entry, index) => {
-      if (!("signature" in entry)) return [];
+      if (!("signature" in entry) || entry.signature.entityClass === "body") return [];
       const signature = entry.signature;
       const id = `${index}`;
       const reference =
@@ -110,6 +186,16 @@ function createLogicLaneReviewCapabilities(
       ];
     },
   );
+  const featureIndexById = new Map(
+    featurePlans.map((plan, index) => [plan.onshapeFeatureId, index]),
+  );
+  const topologyConsumerIndexes = featurePlans.flatMap((plan, index) =>
+    (plan.plannedBodyTopologyConsumer?.slots.length ?? 0) > 0 ||
+    (plan.plannedExtrude?.topologySlots.length ?? 0) > 0
+      ? [index]
+      : [],
+  );
+  let topologyProbeIndex = 0;
 
   return {
     context: {
@@ -141,6 +227,18 @@ function createLogicLaneReviewCapabilities(
     history: {
       async evaluateHistoryProbe(input) {
         const count = input.actions.orderedActions?.length ?? featurePlans.length;
+        const nextConsumerIndex = input.includeFinalTessellation === false
+          ? topologyConsumerIndexes[topologyProbeIndex++] ?? -1
+          : -1;
+        const boundarySnapshot = nextConsumerIndex < 0
+          ? rollbackSnapshots?.at(-1)
+          : [...(rollbackSnapshots ?? [])].reverse().find((snapshot) =>
+              (featureIndexById.get(snapshot.featureId) ?? Infinity) < nextConsumerIndex,
+            );
+        const signatures = [
+          ...rollbackBodySignatures(boundarySnapshot ? [boundarySnapshot] : []),
+          ...nonBodySignatures,
+        ];
         return {
           steps: Array.from({ length: count }, () => ({
             status: "rebuilt" as const,
@@ -200,7 +298,10 @@ async function main() {
   }
 
   const read = readPartStudio(bundle, elementId);
-  const plan = planStudioFidelity(read);
+  const plan = planStudioFidelity(read, {
+    captureFormatVersion: bundle.formatVersion,
+    historyProbeAvailable: true,
+  });
   console.log(`formatVersion: ${bundle.formatVersion}`);
   console.log(`studio: ${read.studio.name} (${read.studio.elementId})`);
   console.log(`rollbackSnapshots: ${read.studio.rollbackSnapshots?.length ?? 0}`);
@@ -218,6 +319,7 @@ async function main() {
     const capabilities = createLogicLaneReviewCapabilities(
       plan.featurePlans,
       read.studio.resolvedReferences,
+      read.studio.rollbackSnapshots,
     );
     const reviewed = await onshapeImportProvider.review({
       source: sourceFromBytes(path, bytes),
@@ -229,7 +331,7 @@ async function main() {
     if (!reviewedStudio) {
       throw new Error(`Provider review did not return Part Studio ${elementId}.`);
     }
-    printPlan("Logic-lane review (mock kernel)", reviewedStudio);
+    printPlan("Logic-lane review (rollback-prefix evidence)", reviewedStudio);
   }
 }
 
