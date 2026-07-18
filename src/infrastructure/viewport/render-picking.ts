@@ -818,10 +818,16 @@ export function createRenderableMeshMaterial(
   );
   const sharedOptions = {
     color,
-    transparent: origin === "preview" || semanticClass === "region",
+    transparent:
+      origin === "preview" ||
+      semanticClass === "region" ||
+      semanticClass === "construction",
     opacity: getRenderableMeshOpacity(semanticClass, origin, false, false),
     side: THREE.DoubleSide,
-    depthWrite: displayOptions.flat || origin === "preview" ? false : true,
+    depthWrite:
+      !displayOptions.flat &&
+      origin !== "preview" &&
+      semanticClass !== "construction",
     polygonOffset: true,
     polygonOffsetFactor:
       displayOptions.polygonOffsetFactor ?? defaultPolygonOffset.factor,
