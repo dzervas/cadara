@@ -158,6 +158,58 @@ test("kernel history probe materializes deferred sketch-region extrudes", async 
   ).toBeTruthy();
 });
 
+test("kernel history probe derives body-only checkpoint signatures from render meshes", async () => {
+  const bodyId = "body_checkpoint" as BodyId;
+  const probe = createKernelHistoryProbeSession({
+    service: {
+      async getCurrentDocumentSnapshot() {
+        return {
+          document: {
+            revisionId: "rev_checkpoint" as RevisionId,
+            bodies: [{ bodyId, topologyPresentation: "bodyOnlyMesh" }],
+            render: {
+              records: [{
+                ownerBodyId: bodyId,
+                geometry: {
+                  kind: "mesh",
+                  vertexPositions: [[0, 0, 0], [2, 4, 6]],
+                },
+              }],
+            },
+          },
+        } as never;
+      },
+      async createFeature() {
+        return ok({ changedTargets: [{ kind: "body", bodyId }] }) as never;
+      },
+      async commitSketch() {
+        return ok({}) as never;
+      },
+      async addDocumentVariable() {
+        return ok({}) as never;
+      },
+      async buildNativeExactBrepPayload() {
+        throw new Error("body-only checkpoints must not request native topology");
+      },
+    },
+  });
+
+  const result = await probe.evaluateHistoryProbe({
+    actions: { createFeatures: [{ requestId: "request_checkpoint" } as never] },
+  });
+
+  expect(result.steps).toEqual([{
+    status: "rebuilt",
+    signatures: [{
+      entityClass: "body",
+      geometryType: "solid",
+      boundingBox: { low: [0, 0, 0], high: [2, 4, 6] },
+      centroid: [1, 2, 3],
+      reference: { kind: "body", bodyId },
+    }],
+  }]);
+});
+
 test("kernel history probe rebuilds in the provided isolated session without touching an open document", async () => {
   const openDocumentState = structuredClone(
     makeSnapshot("rev_open" as RevisionId, [{ bodyId: "body_open" as BodyId }]),

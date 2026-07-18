@@ -11,7 +11,7 @@ import type {
 import type { BodyId, RevisionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
-import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import {
   ImportDeferredMaterializer,
   type ImportActionOutputRecord,
@@ -101,56 +101,17 @@ async function evaluateHistoryProbeInKernelSession(
     }
 
     const snapshot = await service.getCurrentDocumentSnapshot();
-    const signatures = [];
-    const diagnostics: HistoryProbeStepDiagnostic[] = [];
-
-    for (const body of snapshot.document.bodies) {
-      const result = await service.buildNativeExactBrepPayload({
-        baseRevisionId: snapshot.document.revisionId,
-        target: { kind: "body", bodyId: body.bodyId as BodyId },
-      });
-
-      if (result.kind !== "nativeTopologyPayload") {
-        steps.push({
-          status: "failed",
-          diagnostics: result.diagnostics.map((diagnostic) => ({
-            severity: diagnostic.severity,
-            code: diagnostic.code,
-            message: diagnostic.message,
-          })),
-        });
-        return { steps };
-      }
-
-      const signatureResult = deriveKernelTopologySignaturesFromExactBrepPayload(
-        result.payload,
-      );
-      if (signatureResult.status === "unavailable") {
-        steps.push({
-          status: "failed",
-          diagnostics: signatureResult.diagnostics.map((diagnostic) => ({
-            severity: diagnostic.severity,
-            code: diagnostic.code,
-            message: diagnostic.message,
-          })),
-        });
-        return { steps };
-      }
-
-      signatures.push(...signatureResult.signatures);
-      diagnostics.push(
-        ...signatureResult.diagnostics.map((diagnostic) => ({
-          severity: diagnostic.severity,
-          code: diagnostic.code,
-          message: diagnostic.message,
-        })),
-      );
+    const signatureResult = await deriveLiveBodySignatures({ snapshot, service });
+    if (signatureResult.status === "unavailable") {
+      steps.push({ status: "failed", diagnostics: signatureResult.diagnostics });
+      return { steps };
     }
+    const diagnostics: HistoryProbeStepDiagnostic[] = signatureResult.diagnostics;
 
     steps.push(
       diagnostics.some((diagnostic) => diagnostic.severity === "error")
         ? { status: "failed", diagnostics }
-        : { status: "rebuilt", signatures },
+        : { status: "rebuilt", signatures: signatureResult.signatures },
     );
 
     if (steps[steps.length - 1]?.status === "failed") {
