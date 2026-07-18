@@ -67,7 +67,7 @@ export const OCC_KERNEL_CAPABILITIES: ModelingKernelCapabilities = {
   ],
   supportedProfileKinds: ["region", "face"],
   supportsFaceBackedSketchPlanes: true,
-  supportsDurableTopologyNaming: false,
+  supportsDurableTopologyNaming: true,
 };
 
 export const OCC_KERNEL_CONSTRUCTION_IDS = {

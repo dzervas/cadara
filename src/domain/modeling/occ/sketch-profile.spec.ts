@@ -312,6 +312,93 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       1e-6,
       "Rectangle profile should build the expected area",
     );
+    expect([...profile.provenance.edges.keys()]).toEqual([
+      entityId("bottom"),
+      entityId("right"),
+      entityId("top"),
+      entityId("left"),
+    ]);
+    expect([...profile.provenance.vertices.keys()]).toEqual(
+      points.map((point) => point.id),
+    );
+    const bottomEdge = profile.provenance.edges.get(entityId("bottom"))!;
+    const rightEdge = profile.provenance.edges.get(entityId("right"))!;
+    const bottomRight = profile.provenance.vertices.get(
+      pointId("bottom_right"),
+    )!;
+    const bottomLast = oc.TopExp.LastVertex(bottomEdge, true);
+    const rightFirst = oc.TopExp.FirstVertex(rightEdge, true);
+    try {
+      expect(bottomLast.IsSame(bottomRight)).toBeTruthy();
+      expect(rightFirst.IsSame(bottomRight)).toBeTruthy();
+    } finally {
+      bottomLast.delete();
+      rightFirst.delete();
+    }
+    expect(profile.provenance.unsupportedSources).toEqual([]);
+
+    const diagonalId = entityId("diagonal_after_edit");
+    const editedDefinition = createSketchDefinition(
+      sketchId,
+      points.slice(0, 3),
+      [
+        ...definition.entities.slice(0, 2),
+        {
+          kind: "lineSegment",
+          entityId: diagonalId,
+          label: "diagonal",
+          target: { kind: "sketchEntity", sketchId, entityId: diagonalId },
+          isConstruction: false,
+          startPointId: pointId("top_right"),
+          endPointId: pointId("bottom_left"),
+        },
+      ],
+    );
+    const editedSketch = createSketchRecord(sketchId, editedDefinition, [
+      ...sketch.solvedSnapshot.solvedEntities.slice(0, 2),
+      {
+        kind: "lineSegment",
+        entityId: diagonalId,
+        startPosition: [4, 3],
+        endPosition: [0, 0],
+      },
+    ]);
+    const editedRegion = createRegion(sketchId, "triangle_after_edit", [
+      {
+        loopId: loopId("triangle_after_edit_outer"),
+        role: "outer",
+        orientation: "counterClockwise",
+        segments: [
+          ...region.loops[0]!.segments.slice(0, 2),
+          {
+            source: { kind: "entity", entityId: diagonalId },
+            startPointId: pointId("top_right"),
+            endPointId: pointId("bottom_left"),
+          },
+        ],
+        boundaryPointIds: [
+          pointId("bottom_left"),
+          pointId("bottom_right"),
+          pointId("top_right"),
+        ],
+        isClosed: true,
+      },
+    ]);
+    const editedProfile = buildRegionProfileFace(
+      oc,
+      { plane, sketch: editedSketch },
+      editedRegion,
+    );
+    expect([...editedProfile.provenance.edges.keys()]).toEqual([
+      entityId("bottom"),
+      entityId("right"),
+      diagonalId,
+    ]);
+    expect(editedProfile.provenance.edges.has(entityId("top"))).toBeFalsy();
+    expect(editedProfile.provenance.edges.has(entityId("left"))).toBeFalsy();
+    expect(
+      editedProfile.provenance.vertices.has(pointId("top_left")),
+    ).toBeFalsy();
   }
 
   async function testCircleProfileUsesSolvedCenterOffset() {
@@ -368,6 +455,13 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       1e-5,
       "Circle profile should build with the solved center and radius",
     );
+    expect([...profile.provenance.edges.keys()]).toEqual([
+      entityId("circle"),
+    ]);
+    expect(
+      profile.provenance.vertices.has(pointId("circle_center")),
+      "A circle center is not a profile boundary vertex.",
+    ).toBeFalsy();
   }
 
   async function testArcProfileRespectsReversedLoopTraversal() {
@@ -454,6 +548,14 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       1e-5,
       "Arc profile should support reversed loop traversal via boundary point IDs",
     );
+    expect([...profile.provenance.edges.keys()]).toEqual([
+      entityId("upper_arc"),
+      entityId("diameter"),
+    ]);
+    expect([...profile.provenance.vertices.keys()]).toEqual([
+      pointId("arc_left"),
+      pointId("arc_right"),
+    ]);
   }
 
   async function testInnerLoopHoleReducesFaceArea() {
@@ -1031,6 +1133,10 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
       sketch.definition.entities.length,
       "Projected profile reconstruction must not create copied sketch entities.",
     ).toBe(3);
+    const projectedKey = `projected:${referenceId}/${geometryId}` as const;
+    expect(profile.provenance.edges.has(projectedKey)).toBeTruthy();
+    expect(profile.provenance.vertices.has(`${projectedKey}:start`)).toBeTruthy();
+    expect(profile.provenance.vertices.has(`${projectedKey}:end`)).toBeTruthy();
   }
 
   async function testProjectedCircleProfileBuildsFromLiveProjection() {
@@ -1217,6 +1323,63 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     ).toBeTruthy();
   }
 
+  async function testApproximationProvenanceIsExplicit() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createSketchPlane();
+    const sketchId = "sketch_approximated_ellipse" as SketchId;
+    const ellipseId = entityId("approximated_ellipse");
+    const definition = createSketchDefinition(
+      sketchId,
+      [
+        { id: pointId("ellipse_center"), position: [0, 0] },
+        { id: pointId("ellipse_major"), position: [2, 0] },
+      ],
+      [
+        {
+          kind: "ellipse",
+          entityId: ellipseId,
+          label: "ellipse",
+          target: { kind: "sketchEntity", sketchId, entityId: ellipseId },
+          isConstruction: false,
+          centerPointId: pointId("ellipse_center"),
+          majorAxisPointId: pointId("ellipse_major"),
+          minorRadius: 1,
+        },
+      ],
+    );
+    const sketch = createSketchRecord(sketchId, definition, [
+      {
+        kind: "ellipse",
+        entityId: ellipseId,
+        centerPosition: [0, 0],
+        majorAxisEndpointPosition: [2, 0],
+        minorRadius: 1,
+      },
+    ]);
+    const region = createRegion(sketchId, "approximated_ellipse", [
+      {
+        loopId: loopId("approximated_ellipse_outer"),
+        role: "outer",
+        orientation: "counterClockwise",
+        segments: [
+          {
+            source: { kind: "entity", entityId: ellipseId },
+            startPointId: null,
+            endPointId: null,
+          },
+        ],
+        boundaryPointIds: [],
+        isClosed: true,
+      },
+    ]);
+
+    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+    expect(profile.provenance.edges.has(ellipseId)).toBeFalsy();
+    expect(profile.provenance.unsupportedSources).toEqual([
+      { sourceKey: ellipseId, reason: "approximated" },
+    ]);
+  }
+
   async function testRejectsMultipleOuterLoops() {
     const oc = await getDefaultOpenCascadeInstance();
     const plane = createSketchPlane();
@@ -1259,6 +1422,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
   await testProjectedCircleProfileBuildsFromLiveProjection();
   await testProjectedBoundaryInvalidationReportsStructuredCode();
   await testUnauthoredProjectedBoundaryInvalidatesEvenWithProjectionData();
+  await testApproximationProvenanceIsExplicit();
   await testRejectsMultipleOuterLoops();
 
   console.log("OCC phase 3 sketch profile tests passed.");

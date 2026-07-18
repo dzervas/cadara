@@ -7,6 +7,7 @@ import type {
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OccTopologyStageOutput } from "@/domain/modeling/occ/topology-stage";
 import type {
   OccReferenceInvalidationRecord,
   OccTrackedBody,
@@ -76,6 +77,191 @@ export type OccGeneratedTopologyContributorResult =
 const TOPOLOGY_DELETED_REASON = "occ-topology-deleted";
 const TOPOLOGY_AMBIGUOUS_REASON = "occ-topology-ambiguous";
 const TOPOLOGY_MISSING_REASON = "occ-missing-reference";
+
+type OccSubtopologyRef = Extract<
+  DurableRef,
+  { kind: "face" | "edge" | "vertex" }
+>;
+
+export interface OccSemanticStageReconciliation {
+  preservedTargetsByCurrentKey: ReadonlyMap<string, OccSubtopologyRef>;
+  invalidations: ReadonlyMap<string, OccReferenceInvalidationRecord>;
+}
+
+function isStageSubtopologyTarget(
+  target: DurableRef,
+  bodyId: BodyId,
+): target is OccSubtopologyRef {
+  return (
+    (target.kind === "face" ||
+      target.kind === "edge" ||
+      target.kind === "vertex") &&
+    target.bodyId === bodyId
+  );
+}
+
+function getBodySubtopologyTargets(body: OccTrackedBody) {
+  return [
+    ...body.topology.faceIds.map(
+      (faceId): OccSubtopologyRef => ({
+        kind: "face",
+        bodyId: body.bodyId,
+        faceId,
+      }),
+    ),
+    ...body.topology.edgeIds.map(
+      (edgeId): OccSubtopologyRef => ({
+        kind: "edge",
+        bodyId: body.bodyId,
+        edgeId,
+      }),
+    ),
+    ...body.topology.vertexIds.map(
+      (vertexId): OccSubtopologyRef => ({
+        kind: "vertex",
+        bodyId: body.bodyId,
+        vertexId,
+      }),
+    ),
+  ];
+}
+
+export function createUnsupportedStageTopologyInvalidations(
+  output: OccTopologyStageOutput,
+) {
+  return new Map(
+    getBodySubtopologyTargets(output.body).map((target) => [
+      topologyRefKey(target),
+      {
+        target,
+        reason: "occ-topology-unsupported-history",
+        sourceTarget: { kind: "body" as const, bodyId: output.outputSlot },
+      },
+    ]),
+  );
+}
+
+/**
+ * Classifies exact semantic source-key lineage between two executions of the
+ * same feature/output slot. Geometry and topology traversal order are never
+ * consulted: only a unique source-key successor can preserve an old public ID.
+ */
+export function classifySemanticStageTopology(input: {
+  previous: OccTopologyStageOutput;
+  current: OccTopologyStageOutput;
+}): OccSemanticStageReconciliation {
+  if (input.previous.outputSlot !== input.current.outputSlot) {
+    throw new Error(
+      `Cannot reconcile topology slots ${input.previous.outputSlot} and ${input.current.outputSlot}.`,
+    );
+  }
+
+  const bodyId = input.previous.outputSlot;
+  const sourceKeysByPreviousTarget = new Map<string, string[]>();
+  const previousTargetsByKey = new Map<string, OccSubtopologyRef>();
+
+  for (const target of getBodySubtopologyTargets(input.previous.body)) {
+    const key = topologyRefKey(target);
+    previousTargetsByKey.set(key, target);
+    sourceKeysByPreviousTarget.set(key, []);
+  }
+
+  for (const [sourceKey, targets] of input.previous.sourceTargets) {
+    for (const target of targets) {
+      if (!isStageSubtopologyTarget(target, bodyId)) {
+        continue;
+      }
+
+      const targetKey = topologyRefKey(target);
+      const sourceKeys = sourceKeysByPreviousTarget.get(targetKey);
+      if (sourceKeys && !sourceKeys.includes(sourceKey)) {
+        sourceKeys.push(sourceKey);
+      }
+    }
+  }
+
+  const candidateByPreviousKey = new Map<string, OccSubtopologyRef>();
+  const invalidations = new Map<string, OccReferenceInvalidationRecord>();
+
+  const invalidate = (target: OccSubtopologyRef, reason: string) => {
+    invalidations.set(topologyRefKey(target), {
+      target,
+      reason,
+      sourceTarget: { kind: "body", bodyId },
+    });
+  };
+
+  for (const [previousKey, previousTarget] of previousTargetsByKey) {
+    const sourceKeys = sourceKeysByPreviousTarget.get(previousKey) ?? [];
+
+    if (sourceKeys.length === 0) {
+      invalidate(previousTarget, "occ-topology-unsupported-history");
+      continue;
+    }
+
+    if (
+      sourceKeys.some((sourceKey) =>
+        input.current.unsupportedSourceKeys.has(sourceKey),
+      )
+    ) {
+      invalidate(previousTarget, "occ-topology-unsupported-history");
+      continue;
+    }
+
+    const successorsByKey = new Map<string, OccSubtopologyRef>();
+    for (const sourceKey of sourceKeys) {
+      for (const target of input.current.sourceTargets.get(sourceKey) ?? []) {
+        if (isStageSubtopologyTarget(target, bodyId)) {
+          successorsByKey.set(topologyRefKey(target), target);
+        }
+      }
+    }
+
+    if (successorsByKey.size === 0) {
+      invalidate(previousTarget, TOPOLOGY_DELETED_REASON);
+      continue;
+    }
+
+    if (successorsByKey.size > 1) {
+      invalidate(previousTarget, TOPOLOGY_AMBIGUOUS_REASON);
+      continue;
+    }
+
+    candidateByPreviousKey.set(
+      previousKey,
+      successorsByKey.values().next().value!,
+    );
+  }
+
+  const previousClaimsByCurrentKey = new Map<string, string[]>();
+  for (const [previousKey, currentTarget] of candidateByPreviousKey) {
+    const currentKey = topologyRefKey(currentTarget);
+    previousClaimsByCurrentKey.set(currentKey, [
+      ...(previousClaimsByCurrentKey.get(currentKey) ?? []),
+      previousKey,
+    ]);
+  }
+
+  const preservedTargetsByCurrentKey = new Map<string, OccSubtopologyRef>();
+  for (const [currentKey, previousKeys] of previousClaimsByCurrentKey) {
+    if (previousKeys.length === 1) {
+      preservedTargetsByCurrentKey.set(
+        currentKey,
+        previousTargetsByKey.get(previousKeys[0]!)!,
+      );
+      continue;
+    }
+
+    for (const previousKey of previousKeys) {
+      invalidate(
+        previousTargetsByKey.get(previousKey)!,
+        TOPOLOGY_AMBIGUOUS_REASON,
+      );
+    }
+  }
+
+  return { preservedTargetsByCurrentKey, invalidations };
+}
 
 function ignoreOccNamingResolutionError() {
   // TNaming selector solving can fail for deleted or unresolved names. History

@@ -39,7 +39,19 @@ import {
 import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
+  createFeatureTopologyStage,
+  getPreviousFeatureTopologyStage,
+  type OccFeatureTopologyStageMap,
+} from "@/domain/modeling/occ/topology-stage";
+import {
+  classifySemanticStageTopology,
+  createUnsupportedStageTopologyInvalidations,
+} from "@/domain/modeling/occ/topology-naming";
+import {
+  applySemanticStageTopologyIds,
   createOccReferenceState,
+  getOccDurableRefKey,
+  type OccReferenceInvalidationRecord,
   type OccReferenceState,
   type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
@@ -72,6 +84,8 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   entities: readonly SnapshotEntityRecord[];
   renderRecords: readonly RenderableEntityRecord[];
   referenceState: OccReferenceState;
+  featureTopologyStages: OccFeatureTopologyStageMap;
+  previousFeatureTopologyStages: OccFeatureTopologyStageMap;
 }
 
 function createTailCursor(
@@ -205,6 +219,8 @@ export function createOccAuthoringState(
     revisionId?: OccFeatureExecutionContext["revisionId"];
     modelingTolerance?: number;
     previousReferenceState?: OccReferenceState;
+    featureTopologyStages?: OccFeatureTopologyStageMap;
+    previousFeatureTopologyStages?: OccFeatureTopologyStageMap;
     diagnostics?: readonly ModelingDiagnostic[];
   } = {},
 ): OccAuthoringState {
@@ -288,6 +304,7 @@ export function createOccAuthoringState(
     assetResolver: input.assetResolver,
     resolvedGeometryAssets,
     bakedShapeCache,
+    previousTopologyStage: null,
     embeddedBinaryAssets,
     historyOrder,
     cursor,
@@ -295,6 +312,95 @@ export function createOccAuthoringState(
     entities: [],
     renderRecords: [],
     referenceState,
+    featureTopologyStages: new Map(input.featureTopologyStages ?? []),
+    previousFeatureTopologyStages: new Map(
+      input.previousFeatureTopologyStages ?? [],
+    ),
+  };
+}
+
+function reconcileFeatureTopologyStage(
+  previousStage: ReturnType<typeof getPreviousFeatureTopologyStage>,
+  currentStage: ReturnType<typeof createFeatureTopologyStage>,
+  bodies: readonly OccTrackedBody[],
+  historyInvalidations: ReadonlyMap<string, OccReferenceInvalidationRecord>,
+) {
+  if (!previousStage) {
+    return {
+      bodies: [...bodies],
+      topologyStage: currentStage,
+      historyInvalidations: new Map(historyInvalidations),
+      provedLiveReferenceKeys: new Set<string>(),
+    };
+  }
+
+  const bodiesById = new Map(bodies.map((body) => [body.bodyId, body]));
+  const outputs = new Map(currentStage.outputs);
+  const reconciledInvalidations = new Map(historyInvalidations);
+  const provedLiveReferenceKeys = new Set<string>();
+
+  for (const [outputSlot, currentOutput] of currentStage.outputs) {
+    const previousOutput = previousStage.outputs.get(outputSlot);
+    if (!previousOutput) {
+      continue;
+    }
+
+    const classification = classifySemanticStageTopology({
+      previous: previousOutput,
+      current: currentOutput,
+    });
+    const reconciled = applySemanticStageTopologyIds({
+      previous: previousOutput.body,
+      current: currentOutput.body,
+      preservedTargetsByCurrentKey: classification.preservedTargetsByCurrentKey,
+    });
+    const sourceTargets = new Map(
+      [...currentOutput.sourceTargets].map(([sourceKey, targets]) => [
+        sourceKey,
+        targets.map((target) =>
+          target.kind === "face" ||
+          target.kind === "edge" ||
+          target.kind === "vertex"
+            ? (reconciled.targetByCurrentKey.get(getOccDurableRefKey(target)) ??
+              target)
+            : target,
+        ),
+      ]),
+    );
+
+    for (const target of classification.preservedTargetsByCurrentKey.values()) {
+      provedLiveReferenceKeys.add(getOccDurableRefKey(target));
+    }
+
+    bodiesById.set(outputSlot, reconciled.body);
+    outputs.set(outputSlot, {
+      ...currentOutput,
+      body: reconciled.body,
+      sourceTargets,
+    });
+    for (const [key, invalidation] of classification.invalidations) {
+      reconciledInvalidations.set(key, invalidation);
+    }
+  }
+
+  for (const [outputSlot, previousOutput] of previousStage.outputs) {
+    if (currentStage.outputs.has(outputSlot)) {
+      continue;
+    }
+
+    for (const [
+      key,
+      invalidation,
+    ] of createUnsupportedStageTopologyInvalidations(previousOutput)) {
+      reconciledInvalidations.set(key, invalidation);
+    }
+  }
+
+  return {
+    bodies: bodies.map((body) => bodiesById.get(body.bodyId) ?? body),
+    topologyStage: { ...currentStage, outputs },
+    historyInvalidations: reconciledInvalidations,
+    provedLiveReferenceKeys,
   };
 }
 
@@ -313,22 +419,48 @@ function applyFeatureResult(
       producedTargets: [...result.producedTargets],
     },
   ];
-  const bodies = applyBodyLabels(result.bodies, state.bodyLabels);
+  const rawBodies = applyBodyLabels(result.bodies, state.bodyLabels);
+  const rawTopologyStage =
+    result.topologyStage ??
+    createFeatureTopologyStage({
+      featureId: feature.featureId,
+      previousBodies: state.bodies,
+      currentBodies: rawBodies,
+    });
+
+  if (rawTopologyStage.featureId !== feature.featureId) {
+    throw new Error(
+      `Feature ${feature.featureId} returned topology stage ${rawTopologyStage.featureId}.`,
+    );
+  }
+
+  const reconciled = reconcileFeatureTopologyStage(
+    getPreviousFeatureTopologyStage(
+      state.previousFeatureTopologyStages,
+      feature.featureId,
+    ),
+    rawTopologyStage,
+    rawBodies,
+    result.historyInvalidations,
+  );
   const referenceState = createOccReferenceState({
     documentId: state.documentId,
     revisionId: state.revisionId,
-    bodies,
+    bodies: reconciled.bodies,
     constructions: result.constructions,
     sketches: state.sketches,
     features,
     previous: state.referenceState,
-    historyInvalidations: result.historyInvalidations,
+    historyInvalidations: reconciled.historyInvalidations,
+    provedLiveReferenceKeys: reconciled.provedLiveReferenceKeys,
   });
+  const featureTopologyStages = new Map(state.featureTopologyStages);
+  featureTopologyStages.set(feature.featureId, reconciled.topologyStage);
 
   return {
     ...state,
     assets: mergeGeometryAssetRecords(state.assets, result.assetRecords),
-    bodies,
+    bodies: reconciled.bodies,
     constructions: result.constructions,
     constructionPlanes: result.constructionPlanes,
     features,
@@ -337,6 +469,8 @@ function applyFeatureResult(
     entities: [...state.entities, ...result.entities],
     renderRecords: [...state.renderRecords, ...result.renderRecords],
     referenceState,
+    previousTopologyStage: null,
+    featureTopologyStages,
   };
 }
 
@@ -357,10 +491,19 @@ export function applyOccFeatureToAuthoringState(
     );
   }
 
+  const previousTopologyStage = getPreviousFeatureTopologyStage(
+    state.previousFeatureTopologyStages,
+    feature.featureId,
+  );
+
   return applyFeatureResult(
     state,
     feature,
-    executeOccFeature(state, feature.featureId, resolvedDefinition.definition),
+    executeOccFeature(
+      { ...state, previousTopologyStage },
+      feature.featureId,
+      resolvedDefinition.definition,
+    ),
   );
 }
 
@@ -384,6 +527,7 @@ export function rebuildOccAuthoringState(
     cursor: { kind: "empty" },
     assetResolver: state.assetResolver,
     previousReferenceState: state.referenceState,
+    previousFeatureTopologyStages: state.featureTopologyStages,
     resolvedGeometryAssets: state.resolvedGeometryAssets,
     bakedShapeCache: state.bakedShapeCache,
   });

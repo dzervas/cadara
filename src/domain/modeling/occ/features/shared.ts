@@ -23,11 +23,14 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OccFeatureTopologyStage } from "@/domain/modeling/occ/topology-stage";
 import {
   extractSolidShapes,
+  getOccDurableRefKey,
   trackNewSolidBody,
   type OccTrackedBody,
   type OccReferenceInvalidationRecord,
+  type OccReferenceState,
 } from "@/domain/modeling/occ/topology";
 
 export interface OccResolvedGeometryAsset {
@@ -54,6 +57,8 @@ export interface OccFeatureExecutionContext {
   assetResolver?: GeometryAssetResolver;
   resolvedGeometryAssets: Map<GeometryAssetId, OccResolvedGeometryAsset>;
   bakedShapeCache: Map<GeometryAssetId, OccMaterializedBakedShape[]>;
+  referenceState?: OccReferenceState;
+  previousTopologyStage: OccFeatureTopologyStage | null;
 }
 
 export interface OccFeatureExecutionResult {
@@ -66,6 +71,7 @@ export interface OccFeatureExecutionResult {
   entities: SnapshotEntityRecord[];
   renderRecords: RenderableEntityRecord[];
   historyInvalidations: Map<string, OccReferenceInvalidationRecord>;
+  topologyStage?: OccFeatureTopologyStage;
   diagnostics?: ModelingDiagnostic[];
 }
 
@@ -179,7 +185,26 @@ export function requireBody(
   return body;
 }
 
-export function requireFace(body: OccTrackedBody, faceId: `face_${string}`) {
+function assertTopologyReferenceLive(
+  context: OccFeatureExecutionContext,
+  target: Extract<DurableRef, { kind: "face" | "edge" | "vertex" }>,
+) {
+  const invalidated = context.referenceState?.invalidatedReferencesByKey.get(
+    getOccDurableRefKey(target),
+  );
+  if (invalidated?.invalidation) {
+    throw new Error(
+      `occ-invalid-reference: ${target.kind} reference was invalidated with reason ${invalidated.invalidation.reason}.`,
+    );
+  }
+}
+
+export function requireFace(
+  context: OccFeatureExecutionContext,
+  body: OccTrackedBody,
+  faceId: `face_${string}`,
+) {
+  assertTopologyReferenceLive(context, { kind: "face", bodyId: body.bodyId, faceId });
   const face = body.facesById.get(faceId);
 
   if (!face) {
@@ -189,7 +214,12 @@ export function requireFace(body: OccTrackedBody, faceId: `face_${string}`) {
   return face;
 }
 
-export function requireEdge(body: OccTrackedBody, edgeId: `edge_${string}`) {
+export function requireEdge(
+  context: OccFeatureExecutionContext,
+  body: OccTrackedBody,
+  edgeId: `edge_${string}`,
+) {
+  assertTopologyReferenceLive(context, { kind: "edge", bodyId: body.bodyId, edgeId });
   const edge = body.edgesById.get(edgeId);
 
   if (!edge) {
@@ -200,9 +230,15 @@ export function requireEdge(body: OccTrackedBody, edgeId: `edge_${string}`) {
 }
 
 export function requireVertex(
+  context: OccFeatureExecutionContext,
   body: OccTrackedBody,
   vertexId: `vertex_${string}`,
 ) {
+  assertTopologyReferenceLive(context, {
+    kind: "vertex",
+    bodyId: body.bodyId,
+    vertexId,
+  });
   const vertex = body.verticesById.get(vertexId);
 
   if (!vertex) {

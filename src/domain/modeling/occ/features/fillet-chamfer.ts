@@ -134,6 +134,9 @@ export function executeFilletFeature(
 
   for (const [bodyId, targets] of targetsByBody.entries()) {
     const body = requireBody(context, bodyId);
+    for (const target of targets) {
+      requireEdge(context, body, target.edgeId);
+    }
     const replacementResult =
       resolveNativeFilletReplacement(
         context,
@@ -149,7 +152,10 @@ export function executeFilletFeature(
         );
 
         for (const target of targets) {
-          fillet.Add_2(resolvedRadius, requireEdge(body, target.edgeId));
+          fillet.Add_2(
+            resolvedRadius,
+            requireEdge(context, body, target.edgeId),
+          );
         }
 
         fillet.Build(new context.oc.Message_ProgressRange_1());
@@ -296,6 +302,9 @@ export function executeChamferFeature(
 
   for (const [bodyId, targets] of targetsByBody.entries()) {
     const body = requireBody(context, bodyId);
+    for (const target of targets) {
+      requireEdge(context, body, target.edgeId);
+    }
     const replacementResult =
       resolveNativeChamferReplacement(
         context,
@@ -308,7 +317,7 @@ export function executeChamferFeature(
         const chamfer = new context.oc.BRepFilletAPI_MakeChamfer(body.shape);
 
         for (const target of targets) {
-          const edge = requireEdge(body, target.edgeId);
+          const edge = requireEdge(context, body, target.edgeId);
           chamfer.Add_3(
             distance,
             distance,

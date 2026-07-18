@@ -9,7 +9,12 @@ import type {
   ProjectedSketchReferenceGeometry,
   ProjectedSketchReferenceRecord,
 } from "@/contracts/solver/schema";
-import type { FaceId, ReferenceId } from "@/contracts/shared/ids";
+import type {
+  FaceId,
+  ReferenceId,
+  SketchEntityId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import { buildConstructionPlaneFromPlanarFace as buildConstructionPlaneFromPlanarFaceFromPlaneUtility } from "@/domain/modeling/occ/planes";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
@@ -31,10 +36,51 @@ import {
 import { getClosedCurveSampleCount } from "@/contracts/sketch/region-geometry";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
 
+export type ProjectedSketchProfileEdgeKey =
+  `projected:${ReferenceId}/${string}`;
+export type ProjectedSketchProfileVertexKey =
+  `${ProjectedSketchProfileEdgeKey}:${"start" | "end"}`;
+export type SketchProfileEdgeSourceKey =
+  | SketchEntityId
+  | ProjectedSketchProfileEdgeKey;
+export type SketchProfileVertexSourceKey =
+  | SketchPointId
+  | ProjectedSketchProfileVertexKey;
+
+export interface UnsupportedSketchProfileSource {
+  sourceKey: SketchProfileEdgeSourceKey;
+  reason: "approximated";
+}
+
+export interface SketchProfileProvenance {
+  edges: ReadonlyMap<
+    SketchProfileEdgeSourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Edge"]>
+  >;
+  vertices: ReadonlyMap<
+    SketchProfileVertexSourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>
+  >;
+  unsupportedSources: readonly UnsupportedSketchProfileSource[];
+}
+
 export interface BuiltSketchProfileFace {
   face: InstanceType<OpenCascadeInstance["TopoDS_Face"]>;
   plane: SketchPlaneDefinition;
   normal: Vec3;
+  provenance: SketchProfileProvenance;
+}
+
+interface MutableSketchProfileProvenance {
+  edges: Map<
+    SketchProfileEdgeSourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Edge"]>
+  >;
+  vertices: Map<
+    SketchProfileVertexSourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>
+  >;
+  unsupportedSources: UnsupportedSketchProfileSource[];
 }
 
 const PROFILE_LOOP_TOLERANCE = 1e-6;
@@ -370,14 +416,38 @@ function assertLoopSegmentOwnership(
 
 function buildLineEdge(
   oc: OpenCascadeInstance,
-  plane: SketchPlaneDefinition,
-  geometry: Extract<SolvedSketchEntityGeometryRecord, { kind: "lineSegment" }>,
+  startVertex: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
+  endVertex: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
 ) {
-  return buildLineEdgeFromWorld(
-    oc,
-    mapSketchPointToWorld(plane, geometry.startPosition),
-    mapSketchPointToWorld(plane, geometry.endPosition),
-  );
+  const builder = new oc.BRepBuilderAPI_MakeEdge_2(startVertex, endVertex);
+  try {
+    return builder.Edge();
+  } finally {
+    deleteOccObject(builder);
+  }
+}
+
+function getOrCreateProfileVertex(
+  oc: OpenCascadeInstance,
+  provenance: MutableSketchProfileProvenance,
+  sourceKey: SketchProfileVertexSourceKey,
+  position: Vec3,
+) {
+  const existing = provenance.vertices.get(sourceKey);
+  if (existing) {
+    return existing;
+  }
+
+  const point = toGpPnt(oc, position);
+  const builder = new oc.BRepBuilderAPI_MakeVertex(point);
+  try {
+    const vertex = builder.Vertex();
+    provenance.vertices.set(sourceKey, vertex);
+    return vertex;
+  } finally {
+    deleteOccObject(builder);
+    deleteOccObject(point);
+  }
 }
 
 function buildLineEdgeFromWorld(
@@ -439,6 +509,8 @@ function buildArcEdge(
   oc: OpenCascadeInstance,
   plane: SketchPlaneDefinition,
   geometry: Extract<SolvedSketchEntityGeometryRecord, { kind: "arc" }>,
+  startVertex: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
+  endVertex: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
 ) {
   return buildArcEdgeFromSketchGeometry(
     oc,
@@ -448,6 +520,8 @@ function buildArcEdge(
     geometry.centerPosition,
     geometry.sweepDirection,
     `sketch entity ${geometry.entityId}`,
+    startVertex,
+    endVertex,
   );
 }
 
@@ -459,6 +533,8 @@ function buildArcEdgeFromSketchGeometry(
   centerPosition: readonly [number, number],
   sweepDirection: "clockwise" | "counterClockwise",
   label: string,
+  startVertex?: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
+  endVertex?: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>,
 ) {
   const start = mapSketchPointToWorld(plane, startPosition);
   const end = mapSketchPointToWorld(plane, endPosition);
@@ -494,7 +570,14 @@ function buildArcEdgeFromSketchGeometry(
     } finally {
       deleteOccObject(arcValue);
     }
-    builder = new oc.BRepBuilderAPI_MakeEdge_24(nextCurveHandle);
+    builder =
+      startVertex && endVertex
+        ? new oc.BRepBuilderAPI_MakeEdge_27(
+            nextCurveHandle,
+            startVertex,
+            endVertex,
+          )
+        : new oc.BRepBuilderAPI_MakeEdge_24(nextCurveHandle);
     return builder.Edge();
   } finally {
     deleteOccObject(builder);
@@ -528,8 +611,8 @@ function getProjectedSegmentId(
     RegionBoundarySegmentRecord["source"],
     { kind: "projectedGeometry" }
   >,
-) {
-  return `${source.reference.referenceId}/${source.reference.geometryId}`;
+): ProjectedSketchProfileEdgeKey {
+  return `projected:${source.reference.referenceId}/${source.reference.geometryId}`;
 }
 
 function projectedGeometryKindForRef(
@@ -818,15 +901,39 @@ function buildProjectedBoundaryEdge(
   loopGeometry: BoundarySegmentGeometry,
   loopRole: RegionRecord["loops"][number]["role"],
   traversalDirection: RegionBoundarySegmentRecord["traversalDirection"],
+  provenance: MutableSketchProfileProvenance,
 ) {
+  const sourceKey = getProjectedSegmentId(source);
+
   switch (geometry.kind) {
-    case "lineSegment":
+    case "lineSegment": {
       if (loopGeometry.kind !== "open") {
         throw new Error(
           `Projected line ${source.reference.geometryId} did not resolve to open loop geometry.`,
         );
       }
-      return buildLineEdgeFromWorld(oc, loopGeometry.start, loopGeometry.end);
+      const startVertex = getOrCreateProfileVertex(
+        oc,
+        provenance,
+        `${sourceKey}:start`,
+        mapSketchPointToWorld(plane, geometry.startPosition),
+      );
+      const endVertex = getOrCreateProfileVertex(
+        oc,
+        provenance,
+        `${sourceKey}:end`,
+        mapSketchPointToWorld(plane, geometry.endPosition),
+      );
+      const baseEdge = buildLineEdge(oc, startVertex, endVertex);
+      if (traversalDirection !== "reverse") {
+        return baseEdge;
+      }
+      try {
+        return reverseEdge(oc, baseEdge);
+      } finally {
+        deleteOccObject(baseEdge);
+      }
+    }
     case "circle": {
       const edge = buildCircleEdgeFromSketchGeometry(
         oc,
@@ -844,6 +951,18 @@ function buildProjectedBoundaryEdge(
       }
     }
     case "arc": {
+      const startVertex = getOrCreateProfileVertex(
+        oc,
+        provenance,
+        `${sourceKey}:start`,
+        mapSketchPointToWorld(plane, geometry.startPosition),
+      );
+      const endVertex = getOrCreateProfileVertex(
+        oc,
+        provenance,
+        `${sourceKey}:end`,
+        mapSketchPointToWorld(plane, geometry.endPosition),
+      );
       const edge = buildArcEdgeFromSketchGeometry(
         oc,
         plane,
@@ -852,6 +971,8 @@ function buildProjectedBoundaryEdge(
         geometry.centerPosition,
         geometry.sweepDirection,
         `projected geometry ${source.reference.geometryId}`,
+        startVertex,
+        endVertex,
       );
       if (traversalDirection !== "reverse") {
         return edge;
@@ -879,6 +1000,7 @@ function buildLoopWire(
   sketch: SketchRecord,
   loop: RegionRecord["loops"][number],
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  provenance: MutableSketchProfileProvenance,
 ) {
   const loopGeometry: BoundarySegmentGeometry[] = [];
   const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1();
@@ -910,12 +1032,10 @@ function buildLoopWire(
           segmentGeometry,
           loop.role,
           segment.traversalDirection,
+          provenance,
         );
-        try {
-          wireBuilder.Add_1(edge);
-        } finally {
-          deleteOccObject(edge);
-        }
+        wireBuilder.Add_1(edge);
+        provenance.edges.set(getProjectedSegmentId(segment.source), edge);
       } else {
         const geometry = getSolvedEntityGeometry(
           sketch,
@@ -932,46 +1052,86 @@ function buildLoopWire(
 
         switch (geometry.kind) {
           case "lineSegment": {
-            const baseEdge = buildLineEdge(oc, plane, geometry);
-            let edge = baseEdge;
-            try {
-              edge = orientEdgeForLoop(oc, baseEdge, segmentGeometry, segment);
-              wireBuilder.Add_1(edge);
-            } finally {
-              if (edge !== baseEdge) {
-                deleteOccObject(edge);
-              }
+            const entity = getSketchEntityDefinition(sketch, geometry.entityId);
+            if (entity.kind !== "lineSegment") {
+              throw new Error(
+                `Solved line ${geometry.entityId} does not match its authored entity kind.`,
+              );
+            }
+            const startVertex = getOrCreateProfileVertex(
+              oc,
+              provenance,
+              entity.startPointId,
+              getSolvedBoundaryPointPosition(plane, sketch, entity.startPointId),
+            );
+            const endVertex = getOrCreateProfileVertex(
+              oc,
+              provenance,
+              entity.endPointId,
+              getSolvedBoundaryPointPosition(plane, sketch, entity.endPointId),
+            );
+            const baseEdge = buildLineEdge(oc, startVertex, endVertex);
+            const edge = orientEdgeForLoop(
+              oc,
+              baseEdge,
+              segmentGeometry,
+              segment,
+            );
+            if (edge !== baseEdge) {
               deleteOccObject(baseEdge);
             }
+            wireBuilder.Add_1(edge);
+            provenance.edges.set(entity.entityId, edge);
             break;
           }
           case "circle": {
             const baseEdge = buildCircleEdge(oc, plane, geometry);
-            let edge = baseEdge;
-            try {
-              edge =
-                loop.role === "inner" ? reverseEdge(oc, baseEdge) : baseEdge;
-              wireBuilder.Add_1(edge);
-            } finally {
-              if (edge !== baseEdge) {
-                deleteOccObject(edge);
-              }
+            const edge =
+              loop.role === "inner" ? reverseEdge(oc, baseEdge) : baseEdge;
+            if (edge !== baseEdge) {
               deleteOccObject(baseEdge);
             }
+            wireBuilder.Add_1(edge);
+            provenance.edges.set(geometry.entityId, edge);
             break;
           }
           case "arc": {
-            const baseEdge = buildArcEdge(oc, plane, geometry);
-            let edge = baseEdge;
-            try {
-              edge = orientEdgeForLoop(oc, baseEdge, segmentGeometry, segment);
-              wireBuilder.Add_1(edge);
-            } finally {
-              if (edge !== baseEdge) {
-                deleteOccObject(edge);
-              }
+            const entity = getSketchEntityDefinition(sketch, geometry.entityId);
+            if (entity.kind !== "arc") {
+              throw new Error(
+                `Solved arc ${geometry.entityId} does not match its authored entity kind.`,
+              );
+            }
+            const startVertex = getOrCreateProfileVertex(
+              oc,
+              provenance,
+              entity.startPointId,
+              getSolvedBoundaryPointPosition(plane, sketch, entity.startPointId),
+            );
+            const endVertex = getOrCreateProfileVertex(
+              oc,
+              provenance,
+              entity.endPointId,
+              getSolvedBoundaryPointPosition(plane, sketch, entity.endPointId),
+            );
+            const baseEdge = buildArcEdge(
+              oc,
+              plane,
+              geometry,
+              startVertex,
+              endVertex,
+            );
+            const edge = orientEdgeForLoop(
+              oc,
+              baseEdge,
+              segmentGeometry,
+              segment,
+            );
+            if (edge !== baseEdge) {
               deleteOccObject(baseEdge);
             }
+            wireBuilder.Add_1(edge);
+            provenance.edges.set(entity.entityId, edge);
             break;
           }
           case "ellipse":
@@ -982,6 +1142,10 @@ function buildLoopWire(
               );
             }
             addClosedPolylineEdges(oc, wireBuilder, segmentGeometry);
+            provenance.unsupportedSources.push({
+              sourceKey: geometry.entityId,
+              reason: "approximated",
+            });
             break;
           case "point":
             throw new Error(
@@ -1049,6 +1213,12 @@ export function buildRegionProfileFace(
     snapshotSketch.projectedReferences ??
     snapshotSketch.sketch.projectedReferences ??
     [];
+  const provenance: MutableSketchProfileProvenance = {
+    edges: new Map(),
+    vertices: new Map(),
+    unsupportedSources: [],
+  };
+  let succeeded = false;
   let outerWire: ReturnType<typeof buildLoopWire> | null = null;
   let faceBuilder: {
     Add(wire: unknown): void;
@@ -1064,6 +1234,7 @@ export function buildRegionProfileFace(
       snapshotSketch.sketch,
       outerLoop,
       projectedReferences,
+      provenance,
     );
     faceBuilder = new oc.BRepBuilderAPI_MakeFace_15(outerWire, true);
 
@@ -1077,6 +1248,7 @@ export function buildRegionProfileFace(
         snapshotSketch.sketch,
         innerLoop,
         projectedReferences,
+        provenance,
       );
       try {
         faceBuilder.Add(innerWire);
@@ -1091,14 +1263,25 @@ export function buildRegionProfileFace(
       );
     }
 
-    return {
+    const result = {
       face: faceBuilder.Face(),
       plane,
       normal: plane.frame.normal,
+      provenance,
     };
+    succeeded = true;
+    return result;
   } finally {
     deleteOccObject(faceBuilder);
     deleteOccObject(outerWire);
+    if (!succeeded) {
+      for (const edge of provenance.edges.values()) {
+        deleteOccObject(edge);
+      }
+      for (const vertex of provenance.vertices.values()) {
+        deleteOccObject(vertex);
+      }
+    }
   }
 }
 
