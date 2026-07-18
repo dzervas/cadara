@@ -173,3 +173,137 @@ export function makeWaveARevolveCaptureBundle() {
     ],
   };
 }
+
+/** CI-safe v1 envelope for a cut revolve whose profile and axis live in different sketches. */
+export function makeWaveARevolveBreadthCaptureBundle() {
+  const bundle = makeWaveARevolveCaptureBundle();
+  const studio = bundle.partStudios[0]!;
+  studio.name = "Wave A revolve breadth";
+  studio.features.features = [
+    {
+      featureType: "newSketch",
+      featureId: "S_BASE",
+      name: "Base profile",
+      parameters: [
+        {
+          btType: "BTMParameterQueryList-148",
+          parameterId: "sketchPlane",
+          queries: [{ deterministicIds: ["Top"] }],
+        },
+      ],
+    },
+    {
+      featureType: "extrude",
+      featureId: "F_BASE",
+      name: "Base extrude",
+      parameters: [
+        { btType: "BTMParameterEnum-145", parameterId: "bodyType", value: "SOLID" },
+        { btType: "BTMParameterEnum-145", parameterId: "operationType", value: "NEW" },
+        {
+          btType: "BTMParameterQueryList-148",
+          parameterId: "entities",
+          queries: [{ queryString: 'query = qSketchRegion(id + "S_BASE", true);' }],
+        },
+        { btType: "BTMParameterEnum-145", parameterId: "endBound", value: "BLIND" },
+        { btType: "BTMParameterQuantity-147", parameterId: "depth", expression: "20 mm", value: 0.02 },
+      ],
+    },
+    {
+      featureType: "newSketch",
+      featureId: "S_PROFILE",
+      name: "Cut profile",
+      parameters: [
+        {
+          btType: "BTMParameterQueryList-148",
+          parameterId: "sketchPlane",
+          queries: [{ deterministicIds: ["Top"] }],
+        },
+      ],
+    },
+    {
+      featureType: "newSketch",
+      featureId: "S_AXIS",
+      name: "Remote axis",
+      parameters: [
+        {
+          btType: "BTMParameterQueryList-148",
+          parameterId: "sketchPlane",
+          queries: [{ deterministicIds: ["Top"] }],
+        },
+      ],
+    },
+    {
+      featureType: "revolve",
+      featureId: "F_REVOLVE",
+      name: "Two-side cut revolve",
+      parameters: [
+        { btType: "BTMParameterEnum-145", parameterId: "bodyType", value: "SOLID" },
+        { btType: "BTMParameterEnum-145", parameterId: "operationType", value: "REMOVE" },
+        {
+          btType: "BTMParameterQueryList-148",
+          parameterId: "entities",
+          queries: [{ queryString: 'query = qSketchRegion(id + "S_PROFILE", true);' }],
+        },
+        {
+          btType: "BTMParameterQueryList-148",
+          parameterId: "axis",
+          queries: [{
+            queryString:
+              'query=qCompressed(1.0,"$operationId$S_AXISwireOp$queryType$SKETCH_ENTITY$sketchEntityId$axis_line",id);',
+          }],
+        },
+        { btType: "BTMParameterBoolean-144", parameterId: "fullRevolve", value: false },
+        { btType: "BTMParameterEnum-145", parameterId: "endBound", value: "BLIND" },
+        { btType: "BTMParameterQuantity-147", parameterId: "angle", expression: "60 deg", value: Math.PI / 3 },
+        { btType: "BTMParameterBoolean-144", parameterId: "oppositeDirection", value: false },
+        { btType: "BTMParameterBoolean-144", parameterId: "hasSecondDirection", value: true },
+        { btType: "BTMParameterEnum-145", parameterId: "secondDirectionBound", value: "BLIND" },
+        { btType: "BTMParameterQuantity-147", parameterId: "secondDirectionAngle", expression: "30 deg", value: Math.PI / 6 },
+        { btType: "BTMParameterBoolean-144", parameterId: "secondDirectionOppositeDirection", value: true },
+        { btType: "BTMParameterBoolean-144", parameterId: "defaultScope", value: false },
+        {
+          btType: "BTMParameterQueryList-148",
+          parameterId: "booleanScope",
+          queries: [{ queryString: 'query = qCreatedBy(id + "F_BASE", EntityType.BODY);' }],
+        },
+      ],
+    },
+  ];
+  studio.sketches.sketches = [
+    {
+      featureId: "S_BASE",
+      entities: [
+        {
+          sketchEntityId: "base_circle",
+          sketchEntityType: "skCircle",
+          geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: 0.012 },
+          isConstruction: false,
+        },
+      ],
+    },
+    {
+      featureId: "S_PROFILE",
+      entities: [
+        {
+          sketchEntityId: "cut_circle",
+          sketchEntityType: "skCircle",
+          geometry: { center3d: { x: 0.007, y: 0, z: 0 }, radius: 0.004 },
+          isConstruction: false,
+        },
+      ],
+    },
+    {
+      featureId: "S_AXIS",
+      entities: [
+        {
+          sketchEntityId: "axis_line",
+          sketchEntityType: "skLineSegment",
+          startPosition3d: { x: 0, y: -0.02, z: 0 },
+          endPosition3d: { x: 0, y: 0.02, z: 0 },
+          isConstruction: true,
+        },
+      ],
+    },
+  ];
+  return bundle;
+}

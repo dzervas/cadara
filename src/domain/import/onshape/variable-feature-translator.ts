@@ -11,6 +11,7 @@ export const variableFeatureTranslator: OnshapeFeatureTranslator = {
     target: { kind: "variable" },
     reasonCodes: ["document-variable"],
     suppressed: onshapeSuppressed,
+    inputDependencies: [],
     inputFeatureIds: [],
   }),
   apply: ({ apply }) => apply(),

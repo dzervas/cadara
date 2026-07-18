@@ -5,7 +5,7 @@
  * solved sketch). Keeping one projection means the geometry the planner verifies
  * is exactly the geometry the provider commits.
  */
-import type { SketchPlaneKey } from "@/contracts/shared/sketch-plane";
+import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 
 import type {
   OnshapeSketchConstraint,
@@ -13,6 +13,7 @@ import type {
 } from "@/domain/import/onshape/bundle-reader";
 import {
   projectPointToPlane,
+  projectPointToSketchPlaneFrame,
   translateSketch,
   type SketchTranslationResult,
   type SolvedSketchEntityGeometry,
@@ -26,6 +27,7 @@ export function translateSolvedSketch(input: {
   featureId: string;
   label: string;
   planeKey: SketchPlaneKey;
+  planeFrame?: SketchPlaneFrame;
   constraints?: readonly OnshapeSketchConstraint[];
 }): SketchTranslationResult {
   const entities: SolvedSketchEntityGeometry[] = input.solved.entities.map(
@@ -34,13 +36,19 @@ export function translateSolvedSketch(input: {
       entityType: curve.entityType,
       isConstruction: curve.isConstruction,
       start: curve.start3d
-        ? projectPointToPlane(curve.start3d, input.planeKey)
+        ? input.planeFrame
+          ? projectPointToSketchPlaneFrame(curve.start3d, input.planeFrame)
+          : projectPointToPlane(curve.start3d, input.planeKey)
         : undefined,
       end: curve.end3d
-        ? projectPointToPlane(curve.end3d, input.planeKey)
+        ? input.planeFrame
+          ? projectPointToSketchPlaneFrame(curve.end3d, input.planeFrame)
+          : projectPointToPlane(curve.end3d, input.planeKey)
         : undefined,
       center: curve.center3d
-        ? projectPointToPlane(curve.center3d, input.planeKey)
+        ? input.planeFrame
+          ? projectPointToSketchPlaneFrame(curve.center3d, input.planeFrame)
+          : projectPointToPlane(curve.center3d, input.planeKey)
         : undefined,
       radius: curve.radius === undefined ? undefined : curve.radius * METERS_TO_MM,
     }),

@@ -1,4 +1,8 @@
 import { describe, expect, test } from "vitest";
+import type { ImportCapabilities } from "@/contracts/import/capabilities";
+import type { ResolvedImportSource } from "@/contracts/import/source";
+import { validateImportPreparedActions } from "@/contracts/import/validation";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 import type { OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
@@ -14,9 +18,12 @@ import {
   holeFeatureTranslator,
   mirrorFeatureTranslator,
   shellFeatureTranslator,
+  thickenFeatureTranslator,
   splitFeatureTranslator,
   transformFeatureTranslator,
 } from "@/domain/import/onshape/wave-b-body-feature-translators";
+import { onshapeImportProvider } from "@/domain/import/onshape/provider";
+import { makeWaveTMirrorTransformCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
 
 const query = (id: string) => ({
   btType: "BTMIndividualQuery-138",
@@ -43,11 +50,56 @@ function plan(translator: OnshapeFeatureTranslator, featureType: string, paramet
     read: {} as never,
     references,
     state: {
-      bakedLineageFeatureIds: new Set(),
       sketchPlansByFeatureId: new Map(),
       bodyProducingFeatureIds: [],
     },
   });
+}
+
+const providerCapabilities: ImportCapabilities = {
+  context: {
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+  },
+  modeling: {
+    async bakeGeometry() { throw new Error("not used"); },
+    async reconstructMeshToBrep() { throw new Error("not used"); },
+  },
+  sketch: {
+    async convertVectorToSketch() { throw new Error("not used"); },
+  },
+  assets: {
+    async registerGeometryAsset() { throw new Error("not used"); },
+    async storeEmbeddedBinary() { throw new Error("not used"); },
+  },
+  history: {
+    async evaluateHistoryProbe(input) {
+      const signatures = [{
+        entityClass: "body" as const,
+        geometryType: "solid",
+        boundingBox: { low: [-10, -10, 0] as [number, number, number], high: [10, 10, 20] as [number, number, number] },
+        centroid: [0, 0, 10] as [number, number, number],
+        reference: { kind: "body" as const, bodyId: "body_mirror_source" as never },
+      }];
+      return {
+        steps: Array.from(
+          { length: Math.max(1, input.actions.orderedActions?.length ?? 0) },
+          () => ({ status: "rebuilt" as const, signatures }),
+        ),
+      };
+    },
+  },
+};
+
+function mirrorSource(): ResolvedImportSource {
+  return {
+    name: "wave-t-mirror.onshape-capture.json",
+    origin: { kind: "localFile", fileName: "wave-t-mirror.onshape-capture.json" },
+    mediaType: "application/json",
+    bytes: new TextEncoder().encode(JSON.stringify(makeWaveTMirrorTransformCaptureBundle())),
+    fingerprint: `sha256:${"a".repeat(64)}`,
+  };
 }
 
 describe("Wave B body topology translators", () => {
@@ -75,6 +127,10 @@ describe("Wave B body topology translators", () => {
         { parameterId: "tools", role: "toolBody" },
       ],
     });
+    expect(result.inputDependencies).toEqual([
+      { kind: "query", parameterId: "targets", slotKey: "targetBodies" },
+      { kind: "query", parameterId: "tools", slotKey: "toolBodies" },
+    ]);
     const read = readTopologyQueryRefs(feature, result.plannedBodyTopologyConsumer!.slots);
     expect(read.refs.map((entry) => entry.deterministicId)).toEqual(["target", "tool"]);
   });
@@ -92,9 +148,9 @@ describe("Wave B body topology translators", () => {
     expect(readTopologyQueryRefs(feature, result.plannedBodyTopologyConsumer!.slots).refs.map((entry) => entry.deterministicId)).toEqual(["A", "B"]);
   });
 
-  test("maps XYZ translation in millimeters and rejects rotation honestly", () => {
+  test("maps XYZ translation aliases in millimeters and rejects rotation honestly", () => {
     const translated = plan(transformFeatureTranslator, "transform", [
-      valueParameter("transformType", "TRANSLATION_BY_XYZ"),
+      valueParameter("transformType", "TRANSLATION_3D"),
       queryParameter("entities", ["body"]),
       valueParameter("dx", 0, "25 mm"),
       valueParameter("dy", 0, "-2 cm"),
@@ -152,35 +208,177 @@ describe("Wave B body topology translators", () => {
     });
   });
 
-  test("maps fillet radius and root-bundle equal-offset chamfer parameters before topology gating", () => {
+
+  test("plans translated cPlane references for mirror and distance transform", () => {
+    const read = { features: [{ featureId: "OFFSET_PLANE", featureType: "cPlane" }] } as never;
+    const contextPlan = (
+      translator: OnshapeFeatureTranslator,
+      featureType: string,
+      parameterId: string,
+    ) => translator.plan({
+      feature: {
+        featureId: `F_${featureType}`,
+        featureType,
+        name: featureType,
+        parameters: [
+          ...(featureType === "mirror"
+            ? [valueParameter("patternType", "PART"), valueParameter("operationType", "NEW")]
+            : [valueParameter("transformType", "TRANSLATION_BY_DISTANCE"), valueParameter("distance", 0, "5 mm")]),
+          queryParameter("entities", ["body"]),
+          {
+            parameterId,
+            queries: [{ queryString: 'query = qCreatedBy(id + "OFFSET_PLANE" + "planeOp", EntityType.FACE);' }],
+          },
+        ],
+      } as OnshapeFeatureNode,
+      label: featureType,
+      onshapeSuppressed: false,
+      read,
+      references: new Map(),
+      state: { sketchPlansByFeatureId: new Map(), bodyProducingFeatureIds: [] },
+    });
+
+    expect(contextPlan(mirrorFeatureTranslator, "mirror", "mirrorPlane").plannedBodyTopologyConsumer)
+      .toMatchObject({ staticParticipants: [{ role: "plane", targets: [{ kind: "constructionFromFeature", featureId: "OFFSET_PLANE" }] }] });
+    expect(contextPlan(transformFeatureTranslator, "transform", "transformDirection").plannedBodyTopologyConsumer)
+      .toMatchObject({ staticParticipants: [{ role: "transformReference", targets: [{ kind: "constructionFromFeature", featureId: "OFFSET_PLANE" }] }] });
+  });
+
+  test("provider promotes mirror across a captured-frame cPlane and emits constructionOf", async () => {
+    const source = mirrorSource();
+    const review = await onshapeImportProvider.review({ source, capabilities: providerCapabilities });
+    const studio = review.providerReview.studios[0]!;
+    expect(studio.tierCounts).toEqual({ parametric: 4, baked: 1, geometryOnly: 0 });
+    expect(studio.featurePlans.find((candidate) => candidate.featureType === "cPlane")).toMatchObject({
+      tier: "parametric",
+      reasonCodes: ["plane-from-captured-frame"],
+    });
+    expect(studio.featurePlans.find((candidate) => candidate.featureType === "mirror")).toMatchObject({
+      tier: "parametric",
+      reasonCodes: [],
+    });
+
+    const actions = await onshapeImportProvider.prepare({
+      source,
+      review,
+      selections: onshapeImportProvider.createDefaultSelections(review),
+      capabilities: providerCapabilities,
+    });
+    const mirror = actions.createFeatures?.find((candidate) => candidate.definition.kind === "mirror");
+    expect(mirror?.definition).toMatchObject({
+      kind: "mirror",
+      parameters: {
+        participants: expect.arrayContaining([
+          { role: "plane", targets: [{ kind: "constructionOf", actionIndex: 2 }] },
+        ]),
+      },
+    });
+    expect(validateImportPreparedActions(actions).success).toBe(true);
+  });
+
+  test("maps the real equal-offset chamfer envelope to the executor's distance-only contract", () => {
     const fillet = plan(filletFeatureTranslator, "fillet", [valueParameter("radius", 0, "2.5 mm"), queryParameter("entities", ["edge"]) ]);
     expect(fillet).toMatchObject({
       reasonCodes: ["needs-history-probe"],
       plannedBodyTopologyConsumer: { featureKind: "fillet", radius: 2.5, slots: [{ parameterId: "entities", role: "edge", expectedKinds: ["edge"] }] },
     });
     const chamfer = plan(chamferFeatureTranslator, "chamfer", [
-      queryParameter("entities", ["edge"]),
+      queryParameter("entities", ["JNB"]),
       valueParameter("chamferMethod", "FACE_OFFSET"),
       valueParameter("chamferType", "EQUAL_OFFSETS"),
       valueParameter("width", 0, "15 mm"),
       valueParameter("width1", 0, "5 mm"),
+      valueParameter("oppositeDirection", false),
       valueParameter("width2", 0, "5 mm"),
       valueParameter("angle", 0, "45 deg"),
-      valueParameter("oppositeDirection", false),
-      valueParameter("tangentPropagation", true),
       queryParameter("directionOverrides", []),
+      valueParameter("tangentPropagation", true),
     ]);
-    expect(chamfer.plannedBodyTopologyConsumer).toMatchObject({ featureKind: "chamfer", options: { distance: 15, style: "equalOffsets" } });
-    expect(plan(chamferFeatureTranslator, "chamfer", [valueParameter("chamferType", "TWO_OFFSETS")]).reasonCodes).toEqual(["chamfer-style-unsupported"]);
+    expect(chamfer).toMatchObject({
+      reasonCodes: ["needs-history-probe"],
+      plannedBodyTopologyConsumer: {
+        featureKind: "chamfer",
+        options: { distance: 15 },
+        slots: [{ parameterId: "entities", role: "edge", expectedKinds: ["edge"] }],
+      },
+    });
+    expect(chamfer.plannedBodyTopologyConsumer?.options).toEqual({ distance: 15 });
   });
 
-  test("maps shell openings and rejects the root bundle's hollow shell without openings", () => {
+  test("accepts the chamferStyle parameter name and rejects only inexpressible width forms", () => {
+    const equalOffsets = plan(chamferFeatureTranslator, "chamfer", [
+      queryParameter("entities", ["edge"]),
+      valueParameter("chamferMethod", "FACE_OFFSET"),
+      valueParameter("chamferStyle", "EQUAL_OFFSETS"),
+      valueParameter("width", 0, "2.5 mm"),
+    ]);
+    expect(equalOffsets.plannedBodyTopologyConsumer?.options).toEqual({ distance: 2.5 });
+
+    for (const style of ["TWO_OFFSETS", "OFFSET_ANGLE"]) {
+      expect(plan(chamferFeatureTranslator, "chamfer", [
+        valueParameter("chamferMethod", "FACE_OFFSET"),
+        valueParameter("chamferStyle", style),
+      ]).reasonCodes).toEqual(["chamfer-style-unsupported"]);
+    }
+    expect(plan(chamferFeatureTranslator, "chamfer", [
+      valueParameter("chamferMethod", "EDGE_OFFSET"),
+      valueParameter("chamferStyle", "EQUAL_OFFSETS"),
+    ]).reasonCodes).toEqual(["chamfer-method-unsupported"]);
+  });
+
+  test("maps shell openings and keeps inexpressible shell forms honest", () => {
     const shell = plan(shellFeatureTranslator, "shell", [
       valueParameter("isHollow", true), queryParameter("parts", ["body"]), queryParameter("entities", ["face"]),
       valueParameter("thickness", 0, "2.5 mm"), valueParameter("oppositeDirection", false),
     ]);
     expect(shell.plannedBodyTopologyConsumer).toMatchObject({ featureKind: "shell", thickness: 2.5, direction: "inside", slots: [{ parameterId: "parts", role: "body" }, { parameterId: "entities", role: "face" }] });
-    expect(plan(shellFeatureTranslator, "shell", [valueParameter("isHollow", true), queryParameter("parts", ["body"]), valueParameter("thickness", 0, "2.5 mm")]).reasonCodes).toEqual(["shell-hollow-without-openings"]);
+
+    const realRootCaptureEnvelope = [
+      valueParameter("isHollow", true),
+      queryParameter("entities", []),
+      queryParameter("parts", ["JND"]),
+      valueParameter("thickness", 0, "2.5 mm"),
+      valueParameter("oppositeDirection", false),
+    ];
+    expect(plan(shellFeatureTranslator, "shell", realRootCaptureEnvelope).reasonCodes).toEqual(["shell-hollow-without-openings"]);
+
+    const nonHollowOffsetAllFaces = [
+      valueParameter("isHollow", false),
+      queryParameter("entities", []),
+      queryParameter("parts", ["body"]),
+      valueParameter("thickness", 0, "2.5 mm"),
+      valueParameter("oppositeDirection", false),
+    ];
+    expect(plan(shellFeatureTranslator, "shell", nonHollowOffsetAllFaces).reasonCodes).toEqual(["shell-non-hollow-unsupported"]);
+  });
+
+  test("maps one-face NEW thicken to a capability-gated topology consumer", () => {
+    const thicken = plan(thickenFeatureTranslator, "thicken", [
+      valueParameter("operationType", "NEW"),
+      queryParameter("entities", ["face"]),
+      valueParameter("thickness", 0, "2.5 mm"),
+      valueParameter("oppositeDirection", true),
+    ]);
+    expect(thicken).toMatchObject({
+      reasonCodes: ["needs-history-probe"],
+      plannedBodyTopologyConsumer: {
+        featureKind: "thicken",
+        operationIntent: "create",
+        options: {
+          thickness: 2.5,
+          side: "oneSide",
+          direction: "negative",
+        },
+        slots: [{ parameterId: "entities", expectedKinds: ["face"] }],
+      },
+    });
+
+    expect(plan(thickenFeatureTranslator, "thicken", [
+      valueParameter("operationType", "NEW"),
+      queryParameter("entities", ["face"]),
+      valueParameter("thickness", 0, "2.5 mm"),
+      valueParameter("midplane", true),
+    ]).reasonCodes).toEqual(["thicken-requires-topology"]);
   });
 
   test("reads hole locations and scope but reports the absent OCC hole executor", () => {
@@ -196,13 +394,21 @@ describe("Wave B body topology translators", () => {
   });
 
   test("gate-flip readiness resolves synthetic v2 edge evidence into fillet and chamfer deferred positions", () => {
-    const resolution = resolveTopologyReferences({
+    const input = {
       consumerFeatureId: "consumer",
-      queries: [{ consumerFeatureId: "consumer", slotKey: "edgeTargets", parameterId: "entities", queryIndex: 0, deterministicId: "edge", queryString: null, expectedKinds: ["edge"] }],
-      capturedReferences: [{ deterministicId: "edge", evaluatedAt: "historyPoint", consumingFeatureId: "consumer", signature: { entityClass: "edge", geometryType: "line", definingData: { origin: [0, 0, 0], direction: [1, 0, 0] } } }],
+      queries: [{ consumerFeatureId: "consumer", slotKey: "edgeTargets", parameterId: "entities", queryIndex: 0, deterministicId: "edge", queryString: null, expectedKinds: ["edge"] as const }],
+      capturedReferences: [{ deterministicId: "edge", evaluatedAt: "historyPoint" as const, consumingFeatureId: "consumer", signature: { entityClass: "edge" as const, geometryType: "line", definingData: { origin: [0, 0, 0] as [number, number, number], direction: [1, 0, 0] as [number, number, number] } } }],
       rollback: createRollbackTopologyTimeline({ featureIds: ["consumer"], snapshots: [] }),
-      cadaraSignatures: [{ entityClass: "edge", geometryType: "line", definingData: { origin: [0, 0, 0], direction: [1, 0, 0] }, reference: { kind: "edge", bodyId: "body" as never, edgeId: "live" as never } }],
+      cadaraSignatures: [{ entityClass: "edge" as const, geometryType: "line", definingData: { origin: [0, 0, 0], direction: [1, 0, 0] }, reference: { kind: "edge" as const, bodyId: "body" as never, edgeId: "live" as never } }],
       tolerance: { linear: 0.01, angularRadians: 0.001, relative: 0.000001, ambiguityMargin: 0.000001 },
+    };
+    expect(resolveTopologyReferences({ ...input, durableNamingAvailable: false })).toMatchObject({
+      kind: "degraded",
+      reason: "topology-durable-naming-unavailable",
+    });
+
+    const resolution = resolveTopologyReferences({
+      ...input,
       durableNamingAvailable: true, // mocked capability flip; source evidence is v2 history-point evidence.
     });
     expect(resolution.kind).toBe("resolved");
@@ -211,5 +417,60 @@ describe("Wave B body topology translators", () => {
     const chamfer = buildResolvedBodyConsumerDefinition({ featureKind: "chamfer", options: { distance: 2 }, slots: [{ key: "edgeTargets", parameterId: "entities", role: "edge", expectedKinds: ["edge"], cardinality: { min: 1, max: null } }] }, resolution.bindings);
     expect(fillet).toMatchObject({ kind: "fillet", parameters: { edgeTargets: [{ kind: "topologyOf", expectedKind: "edge" }] } });
     expect(chamfer).toMatchObject({ kind: "chamfer", parameters: { participants: [{ role: "edge", targets: [{ kind: "topologyOf", expectedKind: "edge" }] }] } });
+
+    const faceResolution = resolveTopologyReferences({
+      ...input,
+      queries: [{
+        consumerFeatureId: "consumer",
+        slotKey: "faceTargets",
+        parameterId: "entities",
+        queryIndex: 0,
+        deterministicId: "face",
+        queryString: null,
+        expectedKinds: ["face"] as const,
+      }],
+      capturedReferences: [{
+        deterministicId: "face",
+        evaluatedAt: "historyPoint" as const,
+        consumingFeatureId: "consumer",
+        signature: {
+          entityClass: "face" as const,
+          geometryType: "plane",
+          definingData: { origin: [0, 0, 0], normal: [0, 0, 1] },
+        },
+      }],
+      cadaraSignatures: [{
+        entityClass: "face" as const,
+        geometryType: "plane",
+        definingData: { origin: [0, 0, 0], normal: [0, 0, 1] },
+        reference: {
+          kind: "face" as const,
+          bodyId: "body" as never,
+          faceId: "live-face" as never,
+        },
+      }],
+      durableNamingAvailable: true,
+    });
+    expect(faceResolution.kind).toBe("resolved");
+    if (faceResolution.kind !== "resolved") return;
+    expect(buildResolvedBodyConsumerDefinition({
+      featureKind: "thicken",
+      operationIntent: "create",
+      options: { thickness: 2, side: "oneSide", direction: "positive" },
+      slots: [{
+        key: "faceTargets",
+        parameterId: "entities",
+        role: "face",
+        expectedKinds: ["face"],
+        cardinality: { min: 1, max: 1 },
+      }],
+    }, faceResolution.bindings)).toMatchObject({
+      kind: "thicken",
+      parameters: {
+        operationIntent: { value: "create" },
+        options: { thickness: 2, side: "oneSide", direction: "positive" },
+        participants: [{ role: "face", targets: [{ kind: "topologyOf" }] }],
+      },
+    });
   });
 });

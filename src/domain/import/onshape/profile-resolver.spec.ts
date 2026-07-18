@@ -51,6 +51,42 @@ test("profile resolver returns verified deferred profiles for a closed translate
   });
 });
 
+test("profile resolver derives selectors in the referenced sketch frame", () => {
+  const result = resolveOnshapeSketchProfiles({
+    profileParameter: profileParameter("S1"),
+    featureLabel: "Captured-frame extrude",
+    featureKind: "extrude",
+    solvedSketch: {
+      featureId: "S1",
+      entities: [{
+        entityId: "circle",
+        entityType: "circle",
+        onshapeEntityType: "skCircle",
+        isConstruction: false,
+        center3d: [0.004, 0, 0],
+        radius: 0.002,
+      }],
+    },
+    referencedSketch: {
+      tier: "parametric",
+      planeKey: "xy",
+      planeFrame: {
+        origin: [4, 0, 0],
+        xAxis: [1, 0, 0],
+        yAxis: [0, 1, 0],
+        normal: [0, 0, 1],
+        linearUnit: "documentLength",
+        handedness: "rightHanded",
+      },
+    },
+  });
+
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [{ interiorPoint: [0, 0] }],
+  });
+});
+
 test("profile resolver degrades an open translated sketch with needs-region-resolution", () => {
   const result = resolveProfile([
     {

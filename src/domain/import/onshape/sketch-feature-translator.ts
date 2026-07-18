@@ -20,7 +20,6 @@ export const sketchFeatureTranslator: OnshapeFeatureTranslator = {
           : null;
 
     if (!sketch) {
-      state.bakedLineageFeatureIds.add(feature.featureId);
       return {
         onshapeFeatureId: feature.featureId,
         featureType: feature.featureType,
@@ -29,6 +28,9 @@ export const sketchFeatureTranslator: OnshapeFeatureTranslator = {
         target: { kind: "suppressed" },
         reasonCodes: ["needs-history-probe"],
         suppressed: true,
+        inputDependencies: planeId
+          ? [{ kind: "query" as const, parameterId: "sketchPlane" }]
+          : [],
         inputFeatureIds: [],
       };
     }
@@ -45,6 +47,9 @@ export const sketchFeatureTranslator: OnshapeFeatureTranslator = {
       target: { kind: "sketch", planeKey: sketch.planeKey },
       reasonCodes: ["sketch-on-canonical-plane"],
       suppressed: onshapeSuppressed,
+      inputDependencies: planeId
+        ? [{ kind: "query" as const, parameterId: "sketchPlane" }]
+        : [],
       inputFeatureIds: [],
     };
   },

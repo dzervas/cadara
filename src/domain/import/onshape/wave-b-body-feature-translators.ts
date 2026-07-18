@@ -14,12 +14,20 @@ import type { ConstructionId } from "@/contracts/shared/ids";
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 import type { OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
 import type { TopologyQuerySlot } from "@/domain/import/onshape/topology-query-reader";
+export interface PlannedConstructionFromFeatureRef {
+  kind: "constructionFromFeature";
+  featureId: string;
+}
+
 export interface PlannedBodyTopologyConsumer {
   slots: readonly TopologyQuerySlot[];
   featureKind: AdvancedSolidFeatureKind | "fillet" | "shell" | "hole";
   operationIntent?: AdvancedSolidOperationIntent;
   options?: Record<string, unknown>;
-  staticParticipants?: readonly AdvancedParticipantValue[];
+  staticParticipants?: readonly {
+    role: AdvancedParticipantValue["role"];
+    targets: readonly (AdvancedParticipantValue["targets"][number] | PlannedConstructionFromFeatureRef)[];
+  }[];
   radius?: number;
   thickness?: number;
   direction?: "inside" | "outside";
@@ -79,12 +87,36 @@ function canonicalPlane(feature: OnshapeFeatureNode, parameterId: string, contex
     : null;
 }
 
+function planeReference(
+  feature: OnshapeFeatureNode,
+  parameterId: string,
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+): AdvancedParticipantValue["targets"][number] | PlannedConstructionFromFeatureRef | null {
+  const canonical = canonicalPlane(feature, parameterId, context);
+  if (canonical) return canonical;
+
+  const queries = parameter(feature, parameterId)?.queries;
+  if (!Array.isArray(queries) || queries.length !== 1) return null;
+  const queryString = (queries[0] as { queryString?: unknown }).queryString;
+  if (typeof queryString !== "string") return null;
+  const match = queryString.match(
+    /\$([A-Za-z0-9_]+)planeOp|id\s*\+\s*"([A-Za-z0-9_]+)"\s*\+\s*"planeOp"/,
+  );
+  const featureId = match?.[1] ?? match?.[2];
+  if (!featureId) return null;
+  const producer = context.read.features.find(
+    (candidate) => candidate.featureId === featureId,
+  );
+  return producer?.featureType === "cPlane"
+    ? { kind: "constructionFromFeature", featureId }
+    : null;
+}
+
 function slot(key: string, parameterId: string, role: TopologyQuerySlot["role"], min = 1, max: number | null = null, expectedKinds: TopologyQuerySlot["expectedKinds"] = ["body"]): TopologyQuerySlot {
   return { key, parameterId, role, expectedKinds, cardinality: { min, max } };
 }
 
 function baked(context: Parameters<OnshapeFeatureTranslator["plan"]>[0], reason: import("@/domain/import/onshape/fidelity-planner").PlanReasonCode, planned?: PlannedBodyTopologyConsumer) {
-  context.state.bakedLineageFeatureIds.add(context.feature.featureId);
   return {
     onshapeFeatureId: context.feature.featureId,
     featureType: context.feature.featureType,
@@ -94,6 +126,11 @@ function baked(context: Parameters<OnshapeFeatureTranslator["plan"]>[0], reason:
     reasonCodes: [reason],
     suppressed: true,
     plannedBodyTopologyConsumer: planned,
+    inputDependencies: planned?.slots.map((input) => ({
+      kind: "query" as const,
+      parameterId: input.parameterId,
+      slotKey: input.key,
+    })) ?? [],
     inputFeatureIds: [],
   };
 }
@@ -152,7 +189,7 @@ export const transformFeatureTranslator: OnshapeFeatureTranslator = {
     if (booleanValue(context.feature, "makeCopy")) return baked(context, "transform-copy-unsupported");
     const transformType = enumValue(context.feature, "transformType") ?? "TRANSLATION_BY_XYZ";
     if (transformType === "ROTATION") return baked(context, "transform-rotation-unsupported");
-    if (transformType === "TRANSLATION_BY_XYZ") {
+    if (transformType === "TRANSLATION_BY_XYZ" || transformType === "TRANSLATION_3D") {
       const vector = ["dx", "dy", "dz"].map((id) => quantityMillimeters(context.feature, id));
       if (vector.some((value) => value === null) || vector.every((value) => value === 0)) return baked(context, "transform-translation-unreadable");
       return topologyCandidate(context, {
@@ -163,7 +200,7 @@ export const transformFeatureTranslator: OnshapeFeatureTranslator = {
     }
     if (transformType === "TRANSLATION_BY_DISTANCE") {
       const distance = quantityMillimeters(context.feature, "distance");
-      const reference = canonicalPlane(context.feature, "transformDirection", context);
+      const reference = planeReference(context.feature, "transformDirection", context);
       if (!distance || !reference) return baked(context, "transform-reference-unresolved");
       return topologyCandidate(context, {
         featureKind: "transform",
@@ -183,7 +220,7 @@ export const mirrorFeatureTranslator: OnshapeFeatureTranslator = {
     const patternType = enumValue(context.feature, "patternType") ?? "PART";
     const operation = enumValue(context.feature, "operationType") ?? "NEW";
     if (patternType !== "PART" || operation !== "NEW") return baked(context, "mirror-operation-unsupported");
-    const plane = canonicalPlane(context.feature, "mirrorPlane", context);
+    const plane = planeReference(context.feature, "mirrorPlane", context);
     if (!plane) return baked(context, "mirror-plane-unresolved");
     return topologyCandidate(context, {
       featureKind: "mirror",
@@ -218,7 +255,10 @@ export const chamferFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["chamfer"],
   plan(context) {
     const method = enumValue(context.feature, "chamferMethod") ?? "FACE_OFFSET";
-    const style = enumValue(context.feature, "chamferType") ?? "EQUAL_OFFSETS";
+    const style =
+      enumValue(context.feature, "chamferStyle") ??
+      enumValue(context.feature, "chamferType") ??
+      "EQUAL_OFFSETS";
     if (method !== "FACE_OFFSET") return baked(context, "chamfer-method-unsupported");
     if (style !== "EQUAL_OFFSETS") return baked(context, "chamfer-style-unsupported");
     if (hasQueries(context.feature, "directionOverrides")) return baked(context, "chamfer-direction-overrides-unsupported");
@@ -226,13 +266,39 @@ export const chamferFeatureTranslator: OnshapeFeatureTranslator = {
     if (width === null) return baked(context, "chamfer-width-unreadable");
     return topologyCandidate(context, {
       featureKind: "chamfer",
-      options: {
-        distance: width,
-        style: "equalOffsets",
-        oppositeDirection: booleanValue(context.feature, "oppositeDirection"),
-        tangentPropagation: booleanValue(context.feature, "tangentPropagation", true),
-      },
+      options: { distance: width },
       slots: [slot("edgeTargets", "entities", "edge", 1, null, ["edge"])],
+    });
+  },
+  apply: ({ apply }) => apply(),
+};
+
+export const thickenFeatureTranslator: OnshapeFeatureTranslator = {
+  featureTypes: ["thicken"],
+  plan(context) {
+    const operation = enumValue(context.feature, "operationType") ?? "NEW";
+    const thickness = positiveQuantity(context.feature, "thickness");
+    if (
+      operation !== "NEW" ||
+      thickness === null ||
+      !hasQueries(context.feature, "entities") ||
+      booleanValue(context.feature, "midplane") ||
+      booleanValue(context.feature, "symmetric")
+    ) {
+      return baked(context, "thicken-requires-topology");
+    }
+    context.state.bodyProducingFeatureIds.push(context.feature.featureId);
+    return topologyCandidate(context, {
+      featureKind: "thicken",
+      operationIntent: "create",
+      options: {
+        thickness,
+        side: "oneSide",
+        direction: booleanValue(context.feature, "oppositeDirection")
+          ? "negative"
+          : "positive",
+      },
+      slots: [slot("faceTargets", "entities", "face", 1, 1, ["face"])],
     });
   },
   apply: ({ apply }) => apply(),
@@ -241,6 +307,10 @@ export const chamferFeatureTranslator: OnshapeFeatureTranslator = {
 export const shellFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["shell"],
   plan(context) {
+    // Cadara's shell contract models a hollowed solid with explicit removable
+    // faces, and normalization plus both OCC execution paths reject an empty
+    // faceTargets list. Onshape isHollow=false instead offsets every face while
+    // retaining a closed solid, so it cannot be represented by this contract.
     if (!booleanValue(context.feature, "isHollow")) return baked(context, "shell-non-hollow-unsupported");
     if (!hasQueries(context.feature, "entities")) return baked(context, "shell-hollow-without-openings");
     const thickness = positiveQuantity(context.feature, "thickness");

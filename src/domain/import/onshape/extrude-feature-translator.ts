@@ -2,17 +2,71 @@ import {
   planExtrudeFeature,
   referencedSketchFeatureIds,
 } from "@/domain/import/onshape/extrude-planner";
-import type { OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
+import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
+import {
+  dependencyFeatureIds,
+  type FeatureDependencyInput,
+  type OnshapeFeatureTranslator,
+} from "@/domain/import/onshape/feature-translator-registry";
+import { readRollbackTopologySnapshot } from "@/domain/import/onshape/rollback-topology-reader";
+
+function inferredDefaultScopeFeatureIds(
+  feature: OnshapeFeatureNode,
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+): string[] {
+  if (isNewBodyExtrude(feature) || hasScopeQueries(feature)) return [];
+  const snapshots = context.read.studio.rollbackSnapshots;
+  if (!snapshots) return [];
+  const featureIndex = context.read.features.findIndex(
+    (candidate) => candidate.featureId === feature.featureId,
+  );
+  if (featureIndex < 0) return [];
+  const parsed = new Map(
+    snapshots.map((snapshot) => [
+      snapshot.featureId,
+      readRollbackTopologySnapshot(snapshot),
+    ]),
+  );
+  const after = parsed.get(feature.featureId);
+  if (!after) return [];
+  let before: ReturnType<typeof readRollbackTopologySnapshot> | undefined;
+  for (let index = featureIndex - 1; index >= 0; index -= 1) {
+    before = parsed.get(context.read.features[index]!.featureId);
+    if (before) break;
+  }
+  if (!before) return [];
+
+  const changedBodyIds = before.bodies.flatMap((body) => {
+    const next = after.bodies.find((candidate) => candidate.id === body.id);
+    return next && JSON.stringify(next) !== JSON.stringify(body) ? [body.id] : [];
+  });
+  if (changedBodyIds.length !== 1) return [];
+
+  const bodyId = changedBodyIds[0]!;
+  for (let index = 0; index < featureIndex; index += 1) {
+    const producerId = context.read.features[index]!.featureId;
+    if (
+      parsed.get(producerId)?.bodies.some((body) => body.id === bodyId) &&
+      context.state.bodyProducingFeatureIds.includes(producerId)
+    ) {
+      return [producerId];
+    }
+  }
+  return [];
+}
 
 export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["extrude"],
-  plan: ({ feature, label, onshapeSuppressed, read, state }) => {
-    const inputFeatureIds = referencedSketchFeatureIds(feature);
-    let dependsOnBakedLineage = inputFeatureIds.some((id) => state.bakedLineageFeatureIds.has(id));
-    const referencedSketch = inputFeatureIds
+  plan: (context) => {
+    const { feature, label, onshapeSuppressed, read, state } = context;
+    const sketchFeatureIds = referencedSketchFeatureIds(feature);
+    const inputDependencies: FeatureDependencyInput[] = sketchFeatureIds.map(
+      (featureId) => ({ kind: "sketch", featureId }),
+    );
+    const referencedSketch = sketchFeatureIds
       .map((id) => state.sketchPlansByFeatureId.get(id))
       .find((plan) => plan !== undefined);
-    const solvedSketch = inputFeatureIds
+    const solvedSketch = sketchFeatureIds
       .map((id) => read.solvedSketchesByFeatureId.get(id))
       .find((solved) => solved !== undefined);
     const extrudePlan = planExtrudeFeature({
@@ -20,61 +74,89 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
       solvedSketch,
       referencedSketch,
       priorBodyProducingFeatureIds: state.bodyProducingFeatureIds,
+      inferredDefaultScopeFeatureIds: inferredDefaultScopeFeatureIds(
+        feature,
+        context,
+      ),
     });
 
     if (extrudePlan.tier === "parametric") {
       if (extrudePlan.plannedExtrude.boolean.kind === "deferredBody") {
-        const sourceFeatureId = extrudePlan.plannedExtrude.boolean.sourceFeatureId;
-        inputFeatureIds.push(sourceFeatureId);
-        dependsOnBakedLineage ||= state.bakedLineageFeatureIds.has(sourceFeatureId);
+        inputDependencies.push({
+          kind: "body",
+          featureId: extrudePlan.plannedExtrude.boolean.sourceFeatureId,
+        });
       }
-      if (!dependsOnBakedLineage) {
-        if (extrudePlan.plannedExtrude.boolean.kind === "standalone") {
-          state.bodyProducingFeatureIds.push(feature.featureId);
-        }
-        return {
-          onshapeFeatureId: feature.featureId,
-          featureType: feature.featureType,
-          label,
-          tier: "parametric",
-          target: { kind: "feature" },
-          reasonCodes: [],
-          suppressed: onshapeSuppressed,
-          plannedExtrude: extrudePlan.plannedExtrude,
-          inputFeatureIds,
-        };
+      if (extrudePlan.plannedExtrude.boolean.kind === "standalone") {
+        state.bodyProducingFeatureIds.push(feature.featureId);
       }
+      return {
+        onshapeFeatureId: feature.featureId,
+        featureType: feature.featureType,
+        label,
+        tier: "parametric",
+        target: { kind: "feature" },
+        reasonCodes: [],
+        suppressed: onshapeSuppressed,
+        plannedExtrude: extrudePlan.plannedExtrude,
+        inputDependencies,
+        inputFeatureIds: dependencyFeatureIds(inputDependencies),
+      };
     }
 
-    const reason = extrudePlan.tier === "baked" ? extrudePlan.reason : "needs-region-resolution";
+    if (extrudePlan.tier === "topology") {
+      if (isNewBodyExtrude(feature)) state.bodyProducingFeatureIds.push(feature.featureId);
+      return {
+        onshapeFeatureId: feature.featureId,
+        featureType: feature.featureType,
+        label,
+        tier: "baked",
+        target: { kind: "bakedBody" },
+        reasonCodes: ["needs-history-probe"],
+        suppressed: true,
+        plannedExtrude: extrudePlan.plannedExtrude,
+        inputDependencies,
+        inputFeatureIds: dependencyFeatureIds(inputDependencies),
+      };
+    }
+
+    const reason =
+      extrudePlan.tier === "baked"
+        ? extrudePlan.reason
+        : "needs-region-resolution";
     if (isNewBodyExtrude(feature)) {
       state.bodyProducingFeatureIds.push(feature.featureId);
     }
-    state.bakedLineageFeatureIds.add(feature.featureId);
     return {
       onshapeFeatureId: feature.featureId,
       featureType: feature.featureType,
       label,
       tier: "baked",
-      target: { kind: dependsOnBakedLineage ? "suppressed" : "bakedBody" },
-      reasonCodes: dependsOnBakedLineage
-        ? extrudePlan.tier === "baked"
-          ? [reason, "downstream-of-baked"]
-          : ["downstream-of-baked"]
-        : [reason],
+      target: { kind: "bakedBody" },
+      reasonCodes: [reason],
       suppressed: true,
-      inputFeatureIds,
+      inputDependencies,
+      inputFeatureIds: dependencyFeatureIds(inputDependencies),
     };
   },
   apply: ({ apply }) => apply(),
 };
 
-function isNewBodyExtrude(feature: Parameters<OnshapeFeatureTranslator["plan"]>[0]["feature"]): boolean {
-  const operationType = feature.parameters?.find(
-    (parameter) =>
-      typeof parameter === "object" &&
-      parameter !== null &&
-      (parameter as { parameterId?: unknown }).parameterId === "operationType",
-  ) as { value?: unknown } | undefined;
+function parameter(feature: OnshapeFeatureNode, parameterId: string) {
+  return feature.parameters?.find(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { parameterId?: unknown }).parameterId === parameterId,
+  ) as { value?: unknown; queries?: unknown } | undefined;
+}
+
+function hasScopeQueries(feature: OnshapeFeatureNode): boolean {
+  const queries = parameter(feature, "booleanScope")?.queries;
+  return Array.isArray(queries) && queries.length > 0;
+}
+
+function isNewBodyExtrude(feature: OnshapeFeatureNode): boolean {
+  const operationType = parameter(feature, "operationType");
   return operationType?.value === undefined || operationType.value === "NEW";
 }
