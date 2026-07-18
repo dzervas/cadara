@@ -34,8 +34,13 @@ export function buildImportFilePickerConfiguration(
     (result, entry) => {
       const mediaType = entry.mediaType ?? "application/octet-stream";
       const extensions = result[mediaType] ?? [];
-      if (!extensions.includes(`.${entry.extension}`)) {
-        extensions.push(`.${entry.extension}`);
+      // The native File System Access picker rejects compound extensions
+      // ("Extension '.onshape-capture.json' contains invalid characters"),
+      // so only the final suffix is offered there; providers still match on
+      // the full file name after selection.
+      const pickerExtension = `.${entry.extension.split(".").at(-1)!}`;
+      if (!extensions.includes(pickerExtension)) {
+        extensions.push(pickerExtension);
       }
       result[mediaType] = extensions;
       return result;
