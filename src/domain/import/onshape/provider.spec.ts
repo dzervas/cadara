@@ -1,10 +1,15 @@
-import { test, expect } from "vitest";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { test, expect } from "vitest";
 
 import type {
   HistoryProbeTopologySignature,
   ImportCapabilities,
 } from "@/contracts/import/capabilities";
+import type {
+  OnshapeCaptureBundleV2,
+  OnshapeRollbackSnapshot,
+} from "@/contracts/import/onshape-capture-bundle";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import { validateImportPreparedActions } from "@/contracts/import/validation";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
@@ -21,6 +26,7 @@ import { createGeometryAssetRecordFromReference } from "@/contracts/modeling/geo
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
@@ -30,7 +36,7 @@ import {
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
 
-import type { BodyId, FaceId } from "@/contracts/shared/ids";
+import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
 function sourceFromBundle(bundle: unknown): ResolvedImportSource {
   const bytes = new TextEncoder().encode(JSON.stringify(bundle));
   return {
@@ -245,6 +251,197 @@ function makeFaceSketchBundle() {
   };
 }
 
+function makeDurableSubtopologyBundle(): OnshapeCaptureBundleV2 {
+  const bundle = makeSegmentedCheckpointBundle();
+  const studio = bundle.partStudios[0]!;
+  const features = (studio.features as { features: Record<string, unknown>[] }).features;
+  const chamfer = features.find((feature) => feature.featureId === "CHAMFER")!;
+  Object.assign(chamfer, {
+    parameters: [
+      {
+        parameterId: "entities",
+        queries: [{ deterministicIds: ["edge_ref"] }],
+      },
+      { parameterId: "chamferMethod", value: "FACE_OFFSET" },
+      { parameterId: "chamferType", value: "EQUAL_OFFSETS" },
+      { parameterId: "width", expression: "1 mm", value: 0.001 },
+    ],
+  });
+  studio.resolvedReferences.push({
+    deterministicId: "edge_ref",
+    evaluatedAt: "historyPoint",
+    consumingFeatureId: "CHAMFER",
+    signature: {
+      entityClass: "edge",
+      geometryType: "line",
+      definingData: { direction: [1, 0, 0] },
+      centroid: [0.0005, 0, 0.003],
+      boundingBox: { low: [0, 0, 0.003], high: [0.001, 0, 0.003] },
+    },
+  });
+  return bundle;
+}
+
+function makeSegmentedCheckpointBundle(): OnshapeCaptureBundleV2 {
+  const bundle = structuredClone(makeFaceSketchBundle()) as unknown as OnshapeCaptureBundleV2;
+  bundle.formatVersion = 2;
+  const studio = bundle.partStudios[0]!;
+  const rawFeatures = studio.features as { features: Record<string, unknown>[] };
+  const baseExtrude = rawFeatures.features.find(
+    (feature) => feature.featureId === "E_BASE",
+  )!;
+  rawFeatures.features.splice(2, 0, {
+    ...structuredClone(baseExtrude),
+    featureId: "E_INDEPENDENT",
+    name: "Independent extrude",
+  });
+  rawFeatures.features.push(
+    {
+      featureType: "assignVariable",
+      featureId: "V_AFTER",
+      name: "After checkpoint",
+      parameters: [
+        { parameterId: "name", value: "afterCheckpoint" },
+        { parameterId: "value", expression: "4 mm", value: 0.004 },
+      ],
+    },
+    {
+      ...structuredClone(baseExtrude),
+      featureId: "E_AFTER",
+      name: "After checkpoint extrude",
+    },
+    {
+      featureType: "chamfer",
+      featureId: "CHAMFER_TWO",
+      name: "Second chamfer",
+    },
+  );
+
+  const body = (id: string, extent: number) => ({
+    id,
+    faces: [{
+      id: `${id}-face`,
+      facets: [{
+        vertices: [
+          { x: 0, y: 0, z: 0 },
+          { x: extent, y: 0, z: 0 },
+          { x: extent, y: 1, z: 1 },
+        ],
+      }],
+    }],
+  });
+  const snapshot = (
+    featureId: string,
+    bodies: ReturnType<typeof body>[],
+  ): OnshapeRollbackSnapshot => ({
+    featureId,
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: { bodies },
+  });
+  studio.rollbackSnapshots = [
+    snapshot("S_BASE", []),
+    snapshot("E_BASE", [body("A", 1)]),
+    snapshot("E_INDEPENDENT", [body("A", 1), body("B", 1)]),
+    snapshot("S_FACE", [body("A", 1), body("B", 1)]),
+    snapshot("CHAMFER", [body("A", 2), body("B", 1)]),
+    snapshot("V_AFTER", [body("A", 2), body("B", 1)]),
+    snapshot("E_AFTER", [body("A", 2), body("B", 1), body("C", 1)]),
+    snapshot("CHAMFER_TWO", [body("A", 2), body("B", 2), body("C", 1)]),
+  ];
+  studio.groundTruth = {
+    hasBodies: true,
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: {
+      bodies: [body("A", 2), body("B", 2), body("C", 1)],
+    },
+    step: "",
+  };
+  return bundle;
+}
+
+function makeCapturedFrameCheckpointBundle(): OnshapeCaptureBundleV2 {
+  const bundle = structuredClone(makeFaceSketchBundle()) as unknown as OnshapeCaptureBundleV2;
+  bundle.formatVersion = 2;
+  const studio = bundle.partStudios[0]!;
+  const rawFeatures = studio.features as { features: Record<string, unknown>[] };
+  const baseExtrude = rawFeatures.features.find(
+    (feature) => feature.featureId === "E_BASE",
+  )!;
+  rawFeatures.features = [
+    rawFeatures.features[0]!,
+    baseExtrude,
+    {
+      featureType: "transform",
+      featureId: "TRANSFORM",
+      name: "Transform checkpoint",
+      parameters: [
+        { parameterId: "transformType", value: "ROTATION" },
+        { parameterId: "entities", queries: [{ deterministicIds: ["A"] }] },
+      ],
+    },
+    rawFeatures.features.find((feature) => feature.featureId === "S_FACE")!,
+    {
+      ...structuredClone(baseExtrude),
+      featureId: "E_AFTER",
+      name: "Extrude after checkpoint",
+      parameters: [
+        {
+          parameterId: "entities",
+          queries: [{ queryString: 'query = qSketchRegion(id + "S_FACE", true);' }],
+        },
+        { parameterId: "endBound", value: "BLIND" },
+        { parameterId: "depth", expression: "2 mm", value: 0.002 },
+        { parameterId: "operationType", value: "ADD" },
+      ],
+    },
+  ];
+
+  studio.resolvedReferences = [{
+    deterministicId: "face_ref",
+    evaluatedAt: "historyPoint",
+    consumingFeatureId: "S_FACE",
+    signature: {
+      entityClass: "face",
+      geometryType: "plane",
+      definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+      centroid: [0.0005, 0.001, 0.003],
+      boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+    },
+  }];
+  const body = (extent: number) => ({
+    id: "A",
+    faces: [{
+      id: "A-face",
+      facets: [{
+        vertices: [
+          { x: 0, y: 0, z: 0 },
+          { x: extent, y: 0, z: 0 },
+          { x: 0, y: 1, z: 1 },
+        ],
+      }],
+    }],
+  });
+  const snapshot = (featureId: string, extent: number): OnshapeRollbackSnapshot => ({
+    featureId,
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: { bodies: extent === 0 ? [] : [body(extent)] },
+  });
+  studio.rollbackSnapshots = [
+    snapshot("S_BASE", 0),
+    snapshot("E_BASE", 1),
+    snapshot("TRANSFORM", 2),
+    snapshot("S_FACE", 2),
+    snapshot("E_AFTER", 3),
+  ];
+  studio.groundTruth = {
+    hasBodies: true,
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: { bodies: [body(3)] },
+    step: "",
+  };
+  return bundle;
+}
+
 function makeCPlaneSketchBundle(options: { recoverable: boolean }) {
   return {
     formatVersion: 1,
@@ -365,14 +562,55 @@ function probeSignature(id: string): HistoryProbeTopologySignature {
   };
 }
 
+function durableConsumerProbeSignatures(): HistoryProbeTopologySignature[] {
+  return [
+    probeSignature("face_match"),
+    {
+      entityClass: "edge",
+      geometryType: "line",
+      definingData: { direction: [1, 0, 0] },
+      centroid: [0.5, 0, 3],
+      boundingBox: { low: [0, 0, 3], high: [1, 0, 3] },
+      reference: {
+        kind: "edge",
+        bodyId: "body_probe" as BodyId,
+        edgeId: "edge_match" as EdgeId,
+      },
+    },
+    {
+      entityClass: "vertex",
+      geometryType: "point",
+      centroid: [0, 0, 3],
+      boundingBox: { low: [0, 0, 3], high: [0, 0, 3] },
+      reference: {
+        kind: "vertex",
+        bodyId: "body_probe" as BodyId,
+        vertexId: "vertex_match" as VertexId,
+      },
+    },
+    {
+      entityClass: "body",
+      geometryType: "solid",
+      centroid: [0.5, 1, 1.5],
+      boundingBox: { low: [0, 0, 0], high: [1, 2, 3] },
+      reference: { kind: "body", bodyId: "body_probe" as BodyId },
+    },
+  ];
+}
+
 function capabilitiesWithProbe(
   signatures: readonly HistoryProbeTopologySignature[],
 ): ImportCapabilities {
   return {
     ...capabilities,
     history: {
-      async evaluateHistoryProbe() {
-        return { steps: [{ status: "rebuilt", signatures: [...signatures] }] };
+      async evaluateHistoryProbe(input) {
+        return {
+          steps: Array.from(
+            { length: Math.max(1, input.actions.orderedActions?.length ?? 0) },
+            () => ({ status: "rebuilt" as const, signatures: [...signatures] }),
+          ),
+        };
       },
     },
   };
@@ -429,12 +667,21 @@ test("src/domain/import/onshape/provider.spec.ts emits a deferred parametric rev
   expect(validateImportPreparedActions(actions).success).toBe(true);
 });
 
-test("src/domain/import/onshape/provider.spec.ts real-bundle Wave A tier counts remain unchanged", async () => {
-  const cases = [
-    ["40a51fb8fa82fd4565151114.onshape-capture.json", { parametric: 6, baked: 4, geometryOnly: 0 }],
-    ["9841e486906fa2ce62d74d8e.onshape-capture.json", { parametric: 6, baked: 35, geometryOnly: 0 }],
-  ] as const;
-  for (const [fileName, expected] of cases) {
+const realBundleCases = [
+  [
+    "40a51fb8fa82fd4565151114.onshape-capture.json",
+    { parametric: 6, baked: 4, geometryOnly: 0 },
+  ],
+  [
+    "9841e486906fa2ce62d74d8e.onshape-capture.json",
+    { parametric: 6, baked: 35, geometryOnly: 0 },
+  ],
+] as const;
+
+test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
+  "src/domain/import/onshape/provider.spec.ts real-bundle no-history tier counts retain the pinned baselines",
+  async () => {
+  for (const [fileName, expected] of realBundleCases) {
     const bundle = JSON.parse(await readFile(fileName, "utf8"));
     const review = await onshapeImportProvider.review({
       source: sourceFromBundle(bundle),
@@ -449,7 +696,7 @@ test("src/domain/import/onshape/provider.spec.ts real-bundle Wave A tier counts 
   }
 });
 
-test("src/domain/import/onshape/provider.spec.ts durable naming gate blocks unique face sketches", async () => {
+test("src/domain/import/onshape/provider.spec.ts unique face sketches follow the durable naming capability gate", async () => {
   const source = sourceFromBundle(makeFaceSketchBundle());
   const review = await onshapeImportProvider.review({
     source,
@@ -464,9 +711,12 @@ test("src/domain/import/onshape/provider.spec.ts durable naming gate blocks uniq
   );
 
   expect(
-    faceSketch?.tier === "baked" &&
-      faceSketch.reasonCodes.includes("topology-durable-naming-unavailable"),
-    "A unique face match must remain baked while durable subtopology naming is disabled.",
+    OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming
+      ? faceSketch?.tier === "parametric" &&
+        faceSketch.reasonCodes.includes("sketch-on-probed-face")
+      : faceSketch?.tier === "baked" &&
+        faceSketch.reasonCodes.includes("topology-durable-naming-unavailable"),
+    "A unique face match must follow the kernel's durable topology naming capability.",
   ).toBeTruthy();
   expect(
     chamfer?.tier === "baked" &&
@@ -483,7 +733,31 @@ test("src/domain/import/onshape/provider.spec.ts durable naming gate blocks uniq
   });
   expect(
     actions.commitSketches?.some((sketch) => sketch.plane.support.kind === "face"),
-  ).toBe(false);
+  ).toBe(OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming);
+});
+
+test("src/domain/import/onshape/provider.spec.ts chamfer promotes with matching durable edge evidence", async () => {
+  const source = sourceFromBundle(makeDurableSubtopologyBundle());
+  const probeCapabilities = capabilitiesWithProbe(durableConsumerProbeSignatures());
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: probeCapabilities,
+  });
+  const studio = review.providerReview.studios[0]!;
+  expect(
+    studio.featurePlans.find((plan) => plan.onshapeFeatureId === "CHAMFER"),
+    JSON.stringify(studio.featurePlans),
+  ).toMatchObject({ tier: "parametric", reasonCodes: [], suppressed: false });
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: probeCapabilities,
+  });
+  expect(actions.createFeatures?.some((action) => action.definition.kind === "chamfer"))
+    .toBe(true);
+  expect(validateImportPreparedActions(actions).success).toBe(true);
 });
 
 test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch stays honestly baked", async () => {
@@ -707,9 +981,12 @@ test("src/domain/import/onshape/provider.spec.ts no fabricated construction supp
     "The synthetic fixture must build a real parametric prefix before the face sketch probe runs.",
   ).toBeTruthy();
   expect(
-    faceSketch?.tier === "baked" &&
-      faceSketch.reasonCodes.includes("topology-durable-naming-unavailable"),
-    "A face sketch must not ship a subtopology support while durable naming is disabled.",
+    OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming
+      ? faceSketch?.tier === "parametric" &&
+        faceSketch.reasonCodes.includes("sketch-on-probed-face")
+      : faceSketch?.tier === "baked" &&
+        faceSketch.reasonCodes.includes("topology-durable-naming-unavailable"),
+    "A face sketch must follow the kernel's durable topology naming capability.",
   ).toBeTruthy();
 
   const actions = await onshapeImportProvider.prepare({
@@ -744,6 +1021,7 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
     tessellatedFaces: {
       bodies: [
         {
+          id: "ground-truth-body",
           faces: [
             {
               facets: [
@@ -814,7 +1092,7 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
     "Provider must preserve each raw tessellation body as an explicit source component.",
   ).toEqual([
     expect.objectContaining({
-      sourceComponentKey: "onshape-tessellation-body-0",
+      sourceComponentKey: "onshape-body:ground-truth-body",
       indexStart: 0,
       indexCount: 1,
     }),
@@ -826,6 +1104,366 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
     ),
     "Successful baking should not emit the bake-unavailable fallback.",
   ).toBeTruthy();
+  expect(
+    actions.diagnostics?.find(
+      (diagnostic) => diagnostic.code === "onshape-bake-segment-legacy-fallback",
+    )?.message,
+  ).toContain("capture-v1");
+  expect(
+    actions.diagnostics?.find(
+      (diagnostic) => diagnostic.code === "onshape-fidelity-summary",
+    )?.message,
+  ).toContain("bake strategy: legacy whole-studio (capture-v1), 0 checkpoints");
+});
+
+test("src/domain/import/onshape/provider.spec.ts emits selective segment checkpoints at their source boundaries", async () => {
+  const bundle = makeSegmentedCheckpointBundle();
+  const source = sourceFromBundle(bundle);
+  const assetStore = createMemoryGeometryAssetStore();
+  const segmentedCapabilities: ImportCapabilities = {
+    ...createImportCapabilities(
+      {} as never,
+      {
+        document: { documentId: "doc_workspace", revisionId: "rev_1" },
+      } as never,
+      { assetStore },
+    ),
+    history: {
+      async evaluateHistoryProbe(input) {
+        return {
+          steps: (input.actions.orderedActions ?? []).map(() => ({
+            status: "rebuilt" as const,
+            signatures: [],
+          })),
+        };
+      },
+    },
+  };
+
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: segmentedCapabilities,
+  });
+  const studio = review.providerReview.studios[0];
+  expect(studio?.bakeDiagnostics).toEqual([]);
+  expect(studio?.bakeStrategy).toMatchObject({
+    kind: "segments",
+    segments: [
+      {
+        boundaryFeatureId: "CHAMFER",
+        checkpointBodyDeterministicIds: ["A"],
+        replacementProducerFeatureIds: ["E_BASE"],
+      },
+      {
+        boundaryFeatureId: "CHAMFER_TWO",
+        checkpointBodyDeterministicIds: ["B"],
+        replacementProducerFeatureIds: ["E_INDEPENDENT"],
+      },
+    ],
+  });
+
+  const selections = onshapeImportProvider.createDefaultSelections(review);
+  const segmentedSchema = onshapeImportProvider.getReviewFormSchema(review, selections);
+  const segmentSection = segmentedSchema.sections.find(
+    (section) => section.id === "bake-segments",
+  );
+  expect(segmentSection?.fields).toEqual([
+    expect.objectContaining({
+      id: "bake-strategy",
+      kind: "summary",
+      value: "Segmented — 2 baked-body checkpoints.",
+    }),
+    expect.objectContaining({
+      id: "bake-checkpoint-count",
+      kind: "summary",
+      value: expect.stringContaining("2 checkpoints"),
+    }),
+    expect.objectContaining({
+      id: "bake-segment-1",
+      label: "Checkpoint 1 — Chamfer",
+      value: expect.stringMatching(
+        /Feature span: Face sketch → Chamfer; output bodies: A; consumed: A; carried: none; replaces 1 prior producer action;.*tessellation-backed checkpoint; preflight limitations: none\./,
+      ),
+    }),
+    expect.objectContaining({
+      id: "bake-segment-2",
+      label: "Checkpoint 2 — Second chamfer",
+      value: expect.stringContaining("output bodies: B"),
+    }),
+  ]);
+  const segmentedFidelity = segmentedSchema.sections.find(
+    (section) => section.id === "fidelity-report",
+  );
+  const chamferReview = segmentedFidelity?.fields.find(
+    (field) => field.id === "feature-CHAMFER",
+  );
+  expect(chamferReview).toMatchObject({
+    kind: "summary",
+    value: expect.stringContaining(
+      "represented by bake segment 1; intrinsic reason retained above",
+    ),
+  });
+  const chamferValue = chamferReview?.kind === "summary" ? chamferReview.value : "";
+  for (const reason of studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "CHAMFER",
+  )?.reasonCodes ?? []) {
+    expect(chamferValue).not.toContain(reason);
+  }
+
+  const noBakeReview = structuredClone(review);
+  noBakeReview.providerReview.studios[0]!.bakeStrategy = { kind: "none" };
+  noBakeReview.providerReview.studios[0]!.bakeDiagnostics = [];
+  const noBakeSection = onshapeImportProvider
+    .getReviewFormSchema(noBakeReview, selections)
+    .sections.find((section) => section.id === "bake-segments");
+  expect(noBakeSection?.fields).toEqual([
+    expect.objectContaining({
+      id: "bake-strategy",
+      value: "None — no baked-body checkpoints are required.",
+    }),
+    expect.objectContaining({
+      id: "bake-checkpoint-count",
+      value: expect.stringContaining("0 checkpoints"),
+    }),
+  ]);
+
+  const legacyReview = structuredClone(review);
+  legacyReview.providerReview.studios[0]!.bakeStrategy = {
+    kind: "wholeStudioLegacy",
+    reason: "segment-preflight-failed",
+  };
+  legacyReview.providerReview.studios[0]!.bakeDiagnostics = [{
+    code: "bake-segment-boundary-snapshot-missing",
+    segmentId: "bake-segment-1",
+    featureId: "CHAMFER",
+    message: "Exact rollback boundary unavailable.",
+  }];
+  const legacySection = onshapeImportProvider
+    .getReviewFormSchema(legacyReview, selections)
+    .sections.find((section) => section.id === "bake-segments");
+  expect(legacySection?.fields).toEqual([
+    expect.objectContaining({
+      id: "bake-strategy",
+      value: "Legacy whole-studio bake — segment preflight could not prove a safe checkpoint.",
+    }),
+    expect.objectContaining({
+      id: "bake-checkpoint-count",
+      value: expect.stringContaining("0 checkpoints"),
+    }),
+    expect.objectContaining({
+      id: "bake-diagnostic-bake-segment-1-CHAMFER",
+      label: "Checkpoint limitation — Chamfer",
+      value: "bake segment boundary snapshot is missing. Exact rollback boundary unavailable.",
+    }),
+  ]);
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: segmentedCapabilities,
+  });
+  expect(validateImportPreparedActions(actions).success).toBe(true);
+  expect(
+    actions.diagnostics?.filter(
+      (diagnostic) => diagnostic.code === "onshape-bake-segment-planned",
+    ),
+  ).toHaveLength(2);
+  expect(
+    actions.diagnostics?.filter(
+      (diagnostic) => diagnostic.code === "onshape-bake-segment-tessellation-backed",
+    ),
+  ).toHaveLength(2);
+  expect(
+    actions.diagnostics?.find(
+      (diagnostic) => diagnostic.code === "onshape-fidelity-summary",
+    )?.message,
+  ).toContain("bake strategy: segmented, 2 checkpoints");
+  expect(actions.orderedActions).toHaveLength(
+    (actions.addDocumentVariables?.length ?? 0) +
+      (actions.commitSketches?.length ?? 0) +
+      (actions.createFeatures?.length ?? 0),
+  );
+
+  const checkpointCreateIndexes = (actions.createFeatures ?? []).flatMap(
+    (request, index) => request.definition.kind === "bakedBody" ? [index] : [],
+  );
+  expect(checkpointCreateIndexes).toHaveLength(2);
+  const checkpointOrderedIndexes = checkpointCreateIndexes.map(
+    (createIndex) => actions.orderedActions?.findIndex(
+      (action) => action.kind === "createFeature" && action.index === createIndex,
+    ) ?? -1,
+  );
+  const variableOrderedIndex = actions.orderedActions?.findIndex(
+    (action) => action.kind === "addDocumentVariable",
+  ) ?? -1;
+  expect(checkpointOrderedIndexes[0]).toBeGreaterThanOrEqual(0);
+  expect(checkpointOrderedIndexes[0]).toBeLessThan(variableOrderedIndex);
+  expect(checkpointOrderedIndexes[1]).toBeGreaterThan(variableOrderedIndex);
+
+  const baseCreateIndex = actions.createFeatures?.findIndex(
+    (request) => request.featureLabel === "Base extrude",
+  ) ?? -1;
+  const independentCreateIndex = actions.createFeatures?.findIndex(
+    (request) => request.featureLabel === "Independent extrude",
+  ) ?? -1;
+  const baseOrderedIndex = actions.orderedActions?.findIndex(
+    (action) => action.kind === "createFeature" && action.index === baseCreateIndex,
+  ) ?? -1;
+  const independentOrderedIndex = actions.orderedActions?.findIndex(
+    (action) => action.kind === "createFeature" && action.index === independentCreateIndex,
+  ) ?? -1;
+  const checkpoints = checkpointCreateIndexes.map(
+    (index) => actions.createFeatures?.[index],
+  );
+  if (checkpoints.some((checkpoint) => checkpoint?.definition.kind !== "bakedBody")) {
+    throw new Error("Expected two interleaved bakedBody checkpoints.");
+  }
+  const [firstCheckpoint, secondCheckpoint] = checkpoints;
+  if (
+    !firstCheckpoint || firstCheckpoint.definition.kind !== "bakedBody" ||
+    !secondCheckpoint || secondCheckpoint.definition.kind !== "bakedBody"
+  ) {
+    throw new Error("Expected narrowed bakedBody checkpoints.");
+  }
+  expect(firstCheckpoint.definition.parameters.replacement).toEqual({
+    kind: "replaceBodyOutputs",
+    actionIndexes: [baseOrderedIndex],
+  });
+  expect(
+    firstCheckpoint.definition.parameters.replacement.actionIndexes,
+  ).not.toContain(independentOrderedIndex);
+  expect(firstCheckpoint.definition.parameters.provenance.featureSpan).toEqual({
+    fromFeatureId: "S_FACE",
+    toFeatureId: "CHAMFER",
+  });
+  expect(secondCheckpoint.definition.parameters.replacement).toEqual({
+    kind: "replaceBodyOutputs",
+    actionIndexes: [independentOrderedIndex],
+  });
+  expect(secondCheckpoint.definition.parameters.provenance.featureSpan).toEqual({
+    fromFeatureId: "CHAMFER_TWO",
+    toFeatureId: "CHAMFER_TWO",
+  });
+});
+
+test("src/domain/import/onshape/provider.spec.ts promotes a captured-frame sketch and extrude after a body-only checkpoint", async () => {
+  const source = sourceFromBundle(makeCapturedFrameCheckpointBundle());
+  const assetStore = createMemoryGeometryAssetStore();
+  const checkpointCapabilities: ImportCapabilities = {
+    ...createImportCapabilities(
+      {} as never,
+      {
+        document: { documentId: "doc_workspace", revisionId: "rev_1" },
+      } as never,
+      { assetStore },
+    ),
+    history: {
+      async evaluateHistoryProbe(input) {
+        return {
+          steps: (input.actions.orderedActions ?? []).map(() => ({
+            status: "rebuilt" as const,
+            signatures: [],
+          })),
+        };
+      },
+    },
+  };
+
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: checkpointCapabilities,
+  });
+  const studio = review.providerReview.studios[0]!;
+  expect(studio.featurePlans.find((plan) => plan.onshapeFeatureId === "TRANSFORM")).toMatchObject({
+    tier: "baked",
+    reasonCodes: ["transform-rotation-unsupported"],
+  });
+  expect(studio.featurePlans.find((plan) => plan.onshapeFeatureId === "S_FACE")).toMatchObject({
+    tier: "parametric",
+    reasonCodes: ["sketch-on-captured-frame"],
+  });
+  expect(studio.featurePlans.find((plan) => plan.onshapeFeatureId === "E_AFTER")).toMatchObject({
+    tier: "parametric",
+    reasonCodes: [],
+  });
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: checkpointCapabilities,
+  });
+  expect(validateImportPreparedActions(actions).success).toBe(true);
+  const checkpointOrderedIndex = actions.orderedActions?.findIndex((action) =>
+    action.kind === "createFeature" &&
+    actions.createFeatures?.[action.index]?.definition.kind === "bakedBody"
+  ) ?? -1;
+  const planeOrderedIndex = actions.orderedActions?.findIndex((action) =>
+    action.kind === "createFeature" &&
+    actions.createFeatures?.[action.index]?.featureLabel === "Face sketch captured support"
+  ) ?? -1;
+  const sketchOrderedIndex = actions.orderedActions?.findIndex((action) =>
+    action.kind === "commitSketch" &&
+    actions.commitSketches?.[action.index]?.sketchLabel === "Face sketch"
+  ) ?? -1;
+  const extrudeOrderedIndex = actions.orderedActions?.findIndex((action) =>
+    action.kind === "createFeature" &&
+    actions.createFeatures?.[action.index]?.featureLabel === "Extrude after checkpoint"
+  ) ?? -1;
+  expect(checkpointOrderedIndex).toBeLessThan(planeOrderedIndex);
+  expect(planeOrderedIndex).toBeLessThan(sketchOrderedIndex);
+  expect(sketchOrderedIndex).toBeLessThan(extrudeOrderedIndex);
+
+  const supportPlane = actions.createFeatures?.find(
+    (action) => action.featureLabel === "Face sketch captured support",
+  );
+  expect(supportPlane?.definition).toMatchObject({
+    kind: "plane",
+    parameters: { mode: "explicitFrame" },
+  });
+  const sketch = actions.commitSketches?.find((action) => action.sketchLabel === "Face sketch");
+  expect(sketch?.plane.support).toEqual({
+    kind: "constructionOf",
+    actionIndex: planeOrderedIndex,
+  });
+  expect(JSON.stringify(sketch)).not.toContain('"kind":"face"');
+  expect(actions.createFeatures?.some(
+    (action) => action.featureLabel === "Extrude after checkpoint" &&
+      action.definition.kind === "extrude",
+  )).toBe(true);
+});
+
+test("src/domain/import/onshape/provider.spec.ts keeps a post-checkpoint sketch baked without unique planar frame evidence", async () => {
+  const bundle = makeCapturedFrameCheckpointBundle();
+  const studio = bundle.partStudios[0]!;
+  studio.resolvedReferences = studio.resolvedReferences.map((reference) => ({
+    ...reference,
+    signature: "signature" in reference
+      ? { ...reference.signature, geometryType: "cylinder" }
+      : undefined,
+  })) as typeof studio.resolvedReferences;
+  const source = sourceFromBundle(bundle);
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([]),
+  });
+  const reviewedStudio = review.providerReview.studios[0]!;
+  expect(reviewedStudio.featurePlans.find((plan) => plan.onshapeFeatureId === "S_FACE")).toMatchObject({
+    tier: "baked",
+  });
+  expect(reviewedStudio.featurePlans.find((plan) => plan.onshapeFeatureId === "E_AFTER")).toMatchObject({
+    tier: "baked",
+  });
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: capabilitiesWithProbe([]),
+  });
+  expect(actions.createFeatures?.some(
+    (action) => action.featureLabel === "Face sketch captured support",
+  )).toBe(false);
 });
 
 test("src/domain/import/onshape/provider.spec.ts translates a recoverable cPlane to a parametric plane feature with a deferred sketch support", async () => {

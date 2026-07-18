@@ -1,6 +1,16 @@
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 
-import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
+import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
+import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
+import { makeWaveBBodyCaptureBundle } from "@/domain/import/onshape/wave-b-capture-fixtures";
+import {
+  createRollbackTopologyTimeline,
+  diffRollbackTopologySnapshots,
+  readRollbackTopologySnapshot,
+  rollbackBodyShapeKey,
+} from "@/domain/import/onshape/rollback-topology-reader";
 
 const tessellation = (bodyId: string, faceId: string) => ({
   btType: "BTExportTessellatedFacesResponse-898",
@@ -64,10 +74,132 @@ test("selects the nearest available preceding snapshot and diagnoses malformed p
     featureIds: ["a", "b", "c"],
     snapshots: [
       { featureId: "a", tessellationTolerance: 0.001, tessellatedFaces: {} },
+      { featureId: "c", tessellationTolerance: 0.001, tessellatedFaces: tessellation("result", "face") },
       { featureId: "unknown", tessellationTolerance: 0.001, tessellatedFaces: tessellation("x", "y") },
     ],
   });
   expect(timeline.snapshotBeforeFeature("c")?.featureId).toBe("a");
   expect(timeline.snapshotBeforeFeature("c")?.diagnostics[0]?.code).toBe("rollback-tessellation-unreadable");
+  expect(timeline.bodyDeltaBetweenFeatures("c", "c")).toBeNull();
   expect(timeline.diagnostics[0]?.code).toBe("rollback-feature-order-unreadable");
 });
+
+test("classifies persistent, introduced, changed, removed, and unchanged body IDs", () => {
+  const before = readRollbackTopologySnapshot({
+    featureId: "before",
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: {
+      bodies: [
+        ...tessellation("changed", "face-a").bodies,
+        ...tessellation("removed", "face-b").bodies,
+        ...tessellation("unchanged", "face-c").bodies,
+      ],
+    },
+  });
+  const after = readRollbackTopologySnapshot({
+    featureId: "after",
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: {
+      bodies: [
+        ...tessellation("introduced", "face-d").bodies,
+        ...tessellation("unchanged", "face-c").bodies,
+        ...tessellation("changed", "face-a-updated").bodies,
+      ],
+    },
+  });
+
+  expect(diffRollbackTopologySnapshots(before, after)).toEqual({
+    beforeFeatureId: "before",
+    afterFeatureId: "after",
+    introducedBodyDeterministicIds: ["introduced"],
+    changedBodyDeterministicIds: ["changed"],
+    removedBodyDeterministicIds: ["removed"],
+    unchangedBodyDeterministicIds: ["unchanged"],
+  });
+  expect(rollbackBodyShapeKey(before.bodies[2]!)).toBe(
+    rollbackBodyShapeKey(after.bodies[1]!),
+  );
+});
+
+test("uses sparse consecutive rollback snapshots and refuses missing boundaries", () => {
+  const bundle = makeWaveBBodyCaptureBundle("delete");
+  const studio = bundle.partStudios[0]!;
+  const featureIds = studio.features.features.map((feature) => feature.featureId);
+  const timeline = createRollbackTopologyTimeline({
+    featureIds,
+    snapshots: studio.rollbackSnapshots,
+  });
+
+  expect(timeline.bodyDeltaBetweenFeatures("C", "C")).toEqual({
+    beforeFeatureId: "E1",
+    afterFeatureId: "C",
+    introducedBodyDeterministicIds: [],
+    changedBodyDeterministicIds: [],
+    removedBodyDeterministicIds: ["SRC1"],
+    unchangedBodyDeterministicIds: [],
+  });
+  expect(timeline.bodyDeltaBetweenFeatures("E1", "C")).toBeNull();
+  expect(timeline.bodyDeltaBetweenFeatures("C", "missing")).toBeNull();
+});
+
+test("reports a no-change feature without inventing a body delta", () => {
+  const bundle = makeWaveBBodyCaptureBundle("transform");
+  const studio = bundle.partStudios[0]!;
+  const timeline = createRollbackTopologyTimeline({
+    featureIds: studio.features.features.map((feature) => feature.featureId),
+    snapshots: studio.rollbackSnapshots,
+  });
+
+  expect(timeline.bodyDeltaBetweenFeatures("C", "C")).toMatchObject({
+    introducedBodyDeterministicIds: [],
+    changedBodyDeterministicIds: [],
+    removedBodyDeterministicIds: [],
+    unchangedBodyDeterministicIds: ["SRC1"],
+  });
+});
+
+const realBundleFiles = [
+  "40a51fb8fa82fd4565151114.onshape-capture.json",
+  "9841e486906fa2ce62d74d8e.onshape-capture.json",
+] as const;
+
+test.skipIf(realBundleFiles.some((fileName) => !existsSync(fileName)))(
+  "extracts pinned rollback body deltas from both real capture bundles",
+  async () => {
+    const timelines = new Map<string, ReturnType<typeof createRollbackTopologyTimeline>>();
+    for (const fileName of realBundleFiles) {
+      const parsed = validateOnshapeCaptureBundle(
+        JSON.parse(await readFile(fileName, "utf8")),
+      );
+      if (!parsed.success) throw new Error(`Real capture ${fileName} must validate.`);
+      const studio = parsed.data.partStudios[0]!;
+      const read = readPartStudio(parsed.data, studio.elementId);
+      timelines.set(fileName, createRollbackTopologyTimeline({
+        featureIds: read.features.map((feature) => feature.featureId),
+        snapshots: studio.rollbackSnapshots,
+      }));
+    }
+
+    expect(
+      timelines.get(realBundleFiles[0])?.bodyDeltaBetweenFeatures(
+        "FKFj5KgXfGGLv7N_1",
+        "FKFj5KgXfGGLv7N_1",
+      ),
+    ).toMatchObject({
+      beforeFeatureId: "FO7A93XUDZDmrrZ_1",
+      afterFeatureId: "FKFj5KgXfGGLv7N_1",
+      changedBodyDeterministicIds: ["JHD"],
+    });
+    expect(
+      timelines.get(realBundleFiles[1])?.bodyDeltaBetweenFeatures(
+        "FQtApb0Sk3fJDW8_2",
+        "FQtApb0Sk3fJDW8_2",
+      ),
+    ).toMatchObject({
+      beforeFeatureId: "FZdJtqPHdzYIXNr_1",
+      afterFeatureId: "FQtApb0Sk3fJDW8_2",
+      introducedBodyDeterministicIds: ["JbD", "JbH"],
+      removedBodyDeterministicIds: ["JND", "JaD"],
+    });
+  },
+);

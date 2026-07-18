@@ -32,10 +32,28 @@ export interface RollbackTopologySnapshot {
   source: OnshapeRollbackSnapshot;
 }
 
+export interface RollbackBodyDelta {
+  beforeFeatureId: string;
+  afterFeatureId: string;
+  introducedBodyDeterministicIds: readonly string[];
+  changedBodyDeterministicIds: readonly string[];
+  removedBodyDeterministicIds: readonly string[];
+  unchangedBodyDeterministicIds: readonly string[];
+}
+
 export interface RollbackTopologyTimeline {
   readonly diagnostics: readonly RollbackTopologyDiagnostic[];
   snapshotBeforeFeature(featureId: string): RollbackTopologySnapshot | null;
   snapshotAfterFeature(featureId: string): RollbackTopologySnapshot | null;
+  /**
+   * Compare the nearest available snapshot before `fromFeatureId` with the
+   * exact post-feature snapshot at `toFeatureId`. Returns null when either
+   * required boundary is unavailable.
+   */
+  bodyDeltaBetweenFeatures(
+    fromFeatureId: string,
+    toFeatureId: string,
+  ): RollbackBodyDelta | null;
   /**
    * Features strictly before `beforeFeatureId` whose post-feature snapshot
    * introduced the body or changed its topology/tessellation relative to the
@@ -131,6 +149,48 @@ export function readRollbackTopologySnapshot(
   return { ...snapshot, bodies, diagnostics, source: snapshot };
 }
 
+/** Exact parsed tessellation key. Source payload surplus and STEP order are excluded. */
+export function rollbackBodyShapeKey(body: RollbackBodyTopology): string {
+  return JSON.stringify(body.faces);
+}
+
+/** Compare complete before/after body states by deterministic ID and exact shape key. */
+export function diffRollbackTopologySnapshots(
+  before: RollbackTopologySnapshot,
+  after: RollbackTopologySnapshot,
+): RollbackBodyDelta {
+  const beforeBodies = new Map(before.bodies.map((body) => [body.id, body]));
+  const afterBodies = new Map(after.bodies.map((body) => [body.id, body]));
+  const introducedBodyDeterministicIds: string[] = [];
+  const changedBodyDeterministicIds: string[] = [];
+  const removedBodyDeterministicIds: string[] = [];
+  const unchangedBodyDeterministicIds: string[] = [];
+
+  for (const [id, body] of afterBodies) {
+    const previous = beforeBodies.get(id);
+    if (!previous) introducedBodyDeterministicIds.push(id);
+    else if (rollbackBodyShapeKey(previous) === rollbackBodyShapeKey(body)) {
+      unchangedBodyDeterministicIds.push(id);
+    } else changedBodyDeterministicIds.push(id);
+  }
+  for (const id of beforeBodies.keys()) {
+    if (!afterBodies.has(id)) removedBodyDeterministicIds.push(id);
+  }
+
+  introducedBodyDeterministicIds.sort();
+  changedBodyDeterministicIds.sort();
+  removedBodyDeterministicIds.sort();
+  unchangedBodyDeterministicIds.sort();
+  return {
+    beforeFeatureId: before.featureId,
+    afterFeatureId: after.featureId,
+    introducedBodyDeterministicIds,
+    changedBodyDeterministicIds,
+    removedBodyDeterministicIds,
+    unchangedBodyDeterministicIds,
+  };
+}
+
 /** Build feature-order lookup. STEP text is intentionally never inspected for identity. */
 export function createRollbackTopologyTimeline(input: {
   featureIds: readonly string[];
@@ -139,16 +199,6 @@ export function createRollbackTopologyTimeline(input: {
   const diagnostics: RollbackTopologyDiagnostic[] = [];
   const featureIndex = new Map(input.featureIds.map((id, index) => [id, index]));
   const snapshots = new Map<string, RollbackTopologySnapshot>();
-  const shapeKeyCache = new Map<string, string>();
-  function bodyShapeKey(featureId: string, body: RollbackBodyTopology): string {
-    const cacheKey = `${featureId}\u0000${body.id}`;
-    let key = shapeKeyCache.get(cacheKey);
-    if (key === undefined) {
-      key = JSON.stringify(body);
-      shapeKeyCache.set(cacheKey, key);
-    }
-    return key;
-  }
   for (const snapshot of input.snapshots ?? []) {
     if (!featureIndex.has(snapshot.featureId)) {
       diagnostics.push({
@@ -175,6 +225,16 @@ export function createRollbackTopologyTimeline(input: {
       }
       return null;
     },
+    bodyDeltaBetweenFeatures(fromFeatureId, toFeatureId) {
+      const before = this.snapshotBeforeFeature(fromFeatureId);
+      const after = this.snapshotAfterFeature(toFeatureId);
+      return before &&
+        before.diagnostics.length === 0 &&
+        after &&
+        after.diagnostics.length === 0
+        ? diffRollbackTopologySnapshots(before, after)
+        : null;
+    },
     featuresModifyingBody(bodyDeterministicId, beforeFeatureId) {
       const limit = featureIndex.get(beforeFeatureId) ?? input.featureIds.length;
       const modifiers: string[] = [];
@@ -185,7 +245,7 @@ export function createRollbackTopologyTimeline(input: {
         const body = snapshot.bodies.find(
           (candidate) => candidate.id === bodyDeterministicId,
         );
-        const shape = body ? bodyShapeKey(snapshot.featureId, body) : null;
+        const shape = body ? rollbackBodyShapeKey(body) : null;
         if (shape !== previousShape) modifiers.push(snapshot.featureId);
         previousShape = shape;
       }
