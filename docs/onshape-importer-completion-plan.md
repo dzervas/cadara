@@ -274,6 +274,59 @@ mesh, and later parametric-eligible solids import suppressed
       build green; logic 497 + ui 125 + static 24 = 646 non-E2E tests passed;
       `playwright test` 61/61 passed. See verification note below.
 
+## Phase W — Remaining parametric gap (not started; next session)
+
+Current review plans: Mounts **8/2/0**, Part Studio 1 **14/27/0**. The 27
+baked PS1 features decompose into: 9 sketches-on-body-faces
+(`needs-history-probe`) which cascade-block 14 downstream extrudes
+(`needs-region-resolution`), 2 chamfers failing edge matching
+(`topology-reference-no-match`), 1 chamfer style, 1 hollow shell.
+
+- [ ] W.1 **Sketch-on-face promotion** — ~85% of the remaining PS1 gap; pure
+      importer work; unlocks recursively (each promoted sketch unlocks its
+      extrudes, whose bodies unlock the next sketch). PS1 target: 14 → ~37/41.
+      The `sketch-on-probed-face` promotion path exists and durable naming is
+      qualified, but it never fires on the real bundle:
+      (a) diagnose why captured/inferred face signatures never match prefix
+      probe signatures (evidence quality, planar-face-only path, promotion
+      loop preconditions — see provider.ts:987 area);
+      (b) capture side: sketch-plane queries may need resolution at each
+      sketch's rollback index, not only unresolved-at-final IDs
+      (src/cli/commands/onshape-capture/references.ts);
+      (c) apply side: commit a sketch on a live body face
+      (`SketchPlaneSupportRef` face support) with apply-time rewiring, same
+      pattern as `constructionOf`; prove with real-kernel e2e (mock/real
+      divergence is exactly where regionOf-class bugs hide).
+- [ ] W.2 **Chamfer edge signature matching** — 2 PS1 chamfers + Mounts
+      Chamfer 1 report `topology-reference-no-match`; edge signatures
+      (bbox/centroid) are too weak/ambiguous on symmetric parts. Enrich
+      signatures (edge endpoints + owning-face pair) or capture deterministic
+      edge adjacency; diagnose with plan-dump + probe tooling.
+- [ ] W.3 **Transform rotation** (contract+kernel, small) — rotation option on
+      the transform advanced-solid feature; `gp_Trsf` rotation in the existing
+      executor. Unlocks Mounts Transform 1 → Mounts 10/10.
+- [ ] W.4 **Chamfer two-distance / distance+angle** (contract plumbing; OCC
+      `Add_3` already accepts two distances). Unlocks PS1 Chamfer 3.
+- [ ] W.5 **Shell non-hollow / offset-all-faces** (new executor branch via
+      whole-solid `BRepOffset_MakeOffset`). Unlocks PS1 Shell 1.
+- [ ] W.6 **Hole executor** (largest kernel item; no instances in current
+      bundles) — cylinder cut + countersink/counterbore per the validated
+      translator that currently reports `hole-executor-unavailable`.
+- [ ] W.7 **Patterns (linear/circular)** (largest overall; new feature kind
+      end-to-end: contract, executor, forms, translator). Nothing in current
+      bundles but ubiquitous in real documents.
+
+Full-parametric math: Mounts = W.2 + W.3. Part Studio 1 = W.1 + W.2 + W.4 +
+W.5. Highest leverage first: W.1.
+
+Session notes for the next orchestrator: subagent model routing —
+`dzerv-art/gpt-5.6-sol` had a multi-day quota cooldown (check before use),
+`openai-codex/gpt-5.6-sol` quota was reset 2026-07-18, Claude models work as
+fallback; always pass fully-qualified model names to workflow agents (fuzzy
+resolution picked a keyless openrouter provider once). Real bundles + the
+`.cadara` capture in repo root are gitignored local fixtures. jj commits with
+`--config signing.behavior=drop` while the 1Password SSH agent is down.
+
 ## Execution notes for the orchestrator
 
 - Dependency graph: 0.1–0.3 first (parallel). Then Phase T items T.1–T.7 all
