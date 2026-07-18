@@ -29,6 +29,7 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
 import { getSweepLinearPathData } from "@/domain/modeling/occ/features/sweep";
+import { createUnsupportedProducerTopologyStage } from "@/domain/modeling/occ/topology-stage";
 
 function buildLoftSectionWire(
   context: OccFeatureExecutionContext,
@@ -54,7 +55,7 @@ function buildLoftSectionWire(
 
   if (profile.kind === "face") {
     const body = requireBody(context, profile.bodyId);
-    const face = requireFace(body, profile.faceId);
+    const face = requireFace(context, body, profile.faceId);
     getExtrusionNormalForPlanarFace(context.oc, face, "positive");
     return context.oc.BRepTools.OuterWire(face);
   }
@@ -158,7 +159,7 @@ function assertLoftGuideTargetsResolve(
 ) {
   for (const target of guideCurveTargets) {
     if (target.kind === "edge") {
-      requireEdge(requireBody(context, target.bodyId), target.edgeId);
+      requireEdge(context, requireBody(context, target.bodyId), target.edgeId);
       continue;
     }
 
@@ -200,9 +201,17 @@ function assertSupportedLoftConnections(
   }[];
   for (const endpoint of [connection?.from, connection?.to]) {
     if (endpoint?.kind === "edge") {
-      requireEdge(requireBody(context, endpoint.bodyId), endpoint.edgeId);
+      requireEdge(
+        context,
+        requireBody(context, endpoint.bodyId),
+        endpoint.edgeId,
+      );
     } else if (endpoint?.kind === "vertex") {
-      requireVertex(requireBody(context, endpoint.bodyId), endpoint.vertexId);
+      requireVertex(
+        context,
+        requireBody(context, endpoint.bodyId),
+        endpoint.vertexId,
+      );
     } else {
       throw new Error(
         "advanced-feature-unsupported-kernel-case: OCC loft match connections require durable edge or vertex endpoints.",
@@ -381,5 +390,10 @@ export function executeLoftFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations: result.historyInvalidations,
+    topologyStage: createUnsupportedProducerTopologyStage({
+      featureId: ownerFeatureId,
+      bodies: result.bodies,
+      producedTargets: result.producedTargets,
+    }),
   };
 }

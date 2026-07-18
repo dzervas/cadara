@@ -4,7 +4,8 @@ import type {
 } from "@/contracts/modeling/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getExtrudeFeatureExtent } from "@/contracts/modeling/feature-extents";
-import type { FeatureId } from "@/contracts/shared/ids";
+import type { BodyId, FeatureId } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
 import type { Vec3 } from "@/domain/modeling/occ/math";
 import {
   buildRegionProfileFace,
@@ -31,7 +32,116 @@ import {
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
-import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
+import {
+  applyBooleanPolicy,
+  type OccFeatureSourceShapeMap,
+} from "@/domain/modeling/occ/features/boolean-operations";
+import { deleteOccObject } from "@/domain/modeling/occ/memory";
+import type {
+  OccTopologySourceKey,
+  OccTopologyStageOutput,
+} from "@/domain/modeling/occ/topology-stage";
+
+interface BuiltExtrudeShape {
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+  sourceShapes: Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >;
+  unsupportedSourceKeys: Set<OccTopologySourceKey>;
+}
+
+function appendUniqueShape(
+  shapes: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[],
+  candidate: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  if (!candidate.IsNull() && !shapes.some((shape) => shape.IsSame(candidate))) {
+    shapes.push(candidate);
+  }
+}
+
+function registerSourceShape(
+  sourceShapes: Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >,
+  sourceKey: OccTopologySourceKey,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  const shapes = sourceShapes.get(sourceKey) ?? [];
+  appendUniqueShape(shapes, shape);
+  sourceShapes.set(sourceKey, shapes);
+}
+
+function registerSourceShapes(
+  sourceShapes: Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >,
+  sourceKey: OccTopologySourceKey,
+  shapes: readonly InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[],
+) {
+  for (const shape of shapes) {
+    registerSourceShape(sourceShapes, sourceKey, shape);
+  }
+}
+
+function listOccShapes(
+  oc: OpenCascadeInstance,
+  list: InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>,
+) {
+  const shapes: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[] = [];
+  const copy = new oc.TopTools_ListOfShape_3(list);
+
+  try {
+    while (copy.Size() > 0) {
+      appendUniqueShape(shapes, copy.First_1());
+      copy.RemoveFirst();
+    }
+  } finally {
+    deleteOccObject(copy);
+    deleteOccObject(list);
+  }
+
+  return shapes;
+}
+
+function projectSourceShapesThroughHistory(
+  oc: OpenCascadeInstance,
+  sourceShapes: OccFeatureSourceShapeMap,
+  historySource: {
+    Modified(
+      shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+    ): InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>;
+    Generated(
+      shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+    ): InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>;
+  },
+) {
+  const projected = new Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >();
+
+  for (const [sourceKey, candidates] of sourceShapes) {
+    for (const candidate of candidates) {
+      const evolved = [
+        ...listOccShapes(oc, historySource.Modified(candidate)),
+        ...listOccShapes(oc, historySource.Generated(candidate)),
+      ];
+      registerSourceShapes(
+        projected,
+        sourceKey,
+        evolved.length > 0 ? evolved : [candidate],
+      );
+    }
+    if (!projected.has(sourceKey)) {
+      projected.set(sourceKey, []);
+    }
+  }
+
+  return projected;
+}
 
 function getShapeProjectionRange(
   oc: OpenCascadeInstance,
@@ -143,7 +253,7 @@ function getExtrudeTargetProjection(
 
   if (end.kind === "upToFace") {
     const body = requireBody(context, end.target.bodyId);
-    const face = requireFace(body, end.target.faceId);
+    const face = requireFace(context, body, end.target.faceId);
     return getShapeProjectionRange(context.oc, face, direction).max;
   }
 
@@ -151,7 +261,6 @@ function getExtrudeTargetProjection(
     const body = requireBody(context, end.target.bodyId);
     return getShapeProjectionRange(context.oc, body.shape, direction).max;
   }
-
 
   if (end.kind === "upToVertex") {
     const body = requireBody(context, end.target.bodyId);
@@ -234,11 +343,17 @@ function resolveExtrudeDistance(
 
 function buildExtrudeProfileShapes(
   context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
   profile: ExtrudeFeatureParameters["profiles"][number],
+  profileSlot: number,
   extent: ReturnType<typeof getExtrudeFeatureExtent>,
 ) {
   let profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
   let baseNormal: Vec3;
+  let sketchProvenance:
+    | ReturnType<typeof buildRegionProfileFace>["provenance"]
+    | null = null;
+  let sketchId: string | null = null;
 
   if (profile.kind === "region") {
     const sketch = requireSketchSnapshot(context, profile.sketchId);
@@ -253,29 +368,48 @@ function buildExtrudeProfileShapes(
       profileFace.plane,
       "positive",
     );
+    sketchProvenance = profileFace.provenance;
+    sketchId = profile.sketchId;
   } else {
     const body = requireBody(context, profile.bodyId);
-    const face = requireFace(body, profile.faceId);
+    const face = requireFace(context, body, profile.faceId);
     profileShape = face;
     baseNormal = getExtrusionNormalForPlanarFace(context.oc, face, "positive");
   }
 
-  const ends: ExtrudeEndCondition[] =
+  const ends: Array<{ end: ExtrudeEndCondition; role: string }> =
     extent.mode === "twoSide"
-      ? [extent.firstEnd, extent.secondEnd]
+      ? [
+          { end: extent.firstEnd, role: "first-end" },
+          { end: extent.secondEnd, role: "second-end" },
+        ]
       : extent.mode === "symmetric"
         ? [
-            extent.end,
+            { end: extent.end, role: "symmetric-first-end" },
             {
-              ...extent.end,
-              direction:
-                extent.end.direction === "positive" ? "negative" : "positive",
+              end: {
+                ...extent.end,
+                direction:
+                  extent.end.direction === "positive" ? "negative" : "positive",
+              },
+              role: "symmetric-second-end",
             },
           ]
-        : [extent.end];
+        : [{ end: extent.end, role: "one-side-end" }];
 
-  return ends.map((end) =>
-    buildExtrudeEndShape(context, profileShape, baseNormal, end),
+  return ends.map(({ end, role }) =>
+    buildExtrudeEndShape(context, {
+      ownerFeatureId,
+      profileShape,
+      baseNormal,
+      end,
+      profileSlot,
+      endRole: role,
+      sketchId,
+      sketchProvenance,
+      faceProfileKey:
+        profile.kind === "face" ? getOccDurableRefKey(profile) : null,
+    }),
   );
 }
 
@@ -331,17 +465,17 @@ function collectExtrudeDraftFaces(
 
 function applyExtrudeDraft(
   context: OccFeatureExecutionContext,
-  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  built: BuiltExtrudeShape,
   direction: Vec3,
   startProjection: number,
   distance: number,
   draftAngle: number | undefined,
-) {
+): BuiltExtrudeShape {
   if (
     draftAngle === undefined ||
     Math.abs(draftAngle) <= context.modelingTolerance
   ) {
-    return shape;
+    return built;
   }
 
   if (!Number.isFinite(draftAngle)) {
@@ -352,7 +486,7 @@ function applyExtrudeDraft(
 
   const draftFaces = collectExtrudeDraftFaces(
     context.oc,
-    shape,
+    built.shape,
     direction,
     startProjection,
     distance,
@@ -370,7 +504,7 @@ function applyExtrudeDraft(
     createPlaneFrameForNormal(scale(direction, startProjection), direction),
   );
   const draft = new context.oc.BRepOffsetAPI_DraftAngle_1();
-  draft.Init(shape);
+  draft.Init(built.shape);
 
   for (const face of draftFaces) {
     draft.Add(
@@ -382,6 +516,7 @@ function applyExtrudeDraft(
     );
 
     if (!draft.AddDone()) {
+      deleteOccObject(draft);
       throw new Error(
         "advanced-feature-unsupported-kernel-case: OCC extrude draft could not add a lateral face.",
       );
@@ -391,37 +526,69 @@ function applyExtrudeDraft(
   draft.Build(new context.oc.Message_ProgressRange_1());
 
   if (!draft.IsDone()) {
+    deleteOccObject(draft);
     throw new Error(
       "advanced-feature-unsupported-kernel-case: OCC extrude draft build failed.",
     );
   }
 
-  return draft.Shape();
+  const shape = draft.Shape();
+  const sourceShapes = projectSourceShapesThroughHistory(
+    context.oc,
+    built.sourceShapes,
+    draft,
+  );
+  // Draft history is incomplete for edge and vertex roles in the current
+  // binding. Mark every drafted source conservatively, then clear keys that
+  // prove a final target after boolean composition below.
+  const unsupportedSourceKeys = new Set([
+    ...built.unsupportedSourceKeys,
+    ...sourceShapes.keys(),
+  ]);
+  deleteOccObject(draft);
+
+  return {
+    shape,
+    sourceShapes,
+    unsupportedSourceKeys,
+  };
 }
 
 function buildExtrudeEndShape(
   context: OccFeatureExecutionContext,
-  profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
-  baseNormal: Vec3,
-  end: ExtrudeEndCondition,
-) {
+  input: {
+    ownerFeatureId: FeatureId;
+    profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+    baseNormal: Vec3;
+    end: ExtrudeEndCondition;
+    profileSlot: number;
+    endRole: string;
+    sketchId: string | null;
+    sketchProvenance:
+      | ReturnType<typeof buildRegionProfileFace>["provenance"]
+      | null;
+    faceProfileKey: string | null;
+  },
+): BuiltExtrudeShape {
   const extrusionDirection = normalize(
-    end.direction === "positive" ? baseNormal : scale(baseNormal, -1),
+    input.end.direction === "positive"
+      ? input.baseNormal
+      : scale(input.baseNormal, -1),
   );
   const distance = resolveExtrudeDistance(
     context,
-    profileShape,
+    input.profileShape,
     extrusionDirection,
-    end,
+    input.end,
   );
   const profileRange = getShapeProjectionRange(
     context.oc,
-    profileShape,
+    input.profileShape,
     extrusionDirection,
   );
 
   const prism = new context.oc.BRepPrimAPI_MakePrism_1(
-    profileShape,
+    input.profileShape,
     toGpVec(context.oc, scale(extrusionDirection, distance)),
     false,
     true,
@@ -430,23 +597,102 @@ function buildExtrudeEndShape(
   prism.Build(new context.oc.Message_ProgressRange_1());
 
   if (!prism.IsDone()) {
+    deleteOccObject(prism);
     throw new Error("OCC extrude prism build failed.");
   }
 
-  return applyExtrudeDraft(
-    context,
-    prism.Shape(),
-    extrusionDirection,
-    profileRange.max,
-    distance,
-    end.draftAngle as number | undefined,
+  const sourceShapes = new Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >();
+  const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
+  const slotPrefix = `extrude:${input.ownerFeatureId}:profile:${input.profileSlot}:end:${input.endRole}`;
+
+  registerSourceShape(
+    sourceShapes,
+    `${slotPrefix}:profile:first-face`,
+    prism.FirstShape_1(),
   );
+  registerSourceShape(
+    sourceShapes,
+    `${slotPrefix}:profile:last-face`,
+    prism.LastShape_1(),
+  );
+
+  if (input.sketchId && input.sketchProvenance) {
+    for (const [sourceKey, edge] of input.sketchProvenance.edges) {
+      const prefix = `${slotPrefix}:sketch-entity:${input.sketchId}:${sourceKey}`;
+      registerSourceShapes(
+        sourceShapes,
+        `${prefix}:generated-side-face`,
+        listOccShapes(context.oc, prism.Generated(edge)),
+      );
+      registerSourceShape(
+        sourceShapes,
+        `${prefix}:first-edge`,
+        prism.FirstShape_2(edge),
+      );
+      registerSourceShape(
+        sourceShapes,
+        `${prefix}:last-edge`,
+        prism.LastShape_2(edge),
+      );
+    }
+
+    for (const [sourceKey, vertex] of input.sketchProvenance.vertices) {
+      const prefix = `${slotPrefix}:sketch-point:${input.sketchId}:${sourceKey}`;
+      registerSourceShapes(
+        sourceShapes,
+        `${prefix}:generated-side-edge`,
+        listOccShapes(context.oc, prism.Generated(vertex)),
+      );
+      registerSourceShape(
+        sourceShapes,
+        `${prefix}:first-vertex`,
+        prism.FirstShape_2(vertex),
+      );
+      registerSourceShape(
+        sourceShapes,
+        `${prefix}:last-vertex`,
+        prism.LastShape_2(vertex),
+      );
+    }
+
+    for (const unsupported of input.sketchProvenance.unsupportedSources) {
+      unsupportedSourceKeys.add(
+        `${slotPrefix}:sketch-source:${input.sketchId}:${unsupported.sourceKey}:unsupported-profile-history`,
+      );
+    }
+  } else if (input.faceProfileKey) {
+    sourceShapes.clear();
+    unsupportedSourceKeys.add(
+      `${slotPrefix}:face-profile:${input.faceProfileKey}:unsupported-profile-history`,
+    );
+  }
+
+  try {
+    return applyExtrudeDraft(
+      context,
+      {
+        shape: prism.Shape(),
+        sourceShapes,
+        unsupportedSourceKeys,
+      },
+      extrusionDirection,
+      profileRange.max,
+      distance,
+      input.end.draftAngle as number | undefined,
+    );
+  } finally {
+    deleteOccObject(prism);
+  }
 }
 
 function buildExtrudeFeatureShape(
   context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
   parameters: ExtrudeFeatureParameters,
-) {
+): BuiltExtrudeShape {
   if (parameters.startExtent.kind !== "profilePlane") {
     throw new Error("Extrude startExtent.kind must be profilePlane.");
   }
@@ -464,8 +710,14 @@ function buildExtrudeFeatureShape(
     profileKeys.add(key);
   }
 
-  const extrudedShapes = parameters.profiles.flatMap((profile) =>
-    buildExtrudeProfileShapes(context, profile, extent),
+  const extrudedShapes = parameters.profiles.flatMap((profile, profileSlot) =>
+    buildExtrudeProfileShapes(
+      context,
+      ownerFeatureId,
+      profile,
+      profileSlot,
+      extent,
+    ),
   );
 
   if (extrudedShapes.length === 1) {
@@ -474,12 +726,24 @@ function buildExtrudeFeatureShape(
 
   const builder = new context.oc.BRep_Builder();
   const compound = new context.oc.TopoDS_Compound();
+  const sourceShapes = new Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >();
+  const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
   builder.MakeCompound(compound);
-  for (const shape of extrudedShapes) {
-    builder.Add(compound, shape);
+  for (const built of extrudedShapes) {
+    builder.Add(compound, built.shape);
+    for (const [sourceKey, shapes] of built.sourceShapes) {
+      registerSourceShapes(sourceShapes, sourceKey, shapes);
+    }
+    for (const sourceKey of built.unsupportedSourceKeys) {
+      unsupportedSourceKeys.add(sourceKey);
+    }
   }
+  deleteOccObject(builder);
 
-  return compound;
+  return { shape: compound, sourceShapes, unsupportedSourceKeys };
 }
 
 export function executeExtrudeFeature(
@@ -487,7 +751,11 @@ export function executeExtrudeFeature(
   ownerFeatureId: FeatureId,
   parameters: ExtrudeFeatureParameters,
 ): OccFeatureExecutionResult {
-  const featureShape = buildExtrudeFeatureShape(context, parameters);
+  const featureShape = buildExtrudeFeatureShape(
+    context,
+    ownerFeatureId,
+    parameters,
+  );
   const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
   if (!resolvedOperation) {
     throw new Error("Extrude operation must be a resolved literal value.");
@@ -497,8 +765,45 @@ export function executeExtrudeFeature(
     ownerFeatureId,
     resolvedOperation,
     parameters.booleanScope,
-    featureShape,
+    featureShape.shape,
+    { sourceShapes: featureShape.sourceShapes },
   );
+  const producedBodyIds = new Set(
+    result.producedTargets
+      .filter(
+        (target): target is Extract<DurableRef, { kind: "body" }> =>
+          target.kind === "body",
+      )
+      .map((target) => target.bodyId),
+  );
+  const outputs = new Map<BodyId, OccTopologyStageOutput>();
+
+  for (const body of result.bodies) {
+    if (!producedBodyIds.has(body.bodyId)) {
+      continue;
+    }
+
+    const sourceTargets = new Map<OccTopologySourceKey, DurableRef[]>();
+    for (const [sourceKey, targets] of result.featureSourceTargets ?? []) {
+      const matching = targets.filter(
+        (target) => "bodyId" in target && target.bodyId === body.bodyId,
+      );
+      if (matching.length > 0) {
+        sourceTargets.set(sourceKey, matching);
+      }
+    }
+
+    outputs.set(body.bodyId, {
+      outputSlot: body.bodyId,
+      body,
+      sourceTargets,
+      unsupportedSourceKeys: new Set(
+        [...featureShape.unsupportedSourceKeys].filter(
+          (sourceKey) => !sourceTargets.has(sourceKey),
+        ),
+      ),
+    });
+  }
 
   return {
     bodies: result.bodies,
@@ -508,5 +813,6 @@ export function executeExtrudeFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations: result.historyInvalidations,
+    topologyStage: { featureId: ownerFeatureId, outputs },
   };
 }

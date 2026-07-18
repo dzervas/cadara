@@ -165,6 +165,7 @@ export function executePlaneFeature(
       : buildConstructionPlaneFromPlanarFace(
           context.oc,
           requireFace(
+            context,
             requireBody(context, parameters.reference.target.bodyId),
             parameters.reference.target.faceId,
           ),

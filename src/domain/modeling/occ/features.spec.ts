@@ -705,21 +705,25 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     // A degenerate frame is rejected loudly.
     let degenerate: string | null = null;
     try {
-      executeOccFeature(context, "feature_phase4_plane_degenerate" as FeatureId, {
-        kind: "plane",
-        featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          mode: "explicitFrame",
-          frame: {
-            origin: [0, 0, 0],
-            xAxis: [1, 0, 0],
-            yAxis: [1, 0, 0],
-            normal: [0, 0, 1],
-            linearUnit: "documentLength",
-            handedness: "rightHanded",
+      executeOccFeature(
+        context,
+        "feature_phase4_plane_degenerate" as FeatureId,
+        {
+          kind: "plane",
+          featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            mode: "explicitFrame",
+            frame: {
+              origin: [0, 0, 0],
+              xAxis: [1, 0, 0],
+              yAxis: [1, 0, 0],
+              normal: [0, 0, 1],
+              linearUnit: "documentLength",
+              handedness: "rightHanded",
+            },
           },
         },
-      });
+      );
     } catch (error) {
       degenerate = error instanceof Error ? error.message : String(error);
     }
@@ -778,6 +782,308 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       1e-6,
       "4x3 rectangle extruded by 5 should produce the expected prism volume.",
     );
+  }
+
+  async function testExtrudePublishesSemanticPrismHistoryProvenance() {
+    const plane = createStandardPlaneDefinition("xy");
+    const primary = createRectangleSketch(
+      "sketch_extrude_provenance_primary" as SketchId,
+      plane,
+    );
+    const secondary = createRectangleSketch(
+      "sketch_extrude_provenance_secondary" as SketchId,
+      plane,
+      { origin: [8, 0], width: 2, height: 2 },
+    );
+    const context = await createContext({
+      sketches: [primary.sketch, secondary.sketch],
+    })();
+    const featureId = "feature_extrude_provenance" as FeatureId;
+    const standalone = executeOccFeature(context, featureId, {
+      kind: "extrude",
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [
+          {
+            kind: "region",
+            sketchId: primary.sketch.sketchId,
+            regionId: primary.region.regionId,
+          },
+        ],
+        startExtent: { kind: "profilePlane" },
+        extent: {
+          mode: "oneSide",
+          end: { kind: "blind", direction: "positive", distance: 5 },
+        },
+        operation: "newBody",
+        booleanScope: { kind: "standalone" },
+      },
+    });
+    const standaloneOutput = [
+      ...standalone.topologyStage!.outputs.values(),
+    ][0]!;
+    const expectedTargets = new Set([
+      ...standaloneOutput.body.topology.faceIds.map((faceId) =>
+        getOccDurableRefKey({
+          kind: "face" as const,
+          bodyId: standaloneOutput.body.bodyId,
+          faceId,
+        }),
+      ),
+      ...standaloneOutput.body.topology.edgeIds.map((edgeId) =>
+        getOccDurableRefKey({
+          kind: "edge" as const,
+          bodyId: standaloneOutput.body.bodyId,
+          edgeId,
+        }),
+      ),
+      ...standaloneOutput.body.topology.vertexIds.map((vertexId) =>
+        getOccDurableRefKey({
+          kind: "vertex" as const,
+          bodyId: standaloneOutput.body.bodyId,
+          vertexId,
+        }),
+      ),
+    ]);
+    const actualTargets = new Set(
+      [...standaloneOutput.sourceTargets.values()]
+        .flat()
+        .map(getOccDurableRefKey),
+    );
+
+    expect(
+      standaloneOutput.sourceTargets.size,
+      "A rectangle prism should publish 2 cap roles plus 3 roles for each of 4 edges and 4 vertices.",
+    ).toBe(26);
+    expect(
+      [...standaloneOutput.sourceTargets.values()].every(
+        (targets) => targets.length === 1,
+      ),
+      "Every semantic rectangle prism source should resolve to exactly one current topology target.",
+    ).toBe(true);
+    expect(
+      actualTargets,
+      "Prism history should cover every face, edge, and vertex without traversal matching.",
+    ).toEqual(expectedTargets);
+
+    const twoSideMulti = executeOccFeature(
+      context,
+      "feature_extrude_provenance_multi" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: primary.sketch.sketchId,
+              regionId: primary.region.regionId,
+            },
+            {
+              kind: "region",
+              sketchId: secondary.sketch.sketchId,
+              regionId: secondary.region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "twoSide",
+            firstEnd: {
+              kind: "blind",
+              direction: "positive",
+              distance: 2,
+            },
+            secondEnd: {
+              kind: "blind",
+              direction: "negative",
+              distance: 1,
+            },
+          },
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
+        },
+      },
+    );
+    const multiKeys = [...twoSideMulti.topologyStage!.outputs.values()].flatMap(
+      (output) => [...output.sourceTargets.keys()],
+    );
+
+    expect(
+      multiKeys.some((key) => key.includes("profile:0:end:first-end")),
+      "Two-side provenance should include the first end role and first profile slot.",
+    ).toBe(true);
+    expect(
+      multiKeys.some((key) => key.includes("profile:1:end:second-end")),
+      "Multi-profile provenance should disambiguate the second profile and second end.",
+    ).toBe(true);
+    expect(
+      new Set(multiKeys).size,
+      "Two profiles with two ends should retain one distinct 26-role key set per profile/end pair.",
+    ).toBe(104);
+
+    const drafted = executeOccFeature(
+      context,
+      "feature_extrude_provenance_draft" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: primary.sketch.sketchId,
+              regionId: primary.region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: {
+              kind: "blind",
+              direction: "positive",
+              distance: 3,
+              draftAngle: 0.03,
+            },
+          },
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
+        },
+      },
+    );
+    const draftedOutput = [...drafted.topologyStage!.outputs.values()][0]!;
+    expect(
+      draftedOutput.sourceTargets.size,
+      "Draft history should retain the six face roles that OCC can project onto the drafted result.",
+    ).toBe(6);
+    expect(
+      draftedOutput.unsupportedSourceKeys.size,
+      "Drafted edge and vertex roles without OCC successors must be invalidated conservatively.",
+    ).toBe(20);
+
+    const baseBody = await makeBoxBody(
+      context.oc,
+      "body_extrude_provenance_join_target" as BodyId,
+      4,
+      3,
+      2,
+      "feature_extrude_provenance_join_target" as FeatureId,
+    );
+    const booleanContext = await createContext({
+      sketches: [primary.sketch],
+      bodies: [baseBody],
+    })();
+    const joined = executeOccFeature(
+      booleanContext,
+      "feature_extrude_provenance_join" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region",
+              sketchId: primary.sketch.sketchId,
+              regionId: primary.region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 5 },
+          },
+          operation: "join",
+          booleanScope: { kind: "targetBody", bodyId: baseBody.bodyId },
+        },
+      },
+    );
+    const joinedOutput = joined.topologyStage!.outputs.get(baseBody.bodyId)!;
+    expect(
+      [...joinedOutput.sourceTargets.keys()].some(
+        (key) =>
+          key.endsWith(":generated-side-face") &&
+          joinedOutput.sourceTargets.get(key)?.length === 1,
+      ),
+      "Boolean and same-domain refinement history should preserve generated side-face provenance.",
+    ).toBe(true);
+    expect(
+      [...joinedOutput.sourceTargets.keys()].some(
+        (key) =>
+          key.endsWith(":profile:last-face") &&
+          joinedOutput.sourceTargets.get(key)?.length === 1,
+      ),
+      "Boolean history should project the prism end-cap role onto the joined result.",
+    ).toBe(true);
+
+    const multiResultFeatureId =
+      "feature_extrude_provenance_multi_result_rebuild" as FeatureId;
+    const multiResultFeature = {
+      featureId: multiResultFeatureId,
+      definition: {
+        kind: "extrude" as const,
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region" as const,
+              sketchId: primary.sketch.sketchId,
+              regionId: primary.region.regionId,
+            },
+            {
+              kind: "region" as const,
+              sketchId: secondary.sketch.sketchId,
+              regionId: secondary.region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" as const },
+          extent: {
+            mode: "oneSide" as const,
+            end: {
+              kind: "blind" as const,
+              direction: "positive" as const,
+              distance: 2,
+            },
+          },
+          operation: "newBody" as const,
+          booleanScope: { kind: "standalone" as const },
+        },
+      },
+    };
+    const authoredMultiResult = rebuildOccAuthoringState(
+      createOccAuthoringState(context.oc, {
+        sketches: [primary.sketch, secondary.sketch],
+      }),
+      [multiResultFeature],
+    );
+    const removedOutput = [
+      ...authoredMultiResult.featureTopologyStages
+        .get(multiResultFeatureId)!
+        .outputs.values(),
+    ][1]!;
+    const removedFaceId = removedOutput.body.topology.faceIds[0]!;
+    const narrowed = rebuildOccAuthoringState(authoredMultiResult, [
+      {
+        ...multiResultFeature,
+        definition: {
+          ...multiResultFeature.definition,
+          parameters: {
+            ...multiResultFeature.definition.parameters,
+            profiles: [multiResultFeature.definition.parameters.profiles[0]!],
+          },
+        },
+      },
+    ]);
+    const removedResolution =
+      narrowed.referenceState.invalidatedReferencesByKey.get(
+        getOccDurableRefKey({
+          kind: "face",
+          bodyId: removedOutput.body.bodyId,
+          faceId: removedFaceId,
+        }),
+      );
+    expect(
+      removedResolution?.invalidation?.reason,
+      "A disappeared multi-result output slot must invalidate its prior topology as unsupported history.",
+    ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory);
   }
 
   async function testExtrudeUpToNextSkipsCoplanarStartFace() {
@@ -846,6 +1152,17 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       1e-6,
       "Up-to-next from a face must skip the coplanar start face and terminate at the next parallel face.",
     );
+    const faceBackedOutput = result.topologyStage?.outputs.get(
+      producedBody.bodyId,
+    );
+    expect(
+      faceBackedOutput?.sourceTargets.size,
+      "Face-backed extrude must not claim sketch-style semantic topology lineage.",
+    ).toBe(0);
+    expect(
+      faceBackedOutput?.unsupportedSourceKeys.size,
+      "Face-backed extrude must mark its unavailable profile history explicitly.",
+    ).toBeGreaterThan(0);
   }
 
   async function testExtrudeDraftsOneSideSymmetricAndTwoSideEnds() {
@@ -1977,6 +2294,19 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       result.producedTargets[0]?.kind,
       "Edge-backed revolve should produce a solid body.",
     ).toBe("body");
+    const transformedOutput = [...result.topologyStage!.outputs.values()][0]!;
+    expect(
+      [...transformedOutput.sourceTargets.keys()].some((key) =>
+        key.endsWith(":generated-swept-face"),
+      ),
+      "A start-angle transform must project sketch-entity lineage before revolve history is queried.",
+    ).toBe(true);
+    expect(
+      [...transformedOutput.sourceTargets.keys()].some((key) =>
+        key.endsWith(":generated-swept-edge"),
+      ),
+      "Revolve must publish sketch-point generated-edge roles.",
+    ).toBe(true);
     expect(
       sketchAxisResult.producedTargets[0]?.kind,
       "A solved same-sketch line axis should produce a revolve body.",
@@ -2091,6 +2421,92 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         },
       },
     );
+
+    const upToOutput = [...upToPart.topologyStage!.outputs.values()][0]!;
+    const expectedUpToTargets = new Set([
+      ...upToOutput.body.topology.faceIds.map((faceId) =>
+        getOccDurableRefKey({
+          kind: "face" as const,
+          bodyId: upToOutput.body.bodyId,
+          faceId,
+        }),
+      ),
+      ...upToOutput.body.topology.edgeIds.map((edgeId) =>
+        getOccDurableRefKey({
+          kind: "edge" as const,
+          bodyId: upToOutput.body.bodyId,
+          edgeId,
+        }),
+      ),
+      ...upToOutput.body.topology.vertexIds.map((vertexId) =>
+        getOccDurableRefKey({
+          kind: "vertex" as const,
+          bodyId: upToOutput.body.bodyId,
+          vertexId,
+        }),
+      ),
+    ]);
+    const actualUpToTargets = new Set(
+      [...upToOutput.sourceTargets.values()].flat().map(getOccDurableRefKey),
+    );
+    expect(
+      actualUpToTargets,
+      "A partial sketch-backed revolve should cover every produced face, edge, and vertex through source roles.",
+    ).toEqual(expectedUpToTargets);
+
+    const semanticRevolveFeatureId =
+      "feature_phase4_revolve_semantic_rebuild" as FeatureId;
+    const semanticRevolveFeature = {
+      featureId: semanticRevolveFeatureId,
+      definition: {
+        kind: "revolve" as const,
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          ...baseParameters,
+          extent: {
+            mode: "oneSide" as const,
+            end: {
+              kind: "blind" as const,
+              direction: "counterClockwise" as const,
+              angle: Math.PI,
+            },
+          },
+        },
+      },
+    };
+    const semanticAuthored = rebuildOccAuthoringState(
+      createOccAuthoringState(context.oc, {
+        sketches: [sketch],
+        bodies: [axisBody, targetBody],
+      }),
+      [semanticRevolveFeature],
+    );
+    const semanticOutput = semanticAuthored.featureTopologyStages
+      .get(semanticRevolveFeatureId)!
+      .outputs.values()
+      .next().value!;
+    const semanticSourceKey = [...semanticOutput.sourceTargets.keys()].find(
+      (key) => key.endsWith(":generated-swept-edge"),
+    )!;
+    const semanticTarget =
+      semanticOutput.sourceTargets.get(semanticSourceKey)?.[0];
+    const editedSketch = createRectangleSketch(sketch.sketchId, profilePlane, {
+      origin: [1.25, 0.25],
+      width: 1.25,
+      height: 1.5,
+    }).sketch;
+    const semanticRebuilt = rebuildOccAuthoringState(
+      { ...semanticAuthored, sketches: [editedSketch] },
+      [semanticRevolveFeature],
+    );
+    expect(
+      semanticRebuilt.featureTopologyStages
+        .get(semanticRevolveFeatureId)!
+        .outputs.values()
+        .next()
+        .value!.sourceTargets.get(semanticSourceKey),
+      "A dimension-only revolve profile edit should preserve the exact semantic source successor.",
+    ).toEqual([semanticTarget]);
 
     const fullVolume = await producedBodyVolume(context, full);
     const upToVolume = await producedBodyVolume(context, upToPart);
@@ -2365,8 +2781,12 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       (await bodyVolume(context.oc, producedBody.shape)) > 0,
       "Standalone sweep should produce non-empty solid geometry.",
     ).toBeTruthy();
+    const sweepOutput = result.topologyStage?.outputs.get(producedBody.bodyId);
+    expect(
+      sweepOutput?.sourceTargets.size,
+      "Sweep has no complete semantic builder history and must publish a conservative unsupported stage.",
+    ).toBe(0);
   }
-
 
   async function testSweepBuildsFromSolvedSketchEntityPath() {
     const profilePlane = createStandardPlaneDefinition("xy");
@@ -2391,7 +2811,11 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "lineSegment",
           entityId: pathEntityId,
           label: "Sweep path",
-          target: { kind: "sketchEntity", sketchId: pathSketchId, entityId: pathEntityId },
+          target: {
+            kind: "sketchEntity",
+            sketchId: pathSketchId,
+            entityId: pathEntityId,
+          },
           isConstruction: false,
           startPointId: startId,
           endPointId: endId,
@@ -2951,6 +3375,16 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       pathBody != null && (await bodyVolume(context.oc, pathBody.shape)) > 0,
       "Path loft should produce non-empty solid geometry.",
     ).toBeTruthy();
+    expect(
+      result.topologyStage?.outputs.get(producedBody.bodyId)?.sourceTargets
+        .size,
+      "Loft has no complete semantic builder history and must publish a conservative unsupported stage.",
+    ).toBe(0);
+    expect(
+      pathResult.topologyStage?.outputs.get(pathBody.bodyId)?.sourceTargets
+        .size,
+      "Path-driven loft must not silently re-enumerate topology without complete history.",
+    ).toBe(0);
   }
 
   async function testLoftAdvancedControlsAndUnsupportedCombinations() {
@@ -3563,6 +3997,132 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     ).toBe(1);
   }
 
+  async function testOccAuthoringStateRetainsTopologyStagesByFeatureAndOutputSlot() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const firstSketch = createRectangleSketch(
+      "sketch_topology_stage_first" as SketchId,
+      plane,
+      { origin: [0, 0] },
+    );
+    const secondSketch = createRectangleSketch(
+      "sketch_topology_stage_second" as SketchId,
+      plane,
+      { origin: [10, 0] },
+    );
+    const firstFeatureId = "feature_topology_stage_first" as FeatureId;
+    const secondFeatureId = "feature_topology_stage_second" as FeatureId;
+    const firstBodyId = `body_${firstFeatureId}` as BodyId;
+    const secondBodyId = `body_${secondFeatureId}` as BodyId;
+    const firstFeature = {
+      featureId: firstFeatureId,
+      suppressed: false,
+      definition: {
+        kind: "extrude" as const,
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          profiles: [
+            {
+              kind: "region" as const,
+              sketchId: firstSketch.sketch.sketchId,
+              regionId: firstSketch.region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" as const },
+          extent: {
+            mode: "oneSide" as const,
+            end: {
+              kind: "blind" as const,
+              direction: "positive" as const,
+              distance: 1,
+            },
+          },
+          operation: "newBody" as const,
+          booleanScope: { kind: "standalone" as const },
+        },
+      },
+    };
+    const secondFeature = {
+      featureId: secondFeatureId,
+      suppressed: false,
+      definition: {
+        ...firstFeature.definition,
+        parameters: {
+          ...firstFeature.definition.parameters,
+          profiles: [
+            {
+              kind: "region" as const,
+              sketchId: secondSketch.sketch.sketchId,
+              regionId: secondSketch.region.regionId,
+            },
+          ],
+        },
+      },
+    };
+    const initial = createOccAuthoringState(oc, {
+      sketches: [firstSketch.sketch, secondSketch.sketch],
+    });
+    const authored = rebuildOccAuthoringState(initial, [
+      firstFeature,
+      secondFeature,
+    ]);
+
+    expect(
+      authored.featureTopologyStages
+        .get(firstFeatureId)
+        ?.outputs.has(firstBodyId),
+      "The first feature stage should retain its own body output slot.",
+    ).toBe(true);
+    expect(
+      authored.featureTopologyStages
+        .get(firstFeatureId)
+        ?.outputs.has(secondBodyId),
+      "A feature stage must not retain another feature's body output slot.",
+    ).toBe(false);
+
+    const reordered = rebuildOccAuthoringState(authored, [
+      secondFeature,
+      firstFeature,
+    ]);
+
+    expect(
+      reordered.previousFeatureTopologyStages.get(firstFeatureId),
+      "Reordering should retain the old first-feature stage under its semantic feature id.",
+    ).toBe(authored.featureTopologyStages.get(firstFeatureId));
+    expect(
+      reordered.previousFeatureTopologyStages.get(secondFeatureId),
+      "Reordering should retain the old second-feature stage under its semantic feature id.",
+    ).toBe(authored.featureTopologyStages.get(secondFeatureId));
+    expect(
+      reordered.featureTopologyStages
+        .get(firstFeatureId)
+        ?.outputs.has(firstBodyId),
+      "Reordering must not cross-associate the first feature's output slot.",
+    ).toBe(true);
+    expect(
+      reordered.featureTopologyStages
+        .get(secondFeatureId)
+        ?.outputs.has(secondBodyId),
+      "Reordering must not cross-associate the second feature's output slot.",
+    ).toBe(true);
+
+    const suppressed = rebuildOccAuthoringState(reordered, [
+      { ...firstFeature, suppressed: true },
+      secondFeature,
+    ]);
+
+    expect(
+      suppressed.featureTopologyStages.has(firstFeatureId),
+      "A suppressed feature must not publish a current topology stage.",
+    ).toBe(false);
+    expect(
+      suppressed.featureTopologyStages
+        .get(secondFeatureId)
+        ?.outputs.has(secondBodyId),
+      "Suppressing another feature must not cross-associate its retained stage.",
+    ).toBe(true);
+  }
+
   async function testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns() {
     const oc = await getDefaultOpenCascadeInstance();
     const plane = createStandardPlaneDefinition("xy");
@@ -3643,6 +4203,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testPlaneFeatureBuildsExplicitFrameConstructionPlane();
   await testRegionResolutionAcceptsLegacyTraversalLabel();
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion();
+  await testExtrudePublishesSemanticPrismHistoryProvenance();
   await testExtrudeUpToNextSkipsCoplanarStartFace();
   await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds();
   await testExtrudeFeatureCreatesBodiesFromMultipleRegions();
@@ -3672,6 +4233,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testTransformReplacesBodyWithTranslatedResult();
   await testShellBuildsPreviewableSolidFromExplicitBodyAndFaces();
   await testOccAuthoringStateRebuildUsesFeatureExecutionFlow();
+  await testOccAuthoringStateRetainsTopologyStagesByFeatureAndOutputSlot();
   await testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns();
 
   console.log("OCC phase 4 feature execution tests passed.");

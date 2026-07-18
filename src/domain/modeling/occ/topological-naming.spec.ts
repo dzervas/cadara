@@ -29,7 +29,10 @@ import {
   type SketchDefinition,
   type SketchRecord,
 } from "@/contracts/sketch/schema";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  OCC_KERNEL_CAPABILITIES,
+  createStandardPlaneDefinition,
+} from "@/domain/modeling/opencascade-kernel-seed";
 import {
   applyOccFeatureToAuthoringState,
   createOccAuthoringState,
@@ -38,6 +41,7 @@ import {
   type OccAuthoringState,
 } from "@/domain/modeling/occ/authoring-state";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
+import { classifySemanticStageTopology } from "@/domain/modeling/occ/topology-naming";
 import {
   getDefaultOpenCascadeInstance,
   type OpenCascadeInstance,
@@ -469,12 +473,7 @@ async function rebuildAfterDimensionEdit(
       : ({
           kind: "edge",
           bodyId,
-          edgeId: findEdgeByEndpoints(
-            oc,
-            baseBody,
-            [10, 0, 0],
-            [10, 0, 6],
-          ),
+          edgeId: findEdgeByEndpoints(oc, baseBody, [10, 0, 0], [10, 0, 6]),
         } as const);
   const consumerFeature =
     selectedTarget.kind === "face"
@@ -1249,7 +1248,7 @@ test("proper naming should keep untouched edge and vertex references live throug
   ).toBe(null);
 });
 
-test("proper naming should carry thicken-produced topology through chained fillet and chamfer operations", async () => {
+test("durable naming qualification conservatively invalidates rebuilt unsupported thicken topology", async () => {
   const oc = await getDefaultOpenCascadeInstance();
   const baseFeatureId = featureId("thicken_seed_base");
   const thickenFeatureId = featureId("thicken_stress");
@@ -1265,22 +1264,24 @@ test("proper naming should carry thicken-produced topology through chained fille
     },
   );
   const initial = createOccAuthoringState(oc, { sketches: [base.sketch] });
-  const afterBase = applyFeature(initial, {
+  const baseFeature = {
     featureId: baseFeatureId,
     definition: createExtrudeDefinition(base.sketch, base.region, 6, {
       operation: "newBody",
       booleanScope: { kind: "standalone" },
     }),
-  });
+  } as const;
+  const afterBase = applyFeature(initial, baseFeature);
   const sourceTopFaceId = findPlanarFaceAtZ(
     oc,
     requireBody(afterBase, sourceBodyId),
     6,
   );
-  const afterThicken = applyFeature(afterBase, {
+  const thickenFeature = {
     featureId: thickenFeatureId,
     definition: createThickenDefinition(sourceBodyId, sourceTopFaceId),
-  });
+  } as const;
+  const afterThicken = applyFeature(afterBase, thickenFeature);
   const thickenedBody = requireBody(afterThicken, thickenedBodyId);
   const stableEdgeId = findEdgeByEndpoints(
     oc,
@@ -1289,6 +1290,28 @@ test("proper naming should carry thicken-produced topology through chained fille
     [10, 8, 6.5],
   );
   const stableVertexId = findVertexAt(oc, thickenedBody, [10, 8, 6.5]);
+  expect(
+    afterThicken.featureTopologyStages
+      .get(thickenFeatureId)
+      ?.outputs.get(thickenedBodyId)?.sourceTargets.size,
+    "Thicken must publish an explicit conservative stage until complete prism/face lineage is implemented.",
+  ).toBe(0);
+  const rebuiltThicken = rebuildOccAuthoringState(afterThicken, [
+    baseFeature,
+    thickenFeature,
+  ]);
+  const rebuiltThickenEdge = resolveOccReference(
+    {
+      documentId: rebuiltThicken.documentId,
+      revisionId: rebuiltThicken.revisionId,
+      referenceState: rebuiltThicken.referenceState,
+    },
+    { kind: "edge", bodyId: thickenedBodyId, edgeId: stableEdgeId },
+  );
+  expect(
+    rebuiltThickenEdge.resolution.invalidation?.reason,
+    "A rebuilt thicken must invalidate prior topology instead of silently re-enumerating it.",
+  ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory);
   const filletEdgeId = findEdgeByEndpoints(
     oc,
     thickenedBody,
@@ -1564,87 +1587,249 @@ test("proper naming should invalidate consumed Combine tool-body topology", asyn
   ).toBeFalsy();
 });
 
+test("durable naming qualification preserves a moving fillet edge through a dimension-only sketch edit", async () => {
+  const rebuilt = await rebuildAfterDimensionEdit("fillet");
+  expect(rebuilt.features.at(-1)?.definition.kind).toBe("fillet");
+}, 15000);
 
-test(
-  "durable naming qualification preserves a moving fillet edge through a dimension-only sketch edit",
-  async () => {
-    const rebuilt = await rebuildAfterDimensionEdit("fillet");
-    expect(rebuilt.features.at(-1)?.definition.kind).toBe("fillet");
-  },
-  15000,
-);
+test("durable naming qualification preserves a moving chamfer edge through a dimension-only sketch edit", async () => {
+  const rebuilt = await rebuildAfterDimensionEdit("chamfer");
+  expect(rebuilt.features.at(-1)?.definition.kind).toBe("chamfer");
+}, 15000);
 
-test(
-  "durable naming qualification preserves a moving chamfer edge through a dimension-only sketch edit",
-  async () => {
-    const rebuilt = await rebuildAfterDimensionEdit("chamfer");
-    expect(rebuilt.features.at(-1)?.definition.kind).toBe("chamfer");
-  },
-  15000,
-);
+test("durable naming qualification pins exact semantic zero, one, and many successor outcomes", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const baseFeatureId = featureId("extrude_stage_semantic_provenance");
+  const sketchId = "sketch_occ_extrude_stage_semantic" as SketchId;
+  const bodyId = bodyIdForFeature(baseFeatureId);
+  const plane = createStandardPlaneDefinition("xy");
+  const original = createDimensionedRectangleSketch(sketchId, plane, 10);
+  const dimensionEdited = createDimensionedRectangleSketch(sketchId, plane, 12);
+  const topologyEdited = createTriangleTopologyEdit(sketchId, plane);
+  const baseFeature = {
+    featureId: baseFeatureId,
+    definition: createExtrudeDefinition(original.sketch, original.region, 6, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const authored = applyFeature(
+    createOccAuthoringState(oc, { sketches: [original.sketch] }),
+    baseFeature,
+  );
+  const sourceKey = [
+    ...authored.featureTopologyStages
+      .get(baseFeatureId)!
+      .outputs.get(bodyId)!
+      .sourceTargets.keys(),
+  ].find(
+    (key) =>
+      key.includes(
+        `sketch-point:${sketchId}:${pointId(`${sketchId}_bottom_right`)}`,
+      ) && key.endsWith(":generated-side-edge"),
+  );
+  expect(
+    sourceKey,
+    "The original rectangle stage should key its vertical edge by the authored bottom-right sketch point.",
+  ).toBeTruthy();
+  const originalOutput = authored.featureTopologyStages
+    .get(baseFeatureId)!
+    .outputs.get(bodyId)!;
+  const originalTarget = originalOutput.sourceTargets.get(sourceKey!)?.[0];
+  expect(originalTarget?.kind).toBe("edge");
 
+  const dimensionRebuilt = rebuildOccAuthoringState(
+    { ...authored, sketches: [dimensionEdited.sketch] },
+    [baseFeature],
+  );
+  const dimensionTargets = dimensionRebuilt.featureTopologyStages
+    .get(baseFeatureId)!
+    .outputs.get(bodyId)!
+    .sourceTargets.get(sourceKey!);
+  expect(
+    dimensionTargets?.length,
+    "A dimension-only edit should retain exactly one successor for the same semantic prism role.",
+  ).toBe(1);
+  expect(
+    dimensionTargets?.[0],
+    "A proved one-to-one semantic successor should retain the old public topology ID.",
+  ).toEqual(originalTarget);
 
-test.fails(
-  "durable naming qualification invalidates an edge deleted by an upstream sketch topology edit instead of silently remapping",
-  async () => {
-    const oc = await getDefaultOpenCascadeInstance();
-    const baseFeatureId = featureId("qualification_sketch_deleted_edge_base");
-    const sketchId = "sketch_occ_qualification_deleted_profile_edge" as SketchId;
-    const bodyId = bodyIdForFeature(baseFeatureId);
-    const plane = createStandardPlaneDefinition("xy");
-    const original = createDimensionedRectangleSketch(sketchId, plane, 10);
-    const edited = createTriangleTopologyEdit(sketchId, plane);
-    const initial = createOccAuthoringState(oc, { sketches: [original.sketch] });
-    const baseFeature = {
-      featureId: baseFeatureId,
-      definition: createExtrudeDefinition(original.sketch, original.region, 6, {
-        operation: "newBody",
-        booleanScope: { kind: "standalone" },
-      }),
-      suppressed: false,
-    } satisfies OccAuthoringFeatureRecord;
-    const afterBase = applyFeature(initial, baseFeature);
-    const deletedEdgeId = findEdgeByEndpoints(
-      oc,
-      requireBody(afterBase, bodyId),
-      [10, 0, 0],
-      [10, 0, 6],
+  const topologyRebuilt = rebuildOccAuthoringState(
+    { ...authored, sketches: [topologyEdited.sketch] },
+    [baseFeature],
+  );
+  const topologyTargets = topologyRebuilt.featureTopologyStages
+    .get(baseFeatureId)!
+    .outputs.get(bodyId)!
+    .sourceTargets.get(sourceKey!);
+  expect(
+    topologyTargets,
+    "Removing the authored bottom-right sketch point should yield zero semantic successors, not a traversal replacement.",
+  ).toBeUndefined();
+  if (originalTarget?.kind !== "edge") {
+    throw new Error(
+      "Expected the semantic prism source to resolve to an edge.",
     );
-    const filletFeature = {
-      featureId: featureId("qualification_sketch_deleted_edge_fillet"),
+  }
+  const deletedResolution = resolveOccReference(
+    {
+      documentId: topologyRebuilt.documentId,
+      revisionId: topologyRebuilt.revisionId,
+      referenceState: topologyRebuilt.referenceState,
+    },
+    originalTarget,
+  );
+  expect(deletedResolution.resolution.invalidation?.reason).toBe(
+    OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+  );
+  expect(deletedResolution.diagnostics[0]?.detail?.kind).toBe(
+    "invalidReference",
+  );
+
+  const freshOutput = dimensionRebuilt.featureTopologyStages
+    .get(baseFeatureId)!
+    .outputs.get(bodyId)!;
+  const twoFreshEdges = freshOutput.body.topology.edgeIds
+    .slice(0, 2)
+    .map((edgeId) => ({ kind: "edge" as const, bodyId, edgeId }));
+  const ambiguous = classifySemanticStageTopology({
+    previous: originalOutput,
+    current: {
+      ...freshOutput,
+      sourceTargets: new Map(freshOutput.sourceTargets).set(
+        sourceKey!,
+        twoFreshEdges,
+      ),
+    },
+  });
+  expect(
+    ambiguous.invalidations.get(`edge:${bodyId}:${originalTarget.edgeId}`)
+      ?.reason,
+  ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous);
+
+  const unsupported = classifySemanticStageTopology({
+    previous: originalOutput,
+    current: {
+      ...freshOutput,
+      unsupportedSourceKeys: new Set([sourceKey!]),
+    },
+  });
+  expect(
+    unsupported.invalidations.get(`edge:${bodyId}:${originalTarget.edgeId}`)
+      ?.reason,
+  ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory);
+}, 15000);
+
+test("durable naming qualification keeps coincident delete and recreate invalid without stage proof", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const baseFeatureId = featureId("fresh_id_resurrection_base");
+  const sketchId = "sketch_occ_fresh_id_resurrection" as SketchId;
+  const bodyId = bodyIdForFeature(baseFeatureId);
+  const plane = createStandardPlaneDefinition("xy");
+  const rectangle = createDimensionedRectangleSketch(sketchId, plane, 10);
+  const baseFeature = {
+    featureId: baseFeatureId,
+    definition: createExtrudeDefinition(rectangle.sketch, rectangle.region, 6, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const authored = applyFeature(
+    createOccAuthoringState(oc, { sketches: [rectangle.sketch] }),
+    baseFeature,
+  );
+  const deletedEdgeId = requireBody(authored, bodyId).topology.edgeIds[0]!;
+  const deleted = rebuildOccAuthoringState(authored, []);
+  const recreated = rebuildOccAuthoringState(deleted, [baseFeature]);
+
+  expect(
+    requireBody(recreated, bodyId).topology.edgeIds,
+    "A recreated body should exercise the exact fresh public-ID collision.",
+  ).toContain(deletedEdgeId);
+
+  const target = { kind: "edge" as const, bodyId, edgeId: deletedEdgeId };
+  const resolution = resolveOccReference(
+    {
+      documentId: recreated.documentId,
+      revisionId: recreated.revisionId,
+      referenceState: recreated.referenceState,
+    },
+    target,
+  );
+  expect(resolution.resolution.invalidation?.reason).toBe(
+    OCC_REFERENCE_INVALIDATION_REASONS.missing,
+  );
+  expect(resolution.diagnostics[0]?.detail?.kind).toBe("invalidReference");
+
+  expect(() =>
+    applyFeature(recreated, {
+      featureId: featureId("fresh_id_resurrection_fillet"),
       definition: createFilletDefinition(bodyId, deletedEdgeId),
       suppressed: false,
-    } satisfies OccAuthoringFeatureRecord;
-    const authored = applyFeature(afterBase, filletFeature);
-    const editedState = { ...authored, sketches: [edited.sketch] };
-    const rebuiltPrefix = rebuildOccAuthoringState(editedState, [baseFeature]);
-    const resolved = resolveOccReference(
-      {
-        documentId: rebuiltPrefix.documentId,
-        revisionId: rebuiltPrefix.revisionId,
-        referenceState: rebuiltPrefix.referenceState,
-      },
-      { kind: "edge", bodyId, edgeId: deletedEdgeId },
-    );
+    }),
+  ).toThrow(/occ-invalid-reference.*occ-missing-reference/);
+}, 15000);
 
-    expect([
-      OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
-      OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
-      OCC_REFERENCE_INVALIDATION_REASONS.missing,
-    ]).toContain(resolved.resolution.invalidation?.reason);
-    expect(resolved.diagnostics[0]?.detail?.kind).toBe("invalidReference");
-  },
-  15000,
-);
+test("durable naming qualification invalidates an edge deleted by an upstream sketch topology edit instead of silently remapping", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const baseFeatureId = featureId("qualification_sketch_deleted_edge_base");
+  const sketchId = "sketch_occ_qualification_deleted_profile_edge" as SketchId;
+  const bodyId = bodyIdForFeature(baseFeatureId);
+  const plane = createStandardPlaneDefinition("xy");
+  const original = createDimensionedRectangleSketch(sketchId, plane, 10);
+  const edited = createTriangleTopologyEdit(sketchId, plane);
+  const initial = createOccAuthoringState(oc, { sketches: [original.sketch] });
+  const baseFeature = {
+    featureId: baseFeatureId,
+    definition: createExtrudeDefinition(original.sketch, original.region, 6, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const afterBase = applyFeature(initial, baseFeature);
+  const deletedEdgeId = findEdgeByEndpoints(
+    oc,
+    requireBody(afterBase, bodyId),
+    [10, 0, 0],
+    [10, 0, 6],
+  );
+  const filletFeature = {
+    featureId: featureId("qualification_sketch_deleted_edge_fillet"),
+    definition: createFilletDefinition(bodyId, deletedEdgeId),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const authored = applyFeature(afterBase, filletFeature);
+  const editedState = { ...authored, sketches: [edited.sketch] };
+  const rebuiltPrefix = rebuildOccAuthoringState(editedState, [baseFeature]);
+  const resolved = resolveOccReference(
+    {
+      documentId: rebuiltPrefix.documentId,
+      revisionId: rebuiltPrefix.revisionId,
+      referenceState: rebuiltPrefix.referenceState,
+    },
+    { kind: "edge", bodyId, edgeId: deletedEdgeId },
+  );
 
-test(
-  "durable naming qualification preserves a changed shell face through a dimension-only sketch edit",
-  async () => {
-    const rebuilt = await rebuildAfterDimensionEdit("shell");
-    expect(rebuilt.features.at(-1)?.definition.kind).toBe("shell");
-  },
-  15000,
-);
+  expect([
+    OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+    OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
+    OCC_REFERENCE_INVALIDATION_REASONS.missing,
+  ]).toContain(resolved.resolution.invalidation?.reason);
+  expect(resolved.diagnostics[0]?.detail?.kind).toBe("invalidReference");
+}, 15000);
+
+test("durable naming capability is enabled after all K.2 qualification cases pass", () => {
+  expect(OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming).toBe(true);
+});
+
+test("durable naming qualification preserves a changed shell face through a dimension-only sketch edit", async () => {
+  const rebuilt = await rebuildAfterDimensionEdit("shell");
+  expect(rebuilt.features.at(-1)?.definition.kind).toBe("shell");
+}, 15000);
 
 test("durable naming qualification explicitly invalidates a deleted edge without remapping", async () => {
   const oc = await getDefaultOpenCascadeInstance();

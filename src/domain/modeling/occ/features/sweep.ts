@@ -39,6 +39,7 @@ import {
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
 import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
+import { createUnsupportedProducerTopologyStage } from "@/domain/modeling/occ/topology-stage";
 
 type SweepProfileControl =
   | "none"
@@ -67,7 +68,7 @@ function buildSweepProfileShape(
 
   if (profile.kind === "face") {
     const body = requireBody(context, profile.bodyId);
-    const face = requireFace(body, profile.faceId);
+    const face = requireFace(context, body, profile.faceId);
     getExtrusionNormalForPlanarFace(context.oc, face, "positive");
     return face;
   }
@@ -94,8 +95,14 @@ function buildSweepPathWire(
     }
     if (geometry.kind === "lineSegment") {
       edge = new context.oc.BRepBuilderAPI_MakeEdge_3(
-        toGpPnt(context.oc, mapSketchPointToWorld(sketch.plane, geometry.startPosition)),
-        toGpPnt(context.oc, mapSketchPointToWorld(sketch.plane, geometry.endPosition)),
+        toGpPnt(
+          context.oc,
+          mapSketchPointToWorld(sketch.plane, geometry.startPosition),
+        ),
+        toGpPnt(
+          context.oc,
+          mapSketchPointToWorld(sketch.plane, geometry.endPosition),
+        ),
       ).Edge();
     } else if (geometry.kind === "circle") {
       const axis = new context.oc.gp_Ax2_2(
@@ -138,7 +145,7 @@ function buildSweepPathWire(
       );
     }
   } else if (path.kind === "edge") {
-    edge = requireEdge(requireBody(context, path.bodyId), path.edgeId);
+    edge = requireEdge(context, requireBody(context, path.bodyId), path.edgeId);
   } else {
     throw new Error(
       "advanced-feature-unsupported-kernel-case: OCC sweep path must be a durable edge or sketch-entity target.",
@@ -268,7 +275,7 @@ export function getSweepLinearPathData(
   }
 
   const body = requireBody(context, path.bodyId);
-  const edge = requireEdge(body, path.edgeId);
+  const edge = requireEdge(context, body, path.edgeId);
   buildAxisFromLineEdge(context.oc, edge);
   const curve = new context.oc.BRepAdaptor_Curve_2(edge);
   const start = toVec3FromGpPoint(curve.Value(curve.FirstParameter()));
@@ -431,7 +438,7 @@ function resolveSweepLockDirection(
   if (target.kind === "edge") {
     const axis = buildAxisFromLineEdge(
       context.oc,
-      requireEdge(requireBody(context, target.bodyId), target.edgeId),
+      requireEdge(context, requireBody(context, target.bodyId), target.edgeId),
     );
     return normalize(toVec3FromGpPoint(axis.Direction()));
   }
@@ -471,7 +478,7 @@ function resolveSweepLockProfileFaceDirection(
 
     const normal = getExtrusionNormalForPlanarFace(
       context.oc,
-      requireFace(requireBody(context, target.bodyId), target.faceId),
+      requireFace(context, requireBody(context, target.bodyId), target.faceId),
       "positive",
     );
     direction ??= normal;
@@ -629,5 +636,10 @@ export function executeSweepFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations: result.historyInvalidations,
+    topologyStage: createUnsupportedProducerTopologyStage({
+      featureId: ownerFeatureId,
+      bodies: result.bodies,
+      producedTargets: result.producedTargets,
+    }),
   };
 }

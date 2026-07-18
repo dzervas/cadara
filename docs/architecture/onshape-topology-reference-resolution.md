@@ -169,47 +169,45 @@ body identity is independently durable.
 
 ## Durable naming qualification status
 
-**Status (2026-07-15): not qualified.**
-`OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming` remains `false`.
+**Status (2026-07-18): qualified.**
+`OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming` is `true`.
 
-The flag was initialized to `false` with the first OCC kernel seed on 2026-04-09.
-The 2026-04-20 OCAF/TNaming work and the later native topology modernization added
-operation-local successor reconciliation, but neither change revisited the broad
-capability flag. The archived kernel-topology-signatures change qualifies geometric
-signature extraction and isolated probing; it does not qualify authored-reference
-survival across an upstream edit.
+The pre-8 implementation retains matching per-feature/output stages and projects
+stable authored sketch source keys through OCC producer history. Rebuild
+reconciliation compares semantic source-key lineage only; it does not use nearest
+geometry or topology traversal order. For every prior public subtopology ID, exact
+source lineage now yields one of three outcomes before downstream execution:
+
+- zero successors: `occ-topology-deleted`;
+- one uniquely claimed successor: preserve the prior public ID;
+- multiple successors or competing prior claims: `occ-topology-ambiguous`.
+
+A producer or source role without complete semantic/operation history invalidates
+prior topology as `occ-topology-unsupported-history`. Fresh topology IDs are also
+quarantined when they coincide with an invalidated prior ID but have no stage proof,
+so an exact delete-and-recreate cannot resurrect a stale reference.
 
 Real-OCC logic qualification in
-`src/domain/modeling/occ/topological-naming.spec.ts` now proves:
+`src/domain/modeling/occ/topological-naming.spec.ts` proves:
 
-- a width-dimension edit that moves the selected geometry preserves the same public
-  edge id through rebuild for downstream fillet and chamfer, and preserves the same
-  changed face id for shell;
-- local OCC operation history reports deleted edges as `occ-topology-deleted` and
-  split edges as `occ-topology-ambiguous`, with structured `invalidReference`
-  diagnostics and the original target retained;
-- an independent feature can be legally reordered, suppressed, and re-enabled
-  without breaking a downstream fillet reference.
+- dimension-only edits preserve moving edge references for downstream fillet and
+  chamfer and a moving face reference for shell;
+- a rectangle-to-triangle sketch edit reports the removed generated edge as deleted
+  instead of remapping it;
+- exact semantic source keys produce pinned zero, one, and many outcomes;
+- coincident delete/recreate remains invalid without semantic stage proof;
+- rebuilt unsupported producers such as thicken invalidate prior subtopology as
+  unsupported history;
+- operation-local deleted and split successors remain deleted/ambiguous with
+  structured `invalidReference` diagnostics; and
+- independent feature reorder, suppression, and re-enable preserve valid downstream
+  references without cross-associating feature stages.
 
-The release-blocking case is an upstream **topology-changing sketch edit**. The
-qualification replaces a rectangular profile with a triangular profile that deletes
-the selected profile vertex and its extruded edge. Rebuilding the prefix currently
-reports the old edge reference as live (`invalidation === null`) instead of deleted,
-missing, or ambiguous. The expected contract is retained as a `test.fails` release
-gate. Enabling the capability in this state could silently move an imported
-fillet/chamfer to unrelated topology.
-
-The reason is architectural: native/OCAF reconciliation receives usable history
-inside a mutating OCC operation, but a sketch edit regenerates an earlier feature
-from a new profile without an old-to-new kernel history source at that feature
-stage. Current public identity can therefore coincide with fresh enumeration or
-shape identity without proving semantic lineage. Fixing this safely requires
-per-feature rebuild-stage naming state and source provenance (for example,
-sketch-entity/profile-generation lineage), followed by zero/one/many successor
-classification before downstream features execute. The planned BRepGraph migration
-can provide the graph-owned form of that history; a pre-8 fix would need equivalent
-stage reconciliation. Nearest-geometry or traversal-order matching is not an
-acceptable substitute.
+The former `test.fails` capability gate is now a passing assertion, and the focused
+OCC suite passes with no expected failures. Phase S.1 importer plan-time promotion
+is therefore unblocked. The semantic source-key contract remains compatible with
+the planned BRepGraph migration; its temporary JS-held stage bodies and pre-8
+reconciliation machinery should be removed at that cutover.
 
 ## Design decisions
 

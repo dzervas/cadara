@@ -58,7 +58,7 @@ function resolvePlanarReferencePlane(
   if (target.kind === "face") {
     return buildConstructionPlaneFromPlanarFace(
       context.oc,
-      requireFace(requireBody(context, target.bodyId), target.faceId),
+      requireFace(context, requireBody(context, target.bodyId), target.faceId),
       target.faceId,
       { kind: "construction", constructionId: supportConstructionId },
     );

@@ -17,6 +17,7 @@ import {
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
 import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
+import { createUnsupportedProducerTopologyStage } from "@/domain/modeling/occ/topology-stage";
 
 function getThickenThickness(
   definition: AdvancedSolidFeatureDefinition & { kind: "thicken" },
@@ -105,7 +106,7 @@ function buildThickenFeatureShape(
   getThickenSide(definition);
   const direction = getThickenDirection(definition);
   const body = requireBody(context, faceTarget!.bodyId);
-  const face = requireFace(body, faceTarget!.faceId);
+  const face = requireFace(context, body, faceTarget!.faceId);
 
   let extrusionNormal: Vec3;
   try {
@@ -182,5 +183,10 @@ export function executeThickenFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations: result.historyInvalidations,
+    topologyStage: createUnsupportedProducerTopologyStage({
+      featureId: ownerFeatureId,
+      bodies: result.bodies,
+      producedTargets: result.producedTargets,
+    }),
   };
 }

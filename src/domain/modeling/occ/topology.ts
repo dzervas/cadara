@@ -893,6 +893,155 @@ export function trackNewSolidBody(
   });
 }
 
+type OccSubtopologyRef = Extract<
+  DurableRef,
+  { kind: "face" | "edge" | "vertex" }
+>;
+
+export function applySemanticStageTopologyIds(input: {
+  previous: OccTrackedBody;
+  current: OccTrackedBody;
+  preservedTargetsByCurrentKey: ReadonlyMap<string, OccSubtopologyRef>;
+}) {
+  if (input.previous.bodyId !== input.current.bodyId) {
+    throw new Error(
+      `Cannot reconcile semantic topology across bodies ${input.previous.bodyId} and ${input.current.bodyId}.`,
+    );
+  }
+
+  const topologyToken = advanceTopologyToken(input.previous.topologyToken);
+  const targetByCurrentKey = new Map<string, OccSubtopologyRef>();
+
+  const remapKind = <
+    Id extends FaceId | EdgeId | VertexId,
+    Shape,
+  >(options: {
+    kind: "face" | "edge" | "vertex";
+    ids: readonly Id[];
+    shapesById: ReadonlyMap<Id, Shape>;
+    contributorsById: ReadonlyMap<Id, FeatureId[]>;
+  }) => {
+    const ids: Id[] = [];
+    const shapesById = new Map<Id, Shape>();
+    const contributorsById = new Map<Id, FeatureId[]>();
+
+    for (const [index, currentId] of options.ids.entries()) {
+      const currentTarget = (() => {
+        switch (options.kind) {
+          case "face":
+            return {
+              kind: "face",
+              bodyId: input.current.bodyId,
+              faceId: currentId as FaceId,
+            } as const;
+          case "edge":
+            return {
+              kind: "edge",
+              bodyId: input.current.bodyId,
+              edgeId: currentId as EdgeId,
+            } as const;
+          case "vertex":
+            return {
+              kind: "vertex",
+              bodyId: input.current.bodyId,
+              vertexId: currentId as VertexId,
+            } as const;
+        }
+      })();
+      const currentKey = getOccDurableRefKey(currentTarget);
+      const preserved = input.preservedTargetsByCurrentKey.get(currentKey);
+      if (preserved && preserved.kind !== options.kind) {
+        throw new Error(
+          `Semantic topology claim changed ${options.kind} ${currentKey} into ${preserved.kind}.`,
+        );
+      }
+
+      const nextId = (preserved
+        ? preserved.kind === "face"
+          ? preserved.faceId
+          : preserved.kind === "edge"
+            ? preserved.edgeId
+            : preserved.vertexId
+        : `${options.kind}_${input.current.bodyId}_${topologyToken}_${index + 1}`) as Id;
+      const shape = options.shapesById.get(currentId);
+      if (!shape) {
+        throw new Error(`Missing ${options.kind} shape for ${currentId}.`);
+      }
+
+      ids.push(nextId);
+      shapesById.set(nextId, shape);
+      contributorsById.set(nextId, [
+        ...(options.contributorsById.get(currentId) ?? []),
+      ]);
+      targetByCurrentKey.set(currentKey, (() => {
+        switch (options.kind) {
+          case "face":
+            return {
+              kind: "face",
+              bodyId: input.current.bodyId,
+              faceId: nextId as FaceId,
+            };
+          case "edge":
+            return {
+              kind: "edge",
+              bodyId: input.current.bodyId,
+              edgeId: nextId as EdgeId,
+            };
+          case "vertex":
+            return {
+              kind: "vertex",
+              bodyId: input.current.bodyId,
+              vertexId: nextId as VertexId,
+            };
+        }
+      })());
+    }
+
+    return { ids, shapesById, contributorsById };
+  };
+
+  const faces = remapKind({
+    kind: "face",
+    ids: input.current.topology.faceIds,
+    shapesById: input.current.facesById,
+    contributorsById: input.current.faceContributingFeatureIdsById,
+  });
+  const edges = remapKind({
+    kind: "edge",
+    ids: input.current.topology.edgeIds,
+    shapesById: input.current.edgesById,
+    contributorsById: input.current.edgeContributingFeatureIdsById,
+  });
+  const vertices = remapKind({
+    kind: "vertex",
+    ids: input.current.topology.vertexIds,
+    shapesById: input.current.verticesById,
+    contributorsById: input.current.vertexContributingFeatureIdsById,
+  });
+
+  return {
+    body: {
+      ...input.current,
+      topologyToken,
+      topology: {
+        faceIds: faces.ids,
+        edgeIds: edges.ids,
+        vertexIds: vertices.ids,
+      },
+      facesById: faces.shapesById,
+      faceContributingFeatureIdsById: faces.contributorsById,
+      edgesById: edges.shapesById,
+      edgeContributingFeatureIdsById: edges.contributorsById,
+      verticesById: vertices.shapesById,
+      vertexContributingFeatureIdsById: vertices.contributorsById,
+      naming: undefined,
+      nativeTopologyPayload: undefined,
+      nativeTopologyIdAliases: undefined,
+    } satisfies OccTrackedBody,
+    targetByCurrentKey,
+  };
+}
+
 export function trackDerivedSolidBody(
   oc: OpenCascadeInstance,
   input: {
@@ -1269,13 +1418,28 @@ export function createOccReferenceState(input: {
   features: readonly OccAuthoringFeatureRecordLike[];
   previous?: OccReferenceState;
   historyInvalidations?: ReadonlyMap<string, OccReferenceInvalidationRecord>;
+  provedLiveReferenceKeys?: ReadonlySet<string>;
 }): OccReferenceState {
   const liveReferencesByKey = buildLiveReferenceMap(input);
   const invalidatedReferencesByKey = new Map(
     input.previous?.invalidatedReferencesByKey ?? [],
   );
 
-  for (const key of liveReferencesByKey.keys()) {
+  for (const [key, live] of liveReferencesByKey) {
+    const previousInvalidation = invalidatedReferencesByKey.get(key);
+    const isSubtopology =
+      live.target.kind === "face" ||
+      live.target.kind === "edge" ||
+      live.target.kind === "vertex";
+    if (
+      previousInvalidation &&
+      isSubtopology &&
+      !input.provedLiveReferenceKeys?.has(key)
+    ) {
+      liveReferencesByKey.delete(key);
+      continue;
+    }
+
     invalidatedReferencesByKey.delete(key);
   }
 
@@ -1290,6 +1454,28 @@ export function createOccReferenceState(input: {
       reason: OCC_REFERENCE_INVALIDATION_REASONS.missing,
       sourceTarget: createInvalidationSourceTarget(previousResolution),
     };
+
+    invalidatedReferencesByKey.set(
+      key,
+      createInvalidatedReferenceRecord(
+        previousResolution,
+        input.revisionId,
+        invalidation,
+      ),
+    );
+  }
+
+  for (const [key, invalidation] of input.historyInvalidations ?? []) {
+    if (liveReferencesByKey.has(key)) {
+      continue;
+    }
+
+    const previousResolution =
+      input.previous?.liveReferencesByKey.get(key) ??
+      input.previous?.invalidatedReferencesByKey.get(key);
+    if (!previousResolution) {
+      continue;
+    }
 
     invalidatedReferencesByKey.set(
       key,

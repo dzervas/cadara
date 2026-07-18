@@ -45,6 +45,149 @@ import {
   type OccFeatureExecutionContext,
 } from "@/domain/modeling/occ/features/shared";
 
+export type OccFeatureSourceShapeMap = ReadonlyMap<
+  string,
+  readonly InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+>;
+
+interface ApplyBooleanPolicyOptions {
+  sourceShapes?: OccFeatureSourceShapeMap;
+}
+
+function listHistoryShapes(
+  oc: OpenCascadeInstance,
+  list: { Size(): number },
+) {
+  const shapes: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[] = [];
+  const typedList = list as InstanceType<
+    OpenCascadeInstance["TopTools_ListOfShape"]
+  >;
+  const copy = new oc.TopTools_ListOfShape_3(typedList);
+
+  try {
+    while (copy.Size() > 0) {
+      shapes.push(copy.First_1());
+      copy.RemoveFirst();
+    }
+  } finally {
+    copy.delete();
+    typedList.delete();
+  }
+
+  return shapes;
+}
+
+function appendUniqueShape(
+  shapes: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[],
+  candidate: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  if (!shapes.some((shape) => shape.IsSame(candidate))) {
+    shapes.push(candidate);
+  }
+}
+
+function projectFeatureSourceShapes(
+  oc: OpenCascadeInstance,
+  sourceShapes: OccFeatureSourceShapeMap,
+  historySources: readonly OccTopologyHistorySource[],
+) {
+  const projected = new Map<
+    string,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >();
+
+  for (const [sourceKey, initialShapes] of sourceShapes) {
+    let candidates = [...initialShapes];
+
+    for (const historySource of historySources) {
+      const successors: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[] = [];
+
+      for (const candidate of candidates) {
+        if (isOccTopologyHistoryDeleted(historySource, candidate)) {
+          continue;
+        }
+
+        const evolved = [
+          ...listHistoryShapes(oc, historySource.Modified(candidate)),
+          ...listHistoryShapes(oc, historySource.Generated(candidate)),
+        ];
+
+        if (evolved.length === 0) {
+          appendUniqueShape(successors, candidate);
+        } else {
+          for (const shape of evolved) {
+            appendUniqueShape(successors, shape);
+          }
+        }
+      }
+
+      candidates = successors;
+    }
+
+    projected.set(sourceKey, candidates);
+  }
+
+  return projected;
+}
+
+function mergeFeatureSourceShapes(
+  target: Map<string, InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]>,
+  source: OccFeatureSourceShapeMap,
+) {
+  for (const [sourceKey, shapes] of source) {
+    const merged = target.get(sourceKey) ?? [];
+    for (const shape of shapes) {
+      appendUniqueShape(merged, shape);
+    }
+    target.set(sourceKey, merged);
+  }
+}
+
+function mapFeatureSourceTargets(
+  bodies: readonly OccTrackedBody[],
+  sourceShapes: OccFeatureSourceShapeMap | undefined,
+) {
+  if (!sourceShapes) {
+    return undefined;
+  }
+
+  const targets = new Map<string, DurableRef[]>();
+
+  for (const [sourceKey, shapes] of sourceShapes) {
+    const refs: DurableRef[] = [];
+    const register = (target: DurableRef) => {
+      const key = getOccDurableRefKey(target);
+      if (!refs.some((entry) => getOccDurableRefKey(entry) === key)) {
+        refs.push(target);
+      }
+    };
+
+    for (const body of bodies) {
+      for (const shape of shapes) {
+        for (const [faceId, face] of body.facesById) {
+          if (face.IsSame(shape)) {
+            register({ kind: "face", bodyId: body.bodyId, faceId });
+          }
+        }
+        for (const [edgeId, edge] of body.edgesById) {
+          if (edge.IsSame(shape)) {
+            register({ kind: "edge", bodyId: body.bodyId, edgeId });
+          }
+        }
+        for (const [vertexId, vertex] of body.verticesById) {
+          if (vertex.IsSame(shape)) {
+            register({ kind: "vertex", bodyId: body.bodyId, vertexId });
+          }
+        }
+      }
+    }
+
+    targets.set(sourceKey, refs);
+  }
+
+  return targets;
+}
+
 export { trackDerivedSolidBody };
 
 export function createBooleanBuilder(
@@ -828,6 +971,7 @@ export function applyBooleanPolicy(
   operation: FeatureBooleanOperation,
   booleanScope: FeatureBooleanScope,
   featureShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  options: ApplyBooleanPolicyOptions = {},
 ) {
   assertBooleanScopeCompatible(operation, booleanScope);
 
@@ -838,12 +982,17 @@ export function applyBooleanPolicy(
       ownerFeatureId,
       featureShape,
     );
+    const bodies = [...context.bodies, ...newBodies];
     return {
-      bodies: [...context.bodies, ...newBodies],
+      bodies,
       producedTargets: newBodies.map(
         (body) => ({ kind: "body", bodyId: body.bodyId }) as DurableRef,
       ),
       historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
+      featureSourceTargets: mapFeatureSourceTargets(
+        newBodies,
+        options.sourceShapes,
+      ),
     };
   }
 
@@ -874,32 +1023,43 @@ export function applyBooleanPolicy(
   if (!policy) {
     const bodyId = targetBodyIds[0]!;
     const targetBody = requireBody(context, bodyId);
-    const replacementResult =
-      resolveNativeBooleanReplacement(
-        context,
-        targetBody,
-        featureShape,
-        operation,
-        ownerFeatureId,
-      ) ??
-      (() => {
-        const result = runBoolean(
-          context.oc,
-          operation,
-          targetBody.shape,
-          featureShape,
-        );
-        return resolveReplacementBodies(
+    let projectedSourceShapes = options.sourceShapes;
+    let replacementResult = options.sourceShapes
+      ? null
+      : resolveNativeBooleanReplacement(
           context,
-          bodyId,
-          result.shape,
+          targetBody,
+          featureShape,
+          operation,
           ownerFeatureId,
-          {
-            allowEmpty: true,
-            historySources: result.historySources,
-          },
         );
-      })();
+
+    if (!replacementResult) {
+      const result = runBoolean(
+        context.oc,
+        operation,
+        targetBody.shape,
+        featureShape,
+      );
+      projectedSourceShapes = options.sourceShapes
+        ? projectFeatureSourceShapes(
+            context.oc,
+            options.sourceShapes,
+            result.historySources,
+          )
+        : undefined;
+      replacementResult = resolveReplacementBodies(
+        context,
+        bodyId,
+        result.shape,
+        ownerFeatureId,
+        {
+          allowEmpty: true,
+          historySources: result.historySources,
+        },
+      );
+    }
+
     const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId);
     nextBodies.splice(index, 1, ...replacementResult.replacements);
     for (const replacement of replacementResult.replacements) {
@@ -909,6 +1069,10 @@ export function applyBooleanPolicy(
       bodies: nextBodies,
       producedTargets,
       historyInvalidations: replacementResult.historyInvalidations,
+      featureSourceTargets: mapFeatureSourceTargets(
+        replacementResult.replacements,
+        projectedSourceShapes,
+      ),
     };
   }
 
@@ -919,13 +1083,16 @@ export function applyBooleanPolicy(
       string,
       OccReferenceInvalidationRecord
     >();
-    let replacementResult = resolveNativeBooleanReplacement(
-      context,
-      firstBody,
-      featureShape,
-      policy.operation,
-      ownerFeatureId,
-    );
+    let projectedSourceShapes = options.sourceShapes;
+    let replacementResult = options.sourceShapes
+      ? null
+      : resolveNativeBooleanReplacement(
+          context,
+          firstBody,
+          featureShape,
+          policy.operation,
+          ownerFeatureId,
+        );
 
     if (replacementResult) {
       let currentBody = replacementResult.replacements[0];
@@ -968,6 +1135,13 @@ export function applyBooleanPolicy(
       const firstBodyHistorySources: OccTopologyHistorySource[] = [
         ...currentResult.historySources,
       ];
+      if (projectedSourceShapes) {
+        projectedSourceShapes = projectFeatureSourceShapes(
+          context.oc,
+          projectedSourceShapes,
+          currentResult.historySources,
+        );
+      }
       for (const [key, value] of collectTopologyHistoryInvalidations(
         firstBody,
         currentResult.builder,
@@ -984,6 +1158,13 @@ export function applyBooleanPolicy(
           body.shape,
         );
         firstBodyHistorySources.push(...currentResult.historySources);
+        if (projectedSourceShapes) {
+          projectedSourceShapes = projectFeatureSourceShapes(
+            context.oc,
+            projectedSourceShapes,
+            currentResult.historySources,
+          );
+        }
         for (const [key, value] of collectTopologyHistoryInvalidations(
           body,
           currentResult.builder,
@@ -1030,6 +1211,10 @@ export function applyBooleanPolicy(
       bodies: nextBodies,
       producedTargets,
       historyInvalidations: combinedHistoryInvalidations,
+      featureSourceTargets: mapFeatureSourceTargets(
+        replacementResult.replacements,
+        projectedSourceShapes,
+      ),
     };
   }
 
@@ -1037,34 +1222,55 @@ export function applyBooleanPolicy(
     string,
     OccReferenceInvalidationRecord
   >();
+  const projectedSourceShapes = new Map<
+    string,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >();
+  const replacementBodies: OccTrackedBody[] = [];
+
   for (const bodyId of targetBodyIds) {
     const targetBody = requireBody(context, bodyId);
-    const replacementResult =
-      resolveNativeBooleanReplacement(
-        context,
-        targetBody,
-        featureShape,
-        policy.operation,
-        ownerFeatureId,
-      ) ??
-      (() => {
-        const result = runBoolean(
-          context.oc,
-          policy.operation,
-          targetBody.shape,
-          featureShape,
-        );
-        return resolveReplacementBodies(
+    let targetSourceShapes = options.sourceShapes;
+    let replacementResult = options.sourceShapes
+      ? null
+      : resolveNativeBooleanReplacement(
           context,
-          bodyId,
-          result.shape,
+          targetBody,
+          featureShape,
+          policy.operation,
           ownerFeatureId,
-          {
-            allowEmpty: true,
-            historySources: result.historySources,
-          },
         );
-      })();
+
+    if (!replacementResult) {
+      const result = runBoolean(
+        context.oc,
+        policy.operation,
+        targetBody.shape,
+        featureShape,
+      );
+      targetSourceShapes = options.sourceShapes
+        ? projectFeatureSourceShapes(
+            context.oc,
+            options.sourceShapes,
+            result.historySources,
+          )
+        : undefined;
+      replacementResult = resolveReplacementBodies(
+        context,
+        bodyId,
+        result.shape,
+        ownerFeatureId,
+        {
+          allowEmpty: true,
+          historySources: result.historySources,
+        },
+      );
+    }
+
+    if (targetSourceShapes) {
+      mergeFeatureSourceShapes(projectedSourceShapes, targetSourceShapes);
+    }
+    replacementBodies.push(...replacementResult.replacements);
     const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId);
     nextBodies.splice(index, 1, ...replacementResult.replacements);
     for (const replacement of replacementResult.replacements) {
@@ -1079,6 +1285,10 @@ export function applyBooleanPolicy(
     bodies: nextBodies,
     producedTargets,
     historyInvalidations: combinedHistoryInvalidations,
+    featureSourceTargets: mapFeatureSourceTargets(
+      replacementBodies,
+      options.sourceShapes ? projectedSourceShapes : undefined,
+    ),
   };
 }
 

@@ -47,7 +47,7 @@ function buildShellFeatureShape(
       );
     }
 
-    closingFaces.Append_1(requireFace(sourceBody, target.faceId));
+    closingFaces.Append_1(requireFace(context, sourceBody, target.faceId));
   }
 
   const signedThickness =
