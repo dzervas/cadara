@@ -3290,6 +3290,123 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     );
   }
 
+  async function testDefaultSolveRecoversFromStalledImportedProfile() {
+    const pointTuples = [
+      ["sketch_point_a", 1, 0],
+      ["sketch_point_b", 1, 1],
+      ["sketch_point_c", 6, 1],
+      ["sketch_point_d", 6, 0],
+      ["sketch_point_e", 9, 0],
+      ["sketch_point_f", 9, 4],
+      ["sketch_point_g", -9, 4],
+      ["sketch_point_h", -9, 0],
+      ["sketch_point_mid", 0, 4],
+    ] as const;
+    const lineTuples = [
+      ["sketch_entity_ab", "sketch_point_a", "sketch_point_b"],
+      ["sketch_entity_bc", "sketch_point_b", "sketch_point_c"],
+      ["sketch_entity_cd", "sketch_point_c", "sketch_point_d"],
+      ["sketch_entity_de", "sketch_point_d", "sketch_point_e"],
+      ["sketch_entity_ef", "sketch_point_e", "sketch_point_f"],
+      ["sketch_entity_fg", "sketch_point_f", "sketch_point_g"],
+      ["sketch_entity_gh", "sketch_point_g", "sketch_point_h"],
+      ["sketch_entity_ha", "sketch_point_h", "sketch_point_a"],
+    ] as const;
+    const points = pointTuples.map(([id, x, y]) => makePoint(id, id, x, y));
+    const entities = lineTuples.map(([id, start, end]) =>
+      makeLine(id, id, start, end),
+    );
+    const constraints: SketchDefinition["constraints"] = [
+      ...[0, 2, 4, 6].map((index) => ({
+        constraintId: `constraint_vertical_${index}` as `constraint_${string}`,
+        kind: "vertical" as const,
+        label: `Vertical ${index}`,
+        entityId: entities[index]!.entityId,
+      })),
+      ...[1, 3, 5, 7].map((index) => ({
+        constraintId: `constraint_horizontal_${index}` as `constraint_${string}`,
+        kind: "horizontal" as const,
+        label: `Horizontal ${index}`,
+        entityId: entities[index]!.entityId,
+      })),
+      {
+        constraintId: "constraint_midpoint",
+        kind: "midpoint",
+        label: "Midpoint",
+        point: { kind: "localPoint", pointId: points[8]!.pointId },
+        line: { kind: "localEntity", entityId: entities[5]!.entityId },
+      },
+      {
+        constraintId: "constraint_anchor",
+        kind: "fixPoint",
+        label: "Imported source anchor",
+        pointId: points[0]!.pointId,
+        position: [1, 0],
+      },
+    ];
+    const dimensions: SketchDefinition["dimensions"] = [
+      ["dimension_width", 1, 5],
+      ["dimension_height", 2, 1],
+      ["dimension_wall", 3, 3],
+      ["dimension_variable_span", 7, 11],
+    ].map(([id, entityIndex, value]) => ({
+      dimensionId: id as `dimension_${string}`,
+      kind: "lineLength" as const,
+      label: String(id),
+      entityId: entities[Number(entityIndex)]!.entityId,
+      value: Number(value),
+    }));
+    dimensions.push({
+      dimensionId: "dimension_wall_distance",
+      kind: "lineDistance",
+      label: "Wall distance",
+      lines: [
+        { kind: "localEntity", entityId: entities[1]!.entityId },
+        { kind: "localEntity", entityId: entities[5]!.entityId },
+      ],
+      value: 3,
+    });
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: points.map((point) => point.pointId),
+      points,
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+      constraintIds: constraints.map((constraint) => constraint.constraintId),
+      constraints,
+      dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+      dimensions,
+    };
+
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      partialSolvePolicy: "bestEffort",
+    });
+    const solvedPoints = new Map(
+      solved.solvedSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+
+    expect(
+      solved.status.solveState,
+      "The default solver should recover when its BFGS pass stalls on a satisfiable imported profile.",
+    ).toBe("solved");
+    for (const [index, line] of entities.entries()) {
+      const start = solvedPoints.get(line.startPointId)!;
+      const end = solvedPoints.get(line.endPointId)!;
+      const axisDelta = index % 2 === 0 ? Math.abs(start[0] - end[0]) : Math.abs(start[1] - end[1]);
+      expect(
+        axisDelta,
+        `Solved imported profile line ${index} should not render crooked.`,
+      ).toBeLessThan(1e-6);
+    }
+  }
+
   async function run() {
     await testFixPoint();
     await testEuclideanDistance();
@@ -3312,6 +3429,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     await testArcEndPointCoincident();
     await testAxisAlignedRectangle();
     await testProjectedDatumConstraintSeedsLogoReferenceImageAnchorTranslation();
+    await testDefaultSolveRecoversFromStalledImportedProfile();
     await testRotatedRectangle();
     await testRotatedRectangleGradientDescent();
     await testRotatedRectangleGaussNewton();

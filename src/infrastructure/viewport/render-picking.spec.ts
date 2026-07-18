@@ -1017,6 +1017,53 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
   }
 
   {
+    const constructionRenderable: RenderableEntityRecord = {
+      id: "renderable_feature_plane",
+      label: "Feature plane",
+      ownerBodyId: null,
+      ownerFeatureId: "feature_plane-1",
+      binding: {
+        pickId: "pick_feature_plane",
+        pickPriority: 40,
+        target: {
+          kind: "construction",
+          constructionId: "construction_feature_plane-1",
+        },
+        topology: null,
+        semanticClass: "construction",
+      },
+      geometry: {
+        kind: "mesh",
+        vertexPositions: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [1, 1, 0],
+          [0, 1, 0],
+        ],
+        vertexNormals: [
+          [0, 0, 1],
+          [0, 0, 1],
+          [0, 0, 1],
+          [0, 0, 1],
+        ],
+        triangleIndices: [
+          [0, 1, 2],
+          [0, 2, 3],
+        ],
+      },
+    };
+    const material = createRenderableMeshMaterial(
+      constructionRenderable,
+      "document",
+    );
+    expect(
+      material.transparent && material.opacity === 0.12 && !material.depthWrite,
+      "Document construction planes should honor their faint plane opacity instead of rendering as opaque cyan surfaces.",
+    ).toBeTruthy();
+    material.dispose();
+  }
+
+  {
     const faceMesh = createBoundMesh(faceRenderable);
     const projectedVertex = createProjectedPickCandidate({
       pickId: vertexRenderable.binding.pickId,

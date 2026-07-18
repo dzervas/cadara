@@ -4705,6 +4705,25 @@ function solveGaussNewtonLike(
   return { values, loss: state.loss, perConstraint: state.perConstraint };
 }
 
+function solveBfgsWithGaussNewtonFallback(
+  initialValues: Float64Array,
+  constraints: ScalarConstraintRecord[],
+) {
+  const bfgs = solveBfgs(initialValues, constraints);
+  if (bfgs.loss < SOLVED_LOSS_THRESHOLD) {
+    return bfgs;
+  }
+
+  const gaussNewton = solveGaussNewtonLike(initialValues, constraints, {
+    maxIterations: 1000,
+    minLoss: 1e-14,
+    stepSize: 1,
+    damping: 0,
+    pseudoInverseEpsilon: 1e-12,
+  });
+  return gaussNewton.loss < bfgs.loss ? gaussNewton : bfgs;
+}
+
 function solveSystemValues(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
@@ -4728,7 +4747,7 @@ function solveSystemValues(
             damping: 1e-5,
             pseudoInverseEpsilon: 1e-6,
           })
-        : solveBfgs(initialValues, constraints);
+        : solveBfgsWithGaussNewtonFallback(initialValues, constraints);
 }
 
 function createStableHash(value: string) {
