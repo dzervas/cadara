@@ -1,5 +1,6 @@
-import { test, expect } from "vitest";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { test, expect } from "vitest";
 
 import {
   assembleFixtureMountsBundle,
@@ -8,7 +9,10 @@ import {
 import type { StudioReadResult } from "@/domain/import/onshape/bundle-reader";
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
-import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
+import {
+  validateOnshapeCaptureBundle,
+  type OnshapeRollbackSnapshot,
+} from "@/contracts/import/onshape-capture-bundle";
 
 test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
   const bundle = await assembleFixtureMountsBundle();
@@ -42,6 +46,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
     "An extrude consuming a verified region of a parametric sketch should now plan parametric with a deferred standalone profile.",
   ).toBeTruthy();
 
+  expect(plan.bakeStrategy).toEqual({ kind: "none" });
   expect(
     !plan.requiresStudioBake,
     "With every feature parametric, no whole-studio bake is required.",
@@ -54,12 +59,21 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
 });
 
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts real bundles contain no Wave A features and retain baseline counts", async () => {
-  const cases = [
-    ["40a51fb8fa82fd4565151114.onshape-capture.json", { parametric: 6, baked: 4, geometryOnly: 0 }],
-    ["9841e486906fa2ce62d74d8e.onshape-capture.json", { parametric: 6, baked: 35, geometryOnly: 0 }],
-  ] as const;
-  for (const [fileName, expected] of cases) {
+const realBundleCases = [
+  [
+    "40a51fb8fa82fd4565151114.onshape-capture.json",
+    { parametric: 8, baked: 2, geometryOnly: 0 },
+  ],
+  [
+    "9841e486906fa2ce62d74d8e.onshape-capture.json",
+    { parametric: 6, baked: 35, geometryOnly: 0 },
+  ],
+] as const;
+
+test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
+  "src/domain/import/onshape/fidelity-planner.spec.ts real bundles contain no Wave A features and retain baseline counts",
+  async () => {
+  for (const [fileName, expected] of realBundleCases) {
     const parsed = validateOnshapeCaptureBundle(JSON.parse(await readFile(fileName, "utf8")));
     if (!parsed.success) throw new Error(`Real capture ${fileName} must validate.`);
     const studio = parsed.data.partStudios[0]!;
@@ -69,7 +83,13 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts real bundles contain no
         ["revolve", "thicken", "sweep", "loft"].includes(feature.featureType),
       ),
     ).toBe(false);
-    expect(planStudioFidelity(read).tierCounts).toEqual(expected);
+    const plan = planStudioFidelity(read, {
+      captureFormatVersion: parsed.data.formatVersion,
+      historyProbeAvailable: true,
+    });
+    expect(plan.tierCounts).toEqual(expected);
+    expect(plan.bakeStrategy.kind).toBe("segments");
+    expect(plan.requiresStudioBake).toBe(false);
   }
 });
 
@@ -130,8 +150,9 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts retains v1 final-state 
     sketchEntities: [{ entityId: "c1", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 }],
     extrudeOperation: "NEW",
   });
-  const plan = planStudioFidelity(read);
+  const plan = planStudioFidelity(read, { captureFormatVersion: 1 });
   expect(plan.featurePlans[0]?.tier).toBe("parametric");
+  expect(plan.bakeStrategy).toEqual({ kind: "none" });
 });
 
 // ---- Synthetic seam coverage for scope-ambiguity and selector-failure -----
@@ -304,6 +325,72 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts ambiguous default-scope
   ).toBeTruthy();
 });
 
+function rollbackSnapshot(
+  featureId: string,
+  bodyEnd: number | null,
+): OnshapeRollbackSnapshot {
+  return {
+    featureId,
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: {
+      bodies: bodyEnd === null ? [] : [{
+        id: "A",
+        faces: [{
+          id: "A-face",
+          facets: [{
+            vertices: [
+              { x: 0, y: 0, z: 0 },
+              { x: bodyEnd, y: 0, z: 0 },
+              { x: bodyEnd, y: 1, z: 1 },
+            ],
+          }],
+        }],
+      }],
+    },
+  };
+}
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts reviewer demotion replans a v2 body run into a segment", () => {
+  const read = makeStudioRead({
+    sketchEntities: [
+      { entityId: "c1", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 },
+    ],
+    priorExtrudes: [{ featureId: "E_BASE", operation: "NEW" }],
+    extrudeOperation: "REMOVE",
+  });
+  read.studio.groundTruth = {
+    hasBodies: true,
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: {},
+    step: "",
+  };
+  read.studio.rollbackSnapshots = [
+    rollbackSnapshot("S1", null),
+    rollbackSnapshot("E_BASE", 1),
+    rollbackSnapshot("E_TARGET", 2),
+  ];
+
+  const baseline = planStudioFidelity(read, { captureFormatVersion: 2 });
+  expect(baseline.bakeStrategy).toEqual({ kind: "none" });
+
+  const demoted = planStudioFidelity(read, {
+    captureFormatVersion: 2,
+    demotedFeatureIds: ["E_TARGET"],
+  });
+  expect(demoted.requiresStudioBake).toBe(false);
+  expect(demoted.bakeStrategy).toMatchObject({
+    kind: "segments",
+    segments: [{
+      fromFeatureId: "E_TARGET",
+      boundaryFeatureId: "E_TARGET",
+      checkpointBodyDeterministicIds: ["A"],
+      consumedBodyDeterministicIds: ["A"],
+      replacementProducerFeatureIds: ["E_BASE"],
+    }],
+  });
+  expect(demoted.featurePlans.find((plan) => plan.onshapeFeatureId === "E_TARGET")?.tier)
+    .toBe("baked");
+});
 
 function makeTwoBranchStudioRead(): StudioReadResult {
   const sketchFeature = (
@@ -405,6 +492,9 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts independent branch stay
   expect(
     independent?.tier === "parametric" &&
       independent.target.kind === "feature" &&
+      independent.inputDependencies.some(
+        (input) => input.kind === "sketch" && input.featureId === "S_GOOD",
+      ) &&
       !independent.reasonCodes.includes("downstream-of-baked"),
     "An independent sketch/extrude branch after a baked branch should remain live.",
   ).toBeTruthy();
@@ -416,10 +506,10 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts true dependent of baked
 
   expect(
     cut?.tier === "baked" &&
-      cut.reasonCodes.includes("needs-history-probe") &&
+      cut.reasonCodes.includes("extrude-default-scope-ambiguous") &&
       !cut.reasonCodes.includes("needs-region-resolution") &&
       !cut.reasonCodes.includes("downstream-of-baked"),
-    "A default-scope boolean with a baked body candidate should stay probe-gated for scope ambiguity rather than silently targeting the visible parametric body.",
+    "A default-scope boolean with multiple body candidates should retain its specific scope-ambiguity reason rather than silently targeting the visible parametric body.",
   ).toBeTruthy();
 });
 
@@ -432,6 +522,9 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts deferred body from a ba
   expect(
     cut?.tier === "baked" &&
       cut.reasonCodes.includes("downstream-of-baked") &&
+      cut.inputDependencies.some(
+        (input) => input.kind === "body" && input.featureId === "E_BAD",
+      ) &&
       cut.inputFeatureIds.includes("E_BAD"),
     "When the only body lineage candidate is baked, the consuming boolean is a true dependent and carries downstream-of-baked.",
   ).toBeTruthy();

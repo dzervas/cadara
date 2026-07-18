@@ -17,13 +17,36 @@ function readCapturedPoint(value: unknown): [number, number, number] | null {
     : null;
 }
 
-/** Encode an Onshape tessellated-faces payload as Cadara baked-mesh bytes. */
+/** Encode Onshape bodies in capture order, retaining each deterministic source ID. */
 export function encodeOnshapeTessellationAsBakedMeshBytes(
   tessellatedFaces: unknown,
+  selectedBodyDeterministicIds?: readonly string[],
 ): Uint8Array | null {
   if (typeof tessellatedFaces !== "object" || tessellatedFaces === null) return null;
-  const bodies = (tessellatedFaces as { bodies?: unknown }).bodies;
-  if (!Array.isArray(bodies) || bodies.length === 0) return null;
+  const rawBodies = (tessellatedFaces as { bodies?: unknown }).bodies;
+  if (!Array.isArray(rawBodies) || rawBodies.length === 0) return null;
+
+  const selectedIds = selectedBodyDeterministicIds
+    ? new Set(selectedBodyDeterministicIds)
+    : null;
+  if (selectedIds && selectedIds.size !== selectedBodyDeterministicIds?.length) return null;
+
+  const bodies: { id: string; faces: unknown[] }[] = [];
+  const capturedIds = new Set<string>();
+  for (const rawBody of rawBodies) {
+    if (typeof rawBody !== "object" || rawBody === null) return null;
+    const body = rawBody as { id?: unknown; faces?: unknown };
+    if (typeof body.id !== "string" || body.id.length === 0 || capturedIds.has(body.id)) {
+      return null;
+    }
+    capturedIds.add(body.id);
+    if (!Array.isArray(body.faces)) return null;
+    if (!selectedIds || selectedIds.has(body.id)) {
+      bodies.push({ id: body.id, faces: body.faces });
+    }
+  }
+  if (selectedIds && [...selectedIds].some((id) => !capturedIds.has(id))) return null;
+  if (bodies.length === 0) return null;
 
   const vertices: [number, number, number][] = [];
   const indices: [number, number, number][] = [];
@@ -33,14 +56,14 @@ export function encodeOnshapeTessellationAsBakedMeshBytes(
     indexCount: number;
   }[] = [];
 
-  for (const [bodyIndex, body] of bodies.entries()) {
-    const faces = (body as { faces?: unknown }).faces;
-    if (!Array.isArray(faces)) return null;
+  for (const body of bodies) {
     const indexStart = indices.length;
-    for (const face of faces) {
+    for (const face of body.faces) {
+      if (typeof face !== "object" || face === null) return null;
       const facets = (face as { facets?: unknown }).facets;
       if (!Array.isArray(facets)) return null;
       for (const facet of facets) {
+        if (typeof facet !== "object" || facet === null) return null;
         const rawVertices = (facet as { vertices?: unknown }).vertices;
         if (!Array.isArray(rawVertices) || rawVertices.length !== 3) return null;
         const points = rawVertices.map(readCapturedPoint);
@@ -53,7 +76,7 @@ export function encodeOnshapeTessellationAsBakedMeshBytes(
     const indexCount = indices.length - indexStart;
     if (indexCount === 0) return null;
     components.push({
-      sourceComponentKey: `onshape-tessellation-body-${bodyIndex}`,
+      sourceComponentKey: `onshape-body:${body.id}`,
       indexStart,
       indexCount,
     });
@@ -70,12 +93,16 @@ export function encodeOnshapeTessellationAsBakedMeshBytes(
   );
 }
 
-/** Encode the v2 post-feature checkpoint used to replace one failed consumer. */
+/** Encode the selected v2 post-feature checkpoint bodies. */
 export function encodeRollbackSnapshotBake(
   snapshot: OnshapeRollbackSnapshot | null,
+  checkpointBodyDeterministicIds?: readonly string[],
 ): Uint8Array | null {
   return snapshot
-    ? encodeOnshapeTessellationAsBakedMeshBytes(snapshot.tessellatedFaces)
+    ? encodeOnshapeTessellationAsBakedMeshBytes(
+        snapshot.tessellatedFaces,
+        checkpointBodyDeterministicIds,
+      )
     : null;
 }
 
@@ -96,9 +123,17 @@ export async function prepareRollbackCheckpointBake(input: {
   featureLabel: string;
   studioElementId: string;
   studioName: string;
+  checkpointBodyDeterministicIds?: readonly string[];
+  provenanceFeatureSpan?: {
+    fromFeatureId: string;
+    toFeatureId: string;
+  };
   replacementActionIndexes: readonly number[];
 }): Promise<RollbackCheckpointBakeResult> {
-  const bytes = encodeRollbackSnapshotBake(input.snapshot);
+  const bytes = encodeRollbackSnapshotBake(
+    input.snapshot,
+    input.checkpointBodyDeterministicIds,
+  );
   if (!bytes || !input.snapshot) {
     return { kind: "missing", reason: "topology-bake-snapshot-missing" };
   }
@@ -123,7 +158,7 @@ export async function prepareRollbackCheckpointBake(input: {
             source: "onshape",
             sourceId: input.studioElementId,
             sourceName: input.studioName,
-            featureSpan: {
+            featureSpan: input.provenanceFeatureSpan ?? {
               fromFeatureId: input.snapshot.featureId,
               toFeatureId: input.snapshot.featureId,
             },
