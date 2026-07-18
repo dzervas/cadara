@@ -585,6 +585,7 @@ export class ImportDeferredMaterializer {
       : never,
     consumer: ImportPreparedActionRef,
   ): Promise<CreateFeatureRequest> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- rest-sibling destructuring strips `topologyFallback` from the forwarded request.
     const { topologyFallback: _topologyFallback, ...requestWithoutFallback } = request;
     if (request.definition?.kind === "bakedBody") {
       const replacement = request.definition.parameters.replacement;

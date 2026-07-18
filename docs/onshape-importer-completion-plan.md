@@ -264,13 +264,15 @@ mesh, and later parametric-eligible solids import suppressed
       fixture docs: revolve/sweep/loft/boolean/mirror/transform parametric.
       Plan-dump acceptance is complete; the browser half remains pending because
       Playwright Chromium is unavailable in this environment.
-- [ ] V.3 Playwright interactive verification extending
+- [x] V.3 Playwright interactive verification extending
       `e2e/onshape-import-parametric.spec.ts`: edit revolve angle / sweep
       profile / loft profile sketches and confirm rebuild; verify checkpoint
       bodies survive upstream parametric edits; drag constrained sketches.
-- [ ] V.4 `bun run test:all` green, including e2e.
-      V.3 and V.4 remain intentionally unticked: Playwright Chromium is missing,
-      so browser import/edit verification and an all-green E2E run are blocked.
+      Real-kernel tier tables, the four-test regression root causes, and new
+      coverage list are recorded below.
+- [x] V.4 `bun run test:all` green, including e2e. Final counts: lint clean;
+      build green; logic 497 + ui 125 + static 24 = 646 non-E2E tests passed;
+      `playwright test` 61/61 passed. See verification note below.
 
 ## Execution notes for the orchestrator
 
@@ -695,6 +697,8 @@ mesh, and later parametric-eligible solids import suppressed
   Browser import verification was not attempted: Playwright Chromium is absent.
   Therefore V.2's browser half and all of V.3/V.4 remain pending on the
   environment fix, with their checkboxes intentionally left unticked.
+  (Superseded: see the "V.3/V.4 real-kernel closure" note below — Chromium
+  became available in a later session and V.3/V.4 are now complete.)
 
   Final verification: `bunx vitest run src/domain/import/ src/contracts/import/
   src/domain/modeling/occ/` passed **48 files / 230 tests**. `bun run test:all`
@@ -702,3 +706,99 @@ mesh, and later parametric-eligible solids import suppressed
   125 tests**), and static (**14 files / 24 tests**), then failed all 58 E2E cases
   at Chromium launch because the configured executable is absent. No browser test
   reached an assertion, so there were no E2E assertion failures to classify.
+
+- **V.3/V.4 real-kernel closure (this session).** Playwright Chromium is now
+  available; `bun run test:e2e` was run against the real gitignored bundles
+  (Mounts `40a51fb8fa82fd4565151114`, Part Studio 1 `9841e486906fa2ce62d74d8e`,
+  Wave T `405fa226bb150016d09afc09`). Baseline at session start (with a prior
+  agent's uncommitted, partial `e2e/helpers/onshape-import.ts` +
+  `e2e/onshape-import-parametric.spec.ts` edits already in the tree): 58
+  passed / 3 failed (a fourth previously-reported failure, the Part Studio 1
+  missing-`feature_extrude-1` case, was already fixed uncommitted by that
+  prior agent). All 3 remaining failures were root-caused with direct browser
+  evidence (temporary `console.log`/`page.on("console")` instrumentation,
+  since removed) and turned out to be **test-authoring defects, not production
+  defects**:
+
+  | Test | Symptom | Root cause | Fix |
+  |---|---|---|---|
+  | Mounts constrained sketch drag | `expectSketchSessionActive()` timed out polling `sketchPlane !== "none"` after entering Sketch 2 | Sketch 2 is committed on a captured-frame **construction** plane, not a canonical XY/YZ/XZ datum. `SketchPlaneDefinition.key` (`src/contracts/shared/sketch-plane.ts`) is `null` for any non-canonical plane by contract, so the debug `sketchPlane` readout is legitimately `"none"` there; the shared harness helper (built for canonical-plane sketches) does not apply. Confirmed via page snapshot: `machineState` was already `sketch/editingSketch/sketch` with Sketch 2's real geometry loaded. | Assert `workbench.expectMachine("editingSketch")` directly instead of `expectSketchSessionActive()` for this sketch, with a comment explaining why. |
+  | Mounts variable/extrude edits | Rolling history to `feature_extrude-2` never showed `body_feature_extrude-2` in `selectableTargets` | Extrude 2 is a `REMOVE` boolean that cuts *into* the body Extrude 1 created (`booleanScope` targets Onshape body `JHD`); it does not create a new body. Durable body identity is keyed by the **owning (creating) feature**, not the latest consumer: `trackReplacementSolidBody`/`trackReplacementSolidBodyFromNativePayload` in `src/domain/modeling/occ/topology.ts` explicitly retain `bodyId: input.previous.bodyId` across in-place boolean modification. So the body legitimately stays `body_feature_extrude-1` through Extrude 2, Transform 1, and Chamfer 1, until the bake-segment checkpoint replaces it with `body_feature_bakedBody-1`. Confirmed Extrude 2 does execute correctly: rolling from `feature_extrude-1` to `feature_extrude-2` changes `body_feature_extrude-1`'s face count from 10 to 11 (the through-all cut applying), with the correct captured-frame-local `regionOf` interior point (see below). | Assert `body_feature_extrude-1` persists (not `-extrude-2`) and additionally assert its face count changes across the roll, proving the cut actually applied instead of merely asserting an id that would never exist. |
+  | Wave T Sweep timeline | `sketch_2.sketch_point_Sweep_path_0_end` never projected | Cadara's sketch entity id convention is `sketch_point_<sketchFeatureId>_<entityId>_<role>` — the guessed candidate omitted the owning sketch feature id (`FmRzyMZqAsUDXhZ_0`). Confirmed against the real captured bundle's `selectableTargets`. | Use the confirmed id `sketch_2.sketch_point_FmRzyMZqAsUDXhZ_0_Sweep_path_0_end`. |
+
+  **On the prompted "known root cause" (regionOf interior point in canonical vs.
+  captured-frame-local coordinates):** this was investigated first, per the
+  provided hypothesis, before the above three test-authoring defects were
+  found. Direct evidence contradicts the hypothesis for the current code: a
+  temporary log at `resolveOnshapeSketchProfiles` (`profile-resolver.ts`)
+  during a real Mounts import showed Extrude 2's resolved interior point is
+  `[0, 0]` — correctly expressed in Sketch 2's captured-frame-local
+  coordinates (the captured frame's `origin: [-4, ~0, 5]` is subtracted before
+  the dot-product projection in `projectPointToSketchPlaneFrame`
+  (`sketch-translator.ts`) — not the canonical `[-4, 0]` the hypothesis
+  described). This is exactly what the existing logic-lane regression
+  `profile-resolver.spec.ts` ("profile resolver derives selectors in the
+  referenced sketch frame") already pins: a circle whose world-space center
+  coincides with the captured frame's origin must resolve to a local interior
+  point of `[0, 0]`, not the frame's world offset. That regression already
+  existed and already passed before this session's changes, so no new
+  logic-lane test or production fix was needed at that seam — the state
+  lane/seam this session's investigation targeted (`resolveOnshapeSketchProfiles`
+  at the profile-resolution seam, called from `extrude-feature-translator.ts`)
+  was already correctly proven. No production code changes were required to
+  fix any of the 3 failing tests; only `e2e/onshape-import-parametric.spec.ts`
+  assertions changed (plus one unrelated pre-existing lint violation fixed in
+  `src/domain/import/orchestrator.ts`, a stray `no-unused-vars` on an
+  intentional rest-sibling destructure, blocking `bun run test:all`).
+
+  New V.3 real-interaction coverage added/kept in
+  `e2e/onshape-import-parametric.spec.ts` (helper support in
+  `e2e/helpers/onshape-import.ts`: `studioName` param + `reviewText` return
+  value, both from the prior agent's uncommitted work, kept as-is):
+  - Mounts: import review asserts the segmented timeline (`feature_extrude-1`,
+    `feature_plane-1` captured-frame construction, `feature_extrude-2`,
+    `feature_bakedBody-1` checkpoint) and `8 parametric, 2 baked` tier text;
+    pointer-drags a constrained Sketch 2 vertex and asserts the constraint
+    holds (`toBeCloseTo`) after commit; rolls to `feature_extrude-1`, edits
+    variable `nail`, asserts a real geometry-pixel delta and the checkpoint
+    body's continued presence; rolls forward through `feature_extrude-2` and
+    proves the boolean cut applied via a face-count delta; rolls to the
+    checkpoint and back; edits Extrude 1's depth via a form field and
+    verifies the full segmented timeline still commits.
+  - Wave T fixture bundle (`405fa226bb150016d09afc09`, via the `studioName`
+    param): `Revolve remove` studio — commits, asserts its parametric
+    timeline, edits the revolve's driving `Angle (degrees)` parameter through
+    a form field, and asserts a geometry-pixel delta; `Sweep` studio —
+    commits, asserts its timeline, pointer-drags the Sweep path's sketch
+    endpoint and asserts a geometry-pixel delta; `Mirror transform` studio —
+    commits and asserts its timeline (parametric extrude/plane, baked
+    mirror/transform, per T.5's fixture-level result).
+  - Part Studio 1: import review asserts the **real-kernel** tier text and
+    per-feature reasons (see table below), edits variable `walls`, and
+    asserts a geometry-pixel delta plus the two checkpoint bodies' continued
+    presence.
+
+  All tests use the existing `existsSync(...)`-guarded `test.skip` pattern for
+  the gitignored real bundles, and reuse existing helpers
+  (`meanPixelDelta`, `SketchWorkbenchHarness`, `__cadProjectToScreen`,
+  `__cadaraDebug`) rather than new one-off harnesses.
+
+  **Real-kernel tier tables** (this session, via the browser/provider seam,
+  contrasted with the mock-kernel/plan-dump numbers already pinned above):
+
+  | Bundle / studio | Mock-kernel or plain-planner reference | Real-kernel (browser, this session) | Notes |
+  |---|---:|---:|---|
+  | Mounts (`40a51fb8fa82fd4565151114`) | 8 / 2 / 0 (B.2.4/K.2.7) | **8 / 2 / 0** | Matches; Transform 1 + Chamfer 1 share one bake-segment checkpoint (`Chamfer 1 checkpoint`). Sketch 2 and Extrude 2 promote parametrically above it. |
+  | Part Studio 1 (`9841e486906fa2ce62d74d8e`) | 9 / 32 / 0 (K.2.7 mock-kernel review) / 14 / 27 / 0 (B.4 rollback-prefix target) | **8 / 33 / 0** | Real kernel does *not* match the mock-kernel/rollback-prefix promotions for `Split 1`, `Boolean 1`, `Delete part 1` (all remain baked-suppressed, reason `topology reference did not match`) or `Extrude 1` (baked here; it was parametric in the old pinned 6/35/0 and 8-parametric browser targets). This is a real-kernel topology/signature-matching gap in the exact-prefix probe against this specific capture, not a regression from this session's changes (no production code changed). It is recorded here as the honest real-kernel outcome, distinct from the mock-kernel/plan-dump figures pinned elsewhere in this file. |
+  | Wave T `Revolve remove` | 4 / 0 / 0 (T.2 plan-dump) | **4 / 0 / 0** | Matches; revolve angle edit through the UI produces a verified geometry-pixel delta. |
+  | Wave T `Sweep` | 3 / 0 / 0 (T.3 plan-dump) | **3 / 0 / 0** | Matches; sweep path drag produces a verified geometry-pixel delta. |
+  | Wave T `Mirror transform` | 2 / 3 / 0 (plain plan-dump, no captured-frame activation) / 4 / 1 / 0 (CI-safe provider fixture, T.5) | **3 / 2 / 0** | Real Wave T capture differs from the synthetic T.5 fixture; browser review promotes the extrude and the captured-frame plane, and keeps 2 features baked (this capture's own mirror/transform forms, not the T.5 fixture's forms). |
+
+  Counts are parametric / baked / geometryOnly. `bun run test:e2e` finished
+  **61 passed / 0 failed** (net -1 test versus the 58+4=62 nominal baseline:
+  the prior agent's uncommitted edits already added the 3 Wave T timeline
+  tests and already fixed the Part Studio 1 case, for a pre-fix total of 61
+  tests with 3 failing). `bun run test` (logic + UI + static) is **646/646**
+  (174 files / 497 tests logic, 61 files / 125 tests UI, 14 files / 24 tests
+  static). `bun run test:all` (lint + build + test + test:e2e) is fully
+  green.

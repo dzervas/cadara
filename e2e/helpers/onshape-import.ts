@@ -8,11 +8,15 @@ export const MOUNTS_BUNDLE_PATH = resolve(
 export const PART_STUDIO_BUNDLE_PATH = resolve(
   "9841e486906fa2ce62d74d8e.onshape-capture.json",
 );
+export const WAVE_T_BUNDLE_PATH = resolve(
+  "405fa226bb150016d09afc09.onshape-capture.json",
+);
 
 export async function importBundle(
   page: Page,
   bundlePath: string,
   finishSketch = false,
+  studioName?: string,
 ) {
   await page.addInitScript(() =>
     Object.defineProperty(globalThis, "showOpenFilePicker", {
@@ -31,8 +35,16 @@ export async function importBundle(
   const fileChooser = await fileChooserPromise;
   await fileChooser.setFiles(bundlePath);
 
+  if (studioName) {
+    const studio = page.getByRole("combobox", { name: "Part Studio" });
+    await studio.click();
+    await page.getByRole("option", { name: new RegExp(`^${escapeRegExp(studioName)} \\(`) }).click();
+    await expect(studio).toHaveValue(new RegExp(`^${escapeRegExp(studioName)} \\(`));
+  }
+
   const commit = page.getByRole("button", { name: "Commit", exact: true });
   await expect(commit).toBeEnabled({ timeout: 60_000 });
+  const reviewText = await page.locator("main").innerText();
   await commit.click();
   await waitForRevisionChange(page, beforeRevision);
 
@@ -53,6 +65,8 @@ export async function importBundle(
     }
     await waitForMachineIdle(page);
 }
+
+  return { reviewText };
 }
 
 export async function editVariable(page: Page, name: string, value: string) {
@@ -106,4 +120,8 @@ export async function waitForMachineIdle(page: Page) {
     undefined,
     { timeout: 60_000 },
   );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
