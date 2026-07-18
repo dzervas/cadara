@@ -50,14 +50,14 @@ bundle is absent). After each item: `bun run test:all` relevant slices green.
 
 ## Phase 0 — Captures & harness (parallel-safe, do first)
 
-- [ ] 0.1 **Restore the second capture + make real-bundle specs skip cleanly.**
+- [x] 0.1 **Restore the second capture + make real-bundle specs skip cleanly.**
       Recapture `9841e486906fa2ce62d74d8e` with `--rollback-snapshots` into the
       repo root (stays gitignored). Change every spec that loads root
       `*.onshape-capture.json` (fidelity-planner, provider, apply-pipeline,
       e2e helpers) to `test.skipIf(!existsSync(...))` instead of failing, so CI
       and fresh clones stay green while local runs still pin tier baselines.
       Record fresh tier counts for both bundles here.
-- [ ] 0.2 **Fixture documents for missing feature types.** The two real docs
+- [x] 0.2 **Fixture documents for missing feature types.** The two real docs
       contain no revolve/sweep/loft/thicken/mirror/hole history. Author one or
       more Onshape test documents (via API: create document → add features via
       `POST .../features`, or manually if simpler) exercising: revolve
@@ -77,7 +77,7 @@ bundle is absent). After each item: `bun run test:all` relevant slices green.
 
 ## Phase K — Kernel spike (parallel with everything; gates Wave S)
 
-- [ ] K.1 **Durable-naming pre-8.0 feasibility spike (no production code).**
+- [x] K.1 **Durable-naming pre-8.0 feasibility spike (no production code).**
       Investigate whether per-feature rebuild-stage naming state + sketch
       profile-generation lineage can be added to the current OCC 7.x shim so
       the `test.fails` release gate in
@@ -88,8 +88,49 @@ bundle is absent). After each item: `bun run test:all` relevant slices green.
       or (b) infeasible → explicit deferral to the BRepGraph migration
       (`openspec/changes/modernize-occ-kernel-topology`) and Wave S stays
       gated. Nearest-geometry matching is not an acceptable outcome.
-- [ ] K.2 *(only if K.1 says feasible)* Implement, flip
-      `supportsDurableTopologyNaming`, delete the `test.fails` gate.
+- [x] K.2 **Implement semantic per-feature stage naming (feasible; medium-high risk).**
+      Decision and evidence: `docs/architecture/durable-naming-pre8-spike.md`.
+      No geometry/traversal matching is permitted; Wave S remains gated until
+      K.2.7 flips the capability.
+  - [x] K.2.1 **Retain feature-stage state.** Add internal
+        `src/domain/modeling/occ/topology-stage.ts`; thread old/current stages by
+        feature/output slot through `authoring-state.ts` and `features/shared.ts`.
+        JS only, no Wasm rebuild. Verify rebuild, reorder, and suppression do not
+        cross-associate stages.
+  - [x] K.2.2 **Retain sketch profile provenance.** In `sketch-profile.ts`, reuse
+        OCC vertices by `SketchPointId` and return edges/vertices keyed by
+        `SketchEntityId` or projected-reference key; unsupported approximations
+        are explicit. JS only. Verify line/arc/circle/projected source maps and
+        deleted source IDs.
+  - [x] K.2.3 **Project provenance through extrude history.** In `features/extrude.ts`,
+        query the already-bound prism `Generated`/`FirstShape`/`LastShape` APIs
+        before disposing builders; key profile slot/end roles and compose available
+        draft/boolean history. JS only; current recipe is sufficient. Verify full
+        rectangle topology coverage, dimension one-successor, rectangle→triangle
+        zero-successor, and two-side/multi-profile/unsupported-draft outcomes.
+  - [x] K.2.4 **Reconcile before downstream execution.** In `topology-naming.ts`,
+        `topology.ts`, and `authoring-state.ts`, classify exact semantic keys as
+        zero/one/many, preserve old IDs only for one-to-one claims, and install
+        deleted/ambiguous/unsupported invalidations before the next feature. JS
+        only. Verify downstream fillet either receives the proved ID or fails with
+        a structured invalid-reference diagnostic before OCC execution.
+  - [x] K.2.5 **Close fresh-ID resurrection.** In `topology.ts` and feature
+        reference preconditions, quarantine fresh new-body ID collisions without
+        stage proof. JS only; this is independently shippable as the honest-deleted
+        partial. Verify exact delete/recreate remains invalid while a proved
+        semantic successor stays live.
+  - [x] K.2.6 **Cover producers conservatively.** Add revolve source roles in
+        `features/revolve.ts`; audit draft/sweep/loft/thicken/face-backed/multi-result
+        paths. Every unsupported path invalidates rather than remaps. Add a native
+        shim transaction and rebuild Wasm only if profiling/evidence shows the
+        existing bindings cannot carry a required relation; mark it for BRepGraph
+        deletion. Verify every executable new-body producer proves successors or
+        reports unsupported history.
+  - [x] K.2.7 **Qualify and flip.** Logic lane at the OCC authored-rebuild/reference
+        seam: remove `test.fails`, pin zero/one/many plus coincident-recreate and
+        unsupported cases, retain dimension/reorder/suppression coverage, then flip
+        `supportsDurableTopologyNaming`. Run the focused Vitest file and
+        `bun run test:all`; only then unblock Phase S.
 
 ## Phase T — Translator breadth (parallel wave; each item independent)
 
@@ -98,7 +139,7 @@ specific reason codes for the combos that stay degraded + plan-dump evidence on
 the relevant capture. All these target contract surface that already executes
 in OCC — no kernel changes allowed in this wave.
 
-- [ ] T.1 **Extrude extents & scope.** Support `UP_TO_FACE`/`UP_TO_NEXT`/
+- [x] T.1 **Extrude extents & scope.** Support `UP_TO_FACE`/`UP_TO_NEXT`/
       `UP_TO_PART` via the exact-prefix topology resolver (same machinery as
       the existing bespoke `UP_TO_VERTEX` promotion — generalize it, delete the
       bespoke path), two-side extrudes, `draftAngle`, and multi-body
@@ -106,36 +147,36 @@ in OCC — no kernel changes allowed in this wave.
       slots instead of the current unconditional `needs-history-probe` at
       `extrude-planner.ts:230`). Ambiguous no-scope multi-body cases keep a
       specific reason code.
-- [ ] T.2 **Revolve breadth + honest diagnostics.** Split the collapsed
+- [x] T.2 **Revolve breadth + honest diagnostics.** Split the collapsed
       `revolve-axis-unresolved` catch-all into per-cause codes (operation,
       bodyType, profile, axis, extent). Add: ADD/REMOVE/INTERSECT via deferred
       body scope (reuse extrude's boolean lineage logic), two-direction/
       symmetric extents, axis from a construction line in another parametric
       sketch (`sketchIdOf` deferred) and from canonical datum axes.
-- [ ] T.3 **Sweep single-path.** Parametric when the profile resolves via the
+- [x] T.3 **Sweep single-path.** Parametric when the profile resolves via the
       shared region resolver and the path query resolves to exactly one solved
       line/arc/circle entity in another parametric sketch (`sketchIdOf` +
       entityId deferred, mirroring the revolve axis mechanism). Multi-curve
       chains keep `sweep-path-unresolved` with copy saying why.
-- [ ] T.4 **Loft simple form.** Parametric for ordered `sheetProfilesArray`/
+- [x] T.4 **Loft simple form.** Parametric for ordered `sheetProfilesArray`/
       `wireProfilesArray` entries that each resolve to one region on a
       parametric sketch (multiple `regionOf` deferred profiles — the
       cross-action machinery already supports N actions), default conditions,
       no guides, not periodic. Guides/conditions/periodicity degrade with
       distinct reason codes instead of the blanket `loft-profile-unresolved`.
-- [ ] T.5 **Mirror/transform beyond canonical datums.** Accept translated
+- [x] T.5 **Mirror/transform beyond canonical datums.** Accept translated
       cPlanes (the `plane-from-captured-frame` constructions) as mirror planes
       and transform distance references via `constructionOf` deferreds;
       currently only canonical datum planes pass
       (`wave-b-body-feature-translators.ts:64-80`). Transform rotation and
       copy remain out of scope with their existing codes.
-- [ ] T.6 **Chamfer width forms within the existing contract.** Audit what the
+- [x] T.6 **Chamfer width forms within the existing contract.** Audit what the
       cadara chamfer contract + OCC executor actually accept beyond
       equal-offsets (two distances? distance+angle?). Translate every form the
       contract can express; keep `chamfer-style-unsupported` only for the
       rest. Note: chamfer stays plan-gated on durable naming (Wave S) — this
       item makes the translation ready so the gate-flip is a one-liner.
-- [ ] T.7 **Shell non-hollow audit.** Same pattern as T.6: if the contract's
+- [x] T.7 **Shell non-hollow audit.** Same pattern as T.6: if the contract's
       shell can express Onshape's non-hollow (offset) shell, translate it;
       otherwise keep the reason code and document why in the translator.
 
@@ -146,26 +187,49 @@ baked feature converts the entire downstream history into one final-state
 mesh, and later parametric-eligible solids import suppressed
 (`fidelity-planner.ts:11-13`). v2 rollback snapshots make this unnecessary.
 
-- [ ] B.1 **Design doc first** (`docs/architecture/onshape-bake-segments.md`):
-      segment the history into parametric runs and baked runs; each baked run
-      materializes one `bakedBody` checkpoint from the rollback snapshot of
-      its last feature (machinery exists in `rollback-bake.ts`); downstream
-      parametric consumers resolve bodies out of the checkpoint via the
-      existing exact-prefix resolver + apply-time rematch. Must answer:
-      checkpoint body identity across segments, interaction with
-      `replaceBodyOutputs`, diagnostics shape, and what happens when a
-      snapshot is missing (v1 bundles keep today's whole-studio semantics —
-      no behavior change without snapshots).
-- [ ] B.2 **Planner: segment-aware lineage.** Replace the boolean
-      first-bake poisoning with per-segment tracking; a feature downstream of
-      a baked segment plans parametric when all its consumed bodies/regions
-      are reachable from checkpoint + parametric prefix. `downstream-of-baked`
-      only when genuinely blocked.
-- [ ] B.3 **Provider/orchestrator: checkpoint emission.** Emit interleaved
-      bakedBody checkpoint actions in `orderedActions`; wire deferred body
-      refs (`bodyOf` / `topologyOf`) to checkpoint outputs; apply-time rematch
-      unchanged. Whole-studio bake retained only for v1/no-snapshot bundles.
-- [ ] B.4 **Real-capture evidence.** Mounts target: Sketch 2 → Extrude 2
+- [x] B.1 **Design bake segments.** Decisions, fallback invariants, acceptance targets, and one-commit B.2/B.3 task breakdown: `docs/architecture/onshape-bake-segments.md`.
+- [x] B.2 **Planner: segment-aware lineage.** Implement `StudioBakeStrategy`, rollback body-delta/replacement-closure segments, and checkpoint-aware reachability; retain the exact legacy planner for v1/no-snapshot/preflight-failed studios (task order in the design doc).
+  - [x] B.2.1 **Rollback body-delta primitives.** Export exact parsed body
+        shape keys and before/after delta extraction for introduced, changed,
+        removed, and unchanged deterministic body IDs.
+  - [x] B.2.2 **Segment + replacement-closure planner.** Purely plan baked runs,
+        selective checkpoint outputs, carried producer siblings, transitive
+        checkpoint replacement, body bindings, and exact legacy preflight.
+  - [x] B.2.3 **Dependency reachability replaces global poisoning.** Translators
+        declare sketch, body, and topology-query inputs; legacy planning degrades
+        only features whose declared dependency is unreachable, while checkpoint
+        body lineage can be marked reachable by the segment planner.
+  - [x] B.2.4 **Studio bake-strategy integration.** Fidelity planning selects
+        none/segments/whole-studio legacy, replans reviewer demotions, exposes
+        segment diagnostics, and prints checkpoint details in plan-dump output.
+- [x] B.3 **Provider/orchestrator: checkpoint emission.** Emit selective interleaved checkpoints, preserve deterministic body identity through `bodyOf`/`topologyOf`, share body-only mesh signatures for prefix/apply rematch, and add segment review diagnostics (task order in the design doc).
+  - [x] B.3.1 **Deterministic checkpoint source-body identity.** Encode only the
+        planner-selected output/carried bodies in rollback order, key baked-mesh
+        components by Onshape deterministic body ID, and retain the segment
+        provenance span plus exact replacement-action closure.
+  - [x] B.3.2 **Shared body-signature derivation.** Share native and body-only
+        mesh body-signature derivation between exact-prefix review and apply-time
+        rematching, and require `bodyOf` producers to have exactly one output.
+  - [x] B.3.3 **Selective interleaved checkpoint actions.** Emit one planner-selected
+        `bakedBody` checkpoint at each segment boundary with selective replacement
+        scope while preserving complete ordered-action permutations.
+  - [x] B.3.4 **Body reference wiring + apply fallbacks.** Emit `bodyOf` only for
+        proved single-output producers, use body `topologyOf` for attributed
+        multi-output checkpoints, and keep selective post-feature fallbacks at the
+        consumer's ordered position so downstream actions continue.
+  - [x] B.3.5 **Captured-frame sketch after body-only checkpoint.** Emit a visible
+        explicit-frame construction plane from unique captured planar evidence,
+        then support the promoted sketch through `constructionOf` without claiming
+        checkpoint face topology.
+  - [x] B.3.6 **Review-form segment presentation.** Show strategy and checkpoint
+        summaries, segment body/replacement details, preflight diagnostics, and
+        per-feature checkpoint context without replacing intrinsic reasons.
+  - [x] B.3.7 **Synthetic apply-pipeline integration matrix.** Apply two
+        separated baked runs end-to-end with neutral entries, multi-body
+        attribution/replacement closure, successful checkpoint rematching,
+        same-position fallback, downstream continuation, and legacy-v1
+        equivalence.
+- [x] B.4 **Real-capture evidence.** Mounts target: Sketch 2 → Extrude 2
       chain imports parametrically on top of a Transform 1 checkpoint
       (Transform 1 itself stays baked — rotation is out of scope). Part
       Studio 1 target: Boolean 1 / Delete part 1 / Split 1 promote once their
@@ -173,26 +237,40 @@ mesh, and later parametric-eligible solids import suppressed
       showed they resolve automatically when the prefix carries the bodies).
       Record before/after tier counts here.
 
+      | Capture / studio | Before Phase B | After checkpoint-prefix review | Required promotions |
+      |---|---:|---:|---|
+      | Mounts (`865452a3e2270f0ebca3ce63`) | 6 / 4 / 0 | 8 / 2 / 0 | Sketch 2 and Extrude 2 are parametric above the Transform 1 checkpoint; Transform 1 remains baked (`transform-rotation-unsupported`). |
+      | Part Studio 1 (`a294dd6e940aa00fdcb206dc`) | 6 / 35 / 0 | 14 / 27 / 0 | Split 1, Boolean 1, and Delete part 1 are parametric from uniquely attributed checkpoint bodies. |
+
+      Counts are parametric / baked / geometryOnly. Part Studio 1 also promotes
+      Incline, Screen Outline, Chamfer 1, Extrude 8, and Extrude 13 from the
+      already-landed translator and durable-naming work when reviewed against
+      exact rollback-prefix body evidence.
+
 ## Phase S — Subtopology gate flip (only after K.2; otherwise skipped)
 
-- [ ] S.1 Flip the plan-time gate for fillet/chamfer/shell/thicken and
+- [x] S.1 Flip the plan-time gate for fillet/chamfer/shell/thicken and
       sketch-on-probed-face; the translators and resolver paths already exist
       (T.6/T.7 made them current). Re-run both real captures; chamfers in both
       documents should promote. Hole remains `hole-executor-unavailable`.
 
 ## Phase V — Integration & verification (sequential, last)
 
-- [ ] V.1 Review-form copy for every new/changed reason code; per-tier counts
+- [x] V.1 Review-form copy for every new/changed reason code; per-tier counts
       asserted in provider/planner specs against transcript fixtures.
-- [ ] V.2 Import all captures (two real + Phase-0 fixture docs) via plan-dump
+- [x] V.2 Import all captures (two real + Phase-0 fixture docs) via plan-dump
       and the browser; record final tier tables here. Targets: Mounts
       ≥ 8 parametric (only Transform 1 + gated Chamfer 1 baked without K.2);
       fixture docs: revolve/sweep/loft/boolean/mirror/transform parametric.
+      Plan-dump acceptance is complete; the browser half remains pending because
+      Playwright Chromium is unavailable in this environment.
 - [ ] V.3 Playwright interactive verification extending
       `e2e/onshape-import-parametric.spec.ts`: edit revolve angle / sweep
       profile / loft profile sketches and confirm rebuild; verify checkpoint
       bodies survive upstream parametric edits; drag constrained sketches.
 - [ ] V.4 `bun run test:all` green, including e2e.
+      V.3 and V.4 remain intentionally unticked: Playwright Chromium is missing,
+      so browser import/edit verification and an all-green E2E run are blocked.
 
 ## Execution notes for the orchestrator
 
@@ -214,16 +292,413 @@ mesh, and later parametric-eligible solids import suppressed
 | featureType | parametric when | otherwise |
 |---|---|---|
 | assignVariable | always | — |
-| newSketch | canonical datum plane (+ provider promotions: translated cPlane frame, probed face — latter gated) | `needs-history-probe` |
+| newSketch | canonical datum plane, translated cPlane frame, or uniquely probed durable face | `needs-history-probe` / topology match diagnostics |
 | defaultPlane/cPlane | provider promotion from captured frame when a dependent sketch needs it | `needs-history-probe` |
 | extrude | 1 sketch, parametric+solved, BLIND/SYMMETRIC/THROUGH_ALL, resolvable regions, NEW or single-upstream-body boolean | `needs-region-resolution`, `unsupported-feature` (UP_TO_*), `needs-history-probe` (explicit scope / multi-body) |
 | revolve | same-sketch line axis, SOLID, NEW, FULL/one-direction | `revolve-axis-unresolved` (collapsed catch-all) |
-| sweep / loft / thicken | never | `sweep-path-unresolved` / `loft-profile-unresolved` / `thicken-requires-topology` |
+| sweep / loft | supported simple forms with resolvable parametric sketch inputs | specific path/profile/guide/condition/periodicity reason codes |
+| thicken | NEW, one selected face, one-side positive/negative thickness after exact-prefix face resolution | `thicken-requires-topology` |
 | booleanBodies / deleteBodies / splitPart / transform / mirror | body-only topology candidates; promote via exact-prefix probe when all consumed bodies live in parametric prefix | `topology-upstream-baked`, param-specific codes |
-| fillet / chamfer / shell | translate + resolve, then plan-gated | `topology-durable-naming-unavailable` |
+| fillet / chamfer / shell | translate and promote after exact-prefix durable topology resolution | topology match/ambiguity codes or parameter-specific codes |
 | hole | never (no OCC executor — out of scope) | `hole-executor-unavailable` |
 | patterns / draft / rib / primitives / curves / direct-edit / derived | out of scope | Wave-C family codes |
 
 ## Verification notes / tier counts
 
 (filled in by agents as work lands)
+
+- `9841e486906fa2ce62d74d8e` fresh rollback capture: parametric=6, baked=35, geometryOnly=0 (28 rollback snapshots, 328 resolved references).
+- Phase 0.2 Wave-T document: `405fa226bb150016d09afc09`, workspace
+  `50891a71850666bcbdb5d75d`,
+  <https://cad.onshape.com/documents/405fa226bb150016d09afc09/w/50891a71850666bcbdb5d75d>.
+  Captured as the gitignored format-v2 bundle
+  `405fa226bb150016d09afc09.onshape-capture.json`; every studio has non-null
+  rollback snapshots. Checked-in CI coverage is
+  `src/domain/import/onshape/wave-t-capture-fixtures.ts`, using the captured v6
+  envelopes (`fullRevolve`, `sheetProfilesArray`, `TRANSLATION_3D`, etc.).
+  Plan-dump baselines:
+  - `Part Studio 1` (`1011ad3d5713fd25de290062`): sketch + FULL/NEW revolve;
+    parametric=1, baked=1, geometryOnly=0.
+  - `Revolve remove` (`337de0799b893f67db1e2aac`): base sketch/extrude +
+    ONE_DIRECTION BLIND/REMOVE revolve; parametric=3, baked=1, geometryOnly=0.
+  - `Sweep` (`7a2c487fe0f0acdee662e999`): orthogonal profile/path sketches +
+    SOLID/NEW sweep; parametric=2, baked=1, geometryOnly=0.
+  - `Loft` (`fb6fcec023da33168eb1aab9`): profile + offset cPlane + profile +
+    SOLID/NEW loft without guides; parametric=1, baked=3, geometryOnly=0.
+  - `Extrude extents` (`6869c89206c7a4bb97bd9129`): base extrude + two-side
+    extrude + UP_TO_NEXT/REMOVE extrude; parametric=5, baked=1, geometryOnly=0.
+  - `Mirror transform` (`5ce54329c7479e330d9d5c15`): base extrude + offset
+    cPlane + PART mirror + XYZ translation (`makeCopy=false`); parametric=2,
+    baked=3, geometryOnly=0.
+  Skipped/not authored: UP_TO_FACE (UP_TO_NEXT covers the requested alternative),
+  standalone `booleanBodies`, and optional thicken/shell/hole coverage. These
+  remain gated and were deferred after completing the six short core studios.
+- T.1 extrude verification (`6869c89206c7a4bb97bd9129`): before
+  **5 parametric / 1 baked / 0 geometryOnly** (the `UP_TO_NEXT` remove baked
+  with `needs-region-resolution`); after **6 / 0 / 0**. The two-side extrude
+  retains distinct 20 mm / 10 mm ends, and the remove extrude retains
+  `upToNext` plus rollback-identified target-body lineage. `UP_TO_FACE`,
+  `UP_TO_PART`, generalized `UP_TO_VERTEX`, and explicit multi-body scope use
+  translator-declared exact-prefix topology slots; ambiguous default scope now
+  reports `extrude-default-scope-ambiguous`. Pinned captures remain Mounts
+  **6 / 4 / 0** and Part Studio 1 **6 / 35 / 0**.
+- T.6 chamfer audit: Cadara's authoring descriptor validates one positive
+  `distance`; the OCC executor reads only that option and calls the equal-leg
+  `Add_3(distance, distance, edge, face)` path (the native transaction also
+  accepts one distance). Therefore Onshape `FACE_OFFSET` + `EQUAL_OFFSETS` is
+  the only currently expressible width form. `TWO_OFFSETS` and `OFFSET_ANGLE`
+  remain honestly baked with `chamfer-style-unsupported`; other measurement
+  methods retain `chamfer-method-unsupported`. The translator accepts both
+  captured `chamferType` and the `chamferStyle` parameter spelling and emits
+  only the executable `{ distance }` option.
+
+  | Capture / studio | Before | After | Chamfer review reasons after |
+  |---|---:|---:|---|
+  | Mounts (`865452a3e2270f0ebca3ce63`) | 6 / 4 / 0 | 6 / 4 / 0 | Chamfer 1: `topology-durable-naming-unavailable` |
+  | Part Studio 1 (`a294dd6e940aa00fdcb206dc`) | 6 / 35 / 0 | 6 / 35 / 0 | Chamfer 1, 2, 4: `topology-durable-naming-unavailable`; Chamfer 3: `chamfer-style-unsupported` |
+
+  Counts are parametric / baked / geometryOnly. The mandatory Wave-T capture
+  `405fa226bb150016d09afc09` contains no chamfer feature, so it has no relevant
+  T.6 studio; all six studios were nevertheless plan-dumped after the change
+  to check for collateral planning changes.
+- T.3 sweep verification (`7a2c487fe0f0acdee662e999`): before
+  **2 parametric / 1 baked / 0 geometryOnly** (`Solid sweep`:
+  `sweep-path-unresolved`); after **3 / 0 / 0**. The profile is deferred through
+  `regionOf`, and the single solved circle path in the second parametric sketch
+  is deferred through `sketchIdOf` plus its translated entity id. Synthetic
+  coverage keeps a multi-curve path baked and verifies provider preparation and
+  apply-time path materialization. Pinned captures remain Mounts **6 / 4 / 0**
+  and Part Studio 1 **6 / 35 / 0**.
+- T.7 shell audit: Cadara cannot express Onshape's non-hollow
+  offset-all-faces form. `ShellFeatureParameters` defines removable
+  `faceTargets`; modeling-service normalization rejects an empty list; and both
+  OCC execution paths require opening faces for `MakeThickSolidByJoin` (or the
+  native equivalent). The translator therefore retains
+  `shell-non-hollow-unsupported`, with logic coverage for that exact reason.
+  The real Part Studio envelope is instead `isHollow=true`, `entities=[]`, so
+  Shell 1 correctly remains `shell-hollow-without-openings`.
+
+  | Capture / studio | Before | After | Shell review reason after |
+  |---|---:|---:|---|
+  | Part Studio 1 (`a294dd6e940aa00fdcb206dc`) | 6 / 35 / 0 | 6 / 35 / 0 | Shell 1: `shell-hollow-without-openings` |
+  | Mounts (`865452a3e2270f0ebca3ce63`) | 6 / 4 / 0 | 6 / 4 / 0 | No shell feature |
+
+  Counts are parametric / baked / geometryOnly. The Wave-T capture
+  `405fa226bb150016d09afc09` contains no shell studio; all six studios were
+  plan-dumped after the audit and showed no shell-related collateral change.
+- T.4 loft verification (`fb6fcec023da33168eb1aab9`): the mandatory plain
+  planner table remains **1 parametric / 3 baked / 0 geometryOnly** before and
+  after because captured-frame cPlane promotion is intentionally a provider
+  review capability. The logic-lane provider review changes from **1 / 3 / 0**
+  to **4 / 0 / 0**:
+
+  | Feature | Before | After |
+  |---|---|---|
+  | Loft profile A | parametric — `sketch-on-canonical-plane` | same |
+  | Loft offset plane | baked — `translator-unavailable` | parametric — `plane-from-captured-frame` |
+  | Loft profile B | baked — `topology-durable-naming-unavailable` | parametric — `sketch-on-translated-plane` |
+  | Solid loft | baked — `loft-profile-unresolved` | parametric — no reason |
+
+  The loft preserves ordered `sheetProfilesArray`/`wireProfilesArray` entries as
+  one deferred `regionOf` target per parametric sketch. Guide curves, non-default
+  end conditions, and periodic lofts now report `loft-guides-unsupported`,
+  `loft-conditions-unsupported`, and `loft-periodicity-unsupported`. Pinned
+  captures remain Mounts **6 / 4 / 0** and Part Studio 1 **6 / 35 / 0**.
+
+- T.2 revolve verification: deferred revolve parameters now share
+  `ImportDeferredFeatureBooleanScope` with extrude, validation blesses and checks
+  `bodyOf` at the common boolean-scope position for both feature kinds, and the
+  orchestrator materializes that scope before returning either request. Checked-in
+  Wave-A/Wave-T logic coverage proves ADD/REMOVE/INTERSECT lineage, remote-sketch
+  axes, symmetric/two-side extents, prepared-action validation, and apply-time body
+  materialization.
+
+  | Capture / studio | Before | After | Revolve result after |
+  |---|---:|---:|---|
+  | Revolve remove (`337de0799b893f67db1e2aac`) | 3 / 1 / 0 | 4 / 0 / 0 | `Blind remove on extrude`: parametric |
+  | FULL revolve (`1011ad3d5713fd25de290062`) | 1 / 1 / 0 | 2 / 0 / 0 | `Full revolve`: parametric |
+
+  Counts are parametric / baked / geometryOnly. The mandatory remove-revolve
+  plan dump now has no studio bake. Pinned real captures remain Mounts **6 / 4 / 0**
+  and Part Studio 1 **6 / 35 / 0**.
+
+- T.5 translated-cPlane verification: advanced-solid participant targets now
+  accept `constructionOf`; the blessed-position validator enforces an earlier
+  `createFeature` producer, and `ImportDeferredMaterializer` resolves the recorded
+  plane-feature construction to a durable `{ kind: "construction", constructionId }`
+  target. Mirror planes and transform distance references recognize cPlane
+  `planeOp` queries as `constructionFromFeature` planning refs; provider prepare
+  rewrites them to ordered `constructionOf` participants. Rotation and copy remain
+  out of scope.
+
+  | Evidence / studio | Before | After | Detail |
+  |---|---:|---:|---|
+  | Plain plan dump, Mirror transform (`5ce54329c7479e330d9d5c15`) | 2 / 3 / 0 | 2 / 3 / 0 | Static planning has no captured-frame activation; cPlane, mirror, and transform report `needs-history-probe`. |
+  | CLI `--review` mock kernel | 2 / 3 / 0 | 3 / 2 / 0 | cPlane promotes with `plane-from-captured-frame`; mirror and XYZ transform remain `topology-reference-no-match` because the generic mock probe emits no matching live body signatures. |
+  | CI-safe Wave-T provider fixture with matching history-point body evidence | 3 / 2 / 0 | 4 / 1 / 0 | `Part mirror` promotes parametric and prepare emits its plane participant as `constructionOf`; the remaining baked feature is the fixture's separate XYZ transform, not the distance-reference form. |
+
+  The translated-plane path is therefore proved at the provider review/prepare
+  seam rather than by the CLI mock review. Separate translator logic coverage
+  proves `TRANSLATION_BY_DISTANCE` uses the same deferred construction participant.
+  Pinned real captures remain Mounts **6 / 4 / 0** and Part Studio 1 **6 / 35 / 0**.
+
+- B.2.1 rollback body-delta verification: the logic-lane rollback reader spec
+  covers exact body-shape persistence, introduction, change, disappearance,
+  unchanged features, sparse snapshot lookup, and missing-boundary refusal using
+  synthetic Wave-B fixtures plus both available real rollback bundles. Focused
+  Vitest (7 tests), targeted ESLint, and the production build are green. Plan
+  dumps remain pinned at Mounts **6 / 4 / 0** and Part Studio 1 **6 / 35 / 0**.
+  E2E was skipped because Playwright Chromium is unavailable in this environment.
+- K.2.1 feature-stage state verification: internal stages now retain changed
+  tracked bodies by semantic feature id and body output slot, expose only the
+  matching prior feature stage during execution, and omit suppressed current
+  stages. Logic coverage verifies rebuild, reorder, and suppression do not
+  cross-associate outputs. `bunx vitest run src/domain/modeling/occ/` is green
+  (58 passed, 1 expected fail); lint, production build, and all non-E2E suites
+  are green. E2E was skipped because Playwright Chromium is unavailable.
+- K.2.2 sketch-profile provenance verification: profile construction now reuses
+  exact OCC vertices by `SketchPointId`, retains authored line/arc/circle edges
+  by `SketchEntityId`, and keys projected edges/endpoints by their authored
+  reference plus projected geometry id. Sampled ellipse/profile-text outlines
+  are explicitly marked `approximated` instead of receiving semantic edges.
+  Logic coverage proves shared rectangle vertices, line/arc/circle/projected
+  maps, rectangle-to-triangle deleted source IDs, and approximation diagnostics.
+  `bunx vitest run src/domain/modeling/occ/` is green (58 passed, 1 expected
+  fail). Pinned import plans are unaffected. E2E was skipped because Playwright
+  Chromium is unavailable in this environment.
+- B.2.2 segment-planner verification: the pure logic seam collapses consecutive
+  baked body changes into one checkpoint, preserves independent producers,
+  carries multi-output siblings, closes transitively over prior checkpoints,
+  emits deterministic body bindings, and refuses deletion-only or unresolved
+  boundaries with exact legacy preflight codes. Focused Vitest (13 tests),
+  targeted ESLint/TypeScript, and all non-E2E suites are green. Plan dumps remain
+  pinned at Mounts **6 / 4 / 0** and Part Studio 1 **6 / 35 / 0**. E2E was
+  skipped because Playwright Chromium is unavailable in this environment.
+- K.2.3 extrude-history provenance verification: prism builders now project
+  authored sketch entity/point sources through `Generated`, source-specific and
+  whole-profile `FirstShape`/`LastShape`, with feature/profile/end-role keys and
+  available draft/boolean history composition. Rectangle prisms cover all 6
+  faces, 12 edges, and 8 vertices; dimension edits retain one semantic successor,
+  rectangle-to-triangle edits omit the deleted source, two-side/multi-profile
+  keys remain disambiguated, and incomplete draft edge/vertex history is marked
+  unsupported. `bunx vitest run src/domain/modeling/occ/` is green (59 passed,
+  1 expected fail); targeted ESLint and the production build are green. Pinned
+  import plans are unaffected. E2E was skipped because Playwright Chromium is
+  unavailable in this environment.
+- B.2.3 dependency-reachability verification: translators now emit classified
+  sketch/body/query inputs without reading or mutating a global baked-lineage
+  set. The logic seam proves independent later branches remain eligible,
+  checkpoint-provided body lineage is reachable, and baked sketch/profile inputs
+  retain `downstream-of-baked` in legacy planning. Focused Onshape Vitest (132
+  tests), lint, production build, TypeScript, and all non-E2E suites are green.
+  Plan dumps remain pinned at Mounts **6 / 4 / 0** and Part Studio 1
+  **6 / 35 / 0**. E2E was skipped because Playwright Chromium is unavailable.
+- B.2.4 StudioBakeStrategy verification: snapshot-enabled fidelity planning now
+  selects explicit none/segments/whole-studio-legacy strategies, derives
+  `requiresStudioBake` only from the legacy branch, surfaces exact preflight
+  diagnostics, and replans reviewer demotions into body-history segments. The
+  plan dump prints strategy, checkpoint count, segment spans, body sets, and
+  replacement producers. Mounts changes from **6 / 4 / 0** to **8 / 2 / 0**:
+  Sketch 2 promotes with its captured fixed frame and Extrude 2 promotes before
+  the Transform 1 + Chamfer 1 checkpoint; Transform 1 retains
+  `transform-rotation-unsupported`. Part Studio 1 remains **6 / 35 / 0**, now
+  with one planned checkpoint and no whole-studio bake. Focused Onshape Vitest
+  is green (133 tests), targeted ESLint and the production build are green.
+  The umbrella non-E2E run is currently blocked only by 13 concurrent Lane-K OCC
+  failures reading missing `referenceState.invalidatedReferencesByKey`; Lane B
+  did not edit that subtree. E2E was skipped because Playwright Chromium is
+  unavailable in this environment.
+- K.2.4 stage-reconciliation verification: matching feature/output stages now
+  classify exact semantic source keys as zero, one, many, or unsupported before
+  the next feature executes. Only unique one-to-one claims retain old public
+  topology IDs; all other current topology receives a fresh stage token, while
+  deleted/ambiguous/unsupported old references remain structured invalidations
+  even when they were already invalidated by a later authored feature. The OCC
+  rebuild/reference seam proves dimension edits preserve the selected fillet
+  edge and rectangle-to-triangle edits report `occ-topology-deleted` with an
+  `invalidReference` diagnostic; synthetic claims pin many and unsupported
+  outcomes. `bunx vitest run src/domain/modeling/occ/` is green (60 passed,
+  1 expected capability-gate failure); targeted ESLint, TypeScript, and the
+  production build are green. The umbrella non-E2E run reaches 475 passing tests
+  but is currently blocked by four concurrent Lane-B importer baseline failures
+  (Mounts reports 8/2/0 instead of the pinned 6/4/0, plus one Wave-T loft count);
+  Lane K did not edit that read-only subtree or its baselines. Import plans are
+  unaffected by K.2.4. E2E was skipped because Playwright Chromium is unavailable
+  in this environment.
+- K.2.5 fresh-ID resurrection verification: reference-state construction now
+  quarantines face/edge/vertex IDs that collide with an already invalidated
+  reference unless semantic stage reconciliation explicitly proves the old ID.
+  Topology-consuming feature preconditions consult that quarantine before OCC
+  execution, including native fillet/chamfer paths. The logic-lane authored
+  rebuild seam proves an exact delete/recreate collision stays
+  `occ-missing-reference`, rejects a downstream fillet before execution, and
+  retains the K.2.4 one-to-one semantic-successor case. `bunx vitest run
+  src/domain/modeling/occ/` is green (61 passed, 1 expected capability-gate
+  failure); targeted ESLint and TypeScript are green. Import plans are
+  unaffected. E2E was skipped because Playwright Chromium is unavailable.
+- B.3.1 deterministic checkpoint identity verification: rollback checkpoint
+  baking now selects the planner-declared output and carried body IDs, preserves
+  rollback snapshot order, and encodes stable `onshape-body:<deterministicId>`
+  component keys. Prepared assets retain the full segment provenance span and
+  exact replacement ordered positions; missing or duplicate body attribution is
+  refused rather than falling back to component ordinal. Focused rollback-bake
+  Vitest (4 tests), the full Onshape Vitest glob (135 tests), targeted ESLint,
+  the production build, and all non-E2E suites (632 tests, 1 expected fail) are
+  green. Plan dumps remain Mounts **8 / 2 / 0** and Part Studio 1 **6 / 35 / 0**.
+  E2E was skipped because Playwright Chromium is unavailable in this environment.
+- B.3.2 shared body-signature verification: exact-prefix review and apply-time
+  rematching now use one live-signature helper. Native bodies retain exact B-rep
+  topology when available; render meshes provide body-only bbox/centroid evidence
+  otherwise, and checkpoint meshes never synthesize face/edge/vertex signatures.
+  Logic coverage resolves one checkpoint body, rejects coincident ambiguity, and
+  rejects multi-output `bodyOf`. Focused Vitest (11 tests), the full import-domain
+  Vitest glob (151 tests), targeted ESLint, TypeScript, and all non-E2E suites
+  (636 tests, 1 expected fail) are green. Plan dumps remain Mounts **8 / 2 / 0**
+  and Part Studio 1 **6 / 35 / 0**. `bun run test:all` reached E2E only and failed
+  because Playwright Chromium is unavailable in the Nix store; E2E was skipped.
+- K.2.6 conservative-producer verification: sketch-backed revolve now projects
+  exact profile cap, sketch-entity swept-face, and sketch-point swept-edge roles
+  through optional start-angle transforms and boolean history. Dimension-only
+  rebuilds preserve one semantic successor. Sweep, loft, thicken, face-backed
+  profiles, and disappeared multi-result output slots publish conservative
+  stages that invalidate prior subtopology as `occ-topology-unsupported-history`
+  instead of accepting fresh enumeration; existing draft coverage retains only
+  the roles proved by OCC history. The current TypeScript bindings were
+  sufficient, so no native shim or Wasm rebuild was needed. `bunx vitest run
+  src/domain/modeling/occ/` is green (61 passed, 1 expected capability-gate
+  failure); targeted ESLint and TypeScript are green. Import plans are
+  unaffected. E2E was skipped because Playwright Chromium is unavailable.
+- K.2.7 durable-naming qualification verification: the OCC authored-rebuild and
+  reference-resolution release gate now passes normally with exact semantic
+  zero/one/many outcomes, coincident delete/recreate quarantine, conservative
+  unsupported-thicken invalidation, dimension edits, and reorder/suppression
+  coverage. `supportsDurableTopologyNaming` is now `true`.
+  `bunx vitest run src/domain/modeling/occ/topological-naming.spec.ts` is green
+  (21 tests), the full OCC glob is green (62 tests, no expected failures), and
+  the import-domain glob is green (152 tests). Plain real-bundle plan dumps
+  remain Mounts **8 / 2 / 0** and Part Studio 1 **6 / 35 / 0**; mock-kernel
+  review remains Mounts **8 / 2 / 0** and changes Part Studio 1 to **9 / 32 / 0**
+  because Chamfer 1 and the translated-plane face sketch are now allowed to
+  promote when their topology evidence matches. Phase S.1 is unblocked but
+  remains a separate unchecked task. E2E was skipped because Playwright
+  Chromium is unavailable in the Nix store.
+- B.3.3 selective checkpoint-action verification: provider preparation now emits
+  one `bakedBody` action at each planned segment boundary, records the checkpoint
+  under the boundary feature for later transitive replacement, and resolves only
+  the planner-declared prior `createFeature` producers. Logic coverage pins two
+  separated runs, complete ordered-action permutation validation, source-boundary
+  ordering around a neutral variable, exact provenance spans, and exclusion of an
+  independent body producer from each replacement scope. Provider + import-action
+  validation Vitest is green (14 tests), the full Onshape glob is green (136 tests),
+  TypeScript, targeted ESLint, and all non-E2E suites are green (638 tests). Plan
+  dumps remain Mounts **8 / 2 / 0** and Part Studio 1 **6 / 35 / 0**. Provider
+  gate assertions were made capability-aware after concurrent K.2.7 enabled
+  durable naming. `bun run test:all` reached E2E only and failed because Playwright
+  Chromium is unavailable in the Nix store; E2E was skipped.
+- B.3.4 body-reference/fallback verification: provider preparation now tracks the
+  current deterministic body producer through parametric actions and selective
+  checkpoints, emits `bodyOf` only for one-output producers, and emits body
+  `topologyOf` selectors for attributed multi-output checkpoint bodies. Extrude
+  and revolve boolean scopes accept and apply-rematch those selectors. Topology
+  fallbacks now select only the consumer body delta plus action-level sibling
+  closure, remain at the consumer's ordered position, and record fallback outputs
+  for later actions. Logic coverage pins Boolean/Split target-tool role order,
+  selective replacement positions, live body-id materialization, multi-output
+  scope rematching, and downstream continuation after fallback. Focused Vitest is
+  green (29 tests), provider/validation Vitest is green (14 tests), the full
+  import-domain glob is green (155 tests), targeted ESLint, TypeScript, build,
+  and all non-E2E suites are green. Plan dumps remain Mounts **8 / 2 / 0** and
+  Part Studio 1 **6 / 35 / 0**. `bun run test:all` reached E2E only and failed
+  because Playwright Chromium is unavailable in the Nix store; E2E was skipped.
+- B.3.5 captured-frame checkpoint verification: segmented planning now accepts a
+  uniquely captured history-point planar frame after a baked body barrier. Provider
+  preparation emits a visible explicit-frame plane immediately after the checkpoint,
+  commits the sketch through backward-only `constructionOf`, and continues with its
+  parametric extrude without emitting a checkpoint face reference. Missing,
+  non-planar, or non-unique frame evidence stays baked. Focused provider/apply
+  Vitest is green (36 tests), the full import-domain glob is green (155 tests), and
+  lint, TypeScript, and the production build are green. Mounts remains **8 / 2 / 0**
+  with Sketch 2 and Extrude 2 parametric and Transform 1 baked; Part Studio 1 remains
+  pinned at **6 / 35 / 0**. `bun run test:all` reached E2E only and failed because
+  Playwright Chromium is unavailable in the Nix store; E2E was skipped.
+- B.3.6 review-form segment verification: the provider review form now places a
+  Bake segments section before per-feature fidelity, with none/segmented/legacy
+  strategy copy, checkpoint counts, feature spans, output/consumed/carried body IDs,
+  replacement-action counts, downstream continuation, tessellation status, and
+  human-readable preflight limitations. Per-feature rows retain intrinsic reason
+  copy while naming their segment or satisfied checkpoint dependency. Prepare emits
+  planned/tessellation-backed/legacy-fallback diagnostics and extends the fidelity
+  summary with strategy and checkpoint count. Focused provider Vitest (14 tests),
+  the import/contracts glob (165 tests), TypeScript, targeted ESLint, and all
+  non-E2E suites (641 tests) are green. Plain plan dumps remain Mounts **8 / 2 / 0**
+  and Part Studio 1 **6 / 35 / 0**. `bun run test:all` reached E2E only and failed
+  because Playwright Chromium is unavailable in the Nix store; E2E was skipped.
+- B.3.7/B.4 integration verification: a shared Wave-B fixture now applies two
+  separated rotation-bake runs through the modeling-service seam, including a
+  carried sibling from a multi-output producer, unique checkpoint `topologyOf`
+  rematching for Boolean target/tool roles, an intentionally ambiguous second
+  checkpoint that activates the same-position MOVE fallback, neutral variables
+  before/between/after checkpoints, exact replacement scopes, and legacy-v1 action
+  and apply equivalence with and without a history probe. The matrix exposed and
+  fixed provisional checkpoint replanning for topology consumers. Focused
+  apply-pipeline Vitest is green (24 tests); provider/planner focused Vitest,
+  TypeScript, targeted ESLint, and the import/contracts glob are green (167 tests).
+  Real-capture rollback-prefix review records Mounts **6 / 4 / 0 → 8 / 2 / 0** and
+  Part Studio 1 **6 / 35 / 0 → 14 / 27 / 0**; Split 1, Boolean 1, and Delete part 1
+  all promote. `bun run test:all` passed lint, build, and all non-E2E suites, then
+  reached E2E and failed only because Playwright Chromium is absent from the Nix
+  store; E2E/browser evidence was skipped as required.
+- S.1/V.1/V.2 final acceptance (plan-dump portion): every subtopology gate now
+  reads the live `OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming` value.
+  Fillet/chamfer/shell use the shared exact-prefix resolver; sketch-on-face uses
+  the same live capability before unique face promotion. Thicken's former
+  unconditional refusal was replaced by a conservative topology candidate for
+  `NEW`, exactly one selected face, one-side thickness; it promotes only after a
+  unique durable face match. CI-safe provider coverage proves Chamfer promotion
+  with history-point edge evidence, and resolver/definition coverage proves
+  fillet plus thicken deferred topology materialization. Hole still resolves its
+  topology only to degrade with `hole-executor-unavailable`.
+
+  The real-bundle mock review distinction is intentional: Mounts Chamfer 1 stays
+  baked as `topology-reference-no-match` because the plan-dump mock does not
+  provide a matching live edge signature; Part Studio 1 Chamfer 1 promotes,
+  while Chamfers 2 and 4 remain no-match and Chamfer 3 remains
+  `chamfer-style-unsupported`. The CI-safe fixture supplies the evidence that the
+  Mounts-style mock lacks rather than weakening matching.
+
+  `REVIEW_REASON_COPY` is a typed `Record<PlanReasonCode, string>` and now covers
+  the complete planner union, including all Wave-T revolve/loft/extrude reasons
+  and Wave-B checkpoint diagnostics. Existing provider review-form coverage also
+  asserts that rendered values contain human copy rather than raw reason codes;
+  CI-safe provider/planner fixtures retain their per-tier count assertions.
+
+  Final counts are parametric / baked / geometryOnly:
+
+  | Capture / studio | Plain plan | Rollback-prefix `--review` | Acceptance |
+  |---|---:|---:|---|
+  | Mounts (`40a51fb8fa82fd4565151114`, `865452a3e2270f0ebca3ce63`) | **8 / 2 / 0** | **8 / 2 / 0** | Meets ≥8 target; Transform 1 is out-of-scope rotation and Chamfer 1 is mock-probe no-match. |
+  | Part Studio 1 (`9841e486906fa2ce62d74d8e`, `a294dd6e940aa00fdcb206dc`) | **6 / 35 / 0** | **14 / 27 / 0** | Chamfer 1, Screen Outline, Split 1, Boolean 1, Delete part 1, Incline, Extrude 8, and Extrude 13 promote with rollback-prefix evidence. |
+  | FULL revolve (`1011ad3d5713fd25de290062`) | **2 / 0 / 0** | **2 / 0 / 0** | Revolve parametric. |
+  | Revolve remove (`337de0799b893f67db1e2aac`) | **4 / 0 / 0** | **4 / 0 / 0** | Boolean REMOVE revolve parametric. |
+  | Sweep (`7a2c487fe0f0acdee662e999`) | **3 / 0 / 0** | **3 / 0 / 0** | Sweep parametric. |
+  | Loft (`fb6fcec023da33168eb1aab9`) | **1 / 3 / 0** | **4 / 0 / 0** | Captured-frame plane, dependent sketch, and loft promote in review. |
+  | Extrude extents (`6869c89206c7a4bb97bd9129`) | **6 / 0 / 0** | **6 / 0 / 0** | Two-side and UP_TO_NEXT extrudes parametric. |
+  | Mirror transform (`5ce54329c7479e330d9d5c15`) | **2 / 3 / 0** | **5 / 0 / 0** | Captured-frame cPlane, PART mirror, and XYZ translation all promote with rollback-prefix body evidence. |
+
+  Pinned spec baselines follow the seam: the plain snapshot-aware planner remains
+  Mounts **8 / 2 / 0** and Part Studio 1 **6 / 35 / 0**; provider/apply tests that
+  intentionally omit history capability remain **6 / 4 / 0** and **6 / 35 / 0**.
+  The promoted **8 / 2 / 0** and **14 / 27 / 0** rollback-prefix counts are pinned
+  at the provider/segmented-review seam rather than incorrectly changing the
+  probe-less baselines.
+
+  Browser import verification was not attempted: Playwright Chromium is absent.
+  Therefore V.2's browser half and all of V.3/V.4 remain pending on the
+  environment fix, with their checkboxes intentionally left unticked.
+
+  Final verification: `bunx vitest run src/domain/import/ src/contracts/import/
+  src/domain/modeling/occ/` passed **48 files / 230 tests**. `bun run test:all`
+  passed lint, production build, logic (**174 files / 495 tests**), UI (**61 files /
+  125 tests**), and static (**14 files / 24 tests**), then failed all 58 E2E cases
+  at Chromium launch because the configured executable is absent. No browser test
+  reached an assertion, so there were no E2E assertion failures to classify.
