@@ -253,12 +253,12 @@ function dot3(
 }
 
 /**
- * Project a world-space point (meters) onto a sketch plane, returning 2D
+ * Project a world-space point (meters) onto a sketch frame, returning 2D
  * sketch-plane coordinates in document millimeters.
  */
-export function projectPointToSketchPlane(
+export function projectPointToSketchPlaneFrame(
   point3d: readonly [number, number, number],
-  plane: SketchPlaneDefinition,
+  frame: SketchPlaneFrame,
 ): SketchPoint2D {
   const pointMm: readonly [number, number, number] = [
     point3d[0] * METERS_TO_MM,
@@ -266,11 +266,19 @@ export function projectPointToSketchPlane(
     point3d[2] * METERS_TO_MM,
   ];
   const delta: readonly [number, number, number] = [
-    pointMm[0] - plane.frame.origin[0],
-    pointMm[1] - plane.frame.origin[1],
-    pointMm[2] - plane.frame.origin[2],
+    pointMm[0] - frame.origin[0],
+    pointMm[1] - frame.origin[1],
+    pointMm[2] - frame.origin[2],
   ];
-  return [dot3(delta, plane.frame.xAxis), dot3(delta, plane.frame.yAxis)];
+  return [dot3(delta, frame.xAxis), dot3(delta, frame.yAxis)];
+}
+
+/** Project a world-space point (meters) onto a complete sketch plane definition. */
+export function projectPointToSketchPlane(
+  point3d: readonly [number, number, number],
+  plane: SketchPlaneDefinition,
+): SketchPoint2D {
+  return projectPointToSketchPlaneFrame(point3d, plane.frame);
 }
 
 /** Project a world-space point (meters) onto a canonical datum plane. */

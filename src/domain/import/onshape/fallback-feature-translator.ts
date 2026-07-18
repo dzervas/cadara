@@ -17,13 +17,12 @@ const WAVE_C_REASON_BY_FEATURE_TYPE: ReadonlyMap<string, import("@/domain/import
 
 export const fallbackFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: [],
-  plan: ({ feature, label, state }) => {
+  plan: ({ feature, label }) => {
     const reason = REGION_CONSUMING_FEATURES.has(feature.featureType)
       ? "needs-region-resolution"
       : TOPOLOGY_DEPENDENT_FEATURES.has(feature.featureType)
         ? "needs-history-probe"
         : WAVE_C_REASON_BY_FEATURE_TYPE.get(feature.featureType) ?? "custom-feature";
-    state.bakedLineageFeatureIds.add(feature.featureId);
     return {
       onshapeFeatureId: feature.featureId,
       featureType: feature.featureType,
@@ -32,6 +31,7 @@ export const fallbackFeatureTranslator: OnshapeFeatureTranslator = {
       target: { kind: "bakedBody" },
       reasonCodes: [reason],
       suppressed: true,
+      inputDependencies: [],
       inputFeatureIds: [],
     };
   },

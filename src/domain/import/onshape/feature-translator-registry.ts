@@ -1,12 +1,24 @@
 import type { OnshapeResolvedReference } from "@/contracts/import/onshape-capture-bundle";
-import type { SketchPlaneKey } from "@/contracts/shared/sketch-plane";
+import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 import type { OnshapeFeatureNode, StudioReadResult } from "@/domain/import/onshape/bundle-reader";
 import type { FeaturePlan, FidelityTier, PlanReasonCode } from "@/domain/import/onshape/fidelity-planner";
 
 export interface FidelityPlanningState {
-  bakedLineageFeatureIds: Set<string>;
-  sketchPlansByFeatureId: Map<string, { tier: FidelityTier; planeKey: SketchPlaneKey }>;
+  sketchPlansByFeatureId: Map<string, { tier: FidelityTier; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame }>;
   bodyProducingFeatureIds: string[];
+}
+
+export type FeatureDependencyInput =
+  | { kind: "sketch"; featureId: string }
+  | { kind: "body"; featureId: string }
+  | { kind: "query"; parameterId: string; slotKey?: string };
+
+export function dependencyFeatureIds(
+  inputs: readonly FeatureDependencyInput[],
+): string[] {
+  return [...new Set(inputs.flatMap((input) =>
+    input.kind === "query" ? [] : [input.featureId]
+  ))];
 }
 
 export interface FeaturePlanningContext {

@@ -10,7 +10,7 @@ function reason(featureType: string) {
     onshapeSuppressed: false,
     read: {} as never,
     references: new Map(),
-    state: { bakedLineageFeatureIds: new Set(), sketchPlansByFeatureId: new Map(), bodyProducingFeatureIds: [] },
+    state: { sketchPlansByFeatureId: new Map(), bodyProducingFeatureIds: [] },
   }).reasonCodes;
 }
 

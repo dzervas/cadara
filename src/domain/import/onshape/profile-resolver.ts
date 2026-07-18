@@ -1,5 +1,5 @@
 import type { DocumentId, RevisionId, SketchId } from "@/contracts/shared/ids";
-import type { SketchPlaneKey } from "@/contracts/shared/sketch-plane";
+import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
   type RegionRecord,
@@ -50,7 +50,7 @@ export interface ProfileResolutionInput {
   /** Solved sketch keyed by the referenced sketch feature id. */
   solvedSketch: OnshapeSolvedSketch | undefined;
   /** Plane and tier of the referenced sketch, as planned earlier in history. */
-  referencedSketch: { tier: string; planeKey: SketchPlaneKey } | undefined;
+  referencedSketch: { tier: string; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame } | undefined;
 }
 
 const SKETCH_REGION_REFERENCE =
@@ -225,6 +225,7 @@ export function resolveOnshapeSketchProfiles(
     featureId: sketchFeatureId,
     label: sketchFeatureId,
     planeKey: input.referencedSketch.planeKey,
+    planeFrame: input.referencedSketch.planeFrame,
   });
   const solvedSnapshot = buildSolvedSnapshot(translation.definition);
   const { regions } = deriveSketchRegionsCore({
