@@ -408,6 +408,73 @@ test("src/contracts/import/validation.spec.ts", async () => {
     }).success,
     "Prepared action validation should reject a constructionOf reference to a non-feature producer.",
   ).toBeFalsy();
+
+  const probedFaceSupport = {
+    kind: "topologyOf" as const,
+    expectedKind: "face" as const,
+    capturedSignature: {
+      entityClass: "face" as const,
+      geometryType: "plane",
+    } as never,
+    tolerance: {
+      linear: 0.01,
+      angularRadians: 0.01,
+      relative: 0.001,
+      ambiguityMargin: 0.25,
+    },
+    source: {
+      consumerFeatureId: "S_FACE",
+      parameterId: "sketchPlane",
+      deterministicId: "face_1",
+    },
+  };
+  const sketchOnProbedFace = () => ({
+    ...sketchRequest(),
+    plane: { ...sketchRequest().plane, support: probedFaceSupport },
+  });
+
+  // Happy path: a probed-face topologyOf support that follows a producer feature.
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [planeRequest()],
+      commitSketches: [sketchOnProbedFace()],
+      orderedActions: [
+        { kind: "createFeature", index: 0 },
+        { kind: "commitSketch", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should accept a topologyOf face support following a producer feature.",
+  ).toBeTruthy();
+
+  // A topologyOf support with no earlier producer feature is rejected.
+  expect(
+    validateImportPreparedActions({
+      commitSketches: [sketchOnProbedFace()],
+      orderedActions: [{ kind: "commitSketch", index: 0 }],
+    }).success,
+    "Prepared action validation should reject a topologyOf sketch support with no earlier producer feature.",
+  ).toBeFalsy();
+
+  // A non-face topologyOf sketch support is rejected.
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [planeRequest()],
+      commitSketches: [
+        {
+          ...sketchRequest(),
+          plane: {
+            ...sketchRequest().plane,
+            support: { ...probedFaceSupport, expectedKind: "body" as const },
+          },
+        },
+      ],
+      orderedActions: [
+        { kind: "createFeature", index: 0 },
+        { kind: "commitSketch", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should reject a non-face topologyOf sketch-plane support.",
+  ).toBeFalsy();
 });
 
 

@@ -282,7 +282,7 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
 (`needs-region-resolution`), 2 chamfers failing edge matching
 (`topology-reference-no-match`), 1 chamfer style, 1 hollow shell.
 
-- [ ] W.1 **Sketch-on-face promotion** — ~85% of the remaining PS1 gap; pure
+- [x] W.1 **Sketch-on-face promotion** — ~85% of the remaining PS1 gap; pure
       importer work; unlocks recursively (each promoted sketch unlocks its
       extrudes, whose bodies unlock the next sketch). PS1 target: 14 → ~37/41.
       The `sketch-on-probed-face` promotion path exists and durable naming is
@@ -855,3 +855,57 @@ resolution picked a keyless openrouter provider once). Real bundles + the
   (174 files / 497 tests logic, 61 files / 125 tests UI, 14 files / 24 tests
   static). `bun run test:all` (lint + build + test + test:e2e) is fully
   green.
+- W.1 sketch-on-face promotion verification (this session, plan-dump
+  mock-kernel rollback-prefix review, no capture recapture performed):
+
+  | Capture / studio | Before (rollback-prefix review) | After (this session) | Notes |
+  |---|---:|---:|---|
+  | Part Studio 1 (`9841e486906fa2ce62d74d8e`) | 14 / 27 / 0 | **22 / 19 / 0** | Plain planner unchanged at 6 / 35 / 0. Eight body-face sketches promoted to `sketch-on-probed-face` (Cutter, Sketch 3, 4, 5, 6, 7, 9, 10) via consumer-aware probe selection + iterative fixed-point promotion. |
+  | Mounts (`40a51fb8fa82fd4565151114`) | 8 / 2 / 0 | **8 / 2 / 0** | Unchanged (plain and review agree); no body-face sketches eligible above the Chamfer 1 bake checkpoint. |
+  | Wave T (`405fa226bb150016d09afc09`) | 2 / 0 / 0 | **2 / 0 / 0** | Unchanged (plain and review agree); no body-face sketch-plane features. |
+
+  Counts are parametric / baked / geometryOnly.
+
+  **(b) Capture-side recapture NOT needed.** Sub-item (b) (resolving sketch-plane
+  queries at each sketch's rollback index rather than only unresolved-at-final
+  IDs) was resolved by analysis: the existing captured reference evidence
+  already carries the per-consumer probe signatures needed to match a sketch's
+  prefix body face. Consumer-aware selection in
+  `activateProbeBackedPlanning` reads the consumer's own captured record, so no
+  new capture pass or `references.ts` change was required.
+
+  **(3) Promotions vs. honest bakes.** Promoted to `sketch-on-probed-face`:
+  Cutter, Sketch 3, Sketch 4, Sketch 5, Sketch 6, Sketch 7, Sketch 9, Sketch
+  10 (8 body-face sketches). Stayed baked honestly:
+  - **Sketch 2** → `sketch-face-on-checkpoint-body` (finalState-only face
+    evidence with no historyPoint; the face lives on a checkpoint/baked body,
+    so it cannot be lifted onto a live probed face).
+  - Sketch 1, Side Outline, Sketch 8 remain canonical-plane sketches;
+    Screen Outline stays `sketch-on-translated-plane` (already parametric).
+
+  **(4) Remaining gap toward the ~37/41 target.** The 8 promoted sketches did
+  not cascade-unlock all their downstream extrudes: extrudes whose regions are
+  built from mirror-derived sketch entities still fail region resolution and
+  stay baked with `needs-region-resolution` (`onshape-region-selector-unverified`).
+  Concretely the extrudes consuming Sketches 5 / 7 / 10, plus **Extrude 12**
+  (empty-diagnostics case: no region candidates surfaced), remain baked. This
+  is the primary residual gap between the current 22 parametric and the ~37
+  target and is recorded as a **W.1 follow-up** (region selection over
+  mirror-derived sketch geometry — needs verified region-selector evidence for
+  mirrored profile entities).
+
+  **(5) Apply-path fix surfaced by real-kernel e2e (this session).** The
+  fixed-point promotion loop added `|| candidate.tier === "parametric"` to its
+  consumer-skip guard. That also skipped a *parametric* extrude whose boolean
+  scope is still unresolved: `extrude-planner` seeds `topologyTargets` with an
+  empty `targets` array, and the loop is the only place that matches the target
+  body against the parametric prefix. The skip left the Mounts `Extrude 2`
+  (REMOVE) with an empty boolean scope, so its real-kernel apply failed region
+  selection and dropped `Extrude 2` + the bake checkpoint (`bakedBody-1`). The
+  mock plan-dump could not see this — the prepared actions are byte-identical to
+  the pre-W.1 baseline except for the emptied `booleanScope`, which only the
+  real OCC kernel rejects at apply. Fix: skip a parametric candidate only when
+  its extrude topology is already resolved (`booleanScope.targets` non-empty),
+  which restores the pre-W.1 resolution while keeping the fixed-point from
+  re-resolving a settled consumer. All six real-kernel Onshape e2e tests
+  (Mounts ×2, Part Studio 1, Wave T ×3) and `bun run test:all` are green.

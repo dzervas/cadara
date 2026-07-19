@@ -562,6 +562,167 @@ function probeSignature(id: string): HistoryProbeTopologySignature {
   };
 }
 
+function bodyProbeSignature(
+  id: string,
+  low: [number, number, number],
+  high: [number, number, number],
+): HistoryProbeTopologySignature {
+  return {
+    entityClass: "body",
+    geometryType: "solid",
+    boundingBox: { low, high },
+    centroid: [
+      (low[0] + high[0]) / 2,
+      (low[1] + high[1]) / 2,
+      (low[2] + high[2]) / 2,
+    ],
+    reference: { kind: "body", bodyId: id as BodyId },
+  };
+}
+
+// A parametric base extrude followed by two stacked transform (translation)
+// consumers over the same body. Each consumer's captured signature reflects the
+// body's pre-consumer state (mm-scale), so C2 only matches once C1 is parametric.
+function makeStackedTransformChainBundle(): OnshapeCaptureBundleV2 {
+  const query = (parameterId: string, ids: string[]) => ({
+    parameterId,
+    queries: ids.map((refId) => ({
+      queryString: `query=${refId}`,
+      deterministicIds: [refId],
+    })),
+  });
+  const facesFor = (
+    id: string,
+    low: [number, number, number],
+    high: [number, number, number],
+  ) => ({
+    id,
+    faces: [{
+      id: `${id}_face`,
+      facets: [
+        {
+          vertices: [
+            { x: low[0], y: low[1], z: low[2] },
+            { x: high[0], y: low[1], z: low[2] },
+            { x: high[0], y: high[1], z: high[2] },
+          ],
+        },
+        {
+          vertices: [
+            { x: low[0], y: low[1], z: low[2] },
+            { x: high[0], y: high[1], z: high[2] },
+            { x: low[0], y: high[1], z: high[2] },
+          ],
+        },
+      ],
+    }],
+  });
+  const translate = (featureId: string) => ({
+    featureType: "transform",
+    featureId,
+    name: featureId,
+    parameters: [
+      query("entities", ["A"]),
+      { parameterId: "transformType", value: "TRANSLATION_BY_XYZ" },
+      { parameterId: "dx", expression: "5 mm", value: 0.005 },
+      { parameterId: "dy", expression: "0 mm", value: 0 },
+      { parameterId: "dz", expression: "0 mm", value: 0 },
+      { parameterId: "makeCopy", value: false },
+    ],
+  });
+  const snapshot = (
+    featureId: string,
+    bodies: ReturnType<typeof facesFor>[],
+  ): OnshapeRollbackSnapshot => ({
+    featureId,
+    tessellationTolerance: 0.0001,
+    tessellatedFaces: { bodies },
+  });
+  return {
+    formatVersion: 2,
+    provenance: {
+      capturedAt: "2026-07-18T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "d".repeat(24),
+      wvm: "w",
+      wvmId: "w".repeat(24),
+      microversion: "m".repeat(24),
+    },
+    document: {},
+    elements: {},
+    diagnostics: [],
+    partStudios: [{
+      elementId: "e1",
+      name: "Stacked transforms",
+      features: {
+        features: [
+          {
+            featureType: "newSketch",
+            featureId: "S1",
+            name: "S1",
+            parameters: [query("sketchPlane", ["Top"])],
+          },
+          {
+            featureType: "extrude",
+            featureId: "E1",
+            name: "E1",
+            parameters: [
+              {
+                parameterId: "entities",
+                queries: [{ queryString: 'query = qSketchRegion(id + "S1", true);' }],
+              },
+              { parameterId: "endBound", value: "BLIND" },
+              { parameterId: "depth", expression: "10 mm", value: 0.01 },
+              { parameterId: "operationType", value: "NEW" },
+            ],
+          },
+          translate("C1"),
+          translate("C2"),
+        ],
+      },
+      sketches: {
+        sketches: [{
+          featureId: "S1",
+          entities: [{
+            sketchEntityId: "c1",
+            sketchEntityType: "skCircle",
+            geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: 0.004 },
+            isConstruction: false,
+          }],
+        }],
+      },
+      parts: null,
+      featureSpecs: { present: false, reason: "n/a" },
+      resolvedReferences: [{
+        deterministicId: "Top",
+        evaluatedAt: "finalState",
+        signature: {
+          entityClass: "face",
+          geometryType: "plane",
+          definingData: { normal: [0, 0, 1] },
+          isDefaultPlane: true,
+        },
+      }],
+      groundTruth: {
+        hasBodies: true,
+        tessellationTolerance: 0.0001,
+        tessellatedFaces: {
+          bodies: [facesFor("A", [0.01, 0, 0], [0.018, 0.008, 0.01])],
+        },
+        step: "",
+      },
+      rollbackSnapshots: [
+        snapshot("S1", []),
+        snapshot("E1", [facesFor("A", [0, 0, 0], [0.008, 0.008, 0.01])]),
+        snapshot("C1", [facesFor("A", [0.005, 0, 0], [0.013, 0.008, 0.01])]),
+        snapshot("C2", [facesFor("A", [0.01, 0, 0], [0.018, 0.008, 0.01])]),
+      ],
+    }],
+  } as unknown as OnshapeCaptureBundleV2;
+}
+
 function durableConsumerProbeSignatures(): HistoryProbeTopologySignature[] {
   return [
     probeSignature("face_match"),
@@ -697,7 +858,22 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
 });
 
 test("src/domain/import/onshape/provider.spec.ts unique face sketches follow the durable naming capability gate", async () => {
-  const source = sourceFromBundle(makeFaceSketchBundle());
+  const bundle = structuredClone(
+    makeFaceSketchBundle(),
+  ) as unknown as OnshapeCaptureBundleV2;
+  bundle.partStudios[0]!.resolvedReferences.push({
+    deterministicId: "face_ref",
+    evaluatedAt: "historyPoint",
+    consumingFeatureId: "S_FACE",
+    signature: {
+      entityClass: "face",
+      geometryType: "plane",
+      definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+      centroid: [0.0005, 0.001, 0.003],
+      boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+    },
+  });
+  const source = sourceFromBundle(bundle);
   const review = await onshapeImportProvider.review({
     source,
     capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
@@ -732,7 +908,11 @@ test("src/domain/import/onshape/provider.spec.ts unique face sketches follow the
     capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
   });
   expect(
-    actions.commitSketches?.some((sketch) => sketch.plane.support.kind === "face"),
+    actions.commitSketches?.some(
+      (sketch) =>
+        sketch.plane.support.kind === "topologyOf" &&
+        sketch.plane.support.expectedKind === "face",
+    ),
   ).toBe(OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming);
 });
 
@@ -778,6 +958,115 @@ test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch sta
       !faceSketch.reasonCodes.includes("sketch-on-probed-face"),
     "Ambiguous probe matches must not promote the face sketch; it stays honestly baked.",
   ).toBeTruthy();
+});
+
+test("src/domain/import/onshape/provider.spec.ts prefers the consumer-scoped historyPoint reference among duplicate deterministicIds", async () => {
+  // Two resolved references share the deterministicId `face_ref`. The first is a
+  // historyPoint captured for a *different* consumer and carries a signature that
+  // sits far from the probed face; the second is the S_FACE consumer's own
+  // historyPoint evidence and matches the probe. Consumer-aware selection must
+  // pick the second — picking the first (source order) would fail to match and
+  // leave the sketch baked.
+  const bundle = structuredClone(
+    makeFaceSketchBundle(),
+  ) as unknown as OnshapeCaptureBundleV2;
+  bundle.partStudios[0]!.resolvedReferences = [
+    {
+      deterministicId: "face_ref",
+      evaluatedAt: "historyPoint",
+      consumingFeatureId: "SOME_OTHER_FEATURE",
+      signature: {
+        entityClass: "face",
+        geometryType: "plane",
+        definingData: { origin: [9, 9, 9], normal: [0, 0, 1] },
+        centroid: [9, 9, 9],
+        boundingBox: { low: [9, 9, 9], high: [9.001, 9.002, 9] },
+      },
+    },
+    {
+      deterministicId: "face_ref",
+      evaluatedAt: "historyPoint",
+      consumingFeatureId: "S_FACE",
+      signature: {
+        entityClass: "face",
+        geometryType: "plane",
+        definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+        centroid: [0.0005, 0.001, 0.003],
+        boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+      },
+    },
+  ];
+  const source = sourceFromBundle(bundle);
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
+  });
+  const faceSketch = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_FACE",
+  );
+  expect(
+    OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming
+      ? faceSketch?.tier === "parametric" &&
+        faceSketch.reasonCodes.includes("sketch-on-probed-face")
+      : faceSketch?.tier === "baked",
+    "The consumer's own historyPoint signature must drive the probe match, not the first record sharing the deterministicId.",
+  ).toBeTruthy();
+});
+
+test("src/domain/import/onshape/provider.spec.ts a face sketch with only finalState evidence stays baked with sketch-face-on-checkpoint-body", async () => {
+  // makeFaceSketchBundle ships a single `finalState` face reference and no
+  // historyPoint evidence, so the probed face only exists on the checkpoint
+  // (final-state) body. The planner must keep the sketch honestly baked with the
+  // sketch-face-on-checkpoint-body reason rather than promoting on final-state
+  // geometry.
+  const source = sourceFromBundle(makeFaceSketchBundle());
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
+  });
+  const faceSketch = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_FACE",
+  );
+  expect(
+    faceSketch?.tier === "baked" &&
+      faceSketch.reasonCodes.includes("sketch-face-on-checkpoint-body") &&
+      !faceSketch.reasonCodes.includes("sketch-on-probed-face"),
+    "Final-state-only evidence must keep the face sketch baked with the checkpoint-body reason.",
+  ).toBeTruthy();
+});
+
+test("src/domain/import/onshape/provider.spec.ts fixed-point promotion resolves a stacked topology-consumer chain across iterations", async () => {
+  // A parametric base body feeds two stacked transform consumers. C2 consumes the
+  // body *after* C1 has moved it, so C2's pre-consumer prefix can only match once
+  // C1 has itself been promoted to parametric. The fixed-point promotion loop
+  // must therefore lift C1 first and re-derive C2's prefix before C2 can match —
+  // a single non-iterative pass would leave C2 baked.
+  const source = sourceFromBundle(makeStackedTransformChainBundle());
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([
+      bodyProbeSignature("pre-C1", [0, 0, 0], [8, 8, 10]),
+      bodyProbeSignature("pre-C2", [5, 0, 0], [13, 8, 10]),
+    ]),
+  });
+  const studio = review.providerReview.studios[0]!;
+  const tierOf = (featureId: string) =>
+    studio.featurePlans.find((plan) => plan.onshapeFeatureId === featureId);
+  expect(tierOf("E1"), JSON.stringify(studio.featurePlans)).toMatchObject({
+    tier: "parametric",
+  });
+  expect(tierOf("C1"), JSON.stringify(studio.featurePlans)).toMatchObject({
+    tier: "parametric",
+    reasonCodes: [],
+  });
+  expect(tierOf("C2"), JSON.stringify(studio.featurePlans)).toMatchObject({
+    tier: "parametric",
+    reasonCodes: [],
+  });
+  expect(
+    studio.bakeStrategy.kind,
+    "A fully promoted chain needs no baked checkpoints.",
+  ).toBe("none");
 });
 
 test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", async () => {
@@ -981,12 +1270,9 @@ test("src/domain/import/onshape/provider.spec.ts no fabricated construction supp
     "The synthetic fixture must build a real parametric prefix before the face sketch probe runs.",
   ).toBeTruthy();
   expect(
-    OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming
-      ? faceSketch?.tier === "parametric" &&
-        faceSketch.reasonCodes.includes("sketch-on-probed-face")
-      : faceSketch?.tier === "baked" &&
-        faceSketch.reasonCodes.includes("topology-durable-naming-unavailable"),
-    "A face sketch must follow the kernel's durable topology naming capability.",
+    faceSketch?.tier === "baked" &&
+      faceSketch.reasonCodes.includes("sketch-face-on-checkpoint-body"),
+    "A face sketch whose plane resolves only on checkpoint-baked geometry stays honestly baked without fabricating a construction support.",
   ).toBeTruthy();
 
   const actions = await onshapeImportProvider.prepare({
