@@ -332,14 +332,43 @@ function validateImportDeferredValueInvariants(
     }
     const request = actions.commitSketches?.[ref.index];
     const support = request?.plane?.support;
-    if (!support || !isDeferredValue(support)) {
+    if (!support) {
+      return;
+    }
+    const path = `commitSketches.${ref.index}.plane.support`;
+    // A `topologyOf` support rematches a probed face against live topology, so
+    // it must resolve a face produced by an earlier imported feature action.
+    if (isDeferredTopologyRef(support)) {
+      if (support.expectedKind !== "face") {
+        issues.push({
+          path: `${path}.expectedKind`,
+          expected: "face",
+          value: support.expectedKind,
+          message: "Sketch-plane topologyOf supports must resolve a face.",
+        });
+      }
+      const hasEarlierProducer =
+        actions.orderedActions
+          ?.slice(0, orderedPosition)
+          .some((entry) => entry.kind === "createFeature") ?? false;
+      if (!hasEarlierProducer) {
+        issues.push({
+          path,
+          expected: "an earlier createFeature producer action",
+          value: orderedPosition,
+          message:
+            "A topologyOf sketch-plane support must follow the feature action that produces its face.",
+        });
+      }
+      return;
+    }
+    if (!isDeferredValue(support)) {
       return;
     }
     // The contract only permits `constructionOf` at sketch-plane support
     // positions (Typia enforces the structural union); here we enforce the
     // ordered backward-reference-to-a-createFeature invariant.
     blessed.add(support);
-    const path = `commitSketches.${ref.index}.plane.support`;
     issues.push(
       ...validateDeferredReference(actions, support, orderedPosition, path),
     );

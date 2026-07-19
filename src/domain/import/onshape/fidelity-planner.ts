@@ -92,6 +92,9 @@ export type PlanReasonCode =
   | "needs-history-probe"
   | "extrude-default-scope-ambiguous"
   | "sketch-on-probed-face"
+  // The sketch plane face exists only on a checkpoint-baked body lineage, so no
+  // live face can ever be probed or rematched in the parametric prefix.
+  | "sketch-face-on-checkpoint-body"
   | "sketch-on-captured-frame"
   // A cPlane translated to a parametric plane feature from its captured frame.
   | "plane-from-captured-frame"
@@ -176,6 +179,12 @@ export type PlannedTarget =
       constructionFromFeatureId?: string;
       /** Fixed world-space support recovered at a baked checkpoint barrier. */
       capturedFrame?: import("@/contracts/shared/sketch-plane").SketchPlaneFrame;
+      /**
+       * Deferred face selector for a probe-promoted sketch. The provider emits
+       * it as the commit's plane support so the orchestrator rematches the
+       * probed face against live topology at apply time.
+       */
+      probedFaceSelector?: import("@/contracts/import/actions").ImportDeferredTopologyRef;
     }
   | {
       kind: "plane";

@@ -89,6 +89,32 @@ function scalePoint(point: [number, number, number]): [number, number, number] {
   return [point[0] * 1000, point[1] * 1000, point[2] * 1000];
 }
 
+function readPoint3(value: unknown): [number, number, number] | null {
+  return Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((component) => typeof component === "number")
+    ? [value[0] as number, value[1] as number, value[2] as number]
+    : null;
+}
+
+function normalizeVector(
+  value: readonly [number, number, number],
+): [number, number, number] | null {
+  const length = Math.hypot(value[0], value[1], value[2]);
+  if (length <= 1e-12) return null;
+  return [value[0] / length, value[1] / length, value[2] / length];
+}
+
+function mockXAxisForNormal(normal: readonly [number, number, number]): [number, number, number] | null {
+  const seed: [number, number, number] = Math.abs(normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const seedDotNormal = seed[0] * normal[0] + seed[1] * normal[1] + seed[2] * normal[2];
+  return normalizeVector([
+    seed[0] - normal[0] * seedDotNormal,
+    seed[1] - normal[1] * seedDotNormal,
+    seed[2] - normal[2] * seedDotNormal,
+  ]);
+}
+
 function rollbackBodySignatures(
   snapshots: ReturnType<typeof readPartStudio>["studio"]["rollbackSnapshots"],
 ): HistoryProbeTopologySignature[] {
@@ -169,9 +195,16 @@ function createLogicLaneReviewCapabilities(
                   bodyId: `body_review_${id}` as never,
                   vertexId: `vertex_review_${id}` as never,
                 };
+      const normal = signature.entityClass === "face" && signature.geometryType === "plane"
+        ? normalizeVector(readPoint3(signature.definingData?.normal) ?? [0, 0, 0])
+        : null;
+      const xDirection = normal ? mockXAxisForNormal(normal) : null;
       return [
         {
           ...signature,
+          definingData: xDirection
+            ? { ...signature.definingData, xDirection }
+            : signature.definingData,
           centroid: signature.centroid
             ? scalePoint(signature.centroid)
             : undefined,

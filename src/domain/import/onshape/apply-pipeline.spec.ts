@@ -4,8 +4,16 @@ import { test, expect } from "vitest";
 import { ResultAsync, createAppError } from "@/contracts/errors";
 
 import type { ImportPreparedActions } from "@/contracts/import/actions";
+import type {
+  HistoryProbeTopologySignature,
+  ImportCapabilities,
+} from "@/contracts/import/capabilities";
+import type { OnshapeCaptureBundleV2 } from "@/contracts/import/onshape-capture-bundle";
 import type { ResolvedImportSource } from "@/contracts/import/source";
-import type { CreateFeatureRequest } from "@/contracts/modeling/schema";
+import type {
+  CommitSketchRequest,
+  CreateFeatureRequest,
+} from "@/contracts/modeling/schema";
 import { CONTRACT_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { FIXTURE_PART_STUDIO_ID } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
@@ -37,7 +45,12 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
-import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
+import type { BodyId, DocumentId, FaceId, RevisionId } from "@/contracts/shared/ids";
+import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
+import {
+  createOccNativeExactBrepPayloadFromShimPayload,
+  parseNativeShimPayloadJson,
+} from "@/domain/modeling/occ/native-topology-payload";
 
 // Use the REAL sketch constraint solver (pure TS, always available). It solves
 // against any revision, so we delegate each call to an instance configured for
@@ -1831,4 +1844,245 @@ test("applyImportPreparedActions rolls back atomically when a constructionOf pro
   ).toBe(1);
   expect(result.rolledBack).toBe(true);
   expect(result.createdEntityIds.sketchIds.length).toBe(0);
+});
+
+// A face sketch the provider promoted to `sketch-on-probed-face` carries its
+// plane support as a deferred `topologyOf` face selector. At apply time the
+// selector must rematch against the live document's derived face signatures and
+// resolve to a concrete face reference before the sketch commits.
+function makePromotedFaceSketchBundle(): OnshapeCaptureBundleV2 {
+  return {
+    formatVersion: 1,
+    provenance: {
+      capturedAt: "2026-07-08T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "d".repeat(24),
+      wvm: "w",
+      wvmId: "w".repeat(24),
+      microversion: "m".repeat(24),
+    },
+    document: {},
+    elements: {},
+    diagnostics: [],
+    partStudios: [{
+      elementId: "e1",
+      name: "Probe",
+      features: {
+        features: [
+          { featureType: "newSketch", featureId: "S_BASE", name: "Base sketch" },
+          {
+            featureType: "extrude",
+            featureId: "E_BASE",
+            name: "Base extrude",
+            parameters: [
+              {
+                parameterId: "entities",
+                queries: [{ queryString: 'query = qSketchRegion(id + "S_BASE", true);' }],
+              },
+              { parameterId: "endBound", value: "BLIND" },
+              { parameterId: "depth", expression: "3 mm", value: 0.003 },
+              { parameterId: "operationType", value: "NEW" },
+            ],
+          },
+          {
+            featureType: "newSketch",
+            featureId: "S_FACE",
+            name: "Face sketch",
+            parameters: [
+              { parameterId: "sketchPlane", queries: [{ deterministicIds: ["face_ref"] }] },
+            ],
+          },
+        ],
+      },
+      sketches: {
+        sketches: [
+          {
+            featureId: "S_BASE",
+            entities: [{
+              sketchEntityId: "cb",
+              sketchEntityType: "skCircle",
+              geometry: { center3d: { x: 0.0005, y: 0.001, z: 0 }, radius: 0.0004 },
+              isConstruction: false,
+            }],
+          },
+          {
+            featureId: "S_FACE",
+            entities: [{
+              sketchEntityId: "c1",
+              sketchEntityType: "skCircle",
+              geometry: { center3d: { x: 0.0005, y: 0.001, z: 0.003 }, radius: 0.0001 },
+              isConstruction: false,
+            }],
+          },
+        ],
+      },
+      parts: null,
+      featureSpecs: { present: false, reason: "n/a" },
+      resolvedReferences: [{
+        deterministicId: "face_ref",
+        evaluatedAt: "historyPoint",
+        consumingFeatureId: "S_FACE",
+        signature: {
+          entityClass: "face",
+          geometryType: "plane",
+          definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+          centroid: [0.0005, 0.001, 0.003],
+          boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+        },
+      }],
+      groundTruth: {
+        hasBodies: true,
+        tessellationTolerance: 0.001,
+        tessellatedFaces: {},
+        step: "",
+      },
+      rollbackSnapshots: null,
+    }],
+  } as unknown as OnshapeCaptureBundleV2;
+}
+
+function probeFaceSignature(id: string): HistoryProbeTopologySignature {
+  return {
+    entityClass: "face",
+    geometryType: "plane",
+    definingData: { origin: [0, 0, 3], normal: [0, 0, 1], xDirection: [1, 0, 0] },
+    centroid: [0.5, 1, 3],
+    boundingBox: { low: [0, 0, 3], high: [1, 2, 3] },
+    reference: { kind: "face", bodyId: "body_probe" as BodyId, faceId: id as FaceId },
+  };
+}
+
+function probeCapabilities(
+  signatures: readonly HistoryProbeTopologySignature[],
+): ImportCapabilities {
+  return {
+    context: {
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_1" as RevisionId,
+    },
+    modeling: {
+      async bakeGeometry() { throw new Error("not used"); },
+      async reconstructMeshToBrep() { throw new Error("not used"); },
+    },
+    sketch: {
+      async convertVectorToSketch() { throw new Error("not used"); },
+    },
+    assets: {
+      async registerGeometryAsset() { throw new Error("not used"); },
+      async storeEmbeddedBinary() { throw new Error("not used"); },
+    },
+    history: {
+      async evaluateHistoryProbe(input) {
+        return {
+          steps: Array.from(
+            { length: Math.max(1, input.actions.orderedActions?.length ?? 0) },
+            () => ({ status: "rebuilt" as const, signatures: [...signatures] }),
+          ),
+        };
+      },
+    },
+  } as ImportCapabilities;
+}
+
+test("a provider-promoted sketch-on-face applies with its topologyOf plane support rematched to a live face", async () => {
+  const source = sourceFromBundle(makePromotedFaceSketchBundle());
+  const reviewCapabilities = probeCapabilities([probeFaceSignature("face_match")]);
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: reviewCapabilities,
+  });
+  const faceSketchPlan = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_FACE",
+  );
+  expect(faceSketchPlan, JSON.stringify(review.providerReview.studios[0]?.featurePlans))
+    .toMatchObject({ tier: "parametric", reasonCodes: ["sketch-on-probed-face"] });
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: reviewCapabilities,
+  });
+  const promotedSketch = (actions.commitSketches ?? []).find(
+    (commit) =>
+      commit.plane.support.kind === "topologyOf" &&
+      commit.plane.support.expectedKind === "face",
+  );
+  expect(
+    promotedSketch,
+    "The promoted face sketch must carry a deferred topologyOf face support.",
+  ).toBeDefined();
+  if (!promotedSketch) throw new Error("Expected a promoted face sketch commit.");
+
+  // Live document with a single non-mesh body whose native BREP resolves the box
+  // fixture; its top face (centroid [0.5, 1, 3]) matches the captured signature.
+  const recordedCommits: CommitSketchRequest[] = [];
+  const boxPayload = () =>
+    createOccNativeExactBrepPayloadFromShimPayload({
+      revisionId: "rev_apply_0" as RevisionId,
+      target: { kind: "body", bodyId: "body_box" as BodyId },
+      bodyId: "body_box" as BodyId,
+      bodyLabel: "Box",
+      nativePayload: parseNativeShimPayloadJson(JSON.stringify(boxFixture.exactBrep)),
+    });
+  const snapshot = {
+    document: {
+      documentId: "doc_workspace",
+      revisionId: "rev_apply_0" as RevisionId,
+      bodies: [{ bodyId: "body_box", topologyPresentation: "exact" }],
+      render: { records: [] },
+    },
+  } as never;
+  const service = {
+    async getCurrentDocumentSnapshot() {
+      return snapshot;
+    },
+    async buildNativeExactBrepPayload() {
+      return {
+        kind: "nativeTopologyPayload" as const,
+        payload: boxPayload(),
+        diagnostics: [],
+      };
+    },
+    commitSketch(request: CommitSketchRequest) {
+      recordedCommits.push(request);
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          revisionId: "rev_apply_1" as RevisionId,
+          sketchId: "sketch_applied" as never,
+          revisionState: "advanced" as const,
+          rebuildResult: "rebuilt" as const,
+          changedTargets: [],
+          diagnostics: [],
+        }),
+        (error) => createAppError({ code: "unknown", message: String(error) }),
+      );
+    },
+  } as unknown as ModelingService;
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: "rev_apply_0" as RevisionId,
+    actions: {
+      commitSketches: [promotedSketch],
+      orderedActions: [{ kind: "commitSketch", index: 0 }],
+    },
+  });
+
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify(result.diagnostics),
+  ).toBe(true);
+  expect(result.rolledBack).toBe(false);
+  expect(result.createdEntityIds.sketchIds).toEqual(["sketch_applied"]);
+
+  const appliedSupport = recordedCommits[0]?.plane.support;
+  expect(
+    appliedSupport,
+    "The commit must receive a concrete rematched face support, not the deferred selector.",
+  ).toMatchObject({ kind: "face", bodyId: "body_box" });
+  expect(JSON.stringify(recordedCommits)).not.toContain("topologyOf");
 });
