@@ -85,6 +85,7 @@ import {
 } from "@/domain/import/onshape/sketch-translator";
 import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
 import { matchSignature } from "@/domain/import/onshape/signature-matcher";
+import { normalizeOnshapeTopologySignature } from "@/domain/import/onshape/topology-signature-normalizer";
 import type {
   OnshapeGeometricSignature,
   OnshapeResolvedReference,
@@ -95,6 +96,7 @@ import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-
 import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
 import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
 import { resolveTopologyReferences } from "@/domain/import/onshape/topology-reference-resolver";
+import { computeCaptureFrameToWorld } from "@/domain/import/onshape/capture-frame";
 import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
 import { DEFAULT_MATCH_TOLERANCE } from "@/domain/import/onshape/signature-matcher";
 import { buildResolvedBodyConsumerDefinition } from "@/domain/import/onshape/wave-b-body-feature-translators";
@@ -161,26 +163,6 @@ function referenceKey(reference: HistoryProbeTopologySignature["reference"]): st
     default:
       return JSON.stringify(reference);
   }
-}
-
-function scaleCapturedSignatureToDocumentUnits(
-  signature: OnshapeGeometricSignature,
-): OnshapeGeometricSignature {
-  const scalePoint = (point: [number, number, number]): [number, number, number] => [
-    point[0] * 1000,
-    point[1] * 1000,
-    point[2] * 1000,
-  ];
-  return {
-    ...signature,
-    centroid: signature.centroid ? scalePoint(signature.centroid) : undefined,
-    boundingBox: signature.boundingBox
-      ? {
-          low: scalePoint(signature.boundingBox.low),
-          high: scalePoint(signature.boundingBox.high),
-        }
-      : undefined,
-  };
 }
 
 function readPoint3(value: unknown): [number, number, number] | null {
@@ -885,6 +867,20 @@ async function activateProbeBackedPlanning(input: {
           input.read,
         );
       };
+      // Bake checkpoints (bodyOnlyMesh) expose only body identity, so they can
+      // only serve whole-body consumers. A face/edge consumer needs sub-topology
+      // (a specific face or edge) of its owning body; a tessellation-backed
+      // checkpoint body cannot expose that, and apply rebuilds the consumer on
+      // exactly that checkpoint body (not on the pre-checkpoint parametric
+      // bodies). So the probe prefix emits checkpoints only for whole-body
+      // consumers, and those are the only consumers over a baked body that can
+      // be recovered.
+      const consumesOnlyBodies =
+        queryRead.refs.length > 0 &&
+        queryRead.refs.every(
+          (query) =>
+            query.expectedKinds.length === 1 && query.expectedKinds[0] === "body",
+        );
       if (
         consumesBakedUpstreamBody &&
         prefixPlan.bakeStrategy.kind !== "segments"
@@ -898,6 +894,7 @@ async function activateProbeBackedPlanning(input: {
         plan: prefixPlan,
         capabilities: input.capabilities,
         materializeBake: false,
+        emitBakeCheckpoints: consumesOnlyBodies,
         featureIdToOrderedPrefixPosition,
       });
       const [prefix] = await probeTopologyConsumerPrefixes({
@@ -913,6 +910,26 @@ async function activateProbeBackedPlanning(input: {
         degradeConsumer("topology-history-evidence-missing");
         continue;
       }
+      const captureFrameToWorld = computeCaptureFrameToWorld({
+        features: input.read.features,
+        consumerFeatureId: candidate.onshapeFeatureId,
+        isParametric: (featureId) => plansById.get(featureId)?.tier === "parametric",
+        resolvedReferences: input.read.studio.resolvedReferences,
+      });
+      if (captureFrameToWorld && !consumesOnlyBodies) {
+        // A non-identity capture→world transform means a baked (checkpoint)
+        // feature sits between this face/edge consumer and its captured
+        // evidence. The probe prefix (checkpoints suppressed for face/edge
+        // consumers) matches the still-parametric pre-checkpoint body, but apply
+        // rebuilds the consumer on the tessellation-backed checkpoint body,
+        // which exposes only body identity — never the specific face/edge. So
+        // reframing lets review match a body that apply never presents,
+        // over-promoting the consumer. Stay honestly baked: recovering it needs
+        // the owning feature to be parametric (e.g. Mounts Chamfer 1 is gated on
+        // W.3 Transform rotation), not a reframe against the wrong prefix.
+        degradeConsumer("topology-upstream-baked");
+        continue;
+      }
       const resolution = resolveTopologyReferences({
         consumerFeatureId: candidate.onshapeFeatureId,
         queries: queryRead.refs,
@@ -922,6 +939,7 @@ async function activateProbeBackedPlanning(input: {
         cadaraSignatures: prefix.signatures,
         tolerance: { ...DEFAULT_MATCH_TOLERANCE, linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01) },
         durableNamingAvailable: OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming,
+        captureFrameToWorld: captureFrameToWorld ?? undefined,
       });
       workingPlan = recomputePlanWithFeaturePlans(
         workingPlan,
@@ -1074,7 +1092,7 @@ async function activateProbeBackedPlanning(input: {
       const reference = historyReference ?? finalStateReference;
       const capturedSignature =
         reference && "signature" in reference
-          ? scaleCapturedSignatureToDocumentUnits(reference.signature)
+          ? normalizeOnshapeTopologySignature(reference.signature)
           : feature
             ? inferredSweptFaceSignature({
                 feature,
@@ -1561,6 +1579,14 @@ async function buildPreparedActions(input: {
   includeBinding?: boolean;
   materializeBake?: boolean;
   /**
+   * Emit planner-selected bake checkpoints (segment checkpoint bodies) into the
+   * prepared prefix without materializing the monolithic whole-studio bake.
+   * Probe prefixes set this so whole-body consumers (Split/Boolean/Delete/
+   * body-scope extrude) can match on the checkpoint's body-identity signature,
+   * while `materializeBake` stays false (no full-studio baked mesh).
+   */
+  emitBakeCheckpoints?: boolean;
+  /**
    * Optional sink recording, per ordered-action position, the Onshape feature id
    * that produced it. The probe-backed planner uses it to correlate a failed
    * probe step back to the feature plan that must be demoted.
@@ -1750,8 +1776,12 @@ async function buildPreparedActions(input: {
 
   const emitSegmentCheckpoint = async (boundaryFeatureId: string): Promise<void> => {
     const segment = segmentByBoundaryFeatureId.get(boundaryFeatureId);
-    if (!segment || !input.materializeBake || !rollbackTimeline) return;
-
+    if (
+      !segment ||
+      !(input.materializeBake || input.emitBakeCheckpoints) ||
+      !rollbackTimeline
+    )
+      return;
     const replacementActionIndexes: number[] = [];
     for (const producerFeatureId of segment.replacementProducerFeatureIds) {
       const actionIndex = orderedIndexByFeatureId.get(producerFeatureId);
@@ -1807,7 +1837,7 @@ async function buildPreparedActions(input: {
           {
             kind: "topologyOf" as const,
             expectedKind: "body" as const,
-            capturedSignature: scaleCapturedSignatureToDocumentUnits(
+            capturedSignature: normalizeOnshapeTopologySignature(
               binding.capturedSignature,
             ),
             tolerance: {
