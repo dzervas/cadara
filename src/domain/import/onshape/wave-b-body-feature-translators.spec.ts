@@ -473,4 +473,88 @@ describe("Wave B body topology translators", () => {
       },
     });
   });
+
+  test("promotes a symmetric-part chamfer to distinct resolved edges and never picks a mirror arbitrarily", () => {
+    // Two diagonals of the same square face share bbox+centroid; only the line
+    // direction/support distinguishes them (W.2 symmetric-part failure mode).
+    // Captured evidence is in meters (the resolver normalizes it to mm); the
+    // live cadara signatures are already in the document's millimeters.
+    const capturedBox = { low: [0, 0, 0] as [number, number, number], high: [0.01, 0.01, 0] as [number, number, number] };
+    const liveBox = { low: [0, 0, 0] as [number, number, number], high: [10, 10, 0] as [number, number, number] };
+    const diagA = { origin: [0, 0, 0] as [number, number, number], direction: [1, 1, 0] as [number, number, number] };
+    const diagB = { origin: [0, 0.01, 0] as [number, number, number], direction: [1, -1, 0] as [number, number, number] };
+    const liveDiagA = { origin: [0, 0, 0] as [number, number, number], direction: [1, 1, 0] as [number, number, number] };
+    const liveDiagB = { origin: [0, 10, 0] as [number, number, number], direction: [1, -1, 0] as [number, number, number] };
+    const chamferSlots = [{
+      key: "edgeTargets",
+      parameterId: "entities",
+      role: "edge" as const,
+      expectedKinds: ["edge" as const],
+      cardinality: { min: 1, max: null },
+    }];
+    const edgeQuery = (deterministicId: string, queryIndex: number) => ({
+      consumerFeatureId: "consumer",
+      slotKey: "edgeTargets",
+      parameterId: "entities",
+      queryIndex,
+      deterministicId,
+      queryString: null,
+      expectedKinds: ["edge"] as const,
+    });
+    const historyEdge = (deterministicId: string, definingData: Record<string, unknown>) => ({
+      deterministicId,
+      evaluatedAt: "historyPoint" as const,
+      consumingFeatureId: "consumer",
+      signature: { entityClass: "edge" as const, geometryType: "line", definingData, boundingBox: capturedBox },
+    });
+    const liveEdge = (edgeId: string, definingData: Record<string, unknown>) => ({
+      entityClass: "edge" as const,
+      geometryType: "line",
+      definingData,
+      boundingBox: liveBox,
+      reference: { kind: "edge" as const, bodyId: "body" as never, edgeId: edgeId as never },
+    });
+    const base = {
+      consumerFeatureId: "consumer",
+      rollback: createRollbackTopologyTimeline({ featureIds: ["consumer"], snapshots: [] }),
+      tolerance: { linear: 0.01, angularRadians: 0.001, relative: 0.000001, ambiguityMargin: 0.000001 },
+      durableNamingAvailable: true,
+    };
+
+    const resolution = resolveTopologyReferences({
+      ...base,
+      queries: [edgeQuery("edge-diag-a", 0), edgeQuery("edge-diag-b", 1)],
+      capturedReferences: [historyEdge("edge-diag-a", diagA), historyEdge("edge-diag-b", diagB)],
+      cadaraSignatures: [liveEdge("live_diag_a", liveDiagA), liveEdge("live_diag_b", liveDiagB)],
+    });
+    expect(resolution.kind).toBe("resolved");
+    if (resolution.kind !== "resolved") return;
+    // Each mirror query resolves to its own live edge — no arbitrary pick.
+    expect(resolution.bindings.map((binding) => binding.reviewReference)).toMatchObject([
+      { edgeId: "live_diag_a" },
+      { edgeId: "live_diag_b" },
+    ]);
+    const chamfer = buildResolvedBodyConsumerDefinition(
+      { featureKind: "chamfer", options: { distance: 2 }, slots: chamferSlots },
+      resolution.bindings,
+    );
+    expect(chamfer).toMatchObject({
+      kind: "chamfer",
+      parameters: { participants: [{ role: "edge", targets: [{ kind: "topologyOf" }, { kind: "topologyOf" }] }] },
+    });
+    if (chamfer.kind !== "chamfer") return;
+    const sources = chamfer.parameters.participants[0]!.targets.map(
+      (target) => (target as { source: { deterministicId: string } }).source.deterministicId,
+    );
+    expect(sources).toEqual(["edge-diag-a", "edge-diag-b"]);
+
+    // Genuinely coincident edges (same defining data) must degrade honestly.
+    const ambiguous = resolveTopologyReferences({
+      ...base,
+      queries: [edgeQuery("edge-diag-a", 0)],
+      capturedReferences: [historyEdge("edge-diag-a", diagA)],
+      cadaraSignatures: [liveEdge("live_coincident_a", liveDiagA), liveEdge("live_coincident_b", liveDiagA)],
+    });
+    expect(ambiguous).toMatchObject({ kind: "degraded", reason: "topology-reference-ambiguous" });
+  });
 });

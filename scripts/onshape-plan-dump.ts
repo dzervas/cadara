@@ -17,6 +17,7 @@ import {
   type StudioPlan,
 } from "../src/domain/import/onshape/fidelity-planner.ts";
 import { onshapeImportProvider } from "../src/domain/import/onshape/provider.ts";
+import { normalizeOnshapeTopologySignature } from "../src/domain/import/onshape/topology-signature-normalizer.ts";
 
 const USAGE =
   "Usage: bun run scripts/onshape-plan-dump.ts <bundle.onshape-capture.json> [elementId] [--review]";
@@ -195,25 +196,17 @@ function createLogicLaneReviewCapabilities(
                   bodyId: `body_review_${id}` as never,
                   vertexId: `vertex_review_${id}` as never,
                 };
+      const normalized = normalizeOnshapeTopologySignature(signature);
       const normal = signature.entityClass === "face" && signature.geometryType === "plane"
         ? normalizeVector(readPoint3(signature.definingData?.normal) ?? [0, 0, 0])
         : null;
       const xDirection = normal ? mockXAxisForNormal(normal) : null;
       return [
         {
-          ...signature,
+          ...normalized,
           definingData: xDirection
-            ? { ...signature.definingData, xDirection }
-            : signature.definingData,
-          centroid: signature.centroid
-            ? scalePoint(signature.centroid)
-            : undefined,
-          boundingBox: signature.boundingBox
-            ? {
-                low: scalePoint(signature.boundingBox.low),
-                high: scalePoint(signature.boundingBox.high),
-              }
-            : undefined,
+            ? { ...normalized.definingData, xDirection }
+            : normalized.definingData,
           reference,
         },
       ];
