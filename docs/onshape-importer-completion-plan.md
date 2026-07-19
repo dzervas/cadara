@@ -297,11 +297,45 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
       (`SketchPlaneSupportRef` face support) with apply-time rewiring, same
       pattern as `constructionOf`; prove with real-kernel e2e (mock/real
       divergence is exactly where regionOf-class bugs hide).
-- [ ] W.2 **Chamfer edge signature matching** — 2 PS1 chamfers + Mounts
+- [x] W.2 **Chamfer edge signature matching** — 2 PS1 chamfers + Mounts
       Chamfer 1 report `topology-reference-no-match`; edge signatures
       (bbox/centroid) are too weak/ambiguous on symmetric parts. Enrich
       signatures (edge endpoints + owning-face pair) or capture deterministic
       edge adjacency; diagnose with plan-dump + probe tooling.
+
+  **Verification (done).** Root cause was not weak signatures: the plan-dump
+  review mock reflected captured edge probes at mixed units (bbox in mm,
+  `definingData`/centroid in meters), so exact-tolerance matching never fired
+  on symmetric parts. Fix is pure importer/harness-side: normalize review
+  probe signatures to mm before matching (no capture-side enrichment, no
+  recapture, no nearest-geometry scoring — durable-naming exact-tolerance is
+  preserved). Added matcher + resolver→prepare regression specs proving
+  symmetric/mirror edges each resolve to their own distinct live edge and
+  degrade honestly to `topology-reference-ambiguous` when genuinely coincident.
+
+  Mock plan-dump (`--review`) tier counts before → after:
+
+  | bundle | plain | review before | review after |
+  |---|---|---|---|
+  | PS1 `9841e486…` | 6/35/0 | 22/19/0 | **24/17/0** |
+  | Mounts `40a51fb8…` | 8/2/0 | 8/2/0 | **9/1/0** |
+  | Wave T `405fa226…` | 2/0/0 | 2/0/0 | 2/0/0 (collateral, unchanged) |
+
+  Per-chamfer (mock review): PS1 Chamfer 1 parametric (unchanged); PS1 Chamfer 2
+  (5 lines) & Chamfer 4 (4 circles) no-match → **parametric**; PS1 Chamfer 3
+  stays baked `chamfer-style-unsupported` (**W.4**, out of scope); Mounts
+  Chamfer 1 no-match → **parametric**.
+
+  **Real-kernel divergence (open acceptance gate).** The `test:e2e`
+  real-kernel tiers are *unchanged*: Mounts stays **8/2/0** and PS1 stays
+  **8/33/0** because the fix was harness/matcher-side (mock review) only and
+  touched no production import code. The real OCC parametric-prefix rebuild
+  does not yet expose the chamfer edges those signatures match, so the chamfer
+  features are not promoted into the real-kernel timeline (Mounts Transform 1
+  is still baked — **W.3**; Mounts baked body remains `feature_bakedBody-1`).
+  W.2 is complete for the probe-backed review lane; closing the real-kernel gap
+  is the OCC-backed replay / browser-lane acceptance gate tracked as a
+  follow-up.
 - [ ] W.3 **Transform rotation** (contract+kernel, small) — rotation option on
       the transform advanced-solid feature; `gp_Trsf` rotation in the existing
       executor. Unlocks Mounts Transform 1 → Mounts 10/10.

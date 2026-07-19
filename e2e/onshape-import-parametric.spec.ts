@@ -69,6 +69,9 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   await page.locator('button[data-tool-id="finishSketch"]').click();
   await waitForRevisionChange(page, beforeRevision);
   await waitForMachineIdle(page);
+  // Wait for the post-finishSketch rebuild to settle before reading selectable
+  // targets; otherwise the committed sketch/body can be momentarily absent.
+  await page.waitForSelector('[data-render-idle="true"]', { timeout: 30_000 });
 
   const state = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect(state.snapshotDiagnosticsCount).toBe(0);
