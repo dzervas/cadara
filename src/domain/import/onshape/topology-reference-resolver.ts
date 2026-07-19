@@ -13,6 +13,10 @@ import {
   type TopologyMatchTolerance,
 } from "@/domain/import/onshape/signature-matcher";
 import { normalizeOnshapeTopologySignature } from "@/domain/import/onshape/topology-signature-normalizer";
+import {
+  reframeSignature,
+  type RigidTransform,
+} from "@/domain/import/onshape/capture-frame";
 import type {
   OnshapeTopologyQueryRef,
   TopologyQueryReadDiagnostic,
@@ -62,6 +66,12 @@ export interface ResolveTopologyReferencesInput {
   cadaraSignatures: readonly HistoryProbeTopologySignature[];
   tolerance: TopologyMatchTolerance;
   durableNamingAvailable: boolean;
+  /**
+   * Maps captured-frame signatures into the frame Cadara's parametric probe
+   * rebuilds. Present only when a baked transform feature precedes the consumer;
+   * absent otherwise so already-world-frame signatures are not re-transformed.
+   */
+  captureFrameToWorld?: RigidTransform;
 }
 
 type SourceEvidence = {
@@ -134,6 +144,18 @@ function sameBox(
   return true;
 }
 
+function toWorldFrame(
+  input: ResolveTopologyReferencesInput,
+  signature: OnshapeGeometricSignature,
+): OnshapeGeometricSignature {
+  // Default datum planes are frame-invariant world references (Cadara rebuilds
+  // them at the origin regardless of downstream transforms), so they are never
+  // reframed even when a baked transform precedes the consumer.
+  return input.captureFrameToWorld && signature.isDefaultPlane !== true
+    ? reframeSignature(signature, input.captureFrameToWorld)
+    : signature;
+}
+
 function selectSourceEvidence(
   input: ResolveTopologyReferencesInput,
   query: OnshapeTopologyQueryRef,
@@ -151,7 +173,10 @@ function selectSourceEvidence(
         message: history.unresolved.reason,
       };
     }
-    return { signature: normalizeOnshapeTopologySignature(history.signature), source: "historyPoint" };
+    return {
+      signature: toWorldFrame(input, normalizeOnshapeTopologySignature(history.signature)),
+      source: "historyPoint",
+    };
   }
 
   const snapshot = input.rollback.snapshotBeforeFeature(input.consumerFeatureId);
@@ -172,10 +197,10 @@ function selectSourceEvidence(
         normalizedFinal.entityClass === normalizedRollback.entityClass &&
         sameBox(normalizedFinal, normalizedRollback, input.tolerance)
       ) {
-        return { signature: normalizedFinal, source: "corroboratedFinalState" };
+        return { signature: toWorldFrame(input, normalizedFinal), source: "corroboratedFinalState" };
       }
     }
-    return { signature: normalizedRollback, source: "rollback" };
+    return { signature: toWorldFrame(input, normalizedRollback), source: "rollback" };
   }
 
   const canonicalDatum = input.capturedReferences.find(

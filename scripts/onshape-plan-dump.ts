@@ -18,6 +18,11 @@ import {
 } from "../src/domain/import/onshape/fidelity-planner.ts";
 import { onshapeImportProvider } from "../src/domain/import/onshape/provider.ts";
 import { normalizeOnshapeTopologySignature } from "../src/domain/import/onshape/topology-signature-normalizer.ts";
+import {
+  computeCaptureFrameToWorld,
+  reframeSignature,
+} from "../src/domain/import/onshape/capture-frame.ts";
+import type { OnshapeFeatureNode } from "../src/domain/import/onshape/bundle-reader.ts";
 
 const USAGE =
   "Usage: bun run scripts/onshape-plan-dump.ts <bundle.onshape-capture.json> [elementId] [--review]";
@@ -168,13 +173,39 @@ function rollbackBodySignatures(
 
 function createLogicLaneReviewCapabilities(
   featurePlans: FeaturePlan[],
+  features: readonly OnshapeFeatureNode[],
   resolvedReferences: ReturnType<typeof readPartStudio>["studio"]["resolvedReferences"],
   rollbackSnapshots: ReturnType<typeof readPartStudio>["studio"]["rollbackSnapshots"],
 ): ImportCapabilities {
+  const isParametric = (featureId: string) =>
+    featurePlans.find((plan) => plan.onshapeFeatureId === featureId)?.tier === "parametric";
+  // Honesty caveat: these echo the captured face/edge signatures straight back
+  // as the "probe" signatures, so every face/edge consumer is a guaranteed
+  // self-match after unit normalization. This proves matcher + units ONLY. The
+  // real OCC probe exposes world-frame topology that (a) may not exist in the
+  // prefix at all (PS1: extrudes bake -> zero signatures) or (b) sits in a
+  // different frame than the captured signature (Mounts Chamfer 1). Those two
+  // real-kernel failures are pinned in realkernel-acceptance-gate.spec.ts so
+  // this mock can never green-light them; see the W-realkernel note in
+  // docs/onshape-importer-completion-plan.md.
   const nonBodySignatures: HistoryProbeTopologySignature[] = resolvedReferences.flatMap(
     (entry, index) => {
       if (!("signature" in entry) || entry.signature.entityClass === "body") return [];
       const signature = entry.signature;
+      // The real OCC probe exposes faces/edges only for PARAMETRIC bodies present
+      // in the consumer's prefix. A face/edge whose owning feature is baked lives
+      // on a bodyOnlyMesh checkpoint body, which exposes body identity only — the
+      // kernel can never provide its sub-topology. Suppressing these echoes keeps
+      // the mock from over-promoting face/edge-over-checkpoint consumers the real
+      // kernel leaves honestly baked. A face/edge on a still-parametric body
+      // (e.g. a chamfer edge over parametric extrudes behind a baked transform)
+      // has a parametric owning feature and is echoed as before.
+      if (
+        signature.owningFeatureId !== undefined &&
+        !isParametric(signature.owningFeatureId)
+      ) {
+        return [];
+      }
       const id = `${index}`;
       const reference =
         signature.entityClass === "body"
@@ -196,9 +227,24 @@ function createLogicLaneReviewCapabilities(
                   bodyId: `body_review_${id}` as never,
                   vertexId: `vertex_review_${id}` as never,
                 };
-      const normalized = normalizeOnshapeTopologySignature(signature);
+      // Mirror the resolver: echo world-frame signatures so consumers behind a
+      // baked transform still self-match (the real OCC probe is world-frame too).
+      const captureFrameToWorld =
+        "consumingFeatureId" in entry
+          ? computeCaptureFrameToWorld({
+              features,
+              consumerFeatureId: entry.consumingFeatureId,
+              isParametric,
+              resolvedReferences,
+            })
+          : null;
+      const worldSignature =
+        captureFrameToWorld && signature.isDefaultPlane !== true
+          ? reframeSignature(normalizeOnshapeTopologySignature(signature), captureFrameToWorld)
+          : normalizeOnshapeTopologySignature(signature);
+      const normalized = worldSignature;
       const normal = signature.entityClass === "face" && signature.geometryType === "plane"
-        ? normalizeVector(readPoint3(signature.definingData?.normal) ?? [0, 0, 0])
+        ? normalizeVector(readPoint3(normalized.definingData?.normal) ?? [0, 0, 0])
         : null;
       const xDirection = normal ? mockXAxisForNormal(normal) : null;
       return [
@@ -344,6 +390,7 @@ async function main() {
   if (review) {
     const capabilities = createLogicLaneReviewCapabilities(
       plan.featurePlans,
+      read.features,
       read.studio.resolvedReferences,
       read.studio.rollbackSnapshots,
     );

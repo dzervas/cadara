@@ -336,6 +336,101 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
   W.2 is complete for the probe-backed review lane; closing the real-kernel gap
   is the OCC-backed replay / browser-lane acceptance gate tracked as a
   follow-up.
+
+  **Real-kernel acceptance-gate follow-up (W-realkernel).** Diagnosed and
+  pinned across a 4-step sub-plan:
+  - *Diagnosis* (node-side real-OCC harness `realkernel-diag.spec.ts` under
+    `scripts/tmp/`; scratch, removed at finalize): the mock echoes captured
+    signatures as probe signatures (guaranteed self-match), proving matcher +
+    units only. **Root cause A** — PS1 extrudes bake, so the real probe prefix
+    has zero solid bodies (`probeCount 0`) and every consumer no-matches with
+    an empty rejection list. **Root cause B** — Mounts Chamfer 1's captured
+    edge is recorded in the construction-plane (feature-local) frame
+    (`center [-4,9,0]`, `axis +Z`, y=9 is outside the body's y-range [0,4]),
+    so it never lines up with the real world-frame OCC hole edges
+    (`center [-4,{0,4},5]`, `axis ±Y`, same radius 2.05). Frame mismatch, not
+    units.
+  - *Fix #1* (step 2): dropped the partial `scaleCapturedSignatureToDocument
+    Units` scaler; both match sides now normalize `definingData` identically.
+  - *Specs + evidence* (step 3): `realkernel-acceptance-gate.spec.ts` feeds the
+    real-kernel-captured signatures (not mock echoes) through the matcher and
+    resolver, pinning root causes A and B and the world-frame positive control
+    that fix #2 must satisfy. The plan-dump mock's self-match caveat is now
+    documented inline pointing at this pin, so the mock can no longer
+    green-light a real acceptance-gate failure without this suite going red.
+    (No vitest baseline pins the mock 24/17/0 · 9/1/0 counts, so none changed.)
+  - *E2E + finalize* (final step): the browser is the true acceptance gate, and
+    it disproved the node harness's promotions. The node-side real-OCC harness
+    (`realkernel-diag.spec.ts`, now deleted) reported Mounts **9/1/0** and PS1
+    **9/32/0**, but neither survives the worker-backed browser lane / apply:
+
+    - **Mounts Chamfer 1 (harness 9/1/0 → browser 8/2/0).** Chamfer 1 is the
+      last feature, after the *baked* `Transform 1` (rotation → W.3). Its edge
+      therefore lives on the tessellation-backed `Transform 1` checkpoint body,
+      which exposes only body identity — never the hole edge. The harness/probe
+      matched the reframed edge against a probe prefix that *omits* the bake
+      (still-parametric pre-transform bodies), so review promoted it; but apply
+      rebuilds the chamfer on the checkpoint body and its live topology rematch
+      fails (`Live topology rematch failed …`, confirmed node-side against real
+      OCC). This was a silent review→apply over-promotion. **Fix (this step):**
+      the provider now degrades any face/edge consumer sitting behind a baked
+      transform (non-null capture→world transform + non-body slots) to
+      `topology-upstream-baked`, so review == apply == browser at **8/2/0**.
+      Recovering Chamfer 1 needs `Transform 1` to be parametric first (**W.3**),
+      not a reframe against the wrong prefix. This also makes the *mock*
+      plan-dump honest: Mounts review dropped **9/1/0 → 8/2/0** (superseding the
+      W.2 mock table above).
+    - **PS1 Extrude 8 (harness 9/32/0 → browser 8/33/0).** The whole-body
+      checkpoint-materialization path (probe prefix emits bake checkpoints for
+      body-only consumers) lets a body-scope extrude match a checkpoint body in
+      the *direct-OCC* node harness (shared geometry-asset store). In the
+      worker-backed browser probe the checkpoint body rebuilds without the same
+      shared bytes, so Extrude 8 is not promoted and PS1 stays **8/33/0**. The
+      materialization code is forward-correct and browser-inert (mock 24/17/0
+      and browser 8/33/0 are both unaffected); genuine PS1 face/edge/body
+      recovery is gated on **W.1** (every PS1 body-producing extrude bakes at
+      region resolution, so no parametric body is ever exposed to probe).
+
+    `e2e/onshape-import-parametric.spec.ts` asserts the honest browser tiers
+    (Mounts **8/2/0**, PS1 **8/33/0**; PS1 `Split 1` / `Boolean 1` /
+    `Delete part 1` baked-suppressed `topology reference did not match`; Mounts
+    parametric extrudes survive a `nail` edit + Extrude 1 depth edit; PS1 walls
+    survive a `walls` edit; Wave T Revolve/Sweep/Mirror timelines). Deleted the
+    `scripts/tmp/` scratch harness.
+
+    **Final tier tables (mock vs real browser gate).** All divergence is now
+    honest and pinned, not silent:
+
+    | bundle | mock plain | mock review | real (browser e2e gate) |
+    |---|---|---|---|
+    | PS1 `9841e486…` | 6/35/0 | 24/17/0 | **8/33/0** |
+    | Mounts `40a51fb8…` | 8/2/0 | **8/2/0** | **8/2/0** |
+    | Wave T `405fa226…` | 2/0/0 | 2/0/0 | Revolve 4/0/0 · Sweep 3/0/0 · Mirror 3/2/0 |
+
+    Mounts mock now equals the browser (the new gate removed the sole
+    over-promotion). PS1 mock still over-promotes by 16 (24→8) versus the
+    browser: **root cause A / W.1** — PS1 extrudes bake at region resolution, so
+    the real parametric prefix has no solid body for any downstream consumer to
+    probe. No production code was forced to fake a promotion.
+
+  - *Remaining honest residuals* (tracked follow-ups):
+    - **A1 / W.1** — every PS1 body-producing extrude bakes at region
+      resolution; genuine PS1 face/edge/body parametric recovery is gated on it
+      (extrudes must go parametric before any downstream consumer can probe a
+      real body). This is the entire PS1 mock↔browser delta.
+    - **Mounts Chamfer 1 / W.3** — permanently baked (`topology-upstream-baked`)
+      until `Transform 1` (rotation) becomes parametric; a face/edge over a
+      tessellation-backed checkpoint body is structurally unrecoverable by
+      design.
+    - **Checkpoint materialization is browser-inert** — the whole-body
+      checkpoint probe path promotes in the direct-OCC harness only; the
+      worker-backed browser probe does not rebuild checkpoint bytes into the
+      probe, so it never changes the browser gate. Kept as forward-correct.
+    - The `reframeSignature` / `computeCaptureFrameToWorld` machinery is
+      retained: `computeCaptureFrameToWorld` is the signal the new gate keys on,
+      and reframing still applies to whole-body consumers behind a baked
+      transform. `realkernel-acceptance-gate.spec.ts` keeps the reframe as a
+      mechanism-only control, explicitly noting apply keeps Chamfer 1 baked.
 - [ ] W.3 **Transform rotation** (contract+kernel, small) — rotation option on
       the transform advanced-solid feature; `gp_Trsf` rotation in the existing
       executor. Unlocks Mounts Transform 1 → Mounts 10/10.
