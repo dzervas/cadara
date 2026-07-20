@@ -12,6 +12,7 @@ import {
 import {
   requireBody,
   requireEdge,
+  resolveNativeTopologyTargetId,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
@@ -22,9 +23,18 @@ import {
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 
 function serializeNativeEdgeTargets(
-  targets: readonly { edgeId: `edge_${string}` }[],
+  body: OccTrackedBody,
+  targets: readonly { kind?: "edge"; bodyId: BodyId; edgeId: `edge_${string}` }[],
 ) {
-  return targets.map((target) => target.edgeId).join(",");
+  return targets
+    .map((target) =>
+      resolveNativeTopologyTargetId(body, {
+        kind: "edge",
+        bodyId: target.bodyId,
+        edgeId: target.edgeId,
+      }),
+    )
+    .join(",");
 }
 
 function resolveNativeFilletReplacement(
@@ -46,7 +56,7 @@ function resolveNativeFilletReplacement(
 
   const transaction = builder(
     body.shape,
-    serializeNativeEdgeTargets(targets),
+    serializeNativeEdgeTargets(body, targets),
     radius,
     body.bodyId,
     body.topologyToken,
@@ -83,7 +93,7 @@ function resolveNativeChamferReplacement(
 
   const transaction = builder(
     body.shape,
-    serializeNativeEdgeTargets(targets),
+    serializeNativeEdgeTargets(body, targets),
     distance,
     body.bodyId,
     body.topologyToken,

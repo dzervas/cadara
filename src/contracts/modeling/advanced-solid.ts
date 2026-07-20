@@ -1,4 +1,4 @@
-import type { BodyId } from "@/contracts/shared/ids";
+import type { BodyId, SketchEntityId, SketchId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import {
   createLiteralAuthoredValue,
@@ -558,6 +558,100 @@ export function validateAdvancedSolidFeatureDefinition(
       ),
     );
   }
+  if (definition.kind === "transform") {
+    diagnostics.push(
+      ...validateTransformAdvancedOptions(
+        definition as AdvancedSolidFeatureDefinition & { kind: "transform" },
+      ),
+    );
+  }
+
+  return diagnostics;
+}
+
+export type TransformOperationKind = "translation" | "rotation";
+
+/**
+ * Explicit discriminant for the transform advanced-solid feature. Absent or
+ * unrecognized `transformType` options default to `translation` so existing
+ * translation definitions stay untouched.
+ */
+export function getTransformOperationKind(
+  definition: AdvancedSolidFeatureDefinition,
+): TransformOperationKind {
+  const raw = getAuthoredLiteralValue(
+    definition.parameters.options?.transformType as MaybeAuthoredValue<unknown>,
+  );
+  return raw === "rotation" ? "rotation" : "translation";
+}
+
+function validateTransformAdvancedOptions(
+  definition: AdvancedSolidFeatureDefinition & { kind: "transform" },
+): AdvancedFeatureValidationDiagnostic[] {
+  const diagnostics: AdvancedFeatureValidationDiagnostic[] = [];
+  const options = definition.parameters.options ?? {};
+  const axisTargets = getAdvancedParticipant(definition, "axis")?.targets ?? [];
+  const referenceTargets =
+    getAdvancedParticipant(definition, "transformReference")?.targets ?? [];
+
+  if (getTransformOperationKind(definition) === "rotation") {
+    if (axisTargets.length !== 1) {
+      diagnostics.push(
+        createAdvancedDiagnostic({
+          code: "advanced-feature-missing-participant",
+          role: "axis",
+          message: "Rotation transform requires exactly one axis reference.",
+        }),
+      );
+    }
+    if (referenceTargets.length > 0) {
+      diagnostics.push(
+        createInvalidOptionDiagnostic(
+          "Rotation transform must not include a translation reference participant.",
+        ),
+      );
+    }
+    const rawAngle = options.angle;
+    if (
+      rawAngle === undefined ||
+      (!isExpressionAuthoredValue(rawAngle) &&
+        (() => {
+          const angle = getAuthoredLiteralValue(
+            rawAngle as MaybeAuthoredValue<unknown>,
+          );
+          return (
+            typeof angle !== "number" || !Number.isFinite(angle) || angle === 0
+          );
+        })())
+    ) {
+      diagnostics.push(
+        createInvalidOptionDiagnostic(
+          "Rotation transform requires a non-zero angle in degrees.",
+        ),
+      );
+    }
+    return diagnostics;
+  }
+
+  // Translation: a distance-reference translation carries exactly one
+  // transformReference; the importer's raw XYZ vector path carries neither an
+  // axis nor a reference and is validated by the kernel, not here.
+  if (axisTargets.length > 0) {
+    diagnostics.push(
+      createInvalidOptionDiagnostic(
+        "Translation transform must not include an axis participant.",
+      ),
+    );
+  }
+  if (referenceTargets.length !== 1 && options.vector === undefined) {
+    diagnostics.push(
+      createAdvancedDiagnostic({
+        code: "advanced-feature-missing-participant",
+        role: "transformReference",
+        message: "Translation transform requires exactly one transform reference.",
+      }),
+    );
+  }
 
   return diagnostics;
 }
@@ -1032,6 +1126,33 @@ export const transformAdvancedFeatureExample = {
     ],
     options: {
       distance: 5,
+    },
+  },
+} satisfies AdvancedSolidFeatureDefinition;
+
+export const transformRotationAdvancedFeatureExample = {
+  kind: "transform",
+  featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  parameters: {
+    participants: [
+      {
+        role: "body",
+        targets: [{ kind: "body", bodyId: "body_target" as BodyId }],
+      },
+      {
+        role: "axis",
+        targets: [
+          {
+            kind: "sketchEntity",
+            sketchId: "sketch_rotation_axis" as SketchId,
+            entityId: "entity_rotation_axis" as SketchEntityId,
+          },
+        ],
+      },
+    ],
+    options: {
+      transformType: "rotation",
+      angle: 45,
     },
   },
 } satisfies AdvancedSolidFeatureDefinition;

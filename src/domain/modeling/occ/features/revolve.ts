@@ -114,7 +114,7 @@ function listOccShapes(
   return shapes;
 }
 
-function buildAxisFromSketchLine(
+export function buildAxisFromSketchLine(
   context: OccFeatureExecutionContext,
   sketchId: import("@/contracts/shared/ids").SketchId,
   entityId: import("@/contracts/shared/ids").SketchEntityId,

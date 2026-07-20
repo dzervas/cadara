@@ -261,6 +261,12 @@ export interface TransformFeatureParameterDraft {
   > | null;
   distance: MaybeAuthoredValue<number>;
   direction: "positive" | "negative";
+  transformType: "translation" | "rotation";
+  axisTarget: Extract<
+    PrimitiveRef,
+    { kind: "construction" | "face" | "edge" | "sketchEntity" }
+  > | null;
+  angle: MaybeAuthoredValue<number>;
 }
 
 export interface FeatureDraftByKind {

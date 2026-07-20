@@ -275,16 +275,23 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
       {
         role: "transformReference",
         label: "Transform reference",
-        required: true,
-        cardinality: { min: 1, max: 1 },
+        required: false,
+        cardinality: { min: 0, max: 1 },
         acceptedKinds: ["construction", "face"],
+      },
+      {
+        role: "axis",
+        label: "Rotation axis",
+        required: false,
+        cardinality: { min: 0, max: 1 },
+        acceptedKinds: ["construction", "face", "edge", "sketchEntity"],
       },
     ],
     options: [
       {
         key: "distance",
         label: "Distance",
-        required: true,
+        required: false,
         valueKind: "positiveNumber",
       },
     ],
@@ -1203,6 +1210,33 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
       transformDescriptor,
     );
 
+    const validSketchAxisRotation = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "transform",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "body",
+              targets: [{ kind: "body", bodyId: "body_rotation" }],
+            },
+            {
+              role: "axis",
+              targets: [
+                {
+                  kind: "sketchEntity",
+                  sketchId: "sketch_rotation_axis",
+                  entityId: "entity_rotation_axis",
+                },
+              ],
+            },
+          ],
+          options: { transformType: "rotation", angle: 90 },
+        },
+      },
+      transformDescriptor,
+    );
+
     const invalid = validateAdvancedSolidFeatureDefinition(
       {
         kind: "transform",
@@ -1232,6 +1266,10 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
     expect(
       valid.length,
       "Transform validation should accept body-only targets, an explicit transform reference, and a positive distance.",
+    ).toBe(0);
+    expect(
+      validSketchAxisRotation.length,
+      "Transform validation should accept a sketch entity as a rotation axis.",
     ).toBe(0);
     expect(
       invalid.some(

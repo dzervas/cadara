@@ -898,6 +898,105 @@ type OccSubtopologyRef = Extract<
   { kind: "face" | "edge" | "vertex" }
 >;
 
+type OccNativeTopologyIdAliases = NonNullable<
+  OccTrackedBody["nativeTopologyIdAliases"]
+>;
+
+function idFromSubtopologyRef(target: OccSubtopologyRef) {
+  if (target.kind === "face") {
+    return target.faceId;
+  }
+  if (target.kind === "edge") {
+    return target.edgeId;
+  }
+  return target.vertexId;
+}
+
+function composeNativeTopologyAliases(input: {
+  current: OccTrackedBody;
+  targetByCurrentKey: ReadonlyMap<string, OccSubtopologyRef>;
+}): OccNativeTopologyIdAliases | undefined {
+  const aliases = input.current.nativeTopologyIdAliases;
+  if (!aliases) {
+    return undefined;
+  }
+
+  const compose = <Id extends FaceId | EdgeId | VertexId>(
+    kind: "face" | "edge" | "vertex",
+    source: ReadonlyMap<Id, Id> | undefined,
+  ) => {
+    if (!source) {
+      return undefined;
+    }
+
+    const result = new Map<Id, Id>();
+    const claimedPublicIds = new Map<Id, Id>();
+    for (const [nativeId, currentId] of source) {
+      const currentTarget = (() => {
+        if (kind === "face") {
+          return { kind, bodyId: input.current.bodyId, faceId: currentId as FaceId };
+        }
+        if (kind === "edge") {
+          return { kind, bodyId: input.current.bodyId, edgeId: currentId as EdgeId };
+        }
+        return {
+          kind,
+          bodyId: input.current.bodyId,
+          vertexId: currentId as VertexId,
+        };
+      })() as OccSubtopologyRef;
+      const reconciled =
+        input.targetByCurrentKey.get(getOccDurableRefKey(currentTarget)) ??
+        currentTarget;
+      if (reconciled.kind !== kind) {
+        throw new Error(
+          `Native topology alias collision changed ${kind} ${currentId} into ${reconciled.kind}.`,
+        );
+      }
+      const reconciledId = idFromSubtopologyRef(reconciled) as Id;
+      const previousNative = claimedPublicIds.get(reconciledId);
+      if (previousNative && previousNative !== nativeId) {
+        throw new Error(
+          `Native topology alias collision for ${kind} ${reconciledId}.`,
+        );
+      }
+      claimedPublicIds.set(reconciledId, nativeId);
+      result.set(nativeId, reconciledId);
+    }
+    return result;
+  };
+
+  return {
+    faceIdsByNativeId: compose("face", aliases.faceIdsByNativeId) ?? new Map(),
+    edgeIdsByNativeId: compose("edge", aliases.edgeIdsByNativeId),
+    vertexIdsByNativeId: compose("vertex", aliases.vertexIdsByNativeId),
+  };
+}
+
+function createCurrentToReconciledAliases(
+  targetByCurrentKey: ReadonlyMap<string, OccSubtopologyRef>,
+): OccNativeTopologyIdAliases {
+  const faceIdsByNativeId = new Map<FaceId, FaceId>();
+  const edgeIdsByNativeId = new Map<EdgeId, EdgeId>();
+  const vertexIdsByNativeId = new Map<VertexId, VertexId>();
+
+  for (const [currentKey, reconciled] of targetByCurrentKey) {
+    const [, , currentId] = currentKey.split(":");
+    if (!currentId) {
+      continue;
+    }
+    if (reconciled.kind === "face") {
+      faceIdsByNativeId.set(currentId as FaceId, reconciled.faceId);
+    } else if (reconciled.kind === "edge") {
+      edgeIdsByNativeId.set(currentId as EdgeId, reconciled.edgeId);
+    } else {
+      vertexIdsByNativeId.set(currentId as VertexId, reconciled.vertexId);
+    }
+  }
+
+  return { faceIdsByNativeId, edgeIdsByNativeId, vertexIdsByNativeId };
+}
+
 export function applySemanticStageTopologyIds(input: {
   previous: OccTrackedBody;
   current: OccTrackedBody;
@@ -1019,6 +1118,17 @@ export function applySemanticStageTopologyIds(input: {
     contributorsById: input.current.vertexContributingFeatureIdsById,
   });
 
+  const nativeTopologyIdAliases = composeNativeTopologyAliases({
+    current: input.current,
+    targetByCurrentKey,
+  });
+  const nativeTopologyPayload = input.current.nativeTopologyPayload
+    ? rewriteNativeTopologyPayloadIds(
+        input.current.bodyId,
+        input.current.nativeTopologyPayload,
+        createCurrentToReconciledAliases(targetByCurrentKey),
+      )
+    : undefined;
   return {
     body: {
       ...input.current,
@@ -1035,8 +1145,8 @@ export function applySemanticStageTopologyIds(input: {
       verticesById: vertices.shapesById,
       vertexContributingFeatureIdsById: vertices.contributorsById,
       naming: undefined,
-      nativeTopologyPayload: undefined,
-      nativeTopologyIdAliases: undefined,
+      nativeTopologyPayload,
+      nativeTopologyIdAliases,
     } satisfies OccTrackedBody,
     targetByCurrentKey,
   };

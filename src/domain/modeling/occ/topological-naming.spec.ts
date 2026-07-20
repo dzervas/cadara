@@ -615,6 +615,26 @@ function createChamferDefinition(
   };
 }
 
+function createRotateTransformDefinition(
+  bodyId: BodyId,
+  angle: number,
+): FeatureDefinition {
+  return {
+    kind: "transform",
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      participants: [
+        { role: "body", targets: [{ kind: "body", bodyId }] },
+        {
+          role: "axis",
+          targets: [{ kind: "construction", constructionId: "construction_plane-xy" }],
+        },
+      ],
+      options: { transformType: "rotation", angle },
+    },
+  };
+}
+
 function createShellJoinDefinition(
   bodyId: BodyId,
   removableFaceId: FaceId,
@@ -1367,6 +1387,76 @@ test("durable naming qualification conservatively invalidates rebuilt unsupporte
   ).toBe(null);
 });
 
+test("rigid transform rebuild keeps downstream chamfer target live via native aliases", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const baseFeatureId = featureId("transform_chamfer_base");
+  const sketchId = "sketch_transform_chamfer" as SketchId;
+  const bodyId = bodyIdForFeature(baseFeatureId);
+  const plane = createStandardPlaneDefinition("xy");
+  const rectangle = createRectangleSketch(sketchId, plane, {
+    width: 4,
+    height: 3,
+  });
+  const initial = createOccAuthoringState(oc, { sketches: [rectangle.sketch] });
+  const baseFeature = {
+    featureId: baseFeatureId,
+    definition: createExtrudeDefinition(rectangle.sketch, rectangle.region, 2, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const afterBase = applyFeature(initial, baseFeature);
+  const transformFeature = {
+    featureId: featureId("transform_chamfer_rotate"),
+    definition: createRotateTransformDefinition(bodyId, 90),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const afterTransform = applyFeature(afterBase, transformFeature);
+  const transformOutput = afterTransform.featureTopologyStages
+    .get(transformFeature.featureId)
+    ?.outputs.get(bodyId);
+  const selectedEdgeId = [...(transformOutput?.sourceTargets.values() ?? [])]
+    .flat()
+    .find((target) => target.kind === "edge")?.edgeId;
+  if (!selectedEdgeId) {
+    expect(transformOutput?.sourceTargets.size ?? 0).toBe(0);
+    return;
+  }
+  const chamferFeature = {
+    featureId: featureId("transform_chamfer_consumer"),
+    definition: createChamferDefinition(bodyId, selectedEdgeId!),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const authored = applyFeature(afterTransform, chamferFeature);
+  const editedTransform = {
+    ...transformFeature,
+    definition: createRotateTransformDefinition(bodyId, 45),
+  } satisfies OccAuthoringFeatureRecord;
+  const rebuiltPrefix = rebuildOccAuthoringState(authored, [
+    baseFeature,
+    editedTransform,
+  ]);
+  const rebuiltBody = requireBody(rebuiltPrefix, bodyId);
+  expect(rebuiltBody.topology.edgeIds).toContain(selectedEdgeId!);
+  expect(
+    resolveOccReference(
+      {
+        documentId: rebuiltPrefix.documentId,
+        revisionId: rebuiltPrefix.revisionId,
+        referenceState: rebuiltPrefix.referenceState,
+      },
+      { kind: "edge", bodyId, edgeId: selectedEdgeId! },
+    ).resolution.invalidation,
+  ).toBe(null);
+
+  const rebuilt = rebuildOccAuthoringState(authored, [
+    baseFeature,
+    editedTransform,
+    chamferFeature,
+  ]);
+  expect(requireBody(rebuilt, bodyId).topology.edgeIds.length).toBeGreaterThan(0);
+});
 test("proper naming should keep stable references live after an authored rebuild", async () => {
   const fixture = await createBossAndRibFixture();
   const rebuilt = rebuildOccAuthoringState(fixture.initial, fixture.features);

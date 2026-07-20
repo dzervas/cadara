@@ -2,7 +2,12 @@ import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanc
 import type { ConstructionId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
-import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
+import {
+  getAdvancedParticipant,
+  getTransformOperationKind,
+} from "@/contracts/modeling/advanced-solid";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
+import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
   normalize,
   scale,
@@ -10,7 +15,11 @@ import {
   toGpPnt,
   toGpVec,
 } from "@/domain/modeling/occ/geometry";
-import { buildConstructionPlaneFromPlanarFace } from "@/domain/modeling/occ/sketch-profile";
+import {
+  buildAxisFromLineEdge,
+  buildConstructionPlaneFromPlanarFace,
+} from "@/domain/modeling/occ/sketch-profile";
+import { buildAxisFromSketchLine } from "@/domain/modeling/occ/features/revolve";
 import type {
   OccReferenceInvalidationRecord,
   OccTrackedBody,
@@ -18,6 +27,7 @@ import type {
 import { advanceTopologyToken } from "@/domain/modeling/occ/topology";
 import {
   requireBody,
+  requireEdge,
   requireFace,
   requireConstructionPlaneDefinition,
   type OccFeatureExecutionContext,
@@ -34,6 +44,11 @@ import type {
   OpenCascadeNativeFeatureTransactionResult,
   OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
+import {
+  createRigidTransformTopologyStage,
+  createUnsupportedProducerTopologyStage,
+  type OccFeatureTopologyStage,
+} from "@/domain/modeling/occ/topology-stage";
 
 function resolvePlanarReferencePlane(
   context: OccFeatureExecutionContext,
@@ -247,6 +262,14 @@ export function executeMirrorFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
+    topologyStage: createUnsupportedProducerTopologyStage({
+      featureId: ownerFeatureId,
+      bodies: mirroredBodies,
+      producedTargets: mirroredBodies.map((body) => ({
+        kind: "body" as const,
+        bodyId: body.bodyId,
+      })),
+    }),
   };
 }
 
@@ -345,19 +368,83 @@ function getTransformVector(
     : null;
 }
 
-export function executeTransformFeature(
-  context: OccFeatureExecutionContext,
-  ownerFeatureId: FeatureId,
+function getTransformAxisTarget(
   definition: AdvancedSolidFeatureDefinition & { kind: "transform" },
-): OccFeatureExecutionResult {
-  if (definition.parameters.operationIntent !== undefined) {
+) {
+  const targets = getAdvancedParticipant(definition, "axis")?.targets ?? [];
+
+  if (targets.length !== 1) {
     throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC transform does not support operation intents.",
+      "advanced-feature-unsupported-kernel-case: OCC transform rotation requires exactly one axis participant.",
     );
   }
 
-  const bodyTargets = getTransformBodyTargets(definition);
-  requireUniqueTargetBodies(bodyTargets.map((target) => target.bodyId));
+  const [axisTarget] = targets;
+  if (
+    !axisTarget ||
+    (axisTarget.kind !== "construction" &&
+      axisTarget.kind !== "face" &&
+      axisTarget.kind !== "edge" &&
+      axisTarget.kind !== "sketchEntity")
+  ) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC transform rotation axis must be a construction, planar face, linear edge, or sketch line target.",
+    );
+  }
+
+  return axisTarget;
+}
+
+function getTransformAngleRadians(
+  definition: AdvancedSolidFeatureDefinition & { kind: "transform" },
+) {
+  const raw = definition.parameters.options?.angle;
+  const degrees =
+    typeof raw === "number"
+      ? raw
+      : getAuthoredLiteralValue(raw as MaybeAuthoredValue<unknown>);
+
+  if (typeof degrees !== "number" || !Number.isFinite(degrees) || degrees === 0) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC transform rotation requires a non-zero angle in degrees.",
+    );
+  }
+
+  return (degrees * Math.PI) / 180;
+}
+
+function buildRotationAxis(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  target: DurableRef,
+) {
+  if (target.kind === "edge") {
+    return buildAxisFromLineEdge(
+      context.oc,
+      requireEdge(context, requireBody(context, target.bodyId), target.edgeId),
+    );
+  }
+
+  if (target.kind === "sketchEntity") {
+    return buildAxisFromSketchLine(context, target.sketchId, target.entityId);
+  }
+
+  const plane = resolvePlanarReferencePlane(
+    context,
+    target,
+    `construction_${ownerFeatureId}_transform_axis` as ConstructionId,
+  );
+  return new context.oc.gp_Ax1_2(
+    toGpPnt(context.oc, plane.frame.origin),
+    toGpDir(context.oc, plane.frame.normal),
+  );
+}
+
+function buildTransformTranslation(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  definition: AdvancedSolidFeatureDefinition & { kind: "transform" },
+) {
   const vector = getTransformVector(definition);
   let translationVector: readonly [number, number, number];
   if (vector) {
@@ -375,9 +462,43 @@ export function executeTransformFeature(
     translationVector = scale(normalize(plane.frame.normal), signedDistance);
   }
   const translation = new context.oc.gp_Trsf_1();
-  translation.SetTranslation_1(
-    toGpVec(context.oc, translationVector),
+  translation.SetTranslation_1(toGpVec(context.oc, translationVector));
+  return translation;
+}
+
+function buildTransformRotation(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  definition: AdvancedSolidFeatureDefinition & { kind: "transform" },
+) {
+  const axis = buildRotationAxis(
+    context,
+    ownerFeatureId,
+    getTransformAxisTarget(definition),
   );
+  const angle = getTransformAngleRadians(definition);
+  const rotation = new context.oc.gp_Trsf_1();
+  rotation.SetRotation_1(axis, angle);
+  return rotation;
+}
+
+export function executeTransformFeature(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  definition: AdvancedSolidFeatureDefinition & { kind: "transform" },
+): OccFeatureExecutionResult {
+  if (definition.parameters.operationIntent !== undefined) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC transform does not support operation intents.",
+    );
+  }
+
+  const bodyTargets = getTransformBodyTargets(definition);
+  requireUniqueTargetBodies(bodyTargets.map((target) => target.bodyId));
+  const transform =
+    getTransformOperationKind(definition) === "rotation"
+      ? buildTransformRotation(context, ownerFeatureId, definition)
+      : buildTransformTranslation(context, ownerFeatureId, definition);
 
   const nextBodies = [...context.bodies];
   const historyInvalidations = new Map<
@@ -386,12 +507,13 @@ export function executeTransformFeature(
   >();
   const producedTargets: DurableRef[] = [];
 
+  const topologyStages: OccFeatureTopologyStage[] = [];
   for (const bodyTarget of bodyTargets) {
     const body = requireBody(context, bodyTarget.bodyId);
     const nativeTransaction = buildNativeTransformTransaction(
       context,
       body,
-      translation,
+      transform,
       "transform",
     );
     const replacementResult = nativeTransaction
@@ -403,29 +525,40 @@ export function executeTransformFeature(
           ownerFeatureId,
         )
       : (() => {
-          const transform = new context.oc.BRepBuilderAPI_Transform_2(
+          const builder = new context.oc.BRepBuilderAPI_Transform_2(
             body.shape,
-            translation,
+            transform,
             true,
           );
-          transform.Build(new context.oc.Message_ProgressRange_1());
+          builder.Build(new context.oc.Message_ProgressRange_1());
 
-          if (!transform.IsDone()) {
+          if (!builder.IsDone()) {
             throw new Error(
               "advanced-feature-unsupported-kernel-case: OCC transform build failed.",
             );
           }
 
-          return resolveReplacementBodies(
+          const fallbackResult = resolveReplacementBodies(
             context,
             body.bodyId,
-            transform.Shape(),
+            builder.Shape(),
             ownerFeatureId,
             {
               allowEmpty: false,
-              historySource: transform,
+              historySource: builder,
             },
           );
+          topologyStages.push(
+            createUnsupportedProducerTopologyStage({
+              featureId: ownerFeatureId,
+              bodies: fallbackResult.replacements,
+              producedTargets: fallbackResult.replacements.map((replacement) => ({
+                kind: "body" as const,
+                bodyId: replacement.bodyId,
+              })),
+            }),
+          );
+          return fallbackResult;
         })();
     const index = nextBodies.findIndex((entry) => entry.bodyId === body.bodyId);
     nextBodies.splice(index, 1, ...replacementResult.replacements);
@@ -434,6 +567,19 @@ export function executeTransformFeature(
     }
     for (const [key, value] of replacementResult.historyInvalidations) {
       historyInvalidations.set(key, value);
+    }
+    if (nativeTransaction) {
+      for (const replacement of replacementResult.replacements) {
+        topologyStages.push(
+          createRigidTransformTopologyStage({
+            featureId: ownerFeatureId,
+            sourceBody: body,
+            outputBody: replacement,
+            successorsBySourceKey:
+              replacementResult.successorTargetsByPreviousKey ?? new Map(),
+          }),
+        );
+      }
     }
   }
 
@@ -445,5 +591,9 @@ export function executeTransformFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations,
+    topologyStage: {
+      featureId: ownerFeatureId,
+      outputs: new Map(topologyStages.flatMap((stage) => [...stage.outputs])),
+    },
   };
 }

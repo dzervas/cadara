@@ -125,6 +125,8 @@ export type PlanReasonCode =
   | "mirror-plane-unresolved"
   | "transform-copy-unsupported"
   | "transform-rotation-unsupported"
+  | "transform-rotation-angle-unreadable"
+  | "transform-rotation-axis-unresolved"
   | "transform-translation-unreadable"
   | "transform-reference-unresolved"
   | "transform-type-unsupported"

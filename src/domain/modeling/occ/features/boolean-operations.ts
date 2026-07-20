@@ -401,32 +401,87 @@ function createNativeCurrentTargetAliases(
   return aliases;
 }
 
+function resolveExistingNativeAliasTarget(
+  current: OccTrackedBody,
+  target: DurableRef,
+): DurableRef {
+  if (target.kind === "face") {
+    const faceId = current.nativeTopologyIdAliases?.faceIdsByNativeId.get(
+      target.faceId,
+    );
+    return faceId ? { ...target, faceId } : target;
+  }
+  if (target.kind === "edge") {
+    const edgeId = current.nativeTopologyIdAliases?.edgeIdsByNativeId?.get(
+      target.edgeId,
+    );
+    return edgeId ? { ...target, edgeId } : target;
+  }
+  if (target.kind === "vertex") {
+    const vertexId = current.nativeTopologyIdAliases?.vertexIdsByNativeId?.get(
+      target.vertexId,
+    );
+    return vertexId ? { ...target, vertexId } : target;
+  }
+  return target;
+}
+
+function isCurrentTopologyTarget(current: OccTrackedBody, target: DurableRef) {
+  if (target.kind === "face") {
+    return target.bodyId === current.bodyId && current.facesById.has(target.faceId);
+  }
+  if (target.kind === "edge") {
+    return target.bodyId === current.bodyId && current.edgesById.has(target.edgeId);
+  }
+  if (target.kind === "vertex") {
+    return (
+      target.bodyId === current.bodyId && current.verticesById.has(target.vertexId)
+    );
+  }
+  return false;
+}
+
+type OccNativeSuccessorClaim = {
+  previous: Extract<DurableRef, { kind: "face" | "edge" | "vertex" }>;
+  successor: Extract<DurableRef, { kind: "face" | "edge" | "vertex" }>;
+};
+
 function collectNativeHistoryResolution(input: {
   current: OccTrackedBody;
   history: OccNativeFeatureTransactionHistoryPayload;
   currentNativePayload?: OccNativeShimPayload | null;
 }) {
   const preservedTargetsBySuccessorKey = new Map<string, DurableRef>();
+  const successorTargetsByPreviousKey = new Map<string, DurableRef>();
   const invalidations = new Map<string, OccReferenceInvalidationRecord>();
   const currentTargetAliases = createNativeCurrentTargetAliases(
     input.current,
     input.currentNativePayload ?? null,
   );
+  const claims: OccNativeSuccessorClaim[] = [];
 
   for (const record of input.history.records) {
     const target =
       currentTargetAliases.get(getOccDurableRefKey(record.target)) ??
       record.target;
+    const exactTarget = resolveExistingNativeAliasTarget(input.current, record.target);
 
     if (
       record.reason === "unique-successor" &&
       record.successors.length === 1 &&
       sameTopologyTargetKind(target, record.successors[0]!)
     ) {
-      preservedTargetsBySuccessorKey.set(
-        getOccDurableRefKey(record.successors[0]!),
-        target,
-      );
+      const successor = record.successors[0]!;
+      preservedTargetsBySuccessorKey.set(getOccDurableRefKey(successor), target);
+      if (
+        sameTopologyTargetKind(exactTarget, successor) &&
+        isCurrentTopologyTarget(input.current, exactTarget)
+      ) {
+        claims.push({
+          previous: exactTarget,
+          successor,
+        } as OccNativeSuccessorClaim);
+      }
       continue;
     }
 
@@ -444,8 +499,39 @@ function collectNativeHistoryResolution(input: {
     }
   }
 
+  const previousClaims = new Map<string, OccNativeSuccessorClaim[]>();
+  const successorClaims = new Map<string, OccNativeSuccessorClaim[]>();
+  for (const claim of claims) {
+    const previousKey = getOccDurableRefKey(claim.previous);
+    const successorKey = getOccDurableRefKey(claim.successor);
+    previousClaims.set(previousKey, [...(previousClaims.get(previousKey) ?? []), claim]);
+    successorClaims.set(successorKey, [
+      ...(successorClaims.get(successorKey) ?? []),
+      claim,
+    ]);
+  }
+
+  for (const claim of claims) {
+    const previousKey = getOccDurableRefKey(claim.previous);
+    const successorKey = getOccDurableRefKey(claim.successor);
+    const duplicatePrevious = (previousClaims.get(previousKey)?.length ?? 0) > 1;
+    const duplicateSuccessor = (successorClaims.get(successorKey)?.length ?? 0) > 1;
+    if (duplicatePrevious || duplicateSuccessor) {
+      invalidations.set(previousKey, {
+        target: claim.previous,
+        reason: OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
+        sourceTarget: { kind: "body", bodyId: input.current.bodyId },
+      });
+      preservedTargetsBySuccessorKey.delete(successorKey);
+      continue;
+    }
+
+    successorTargetsByPreviousKey.set(previousKey, claim.successor);
+  }
+
   return {
     preservedTargetsBySuccessorKey,
+    successorTargetsByPreviousKey,
     invalidations,
   };
 }
@@ -475,15 +561,19 @@ function reconcileNativeHistoryReplacement(
     return {
       body: replacement,
       historyInvalidations: createUnsupportedHistoryInvalidations(current),
+      successorTargetsByPreviousKey: new Map<string, DurableRef>(),
     };
   }
 
-  const { preservedTargetsBySuccessorKey, invalidations } =
-    collectNativeHistoryResolution({
-      current,
-      history,
-      currentNativePayload,
-    });
+  const {
+    preservedTargetsBySuccessorKey,
+    successorTargetsByPreviousKey: rawSuccessorTargetsByPreviousKey,
+    invalidations,
+  } = collectNativeHistoryResolution({
+    current,
+    history,
+    currentNativePayload,
+  });
   const faceIds: FaceId[] = [];
   const facesById = new Map<
     FaceId,
@@ -603,6 +693,30 @@ function reconcileNativeHistoryReplacement(
     );
   }
 
+  const successorTargetsByPreviousKey = new Map<string, DurableRef>();
+  for (const [previousKey, successor] of rawSuccessorTargetsByPreviousKey) {
+    if (successor.kind === "face") {
+      const faceId = faceIdsByNativeId.get(successor.faceId);
+      if (faceId) {
+        successorTargetsByPreviousKey.set(previousKey, { ...successor, faceId });
+      }
+      continue;
+    }
+    if (successor.kind === "edge") {
+      const edgeId = edgeIdsByNativeId.get(successor.edgeId);
+      if (edgeId) {
+        successorTargetsByPreviousKey.set(previousKey, { ...successor, edgeId });
+      }
+      continue;
+    }
+    if (successor.kind === "vertex") {
+      const vertexId = vertexIdsByNativeId.get(successor.vertexId);
+      if (vertexId) {
+        successorTargetsByPreviousKey.set(previousKey, { ...successor, vertexId });
+      }
+    }
+  }
+
   const reconciledBody = {
     ...replacement,
     topology: {
@@ -644,6 +758,7 @@ function reconcileNativeHistoryReplacement(
   return {
     body: reconciledBody,
     historyInvalidations: invalidations,
+    successorTargetsByPreviousKey,
   };
 }
 
@@ -690,6 +805,7 @@ export function resolveNativeFeatureTransactionReplacement(
   return {
     replacements: [reconciled.body],
     historyInvalidations: reconciled.historyInvalidations,
+    successorTargetsByPreviousKey: reconciled.successorTargetsByPreviousKey,
   };
 }
 
@@ -897,6 +1013,7 @@ export function resolveReplacementBodies(
       return {
         replacements: [] as OccTrackedBody[],
         historyInvalidations,
+        successorTargetsByPreviousKey: new Map<string, DurableRef>(),
       };
     }
 
@@ -933,6 +1050,7 @@ export function resolveReplacementBodies(
   return {
     replacements: [replacement.body],
     historyInvalidations,
+    successorTargetsByPreviousKey: new Map<string, DurableRef>(),
   };
 }
 

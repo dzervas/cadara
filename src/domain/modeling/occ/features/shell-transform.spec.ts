@@ -2,10 +2,17 @@ import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
+import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
-import type { BodyId, FeatureId } from "@/contracts/shared/ids";
+import type {
+  BodyId,
+  FeatureId,
+  SketchEntityId,
+  SketchId,
+} from "@/contracts/shared/ids";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import { executeShellFeature } from "@/domain/modeling/occ/features/shell";
+import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import {
   executeMirrorFeature,
   executeTransformFeature,
@@ -15,9 +22,20 @@ import { toGpPnt } from "@/domain/modeling/occ/planes";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   OCC_REFERENCE_INVALIDATION_REASONS,
+  getOccDurableRefKey,
   trackNewSolidBody,
   type OccReferenceInvalidationRecord,
 } from "@/domain/modeling/occ/topology";
+import {
+  SKETCH_SCHEMA_VERSION,
+  SOLVED_SKETCH_SCHEMA_VERSION,
+  type SketchRecord,
+} from "@/contracts/sketch/schema";
+import {
+  OCC_KERNEL_DOCUMENT_ID,
+  OCC_KERNEL_INITIAL_REVISION_ID,
+  createStandardPlaneDefinition,
+} from "@/domain/modeling/opencascade-kernel-seed";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,
@@ -51,6 +69,67 @@ function makeTrackedBox(
     ownerFeatureId,
     shape: box.Shape(),
   });
+}
+
+function makeSketchLineAxis(
+  sketchId: SketchId,
+  entityId: SketchEntityId,
+): SketchSnapshotRecord {
+  const plane = createStandardPlaneDefinition("xy");
+  const sketch: SketchRecord = {
+    ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
+    ownerRevisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+    ownerFeatureId: null,
+    ownerSketchId: sketchId,
+    ownerBodyId: null,
+    sketchId,
+    label: "Rotation axis",
+    planeSupport: plane.support,
+    definition: {
+      schemaVersion: SKETCH_SCHEMA_VERSION,
+      referenceIds: [],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    },
+    solvedSnapshot: {
+      schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
+      status: { solveState: "solved", constraintState: "wellConstrained" },
+      solvedEntities: [
+        {
+          kind: "lineSegment",
+          entityId,
+          startPosition: [0, 0],
+          endPosition: [0, 4],
+        },
+      ],
+      solvedPoints: [],
+      constraintStatuses: [],
+      dimensionStatuses: [],
+      diagnostics: [],
+    },
+    regions: [],
+  };
+
+  return {
+    ownerDocumentId: OCC_KERNEL_DOCUMENT_ID,
+    ownerRevisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+    ownerFeatureId: null,
+    ownerSketchId: sketchId,
+    ownerBodyId: null,
+    sketchId,
+    label: "Rotation axis",
+    plane,
+    planeTarget: plane.support,
+    planeKey: plane.key,
+    sketch,
+  };
 }
 
 function assertNativeHistoryDidNotFallBack(
@@ -112,10 +191,217 @@ test("executeTransformFeature uses native transaction history for replacement to
     ),
     "Native transform should preserve previous face ids with unique successors.",
   ).toBeTruthy();
+  const output = result.topologyStage?.outputs.get(body.bodyId);
+  expect(output, "Native transform should publish a topology stage.").toBeTruthy();
+  const sourceKeyPrefix = `rigid-transform:feature_native_transform_history:${body.bodyId}:`;
+  const expectedSourceCount =
+    body.topology.faceIds.length +
+    body.topology.edgeIds.length +
+    body.topology.vertexIds.length;
+  expect(output!.sourceTargets.size).toBe(expectedSourceCount);
+  expect(output!.unsupportedSourceKeys.size).toBe(0);
+  expect(
+    [...output!.sourceTargets.keys()].every((key) =>
+      key.startsWith(sourceKeyPrefix),
+    ),
+    "Rigid transform source keys should be stable semantic keys, not traversal positions.",
+  ).toBeTruthy();
+  const targetKeys = [...output!.sourceTargets.values()].flatMap((targets) =>
+    targets.map((target) => getOccDurableRefKey(target)),
+  );
+  expect(new Set(targetKeys).size).toBe(expectedSourceCount);
+  expect(
+    targetKeys.every((key) =>
+      [
+        ...replacement!.topology.faceIds.map((faceId) =>
+          getOccDurableRefKey({ kind: "face", bodyId: body.bodyId, faceId }),
+        ),
+        ...replacement!.topology.edgeIds.map((edgeId) =>
+          getOccDurableRefKey({ kind: "edge", bodyId: body.bodyId, edgeId }),
+        ),
+        ...replacement!.topology.vertexIds.map((vertexId) =>
+          getOccDurableRefKey({ kind: "vertex", bodyId: body.bodyId, vertexId }),
+        ),
+      ].includes(key),
+    ),
+    "Every rigid transform source should map to one current same-body successor.",
+  ).toBeTruthy();
   assertNativeHistoryDidNotFallBack(
     result.historyInvalidations,
     "Native transform",
   );
+});
+
+test("executeTransformFeature fallback publishes honest unsupported topology stage", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const nativeHost = oc as unknown as OpenCascadeNativeTopologyKernelHost;
+  const nativeTransactions = nativeHost.CadaraExecuteNativeFeatureTransaction;
+  const nativeTransform =
+    nativeTransactions?.BuildTransformCommittedShapeTransactionWithHistory;
+  if (nativeTransactions) {
+    delete nativeTransactions.BuildTransformCommittedShapeTransactionWithHistory;
+  }
+  try {
+    const body = makeTrackedBox(
+      oc,
+      "body_transform_fallback_seed" as BodyId,
+      "feature_transform_fallback_seed" as FeatureId,
+    );
+    const context = createOccAuthoringState(oc, { bodies: [body] });
+    const result = executeTransformFeature(
+      context,
+      "feature_transform_fallback" as FeatureId,
+      {
+        kind: "transform",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+            {
+              role: "transformReference",
+              targets: [
+                { kind: "construction", constructionId: "construction_plane-xy" },
+              ],
+            },
+          ],
+          options: { distance: 1 },
+        },
+      } satisfies AdvancedSolidFeatureDefinition & { kind: "transform" },
+    );
+    const output = result.topologyStage?.outputs.get(body.bodyId);
+    expect(output?.sourceTargets.size).toBe(0);
+    expect(output?.unsupportedSourceKeys.size).toBe(0);
+  } finally {
+    if (nativeTransactions && nativeTransform) {
+      nativeTransactions.BuildTransformCommittedShapeTransactionWithHistory =
+        nativeTransform;
+    }
+  }
+});
+
+test("executeTransformFeature rotates a body about a construction-plane axis while retaining identity", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_rotation_seed" as BodyId,
+    "feature_rotation_seed" as FeatureId,
+  );
+  const context = createOccAuthoringState(oc, { bodies: [body] });
+
+  const result = executeTransformFeature(
+    context,
+    "feature_rotation" as FeatureId,
+    {
+      kind: "transform",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        participants: [
+          { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+          {
+            role: "axis",
+            targets: [
+              { kind: "construction", constructionId: "construction_plane-xy" },
+            ],
+          },
+        ],
+        options: { transformType: "rotation", angle: 90 },
+      },
+    } satisfies AdvancedSolidFeatureDefinition & { kind: "transform" },
+  );
+
+  const replacement = result.bodies.find(
+    (candidate) => candidate.bodyId === body.bodyId,
+  );
+  expect(
+    replacement != null,
+    "Rotation should replace the selected body in place, retaining its bodyId.",
+  ).toBeTruthy();
+  expect(
+    body.topology.faceIds.every((faceId) =>
+      replacement?.topology.faceIds.includes(faceId),
+    ),
+    "Rotation should preserve previous face ids as unique successors.",
+  ).toBeTruthy();
+  assertNativeHistoryDidNotFallBack(result.historyInvalidations, "Rotation");
+
+  // The seed box spans [0,4]^3. A +90° rotation about the +Z axis through the
+  // origin maps (x, y, z) -> (-y, x, z), so the rotated body spans
+  // x in [-4, 0], y in [0, 4], z in [0, 4].
+  const points = getShapeVertexPoints(oc, replacement!.shape);
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  const zs = points.map((point) => point[2]);
+  expect(Math.min(...xs)).toBeCloseTo(-4, 5);
+  expect(Math.max(...xs)).toBeCloseTo(0, 5);
+  expect(Math.min(...ys)).toBeCloseTo(0, 5);
+  expect(Math.max(...ys)).toBeCloseTo(4, 5);
+  expect(Math.min(...zs)).toBeCloseTo(0, 5);
+  expect(Math.max(...zs)).toBeCloseTo(4, 5);
+});
+
+test("executeTransformFeature rotates about a committed sketch line while retaining identity and provenance", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_sketch_rotation_seed" as BodyId,
+    "feature_sketch_rotation_seed" as FeatureId,
+  );
+  const sketchId = "sketch_transform_rotation_axis" as SketchId;
+  const entityId = "sketch_entity_transform_rotation_axis" as SketchEntityId;
+  const axisSketch = makeSketchLineAxis(sketchId, entityId);
+  const context = createOccAuthoringState(oc, {
+    bodies: [body],
+    sketches: [axisSketch],
+  });
+
+  const result = executeTransformFeature(
+    context,
+    "feature_sketch_rotation" as FeatureId,
+    {
+      kind: "transform",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        participants: [
+          { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+          {
+            role: "axis",
+            targets: [{ kind: "sketchEntity", sketchId, entityId }],
+          },
+        ],
+        options: { transformType: "rotation", angle: 90 },
+      },
+    } satisfies AdvancedSolidFeatureDefinition & { kind: "transform" },
+  );
+
+  const replacement = result.bodies.find(
+    (candidate) => candidate.bodyId === body.bodyId,
+  );
+  expect(
+    replacement,
+    "Sketch-line rotation should retain the bodyId.",
+  ).toBeDefined();
+  expect(
+    body.contributingFeatureIds.every((featureId) =>
+      replacement?.contributingFeatureIds.includes(featureId),
+    ),
+    "Sketch-line rotation should retain the body's existing feature provenance.",
+  ).toBeTruthy();
+  assertNativeHistoryDidNotFallBack(
+    result.historyInvalidations,
+    "Sketch-line rotation",
+  );
+
+  // The +Y sketch line rotates (x, y, z) -> (z, y, -x).
+  const points = getShapeVertexPoints(oc, replacement!.shape);
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  const zs = points.map((point) => point[2]);
+  expect(Math.min(...xs)).toBeCloseTo(0, 5);
+  expect(Math.max(...xs)).toBeCloseTo(4, 5);
+  expect(Math.min(...ys)).toBeCloseTo(0, 5);
+  expect(Math.max(...ys)).toBeCloseTo(4, 5);
+  expect(Math.min(...zs)).toBeCloseTo(-4, 5);
+  expect(Math.max(...zs)).toBeCloseTo(0, 5);
 });
 
 test("executeShellFeature uses native shell transaction before replacement boolean composition", async () => {

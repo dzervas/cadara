@@ -9,6 +9,7 @@ import {
 import {
   requireBody,
   requireFace,
+  resolveNativeTopologyTargetId,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
@@ -19,9 +20,18 @@ import {
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 
 function serializeNativeFaceTargets(
-  targets: readonly { faceId: `face_${string}` }[],
+  body: ReturnType<typeof requireBody>,
+  targets: readonly { bodyId: BodyId; faceId: `face_${string}` }[],
 ) {
-  return targets.map((target) => target.faceId).join(",");
+  return targets
+    .map((target) =>
+      resolveNativeTopologyTargetId(body, {
+        kind: "face",
+        bodyId: target.bodyId,
+        faceId: target.faceId,
+      }),
+    )
+    .join(",");
 }
 
 function buildShellFeatureShape(
@@ -119,7 +129,7 @@ function buildNativeShellFeatureShape(
       : -resolvedThickness;
   const transaction = builder(
     sourceBody.shape,
-    serializeNativeFaceTargets(parameters.faceTargets),
+    serializeNativeFaceTargets(sourceBody, parameters.faceTargets),
     signedThickness,
     sourceBody.bodyId,
     sourceBody.topologyToken,

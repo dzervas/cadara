@@ -15,6 +15,7 @@ import type {
   CreateFeatureRequest,
 } from "@/contracts/modeling/schema";
 import { CONTRACT_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
+import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { FIXTURE_PART_STUDIO_ID } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
@@ -779,6 +780,55 @@ test("legacy v1 preparation and apply remain equivalent with or without history 
   }
 });
 
+test("import apply accepts an authored imported chamfer distance", async () => {
+  const created: CreateFeatureRequest[] = [];
+  const service = {
+    createFeature(request: CreateFeatureRequest) {
+      created.push(request);
+      expect(validateFeatureDefinitionAuthoredValueInvariants(request.definition).map((issue) => issue.message)).toEqual([]);
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          contractVersion: CONTRACT_VERSION,
+          revisionId: "rev_chamfer_next" as RevisionId,
+          featureId: "feature_chamfer" as const,
+          revisionState: "advanced" as const,
+          rebuildResult: "rebuilt" as const,
+          changedTargets: [],
+          diagnostics: [],
+        }),
+        (error) => createAppError({ code: "unknown", message: String(error) }),
+      );
+    },
+  } as ModelingService;
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: "rev_chamfer" as RevisionId,
+    actions: {
+      createFeatures: [{
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_chamfer" as RevisionId,
+        definition: {
+          kind: "chamfer",
+          featureTypeVersion: "advanced-solid-feature/v0",
+          parameters: {
+            participants: [{
+              role: "edge",
+              targets: [{ kind: "edge", bodyId: "body_1", edgeId: "edge_1" }],
+            }],
+            options: { distance: { source: "literal", value: 2 } },
+          },
+        },
+      }],
+    },
+  });
+
+  expect(result.diagnostics).toEqual([]);
+  expect(created).toHaveLength(1);
+  expect(created[0]?.definition.kind).toBe("chamfer");
+  expect(created[0]?.definition.parameters.options?.distance).toEqual({ source: "literal", value: 2 });
+});
+
 test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same position and later replacements continue", async () => {
   const created: CreateFeatureRequest[] = [];
   const snapshot = {
@@ -943,7 +993,9 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
     for (const consumer of consumers) {
       expect(consumer.tier).toBe("baked");
       if (consumer.featureType === "transform") {
-        expect(consumer.reasonCodes).toContain("transform-rotation-unsupported");
+        expect(consumer.reasonCodes.some((reason) =>
+          reason === "needs-history-probe" || reason === "transform-rotation-axis-unresolved"
+        )).toBe(true);
       } else if (legacySnapshotless) {
         expect(consumer.reasonCodes).toContain("topology-history-evidence-missing");
         expect(consumer.reasonCodes).toContain("topology-bake-snapshot-missing");
@@ -1260,6 +1312,94 @@ test("applyImportPreparedActions resolves a fixture sketch region into a concret
       createFeatureRequests[0].definition.parameters.profiles[0]?.kind === "region",
     "The deferred regionOf profile should be materialized to a concrete region profile before createFeature.",
   ).toBeTruthy();
+});
+
+test("applyImportPreparedActions materializes a deferred sketchEntity rotation axis before mock create", async () => {
+  const { action: sketchAction } = await verifiedConstrainedLineAction(10);
+  const created: CreateFeatureRequest[] = [];
+  let revision = 0;
+  const service = {
+    async getCurrentDocumentSnapshot() {
+      throw new Error("not used");
+    },
+    async buildNativeExactBrepPayload() {
+      throw new Error("not used");
+    },
+    commitSketch() {
+      revision += 1;
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          revisionId: `rev_axis_${revision}` as RevisionId,
+          sketchId: "sketch_live_axis" as never,
+          diagnostics: [],
+        }),
+        (error) => createAppError({ code: "unknown", message: String(error) }),
+      );
+    },
+    createFeature(request: CreateFeatureRequest) {
+      created.push(request);
+      revision += 1;
+      return ResultAsync.fromPromise(
+        Promise.resolve({
+          revisionId: `rev_axis_${revision}` as RevisionId,
+          featureId: "feature_rotation" as never,
+          revisionState: "advanced" as const,
+          rebuildResult: "rebuilt" as const,
+          changedTargets: [],
+          diagnostics: [],
+        }),
+        (error) => createAppError({ code: "unknown", message: String(error) }),
+      );
+    },
+  } as unknown as ModelingService;
+  const actions: ImportPreparedActions = {
+    commitSketches: [sketchAction],
+    createFeatures: [{
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_ignored" as RevisionId,
+      featureLabel: "Transform 1",
+      definition: {
+        kind: "transform",
+        featureTypeVersion: "advanced-solid-feature/v0",
+        parameters: {
+          options: { transformType: "rotation", angle: 90 },
+          participants: [
+            { role: "body", targets: [{ kind: "body", bodyId: "body_live" as never }] },
+            {
+              role: "axis",
+              targets: [{
+                kind: "sketchEntity",
+                sketchId: { kind: "sketchIdOf", actionIndex: 0 },
+                entityId: "line" as never,
+              }],
+            },
+          ],
+        },
+      },
+    }],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+    ],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: "rev_ignored" as RevisionId,
+    actions,
+  });
+
+  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
+  expect(created[0]?.definition).toMatchObject({
+    kind: "transform",
+    parameters: {
+      participants: [
+        { role: "body" },
+        { role: "axis", targets: [{ kind: "sketchEntity", sketchId: "sketch_live_axis", entityId: "line" }] },
+      ],
+    },
+  });
 });
 
 test("applyImportPreparedActions resolves bodyOf scope for a sketch-extrude-cut chain", async () => {

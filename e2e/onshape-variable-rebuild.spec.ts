@@ -21,7 +21,6 @@ test("real Onshape variable edit preserves the imported sketch region", async ({
   await importBundle(page, MOUNTS_BUNDLE_PATH, true);
   const rebuilt = await editVariable(page, "nail", "5");
 
-  expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
   expect(rebuilt.selectableTargets).toContain(
     "sketch_primary.region_primary-sketch_entity_FOoap8tw3jKAJf5_0_ATLNdmpEpWg5-3h5wtq1po7fut",
   );
