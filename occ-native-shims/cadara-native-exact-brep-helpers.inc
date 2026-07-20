@@ -631,6 +631,22 @@ namespace {
     TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
     TopExp::MapShapes(shape, TopAbs_VERTEX, vertexMap);
 
+    const std::vector<std::string> faceIds = CadaraCanonicalTopologyIdsForShapeMap(
+      faceMap,
+      TopAbs_FACE,
+      bodyId
+    );
+    const std::vector<std::string> edgeIds = CadaraCanonicalTopologyIdsForShapeMap(
+      edgeMap,
+      TopAbs_EDGE,
+      bodyId
+    );
+    const std::vector<std::string> vertexIds = CadaraCanonicalTopologyIdsForShapeMap(
+      vertexMap,
+      TopAbs_VERTEX,
+      bodyId
+    );
+
     std::ostringstream diagnostics;
     bool needsDiagnosticComma = false;
 
@@ -663,7 +679,7 @@ namespace {
         out << ",";
       }
       const TopoDS_Vertex vertex = TopoDS::Vertex(vertexMap.FindKey(vertexIndex));
-      out << "{\"vertexKey\":\"" << CadaraEscapeJson(CadaraExactTopologyKey("vertex", bodyId, topologyToken, vertexIndex)) << "\",\"point\":";
+      out << "{\"vertexKey\":\"" << CadaraEscapeJson(vertexIds[vertexIndex]) << "\",\"point\":";
       CadaraAppendPoint3Json(out, BRep_Tool::Pnt(vertex));
       out << "}";
     }
@@ -678,7 +694,7 @@ namespace {
       const TopoDS_Vertex lastVertex = TopExp::LastVertex(edge, true);
       const int firstVertexIndex = CadaraFindShapeIndex(vertexMap, firstVertex);
       const int lastVertexIndex = CadaraFindShapeIndex(vertexMap, lastVertex);
-      const std::string edgeKey = CadaraExactTopologyKey("edge", bodyId, topologyToken, edgeIndex);
+      const std::string& edgeKey = edgeIds[edgeIndex];
 
       out
         << "{\"edgeKey\":\"" << CadaraEscapeJson(edgeKey)
@@ -787,7 +803,7 @@ namespace {
         out << ",";
       }
       const TopoDS_Face face = TopoDS::Face(faceMap.FindKey(faceIndex));
-      const std::string faceKey = CadaraExactTopologyKey("face", bodyId, topologyToken, faceIndex);
+      const std::string& faceKey = faceIds[faceIndex];
       out << "{\"faceKey\":\"" << CadaraEscapeJson(faceKey) << "\",\"loopIndices\":[";
       for (std::size_t loopIndex = 0; loopIndex < faceLoopIndexes[faceIndex - 1].size(); loopIndex += 1) {
         if (loopIndex > 0) {

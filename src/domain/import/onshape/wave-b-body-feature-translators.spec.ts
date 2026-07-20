@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { ImportCapabilities } from "@/contracts/import/capabilities";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import { validateImportPreparedActions } from "@/contracts/import/validation";
+import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
@@ -162,9 +163,81 @@ describe("Wave B body topology translators", () => {
       options: { vector: [25, -20, 0] },
       slots: [{ parameterId: "entities", role: "body" }],
     });
-    expect(plan(transformFeatureTranslator, "transform", [valueParameter("transformType", "ROTATION")]).reasonCodes).toEqual([
-      "transform-rotation-unsupported",
+  });
+
+  test("maps supported ROTATION about an earlier parametric sketch line", () => {
+    const sketchFeatureId = "SKETCH_AXIS";
+    const rotation = transformFeatureTranslator.plan({
+      feature: {
+        featureId: "F_transform",
+        featureType: "transform",
+        name: "Transform",
+        parameters: [
+          valueParameter("transformType", "ROTATION"),
+          queryParameter("entities", ["body"]),
+          {
+            parameterId: "transformAxis",
+            queries: [{ queryString: `qCreatedBy(id + "${sketchFeatureId}" + "wireOp", EntityType.EDGE)->qNthElement(0) /* axis_line */` }],
+          },
+          valueParameter("angle", 0, "90 deg"),
+          valueParameter("oppositeDirectionEntity", true),
+          valueParameter("makeCopy", false),
+        ],
+      } as OnshapeFeatureNode,
+      label: "Transform",
+      onshapeSuppressed: false,
+      read: {
+        features: [],
+        solvedSketchesByFeatureId: new Map([[sketchFeatureId, {
+          featureId: sketchFeatureId,
+          entities: [{ entityId: "axis_line", entityType: "lineSegment", start3d: [0, 0, 0], end3d: [0.01, 0, 0] }],
+          constraints: [],
+        }]]),
+      } as never,
+      references: new Map(),
+      state: {
+        sketchPlansByFeatureId: new Map([[sketchFeatureId, { tier: "parametric", planeKey: "xy" }]]),
+        bodyProducingFeatureIds: [],
+      },
+    });
+
+    expect(rotation).toMatchObject({
+      tier: "baked",
+      reasonCodes: ["needs-history-probe"],
+      plannedBodyTopologyConsumer: {
+        featureKind: "transform",
+        options: { transformType: "rotation", angle: -90 },
+        staticParticipants: [{
+          role: "axis",
+          targets: [{ kind: "sketchEntityFromFeature", sketchFeatureId }],
+        }],
+        slots: [{ parameterId: "entities", role: "body" }],
+      },
+    });
+  });
+
+  test("bakes ROTATION when the axis is not a solved earlier sketch line", () => {
+    const rotation = plan(transformFeatureTranslator, "transform", [
+      valueParameter("transformType", "ROTATION"),
+      queryParameter("entities", ["body"]),
+      queryParameter("transformAxis", ["axisEdge"]),
+      valueParameter("angle", 0, "90 deg"),
+      valueParameter("oppositeDirection", false),
+      valueParameter("makeCopy", false),
     ]);
+    expect(rotation.tier).toBe("baked");
+    expect(rotation.reasonCodes).toEqual(["transform-rotation-axis-unresolved"]);
+    expect(rotation.plannedBodyTopologyConsumer).toBeUndefined();
+  });
+
+  test("reports an unreadable rotation angle before the axis blocker", () => {
+    expect(
+      plan(transformFeatureTranslator, "transform", [
+        valueParameter("transformType", "ROTATION"),
+        queryParameter("entities", ["body"]),
+        queryParameter("transformAxis", ["axisEdge"]),
+      ]).reasonCodes,
+    ).toEqual(["transform-rotation-angle-unreadable"]);
   });
 
   test("accepts body-tool split and rejects active face-tool split", () => {
@@ -417,6 +490,11 @@ describe("Wave B body topology translators", () => {
     const chamfer = buildResolvedBodyConsumerDefinition({ featureKind: "chamfer", options: { distance: 2 }, slots: [{ key: "edgeTargets", parameterId: "entities", role: "edge", expectedKinds: ["edge"], cardinality: { min: 1, max: null } }] }, resolution.bindings);
     expect(fillet).toMatchObject({ kind: "fillet", parameters: { edgeTargets: [{ kind: "topologyOf", expectedKind: "edge" }] } });
     expect(chamfer).toMatchObject({ kind: "chamfer", parameters: { participants: [{ role: "edge", targets: [{ kind: "topologyOf", expectedKind: "edge" }] }] } });
+    expect(chamfer).toMatchObject({
+      kind: "chamfer",
+      parameters: { options: { distance: { source: "literal", value: 2 } } },
+    });
+    expect(validateFeatureDefinitionAuthoredValueInvariants(chamfer).map((issue) => issue.message)).toEqual([]);
 
     const faceResolution = resolveTopologyReferences({
       ...input,
@@ -543,6 +621,7 @@ describe("Wave B body topology translators", () => {
       parameters: { participants: [{ role: "edge", targets: [{ kind: "topologyOf" }, { kind: "topologyOf" }] }] },
     });
     if (chamfer.kind !== "chamfer") return;
+    expect(chamfer.parameters.options?.distance).toEqual({ source: "literal", value: 2 });
     const sources = chamfer.parameters.participants[0]!.targets.map(
       (target) => (target as { source: { deterministicId: string } }).source.deterministicId,
     );

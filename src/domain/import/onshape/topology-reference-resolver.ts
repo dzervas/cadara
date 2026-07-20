@@ -67,9 +67,10 @@ export interface ResolveTopologyReferencesInput {
   tolerance: TopologyMatchTolerance;
   durableNamingAvailable: boolean;
   /**
-   * Maps captured-frame signatures into the frame Cadara's parametric probe
-   * rebuilds. Present only when a baked transform feature precedes the consumer;
-   * absent otherwise so already-world-frame signatures are not re-transformed.
+   * Maps non-consumer/rollback/final captured-frame signatures into the frame
+   * Cadara's parametric probe rebuilds. Current-consumer historyPoint evidence
+   * is already authored in the consuming feature's live frame and must not be
+   * transformed again.
    */
   captureFrameToWorld?: RigidTransform;
 }
@@ -147,11 +148,12 @@ function sameBox(
 function toWorldFrame(
   input: ResolveTopologyReferencesInput,
   signature: OnshapeGeometricSignature,
+  options: { reframe: boolean } = { reframe: true },
 ): OnshapeGeometricSignature {
   // Default datum planes are frame-invariant world references (Cadara rebuilds
   // them at the origin regardless of downstream transforms), so they are never
   // reframed even when a baked transform precedes the consumer.
-  return input.captureFrameToWorld && signature.isDefaultPlane !== true
+  return options.reframe && input.captureFrameToWorld && signature.isDefaultPlane !== true
     ? reframeSignature(signature, input.captureFrameToWorld)
     : signature;
 }
@@ -174,7 +176,7 @@ function selectSourceEvidence(
       };
     }
     return {
-      signature: toWorldFrame(input, normalizeOnshapeTopologySignature(history.signature)),
+      signature: toWorldFrame(input, normalizeOnshapeTopologySignature(history.signature), { reframe: false }),
       source: "historyPoint",
     };
   }

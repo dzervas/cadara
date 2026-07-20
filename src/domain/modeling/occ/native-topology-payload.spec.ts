@@ -13,6 +13,7 @@ import {
   parseNativeShimPayloadJson,
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
 
 type NativeShapeForTest = { delete?: () => void };
 
@@ -64,6 +65,14 @@ type NativeOpenCascadeForTest = OpenCascadeNativeTopologyKernelHost & {
     radius: number,
   ) => NativeDisposableForTest;
   TopoDS_Shape: new () => { delete?: () => void };
+  gp_Trsf_1: new () => NativeDisposableForTest & {
+    SetTranslation_1(vector: NativeDisposableForTest): void;
+  };
+  gp_Vec_4: new (
+    x: number,
+    y: number,
+    z: number,
+  ) => NativeDisposableForTest;
 };
 
 type NativeOpenCascadeMainJSForTest = new (
@@ -247,13 +256,39 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
   async function testNativeShimReturnsFlatTopologyAndMeshPayloads() {
     const oc = await loadNativeOpenCascadeForTest();
     const boxBuilder = new oc.BRepPrimAPI_MakeBox_2(1, 2, 3);
-    const shape = boxBuilder.Shape();
+    const sourceShape = boxBuilder.Shape();
     const bodyId = "body_native_payload_probe" as BodyId;
     const revisionId = "rev_native_payload_probe" as RevisionId;
+    const topologyToken = "t0003";
+    const transform = new oc.gp_Trsf_1();
+    const translation = new oc.gp_Vec_4(5, 2, 1);
+    transform.SetTranslation_1(translation);
+    const transformBuilder =
+      oc.CadaraExecuteNativeFeatureTransaction
+        ?.BuildTransformCommittedShapeTransactionWithHistory;
+    expect(
+      typeof transformBuilder,
+      "Custom OCC build should expose native transform transactions.",
+    ).toBe("function");
+    const transformResult = transformBuilder!(
+      sourceShape,
+      transform,
+      true,
+      bodyId,
+      "t0002",
+      topologyToken,
+      0.1,
+      0.5,
+    );
+    expect(
+      transformResult.IsDone(),
+      "Native topology parity fixture should transform a committed body.",
+    ).toBeTruthy();
+    const shape = transformResult.Shape();
     const topologyJson = oc.CadaraBuildNativeTopologyPayload?.BuildJson?.(
       shape,
       bodyId,
-      "t_native",
+      topologyToken,
       0.1,
       0.5,
     );
@@ -265,7 +300,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     const exactBrepJson = oc.CadaraBuildNativeExactBrepPayload?.BuildJson?.(
       shape,
       bodyId,
-      "t_native",
+      topologyToken,
     );
 
     expect(
@@ -311,6 +346,78 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
       bodyLabel: "Native payload probe",
       nativePayload: nativeExactBrep,
     });
+
+    const topologyIdsByKind = new Map(
+      (["face", "edge", "vertex"] as const).map((kind) => [
+        kind,
+        new Set(
+          topologyPayload.bodies[0]?.topology
+            .filter((record) => record.kind === kind)
+            .map((record) => record.id) ?? [],
+        ),
+      ]),
+    );
+    const signatureResult =
+      deriveKernelTopologySignaturesFromExactBrepPayload(exactBrepPayload);
+    expect(
+      signatureResult.status,
+      "Native exact B-rep should expose topology signatures for the transformed body.",
+    ).toBe("available");
+    if (signatureResult.status === "available") {
+      for (const signature of signatureResult.signatures) {
+        if (
+          signature.reference.kind !== "face" &&
+          signature.reference.kind !== "edge" &&
+          signature.reference.kind !== "vertex"
+        ) {
+          continue;
+        }
+        const publicId =
+          signature.reference.kind === "face"
+            ? signature.reference.faceId
+            : signature.reference.kind === "edge"
+              ? signature.reference.edgeId
+              : signature.reference.vertexId;
+        expect(
+          topologyIdsByKind.get(signature.reference.kind)?.has(publicId),
+          `Exact ${signature.reference.kind} reference ${publicId} should be a live canonical native topology id.`,
+        ).toBeTruthy();
+        expect(
+          publicId,
+          `Exact ${signature.reference.kind} references must not expose export-local topology tokens.`,
+        ).not.toMatch(/_t[0-9]+_/);
+      }
+      const exactEdge = signatureResult.signatures.find(
+        (signature) => signature.reference.kind === "edge",
+      )?.reference;
+      expect(
+        exactEdge?.kind,
+        "Native exact B-rep signatures should expose a chamferable edge.",
+      ).toBe("edge");
+      if (exactEdge?.kind === "edge") {
+        const chamferBuilder =
+          oc.CadaraExecuteNativeFeatureTransaction
+            ?.BuildChamferCommittedShapeTransactionWithHistory;
+        expect(
+          typeof chamferBuilder,
+          "Custom OCC build should expose native chamfer transactions.",
+        ).toBe("function");
+        const chamferResult = chamferBuilder!(
+          shape,
+          exactEdge.edgeId,
+          0.1,
+          bodyId,
+          topologyToken,
+          "t0004",
+          0.1,
+          0.5,
+        );
+        expect(
+          chamferResult.IsDone(),
+          `Exact signature edge ${exactEdge.edgeId} should resolve for native Chamfer apply.`,
+        ).toBeTruthy();
+      }
+    }
 
     expect(
       nativeTopology.topology.length,

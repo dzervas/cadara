@@ -10,13 +10,20 @@ import {
 } from "@/contracts/modeling/advanced-solid";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { FILLET_FEATURE_SCHEMA_VERSION, SHELL_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
-import type { ConstructionId } from "@/contracts/shared/ids";
-import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
+import type { ConstructionId, SketchEntityId } from "@/contracts/shared/ids";
+import type { OnshapeFeatureNode, OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
 import type { OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
+import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
 import type { TopologyQuerySlot } from "@/domain/import/onshape/topology-query-reader";
 export interface PlannedConstructionFromFeatureRef {
   kind: "constructionFromFeature";
   featureId: string;
+}
+
+export interface PlannedSketchEntityFromFeatureRef {
+  kind: "sketchEntityFromFeature";
+  sketchFeatureId: string;
+  entityId: SketchEntityId;
 }
 
 export interface PlannedBodyTopologyConsumer {
@@ -26,7 +33,7 @@ export interface PlannedBodyTopologyConsumer {
   options?: Record<string, unknown>;
   staticParticipants?: readonly {
     role: AdvancedParticipantValue["role"];
-    targets: readonly (AdvancedParticipantValue["targets"][number] | PlannedConstructionFromFeatureRef)[];
+    targets: readonly (AdvancedParticipantValue["targets"][number] | PlannedConstructionFromFeatureRef | PlannedSketchEntityFromFeatureRef)[];
   }[];
   radius?: number;
   thickness?: number;
@@ -55,6 +62,19 @@ function hasQueries(feature: OnshapeFeatureNode, id: string): boolean {
   return Array.isArray(queries) && queries.length > 0;
 }
 
+function queryText(feature: OnshapeFeatureNode, id: string): string {
+  const queries = parameter(feature, id)?.queries;
+  if (!Array.isArray(queries)) return "";
+  return queries
+    .map((query) =>
+      typeof query === "object" &&
+      query !== null &&
+      typeof (query as { queryString?: unknown }).queryString === "string"
+        ? (query as { queryString: string }).queryString
+        : "",
+    )
+    .join("\n");
+}
 function quantityMillimeters(feature: OnshapeFeatureNode, id: string): number | null {
   const entry = parameter(feature, id);
   const expression = entry?.expression;
@@ -67,6 +87,20 @@ function quantityMillimeters(feature: OnshapeFeatureNode, id: string): number | 
     }
   }
   return typeof entry?.value === "number" && Number.isFinite(entry.value) ? entry.value * 1000 : null;
+}
+
+function angleDegrees(feature: OnshapeFeatureNode, id: string): number | null {
+  const entry = parameter(feature, id);
+  const expression = entry?.expression;
+  if (typeof expression === "string") {
+    const match = expression.trim().match(/^([-+]?\d+(?:\.\d+)?)\s*(deg|rad|degree|radian)?$/i);
+    if (match) {
+      const value = Number(match[1]);
+      const unit = (match[2]?.toLowerCase() ?? "deg");
+      return unit.startsWith("rad") ? (value * 180) / Math.PI : value;
+    }
+  }
+  return typeof entry?.value === "number" && Number.isFinite(entry.value) ? entry.value : null;
 }
 
 function canonicalPlane(feature: OnshapeFeatureNode, parameterId: string, context: Parameters<OnshapeFeatureTranslator["plan"]>[0]) {
@@ -109,6 +143,58 @@ function planeReference(
   );
   return producer?.featureType === "cPlane"
     ? { kind: "constructionFromFeature", featureId }
+    : null;
+}
+
+function resolveSketchLineAxisSource(axisQuery: string, solvedSketch: OnshapeSolvedSketch) {
+  const lines = solvedSketch.entities.filter((entity) => entity.entityType === "lineSegment");
+  const exact = lines.filter((entity) => axisQuery.includes(entity.entityId));
+  if (exact.length === 1) return exact[0]!;
+
+  const nthIndex = axisQuery.match(/qNthElement\([^;]*?,\s*(\d+)\s*\)/)?.[1];
+  if (nthIndex !== undefined) {
+    const createdEdges = solvedSketch.entities.filter(
+      (entity) => entity.entityType === "lineSegment" || entity.entityType === "circle",
+    );
+    const indexed = createdEdges[Number(nthIndex)];
+    return indexed?.entityType === "lineSegment" ? indexed : null;
+  }
+
+  return lines.length === 1 ? lines[0]! : null;
+}
+
+function translateRotationAxis(
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+): PlannedSketchEntityFromFeatureRef | null {
+  const axisQuery = queryText(context.feature, "transformAxis");
+  if (!axisQuery) return null;
+
+  const solvedSketches = context.read.solvedSketchesByFeatureId;
+  if (!solvedSketches) return null;
+  const sketchCandidates = [...solvedSketches.entries()].filter(
+    ([featureId]) => axisQuery.includes(featureId),
+  );
+  if (sketchCandidates.length !== 1) return null;
+
+  const [sketchFeatureId, solvedSketch] = sketchCandidates[0]!;
+  const sketchPlan = context.state.sketchPlansByFeatureId.get(sketchFeatureId);
+  if (!sketchPlan || sketchPlan.tier !== "parametric") return null;
+
+  const axisSource = resolveSketchLineAxisSource(axisQuery, solvedSketch);
+  if (!axisSource) return null;
+
+  const translation = translateSolvedSketch({
+    solved: solvedSketch,
+    featureId: sketchFeatureId,
+    label: sketchFeatureId,
+    planeKey: sketchPlan.planeKey,
+    planeFrame: sketchPlan.planeFrame,
+  });
+  const axisEntity = translation.definition.entities.find(
+    (entity) => entity.kind === "lineSegment" && entity.label === axisSource.entityId,
+  );
+  return axisEntity
+    ? { kind: "sketchEntityFromFeature", sketchFeatureId, entityId: axisEntity.entityId }
     : null;
 }
 
@@ -188,7 +274,21 @@ export const transformFeatureTranslator: OnshapeFeatureTranslator = {
   plan(context) {
     if (booleanValue(context.feature, "makeCopy")) return baked(context, "transform-copy-unsupported");
     const transformType = enumValue(context.feature, "transformType") ?? "TRANSLATION_BY_XYZ";
-    if (transformType === "ROTATION") return baked(context, "transform-rotation-unsupported");
+    if (transformType === "ROTATION") {
+      const angle = angleDegrees(context.feature, "angle");
+      if (angle === null || angle === 0) return baked(context, "transform-rotation-angle-unreadable");
+      const axis = translateRotationAxis(context);
+      if (!axis) return baked(context, "transform-rotation-axis-unresolved");
+      const signedAngle = booleanValue(context.feature, "oppositeDirectionEntity") || booleanValue(context.feature, "oppositeDirection")
+        ? -angle
+        : angle;
+      return topologyCandidate(context, {
+        featureKind: "transform",
+        options: { transformType: "rotation", angle: signedAngle },
+        staticParticipants: [{ role: "axis", targets: [axis] }],
+        slots: [slot("bodies", "entities", "body")],
+      });
+    }
     if (transformType === "TRANSLATION_BY_XYZ" || transformType === "TRANSLATION_3D") {
       const vector = ["dx", "dy", "dz"].map((id) => quantityMillimeters(context.feature, id));
       if (vector.some((value) => value === null) || vector.every((value) => value === 0)) return baked(context, "transform-translation-unreadable");
@@ -381,12 +481,21 @@ export function buildResolvedBodyConsumerDefinition(
       },
     };
   }
+  const executableOptions =
+    planned.featureKind === "chamfer" &&
+    planned.options &&
+    typeof planned.options.distance === "number"
+      ? {
+          ...planned.options,
+          distance: createLiteralAuthoredValue(planned.options.distance),
+        }
+      : planned.options;
   return {
     kind: planned.featureKind as AdvancedSolidFeatureKind,
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
     parameters: {
       ...(planned.operationIntent ? { operationIntent: createLiteralAuthoredValue(planned.operationIntent) } : {}),
-      ...(planned.options ? { options: planned.options } : {}),
+      ...(executableOptions ? { options: executableOptions } : {}),
       participants: [
         ...[...targetsByRole].map(([role, targets]) => ({ role: role as never, targets })),
         ...(planned.staticParticipants ?? []),

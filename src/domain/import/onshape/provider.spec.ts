@@ -12,6 +12,7 @@ import type {
 } from "@/contracts/import/onshape-capture-bundle";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import { validateImportPreparedActions } from "@/contracts/import/validation";
+import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createBuiltinImportProviderRegistry } from "@/domain/import/builtin-provider-composition";
 import {
@@ -935,8 +936,18 @@ test("src/domain/import/onshape/provider.spec.ts chamfer promotes with matching 
     selections: onshapeImportProvider.createDefaultSelections(review),
     capabilities: probeCapabilities,
   });
-  expect(actions.createFeatures?.some((action) => action.definition.kind === "chamfer"))
-    .toBe(true);
+  const chamferAction = actions.createFeatures?.find((action) => action.definition.kind === "chamfer");
+  expect(chamferAction).toBeDefined();
+  expect(chamferAction?.definition.parameters.options?.distance).toEqual({
+    source: "literal",
+    value: 1,
+  });
+  if (!chamferAction) throw new Error("Expected chamfer action.");
+  expect(
+    validateFeatureDefinitionAuthoredValueInvariants(chamferAction.definition).map(
+      (issue) => issue.message,
+    ),
+  ).toEqual([]);
   expect(validateImportPreparedActions(actions).success).toBe(true);
 });
 
@@ -1663,7 +1674,7 @@ test("src/domain/import/onshape/provider.spec.ts promotes a captured-frame sketc
   const studio = review.providerReview.studios[0]!;
   expect(studio.featurePlans.find((plan) => plan.onshapeFeatureId === "TRANSFORM")).toMatchObject({
     tier: "baked",
-    reasonCodes: ["transform-rotation-unsupported"],
+    reasonCodes: ["transform-rotation-angle-unreadable"],
   });
   expect(studio.featurePlans.find((plan) => plan.onshapeFeatureId === "S_FACE")).toMatchObject({
     tier: "parametric",

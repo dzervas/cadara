@@ -96,7 +96,11 @@ import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-
 import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
 import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
 import { resolveTopologyReferences } from "@/domain/import/onshape/topology-reference-resolver";
-import { computeCaptureFrameToWorld } from "@/domain/import/onshape/capture-frame";
+import {
+  composeCaptureFrameTransforms,
+  computeCaptureFrameToWorld,
+  computeParametricTransformReframe,
+} from "@/domain/import/onshape/capture-frame";
 import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
 import { DEFAULT_MATCH_TOLERANCE } from "@/domain/import/onshape/signature-matcher";
 import { buildResolvedBodyConsumerDefinition } from "@/domain/import/onshape/wave-b-body-feature-translators";
@@ -930,6 +934,21 @@ async function activateProbeBackedPlanning(input: {
         degradeConsumer("topology-upstream-baked");
         continue;
       }
+      // A parametric transform preceding a face/edge consumer can leave older
+      // rollback/final evidence in the pre-transform frame while the probe
+      // rebuilds the post-transform world frame. The resolver applies this
+      // reframe only to evidence that needs conversion; current-consumer
+      // historyPoint evidence is already in the consumer's authored/live frame.
+      const parametricReframe = computeParametricTransformReframe({
+        features: input.read.features,
+        consumerFeatureId: candidate.onshapeFeatureId,
+        isParametric: (featureId) => plansById.get(featureId)?.tier === "parametric",
+        resolvedReferences: input.read.studio.resolvedReferences,
+      });
+      const topologyCaptureFrameToWorld = composeCaptureFrameTransforms(
+        captureFrameToWorld,
+        parametricReframe,
+      );
       const resolution = resolveTopologyReferences({
         consumerFeatureId: candidate.onshapeFeatureId,
         queries: queryRead.refs,
@@ -939,7 +958,7 @@ async function activateProbeBackedPlanning(input: {
         cadaraSignatures: prefix.signatures,
         tolerance: { ...DEFAULT_MATCH_TOLERANCE, linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01) },
         durableNamingAvailable: OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming,
-        captureFrameToWorld: captureFrameToWorld ?? undefined,
+        captureFrameToWorld: topologyCaptureFrameToWorld ?? undefined,
       });
       workingPlan = recomputePlanWithFeaturePlans(
         workingPlan,
@@ -1291,6 +1310,8 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "mirror-plane-unresolved": "mirror plane could not be resolved",
   "transform-copy-unsupported": "transform copy mode is not supported",
   "transform-rotation-unsupported": "transform rotation is not supported",
+  "transform-rotation-angle-unreadable": "transform rotation angle could not be read",
+  "transform-rotation-axis-unresolved": "transform rotation axis could not be resolved",
   "transform-translation-unreadable": "transform translation could not be read",
   "transform-reference-unresolved": "transform reference could not be resolved",
   "transform-type-unsupported": "transform type is not supported",
@@ -1525,7 +1546,7 @@ type OnshapeStudioPlan = Pick<
   | "requiresStudioBake"
 >;
 
-function resolvePlannedConstructionParticipants(
+function resolvePlannedDeferredParticipants(
   definition: ImportDeferredFeatureDefinition,
   orderedIndexByFeatureId: ReadonlyMap<string, number>,
 ): { definition: ImportDeferredFeatureDefinition; missingFeatureId: null } | {
@@ -1541,23 +1562,37 @@ function resolvePlannedConstructionParticipants(
   const participants = parameters.participants.map((participant) => ({
     ...participant,
     targets: participant.targets.map((target) => {
-      if (
-        !target ||
-        typeof target !== "object" ||
-        (target as { kind?: unknown }).kind !== "constructionFromFeature"
-      ) {
-        return target;
+      if (!target || typeof target !== "object") return target;
+      const kind = (target as { kind?: unknown }).kind;
+      if (kind === "constructionFromFeature") {
+        const featureId = (target as { featureId?: unknown }).featureId;
+        const actionIndex =
+          typeof featureId === "string"
+            ? orderedIndexByFeatureId.get(featureId)
+            : undefined;
+        if (typeof featureId !== "string" || actionIndex === undefined) {
+          missingFeatureId = typeof featureId === "string" ? featureId : "unknown";
+          return target;
+        }
+        return { kind: "constructionOf" as const, actionIndex };
       }
-      const featureId = (target as { featureId?: unknown }).featureId;
-      const actionIndex =
-        typeof featureId === "string"
-          ? orderedIndexByFeatureId.get(featureId)
-          : undefined;
-      if (typeof featureId !== "string" || actionIndex === undefined) {
-        missingFeatureId = typeof featureId === "string" ? featureId : "unknown";
-        return target;
+      if (kind === "sketchEntityFromFeature") {
+        const featureId = (target as { sketchFeatureId?: unknown }).sketchFeatureId;
+        const actionIndex =
+          typeof featureId === "string"
+            ? orderedIndexByFeatureId.get(featureId)
+            : undefined;
+        if (typeof featureId !== "string" || actionIndex === undefined) {
+          missingFeatureId = typeof featureId === "string" ? featureId : "unknown";
+          return target;
+        }
+        return {
+          kind: "sketchEntity" as const,
+          sketchId: { kind: "sketchIdOf" as const, actionIndex },
+          entityId: (target as { entityId: unknown }).entityId,
+        };
       }
-      return { kind: "constructionOf" as const, actionIndex };
+      return target;
     }),
   }));
   if (missingFeatureId) return { definition: null, missingFeatureId };
@@ -2423,15 +2458,15 @@ async function buildPreparedActions(input: {
     }
 
     if (featurePlan.target.kind === "feature" && featurePlan.plannedAdvancedSolid) {
-      const resolvedDefinition = resolvePlannedConstructionParticipants(
+      const resolvedDefinition = resolvePlannedDeferredParticipants(
         featurePlan.plannedAdvancedSolid,
         orderedIndexByFeatureId,
       );
       if (!resolvedDefinition.definition) {
         diagnostics.push({
           severity: "warning",
-          message: `Feature "${featurePlan.label}" referenced translated plane ${resolvedDefinition.missingFeatureId}, which was not emitted; the feature was skipped.`,
-          code: "onshape-feature-missing-plane",
+          message: `Feature "${featurePlan.label}" referenced deferred feature ${resolvedDefinition.missingFeatureId}, which was not emitted; the feature was skipped.`,
+          code: "onshape-feature-missing-deferred-reference",
         });
         continue;
       }

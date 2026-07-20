@@ -24,6 +24,7 @@ import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 import {
   advanceTopologyToken,
+  applySemanticStageTopologyIds,
   createBodySnapshotRecord,
   createInitialTopologyToken,
   createOccReferenceState,
@@ -745,12 +746,90 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
     ).toBe(null);
   }
 
+  async function testSemanticReconciliationPreservesNativeAliasesAndPayload() {
+    const body = await makeBoxBody("t0001");
+    const faceId = body.topology.faceIds[0]!;
+    const edgeId = body.topology.edgeIds[0]!;
+    const vertexId = body.topology.vertexIds[0]!;
+    const preservedFaceId = "face_preserved_semantic" as typeof faceId;
+    const preservedEdgeId = "edge_preserved_semantic" as typeof edgeId;
+    const preservedVertexId = "vertex_preserved_semantic" as typeof vertexId;
+    const current = {
+      ...body,
+      nativeTopologyIdAliases: {
+        faceIdsByNativeId: new Map([["face_native_raw" as typeof faceId, faceId]]),
+        edgeIdsByNativeId: new Map([["edge_native_raw" as typeof edgeId, edgeId]]),
+        vertexIdsByNativeId: new Map([
+          ["vertex_native_raw" as typeof vertexId, vertexId],
+        ]),
+      },
+    };
+    const preservedTargetsByCurrentKey = new Map([
+      [
+        `face:${body.bodyId}:${faceId}`,
+        { kind: "face" as const, bodyId: body.bodyId, faceId: preservedFaceId },
+      ],
+      [
+        `edge:${body.bodyId}:${edgeId}`,
+        { kind: "edge" as const, bodyId: body.bodyId, edgeId: preservedEdgeId },
+      ],
+      [
+        `vertex:${body.bodyId}:${vertexId}`,
+        {
+          kind: "vertex" as const,
+          bodyId: body.bodyId,
+          vertexId: preservedVertexId,
+        },
+      ],
+    ]);
+
+    const reconciled = applySemanticStageTopologyIds({
+      previous: body,
+      current,
+      preservedTargetsByCurrentKey,
+    }).body;
+
+    expect(reconciled.nativeTopologyPayload).toBeTruthy();
+    expect(reconciled.nativeTopologyIdAliases?.faceIdsByNativeId.get(
+      "face_native_raw" as typeof faceId,
+    )).toBe(preservedFaceId);
+    expect(reconciled.nativeTopologyIdAliases?.edgeIdsByNativeId?.get(
+      "edge_native_raw" as typeof edgeId,
+    )).toBe(preservedEdgeId);
+    expect(reconciled.nativeTopologyIdAliases?.vertexIdsByNativeId?.get(
+      "vertex_native_raw" as typeof vertexId,
+    )).toBe(preservedVertexId);
+    expect(
+      reconciled.nativeTopologyPayload!.topology.some(
+        (record) => record.kind === "face" && record.id === preservedFaceId,
+      ),
+    ).toBeTruthy();
+
+    const colliding = {
+      ...current,
+      nativeTopologyIdAliases: {
+        faceIdsByNativeId: new Map([
+          ["face_native_raw_a" as typeof faceId, faceId],
+          ["face_native_raw_b" as typeof faceId, faceId],
+        ]),
+      },
+    };
+    expect(() =>
+      applySemanticStageTopologyIds({
+        previous: body,
+        current: colliding,
+        preservedTargetsByCurrentKey,
+      }),
+    ).toThrow(/Native topology alias collision/);
+  }
+
   await testTopologyTokensAdvanceForReplacementBodies();
   await testNewBodiesUseKernelOwnedNativeTopologyIds();
   await testBodyCommitRequiresNativeTopologyPayloads();
   await testBodyCommitRejectsNativePayloadErrorsAndDisambiguatesDuplicateIdentity();
   await testBodySnapshotsAndReferenceStateExposeLiveTopology();
   await testMissingTopologyReferencesInvalidateAgainstPriorState();
+  await testSemanticReconciliationPreservesNativeAliasesAndPayload();
 
   console.log("OCC phase 5 topology/reference tests passed.");
 });

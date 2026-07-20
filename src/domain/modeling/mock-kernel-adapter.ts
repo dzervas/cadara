@@ -118,6 +118,7 @@ import type { DurableRef } from "@/contracts/shared/references";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   getAdvancedParticipant,
+  getTransformOperationKind,
   isAdvancedSolidFeatureKind,
 } from "@/contracts/modeling/advanced-solid";
 import {
@@ -2339,7 +2340,10 @@ function validateFeatureDefinitionAgainstSnapshot(
         getAdvancedParticipant(definition, "body")?.targets ?? [];
       const referenceTargets =
         getAdvancedParticipant(definition, "transformReference")?.targets ?? [];
+      const axisTargets =
+        getAdvancedParticipant(definition, "axis")?.targets ?? [];
       const distance = definition.parameters.options?.distance;
+      const isRotation = getTransformOperationKind(definition) === "rotation";
 
       if (
         bodyTargets.length === 0 ||
@@ -2357,39 +2361,79 @@ function validateFeatureDefinitionAgainstSnapshot(
         };
       }
 
-      if (
-        referenceTargets.length !== 1 ||
-        referenceTargets.some(
-          (target) => target.kind !== "construction" && target.kind !== "face",
-        )
-      ) {
-        return {
-          accepted: false as const,
-          reasonCode: "mock-invalid-transform",
-          diagnostics: [
-            createUnsupportedFeatureDiagnostic(
-              definition,
-              "Transform requires exactly one planar face or construction plane participant.",
-            ),
-          ],
-        };
-      }
+      if (isRotation) {
+        if (
+          axisTargets.length !== 1 ||
+          axisTargets.some(
+            (target) =>
+              target.kind !== "construction" &&
+              target.kind !== "face" &&
+              target.kind !== "edge",
+          )
+        ) {
+          return {
+            accepted: false as const,
+            reasonCode: "mock-invalid-transform",
+            diagnostics: [
+              createUnsupportedFeatureDiagnostic(
+                definition,
+                "Rotation transform requires exactly one construction, planar face, or linear edge axis participant.",
+              ),
+            ],
+          };
+        }
 
-      if (
-        typeof distance !== "number" ||
-        !Number.isFinite(distance) ||
-        distance <= 0
-      ) {
-        return {
-          accepted: false as const,
-          reasonCode: "mock-invalid-transform",
-          diagnostics: [
-            createUnsupportedFeatureDiagnostic(
-              definition,
-              "Transform requires a positive distance option.",
-            ),
-          ],
-        };
+        const angle = getAuthoredLiteralValue(
+          definition.parameters.options?.angle,
+        );
+        if (typeof angle !== "number" || !Number.isFinite(angle) || angle === 0) {
+          return {
+            accepted: false as const,
+            reasonCode: "mock-invalid-transform",
+            diagnostics: [
+              createUnsupportedFeatureDiagnostic(
+                definition,
+                "Rotation transform requires a non-zero angle option.",
+              ),
+            ],
+          };
+        }
+      } else {
+        if (
+          referenceTargets.length !== 1 ||
+          referenceTargets.some(
+            (target) =>
+              target.kind !== "construction" && target.kind !== "face",
+          )
+        ) {
+          return {
+            accepted: false as const,
+            reasonCode: "mock-invalid-transform",
+            diagnostics: [
+              createUnsupportedFeatureDiagnostic(
+                definition,
+                "Transform requires exactly one planar face or construction plane participant.",
+              ),
+            ],
+          };
+        }
+
+        if (
+          typeof distance !== "number" ||
+          !Number.isFinite(distance) ||
+          distance <= 0
+        ) {
+          return {
+            accepted: false as const,
+            reasonCode: "mock-invalid-transform",
+            diagnostics: [
+              createUnsupportedFeatureDiagnostic(
+                definition,
+                "Transform requires a positive distance option.",
+              ),
+            ],
+          };
+        }
       }
 
       if (
@@ -2410,16 +2454,20 @@ function validateFeatureDefinitionAgainstSnapshot(
         };
       }
 
-      const [referenceTarget] = referenceTargets;
+      const resolvedReference = isRotation
+        ? axisTargets[0]
+        : referenceTargets[0];
       if (
-        (referenceTarget?.kind === "construction" &&
-          !hasConstructionTarget(snapshot, referenceTarget.constructionId)) ||
-        (referenceTarget?.kind === "face" &&
+        (resolvedReference?.kind === "construction" &&
+          !hasConstructionTarget(snapshot, resolvedReference.constructionId)) ||
+        (resolvedReference?.kind === "face" &&
           !hasFaceTarget(
             snapshot,
-            referenceTarget.bodyId,
-            referenceTarget.faceId,
-          ))
+            resolvedReference.bodyId,
+            resolvedReference.faceId,
+          )) ||
+        (resolvedReference?.kind === "edge" &&
+          !hasBodyTarget(snapshot, resolvedReference.bodyId))
       ) {
         return {
           accepted: false as const,
@@ -2427,7 +2475,7 @@ function validateFeatureDefinitionAgainstSnapshot(
           diagnostics: [
             createUnsupportedFeatureDiagnostic(
               definition,
-              "Transform planar references must resolve to live construction planes or planar faces.",
+              "Transform references must resolve to live construction planes, planar faces, or edges.",
             ),
           ],
         };

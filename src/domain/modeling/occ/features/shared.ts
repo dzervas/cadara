@@ -11,8 +11,11 @@ import type { RegionRecord } from "@/contracts/sketch/schema";
 import type {
   BodyId,
   ConstructionId,
+  EdgeId,
+  FaceId,
   FeatureId,
   GeometryAssetId,
+  VertexId,
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
@@ -199,13 +202,61 @@ function assertTopologyReferenceLive(
   }
 }
 
+type NativeMarshalableTarget = Extract<
+  DurableRef,
+  { kind: "face" | "edge" | "vertex" }
+>;
+
+export function resolveNativeTopologyTargetId(
+  body: OccTrackedBody,
+  target: NativeMarshalableTarget,
+): FaceId | EdgeId | VertexId {
+  const resolve = <Id extends FaceId | EdgeId | VertexId>(
+    aliases: ReadonlyMap<Id, Id> | undefined,
+    publicId: Id,
+  ) => {
+    if (!aliases) {
+      return publicId;
+    }
+
+    const nativeIds = [...aliases]
+      .filter(([, aliasPublicId]) => aliasPublicId === publicId)
+      .map(([nativeId]) => nativeId);
+    if (nativeIds.length > 1) {
+      throw new Error(
+        `occ-native-target-ambiguous: ${target.kind} ${publicId} resolves to multiple native ids.`,
+      );
+    }
+    return nativeIds[0] ?? publicId;
+  };
+
+  if (target.bodyId !== body.bodyId) {
+    throw new Error(
+      `occ-native-target-body-mismatch: ${target.kind} target belongs to ${target.bodyId}, not ${body.bodyId}.`,
+    );
+  }
+
+  if (target.kind === "face") {
+    return resolve(body.nativeTopologyIdAliases?.faceIdsByNativeId, target.faceId);
+  }
+  if (target.kind === "edge") {
+    return resolve(body.nativeTopologyIdAliases?.edgeIdsByNativeId, target.edgeId);
+  }
+  return resolve(body.nativeTopologyIdAliases?.vertexIdsByNativeId, target.vertexId);
+}
+
 export function requireFace(
   context: OccFeatureExecutionContext,
   body: OccTrackedBody,
   faceId: `face_${string}`,
 ) {
   assertTopologyReferenceLive(context, { kind: "face", bodyId: body.bodyId, faceId });
-  const face = body.facesById.get(faceId);
+  const nativeFaceId = resolveNativeTopologyTargetId(body, {
+    kind: "face",
+    bodyId: body.bodyId,
+    faceId,
+  }) as `face_${string}`;
+  const face = body.facesById.get(faceId) ?? body.facesById.get(nativeFaceId);
 
   if (!face) {
     throw new Error(`Face ${faceId} does not resolve on body ${body.bodyId}.`);
@@ -220,7 +271,12 @@ export function requireEdge(
   edgeId: `edge_${string}`,
 ) {
   assertTopologyReferenceLive(context, { kind: "edge", bodyId: body.bodyId, edgeId });
-  const edge = body.edgesById.get(edgeId);
+  const nativeEdgeId = resolveNativeTopologyTargetId(body, {
+    kind: "edge",
+    bodyId: body.bodyId,
+    edgeId,
+  }) as `edge_${string}`;
+  const edge = body.edgesById.get(edgeId) ?? body.edgesById.get(nativeEdgeId);
 
   if (!edge) {
     throw new Error(`Edge ${edgeId} does not resolve on body ${body.bodyId}.`);
@@ -239,7 +295,12 @@ export function requireVertex(
     bodyId: body.bodyId,
     vertexId,
   });
-  const vertex = body.verticesById.get(vertexId);
+  const nativeVertexId = resolveNativeTopologyTargetId(body, {
+    kind: "vertex",
+    bodyId: body.bodyId,
+    vertexId,
+  }) as `vertex_${string}`;
+  const vertex = body.verticesById.get(vertexId) ?? body.verticesById.get(nativeVertexId);
 
   if (!vertex) {
     throw new Error(

@@ -11,7 +11,11 @@ import {
   resolveTopologyReferences,
   type ResolveTopologyReferencesInput,
 } from "@/domain/import/onshape/topology-reference-resolver";
-import { computeCaptureFrameToWorld } from "@/domain/import/onshape/capture-frame";
+import {
+  computeCaptureFrameToWorld,
+  computeParametricTransformReframe,
+  reframeSignature,
+} from "@/domain/import/onshape/capture-frame";
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 import type { OnshapeTopologyQueryRef } from "@/domain/import/onshape/topology-query-reader";
 
@@ -63,6 +67,16 @@ const realHoleEdge = (
   geometryType: "circle",
   definingData: { center, axisDirection: [0, -1, 0], radius: 2.05 },
   reference: { kind: "edge", bodyId: "body_feature_extrude-1" as never, edgeId: `edge_${suffix}` as never },
+});
+
+const liveMountsChamferEdge = (
+  suffix: string,
+  center: [number, number, number],
+): HistoryProbeTopologySignature => ({
+  entityClass: "edge",
+  geometryType: "circle",
+  definingData: { center, axisDirection: [0, 0, 1], radius: 2.05 },
+  reference: { kind: "edge", bodyId: "body_feature_transform-1" as never, edgeId: `edge_${suffix}` as never },
 });
 
 test("root cause B: captured feature-local chamfer edge no-matches the real world-frame OCC edges", () => {
@@ -182,19 +196,11 @@ test("resolver: an empty probe prefix degrades to topology-reference-no-match (r
   expect(result).toMatchObject({ kind: "degraded", reason: "topology-reference-no-match" });
 });
 
-// Capture-frame MECHANISM control (not an end-to-end recovery): the captured
-// edge sits in the frame AFTER a baked ROTATION transform (Transform 1) that
-// Cadara's probe skips. Re-expressing the captured signature by the inverse of
-// that transform lands it on a synthetic world-frame OCC *edge* signature.
-//
-// This proves the reframe math is correct, but it does NOT mean Chamfer 1 is
-// recoverable end to end: at apply, the body preceding the chamfer is the
-// tessellation-backed Transform 1 checkpoint, which exposes only body identity
-// (see the "baked body-only-mesh" pin above) — never the hole edge. Matching a
-// probe prefix that omits the bake would therefore promote a consumer apply
-// cannot rebuild, so the provider keeps such face/edge-over-baked-body
-// consumers honestly baked (`topology-upstream-baked`), gated on W.3 making the
-// transform parametric. The transform is derived exactly as the provider does.
+// Capture-frame mechanism controls for Transform 1. W.3 makes the transform
+// itself parametric, so provider review can pass a transform reframe to the
+// resolver. The resolver must then decide per evidence record: current-consumer
+// historyPoint evidence is already live, while rollback/final evidence still
+// needs conversion into the probe frame.
 const transformFeatureId = "FKFj5KgXfGGLv7N_1";
 const captureFrameFeatures: readonly OnshapeFeatureNode[] = [
   {
@@ -243,17 +249,119 @@ test("capture-frame: no transform is derived when the rotation is parametric (no
   expect(transform).toBeNull();
 });
 
-test("resolver: reframing the captured edge onto a synthetic world-frame edge resolves (capture-frame mechanism control only; apply keeps Chamfer 1 baked)", () => {
-  const captureFrameToWorld = computeCaptureFrameToWorld({
+test("capture-frame: parametric rotation would double-reframe Mounts Chamfer 1 consumer-owned history evidence", () => {
+  const transform = computeParametricTransformReframe({
     features: captureFrameFeatures,
     consumerFeatureId: "FqXExmahcCNDI8A_1",
-    isParametric: () => false,
+    isParametric: (featureId) => featureId === transformFeatureId,
     resolvedReferences: [axisReference],
   });
-  expect(captureFrameToWorld).not.toBeNull();
+  expect(transform).not.toBeNull();
+
+  const reframed = reframeSignature(capturedChamferEdge, transform!);
+  expect(reframed.definingData?.center).toEqual([-4, 4, 5]);
+
+  const outcome = matchSignature(
+    reframed,
+    [liveMountsChamferEdge("t0003_24", [-4, 9, 0]), liveMountsChamferEdge("t0003_28", [-4, 9, 4])],
+    tolerance,
+  );
+  expect(outcome.kind).toBe("noMatch");
+});
+
+test("resolver: consumer-owned historyPoint skips parametric reframe and resolves Mounts Chamfer 1 against the live circle", () => {
+  const parametricReframe = computeParametricTransformReframe({
+    features: captureFrameFeatures,
+    consumerFeatureId: "FqXExmahcCNDI8A_1",
+    isParametric: (featureId) => featureId === transformFeatureId,
+    resolvedReferences: [axisReference],
+  });
+  expect(parametricReframe).not.toBeNull();
+
   const result = resolveTopologyReferences({
-    ...resolverInput([realHoleEdge("hole_hi", [-4, 4, 5])]),
-    captureFrameToWorld: captureFrameToWorld ?? undefined,
+    ...resolverInput([liveMountsChamferEdge("t0003_24", [-4, 9, 0]), liveMountsChamferEdge("t0003_28", [-4, 9, 4])]),
+    captureFrameToWorld: parametricReframe ?? undefined,
   });
   expect(result.kind).toBe("resolved");
+  if (result.kind === "resolved") {
+    expect(result.bindings[0]?.sourceEvidence).toBe("historyPoint");
+    expect(result.bindings[0]?.reviewReference).toMatchObject({ edgeId: "edge_t0003_24" });
+    expect(result.bindings[0]?.deferred.capturedSignature.definingData?.center).toEqual([-4, 9, 0]);
+  }
+});
+
+test("resolver: final corroborated evidence still uses parametric reframe", () => {
+  const faceQuery: OnshapeTopologyQueryRef = {
+    consumerFeatureId: "FqXExmahcCNDI8A_1",
+    slotKey: "faces",
+    parameterId: "entities",
+    queryIndex: 0,
+    deterministicId: "final-face",
+    queryString: null,
+    expectedKinds: ["face"],
+  };
+  const rollback = createRollbackTopologyTimeline({
+    featureIds: ["producer", "FqXExmahcCNDI8A_1"],
+    snapshots: [
+      {
+        featureId: "producer",
+        tessellationTolerance: 0.001,
+        tessellatedFaces: {
+          bodies: [
+            {
+              id: "body-source",
+              faces: [
+                {
+                  id: "final-face",
+                  facets: [
+                    {
+                      vertices: [
+                        { x: 0, y: 0, z: 0 },
+                        { x: 0.001, y: 0, z: 0 },
+                        { x: 0, y: 0.001, z: 0 },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+  });
+  const result = resolveTopologyReferences({
+    consumerFeatureId: "FqXExmahcCNDI8A_1",
+    queries: [faceQuery],
+    capturedReferences: [
+      {
+        deterministicId: "final-face",
+        evaluatedAt: "finalState",
+        signature: {
+          entityClass: "face",
+          geometryType: "plane",
+          definingData: { origin: [0, 0, 0], normal: [0, 0, 1] },
+          boundingBox: { low: [0, 0, 0], high: [0.001, 0.001, 0] },
+        },
+      },
+    ],
+    rollback,
+    cadaraSignatures: [
+      {
+        entityClass: "face",
+        geometryType: "plane",
+        definingData: { origin: [10, 0, 0], normal: [0, 0, 1] },
+        boundingBox: { low: [10, 0, 0], high: [11, 1, 0] },
+        reference: { kind: "face", bodyId: "body-source" as never, faceId: "face_live" as never },
+      },
+    ],
+    tolerance,
+    durableNamingAvailable: true,
+    captureFrameToWorld: { m: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [10, 0, 0] },
+  });
+  expect(result.kind).toBe("resolved");
+  if (result.kind === "resolved") {
+    expect(result.bindings[0]?.sourceEvidence).toBe("corroboratedFinalState");
+    expect(result.bindings[0]?.reviewReference).toMatchObject({ faceId: "face_live" });
+  }
 });

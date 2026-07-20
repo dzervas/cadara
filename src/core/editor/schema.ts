@@ -882,7 +882,7 @@ export const mirrorSelectionFilter: SelectionFilter = {
 
 export const transformSelectionFilter: SelectionFilter = {
   kind: "transformReferences",
-  allowedKinds: ["body", "construction", "face"],
+  allowedKinds: ["body", "construction", "face", "edge", "sketchEntity"],
   label: "Transform references",
   requirements: [
     {
@@ -912,6 +912,27 @@ export const transformSelectionFilter: SelectionFilter = {
           description: "Select one planar face or construction plane.",
           acceptedKinds: ["construction", "face"],
           acceptedSemantics: ["planarReference"],
+        },
+      ],
+    },
+    {
+      id: "transform-axis",
+      label: "Rotation axis",
+      description:
+        "Rotation transforms revolve bodies about one explicit axis reference.",
+      slots: [
+        {
+          id: "transform-axis",
+          label: "Rotation axis",
+          description:
+            "Select one construction plane, planar face, linear edge, or sketch line axis.",
+          acceptedKinds: ["construction", "face", "edge", "sketchEntity"],
+          acceptedSemantics: [
+            "planarReference",
+            "planarFace",
+            "edge",
+            "sketchEntity",
+          ],
         },
       ],
     },

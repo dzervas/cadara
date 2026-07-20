@@ -431,9 +431,28 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
       and reframing still applies to whole-body consumers behind a baked
       transform. `realkernel-acceptance-gate.spec.ts` keeps the reframe as a
       mechanism-only control, explicitly noting apply keeps Chamfer 1 baked.
-- [ ] W.3 **Transform rotation** (contract+kernel, small) — rotation option on
+- [x] W.3 **Transform rotation** (contract+kernel, small) — rotation option on
       the transform advanced-solid feature; `gp_Trsf` rotation in the existing
-      executor. Unlocks Mounts Transform 1 → Mounts 10/10.
+      executor. Unlocks Mounts Transform 1 + Chamfer 1: Mounts is now fully
+      parametric at **10/0/0** and the checkpoint body is gone.
+
+  **Verification (done).** Final before/after: originally Mounts was **8/2/0**;
+  after W.2 / real-kernel honesty it was **9/1/0**; W.3 mock + real browser
+  review now report **10/0/0**. `Transform 1` and `Chamfer 1` are parametric,
+  `feature_bakedBody-1` is no longer emitted, and the live body lineage remains
+  `body_feature_extrude-1` through in-place extrude/transform/chamfer updates.
+
+  Mechanism: rotation axes use `sketchEntity` references resolved through
+  `sketchIdOf` + entity id; OCC executes rotation via `gp_Trsf`; rigid transform
+  topology keeps exact topology-stage lineage; exact-BREP ids are canonicalized
+  for apply rematch; consumer history avoids double-reframing; imported Chamfer
+  distance is materialized through the authored-value wrapper.
+
+  Browser coverage: `e2e/onshape-import-parametric.spec.ts` asserts the Mounts
+  review count **10 parametric / 0 baked / 0 geometry-only**, the no-checkpoint
+  feature timeline (`Extrude 1`, support plane, `Extrude 2`, `Transform 1`,
+  `Chamfer 1`), constrained Sketch 2 drag, variable geometry rebuild, and
+  Extrude 1 edit coverage. Full-parametric Mounts milestone is satisfied.
 - [ ] W.4 **Chamfer two-distance / distance+angle** (contract plumbing; OCC
       `Add_3` already accepts two distances). Unlocks PS1 Chamfer 3.
 - [ ] W.5 **Shell non-hollow / offset-all-faces** (new executor branch via

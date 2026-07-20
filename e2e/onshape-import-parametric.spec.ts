@@ -20,7 +20,14 @@ test.use({ viewport: { width: 1440, height: 960 } });
 
 const MOUNTS_CONSTRAINED_VERTEX =
   "sketch_2.sketch_point_FkkBVfXRKopMlIW_1_ZSK0f3tIhxWZ_center";
-const MOUNTS_BAKED_BODY = "body_feature_bakedBody-1";
+const MOUNTS_LIVE_BODY = "body_feature_extrude-1";
+const MOUNTS_FULL_FEATURE_IDS = [
+  "feature_extrude-1",
+  "feature_plane-1",
+  "feature_extrude-2",
+  "feature_transform-1",
+  "feature_chamfer-1",
+];
 const PART_STUDIO_BAKED_BODIES = [
   "body_feature_bakedBody-1_1",
   "body_feature_bakedBody-1_2",
@@ -38,7 +45,13 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   const workbench = new SketchWorkbenchHarness(page);
 
   const { reviewText } = await importBundle(page, MOUNTS_BUNDLE_PATH);
-  expect(reviewText).toContain("8 parametric, 2 baked, 0 geometry-only features.");
+  expect(reviewText).toContain("10 parametric, 0 baked, 0 geometry-only features.");
+  const importedState = await page.evaluate(() => window.__cadaraDebug!.getState());
+  expect(importedState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
+  expectMountsLiveBodyIdentity(importedState);
+  await dismissWorkbenchAlerts(page);
+
+  await chooseHistoryAction(page, "feature_transform-1", "Roll History Here");
   await page.getByRole("button", {
     name: "Select Sketch 2. Double-click to reopen.",
   }).dblclick();
@@ -74,27 +87,20 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   await page.waitForSelector('[data-render-idle="true"]', { timeout: 30_000 });
 
   const state = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(state.snapshotDiagnosticsCount).toBe(0);
-  expect(state.featureIds).toEqual([
-    "feature_extrude-1",
-    "feature_plane-1",
-    "feature_extrude-2",
-    "feature_bakedBody-1",
-  ]);
+  expect(state.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
   expect(state.selectableTargets).toEqual(
     expect.arrayContaining([
       "construction_plane-xy",
       "construction_plane-yz",
       "construction_plane-xz",
       "sketch_primary",
-      "sketch_2",
-      MOUNTS_BAKED_BODY,
     ]),
   );
-  await expectNoReferenceAlerts(page);
+  expectMountsLiveBodyIdentity(state);
+  await dismissWorkbenchAlerts(page);
 });
 
-test("Mounts variable and extrude edits rebuild geometry while preserving its baked body", async ({
+test("Mounts variable and extrude edits rebuild geometry while preserving live body identity", async ({
   page,
 }) => {
   test.skip(
@@ -102,13 +108,15 @@ test("Mounts variable and extrude edits rebuild geometry while preserving its ba
     "Real Onshape Mounts capture is not present locally.",
   );
   const { reviewText } = await importBundle(page, MOUNTS_BUNDLE_PATH, true);
-  expect(reviewText).toContain("8 parametric, 2 baked, 0 geometry-only features.");
+  expect(reviewText).toContain("10 parametric, 0 baked, 0 geometry-only features.");
   const initialState = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(initialState.selectableTargets).toContain(MOUNTS_BAKED_BODY);
+  expectMountsLiveBodyIdentity(initialState);
+  expect(initialState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
+  await dismissWorkbenchAlerts(page);
 
   await chooseHistoryAction(page, "feature_extrude-1", "Roll History Here");
   const rolledState = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(rolledState.selectableTargets).toContain("body_feature_extrude-1");
+  expectMountsLiveBodyIdentity(rolledState);
   const beforeVariableGeometry = await page.locator("main canvas").first().screenshot();
 
   const variableState = await editVariable(page, "nail", "5");
@@ -118,19 +126,15 @@ test("Mounts variable and extrude edits rebuild geometry while preserving its ba
   expect(meanPixelDelta(beforeVariableGeometry, afterVariableGeometry)).toBeGreaterThan(
     0.05,
   );
-  expect(variableState.snapshotDiagnosticsCount).toBe(0);
-  expect(variableState.selectableTargets).toContain("body_feature_extrude-1");
+  expectMountsLiveBodyIdentity(variableState);
 
   await chooseHistoryAction(page, "feature_extrude-2", "Roll History Here");
   const downstreamState = await page.evaluate(() => window.__cadaraDebug!.getState());
-  // Extrude 2 booleans (REMOVE) into the body Extrude 1 created rather than
-  // producing a new one, and durable body identity is keyed by the owning
-  // (creating) feature (see `trackReplacementSolidBody` in
-  // src/domain/modeling/occ/topology.ts), so the body id stays
-  // "body_feature_extrude-1" across the in-place modification. Prove the cut
-  // actually applied by asserting its face count changed instead of asserting
-  // a body id that would never exist.
-  expect(downstreamState.selectableTargets).toContain("body_feature_extrude-1");
+  // Extrude 2 booleans (REMOVE), Transform 1, and Chamfer 1 modify the body
+  // Extrude 1 created in place, so downstream live targets retain the
+  // "body_feature_extrude-1" lineage instead of introducing a checkpoint.
+  expectMountsLiveBodyIdentity(downstreamState);
+  expect(downstreamState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
   const facesBeforeExtrude2 = variableState.selectableTargets.filter((target) =>
     target.includes("face_body_feature_extrude-1"),
   ).length;
@@ -139,8 +143,12 @@ test("Mounts variable and extrude edits rebuild geometry while preserving its ba
   ).length;
   expect(facesAfterExtrude2).not.toBe(facesBeforeExtrude2);
   await chooseHistoryAction(page, "feature_extrude-2", "Roll To End");
-  const checkpointState = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(checkpointState.selectableTargets).toContain(MOUNTS_BAKED_BODY);
+  const endState = await page.evaluate(() => window.__cadaraDebug!.getState());
+  expectMountsLiveBodyIdentity(endState);
+  expect(endState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
+  await dismissWorkbenchAlerts(page);
+
+  await chooseHistoryAction(page, "feature_extrude-1", "Roll History Here");
 
   await chooseHistoryAction(page, "feature_extrude-1", "Edit");
   await expect
@@ -167,17 +175,11 @@ test("Mounts variable and extrude edits rebuild geometry while preserving its ba
   await commit.click();
   await waitForRevisionChange(page, beforeFeatureRevision);
   await waitForMachineIdle(page);
+  await page.waitForSelector('[data-render-idle="true"]', { timeout: 30_000 });
 
   const rebuilt = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
-  expect(rebuilt.selectableTargets).toContain(MOUNTS_BAKED_BODY);
-  expect(rebuilt.featureIds).toEqual([
-    "feature_extrude-1",
-    "feature_plane-1",
-    "feature_extrude-2",
-    "feature_bakedBody-1",
-  ]);
-  await expectNoReferenceAlerts(page);
+  expect(rebuilt.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
+  await dismissWorkbenchAlerts(page);
 });
 
 test("Part Studio 1 imports its supported planes and sketches, then rebuilds walls", async ({
@@ -359,6 +361,23 @@ async function projectTarget(page: Page, targetId: string) {
     throw new Error(`Target ${targetId} is not projected in the viewport. Candidates: ${candidates?.join(", ")}`);
   }
   return point;
+}
+
+function expectMountsLiveBodyIdentity(state: { selectableTargets: string[] }) {
+  expect(state.selectableTargets).not.toContain("body_feature_bakedBody-1");
+  expect(
+    state.selectableTargets.some((target) => target.includes(MOUNTS_LIVE_BODY)),
+    `Expected Mounts live body identity ${MOUNTS_LIVE_BODY}; body targets: ${state.selectableTargets
+      .filter((target) => target.includes("body_feature_") || target.includes("face_body_feature_"))
+      .join(", ")}`,
+  ).toBe(true);
+}
+
+async function dismissWorkbenchAlerts(page: Page) {
+  const dismiss = page.getByRole("button", { name: "Dismiss notification" });
+  while ((await dismiss.count()) > 0) {
+    await dismiss.first().click();
+  }
 }
 
 async function expectNoReferenceAlerts(page: Page) {

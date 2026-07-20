@@ -244,6 +244,44 @@ export function computeCaptureFrameToWorld(input: {
   return isIdentity(world) ? null : world;
 }
 
+/** Compose optional capture-frame reframes so `result(v) === outer(inner(v))`. */
+export function composeCaptureFrameTransforms(
+  inner: RigidTransform | null | undefined,
+  outer: RigidTransform | null | undefined,
+): RigidTransform | null {
+  if (!inner) return outer ?? null;
+  if (!outer) return inner;
+  const combined = compose(outer, inner);
+  return isIdentity(combined) ? null : combined;
+}
+
+/**
+ * Compute the transform that maps a consumer's captured creation-frame
+ * signatures into the world frame Cadara's parametric probe rebuilds when the
+ * preceding transform features are PARAMETRIC. Onshape records a downstream
+ * face/edge in the pre-transform (creation) frame, but the parametric probe
+ * applies the transform, so the captured signature must be re-expressed by the
+ * forward transform. Returns `null` when no parametric transform precedes the
+ * consumer, so already-world-frame signatures are never double-transformed.
+ */
+export function computeParametricTransformReframe(input: {
+  features: readonly OnshapeFeatureNode[];
+  consumerFeatureId: string;
+  isParametric: (featureId: string) => boolean;
+  resolvedReferences: readonly OnshapeResolvedReference[];
+}): RigidTransform | null {
+  let world = IDENTITY;
+  for (const feature of input.features) {
+    if (feature.featureId === input.consumerFeatureId) break;
+    if (feature.featureType !== "transform") continue;
+    if (!input.isParametric(feature.featureId)) continue;
+    const transform = transformForFeature(feature, input.resolvedReferences);
+    if (!transform) continue;
+    world = compose(invert(transform), world);
+  }
+  return isIdentity(world) ? null : world;
+}
+
 /** Re-express a normalized captured signature through a world-frame transform. */
 export function reframeSignature(
   signature: OnshapeGeometricSignature,

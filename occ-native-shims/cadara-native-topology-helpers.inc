@@ -171,6 +171,30 @@ namespace {
       + CadaraStableDigest(CadaraStableShapeSignature(shapeType, shape));
   }
 
+  std::vector<std::string> CadaraCanonicalTopologyIdsForShapeMap(
+    const TopTools_IndexedMapOfShape& shapeMap,
+    const TopAbs_ShapeEnum shapeType,
+    const std::string& bodyId
+  ) {
+    std::map<std::string, int> collisionCounts;
+    std::vector<std::string> ids(shapeMap.Size() + 1);
+
+    for (int index = 1; index <= shapeMap.Size(); index += 1) {
+      const std::string baseId = CadaraTopologyIdForShape(
+        shapeType,
+        bodyId,
+        shapeMap.FindKey(index)
+      );
+      const int collisionIndex = collisionCounts[baseId];
+      collisionCounts[baseId] = collisionIndex + 1;
+      ids[index] = collisionIndex == 0
+        ? baseId
+        : baseId + "_i" + std::to_string(collisionIndex);
+    }
+
+    return ids;
+  }
+
   void CadaraAppendTopologyRecords(
     std::ostringstream& out,
     const TopoDS_Shape& shape,
@@ -185,6 +209,11 @@ namespace {
 
     TopTools_IndexedMapOfShape shapeMap;
     TopExp::MapShapes(shape, shapeType, shapeMap);
+    const std::vector<std::string> canonicalIds = CadaraCanonicalTopologyIdsForShapeMap(
+      shapeMap,
+      shapeType,
+      bodyId
+    );
 
     for (int index = 1; index <= shapeMap.Size(); index += 1) {
       if (needsComma) {
@@ -194,7 +223,7 @@ namespace {
 
       const TopoDS_Shape subshape = shapeMap.FindKey(index);
       const std::string kind = CadaraTopologyKind(shapeType);
-      const std::string id = CadaraTopologyIdForShape(shapeType, bodyId, subshape);
+      const std::string& id = canonicalIds[index];
       const std::string kernelUid = CadaraKernelUidForShape(shapeType, subshape);
 
       out
@@ -219,6 +248,11 @@ namespace {
 
     TopTools_IndexedMapOfShape edgeMap;
     TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+    const std::vector<std::string> edgeIds = CadaraCanonicalTopologyIdsForShapeMap(
+      edgeMap,
+      TopAbs_EDGE,
+      bodyId
+    );
 
     for (int index = 1; index <= edgeMap.Size(); index += 1) {
       if (index > 1) {
@@ -230,7 +264,7 @@ namespace {
       const TopoDS_Vertex lastVertex = TopExp::LastVertex(edge, true);
       const gp_Pnt firstPoint = BRep_Tool::Pnt(firstVertex);
       const gp_Pnt lastPoint = BRep_Tool::Pnt(lastVertex);
-      const std::string edgeId = CadaraTopologyIdForShape(TopAbs_EDGE, bodyId, edge);
+      const std::string& edgeId = edgeIds[index];
 
       out
         << "{\"edgeId\":\"" << CadaraEscapeJson(edgeId)
@@ -252,6 +286,11 @@ namespace {
 
     TopTools_IndexedMapOfShape vertexMap;
     TopExp::MapShapes(shape, TopAbs_VERTEX, vertexMap);
+    const std::vector<std::string> vertexIds = CadaraCanonicalTopologyIdsForShapeMap(
+      vertexMap,
+      TopAbs_VERTEX,
+      bodyId
+    );
 
     for (int index = 1; index <= vertexMap.Size(); index += 1) {
       if (index > 1) {
@@ -260,7 +299,7 @@ namespace {
 
       const TopoDS_Vertex vertex = TopoDS::Vertex(vertexMap.FindKey(index));
       const gp_Pnt point = BRep_Tool::Pnt(vertex);
-      const std::string vertexId = CadaraTopologyIdForShape(TopAbs_VERTEX, bodyId, vertex);
+      const std::string& vertexId = vertexIds[index];
 
       out
         << "{\"vertexId\":\"" << CadaraEscapeJson(vertexId)
@@ -283,6 +322,16 @@ namespace {
     TopTools_IndexedMapOfShape edgeMap;
     TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
     TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+    const std::vector<std::string> faceIds = CadaraCanonicalTopologyIdsForShapeMap(
+      faceMap,
+      TopAbs_FACE,
+      bodyId
+    );
+    const std::vector<std::string> edgeIds = CadaraCanonicalTopologyIdsForShapeMap(
+      edgeMap,
+      TopAbs_EDGE,
+      bodyId
+    );
 
     for (int faceIndex = 1; faceIndex <= faceMap.Size(); faceIndex += 1) {
       if (faceIndex > 1) {
@@ -292,7 +341,7 @@ namespace {
       const TopoDS_Face face = TopoDS::Face(faceMap.FindKey(faceIndex));
       TopTools_IndexedMapOfShape faceEdgeMap;
       TopExp::MapShapes(face, TopAbs_EDGE, faceEdgeMap);
-      const std::string faceId = CadaraTopologyIdForShape(TopAbs_FACE, bodyId, face);
+      const std::string& faceId = faceIds[faceIndex];
 
       out
         << "{\"faceId\":\"" << CadaraEscapeJson(faceId)
@@ -308,7 +357,7 @@ namespace {
           out << ",";
         }
         needsComma = true;
-        const std::string edgeId = CadaraTopologyIdForShape(TopAbs_EDGE, bodyId, edgeMap.FindKey(globalEdgeIndex));
+        const std::string& edgeId = edgeIds[globalEdgeIndex];
         out << "\"" << CadaraEscapeJson(edgeId) << "\"";
       }
 
@@ -337,6 +386,11 @@ namespace {
     BRepMesh_IncrementalMesh mesher(shape, linearDeflection, false, angularDeflection, false);
     TopTools_IndexedMapOfShape faceMap;
     TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
+    const std::vector<std::string> faceIds = CadaraCanonicalTopologyIdsForShapeMap(
+      faceMap,
+      TopAbs_FACE,
+      bodyId
+    );
 
     int nodeCount = 0;
     int triangleCount = 0;
@@ -421,7 +475,7 @@ namespace {
         continue;
       }
 
-      const std::string faceId = CadaraTopologyIdForShape(TopAbs_FACE, bodyId, face);
+      const std::string& faceId = faceIds[faceIndex];
       for (int triangleIndex = 1; triangleIndex <= triangulation->NbTriangles(); triangleIndex += 1) {
         if (needsBindingComma) {
           out << ",";
@@ -841,6 +895,11 @@ namespace {
 
     TopTools_IndexedMapOfShape edgeMap;
     TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+    const std::vector<std::string> edgeIds = CadaraCanonicalTopologyIdsForShapeMap(
+      edgeMap,
+      TopAbs_EDGE,
+      bodyId
+    );
 
     if (index > 0 && index <= edgeMap.Size()) {
       edge = TopoDS::Edge(edgeMap.FindKey(index));
@@ -849,7 +908,7 @@ namespace {
 
     for (int edgeIndex = 1; edgeIndex <= edgeMap.Size(); edgeIndex += 1) {
       const TopoDS_Edge candidate = TopoDS::Edge(edgeMap.FindKey(edgeIndex));
-      if (CadaraTopologyIdForShape(TopAbs_EDGE, bodyId, candidate) == edgeId) {
+      if (edgeIds[edgeIndex] == edgeId) {
         edge = candidate;
         return true;
       }
@@ -869,6 +928,11 @@ namespace {
 
     TopTools_IndexedMapOfShape faceMap;
     TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
+    const std::vector<std::string> faceIds = CadaraCanonicalTopologyIdsForShapeMap(
+      faceMap,
+      TopAbs_FACE,
+      bodyId
+    );
 
     if (index > 0 && index <= faceMap.Size()) {
       face = TopoDS::Face(faceMap.FindKey(index));
@@ -877,7 +941,7 @@ namespace {
 
     for (int faceIndex = 1; faceIndex <= faceMap.Size(); faceIndex += 1) {
       const TopoDS_Face candidate = TopoDS::Face(faceMap.FindKey(faceIndex));
-      if (CadaraTopologyIdForShape(TopAbs_FACE, bodyId, candidate) == faceId) {
+      if (faceIds[faceIndex] == faceId) {
         face = candidate;
         return true;
       }
