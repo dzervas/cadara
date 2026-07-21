@@ -71,6 +71,21 @@ function makeTrackedBox(
   });
 }
 
+function getShapeBounds(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  const points = getShapeVertexPoints(oc, shape);
+  return {
+    minX: Math.min(...points.map(([x]) => x)),
+    maxX: Math.max(...points.map(([x]) => x)),
+    minY: Math.min(...points.map(([, y]) => y)),
+    maxY: Math.max(...points.map(([, y]) => y)),
+    minZ: Math.min(...points.map(([, , z]) => z)),
+    maxZ: Math.max(...points.map(([, , z]) => z)),
+  };
+}
+
 function makeSketchLineAxis(
   sketchId: SketchId,
   entityId: SketchEntityId,
@@ -459,6 +474,89 @@ test("executeShellFeature uses native shell transaction before replacement boole
     result.historyInvalidations,
     "Native shell composition",
   );
+});
+
+// Lane: logic (per docs/testing.md — exported OCC feature execution is a
+// deterministic domain seam around the OpenCascade runtime, not UI behavior).
+// Seam: executeShellFeature offsetAllFaces branch uses OCC PerformByJoin,
+// replaces the targeted body identity in place, and publishes honest topology.
+test("executeShellFeature offsets all shell faces as an in-place body replacement", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_offset_all_faces_seed" as BodyId,
+    "feature_offset_all_faces_seed" as FeatureId,
+  );
+  const context = createOccAuthoringState(oc, { bodies: [body] });
+
+  const inward = executeShellFeature(
+    context,
+    "feature_offset_all_faces_inward" as FeatureId,
+    {
+      mode: "offsetAllFaces",
+      bodyTarget: { kind: "body", bodyId: body.bodyId },
+      faceTargets: [],
+      thickness: 0.2,
+      direction: "inside",
+      operation: "join",
+      booleanScope: { kind: "targetBody", bodyId: body.bodyId },
+    },
+  );
+  const inwardBody = inward.bodies.find(
+    (candidate) => candidate.bodyId === body.bodyId,
+  );
+  expect(inward.bodies.length).toBe(1);
+  expect(inwardBody, "Offset-all shell should retain the source body id.").toBeTruthy();
+  expect(inward.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+  expect(inward.topologyStage?.outputs.get(body.bodyId)?.sourceTargets.size).toBe(0);
+
+  const inwardBounds = getShapeBounds(oc, inwardBody!.shape);
+  expect(inwardBounds.minX).toBeCloseTo(0.2, 5);
+  expect(inwardBounds.maxX).toBeCloseTo(3.8, 5);
+  expect(inwardBounds.minY).toBeCloseTo(0.2, 5);
+  expect(inwardBounds.maxY).toBeCloseTo(3.8, 5);
+  expect(inwardBounds.minZ).toBeCloseTo(0.2, 5);
+  expect(inwardBounds.maxZ).toBeCloseTo(3.8, 5);
+
+  const outward = executeShellFeature(
+    context,
+    "feature_offset_all_faces_outward" as FeatureId,
+    {
+      mode: "offsetAllFaces",
+      bodyTarget: { kind: "body", bodyId: body.bodyId },
+      faceTargets: [],
+      thickness: 0.2,
+      direction: "outside",
+      operation: "join",
+      booleanScope: { kind: "targetBody", bodyId: body.bodyId },
+    },
+  );
+  const outwardBody = outward.bodies.find(
+    (candidate) => candidate.bodyId === body.bodyId,
+  );
+  const outwardBounds = getShapeBounds(oc, outwardBody!.shape);
+  expect(outwardBounds.minX).toBeCloseTo(-0.2, 5);
+  expect(outwardBounds.maxX).toBeCloseTo(4.2, 5);
+  expect(outwardBounds.minY).toBeCloseTo(-0.2, 5);
+  expect(outwardBounds.maxY).toBeCloseTo(4.2, 5);
+  expect(outwardBounds.minZ).toBeCloseTo(-0.2, 5);
+  expect(outwardBounds.maxZ).toBeCloseTo(4.2, 5);
+
+  expect(() =>
+    executeShellFeature(
+      context,
+      "feature_offset_all_faces_excessive" as FeatureId,
+      {
+        mode: "offsetAllFaces",
+        bodyTarget: { kind: "body", bodyId: body.bodyId },
+        faceTargets: [],
+        thickness: 3,
+        direction: "inside",
+        operation: "join",
+        booleanScope: { kind: "targetBody", bodyId: body.bodyId },
+      },
+    ),
+  ).toThrow();
 });
 
 test("executeMirrorFeature uses native transform transaction for copied topology", async () => {

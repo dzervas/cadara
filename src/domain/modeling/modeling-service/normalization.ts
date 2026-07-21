@@ -18,6 +18,7 @@ import type {
   ExtrudeFeatureExtent,
   ExtrudeFeatureParameters,
   FeatureBooleanOperation,
+  FeatureBooleanScope,
   FeatureDefinition,
   BakedBodyFeatureParameters,
   BakedBodyFeatureProvenance,
@@ -625,6 +626,22 @@ export function normalizeShellFeatureParameters(
   }
 
   if (
+    value.mode !== undefined &&
+    value.mode !== "openFaces" &&
+    value.mode !== "offsetAllFaces"
+  ) {
+    throw new Error("Invalid shell mode payload.");
+  }
+
+  if (
+    value.direction !== undefined &&
+    value.direction !== "inside" &&
+    value.direction !== "outside"
+  ) {
+    throw new Error("Invalid shell direction payload.");
+  }
+
+  if (
     !isAuthoredEnumLike(value.operation, [
       "newBody",
       "join",
@@ -635,6 +652,50 @@ export function normalizeShellFeatureParameters(
     throw new Error("Invalid shell operation payload.");
   }
 
+  const booleanScope: FeatureBooleanScope =
+    isRecord(value.booleanScope) &&
+    value.booleanScope.kind === "targetBody" &&
+    isString(value.booleanScope.bodyId)
+      ? { kind: "targetBody", bodyId: value.booleanScope.bodyId as BodyId }
+      : isRecord(value.booleanScope) &&
+          value.booleanScope.kind === "targetBodies" &&
+          Array.isArray(value.booleanScope.bodyIds)
+        ? {
+            kind: "targetBodies",
+            bodyIds: value.booleanScope.bodyIds.map((bodyId) =>
+              assertBodyId(bodyId),
+            ),
+          }
+        : { kind: "standalone" };
+
+  const baseParameters = {
+    bodyTarget,
+    thickness: toContractAuthoredValue(
+      value.thickness as MaybeAuthoredValue<number>,
+      1,
+    ),
+    ...(value.direction === undefined
+      ? {}
+      : { direction: value.direction as "inside" | "outside" }),
+    operation: toContractAuthoredValue(
+      value.operation as MaybeAuthoredValue<FeatureBooleanOperation>,
+      "newBody" as FeatureBooleanOperation,
+    ),
+    booleanScope,
+  };
+
+  if (value.mode === "offsetAllFaces") {
+    if (value.faceTargets.length !== 0) {
+      throw new Error("Shell offsetAllFaces mode cannot include face targets.");
+    }
+
+    return {
+      ...baseParameters,
+      mode: "offsetAllFaces",
+      faceTargets: [],
+    };
+  }
+
   if (value.faceTargets.length === 0) {
     throw new Error(
       "Shell requests must include at least one removable face target.",
@@ -642,31 +703,9 @@ export function normalizeShellFeatureParameters(
   }
 
   return {
-    bodyTarget,
+    ...baseParameters,
+    ...(value.mode === "openFaces" ? { mode: "openFaces" as const } : {}),
     faceTargets: value.faceTargets.map((target) => assertShellFaceRef(target)),
-    thickness: toContractAuthoredValue(
-      value.thickness as MaybeAuthoredValue<number>,
-      1,
-    ),
-    operation: toContractAuthoredValue(
-      value.operation as MaybeAuthoredValue<FeatureBooleanOperation>,
-      "newBody",
-    ),
-    booleanScope:
-      isRecord(value.booleanScope) &&
-      value.booleanScope.kind === "targetBody" &&
-      isString(value.booleanScope.bodyId)
-        ? { kind: "targetBody", bodyId: value.booleanScope.bodyId as BodyId }
-        : isRecord(value.booleanScope) &&
-            value.booleanScope.kind === "targetBodies" &&
-            Array.isArray(value.booleanScope.bodyIds)
-          ? {
-              kind: "targetBodies",
-              bodyIds: value.booleanScope.bodyIds.map((bodyId) =>
-                assertBodyId(bodyId),
-              ),
-            }
-          : { kind: "standalone" },
   };
 }
 

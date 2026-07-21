@@ -27,6 +27,10 @@ function isShellDirection(value: unknown): value is "inside" | "outside" {
   return value === "inside" || value === "outside";
 }
 
+function isShellMode(value: unknown): value is "openFaces" | "offsetAllFaces" {
+  return value === "openFaces" || value === "offsetAllFaces";
+}
+
 export const shellAuthoringDefinition = {
   metadata: {
     kind: "shell",
@@ -78,6 +82,7 @@ export const shellAuthoringDefinition = {
         ? { kind: "body" as const, bodyId: selectedFace.bodyId }
         : null);
     return {
+      mode: "openFaces",
       bodyTarget,
       faceTargets: selectedFace ? [selectedFace] : [],
       thickness: 1,
@@ -90,6 +95,7 @@ export const shellAuthoringDefinition = {
   },
   hydrateDraft(feature) {
     return {
+      mode: feature.parameters.mode ?? "openFaces",
       bodyTarget: feature.parameters.bodyTarget,
       faceTargets: [...feature.parameters.faceTargets],
       thickness: feature.parameters.thickness,
@@ -101,6 +107,7 @@ export const shellAuthoringDefinition = {
   applyPatch(draft, patch) {
     return {
       ...draft,
+      mode: isShellMode(patch.mode) ? patch.mode : draft.mode,
       bodyTarget:
         patch.bodyTarget === undefined
           ? draft.bodyTarget
@@ -170,7 +177,7 @@ export const shellAuthoringDefinition = {
     if (!draft.bodyTarget) {
       return "Select a body to shell";
     }
-    if (draft.faceTargets.length === 0) {
+    if (draft.mode === "openFaces" && draft.faceTargets.length === 0) {
       return "Select one or more removable faces for shell";
     }
     return `${prefix} shell on ${draft.bodyTarget.bodyId}`;
@@ -178,14 +185,19 @@ export const shellAuthoringDefinition = {
   getMissingInputsDiagnostics(input) {
     const diagnostics = [];
 
-    if (!input.draft.bodyTarget || input.draft.faceTargets.length === 0) {
+    if (
+      !input.draft.bodyTarget ||
+      (input.draft.mode === "openFaces" && input.draft.faceTargets.length === 0)
+    ) {
       diagnostics.push(
         createMissingInputDiagnostic({
           feature: "shell",
           phase: input.phase,
           suffix: "shell-inputs",
           message:
-            "Shell preview requires one body and at least one removable face.",
+            input.draft.mode === "openFaces"
+              ? "Shell preview requires one body and at least one removable face."
+              : "Whole-solid shell offset preview requires one body.",
         }),
       );
     }
@@ -210,15 +222,20 @@ export const shellAuthoringDefinition = {
   },
   buildDefinition(draft) {
     const operation = authoredStringLiteral(draft.operation, "newBody");
-    return draft.bodyTarget &&
-      draft.faceTargets.length > 0 &&
+    const hasRequiredTargets =
+      draft.bodyTarget != null &&
+      (draft.mode === "offsetAllFaces" || draft.faceTargets.length > 0);
+    return hasRequiredTargets &&
+      draft.bodyTarget &&
       hasBooleanTargetScope(operation, draft.booleanScope)
       ? {
           kind: "shell",
           featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
           parameters: {
+            ...(draft.mode === "offsetAllFaces"
+              ? { mode: "offsetAllFaces" as const, faceTargets: [] as const }
+              : { faceTargets: draft.faceTargets }),
             bodyTarget: draft.bodyTarget,
-            faceTargets: draft.faceTargets,
             thickness: authoredDefinitionValue(draft.thickness, 1),
             direction: draft.direction,
             operation: authoredDefinitionValue(draft.operation, operation),
@@ -238,6 +255,17 @@ export const shellAuthoringDefinition = {
           id: "references",
           title: "References",
           fields: [
+            {
+              kind: "enum",
+              id: "shell-mode",
+              label: "Mode",
+              value: session.draft.mode,
+              options: [
+                { value: "openFaces", label: "Open faces" },
+                { value: "offsetAllFaces", label: "Offset all faces" },
+              ],
+              patch: { patchKey: "mode" },
+            },
             {
               kind: "referencePicker",
               id: "shell-body",
@@ -271,16 +299,27 @@ export const shellAuthoringDefinition = {
               label: "Removable faces",
               value: session.draft.faceTargets,
               emptyLabel: "None selected",
-              helper: "The draft preserves each removable face explicitly.",
+              helper:
+                session.draft.mode === "offsetAllFaces"
+                  ? "Offset-all shell does not use removable faces."
+                  : "The draft preserves each removable face explicitly.",
+              hidden: session.draft.mode === "offsetAllFaces",
               error:
+                session.draft.mode === "offsetAllFaces" ||
                 session.draft.faceTargets.length > 0
                   ? null
                   : { message: "Select at least one removable face." },
               advancedParticipant: {
                 role: "face",
-                required: true,
-                cardinality: { min: 1, max: null },
-                selectedCount: session.draft.faceTargets.length,
+                required: session.draft.mode === "openFaces",
+                cardinality: {
+                  min: session.draft.mode === "openFaces" ? 1 : 0,
+                  max: session.draft.mode === "openFaces" ? null : 0,
+                },
+                selectedCount:
+                  session.draft.mode === "openFaces"
+                    ? session.draft.faceTargets.length
+                    : 0,
               },
               picker: {
                 mode: "appendUnique",

@@ -489,8 +489,12 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
   preparation + apply-pipeline specs, `src/domain/import/onshape` and
   `src/contracts/modeling` logic suites, build, changed-file lint,
   `bun run test:e2e`, and final `bun run test:all`.
-- [ ] W.5 **Shell non-hollow / offset-all-faces** (new executor branch via
-      whole-solid `BRepOffset_MakeOffset`). Unlocks PS1 Shell 1.
+- [x] W.5 **Shell non-hollow / offset-all-faces**: added the general
+      whole-solid offset branch using the bound `BRepOffsetAPI_MakeOffsetShape.PerformByJoin`
+      API. This does **not** unlock PS1 Shell 1: recovered OCC/Onshape evidence
+      showed PS1 Shell 1 is `isHollow=true`, `entities=[]`, and preserves the
+      outer envelope as a closed hollow, which is geometrically different from a
+      whole-solid offset that changes the bounding box.
 - [ ] W.6 **Hole executor** (largest kernel item; no instances in current
       bundles) — cylinder cut + countersink/counterbore per the validated
       translator that currently reports `hole-executor-unavailable`.
@@ -498,8 +502,9 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
       end-to-end: contract, executor, forms, translator). Nothing in current
       bundles but ubiquitous in real documents.
 
-Full-parametric math: Mounts = W.2 + W.3. Part Studio 1 = W.1 + W.2 + W.4 +
-W.5. Highest leverage first: W.1.
+Full-parametric math: Mounts = W.2 + W.3. Part Studio 1 = W.1 + W.2 + W.4,
+with W.5 now covering future non-hollow empty-shell forms but not PS1's true
+closed-hollow Shell 1. Highest leverage first: W.1.
 
 Session notes for the next orchestrator: subagent model routing —
 `dzerv-art/gpt-5.6-sol` had a multi-day quota cooldown (check before use),
@@ -603,14 +608,20 @@ resolution picked a keyless openrouter provider once). Real bundles + the
   coverage keeps a multi-curve path baked and verifies provider preparation and
   apply-time path materialization. Pinned captures remain Mounts **6 / 4 / 0**
   and Part Studio 1 **6 / 35 / 0**.
-- T.7 shell audit: Cadara cannot express Onshape's non-hollow
-  offset-all-faces form. `ShellFeatureParameters` defines removable
-  `faceTargets`; modeling-service normalization rejects an empty list; and both
-  OCC execution paths require opening faces for `MakeThickSolidByJoin` (or the
-  native equivalent). The translator therefore retains
-  `shell-non-hollow-unsupported`, with logic coverage for that exact reason.
-  The real Part Studio envelope is instead `isHollow=true`, `entities=[]`, so
-  Shell 1 correctly remains `shell-hollow-without-openings`.
+- T.7 shell audit superseded by W.5: Cadara now expresses Onshape's
+  non-hollow empty-selection offset-all-faces form via `mode: "offsetAllFaces"`,
+  zero `faceTargets`, positive authored thickness, source `bodyTarget`, and
+  direction-derived offset sign. The OCC executor uses
+  `BRepOffsetAPI_MakeOffsetShape.PerformByJoin(shape, signedOffset, tolerance,
+  BRepOffset_Skin, false, false, GeomAbs_Arc, false, progress)`, validates
+  `IsDone`, `BRepCheck_Analyzer`, and exactly one solid output, then replaces the
+  source body in place with unsupported producer topology history because exact
+  topology successor mapping is not proven.
+
+  The real Part Studio 1 envelope is still `isHollow=true`, `entities=[]`, with
+  identical before/after bbox and face count 13→26, so Shell 1 remains correctly
+  baked as `shell-hollow-without-openings`; it is a closed-hollow/no-openings
+  semantic, not the non-hollow whole-solid offset W.5 implemented.
 
   | Capture / studio | Before | After | Shell review reason after |
   |---|---:|---:|---|

@@ -451,14 +451,29 @@ describe("Wave B body topology translators", () => {
     ];
     expect(plan(shellFeatureTranslator, "shell", realRootCaptureEnvelope).reasonCodes).toEqual(["shell-hollow-without-openings"]);
 
-    const nonHollowOffsetAllFaces = [
+    const nonHollowOffsetAllFaces = plan(shellFeatureTranslator, "shell", [
       valueParameter("isHollow", false),
       queryParameter("entities", []),
       queryParameter("parts", ["body"]),
       valueParameter("thickness", 0, "2.5 mm"),
       valueParameter("oppositeDirection", false),
+    ]);
+    expect(nonHollowOffsetAllFaces.plannedBodyTopologyConsumer).toMatchObject({
+      featureKind: "shell",
+      shellMode: "offsetAllFaces",
+      thickness: 2.5,
+      direction: "inside",
+      slots: [{ parameterId: "parts", role: "body" }],
+    });
+
+    const selectedFaceNonHollow = [
+      valueParameter("isHollow", false),
+      queryParameter("entities", ["face"]),
+      queryParameter("parts", ["body"]),
+      valueParameter("thickness", 0, "2.5 mm"),
+      valueParameter("oppositeDirection", false),
     ];
-    expect(plan(shellFeatureTranslator, "shell", nonHollowOffsetAllFaces).reasonCodes).toEqual(["shell-non-hollow-unsupported"]);
+    expect(plan(shellFeatureTranslator, "shell", selectedFaceNonHollow).reasonCodes).toEqual(["shell-non-hollow-unsupported"]);
   });
 
   test("maps one-face NEW thicken to a capability-gated topology consumer", () => {
@@ -537,6 +552,45 @@ describe("Wave B body topology translators", () => {
       },
     });
     expect(validateFeatureDefinitionAuthoredValueInvariants(chamfer).map((issue) => issue.message)).toEqual([]);
+
+    const shellBodyBinding = {
+      query: {
+        consumerFeatureId: "consumer",
+        slotKey: "bodyTarget",
+        parameterId: "parts",
+        queryIndex: 0,
+        deterministicId: "body",
+        queryString: null,
+        expectedKinds: ["body" as const],
+      },
+      reviewReference: { kind: "body" as const, bodyId: "body" as never },
+      deferred: {
+        kind: "topologyOf" as const,
+        expectedKind: "body" as const,
+        capturedSignature: { entityClass: "body" as const, geometryType: "unknown" as const },
+        tolerance: { linear: 0.01, angularRadians: 0.001, relative: 0.000001, ambiguityMargin: 0.000001 },
+        source: { consumerFeatureId: "consumer", parameterId: "parts", deterministicId: "body" },
+      },
+      score: 0,
+      evidence: [],
+      sourceEvidence: "historyPoint" as const,
+    };
+    const shellOffset = buildResolvedBodyConsumerDefinition({
+      featureKind: "shell",
+      shellMode: "offsetAllFaces",
+      thickness: 2.5,
+      direction: "inside",
+      slots: [{ key: "bodyTarget", parameterId: "parts", role: "body", expectedKinds: ["body"], cardinality: { min: 1, max: 1 } }],
+    }, [shellBodyBinding]);
+    expect(shellOffset).toMatchObject({
+      kind: "shell",
+      parameters: {
+        mode: "offsetAllFaces",
+        bodyTarget: { kind: "topologyOf", expectedKind: "body" },
+        faceTargets: [],
+        thickness: { source: "literal", value: 2.5 },
+      },
+    });
 
     const faceResolution = resolveTopologyReferences({
       ...input,
