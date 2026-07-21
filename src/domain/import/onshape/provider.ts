@@ -1338,7 +1338,7 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "chamfer-style-unsupported": "chamfer style is not supported",
   "chamfer-direction-overrides-unsupported": "chamfer direction overrides are not supported",
   "chamfer-width-unreadable": "chamfer width could not be read",
-  "shell-non-hollow-unsupported": "non-hollow shell is not supported",
+  "shell-non-hollow-unsupported": "selected-face non-hollow shell is not supported",
   "shell-hollow-without-openings": "hollow shell without removed faces is not supported",
   "shell-thickness-unreadable": "shell thickness could not be read",
   "hole-style-unsupported": "hole style is not supported",

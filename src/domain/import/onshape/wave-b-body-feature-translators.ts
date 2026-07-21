@@ -38,6 +38,7 @@ export interface PlannedBodyTopologyConsumer {
   radius?: number;
   thickness?: number;
   direction?: "inside" | "outside";
+  shellMode?: "openFaces" | "offsetAllFaces";
   unavailableReason?: import("@/domain/import/onshape/fidelity-planner").PlanReasonCode;
 }
 
@@ -440,14 +441,25 @@ export const thickenFeatureTranslator: OnshapeFeatureTranslator = {
 export const shellFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["shell"],
   plan(context) {
-    // Cadara's shell contract models a hollowed solid with explicit removable
-    // faces, and normalization plus both OCC execution paths reject an empty
-    // faceTargets list. Onshape isHollow=false instead offsets every face while
-    // retaining a closed solid, so it cannot be represented by this contract.
-    if (!booleanValue(context.feature, "isHollow")) return baked(context, "shell-non-hollow-unsupported");
-    if (!hasQueries(context.feature, "entities")) return baked(context, "shell-hollow-without-openings");
+    // Onshape has two closed/empty-selection shell meanings:
+    // - isHollow=true with no entities creates a closed hollow that preserves the
+    //   outer envelope, which differs from a whole-solid offset and remains baked.
+    // - isHollow=false with no entities offsets every face of the selected part.
+    const isHollow = booleanValue(context.feature, "isHollow");
+    const hasEntityTargets = hasQueries(context.feature, "entities");
     const thickness = positiveQuantity(context.feature, "thickness");
     if (thickness === null) return baked(context, "shell-thickness-unreadable");
+    if (!isHollow) {
+      if (hasEntityTargets) return baked(context, "shell-non-hollow-unsupported");
+      return topologyCandidate(context, {
+        featureKind: "shell",
+        shellMode: "offsetAllFaces",
+        thickness,
+        direction: booleanValue(context.feature, "oppositeDirection") ? "outside" : "inside",
+        slots: [slot("bodyTarget", "parts", "body", 1, 1, ["body"])],
+      });
+    }
+    if (!hasEntityTargets) return baked(context, "shell-hollow-without-openings");
     return topologyCandidate(context, {
       featureKind: "shell",
       thickness,
@@ -505,8 +517,12 @@ export function buildResolvedBodyConsumerDefinition(
       kind: "shell",
       featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
       parameters: {
+        ...(planned.shellMode === "offsetAllFaces"
+          ? { mode: "offsetAllFaces" as const, faceTargets: [] as const }
+          : {
+              faceTargets: (targetsByRole.get("face") ?? []) as import("@/contracts/import/actions").ImportDeferredShellFeatureParameters["faceTargets"],
+            }),
         bodyTarget: targetsByRole.get("body")![0]! as import("@/contracts/import/actions").ImportDeferredShellFeatureParameters["bodyTarget"],
-        faceTargets: (targetsByRole.get("face") ?? []) as import("@/contracts/import/actions").ImportDeferredShellFeatureParameters["faceTargets"],
         thickness: createLiteralAuthoredValue(planned.thickness!),
         direction: planned.direction,
         operation: createLiteralAuthoredValue("newBody"),

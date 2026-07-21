@@ -459,15 +459,12 @@ export interface ShellFaceRef {
 }
 
 /**
- * Fully typed shell parameters.
- * `bodyTarget` names the source solid to hollow.
- * `faceTargets` lists the exact removable faces.
+ * Shared shell parameters.
+ * `bodyTarget` names the source solid to shell or offset.
  */
-export interface ShellFeatureParameters {
+interface ShellBaseFeatureParameters {
   /** Explicit durable source body that will be shelled. */
   bodyTarget: { kind: "body"; bodyId: BodyId };
-  /** Explicit removable faces for the shell opening. */
-  faceTargets: readonly ShellFaceRef[];
   /** Positive shell thickness in document modeling units. */
   thickness: AuthoredValue<number>;
   /** Offset side relative to the source body. Omitted legacy values mean inside. */
@@ -477,6 +474,26 @@ export interface ShellFeatureParameters {
   /** Explicit participant scope for non-standalone boolean operations. */
   booleanScope: FeatureBooleanScope;
 }
+
+/** Hollow shell with explicit removable/open faces. */
+export interface ShellOpenFacesFeatureParameters extends ShellBaseFeatureParameters {
+  /** Explicit shell branch; omitted legacy values mean openFaces. */
+  mode?: "openFaces";
+  /** Explicit removable faces for the shell opening. */
+  faceTargets: readonly ShellFaceRef[];
+}
+
+/** Whole-solid offset of every face; no removable/open faces are allowed. */
+export interface ShellOffsetAllFacesFeatureParameters extends ShellBaseFeatureParameters {
+  /** Offset all faces without creating openings. */
+  mode: "offsetAllFaces";
+  /** Offset-all shell has no removable faces. */
+  faceTargets: readonly [];
+}
+
+export type ShellFeatureParameters =
+  | ShellOpenFacesFeatureParameters
+  | ShellOffsetAllFacesFeatureParameters;
 
 /** Provenance exposed by baked-body features for honest non-parametric editing. */
 export interface BakedBodyFeatureProvenance {

@@ -14,7 +14,11 @@ import type {
   CommitSketchRequest,
   CreateFeatureRequest,
 } from "@/contracts/modeling/schema";
-import { CONTRACT_VERSION, PLANE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
+import {
+  CONTRACT_VERSION,
+  PLANE_FEATURE_SCHEMA_VERSION,
+  SHELL_FEATURE_SCHEMA_VERSION,
+} from "@/contracts/shared/versioning";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { FIXTURE_PART_STUDIO_ID } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
@@ -206,6 +210,28 @@ function extrudeRequest(input: {
       },
     },
   } as CreateFeatureRequest;
+}
+
+function shellOffsetAllFacesRequest(bodyId: BodyId): CreateFeatureRequest {
+  return {
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_ignored" as RevisionId,
+    featureLabel: "Shell offset all faces",
+    definition: {
+      kind: "shell",
+      featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        mode: "offsetAllFaces",
+        bodyTarget: { kind: "body", bodyId },
+        faceTargets: [],
+        thickness: { source: "literal", value: 2.5 },
+        direction: "inside",
+        operation: { source: "literal", value: "newBody" },
+        booleanScope: { kind: "standalone" },
+      },
+    },
+  };
 }
 
 async function translatedFixtureSketchAction() {
@@ -1453,6 +1479,30 @@ test("applyImportPreparedActions resolves bodyOf scope for a sketch-extrude-cut 
       typeof createFeatureRequests[1].definition.parameters.booleanScope.bodyId === "string",
     "The deferred bodyOf scope should be materialized to the first extrude's created body id before the cut applies.",
   ).toBeTruthy();
+});
+
+test("applyImportPreparedActions forwards whole-solid shell offsets to mock create", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const createFeatureRequests = recordSuccessfulCreateFeatureInputs(service);
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions: {
+      createFeatures: [shellOffsetAllFacesRequest("body_apply_shell" as BodyId)],
+      orderedActions: [{ kind: "createFeature", index: 0 }],
+    },
+  });
+
+  expect(result.diagnostics).toEqual([]);
+  expect(createFeatureRequests[0]?.definition).toMatchObject({
+    kind: "shell",
+    parameters: {
+      mode: "offsetAllFaces",
+      bodyTarget: { kind: "body", bodyId: "body_apply_shell" },
+      faceTargets: [],
+    },
+  });
 });
 
 test("applyImportPreparedActions materializes a baked checkpoint that supersedes prior parametric body outputs", async () => {

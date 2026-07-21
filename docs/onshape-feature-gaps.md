@@ -58,7 +58,7 @@ Split by where the gap actually sits.
 |---|---|
 | Transform | Rotation (only XYZ translation + plane-normal distance); copy mode |
 | Chamfer | Two-distances and distance+angle styles. The authoring contract and OCC executor accept only one positive distance and execute equal offsets (`Add_3(distance, distance, ...)`); T.6 confirmed these forms require future contract/kernel work. |
-| Shell | Non-hollow (offset-all-faces) variant. T.7 confirmed Cadara cannot express it: `ShellFeatureParameters` requires removable `faceTargets`, modeling-service normalization rejects an empty list, and both OCC shell paths use `MakeThickSolidByJoin`/the native equivalent with those opening faces. |
+| Shell | True closed-hollow shell with no removable/open faces (`isHollow=true`, empty `entities`) remains unsupported; non-hollow empty-selection offset-all-faces is now represented by `mode: "offsetAllFaces"`. |
 
 ### 3b. Translator-only gap (cadara can already express it — in plan scope, Phase T)
 
