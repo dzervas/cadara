@@ -1,6 +1,12 @@
 import type { FilletFeatureParameters } from "@/contracts/modeling/schema";
-import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
-import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
+import {
+  getAuthoredLiteralValue,
+  type MaybeAuthoredValue,
+} from "@/contracts/modeling/authored-values";
+import type {
+  AdvancedSolidFeatureDefinition,
+  ChamferWidthForm,
+} from "@/contracts/modeling/advanced-solid";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
@@ -206,22 +212,81 @@ export function executeFilletFeature(
   };
 }
 
-function getChamferDistance(
-  definition: AdvancedSolidFeatureDefinition & { kind: "chamfer" },
-) {
-  const distance = definition.parameters.options?.distance;
+type ChamferExecutionWidth =
+  | { widthForm: "equalOffsets"; distance: number }
+  | { widthForm: "twoOffsets"; distance1: number; distance2: number }
+  | { widthForm: "offsetAngle"; distance: number; angleDegrees: number };
 
+function readLiteralNumberOption(
+  definition: AdvancedSolidFeatureDefinition & { kind: "chamfer" },
+  key: string,
+) {
+  const raw = definition.parameters.options?.[key];
+  const value = getAuthoredLiteralValue(raw as MaybeAuthoredValue<unknown>);
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readChamferWidthForm(
+  definition: AdvancedSolidFeatureDefinition & { kind: "chamfer" },
+): ChamferWidthForm {
+  const raw = definition.parameters.options?.widthForm;
+  const value = getAuthoredLiteralValue(raw as MaybeAuthoredValue<unknown>);
+  if (value === undefined || value === null) {
+    return "equalOffsets";
+  }
   if (
-    typeof distance !== "number" ||
-    !Number.isFinite(distance) ||
-    distance <= 0
+    value === "equalOffsets" ||
+    value === "twoOffsets" ||
+    value === "offsetAngle"
   ) {
+    return value;
+  }
+  throw new Error(
+    "advanced-feature-unsupported-kernel-case: OCC chamfer requires a supported widthForm option.",
+  );
+}
+
+function requirePositiveChamferDistance(
+  definition: AdvancedSolidFeatureDefinition & { kind: "chamfer" },
+  key: string,
+) {
+  const value = readLiteralNumberOption(definition, key);
+  if (value === null || value <= 0) {
     throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC chamfer requires a positive constant distance option.",
+      `advanced-feature-unsupported-kernel-case: OCC chamfer requires a positive constant ${key} option.`,
     );
   }
+  return value;
+}
 
-  return distance;
+function getChamferExecutionWidth(
+  definition: AdvancedSolidFeatureDefinition & { kind: "chamfer" },
+): ChamferExecutionWidth {
+  const widthForm = readChamferWidthForm(definition);
+  if (widthForm === "twoOffsets") {
+    return {
+      widthForm,
+      distance1: requirePositiveChamferDistance(definition, "distance1"),
+      distance2: requirePositiveChamferDistance(definition, "distance2"),
+    };
+  }
+  if (widthForm === "offsetAngle") {
+    const angleDegrees = readLiteralNumberOption(definition, "angle");
+    if (angleDegrees === null || angleDegrees <= 0 || angleDegrees >= 90) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC chamfer distance+angle requires a constant angle greater than 0 and less than 90 degrees.",
+      );
+    }
+    return {
+      widthForm,
+      distance: requirePositiveChamferDistance(definition, "distance"),
+      angleDegrees,
+    };
+  }
+  return {
+    widthForm,
+    distance: requirePositiveChamferDistance(definition, "distance"),
+  };
 }
 
 function getChamferEdgeTargets(
@@ -280,6 +345,39 @@ function requireAdjacentFaceForChamfer(
   return context.oc.TopoDS.Face_1(faces.First_1());
 }
 
+function addChamferWidth(
+  chamfer: InstanceType<
+    import("@/domain/modeling/occ/runtime").OpenCascadeInstance["BRepFilletAPI_MakeChamfer"]
+  >,
+  width: ChamferExecutionWidth,
+  edge: InstanceType<
+    import("@/domain/modeling/occ/runtime").OpenCascadeInstance["TopoDS_Edge"]
+  >,
+  face: InstanceType<
+    import("@/domain/modeling/occ/runtime").OpenCascadeInstance["TopoDS_Face"]
+  >,
+) {
+  if (width.widthForm === "twoOffsets") {
+    // OCC applies distance1 on the supplied adjacent face and distance2 on the
+    // other adjacent face. Cadara edge targets do not carry an owner-face choice,
+    // so requireAdjacentFaceForChamfer provides the stable face ordering.
+    chamfer.Add_3(width.distance1, width.distance2, edge, face);
+    return;
+  }
+
+  if (width.widthForm === "offsetAngle") {
+    if (typeof chamfer.AddDA !== "function") {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC chamfer binding does not expose distance+angle execution.",
+      );
+    }
+    chamfer.AddDA(width.distance, (width.angleDegrees * Math.PI) / 180, edge, face);
+    return;
+  }
+
+  chamfer.Add_3(width.distance, width.distance, edge, face);
+}
+
 export function executeChamferFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -294,7 +392,7 @@ export function executeChamferFeature(
     );
   }
 
-  const distance = getChamferDistance(definition);
+  const width = getChamferExecutionWidth(definition);
   const edgeTargets = getChamferEdgeTargets(definition);
   const targetsByBody = new Map<BodyId, typeof edgeTargets>();
 
@@ -316,21 +414,23 @@ export function executeChamferFeature(
       requireEdge(context, body, target.edgeId);
     }
     const replacementResult =
-      resolveNativeChamferReplacement(
-        context,
-        body,
-        targets,
-        distance,
-        ownerFeatureId,
-      ) ??
+      (width.widthForm === "equalOffsets"
+        ? resolveNativeChamferReplacement(
+            context,
+            body,
+            targets,
+            width.distance,
+            ownerFeatureId,
+          )
+        : null) ??
       (() => {
         const chamfer = new context.oc.BRepFilletAPI_MakeChamfer(body.shape);
 
         for (const target of targets) {
           const edge = requireEdge(context, body, target.edgeId);
-          chamfer.Add_3(
-            distance,
-            distance,
+          addChamferWidth(
+            chamfer,
+            width,
             edge,
             requireAdjacentFaceForChamfer(context, body, edge, target.edgeId),
           );

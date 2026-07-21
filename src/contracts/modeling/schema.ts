@@ -89,6 +89,9 @@ export type {
   AdvancedSolidFeatureKind,
   AdvancedSolidFeatureParameters,
   AdvancedSolidOperationIntent,
+  ChamferAdvancedOptions,
+  ChamferWidthForm,
+  ChamferWidthOptions,
   SweepAdvancedOptions,
   SweepProfileControl,
   SweepTwistOption,
@@ -98,7 +101,8 @@ export type {
   LoftPathOptions,
   LoftProfileConditionKind,
   LoftProfileConditionOptions,
-} from "@/contracts/modeling/advanced-solid";
+  } from "@/contracts/modeling/advanced-solid";
+export { CHAMFER_WIDTH_OPTION_DESCRIPTORS } from "@/contracts/modeling/advanced-solid";
 
 /** Re-exported preview identifier used by modeling preview requests. */
 export type { PreviewId };

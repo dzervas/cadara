@@ -20,6 +20,7 @@ import type {
   AdvancedSolidFeatureParameters,
   AdvancedSolidOperationIntent,
   AuthoredFeatureKind,
+  ChamferAdvancedOptions,
   LoftAdvancedOptions,
   SweepAdvancedOptions,
 } from "@/contracts/modeling/schema";
@@ -216,7 +217,7 @@ export interface LoftFeatureParameterDraft {
 
 export interface ChamferFeatureParameterDraft {
   edgeTargets: readonly Extract<PrimitiveRef, { kind: "edge" }>[];
-  distance: MaybeAuthoredValue<number>;
+  options: ChamferAdvancedOptions;
 }
 
 export interface ThickenFeatureParameterDraft {

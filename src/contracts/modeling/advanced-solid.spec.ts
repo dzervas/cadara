@@ -1,6 +1,7 @@
 import { test, expect } from "vitest";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  CHAMFER_WIDTH_OPTION_DESCRIPTORS,
   LOFT_ADVANCED_OPTION_DESCRIPTORS,
   SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   validateAdvancedFeatureOptions,
@@ -120,14 +121,7 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
         acceptedKinds: ["edge"],
       },
     ],
-    options: [
-      {
-        key: "distance",
-        label: "Distance",
-        required: true,
-        valueKind: "positiveNumber",
-      },
-    ],
+    options: CHAMFER_WIDTH_OPTION_DESCRIPTORS,
   } satisfies AdvancedSolidFeatureAuthoringDescriptor;
 
   const thickenDescriptor = {
@@ -1257,7 +1251,7 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
               targets: [{ kind: "body", bodyId: "body_wrong" }],
             },
           ],
-          options: { distance: 0 },
+          options: { widthForm: "equalOffsets", distance: 0 }
         },
       },
       transformDescriptor,
@@ -1309,6 +1303,7 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
   testDeleteSolidValidationAcceptsAndRejectsExplicitBodyTargets();
   testMirrorValidationAcceptsExplicitBodiesPlaneAndCopyPolicy();
   testTransformValidationAcceptsBodyOnlyScopeAndTypedDistance();
+  testChamferEdgeParticipantsAndDistanceValidation();
 
   function testChamferEdgeParticipantsAndDistanceValidation() {
     const valid = validateAdvancedSolidFeatureDefinition(
@@ -1324,7 +1319,7 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
               ],
             },
           ],
-          options: { distance: 0.5 },
+          options: { widthForm: "equalOffsets", distance: 0.5 }
         },
       },
       chamferDescriptor,
@@ -1340,7 +1335,7 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
               targets: [{ kind: "face", bodyId: "body_a", faceId: "face_top" }],
             },
           ],
-          options: { distance: 0.5 },
+          options: { widthForm: "equalOffsets", distance: 0.5 }
         },
       },
       chamferDescriptor,
@@ -1363,6 +1358,65 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
       },
       chamferDescriptor,
     );
+    const validTwoOffsets = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "chamfer",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "edge",
+              targets: [
+                { kind: "edge", bodyId: "body_a", edgeId: "edge_outer" },
+              ],
+            },
+          ],
+          options: { widthForm: "twoOffsets", distance1: 0.5, distance2: 1.25 },
+        },
+      },
+      chamferDescriptor,
+    );
+    const validOffsetAngle = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "chamfer",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "edge",
+              targets: [
+                { kind: "edge", bodyId: "body_a", edgeId: "edge_outer" },
+              ],
+            },
+          ],
+          options: { widthForm: "offsetAngle", distance: 0.5, angle: 45 },
+        },
+      },
+      chamferDescriptor,
+    );
+    const invalidInactiveDistance = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "chamfer",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "edge",
+              targets: [
+                { kind: "edge", bodyId: "body_a", edgeId: "edge_outer" },
+              ],
+            },
+          ],
+          options: {
+            widthForm: "twoOffsets",
+            distance: 0.5,
+            distance1: 0.25,
+            distance2: 1,
+          },
+        },
+      },
+      chamferDescriptor,
+    );
 
     expect(
       valid.length,
@@ -1381,6 +1435,20 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
         (diagnostic) => diagnostic.code === "advanced-feature-invalid-option",
       ),
       "Chamfer validation should reject non-positive distances.",
+    ).toBeTruthy();
+    expect(
+      validTwoOffsets.length,
+      "Chamfer validation should accept two positive offset distances.",
+    ).toBe(0);
+    expect(
+      validOffsetAngle.length,
+      "Chamfer validation should accept positive distance plus finite angle options.",
+    ).toBe(0);
+    expect(
+      invalidInactiveDistance.some(
+        (diagnostic) => diagnostic.code === "advanced-feature-invalid-option",
+      ),
+      "Chamfer validation should reject values from inactive width-form variants.",
     ).toBeTruthy();
   }
 
