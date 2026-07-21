@@ -442,7 +442,7 @@ const toolbarSections = [
     label: "Finish",
     align: "center",
     modes: ["part"],
-    toolIds: ["fillet", "chamfer", "shell", "thicken"],
+    toolIds: ["fillet", "chamfer", "hole", "shell", "thicken"],
   },
   {
     id: "featuresMods",

@@ -228,7 +228,8 @@ function validateImportDeferredValueInvariants(
           if (
             !target ||
             typeof target !== "object" ||
-            (target as { kind?: unknown }).kind !== "sketchEntity"
+            ((target as { kind?: unknown }).kind !== "sketchEntity" &&
+              (target as { kind?: unknown }).kind !== "sketchPoint")
           ) {
             return;
           }
@@ -242,7 +243,7 @@ function validateImportDeferredValueInvariants(
               expected: "sketchIdOf deferred reference",
               value: sketchId.kind,
               message:
-                "Only sketchIdOf deferred references are allowed in advanced sketch-entity target positions.",
+                "Only sketchIdOf deferred references are allowed in advanced sketch target positions.",
             });
           } else {
             issues.push(

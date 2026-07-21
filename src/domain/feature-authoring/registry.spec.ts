@@ -80,6 +80,7 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
         "deleteSolid",
         "extrude",
         "fillet",
+        "hole",
         "loft",
         "mirror",
         "plane",
@@ -718,6 +719,80 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
         getAuthoredLiteralValue(definition.parameters.options.endScale) === 1.5,
       "Hydrated sweep authored advanced options should rebuild as durable definition values.",
     ).toBeTruthy();
+  }
+
+  function testHoleDraftSelectionConditionalFieldsAndDefinitionBuilder() {
+    const location = {
+      kind: "sketchPoint" as const,
+      sketchId: "sketch_a" as const,
+      pointId: "point_a" as const,
+    };
+    const body = { kind: "body" as const, bodyId: "body_a" as const };
+    const initialSession = createFeatureEditSession({
+      featureType: "hole",
+      selectedTarget: location,
+    });
+
+    expect(
+      initialSession.featureType,
+      "Hole activation should create a hole authoring session.",
+    ).toBe("hole");
+    expect(
+      getFormField(initialSession, "hole-depth")?.kind,
+      "Blind hole form should expose depth by default.",
+    ).toBe("numeric");
+
+    const bodyField = getFormField(initialSession, "hole-bodies");
+    const withBody = patchFeatureEditSession(
+      initialSession,
+      createFeatureEditorReferenceSelectionPatch(bodyField, body),
+    );
+    const counterboreSession = patchFeatureEditSession(
+      withBody,
+      createFeatureEditorFieldPatch(
+        getFormField(withBody, "hole-style"),
+        "counterbore",
+      ),
+    );
+    expect(
+      getFormField(counterboreSession, "hole-counterbore-diameter")?.kind,
+      "Counterbore style should expose counterbore diameter.",
+    ).toBe("numeric");
+
+    const throughAllSession = patchFeatureEditSession(
+      counterboreSession,
+      createFeatureEditorFieldPatch(
+        getFormField(counterboreSession, "hole-termination"),
+        "throughAll",
+      ),
+    );
+    expect(
+      getFormField(throughAllSession, "hole-depth"),
+      "Through-all holes should not require a blind depth field.",
+    ).toBeUndefined();
+
+    const definition = buildFeatureDefinition(throughAllSession);
+    expect(
+      definition?.kind,
+      "Completed hole drafts should build a hole advanced-solid definition.",
+    ).toBe("hole");
+    expect(
+      definition.parameters.participants.some(
+        (participant) =>
+          participant.role === "location" && participant.targets.length === 1,
+      ),
+      "Hole definitions should preserve sketch-point location participants.",
+    ).toBeTruthy();
+    expect(
+      definition.parameters.participants.some(
+        (participant) => participant.role === "body" && participant.targets.length === 1,
+      ),
+      "Hole definitions should preserve explicit body scope participants.",
+    ).toBeTruthy();
+    expect(
+      definition.parameters.operationIntent,
+      "Hole definitions should not author arbitrary operation intent.",
+    ).toBeUndefined();
   }
 
   function testChamferDraftSelectionDistanceAndDefinitionBuilder() {
@@ -2656,6 +2731,7 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
   testSweepDraftSelectionAndDefinitionBuilder();
   testSweepHydrationPreservesAuthoredAdvancedOptionsForEditing();
   testChamferDraftSelectionDistanceAndDefinitionBuilder();
+  testHoleDraftSelectionConditionalFieldsAndDefinitionBuilder();
   testLoftDraftSelectionReorderingAndDefinitionBuilder();
   testLoftHydrationPreservesOrderedProfilesForEditing();
   testThickenDraftSelectionOptionsAndDefinitionBuilder();

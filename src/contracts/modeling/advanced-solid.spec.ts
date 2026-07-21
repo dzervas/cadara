@@ -3,6 +3,7 @@ import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   CHAMFER_WIDTH_OPTION_DESCRIPTORS,
   LOFT_ADVANCED_OPTION_DESCRIPTORS,
+  HOLE_OPTION_DESCRIPTORS,
   SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   validateAdvancedFeatureOptions,
   validateAdvancedSolidFeatureDefinition,
@@ -122,6 +123,27 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
       },
     ],
     options: CHAMFER_WIDTH_OPTION_DESCRIPTORS,
+  } satisfies AdvancedSolidFeatureAuthoringDescriptor;
+
+  const holeDescriptor = {
+    featureKind: "hole",
+    participants: [
+      {
+        role: "location",
+        label: "Hole locations",
+        required: true,
+        cardinality: { min: 1, max: null },
+        acceptedKinds: ["sketchPoint"],
+      },
+      {
+        role: "body",
+        label: "Body targets",
+        required: true,
+        cardinality: { min: 1, max: null },
+        acceptedKinds: ["body"],
+      },
+    ],
+    options: HOLE_OPTION_DESCRIPTORS,
   } satisfies AdvancedSolidFeatureAuthoringDescriptor;
 
   const thickenDescriptor = {
@@ -1304,6 +1326,7 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
   testMirrorValidationAcceptsExplicitBodiesPlaneAndCopyPolicy();
   testTransformValidationAcceptsBodyOnlyScopeAndTypedDistance();
   testChamferEdgeParticipantsAndDistanceValidation();
+  testHoleParticipantsAndOptionsValidation();
 
   function testChamferEdgeParticipantsAndDistanceValidation() {
     const valid = validateAdvancedSolidFeatureDefinition(
@@ -1449,6 +1472,152 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
         (diagnostic) => diagnostic.code === "advanced-feature-invalid-option",
       ),
       "Chamfer validation should reject values from inactive width-form variants.",
+    ).toBeTruthy();
+  }
+
+  function testHoleParticipantsAndOptionsValidation() {
+    const valid = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "hole",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "location",
+              targets: [
+                { kind: "sketchPoint", sketchId: "sketch_a", pointId: "point_a" },
+              ],
+            },
+            { role: "body", targets: [{ kind: "body", bodyId: "body_a" }] },
+          ],
+          options: {
+            style: "counterbore",
+            mainDiameter: 4,
+            counterboreDiameter: 8,
+            counterboreDepth: 2,
+            termination: "blind",
+            depth: 10,
+          },
+        },
+      },
+      holeDescriptor,
+    );
+    const wrongLocationKind = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "hole",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "location",
+              targets: [{ kind: "vertex", bodyId: "body_a", vertexId: "vertex_a" }],
+            },
+            { role: "body", targets: [{ kind: "body", bodyId: "body_a" }] },
+          ],
+          options: { style: "simple", mainDiameter: 4, termination: "throughAll" },
+        },
+      },
+      holeDescriptor,
+    );
+    const invalidCounterbore = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "hole",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "location",
+              targets: [
+                { kind: "sketchPoint", sketchId: "sketch_a", pointId: "point_a" },
+              ],
+            },
+            { role: "body", targets: [{ kind: "body", bodyId: "body_a" }] },
+          ],
+          options: {
+            style: "counterbore",
+            mainDiameter: 4,
+            counterboreDiameter: 4,
+            counterboreDepth: 1,
+            termination: "blind",
+            depth: 8,
+          },
+        },
+      },
+      holeDescriptor,
+    );
+    const invalidCountersink = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "hole",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "location",
+              targets: [
+                { kind: "sketchPoint", sketchId: "sketch_a", pointId: "point_a" },
+              ],
+            },
+            { role: "body", targets: [{ kind: "body", bodyId: "body_a" }] },
+          ],
+          options: {
+            style: "countersink",
+            mainDiameter: 4,
+            countersinkDiameter: 8,
+            countersinkAngleDegrees: 180,
+            termination: "throughAll",
+          },
+        },
+      },
+      holeDescriptor,
+    );
+    const unsupportedIntent = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "hole",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "subtract",
+          participants: [
+            {
+              role: "location",
+              targets: [
+                { kind: "sketchPoint", sketchId: "sketch_a", pointId: "point_a" },
+              ],
+            },
+            { role: "body", targets: [{ kind: "body", bodyId: "body_a" }] },
+          ],
+          options: { style: "simple", mainDiameter: 4, termination: "throughAll" },
+        },
+      },
+      holeDescriptor,
+    );
+
+    expect(valid.length, "Hole validation should accept sketch-point locations, body scope, and counterbore dimensions.").toBe(0);
+    expect(
+      wrongLocationKind.some(
+        (diagnostic) =>
+          diagnostic.code === "advanced-feature-invalid-target-kind" &&
+          diagnostic.role === "location",
+      ),
+      "Hole locations should initially reject vertex targets so direction is inherited from the sketch plane.",
+    ).toBeTruthy();
+    expect(
+      invalidCounterbore.some(
+        (diagnostic) => diagnostic.code === "advanced-feature-invalid-option",
+      ),
+      "Hole validation should require counterbore diameter greater than main diameter.",
+    ).toBeTruthy();
+    expect(
+      invalidCountersink.some(
+        (diagnostic) => diagnostic.code === "advanced-feature-invalid-option",
+      ),
+      "Hole validation should require countersink angle in (0, 180).",
+    ).toBeTruthy();
+    expect(
+      unsupportedIntent.some(
+        (diagnostic) =>
+          diagnostic.code === "advanced-feature-unsupported-operation",
+      ),
+      "Hole validation should remain implicitly subtractive and reject authored operation intent.",
     ).toBeTruthy();
   }
 

@@ -206,6 +206,39 @@ export function getFeatureValueExpressionFields(
           valueKind: { kind: "positiveNumber" },
         },
       ];
+    case "hole":
+      return [
+        {
+          path: ["parameters", "options", "mainDiameter"],
+          label: "Hole main diameter",
+          valueKind: { kind: "positiveNumber" },
+        },
+        {
+          path: ["parameters", "options", "depth"],
+          label: "Hole blind depth",
+          valueKind: { kind: "positiveNumber" },
+        },
+        {
+          path: ["parameters", "options", "counterboreDiameter"],
+          label: "Hole counterbore diameter",
+          valueKind: { kind: "positiveNumber" },
+        },
+        {
+          path: ["parameters", "options", "counterboreDepth"],
+          label: "Hole counterbore depth",
+          valueKind: { kind: "positiveNumber" },
+        },
+        {
+          path: ["parameters", "options", "countersinkDiameter"],
+          label: "Hole countersink diameter",
+          valueKind: { kind: "positiveNumber" },
+        },
+        {
+          path: ["parameters", "options", "countersinkAngleDegrees"],
+          label: "Hole countersink angle",
+          valueKind: { kind: "angle" },
+        },
+      ];
     case "thicken":
       return [
         {

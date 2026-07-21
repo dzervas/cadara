@@ -564,3 +564,158 @@ test("validates deferred revolve boolean scope and advanced construction partici
   });
   expect(result.success, JSON.stringify(result.issues)).toBe(true);
 });
+
+
+test("validates deferred advanced sketch-point participant sketch producers", () => {
+  const sketchRequest = {
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    solverCorrelation: null,
+    sketchId: null,
+    sketchLabel: "Hole sketch",
+    plane: {
+      support: { kind: "construction" as const, constructionId: "construction_plane-xy" },
+      frame: {
+        origin: [0, 0, 0] as const,
+        xAxis: [1, 0, 0] as const,
+        yAxis: [0, 1, 0] as const,
+        normal: [0, 0, 1] as const,
+        linearUnit: "documentLength" as const,
+        handedness: "rightHanded" as const,
+      },
+      key: "xy" as const,
+    },
+    definition: {
+      schemaVersion: "sketch-definition/v1alpha1" as const,
+      referenceIds: [],
+      references: [],
+      pointIds: ["sketch_point_hole_center"],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+      styleIds: [],
+      styles: [],
+      svgRenderingEnabled: true,
+      derivedRelationships: [],
+      authoringOperations: [],
+    },
+  };
+  const planeRequest = {
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Plane",
+    definition: {
+      kind: "plane" as const,
+      featureTypeVersion: "feature-type/plane/v1alpha1" as const,
+      parameters: {
+        mode: "explicitFrame" as const,
+        frame: sketchRequest.plane.frame,
+      },
+    },
+  };
+  const holeRequest = (actionIndex: number) => ({
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Hole",
+    definition: {
+      kind: "hole" as const,
+      featureTypeVersion: "advanced-solid-feature/v0" as const,
+      parameters: {
+        participants: [
+          {
+            role: "location" as const,
+            targets: [
+              {
+                kind: "sketchPoint" as const,
+                sketchId: { kind: "sketchIdOf" as const, actionIndex },
+                pointId: "sketch_point_hole_center" as const,
+              },
+            ],
+          },
+          { role: "body" as const, targets: [{ kind: "body" as const, bodyId: "body_target" }] },
+        ],
+      },
+    },
+  });
+
+  expect(
+    validateImportPreparedActions({
+      commitSketches: [sketchRequest],
+      createFeatures: [holeRequest(0)],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "createFeature", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should accept deferred sketchPoint targets from earlier sketch commits.",
+  ).toBe(true);
+
+  for (const { name, actions } of [
+    {
+      name: "forward",
+      actions: {
+        commitSketches: [sketchRequest],
+        createFeatures: [holeRequest(1)],
+        orderedActions: [
+          { kind: "createFeature" as const, index: 0 },
+          { kind: "commitSketch" as const, index: 0 },
+        ],
+      },
+    },
+    {
+      name: "self",
+      actions: {
+        commitSketches: [sketchRequest],
+        createFeatures: [holeRequest(1)],
+        orderedActions: [
+          { kind: "commitSketch" as const, index: 0 },
+          { kind: "createFeature" as const, index: 0 },
+        ],
+      },
+    },
+    {
+      name: "missing",
+      actions: {
+        commitSketches: [sketchRequest],
+        createFeatures: [holeRequest(9)],
+        orderedActions: [
+          { kind: "commitSketch" as const, index: 0 },
+          { kind: "createFeature" as const, index: 0 },
+        ],
+      },
+    },
+    {
+      name: "wrong producer kind",
+      actions: {
+        createFeatures: [planeRequest, holeRequest(0)],
+        orderedActions: [
+          { kind: "createFeature" as const, index: 0 },
+          { kind: "createFeature" as const, index: 1 },
+        ],
+      },
+    },
+    {
+      name: "ordered cardinality",
+      actions: {
+        commitSketches: [sketchRequest],
+        createFeatures: [holeRequest(0)],
+        orderedActions: [
+          { kind: "commitSketch" as const, index: 0 },
+          { kind: "commitSketch" as const, index: 0 },
+        ],
+      },
+    },
+  ]) {
+    expect(
+      validateImportPreparedActions(actions).success,
+      `Prepared action validation should reject ${name} deferred sketchPoint producer references.`,
+    ).toBe(false);
+  }
+});

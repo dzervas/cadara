@@ -112,6 +112,7 @@ export type SelectionFilterKind =
   | "thickenReferences"
   | "filletEdges"
   | "chamferEdges"
+  | "holeReferences"
   | "shellReferences"
   | "planeReferences";
 
@@ -512,6 +513,42 @@ export const chamferSelectionFilter: SelectionFilter = {
           description: "Select one edge reference.",
           acceptedKinds: ["edge"],
           acceptedSemantics: ["edge"],
+        },
+      ],
+    },
+  ],
+};
+
+export const holeSelectionFilter: SelectionFilter = {
+  kind: "holeReferences",
+  allowedKinds: ["sketchPoint", "body"],
+  label: "Hole references",
+  requirements: [
+    {
+      id: "hole-location",
+      label: "Hole location",
+      description: "Hole locations are authored from sketch points.",
+      slots: [
+        {
+          id: "hole-location",
+          label: "Hole location",
+          description: "Select one sketch point.",
+          acceptedKinds: ["sketchPoint"],
+          acceptedSemantics: ["sketchPoint"],
+        },
+      ],
+    },
+    {
+      id: "hole-body",
+      label: "Body target",
+      description: "Hole cuts apply to one or more body targets.",
+      slots: [
+        {
+          id: "hole-body",
+          label: "Body target",
+          description: "Select one body target.",
+          acceptedKinds: ["body"],
+          acceptedSemantics: ["body"],
         },
       ],
     },
