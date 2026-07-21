@@ -1342,8 +1342,15 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "shell-hollow-without-openings": "hollow shell without removed faces is not supported",
   "shell-thickness-unreadable": "shell thickness could not be read",
   "hole-style-unsupported": "hole style is not supported",
+  "hole-thread-unsupported": "threaded, tapped, and clearance holes are not supported",
   "hole-diameter-unreadable": "hole diameter could not be read",
-  "hole-executor-unavailable": "hole is understood, but OCC has no hole executor",
+  "hole-location-unresolved": "hole sketch-point locations could not be resolved",
+  "hole-depth-unreadable": "blind hole depth could not be read",
+  "hole-counterbore-parameters-unreadable": "counterbore diameter or depth could not be read",
+  "hole-countersink-parameters-unreadable": "countersink diameter or angle could not be read",
+  "hole-termination-unsupported": "hole termination is not supported",
+  "hole-scope-unresolved": "hole body scope could not be resolved",
+  "hole-executor-unavailable": "legacy hole capture had no executable hole path",
   "sheet-metal-unsupported": "sheet metal is not supported parametrically",
   "surface-modeling-unsupported": "surface modeling is not supported parametrically",
   "curve-modeling-unsupported": "curve modeling is not supported parametrically",
@@ -1546,7 +1553,7 @@ type OnshapeStudioPlan = Pick<
   | "requiresStudioBake"
 >;
 
-function resolvePlannedDeferredParticipants(
+export function resolvePlannedDeferredParticipants(
   definition: ImportDeferredFeatureDefinition,
   orderedIndexByFeatureId: ReadonlyMap<string, number>,
 ): { definition: ImportDeferredFeatureDefinition; missingFeatureId: null } | {
@@ -1590,6 +1597,22 @@ function resolvePlannedDeferredParticipants(
           kind: "sketchEntity" as const,
           sketchId: { kind: "sketchIdOf" as const, actionIndex },
           entityId: (target as { entityId: unknown }).entityId,
+        };
+      }
+      if (kind === "sketchPointFromFeature") {
+        const featureId = (target as { sketchFeatureId?: unknown }).sketchFeatureId;
+        const actionIndex =
+          typeof featureId === "string"
+            ? orderedIndexByFeatureId.get(featureId)
+            : undefined;
+        if (typeof featureId !== "string" || actionIndex === undefined) {
+          missingFeatureId = typeof featureId === "string" ? featureId : "unknown";
+          return target;
+        }
+        return {
+          kind: "sketchPoint" as const,
+          sketchId: { kind: "sketchIdOf" as const, actionIndex },
+          pointId: (target as { pointId: unknown }).pointId,
         };
       }
       return target;

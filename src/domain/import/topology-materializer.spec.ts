@@ -4,7 +4,7 @@ import type {
   ImportCreateFeatureRequest,
   ImportDeferredTopologyRef,
 } from "@/contracts/import/actions";
-import type { BodyId, RevisionId } from "@/contracts/shared/ids";
+import type { BodyId, RevisionId, SketchId } from "@/contracts/shared/ids";
 import { ImportDeferredMaterializer } from "@/domain/import/orchestrator";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
 import {
@@ -182,6 +182,64 @@ test("materializes topologyOf only in every blessed feature and sketch position"
   expect(JSON.stringify([...requests, sketch])).not.toContain("topologyOf");
   expect(requests[0]!.definition.kind).toBe("fillet");
   expect(sketch.plane.support.kind).toBe("face");
+});
+
+
+test("materializes deferred sketchPoint participants without changing body participants", async () => {
+  const instance = materializer();
+  instance.recordSketchOutput(0, "sketch_live" as SketchId);
+
+  const request = await instance.materializeFeatureRequest(
+    {
+      ...basis,
+      definition: {
+        kind: "hole",
+        featureTypeVersion: "advanced-solid-feature/v0",
+        parameters: {
+          participants: [
+            {
+              role: "location",
+              targets: [
+                {
+                  kind: "sketchPoint",
+                  sketchId: { kind: "sketchIdOf", actionIndex: 0 },
+                  pointId: "sketch_point_hole_center",
+                },
+              ],
+            },
+            {
+              role: "body",
+              targets: [{ kind: "body", bodyId: "body_target" }],
+            },
+          ],
+        },
+      },
+    } as ImportCreateFeatureRequest,
+    { kind: "createFeature", index: 0 },
+  );
+
+  expect(JSON.stringify(request)).not.toContain("sketchIdOf");
+  expect(request.definition).toMatchObject({
+    kind: "hole",
+    parameters: {
+      participants: [
+        {
+          role: "location",
+          targets: [
+            {
+              kind: "sketchPoint",
+              sketchId: "sketch_live",
+              pointId: "sketch_point_hole_center",
+            },
+          ],
+        },
+        {
+          role: "body",
+          targets: [{ kind: "body", bodyId: "body_target" }],
+        },
+      ],
+    },
+  });
 });
 
 test("materialized feature requests omit the import-only topology fallback property", async () => {

@@ -117,9 +117,13 @@ import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { DurableRef } from "@/contracts/shared/references";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  HOLE_OPTION_DESCRIPTORS,
   getAdvancedParticipant,
   getTransformOperationKind,
   isAdvancedSolidFeatureKind,
+  validateAdvancedSolidFeatureDefinition,
+  type AdvancedFeatureValidationDiagnostic,
+  type AdvancedSolidFeatureDefinition,
 } from "@/contracts/modeling/advanced-solid";
 import {
   RENDER_EXPORT_SCHEMA_VERSION,
@@ -1225,6 +1229,62 @@ function hasSketchEntityTarget(
   );
 }
 
+function hasSketchPointTarget(
+  snapshot: WorkspaceSnapshot,
+  sketchId: SketchId,
+  pointId: SketchPointId,
+) {
+  return snapshot.document.sketches.some(
+    (sketch) =>
+      sketch.sketchId === sketchId &&
+      sketch.sketch.definition.pointIds.includes(pointId),
+  );
+}
+
+const HOLE_ADVANCED_FEATURE_DESCRIPTOR = {
+  featureKind: "hole",
+  participants: [
+    {
+      role: "location",
+      label: "Hole locations",
+      required: true,
+      cardinality: { min: 1, max: null },
+      acceptedKinds: ["sketchPoint"],
+    },
+    {
+      role: "body",
+      label: "Body targets",
+      required: true,
+      cardinality: { min: 1, max: null },
+      acceptedKinds: ["body"],
+    },
+  ],
+  options: HOLE_OPTION_DESCRIPTORS,
+} as const;
+
+function createAdvancedFeatureValidationModelingDiagnostics(
+  diagnostics: readonly AdvancedFeatureValidationDiagnostic[],
+): ModelingDiagnostic[] {
+  return diagnostics.map((diagnostic) => ({
+    code: diagnostic.code,
+    severity: diagnostic.severity,
+    message: diagnostic.message,
+    target: diagnostic.target,
+    detail: { kind: "advancedFeatureValidation", diagnostic },
+  }));
+}
+
+function validateHoleAdvancedContract(
+  definition: AdvancedSolidFeatureDefinition & { kind: "hole" },
+): ModelingDiagnostic[] {
+  return createAdvancedFeatureValidationModelingDiagnostics(
+    validateAdvancedSolidFeatureDefinition(
+      definition,
+      HOLE_ADVANCED_FEATURE_DESCRIPTOR,
+    ),
+  );
+}
+
 function createPreviewRenderableSet(
   targetKey: string,
 ): RenderableEntityRecord[] {
@@ -2015,6 +2075,59 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       return { accepted: true as const, diagnostics: [] };
     }
+    case "hole": {
+      const holeDefinition = definition as AdvancedSolidFeatureDefinition & { kind: "hole" };
+      const contractDiagnostics = validateHoleAdvancedContract(holeDefinition);
+      if (contractDiagnostics.length > 0) {
+        return {
+          accepted: false as const,
+          reasonCode: "mock-invalid-hole",
+          diagnostics: contractDiagnostics,
+        };
+      }
+
+      const locationTargets =
+        getAdvancedParticipant(holeDefinition, "location")?.targets ?? [];
+      const bodyTargets = getAdvancedParticipant(holeDefinition, "body")?.targets ?? [];
+
+      if (
+        locationTargets.some(
+          (target) =>
+            target.kind !== "sketchPoint" ||
+            !hasSketchPointTarget(snapshot, target.sketchId, target.pointId),
+        )
+      ) {
+        return {
+          accepted: false as const,
+          reasonCode: "mock-invalid-hole",
+          diagnostics: [
+            createUnsupportedFeatureDiagnostic(
+              definition,
+              "Hole location participants must resolve to live committed sketch points.",
+            ),
+          ],
+        };
+      }
+
+      if (
+        bodyTargets.some(
+          (target) => target.kind !== "body" || !hasBodyTarget(snapshot, target.bodyId),
+        )
+      ) {
+        return {
+          accepted: false as const,
+          reasonCode: "mock-invalid-hole",
+          diagnostics: [
+            createUnsupportedFeatureDiagnostic(
+              definition,
+              "Hole body participants must resolve to live durable bodies.",
+            ),
+          ],
+        };
+      }
+
+      return { accepted: true as const, diagnostics: [] };
+    }
     case "combine": {
       const targetBodyTargets =
         getAdvancedParticipant(definition, "targetBody")?.targets ?? [];
@@ -2520,6 +2633,11 @@ function buildPreviewRenderables(
   if (definition.kind === "chamfer") {
     const edge = getAdvancedParticipant(definition, "edge")?.targets[0];
     return edge ? createPreviewRenderableSet(getPrimitiveRefKey(edge)) : [];
+  }
+
+  if (definition.kind === "hole") {
+    const location = getAdvancedParticipant(definition, "location")?.targets[0];
+    return location ? createPreviewRenderableSet(getPrimitiveRefKey(location)) : [];
   }
 
   if (definition.kind === "thicken") {
@@ -3484,6 +3602,7 @@ async function buildSnapshot(
         "loft",
         "chamfer",
         "thicken",
+        "hole",
         "combine",
         "split",
         "deleteSolid",
@@ -3494,6 +3613,7 @@ async function buildSnapshot(
         "loft",
         "chamfer",
         "thicken",
+        "hole",
         "combine",
         "split",
         "deleteSolid",
@@ -4223,6 +4343,80 @@ function applyMockCombineSnapshotMutation(
   snapshot.document.entities = snapshot.presentation.entities;
 }
 
+function getMockInPlaceBodyIds(definition: FeatureDefinition) {
+  if (definition.kind !== "hole") {
+    return [];
+  }
+
+  return (getAdvancedParticipant(definition, "body")?.targets ?? []).flatMap(
+    (target) => (target.kind === "body" ? [target.bodyId] : []),
+  );
+}
+
+function applyMockInPlaceBodySnapshotMutation(
+  snapshot: WorkspaceSnapshot,
+  featureId: FeatureId,
+  definition: FeatureDefinition,
+) {
+  const bodyIds = getMockInPlaceBodyIds(definition);
+  if (bodyIds.length === 0) {
+    return;
+  }
+
+  const bodyIdSet = new Set(bodyIds);
+  const labelSuffix = `(${definition.kind})`;
+
+  snapshot.document.bodies = snapshot.document.bodies.map((body) =>
+    bodyIdSet.has(body.bodyId)
+      ? {
+          ...body,
+          ownerFeatureId: featureId,
+          label: body.label.includes(labelSuffix)
+            ? body.label
+            : `${body.label} ${labelSuffix}`,
+        }
+      : body,
+  );
+
+  snapshot.presentation.objects = snapshot.presentation.objects.map((item) =>
+    item.target.kind === "body" && bodyIdSet.has(item.target.bodyId)
+      ? {
+          ...item,
+          ownerFeatureId: featureId,
+          label: item.label.includes(labelSuffix)
+            ? item.label
+            : `${item.label} ${labelSuffix}`,
+        }
+      : item,
+  );
+  snapshot.document.objects = snapshot.presentation.objects;
+
+  snapshot.document.render.records = snapshot.document.render.records.map((record) =>
+    record.ownerBodyId !== null && bodyIdSet.has(record.ownerBodyId)
+      ? {
+          ...record,
+          ownerFeatureId: featureId,
+          label: record.label.includes(labelSuffix)
+            ? record.label
+            : `${record.label} ${labelSuffix}`,
+        }
+      : record,
+  );
+
+  snapshot.presentation.entities = snapshot.presentation.entities.map((entry) =>
+    entry.ownerBodyId !== null && bodyIdSet.has(entry.ownerBodyId)
+      ? {
+          ...entry,
+          ownerFeatureId: featureId,
+          label: entry.label.includes(labelSuffix)
+            ? entry.label
+            : `${entry.label} ${labelSuffix}`,
+        }
+      : entry,
+  );
+  snapshot.document.entities = snapshot.presentation.entities;
+}
+
 function allocateFeatureId(
   snapshot: WorkspaceSnapshot,
   kind: FeatureDefinition["kind"],
@@ -4618,6 +4812,11 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       const featureId = allocateFeatureId(
         mutableSnapshot,
         request.definition.kind,
+      );
+      applyMockInPlaceBodySnapshotMutation(
+        mutableSnapshot,
+        featureId,
+        resolvedDefinition.definition,
       );
       const featureIndex =
         mutableSnapshot.document.features.filter(

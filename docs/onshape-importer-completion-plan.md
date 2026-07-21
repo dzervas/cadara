@@ -495,9 +495,51 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
       showed PS1 Shell 1 is `isHollow=true`, `entities=[]`, and preserves the
       outer envelope as a closed hollow, which is geometrically different from a
       whole-solid offset that changes the bounding box.
-- [ ] W.6 **Hole executor** (largest kernel item; no instances in current
-      bundles) — cylinder cut + countersink/counterbore per the validated
-      translator that currently reports `hole-executor-unavailable`.
+- [x] W.6 **Hole executor** (largest kernel item; no instances in current
+      bundles) — parametric simple/counterbore/countersink hole subset now
+      executes through OCC.
+
+  **Verification (done).** The authored hole contract now carries supported
+  Onshape styles (`SIMPLE`, `C_BORE`, `C_SINK`), termination (`BLIND`,
+  `THROUGH` / `THROUGH_ALL`), `oppositeDirection`, explicit body scope, and
+  sketch-point locations. The OCC executor builds cylindrical cutters for simple
+  holes and counterbores, builds a revolved countersink profile for conical
+  entries, and subtracts them with boolean cut while retaining the scoped body.
+  Location semantics are intentionally sketch-point based: Onshape point-sketch
+  locations prepare as deferred `sketchIdOf` targets, then apply resolves them
+  to live `sketchId`/`pointId` values before reaching the kernel.
+
+  CI coverage uses the proprietary-free `makeWaveBHoleCaptureBundle()` synthetic
+  fixture. The real-OCC logic integration reviews/prepares parametric hole
+  actions, applies a base extrude + location sketch + simple blind hole through
+  the actual OCC modeling service, verifies a live cylindrical cut/topology
+  signature and retained body, then applies a fresh countersink case and verifies
+  a live conical face with no kernel errors. The real-OCC case starts from the
+  shared fixture and test-clones the rollback body envelope to the real OCC
+  cylinder tessellation, while the shared fixture remains compatible with the
+  existing mock-provider seam.
+
+  Exact translator degradation reason codes are now: `hole-thread-unsupported`,
+  `hole-style-unsupported`, `hole-diameter-unreadable`,
+  `hole-termination-unsupported`, `hole-depth-unreadable`,
+  `hole-counterbore-parameters-unreadable`,
+  `hole-countersink-parameters-unreadable`, `hole-scope-unresolved`, and
+  `hole-location-unresolved` (plus topology match/ambiguity codes from the
+  shared body-scope resolver). Unsupported remains explicit for threaded,
+  tapped, clearance, and standards-driven holes; `UP_TO_NEXT` / `UP_TO_ENTITY`
+  style terminations; ambiguous multi-sketch or multi-point location queries;
+  and custom start planes or drill/tip geometry.
+
+  Plan-dump evidence (counts are parametric / baked / geometryOnly): real-bundle
+  review counts are unchanged because none of the three bundles contains hole
+  features. Actual local review counts: Mounts `40a51fb8…` **10 / 0 / 0**
+  (plain **8 / 2 / 0**); PS1 `9841e486…` **25 / 16 / 0** (plain **6 / 35 /
+  0**); Wave T first studio `405fa226…` **2 / 0 / 0** (plain **2 / 0 / 0**).
+  If a local mock review still reports Mounts **9 / 1 / 0**, it is the known
+  probe-limitation divergence noted under W.4, not hole fallout.
+
+  Tests: focused contract/OCC/translator/apply specs plus the new real-OCC
+  synthetic import integration, then `bun run test:e2e` and `bun run test:all`.
 - [ ] W.7 **Patterns (linear/circular)** (largest overall; new feature kind
       end-to-end: contract, executor, forms, translator). Nothing in current
       bundles but ubiquitous in real documents.
@@ -541,8 +583,7 @@ resolution picked a keyless openrouter provider once). Real bundles + the
 | sweep / loft | supported simple forms with resolvable parametric sketch inputs | specific path/profile/guide/condition/periodicity reason codes |
 | thicken | NEW, one selected face, one-side positive/negative thickness after exact-prefix face resolution | `thicken-requires-topology` |
 | booleanBodies / deleteBodies / splitPart / transform / mirror | body-only topology candidates; promote via exact-prefix probe when all consumed bodies live in parametric prefix | `topology-upstream-baked`, param-specific codes |
-| fillet / chamfer / shell | translate and promote after exact-prefix durable topology resolution | topology match/ambiguity codes or parameter-specific codes |
-| hole | never (no OCC executor — out of scope) | `hole-executor-unavailable` |
+| fillet / chamfer / shell / hole | translate and promote after exact-prefix durable topology resolution; hole executes the supported simple/counterbore/countersink subset | topology match/ambiguity codes or parameter-specific codes |
 | patterns / draft / rib / primitives / curves / direct-edit / derived | out of scope | Wave-C family codes |
 
 ## Verification notes / tier counts

@@ -7,6 +7,7 @@ import { deleteSolidAuthoringDefinition } from "@/core/feature-authoring/feature
 import { extrudeAuthoringDefinition } from "@/core/feature-authoring/features/extrude";
 import { filletAuthoringDefinition } from "@/core/feature-authoring/features/fillet";
 import { loftAuthoringDefinition } from "@/core/feature-authoring/features/loft";
+import { holeAuthoringDefinition } from "@/core/feature-authoring/features/hole";
 import { mirrorAuthoringDefinition } from "@/core/feature-authoring/features/mirror";
 import { planeAuthoringDefinition } from "@/core/feature-authoring/features/plane";
 import { revolveAuthoringDefinition } from "@/core/feature-authoring/features/revolve";
@@ -25,6 +26,7 @@ export const featureAuthoringDefinitions = [
   sweepAuthoringDefinition,
   loftAuthoringDefinition,
   chamferAuthoringDefinition,
+  holeAuthoringDefinition,
   thickenAuthoringDefinition,
   combineAuthoringDefinition,
   splitAuthoringDefinition,

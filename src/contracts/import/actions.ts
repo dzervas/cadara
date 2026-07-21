@@ -13,7 +13,7 @@ import type {
   ShellFeatureParameters,
 } from "@/contracts/modeling/schema";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
-import type { BodyId, SketchId } from "@/contracts/shared/ids";
+import type { BodyId, SketchId, SketchPointId } from "@/contracts/shared/ids";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
 import type {
   SketchPlaneDefinition,
@@ -79,10 +79,19 @@ export type ImportDeferredSketchEntityRef = Omit<
   sketchId: SketchId | Extract<ImportDeferredValue, { kind: "sketchIdOf" }>;
 };
 
+export type ImportDeferredSketchPointRef = Omit<
+  Extract<DurableRef, { kind: "sketchPoint" }>,
+  "sketchId"
+> & {
+  sketchId: SketchId | Extract<ImportDeferredValue, { kind: "sketchIdOf" }>;
+  pointId: SketchPointId;
+};
+
 export type ImportDeferredDurableRef =
   | DurableRef
   | ImportDeferredTopologyRef
   | ImportDeferredSketchEntityRef
+  | ImportDeferredSketchPointRef
   | Extract<ImportDeferredValue, { kind: "regionOf" | "constructionOf" }>;
 
 export interface ImportDeferredFilletFeatureParameters

@@ -129,6 +129,147 @@ export function makeWaveBBodyCaptureBundle(
   };
 }
 
+const enumParameter = (parameterId: string, value: string) => ({
+  btType: "BTMParameterEnum-145",
+  parameterId,
+  value,
+});
+
+const booleanParameter = (parameterId: string, value: boolean) => ({
+  btType: "BTMParameterBoolean-144",
+  parameterId,
+  value,
+});
+
+const quantityParameter = (parameterId: string, expression: string, value = 0) => ({
+  btType: "BTMParameterQuantity-147",
+  parameterId,
+  expression,
+  value,
+});
+
+const holeLocationQuery = (sketchId: string, pointEntityId: string) => ({
+  btType: "BTMParameterQueryList-148",
+  parameterId: "locations",
+  queries: [{
+    btType: "BTMIndividualQuery-138",
+    queryString: `query = qCreatedBy(id + "${sketchId}" + "pointOp", EntityType.VERTEX)->qEntityFilter(EntityType.VERTEX)->qContainsPoint(id + "${sketchId}" + "${pointEntityId}");`,
+    deterministicIds: [`${sketchId}:${pointEntityId}`],
+  }],
+});
+
+const holeScopeQuery = (bodyId: string, producerFeatureId: string) => ({
+  btType: "BTMParameterQueryList-148",
+  parameterId: "scope",
+  queries: [{
+    btType: "BTMIndividualQuery-138",
+    queryString: `query = qCreatedBy(id + "${producerFeatureId}", EntityType.BODY);`,
+    deterministicIds: [bodyId],
+  }],
+});
+
+function pointSketch(id: string) {
+  return {
+    featureType: "newSketch",
+    featureId: id,
+    name: id,
+    parameters: [query("sketchPlane", ["Top"])],
+  };
+}
+
+function pointSketchData(featureId: string, pointEntityId: string, x = 0.001) {
+  return {
+    featureId,
+    entities: [{
+      sketchEntityId: pointEntityId,
+      sketchEntityType: "skPoint",
+      geometry: { center3d: { x, y: 0, z: 0 } },
+      isConstruction: false,
+    }],
+  };
+}
+
+type HoleFixtureStyle = "simple" | "counterbore" | "countersink";
+
+function holeFeature(style: HoleFixtureStyle, featureId: string, sketchId: string, pointEntityId: string, bodyId: string, producerFeatureId: string) {
+  const styleValue = style === "counterbore" ? "C_BORE" : style === "countersink" ? "C_SINK" : "SIMPLE";
+  return {
+    featureType: "hole",
+    featureId,
+    name: `Hole ${style}`,
+    parameters: [
+      enumParameter("styleV2", styleValue),
+      enumParameter("endStyleV2", style === "simple" ? "BLIND" : "THROUGH"),
+      quantityParameter("holeDiameterV3", "4 mm", 0.004),
+      ...(style === "simple" ? [quantityParameter("holeDepthV3", "8 mm", 0.008)] : []),
+      ...(style === "counterbore"
+        ? [quantityParameter("cBoreDiameterV3", "7 mm", 0.007), quantityParameter("cBoreDepthV3", "2 mm", 0.002)]
+        : []),
+      ...(style === "countersink"
+        ? [quantityParameter("cSinkDiameterV3", "8 mm", 0.008), quantityParameter("cSinkAngleV3", "90 deg", Math.PI / 2)]
+        : []),
+      booleanParameter("oppositeDirection", style === "counterbore"),
+      holeLocationQuery(sketchId, pointEntityId),
+      holeScopeQuery(bodyId, producerFeatureId),
+    ],
+  };
+}
+
+function waveBHoleStudio(style: HoleFixtureStyle, elementId: string) {
+  const baseSketch = `S_BASE_${style}`;
+  const locationSketch = `S_LOC_${style}`;
+  const pointEntityId = `P_${style}`;
+  const bodyId = `BODY_${style}`;
+  const holeId = `HOLE_${style}`;
+  const baseExtrude = `E_BASE_${style}`;
+  return {
+    elementId,
+    name: `Wave B Hole ${style}`,
+    features: { features: [
+      sketch(baseSketch),
+      extrude(baseExtrude, baseSketch),
+      pointSketch(locationSketch),
+      holeFeature(style, holeId, locationSketch, pointEntityId, bodyId, baseExtrude),
+    ] },
+    sketches: { sketches: [
+      { featureId: baseSketch, entities: [{ sketchEntityId: `C_${style}`, sketchEntityType: "skCircle", geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: 0.004 }, isConstruction: false }] },
+      pointSketchData(locationSketch, pointEntityId),
+    ] },
+    parts: null,
+    featureSpecs: { present: false as const, reason: "synthetic hole translator fixture" },
+    resolvedReferences: [{ deterministicId: "Top", evaluatedAt: "finalState" as const, signature: { entityClass: "face" as const, geometryType: "plane" as const, definingData: { normal: [0, 0, 1] as [number, number, number] }, isDefaultPlane: true } }],
+    groundTruth: { hasBodies: false as const },
+    rollbackSnapshots: [
+      { featureId: baseExtrude, tessellationTolerance: 0.0001, tessellatedFaces: tessellation([{ id: bodyId, low: [-0.004, -0.003, 0.012], high: [0.004, 0.003, 0.012] }]) },
+      { featureId: holeId, tessellationTolerance: 0.0001, tessellatedFaces: tessellation([{ id: bodyId, low: [-0.004, -0.003, 0.012], high: [0.004, 0.003, 0.012] }]) },
+    ],
+  };
+}
+
+export function makeWaveBHoleCaptureBundle(): OnshapeCaptureBundleV2 {
+  return {
+    formatVersion: 2,
+    provenance: {
+      capturedAt: "2026-07-21T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "d".repeat(24),
+      wvm: "w",
+      wvmId: "w".repeat(24),
+      microversion: "m".repeat(24),
+    },
+    document: {},
+    elements: {},
+    diagnostics: [],
+    partStudios: [
+      waveBHoleStudio("simple", "wave-b-hole-simple"),
+      waveBHoleStudio("counterbore", "wave-b-hole-counterbore"),
+      waveBHoleStudio("countersink", "wave-b-hole-countersink"),
+    ],
+  };
+}
+
 function integrationBody(id: string, lowX: number, extent: number) {
   const low = [lowX, 0, 0] as const;
   const high = [lowX + extent, extent, extent] as const;

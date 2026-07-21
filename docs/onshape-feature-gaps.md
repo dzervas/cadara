@@ -42,7 +42,6 @@ carry them, the kernel cannot build them.
 
 | Feature | Status |
 |---|---|
-| Hole | Translator validates + resolves topology, then hard-degrades with `hole-executor-unavailable` (`wave-b-body-feature-translators.ts:271`) |
 | Face blend | In contract, no kernel case, no translator |
 | Wrap | 〃 |
 | Enclose | 〃 |
@@ -59,6 +58,7 @@ Split by where the gap actually sits.
 | Transform | Rotation (only XYZ translation + plane-normal distance); copy mode |
 | Chamfer | Two-distances and distance+angle styles. The authoring contract and OCC executor accept only one positive distance and execute equal offsets (`Add_3(distance, distance, ...)`); T.6 confirmed these forms require future contract/kernel work. |
 | Shell | True closed-hollow shell with no removable/open faces (`isHollow=true`, empty `entities`) remains unsupported; non-hollow empty-selection offset-all-faces is now represented by `mode: "offsetAllFaces"`. |
+| Hole | Supported executable subset: simple, counterbore, and countersink holes with sketch-point locations, explicit body scope, blind/through termination, and forward/reverse direction. Unsupported: threaded/tapped/clearance/standards holes, `UP_TO_NEXT` / `UP_TO_ENTITY`, ambiguous multi-sketch or multi-point location queries, and custom start planes or drill/tip geometry. |
 
 ### 3b. Translator-only gap (cadara can already express it — in plan scope, Phase T)
 

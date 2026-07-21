@@ -1494,13 +1494,13 @@ test("src/domain/import/onshape/provider.spec.ts emits selective segment checkpo
   const chamferReview = segmentedFidelity?.fields.find(
     (field) => field.id === "feature-CHAMFER",
   );
+  const chamferValue = chamferReview?.kind === "summary" && typeof chamferReview.value === "string" ? chamferReview.value : "";
   expect(chamferReview).toMatchObject({
     kind: "summary",
     value: expect.stringContaining(
       "represented by bake segment 1; intrinsic reason retained above",
     ),
   });
-  const chamferValue = chamferReview?.kind === "summary" ? chamferReview.value : "";
   for (const reason of studio?.featurePlans.find(
     (plan) => plan.onshapeFeatureId === "CHAMFER",
   )?.reasonCodes ?? []) {

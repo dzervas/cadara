@@ -178,6 +178,7 @@ export function hydrateFeatureEditSession(
     feature.definition.kind !== "sweep" &&
     feature.definition.kind !== "loft" &&
     feature.definition.kind !== "chamfer" &&
+    feature.definition.kind !== "hole" &&
     feature.definition.kind !== "thicken" &&
     feature.definition.kind !== "combine" &&
     feature.definition.kind !== "split" &&

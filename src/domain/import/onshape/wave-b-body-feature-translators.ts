@@ -10,9 +10,9 @@ import {
 } from "@/contracts/modeling/advanced-solid";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { FILLET_FEATURE_SCHEMA_VERSION, SHELL_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
-import type { ConstructionId, SketchEntityId } from "@/contracts/shared/ids";
+import type { ConstructionId, SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { OnshapeFeatureNode, OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
-import type { OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
+import type { FeatureDependencyInput, OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
 import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
 import type { TopologyQuerySlot } from "@/domain/import/onshape/topology-query-reader";
 export interface PlannedConstructionFromFeatureRef {
@@ -26,6 +26,12 @@ export interface PlannedSketchEntityFromFeatureRef {
   entityId: SketchEntityId;
 }
 
+export interface PlannedSketchPointFromFeatureRef {
+  kind: "sketchPointFromFeature";
+  sketchFeatureId: string;
+  pointId: SketchPointId;
+}
+
 export interface PlannedBodyTopologyConsumer {
   slots: readonly TopologyQuerySlot[];
   featureKind: AdvancedSolidFeatureKind | "fillet" | "shell" | "hole";
@@ -33,13 +39,14 @@ export interface PlannedBodyTopologyConsumer {
   options?: Record<string, unknown>;
   staticParticipants?: readonly {
     role: AdvancedParticipantValue["role"];
-    targets: readonly (AdvancedParticipantValue["targets"][number] | PlannedConstructionFromFeatureRef | PlannedSketchEntityFromFeatureRef)[];
+    targets: readonly PlannedAdvancedParticipantTarget[];
   }[];
   radius?: number;
   thickness?: number;
   direction?: "inside" | "outside";
   shellMode?: "openFaces" | "offsetAllFaces";
   unavailableReason?: import("@/domain/import/onshape/fidelity-planner").PlanReasonCode;
+  inputDependencies?: readonly FeatureDependencyInput[];
 }
 
 function parameter(feature: OnshapeFeatureNode, id: string): Record<string, unknown> | undefined {
@@ -94,14 +101,16 @@ function angleDegrees(feature: OnshapeFeatureNode, id: string): number | null {
   const entry = parameter(feature, id);
   const expression = entry?.expression;
   if (typeof expression === "string") {
-    const match = expression.trim().match(/^([-+]?\d+(?:\.\d+)?)\s*(deg|rad|degree|radian)?$/i);
+    const match = expression.trim().match(/^([-+]?\d+(?:\.\d+)?)(?:\s*\*\s*|\s*)(deg|rad|degree|radian)?$/i);
     if (match) {
       const value = Number(match[1]);
       const unit = (match[2]?.toLowerCase() ?? "deg");
       return unit.startsWith("rad") ? (value * 180) / Math.PI : value;
     }
   }
-  return typeof entry?.value === "number" && Number.isFinite(entry.value) ? entry.value : null;
+  return typeof entry?.value === "number" && Number.isFinite(entry.value)
+    ? (entry.value * 180) / Math.PI
+    : null;
 }
 
 function canonicalPlane(feature: OnshapeFeatureNode, parameterId: string, context: Parameters<OnshapeFeatureTranslator["plan"]>[0]) {
@@ -204,6 +213,12 @@ function slot(key: string, parameterId: string, role: TopologyQuerySlot["role"],
 }
 
 function baked(context: Parameters<OnshapeFeatureTranslator["plan"]>[0], reason: import("@/domain/import/onshape/fidelity-planner").PlanReasonCode, planned?: PlannedBodyTopologyConsumer) {
+  const queryDependencies = planned?.slots.map((input) => ({
+    kind: "query" as const,
+    parameterId: input.parameterId,
+    slotKey: input.key,
+  })) ?? [];
+  const inputDependencies = [...queryDependencies, ...(planned?.inputDependencies ?? [])];
   return {
     onshapeFeatureId: context.feature.featureId,
     featureType: context.feature.featureType,
@@ -213,12 +228,8 @@ function baked(context: Parameters<OnshapeFeatureTranslator["plan"]>[0], reason:
     reasonCodes: [reason],
     suppressed: true,
     plannedBodyTopologyConsumer: planned,
-    inputDependencies: planned?.slots.map((input) => ({
-      kind: "query" as const,
-      parameterId: input.parameterId,
-      slotKey: input.key,
-    })) ?? [],
-    inputFeatureIds: [],
+    inputDependencies,
+    inputFeatureIds: [...new Set(inputDependencies.flatMap((input) => input.kind === "query" ? [] : [input.featureId]))],
   };
 }
 
@@ -473,25 +484,153 @@ export const shellFeatureTranslator: OnshapeFeatureTranslator = {
   apply: ({ apply }) => apply(),
 };
 
+function firstPositiveQuantity(feature: OnshapeFeatureNode, ids: readonly string[]): number | null {
+  for (const id of ids) {
+    const value = positiveQuantity(feature, id);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function firstPositiveAngle(feature: OnshapeFeatureNode, ids: readonly string[]): number | null {
+  for (const id of ids) {
+    const value = angleDegrees(feature, id);
+    if (value !== null && value > 0) return value;
+  }
+  return null;
+}
+
+function firstEnumValue(feature: OnshapeFeatureNode, ids: readonly string[]): string | null {
+  for (const id of ids) {
+    const value = enumValue(feature, id);
+    if (value) return value;
+  }
+  return null;
+}
+
+function hasUnsupportedThreadOrClearance(feature: OnshapeFeatureNode): boolean {
+  return (feature.parameters ?? []).some((entry) => {
+    if (typeof entry !== "object" || entry === null) return false;
+    const parameterId = String((entry as { parameterId?: unknown }).parameterId ?? "").toLowerCase();
+    const value = (entry as { value?: unknown }).value;
+    const textValue = typeof value === "string" ? value.toLowerCase() : "";
+    if (/(thread|tap|tapped|clearance)/.test(parameterId) && value === true) return true;
+    return /(thread|tap|tapped|clearance)/.test(textValue);
+  });
+}
+
+function resolveHoleLocations(
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+): { sketchFeatureId: string; targets: PlannedSketchPointFromFeatureRef[] } | null {
+  const locationsQuery = queryText(context.feature, "locations");
+  if (!locationsQuery) return null;
+
+  const consumerIndex = context.read.features.findIndex(
+    (feature) => feature.featureId === context.feature.featureId,
+  );
+  const sketchCandidates = [...context.read.solvedSketchesByFeatureId.entries()].filter(
+    ([featureId]) => {
+      const featureIndex = context.read.features.findIndex((feature) => feature.featureId === featureId);
+      return featureIndex >= 0 && (consumerIndex < 0 || featureIndex < consumerIndex) && locationsQuery.includes(featureId);
+    },
+  );
+  if (sketchCandidates.length !== 1) return null;
+
+  const [sketchFeatureId, solvedSketch] = sketchCandidates[0]!;
+  const sketchPlan = context.state.sketchPlansByFeatureId.get(sketchFeatureId);
+  if (!sketchPlan || sketchPlan.tier !== "parametric") return null;
+
+  const sourcePoints = solvedSketch.entities.filter((entity) => entity.entityType === "point");
+  const explicitPoints = sourcePoints.filter((entity) => locationsQuery.includes(entity.entityId));
+  const selectedPoints = explicitPoints.length > 0
+    ? explicitPoints
+    : sourcePoints.length === 1
+      ? sourcePoints
+      : [];
+  if (selectedPoints.length === 0) return null;
+
+  const translation = translateSolvedSketch({
+    solved: solvedSketch,
+    featureId: sketchFeatureId,
+    label: sketchFeatureId,
+    planeKey: sketchPlan.planeKey,
+    planeFrame: sketchPlan.planeFrame,
+  });
+  const translatedPointIds = new Map(
+    translation.definition.entities.flatMap((entity) =>
+      entity.kind === "point" ? [[entity.label, entity.pointId] as const] : [],
+    ),
+  );
+  const targets = selectedPoints.map((point) => {
+    const pointId = translatedPointIds.get(point.entityId);
+    return pointId ? { kind: "sketchPointFromFeature" as const, sketchFeatureId, pointId } : null;
+  });
+  return targets.every((target): target is PlannedSketchPointFromFeatureRef => target !== null)
+    ? { sketchFeatureId, targets }
+    : null;
+}
+
 export const holeFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["hole"],
   plan(context) {
-    const style = enumValue(context.feature, "styleV2") ?? enumValue(context.feature, "style") ?? "SIMPLE";
-    const diameter = positiveQuantity(context.feature, "diameter");
-    if (style !== "SIMPLE") return baked(context, "hole-style-unsupported");
-    if (diameter === null) return baked(context, "hole-diameter-unreadable");
+    if (hasUnsupportedThreadOrClearance(context.feature)) return baked(context, "hole-thread-unsupported");
+
+    const styleToken = firstEnumValue(context.feature, ["styleV2", "style"]) ?? "SIMPLE";
+    const style = ({ SIMPLE: "simple", C_BORE: "counterbore", C_SINK: "countersink" } satisfies Record<string, "simple" | "counterbore" | "countersink">)[styleToken];
+    if (!style) return baked(context, "hole-style-unsupported");
+
+    const mainDiameter = firstPositiveQuantity(context.feature, ["holeDiameterV3", "holeDiameterV2", "holeDiameter", "diameter"]);
+    if (mainDiameter === null) return baked(context, "hole-diameter-unreadable");
+
+    const terminationToken = firstEnumValue(context.feature, ["endStyleV2", "endStyle"]) ?? "BLIND";
+    const termination = ({ BLIND: "blind", THROUGH: "throughAll", THROUGH_ALL: "throughAll" } satisfies Record<string, "blind" | "throughAll">)[terminationToken];
+    if (!termination) return baked(context, "hole-termination-unsupported");
+
+    const options: Record<string, unknown> = {
+      style,
+      mainDiameter,
+      termination,
+      direction: booleanValue(context.feature, "oppositeDirection") ? "reverse" : "forward",
+    };
+    if (termination === "blind") {
+      const depth = firstPositiveQuantity(context.feature, ["holeDepthV3", "holeDepth"]);
+      if (depth === null) return baked(context, "hole-depth-unreadable");
+      options.depth = depth;
+    }
+    if (style === "counterbore") {
+      const counterboreDiameter = firstPositiveQuantity(context.feature, ["cBoreDiameterV3", "cBoreDiameter"]);
+      const counterboreDepth = firstPositiveQuantity(context.feature, ["cBoreDepthV3", "cBoreDepth"]);
+      if (counterboreDiameter === null || counterboreDepth === null) return baked(context, "hole-counterbore-parameters-unreadable");
+      options.counterboreDiameter = counterboreDiameter;
+      options.counterboreDepth = counterboreDepth;
+    }
+    if (style === "countersink") {
+      const countersinkDiameter = firstPositiveQuantity(context.feature, ["cSinkDiameterV3", "cSinkDiameter"]);
+      const countersinkAngleDegrees = firstPositiveAngle(context.feature, ["cSinkAngleV3", "cSinkAngle"]);
+      if (countersinkDiameter === null || countersinkAngleDegrees === null) return baked(context, "hole-countersink-parameters-unreadable");
+      options.countersinkDiameter = countersinkDiameter;
+      options.countersinkAngleDegrees = countersinkAngleDegrees;
+    }
+
+    const locations = resolveHoleLocations(context);
+    if (!hasQueries(context.feature, "scope")) return baked(context, "hole-scope-unresolved");
+    if (!locations) return baked(context, "hole-location-unresolved");
     return topologyCandidate(context, {
       featureKind: "hole",
-      options: { style: "simple", diameter },
-      unavailableReason: "hole-executor-unavailable",
-      slots: [
-        slot("locations", "locations", "edge", 1, null, ["vertex"]),
-        slot("scope", "scope", "body", 1, null, ["body"]),
-      ],
+      options,
+      staticParticipants: [{ role: "location", targets: locations.targets }],
+      slots: [slot("scope", "scope", "body", 1, null, ["body"])],
+      inputDependencies: [{ kind: "sketch", featureId: locations.sketchFeatureId }],
     });
   },
   apply: ({ apply }) => apply(),
 };
+
+export type PlannedAdvancedParticipantTarget =
+  | AdvancedParticipantValue["targets"][number]
+  | PlannedConstructionFromFeatureRef
+  | PlannedSketchEntityFromFeatureRef
+  | PlannedSketchPointFromFeatureRef;
 
 export function buildResolvedBodyConsumerDefinition(
   planned: PlannedBodyTopologyConsumer,
@@ -530,15 +669,16 @@ export function buildResolvedBodyConsumerDefinition(
       },
     };
   }
-  const executableOptions =
-    planned.featureKind === "chamfer" && planned.options
-      ? Object.fromEntries(
-          Object.entries(planned.options).map(([key, value]) => [
-            key,
-            typeof value === "number" ? createLiteralAuthoredValue(value) : value,
-          ]),
-        )
-      : planned.options;
+  const executableOptions = planned.options
+    ? Object.fromEntries(
+        Object.entries(planned.options).map(([key, value]) => [
+          key,
+          typeof value === "number" || typeof value === "string"
+            ? createLiteralAuthoredValue(value)
+            : value,
+        ]),
+      )
+    : planned.options;
   return {
     kind: planned.featureKind as AdvancedSolidFeatureKind,
     featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,

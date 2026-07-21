@@ -5,6 +5,7 @@ import type {
 } from "@/contracts/import/capabilities";
 import type {
   ImportDeferredSketchEntityRef,
+  ImportDeferredSketchPointRef,
   ImportDeferredTopologyRef,
   ImportDeferredValue,
   ImportPreparedActions,
@@ -318,15 +319,16 @@ function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologyR
   );
 }
 
-function isDeferredSketchEntityRef(
+function isDeferredSketchTargetRef(
   value: unknown,
-): value is ImportDeferredSketchEntityRef & {
+): value is (ImportDeferredSketchEntityRef | ImportDeferredSketchPointRef) & {
   sketchId: Extract<ImportDeferredValue, { kind: "sketchIdOf" }>;
 } {
   return Boolean(
     value &&
       typeof value === "object" &&
-      (value as { kind?: unknown }).kind === "sketchEntity" &&
+      ((value as { kind?: unknown }).kind === "sketchEntity" ||
+        (value as { kind?: unknown }).kind === "sketchPoint") &&
       isDeferredValue((value as { sketchId?: unknown }).sketchId),
   );
 }
@@ -684,6 +686,7 @@ export class ImportDeferredMaterializer {
               | DurableRef
               | ImportDeferredTopologyRef
               | ImportDeferredSketchEntityRef
+              | ImportDeferredSketchPointRef
               | Extract<ImportDeferredValue, { kind: "regionOf" | "constructionOf" }>
             )[];
           }[];
@@ -698,7 +701,7 @@ export class ImportDeferredMaterializer {
               if (isDeferredTopologyRef(target)) {
                 return this.resolveDeferredTopologyRef(target);
               }
-              if (isDeferredSketchEntityRef(target)) {
+              if (isDeferredSketchTargetRef(target)) {
                 return {
                   ...target,
                   sketchId: await this.resolveDeferredValue(

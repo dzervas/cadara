@@ -92,6 +92,10 @@ export type {
   ChamferAdvancedOptions,
   ChamferWidthForm,
   ChamferWidthOptions,
+  HoleAdvancedOptions,
+  HoleStyle,
+  HoleTermination,
+  HoleDirection,
   SweepAdvancedOptions,
   SweepProfileControl,
   SweepTwistOption,
@@ -102,7 +106,7 @@ export type {
   LoftProfileConditionKind,
   LoftProfileConditionOptions,
   } from "@/contracts/modeling/advanced-solid";
-export { CHAMFER_WIDTH_OPTION_DESCRIPTORS } from "@/contracts/modeling/advanced-solid";
+export { CHAMFER_WIDTH_OPTION_DESCRIPTORS, HOLE_OPTION_DESCRIPTORS } from "@/contracts/modeling/advanced-solid";
 
 /** Re-exported preview identifier used by modeling preview requests. */
 export type { PreviewId };
@@ -128,6 +132,7 @@ export type AuthoredFeatureKind =
   | "sweep"
   | "loft"
   | "chamfer"
+  | "hole"
   | "thicken"
   | "combine"
   | "split"

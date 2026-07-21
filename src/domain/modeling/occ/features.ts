@@ -27,6 +27,7 @@ import {
 import { executeShellFeature } from "@/domain/modeling/occ/features/shell";
 import { executePlaneFeature } from "@/domain/modeling/occ/features/plane";
 import { executeBakedBodyFeature } from "@/domain/modeling/occ/features/baked-body";
+import { executeHoleFeature } from "@/domain/modeling/occ/features/hole";
 
 // Re-export public API
 export type {
@@ -105,6 +106,12 @@ export function executeOccFeature(
         context,
         ownerFeatureId,
         definition as AdvancedSolidFeatureDefinition & { kind: "thicken" },
+      );
+    case "hole":
+      return executeHoleFeature(
+        context,
+        ownerFeatureId,
+        definition as AdvancedSolidFeatureDefinition & { kind: "hole" },
       );
     case "combine":
       return executeCombineFeature(

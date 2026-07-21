@@ -18,7 +18,8 @@ import {
   CONTRACT_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
-} from "@/contracts/shared/versioning";
+  } from "@/contracts/shared/versioning";
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { FIXTURE_PART_STUDIO_ID } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
@@ -26,6 +27,7 @@ import { onshapeImportProvider } from "@/domain/import/onshape/provider";
 import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-capture-fixtures";
 import {
   makeWaveBBodyCaptureBundle,
+  makeWaveBHoleCaptureBundle,
   makeWaveBSegmentedApplyCaptureBundle,
 } from "@/domain/import/onshape/wave-b-capture-fixtures";
 import {
@@ -49,8 +51,12 @@ import { createGeometryAssetComposition } from "@/infrastructure/modeling/browse
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
+import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
-import type { BodyId, DocumentId, FaceId, RevisionId } from "@/contracts/shared/ids";
+import type { BodyId, DocumentId, FaceId, RevisionId, SketchPointId } from "@/contracts/shared/ids";
 import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
 import {
   createOccNativeExactBrepPayloadFromShimPayload,
@@ -150,6 +156,68 @@ function sourceFromBundle(bundle: unknown): ResolvedImportSource {
     bytes: new TextEncoder().encode(JSON.stringify(bundle)),
     fingerprint: `sha256:${"a".repeat(64)}`,
   };
+}
+
+type CustomOpenCascadeMainJSForImportTest = new (
+  module: Record<string, unknown>,
+) => Promise<OpenCascadeInstance>;
+
+let realOccImportTestRuntime: Promise<OpenCascadeInstance> | null = null;
+
+function loadRealOccForImportTest() {
+  realOccImportTestRuntime ??= (async () => {
+    const module = (await import("../../../../public/cadara-occ.js")) as {
+      default: CustomOpenCascadeMainJSForImportTest;
+    };
+    const wasmBinary = new Uint8Array(
+      await readFile(new URL("../../../../public/cadara-occ.wasm", import.meta.url)),
+    );
+    return new module.default({ wasmBinary });
+  })();
+  return realOccImportTestRuntime;
+}
+
+function createRealOccModelingService(oc: OpenCascadeInstance) {
+  const createSolver = (revisionId: RevisionId | null) =>
+    new SketchConstraintSolverAdapter({
+      documentId: "doc_workspace" as DocumentId,
+      revisionId,
+    });
+  const adapter = new OpenCascadeKernelAdapter({
+    solverAdapter: createSolver(null),
+    solverAdapterFactory: createSolver,
+    getOpenCascadeInstance: async () => oc,
+  });
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+    sketchSolver: createSolver(null),
+  });
+  return { adapter, service };
+}
+
+function signatureRadius(signature: HistoryProbeTopologySignature) {
+  const radius = (signature.definingData as { radius?: unknown } | undefined)?.radius;
+  return typeof radius === "number" ? radius : null;
+}
+
+function makeRealOccHoleReviewBundle() {
+  const bundle = structuredClone(makeWaveBHoleCaptureBundle());
+  const low = { x: -0.004, y: -0.00397084, z: 0 };
+  const high = { x: 0.004, y: 0.00397084, z: 0.01 };
+  for (const studio of bundle.partStudios) {
+    for (const snapshot of studio.rollbackSnapshots ?? []) {
+      for (const body of snapshot.tessellatedFaces.bodies) {
+        body.faces = [{
+          id: `${body.id}_face`,
+          facets: [
+            { vertices: [low, { x: high.x, y: low.y, z: low.z }, high] },
+            { vertices: [low, high, { x: low.x, y: high.y, z: high.z }] },
+          ],
+        }];
+      }
+    }
+  }
+  return bundle;
 }
 
 function createTestModelingService() {
@@ -340,6 +408,44 @@ function nestedCircleSketchAction() {
   };
 }
 
+function sketchPointAction() {
+  const translation = translateSketch({
+    featureId: "import_hole_points",
+    label: "Hole point sketch",
+    planeKey: "xy",
+    entities: [
+      {
+        entityId: "hole_center",
+        entityType: "point",
+        position: [0, 0],
+      },
+    ],
+  });
+  const pointId = translation.definition.points[0]?.pointId;
+  if (!pointId) {
+    throw new Error("Hole point translation should produce a sketch point id.");
+  }
+  return {
+    pointId,
+    action: {
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace" as DocumentId,
+      baseRevisionId: "rev_ignored" as RevisionId,
+      solverCorrelation: {
+        requestId: "request_import_hole_point",
+        projectionRequestId: "request_import_hole_point_project",
+        validationRequestId: "request_import_hole_point_validate",
+        solveRequestId: "request_import_hole_point_solve",
+        regionRequestId: "request_import_hole_point_regions",
+      },
+      sketchId: null,
+      sketchLabel: "Hole point sketch",
+      plane: translation.plane,
+      definition: translation.definition,
+    },
+  };
+}
+
 function recordCreateFeatureInputs(service: ModelingService) {
   const createFeature = service.createFeature.bind(service);
   const requests: CreateFeatureRequest[] = [];
@@ -389,9 +495,10 @@ function recordSuccessfulCreateFeatureInputs(service: ModelingService) {
   return requests;
 }
 
-// Seam tests: prepared actions must apply cleanly through the *real* modeling
-// service against the mock kernel adapter — the same path the workbench commit
-// uses. Provider-produced fixture coverage below protects Onshape translation.
+// Seam tests: prepared actions must apply cleanly through the modeling service.
+// Most tests below use the mock kernel adapter for speed; the hole acceptance
+// case uses the real OCC adapter to pin kernel execution. Provider-produced
+// fixture coverage below protects Onshape translation.
 // The hand-authored deferred consumers later in this file are intentionally
 // separate import-contract coverage; do not delete/merge them when provider
 // deferred emission lands, because they prove the generic deferred-reference
@@ -457,6 +564,271 @@ test("src/domain/import/onshape/apply-pipeline.spec.ts", async () => {
     hasCircle,
     "The translated sketch should contain the circle parsed from the real solved-sketch payload.",
   ).toBeTruthy();
+});
+
+test("generic deferred sketch-point participants apply authored hole features through the mock kernel", async () => {
+  const adapter = new MockKernelAdapter();
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+  });
+  const requests = recordCreateFeatureInputs(service);
+  const before = await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+  });
+  const { action: pointSketchAction, pointId } = sketchPointAction();
+  const actions: ImportPreparedActions = {
+    commitSketches: [pointSketchAction],
+    createFeatures: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Imported through-all hole",
+        definition: {
+          kind: "hole",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            participants: [
+              {
+                role: "location",
+                targets: [
+                  {
+                    kind: "sketchPoint",
+                    sketchId: { kind: "sketchIdOf", actionIndex: 0 },
+                    pointId: pointId as SketchPointId,
+                  },
+                ],
+              },
+              {
+                role: "body",
+                targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }],
+              },
+            ],
+            options: {
+              style: "countersink",
+              mainDiameter: 1,
+              countersinkDiameter: 2,
+              countersinkAngleDegrees: 90,
+              direction: "forward",
+              termination: "throughAll",
+            },
+          },
+        },
+      },
+    ],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+    ],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: before.snapshot.document.revisionId,
+    actions,
+  });
+  const forwarded = requests[0];
+  const after = await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+  });
+
+  expect(
+    forwarded,
+    "Hole create request should be forwarded after deferred materialization.",
+  ).toBeDefined();
+  expect(
+    JSON.stringify(forwarded).includes("sketchIdOf"),
+    "Forwarded hole requests must not retain deferred sketch ids.",
+  ).toBeFalsy();
+  expect(
+    forwarded.definition.kind === "hole" &&
+      forwarded.definition.parameters.participants[0]?.targets[0]?.kind ===
+        "sketchPoint" &&
+      typeof forwarded.definition.parameters.participants[0].targets[0].sketchId ===
+        "string",
+    "Deferred sketchIdOf should materialize to a live sketchPoint participant.",
+  ).toBeTruthy();
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    "Applying the materialized hole through the mock kernel should succeed.",
+  ).toBeTruthy();
+  expect(
+    result.createdEntityIds.featureIds.length,
+    "The authored hole action should create a feature.",
+  ).toBe(1);
+  expect(
+    after.snapshot.document.bodies.some((body) => body.bodyId === "body_part-1"),
+    "Mock hole application should keep the scoped base body live.",
+  ).toBeTruthy();
+});
+
+test("Onshape hole fixture translates through provider and applies with materialized sketch points", async () => {
+  const { adapter, service } = createTestModelingService();
+  const before = await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+  });
+  const capabilities = createImportCapabilities(service, before.snapshot, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        const count = input.actions.orderedActions?.length ?? 0;
+        return {
+          steps: Array.from({ length: count }, (_, index) => ({
+            status: "rebuilt" as const,
+            signatures: index >= 1
+              ? [{
+                  entityClass: "body" as const,
+                  geometryType: "solid",
+                  boundingBox: { low: [-4, -3, 12] as [number, number, number], high: [4, 3, 12] as [number, number, number] },
+                  centroid: [0, 0, 12] as [number, number, number],
+                  reference: { kind: "body" as const, bodyId: "probe_hole_body" as never },
+                }]
+              : [],
+          })),
+        };
+      },
+    },
+  });
+  const source = sourceFromBundle(makeWaveBHoleCaptureBundle());
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const plans = review.providerReview.studios.flatMap((studio) => studio.featurePlans);
+  expect(plans.filter((plan) => plan.featureType === "hole").map((plan) => plan.reasonCodes), JSON.stringify(plans)).toEqual([[], [], []]);
+
+  const actions = await prepareImportActions({
+    provider: onshapeImportProvider,
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  const preparedHole = actions.createFeatures?.find((request) => request.definition.kind === "hole");
+  expect(preparedHole?.definition.parameters.participants).toEqual(expect.arrayContaining([
+    expect.objectContaining({ role: "location", targets: [expect.objectContaining({ kind: "sketchPoint", sketchId: expect.objectContaining({ kind: "sketchIdOf" }) })] }),
+  ]));
+
+  const requests = recordCreateFeatureInputs(service);
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: before.snapshot.document.revisionId,
+    actions,
+  });
+  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
+  const forwardedHoles = requests.filter((request) => request.definition.kind === "hole");
+  expect(forwardedHoles).toHaveLength(1);
+  expect(JSON.stringify(forwardedHoles)).not.toContain("sketchIdOf");
+  expect(forwardedHoles.every((request) =>
+    request.definition.kind === "hole" &&
+    request.definition.parameters.participants.some((participant) =>
+      participant.role === "location" &&
+      participant.targets.every((target) => target.kind === "sketchPoint" && typeof target.sketchId === "string"),
+    ),
+  )).toBe(true);
+  const after = await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+  });
+  expect(after.snapshot.document.bodies.length).toBeGreaterThan(0);
+});
+
+test("Onshape hole fixture applies through the real OCC import service with materialized locations", async () => {
+  const oc = await loadRealOccForImportTest();
+  const bundle = makeRealOccHoleReviewBundle();
+  const source = sourceFromBundle(bundle);
+
+  async function prepareAndApplyHoleStudio(elementId: string) {
+    const { service } = createRealOccModelingService(oc);
+    const before = await service.getCurrentDocumentSnapshot();
+    const capabilities = createImportCapabilities(service, before, {
+      history: createKernelHistoryProbeSession({
+        createService: () => createRealOccModelingService(oc).service,
+      }),
+    });
+    const review = await onshapeImportProvider.review({ source, capabilities });
+    const plans = review.providerReview.studios
+      .find((studio) => studio.elementId === elementId)
+      ?.featurePlans ?? [];
+    const holePlan = plans.find((plan) => plan.featureType === "hole");
+    expect(holePlan, JSON.stringify(plans)).toMatchObject({
+      tier: "parametric",
+      reasonCodes: [],
+    });
+
+    const actions = await prepareImportActions({
+      provider: onshapeImportProvider,
+      source,
+      review,
+      selections: { studioElementId: elementId, demotedFeatureIds: [] },
+      capabilities,
+    });
+    const preparedHoles = actions.createFeatures?.filter(
+      (request) => request.definition.kind === "hole",
+    ) ?? [];
+    expect(preparedHoles, JSON.stringify(actions)).toHaveLength(1);
+    expect(JSON.stringify(preparedHoles)).toContain("sketchIdOf");
+
+    const forwarded = recordCreateFeatureInputs(service);
+    const result = await applyImportPreparedActions({
+      modelingService: service,
+      baseRevisionId: before.document.revisionId,
+      actions,
+    });
+    expect(
+      result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+      JSON.stringify(result.diagnostics),
+    ).toBe(true);
+    expect(result.rolledBack).toBe(false);
+
+    const forwardedHole = forwarded.find((request) => request.definition.kind === "hole");
+    expect(forwardedHole, JSON.stringify(forwarded)).toBeDefined();
+    const forwardedHoleJson = JSON.stringify(forwardedHole);
+    expect(forwardedHoleJson).not.toContain("sketchIdOf");
+    expect(forwardedHoleJson).not.toContain("sketchPointFromFeature");
+    expect(forwardedHoleJson).not.toContain("bodyOf");
+    expect(
+      forwardedHole?.definition.kind === "hole" &&
+        forwardedHole.definition.parameters.participants.some((participant) =>
+          participant.role === "location" &&
+          participant.targets.every(
+            (target) =>
+              target.kind === "sketchPoint" &&
+              typeof target.sketchId === "string" &&
+              typeof target.pointId === "string",
+          ),
+        ),
+      "Deferred sketchPoint targets should materialize to live sketchId/pointId values.",
+    ).toBe(true);
+
+    const after = await service.getCurrentDocumentSnapshot();
+    expect(after.document.bodies.length, "Hole application should retain the scoped body.").toBe(1);
+    const signatureResult = await deriveLiveBodySignatures({ snapshot: after, service });
+    expect(signatureResult.status, JSON.stringify(signatureResult.diagnostics)).toBe("available");
+    if (signatureResult.status !== "available") throw new Error("Expected live OCC topology signatures.");
+    expect(
+      signatureResult.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+      JSON.stringify(signatureResult.diagnostics),
+    ).toBe(true);
+    return { result, signatures: signatureResult.signatures };
+  }
+
+  const simple = await prepareAndApplyHoleStudio("wave-b-hole-simple");
+  const simpleCylinderRadii = simple.signatures
+    .filter((signature) => signature.entityClass === "face" && signature.geometryType === "cylinder")
+    .map(signatureRadius)
+    .filter((radius): radius is number => radius !== null);
+  expect(
+    simpleCylinderRadii.some((radius) => Math.abs(radius - 2) < 0.05),
+    JSON.stringify(simple.signatures),
+  ).toBe(true);
+
+  const countersink = await prepareAndApplyHoleStudio("wave-b-hole-countersink");
+  expect(
+    countersink.signatures.some(
+      (signature) => signature.entityClass === "face" && signature.geometryType === "cone",
+    ),
+    JSON.stringify(countersink.signatures),
+  ).toBe(true);
 });
 
 test("segmented provider actions apply two checkpoints with rematch, closure, fallback, and neutral continuation", async () => {

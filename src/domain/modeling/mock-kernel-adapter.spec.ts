@@ -25,6 +25,7 @@ import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import {
   combineAdvancedFeatureExample,
   deleteSolidAdvancedFeatureExample,
+  holeAdvancedFeatureExample,
   mirrorAdvancedFeatureExample,
   splitAdvancedFeatureExample,
   transformAdvancedFeatureExample,
@@ -2592,6 +2593,197 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBe(created.revisionId);
   }
 
+  async function testHolePreviewCommitAndValidationUseAdvancedParticipants() {
+    const adapter = new MockKernelAdapter();
+    await addMockToolBody(adapter, "body_part-2" as BodyId);
+    const before = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const locationTarget = {
+      kind: "sketchPoint" as const,
+      sketchId: "sketch_primary" as const,
+      pointId: "sketch_point_1_rect-bottom-left" as const,
+    };
+
+    const holeDefinition = (options: Record<string, unknown>) => ({
+      ...holeAdvancedFeatureExample,
+      parameters: {
+        participants: [
+          { role: "location" as const, targets: [locationTarget] },
+          {
+            role: "body" as const,
+            targets: [
+              { kind: "body" as const, bodyId: "body_part-1" as BodyId },
+              { kind: "body" as const, bodyId: "body_part-2" as BodyId },
+            ],
+          },
+        ],
+        options,
+      },
+    });
+
+    const simpleDefinition = holeDefinition({
+      style: "simple",
+      mainDiameter: 1,
+      direction: "forward",
+      termination: "throughAll",
+    });
+    const counterboreDefinition = holeDefinition({
+      style: "counterbore",
+      mainDiameter: 1,
+      counterboreDiameter: 2,
+      counterboreDepth: 0.5,
+      direction: "forward",
+      termination: "blind",
+      depth: 3,
+    });
+    const countersinkDefinition = holeDefinition({
+      style: "countersink",
+      mainDiameter: 1,
+      countersinkDiameter: 2,
+      countersinkAngleDegrees: 90,
+      direction: "forward",
+      termination: "blind",
+      depth: 3,
+    });
+    const missingPointDefinition = {
+      ...simpleDefinition,
+      parameters: {
+        ...simpleDefinition.parameters,
+        participants: [
+          {
+            role: "location" as const,
+            targets: [
+              {
+                ...locationTarget,
+                pointId: "sketch_point_missing" as const,
+              },
+            ],
+          },
+          simpleDefinition.parameters.participants[1]!,
+        ],
+      },
+    };
+    const missingBodyDefinition = {
+      ...simpleDefinition,
+      parameters: {
+        ...simpleDefinition.parameters,
+        participants: [
+          simpleDefinition.parameters.participants[0]!,
+          {
+            role: "body" as const,
+            targets: [{ kind: "body" as const, bodyId: "body_missing" as BodyId }],
+          },
+        ],
+      },
+    };
+    const invalidOptionsDefinition = holeDefinition({
+      style: "counterbore",
+      mainDiameter: 2,
+      counterboreDiameter: 1,
+      counterboreDepth: 0.5,
+      direction: "forward",
+      termination: "blind",
+      depth: 3,
+    });
+
+    const preview = await adapter.evaluatePreview({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: before.snapshot.document.revisionId,
+      previewId: "preview_hole_valid",
+      definition: simpleDefinition,
+    });
+    const simple = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: before.snapshot.document.revisionId,
+      definition: simpleDefinition,
+    });
+    const counterbore = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: simple.revisionId,
+      definition: counterboreDefinition,
+    });
+    const countersink = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: counterbore.revisionId,
+      definition: countersinkDefinition,
+    });
+    const missingPoint = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: countersink.revisionId,
+      definition: missingPointDefinition,
+    });
+    const missingBody = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: countersink.revisionId,
+      definition: missingBodyDefinition,
+    });
+    const invalidOptions = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: countersink.revisionId,
+      definition: invalidOptionsDefinition,
+    });
+    const after = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const committedSimple = after.snapshot.document.features.find(
+      (feature) => feature.featureId === simple.featureId,
+    );
+
+    expect(
+      preview.render.records.length > 0,
+      "Supported mock hole previews should return transient renderables.",
+    ).toBeTruthy();
+    expect(simple.revisionState.kind, "Simple holes should be accepted.").toBe(
+      "accepted",
+    );
+    expect(
+      counterbore.revisionState.kind,
+      "Counterbore holes should be accepted.",
+    ).toBe("accepted");
+    expect(
+      countersink.revisionState.kind,
+      "Countersink holes should be accepted.",
+    ).toBe("accepted");
+    expect(
+      committedSimple?.definition.kind,
+      "Committed mock hole should be present in the next snapshot.",
+    ).toBe("hole");
+    expect(
+      after.snapshot.document.bodies.some((body) => body.bodyId === "body_part-1"),
+      "Mock hole application should retain the first scoped body id.",
+    ).toBeTruthy();
+    expect(
+      after.snapshot.document.bodies.some((body) => body.bodyId === "body_part-2"),
+      "Mock hole application should retain every scoped body id.",
+    ).toBeTruthy();
+    expect(
+      missingPoint.revisionState.kind,
+      "Missing hole sketch points should reject explicitly.",
+    ).toBe("rejected");
+    expect(
+      missingBody.revisionState.kind,
+      "Missing hole body scopes should reject explicitly.",
+    ).toBe("rejected");
+    expect(
+      invalidOptions.revisionState.kind,
+      "Invalid hole contract options should reject explicitly.",
+    ).toBe("rejected");
+    expect(
+      after.snapshot.document.revisionId,
+      "Rejected hole create requests must not mutate committed document state.",
+    ).toBe(countersink.revisionId);
+  }
+
   async function testSnapshotRenderablesExposeSemanticBindings() {
     const adapter = new MockKernelAdapter();
     const snapshot = await adapter.getDocumentSnapshot({
@@ -3400,6 +3592,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   await testDeleteSolidPreviewCommitAndValidationUseAdvancedParticipants();
   await testMirrorPreviewCommitAndUnsupportedCasesUseAdvancedParticipants();
   await testTransformPreviewCommitAndValidationUseAdvancedParticipants();
+  await testHolePreviewCommitAndValidationUseAdvancedParticipants();
   await testSnapshotRenderablesExposeSemanticBindings();
   await testConstructionPlanesExposeFilledRenderSurfaces();
   testResolvePickTargetUsesKernelPriority();

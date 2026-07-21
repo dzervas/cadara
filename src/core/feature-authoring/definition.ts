@@ -21,6 +21,7 @@ import type {
   AdvancedSolidOperationIntent,
   AuthoredFeatureKind,
   ChamferAdvancedOptions,
+  HoleAdvancedOptions,
   LoftAdvancedOptions,
   SweepAdvancedOptions,
 } from "@/contracts/modeling/schema";
@@ -221,6 +222,12 @@ export interface ChamferFeatureParameterDraft {
   options: ChamferAdvancedOptions;
 }
 
+export interface HoleFeatureParameterDraft {
+  locationTargets: readonly Extract<PrimitiveRef, { kind: "sketchPoint" }>[];
+  bodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
+  options: HoleAdvancedOptions;
+}
+
 export interface ThickenFeatureParameterDraft {
   faceTargets: readonly Extract<PrimitiveRef, { kind: "face" }>[];
   operationIntent: MaybeAuthoredValue<AdvancedSolidOperationIntent>;
@@ -280,6 +287,7 @@ export interface FeatureDraftByKind {
   sweep: SweepFeatureParameterDraft;
   loft: LoftFeatureParameterDraft;
   chamfer: ChamferFeatureParameterDraft;
+  hole: HoleFeatureParameterDraft;
   thicken: ThickenFeatureParameterDraft;
   combine: CombineFeatureParameterDraft;
   split: SplitFeatureParameterDraft;
@@ -297,6 +305,7 @@ export interface FeatureParametersByKind {
   sweep: AdvancedSolidFeatureParameters;
   loft: AdvancedSolidFeatureParameters;
   chamfer: AdvancedSolidFeatureParameters;
+  hole: AdvancedSolidFeatureParameters;
   thicken: AdvancedSolidFeatureParameters;
   combine: AdvancedSolidFeatureParameters;
   split: AdvancedSolidFeatureParameters;
@@ -314,6 +323,7 @@ export interface FeatureVersionByKind {
   sweep: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
   loft: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
   chamfer: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
+  hole: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
   thicken: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
   combine: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
   split: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
@@ -327,6 +337,7 @@ export type FeatureDefinitionByKind<TKind extends AuthoredFeatureKind> =
     | "sweep"
     | "loft"
     | "chamfer"
+    | "hole"
     | "thicken"
     | "combine"
     | "split"
@@ -373,6 +384,8 @@ export type LoftFeatureEditSessionState =
   FeatureEditSessionStateForKind<"loft">;
 export type ChamferFeatureEditSessionState =
   FeatureEditSessionStateForKind<"chamfer">;
+export type HoleFeatureEditSessionState =
+  FeatureEditSessionStateForKind<"hole">;
 export type ThickenFeatureEditSessionState =
   FeatureEditSessionStateForKind<"thicken">;
 export type CombineFeatureEditSessionState =
@@ -395,6 +408,7 @@ export type FeatureEditSessionState =
   | SweepFeatureEditSessionState
   | LoftFeatureEditSessionState
   | ChamferFeatureEditSessionState
+  | HoleFeatureEditSessionState
   | ThickenFeatureEditSessionState
   | CombineFeatureEditSessionState
   | SplitFeatureEditSessionState

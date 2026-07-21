@@ -53,6 +53,7 @@ export function isFeatureTool(
   | "sweep"
   | "loft"
   | "chamfer"
+  | "hole"
   | "thicken"
   | "combine"
   | "split"
@@ -69,6 +70,7 @@ export function isFeatureTool(
     toolId === "sweep" ||
     toolId === "loft" ||
     toolId === "chamfer" ||
+    toolId === "hole" ||
     toolId === "thicken" ||
     toolId === "combine" ||
     toolId === "split" ||

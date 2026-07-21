@@ -24,6 +24,7 @@ export type AdvancedParticipantRole =
   | "body"
   | "toolBody"
   | "targetBody"
+  | "location"
   | "plane"
   | "axis"
   | "transformReference"
@@ -228,6 +229,164 @@ export interface ChamferAdvancedOptions extends Record<string, unknown> {
   angle?: MaybeAuthoredValue<number>;
 }
 
+export type HoleStyle = "simple" | "counterbore" | "countersink";
+
+export type HoleTermination = "blind" | "throughAll";
+
+export type HoleDirection = "forward" | "reverse";
+
+export type HoleAdvancedOptions =
+  | {
+      style?: MaybeAuthoredValue<"simple">;
+      direction?: MaybeAuthoredValue<HoleDirection>;
+      mainDiameter: MaybeAuthoredValue<number>;
+      termination: MaybeAuthoredValue<HoleTermination>;
+      depth?: MaybeAuthoredValue<number>;
+      counterboreDiameter?: never;
+      counterboreDepth?: never;
+      countersinkDiameter?: never;
+      countersinkAngleDegrees?: never;
+    }
+  | {
+      style: MaybeAuthoredValue<"counterbore">;
+      direction?: MaybeAuthoredValue<HoleDirection>;
+      mainDiameter: MaybeAuthoredValue<number>;
+      counterboreDiameter: MaybeAuthoredValue<number>;
+      counterboreDepth: MaybeAuthoredValue<number>;
+      termination: MaybeAuthoredValue<HoleTermination>;
+      depth?: MaybeAuthoredValue<number>;
+      countersinkDiameter?: never;
+      countersinkAngleDegrees?: never;
+    }
+  | {
+      style: MaybeAuthoredValue<"countersink">;
+      direction?: MaybeAuthoredValue<HoleDirection>;
+      mainDiameter: MaybeAuthoredValue<number>;
+      countersinkDiameter: MaybeAuthoredValue<number>;
+      countersinkAngleDegrees: MaybeAuthoredValue<number>;
+      termination: MaybeAuthoredValue<HoleTermination>;
+      depth?: MaybeAuthoredValue<number>;
+      counterboreDiameter?: never;
+      counterboreDepth?: never;
+    };
+
+const HOLE_TERMINATION_OPTION_DESCRIPTOR = {
+  key: "termination",
+  label: "Termination",
+  required: true,
+  valueKind: "enum",
+  enumValues: ["blind", "throughAll"],
+  patchTarget: { patchKey: "options", valuePath: ["termination"] },
+} as const satisfies AdvancedFeatureScalarOptionDescriptor;
+
+const HOLE_DEPTH_OPTION_DESCRIPTOR = {
+  key: "depth",
+  label: "Blind depth",
+  required: false,
+  valueKind: "positiveNumber",
+  patchTarget: { patchKey: "options", valuePath: ["depth"] },
+} as const satisfies AdvancedFeatureScalarOptionDescriptor;
+
+const HOLE_MAIN_DIAMETER_OPTION_DESCRIPTOR = {
+  key: "mainDiameter",
+  label: "Main diameter",
+  required: true,
+  valueKind: "positiveNumber",
+  patchTarget: { patchKey: "options", valuePath: ["mainDiameter"] },
+} as const satisfies AdvancedFeatureScalarOptionDescriptor;
+
+const HOLE_DIRECTION_OPTION_DESCRIPTOR = {
+  key: "direction",
+  label: "Direction",
+  required: false,
+  valueKind: "enum",
+  enumValues: ["forward", "reverse"],
+  patchTarget: { patchKey: "options", valuePath: ["direction"] },
+} as const satisfies AdvancedFeatureScalarOptionDescriptor;
+
+export const HOLE_OPTION_DESCRIPTORS = [
+  {
+    key: "style",
+    label: "Hole style",
+    required: true,
+    valueKind: "discriminatedGroup",
+    discriminantKey: "style",
+    patchTarget: { patchKey: "options", valuePath: ["style"] },
+    variants: [
+      {
+        value: "simple",
+        label: "Simple",
+        options: [
+          HOLE_MAIN_DIAMETER_OPTION_DESCRIPTOR,
+          HOLE_DIRECTION_OPTION_DESCRIPTOR,
+          HOLE_TERMINATION_OPTION_DESCRIPTOR,
+          HOLE_DEPTH_OPTION_DESCRIPTOR,
+        ],
+      },
+      {
+        value: "counterbore",
+        label: "Counterbore",
+        options: [
+          HOLE_MAIN_DIAMETER_OPTION_DESCRIPTOR,
+          HOLE_DIRECTION_OPTION_DESCRIPTOR,
+          {
+            key: "counterboreDiameter",
+            label: "Counterbore diameter",
+            required: true,
+            valueKind: "positiveNumber",
+            patchTarget: {
+              patchKey: "options",
+              valuePath: ["counterboreDiameter"],
+            },
+          },
+          {
+            key: "counterboreDepth",
+            label: "Counterbore depth",
+            required: true,
+            valueKind: "positiveNumber",
+            patchTarget: {
+              patchKey: "options",
+              valuePath: ["counterboreDepth"],
+            },
+          },
+          HOLE_TERMINATION_OPTION_DESCRIPTOR,
+          HOLE_DEPTH_OPTION_DESCRIPTOR,
+        ],
+      },
+      {
+        value: "countersink",
+        label: "Countersink",
+        options: [
+          HOLE_MAIN_DIAMETER_OPTION_DESCRIPTOR,
+          HOLE_DIRECTION_OPTION_DESCRIPTOR,
+          {
+            key: "countersinkDiameter",
+            label: "Countersink diameter",
+            required: true,
+            valueKind: "positiveNumber",
+            patchTarget: {
+              patchKey: "options",
+              valuePath: ["countersinkDiameter"],
+            },
+          },
+          {
+            key: "countersinkAngleDegrees",
+            label: "Countersink angle",
+            required: true,
+            valueKind: "angle",
+            patchTarget: {
+              patchKey: "options",
+              valuePath: ["countersinkAngleDegrees"],
+            },
+          },
+          HOLE_TERMINATION_OPTION_DESCRIPTOR,
+          HOLE_DEPTH_OPTION_DESCRIPTOR,
+        ],
+      },
+    ],
+  },
+] as const satisfies readonly AdvancedFeatureOptionDescriptor[];
+
 export const CHAMFER_WIDTH_OPTION_DESCRIPTORS = [
   {
     key: "widthForm",
@@ -324,6 +483,7 @@ const advancedParticipantRoles: readonly AdvancedParticipantRole[] = [
   "targetBody",
   "plane",
   "axis",
+  "location",
   "transformReference",
   "enclosingRegionSeed",
 ];
@@ -662,8 +822,103 @@ export function validateAdvancedSolidFeatureDefinition(
       ),
     );
   }
+  if (definition.kind === "hole") {
+    diagnostics.push(
+      ...validateHoleAdvancedFeature(
+        definition as AdvancedSolidFeatureDefinition & { kind: "hole" },
+      ),
+    );
+  }
 
   return diagnostics;
+}
+
+function validateHoleAdvancedFeature(
+  definition: AdvancedSolidFeatureDefinition & { kind: "hole" },
+): AdvancedFeatureValidationDiagnostic[] {
+  const diagnostics: AdvancedFeatureValidationDiagnostic[] = [];
+  const expectedRoles = new Set<AdvancedParticipantRole>(["location", "body"]);
+
+  for (const participant of definition.parameters.participants) {
+    if (!expectedRoles.has(participant.role)) {
+      diagnostics.push(
+        createAdvancedDiagnostic({
+          code: "advanced-feature-invalid-cardinality",
+          role: participant.role,
+          message: "Hole participants may only include location and body roles.",
+        }),
+      );
+    }
+  }
+
+  const options = definition.parameters.options ?? {};
+  const style = getAuthoredLiteralValue(
+    options.style as MaybeAuthoredValue<unknown>,
+  );
+  const termination = getAuthoredLiteralValue(
+    options.termination as MaybeAuthoredValue<unknown>,
+  );
+
+  if (termination === "blind") {
+    const rawDepth = options.depth;
+    if (rawDepth === undefined) {
+      diagnostics.push(createInvalidOptionDiagnostic("Blind holes require depth."));
+    }
+  }
+
+  const mainDiameter = authoredNumericLiteral(options.mainDiameter);
+  if (style === "counterbore") {
+    const counterboreDiameter = authoredNumericLiteral(options.counterboreDiameter);
+    if (
+      mainDiameter !== null &&
+      counterboreDiameter !== null &&
+      counterboreDiameter <= mainDiameter
+    ) {
+      diagnostics.push(
+        createInvalidOptionDiagnostic(
+          "Counterbore diameter must be greater than main diameter.",
+        ),
+      );
+    }
+  }
+
+  if (style === "countersink") {
+    const countersinkDiameter = authoredNumericLiteral(options.countersinkDiameter);
+    const countersinkAngle = authoredNumericLiteral(
+      options.countersinkAngleDegrees,
+    );
+    if (
+      mainDiameter !== null &&
+      countersinkDiameter !== null &&
+      countersinkDiameter <= mainDiameter
+    ) {
+      diagnostics.push(
+        createInvalidOptionDiagnostic(
+          "Countersink diameter must be greater than main diameter.",
+        ),
+      );
+    }
+    if (
+      countersinkAngle !== null &&
+      (countersinkAngle <= 0 || countersinkAngle >= 180)
+    ) {
+      diagnostics.push(
+        createInvalidOptionDiagnostic(
+          "Countersink angle must be greater than 0 and less than 180 degrees.",
+        ),
+      );
+    }
+  }
+
+  return diagnostics;
+}
+
+function authoredNumericLiteral(value: unknown): number | null {
+  if (value === undefined || isExpressionAuthoredValue(value)) {
+    return null;
+  }
+  const literal = getAuthoredLiteralValue(value as MaybeAuthoredValue<unknown>);
+  return typeof literal === "number" && Number.isFinite(literal) ? literal : null;
 }
 
 export type TransformOperationKind = "translation" | "rotation";
@@ -1119,6 +1374,38 @@ export const chamferAdvancedFeatureExample = {
       },
     ],
     options: { widthForm: "equalOffsets", distance: 1 }
+  },
+} satisfies AdvancedSolidFeatureDefinition;
+
+export const holeAdvancedFeatureExample = {
+  kind: "hole",
+  featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  parameters: {
+    participants: [
+      {
+        role: "location",
+        targets: [
+          {
+            kind: "sketchPoint",
+            sketchId: "sketch_hole",
+            pointId: "sketch_point_hole_center",
+          },
+        ],
+      },
+      {
+        role: "body",
+        targets: [{ kind: "body", bodyId: "body_part" as BodyId }],
+      },
+    ],
+    options: {
+      style: "counterbore",
+      mainDiameter: 4,
+      direction: "forward",
+      counterboreDiameter: 8,
+      counterboreDepth: 2,
+      termination: "blind",
+      depth: 12,
+    },
   },
 } satisfies AdvancedSolidFeatureDefinition;
 

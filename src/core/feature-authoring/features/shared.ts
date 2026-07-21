@@ -82,6 +82,12 @@ export function asEdgeRef(
   return value?.kind === "edge" ? value : null;
 }
 
+export function asSketchPointRef(
+  value: PrimitiveRef | null,
+): Extract<PrimitiveRef, { kind: "sketchPoint" }> | null {
+  return value?.kind === "sketchPoint" ? value : null;
+}
+
 export function asUpToTargetRef(
   value: PrimitiveRef | null,
 ): Extract<PrimitiveRef, { kind: "face" | "body" | "vertex" }> | null {

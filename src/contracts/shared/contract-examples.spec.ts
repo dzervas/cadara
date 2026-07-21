@@ -29,6 +29,7 @@ import {
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
   chamferAdvancedFeatureExample,
+  holeAdvancedFeatureExample,
   deleteSolidAdvancedFeatureExample,
   loftAdvancedFeatureExample,
   mirrorAdvancedFeatureExample,
@@ -816,6 +817,16 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
       chamferAdvancedFeatureExample.parameters.participants[0]?.role,
       "Chamfer example must preserve topology modifier edge participants.",
     ).toBe("edge");
+    expect(
+      holeAdvancedFeatureExample.parameters.participants.some(
+        (participant) => participant.role === "location",
+      ),
+      "Hole example must preserve sketch-point location participants.",
+    ).toBeTruthy();
+    expect(
+      holeAdvancedFeatureExample.parameters.options?.termination,
+      "Hole example must preserve explicit flat termination option.",
+    ).toBe("blind");
     expect(
       thickenAdvancedFeatureExample.parameters.participants[0]?.role,
       "Thicken example must preserve explicit face participants.",

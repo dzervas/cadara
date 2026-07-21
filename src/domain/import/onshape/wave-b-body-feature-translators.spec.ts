@@ -2,6 +2,11 @@ import { describe, expect, test } from "vitest";
 import type { ImportCapabilities } from "@/contracts/import/capabilities";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import { validateImportPreparedActions } from "@/contracts/import/validation";
+import {
+  HOLE_OPTION_DESCRIPTORS,
+  validateAdvancedSolidFeatureDefinition,
+  type AdvancedSolidFeatureAuthoringDescriptor,
+} from "@/contracts/modeling/advanced-solid";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
@@ -23,7 +28,10 @@ import {
   splitFeatureTranslator,
   transformFeatureTranslator,
 } from "@/domain/import/onshape/wave-b-body-feature-translators";
-import { onshapeImportProvider } from "@/domain/import/onshape/provider";
+import {
+  onshapeImportProvider,
+  resolvePlannedDeferredParticipants,
+} from "@/domain/import/onshape/provider";
 import { makeWaveTMirrorTransformCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
 
 const query = (id: string) => ({
@@ -36,6 +44,68 @@ const queryParameter = (parameterId: string, ids: string[]) => ({
   parameterId,
   queries: ids.map(query),
 });
+
+const holeAdvancedDescriptor = {
+  featureKind: "hole",
+  participants: [
+    {
+      role: "location",
+      label: "Hole locations",
+      required: true,
+      cardinality: { min: 1, max: null },
+      acceptedKinds: ["sketchPoint"],
+    },
+    {
+      role: "body",
+      label: "Body targets",
+      required: true,
+      cardinality: { min: 1, max: null },
+      acceptedKinds: ["body"],
+    },
+  ],
+  options: HOLE_OPTION_DESCRIPTORS,
+} as const satisfies AdvancedSolidFeatureAuthoringDescriptor;
+
+function planHole(parameters: unknown[], options: { queryText?: string; pointIds?: string[]; sketchPlanTier?: "parametric" | "baked" } = {}) {
+  const sketchFeatureId = "SKETCH_LOC";
+  const pointIds = options.pointIds ?? ["POINT_A"];
+  const queryString = options.queryText ?? `query = qCreatedBy(id + "${sketchFeatureId}" + "pointOp", EntityType.VERTEX); ${pointIds[0]}`;
+  return holeFeatureTranslator.plan({
+    feature: {
+      featureId: "F_hole",
+      featureType: "hole",
+      name: "Hole",
+      parameters: [
+        ...parameters,
+        { parameterId: "locations", queries: [{ queryString }] },
+        queryParameter("scope", ["body"]),
+      ],
+    } as OnshapeFeatureNode,
+    label: "Hole",
+    onshapeSuppressed: false,
+    read: {
+      features: [
+        { featureId: sketchFeatureId, featureType: "newSketch", parameters: [] },
+        { featureId: "F_hole", featureType: "hole", parameters: [] },
+      ],
+      solvedSketchesByFeatureId: new Map([[sketchFeatureId, {
+        featureId: sketchFeatureId,
+        entities: pointIds.map((entityId, index) => ({
+          entityId,
+          entityType: "point",
+          onshapeEntityType: "skPoint",
+          isConstruction: false,
+          center3d: [index / 1000, 0, 0] as [number, number, number],
+        })),
+      }]]),
+    } as never,
+    references: new Map(),
+    state: {
+      sketchPlansByFeatureId: new Map([[sketchFeatureId, { tier: options.sketchPlanTier ?? "parametric", planeKey: "xy" }]]),
+      bodyProducingFeatureIds: [],
+    },
+  });
+}
 const valueParameter = (parameterId: string, value: unknown, expression?: string) => ({
   parameterId,
   value,
@@ -56,6 +126,74 @@ function plan(translator: OnshapeFeatureTranslator, featureType: string, paramet
     },
   });
 }
+
+test("provider helper resolves planned sketchPointFromFeature participants", () => {
+  const result = resolvePlannedDeferredParticipants(
+    {
+      kind: "hole",
+      featureTypeVersion: "advanced-solid-feature/v0",
+      parameters: {
+        participants: [
+          {
+            role: "location",
+            targets: [
+              {
+                kind: "sketchPointFromFeature",
+                sketchFeatureId: "SKETCH_A",
+                pointId: "sketch_point_hole_center",
+              },
+            ],
+          },
+          { role: "body", targets: [{ kind: "body", bodyId: "body_target" }] },
+        ],
+      },
+    },
+    new Map([["SKETCH_A", 3]]),
+  );
+
+  expect(result.missingFeatureId).toBeNull();
+  expect(result.definition).toMatchObject({
+    parameters: {
+      participants: [
+        {
+          role: "location",
+          targets: [
+            {
+              kind: "sketchPoint",
+              sketchId: { kind: "sketchIdOf", actionIndex: 3 },
+              pointId: "sketch_point_hole_center",
+            },
+          ],
+        },
+        { role: "body", targets: [{ kind: "body", bodyId: "body_target" }] },
+      ],
+    },
+  });
+
+  expect(
+    resolvePlannedDeferredParticipants(
+      {
+        kind: "hole",
+        featureTypeVersion: "advanced-solid-feature/v0",
+        parameters: {
+          participants: [
+            {
+              role: "location",
+              targets: [
+                {
+                  kind: "sketchPointFromFeature",
+                  sketchFeatureId: "MISSING_SKETCH",
+                  pointId: "sketch_point_hole_center",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      new Map(),
+    ),
+  ).toMatchObject({ definition: null, missingFeatureId: "MISSING_SKETCH" });
+});
 
 const providerCapabilities: ImportCapabilities = {
   context: {
@@ -337,6 +475,8 @@ describe("Wave B body topology translators", () => {
       selections: onshapeImportProvider.createDefaultSelections(review),
       capabilities: providerCapabilities,
     });
+    const validation = validateImportPreparedActions(actions);
+    expect(validation.success, JSON.stringify(validation)).toBe(true);
     const mirror = actions.createFeatures?.find((candidate) => candidate.definition.kind === "mirror");
     expect(mirror?.definition).toMatchObject({
       kind: "mirror",
@@ -346,7 +486,6 @@ describe("Wave B body topology translators", () => {
         ]),
       },
     });
-    expect(validateImportPreparedActions(actions).success).toBe(true);
   });
 
   test("maps the real equal-offset chamfer envelope to the executor's distance-only contract", () => {
@@ -505,16 +644,107 @@ describe("Wave B body topology translators", () => {
     ]).reasonCodes).toEqual(["thicken-requires-topology"]);
   });
 
-  test("reads hole locations and scope but reports the absent OCC hole executor", () => {
-    const result = plan(holeFeatureTranslator, "hole", [
-      valueParameter("styleV2", "SIMPLE"), valueParameter("diameter", 0, "6 mm"),
-      queryParameter("locations", ["vertex"]), queryParameter("scope", ["body"]),
+  test("maps supported hole styles, aliases, termination, direction, and sketch-point locations", () => {
+    const simple = planHole([
+      valueParameter("style", "SIMPLE"),
+      valueParameter("holeDiameterV2", 0, "6 mm"),
+      valueParameter("endStyle", "BLIND"),
+      valueParameter("holeDepth", 0, "10 mm"),
+      valueParameter("oppositeDirection", true),
     ]);
-    expect(result.plannedBodyTopologyConsumer).toMatchObject({
-      featureKind: "hole", unavailableReason: "hole-executor-unavailable",
-      slots: [{ parameterId: "locations", expectedKinds: ["vertex"] }, { parameterId: "scope", expectedKinds: ["body"] }],
+    expect(simple).toMatchObject({
+      reasonCodes: ["needs-history-probe"],
+      inputDependencies: [{ kind: "query", slotKey: "scope" }, { kind: "sketch", featureId: "SKETCH_LOC" }],
+      inputFeatureIds: ["SKETCH_LOC"],
+      plannedBodyTopologyConsumer: {
+        featureKind: "hole",
+        options: {
+          style: "simple",
+          mainDiameter: 6,
+          termination: "blind",
+          depth: 10,
+          direction: "reverse",
+        },
+        staticParticipants: [{ role: "location", targets: [{ kind: "sketchPointFromFeature", sketchFeatureId: "SKETCH_LOC" }] }],
+        slots: [{ key: "scope", parameterId: "scope", role: "body", expectedKinds: ["body"] }],
+      },
     });
-    expect(plan(holeFeatureTranslator, "hole", [valueParameter("styleV2", "C_BORE"), valueParameter("diameter", 0, "6 mm")]).reasonCodes).toEqual(["hole-style-unsupported"]);
+
+    const counterbore = planHole([
+      valueParameter("styleV2", "C_BORE"),
+      valueParameter("holeDiameterV3", 0, "4 mm"),
+      valueParameter("endStyleV2", "THROUGH"),
+      valueParameter("cBoreDiameter", 0, "7 mm"),
+      valueParameter("cBoreDepthV3", 0, "2 mm"),
+    ]);
+    expect(counterbore.plannedBodyTopologyConsumer?.options).toMatchObject({
+      style: "counterbore",
+      mainDiameter: 4,
+      termination: "throughAll",
+      counterboreDiameter: 7,
+      counterboreDepth: 2,
+      direction: "forward",
+    });
+
+    const countersink = planHole([
+      valueParameter("styleV2", "C_SINK"),
+      valueParameter("holeDiameterV3", 0, "3 mm"),
+      valueParameter("endStyleV2", "THROUGH"),
+      valueParameter("cSinkDiameter", 0, "6 mm"),
+      valueParameter("cSinkAngleV3", Math.PI / 2),
+    ]);
+    expect(countersink.plannedBodyTopologyConsumer?.options).toMatchObject({
+      style: "countersink",
+      countersinkDiameter: 6,
+      countersinkAngleDegrees: 90,
+    });
+  });
+
+  test("reports exact hole reason codes for unresolved and unsupported forms", () => {
+    expect(planHole([
+      valueParameter("styleV2", "SIMPLE"),
+      valueParameter("holeDiameterV3", 0, "4 mm"),
+      valueParameter("endStyleV2", "BLIND"),
+    ]).reasonCodes).toEqual(["hole-depth-unreadable"]);
+
+    expect(planHole([
+      valueParameter("styleV2", "C_BORE"),
+      valueParameter("holeDiameterV3", 0, "4 mm"),
+      valueParameter("endStyleV2", "THROUGH"),
+      valueParameter("cBoreDiameterV3", 0, "7 mm"),
+    ]).reasonCodes).toEqual(["hole-counterbore-parameters-unreadable"]);
+
+    expect(planHole([
+      valueParameter("styleV2", "C_SINK"),
+      valueParameter("holeDiameterV3", 0, "4 mm"),
+      valueParameter("endStyleV2", "THROUGH"),
+      valueParameter("cSinkDiameterV3", 0, "7 mm"),
+    ]).reasonCodes).toEqual(["hole-countersink-parameters-unreadable"]);
+
+    expect(planHole([
+      valueParameter("styleV2", "SIMPLE"),
+      valueParameter("holeDiameterV3", 0, "4 mm"),
+      valueParameter("endStyleV2", "UP_TO_NEXT"),
+    ]).reasonCodes).toEqual(["hole-termination-unsupported"]);
+
+    expect(planHole([
+      valueParameter("styleV2", "SIMPLE"),
+      valueParameter("holeDiameterV3", 0, "4 mm"),
+      valueParameter("endStyleV2", "THROUGH"),
+      valueParameter("threaded", true),
+    ]).reasonCodes).toEqual(["hole-thread-unsupported"]);
+
+    expect(planHole([
+      valueParameter("styleV2", "SIMPLE"),
+      valueParameter("holeDiameterV3", 0, "4 mm"),
+      valueParameter("endStyleV2", "THROUGH"),
+    ], { queryText: "query = qCreatedBy(id + \"OTHER_SKETCH\" + \"pointOp\", EntityType.VERTEX);" }).reasonCodes).toEqual(["hole-location-unresolved"]);
+
+    expect(planHole([
+      valueParameter("styleV2", "SIMPLE"),
+      valueParameter("holeDiameterV3", 0, "4 mm"),
+      valueParameter("endStyleV2", "THROUGH"),
+    ], { queryText: "query = qCreatedBy(id + \"SKETCH_LOC\" + \"pointOp\", EntityType.VERTEX);", pointIds: ["POINT_A", "POINT_B"] }).reasonCodes).toEqual(["hole-location-unresolved"]);
   });
 
   test("gate-flip readiness resolves synthetic v2 edge evidence into fillet and chamfer deferred positions", () => {
@@ -545,7 +775,7 @@ describe("Wave B body topology translators", () => {
       kind: "chamfer",
       parameters: {
         options: {
-          widthForm: "twoOffsets",
+          widthForm: { source: "literal", value: "twoOffsets" },
           distance1: { source: "literal", value: 2 },
           distance2: { source: "literal", value: 3 },
         },
@@ -575,6 +805,65 @@ describe("Wave B body topology translators", () => {
       evidence: [],
       sourceEvidence: "historyPoint" as const,
     };
+    const holeBodyBinding = {
+      ...shellBodyBinding,
+      query: { ...shellBodyBinding.query, slotKey: "scope", parameterId: "scope" },
+      deferred: {
+        ...shellBodyBinding.deferred,
+        source: { consumerFeatureId: "consumer", parameterId: "scope", deterministicId: "body" },
+      },
+    };
+    const hole = buildResolvedBodyConsumerDefinition({
+      featureKind: "hole",
+      options: {
+        style: "counterbore",
+        mainDiameter: 4,
+        counterboreDiameter: 8,
+        counterboreDepth: 2,
+        termination: "blind",
+        depth: 6,
+        direction: "reverse",
+      },
+      staticParticipants: [{ role: "location", targets: [{ kind: "sketchPointFromFeature", sketchFeatureId: "SKETCH_LOC", pointId: "POINT_LOC" as never }] }],
+      slots: [{ key: "scope", parameterId: "scope", role: "body", expectedKinds: ["body"], cardinality: { min: 1, max: null } }],
+    }, [holeBodyBinding]);
+    const resolvedHole = resolvePlannedDeferredParticipants(hole, new Map([["SKETCH_LOC", 0]]));
+    expect(resolvedHole.missingFeatureId).toBeNull();
+    expect(JSON.stringify(resolvedHole.definition)).not.toContain("sketchPointFromFeature");
+    expect(resolvedHole.definition).toMatchObject({
+      kind: "hole",
+      parameters: {
+        options: {
+          style: { source: "literal", value: "counterbore" },
+          mainDiameter: { source: "literal", value: 4 },
+          termination: { source: "literal", value: "blind" },
+        },
+        participants: [
+          { role: "body", targets: [{ kind: "topologyOf", expectedKind: "body" }] },
+          { role: "location", targets: [{ kind: "sketchPoint", sketchId: { kind: "sketchIdOf", actionIndex: 0 } }] },
+        ],
+      },
+    });
+    if (!resolvedHole.definition || resolvedHole.definition.kind !== "hole") throw new Error("Expected resolved hole definition");
+    const materializedHole = {
+      ...resolvedHole.definition,
+      parameters: {
+        ...resolvedHole.definition.parameters,
+        participants: resolvedHole.definition.parameters.participants.map((participant) => ({
+          ...participant,
+          targets: participant.targets.map((target) => {
+            if (target.kind === "topologyOf") return { kind: "body" as const, bodyId: "live_body" as never };
+            if (target.kind === "sketchPoint" && typeof target.sketchId !== "string") {
+              return { ...target, sketchId: "live_sketch" as never };
+            }
+            return target;
+          }),
+        })),
+      },
+    };
+    expect(JSON.stringify(materializedHole)).not.toContain("topologyOf");
+    expect(JSON.stringify(materializedHole)).not.toContain("sketchIdOf");
+    expect(validateAdvancedSolidFeatureDefinition(materializedHole as never, holeAdvancedDescriptor)).toEqual([]);
     const shellOffset = buildResolvedBodyConsumerDefinition({
       featureKind: "shell",
       shellMode: "offsetAllFaces",
@@ -641,8 +930,12 @@ describe("Wave B body topology translators", () => {
     }, faceResolution.bindings)).toMatchObject({
       kind: "thicken",
       parameters: {
-        operationIntent: { value: "create" },
-        options: { thickness: 2, side: "oneSide", direction: "positive" },
+        operationIntent: { source: "literal", value: "create" },
+        options: {
+          thickness: { source: "literal", value: 2 },
+          side: { source: "literal", value: "oneSide" },
+          direction: { source: "literal", value: "positive" },
+        },
         participants: [{ role: "face", targets: [{ kind: "topologyOf" }] }],
       },
     });
