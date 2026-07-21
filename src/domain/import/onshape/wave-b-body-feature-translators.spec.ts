@@ -371,32 +371,68 @@ describe("Wave B body topology translators", () => {
       reasonCodes: ["needs-history-probe"],
       plannedBodyTopologyConsumer: {
         featureKind: "chamfer",
-        options: { distance: 15 },
+        options: { widthForm: "equalOffsets", distance: 15 },
         slots: [{ parameterId: "entities", role: "edge", expectedKinds: ["edge"] }],
       },
     });
-    expect(chamfer.plannedBodyTopologyConsumer?.options).toEqual({ distance: 15 });
+    expect(chamfer.plannedBodyTopologyConsumer?.options).toEqual({
+      widthForm: "equalOffsets",
+      distance: 15,
+    });
   });
 
-  test("accepts the chamferStyle parameter name and rejects only inexpressible width forms", () => {
+  test("accepts supported chamfer width forms and rejects only inexpressible method/style combinations", () => {
     const equalOffsets = plan(chamferFeatureTranslator, "chamfer", [
       queryParameter("entities", ["edge"]),
       valueParameter("chamferMethod", "FACE_OFFSET"),
       valueParameter("chamferStyle", "EQUAL_OFFSETS"),
       valueParameter("width", 0, "2.5 mm"),
     ]);
-    expect(equalOffsets.plannedBodyTopologyConsumer?.options).toEqual({ distance: 2.5 });
+    expect(equalOffsets.plannedBodyTopologyConsumer?.options).toEqual({
+      widthForm: "equalOffsets",
+      distance: 2.5,
+    });
 
-    for (const style of ["TWO_OFFSETS", "OFFSET_ANGLE"]) {
-      expect(plan(chamferFeatureTranslator, "chamfer", [
-        valueParameter("chamferMethod", "FACE_OFFSET"),
-        valueParameter("chamferStyle", style),
-      ]).reasonCodes).toEqual(["chamfer-style-unsupported"]);
-    }
+    const twoOffsets = plan(chamferFeatureTranslator, "chamfer", [
+      queryParameter("entities", ["edge"]),
+      valueParameter("chamferMethod", "FACE_OFFSET"),
+      valueParameter("chamferStyle", "TWO_OFFSETS"),
+      valueParameter("width1", 0, "3 mm"),
+      valueParameter("width2", 0, "5 mm"),
+    ]);
+    expect(twoOffsets.plannedBodyTopologyConsumer?.options).toEqual({
+      widthForm: "twoOffsets",
+      distance1: 3,
+      distance2: 5,
+    });
+
+    const offsetAngle = plan(chamferFeatureTranslator, "chamfer", [
+      queryParameter("entities", ["edge"]),
+      valueParameter("chamferMethod", "FACE_OFFSET"),
+      valueParameter("chamferStyle", "OFFSET_ANGLE"),
+      valueParameter("width", 0, "4 mm"),
+      valueParameter("angle", 0, "30 deg"),
+    ]);
+    expect(offsetAngle.plannedBodyTopologyConsumer?.options).toEqual({
+      widthForm: "offsetAngle",
+      distance: 4,
+      angle: 30,
+    });
+
     expect(plan(chamferFeatureTranslator, "chamfer", [
       valueParameter("chamferMethod", "EDGE_OFFSET"),
       valueParameter("chamferStyle", "EQUAL_OFFSETS"),
     ]).reasonCodes).toEqual(["chamfer-method-unsupported"]);
+    expect(plan(chamferFeatureTranslator, "chamfer", [
+      valueParameter("chamferMethod", "FACE_OFFSET"),
+      valueParameter("chamferStyle", "VERTEX"),
+    ]).reasonCodes).toEqual(["chamfer-style-unsupported"]);
+    expect(plan(chamferFeatureTranslator, "chamfer", [
+      valueParameter("chamferMethod", "FACE_OFFSET"),
+      valueParameter("chamferStyle", "OFFSET_ANGLE"),
+      valueParameter("width", 0, "2 mm"),
+      valueParameter("angle", 0, "90 deg"),
+    ]).reasonCodes).toEqual(["chamfer-width-unreadable"]);
   });
 
   test("maps shell openings and keeps inexpressible shell forms honest", () => {
@@ -487,12 +523,18 @@ describe("Wave B body topology translators", () => {
     expect(resolution.kind).toBe("resolved");
     if (resolution.kind !== "resolved") return;
     const fillet = buildResolvedBodyConsumerDefinition({ featureKind: "fillet", radius: 2, slots: [{ key: "edgeTargets", parameterId: "entities", role: "edge", expectedKinds: ["edge"], cardinality: { min: 1, max: null } }] }, resolution.bindings);
-    const chamfer = buildResolvedBodyConsumerDefinition({ featureKind: "chamfer", options: { distance: 2 }, slots: [{ key: "edgeTargets", parameterId: "entities", role: "edge", expectedKinds: ["edge"], cardinality: { min: 1, max: null } }] }, resolution.bindings);
+    const chamfer = buildResolvedBodyConsumerDefinition({ featureKind: "chamfer", options: { widthForm: "twoOffsets", distance1: 2, distance2: 3 }, slots: [{ key: "edgeTargets", parameterId: "entities", role: "edge", expectedKinds: ["edge"], cardinality: { min: 1, max: null } }] }, resolution.bindings);
     expect(fillet).toMatchObject({ kind: "fillet", parameters: { edgeTargets: [{ kind: "topologyOf", expectedKind: "edge" }] } });
     expect(chamfer).toMatchObject({ kind: "chamfer", parameters: { participants: [{ role: "edge", targets: [{ kind: "topologyOf", expectedKind: "edge" }] }] } });
     expect(chamfer).toMatchObject({
       kind: "chamfer",
-      parameters: { options: { distance: { source: "literal", value: 2 } } },
+      parameters: {
+        options: {
+          widthForm: "twoOffsets",
+          distance1: { source: "literal", value: 2 },
+          distance2: { source: "literal", value: 3 },
+        },
+      },
     });
     expect(validateFeatureDefinitionAuthoredValueInvariants(chamfer).map((issue) => issue.message)).toEqual([]);
 

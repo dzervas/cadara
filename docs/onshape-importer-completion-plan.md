@@ -453,8 +453,42 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
   feature timeline (`Extrude 1`, support plane, `Extrude 2`, `Transform 1`,
   `Chamfer 1`), constrained Sketch 2 drag, variable geometry rebuild, and
   Extrude 1 edit coverage. Full-parametric Mounts milestone is satisfied.
-- [ ] W.4 **Chamfer two-distance / distance+angle** (contract plumbing; OCC
+- [x] W.4 **Chamfer two-distance / distance+angle** (contract plumbing; OCC
       `Add_3` already accepts two distances). Unlocks PS1 Chamfer 3.
+
+  **Verification (done).** Chamfer advanced-solid options now carry an explicit
+  width form: `equalOffsets` (`distance`), `twoOffsets` (`distance1` +
+  `distance2`), and `offsetAngle` (`distance` + angle in degrees). The OCC
+  executor keeps the native equal-offset transaction path, uses
+  `BRepFilletAPI_MakeChamfer.Add_3(distance1, distance2, edge, face)` for
+  unequal offsets, and uses bound `AddDA(distance, angleRadians, edge, face)`
+  for distance+angle. Distance+angle is executable only for finite angles
+  greater than 0 and less than 90 degrees; 0/90-degree degenerate inputs stay
+  rejected before OCC. Because imported durable edge targets do not carry a
+  selected owning face, `distance1` is assigned to the stable first adjacent
+  face returned by the OCC edge→face ancestor map and `distance2` to the other
+  face.
+
+  Onshape translator support: `FACE_OFFSET` + `EQUAL_OFFSETS`, `TWO_OFFSETS`
+  (`width1`/`width2`; PS1 Chamfer 3 captures 3 mm + 5 mm), and `OFFSET_ANGLE`
+  (`width` + `angle`). Other chamfer methods remain
+  `chamfer-method-unsupported`; genuinely unsupported styles remain
+  `chamfer-style-unsupported`; malformed supported widths/angles remain
+  `chamfer-width-unreadable`.
+
+  Plan-dump evidence (counts are parametric / baked / geometryOnly): PS1 mock
+  review moved **24 / 17 / 0 → 25 / 16 / 0**, with Chamfer 3 now parametric.
+  Mounts browser e2e remains **10 / 0 / 0**; local plan-dump review for the
+  Mounts fixture reported **9 / 1 / 0** with Chamfer 1 still no-match, an
+  existing review/probe divergence unrelated to W.4. Wave-T first-studio review
+  remains **2 / 0 / 0**. Real browser PS1 remains **8 / 33 / 0** because the
+  current browser/import prefix still stops before the Chamfer 3 topology is
+  live; the per-feature translator and OCC executor seams prove the width form.
+
+  Tests: focused OCC executor + contract specs, Onshape translator/provider
+  preparation + apply-pipeline specs, `src/domain/import/onshape` and
+  `src/contracts/modeling` logic suites, build, changed-file lint,
+  `bun run test:e2e`, and final `bun run test:all`.
 - [ ] W.5 **Shell non-hollow / offset-all-faces** (new executor branch via
       whole-solid `BRepOffset_MakeOffset`). Unlocks PS1 Shell 1.
 - [ ] W.6 **Hole executor** (largest kernel item; no instances in current
@@ -545,15 +579,12 @@ resolution picked a keyless openrouter provider once). Real bundles + the
   translator-declared exact-prefix topology slots; ambiguous default scope now
   reports `extrude-default-scope-ambiguous`. Pinned captures remain Mounts
   **6 / 4 / 0** and Part Studio 1 **6 / 35 / 0**.
-- T.6 chamfer audit: Cadara's authoring descriptor validates one positive
-  `distance`; the OCC executor reads only that option and calls the equal-leg
-  `Add_3(distance, distance, edge, face)` path (the native transaction also
-  accepts one distance). Therefore Onshape `FACE_OFFSET` + `EQUAL_OFFSETS` is
-  the only currently expressible width form. `TWO_OFFSETS` and `OFFSET_ANGLE`
-  remain honestly baked with `chamfer-style-unsupported`; other measurement
-  methods retain `chamfer-method-unsupported`. The translator accepts both
-  captured `chamferType` and the `chamferStyle` parameter spelling and emits
-  only the executable `{ distance }` option.
+- T.6 chamfer audit (superseded by W.4): at T.6 time Cadara's authoring
+  descriptor validated one positive `distance`, and the OCC executor only used
+  the equal-leg `Add_3(distance, distance, edge, face)` path (the native
+  transaction also accepted one distance). W.4 extends the contract and
+  executor to express Onshape `FACE_OFFSET` + `TWO_OFFSETS` and
+  `OFFSET_ANGLE`; the T.6 limitation remains historical context only.
 
   | Capture / studio | Before | After | Chamfer review reasons after |
   |---|---:|---:|---|

@@ -337,6 +337,11 @@ function positiveQuantity(feature: OnshapeFeatureNode, id: string): number | nul
   return value !== null && value > 0 ? value : null;
 }
 
+function executableChamferAngle(feature: OnshapeFeatureNode, id: string): number | null {
+  const value = angleDegrees(feature, id);
+  return value !== null && value > 0 && value < 90 ? value : null;
+}
+
 export const filletFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["fillet"],
   plan(context) {
@@ -360,15 +365,43 @@ export const chamferFeatureTranslator: OnshapeFeatureTranslator = {
       enumValue(context.feature, "chamferType") ??
       "EQUAL_OFFSETS";
     if (method !== "FACE_OFFSET") return baked(context, "chamfer-method-unsupported");
-    if (style !== "EQUAL_OFFSETS") return baked(context, "chamfer-style-unsupported");
     if (hasQueries(context.feature, "directionOverrides")) return baked(context, "chamfer-direction-overrides-unsupported");
-    const width = positiveQuantity(context.feature, "width");
-    if (width === null) return baked(context, "chamfer-width-unreadable");
-    return topologyCandidate(context, {
-      featureKind: "chamfer",
-      options: { distance: width },
-      slots: [slot("edgeTargets", "entities", "edge", 1, null, ["edge"])],
-    });
+
+    if (style === "EQUAL_OFFSETS") {
+      const width = positiveQuantity(context.feature, "width");
+      if (width === null) return baked(context, "chamfer-width-unreadable");
+      return topologyCandidate(context, {
+        featureKind: "chamfer",
+        options: { widthForm: "equalOffsets", distance: width },
+        slots: [slot("edgeTargets", "entities", "edge", 1, null, ["edge"])],
+      });
+    }
+
+    if (style === "TWO_OFFSETS") {
+      const distance1 =
+        positiveQuantity(context.feature, "width1") ??
+        positiveQuantity(context.feature, "width");
+      const distance2 = positiveQuantity(context.feature, "width2");
+      if (distance1 === null || distance2 === null) return baked(context, "chamfer-width-unreadable");
+      return topologyCandidate(context, {
+        featureKind: "chamfer",
+        options: { widthForm: "twoOffsets", distance1, distance2 },
+        slots: [slot("edgeTargets", "entities", "edge", 1, null, ["edge"])],
+      });
+    }
+
+    if (style === "OFFSET_ANGLE") {
+      const distance = positiveQuantity(context.feature, "width");
+      const angle = executableChamferAngle(context.feature, "angle");
+      if (distance === null || angle === null) return baked(context, "chamfer-width-unreadable");
+      return topologyCandidate(context, {
+        featureKind: "chamfer",
+        options: { widthForm: "offsetAngle", distance, angle },
+        slots: [slot("edgeTargets", "entities", "edge", 1, null, ["edge"])],
+      });
+    }
+
+    return baked(context, "chamfer-style-unsupported");
   },
   apply: ({ apply }) => apply(),
 };
@@ -482,13 +515,13 @@ export function buildResolvedBodyConsumerDefinition(
     };
   }
   const executableOptions =
-    planned.featureKind === "chamfer" &&
-    planned.options &&
-    typeof planned.options.distance === "number"
-      ? {
-          ...planned.options,
-          distance: createLiteralAuthoredValue(planned.options.distance),
-        }
+    planned.featureKind === "chamfer" && planned.options
+      ? Object.fromEntries(
+          Object.entries(planned.options).map(([key, value]) => [
+            key,
+            typeof value === "number" ? createLiteralAuthoredValue(value) : value,
+          ]),
+        )
       : planned.options;
   return {
     kind: planned.featureKind as AdvancedSolidFeatureKind,

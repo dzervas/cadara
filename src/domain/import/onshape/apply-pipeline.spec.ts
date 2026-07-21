@@ -780,7 +780,7 @@ test("legacy v1 preparation and apply remain equivalent with or without history 
   }
 });
 
-test("import apply accepts an authored imported chamfer distance", async () => {
+test("import apply accepts an authored imported two-distance chamfer", async () => {
   const created: CreateFeatureRequest[] = [];
   const service = {
     createFeature(request: CreateFeatureRequest) {
@@ -816,7 +816,11 @@ test("import apply accepts an authored imported chamfer distance", async () => {
               role: "edge",
               targets: [{ kind: "edge", bodyId: "body_1", edgeId: "edge_1" }],
             }],
-            options: { distance: { source: "literal", value: 2 } },
+            options: {
+              widthForm: "twoOffsets",
+              distance1: { source: "literal", value: 2 },
+              distance2: { source: "literal", value: 3 },
+            },
           },
         },
       }],
@@ -826,7 +830,11 @@ test("import apply accepts an authored imported chamfer distance", async () => {
   expect(result.diagnostics).toEqual([]);
   expect(created).toHaveLength(1);
   expect(created[0]?.definition.kind).toBe("chamfer");
-  expect(created[0]?.definition.parameters.options?.distance).toEqual({ source: "literal", value: 2 });
+  expect(created[0]?.definition.parameters.options).toMatchObject({
+    widthForm: "twoOffsets",
+    distance1: { source: "literal", value: 2 },
+    distance2: { source: "literal", value: 3 },
+});
 });
 
 test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same position and later replacements continue", async () => {

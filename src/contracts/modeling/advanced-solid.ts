@@ -197,6 +197,103 @@ export interface LoftAdvancedOptions extends Record<string, unknown> {
   matchConnections?: readonly LoftMatchConnection[];
 }
 
+export type ChamferWidthForm =
+  | "equalOffsets"
+  | "twoOffsets"
+  | "offsetAngle";
+
+export type ChamferWidthOptions =
+  | {
+      widthForm?: MaybeAuthoredValue<"equalOffsets">;
+      distance: MaybeAuthoredValue<number>;
+    }
+  | {
+      widthForm: MaybeAuthoredValue<"twoOffsets">;
+      distance1: MaybeAuthoredValue<number>;
+      distance2: MaybeAuthoredValue<number>;
+    }
+  | {
+      widthForm: MaybeAuthoredValue<"offsetAngle">;
+      distance: MaybeAuthoredValue<number>;
+      /** Degrees; executor converts to OCC radians. Valid executable range is (0, 90). */
+      angle: MaybeAuthoredValue<number>;
+    };
+
+export interface ChamferAdvancedOptions extends Record<string, unknown> {
+  widthForm?: MaybeAuthoredValue<ChamferWidthForm>;
+  distance?: MaybeAuthoredValue<number>;
+  distance1?: MaybeAuthoredValue<number>;
+  distance2?: MaybeAuthoredValue<number>;
+  /** Degrees; executor converts to OCC radians. Valid executable range is (0, 90). */
+  angle?: MaybeAuthoredValue<number>;
+}
+
+export const CHAMFER_WIDTH_OPTION_DESCRIPTORS = [
+  {
+    key: "widthForm",
+    label: "Width form",
+    required: true,
+    valueKind: "discriminatedGroup",
+    discriminantKey: "widthForm",
+    patchTarget: { patchKey: "options", valuePath: ["widthForm"] },
+    variants: [
+      {
+        value: "equalOffsets",
+        label: "Equal offsets",
+        options: [
+          {
+            key: "distance",
+            label: "Distance",
+            required: true,
+            valueKind: "positiveNumber",
+            patchTarget: { patchKey: "options", valuePath: ["distance"] },
+          },
+        ],
+      },
+      {
+        value: "twoOffsets",
+        label: "Two offsets",
+        options: [
+          {
+            key: "distance1",
+            label: "Distance 1",
+            required: true,
+            valueKind: "positiveNumber",
+            patchTarget: { patchKey: "options", valuePath: ["distance1"] },
+          },
+          {
+            key: "distance2",
+            label: "Distance 2",
+            required: true,
+            valueKind: "positiveNumber",
+            patchTarget: { patchKey: "options", valuePath: ["distance2"] },
+          },
+        ],
+      },
+      {
+        value: "offsetAngle",
+        label: "Distance + angle",
+        options: [
+          {
+            key: "distance",
+            label: "Distance",
+            required: true,
+            valueKind: "positiveNumber",
+            patchTarget: { patchKey: "options", valuePath: ["distance"] },
+          },
+          {
+            key: "angle",
+            label: "Angle",
+            required: true,
+            valueKind: "angle",
+            patchTarget: { patchKey: "options", valuePath: ["angle"] },
+          },
+        ],
+      },
+    ],
+  },
+] as const satisfies readonly AdvancedFeatureOptionDescriptor[];
+
 const advancedSolidFeatureKinds: readonly AdvancedSolidFeatureKind[] = [
   "combine",
   "sweep",
@@ -860,10 +957,12 @@ function validateAdvancedFeatureDiscriminatedOptionGroup(
     ];
   }
 
+  const activeKeys = new Set(collectAdvancedFeatureOptionKeys(activeVariant.options));
   const inactiveKeys = new Set(
     descriptor.variants
       .filter((variant) => variant.value !== activeVariant.value)
-      .flatMap((variant) => collectAdvancedFeatureOptionKeys(variant.options)),
+      .flatMap((variant) => collectAdvancedFeatureOptionKeys(variant.options))
+      .filter((key) => !activeKeys.has(key)),
   );
   const diagnostics: AdvancedFeatureValidationDiagnostic[] = [];
 
@@ -1019,7 +1118,7 @@ export const chamferAdvancedFeatureExample = {
         targets: [{ kind: "edge", bodyId: "body_part", edgeId: "edge_outer" }],
       },
     ],
-    options: { distance: 1 },
+    options: { widthForm: "equalOffsets", distance: 1 }
   },
 } satisfies AdvancedSolidFeatureDefinition;
 
