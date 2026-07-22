@@ -49,7 +49,7 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   const importedState = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect(importedState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
   expectMountsLiveBodyIdentity(importedState);
-  await dismissWorkbenchAlerts(page);
+  await expectNoWorkbenchAlerts(page);
 
   await chooseHistoryAction(page, "feature_transform-1", "Roll History Here");
   await page.getByRole("button", {
@@ -97,7 +97,7 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
     ]),
   );
   expectMountsLiveBodyIdentity(state);
-  await dismissWorkbenchAlerts(page);
+  await expectNoWorkbenchAlerts(page);
 });
 
 test("Mounts variable and extrude edits rebuild geometry while preserving body lineage", async ({
@@ -112,7 +112,7 @@ test("Mounts variable and extrude edits rebuild geometry while preserving body l
   const initialState = await page.evaluate(() => window.__cadaraDebug!.getState());
   expectMountsLiveBodyIdentity(initialState);
   expect(initialState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
-  await dismissWorkbenchAlerts(page);
+  await expectNoWorkbenchAlerts(page);
 
   await chooseHistoryAction(page, "feature_extrude-1", "Roll History Here");
   const rolledState = await page.evaluate(() => window.__cadaraDebug!.getState());
@@ -145,7 +145,7 @@ test("Mounts variable and extrude edits rebuild geometry while preserving body l
   const endState = await page.evaluate(() => window.__cadaraDebug!.getState());
   expectMountsLiveBodyIdentity(endState);
   expect(endState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
-  await dismissWorkbenchAlerts(page);
+  await expectNoWorkbenchAlerts(page);
 
   await chooseHistoryAction(page, "feature_extrude-1", "Roll History Here");
 
@@ -178,7 +178,7 @@ test("Mounts variable and extrude edits rebuild geometry while preserving body l
 
   const rebuilt = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect(rebuilt.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
-  await dismissWorkbenchAlerts(page);
+  await expectNoWorkbenchAlerts(page);
 });
 
 test("Part Studio 1 imports its supported planes and sketches, then rebuilds walls", async ({
@@ -373,11 +373,8 @@ function expectMountsLiveBodyIdentity(state: { selectableTargets: string[] }) {
   ).toBe(true);
 }
 
-async function dismissWorkbenchAlerts(page: Page) {
-  const dismiss = page.getByRole("button", { name: "Dismiss notification" });
-  while ((await dismiss.count()) > 0) {
-    await dismiss.first().click();
-  }
+async function expectNoWorkbenchAlerts(page: Page) {
+  await expect(page.getByRole("alert")).toHaveCount(0);
 }
 
 async function expectNoReferenceAlerts(page: Page) {

@@ -4,7 +4,10 @@ import type {
   EditorEvent,
   EditorViewState,
 } from "@/domain/editor/state-machine";
-import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type {
+  ModelingDiagnostic,
+  WorkspaceSnapshot,
+} from "@/contracts/modeling/schema";
 import type { ImportProvider } from "@/contracts/import/provider";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 import {
@@ -59,6 +62,27 @@ function describeImportError(error: unknown, fallback: string): string {
   }
 
   return parts.join(": ");
+}
+
+function describeImportDiagnostics(diagnostics: readonly ModelingDiagnostic[]) {
+  const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+  const messages = errors.flatMap((diagnostic) => {
+    const nested = diagnostic.detail?.kind === "advancedFeatureValidation"
+      ? diagnostic.detail.diagnostic
+      : null;
+    if (nested && nested.message !== diagnostic.message) {
+      return [diagnostic.message, `${nested.code}: ${nested.message}`];
+    }
+    if (diagnostic.detail?.kind === "invalidReference") {
+      return [
+        diagnostic.message,
+        `${diagnostic.code}: ${diagnostic.detail.reference.reason} — ${JSON.stringify(diagnostic.detail.reference.target)}`,
+      ];
+    }
+    return [diagnostic.message];
+  });
+  const unique = [...new Set(messages.filter((message) => message.trim().length > 0))];
+  return unique.join("\n") || diagnostics[0]?.message || "Import failed.";
 }
 
 function promptForImportProvider(
@@ -171,13 +195,7 @@ export function useWorkbenchPartImport({
       });
       if (!result.ok) {
         dispatch({ type: "import.failed", diagnostics: result.diagnostics });
-        showWorkbenchError(
-          result.diagnostics.find(
-            (diagnostic) => diagnostic.severity === "error",
-          )?.message ??
-            result.diagnostics[0]?.message ??
-            "Import failed.",
-        );
+        showWorkbenchError(describeImportDiagnostics(result.diagnostics));
         return;
       }
 

@@ -21,7 +21,10 @@ import {
   type SketchRecord,
 } from "@/contracts/sketch/schema";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
+import type {
+  OccNativeShimPayload,
+  OpenCascadeNativeTopologyKernelHost,
+} from "@/domain/modeling/occ/native-topology-payload";
 import {
   advanceTopologyToken,
   applySemanticStageTopologyIds,
@@ -29,6 +32,7 @@ import {
   createInitialTopologyToken,
   createOccReferenceState,
   resolveOccReference,
+  rewriteNativeTopologyPayloadIds,
   OCC_REFERENCE_INVALIDATION_REASONS,
   trackNewSolidBody,
   trackReplacementSolidBody,
@@ -758,7 +762,13 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       ...body,
       nativeTopologyIdAliases: {
         faceIdsByNativeId: new Map([["face_native_raw" as typeof faceId, faceId]]),
-        edgeIdsByNativeId: new Map([["edge_native_raw" as typeof edgeId, edgeId]]),
+        edgeIdsByNativeId: new Map([
+          ["edge_native_raw" as typeof edgeId, edgeId],
+          [
+            "edge_native_stale" as typeof edgeId,
+            "edge_deleted_public" as typeof edgeId,
+          ],
+        ]),
         vertexIdsByNativeId: new Map([
           ["vertex_native_raw" as typeof vertexId, vertexId],
         ]),
@@ -800,10 +810,55 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
       "vertex_native_raw" as typeof vertexId,
     )).toBe(preservedVertexId);
     expect(
+      reconciled.nativeTopologyIdAliases?.edgeIdsByNativeId?.has(
+        "edge_native_stale" as typeof edgeId,
+      ),
+      "Deleted public topology must not remain selectable through a stale native alias.",
+    ).toBe(false);
+    expect(
       reconciled.nativeTopologyPayload!.topology.some(
         (record) => record.kind === "face" && record.id === preservedFaceId,
       ),
     ).toBeTruthy();
+
+    const referenceInput = {
+      documentId: "doc_workspace" as never,
+      constructions: [],
+      sketches: [],
+      features: [],
+    };
+    const liveState = createOccReferenceState({
+      ...referenceInput,
+      revisionId: "rev_0001" as never,
+      bodies: [reconciled],
+    });
+    const missingState = createOccReferenceState({
+      ...referenceInput,
+      revisionId: "rev_0002" as never,
+      bodies: [],
+      previous: liveState,
+    });
+    const restoredState = createOccReferenceState({
+      ...referenceInput,
+      revisionId: "rev_0003" as never,
+      bodies: [reconciled],
+      previous: missingState,
+    });
+    expect(
+      resolveOccReference(
+        {
+          documentId: referenceInput.documentId,
+          revisionId: "rev_0003" as never,
+          referenceState: restoredState,
+        },
+        {
+          kind: "edge",
+          bodyId: body.bodyId,
+          edgeId: preservedEdgeId,
+        },
+      ).resolution.invalidation,
+      "An exact native alias to a tracked edge proves that the public reference is live again.",
+    ).toBe(null);
 
     const colliding = {
       ...current,
@@ -832,4 +887,70 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
   await testSemanticReconciliationPreservesNativeAliasesAndPayload();
 
   console.log("OCC phase 5 topology/reference tests passed.");
+});
+
+test("exact B-rep topology keys use reconciled public aliases", () => {
+  const bodyId = "body_alias" as never;
+  const payload = {
+    schemaVersion: "occ-native-topology-payload/v1alpha1",
+    source: "occt7-shim",
+    bodyId,
+    topology: [
+      { id: "face_native", kind: "face", bodyId, index: 1 },
+      { id: "edge_native", kind: "edge", bodyId, index: 1 },
+      { id: "vertex_native", kind: "vertex", bodyId, index: 1 },
+    ],
+    edgeVertices: [{ edgeId: "edge_native", start: [0, 0, 0], end: [1, 0, 0] }],
+    vertexPoints: [{ vertexId: "vertex_native", point: [0, 0, 0] }],
+    faceEdges: [{ faceId: "face_native", edgeIds: ["edge_native"] }],
+    cadaraBrep: {
+      kind: "cadaraBrep",
+      schemaVersion: "cadara-brep/v1alpha1",
+      source: { importedFormat: "step", sourceStored: false },
+      bodies: [{
+        bodyKey: bodyId,
+        label: "Alias body",
+        topology: {
+          vertices: [{ vertexKey: "vertex_native", point: [0, 0, 0] }],
+          edges: [{
+            edgeKey: "edge_native",
+            vertices: [0, 0],
+            curve: {
+              kind: "line",
+              origin: [0, 0, 0],
+              direction: [1, 0, 0],
+              parameterRange: [0, 1],
+            },
+          }],
+          coedges: [],
+          loops: [],
+          faces: [{
+            faceKey: "face_native",
+            loopIndices: [],
+            surface: { kind: "unsupported", typeName: "fixture" },
+            meshVertices: [],
+            triangles: [],
+          }],
+          shells: [],
+          solids: [],
+        },
+      }],
+    },
+    diagnostics: [],
+  } as unknown as OccNativeShimPayload;
+
+  const rewritten = rewriteNativeTopologyPayloadIds(bodyId, payload, {
+    faceIdsByNativeId: new Map([["face_native" as never, "face_public" as never]]),
+    edgeIdsByNativeId: new Map([["edge_native" as never, "edge_public" as never]]),
+    vertexIdsByNativeId: new Map([["vertex_native" as never, "vertex_public" as never]]),
+  });
+
+  expect(rewritten.topology.map((record) => record.id)).toEqual([
+    "face_public",
+    "edge_public",
+    "vertex_public",
+  ]);
+  expect(rewritten.cadaraBrep?.bodies[0]?.topology.faces[0]?.faceKey).toBe("face_public");
+  expect(rewritten.cadaraBrep?.bodies[0]?.topology.edges[0]?.edgeKey).toBe("edge_public");
+  expect(rewritten.cadaraBrep?.bodies[0]?.topology.vertices[0]?.vertexKey).toBe("vertex_public");
 });

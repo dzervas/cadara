@@ -766,8 +766,8 @@ test("document owner handles import provider lookup, diagnostic failures, and su
         return ok({
           revisionId: "rev_after_import",
           variableId: "variable_scale",
-          revisionState: "advanced" as const,
-          rebuildResult: "reused" as const,
+          revisionState: { kind: "accepted" as const },
+          rebuildResult: { kind: "rebuilt" as const },
           changedTargets: [],
           diagnostics: [],
         });
@@ -889,8 +889,8 @@ test("document owner returns delayed plain-object post-commit failures as import
         return ok({
           revisionId: "rev_after_import",
           variableId: "variable_scale",
-          revisionState: "advanced" as const,
-          rebuildResult: "reused" as const,
+          revisionState: { kind: "accepted" as const },
+          rebuildResult: { kind: "rebuilt" as const },
           changedTargets: [],
           diagnostics: [],
         });

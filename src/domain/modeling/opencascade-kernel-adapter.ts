@@ -128,8 +128,10 @@ import {
 } from "@/domain/modeling/feature-diagnostic-mapping";
 import {
   advanceTopologyToken,
+  buildNativeTopologyIdAliasesForTrackedBody,
   getOccDurableRefKey,
   resolveOccReference,
+  rewriteNativeTopologyPayloadIds,
   type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
 import {
@@ -3222,13 +3224,31 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       );
     }
 
-    const nativePayload = parseNativeShimPayloadJson(
+    const parsedNativePayload = parseNativeShimPayloadJson(
       builder(
         bodyOrResult.shape,
         bodyOrResult.bodyId,
         bodyOrResult.topologyToken,
       ),
     );
+    const canIndexTopology =
+      parsedNativePayload.topology.some(
+        (record) => record.bodyId === bodyOrResult.bodyId,
+      ) || parsedNativePayload.cadaraBrep?.bodies[0] !== undefined;
+    const aliases = canIndexTopology
+      ? buildNativeTopologyIdAliasesForTrackedBody(
+          state.oc,
+          bodyOrResult,
+          parsedNativePayload,
+        )
+      : bodyOrResult.nativeTopologyIdAliases;
+    const nativePayload = aliases
+      ? rewriteNativeTopologyPayloadIds(
+          bodyOrResult.bodyId,
+          parsedNativePayload,
+          aliases,
+        )
+      : parsedNativePayload;
     const payload = createOccNativeExactBrepPayloadFromShimPayload({
       revisionId: state.revisionId,
       target,

@@ -485,7 +485,7 @@ function recordSuccessfulCreateFeatureInputs(service: ModelingService) {
       Promise.resolve({
         revisionId: "rev_nested_feature" as RevisionId,
         featureId: "feature_nested" as const,
-        revisionState: "advanced" as const,
+        revisionState: { kind: "accepted" as const },
         rebuildResult: "reused" as const,
         changedTargets: [],
         diagnostics: [],
@@ -1091,7 +1091,7 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
     return {
       revisionId: currentRevisionId,
       featureId: `feature_segment_${revision}` as never,
-      revisionState: "advanced" as const,
+      revisionState: { kind: "accepted" as const },
       rebuildResult: "rebuilt" as const,
       changedTargets,
       diagnostics: [],
@@ -1302,7 +1302,7 @@ test("import apply accepts an authored imported two-distance chamfer", async () 
           contractVersion: CONTRACT_VERSION,
           revisionId: "rev_chamfer_next" as RevisionId,
           featureId: "feature_chamfer" as const,
-          revisionState: "advanced" as const,
+          revisionState: { kind: "accepted" as const },
           rebuildResult: "rebuilt" as const,
           changedTargets: [],
           diagnostics: [],
@@ -1370,7 +1370,7 @@ test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same pos
         Promise.resolve({
           revisionId: "rev_v2_next" as RevisionId,
           featureId: "feature_checkpoint" as const,
-          revisionState: "advanced" as const,
+          revisionState: { kind: "accepted" as const },
           rebuildResult: "rebuilt" as const,
           changedTargets: created.length === 1
             ? [{ kind: "body" as const, bodyId: "body_checkpoint_live" as const }]
@@ -1850,6 +1850,9 @@ test("applyImportPreparedActions materializes a deferred sketchEntity rotation a
         Promise.resolve({
           revisionId: `rev_axis_${revision}` as RevisionId,
           sketchId: "sketch_live_axis" as never,
+          revisionState: { kind: "accepted" as const },
+          rebuildResult: { kind: "rebuilt" as const },
+          changedTargets: [],
           diagnostics: [],
         }),
         (error) => createAppError({ code: "unknown", message: String(error) }),
@@ -1862,7 +1865,7 @@ test("applyImportPreparedActions materializes a deferred sketchEntity rotation a
         Promise.resolve({
           revisionId: `rev_axis_${revision}` as RevisionId,
           featureId: "feature_rotation" as never,
-          revisionState: "advanced" as const,
+          revisionState: { kind: "accepted" as const },
           rebuildResult: "rebuilt" as const,
           changedTargets: [],
           diagnostics: [],
@@ -3008,7 +3011,7 @@ test("a provider-promoted sketch-on-face applies with its topologyOf plane suppo
         Promise.resolve({
           revisionId: "rev_apply_1" as RevisionId,
           sketchId: "sketch_applied" as never,
-          revisionState: "advanced" as const,
+          revisionState: { kind: "accepted" as const },
           rebuildResult: "rebuilt" as const,
           changedTargets: [],
           diagnostics: [],
@@ -3040,4 +3043,79 @@ test("a provider-promoted sketch-on-face applies with its topologyOf plane suppo
     "The commit must receive a concrete rematched face support, not the deferred selector.",
   ).toMatchObject({ kind: "face", bodyId: "body_box" });
   expect(JSON.stringify(recordedCommits)).not.toContain("topologyOf");
+});
+
+test("applyImportPreparedActions rolls back prior operations when a modeling mutation is rejected", async () => {
+  let callCount = 0;
+  const rollbackCounts: number[] = [];
+  const service = {
+    createFeature() {
+      callCount += 1;
+      return ResultAsync.fromPromise(
+        Promise.resolve(callCount === 1
+          ? {
+              revisionId: "rev_rejected_1" as RevisionId,
+              featureId: "feature_first" as never,
+              revisionState: { kind: "accepted" as const },
+              rebuildResult: { kind: "rebuilt" as const },
+              changedTargets: [],
+              diagnostics: [],
+            }
+          : {
+              revisionId: "rev_rejected_1" as RevisionId,
+              featureId: "feature_rejected" as never,
+              revisionState: {
+                kind: "rejected" as const,
+                reasonCode: "advanced-feature-unsupported-kernel-case",
+              },
+              rebuildResult: { kind: "skipped" as const },
+              changedTargets: [],
+              diagnostics: [{
+                code: "advanced-feature-unsupported-kernel-case",
+                severity: "error" as const,
+                message: "Rejected imported feature.",
+                target: null,
+                detail: null,
+              }],
+            }),
+        (error) => createAppError({ code: "unknown", message: String(error) }),
+      );
+    },
+  } as unknown as ModelingService;
+
+  const request = {
+    documentId: "doc_workspace" as DocumentId,
+    baseRevisionId: "rev_rejected_0" as RevisionId,
+    definition: { kind: "fixture" },
+  } as never;
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: "rev_rejected_0" as RevisionId,
+    actions: {
+      createFeatures: [request, request],
+      orderedActions: [
+        { kind: "createFeature", index: 0 },
+        { kind: "createFeature", index: 1 },
+      ],
+    },
+    rollback: async (count) => {
+      rollbackCounts.push(count);
+    },
+  });
+
+  expect(rollbackCounts).toEqual([1]);
+  expect(result).toMatchObject({
+    revisionId: "rev_rejected_0",
+    createdEntityIds: { featureIds: [] },
+    appliedOperationCount: 1,
+    rolledBack: true,
+    rollbackAttempted: true,
+  });
+  expect(result.diagnostics).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      code: "advanced-feature-unsupported-kernel-case",
+      message: "Rejected imported feature.",
+    }),
+    expect.objectContaining({ code: "import-apply-failed" }),
+  ]));
 });
