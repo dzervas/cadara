@@ -95,7 +95,11 @@ import { encodeOnshapeTessellationAsBakedMeshBytes } from "@/domain/import/onsha
 import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-resolution-planner";
 import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
 import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
-import { resolveTopologyReferences } from "@/domain/import/onshape/topology-reference-resolver";
+import {
+  isUniquePrefixBodyQuery,
+  resolveTopologyReferences,
+  resolveUniquePrefixBody,
+} from "@/domain/import/onshape/topology-reference-resolver";
 import {
   composeCaptureFrameTransforms,
   computeCaptureFrameToWorld,
@@ -879,12 +883,14 @@ async function activateProbeBackedPlanning(input: {
       // bodies). So the probe prefix emits checkpoints only for whole-body
       // consumers, and those are the only consumers over a baked body that can
       // be recovered.
+      const uniquePrefixBodyEligible = isUniquePrefixBodyQuery(feature, slots);
       const consumesOnlyBodies =
-        queryRead.refs.length > 0 &&
-        queryRead.refs.every(
-          (query) =>
-            query.expectedKinds.length === 1 && query.expectedKinds[0] === "body",
-        );
+        uniquePrefixBodyEligible ||
+        (queryRead.refs.length > 0 &&
+          queryRead.refs.every(
+            (query) =>
+              query.expectedKinds.length === 1 && query.expectedKinds[0] === "body",
+          ));
       if (
         consumesBakedUpstreamBody &&
         prefixPlan.bakeStrategy.kind !== "segments"
@@ -949,17 +955,29 @@ async function activateProbeBackedPlanning(input: {
         captureFrameToWorld,
         parametricReframe,
       );
-      const resolution = resolveTopologyReferences({
-        consumerFeatureId: candidate.onshapeFeatureId,
-        queries: queryRead.refs,
-        queryDiagnostics: queryRead.diagnostics,
-        capturedReferences: input.read.studio.resolvedReferences,
-        rollback: topologyTimeline,
-        cadaraSignatures: prefix.signatures,
-        tolerance: { ...DEFAULT_MATCH_TOLERANCE, linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01) },
-        durableNamingAvailable: OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming,
-        captureFrameToWorld: topologyCaptureFrameToWorld ?? undefined,
-      });
+      const topologyTolerance = {
+        ...DEFAULT_MATCH_TOLERANCE,
+        linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01),
+      };
+      const resolution =
+        resolveUniquePrefixBody({
+          consumerFeatureId: candidate.onshapeFeatureId,
+          feature,
+          slots,
+          cadaraSignatures: prefix.signatures,
+          tolerance: topologyTolerance,
+        }) ??
+        resolveTopologyReferences({
+          consumerFeatureId: candidate.onshapeFeatureId,
+          queries: queryRead.refs,
+          queryDiagnostics: queryRead.diagnostics,
+          capturedReferences: input.read.studio.resolvedReferences,
+          rollback: topologyTimeline,
+          cadaraSignatures: prefix.signatures,
+          tolerance: topologyTolerance,
+          durableNamingAvailable: OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming,
+          captureFrameToWorld: topologyCaptureFrameToWorld ?? undefined,
+        });
       workingPlan = recomputePlanWithFeaturePlans(
         workingPlan,
         workingPlan.featurePlans.map((plan) => {
