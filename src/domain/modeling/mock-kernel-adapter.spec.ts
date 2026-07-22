@@ -2784,6 +2784,256 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBe(countersink.revisionId);
   }
 
+
+  function linearPatternDefinition(input: {
+    bodyIds: readonly BodyId[];
+    instanceCount: number;
+    direction?: { kind: "construction"; constructionId: ConstructionId } | { kind: "edge"; bodyId: BodyId; edgeId: string };
+    centered?: boolean;
+  }) {
+    return {
+      kind: "linearPattern" as const,
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        participants: [
+          {
+            role: "body" as const,
+            targets: input.bodyIds.map((bodyId) => ({ kind: "body" as const, bodyId })),
+          },
+          {
+            role: "direction" as const,
+            targets: [
+              input.direction ?? {
+                kind: "construction" as const,
+                constructionId: "construction_plane-yz" as ConstructionId,
+              },
+            ],
+          },
+        ],
+        options: {
+          instanceCount: input.instanceCount,
+          spacing: 10,
+          centered: input.centered ?? false,
+          oppositeDirection: false,
+        },
+      },
+    };
+  }
+
+  function circularPatternDefinition(input: {
+    bodyIds: readonly BodyId[];
+    instanceCount: number;
+    axis?: { kind: "construction"; constructionId: ConstructionId };
+  }) {
+    return {
+      kind: "circularPattern" as const,
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        participants: [
+          {
+            role: "body" as const,
+            targets: input.bodyIds.map((bodyId) => ({ kind: "body" as const, bodyId })),
+          },
+          {
+            role: "axis" as const,
+            targets: [
+              input.axis ?? {
+                kind: "construction" as const,
+                constructionId: "construction_plane-xy" as ConstructionId,
+              },
+            ],
+          },
+        ],
+        options: {
+          instanceCount: input.instanceCount,
+          angleDegrees: 360,
+          equalSpace: true,
+          oppositeDirection: false,
+        },
+      },
+    };
+  }
+
+  async function testPatternPreviewCommitAndValidationUseAdvancedParticipants() {
+    const linearAdapter = new MockKernelAdapter();
+    await addMockToolBody(linearAdapter, "body_part-2" as BodyId);
+    const linear = await linearAdapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_0001",
+      featureLabel: "Linear copy pattern",
+      definition: linearPatternDefinition({
+        bodyIds: ["body_part-1" as BodyId, "body_part-2" as BodyId],
+        instanceCount: 3,
+      }),
+    });
+    const linearSnapshot = await linearAdapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const linearCapabilities = linearSnapshot.snapshot.document.capabilities;
+    const expectedLinearIds = [
+      "body_feature_linearPattern-1_linear_seed1_instance1",
+      "body_feature_linearPattern-1_linear_seed1_instance2",
+      "body_feature_linearPattern-1_linear_seed2_instance1",
+      "body_feature_linearPattern-1_linear_seed2_instance2",
+    ];
+    expect(linearCapabilities.supportedFeatureKinds).toEqual(
+      expect.arrayContaining(["linearPattern", "circularPattern"]),
+    );
+    expect(linearCapabilities.previewableFeatureKinds).toEqual(
+      expect.arrayContaining(["linearPattern", "circularPattern"]),
+    );
+
+    expect(linear.revisionState.kind).toBe("accepted");
+    expect(linear.changedTargets).toEqual(
+      expectedLinearIds.map((bodyId) => ({ kind: "body", bodyId })),
+    );
+    expect(
+      linearSnapshot.snapshot.document.bodies
+        .filter((body) => body.ownerFeatureId === linear.featureId)
+        .map((body) => body.bodyId),
+      "Linear pattern outputs should be ordered seed-major, then instance ordinal.",
+    ).toEqual(expectedLinearIds);
+
+    const circularAdapter = new MockKernelAdapter();
+    const circular = await circularAdapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_0001",
+      featureLabel: "Circular copy pattern",
+      definition: circularPatternDefinition({
+        bodyIds: ["body_part-1" as BodyId],
+        instanceCount: 4,
+      }),
+    });
+    expect(circular.revisionState.kind).toBe("accepted");
+    expect(circular.changedTargets.map((target) => target.kind === "body" && target.bodyId)).toEqual([
+      "body_feature_circularPattern-1_circular_seed1_instance1",
+      "body_feature_circularPattern-1_circular_seed1_instance2",
+      "body_feature_circularPattern-1_circular_seed1_instance3",
+    ]);
+
+    const invalidOptions = await new MockKernelAdapter().createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_0001",
+      definition: linearPatternDefinition({
+        bodyIds: ["body_part-1" as BodyId],
+        instanceCount: 1,
+      }),
+    });
+    const invalidBody = await new MockKernelAdapter().createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_0001",
+      definition: circularPatternDefinition({
+        bodyIds: ["body_missing" as BodyId],
+        instanceCount: 3,
+      }),
+    });
+    const invalidDirection = await new MockKernelAdapter().createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_0001",
+      definition: linearPatternDefinition({
+        bodyIds: ["body_part-1" as BodyId],
+        instanceCount: 3,
+        direction: {
+          kind: "edge",
+          bodyId: "body_part-1" as BodyId,
+          edgeId: "edge_missing",
+        },
+      }),
+    });
+
+    expect(invalidOptions.revisionState.kind).toBe("rejected");
+    expect(invalidBody.revisionState.kind).toBe("rejected");
+    expect(invalidDirection.revisionState.kind).toBe("rejected");
+  }
+
+  async function testPatternSuppressionAndRebuildRecreateOnlyOwnedOutputs() {
+    const adapter = new MockKernelAdapter();
+    const created = await adapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: "rev_0001",
+      featureLabel: "Rebuildable linear pattern",
+      definition: linearPatternDefinition({
+        bodyIds: ["body_part-1" as BodyId],
+        instanceCount: 3,
+      }),
+    });
+    const initialOutputIds = created.changedTargets.flatMap((target) =>
+      target.kind === "body" ? [target.bodyId] : [],
+    );
+    const suppressed = await adapter.setFeatureSuppression({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: created.revisionId,
+      featureId: created.featureId,
+      suppressed: true,
+    });
+    const afterSuppress = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+
+    expect(suppressed.revisionState.kind).toBe("accepted");
+    expect(
+      afterSuppress.snapshot.document.bodies.some((body) => initialOutputIds.includes(body.bodyId)),
+      "Suppressing a pattern should remove only its generated body records.",
+    ).toBeFalsy();
+    expect(afterSuppress.snapshot.document.bodies.some((body) => body.bodyId === "body_part-1")).toBeTruthy();
+
+    const unsuppressed = await adapter.setFeatureSuppression({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: suppressed.revisionId,
+      featureId: created.featureId,
+      suppressed: false,
+    });
+    expect(
+      unsuppressed.changedTargets.filter((target) => target.kind === "body").map((target) => target.bodyId),
+      "Unsuppress should recreate deterministic body ids for the same pattern definition.",
+    ).toEqual(initialOutputIds);
+
+    const updated = await adapter.updateFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: unsuppressed.revisionId,
+      featureId: created.featureId,
+      definition: linearPatternDefinition({
+        bodyIds: ["body_part-1" as BodyId],
+        instanceCount: 4,
+      }),
+    });
+    const afterUpdate = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const updatedOutputIds = updated.changedTargets.flatMap((target) =>
+      target.kind === "body" ? [target.bodyId] : [],
+    );
+
+    expect(updatedOutputIds).toEqual([
+      ...initialOutputIds,
+      "body_feature_linearPattern-1_linear_seed1_instance3",
+    ]);
+    expect(
+      afterUpdate.snapshot.document.bodies
+        .filter((body) => body.ownerFeatureId === created.featureId)
+        .map((body) => body.bodyId),
+      "Pattern rebuild should leave no stale generated bodies cross-associated to the feature.",
+    ).toEqual(updatedOutputIds);
+    expect(
+      afterUpdate.snapshot.document.render.records.every(
+        (record) => record.ownerBodyId === null || afterUpdate.snapshot.document.bodies.some((body) => body.bodyId === record.ownerBodyId),
+      ),
+      "Pattern rebuild should not leave orphan render records for removed generated bodies.",
+    ).toBeTruthy();
+  }
+
   async function testSnapshotRenderablesExposeSemanticBindings() {
     const adapter = new MockKernelAdapter();
     const snapshot = await adapter.getDocumentSnapshot({
@@ -3593,6 +3843,8 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   await testMirrorPreviewCommitAndUnsupportedCasesUseAdvancedParticipants();
   await testTransformPreviewCommitAndValidationUseAdvancedParticipants();
   await testHolePreviewCommitAndValidationUseAdvancedParticipants();
+  await testPatternPreviewCommitAndValidationUseAdvancedParticipants();
+  await testPatternSuppressionAndRebuildRecreateOnlyOwnedOutputs();
   await testSnapshotRenderablesExposeSemanticBindings();
   await testConstructionPlanesExposeFilledRenderSurfaces();
   testResolvePickTargetUsesKernelPriority();

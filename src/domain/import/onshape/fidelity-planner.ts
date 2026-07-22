@@ -47,9 +47,11 @@ import {
 import {
   booleanBodiesFeatureTranslator,
   chamferFeatureTranslator,
+  circularPatternFeatureTranslator,
   deleteBodiesFeatureTranslator,
   filletFeatureTranslator,
   holeFeatureTranslator,
+  linearPatternFeatureTranslator,
   mirrorFeatureTranslator,
   shellFeatureTranslator,
   splitFeatureTranslator,
@@ -75,6 +77,8 @@ export const onshapeFeatureTranslatorRegistry = createOnshapeFeatureTranslatorRe
     shellFeatureTranslator,
     holeFeatureTranslator,
     mirrorFeatureTranslator,
+    linearPatternFeatureTranslator,
+    circularPatternFeatureTranslator,
     transformFeatureTranslator,
     splitFeatureTranslator,
   ],
@@ -173,6 +177,18 @@ export type PlanReasonCode =
   | "annotation-meta-unsupported"
   | "part-operation-unsupported"
   | "pattern-unsupported"
+  | "pattern-type-unsupported"
+  | "pattern-operation-unsupported"
+  | "pattern-seed-unresolved"
+  | "pattern-direction-unresolved"
+  | "pattern-axis-unresolved"
+  | "pattern-count-unreadable"
+  | "pattern-spacing-unreadable"
+  | "pattern-angle-unreadable"
+  | "pattern-second-direction-unsupported"
+  | "pattern-centered-unsupported"
+  | "pattern-skipping-unsupported"
+  | "pattern-feature-seed-unsupported"
   | "tolerance-unsupported";
 
 export type PlannedTarget =

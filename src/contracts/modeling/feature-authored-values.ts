@@ -9,6 +9,8 @@ import {
 import {
   getFeatureValueKindDescriptor,
   LOFT_ADVANCED_OPTION_DESCRIPTORS,
+  CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
+  LINEAR_PATTERN_OPTION_DESCRIPTORS,
   SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   type AdvancedFeatureOptionDescriptor,
   type AdvancedFeatureScalarOptionDescriptor,
@@ -317,6 +319,16 @@ export function getFeatureValueExpressionFields(
           LOFT_ADVANCED_OPTION_DESCRIPTORS,
         ),
       ];
+    case "linearPattern":
+      return getAdvancedFeatureOptionExpressionFields(
+        ["parameters", "options"],
+        LINEAR_PATTERN_OPTION_DESCRIPTORS,
+      );
+    case "circularPattern":
+      return getAdvancedFeatureOptionExpressionFields(
+        ["parameters", "options"],
+        CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
+      );
     case "plane":
     case "split":
     case "deleteSolid":

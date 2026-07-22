@@ -1358,6 +1358,18 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "annotation-meta-unsupported": "annotation or metadata is not modeled",
   "part-operation-unsupported": "this part operation is outside the importer scope",
   "pattern-unsupported": "this pattern family is outside the importer scope",
+  "pattern-type-unsupported": "this pattern type is not supported parametrically",
+  "pattern-operation-unsupported": "this pattern boolean operation is not supported parametrically",
+  "pattern-seed-unresolved": "pattern seed bodies could not be resolved",
+  "pattern-direction-unresolved": "linear pattern direction could not be resolved",
+  "pattern-axis-unresolved": "circular pattern axis could not be resolved",
+  "pattern-count-unreadable": "pattern instance count could not be read",
+  "pattern-spacing-unreadable": "linear pattern spacing could not be read",
+  "pattern-angle-unreadable": "circular pattern angle could not be read",
+  "pattern-second-direction-unsupported": "linear pattern second direction is not supported",
+  "pattern-centered-unsupported": "centered body patterns are not supported",
+  "pattern-skipping-unsupported": "skipped pattern instances are not supported",
+  "pattern-feature-seed-unsupported": "feature-seed patterns are not supported parametrically",
   "tolerance-unsupported": "tolerance metadata is not modeled",
 };
 

@@ -28,6 +28,10 @@ import { executeShellFeature } from "@/domain/modeling/occ/features/shell";
 import { executePlaneFeature } from "@/domain/modeling/occ/features/plane";
 import { executeBakedBodyFeature } from "@/domain/modeling/occ/features/baked-body";
 import { executeHoleFeature } from "@/domain/modeling/occ/features/hole";
+import {
+  executeCircularPatternFeature,
+  executeLinearPatternFeature,
+} from "@/domain/modeling/occ/features/pattern";
 
 // Re-export public API
 export type {
@@ -141,6 +145,18 @@ export function executeOccFeature(
         context,
         ownerFeatureId,
         definition as AdvancedSolidFeatureDefinition & { kind: "transform" },
+      );
+    case "linearPattern":
+      return executeLinearPatternFeature(
+        context,
+        ownerFeatureId,
+        definition as AdvancedSolidFeatureDefinition & { kind: "linearPattern" },
+      );
+    case "circularPattern":
+      return executeCircularPatternFeature(
+        context,
+        ownerFeatureId,
+        definition as AdvancedSolidFeatureDefinition & { kind: "circularPattern" },
       );
     default:
       throw new Error(

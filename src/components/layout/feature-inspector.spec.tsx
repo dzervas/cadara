@@ -151,6 +151,40 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
     "Feature inspector should render numeric direction flip buttons for fields that support directional magnitudes.",
   ).toBeTruthy();
 
+  const linearPatternMarkup = renderInspector({
+    activeEditSession: patchFeatureEditSession(
+      createFeatureEditSession({
+        featureType: "linearPattern",
+        selectedTarget: { kind: "body", bodyId: "body_pattern" },
+      }),
+      {
+        directionTarget: {
+          kind: "edge",
+          bodyId: "body_pattern",
+          edgeId: "edge_direction",
+        },
+      },
+    ),
+  });
+
+  expect(
+    linearPatternMarkup.includes("Seed bodies") &&
+      linearPatternMarkup.includes("Linear direction") &&
+      linearPatternMarkup.includes("Instance count") &&
+      linearPatternMarkup.includes("Spacing") &&
+      linearPatternMarkup.includes("Opposite direction"),
+    "Feature inspector should render pattern participant and option fields from the authoring schema.",
+  ).toBeTruthy();
+  expect(
+    linearPatternMarkup.includes("Required; 1 selected; expected 1+.") &&
+      linearPatternMarkup.includes("Required; 1 selected; expected 1-1."),
+    "Feature inspector should render advanced participant metadata for pattern bodies and direction references.",
+  ).toBeTruthy();
+  expect(
+    linearPatternMarkup.includes("Centered"),
+    "Linear pattern should not expose centered because the executor rejects centered=true.",
+  ).toBeFalsy();
+
   const shellSchema = getFeatureEditorFormSchema(baseShellSession);
   const activeShellSchema = getFeatureEditorFormSchema(
     patchFeatureEditSession(baseShellSession, {

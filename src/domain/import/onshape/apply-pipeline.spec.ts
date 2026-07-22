@@ -18,9 +18,10 @@ import {
   CONTRACT_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
-  } from "@/contracts/shared/versioning";
+} from "@/contracts/shared/versioning";
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { assembleFixtureCaptureBundle } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { FIXTURE_PART_STUDIO_ID } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
@@ -30,6 +31,7 @@ import {
   makeWaveBHoleCaptureBundle,
   makeWaveBSegmentedApplyCaptureBundle,
 } from "@/domain/import/onshape/wave-b-capture-fixtures";
+import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
 import {
   applyImportPreparedActions,
   createImportCapabilities,
@@ -829,6 +831,117 @@ test("Onshape hole fixture applies through the real OCC import service with mate
     ),
     JSON.stringify(countersink.signatures),
   ).toBe(true);
+});
+
+
+test("Onshape pattern fixture applies through provider and mock kernel without unresolved refs", async () => {
+  const { adapter, service } = createTestModelingService();
+  const before = await adapter.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace",
+  });
+  const capabilities = createImportCapabilities(service, before.snapshot, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        const signatures = [
+          { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [0, 0, 0] as [number, number, number], high: [2, 2, 2] as [number, number, number] }, centroid: [1, 1, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_linear" as never } },
+          { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [10, -0.992709, 0] as [number, number, number], high: [12, 0.992709, 2] as [number, number, number] }, centroid: [11, 0, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_circular" as never } },
+        ];
+        return { steps: (input.actions.orderedActions ?? []).map(() => ({ status: "rebuilt" as const, signatures })) };
+      },
+    },
+  });
+  const source = sourceFromBundle(makeWaveWPatternCaptureBundle());
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const actions = await prepareImportActions({
+    provider: onshapeImportProvider,
+    source,
+    review,
+    selections: { studioElementId: "wave-w-pattern-linear", demotedFeatureIds: [] },
+    capabilities,
+  });
+  const preparedPattern = actions.createFeatures?.find((request) => request.definition.kind === "linearPattern");
+  expect(JSON.stringify(preparedPattern)).toContain("topologyOf");
+  expect(JSON.stringify(preparedPattern)).toContain("sketchIdOf");
+  if (preparedPattern?.definition.kind === "linearPattern") {
+    preparedPattern.definition.parameters.participants = preparedPattern.definition.parameters.participants.map((participant) =>
+      participant.role === "body"
+        ? { ...participant, targets: [{ kind: "body" as const, bodyId: "body_part-1" as BodyId }] }
+        : participant,
+    );
+    preparedPattern.topologyFallback = undefined;
+  }
+
+  const forwarded = recordCreateFeatureInputs(service);
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: before.snapshot.document.revisionId,
+    actions,
+  });
+  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
+  const forwardedPattern = forwarded.find((request) => request.definition.kind === "linearPattern");
+  expect(forwardedPattern, JSON.stringify(forwarded)).toBeDefined();
+  const forwardedJson = JSON.stringify(forwardedPattern);
+  expect(forwardedJson).not.toContain("topologyOf");
+  expect(forwardedJson).not.toContain("sketchIdOf");
+  expect(forwardedJson).not.toContain("sketchEntityFromFeature");
+  expect(result.createdEntityIds.featureIds.length).toBeGreaterThan(0);
+});
+
+test("Onshape circular pattern fixture applies through the real OCC import service in four quadrants", async () => {
+  const oc = await loadRealOccForImportTest();
+  const { service } = createRealOccModelingService(oc);
+  const before = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, before, {
+    history: createKernelHistoryProbeSession({
+      createService: () => createRealOccModelingService(oc).service,
+    }),
+  });
+  const source = sourceFromBundle(makeWaveWPatternCaptureBundle());
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const circularPlan = review.providerReview.studios
+    .find((studio) => studio.elementId === "wave-w-pattern-circular")
+    ?.featurePlans.find((plan) => plan.featureType === "circularPattern");
+  expect(circularPlan, JSON.stringify(review.providerReview.studios)).toMatchObject({
+    tier: "parametric",
+    reasonCodes: [],
+  });
+  const actions = await prepareImportActions({
+    provider: onshapeImportProvider,
+    source,
+    review,
+    selections: { studioElementId: "wave-w-pattern-circular", demotedFeatureIds: [] },
+    capabilities,
+  });
+  const forwarded = recordCreateFeatureInputs(service);
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: before.document.revisionId,
+    actions,
+  });
+  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
+  const forwardedPattern = forwarded.find((request) => request.definition.kind === "circularPattern");
+  expect(forwardedPattern, JSON.stringify(forwarded)).toBeDefined();
+  const forwardedJson = JSON.stringify(forwardedPattern);
+  expect(forwardedJson).not.toContain("topologyOf");
+  expect(forwardedJson).not.toContain("sketchIdOf");
+
+  const after = await service.getCurrentDocumentSnapshot();
+  expect(after.document.bodies.length).toBe(4);
+  const signatureResult = await deriveLiveBodySignatures({ snapshot: after, service });
+  expect(signatureResult.status, JSON.stringify(signatureResult.diagnostics)).toBe("available");
+  if (signatureResult.status !== "available") throw new Error("Expected live OCC topology signatures.");
+  const bodyBoxes = signatureResult.signatures
+    .filter((signature) => signature.entityClass === "body" && signature.boundingBox)
+    .map((signature) => signature.boundingBox!);
+  const centers = bodyBoxes.map((box) => [
+    (box.low[0] + box.high[0]) / 2,
+    (box.low[1] + box.high[1]) / 2,
+  ] as const);
+  expect(centers.some(([x, y]) => x > 9 && Math.abs(y) < 2), JSON.stringify(bodyBoxes)).toBe(true);
+  expect(centers.some(([x, y]) => y > 9 && Math.abs(x) < 2), JSON.stringify(bodyBoxes)).toBe(true);
+  expect(centers.some(([x, y]) => x < -9 && Math.abs(y) < 2), JSON.stringify(bodyBoxes)).toBe(true);
+  expect(centers.some(([x, y]) => y < -9 && Math.abs(x) < 2), JSON.stringify(bodyBoxes)).toBe(true);
 });
 
 test("segmented provider actions apply two checkpoints with rematch, closure, fallback, and neutral continuation", async () => {
@@ -1851,6 +1964,278 @@ test("applyImportPreparedActions resolves bodyOf scope for a sketch-extrude-cut 
       typeof createFeatureRequests[1].definition.parameters.booleanScope.bodyId === "string",
     "The deferred bodyOf scope should be materialized to the first extrude's created body id before the cut applies.",
   ).toBeTruthy();
+});
+
+
+test("generic prepared pattern actions materialize constructionOf and sketchEntity refs", async () => {
+  const adapter = new MockKernelAdapter({
+    solverAdapter: createRevisionAgnosticRealSolver(),
+  });
+  const service = createModelingService(adapter, { currentDocumentId: "doc_workspace" });
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const createFeatureRequests = recordCreateFeatureInputs(service);
+  const axisSketchAction = {
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace" as DocumentId,
+    baseRevisionId: "rev_ignored" as RevisionId,
+    solverCorrelation: {
+      requestId: "request_import_axis_sketch",
+      projectionRequestId: "request_import_axis_sketch_project",
+      validationRequestId: "request_import_axis_sketch_validate",
+      solveRequestId: "request_import_axis_sketch_solve",
+      regionRequestId: "request_import_axis_sketch_regions",
+    },
+    sketchId: null,
+    sketchLabel: "Imported pattern axis sketch",
+    plane: {
+      support: { kind: "constructionOf" as const, actionIndex: 0 },
+      key: null,
+      frame: {
+        origin: [0, 0, 0] as const,
+        xAxis: [1, 0, 0] as const,
+        yAxis: [0, 1, 0] as const,
+        normal: [0, 0, 1] as const,
+        linearUnit: "documentLength" as const,
+        handedness: "rightHanded" as const,
+      },
+    },
+    definition: {
+      schemaVersion: "sketch-definition/v1alpha1" as const,
+      referenceIds: [],
+      references: [],
+      pointIds: ["sketch_point_import_axis_start", "sketch_point_import_axis_end"],
+      points: [
+        {
+          pointId: "sketch_point_import_axis_start" as never,
+          label: "Axis start",
+          target: { kind: "sketchPoint" as const, sketchId: "sketch_import_axis" as never, pointId: "sketch_point_import_axis_start" as never },
+          position: [0, 0] as const,
+          isConstruction: true,
+        },
+        {
+          pointId: "sketch_point_import_axis_end" as never,
+          label: "Axis end",
+          target: { kind: "sketchPoint" as const, sketchId: "sketch_import_axis" as never, pointId: "sketch_point_import_axis_end" as never },
+          position: [10, 0] as const,
+          isConstruction: true,
+        },
+      ],
+      entityIds: ["sketch_entity_import_axis_line"],
+      entities: [
+        {
+          kind: "lineSegment" as const,
+          entityId: "sketch_entity_import_axis_line" as never,
+          label: "Pattern axis",
+          target: { kind: "sketchEntity" as const, sketchId: "sketch_import_axis" as never, entityId: "sketch_entity_import_axis_line" as never },
+          isConstruction: true,
+          startPointId: "sketch_point_import_axis_start" as never,
+          endPointId: "sketch_point_import_axis_end" as never,
+        },
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    },
+  };
+  const downstreamPlane = {
+    ...explicitFramePlaneAction(),
+    featureLabel: "Downstream neutral plane",
+  };
+  const actions: ImportPreparedActions = {
+    commitSketches: [axisSketchAction],
+    createFeatures: [
+      explicitFramePlaneAction() as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Imported circular pattern",
+        definition: {
+          kind: "circularPattern",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            participants: [
+              { role: "body", targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }] },
+              {
+                role: "axis",
+                targets: [
+                  {
+                    kind: "sketchEntity",
+                    sketchId: { kind: "sketchIdOf", actionIndex: 1 },
+                    entityId: "sketch_entity_import_axis_line" as never,
+                  },
+                ],
+              },
+            ],
+            options: {
+              instanceCount: createLiteralAuthoredValue(3),
+              angleDegrees: createLiteralAuthoredValue(180),
+              equalSpace: createLiteralAuthoredValue(true),
+              oppositeDirection: createLiteralAuthoredValue(false),
+            },
+          },
+        },
+      },
+      downstreamPlane as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+    ],
+    orderedActions: [
+      { kind: "createFeature", index: 0 },
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 1 },
+      { kind: "createFeature", index: 2 },
+    ],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+  const after = await service.getCurrentDocumentSnapshot();
+  const patternRequest = createFeatureRequests[1];
+
+  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error")).toBeTruthy();
+  expect(result.createdEntityIds.featureIds.length).toBe(3);
+  expect(
+    after.document.sketches.some(
+      (sketch) => sketch.label === "Imported pattern axis sketch" && sketch.plane.support.kind === "construction",
+    ),
+    "Deferred constructionOf should materialize as the committed sketch plane support.",
+  ).toBeTruthy();
+  expect(
+    patternRequest?.definition.kind === "circularPattern" &&
+      patternRequest.definition.parameters.participants[1]?.targets[0]?.kind === "sketchEntity" &&
+      typeof patternRequest.definition.parameters.participants[1].targets[0].sketchId === "string",
+    "Deferred sketchIdOf should materialize inside advanced sketchEntity participants before pattern create.",
+  ).toBeTruthy();
+  expect(
+    after.document.features.some((feature) => feature.label === "Downstream neutral plane"),
+    "A downstream neutral action should continue after the materialized pattern.",
+  ).toBeTruthy();
+});
+
+test("generic prepared pattern bodyOf outputs reject multi-body consumers", async () => {
+  const adapter = new MockKernelAdapter();
+  const service = createModelingService(adapter, { currentDocumentId: "doc_workspace" });
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const profile = snapshot.document.sketches[0]?.sketch.regions[0]?.target;
+  if (!profile) throw new Error("Mock snapshot must expose a seed region.");
+  const actions: ImportPreparedActions = {
+    createFeatures: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Multi-output linear pattern",
+        definition: {
+          kind: "linearPattern",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            participants: [
+              { role: "body", targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }] },
+              { role: "direction", targets: [{ kind: "construction", constructionId: "construction_plane-yz" as never }] },
+            ],
+            options: { instanceCount: createLiteralAuthoredValue(3), spacing: createLiteralAuthoredValue(10), centered: createLiteralAuthoredValue(false), oppositeDirection: createLiteralAuthoredValue(false) },
+          },
+        },
+      },
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Invalid bodyOf cut",
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          parameters: {
+            profiles: [profile],
+            startExtent: { kind: "profilePlane" },
+            extent: { mode: "oneSide", end: { kind: "blind", direction: "positive", distance: 1 } },
+            operation: "cut",
+            booleanScope: { kind: "targetBody", bodyId: { kind: "bodyOf", actionIndex: 0 } },
+          },
+        },
+      } as never,
+    ],
+    orderedActions: [
+      { kind: "createFeature", index: 0 },
+      { kind: "createFeature", index: 1 },
+    ],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+
+  expect(
+    result.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.severity === "error" &&
+        diagnostic.message.includes("produced 2 body ids, expected exactly one"),
+    ),
+    "A bodyOf consumer should reject multi-output pattern producers through the existing apply policy.",
+  ).toBeTruthy();
+});
+
+test("generic prepared topologyOf participants can seed authored body patterns", async () => {
+  const adapter = new MockKernelAdapter();
+  const service = createModelingService(adapter, { currentDocumentId: "doc_workspace" });
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const actions: ImportPreparedActions = {
+    createFeatures: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Topology rematched linear pattern",
+        definition: {
+          kind: "linearPattern",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            participants: [
+              {
+                role: "body",
+                targets: [
+                  {
+                    kind: "topologyOf",
+                    expectedKind: "body",
+                    capturedSignature: {
+                      entityClass: "body",
+                      geometryType: "solid",
+                      boundingBox: { low: [-4, -3, 12], high: [4, 3, 12] },
+                      centroid: [0, 0, 12],
+                      reference: { kind: "body", bodyId: "body_part-1" as BodyId },
+                    },
+                    tolerance: { linear: 1e-6, angularRadians: 1e-6, relative: 1e-6, ambiguityMargin: 1e-6 },
+                    source: {
+                      consumerFeatureId: "pattern_topology_seed",
+                      parameterId: "body",
+                      deterministicId: "seed_body",
+                    },
+                  },
+                ],
+              },
+              { role: "direction", targets: [{ kind: "construction", constructionId: "construction_plane-yz" as never }] },
+            ],
+            options: { instanceCount: createLiteralAuthoredValue(2), spacing: createLiteralAuthoredValue(10), centered: createLiteralAuthoredValue(false), oppositeDirection: createLiteralAuthoredValue(false) },
+          },
+        },
+      },
+    ],
+    orderedActions: [{ kind: "createFeature", index: 0 }],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+
+  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error")).toBeTruthy();
+  expect(result.createdEntityIds.featureIds.length).toBe(1);
 });
 
 test("applyImportPreparedActions forwards whole-solid shell offsets to mock create", async () => {

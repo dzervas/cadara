@@ -278,6 +278,29 @@ export interface TransformFeatureParameterDraft {
   angle: MaybeAuthoredValue<number>;
 }
 
+export interface LinearPatternFeatureParameterDraft {
+  bodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
+  directionTarget: Extract<
+    PrimitiveRef,
+    { kind: "construction" | "face" | "edge" | "sketchEntity" }
+  > | null;
+  instanceCount: MaybeAuthoredValue<number>;
+  spacing: MaybeAuthoredValue<number>;
+  oppositeDirection: MaybeAuthoredValue<boolean>;
+}
+
+export interface CircularPatternFeatureParameterDraft {
+  bodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
+  axisTarget: Extract<
+    PrimitiveRef,
+    { kind: "construction" | "face" | "edge" | "sketchEntity" }
+  > | null;
+  instanceCount: MaybeAuthoredValue<number>;
+  angleDegrees: MaybeAuthoredValue<number>;
+  equalSpace: MaybeAuthoredValue<boolean>;
+  oppositeDirection: MaybeAuthoredValue<boolean>;
+}
+
 export interface FeatureDraftByKind {
   extrude: ExtrudeFeatureParameterDraft;
   revolve: RevolveFeatureParameterDraft;
@@ -294,6 +317,8 @@ export interface FeatureDraftByKind {
   deleteSolid: DeleteSolidFeatureParameterDraft;
   mirror: MirrorFeatureParameterDraft;
   transform: TransformFeatureParameterDraft;
+  linearPattern: LinearPatternFeatureParameterDraft;
+  circularPattern: CircularPatternFeatureParameterDraft;
 }
 
 export interface FeatureParametersByKind {
@@ -312,6 +337,8 @@ export interface FeatureParametersByKind {
   deleteSolid: AdvancedSolidFeatureParameters;
   mirror: AdvancedSolidFeatureParameters;
   transform: AdvancedSolidFeatureParameters;
+  linearPattern: AdvancedSolidFeatureParameters;
+  circularPattern: AdvancedSolidFeatureParameters;
 }
 
 export interface FeatureVersionByKind {
@@ -330,6 +357,8 @@ export interface FeatureVersionByKind {
   deleteSolid: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
   mirror: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
   transform: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
+  linearPattern: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
+  circularPattern: typeof ADVANCED_SOLID_FEATURE_SCHEMA_VERSION;
 }
 
 export type FeatureDefinitionByKind<TKind extends AuthoredFeatureKind> =
@@ -344,6 +373,8 @@ export type FeatureDefinitionByKind<TKind extends AuthoredFeatureKind> =
     | "deleteSolid"
     | "mirror"
     | "transform"
+    | "linearPattern"
+    | "circularPattern"
     ? AdvancedSolidFeatureDefinition & { kind: TKind }
     : Extract<FeatureDefinition, { kind: TKind }>;
 
@@ -398,6 +429,10 @@ export type MirrorFeatureEditSessionState =
   FeatureEditSessionStateForKind<"mirror">;
 export type TransformFeatureEditSessionState =
   FeatureEditSessionStateForKind<"transform">;
+export type LinearPatternFeatureEditSessionState =
+  FeatureEditSessionStateForKind<"linearPattern">;
+export type CircularPatternFeatureEditSessionState =
+  FeatureEditSessionStateForKind<"circularPattern">;
 
 export type FeatureEditSessionState =
   | ExtrudeFeatureEditSessionState
@@ -414,7 +449,9 @@ export type FeatureEditSessionState =
   | SplitFeatureEditSessionState
   | DeleteSolidFeatureEditSessionState
   | MirrorFeatureEditSessionState
-  | TransformFeatureEditSessionState;
+  | TransformFeatureEditSessionState
+  | LinearPatternFeatureEditSessionState
+  | CircularPatternFeatureEditSessionState;
 
 export type FeatureDraftPatch = Record<string, unknown>;
 
@@ -423,7 +460,7 @@ export interface FeatureAuthoringMetadata<
 > extends Omit<ToolMetadataBase<TKind>, "id"> {
   kind: TKind;
   toolId: TKind;
-  groupId: "features" | "transforms";
+  groupId: "features" | "transforms" | "patterns";
 }
 
 export interface CreateFeatureDraftInput {

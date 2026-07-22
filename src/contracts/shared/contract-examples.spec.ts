@@ -31,8 +31,10 @@ import {
   chamferAdvancedFeatureExample,
   holeAdvancedFeatureExample,
   deleteSolidAdvancedFeatureExample,
+  circularPatternAdvancedFeatureExample,
   loftAdvancedFeatureExample,
   mirrorAdvancedFeatureExample,
+  linearPatternAdvancedFeatureExample,
   splitAdvancedFeatureExample,
   sweepAdvancedFeatureExample,
   thickenAdvancedFeatureExample,
@@ -871,6 +873,26 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
       transformAdvancedFeatureExample.parameters.options?.distance,
       "Transform example must preserve a typed distance option.",
     ).toBe(5);
+  expect(
+    linearPatternAdvancedFeatureExample.parameters.participants.some(
+      (participant) => participant.role === "direction",
+    ),
+    "Linear pattern example must preserve an explicit direction participant.",
+  ).toBeTruthy();
+  expect(
+    linearPatternAdvancedFeatureExample.parameters.options?.centered,
+    "Linear pattern example must document the executable centered=false default.",
+  ).toEqual({ source: "literal", value: false });
+  expect(
+    circularPatternAdvancedFeatureExample.parameters.participants.some(
+      (participant) => participant.role === "axis",
+    ),
+    "Circular pattern example must preserve an explicit axis participant.",
+  ).toBeTruthy();
+  expect(
+    circularPatternAdvancedFeatureExample.parameters.options?.equalSpace,
+    "Circular pattern example must preserve explicit equal-space mode.",
+  ).toEqual({ source: "literal", value: true });
   }
 
   testSolveSketchExampleIsFullyTyped();

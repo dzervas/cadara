@@ -173,16 +173,23 @@ function resolveSketchLineAxisSource(axisQuery: string, solvedSketch: OnshapeSol
   return lines.length === 1 ? lines[0]! : null;
 }
 
-function translateRotationAxis(
+function translateSketchLineReference(
   context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+  parameterId: string,
 ): PlannedSketchEntityFromFeatureRef | null {
-  const axisQuery = queryText(context.feature, "transformAxis");
+  const axisQuery = queryText(context.feature, parameterId);
   if (!axisQuery) return null;
 
   const solvedSketches = context.read.solvedSketchesByFeatureId;
   if (!solvedSketches) return null;
+  const consumerIndex = context.read.features.findIndex(
+    (feature) => feature.featureId === context.feature.featureId,
+  );
   const sketchCandidates = [...solvedSketches.entries()].filter(
-    ([featureId]) => axisQuery.includes(featureId),
+    ([featureId]) => {
+      const featureIndex = context.read.features.findIndex((feature) => feature.featureId === featureId);
+      return axisQuery.includes(featureId) && (featureIndex < 0 || consumerIndex < 0 || featureIndex < consumerIndex);
+    },
   );
   if (sketchCandidates.length !== 1) return null;
 
@@ -206,6 +213,12 @@ function translateRotationAxis(
   return axisEntity
     ? { kind: "sketchEntityFromFeature", sketchFeatureId, entityId: axisEntity.entityId }
     : null;
+}
+
+function translateRotationAxis(
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+): PlannedSketchEntityFromFeatureRef | null {
+  return translateSketchLineReference(context, "transformAxis");
 }
 
 function slot(key: string, parameterId: string, role: TopologyQuerySlot["role"], min = 1, max: number | null = null, expectedKinds: TopologyQuerySlot["expectedKinds"] = ["body"]): TopologyQuerySlot {
@@ -339,6 +352,108 @@ export const mirrorFeatureTranslator: OnshapeFeatureTranslator = {
       options: { copy: true },
       staticParticipants: [{ role: "plane", targets: [plane] }],
       slots: [slot("bodies", "entities", "body")],
+    });
+  },
+  apply: ({ apply }) => apply(),
+};
+
+function integerAtLeast(feature: OnshapeFeatureNode, id: string, minimum: number): number | null {
+  const entry = parameter(feature, id);
+  const expression = entry?.expression;
+  const raw = typeof expression === "string" ? Number(expression.trim()) : entry?.value;
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= minimum ? raw : null;
+}
+
+function hasSkipInstances(feature: OnshapeFeatureNode): boolean {
+  const entry = parameter(feature, "skipInstances");
+  if (!entry) return false;
+  if (entry.value === true) return true;
+  if (Array.isArray(entry.value) && entry.value.length > 0) return true;
+  const queries = entry.queries;
+  return Array.isArray(queries) && queries.length > 0;
+}
+
+function patternTypeUnsupportedReason(patternType: string): import("@/domain/import/onshape/fidelity-planner").PlanReasonCode {
+  return patternType === "FEATURE" ? "pattern-feature-seed-unsupported" : "pattern-type-unsupported";
+}
+
+function directionReference(
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+  parameterId: string,
+): PlannedAdvancedParticipantTarget | null {
+  return planeReference(context.feature, parameterId, context) ?? translateSketchLineReference(context, parameterId);
+}
+
+export const linearPatternFeatureTranslator: OnshapeFeatureTranslator = {
+  featureTypes: ["linearPattern"],
+  plan(context) {
+    const patternType = enumValue(context.feature, "patternType") ?? "PART";
+    if (patternType !== "PART") return baked(context, patternTypeUnsupportedReason(patternType));
+    const operation = enumValue(context.feature, "operationType") ?? "NEW";
+    if (operation !== "NEW") return baked(context, "pattern-operation-unsupported");
+    if (!hasQueries(context.feature, "entities")) return baked(context, "pattern-seed-unresolved");
+    if (booleanValue(context.feature, "hasSecondDir")) return baked(context, "pattern-second-direction-unsupported");
+    if (booleanValue(context.feature, "isCentered")) return baked(context, "pattern-centered-unsupported");
+    if (hasSkipInstances(context.feature)) return baked(context, "pattern-skipping-unsupported");
+
+    const instanceCount = integerAtLeast(context.feature, "instanceCount", 2);
+    if (instanceCount === null) return baked(context, "pattern-count-unreadable");
+    const spacing = positiveQuantity(context.feature, "distance");
+    if (spacing === null) return baked(context, "pattern-spacing-unreadable");
+    const direction = directionReference(context, "directionOne");
+    if (!direction) return baked(context, "pattern-direction-unresolved");
+
+    const inputDependencies = direction.kind === "sketchEntityFromFeature"
+      ? [{ kind: "sketch" as const, featureId: direction.sketchFeatureId }]
+      : [];
+    return topologyCandidate(context, {
+      featureKind: "linearPattern",
+      options: {
+        instanceCount,
+        spacing,
+        centered: false,
+        oppositeDirection: booleanValue(context.feature, "oppositeDirection"),
+      },
+      staticParticipants: [{ role: "direction", targets: [direction] }],
+      slots: [slot("bodies", "entities", "body", 1, null, ["body"])],
+      inputDependencies,
+    });
+  },
+  apply: ({ apply }) => apply(),
+};
+
+export const circularPatternFeatureTranslator: OnshapeFeatureTranslator = {
+  featureTypes: ["circularPattern"],
+  plan(context) {
+    const patternType = enumValue(context.feature, "patternType") ?? "PART";
+    if (patternType !== "PART") return baked(context, patternTypeUnsupportedReason(patternType));
+    const operation = enumValue(context.feature, "operationType") ?? "NEW";
+    if (operation !== "NEW") return baked(context, "pattern-operation-unsupported");
+    if (!hasQueries(context.feature, "entities")) return baked(context, "pattern-seed-unresolved");
+    if (booleanValue(context.feature, "isCentered")) return baked(context, "pattern-centered-unsupported");
+    if (hasSkipInstances(context.feature)) return baked(context, "pattern-skipping-unsupported");
+
+    const instanceCount = integerAtLeast(context.feature, "instanceCount", 2);
+    if (instanceCount === null) return baked(context, "pattern-count-unreadable");
+    const angle = angleDegrees(context.feature, "angle");
+    if (angle === null || angle === 0 || Math.abs(angle) > 360) return baked(context, "pattern-angle-unreadable");
+    const axis = directionReference(context, "axis");
+    if (!axis) return baked(context, "pattern-axis-unresolved");
+
+    const inputDependencies = axis.kind === "sketchEntityFromFeature"
+      ? [{ kind: "sketch" as const, featureId: axis.sketchFeatureId }]
+      : [];
+    return topologyCandidate(context, {
+      featureKind: "circularPattern",
+      options: {
+        instanceCount,
+        angleDegrees: angle,
+        equalSpace: booleanValue(context.feature, "equalSpace"),
+        oppositeDirection: booleanValue(context.feature, "oppositeDirection"),
+      },
+      staticParticipants: [{ role: "axis", targets: [axis] }],
+      slots: [slot("bodies", "entities", "body", 1, null, ["body"])],
+      inputDependencies,
     });
   },
   apply: ({ apply }) => apply(),
@@ -673,7 +788,7 @@ export function buildResolvedBodyConsumerDefinition(
     ? Object.fromEntries(
         Object.entries(planned.options).map(([key, value]) => [
           key,
-          typeof value === "number" || typeof value === "string"
+          typeof value === "number" || typeof value === "string" || typeof value === "boolean"
             ? createLiteralAuthoredValue(value)
             : value,
         ]),

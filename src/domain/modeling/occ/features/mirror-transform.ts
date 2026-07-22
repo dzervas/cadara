@@ -14,6 +14,8 @@ import {
   toGpDir,
   toGpPnt,
   toGpVec,
+  toVec3FromGpPoint,
+  type Vec3,
 } from "@/domain/modeling/occ/geometry";
 import {
   buildAxisFromLineEdge,
@@ -25,6 +27,7 @@ import type {
   OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
 import { advanceTopologyToken } from "@/domain/modeling/occ/topology";
+import { deleteOccObject } from "@/domain/modeling/occ/memory";
 import {
   requireBody,
   requireEdge,
@@ -50,7 +53,7 @@ import {
   type OccFeatureTopologyStage,
 } from "@/domain/modeling/occ/topology-stage";
 
-function resolvePlanarReferencePlane(
+export function resolvePlanarReferencePlane(
   context: OccFeatureExecutionContext,
   target: DurableRef,
   supportConstructionId: ConstructionId,
@@ -81,6 +84,84 @@ function resolvePlanarReferencePlane(
 
   throw new Error(
     "advanced-feature-unsupported-kernel-case: OCC transform-family references must be planar face or construction targets.",
+  );
+}
+
+export function resolvePlanarReferenceNormal(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  target: DurableRef,
+  supportSuffix: string,
+): Vec3 {
+  const plane = resolvePlanarReferencePlane(
+    context,
+    target,
+    `construction_${ownerFeatureId}_${supportSuffix}` as ConstructionId,
+  );
+  return normalize(plane.frame.normal);
+}
+
+export function resolveLinearDirectionReference(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  target: DurableRef,
+  supportSuffix: string,
+): Vec3 {
+  if (target.kind === "construction" || target.kind === "face") {
+    return resolvePlanarReferenceNormal(context, ownerFeatureId, target, supportSuffix);
+  }
+
+  if (target.kind === "edge") {
+    const axis = buildAxisFromLineEdge(
+      context.oc,
+      requireEdge(context, requireBody(context, target.bodyId), target.edgeId),
+    );
+    try {
+      return normalize(toVec3FromGpPoint(axis.Direction()));
+    } finally {
+      deleteOccObject(axis);
+    }
+  }
+
+  if (target.kind === "sketchEntity") {
+    const axis = buildAxisFromSketchLine(context, target.sketchId, target.entityId);
+    try {
+      return normalize(toVec3FromGpPoint(axis.Direction()));
+    } finally {
+      deleteOccObject(axis);
+    }
+  }
+
+  throw new Error(
+    "advanced-feature-unsupported-kernel-case: OCC direction references must be planar construction/face, linear edge, or sketch line targets.",
+  );
+}
+
+export function buildCircularAxisReference(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  target: DurableRef,
+  supportSuffix: string,
+) {
+  if (target.kind === "edge") {
+    return buildAxisFromLineEdge(
+      context.oc,
+      requireEdge(context, requireBody(context, target.bodyId), target.edgeId),
+    );
+  }
+
+  if (target.kind === "sketchEntity") {
+    return buildAxisFromSketchLine(context, target.sketchId, target.entityId);
+  }
+
+  const plane = resolvePlanarReferencePlane(
+    context,
+    target,
+    `construction_${ownerFeatureId}_${supportSuffix}` as ConstructionId,
+  );
+  return new context.oc.gp_Ax1_2(
+    toGpPnt(context.oc, plane.frame.origin),
+    toGpDir(context.oc, plane.frame.normal),
   );
 }
 
@@ -418,25 +499,11 @@ function buildRotationAxis(
   ownerFeatureId: FeatureId,
   target: DurableRef,
 ) {
-  if (target.kind === "edge") {
-    return buildAxisFromLineEdge(
-      context.oc,
-      requireEdge(context, requireBody(context, target.bodyId), target.edgeId),
-    );
-  }
-
-  if (target.kind === "sketchEntity") {
-    return buildAxisFromSketchLine(context, target.sketchId, target.entityId);
-  }
-
-  const plane = resolvePlanarReferencePlane(
+  return buildCircularAxisReference(
     context,
+    ownerFeatureId,
     target,
-    `construction_${ownerFeatureId}_transform_axis` as ConstructionId,
-  );
-  return new context.oc.gp_Ax1_2(
-    toGpPnt(context.oc, plane.frame.origin),
-    toGpDir(context.oc, plane.frame.normal),
+    "transform_axis",
   );
 }
 

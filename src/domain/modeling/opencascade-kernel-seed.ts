@@ -51,6 +51,8 @@ export const OCC_KERNEL_CAPABILITIES: ModelingKernelCapabilities = {
     "combine",
     "split",
     "deleteSolid",
+    "linearPattern",
+    "circularPattern",
   ],
   previewableFeatureKinds: [
     "extrude",
@@ -66,6 +68,8 @@ export const OCC_KERNEL_CAPABILITIES: ModelingKernelCapabilities = {
     "combine",
     "split",
     "deleteSolid",
+    "linearPattern",
+    "circularPattern",
   ],
   supportedProfileKinds: ["region", "face"],
   supportsFaceBackedSketchPlanes: true,

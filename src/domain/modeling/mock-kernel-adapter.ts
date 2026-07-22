@@ -118,6 +118,8 @@ import type { DurableRef } from "@/contracts/shared/references";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   HOLE_OPTION_DESCRIPTORS,
+  CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
+  LINEAR_PATTERN_OPTION_DESCRIPTORS,
   getAdvancedParticipant,
   getTransformOperationKind,
   isAdvancedSolidFeatureKind,
@@ -1283,6 +1285,340 @@ function validateHoleAdvancedContract(
       HOLE_ADVANCED_FEATURE_DESCRIPTOR,
     ),
   );
+}
+
+const LINEAR_PATTERN_ADVANCED_FEATURE_DESCRIPTOR = {
+  featureKind: "linearPattern",
+  participants: [
+    {
+      role: "body",
+      label: "Seed bodies",
+      required: true,
+      cardinality: { min: 1, max: null },
+      acceptedKinds: ["body"],
+    },
+    {
+      role: "direction",
+      label: "Linear direction",
+      required: true,
+      cardinality: { min: 1, max: 1 },
+      acceptedKinds: ["construction", "face", "edge", "sketchEntity"],
+    },
+  ],
+  options: LINEAR_PATTERN_OPTION_DESCRIPTORS,
+} as const;
+
+const CIRCULAR_PATTERN_ADVANCED_FEATURE_DESCRIPTOR = {
+  featureKind: "circularPattern",
+  participants: [
+    {
+      role: "body",
+      label: "Seed bodies",
+      required: true,
+      cardinality: { min: 1, max: null },
+      acceptedKinds: ["body"],
+    },
+    {
+      role: "axis",
+      label: "Pattern axis",
+      required: true,
+      cardinality: { min: 1, max: 1 },
+      acceptedKinds: ["construction", "face", "edge", "sketchEntity"],
+    },
+  ],
+  options: CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
+} as const;
+
+type MockPatternDefinition = AdvancedSolidFeatureDefinition & {
+  kind: "linearPattern" | "circularPattern";
+};
+
+function isMockPatternDefinition(
+  definition: FeatureDefinition,
+): definition is MockPatternDefinition {
+  return definition.kind === "linearPattern" || definition.kind === "circularPattern";
+}
+
+function validatePatternAdvancedContract(
+  definition: MockPatternDefinition,
+): ModelingDiagnostic[] {
+  return createAdvancedFeatureValidationModelingDiagnostics(
+    validateAdvancedSolidFeatureDefinition(
+      definition,
+      definition.kind === "linearPattern"
+        ? LINEAR_PATTERN_ADVANCED_FEATURE_DESCRIPTOR
+        : CIRCULAR_PATTERN_ADVANCED_FEATURE_DESCRIPTOR,
+    ),
+  );
+}
+
+function authoredOptionLiteral<T>(value: unknown): T | null {
+  return getAuthoredLiteralValue(value as T) as T | null;
+}
+
+function getMockPatternInstanceCount(definition: MockPatternDefinition) {
+  const count = authoredOptionLiteral<number>(
+    definition.parameters.options?.instanceCount,
+  );
+  return typeof count === "number" && Number.isInteger(count) ? count : 0;
+}
+
+function getMockLinearPatternOffset(
+  snapshot: WorkspaceSnapshot,
+  definition: MockPatternDefinition & { kind: "linearPattern" },
+  instanceIndex: number,
+): readonly [number, number, number] {
+  const spacing = authoredOptionLiteral<number>(definition.parameters.options?.spacing) ?? 0;
+  const opposite =
+    authoredOptionLiteral<boolean>(definition.parameters.options?.oppositeDirection) === true;
+  const directionTarget = getAdvancedParticipant(definition, "direction")?.targets[0];
+  const direction = (() => {
+    if (directionTarget?.kind === "construction") {
+      return (
+        snapshot.document.constructions.find(
+          (construction) => construction.constructionId === directionTarget.constructionId,
+        )?.plane.frame.normal ?? [1, 0, 0]
+      );
+    }
+    if (directionTarget?.kind === "face") return [0, 0, 1] as const;
+    return [1, 0, 0] as const;
+  })();
+  const signedSpacing = spacing * instanceIndex * (opposite ? -1 : 1);
+  return [
+    direction[0] * signedSpacing,
+    direction[1] * signedSpacing,
+    direction[2] * signedSpacing,
+  ];
+}
+
+function getMockCircularPatternAngleRadians(
+  definition: MockPatternDefinition & { kind: "circularPattern" },
+  instanceIndex: number,
+) {
+  const count = getMockPatternInstanceCount(definition);
+  const angleDegrees =
+    authoredOptionLiteral<number>(definition.parameters.options?.angleDegrees) ?? 0;
+  const equalSpace =
+    authoredOptionLiteral<boolean>(definition.parameters.options?.equalSpace) === true;
+  const opposite =
+    authoredOptionLiteral<boolean>(definition.parameters.options?.oppositeDirection) === true;
+  const step = equalSpace
+    ? Math.abs(angleDegrees) === 360
+      ? angleDegrees / count
+      : angleDegrees / (count - 1)
+    : angleDegrees;
+  return ((opposite ? -step : step) * instanceIndex * Math.PI) / 180;
+}
+
+type MockPoint3 = readonly [number, number, number];
+
+function translatePoint(point: MockPoint3, offset: MockPoint3): MockPoint3 {
+  return [point[0] + offset[0], point[1] + offset[1], point[2] + offset[2]];
+}
+
+function rotatePointAroundZ(point: MockPoint3, radians: number): MockPoint3 {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return [point[0] * cos - point[1] * sin, point[0] * sin + point[1] * cos, point[2]];
+}
+
+function transformMockRenderableGeometry(
+  geometry: RenderableEntityRecord["geometry"],
+  transformPoint: (point: MockPoint3) => MockPoint3,
+): RenderableEntityRecord["geometry"] {
+  if (geometry.kind === "mesh") {
+    return {
+      ...geometry,
+      vertexPositions: geometry.vertexPositions.map(transformPoint),
+    };
+  }
+  if (geometry.kind === "polyline") {
+    return { ...geometry, points: geometry.points.map(transformPoint) };
+  }
+  if (geometry.kind === "marker") {
+    return { ...geometry, position: transformPoint(geometry.position) };
+  }
+  return geometry;
+}
+
+function createMockPatternFallbackMesh(
+  offset: MockPoint3,
+): RenderableEntityRecord["geometry"] {
+  return {
+    kind: "mesh",
+    vertexPositions: [
+      translatePoint([0, 0, 0], offset),
+      translatePoint([1, 0, 0], offset),
+      translatePoint([0, 1, 0], offset),
+    ],
+    vertexNormals: [
+      [0, 0, 1],
+      [0, 0, 1],
+      [0, 0, 1],
+    ],
+    triangleIndices: [[0, 1, 2]],
+  };
+}
+
+function createMockPatternBodyArtifacts(input: {
+  snapshot: WorkspaceSnapshot;
+  featureId: FeatureId;
+  featureLabel: string;
+  revisionId: RevisionId;
+  definition: MockPatternDefinition;
+}) {
+  const seedTargets = (getAdvancedParticipant(input.definition, "body")?.targets ?? []).flatMap(
+    (target) => (target.kind === "body" ? [target] : []),
+  );
+  const instanceCount = getMockPatternInstanceCount(input.definition);
+  const bodies: WorkspaceSnapshot["document"]["bodies"] = [];
+  const objects: WorkspaceSnapshot["presentation"]["objects"] = [];
+  const entities: WorkspaceSnapshot["presentation"]["entities"] = [];
+  const renderRecords: RenderableEntityRecord[] = [];
+  const producedTargets: DurableRef[] = [];
+
+  for (const [seedIndex, seedTarget] of seedTargets.entries()) {
+    const seedBody = input.snapshot.document.bodies.find(
+      (body) => body.bodyId === seedTarget.bodyId,
+    );
+    const seedRenderable = input.snapshot.document.render.records.find(
+      (record) => record.ownerBodyId === seedTarget.bodyId && record.geometry.kind === "mesh",
+    );
+    for (let instanceIndex = 1; instanceIndex < instanceCount; instanceIndex += 1) {
+      const slot = `${input.definition.kind === "linearPattern" ? "linear" : "circular"}_seed${seedIndex + 1}_instance${instanceIndex}`;
+      const bodyId = `body_${input.featureId}_${slot}` as BodyId;
+      const target = { kind: "body" as const, bodyId };
+      let offset: MockPoint3;
+      let transformPoint: (point: MockPoint3) => MockPoint3;
+      if (input.definition.kind === "linearPattern") {
+        offset = getMockLinearPatternOffset(
+          input.snapshot,
+          input.definition as MockPatternDefinition & { kind: "linearPattern" },
+          instanceIndex,
+        );
+        transformPoint = (point) => translatePoint(point, offset);
+      } else {
+        offset = [seedIndex * 12, instanceIndex * 12, 0];
+        const radians = getMockCircularPatternAngleRadians(
+          input.definition as MockPatternDefinition & { kind: "circularPattern" },
+          instanceIndex,
+        );
+        transformPoint = (point) =>
+          translatePoint(rotatePointAroundZ(point, radians), offset);
+      }
+      const geometry = seedRenderable
+        ? transformMockRenderableGeometry(seedRenderable.geometry, transformPoint)
+        : createMockPatternFallbackMesh(offset);
+      const label = `${input.featureLabel} ${seedIndex + 1}.${instanceIndex}`;
+
+      producedTargets.push(target);
+      bodies.push({
+        ownerDocumentId: DOCUMENT_ID,
+        ownerRevisionId: input.revisionId,
+        ownerFeatureId: input.featureId,
+        ownerSketchId: null,
+        ownerBodyId: bodyId,
+        bodyId,
+        label,
+        topology: { faceIds: [], edgeIds: [], vertexIds: [] },
+        topologyPresentation: "bodyOnlyMesh",
+      });
+      objects.push({
+        id: `object_tree_node_${bodyId}` as ObjectTreeNodeId,
+        label,
+        description: seedBody ? `Pattern copy of ${seedBody.label}` : "Pattern body copy",
+        kind: "body",
+        target,
+        ownerBodyId: bodyId,
+        ownerFeatureId: input.featureId,
+        ownerSketchId: null,
+      });
+      entities.push(
+        entity({
+          ownerFeatureId: input.featureId,
+          ownerSketchId: null,
+          ownerBodyId: bodyId,
+          id: `snapshot_entity_${bodyId}` as SnapshotEntityId,
+          label,
+          target,
+          relatedTargets: [
+            { kind: "feature", featureId: input.featureId },
+            { kind: "body", bodyId: seedTarget.bodyId },
+          ],
+          consumedByFeatureIds: [],
+          selectionSemantics: ["body"],
+        }),
+      );
+      renderRecords.push({
+        id: `renderable_${bodyId}` as RenderableId,
+        label,
+        ownerBodyId: bodyId,
+        ownerFeatureId: input.featureId,
+        binding: {
+          pickId: `pick_${bodyId}` as PickId,
+          pickPriority: 30,
+          target,
+          topology: null,
+          semanticClass: "body",
+        },
+        geometry,
+      });
+    }
+  }
+
+  return { bodies, objects, entities, renderRecords, producedTargets };
+}
+
+function removeMockGeneratedBodyOutputs(
+  snapshot: WorkspaceSnapshot,
+  featureId: FeatureId,
+) {
+  const removedBodyIds = new Set(
+    snapshot.document.bodies
+      .filter((body) => body.ownerFeatureId === featureId)
+      .map((body) => body.bodyId),
+  );
+  if (removedBodyIds.size === 0) return;
+
+  snapshot.document.bodies = snapshot.document.bodies.filter(
+    (body) => !removedBodyIds.has(body.bodyId),
+  );
+  snapshot.presentation.objects = snapshot.presentation.objects.filter(
+    (object) => object.ownerBodyId === null || !removedBodyIds.has(object.ownerBodyId),
+  );
+  snapshot.document.render.records = snapshot.document.render.records.filter(
+    (record) => record.ownerBodyId === null || !removedBodyIds.has(record.ownerBodyId),
+  );
+  snapshot.presentation.entities = snapshot.presentation.entities.filter(
+    (entry) => entry.ownerBodyId === null || !removedBodyIds.has(entry.ownerBodyId),
+  );
+  snapshot.document.objects = snapshot.presentation.objects;
+  snapshot.document.entities = snapshot.presentation.entities;
+}
+
+function applyMockPatternBodySnapshotMutation(input: {
+  snapshot: WorkspaceSnapshot;
+  featureId: FeatureId;
+  featureLabel: string;
+  revisionId: RevisionId;
+  definition: FeatureDefinition;
+}) {
+  if (!isMockPatternDefinition(input.definition)) return null;
+
+  const artifacts = createMockPatternBodyArtifacts({
+    snapshot: input.snapshot,
+    featureId: input.featureId,
+    featureLabel: input.featureLabel,
+    revisionId: input.revisionId,
+    definition: input.definition,
+  });
+  input.snapshot.document.bodies.push(...artifacts.bodies);
+  input.snapshot.presentation.objects.push(...artifacts.objects);
+  input.snapshot.presentation.entities.push(...artifacts.entities);
+  input.snapshot.document.render.records.push(...artifacts.renderRecords);
+  input.snapshot.document.objects = input.snapshot.presentation.objects;
+  input.snapshot.document.entities = input.snapshot.presentation.entities;
+  return artifacts.producedTargets;
 }
 
 function createPreviewRenderableSet(
@@ -2596,6 +2932,70 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       return { accepted: true as const, diagnostics: [] };
     }
+    case "linearPattern":
+    case "circularPattern": {
+      const patternDefinition = definition as MockPatternDefinition;
+      const contractDiagnostics = validatePatternAdvancedContract(patternDefinition);
+      if (contractDiagnostics.length > 0) {
+        return {
+          accepted: false as const,
+          reasonCode: `mock-invalid-${definition.kind}`,
+          diagnostics: contractDiagnostics,
+        };
+      }
+
+      const bodyTargets = getAdvancedParticipant(patternDefinition, "body")?.targets ?? [];
+      const referenceTargets =
+        getAdvancedParticipant(
+          patternDefinition,
+          patternDefinition.kind === "linearPattern" ? "direction" : "axis",
+        )?.targets ?? [];
+      if (
+        bodyTargets.some(
+          (target) => target.kind !== "body" || !hasBodyTarget(snapshot, target.bodyId),
+        )
+      ) {
+        return {
+          accepted: false as const,
+          reasonCode: `mock-invalid-${definition.kind}`,
+          diagnostics: [
+            createUnsupportedFeatureDiagnostic(
+              definition,
+              "Pattern seed body participants must resolve to live durable bodies.",
+            ),
+          ],
+        };
+      }
+
+      const [referenceTarget] = referenceTargets;
+      if (
+        (referenceTarget?.kind === "construction" &&
+          !hasConstructionTarget(snapshot, referenceTarget.constructionId)) ||
+        (referenceTarget?.kind === "face" &&
+          !hasFaceTarget(snapshot, referenceTarget.bodyId, referenceTarget.faceId)) ||
+        (referenceTarget?.kind === "edge" &&
+          !hasEdgeTarget(snapshot, referenceTarget.bodyId, referenceTarget.edgeId)) ||
+        (referenceTarget?.kind === "sketchEntity" &&
+          !hasSketchEntityTarget(
+            snapshot,
+            referenceTarget.sketchId,
+            referenceTarget.entityId,
+          ))
+      ) {
+        return {
+          accepted: false as const,
+          reasonCode: `mock-invalid-${definition.kind}`,
+          diagnostics: [
+            createUnsupportedFeatureDiagnostic(
+              definition,
+              "Pattern direction/axis participants must resolve to live construction, face, edge, or sketch-entity targets.",
+            ),
+          ],
+        };
+      }
+
+      return { accepted: true as const, diagnostics: [] };
+    }
     case "bakedBody":
       return { accepted: true as const, diagnostics: [] };
     default:
@@ -3606,6 +4006,8 @@ async function buildSnapshot(
         "combine",
         "split",
         "deleteSolid",
+        "linearPattern",
+        "circularPattern",
       ],
       previewableFeatureKinds: [
         "extrude",
@@ -3617,6 +4019,8 @@ async function buildSnapshot(
         "combine",
         "split",
         "deleteSolid",
+        "linearPattern",
+        "circularPattern",
       ],
       supportedProfileKinds: ["region", "face"],
       supportsFaceBackedSketchPlanes: true,
@@ -4843,9 +5247,17 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
               constructions: mutableSnapshot.document.constructions,
             })
           : null;
+      const patternProducedTargets = applyMockPatternBodySnapshotMutation({
+        snapshot: mutableSnapshot,
+        featureId,
+        featureLabel,
+        revisionId: nextRevisionId,
+        definition: resolvedDefinition.definition,
+      });
       const changedTargets =
         bakedBodyArtifacts?.producedTargets ??
         planeArtifacts?.producedTargets ??
+        patternProducedTargets ??
         getFeatureDefinitionChangedTargets(resolvedDefinition.definition);
       const nextFeature = {
         ownerDocumentId: DOCUMENT_ID,
@@ -5499,12 +5911,24 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       const mutableFeature = mutableSnapshot.document.features.find(
         (feature) => feature.featureId === request.featureId,
       )!;
+      const previousDefinition = mutableFeature.definition;
+      if (
+        isMockPatternDefinition(previousDefinition) ||
+        isMockPatternDefinition(resolvedDefinition.definition)
+      ) {
+        removeMockGeneratedBodyOutputs(mutableSnapshot, request.featureId);
+      }
       mutableFeature.definition = request.definition;
       mutableFeature.label = request.featureLabel ?? mutableFeature.label;
       mutableFeature.ownerRevisionId = nextRevisionId;
-      mutableFeature.producedTargets = getFeatureDefinitionChangedTargets(
-        resolvedDefinition.definition,
-      );
+      mutableFeature.producedTargets =
+        applyMockPatternBodySnapshotMutation({
+          snapshot: mutableSnapshot,
+          featureId: request.featureId,
+          featureLabel: mutableFeature.label,
+          revisionId: nextRevisionId,
+          definition: resolvedDefinition.definition,
+        }) ?? getFeatureDefinitionChangedTargets(resolvedDefinition.definition);
 
       const featureEntity = mutableSnapshot.presentation.entities.find(
         (entry) =>
@@ -5650,11 +6074,20 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         (feature) => feature.featureId === request.featureId,
       )!;
       const previousTargets = mutableFeature.producedTargets;
+      if (isMockPatternDefinition(mutableFeature.definition)) {
+        removeMockGeneratedBodyOutputs(mutableSnapshot, request.featureId);
+      }
       mutableFeature.suppressed = request.suppressed;
       mutableFeature.ownerRevisionId = nextRevisionId;
       mutableFeature.producedTargets = request.suppressed
         ? []
-        : getFeatureDefinitionChangedTargets(mutableFeature.definition);
+        : (applyMockPatternBodySnapshotMutation({
+            snapshot: mutableSnapshot,
+            featureId: request.featureId,
+            featureLabel: mutableFeature.label,
+            revisionId: nextRevisionId,
+            definition: mutableFeature.definition,
+          }) ?? getFeatureDefinitionChangedTargets(mutableFeature.definition));
 
       const featureEntity = mutableSnapshot.presentation.entities.find(
         (entry) =>
@@ -5781,6 +6214,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     }
 
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+      removeMockGeneratedBodyOutputs(mutableSnapshot, request.featureId);
       mutableSnapshot.document.features =
         mutableSnapshot.document.features.filter(
           (feature) => feature.featureId !== request.featureId,
