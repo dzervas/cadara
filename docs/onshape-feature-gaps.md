@@ -20,9 +20,9 @@ Import behavior today: Wave-C honest-bake family reason codes from
 
 | Onshape feature | Notes | Bake reason code |
 |---|---|---|
-| Linear pattern | No pattern substrate at all; biggest practical gap — patterns are everywhere in real docs | `pattern-unsupported` |
-| Circular pattern | 〃 | `pattern-unsupported` |
-| Curve pattern | 〃 | `pattern-unsupported` |
+| Curve pattern | No curve/path pattern executor or topology semantics | `pattern-unsupported` |
+| Sketch/face/feature/table pattern variants | Linear/circular support is body-copy only. Feature-level sketch, face, feature-seed, and table-driven pattern variants are not modeled parametrically. | `pattern-type-unsupported` / `pattern-feature-seed-unsupported` |
+| Skip-instance pattern variants | Body-copy patterns deliberately reject skipped instances to keep output identity/topology deterministic. | `pattern-skipping-unsupported` |
 | Draft | No `draft` kind | `part-operation-unsupported` |
 | Rib | No `rib` kind | `part-operation-unsupported` |
 | Move face | No direct-editing family | `part-operation-unsupported` |
@@ -59,6 +59,8 @@ Split by where the gap actually sits.
 | Chamfer | Two-distances and distance+angle styles. The authoring contract and OCC executor accept only one positive distance and execute equal offsets (`Add_3(distance, distance, ...)`); T.6 confirmed these forms require future contract/kernel work. |
 | Shell | True closed-hollow shell with no removable/open faces (`isHollow=true`, empty `entities`) remains unsupported; non-hollow empty-selection offset-all-faces is now represented by `mode: "offsetAllFaces"`. |
 | Hole | Supported executable subset: simple, counterbore, and countersink holes with sketch-point locations, explicit body scope, blind/through termination, and forward/reverse direction. Unsupported: threaded/tapped/clearance/standards holes, `UP_TO_NEXT` / `UP_TO_ENTITY`, ambiguous multi-sketch or multi-point location queries, and custom start planes or drill/tip geometry. |
+| Linear pattern | Supported executable subset: Onshape `PART`/body seed copy with `operationType=NEW`, resolved seed bodies, one explicit direction, instance count, spacing, optional opposite direction, no second direction, no centered mode, and no skipped instances. Unsupported variants: sketch/face/feature/table/skip. |
+| Circular pattern | Supported executable subset: Onshape `PART`/body seed copy with `operationType=NEW`, resolved seed bodies, explicit axis, instance count, angle/equal spacing, optional opposite direction, no centered mode, and no skipped instances. Unsupported variants: sketch/face/feature/table/skip. |
 
 ### 3b. Translator-only gap (cadara can already express it — in plan scope, Phase T)
 

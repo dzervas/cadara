@@ -274,7 +274,7 @@ mesh, and later parametric-eligible solids import suppressed
       build green; logic 497 + ui 125 + static 24 = 646 non-E2E tests passed;
       `playwright test` 61/61 passed. See verification note below.
 
-## Phase W — Remaining parametric gap (not started; next session)
+## Phase W — Remaining parametric gap (complete; residuals documented)
 
 Current review plans: Mounts **8/2/0**, Part Studio 1 **14/27/0**. The 27
 baked PS1 features decompose into: 9 sketches-on-body-faces
@@ -540,9 +540,68 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
 
   Tests: focused contract/OCC/translator/apply specs plus the new real-OCC
   synthetic import integration, then `bun run test:e2e` and `bun run test:all`.
-- [ ] W.7 **Patterns (linear/circular)** (largest overall; new feature kind
-      end-to-end: contract, executor, forms, translator). Nothing in current
-      bundles but ubiquitous in real documents.
+- [x] W.7 **Patterns (linear/circular)** (largest overall; new feature kind
+      end-to-end: contract, executor, forms, translator). Current real bundles
+      contain no body patterns, so acceptance is pinned by proprietary-free
+      synthetic provider→real OCC coverage plus unchanged real-bundle counts.
+
+  **Verification (done).** W.7 adds an executable body-copy boundary only:
+  linear and circular Onshape `PART` patterns with resolved seed bodies,
+  `operationType=NEW`, finite instance count, explicit linear direction or
+  circular axis, linear spacing or circular angle, no second linear direction,
+  no centered mode, and no skipped instances. Contract/executor semantics stay
+  conservative: pattern features copy whole seed bodies only, never feature/face
+  seeds or boolean-merge intent, and output identities are deterministic new
+  body copies while seed body topology remains untouched rather than claiming
+  source-successor preservation.
+
+  Onshape parameters translate into advanced-solid participants/options:
+  `entities` → body seeds, `directionOne`/`axis` → construction plane or sketch
+  line references, `instanceCount`, `distance`, `angle`, `oppositeDirection`,
+  and circular `equalSpace`. The toolbar pattern dropdown now contains the
+  generated authoring tools `linearPattern` and `circularPattern`, plus the
+  unsupported `curvePattern` tool, with no duplicate tool ids.
+
+  CI coverage uses the proprietary-free `makeWaveWPatternCaptureBundle()`
+  synthetic fixture. Logic acceptance reviews both pattern studios as
+  parametric, prepares topology-deferred body-copy actions, applies a linear
+  pattern and a circular pattern through the real OCC modeling service, and
+  verifies live copied body outputs. No private Onshape pattern bundle or
+  file-picker-only fixture was invented.
+
+  Exact unsupported variants and reason codes: non-`PART` pattern types use
+  `pattern-type-unsupported` except `FEATURE`, which uses
+  `pattern-feature-seed-unsupported`; non-`NEW` operations use
+  `pattern-operation-unsupported`; unresolved seed bodies use
+  `pattern-seed-unresolved`; unresolved linear directions/axes use
+  `pattern-direction-unresolved` / `pattern-axis-unresolved`; invalid count,
+  spacing, or angle use `pattern-count-unreadable`,
+  `pattern-spacing-unreadable`, or `pattern-angle-unreadable`; second linear
+  direction, centered mode, and skipped instances use
+  `pattern-second-direction-unsupported`, `pattern-centered-unsupported`, and
+  `pattern-skipping-unsupported`. Curve pattern remains `pattern-unsupported`.
+  Sketch-, face-, feature-, table-, and skip-instance pattern variants remain
+  unsupported.
+
+  Plan-dump evidence (counts are parametric / baked / geometryOnly): real-bundle
+  counts are unchanged because none contains body patterns. Actual local counts:
+  Mounts `40a51fb8…` plain **8 / 2 / 0**, review **9 / 1 / 0**; PS1
+  `9841e486…` plain **6 / 35 / 0**, review **25 / 16 / 0**. Wave T
+  `405fa226…` exact plain/review counts by studio: Part Studio 1 **2 / 0 / 0**
+  and **2 / 0 / 0**; Revolve remove **4 / 0 / 0** and **4 / 0 / 0**; Sweep
+  **3 / 0 / 0** and **3 / 0 / 0**; Loft **1 / 3 / 0** and **4 / 0 / 0**;
+  Extrude extents **6 / 0 / 0** and **6 / 0 / 0**; Mirror transform
+  **2 / 3 / 0** and **5 / 0 / 0**.
+
+  Tests/regression: existing logic real-OCC importer acceptance covers the
+  synthetic fixture boundary; `bun run test:e2e` passed **61 / 61** before
+  final docs, and final `bun run test:all` passed lint, build, logic
+  **566 / 566**, UI **125 / 125**, static **24 / 24**, and e2e **61 / 61**.
+
+  **Phase W is complete** in the scoped sense that W.1–W.7 are checked off and
+  their residuals are documented. This does not make PS1 fully parametric:
+  known W.1 region-resolution/sketch-on-face fallout and the closed-hollow Shell
+  1 gap remain honest residuals.
 
 Full-parametric math: Mounts = W.2 + W.3. Part Studio 1 = W.1 + W.2 + W.4,
 with W.5 now covering future non-hollow empty-shell forms but not PS1's true
@@ -584,7 +643,7 @@ resolution picked a keyless openrouter provider once). Real bundles + the
 | thicken | NEW, one selected face, one-side positive/negative thickness after exact-prefix face resolution | `thicken-requires-topology` |
 | booleanBodies / deleteBodies / splitPart / transform / mirror | body-only topology candidates; promote via exact-prefix probe when all consumed bodies live in parametric prefix | `topology-upstream-baked`, param-specific codes |
 | fillet / chamfer / shell / hole | translate and promote after exact-prefix durable topology resolution; hole executes the supported simple/counterbore/countersink subset | topology match/ambiguity codes or parameter-specific codes |
-| patterns / draft / rib / primitives / curves / direct-edit / derived | out of scope | Wave-C family codes |
+| linear/circular patterns | supported body-copy subset: Onshape `PART`, `NEW`, resolved seed bodies, one linear direction or circular axis, count/spacing/angle options, no centered/skip/second-direction behavior | `pattern-*` parameter/variant codes; curve/sketch/face/feature/table/skip variants remain unsupported |
 
 ## Verification notes / tier counts
 

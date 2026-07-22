@@ -60,6 +60,8 @@ export function isFeatureTool(
   | "deleteSolid"
   | "mirror"
   | "transform"
+  | "linearPattern"
+  | "circularPattern"
 > {
   return (
     toolId === "extrude" ||
@@ -74,9 +76,11 @@ export function isFeatureTool(
     toolId === "thicken" ||
     toolId === "combine" ||
     toolId === "split" ||
-    toolId === "deleteSolid" ||
-    toolId === "mirror" ||
-    toolId === "transform"
+      toolId === "deleteSolid" ||
+      toolId === "mirror" ||
+      toolId === "transform" ||
+      toolId === "linearPattern" ||
+      toolId === "circularPattern"
   );
 }
 

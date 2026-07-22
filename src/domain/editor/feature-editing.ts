@@ -60,6 +60,10 @@ export type {
   MirrorFeatureParameterDraft,
   TransformFeatureEditSessionState,
   TransformFeatureParameterDraft,
+  LinearPatternFeatureEditSessionState,
+  LinearPatternFeatureParameterDraft,
+  CircularPatternFeatureEditSessionState,
+  CircularPatternFeatureParameterDraft,
 } from "@/core/feature-authoring/definition";
 
 function createBaseFeatureSession(
@@ -184,7 +188,9 @@ export function hydrateFeatureEditSession(
     feature.definition.kind !== "split" &&
     feature.definition.kind !== "deleteSolid" &&
     feature.definition.kind !== "mirror" &&
-    feature.definition.kind !== "transform"
+    feature.definition.kind !== "transform" &&
+    feature.definition.kind !== "linearPattern" &&
+    feature.definition.kind !== "circularPattern"
   ) {
     return null;
   }

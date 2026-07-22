@@ -23,8 +23,10 @@ import {
   filletFeatureTranslator,
   holeFeatureTranslator,
   mirrorFeatureTranslator,
+  circularPatternFeatureTranslator,
   shellFeatureTranslator,
   thickenFeatureTranslator,
+  linearPatternFeatureTranslator,
   splitFeatureTranslator,
   transformFeatureTranslator,
 } from "@/domain/import/onshape/wave-b-body-feature-translators";
@@ -33,6 +35,7 @@ import {
   resolvePlannedDeferredParticipants,
 } from "@/domain/import/onshape/provider";
 import { makeWaveTMirrorTransformCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
+import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
 
 const query = (id: string) => ({
   btType: "BTMIndividualQuery-138",
@@ -453,6 +456,197 @@ describe("Wave B body topology translators", () => {
       .toMatchObject({ staticParticipants: [{ role: "plane", targets: [{ kind: "constructionFromFeature", featureId: "OFFSET_PLANE" }] }] });
     expect(contextPlan(transformFeatureTranslator, "transform", "transformDirection").plannedBodyTopologyConsumer)
       .toMatchObject({ staticParticipants: [{ role: "transformReference", targets: [{ kind: "constructionFromFeature", featureId: "OFFSET_PLANE" }] }] });
+  });
+
+
+  test("maps supported PART NEW linear and circular body patterns", () => {
+    const references = new Map([["Top", [{
+      deterministicId: "Top",
+      evaluatedAt: "finalState" as const,
+      signature: { entityClass: "face" as const, geometryType: "plane", definingData: { normal: [0, 0, 1] }, isDefaultPlane: true },
+    }]]]);
+    const linear = linearPatternFeatureTranslator.plan({
+      feature: {
+        featureId: "P_LINEAR",
+        featureType: "linearPattern",
+        name: "Linear",
+        parameters: [
+          valueParameter("patternType", "PART"),
+          valueParameter("operationType", "NEW"),
+          queryParameter("entities", ["body"]),
+          {
+            parameterId: "directionOne",
+            queries: [{ queryString: 'qCreatedBy(id + "S_AXIS" + "wireOp", EntityType.EDGE)->qNthElement(0) /* axis_line */' }],
+          },
+          valueParameter("distance", 0, "10 mm"),
+          valueParameter("instanceCount", 3),
+          valueParameter("oppositeDirection", true),
+          valueParameter("isCentered", false),
+          valueParameter("hasSecondDir", false),
+          valueParameter("skipInstances", false),
+        ],
+      } as OnshapeFeatureNode,
+      label: "Linear",
+      onshapeSuppressed: false,
+      read: {
+        features: [
+          { featureId: "S_AXIS", featureType: "newSketch", parameters: [] },
+          { featureId: "P_LINEAR", featureType: "linearPattern", parameters: [] },
+        ],
+        solvedSketchesByFeatureId: new Map([["S_AXIS", {
+          featureId: "S_AXIS",
+          entities: [{ entityId: "axis_line", entityType: "lineSegment", start3d: [0, 0, 0], end3d: [0.01, 0, 0] }],
+        }]]),
+      } as never,
+      references,
+      state: { sketchPlansByFeatureId: new Map([["S_AXIS", { tier: "parametric", planeKey: "xy" }]]), bodyProducingFeatureIds: [] },
+    });
+    expect(linear).toMatchObject({
+      reasonCodes: ["needs-history-probe"],
+      inputDependencies: [
+        { kind: "query", parameterId: "entities", slotKey: "bodies" },
+        { kind: "sketch", featureId: "S_AXIS" },
+      ],
+      plannedBodyTopologyConsumer: {
+        featureKind: "linearPattern",
+        options: { instanceCount: 3, spacing: 10, centered: false, oppositeDirection: true },
+        slots: [{ key: "bodies", parameterId: "entities", role: "body", expectedKinds: ["body"] }],
+        staticParticipants: [{ role: "direction", targets: [{ kind: "sketchEntityFromFeature", sketchFeatureId: "S_AXIS" }] }],
+      },
+    });
+
+    const circular = plan(circularPatternFeatureTranslator, "circularPattern", [
+      valueParameter("patternType", "PART"),
+      valueParameter("operationType", "NEW"),
+      queryParameter("entities", ["body"]),
+      queryParameter("axis", ["Top"]),
+      valueParameter("angle", Math.PI * 2),
+      valueParameter("instanceCount", 4),
+      valueParameter("oppositeDirection", false),
+      valueParameter("equalSpace", true),
+      valueParameter("isCentered", false),
+      valueParameter("skipInstances", false),
+    ], references);
+    expect(circular.plannedBodyTopologyConsumer).toMatchObject({
+      featureKind: "circularPattern",
+      options: { instanceCount: 4, angleDegrees: 360, equalSpace: true, oppositeDirection: false },
+      slots: [{ key: "bodies", parameterId: "entities", role: "body", expectedKinds: ["body"] }],
+      staticParticipants: [{ role: "axis", targets: [{ kind: "construction", constructionId: "construction_plane-xy" }] }],
+    });
+  });
+
+  test("reports exact pattern reason codes for unsupported branches", () => {
+    const validLinear = [
+      valueParameter("patternType", "PART"),
+      valueParameter("operationType", "NEW"),
+      queryParameter("entities", ["body"]),
+      queryParameter("directionOne", ["missing"]),
+      valueParameter("distance", 0, "10 mm"),
+      valueParameter("instanceCount", 3),
+    ];
+    const reason = (parameters: unknown[]) => plan(linearPatternFeatureTranslator, "linearPattern", parameters).reasonCodes;
+    expect(reason([valueParameter("patternType", "FACE")])).toEqual(["pattern-type-unsupported"]);
+    expect(reason([valueParameter("patternType", "FEATURE")])).toEqual(["pattern-feature-seed-unsupported"]);
+    expect(reason([valueParameter("patternType", "PART"), valueParameter("operationType", "ADD")])).toEqual(["pattern-operation-unsupported"]);
+    expect(reason([valueParameter("patternType", "PART"), valueParameter("operationType", "NEW")])).toEqual(["pattern-seed-unresolved"]);
+    expect(reason([...validLinear, valueParameter("hasSecondDir", true)])).toEqual(["pattern-second-direction-unsupported"]);
+    expect(reason([...validLinear, valueParameter("isCentered", true)])).toEqual(["pattern-centered-unsupported"]);
+    expect(reason([...validLinear, queryParameter("skipInstances", ["skip"])] )).toEqual(["pattern-skipping-unsupported"]);
+    expect(reason(validLinear.filter((entry) => (entry as { parameterId?: string }).parameterId !== "instanceCount"))).toEqual(["pattern-count-unreadable"]);
+    expect(reason(validLinear.filter((entry) => (entry as { parameterId?: string }).parameterId !== "distance"))).toEqual(["pattern-spacing-unreadable"]);
+    expect(reason(validLinear)).toEqual(["pattern-direction-unresolved"]);
+
+    const circularReason = (parameters: unknown[]) => plan(circularPatternFeatureTranslator, "circularPattern", parameters).reasonCodes;
+    expect(circularReason([
+      valueParameter("patternType", "PART"),
+      valueParameter("operationType", "NEW"),
+      queryParameter("entities", ["body"]),
+      queryParameter("axis", ["missing"]),
+      valueParameter("angle", 0),
+      valueParameter("instanceCount", 4),
+    ])).toEqual(["pattern-angle-unreadable"]);
+    expect(circularReason([
+      valueParameter("patternType", "PART"),
+      valueParameter("operationType", "NEW"),
+      queryParameter("entities", ["body"]),
+      queryParameter("axis", ["missing"]),
+      valueParameter("angle", Math.PI / 2),
+      valueParameter("instanceCount", 4),
+    ])).toEqual(["pattern-axis-unresolved"]);
+  });
+
+  test("provider reviews and prepares pattern fixtures with deferred bodies, refs, and authored boolean wrappers", async () => {
+    const source: ResolvedImportSource = {
+      name: "wave-w-pattern.onshape-capture.json",
+      origin: { kind: "localFile", fileName: "wave-w-pattern.onshape-capture.json" },
+      mediaType: "application/json",
+      bytes: new TextEncoder().encode(JSON.stringify(makeWaveWPatternCaptureBundle())),
+      fingerprint: `sha256:${"b".repeat(64)}`,
+    };
+    const patternCapabilities: ImportCapabilities = {
+      ...providerCapabilities,
+      modeling: {
+        ...providerCapabilities.modeling,
+        async bakeGeometry({ bytes }: { bytes: Uint8Array }) {
+          return { assetId: "asset_pattern_checkpoint", format: "baked-mesh" as const, hash: `sha256:${"c".repeat(64)}`, byteLength: bytes.byteLength };
+        },
+      },
+      history: {
+        async evaluateHistoryProbe(input) {
+          const signatures = [
+            { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [0, 0, 0] as [number, number, number], high: [2, 2, 2] as [number, number, number] }, centroid: [1, 1, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_linear" as never } },
+            { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [10, -0.992709, 0] as [number, number, number], high: [12, 0.992709, 2] as [number, number, number] }, centroid: [11, 0, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_circular" as never } },
+          ];
+          return { steps: (input.actions.orderedActions ?? []).map(() => ({ status: "rebuilt" as const, signatures })) };
+        },
+      },
+    };
+    const review = await onshapeImportProvider.review({ source, capabilities: patternCapabilities });
+    const plans = review.providerReview.studios.flatMap((studio) => studio.featurePlans);
+    expect(plans.filter((plan) => plan.featureType.includes("Pattern")).map((plan) => [plan.featureType, plan.tier, plan.reasonCodes])).toEqual([
+      ["linearPattern", "parametric", []],
+      ["circularPattern", "parametric", []],
+    ]);
+
+    const linearActions = await onshapeImportProvider.prepare({
+      source,
+      review,
+      selections: { studioElementId: "wave-w-pattern-linear", demotedFeatureIds: [] },
+      capabilities: patternCapabilities,
+    });
+    const linear = linearActions.createFeatures?.find((action) => action.definition.kind === "linearPattern");
+    expect(linear?.definition.kind).toBe("linearPattern");
+    const linearParameters = linear?.definition.kind === "linearPattern" ? linear.definition.parameters : null;
+    expect(linearParameters?.participants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "body", targets: [expect.objectContaining({ kind: "topologyOf", expectedKind: "body" })] }),
+      expect.objectContaining({ role: "direction", targets: [expect.objectContaining({ kind: "sketchEntity", sketchId: expect.objectContaining({ kind: "sketchIdOf" }) })] }),
+    ]));
+    expect(linearParameters?.options).toMatchObject({
+      instanceCount: { source: "literal", value: 3 },
+      spacing: { source: "literal", value: 10 },
+      centered: { source: "literal", value: false },
+      oppositeDirection: { source: "literal", value: false },
+    });
+
+    const circularActions = await onshapeImportProvider.prepare({
+      source,
+      review,
+      selections: { studioElementId: "wave-w-pattern-circular", demotedFeatureIds: [] },
+      capabilities: patternCapabilities,
+    });
+    const circular = circularActions.createFeatures?.find((action) => action.definition.kind === "circularPattern");
+    expect(circular?.definition.kind).toBe("circularPattern");
+    const circularParameters = circular?.definition.kind === "circularPattern" ? circular.definition.parameters : null;
+    expect(circularParameters?.participants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "body", targets: [expect.objectContaining({ kind: "topologyOf", expectedKind: "body" })] }),
+      expect.objectContaining({ role: "axis", targets: [expect.objectContaining({ kind: "construction", constructionId: "construction_plane-xy" })] }),
+    ]));
+    expect(circularParameters?.options).toMatchObject({
+      instanceCount: { source: "literal", value: 4 },
+      angleDegrees: { source: "literal", value: 360 },
+      equalSpace: { source: "literal", value: true },
+      oppositeDirection: { source: "literal", value: false },
+    });
   });
 
   test("provider promotes mirror across a captured-frame cPlane and emits constructionOf", async () => {

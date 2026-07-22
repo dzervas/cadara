@@ -97,6 +97,8 @@ export type {
   HoleTermination,
   HoleDirection,
   SweepAdvancedOptions,
+  LinearPatternAdvancedOptions,
+  CircularPatternAdvancedOptions,
   SweepProfileControl,
   SweepTwistOption,
   LoftAdvancedOptions,
@@ -106,7 +108,12 @@ export type {
   LoftProfileConditionKind,
   LoftProfileConditionOptions,
   } from "@/contracts/modeling/advanced-solid";
-export { CHAMFER_WIDTH_OPTION_DESCRIPTORS, HOLE_OPTION_DESCRIPTORS } from "@/contracts/modeling/advanced-solid";
+export {
+  CHAMFER_WIDTH_OPTION_DESCRIPTORS,
+  CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
+  HOLE_OPTION_DESCRIPTORS,
+  LINEAR_PATTERN_OPTION_DESCRIPTORS,
+} from "@/contracts/modeling/advanced-solid";
 
 /** Re-exported preview identifier used by modeling preview requests. */
 export type { PreviewId };
@@ -138,7 +145,9 @@ export type AuthoredFeatureKind =
   | "split"
   | "deleteSolid"
   | "mirror"
-  | "transform";
+  | "transform"
+  | "linearPattern"
+  | "circularPattern";
 export type ModelingFeatureKind =
   | FeatureKind
   | AdvancedSolidFeatureKind

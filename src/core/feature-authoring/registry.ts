@@ -3,11 +3,13 @@ import type { FeatureAuthoringDefinition } from "@/core/feature-authoring/defini
 import { createRegistry } from "@/core/tools/registry-factory";
 import { chamferAuthoringDefinition } from "@/core/feature-authoring/features/chamfer";
 import { combineAuthoringDefinition } from "@/core/feature-authoring/features/combine";
+import { circularPatternAuthoringDefinition } from "@/core/feature-authoring/features/circular-pattern";
 import { deleteSolidAuthoringDefinition } from "@/core/feature-authoring/features/delete-solid";
 import { extrudeAuthoringDefinition } from "@/core/feature-authoring/features/extrude";
 import { filletAuthoringDefinition } from "@/core/feature-authoring/features/fillet";
 import { loftAuthoringDefinition } from "@/core/feature-authoring/features/loft";
 import { holeAuthoringDefinition } from "@/core/feature-authoring/features/hole";
+import { linearPatternAuthoringDefinition } from "@/core/feature-authoring/features/linear-pattern";
 import { mirrorAuthoringDefinition } from "@/core/feature-authoring/features/mirror";
 import { planeAuthoringDefinition } from "@/core/feature-authoring/features/plane";
 import { revolveAuthoringDefinition } from "@/core/feature-authoring/features/revolve";
@@ -33,6 +35,8 @@ export const featureAuthoringDefinitions = [
   deleteSolidAuthoringDefinition,
   mirrorAuthoringDefinition,
   transformAuthoringDefinition,
+  linearPatternAuthoringDefinition,
+  circularPatternAuthoringDefinition,
 ] as const satisfies readonly FeatureAuthoringDefinition[];
 
 const featureAuthoringRegistry = createRegistry<

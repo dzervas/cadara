@@ -2,14 +2,19 @@ import { test, expect } from "vitest";
 import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   CHAMFER_WIDTH_OPTION_DESCRIPTORS,
+  CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
   LOFT_ADVANCED_OPTION_DESCRIPTORS,
   HOLE_OPTION_DESCRIPTORS,
+  LINEAR_PATTERN_OPTION_DESCRIPTORS,
   SWEEP_ADVANCED_OPTION_DESCRIPTORS,
   validateAdvancedFeatureOptions,
   validateAdvancedSolidFeatureDefinition,
   type AdvancedSolidFeatureAuthoringDescriptor,
 } from "@/contracts/modeling/advanced-solid";
-import { createExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
+import {
+  createExpressionAuthoredValue,
+  createLiteralAuthoredValue,
+} from "@/contracts/modeling/authored-values";
 
 test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
   const sweepDescriptor = {
@@ -311,6 +316,48 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
         valueKind: "positiveNumber",
       },
     ],
+  } satisfies AdvancedSolidFeatureAuthoringDescriptor;
+
+  const linearPatternDescriptor = {
+    featureKind: "linearPattern",
+    participants: [
+      {
+        role: "body",
+        label: "Seed bodies",
+        required: true,
+        cardinality: { min: 1, max: null },
+        acceptedKinds: ["body"],
+      },
+      {
+        role: "direction",
+        label: "Pattern direction",
+        required: true,
+        cardinality: { min: 1, max: 1 },
+        acceptedKinds: ["construction", "face", "edge", "sketchEntity"],
+      },
+    ],
+    options: LINEAR_PATTERN_OPTION_DESCRIPTORS,
+  } satisfies AdvancedSolidFeatureAuthoringDescriptor;
+
+  const circularPatternDescriptor = {
+    featureKind: "circularPattern",
+    participants: [
+      {
+        role: "body",
+        label: "Seed bodies",
+        required: true,
+        cardinality: { min: 1, max: null },
+        acceptedKinds: ["body"],
+      },
+      {
+        role: "axis",
+        label: "Pattern axis",
+        required: true,
+        cardinality: { min: 1, max: 1 },
+        acceptedKinds: ["construction", "face", "edge", "sketchEntity"],
+      },
+    ],
+    options: CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
   } satisfies AdvancedSolidFeatureAuthoringDescriptor;
 
   function testAdvancedParticipantValidationAcceptsRoleSpecificPayloads() {
@@ -1311,6 +1358,175 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
     ).toBeTruthy();
   }
 
+  function testBodyPatternParticipantsOptionsAndCopyOnlyIntentValidation() {
+    const validLinear = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "linearPattern",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            { role: "body", targets: [{ kind: "body", bodyId: "body_seed" }] },
+            {
+              role: "direction",
+              targets: [{ kind: "edge", bodyId: "body_seed", edgeId: "edge_x" }],
+            },
+          ],
+          options: {
+            instanceCount: createLiteralAuthoredValue(3),
+            spacing: createLiteralAuthoredValue(2.5),
+            centered: createLiteralAuthoredValue(false),
+            oppositeDirection: createLiteralAuthoredValue(false),
+          },
+        },
+      },
+      linearPatternDescriptor,
+    );
+
+    const invalidLinear = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "linearPattern",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: createLiteralAuthoredValue("add"),
+          participants: [
+            { role: "body", targets: [] },
+            { role: "direction", targets: [{ kind: "body", bodyId: "body_wrong" }] },
+            { role: "targetBody", targets: [{ kind: "body", bodyId: "body_target" }] },
+          ],
+          options: {
+            instanceCount: createLiteralAuthoredValue(1),
+            spacing: createLiteralAuthoredValue(0),
+            oppositeDirection: createLiteralAuthoredValue(false),
+            centered: createLiteralAuthoredValue(true),
+          },
+        },
+      },
+      linearPatternDescriptor,
+    );
+
+    const validCircular = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "circularPattern",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            { role: "body", targets: [{ kind: "body", bodyId: "body_seed" }] },
+            {
+              role: "axis",
+              targets: [
+                { kind: "sketchEntity", sketchId: "sketch_axis", entityId: "axis_entity" },
+              ],
+            },
+          ],
+          options: {
+            instanceCount: createLiteralAuthoredValue(4),
+            angleDegrees: createLiteralAuthoredValue(360),
+            equalSpace: createLiteralAuthoredValue(true),
+            oppositeDirection: createLiteralAuthoredValue(false),
+          },
+        },
+      },
+      circularPatternDescriptor,
+    );
+
+    const invalidCircular = validateAdvancedSolidFeatureDefinition(
+      {
+        kind: "circularPattern",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: createLiteralAuthoredValue("subtract"),
+          participants: [
+            { role: "body", targets: [{ kind: "face", bodyId: "body_seed", faceId: "face_wrong" }] },
+            { role: "axis", targets: [] },
+          ],
+          options: {
+            instanceCount: createLiteralAuthoredValue(1),
+            angleDegrees: createLiteralAuthoredValue(0),
+            equalSpace: createLiteralAuthoredValue(false),
+            oppositeDirection: createLiteralAuthoredValue(true),
+          },
+        },
+      },
+      circularPatternDescriptor,
+    );
+
+    expect(
+      validLinear.length,
+      "Linear pattern validation should accept authored wrapper options, centered=false, seed bodies, and one direction.",
+    ).toBe(0);
+    expect(
+      invalidLinear.some(
+        (diagnostic) => diagnostic.code === "advanced-feature-unsupported-operation",
+      ),
+      "Linear body patterns are copy-only and should reject authored operation intent.",
+    ).toBeTruthy();
+    expect(
+      invalidLinear.some(
+        (diagnostic) =>
+          diagnostic.code === "advanced-feature-missing-participant" &&
+          diagnostic.role === "body",
+      ),
+      "Linear body patterns should require at least one explicit seed body.",
+    ).toBeTruthy();
+    expect(
+      invalidLinear.some(
+        (diagnostic) =>
+          diagnostic.code === "advanced-feature-invalid-target-kind" &&
+          diagnostic.role === "direction",
+      ),
+      "Linear body patterns should reject unsupported direction target kinds.",
+    ).toBeTruthy();
+    expect(
+      invalidLinear.some(
+        (diagnostic) =>
+          diagnostic.code === "advanced-feature-invalid-option" &&
+          diagnostic.message.includes("centered=true"),
+      ),
+      "Linear body patterns should reject centered=true until OCC execution semantics are defined.",
+    ).toBeTruthy();
+    expect(
+      invalidLinear.some(
+        (diagnostic) =>
+          diagnostic.code === "advanced-feature-invalid-cardinality" &&
+          diagnostic.role === "targetBody",
+      ),
+      "Linear body patterns should not accept boolean target participants.",
+    ).toBeTruthy();
+
+    expect(
+      validCircular.length,
+      "Circular equalSpace=true uses angleDegrees as total span divided by count, so 360 avoids a duplicate seed endpoint.",
+    ).toBe(0);
+    expect(
+      invalidCircular.some(
+        (diagnostic) => diagnostic.code === "advanced-feature-unsupported-operation",
+      ),
+      "Circular body patterns are copy-only and should reject authored operation intent.",
+    ).toBeTruthy();
+    expect(
+      invalidCircular.some(
+        (diagnostic) =>
+          diagnostic.code === "advanced-feature-invalid-target-kind" &&
+          diagnostic.role === "body",
+      ),
+      "Circular body patterns should require body seed targets.",
+    ).toBeTruthy();
+    expect(
+      invalidCircular.some(
+        (diagnostic) =>
+          diagnostic.code === "advanced-feature-missing-participant" &&
+          diagnostic.role === "axis",
+      ),
+      "Circular body patterns should require exactly one axis reference.",
+    ).toBeTruthy();
+    expect(
+      invalidCircular.some(
+        (diagnostic) => diagnostic.code === "advanced-feature-invalid-option",
+      ),
+      "Circular body patterns should reject count <2 and zero angle.",
+    ).toBeTruthy();
+  }
+
   testAdvancedParticipantValidationAcceptsRoleSpecificPayloads();
   testAdvancedParticipantValidationRejectsMissingAndWrongKinds();
   testAdvancedOperationIntentValidationRejectsUnsupportedModes();
@@ -1325,6 +1541,7 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
   testDeleteSolidValidationAcceptsAndRejectsExplicitBodyTargets();
   testMirrorValidationAcceptsExplicitBodiesPlaneAndCopyPolicy();
   testTransformValidationAcceptsBodyOnlyScopeAndTypedDistance();
+  testBodyPatternParticipantsOptionsAndCopyOnlyIntentValidation();
   testChamferEdgeParticipantsAndDistanceValidation();
   testHoleParticipantsAndOptionsValidation();
 
@@ -1909,6 +2126,7 @@ test("src/contracts/modeling/advanced-solid.spec.ts", async () => {
   testDeleteSolidValidationAcceptsAndRejectsExplicitBodyTargets();
   testChamferEdgeParticipantsAndDistanceValidation();
   testThickenFaceParticipantsAndThicknessValidation();
+  testBodyPatternParticipantsOptionsAndCopyOnlyIntentValidation();
   testAdvancedOptionDescriptorsValidateAllScalarKindsAndGroups();
   testDiscriminatedOptionValidationRejectsInactiveVariantValues();
 });

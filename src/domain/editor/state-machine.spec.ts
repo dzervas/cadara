@@ -2096,6 +2096,73 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       transformActivation.effects.length,
       "Transform activation should wait for an explicit transform reference before previewing.",
     ).toBe(0);
+
+
+    const linearPatternActivation = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: "doc_workspace",
+          revisionId: "rev_1",
+        },
+        selectionCatalog: createRegionSelectionCatalog(),
+        selection: [{ kind: "body", bodyId: "body_a" }],
+      },
+      {
+        type: "tool.activated",
+        toolId: "linearPattern",
+      },
+    );
+
+    expect(
+      linearPatternActivation.state.kind,
+      "Linear pattern activation should enter feature editing.",
+    ).toBe("editingFeature");
+    expect(
+      linearPatternActivation.state.session.featureType,
+      "Linear pattern activation should create a linear pattern session.",
+    ).toBe("linearPattern");
+    expect(
+      linearPatternActivation.state.session.draft.bodyTargets[0]?.bodyId,
+      "Linear pattern activation should seed the selected body as a seed target.",
+    ).toBe("body_a");
+    expect(
+      linearPatternActivation.effects.length,
+      "Linear pattern activation should wait for an explicit direction before previewing.",
+    ).toBe(0);
+
+    const circularPatternActivation = transitionEditorState(
+      {
+        ...initialEditorState,
+        document: {
+          documentId: "doc_workspace",
+          revisionId: "rev_1",
+        },
+        selectionCatalog: createRegionSelectionCatalog(),
+        selection: [{ kind: "body", bodyId: "body_a" }],
+      },
+      {
+        type: "tool.activated",
+        toolId: "circularPattern",
+      },
+    );
+
+    expect(
+      circularPatternActivation.state.kind,
+      "Circular pattern activation should enter feature editing.",
+    ).toBe("editingFeature");
+    expect(
+      circularPatternActivation.state.session.featureType,
+      "Circular pattern activation should create a circular pattern session.",
+    ).toBe("circularPattern");
+    expect(
+      circularPatternActivation.state.session.draft.bodyTargets[0]?.bodyId,
+      "Circular pattern activation should seed the selected body as a seed target.",
+    ).toBe("body_a");
+    expect(
+      circularPatternActivation.effects.length,
+      "Circular pattern activation should wait for an explicit axis before previewing.",
+    ).toBe(0);
   }
 
   function testActiveReferencePickerRoutesSingleAndMultiSelections() {

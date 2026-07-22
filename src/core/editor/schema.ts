@@ -109,6 +109,8 @@ export type SelectionFilterKind =
   | "deleteSolidReferences"
   | "mirrorReferences"
   | "transformReferences"
+  | "linearPatternReferences"
+  | "circularPatternReferences"
   | "thickenReferences"
   | "filletEdges"
   | "chamferEdges"
@@ -976,6 +978,94 @@ export const transformSelectionFilter: SelectionFilter = {
   ],
 };
 
+export const linearPatternSelectionFilter: SelectionFilter = {
+  kind: "linearPatternReferences",
+  allowedKinds: ["body", "construction", "face", "edge", "sketchEntity"],
+  label: "Linear pattern references",
+  requirements: [
+    {
+      id: "linear-pattern-body",
+      label: "Seed body",
+      description:
+        "Linear pattern accepts one or more explicit durable seed body targets.",
+      slots: [
+        {
+          id: "linear-pattern-body",
+          label: "Seed body",
+          description: "Select one seed body to copy.",
+          acceptedKinds: ["body"],
+          acceptedSemantics: ["body"],
+        },
+      ],
+    },
+    {
+      id: "linear-pattern-direction",
+      label: "Linear direction",
+      description:
+        "Linear pattern requires one explicit planar reference, linear edge, or sketch line direction.",
+      slots: [
+        {
+          id: "linear-pattern-direction",
+          label: "Linear direction",
+          description:
+            "Select one construction plane, planar face, linear edge, or sketch line direction.",
+          acceptedKinds: ["construction", "face", "edge", "sketchEntity"],
+          acceptedSemantics: [
+            "planarReference",
+            "planarFace",
+            "edge",
+            "sketchEntity",
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+export const circularPatternSelectionFilter: SelectionFilter = {
+  kind: "circularPatternReferences",
+  allowedKinds: ["body", "construction", "face", "edge", "sketchEntity"],
+  label: "Circular pattern references",
+  requirements: [
+    {
+      id: "circular-pattern-body",
+      label: "Seed body",
+      description:
+        "Circular pattern accepts one or more explicit durable seed body targets.",
+      slots: [
+        {
+          id: "circular-pattern-body",
+          label: "Seed body",
+          description: "Select one seed body to copy.",
+          acceptedKinds: ["body"],
+          acceptedSemantics: ["body"],
+        },
+      ],
+    },
+    {
+      id: "circular-pattern-axis",
+      label: "Pattern axis",
+      description:
+        "Circular pattern requires one explicit planar reference, linear edge, or sketch line axis.",
+      slots: [
+        {
+          id: "circular-pattern-axis",
+          label: "Pattern axis",
+          description:
+            "Select one construction plane, planar face, linear edge, or sketch line axis.",
+          acceptedKinds: ["construction", "face", "edge", "sketchEntity"],
+          acceptedSemantics: [
+            "planarReference",
+            "planarFace",
+            "edge",
+            "sketchEntity",
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 export const planeSelectionFilter: SelectionFilter = {
   kind: "planeReferences",
   allowedKinds: ["construction", "face"],
@@ -1225,6 +1315,10 @@ export function getSelectionFilterForCommand(
       return sectionViewSelectionFilter;
     case "projectReference":
       return sketchReferenceSelectionFilter;
+    case "linearPattern":
+      return linearPatternSelectionFilter;
+    case "circularPattern":
+      return circularPatternSelectionFilter;
     default:
       return getDefaultSelectionFilterForMode(mode);
   }

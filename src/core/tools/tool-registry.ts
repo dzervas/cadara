@@ -238,22 +238,6 @@ export const toolDefinitions = [
     commandBehavior: "partImport",
   },
   {
-    id: "linearPattern",
-    group: "patterns",
-    name: "Linear Pattern",
-    tooltip: "Pattern features along a line.",
-    icon: "linearPattern",
-    modes: ["part"],
-  },
-  {
-    id: "circularPattern",
-    group: "patterns",
-    name: "Circular Pattern",
-    tooltip: "Pattern features around an axis.",
-    icon: "circularPattern",
-    modes: ["part"],
-  },
-  {
     id: "curvePattern",
     group: "patterns",
     name: "Curve Pattern",

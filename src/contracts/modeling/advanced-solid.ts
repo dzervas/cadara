@@ -27,6 +27,7 @@ export type AdvancedParticipantRole =
   | "location"
   | "plane"
   | "axis"
+  | "direction"
   | "transformReference"
   | "enclosingRegionSeed";
 
@@ -50,7 +51,9 @@ export type AdvancedSolidFeatureKind =
   | "hole"
   | "externalThread"
   | "mirror"
-  | "transform";
+  | "transform"
+  | "linearPattern"
+  | "circularPattern";
 
 export type AdvancedParticipantTargetKind = DurableRef["kind"];
 
@@ -270,6 +273,36 @@ export type HoleAdvancedOptions =
       counterboreDepth?: never;
     };
 
+/** Copy-only body pattern: selected seed bodies remain and each instance produces a new body. */
+
+export interface LinearPatternAdvancedOptions extends Record<string, unknown> {
+  /** Total patterned body count including the selected seed bodies. */
+  instanceCount: MaybeAuthoredValue<number>;
+  /** Positive document-length spacing between adjacent pattern instances. */
+  spacing: MaybeAuthoredValue<number>;
+  /** Defaults to false; true places instances symmetrically around the seed set. */
+  centered?: MaybeAuthoredValue<boolean>;
+  /** Explicit direction reversal without relying on signed spacing. */
+  oppositeDirection: MaybeAuthoredValue<boolean>;
+}
+
+/** Copy-only body pattern around an axis; no boolean operation intent is permitted. */
+
+export interface CircularPatternAdvancedOptions extends Record<string, unknown> {
+  /** Total patterned body count including the selected seed bodies. */
+  instanceCount: MaybeAuthoredValue<number>;
+  /**
+   * Degrees. When equalSpace is true, this is the total span: full 360°
+   * divides by count to avoid duplicating the seed endpoint, while partial spans
+   * divide by count - 1 so the last copied instance lands on the span endpoint.
+   * When equalSpace is false, this is the per-instance step.
+   */
+  angleDegrees: MaybeAuthoredValue<number>;
+  equalSpace: MaybeAuthoredValue<boolean>;
+  /** Explicit axis direction reversal without relying on signed angles. */
+  oppositeDirection: MaybeAuthoredValue<boolean>;
+}
+
 const HOLE_TERMINATION_OPTION_DESCRIPTOR = {
   key: "termination",
   label: "Termination",
@@ -453,6 +486,68 @@ export const CHAMFER_WIDTH_OPTION_DESCRIPTORS = [
   },
 ] as const satisfies readonly AdvancedFeatureOptionDescriptor[];
 
+export const LINEAR_PATTERN_OPTION_DESCRIPTORS = [
+  {
+    key: "instanceCount",
+    label: "Instance count",
+    required: true,
+    valueKind: "positiveInteger",
+    patchTarget: { patchKey: "options", valuePath: ["instanceCount"] },
+  },
+  {
+    key: "spacing",
+    label: "Spacing",
+    required: true,
+    valueKind: "positiveNumber",
+    patchTarget: { patchKey: "options", valuePath: ["spacing"] },
+  },
+  {
+    key: "centered",
+    label: "Centered",
+    required: false,
+    valueKind: "boolean",
+    patchTarget: { patchKey: "options", valuePath: ["centered"] },
+  },
+  {
+    key: "oppositeDirection",
+    label: "Opposite direction",
+    required: true,
+    valueKind: "boolean",
+    patchTarget: { patchKey: "options", valuePath: ["oppositeDirection"] },
+  },
+] as const satisfies readonly AdvancedFeatureOptionDescriptor[];
+
+export const CIRCULAR_PATTERN_OPTION_DESCRIPTORS = [
+  {
+    key: "instanceCount",
+    label: "Instance count",
+    required: true,
+    valueKind: "positiveInteger",
+    patchTarget: { patchKey: "options", valuePath: ["instanceCount"] },
+  },
+  {
+    key: "angleDegrees",
+    label: "Angle degrees",
+    required: true,
+    valueKind: "angle",
+    patchTarget: { patchKey: "options", valuePath: ["angleDegrees"] },
+  },
+  {
+    key: "equalSpace",
+    label: "Equal space",
+    required: true,
+    valueKind: "boolean",
+    patchTarget: { patchKey: "options", valuePath: ["equalSpace"] },
+  },
+  {
+    key: "oppositeDirection",
+    label: "Opposite direction",
+    required: true,
+    valueKind: "boolean",
+    patchTarget: { patchKey: "options", valuePath: ["oppositeDirection"] },
+  },
+] as const satisfies readonly AdvancedFeatureOptionDescriptor[];
+
 const advancedSolidFeatureKinds: readonly AdvancedSolidFeatureKind[] = [
   "combine",
   "sweep",
@@ -468,6 +563,8 @@ const advancedSolidFeatureKinds: readonly AdvancedSolidFeatureKind[] = [
   "externalThread",
   "mirror",
   "transform",
+  "linearPattern",
+  "circularPattern",
 ];
 
 const advancedParticipantRoles: readonly AdvancedParticipantRole[] = [
@@ -483,6 +580,7 @@ const advancedParticipantRoles: readonly AdvancedParticipantRole[] = [
   "targetBody",
   "plane",
   "axis",
+  "direction",
   "location",
   "transformReference",
   "enclosingRegionSeed",
@@ -739,10 +837,19 @@ export function validateAdvancedSolidFeatureDefinition(
     participantsByRole.set(participant.role, participant.targets);
   }
 
-  const operationIntent = definition.parameters.operationIntent
-    ? getAuthoredLiteralValue(definition.parameters.operationIntent)
+  const authoredOperationIntent = definition.parameters.operationIntent;
+  const operationIntent = authoredOperationIntent
+    ? getAuthoredLiteralValue(authoredOperationIntent)
     : undefined;
-  if (
+  if (authoredOperationIntent !== undefined && !descriptor.operationIntent) {
+    diagnostics.push(
+      createAdvancedDiagnostic({
+        code: "advanced-feature-unsupported-operation",
+        role: null,
+        message: `${definition.kind} does not support authored operation intent.`,
+      }),
+    );
+  } else if (
     operationIntent &&
     !descriptor.operationIntent?.supportedIntents.includes(operationIntent)
   ) {
@@ -829,6 +936,20 @@ export function validateAdvancedSolidFeatureDefinition(
       ),
     );
   }
+  if (definition.kind === "linearPattern") {
+    diagnostics.push(
+      ...validateLinearPatternAdvancedFeature(
+        definition as AdvancedSolidFeatureDefinition & { kind: "linearPattern" },
+      ),
+    );
+  }
+  if (definition.kind === "circularPattern") {
+    diagnostics.push(
+      ...validateCircularPatternAdvancedFeature(
+        definition as AdvancedSolidFeatureDefinition & { kind: "circularPattern" },
+      ),
+    );
+  }
 
   return diagnostics;
 }
@@ -906,6 +1027,88 @@ function validateHoleAdvancedFeature(
         createInvalidOptionDiagnostic(
           "Countersink angle must be greater than 0 and less than 180 degrees.",
         ),
+      );
+    }
+  }
+
+  return diagnostics;
+}
+
+function validateLinearPatternAdvancedFeature(
+  definition: AdvancedSolidFeatureDefinition & { kind: "linearPattern" },
+): AdvancedFeatureValidationDiagnostic[] {
+  const diagnostics = validatePatternParticipantRoles(definition, [
+    "body",
+    "direction",
+  ]);
+  const instanceCount = authoredNumericLiteral(
+    definition.parameters.options?.instanceCount,
+  );
+
+  if (instanceCount !== null && Number.isInteger(instanceCount) && instanceCount < 2) {
+    diagnostics.push(
+      createInvalidOptionDiagnostic(
+        "Linear pattern instance count must be at least 2 including seed bodies.",
+      ),
+    );
+  }
+
+  const centered = getAuthoredLiteralValue(
+    definition.parameters.options?.centered as MaybeAuthoredValue<unknown>,
+  );
+  if (centered === true) {
+    diagnostics.push(
+      createInvalidOptionDiagnostic(
+        "Linear pattern centered=true is not executable in the OCC kernel yet.",
+      ),
+    );
+  }
+
+  return diagnostics;
+}
+
+function validateCircularPatternAdvancedFeature(
+  definition: AdvancedSolidFeatureDefinition & { kind: "circularPattern" },
+): AdvancedFeatureValidationDiagnostic[] {
+  const diagnostics = validatePatternParticipantRoles(definition, ["body", "axis"]);
+  const options = definition.parameters.options ?? {};
+  const instanceCount = authoredNumericLiteral(options.instanceCount);
+  const angleDegrees = authoredNumericLiteral(options.angleDegrees);
+
+  if (instanceCount !== null && Number.isInteger(instanceCount) && instanceCount < 2) {
+    diagnostics.push(
+      createInvalidOptionDiagnostic(
+        "Circular pattern instance count must be at least 2 including seed bodies.",
+      ),
+    );
+  }
+
+  if (angleDegrees !== null && (angleDegrees === 0 || Math.abs(angleDegrees) > 360)) {
+    diagnostics.push(
+      createInvalidOptionDiagnostic(
+        "Circular pattern angle must be non-zero and no more than 360 degrees in magnitude.",
+      ),
+    );
+  }
+
+  return diagnostics;
+}
+
+function validatePatternParticipantRoles(
+  definition: AdvancedSolidFeatureDefinition,
+  expectedRoles: readonly AdvancedParticipantRole[],
+): AdvancedFeatureValidationDiagnostic[] {
+  const diagnostics: AdvancedFeatureValidationDiagnostic[] = [];
+  const expectedRoleSet = new Set<AdvancedParticipantRole>(expectedRoles);
+
+  for (const participant of definition.parameters.participants) {
+    if (!expectedRoleSet.has(participant.role)) {
+      diagnostics.push(
+        createAdvancedDiagnostic({
+          code: "advanced-feature-invalid-cardinality",
+          role: participant.role,
+          message: `${definition.kind} participants may only include ${expectedRoles.join(" and ")} roles.`,
+        }),
       );
     }
   }
@@ -1490,6 +1693,60 @@ export const mirrorAdvancedFeatureExample = {
     ],
     options: {
       copy: true,
+    },
+  },
+} satisfies AdvancedSolidFeatureDefinition;
+
+export const linearPatternAdvancedFeatureExample = {
+  kind: "linearPattern",
+  featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  parameters: {
+    participants: [
+      {
+        role: "body",
+        targets: [{ kind: "body", bodyId: "body_seed" as BodyId }],
+      },
+      {
+        role: "direction",
+        targets: [
+          { kind: "edge", bodyId: "body_seed" as BodyId, edgeId: "edge_direction" },
+        ],
+      },
+    ],
+    options: {
+      instanceCount: createLiteralAuthoredValue(4),
+      spacing: createLiteralAuthoredValue(10),
+      centered: createLiteralAuthoredValue(false),
+      oppositeDirection: createLiteralAuthoredValue(false),
+    },
+  },
+} satisfies AdvancedSolidFeatureDefinition;
+
+export const circularPatternAdvancedFeatureExample = {
+  kind: "circularPattern",
+  featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  parameters: {
+    participants: [
+      {
+        role: "body",
+        targets: [{ kind: "body", bodyId: "body_seed" as BodyId }],
+      },
+      {
+        role: "axis",
+        targets: [
+          {
+            kind: "sketchEntity",
+            sketchId: "sketch_axis" as SketchId,
+            entityId: "entity_axis" as SketchEntityId,
+          },
+        ],
+      },
+    ],
+    options: {
+      instanceCount: createLiteralAuthoredValue(6),
+      angleDegrees: createLiteralAuthoredValue(360),
+      equalSpace: createLiteralAuthoredValue(true),
+      oppositeDirection: createLiteralAuthoredValue(false),
     },
   },
 } satisfies AdvancedSolidFeatureDefinition;

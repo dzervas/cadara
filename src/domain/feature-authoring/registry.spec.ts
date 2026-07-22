@@ -76,11 +76,13 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     ).toBe(
       JSON.stringify([
         "chamfer",
+        "circularPattern",
         "combine",
         "deleteSolid",
         "extrude",
         "fillet",
         "hole",
+        "linearPattern",
         "loft",
         "mirror",
         "plane",

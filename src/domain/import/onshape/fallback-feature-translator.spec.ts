@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import { fallbackFeatureTranslator } from "@/domain/import/onshape/fallback-feature-translator";
+import { onshapeFeatureTranslatorRegistry } from "@/domain/import/onshape/fidelity-planner";
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 
 function reason(featureType: string) {
@@ -22,6 +23,11 @@ test("classifies Wave C out-of-scope families explicitly and preserves the unkno
   expect(reason("tag")).toEqual(["annotation-meta-unsupported"]);
   expect(reason("frameTrim")).toEqual(["part-operation-unsupported"]);
   expect(reason("circularPattern")).toEqual(["pattern-unsupported"]);
+  expect(reason("linearPattern")).toEqual(["pattern-unsupported"]);
+  expect(reason("curvePattern")).toEqual(["pattern-unsupported"]);
+  expect(onshapeFeatureTranslatorRegistry.forFeatureType("linearPattern")).not.toBe(fallbackFeatureTranslator);
+  expect(onshapeFeatureTranslatorRegistry.forFeatureType("circularPattern")).not.toBe(fallbackFeatureTranslator);
+  expect(onshapeFeatureTranslatorRegistry.forFeatureType("curvePattern")).toBe(fallbackFeatureTranslator);
   expect(reason("diameterTolerance")).toEqual(["tolerance-unsupported"]);
   expect(reason("unrecognizedPluginFeature")).toEqual(["custom-feature"]);
 });
