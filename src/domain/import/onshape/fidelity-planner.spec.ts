@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "vitest";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
 import {
   assembleFixtureMountsBundle,
@@ -10,7 +11,14 @@ import type { StudioReadResult } from "@/domain/import/onshape/bundle-reader";
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
 import {
+  projectPointToSketchPlaneFrame,
+  translateSketch,
+  verifySketchTranslationSolveConsistency,
+} from "@/domain/import/onshape/sketch-translator";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import {
   validateOnshapeCaptureBundle,
+  type OnshapeCaptureBundle,
   type OnshapeRollbackSnapshot,
 } from "@/contracts/import/onshape-capture-bundle";
 
@@ -92,6 +100,315 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
     expect(plan.requiresStudioBake).toBe(false);
   }
 });
+
+const CAPTURED_SKETCH_MATRIX = [
+  1, 0, 0, 0,
+  0, 0, -1, 0,
+  0, 1, 0, 0,
+  0, 0, 0, 1,
+];
+
+function makeSketchMatrixBundle(input: {
+  sketchMatrix?: unknown;
+  includeSketchPlaneQuery?: boolean;
+  sketchPlaneQuery?: { queryString?: string; deterministicIds?: string[] };
+  sketchPlaneQueries?: unknown[];
+  resolvedReferences?: OnshapeCaptureBundle["partStudios"][number]["resolvedReferences"];
+}): OnshapeCaptureBundle {
+  const defaultSketchPlaneQuery = {
+    queryString: 'query = qCreatedBy(id + "Extrude 1", EntityType.FACE);',
+  };
+  const sketchPlaneParameter = input.includeSketchPlaneQuery
+    ? [{
+        parameterId: "sketchPlane",
+        queries: input.sketchPlaneQueries ?? [input.sketchPlaneQuery ?? defaultSketchPlaneQuery],
+      }]
+    : [];
+  return {
+    formatVersion: 2,
+    provenance: {
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "0123456789abcdef01234567",
+      wvm: "w",
+      wvmId: "0123456789abcdef01234567",
+      microversion: "0123456789abcdef01234567",
+    },
+    document: {},
+    elements: {},
+    partStudios: [{
+      elementId: "e1",
+      name: "Matrix sketch",
+      features: {
+        features: [{
+            featureType: "newSketch",
+            featureId: "S_MATRIX",
+            name: "Matrix sketch",
+            parameters: sketchPlaneParameter,
+          },
+          {
+            featureType: "extrude",
+            featureId: "E_MATRIX",
+            name: "Matrix extrude",
+            parameters: [
+              {
+                parameterId: "entities",
+                queries: [{ queryString: 'query = qSketchRegion(id + "S_MATRIX", true);' }],
+              },
+              { parameterId: "endBound", value: "BLIND" },
+              { parameterId: "depth", expression: "10 mm", value: 0.01 },
+              { parameterId: "operationType", value: "NEW" },
+            ],
+          },
+        ],
+      },
+      sketches: {
+        sketches: [{
+          featureId: "S_MATRIX",
+          sketchSolveStatus: "WELL_DEFINED",
+          ...(input.sketchMatrix ? { sketchMatrix: input.sketchMatrix } : {}),
+          entities: [{
+              sketchEntityId: "vertical_world_line",
+              sketchEntityType: "skLineSegment",
+              isConstruction: true,
+              startPosition3d: { x: -0.004, y: 0, z: 0.01 },
+              endPosition3d: { x: -0.004, y: 0, z: 0 },
+            },
+            {
+              sketchEntityId: "profile_circle",
+              sketchEntityType: "skCircle",
+              geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: 0.005 },
+            },
+          ],
+        }],
+      },
+      parts: {},
+      featureSpecs: { present: false, reason: "n/a" },
+      resolvedReferences: input.resolvedReferences ?? [],
+      groundTruth: { hasBodies: false },
+      rollbackSnapshots: [],
+    }],
+  };
+}
+
+async function expectNoDegenerateLineDiagnostic(translation: ReturnType<typeof translateSketch>) {
+  const sketchId = translation.definition.points[0]?.target.sketchId;
+  expect(sketchId).toBeTruthy();
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: new SketchConstraintSolverAdapter({
+      documentId: "doc_captured_frame_projection",
+      revisionId: "rev_captured_frame_projection",
+    }),
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_captured_frame_projection",
+    revisionId: "rev_captured_frame_projection",
+    sketchId: sketchId!,
+    plane: translation.plane,
+    definition: translation.definition,
+    relationshipSummary: translation.relationshipSummary,
+  });
+  expect(verified.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("degenerate-line-segment");
+}
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts captured sketchMatrix plans unresolved sketch plane on captured frame", async () => {
+  const bundle = makeSketchMatrixBundle({
+    sketchMatrix: CAPTURED_SKETCH_MATRIX,
+    includeSketchPlaneQuery: true,
+  });
+  const read = readPartStudio(bundle, "e1");
+  const plan = planStudioFidelity(read, { captureFormatVersion: 2, historyProbeAvailable: true });
+  const sketchPlan = plan.featurePlans[0];
+  expect(sketchPlan).toMatchObject({
+    tier: "parametric",
+    reasonCodes: ["sketch-on-captured-frame"],
+    target: { kind: "sketch", planeKey: "xy" },
+    inputDependencies: [],
+  });
+  if (sketchPlan?.target.kind !== "sketch" || !sketchPlan.target.capturedFrame) {
+    throw new Error("Expected captured frame sketch target.");
+  }
+
+  const solved = read.solvedSketchesByFeatureId.get("S_MATRIX")!;
+  const line = solved.entities[0]!;
+  const start = projectPointToSketchPlaneFrame(line.start3d!, sketchPlan.target.capturedFrame);
+  const end = projectPointToSketchPlaneFrame(line.end3d!, sketchPlan.target.capturedFrame);
+  expect(start).toEqual([-4, 10]);
+  expect(end).toEqual([-4, 0]);
+  expect(Math.hypot(start[0] - end[0], start[1] - end[1])).toBe(10);
+
+  const translation = translateSketch({
+    featureId: "S_MATRIX",
+    label: "Matrix sketch",
+    planeKey: "xy",
+    plane: {
+      support: { kind: "construction", constructionId: "construction_pending_S_MATRIX" },
+      frame: sketchPlan.target.capturedFrame,
+      key: null,
+    },
+    entities: [{
+      entityId: line.entityId,
+      entityType: "lineSegment",
+      isConstruction: line.isConstruction,
+      start,
+      end,
+    }],
+  });
+  expect(translation.definition.points.map((point) => point.position)).toEqual([[-4, 10], [-4, 0]]);
+  await expectNoDegenerateLineDiagnostic(translation);
+});
+
+test.each([
+  ["TopplaneOp", "xy"],
+  ["RightplaneOp", "yz"],
+  ["FrontplaneOp", "xz"],
+] as const)(
+  "src/domain/import/onshape/fidelity-planner.spec.ts %s sketchPlane query maps to canonical %s",
+  (operationId, planeKey) => {
+    const read = readPartStudio(makeSketchMatrixBundle({
+      sketchMatrix: CAPTURED_SKETCH_MATRIX,
+      includeSketchPlaneQuery: true,
+      sketchPlaneQuery: {
+        queryString: `query = qCreatedBy(id + "${operationId}", EntityType.FACE);`,
+      },
+    }), "e1");
+    expect(planStudioFidelity(read).featurePlans[0]).toMatchObject({
+      tier: "parametric",
+      reasonCodes: ["sketch-on-canonical-plane"],
+      target: { kind: "sketch", planeKey },
+    });
+  },
+);
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts absent sketchPlane keeps canonical XY fallback", () => {
+  const read = readPartStudio(makeSketchMatrixBundle({ includeSketchPlaneQuery: false }), "e1");
+  const sketchPlan = planStudioFidelity(read).featurePlans[0];
+  expect(sketchPlan).toMatchObject({
+    tier: "parametric",
+    reasonCodes: ["sketch-on-canonical-plane"],
+    target: { kind: "sketch", planeKey: "xy" },
+  });
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts empty sketchPlane query list keeps canonical XY fallback", () => {
+  const read = readPartStudio(makeSketchMatrixBundle({
+    includeSketchPlaneQuery: true,
+    sketchPlaneQueries: [],
+  }), "e1");
+  const sketchPlan = planStudioFidelity(read).featurePlans[0];
+  expect(sketchPlan).toMatchObject({
+    tier: "parametric",
+    reasonCodes: ["sketch-on-canonical-plane"],
+    target: { kind: "sketch", planeKey: "xy" },
+  });
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts deterministic sketchPlane without queryString stays baked despite sketchMatrix", () => {
+  const read = readPartStudio(makeSketchMatrixBundle({
+    sketchMatrix: CAPTURED_SKETCH_MATRIX,
+    includeSketchPlaneQuery: true,
+    sketchPlaneQuery: { deterministicIds: ["face-id"] },
+  }), "e1");
+  expect(planStudioFidelity(read).featurePlans[0]).toMatchObject({
+    tier: "baked",
+    reasonCodes: ["needs-history-probe"],
+    target: { kind: "suppressed" },
+  });
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts cPlane sketchPlane query does not use sketchMatrix fallback", () => {
+  const read = readPartStudio(makeSketchMatrixBundle({
+    sketchMatrix: CAPTURED_SKETCH_MATRIX,
+    includeSketchPlaneQuery: true,
+    sketchPlaneQuery: {
+      queryString: 'query = qCreatedBy(id + "C_PLANE" + "planeOp", EntityType.FACE);',
+    },
+  }), "e1");
+  expect(planStudioFidelity(read).featurePlans[0]).toMatchObject({
+    tier: "baked",
+    reasonCodes: ["needs-history-probe"],
+    target: { kind: "suppressed" },
+  });
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts unresolved sketchPlane without valid matrix stays baked", () => {
+  const read = readPartStudio(makeSketchMatrixBundle({ includeSketchPlaneQuery: true }), "e1");
+  const sketchPlan = planStudioFidelity(read).featurePlans[0];
+  expect(sketchPlan).toMatchObject({
+    tier: "baked",
+    reasonCodes: ["needs-history-probe"],
+    target: { kind: "suppressed" },
+  });
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts nonorthogonal sketchMatrix is rejected", () => {
+  const invalidMatrix = [...CAPTURED_SKETCH_MATRIX];
+  invalidMatrix[1] = 0.5;
+  const read = readPartStudio(makeSketchMatrixBundle({
+    sketchMatrix: invalidMatrix,
+    includeSketchPlaneQuery: true,
+  }), "e1");
+  expect(read.solvedSketchesByFeatureId.get("S_MATRIX")?.sketchFrame).toBeUndefined();
+  const sketchPlan = planStudioFidelity(read).featurePlans[0];
+  expect(sketchPlan).toMatchObject({
+    tier: "baked",
+    reasonCodes: ["needs-history-probe"],
+    target: { kind: "suppressed" },
+  });
+});
+
+test.skipIf(!existsSync("40a51fb8fa82fd4565151114.onshape-capture.json"))(
+  "src/domain/import/onshape/fidelity-planner.spec.ts real Mounts Sketch 2 uses captured frame projection",
+  async () => {
+    const parsed = validateOnshapeCaptureBundle(
+      JSON.parse(await readFile("40a51fb8fa82fd4565151114.onshape-capture.json", "utf8")),
+    );
+    if (!parsed.success) throw new Error("Real Mounts capture must validate.");
+    const studio = parsed.data.partStudios[0]!;
+    const read = readPartStudio(parsed.data, studio.elementId);
+    const plan = planStudioFidelity(read, {
+      captureFormatVersion: parsed.data.formatVersion,
+      historyProbeAvailable: true,
+    });
+    const sketchPlan = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "FkkBVfXRKopMlIW_1");
+    expect(sketchPlan).toMatchObject({
+      tier: "parametric",
+      reasonCodes: ["sketch-on-captured-frame"],
+      target: { kind: "sketch", planeKey: "xy" },
+    });
+    if (sketchPlan?.target.kind !== "sketch" || !sketchPlan.target.capturedFrame) {
+      throw new Error("Expected real Sketch 2 captured frame.");
+    }
+    const line = read.solvedSketchesByFeatureId
+      .get("FkkBVfXRKopMlIW_1")
+      ?.entities.find((entity) => entity.entityId === "VdyB64MBDSdx");
+    if (!line?.start3d || !line.end3d) throw new Error("Expected real Sketch 2 line endpoints.");
+    const start = projectPointToSketchPlaneFrame(line.start3d, sketchPlan.target.capturedFrame);
+    const end = projectPointToSketchPlaneFrame(line.end3d, sketchPlan.target.capturedFrame);
+    expect(Math.hypot(start[0] - end[0], start[1] - end[1])).toBeCloseTo(10, 6);
+    expect(start).not.toEqual(end);
+    const translation = translateSketch({
+      featureId: "FkkBVfXRKopMlIW_1",
+      label: "Sketch 2",
+      planeKey: "xy",
+      plane: {
+        support: { kind: "construction", constructionId: "construction_pending_FkkBVfXRKopMlIW_1" },
+        frame: sketchPlan.target.capturedFrame,
+        key: null,
+      },
+      entities: [{
+        entityId: line.entityId,
+        entityType: "lineSegment",
+        isConstruction: line.isConstruction,
+        start,
+        end,
+      }],
+    });
+    expect(translation.definition.points[0]?.position).not.toEqual(translation.definition.points[1]?.position);
+    await expectNoDegenerateLineDiagnostic(translation);
+  },
+);
 
 
 test("src/domain/import/onshape/fidelity-planner.spec.ts prefers the consuming feature's history-point record", () => {
