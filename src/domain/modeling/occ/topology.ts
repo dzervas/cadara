@@ -744,8 +744,37 @@ export function rewriteNativeTopologyPayloadIds(
     };
   });
 
+  const cadaraBrep = nativePayload.cadaraBrep
+    ? {
+        ...nativePayload.cadaraBrep,
+        bodies: nativePayload.cadaraBrep.bodies.map((body) =>
+          body.bodyKey === bodyId
+            ? {
+                ...body,
+                topology: {
+                  ...body.topology,
+                  faces: body.topology.faces.map((face) => ({
+                    ...face,
+                    faceKey: rewriteId("face", face.faceKey),
+                  })),
+                  edges: body.topology.edges.map((edge) => ({
+                    ...edge,
+                    edgeKey: rewriteId("edge", edge.edgeKey),
+                  })),
+                  vertices: body.topology.vertices.map((vertex) => ({
+                    ...vertex,
+                    vertexKey: rewriteId("vertex", vertex.vertexKey),
+                  })),
+                },
+              }
+            : body,
+        ),
+      }
+    : undefined;
+
   return {
     ...nativePayload,
+    ...(cadaraBrep ? { cadaraBrep } : {}),
     topology,
     edgeVertices: nativePayload.edgeVertices.map((record) => ({
       ...record,
@@ -867,6 +896,102 @@ function buildTrackedSolidBody(
   };
 }
 
+export function buildNativeTopologyIdAliasesForTrackedBody(
+  oc: OpenCascadeInstance,
+  body: OccTrackedBody,
+  nativePayload: OccNativeShimPayload,
+): NonNullable<OccTrackedBody["nativeTopologyIdAliases"]> {
+  const indexedPayload = nativePayload.topology.some(
+    (record) => record.bodyId === body.bodyId,
+  )
+    ? nativePayload
+    : {
+        ...nativePayload,
+        topology: nativePayload.cadaraBrep?.bodies[0]
+          ? [
+              ...nativePayload.cadaraBrep.bodies[0].topology.faces.map(
+                (face, index) => ({
+                  id: face.faceKey,
+                  kind: "face" as const,
+                  bodyId: body.bodyId,
+                  index: index + 1,
+                }),
+              ),
+              ...nativePayload.cadaraBrep.bodies[0].topology.edges.map(
+                (edge, index) => ({
+                  id: edge.edgeKey,
+                  kind: "edge" as const,
+                  bodyId: body.bodyId,
+                  index: index + 1,
+                }),
+              ),
+              ...nativePayload.cadaraBrep.bodies[0].topology.vertices.map(
+                (vertex, index) => ({
+                  id: vertex.vertexKey,
+                  kind: "vertex" as const,
+                  bodyId: body.bodyId,
+                  index: index + 1,
+                }),
+              ),
+            ]
+          : [],
+      };
+  const nativeFaces = indexFacesByNativePayload(
+    oc,
+    body.bodyId,
+    body.shape,
+    indexedPayload,
+  );
+  const nativeEdges = indexEdgesByNativePayload(
+    oc,
+    body.bodyId,
+    body.shape,
+    indexedPayload,
+  );
+  const nativeVertices = indexVerticesByNativePayload(
+    oc,
+    body.bodyId,
+    body.shape,
+    indexedPayload,
+  );
+
+  const match = <NativeId extends FaceId | EdgeId | VertexId, PublicId extends NativeId>(
+    kind: "face" | "edge" | "vertex",
+    nativeShapes: ReadonlyMap<NativeId, { IsSame(other: unknown): boolean; delete(): void }>,
+    publicShapes: ReadonlyMap<PublicId, unknown>,
+  ) => {
+    const aliases = new Map<NativeId, PublicId>();
+    try {
+      for (const [nativeId, nativeShape] of nativeShapes) {
+        const matches = [...publicShapes].filter(([, publicShape]) =>
+          nativeShape.IsSame(publicShape),
+        );
+        if (matches.length !== 1) {
+          throw new Error(
+            `Native ${kind} ${nativeId} on body ${body.bodyId} matched ${matches.length} tracked topology entries.`,
+          );
+        }
+        aliases.set(nativeId, matches[0]![0]);
+      }
+      return aliases;
+    } finally {
+      for (const shape of nativeShapes.values()) {
+        shape.delete();
+      }
+    }
+  };
+
+  return {
+    faceIdsByNativeId: match("face", nativeFaces.facesById, body.facesById),
+    edgeIdsByNativeId: match("edge", nativeEdges.edgesById, body.edgesById),
+    vertexIdsByNativeId: match(
+      "vertex",
+      nativeVertices.verticesById,
+      body.verticesById,
+    ),
+  };
+}
+
 export function createInitialTopologyToken() {
   return formatTopologyToken(INITIAL_TOPOLOGY_TOKEN_NUMBER);
 }
@@ -945,9 +1070,12 @@ function composeNativeTopologyAliases(input: {
           vertexId: currentId as VertexId,
         };
       })() as OccSubtopologyRef;
-      const reconciled =
-        input.targetByCurrentKey.get(getOccDurableRefKey(currentTarget)) ??
-        currentTarget;
+      const reconciled = input.targetByCurrentKey.get(
+        getOccDurableRefKey(currentTarget),
+      );
+      if (!reconciled) {
+        continue;
+      }
       if (reconciled.kind !== kind) {
         throw new Error(
           `Native topology alias collision changed ${kind} ${currentId} into ${reconciled.kind}.`,
@@ -1531,6 +1659,30 @@ export function createOccReferenceState(input: {
   provedLiveReferenceKeys?: ReadonlySet<string>;
 }): OccReferenceState {
   const liveReferencesByKey = buildLiveReferenceMap(input);
+  const nativeAliasLiveReferenceKeys = new Set<string>();
+  for (const body of input.bodies) {
+    for (const faceId of body.nativeTopologyIdAliases?.faceIdsByNativeId.values() ?? []) {
+      if (body.facesById.has(faceId)) {
+        nativeAliasLiveReferenceKeys.add(
+          getOccDurableRefKey({ kind: "face", bodyId: body.bodyId, faceId }),
+        );
+      }
+    }
+    for (const edgeId of body.nativeTopologyIdAliases?.edgeIdsByNativeId?.values() ?? []) {
+      if (body.edgesById.has(edgeId)) {
+        nativeAliasLiveReferenceKeys.add(
+          getOccDurableRefKey({ kind: "edge", bodyId: body.bodyId, edgeId }),
+        );
+      }
+    }
+    for (const vertexId of body.nativeTopologyIdAliases?.vertexIdsByNativeId?.values() ?? []) {
+      if (body.verticesById.has(vertexId)) {
+        nativeAliasLiveReferenceKeys.add(
+          getOccDurableRefKey({ kind: "vertex", bodyId: body.bodyId, vertexId }),
+        );
+      }
+    }
+  }
   const invalidatedReferencesByKey = new Map(
     input.previous?.invalidatedReferencesByKey ?? [],
   );
@@ -1544,7 +1696,8 @@ export function createOccReferenceState(input: {
     if (
       previousInvalidation &&
       isSubtopology &&
-      !input.provedLiveReferenceKeys?.has(key)
+      !input.provedLiveReferenceKeys?.has(key) &&
+      !nativeAliasLiveReferenceKeys.has(key)
     ) {
       liveReferencesByKey.delete(key);
       continue;

@@ -53,6 +53,7 @@ import { describeUnknownError } from "@/contracts/errors";
 import { matchSignature } from "@/domain/import/onshape/signature-matcher";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import type { DurableRef } from "@/contracts/shared/references";
+import { requireAcceptedModelingResult } from "@/lib/reported-action";
 
 export async function resolveLocalFileImportSource(
   file: File,
@@ -862,13 +863,22 @@ export async function applyImportPreparedActions(input: {
       ...request,
       baseRevisionId: revisionId,
     });
-    if (result.isErr()) {
-      throw result.error;
-    }
-    revisionId = result.value.revisionId;
-    createdEntityIds.variableIds.push(result.value.variableId);
+    if (result.isErr()) throw result.error;
+
     diagnostics.push(...result.value.diagnostics);
+    const accepted = requireAcceptedModelingResult(result.value, {
+      operation: `Import variable ${request.name}`,
+      fallbackMessage: `Import variable ${request.name} failed.`,
+    });
+    if (accepted.isErr()) throw accepted.error;
+
+    revisionId = accepted.value.revisionId;
+    createdEntityIds.variableIds.push(accepted.value.variableId);
     appliedOperationCount += 1;
+    const errorDiagnostic = accepted.value.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error",
+    );
+    if (errorDiagnostic) throw new Error(errorDiagnostic.message);
   };
 
   const applyFeature = async (index: number) => {
@@ -889,15 +899,21 @@ export async function applyImportPreparedActions(input: {
         detail: null,
       });
     }
-    if (result.isErr()) {
-      throw result.error;
-    }
-    revisionId = result.value.revisionId;
-    createdEntityIds.featureIds.push(result.value.featureId);
-    const bodyIds = result.value.changedTargets.flatMap((target) =>
+    if (result.isErr()) throw result.error;
+
+    diagnostics.push(...result.value.diagnostics);
+    const accepted = requireAcceptedModelingResult(result.value, {
+      operation: `Import feature ${request.featureLabel ?? request.definition.kind}`,
+      fallbackMessage: `Import feature ${request.featureLabel ?? request.definition.kind} failed.`,
+    });
+    if (accepted.isErr()) throw accepted.error;
+
+    revisionId = accepted.value.revisionId;
+    createdEntityIds.featureIds.push(accepted.value.featureId);
+    const bodyIds = accepted.value.changedTargets.flatMap((target) =>
       target.kind === "body" ? [target.bodyId] : [],
     );
-    const constructionIds = result.value.changedTargets.flatMap((target) =>
+    const constructionIds = accepted.value.changedTargets.flatMap((target) =>
       target.kind === "construction" ? [target.constructionId] : [],
     );
     if (currentOrderedPosition >= 0) {
@@ -909,8 +925,11 @@ export async function applyImportPreparedActions(input: {
         );
       }
     }
-    diagnostics.push(...result.value.diagnostics);
     appliedOperationCount += 1;
+    const errorDiagnostic = accepted.value.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error",
+    );
+    if (errorDiagnostic) throw new Error(errorDiagnostic.message);
   };
 
   const applySketch = async (index: number) => {
@@ -920,19 +939,28 @@ export async function applyImportPreparedActions(input: {
       ...(await materializer.materializeCommitSketchRequest(request, consumer)),
       baseRevisionId: revisionId,
     });
-    if (result.isErr()) {
-      throw result.error;
-    }
-    revisionId = result.value.revisionId;
-    createdEntityIds.sketchIds.push(result.value.sketchId);
+    if (result.isErr()) throw result.error;
+
+    diagnostics.push(...result.value.diagnostics);
+    const accepted = requireAcceptedModelingResult(result.value, {
+      operation: `Import sketch ${request.sketchLabel}`,
+      fallbackMessage: `Import sketch ${request.sketchLabel} failed.`,
+    });
+    if (accepted.isErr()) throw accepted.error;
+
+    revisionId = accepted.value.revisionId;
+    createdEntityIds.sketchIds.push(accepted.value.sketchId);
     if (currentOrderedPosition >= 0) {
       materializer.recordSketchOutput(
         currentOrderedPosition,
-        result.value.sketchId,
+        accepted.value.sketchId,
       );
     }
-    diagnostics.push(...result.value.diagnostics);
     appliedOperationCount += 1;
+    const errorDiagnostic = accepted.value.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error",
+    );
+    if (errorDiagnostic) throw new Error(errorDiagnostic.message);
   };
 
   const applyByKind = async (ref: ImportPreparedActionRef) => {
