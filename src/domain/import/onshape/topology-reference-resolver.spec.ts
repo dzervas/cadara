@@ -141,6 +141,32 @@ test("does not infer ID-less non-body, multi-slot, missing, or malformed queries
   }
 });
 
+test("matches captured ID-less query evidence at the consuming history point", () => {
+  const result = resolveTopologyReferences(input({
+    queries: [{
+      ...edgeQuery("captured-query:consumer:entities:0:0"),
+      queryEvidenceIndex: 0,
+    }],
+    capturedReferences: [],
+    capturedQueryReferences: [{
+      consumingFeatureId: "consumer",
+      parameterId: "entities",
+      queryIndex: 0,
+      entityIndex: 0,
+      evaluatedAt: "historyPoint",
+      signature: historyEdge().signature!,
+    }],
+  }));
+
+  expect(result).toMatchObject({
+    kind: "resolved",
+    bindings: [{
+      sourceEvidence: "queryHistoryPoint",
+      reviewReference: { kind: "edge", edgeId: "edge_live" },
+    }],
+  });
+});
+
 test("returns a typed deferred selector only for a unique exact-consumer history match", () => {
   const result = resolveTopologyReferences(input({
     capturedReferences: [

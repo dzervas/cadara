@@ -106,6 +106,24 @@ export type OnshapeResolvedReference =
       unresolved: { reason: string };
     };
 
+/** History-point evidence obtained by evaluating an ID-less captured query. */
+export type OnshapeResolvedQueryReference =
+  | {
+      consumingFeatureId: string;
+      parameterId: string;
+      queryIndex: number;
+      entityIndex: number;
+      evaluatedAt: "historyPoint";
+      signature: OnshapeGeometricSignature;
+    }
+  | {
+      consumingFeatureId: string;
+      parameterId: string;
+      queryIndex: number;
+      evaluatedAt: "historyPoint";
+      unresolved: { reason: string };
+    };
+
 /**
  * Final-state ground-truth geometry for a Part Studio. Empty Part Studios
  * record the absence of bodies explicitly rather than embedding empty payloads.
@@ -154,6 +172,8 @@ export interface OnshapePartStudioCapture {
   featureSpecs: OnshapeOptionalSection;
   /** Resolution table for every referenced deterministic ID. */
   resolvedReferences: OnshapeResolvedReference[];
+  /** Optional history-point evidence for captured queries whose ID arrays were empty. */
+  resolvedQueryReferences?: OnshapeResolvedQueryReference[];
   /** Final-state ground-truth geometry. */
   groundTruth: OnshapeGroundTruth;
   /** `null` unless v2 snapshot capture was explicitly requested. */

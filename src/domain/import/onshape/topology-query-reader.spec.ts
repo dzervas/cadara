@@ -61,6 +61,40 @@ test("preserves chamfer query order and deterministic-ID order", () => {
   expect(result.diagnostics).toEqual([]);
 });
 
+test("uses captured history evidence when Onshape omits query IDs", () => {
+  const feature: OnshapeFeatureNode = {
+    featureId: "FqXExmahcCNDI8A_1",
+    featureType: "chamfer",
+    parameters: [{
+      parameterId: "entities",
+      queries: [{ deterministicIds: [], queryString: 'query=qCompressed(1.0,"payload",id);' }],
+    }],
+  };
+  const result = readTopologyQueryRefs(feature, [{
+    key: "edgeTargets",
+    parameterId: "entities",
+    role: "edge",
+    expectedKinds: ["edge"],
+    cardinality: { min: 1, max: null },
+  }], [{
+    consumingFeatureId: feature.featureId,
+    parameterId: "entities",
+    queryIndex: 0,
+    entityIndex: 0,
+    evaluatedAt: "historyPoint",
+    signature: { entityClass: "edge", geometryType: "line" },
+  }]);
+
+  expect(result.diagnostics).toEqual([]);
+  expect(result.refs).toEqual([
+    expect.objectContaining({
+      deterministicId: "captured-query:FqXExmahcCNDI8A_1:entities:0:0",
+      queryEvidenceIndex: 0,
+      expectedKinds: ["edge"],
+    }),
+  ]);
+});
+
 test("reads only active Boolean 1 slots and ignores inactive offset queries", () => {
   const feature: OnshapeFeatureNode = {
     featureId: "FThhOjyWzjnevIO_1",

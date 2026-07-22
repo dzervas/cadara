@@ -17,8 +17,10 @@ import { DEFAULT_TESSELLATION_TOLERANCE, captureGroundTruth, exportStep } from "
 import {
   collectDeterministicIdConsumers,
   collectDeterministicIds,
+  collectQueryStringConsumers,
   resolveDeterministicIds,
   resolveDeterministicIdsWithHistory,
+  resolveQueryStringsWithHistory,
 } from "@/cli/commands/onshape-capture/references";
 import type { OnshapeDocumentRef } from "@/cli/commands/onshape-capture/url";
 
@@ -251,6 +253,7 @@ async function captureStudio(
 
   const deterministicIdConsumers = collectDeterministicIdConsumers(features);
   const deterministicIds = collectDeterministicIds(features);
+  const queryStringConsumers = collectQueryStringConsumers(features);
   const resolvedReferences = rollbackStudioPath
     ? await resolveDeterministicIdsWithHistory(
         client,
@@ -259,6 +262,9 @@ async function captureStudio(
         deterministicIdConsumers,
       )
     : await resolveDeterministicIds(client, studioPath, deterministicIds);
+  const resolvedQueryReferences = rollbackStudioPath
+    ? await resolveQueryStringsWithHistory(client, studioPath, queryStringConsumers)
+    : [];
 
   const groundTruth = await captureGroundTruth(client, {
     documentId: ref.documentId,
@@ -292,6 +298,7 @@ async function captureStudio(
     parts,
     featureSpecs,
     resolvedReferences,
+    resolvedQueryReferences,
     groundTruth,
     rollbackSnapshots,
   };

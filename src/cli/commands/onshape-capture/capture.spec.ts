@@ -15,12 +15,35 @@ import {
   FIXTURE_EMPTY_STUDIO_ID,
   FIXTURE_ELEMENT_URL,
   FIXTURE_MICROVERSION,
+  FEATURES_WITH_REFERENCES,
   FIXTURE_PART_STUDIO_ID,
   FIXTURE_TEMP_WORKSPACE_ID,
   type FetchResponseStub,
 } from "@/cli/commands/onshape-capture/fixtures/transcript";
 
 const CREDENTIALS = { accessKey: "access", secretKey: "secret" };
+
+function featuresWithIdlessChamfer(queryString: string): typeof FEATURES_WITH_REFERENCES {
+  const features = structuredClone(FEATURES_WITH_REFERENCES) as {
+    features: Array<Record<string, unknown>>;
+  };
+  features.features.push({
+    btType: "BTMFeature-134",
+    featureType: "chamfer",
+    featureId: "FqXExmahcCNDI8A_1",
+    name: "Chamfer 1",
+    parameters: [{
+      btType: "BTMParameterQueryList-148",
+      parameterId: "entities",
+      queries: [{
+        btType: "BTMIndividualQuery-138",
+        deterministicIds: [],
+        queryString,
+      }],
+    }],
+  });
+  return features as typeof FEATURES_WITH_REFERENCES;
+}
 
 test("capture.spec.ts full capture happy path produces a valid bundle", async () => {
   const { fetch } = createFixtureFetch();
@@ -98,6 +121,78 @@ test("capture.spec.ts records final-state and history-point deterministic refere
   expect(featureRequest?.url).toContain("rollbackBarIndex=-1");
   expect(featureRequest?.url).toContain("includeGeometryIds=true");
   expect(featureRequest?.url).toContain("noSketchGeometry=false");
+});
+
+test("capture.spec.ts evaluates an ID-less compressed query at its history point", async () => {
+  const features = featuresWithIdlessChamfer(
+    'query=qCompressed(1.0,"fixture-payload",id);',
+  );
+  const routes = buildDefaultRoutes();
+  routes.unshift({
+    method: "GET",
+    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
+    respond: () => ({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(features)),
+    }),
+  });
+  const { fetch, calls } = createFixtureFetch(routes);
+  const bundle = await captureBundle(
+    parseDocumentUrl(FIXTURE_ELEMENT_URL),
+    CREDENTIALS,
+    createFixtureRuntime(fetch),
+  );
+
+  expect(bundle.partStudios[0]!.resolvedQueryReferences).toEqual([{
+    consumingFeatureId: "FqXExmahcCNDI8A_1",
+    parameterId: "entities",
+    queryIndex: 0,
+    entityIndex: 0,
+    evaluatedAt: "historyPoint",
+    signature: expect.objectContaining({
+      entityClass: "edge",
+      geometryType: "line",
+      boundingBox: { low: [0, 0, 0], high: [0.01, 0, 0] },
+    }),
+  }]);
+  expect(
+    calls.filter(
+      (call) =>
+        call.url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
+        call.url.includes("rollbackBarIndex=3"),
+    ),
+    "ID-less queries at one history point should share one FeatureScript evaluation.",
+  ).toHaveLength(1);
+});
+
+test("capture.spec.ts rejects non-qCompressed query strings without evaluating them", async () => {
+  const features = featuresWithIdlessChamfer("query=qEverything();");
+  const routes = buildDefaultRoutes();
+  routes.unshift({
+    method: "GET",
+    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
+    respond: () => ({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(features)),
+    }),
+  });
+  const { fetch, calls } = createFixtureFetch(routes);
+  const bundle = await captureBundle(
+    parseDocumentUrl(FIXTURE_ELEMENT_URL),
+    CREDENTIALS,
+    createFixtureRuntime(fetch),
+  );
+
+  expect(bundle.partStudios[0]!.resolvedQueryReferences).toEqual([{
+    consumingFeatureId: "FqXExmahcCNDI8A_1",
+    parameterId: "entities",
+    queryIndex: 0,
+    evaluatedAt: "historyPoint",
+    unresolved: { reason: "queryString is not a supported qCompressed assignment" },
+  }]);
+  expect(calls.some((call) => call.url.includes("rollbackBarIndex=3"))).toBe(false);
 });
 
 test("capture.spec.ts creates and deletes a temporary rollback workspace", async () => {

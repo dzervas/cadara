@@ -1,6 +1,7 @@
 import type { HistoryProbeTopologySignature } from "@/contracts/import/capabilities";
 import type {
   OnshapeGeometricSignature,
+  OnshapeResolvedQueryReference,
   OnshapeResolvedReference,
 } from "@/contracts/import/onshape-capture-bundle";
 import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
@@ -41,7 +42,7 @@ export interface TopologyResolutionBinding {
   deferred: ImportDeferredTopologyRef;
   score: number;
   evidence: readonly string[];
-  sourceEvidence: "historyPoint" | "rollback" | "corroboratedFinalState" | "uniquePrefixBody";
+  sourceEvidence: "historyPoint" | "queryHistoryPoint" | "rollback" | "corroboratedFinalState" | "uniquePrefixBody";
 }
 
 export interface TopologyResolutionFailureDetail {
@@ -64,6 +65,7 @@ export interface ResolveTopologyReferencesInput {
   queries: readonly OnshapeTopologyQueryRef[];
   queryDiagnostics?: readonly TopologyQueryReadDiagnostic[];
   capturedReferences: readonly OnshapeResolvedReference[];
+  capturedQueryReferences?: readonly OnshapeResolvedQueryReference[];
   rollback: RollbackTopologyTimeline;
   cadaraSignatures: readonly HistoryProbeTopologySignature[];
   tolerance: TopologyMatchTolerance;
@@ -164,6 +166,38 @@ function selectSourceEvidence(
   input: ResolveTopologyReferencesInput,
   query: OnshapeTopologyQueryRef,
 ): SourceEvidence | SourceFailure {
+  if (query.queryEvidenceIndex !== undefined) {
+    const captured = input.capturedQueryReferences?.find(
+      (reference) =>
+        reference.consumingFeatureId === input.consumerFeatureId &&
+        reference.parameterId === query.parameterId &&
+        reference.queryIndex === query.queryIndex &&
+        ("entityIndex" in reference
+          ? reference.entityIndex === query.queryEvidenceIndex
+          : true),
+    );
+    if (!captured) {
+      return {
+        reason: "topology-history-evidence-missing",
+        message: `No captured history-point evidence exists for query ${query.parameterId}[${query.queryIndex}].`,
+      };
+    }
+    if ("unresolved" in captured) {
+      return {
+        reason: "topology-source-query-unresolved",
+        message: captured.unresolved.reason,
+      };
+    }
+    return {
+      signature: toWorldFrame(
+        input,
+        normalizeOnshapeTopologySignature(captured.signature),
+        { reframe: false },
+      ),
+      source: "queryHistoryPoint",
+    };
+  }
+
   const history = input.capturedReferences.find(
     (reference) =>
       reference.deterministicId === query.deterministicId &&

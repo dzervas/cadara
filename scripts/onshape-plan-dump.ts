@@ -175,20 +175,22 @@ function createLogicLaneReviewCapabilities(
   featurePlans: FeaturePlan[],
   features: readonly OnshapeFeatureNode[],
   resolvedReferences: ReturnType<typeof readPartStudio>["studio"]["resolvedReferences"],
+  resolvedQueryReferences: NonNullable<
+    ReturnType<typeof readPartStudio>["studio"]["resolvedQueryReferences"]
+  >,
   rollbackSnapshots: ReturnType<typeof readPartStudio>["studio"]["rollbackSnapshots"],
 ): ImportCapabilities {
   const isParametric = (featureId: string) =>
     featurePlans.find((plan) => plan.onshapeFeatureId === featureId)?.tier === "parametric";
-  // Honesty caveat: these echo the captured face/edge signatures straight back
-  // as the "probe" signatures, so every face/edge consumer is a guaranteed
-  // self-match after unit normalization. This proves matcher + units ONLY. The
-  // real OCC probe exposes world-frame topology that (a) may not exist in the
-  // prefix at all (PS1: extrudes bake -> zero signatures) or (b) sits in a
-  // different frame than the captured signature (Mounts Chamfer 1). Those two
-  // real-kernel failures are pinned in realkernel-acceptance-gate.spec.ts so
-  // this mock can never green-light them; see the W-realkernel note in
-  // docs/onshape-importer-completion-plan.md.
-  const nonBodySignatures: HistoryProbeTopologySignature[] = resolvedReferences.flatMap(
+  // Honesty caveat: these echo captured face/edge signatures straight back as
+  // probe signatures, so every present face/edge is a guaranteed self-match
+  // after unit normalization. This script proves planning, matching, and units;
+  // browser/OCC acceptance remains the real topology gate.
+  const capturedTopologyEvidence = [
+    ...resolvedReferences,
+    ...resolvedQueryReferences,
+  ];
+  const nonBodySignatures: HistoryProbeTopologySignature[] = capturedTopologyEvidence.flatMap(
     (entry, index) => {
       if (!("signature" in entry) || entry.signature.entityClass === "body") return [];
       const signature = entry.signature;
@@ -378,6 +380,7 @@ async function main() {
   console.log(`studio: ${read.studio.name} (${read.studio.elementId})`);
   console.log(`rollbackSnapshots: ${read.studio.rollbackSnapshots?.length ?? 0}`);
   console.log(`resolvedReferences: ${read.studio.resolvedReferences.length}`);
+  console.log(`resolvedQueryReferences: ${read.studio.resolvedQueryReferences?.length ?? 0}`);
   printPlan("Plain fidelity plan", plan);
 
   if (read.diagnostics.length > 0) {
@@ -392,6 +395,7 @@ async function main() {
       plan.featurePlans,
       read.features,
       read.studio.resolvedReferences,
+      read.studio.resolvedQueryReferences ?? [],
       read.studio.rollbackSnapshots,
     );
     const reviewed = await onshapeImportProvider.review({
