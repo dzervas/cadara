@@ -92,6 +92,12 @@ test("capture.spec.ts records final-state and history-point deterministic refere
     calls.filter((call) => call.url.includes("/features/rollback")).length,
     "Failed IDs at the same rollback index should share one rollback move.",
   ).toBe(1);
+  const featureRequest = calls.find(
+    (call) => call.method === "GET" && call.url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
+  );
+  expect(featureRequest?.url).toContain("rollbackBarIndex=-1");
+  expect(featureRequest?.url).toContain("includeGeometryIds=true");
+  expect(featureRequest?.url).toContain("noSketchGeometry=false");
 });
 
 test("capture.spec.ts creates and deletes a temporary rollback workspace", async () => {
@@ -232,7 +238,7 @@ test("capture.spec.ts aborts when a mandatory section keeps failing", async () =
   const routes = buildDefaultRoutes();
   routes.unshift({
     method: "GET",
-    match: (url) => url.endsWith(`/e/${FIXTURE_PART_STUDIO_ID}/features`),
+    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
     respond: (): FetchResponseStub => ({
       ok: false,
       status: 500,
@@ -256,7 +262,7 @@ test("capture.spec.ts retries with backoff on HTTP 429 before succeeding", async
   let attempts = 0;
   routes.unshift({
     method: "GET",
-    match: (url) => url.endsWith(`/e/${FIXTURE_PART_STUDIO_ID}/features`),
+    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
     respond: (): FetchResponseStub => {
       attempts += 1;
       if (attempts < 3) {

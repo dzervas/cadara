@@ -240,7 +240,9 @@ async function captureStudio(
     : null;
   const partsPath = `/parts/d/${ref.documentId}/${ref.wvm}/${ref.wvmId}/e/${studio.id}`;
 
-  const features = await client.getJson(`${studioPath}/features`);
+  const features = await client.getJson(
+    `${studioPath}/features?rollbackBarIndex=-1&includeGeometryIds=true&noSketchGeometry=false`,
+  );
   const sketches = await client.getJson(
     `${studioPath}/sketches?output3D=true&curvePoints=true`,
   );

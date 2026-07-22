@@ -391,7 +391,7 @@ export function buildDefaultRoutes(): FixtureRoute[] {
     {
       method: "GET",
       match: (url) =>
-        url.endsWith(`/e/${FIXTURE_PART_STUDIO_ID}/features`),
+        url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
       respond: () => json(200, FEATURES_WITH_REFERENCES),
     },
     {
@@ -447,7 +447,7 @@ export function buildDefaultRoutes(): FixtureRoute[] {
     // Part Studio B (empty)
     {
       method: "GET",
-      match: (url) => url.endsWith(`/e/${FIXTURE_EMPTY_STUDIO_ID}/features`),
+      match: (url) => url.includes(`/e/${FIXTURE_EMPTY_STUDIO_ID}/features?`),
       respond: () => json(200, FEATURES_NO_REFERENCES),
     },
     {
