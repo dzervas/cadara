@@ -1489,6 +1489,8 @@ export interface UpdateDocumentVariableResponse extends ModelingOperationResult 
 export interface EvaluatePreviewRequest extends DocumentMutationRequest {
   /** Editor-owned preview identity used to correlate stale responses. */
   previewId: PreviewId;
+  /** Existing feature replaced by this preview, or null for a new feature preview. */
+  replacesFeatureId?: FeatureId | null;
   /** Exact typed feature definition to preview against `baseRevisionId`. */
   definition: FeatureDefinition;
 }

@@ -188,6 +188,71 @@ function mapFeatureSourceTargets(
   return targets;
 }
 
+function mergeFeatureSourceTargets(
+  ...sources: readonly (ReadonlyMap<string, readonly DurableRef[]> | undefined)[]
+) {
+  const merged = new Map<string, DurableRef[]>();
+  for (const source of sources) {
+    for (const [sourceKey, targets] of source ?? []) {
+      const current = merged.get(sourceKey) ?? [];
+      for (const target of targets) {
+        if (
+          !current.some(
+            (candidate) =>
+              getOccDurableRefKey(candidate) === getOccDurableRefKey(target),
+          )
+        ) {
+          current.push(target);
+        }
+      }
+      merged.set(sourceKey, current);
+    }
+  }
+  return merged;
+}
+
+function mapInheritedBodyTopologyTargets(
+  ownerFeatureId: FeatureId,
+  sourceBody: OccTrackedBody,
+  replacements: readonly OccTrackedBody[],
+) {
+  const replacement = replacements.find(
+    (body) => body.bodyId === sourceBody.bodyId,
+  );
+  const targets = new Map<string, DurableRef[]>();
+  if (!replacement) {
+    return targets;
+  }
+
+  const register = (target: DurableRef, isLive: boolean) => {
+    if (isLive) {
+      targets.set(
+        `boolean:${ownerFeatureId}:input:${getOccDurableRefKey(target)}`,
+        [target],
+      );
+    }
+  };
+  for (const faceId of sourceBody.topology.faceIds) {
+    register(
+      { kind: "face", bodyId: sourceBody.bodyId, faceId },
+      replacement.facesById.has(faceId),
+    );
+  }
+  for (const edgeId of sourceBody.topology.edgeIds) {
+    register(
+      { kind: "edge", bodyId: sourceBody.bodyId, edgeId },
+      replacement.edgesById.has(edgeId),
+    );
+  }
+  for (const vertexId of sourceBody.topology.vertexIds) {
+    register(
+      { kind: "vertex", bodyId: sourceBody.bodyId, vertexId },
+      replacement.verticesById.has(vertexId),
+    );
+  }
+  return targets;
+}
+
 export { trackDerivedSolidBody };
 
 export function createBooleanBuilder(
@@ -762,6 +827,23 @@ function reconcileNativeHistoryReplacement(
   };
 }
 
+export function assertValidFeatureResultShape(
+  context: OccFeatureExecutionContext,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  operation: string,
+) {
+  const analyzer = new context.oc.BRepCheck_Analyzer(shape, true, false);
+  try {
+    if (!analyzer.IsValid_2()) {
+      throw new Error(
+        `occ-invalid-result-topology: OCC ${operation} produced invalid or non-manifold topology.`,
+      );
+    }
+  } finally {
+    analyzer.delete();
+  }
+}
+
 export function resolveNativeFeatureTransactionReplacement(
   context: OccFeatureExecutionContext,
   current: OccTrackedBody,
@@ -771,6 +853,11 @@ export function resolveNativeFeatureTransactionReplacement(
 ) {
   const { payload, history } = validateNativeFeatureTransaction(
     transaction,
+    operation,
+  );
+  assertValidFeatureResultShape(
+    context,
+    transaction.Shape() as InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
     operation,
   );
   const replacement = trackReplacementSolidBodyFromNativePayload(context.oc, {
@@ -987,6 +1074,9 @@ export function resolveReplacementBodies(
 ) {
   const current = requireBody(context, bodyId);
   const solids = extractSolidShapes(context.oc, shape);
+  for (const solid of solids) {
+    assertValidFeatureResultShape(context, solid, String(ownerFeatureId));
+  }
   const historySources =
     options.historySources ??
     (options.historySource ? [options.historySource] : []);
@@ -1187,9 +1277,16 @@ export function applyBooleanPolicy(
       bodies: nextBodies,
       producedTargets,
       historyInvalidations: replacementResult.historyInvalidations,
-      featureSourceTargets: mapFeatureSourceTargets(
-        replacementResult.replacements,
-        projectedSourceShapes,
+      featureSourceTargets: mergeFeatureSourceTargets(
+        mapFeatureSourceTargets(
+          replacementResult.replacements,
+          projectedSourceShapes,
+        ),
+        mapInheritedBodyTopologyTargets(
+          ownerFeatureId,
+          targetBody,
+          replacementResult.replacements,
+        ),
       ),
     };
   }
@@ -1329,9 +1426,16 @@ export function applyBooleanPolicy(
       bodies: nextBodies,
       producedTargets,
       historyInvalidations: combinedHistoryInvalidations,
-      featureSourceTargets: mapFeatureSourceTargets(
-        replacementResult.replacements,
-        projectedSourceShapes,
+      featureSourceTargets: mergeFeatureSourceTargets(
+        mapFeatureSourceTargets(
+          replacementResult.replacements,
+          projectedSourceShapes,
+        ),
+        mapInheritedBodyTopologyTargets(
+          ownerFeatureId,
+          firstBody,
+          replacementResult.replacements,
+        ),
       ),
     };
   }
@@ -1345,6 +1449,7 @@ export function applyBooleanPolicy(
     InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
   >();
   const replacementBodies: OccTrackedBody[] = [];
+  const inheritedSourceTargets = new Map<string, DurableRef[]>();
 
   for (const bodyId of targetBodyIds) {
     const targetBody = requireBody(context, bodyId);
@@ -1389,6 +1494,13 @@ export function applyBooleanPolicy(
       mergeFeatureSourceShapes(projectedSourceShapes, targetSourceShapes);
     }
     replacementBodies.push(...replacementResult.replacements);
+    for (const [sourceKey, targets] of mapInheritedBodyTopologyTargets(
+      ownerFeatureId,
+      targetBody,
+      replacementResult.replacements,
+    )) {
+      inheritedSourceTargets.set(sourceKey, targets);
+    }
     const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId);
     nextBodies.splice(index, 1, ...replacementResult.replacements);
     for (const replacement of replacementResult.replacements) {
@@ -1403,9 +1515,12 @@ export function applyBooleanPolicy(
     bodies: nextBodies,
     producedTargets,
     historyInvalidations: combinedHistoryInvalidations,
-    featureSourceTargets: mapFeatureSourceTargets(
-      replacementBodies,
-      options.sourceShapes ? projectedSourceShapes : undefined,
+    featureSourceTargets: mergeFeatureSourceTargets(
+      mapFeatureSourceTargets(
+        replacementBodies,
+        options.sourceShapes ? projectedSourceShapes : undefined,
+      ),
+      inheritedSourceTargets,
     ),
   };
 }

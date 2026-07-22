@@ -91,6 +91,96 @@ function validateAuthoredModelDocumentInvariants(
     );
   }
 
+  const lineageFeatureIds = new Set<string>();
+  for (const lineage of document.topologyLineage ?? []) {
+    if (
+      lineageFeatureIds.has(lineage.featureId) ||
+      !featureIdSet.has(lineage.featureId)
+    ) {
+      return createDiagnostic(
+        "invalid-authored-document",
+        "Authored topology lineage must reference each existing feature at most once.",
+      );
+    }
+    lineageFeatureIds.add(lineage.featureId);
+
+    const outputSlots = new Set<string>();
+    for (const output of lineage.outputs) {
+      if (outputSlots.has(output.outputSlot) || output.topologyToken.length === 0) {
+        return createDiagnostic(
+          "invalid-authored-document",
+          "Authored topology lineage outputs must have unique slots and non-empty tokens.",
+        );
+      }
+      outputSlots.add(output.outputSlot);
+
+      const topologyIds = {
+        face: new Set(output.topology.faceIds),
+        edge: new Set(output.topology.edgeIds),
+        vertex: new Set(output.topology.vertexIds),
+      };
+      if (
+        topologyIds.face.size !== output.topology.faceIds.length ||
+        topologyIds.edge.size !== output.topology.edgeIds.length ||
+        topologyIds.vertex.size !== output.topology.vertexIds.length
+      ) {
+        return createDiagnostic(
+          "invalid-authored-document",
+          "Authored topology lineage outputs must not contain duplicate topology IDs.",
+        );
+      }
+
+      const sourceKeys = new Set<string>();
+      for (const source of output.sourceTargets) {
+        if (sourceKeys.has(source.sourceKey)) {
+          return createDiagnostic(
+            "invalid-authored-document",
+            "Authored topology lineage outputs must not contain duplicate source keys.",
+          );
+        }
+        sourceKeys.add(source.sourceKey);
+        const targetKeys = new Set<string>();
+        for (const target of source.targets) {
+          const targetId =
+            target.kind === "face"
+              ? target.faceId
+              : target.kind === "edge"
+                ? target.edgeId
+                : target.vertexId;
+          const targetKey = `${target.kind}:${target.bodyId}:${targetId}`;
+          const belongsToOutput =
+            target.kind === "face"
+              ? topologyIds.face.has(target.faceId)
+              : target.kind === "edge"
+                ? topologyIds.edge.has(target.edgeId)
+                : topologyIds.vertex.has(target.vertexId);
+          if (
+            target.bodyId !== output.outputSlot ||
+            !belongsToOutput ||
+            targetKeys.has(targetKey)
+          ) {
+            return createDiagnostic(
+              "invalid-authored-document",
+              "Authored topology lineage targets must be unique members of their output topology.",
+            );
+          }
+          targetKeys.add(targetKey);
+        }
+      }
+
+      if (
+        new Set(output.unsupportedSourceKeys).size !==
+          output.unsupportedSourceKeys.length ||
+        output.unsupportedSourceKeys.some((sourceKey) => sourceKeys.has(sourceKey))
+      ) {
+        return createDiagnostic(
+          "invalid-authored-document",
+          "Authored topology lineage unsupported source keys must be unique and disjoint.",
+        );
+      }
+    }
+  }
+
   const sketchIds = new Set(
     document.sketches.map((sketch) => sketch.sketchId),
   );
@@ -179,7 +269,8 @@ export function migrateAuthoredModelDocument(
     };
   }
 
-  const invariantFailure = validateAuthoredModelDocumentInvariants(result.data);
+  const document = result.data;
+  const invariantFailure = validateAuthoredModelDocumentInvariants(document);
   if (invariantFailure) {
     return {
       ok: false,
@@ -189,7 +280,7 @@ export function migrateAuthoredModelDocument(
 
   return {
     ok: true,
-    document: result.data,
+    document,
     migrated: false,
   };
 }

@@ -9,10 +9,14 @@ import type {
 import type {
   BodyId,
   DocumentId,
+  EdgeId,
+  FaceId,
   FeatureId,
   RevisionId,
   SketchId,
+  VertexId,
 } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
 import type { GeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
 import { createEmptyGeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
@@ -47,6 +51,31 @@ export type AuthoredDocumentHistoryOrderEntry =
   | { kind: "sketch"; sketchId: SketchId }
   | { kind: "feature"; featureId: FeatureId };
 
+export type AuthoredTopologyLineageTarget = Extract<
+  DurableRef,
+  { kind: "face" | "edge" | "vertex" }
+>;
+
+export interface AuthoredTopologyLineageOutput {
+  outputSlot: BodyId;
+  topologyToken: string;
+  topology: {
+    faceIds: FaceId[];
+    edgeIds: EdgeId[];
+    vertexIds: VertexId[];
+  };
+  sourceTargets: Array<{
+    sourceKey: string;
+    targets: AuthoredTopologyLineageTarget[];
+  }>;
+  unsupportedSourceKeys: string[];
+}
+
+export interface AuthoredFeatureTopologyLineage {
+  featureId: FeatureId;
+  outputs: AuthoredTopologyLineageOutput[];
+}
+
 export interface AuthoredModelDocument {
   contractVersion: ContractVersion;
   schemaVersion: AuthoredModelDocumentSchemaVersion;
@@ -63,6 +92,8 @@ export interface AuthoredModelDocument {
   bodyLabels: AuthoredBodyLabelRecord[];
   assets: GeometryAssetManifest;
   embeddedBinaryAssets: EmbeddedBinaryAssetRecord[];
+  /** Exact feature/source-key topology provenance; never geometric matching data. */
+  topologyLineage?: AuthoredFeatureTopologyLineage[];
 }
 
 export interface AuthoredModelDocumentDiagnostic {
@@ -112,5 +143,6 @@ export function createAuthoredModelDocumentFromSnapshot(
     })),
     assets: createEmptyGeometryAssetManifest(),
     embeddedBinaryAssets: [],
+    topologyLineage: [],
   };
 }

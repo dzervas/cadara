@@ -52,6 +52,10 @@ import {
   resolveOccReference,
   type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
+import {
+  createOccFeatureTopologyLineageMap,
+  serializeOccFeatureTopologyLineage,
+} from "@/domain/modeling/occ/topology-stage";
 
 function pointId(name: string) {
   return `sketch_point_${name}` as SketchPointId;
@@ -1861,6 +1865,36 @@ test("durable naming qualification keeps coincident delete and recreate invalid 
       suppressed: false,
     }),
   ).toThrow(/occ-invalid-reference.*occ-missing-reference/);
+
+  const persistedLineage = serializeOccFeatureTopologyLineage(
+    authored.featureTopologyStages,
+    new Map(),
+    new Set([baseFeatureId]),
+  );
+  const restored = applyFeature(
+    createOccAuthoringState(oc, {
+      sketches: [rectangle.sketch],
+      previousFeatureTopologyLineage:
+        createOccFeatureTopologyLineageMap(persistedLineage),
+    }),
+    baseFeature,
+  );
+  const restoredDeletedEdgeId = requireBody(restored, bodyId).topology.edgeIds[0]!;
+  const restoredRecreated = rebuildOccAuthoringState(
+    rebuildOccAuthoringState(restored, []),
+    [baseFeature],
+  );
+  const restoredResolution = resolveOccReference(
+    {
+      documentId: restoredRecreated.documentId,
+      revisionId: restoredRecreated.revisionId,
+      referenceState: restoredRecreated.referenceState,
+    },
+    { kind: "edge", bodyId, edgeId: restoredDeletedEdgeId },
+  );
+  expect(restoredResolution.resolution.invalidation?.reason).toBe(
+    OCC_REFERENCE_INVALIDATION_REASONS.missing,
+  );
 }, 15000);
 
 test("durable naming qualification invalidates an edge deleted by an upstream sketch topology edit instead of silently remapping", async () => {

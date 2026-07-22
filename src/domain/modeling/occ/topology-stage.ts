@@ -1,5 +1,9 @@
 import type { FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
+import type {
+  AuthoredFeatureTopologyLineage,
+  AuthoredTopologyLineageTarget,
+} from "@/contracts/modeling/authored-document";
 import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
 import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
 import { getOccDurableRefKey } from "@/domain/modeling/occ/topology";
@@ -24,6 +28,72 @@ export type OccFeatureTopologyStageMap = ReadonlyMap<
   OccFeatureTopologyStage
 >;
 
+export type OccFeatureTopologyLineageMap = ReadonlyMap<
+  FeatureId,
+  AuthoredFeatureTopologyLineage
+>;
+
+function isOutputSubtopologyTarget(
+  target: DurableRef,
+  bodyId: BodyId,
+): target is AuthoredTopologyLineageTarget {
+  return (
+    (target.kind === "face" ||
+      target.kind === "edge" ||
+      target.kind === "vertex") &&
+    target.bodyId === bodyId
+  );
+}
+
+export function createOccFeatureTopologyLineageMap(
+  records: readonly AuthoredFeatureTopologyLineage[] | undefined,
+): OccFeatureTopologyLineageMap {
+  return new Map((records ?? []).map((record) => [record.featureId, record]));
+}
+
+export function mergeOccFeatureTopologyStageMaps(
+  ...maps: readonly OccFeatureTopologyStageMap[]
+): OccFeatureTopologyStageMap {
+  return new Map(maps.flatMap((map) => [...map]));
+}
+
+export function serializeOccFeatureTopologyLineage(
+  stages: OccFeatureTopologyStageMap,
+  retained: OccFeatureTopologyLineageMap,
+  activeFeatureIds: ReadonlySet<FeatureId>,
+): AuthoredFeatureTopologyLineage[] {
+  const records = new Map(
+    [...retained].filter(([featureId]) => activeFeatureIds.has(featureId)),
+  );
+
+  for (const [featureId, stage] of stages) {
+    if (!activeFeatureIds.has(featureId)) {
+      continue;
+    }
+    records.set(featureId, {
+      featureId,
+      outputs: [...stage.outputs].map(([outputSlot, output]) => ({
+        outputSlot,
+        topologyToken: output.body.topologyToken,
+        topology: {
+          faceIds: [...output.body.topology.faceIds],
+          edgeIds: [...output.body.topology.edgeIds],
+          vertexIds: [...output.body.topology.vertexIds],
+        },
+        sourceTargets: [...output.sourceTargets].map(([sourceKey, targets]) => ({
+          sourceKey,
+          targets: targets.filter((target) =>
+            isOutputSubtopologyTarget(target, outputSlot),
+          ),
+        })),
+        unsupportedSourceKeys: [...output.unsupportedSourceKeys],
+      })),
+    });
+  }
+
+  return [...records.values()];
+}
+
 type RigidTransformSubtopologyRef = Extract<
   DurableRef,
   { kind: "face" | "edge" | "vertex" }
@@ -37,6 +107,43 @@ function rigidTransformSourceId(target: RigidTransformSubtopologyRef) {
     return target.edgeId;
   }
   return target.vertexId;
+}
+
+function getRigidTransformSuccessor(
+  sourceBody: OccTrackedBody,
+  source: RigidTransformSubtopologyRef,
+  successorsBySourceKey: ReadonlyMap<string, DurableRef>,
+) {
+  const direct = successorsBySourceKey.get(getOccDurableRefKey(source));
+  if (direct) {
+    return direct;
+  }
+
+  const aliases =
+    source.kind === "face"
+      ? sourceBody.nativeTopologyIdAliases?.faceIdsByNativeId
+      : source.kind === "edge"
+        ? sourceBody.nativeTopologyIdAliases?.edgeIdsByNativeId
+        : sourceBody.nativeTopologyIdAliases?.vertexIdsByNativeId;
+  const publicId = rigidTransformSourceId(source);
+  for (const [nativeId, aliasedPublicId] of aliases ?? []) {
+    if (aliasedPublicId !== publicId) {
+      continue;
+    }
+    const nativeTarget =
+      source.kind === "face"
+        ? { ...source, faceId: nativeId as FaceId }
+        : source.kind === "edge"
+          ? { ...source, edgeId: nativeId as EdgeId }
+          : { ...source, vertexId: nativeId as VertexId };
+    const successor = successorsBySourceKey.get(
+      getOccDurableRefKey(nativeTarget),
+    );
+    if (successor) {
+      return successor;
+    }
+  }
+  return undefined;
 }
 
 function getRigidTransformSourceTargets(body: OccTrackedBody) {
@@ -98,7 +205,11 @@ export function createRigidTransformTopologyStage(input: {
       kind: source.kind,
       sourcePublicId: rigidTransformSourceId(source),
     });
-    const successor = input.successorsBySourceKey.get(getOccDurableRefKey(source));
+    const successor = getRigidTransformSuccessor(
+      input.sourceBody,
+      source,
+      input.successorsBySourceKey,
+    );
 
     if (
       !successor ||
@@ -142,6 +253,13 @@ export function getPreviousFeatureTopologyStage(
   featureId: FeatureId,
 ): OccFeatureTopologyStage | null {
   return stages.get(featureId) ?? null;
+}
+
+export function getPreviousFeatureTopologyLineage(
+  lineage: OccFeatureTopologyLineageMap,
+  featureId: FeatureId,
+): AuthoredFeatureTopologyLineage | null {
+  return lineage.get(featureId) ?? null;
 }
 
 export function createUnsupportedProducerTopologyStage(input: {

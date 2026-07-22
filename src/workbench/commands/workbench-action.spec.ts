@@ -54,6 +54,44 @@ test("src/workbench/commands/workbench-action.spec.ts", async () => {
     "Expected rejected modeling results should not be reported by default.",
   ).toBe(0);
 
+  let acceptedUiMessage: string | null = null;
+  const acceptedWithErrorDiagnostic = await runWorkbenchAction({
+    operation: "Update variable",
+    reporter,
+    reporting: { mappedFailure: "expected" },
+    action: async () => ({
+      revisionState: {
+        kind: "accepted" as const,
+        documentId: "document_test",
+        previousRevisionId: "revision_previous",
+        revisionId: "revision_next",
+      },
+      diagnostics: [
+        {
+          code: "occ-rebuild-failure",
+          severity: "error" as const,
+          message: "Chamfer rebuild failed.",
+          target: null,
+          detail: null,
+        },
+      ],
+    }),
+    mapSuccess: (result) =>
+      requireAcceptedModelingResult(result, {
+        operation: "Update variable",
+        fallbackMessage: "Update variable failed.",
+      }),
+    onError: (error) => {
+      acceptedUiMessage = error.message;
+    },
+  });
+
+  expect(
+    acceptedWithErrorDiagnostic.isErr(),
+    "Accepted mutations with error diagnostics should still surface a failure.",
+  ).toBeTruthy();
+  expect(acceptedUiMessage).toBe("Chamfer rebuild failed.");
+
   const thrownReporter = createTestErrorReporter();
   let thrownMessage = "";
   const thrown = await runWorkbenchAction({

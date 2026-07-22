@@ -414,11 +414,7 @@ public:
 
     for (const std::string& edgeId : edgeIds) {
       TopoDS_Edge edge;
-      TopoDS_Face adjacentFace;
-      if (
-        !CadaraFindEdgeById(shape, bodyId, previousTopologyToken, edgeId, edge)
-        || !CadaraFindFirstAdjacentFace(shape, edge, adjacentFace)
-      ) {
+      if (!CadaraFindEdgeById(shape, bodyId, previousTopologyToken, edgeId, edge)) {
         const TopoDS_Shape emptyShape;
         return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
           emptyShape,
@@ -430,7 +426,7 @@ public:
           CadaraDiagnosticJson(
             "occ-native-feature-transaction-missing-target",
             "error",
-            "Native OCC chamfer feature transaction could not resolve a target edge and adjacent face.",
+            "Native OCC chamfer feature transaction could not resolve a target edge.",
             bodyId,
             "featureTransaction",
             "edgeId",
@@ -439,7 +435,7 @@ public:
         ), CadaraBuildUnsupportedHistoryJson("chamfer", bodyId), false);
       }
 
-      chamfer.Add(distance, distance, edge, adjacentFace);
+      chamfer.Add(distance, edge);
     }
 
     return CadaraBuildLocalOperationTransactionResult(

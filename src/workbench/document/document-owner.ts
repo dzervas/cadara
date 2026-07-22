@@ -109,6 +109,9 @@ export function createWorkbenchDocumentOwner({
 
     const accepted = requireAcceptedModelingResult(result.value, options);
     if (accepted.isErr()) {
+      if (result.value.revisionState.kind === "accepted") {
+        await loadAcceptedMutationSnapshot();
+      }
       return accepted as unknown as AcceptedDocumentMutation<T>;
     }
 

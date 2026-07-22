@@ -539,6 +539,8 @@ function buildNativeTopologyPayloadForTrackedSolid(
     ),
   );
   assertReleasableNativeTopologyPayload(
+    oc,
+    input.solid,
     input.bodyId,
     nativePayload,
     "tracked solid body",
@@ -575,29 +577,51 @@ export function haveSameOccTopologyIds(
   );
 }
 
+function getNativePayloadFaceArea(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  faceIndex: number,
+) {
+  const faceMap = new oc.TopTools_IndexedMapOfShape_1();
+  oc.TopExp.MapShapes_1(shape, faceShapeType(oc) as never, faceMap);
+  if (faceIndex < 1 || faceIndex > faceMap.Size()) {
+    faceMap.delete();
+    return null;
+  }
+  const face = oc.TopoDS.Face_1(faceMap.FindKey(faceIndex));
+  const properties = new oc.GProp_GProps_1();
+  try {
+    oc.BRepGProp.SurfaceProperties_1(face, properties, false, false);
+    return Math.abs(properties.Mass());
+  } finally {
+    properties.delete();
+    face.delete();
+    faceMap.delete();
+  }
+}
+
 function assertReleasableNativeTopologyPayload(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
   bodyId: BodyId,
   nativePayload: OccNativeShimPayload,
   operation: string,
 ) {
-  const isPreviewBody = String(bodyId).startsWith("body_feature_preview_");
   const defersPre8Validation = String(bodyId).startsWith("body_feature_sweep-");
   const errorDiagnostic = nativePayload.diagnostics.find(
     (diagnostic) => diagnostic.severity === "error",
   );
 
-  if (errorDiagnostic && !isPreviewBody && !defersPre8Validation) {
+  if (errorDiagnostic && !defersPre8Validation) {
     throw new Error(
       `Native topology payload for ${operation} ${bodyId} is not releasable: ${errorDiagnostic.message}`,
     );
   }
 
-  if (isPreviewBody) {
-    return;
-  }
 
   const topologyIdsByKind = new Set<string>();
   const kernelUidsByKind = new Set<string>();
+  const faceIds = new Set<string>();
 
   for (const record of nativePayload.topology) {
     if (record.bodyId !== bodyId) {
@@ -621,6 +645,32 @@ function assertReleasableNativeTopologyPayload(
 
     topologyIdsByKind.add(topologyIdKey);
     kernelUidsByKind.add(kernelUidKey);
+    if (record.kind === "face") {
+      faceIds.add(record.id);
+    }
+  }
+
+  if (nativePayload.mesh && faceIds.size > 0) {
+    const bindings = nativePayload.mesh.triangleFaceBindings;
+    if (!bindings || bindings.length === 0) {
+      throw new Error(
+        `Native topology payload for ${operation} ${bodyId} has no face-bound render triangles.`,
+      );
+    }
+    const renderedFaceIds = new Set(bindings);
+    const missingRenderableFace = nativePayload.topology.find(
+      (record) =>
+        record.bodyId === bodyId &&
+        record.kind === "face" &&
+        !renderedFaceIds.has(record.id) &&
+        (getNativePayloadFaceArea(oc, shape, record.index) ??
+          Number.POSITIVE_INFINITY) > 1e-12,
+    );
+    if (missingRenderableFace) {
+      throw new Error(
+        `Native topology payload for ${operation} ${bodyId} omitted render triangles for non-degenerate face ${missingRenderableFace.id}.`,
+      );
+    }
   }
 }
 
@@ -1126,7 +1176,7 @@ function createCurrentToReconciledAliases(
 }
 
 export function applySemanticStageTopologyIds(input: {
-  previous: OccTrackedBody;
+  previous: Pick<OccTrackedBody, "bodyId" | "topologyToken">;
   current: OccTrackedBody;
   preservedTargetsByCurrentKey: ReadonlyMap<string, OccSubtopologyRef>;
 }) {
@@ -1358,6 +1408,8 @@ export function trackReplacementSolidBodyFromNativePayload(
     input.nativePayload,
   );
   assertReleasableNativeTopologyPayload(
+    oc,
+    solid,
     input.previous.bodyId,
     nativePayload,
     "native replacement body",
@@ -1460,9 +1512,16 @@ export function reconcileReplacementSolidBody(
       ? replacement.nativeTopologyPayload
       : undefined,
   } satisfies OccTrackedBody;
+  const nativeTopologyIdAliases = replacement.nativeTopologyPayload
+    ? buildNativeTopologyIdAliasesForTrackedBody(
+        oc,
+        reconciledBody,
+        replacement.nativeTopologyPayload,
+      )
+    : undefined;
 
   return {
-    body: reconciledBody,
+    body: { ...reconciledBody, nativeTopologyIdAliases },
     historyInvalidations: reconciliation.invalidations,
   };
 }

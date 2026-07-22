@@ -504,6 +504,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
   evaluatePreview: (input: {
     baseRevisionId: RevisionId;
     previewId: FeatureEditSessionState["previewId"];
+    replacesFeatureId: FeatureId | null;
     definition: NonNullable<ReturnType<typeof buildFeatureDefinition>>;
   }) => Promise<{
     revisionId: RevisionId;
@@ -707,6 +708,10 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       const result = await modelingService.evaluatePreview({
         baseRevisionId: input.baseRevisionId,
         previewId: input.featureSession.previewId,
+        replacesFeatureId:
+          input.featureSession.mode === "edit"
+            ? input.featureSession.featureId
+            : null,
         definition,
       });
 
