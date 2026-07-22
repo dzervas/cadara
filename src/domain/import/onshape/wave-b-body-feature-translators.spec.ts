@@ -653,7 +653,7 @@ describe("Wave B body topology translators", () => {
     const source = mirrorSource();
     const review = await onshapeImportProvider.review({ source, capabilities: providerCapabilities });
     const studio = review.providerReview.studios[0]!;
-    expect(studio.tierCounts).toEqual({ parametric: 4, baked: 1, geometryOnly: 0 });
+    expect(studio.tierCounts).toEqual({ parametric: 5, baked: 0, geometryOnly: 0 });
     expect(studio.featurePlans.find((candidate) => candidate.featureType === "cPlane")).toMatchObject({
       tier: "parametric",
       reasonCodes: ["plane-from-captured-frame"],

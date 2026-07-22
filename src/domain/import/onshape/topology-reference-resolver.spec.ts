@@ -3,8 +3,15 @@ import { expect, test } from "vitest";
 import type { HistoryProbeTopologySignature } from "@/contracts/import/capabilities";
 import type { OnshapeResolvedReference } from "@/contracts/import/onshape-capture-bundle";
 import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
-import { resolveTopologyReferences, type ResolveTopologyReferencesInput } from "@/domain/import/onshape/topology-reference-resolver";
-import type { OnshapeTopologyQueryRef } from "@/domain/import/onshape/topology-query-reader";
+import {
+  resolveTopologyReferences,
+  resolveUniquePrefixBody,
+  type ResolveTopologyReferencesInput,
+} from "@/domain/import/onshape/topology-reference-resolver";
+import type {
+  OnshapeTopologyQueryRef,
+  TopologyQuerySlot,
+} from "@/domain/import/onshape/topology-query-reader";
 
 const tolerance = { linear: 0.01, angularRadians: 1e-4, relative: 1e-6, ambiguityMargin: 0.001 };
 const emptyRollback = createRollbackTopologyTimeline({ featureIds: ["consumer"], snapshots: [] });
@@ -56,6 +63,82 @@ const tessellation = (bodyId: string, faceId: string, high = 0.01) => ({
   bodies: [{ id: bodyId, faces: [{ id: faceId, facets: [{ vertices: [
     { x: 0, y: 0, z: 0 }, { x: high, y: 0, z: 0 }, { x: 0, y: high, z: 0 },
   ] }] }] }],
+});
+
+const bodyOnlySlot: TopologyQuerySlot = {
+  key: "scope",
+  parameterId: "entities",
+  role: "body",
+  expectedKinds: ["body"],
+  cardinality: { min: 1, max: null },
+};
+
+const emptyIdBodyFeature = {
+  featureId: "consumer",
+  featureType: "transform",
+  parameters: [{
+    parameterId: "entities",
+    queries: [{ deterministicIds: [], queryString: "query = body;" }],
+  }],
+};
+
+const liveBody = (bodyId: string): HistoryProbeTopologySignature => ({
+  entityClass: "body",
+  geometryType: "solid",
+  boundingBox: { low: [0, 0, 0], high: [10, 10, 10] },
+  centroid: [5, 5, 5],
+  reference: { kind: "body", bodyId: bodyId as never },
+});
+
+test("resolves an ID-less body query only when the prefix has exactly one live body", () => {
+  const resolved = resolveUniquePrefixBody({
+    consumerFeatureId: "consumer",
+    feature: emptyIdBodyFeature,
+    slots: [bodyOnlySlot],
+    cadaraSignatures: [liveBody("body_live")],
+    tolerance,
+  });
+  expect(resolved).toMatchObject({
+    kind: "resolved",
+    bindings: [{
+      sourceEvidence: "uniquePrefixBody",
+      reviewReference: { kind: "body", bodyId: "body_live" },
+      evidence: ["unique-prefix-body"],
+      deferred: { kind: "topologyOf", expectedKind: "body" },
+    }],
+  });
+
+  expect(resolveUniquePrefixBody({
+    consumerFeatureId: "consumer",
+    feature: emptyIdBodyFeature,
+    slots: [bodyOnlySlot],
+    cadaraSignatures: [liveBody("one"), liveBody("two")],
+    tolerance,
+  })).toMatchObject({ kind: "degraded", reason: "topology-query-unreadable" });
+});
+
+test("does not infer ID-less non-body, multi-slot, missing, or malformed queries", () => {
+  const edgeSlot = { ...bodyOnlySlot, expectedKinds: ["edge"] as const };
+  for (const value of [
+    { feature: emptyIdBodyFeature, slots: [edgeSlot] },
+    { feature: emptyIdBodyFeature, slots: [bodyOnlySlot, bodyOnlySlot] },
+    { feature: { ...emptyIdBodyFeature, parameters: [] }, slots: [bodyOnlySlot] },
+    {
+      feature: {
+        ...emptyIdBodyFeature,
+        parameters: [{ parameterId: "entities", queries: [{ deterministicIds: [42] }] }],
+      },
+      slots: [bodyOnlySlot],
+    },
+  ]) {
+    expect(resolveUniquePrefixBody({
+      consumerFeatureId: "consumer",
+      feature: value.feature,
+      slots: value.slots,
+      cadaraSignatures: [liveBody("body_live")],
+      tolerance,
+    })).toBeNull();
+  }
 });
 
 test("returns a typed deferred selector only for a unique exact-consumer history match", () => {

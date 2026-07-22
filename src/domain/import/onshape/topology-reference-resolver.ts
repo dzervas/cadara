@@ -17,9 +17,11 @@ import {
   reframeSignature,
   type RigidTransform,
 } from "@/domain/import/onshape/capture-frame";
+import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 import type {
   OnshapeTopologyQueryRef,
   TopologyQueryReadDiagnostic,
+  TopologyQuerySlot,
 } from "@/domain/import/onshape/topology-query-reader";
 
 export type TopologyResolutionReason =
@@ -39,7 +41,7 @@ export interface TopologyResolutionBinding {
   deferred: ImportDeferredTopologyRef;
   score: number;
   evidence: readonly string[];
-  sourceEvidence: "historyPoint" | "rollback" | "corroboratedFinalState";
+  sourceEvidence: "historyPoint" | "rollback" | "corroboratedFinalState" | "uniquePrefixBody";
 }
 
 export interface TopologyResolutionFailureDetail {
@@ -227,6 +229,125 @@ function selectSourceEvidence(
 
 function expectedKindFor(signature: OnshapeGeometricSignature): ImportDeferredTopologyRef["expectedKind"] {
   return signature.entityClass;
+}
+
+export function isUniquePrefixBodyQuery(
+  feature: OnshapeFeatureNode,
+  slots: readonly TopologyQuerySlot[],
+): boolean {
+  if (slots.length !== 1) return false;
+  const slot = slots[0]!;
+  if (
+    slot.expectedKinds.length !== 1 ||
+    slot.expectedKinds[0] !== "body" ||
+    slot.cardinality.min !== 1
+  ) {
+    return false;
+  }
+  const parameter = (feature.parameters ?? []).find(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { parameterId?: unknown }).parameterId === slot.parameterId,
+  ) as { queries?: unknown } | undefined;
+  if (!parameter || !Array.isArray(parameter.queries) || parameter.queries.length === 0) {
+    return false;
+  }
+  return (parameter.queries as Array<{ deterministicIds?: unknown }>).every(
+    (query) => Array.isArray(query?.deterministicIds) && query.deterministicIds.length === 0,
+  );
+}
+
+export interface ResolveUniquePrefixBodyInput {
+  consumerFeatureId: string;
+  feature: OnshapeFeatureNode;
+  slots: readonly TopologyQuerySlot[];
+  cadaraSignatures: readonly HistoryProbeTopologySignature[];
+  tolerance: TopologyMatchTolerance;
+}
+
+/**
+ * Recover a body-only query when Onshape omits geometry IDs but the rebuilt
+ * prefix contains exactly one live body. This is identity by cardinality, not
+ * geometric matching: every non-body, multi-slot, malformed, or multi-body
+ * case remains unreadable.
+ */
+export function resolveUniquePrefixBody(
+  input: ResolveUniquePrefixBodyInput,
+): TopologyResolutionResult | null {
+  if (!isUniquePrefixBodyQuery(input.feature, input.slots)) return null;
+  const slot = input.slots[0]!;
+  const parameter = (input.feature.parameters ?? []).find(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { parameterId?: unknown }).parameterId === slot.parameterId,
+  ) as { queries: Array<{ deterministicIds?: unknown; queryString?: unknown }> };
+  const queries = parameter.queries;
+
+  const bodySignatures = new Map<
+    string,
+    HistoryProbeTopologySignature & { reference: Extract<DurableRef, { kind: "body" }> }
+  >();
+  for (const signature of input.cadaraSignatures) {
+    if (signature.entityClass !== "body" || signature.reference.kind !== "body") continue;
+    bodySignatures.set(
+      signature.reference.bodyId,
+      signature as HistoryProbeTopologySignature & {
+        reference: Extract<DurableRef, { kind: "body" }>;
+      },
+    );
+  }
+  if (bodySignatures.size !== 1) {
+    return {
+      kind: "degraded",
+      reason: "topology-query-unreadable",
+      details: [{
+        message: `Body query ${slot.parameterId} omitted geometry IDs and the prefix exposes ${bodySignatures.size} live bodies; exactly one is required.`,
+      }],
+    };
+  }
+
+  const signature = [...bodySignatures.values()][0]!;
+  const capturedSignature: OnshapeGeometricSignature = {
+    entityClass: "body",
+    geometryType: signature.geometryType,
+    ...(signature.definingData ? { definingData: signature.definingData } : {}),
+    ...(signature.centroid ? { centroid: signature.centroid } : {}),
+    ...(signature.boundingBox ? { boundingBox: signature.boundingBox } : {}),
+  };
+  const deterministicId = `unique-prefix-body:${signature.reference.bodyId}`;
+  const query: OnshapeTopologyQueryRef = {
+    consumerFeatureId: input.consumerFeatureId,
+    slotKey: slot.key,
+    parameterId: slot.parameterId,
+    queryIndex: 0,
+    deterministicId,
+    queryString:
+      typeof queries[0]?.queryString === "string" ? queries[0].queryString : null,
+    expectedKinds: slot.expectedKinds,
+  };
+  return {
+    kind: "resolved",
+    bindings: [{
+      query,
+      reviewReference: signature.reference,
+      deferred: {
+        kind: "topologyOf",
+        expectedKind: "body",
+        capturedSignature,
+        tolerance: input.tolerance,
+        source: {
+          consumerFeatureId: input.consumerFeatureId,
+          parameterId: slot.parameterId,
+          deterministicId,
+        },
+      },
+      score: 0,
+      evidence: ["unique-prefix-body"],
+      sourceEvidence: "uniquePrefixBody",
+    }],
+  };
 }
 
 /** Resolve all required members atomically. One failure degrades the whole consumer. */
