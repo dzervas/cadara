@@ -40,7 +40,7 @@ test("revolve previews and commits with a planar profile and durable edge axis",
   await workbench.commitFeature("feature_revolve-1");
 });
 
-test("sweep previews and commits with a planar profile and durable edge path", async ({
+test("sweep rejects a coplanar profile/path combination instead of previewing non-manifold geometry", async ({
   page,
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
@@ -55,8 +55,15 @@ test("sweep previews and commits with a planar profile and durable edge path", a
     /^Select .* body_feature_extrude-1\.edge_/,
   );
 
-  await workbench.expectFeaturePreviewReady("sweep");
-  await workbench.commitFeature("feature_sweep-1");
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => window.__cadaraDebug?.getState().previewDiagnostics ?? "",
+        ),
+      { timeout: 30_000 },
+    )
+    .toMatch(/error:.*(invalid|rejected)/i);
 });
 
 test("loft previews and commits with ordered profile selection", async ({

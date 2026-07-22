@@ -256,7 +256,7 @@ export function requireFace(
     bodyId: body.bodyId,
     faceId,
   }) as `face_${string}`;
-  const face = body.facesById.get(faceId) ?? body.facesById.get(nativeFaceId);
+  const face = body.facesById.get(nativeFaceId) ?? body.facesById.get(faceId);
 
   if (!face) {
     throw new Error(`Face ${faceId} does not resolve on body ${body.bodyId}.`);
@@ -276,7 +276,7 @@ export function requireEdge(
     bodyId: body.bodyId,
     edgeId,
   }) as `edge_${string}`;
-  const edge = body.edgesById.get(edgeId) ?? body.edgesById.get(nativeEdgeId);
+  const edge = body.edgesById.get(nativeEdgeId) ?? body.edgesById.get(edgeId);
 
   if (!edge) {
     throw new Error(`Edge ${edgeId} does not resolve on body ${body.bodyId}.`);
@@ -300,7 +300,7 @@ export function requireVertex(
     bodyId: body.bodyId,
     vertexId,
   }) as `vertex_${string}`;
-  const vertex = body.verticesById.get(vertexId) ?? body.verticesById.get(nativeVertexId);
+  const vertex = body.verticesById.get(nativeVertexId) ?? body.verticesById.get(vertexId);
 
   if (!vertex) {
     throw new Error(

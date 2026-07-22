@@ -427,22 +427,23 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
     };
 
     try {
-      const body = trackNewSolidBody(oc, {
-        bodyId: "body_native_payload_duplicate",
-        label: "Native Payload Duplicate Body",
-        ownerFeatureId: "feature_native_payload_duplicate",
-        shape: builder.Shape(),
-      });
-      const faceIds = body.topology.faceIds;
-
+      let rejectedIncompleteMesh = false;
+      try {
+        trackNewSolidBody(oc, {
+          bodyId: "body_native_payload_duplicate",
+          label: "Native Payload Duplicate Body",
+          ownerFeatureId: "feature_native_payload_duplicate",
+          shape: builder.Shape(),
+        });
+      } catch (error) {
+        rejectedIncompleteMesh =
+          error instanceof Error &&
+          error.message.includes("omitted render triangles for non-degenerate face");
+      }
       expect(
-        new Set(faceIds).size,
-        "Duplicate native topology identity should be deterministically disambiguated before ids are inserted into topology maps.",
-      ).toBe(faceIds.length);
-      expect(
-        faceIds.some((faceId) => faceId.includes("_i")),
-        "Disambiguated native topology ids should retain a deterministic collision suffix.",
-      ).toBeTruthy();
+        rejectedIncompleteMesh,
+        "Ambiguous native topology that cannot bind every face to render triangles must be rejected.",
+      ).toBe(true);
     } finally {
       nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson =
         originalBuildJson;

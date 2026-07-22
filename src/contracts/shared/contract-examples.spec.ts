@@ -423,6 +423,7 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
     documentId: "doc_workspace",
     baseRevisionId: "rev_7",
     previewId: "preview_extrude_1",
+    replacesFeatureId: null,
     definition: createExtrudeRequest.definition,
   };
 

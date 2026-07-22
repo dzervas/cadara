@@ -107,6 +107,12 @@ function resolveNativeChamferReplacement(
     context.modelingTolerance,
     0.5,
   );
+  if (!transaction.IsDone()) {
+    // Older native payload builds used the two-distance overload for equal
+    // offsets. Fall back to the symmetric OCC overload when that transaction
+    // rejects the edge; fallback failures still surface below.
+    return null;
+  }
 
   return resolveNativeFeatureTransactionReplacement(
     context,
@@ -375,7 +381,7 @@ function addChamferWidth(
     return;
   }
 
-  chamfer.Add_3(width.distance, width.distance, edge, face);
+  chamfer.Add_2(width.distance, edge);
 }
 
 export function executeChamferFeature(
@@ -425,7 +431,6 @@ export function executeChamferFeature(
         : null) ??
       (() => {
         const chamfer = new context.oc.BRepFilletAPI_MakeChamfer(body.shape);
-
         for (const target of targets) {
           const edge = requireEdge(context, body, target.edgeId);
           addChamferWidth(

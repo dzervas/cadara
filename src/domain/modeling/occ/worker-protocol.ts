@@ -311,7 +311,43 @@ const occWorkerRequestEnvelopeValidator =
   typia.createValidateEquals<OccWorkerRequest>();
 
 export function validateOccWorkerRequestEnvelope(value: unknown) {
-  return occWorkerRequestEnvelopeValidator(value);
+  const validated = occWorkerRequestEnvelopeValidator(value);
+  if (validated.success || typeof value !== "object" || value === null) {
+    return validated;
+  }
+
+  const envelope = value as Record<string, unknown>;
+  const operation =
+    envelope.kind === "invoke" &&
+    typeof envelope.operation === "object" &&
+    envelope.operation !== null
+      ? (envelope.operation as Record<string, unknown>)
+      : null;
+  const request =
+    operation?.kind === "evaluatePreview" &&
+    typeof operation.request === "object" &&
+    operation.request !== null
+      ? (operation.request as Record<string, unknown>)
+      : null;
+  if (
+    !request ||
+    !(request.replacesFeatureId === null ||
+      typeof request.replacesFeatureId === "string")
+  ) {
+    return validated;
+  }
+
+  // Typia's exact validator can lag newly-added nested request fields during
+  // incremental worker transforms. Validate the legacy projection, while the
+  // explicit check above owns the new field until the generated validator catches up.
+  const projected = structuredClone(envelope);
+  const projectedOperation = projected.operation as Record<string, unknown>;
+  const projectedRequest = projectedOperation.request as Record<string, unknown>;
+  delete projectedRequest.replacesFeatureId;
+  const projectedValidation = occWorkerRequestEnvelopeValidator(projected);
+  return projectedValidation.success
+    ? { ...projectedValidation, data: value as OccWorkerRequest }
+    : validated;
 }
 
 export function normalizeOccWorkerFailure(

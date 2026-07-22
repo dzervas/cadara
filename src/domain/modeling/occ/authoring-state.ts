@@ -40,11 +40,15 @@ import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   createFeatureTopologyStage,
+  getPreviousFeatureTopologyLineage,
   getPreviousFeatureTopologyStage,
+  type OccFeatureTopologyLineageMap,
   type OccFeatureTopologyStageMap,
 } from "@/domain/modeling/occ/topology-stage";
 import {
+  classifyPersistedStageTopology,
   classifySemanticStageTopology,
+  createUnsupportedPersistedTopologyInvalidations,
   createUnsupportedStageTopologyInvalidations,
 } from "@/domain/modeling/occ/topology-naming";
 import {
@@ -86,6 +90,7 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   referenceState: OccReferenceState;
   featureTopologyStages: OccFeatureTopologyStageMap;
   previousFeatureTopologyStages: OccFeatureTopologyStageMap;
+  previousFeatureTopologyLineage: OccFeatureTopologyLineageMap;
 }
 
 function createTailCursor(
@@ -221,6 +226,7 @@ export function createOccAuthoringState(
     previousReferenceState?: OccReferenceState;
     featureTopologyStages?: OccFeatureTopologyStageMap;
     previousFeatureTopologyStages?: OccFeatureTopologyStageMap;
+    previousFeatureTopologyLineage?: OccFeatureTopologyLineageMap;
     diagnostics?: readonly ModelingDiagnostic[];
   } = {},
 ): OccAuthoringState {
@@ -316,16 +322,20 @@ export function createOccAuthoringState(
     previousFeatureTopologyStages: new Map(
       input.previousFeatureTopologyStages ?? [],
     ),
+    previousFeatureTopologyLineage: new Map(
+      input.previousFeatureTopologyLineage ?? [],
+    ),
   };
 }
 
 function reconcileFeatureTopologyStage(
   previousStage: ReturnType<typeof getPreviousFeatureTopologyStage>,
+  previousLineage: ReturnType<typeof getPreviousFeatureTopologyLineage>,
   currentStage: ReturnType<typeof createFeatureTopologyStage>,
   bodies: readonly OccTrackedBody[],
   historyInvalidations: ReadonlyMap<string, OccReferenceInvalidationRecord>,
 ) {
-  if (!previousStage) {
+  if (!previousStage && !previousLineage) {
     return {
       bodies: [...bodies],
       topologyStage: currentStage,
@@ -340,17 +350,28 @@ function reconcileFeatureTopologyStage(
   const provedLiveReferenceKeys = new Set<string>();
 
   for (const [outputSlot, currentOutput] of currentStage.outputs) {
-    const previousOutput = previousStage.outputs.get(outputSlot);
-    if (!previousOutput) {
+    const previousOutput = previousStage?.outputs.get(outputSlot);
+    const previousLineageOutput = previousLineage?.outputs.find(
+      (output) => output.outputSlot === outputSlot,
+    );
+    if (!previousOutput && !previousLineageOutput) {
       continue;
     }
 
-    const classification = classifySemanticStageTopology({
-      previous: previousOutput,
-      current: currentOutput,
-    });
+    const classification = previousOutput
+      ? classifySemanticStageTopology({
+          previous: previousOutput,
+          current: currentOutput,
+        })
+      : classifyPersistedStageTopology({
+          previous: previousLineageOutput!,
+          current: currentOutput,
+        });
     const reconciled = applySemanticStageTopologyIds({
-      previous: previousOutput.body,
+      previous: previousOutput?.body ?? {
+        bodyId: previousLineageOutput!.outputSlot,
+        topologyToken: previousLineageOutput!.topologyToken,
+      },
       current: currentOutput.body,
       preservedTargetsByCurrentKey: classification.preservedTargetsByCurrentKey,
     });
@@ -383,15 +404,21 @@ function reconcileFeatureTopologyStage(
     }
   }
 
-  for (const [outputSlot, previousOutput] of previousStage.outputs) {
-    if (currentStage.outputs.has(outputSlot)) {
+  const previousOutputs = previousStage
+    ? [...previousStage.outputs.values()].map((output) => ({
+        outputSlot: output.outputSlot,
+        invalidations: createUnsupportedStageTopologyInvalidations(output),
+      }))
+    : (previousLineage?.outputs ?? []).map((output) => ({
+        outputSlot: output.outputSlot,
+        invalidations: createUnsupportedPersistedTopologyInvalidations(output),
+      }));
+  for (const previousOutput of previousOutputs) {
+    if (currentStage.outputs.has(previousOutput.outputSlot)) {
       continue;
     }
 
-    for (const [
-      key,
-      invalidation,
-    ] of createUnsupportedStageTopologyInvalidations(previousOutput)) {
+    for (const [key, invalidation] of previousOutput.invalidations) {
       reconciledInvalidations.set(key, invalidation);
     }
   }
@@ -437,6 +464,10 @@ function applyFeatureResult(
   const reconciled = reconcileFeatureTopologyStage(
     getPreviousFeatureTopologyStage(
       state.previousFeatureTopologyStages,
+      feature.featureId,
+    ),
+    getPreviousFeatureTopologyLineage(
+      state.previousFeatureTopologyLineage,
       feature.featureId,
     ),
     rawTopologyStage,
@@ -528,6 +559,7 @@ export function rebuildOccAuthoringState(
     assetResolver: state.assetResolver,
     previousReferenceState: state.referenceState,
     previousFeatureTopologyStages: state.featureTopologyStages,
+    previousFeatureTopologyLineage: state.previousFeatureTopologyLineage,
     resolvedGeometryAssets: state.resolvedGeometryAssets,
     bakedShapeCache: state.bakedShapeCache,
   });
@@ -550,7 +582,7 @@ export function rebuildOccAuthoringState(
     current = applyOccFeatureToAuthoringState(current, feature);
   }
 
-  return current;
+  return { ...current, previousFeatureTopologyLineage: new Map() };
 }
 
 export function buildOccConstructionPresentationForState(

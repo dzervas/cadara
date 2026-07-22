@@ -35,7 +35,10 @@ export function requireAcceptedModelingResult<
     context?: readonly AppErrorContextEntry[];
   },
 ): AppResult<T> {
-  if (result.revisionState.kind === "accepted") {
+  const hasErrorDiagnostic = result.diagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (result.revisionState.kind === "accepted" && !hasErrorDiagnostic) {
     return ok(result);
   }
 

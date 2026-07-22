@@ -38,6 +38,48 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
     "Authored documents should default to an empty embedded binary asset list.",
   ).toBeTruthy();
 
+  authoredDocument.topologyLineage = [
+    {
+      featureId: "feature_extrude-1",
+      outputs: [
+        {
+          outputSlot: "body_feature_extrude-1",
+          topologyToken: "topology-lineage-token",
+          topology: {
+            faceIds: ["face_body_feature_extrude-1_preserved"],
+            edgeIds: ["edge_body_feature_extrude-1_preserved"],
+            vertexIds: ["vertex_body_feature_extrude-1_preserved"],
+          },
+          sourceTargets: [
+            {
+              sourceKey: "feature:feature_extrude-1:profile:0:generated-side-face",
+              targets: [
+                {
+                  kind: "edge",
+                  bodyId: "body_feature_extrude-1",
+                  edgeId: "edge_body_feature_extrude-1_preserved",
+                },
+              ],
+            },
+          ],
+          unsupportedSourceKeys: [],
+        },
+      ],
+    },
+  ];
+  const parsedLineage = parseAuthoredModelDocument(authoredDocument);
+  expect(parsedLineage.ok && parsedLineage.document.topologyLineage).toEqual(
+    authoredDocument.topologyLineage,
+  );
+
+  const malformedLineage = structuredClone(authoredDocument);
+  malformedLineage.topologyLineage![0]!.outputs[0]!.sourceTargets[0]!.targets[0]!.bodyId =
+    "body_wrong_output";
+  expect(
+    parseAuthoredModelDocument(malformedLineage).ok,
+    "Persisted lineage targets outside their declared output must be rejected.",
+  ).toBe(false);
+
   const missingSuppression = structuredClone(authoredDocument) as unknown as {
     features: Array<Record<string, unknown>>;
   };

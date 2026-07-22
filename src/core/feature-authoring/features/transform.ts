@@ -2,6 +2,7 @@ import {
   ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
   validateAdvancedSolidFeatureDefinition,
 } from "@/contracts/modeling/advanced-solid";
+import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   FeatureAuthoringDefinition,
   TransformFeatureParameterDraft,
@@ -19,6 +20,7 @@ import {
   authoredDefinitionValue,
   authoredNumberFormValue,
   authoredNumberLiteral,
+  authoredStringLiteral,
   createMissingInputDiagnostic,
   expressionCapableAuthoredValue,
   isPositiveAuthoredNumber,
@@ -196,8 +198,18 @@ export const transformAuthoringDefinition = {
     };
   },
   hydrateDraft(feature) {
-    const direction = feature.parameters.options?.direction;
-    const transformType = feature.parameters.options?.transformType;
+    const direction = authoredStringLiteral(
+      feature.parameters.options?.direction as MaybeAuthoredValue<
+        "positive" | "negative"
+      >,
+      "positive",
+    );
+    const transformType = authoredStringLiteral(
+      feature.parameters.options?.transformType as MaybeAuthoredValue<
+        "translation" | "rotation"
+      >,
+      "translation",
+    );
     return {
       bodyTargets: filterBodyTargets(
         feature.parameters.participants.find(

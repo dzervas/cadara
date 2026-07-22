@@ -6,6 +6,7 @@ import type {
   VertexId,
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
+import type { AuthoredTopologyLineageOutput } from "@/contracts/modeling/authored-document";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import type { OccTopologyStageOutput } from "@/domain/modeling/occ/topology-stage";
 import type {
@@ -88,6 +89,26 @@ export interface OccSemanticStageReconciliation {
   invalidations: ReadonlyMap<string, OccReferenceInvalidationRecord>;
 }
 
+interface OccTopologyStageLineageView {
+  outputSlot: OccTopologyStageOutput["outputSlot"];
+  body: Pick<OccTrackedBody, "bodyId" | "topology">;
+  sourceTargets: OccTopologyStageOutput["sourceTargets"];
+  unsupportedSourceKeys: OccTopologyStageOutput["unsupportedSourceKeys"];
+}
+
+function createPersistedStageLineageView(
+  output: AuthoredTopologyLineageOutput,
+): OccTopologyStageLineageView {
+  return {
+    outputSlot: output.outputSlot,
+    body: { bodyId: output.outputSlot, topology: output.topology },
+    sourceTargets: new Map(
+      output.sourceTargets.map((entry) => [entry.sourceKey, entry.targets]),
+    ),
+    unsupportedSourceKeys: new Set(output.unsupportedSourceKeys),
+  };
+}
+
 function isStageSubtopologyTarget(
   target: DurableRef,
   bodyId: BodyId,
@@ -100,7 +121,9 @@ function isStageSubtopologyTarget(
   );
 }
 
-function getBodySubtopologyTargets(body: OccTrackedBody) {
+function getBodySubtopologyTargets(
+  body: Pick<OccTrackedBody, "bodyId" | "topology">,
+) {
   return [
     ...body.topology.faceIds.map(
       (faceId): OccSubtopologyRef => ({
@@ -127,7 +150,10 @@ function getBodySubtopologyTargets(body: OccTrackedBody) {
 }
 
 export function createUnsupportedStageTopologyInvalidations(
-  output: OccTopologyStageOutput,
+  output: {
+    outputSlot: OccTopologyStageOutput["outputSlot"];
+    body: Pick<OccTrackedBody, "bodyId" | "topology">;
+  },
 ) {
   return new Map(
     getBodySubtopologyTargets(output.body).map((target) => [
@@ -147,8 +173,8 @@ export function createUnsupportedStageTopologyInvalidations(
  * consulted: only a unique source-key successor can preserve an old public ID.
  */
 export function classifySemanticStageTopology(input: {
-  previous: OccTopologyStageOutput;
-  current: OccTopologyStageOutput;
+  previous: OccTopologyStageLineageView;
+  current: OccTopologyStageLineageView;
 }): OccSemanticStageReconciliation {
   if (input.previous.outputSlot !== input.current.outputSlot) {
     throw new Error(
@@ -211,7 +237,10 @@ export function classifySemanticStageTopology(input: {
     const successorsByKey = new Map<string, OccSubtopologyRef>();
     for (const sourceKey of sourceKeys) {
       for (const target of input.current.sourceTargets.get(sourceKey) ?? []) {
-        if (isStageSubtopologyTarget(target, bodyId)) {
+        if (
+          isStageSubtopologyTarget(target, bodyId) &&
+          target.kind === previousTarget.kind
+        ) {
           successorsByKey.set(topologyRefKey(target), target);
         }
       }
@@ -261,6 +290,24 @@ export function classifySemanticStageTopology(input: {
   }
 
   return { preservedTargetsByCurrentKey, invalidations };
+}
+
+export function classifyPersistedStageTopology(input: {
+  previous: AuthoredTopologyLineageOutput;
+  current: OccTopologyStageOutput;
+}): OccSemanticStageReconciliation {
+  return classifySemanticStageTopology({
+    previous: createPersistedStageLineageView(input.previous),
+    current: input.current,
+  });
+}
+
+export function createUnsupportedPersistedTopologyInvalidations(
+  output: AuthoredTopologyLineageOutput,
+) {
+  return createUnsupportedStageTopologyInvalidations(
+    createPersistedStageLineageView(output),
+  );
 }
 
 function ignoreOccNamingResolutionError() {

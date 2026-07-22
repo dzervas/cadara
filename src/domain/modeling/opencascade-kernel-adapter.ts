@@ -135,6 +135,11 @@ import {
   type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
 import {
+  createOccFeatureTopologyLineageMap,
+  mergeOccFeatureTopologyStageMaps,
+  serializeOccFeatureTopologyLineage,
+} from "@/domain/modeling/occ/topology-stage";
+import {
   getExtrudeFeatureExtent,
   getRevolveFeatureExtent,
 } from "@/contracts/modeling/feature-extents";
@@ -281,6 +286,14 @@ function createAuthoredModelDocumentFromAuthoringState(
     })),
     assets: structuredClone(state.assets),
     embeddedBinaryAssets: [...structuredClone(state.embeddedBinaryAssets)],
+    topologyLineage: serializeOccFeatureTopologyLineage(
+      mergeOccFeatureTopologyStageMaps(
+        state.previousFeatureTopologyStages,
+        state.featureTopologyStages,
+      ),
+      state.previousFeatureTopologyLineage,
+      new Set(state.features.map((feature) => feature.featureId)),
+    ),
   };
 }
 
@@ -1902,6 +1915,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver);
     const restoreDiagnostics = [...diagnostics];
     const historyOrder = createAuthoredHistoryRestoreOrder(document);
+    const previousFeatureTopologyLineage =
+      createOccFeatureTopologyLineageMap(document.topologyLineage);
     const sketchById = new Map(
       document.sketches.map((sketch) => [sketch.sketchId, sketch]),
     );
@@ -1939,6 +1954,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       historyOrder,
       diagnostics: restoreDiagnostics,
       cursor: { kind: "empty" },
+      previousFeatureTopologyLineage,
     });
     await this.preResolveBakedBodyAssets(
       projectionState,
@@ -2016,6 +2032,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       historyOrder,
       diagnostics: restoreDiagnostics,
       cursor: { kind: "empty" },
+      previousFeatureTopologyLineage,
     });
     authoringState = {
       ...authoringState,
@@ -2167,6 +2184,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
       historyOrder:
         input.historyOrder ?? runtimeState.authoringState.historyOrder,
+      previousFeatureTopologyStages:
+        runtimeState.authoringState.featureTopologyStages,
+      previousFeatureTopologyLineage:
+        runtimeState.authoringState.previousFeatureTopologyLineage,
       diagnostics: getPersistentAuthoringDiagnostics(
         runtimeState.authoringState.diagnostics,
       ),
@@ -2194,6 +2215,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         (feature) => rebuiltFeatures.get(feature.featureId) ?? feature,
       ),
       cursor,
+      previousFeatureTopologyLineage: new Map(),
     };
   }
 
@@ -2407,6 +2429,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       historyOrder:
         input.historyOrder ?? runtimeState.authoringState.historyOrder,
       previousReferenceState: runtimeState.authoringState.referenceState,
+      previousFeatureTopologyStages:
+        runtimeState.authoringState.featureTopologyStages,
+      previousFeatureTopologyLineage:
+        runtimeState.authoringState.previousFeatureTopologyLineage,
       diagnostics: getPersistentAuthoringDiagnostics(
         runtimeState.authoringState.diagnostics,
       ),
@@ -2544,6 +2570,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       ),
       cursor,
       diagnostics: [...current.diagnostics, ...diagnostics],
+      previousFeatureTopologyLineage: new Map(),
     };
 
     return {
@@ -4759,7 +4786,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       runtimeState.authoringState,
       nextRuntimeState.authoringState,
       [],
-      false,
+      nextRuntimeState.authoringState.diagnostics.some(
+        (diagnostic) => diagnostic.severity === "error",
+      ),
     );
     const changedTargets = getVariableMutationChangedTargetsFromOccState(
       nextRuntimeState.authoringState,
@@ -4798,16 +4827,51 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       suppressed: false,
       definition: request.definition,
     };
-    const previewInsertionIndex = getCursorInsertionIndex(
-      runtimeState.authoringState.cursor,
-      runtimeState.authoringState.features,
-      runtimeState.authoringState.historyOrder,
-    );
-    const previewFeatures = [
-      ...runtimeState.authoringState.features.slice(0, previewInsertionIndex),
+    const replacedFeatureIndex = request.replacesFeatureId
+      ? runtimeState.authoringState.features.findIndex(
+          (feature) => feature.featureId === request.replacesFeatureId,
+        )
+      : -1;
+    if (request.replacesFeatureId && replacedFeatureIndex < 0) {
+      throw new Error(
+        `Preview replacement feature ${request.replacesFeatureId} does not exist.`,
+      );
+    }
+    const replacedFeature =
+      replacedFeatureIndex >= 0
+        ? runtimeState.authoringState.features[replacedFeatureIndex]!
+        : null;
+    if (replacedFeature && replacedFeature.definition.kind !== request.definition.kind) {
+      throw new Error(
+        `Preview replacement cannot change ${replacedFeature.definition.kind} into ${request.definition.kind}.`,
+      );
+    }
+    const previewInsertionIndex =
+      replacedFeatureIndex >= 0
+        ? replacedFeatureIndex
+        : getCursorInsertionIndex(
+            runtimeState.authoringState.cursor,
+            runtimeState.authoringState.features,
+            runtimeState.authoringState.historyOrder,
+          );
+    const previewFeatures = [...runtimeState.authoringState.features];
+    previewFeatures.splice(
+      previewInsertionIndex,
+      replacedFeature ? 1 : 0,
       previewFeature,
-      ...runtimeState.authoringState.features.slice(previewInsertionIndex),
-    ];
+    );
+    const previewHistoryOrder = replacedFeature
+      ? runtimeState.authoringState.historyOrder.map((item) =>
+          item.kind === "feature" && item.featureId === replacedFeature.featureId
+            ? { kind: "feature" as const, featureId: previewFeatureId }
+            : item,
+        )
+      : insertDocumentHistoryOrderEntryAfterCursor(
+          buildOccWorkspaceSnapshot(runtimeState.authoringState).presentation
+            .documentHistory,
+          runtimeState.authoringState.cursor,
+          { kind: "feature", featureId: previewFeatureId },
+        );
 
     await this.preResolveBakedBodyAssets(
       runtimeState.authoringState,
@@ -4818,6 +4882,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       const previewState = this.buildNextAuthoringState(runtimeState, {
         revisionId: currentRevisionId,
         features: previewFeatures,
+        historyOrder: previewHistoryOrder,
         cursor: { kind: "feature", featureId: previewFeatureId },
       });
       const snapshot = buildOccWorkspaceSnapshot(previewState);
