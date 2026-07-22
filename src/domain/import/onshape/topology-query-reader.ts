@@ -1,3 +1,4 @@
+import type { OnshapeResolvedQueryReference } from "@/contracts/import/onshape-capture-bundle";
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 
 export interface TopologyQuerySlot {
@@ -15,6 +16,7 @@ export interface OnshapeTopologyQueryRef {
   queryIndex: number;
   deterministicId: string;
   queryString: string | null;
+  queryEvidenceIndex?: number;
   expectedKinds: TopologyQuerySlot["expectedKinds"];
 }
 
@@ -41,6 +43,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 export function readTopologyQueryRefs(
   feature: OnshapeFeatureNode,
   slots: readonly TopologyQuerySlot[],
+  capturedQueryReferences: readonly OnshapeResolvedQueryReference[] = [],
 ): TopologyQueryReadResult {
   const refs: OnshapeTopologyQueryRef[] = [];
   const diagnostics: TopologyQueryReadDiagnostic[] = [];
@@ -76,13 +79,50 @@ export function readTopologyQueryRefs(
         continue;
       }
       if (query.deterministicIds.length === 0) {
-        diagnostics.push({
-          code: "topology-query-unreadable",
-          consumerFeatureId: feature.featureId,
-          slotKey: slot.key,
-          parameterId: slot.parameterId,
-          message: `Query ${queryIndex} in ${slot.parameterId} contains no deterministic IDs.`,
-        });
+        const evidence = capturedQueryReferences.filter(
+          (reference) =>
+            reference.consumingFeatureId === feature.featureId &&
+            reference.parameterId === slot.parameterId &&
+            reference.queryIndex === queryIndex,
+        );
+        const resolvedEvidence = evidence.filter(
+          (reference): reference is Extract<OnshapeResolvedQueryReference, { signature: unknown }> =>
+            "signature" in reference,
+        );
+        if (resolvedEvidence.length === 0) {
+          const unresolved = evidence.find(
+            (reference): reference is Extract<OnshapeResolvedQueryReference, { unresolved: unknown }> =>
+              "unresolved" in reference,
+          );
+          diagnostics.push({
+            code: "topology-query-unreadable",
+            consumerFeatureId: feature.featureId,
+            slotKey: slot.key,
+            parameterId: slot.parameterId,
+            message: unresolved
+              ? `Query ${queryIndex} in ${slot.parameterId} could not be evaluated: ${unresolved.unresolved.reason}.`
+              : `Query ${queryIndex} in ${slot.parameterId} contains no deterministic IDs or captured query evidence.`,
+          });
+          continue;
+        }
+        for (const reference of resolvedEvidence) {
+          const deterministicId = `captured-query:${feature.featureId}:${slot.parameterId}:${queryIndex}:${reference.entityIndex}`;
+          const duplicateKey = `${slot.role}\u0000${deterministicId}`;
+          if (seen.has(duplicateKey)) continue;
+          seen.add(duplicateKey);
+          countBySlot.set(slot.key, (countBySlot.get(slot.key) ?? 0) + 1);
+          refs.push({
+            consumerFeatureId: feature.featureId,
+            slotKey: slot.key,
+            parameterId: slot.parameterId,
+            queryIndex,
+            deterministicId,
+            queryString: typeof query.queryString === "string" ? query.queryString : null,
+            queryEvidenceIndex: reference.entityIndex,
+            expectedKinds: slot.expectedKinds,
+          });
+        }
+        continue;
       }
       for (const deterministicId of query.deterministicIds) {
         if (typeof deterministicId !== "string" || deterministicId.length === 0) {

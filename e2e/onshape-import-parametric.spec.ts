@@ -21,19 +21,12 @@ test.use({ viewport: { width: 1440, height: 960 } });
 const MOUNTS_CONSTRAINED_VERTEX =
   "sketch_2.sketch_point_FkkBVfXRKopMlIW_1_ZSK0f3tIhxWZ_center";
 const MOUNTS_LIVE_BODY = "body_feature_extrude-1";
-const MOUNTS_PARAMETRIC_FEATURE_IDS = [
+const MOUNTS_FULL_FEATURE_IDS = [
   "feature_extrude-1",
   "feature_plane-1",
   "feature_extrude-2",
   "feature_transform-1",
   "feature_chamfer-1",
-];
-const MOUNTS_CHECKPOINT_FEATURE_IDS = [
-  "feature_extrude-1",
-  "feature_plane-1",
-  "feature_extrude-2",
-  "feature_transform-1",
-  "feature_bakedBody-1",
 ];
 const PART_STUDIO_BAKED_BODIES = [
   "body_feature_bakedBody-1_1",
@@ -52,13 +45,10 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   const workbench = new SketchWorkbenchHarness(page);
 
   const { reviewText } = await importBundle(page, MOUNTS_BUNDLE_PATH);
-  expect(reviewText).toMatch(
-    /(?:10 parametric, 0 baked|9 parametric, 1 baked), 0 geometry-only features\./,
-  );
-  const usesCheckpoint = reviewText.includes("9 parametric, 1 baked");
+  expect(reviewText).toContain("10 parametric, 0 baked, 0 geometry-only features.");
   const importedState = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(importedState.featureIds).toEqual(mountsFeatureIds(usesCheckpoint));
-  expectMountsEndBodyIdentity(importedState, usesCheckpoint);
+  expect(importedState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
+  expectMountsLiveBodyIdentity(importedState);
   await dismissWorkbenchAlerts(page);
 
   await chooseHistoryAction(page, "feature_transform-1", "Roll History Here");
@@ -97,7 +87,7 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   await page.waitForSelector('[data-render-idle="true"]', { timeout: 30_000 });
 
   const state = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(state.featureIds).toEqual(mountsFeatureIds(usesCheckpoint));
+  expect(state.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
   expect(state.selectableTargets).toEqual(
     expect.arrayContaining([
       "construction_plane-xy",
@@ -118,13 +108,10 @@ test("Mounts variable and extrude edits rebuild geometry while preserving body l
     "Real Onshape Mounts capture is not present locally.",
   );
   const { reviewText } = await importBundle(page, MOUNTS_BUNDLE_PATH, true);
-  expect(reviewText).toMatch(
-    /(?:10 parametric, 0 baked|9 parametric, 1 baked), 0 geometry-only features\./,
-  );
-  const usesCheckpoint = reviewText.includes("9 parametric, 1 baked");
+  expect(reviewText).toContain("10 parametric, 0 baked, 0 geometry-only features.");
   const initialState = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expectMountsEndBodyIdentity(initialState, usesCheckpoint);
-  expect(initialState.featureIds).toEqual(mountsFeatureIds(usesCheckpoint));
+  expectMountsLiveBodyIdentity(initialState);
+  expect(initialState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
   await dismissWorkbenchAlerts(page);
 
   await chooseHistoryAction(page, "feature_extrude-1", "Roll History Here");
@@ -143,11 +130,10 @@ test("Mounts variable and extrude edits rebuild geometry while preserving body l
 
   await chooseHistoryAction(page, "feature_extrude-2", "Roll History Here");
   const downstreamState = await page.evaluate(() => window.__cadaraDebug!.getState());
-  // Extrude 2 and Transform 1 modify Extrude 1's body in place. At this rolled
-  // position the body retains its live lineage even when an evidence-poor
-  // capture needs a final Chamfer checkpoint.
+  // Extrude 2, Transform 1, and Chamfer 1 modify Extrude 1's body in place,
+  // preserving its live lineage throughout the downstream history.
   expectMountsLiveBodyIdentity(downstreamState);
-  expect(downstreamState.featureIds).toEqual(mountsFeatureIds(usesCheckpoint));
+  expect(downstreamState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
   const facesBeforeExtrude2 = variableState.selectableTargets.filter((target) =>
     target.includes("face_body_feature_extrude-1"),
   ).length;
@@ -157,8 +143,8 @@ test("Mounts variable and extrude edits rebuild geometry while preserving body l
   expect(facesAfterExtrude2).not.toBe(facesBeforeExtrude2);
   await chooseHistoryAction(page, "feature_extrude-2", "Roll To End");
   const endState = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expectMountsEndBodyIdentity(endState, usesCheckpoint);
-  expect(endState.featureIds).toEqual(mountsFeatureIds(usesCheckpoint));
+  expectMountsLiveBodyIdentity(endState);
+  expect(endState.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
   await dismissWorkbenchAlerts(page);
 
   await chooseHistoryAction(page, "feature_extrude-1", "Roll History Here");
@@ -191,7 +177,7 @@ test("Mounts variable and extrude edits rebuild geometry while preserving body l
   await page.waitForSelector('[data-render-idle="true"]', { timeout: 30_000 });
 
   const rebuilt = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(rebuilt.featureIds).toEqual(mountsFeatureIds(usesCheckpoint));
+  expect(rebuilt.featureIds).toEqual(MOUNTS_FULL_FEATURE_IDS);
   await dismissWorkbenchAlerts(page);
 });
 
@@ -376,20 +362,6 @@ async function projectTarget(page: Page, targetId: string) {
   return point;
 }
 
-function mountsFeatureIds(usesCheckpoint: boolean) {
-  return usesCheckpoint ? MOUNTS_CHECKPOINT_FEATURE_IDS : MOUNTS_PARAMETRIC_FEATURE_IDS;
-}
-
-function expectMountsEndBodyIdentity(
-  state: { selectableTargets: string[] },
-  usesCheckpoint: boolean,
-) {
-  if (usesCheckpoint) {
-    expect(state.selectableTargets).toContain("body_feature_bakedBody-1");
-    return;
-  }
-  expectMountsLiveBodyIdentity(state);
-}
 
 function expectMountsLiveBodyIdentity(state: { selectableTargets: string[] }) {
   expect(state.selectableTargets).not.toContain("body_feature_bakedBody-1");

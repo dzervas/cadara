@@ -28,7 +28,7 @@ export const FIXTURE_DOCUMENT_URL = `https://cad.onshape.com/documents/${FIXTURE
 export const FIXTURE_ELEMENT_URL = `${FIXTURE_DOCUMENT_URL}/e/${FIXTURE_PART_STUDIO_ID}`;
 
 /** A pruned `getFeatures` response with three referenced deterministic IDs. */
-const FEATURES_WITH_REFERENCES = {
+export const FEATURES_WITH_REFERENCES = {
   btType: "BTFeatureListResponse-2457",
   serializationVersion: "1.2.20",
   sourceMicroversion: FIXTURE_MICROVERSION,
@@ -320,6 +320,23 @@ const HISTORY_FEATURESCRIPT_RESPONSE = {
   notices: [],
 };
 
+
+const QUERY_HISTORY_FEATURESCRIPT_RESPONSE = {
+  btType: "BTFeatureScriptEvalResponse-1859",
+  result: fsEncode([{
+    index: 0,
+    records: [{
+      id: "EDGE-CHAMFER",
+      entityClass: "edge",
+      geometryType: "LINE",
+      box: [0, 0, 0, 0.01, 0, 0],
+      origin: [0, 0, 0],
+      direction: [1, 0, 0],
+    }],
+  }]),
+  notices: [],
+};
+
 function json(status: number, body: unknown): FetchResponse {
   const text = typeof body === "string" ? body : JSON.stringify(body);
   return {
@@ -424,6 +441,13 @@ export function buildDefaultRoutes(): FixtureRoute[] {
         url.includes(`/w/${FIXTURE_TEMP_WORKSPACE_ID}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
         url.includes("rollbackBarIndex=2"),
       respond: () => json(200, HISTORY_FEATURESCRIPT_RESPONSE),
+    },
+    {
+      method: "POST",
+      match: (url) =>
+        url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
+        url.includes("rollbackBarIndex=3"),
+      respond: () => json(200, QUERY_HISTORY_FEATURESCRIPT_RESPONSE),
     },
     {
       method: "POST",

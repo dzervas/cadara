@@ -820,7 +820,11 @@ async function activateProbeBackedPlanning(input: {
       }
       const feature = featuresById.get(candidate.onshapeFeatureId);
       if (!feature) continue;
-      const queryRead = readTopologyQueryRefs(feature, slots);
+      const queryRead = readTopologyQueryRefs(
+        feature,
+        slots,
+        input.read.studio.resolvedQueryReferences ?? [],
+      );
       // Onshape's rollback timeline names every feature that produced or reshaped
       // each queried body before the consumer. When any of them is not parametric,
       // the body as consumed cannot exist in the parametric prefix: the consumer
@@ -972,6 +976,7 @@ async function activateProbeBackedPlanning(input: {
           queries: queryRead.refs,
           queryDiagnostics: queryRead.diagnostics,
           capturedReferences: input.read.studio.resolvedReferences,
+          capturedQueryReferences: input.read.studio.resolvedQueryReferences ?? [],
           rollback: topologyTimeline,
           cadaraSignatures: prefix.signatures,
           tolerance: topologyTolerance,
