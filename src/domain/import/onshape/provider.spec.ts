@@ -832,7 +832,7 @@ test("src/domain/import/onshape/provider.spec.ts emits a deferred parametric rev
 const realBundleCases = [
   [
     "40a51fb8fa82fd4565151114.onshape-capture.json",
-    { parametric: 6, baked: 4, geometryOnly: 0 },
+    { parametric: 7, baked: 3, geometryOnly: 0 },
   ],
   [
     "9841e486906fa2ce62d74d8e.onshape-capture.json",

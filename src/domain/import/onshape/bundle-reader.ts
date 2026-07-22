@@ -14,6 +14,7 @@ import type {
   OnshapeCaptureBundle,
   OnshapePartStudioCapture,
 } from "@/contracts/import/onshape-capture-bundle";
+import type { SketchPlaneFrame } from "@/contracts/shared/sketch-plane";
 
 export interface OnshapeFeatureNode {
   featureType: string;
@@ -67,11 +68,18 @@ export interface OnshapeSolvedCurve {
 export interface OnshapeSolvedSketch {
   featureId: string;
   sketchSolveStatus?: string;
+  /** Captured solved-sketch placement, recovered from Onshape `sketchMatrix`. */
+  sketchFrame?: SketchPlaneFrame;
   entities: OnshapeSolvedCurve[];
 }
 
 interface RawSolvedSketchPayload {
-  sketches: { featureId: string; sketchSolveStatus?: string; entities?: readonly unknown[] }[];
+  sketches: {
+    featureId: string;
+    sketchSolveStatus?: string;
+    sketchMatrix?: unknown;
+    entities?: readonly unknown[];
+  }[];
 }
 
 export interface BundleReadDiagnostic {
@@ -153,6 +161,78 @@ function readVector3(value: unknown): [number, number, number] | undefined {
     return [record.x, record.y, record.z];
   }
   return undefined;
+}
+
+const METERS_TO_MM = 1000;
+const BASIS_TOLERANCE = 1e-6;
+
+type Vec3 = readonly [number, number, number];
+
+function dot(left: Vec3, right: Vec3): number {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function cross(left: Vec3, right: Vec3): [number, number, number] {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ];
+}
+
+function norm(value: Vec3): number {
+  return Math.hypot(value[0], value[1], value[2]);
+}
+
+function isUnit(value: Vec3): boolean {
+  return Math.abs(norm(value) - 1) <= BASIS_TOLERANCE;
+}
+
+function isNearZero(value: number): boolean {
+  return Math.abs(value) <= BASIS_TOLERANCE;
+}
+
+function isSameVector(left: Vec3, right: Vec3): boolean {
+  return norm([left[0] - right[0], left[1] - right[1], left[2] - right[2]]) <= BASIS_TOLERANCE;
+}
+
+/**
+ * Convert Onshape solved-sketch `sketchMatrix` into a trusted document-mm frame.
+ * Captured data is a flat row-major 4×4 matrix whose first three columns are
+ * unitless basis vectors and fourth column is a world origin in meters.
+ */
+export function sketchFrameFromMatrix(value: unknown): SketchPlaneFrame | null {
+  if (!Array.isArray(value) || value.length !== 16) {
+    return null;
+  }
+  const matrix = value.map((entry) => typeof entry === "number" ? entry : NaN);
+  if (!matrix.every(Number.isFinite)) {
+    return null;
+  }
+
+  const xAxis: Vec3 = [matrix[0]!, matrix[4]!, matrix[8]!];
+  const yAxis: Vec3 = [matrix[1]!, matrix[5]!, matrix[9]!];
+  const normal: Vec3 = [matrix[2]!, matrix[6]!, matrix[10]!];
+  if (
+    !isUnit(xAxis) ||
+    !isUnit(yAxis) ||
+    !isUnit(normal) ||
+    !isNearZero(dot(xAxis, yAxis)) ||
+    !isNearZero(dot(xAxis, normal)) ||
+    !isNearZero(dot(yAxis, normal)) ||
+    !isSameVector(cross(xAxis, yAxis), normal)
+  ) {
+    return null;
+  }
+
+  return {
+    origin: [matrix[3]! * METERS_TO_MM, matrix[7]! * METERS_TO_MM, matrix[11]! * METERS_TO_MM],
+    xAxis,
+    yAxis,
+    normal,
+    linearUnit: "documentLength",
+    handedness: "rightHanded",
+  };
 }
 
 const ONSHAPE_ENTITY_KIND: Record<string, OnshapeSolvedCurve["entityType"]> = {
@@ -297,9 +377,11 @@ export function readPartStudio(
           entities.push(normalized);
         }
       }
+      const sketchFrame = sketchFrameFromMatrix(solved.sketchMatrix);
       solvedSketchesByFeatureId.set(solved.featureId, {
         featureId: solved.featureId,
         sketchSolveStatus: solved.sketchSolveStatus,
+        ...(sketchFrame ? { sketchFrame } : {}),
         entities,
       });
     }
