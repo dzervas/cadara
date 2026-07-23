@@ -123,6 +123,7 @@ function studio(
   features: Record<string, unknown>[],
   sketches: Record<string, unknown>[],
   extraResolvedReferences: Record<string, unknown>[] = [],
+  resolvedQueryReferences: Record<string, unknown>[] = [],
 ) {
   return {
     elementId,
@@ -144,6 +145,7 @@ function studio(
       },
       ...extraResolvedReferences,
     ],
+    resolvedQueryReferences,
     groundTruth: { hasBodies: false },
     rollbackSnapshots: [],
   };
@@ -372,6 +374,19 @@ export function makeWaveTCaptureBundle() {
           deterministicId: "WT_MIRROR_BODY",
           evaluatedAt: "historyPoint",
           consumingFeatureId: "WT_MIRROR",
+          signature: {
+            entityClass: "body",
+            geometryType: "solid",
+            boundingBox: { low: [-0.01, -0.01, 0], high: [0.01, 0.01, 0.02] },
+            centroid: [0, 0, 0.01],
+          },
+        }],
+        [{
+          consumingFeatureId: "WT_TRANSFORM",
+          parameterId: "entities",
+          queryIndex: 0,
+          entityIndex: 0,
+          evaluatedAt: "historyPoint",
           signature: {
             entityClass: "body",
             geometryType: "solid",

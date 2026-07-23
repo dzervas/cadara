@@ -641,13 +641,24 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
 | Part Studio 1 `9841…` | **25 / 16 / 0** | **8 / 33 / 0** | 13 solid region extrudes, checkpoint-backed Sketch 2, closed-hollow shell; one surface extrude excluded. |
 | Part Studio 1 `d3cd9…` | **19 / 5 / 0** | Not pinned | 3 solid region extrudes and PART+ADD mirror; one surface extrude excluded. |
 
-- [ ] X.1 **Truthful topology-query fallback.** At the exported resolver/provider
+- [x] X.1 **Truthful topology-query fallback.** At the exported resolver/provider
       seam, make the unique-prefix body fallback eligible only for exactly one
       slot, one query, body kind, and exact singleton cardinality. Return `null`
       when the rebuilt prefix has zero or multiple live bodies so captured
       rollback query evidence is attempted instead of being masked by a
       degraded fallback. Pin zero/one/many, plural-cardinality, multi-query, and
       captured-evidence precedence in logic-lane tests.
+
+
+      **Verification (done).** The fallback now requires one body slot, one
+      ID-less query, and exact `1..1` cardinality; zero/many live prefix bodies
+      return `null` so rollback query evidence can resolve instead. The Wave-T
+      fixture now carries captured history evidence for its plural-capable
+      transform query instead of relying on single-body inference. Focused
+      resolver/translator tests pass (30/30), the complete Onshape import logic
+      suite passes (197/197), changed-file lint is clean, and the production
+      build is green. Local review counts remain Mounts **10/0/0**, PS1
+      **25/16/0**, 5151 **12/12/0**, and d3cd9 **19/5/0**.
 - [ ] X.2 **Honest solid-extrude boundary.** Inspect `bodyType` before planning a
       solid extrude. Keep `SURFACE` forms baked with a specific reason code and
       review copy; ensure none can enter solid apply, body lineage, or segment

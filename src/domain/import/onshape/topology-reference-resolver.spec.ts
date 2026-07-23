@@ -65,11 +65,16 @@ const tessellation = (bodyId: string, faceId: string, high = 0.01) => ({
   ] }] }] }],
 });
 
-const bodyOnlySlot: TopologyQuerySlot = {
+const singleBodySlot: TopologyQuerySlot = {
   key: "scope",
   parameterId: "entities",
   role: "body",
   expectedKinds: ["body"],
+  cardinality: { min: 1, max: 1 },
+};
+
+const pluralBodySlot: TopologyQuerySlot = {
+  ...singleBodySlot,
   cardinality: { min: 1, max: null },
 };
 
@@ -90,11 +95,11 @@ const liveBody = (bodyId: string): HistoryProbeTopologySignature => ({
   reference: { kind: "body", bodyId: bodyId as never },
 });
 
-test("resolves an ID-less body query only when the prefix has exactly one live body", () => {
+test("resolves an ID-less singleton body query only when the prefix has exactly one live body", () => {
   const resolved = resolveUniquePrefixBody({
     consumerFeatureId: "consumer",
     feature: emptyIdBodyFeature,
-    slots: [bodyOnlySlot],
+    slots: [singleBodySlot],
     cadaraSignatures: [liveBody("body_live")],
     tolerance,
   });
@@ -108,27 +113,43 @@ test("resolves an ID-less body query only when the prefix has exactly one live b
     }],
   });
 
-  expect(resolveUniquePrefixBody({
-    consumerFeatureId: "consumer",
-    feature: emptyIdBodyFeature,
-    slots: [bodyOnlySlot],
-    cadaraSignatures: [liveBody("one"), liveBody("two")],
-    tolerance,
-  })).toMatchObject({ kind: "degraded", reason: "topology-query-unreadable" });
+  for (const cadaraSignatures of [[], [liveBody("one"), liveBody("two")]]) {
+    expect(resolveUniquePrefixBody({
+      consumerFeatureId: "consumer",
+      feature: emptyIdBodyFeature,
+      slots: [singleBodySlot],
+      cadaraSignatures,
+      tolerance,
+    })).toBeNull();
+  }
 });
 
-test("does not infer ID-less non-body, multi-slot, missing, or malformed queries", () => {
-  const edgeSlot = { ...bodyOnlySlot, expectedKinds: ["edge"] as const };
+test("does not infer ID-less non-body, plural, multi-slot, multi-query, missing, or malformed queries", () => {
+  const edgeSlot = { ...singleBodySlot, expectedKinds: ["edge"] as const };
   for (const value of [
     { feature: emptyIdBodyFeature, slots: [edgeSlot] },
-    { feature: emptyIdBodyFeature, slots: [bodyOnlySlot, bodyOnlySlot] },
-    { feature: { ...emptyIdBodyFeature, parameters: [] }, slots: [bodyOnlySlot] },
+    { feature: emptyIdBodyFeature, slots: [pluralBodySlot] },
+    { feature: emptyIdBodyFeature, slots: [singleBodySlot, singleBodySlot] },
+    {
+      feature: {
+        ...emptyIdBodyFeature,
+        parameters: [{
+          parameterId: "entities",
+          queries: [
+            { deterministicIds: [], queryString: "query = first;" },
+            { deterministicIds: [], queryString: "query = second;" },
+          ],
+        }],
+      },
+      slots: [singleBodySlot],
+    },
+    { feature: { ...emptyIdBodyFeature, parameters: [] }, slots: [singleBodySlot] },
     {
       feature: {
         ...emptyIdBodyFeature,
         parameters: [{ parameterId: "entities", queries: [{ deterministicIds: [42] }] }],
       },
-      slots: [bodyOnlySlot],
+      slots: [singleBodySlot],
     },
   ]) {
     expect(resolveUniquePrefixBody({
@@ -139,6 +160,55 @@ test("does not infer ID-less non-body, multi-slot, missing, or malformed queries
       tolerance,
     })).toBeNull();
   }
+});
+
+test("falls through to captured query evidence when the prefix is not uniquely attributable", () => {
+  const otherBody = {
+    ...liveBody("body_other"),
+    boundingBox: { low: [20, 20, 20] as [number, number, number], high: [30, 30, 30] as [number, number, number] },
+    centroid: [25, 25, 25] as [number, number, number],
+  };
+  const result = resolveUniquePrefixBody({
+    consumerFeatureId: "consumer",
+    feature: emptyIdBodyFeature,
+    slots: [singleBodySlot],
+    cadaraSignatures: [liveBody("body_live"), otherBody],
+    tolerance,
+  }) ?? resolveTopologyReferences(input({
+    queries: [{
+      consumerFeatureId: "consumer",
+      slotKey: "scope",
+      parameterId: "entities",
+      queryIndex: 0,
+      deterministicId: "captured-query:consumer:entities:0:0",
+      queryString: "query = body;",
+      expectedKinds: ["body"],
+      queryEvidenceIndex: 0,
+    }],
+    capturedReferences: [],
+    capturedQueryReferences: [{
+      consumingFeatureId: "consumer",
+      parameterId: "entities",
+      queryIndex: 0,
+      entityIndex: 0,
+      evaluatedAt: "historyPoint",
+      signature: {
+        entityClass: "body",
+        geometryType: "solid",
+        boundingBox: { low: [0, 0, 0], high: [0.01, 0.01, 0.01] },
+        centroid: [0.005, 0.005, 0.005],
+      },
+    }],
+    cadaraSignatures: [liveBody("body_live"), otherBody],
+  }));
+
+  expect(result).toMatchObject({
+    kind: "resolved",
+    bindings: [{
+      sourceEvidence: "queryHistoryPoint",
+      reviewReference: { kind: "body", bodyId: "body_live" },
+    }],
+  });
 });
 
 test("matches captured ID-less query evidence at the consuming history point", () => {
