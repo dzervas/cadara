@@ -41,6 +41,27 @@ function ensureParameter(feature: { parameters?: unknown[] }, id: string) {
   return created;
 }
 
+function profileInput(input: ReturnType<typeof fixtureInput>) {
+  const center = input.solvedSketch?.entities.find(
+    (entity) => entity.entityType === "circle",
+  )?.center3d ?? [0, 0, 0] as [number, number, number];
+  return {
+    profileEvidence: [{
+      consumingFeatureId: input.feature.featureId,
+      parameterId: "entities" as const,
+      queryIndex: 0,
+      resultIndex: 0,
+      deterministicId: `profile-${input.feature.featureId}`,
+      evaluatedAt: "historyPoint" as const,
+      kind: "sketchRegion" as const,
+      sourceSketchFeatureId: input.sketchId,
+      interiorPoint3d: center,
+    }],
+    solvedSketchesByFeatureId: input.read.solvedSketchesByFeatureId,
+    referencedSketchesByFeatureId: new Map([[input.sketchId, input.referencedSketch]]),
+  };
+}
+
 test("plans two-side extents and active draft angles", () => {
   const input = fixtureInput("WT_TWO_SIDE");
   ensureParameter(input.feature, "hasDraft").value = true;
@@ -48,8 +69,7 @@ test("plans two-side extents and active draft angles", () => {
 
   const result = planExtrudeFeature({
     feature: input.feature,
-    solvedSketch: input.solvedSketch,
-    referencedSketch: input.referencedSketch,
+    ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
   });
 
@@ -81,8 +101,7 @@ test("plans UP_TO_NEXT with rollback-inferred default scope and compressed profi
 
   const result = planExtrudeFeature({
     feature: input.feature,
-    solvedSketch: input.solvedSketch,
-    referencedSketch: input.referencedSketch,
+    ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
     inferredDefaultScopeFeatureIds: ["WT_EXTENT_BASE"],
   });
@@ -108,8 +127,7 @@ test("keeps ambiguous default-scope multi-body extrudes honest", () => {
   const input = fixtureInput("WT_UP_TO_NEXT");
   const result = planExtrudeFeature({
     feature: input.feature,
-    solvedSketch: input.solvedSketch,
-    referencedSketch: input.referencedSketch,
+    ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
   });
   expect(result).toMatchObject({
@@ -133,8 +151,7 @@ test("declares and resolves exact-prefix slots for up-to-face and explicit body 
 
   const result = planExtrudeFeature({
     feature: input.feature,
-    solvedSketch: input.solvedSketch,
-    referencedSketch: input.referencedSketch,
+    ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
   });
   expect(result.tier).toBe("topology");

@@ -1,116 +1,211 @@
 import { expect, test } from "vitest";
 
+import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
 import {
   referencedSketchFeatureIdsFromProfileParameter,
   resolveOnshapeSketchProfiles,
 } from "@/domain/import/onshape/profile-resolver";
 
-const profileParameter = (sketchFeatureId: string) => ({
+const frame = {
+  tier: "parametric",
+  planeKey: "xy" as const,
+};
+
+const profileParameter = (...sketchFeatureIds: string[]) => ({
   parameterId: "entities",
-  queries: [
-    {
-      queryString: `query = qSketchRegion(id + "${sketchFeatureId}", true);`,
-    },
-  ],
+  queries: sketchFeatureIds.map((sketchFeatureId) => ({
+    queryString: `query = qSketchRegion(id + "${sketchFeatureId}", true);`,
+  })),
 });
 
-function resolveProfile(entities: {
-  entityId: string;
-  entityType: "circle" | "lineSegment";
-  center3d?: [number, number, number];
-  radius?: number;
-  start3d?: [number, number, number];
-  end3d?: [number, number, number];
-}[]) {
+function solvedCircle(featureId: string, center: [number, number, number], radius = 0.002) {
+  return {
+    featureId,
+    entities: [{
+      entityId: `${featureId}_circle`,
+      entityType: "circle" as const,
+      onshapeEntityType: "skCircle",
+      isConstruction: false,
+      center3d: center,
+      radius,
+    }],
+  };
+}
+
+function sketchEvidence(input: {
+  sketchFeatureId: string;
+  queryIndex?: number;
+  resultIndex?: number;
+  point: [number, number, number];
+  deterministicId?: string;
+}): OnshapeProfileEvidence {
+  return {
+    consumingFeatureId: "E_PROFILE",
+    parameterId: "entities",
+    queryIndex: input.queryIndex ?? 0,
+    resultIndex: input.resultIndex ?? 0,
+    deterministicId: input.deterministicId ?? `face-${input.sketchFeatureId}`,
+    evaluatedAt: "historyPoint",
+    kind: "sketchRegion",
+    sourceSketchFeatureId: input.sketchFeatureId,
+    interiorPoint3d: input.point,
+  };
+}
+
+function resolve(input: {
+  parameter: ReturnType<typeof profileParameter>;
+  evidence: OnshapeProfileEvidence[];
+  solved: ReturnType<typeof solvedCircle>[];
+}) {
   return resolveOnshapeSketchProfiles({
-    profileParameter: profileParameter("S1"),
+    profileParameter: input.parameter,
+    consumerFeatureId: "E_PROFILE",
     featureLabel: "Profile consumer",
-    featureKind: "revolve",
-    solvedSketch: {
-      featureId: "S1",
-      entities: entities.map((entity) => ({
-        ...entity,
-        onshapeEntityType: entity.entityType === "circle" ? "skCircle" : "skLineSegment",
-        isConstruction: false,
-      })),
-    },
-    referencedSketch: { tier: "parametric", planeKey: "xy" },
+    featureKind: "extrude",
+    profileEvidence: input.evidence,
+    solvedSketchesByFeatureId: new Map(input.solved.map((sketch) => [sketch.featureId, sketch])),
+    referencedSketchesByFeatureId: new Map(input.solved.map((sketch) => [sketch.featureId, frame])),
   });
 }
 
-test("profile resolver returns verified deferred profiles for a closed translated sketch region", () => {
-  const result = resolveProfile([
-    { entityId: "circle", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 },
-  ]);
+test("profile resolver selects only the captured subset, never all closed regions", () => {
+  const result = resolve({
+    parameter: profileParameter("S_LEFT"),
+    evidence: [sketchEvidence({ sketchFeatureId: "S_LEFT", point: [-0.004, 0, 0] })],
+    solved: [
+      solvedCircle("S_LEFT", [-0.004, 0, 0]),
+      solvedCircle("S_UNUSED", [0.004, 0, 0]),
+    ],
+  });
 
   expect(result).toMatchObject({
     tier: "resolved",
-    sketchFeatureId: "S1",
-    profiles: [{ interiorPoint: [0, 0] }],
-    diagnostics: [],
+    profiles: [{
+      kind: "sketchRegion",
+      sketchFeatureId: "S_LEFT",
+      interiorPoint: [-4, 0],
+      evidence: { queryIndex: 0, resultIndex: 0, deterministicId: "face-S_LEFT" },
+    }],
   });
 });
 
-test("profile resolver derives selectors in the referenced sketch frame", () => {
-  const result = resolveOnshapeSketchProfiles({
-    profileParameter: profileParameter("S1"),
-    featureLabel: "Captured-frame extrude",
-    featureKind: "extrude",
-    solvedSketch: {
-      featureId: "S1",
-      entities: [{
-        entityId: "circle",
-        entityType: "circle",
-        onshapeEntityType: "skCircle",
-        isConstruction: false,
-        center3d: [0.004, 0, 0],
-        radius: 0.002,
-      }],
-    },
-    referencedSketch: {
-      tier: "parametric",
-      planeKey: "xy",
-      planeFrame: {
-        origin: [4, 0, 0],
-        xAxis: [1, 0, 0],
-        yAxis: [0, 1, 0],
-        normal: [0, 0, 1],
-        linearUnit: "documentLength",
-        handedness: "rightHanded",
+test("profile resolver preserves ordered exact profiles from multiple source sketches", () => {
+  const result = resolve({
+    parameter: profileParameter("S_ONE", "S_TWO"),
+    evidence: [
+      sketchEvidence({ sketchFeatureId: "S_ONE", queryIndex: 0, point: [-0.003, 0, 0] }),
+      sketchEvidence({ sketchFeatureId: "S_TWO", queryIndex: 1, point: [0.003, 0, 0] }),
+    ],
+    solved: [solvedCircle("S_ONE", [-0.003, 0, 0]), solvedCircle("S_TWO", [0.003, 0, 0])],
+  });
+
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [
+      { kind: "sketchRegion", sketchFeatureId: "S_ONE", interiorPoint: [-3, 0] },
+      { kind: "sketchRegion", sketchFeatureId: "S_TWO", interiorPoint: [3, 0] },
+    ],
+  });
+});
+
+test("profile resolver requires a unique projected witness region for nested profiles", () => {
+  const nested = {
+    featureId: "S_NESTED",
+    entities: [
+      ...solvedCircle("S_NESTED_OUTER", [0, 0, 0], 0.006).entities,
+      ...solvedCircle("S_NESTED_INNER", [0, 0, 0], 0.002).entities,
+    ],
+  };
+  const result = resolve({
+    parameter: profileParameter("S_NESTED"),
+    evidence: [sketchEvidence({ sketchFeatureId: "S_NESTED", point: [0.004, 0, 0] })],
+    solved: [nested],
+  });
+
+  expect(result).toMatchObject({ tier: "resolved", profiles: [{ interiorPoint: [4, 0] }] });
+});
+
+test("profile resolver projects a mirror-derived source witness through the sketch frame", () => {
+  const result = resolve({
+    parameter: profileParameter("S_MIRROR"),
+    evidence: [sketchEvidence({ sketchFeatureId: "S_MIRROR", point: [0.004, 0, 0] })],
+    solved: [solvedCircle("S_MIRROR", [0.004, 0, 0])],
+  });
+
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [{ kind: "sketchRegion", sketchFeatureId: "S_MIRROR", interiorPoint: [4, 0] }],
+  });
+});
+
+test("profile resolver keeps a selected planar face as an exact deferred topology profile", () => {
+  const result = resolve({
+    parameter: profileParameter("S_PROFILE", "S_CAP"),
+    evidence: [
+      sketchEvidence({ sketchFeatureId: "S_PROFILE", queryIndex: 0, point: [0, 0, 0] }),
+      {
+        consumingFeatureId: "E_PROFILE",
+        parameterId: "entities",
+        queryIndex: 1,
+        resultIndex: 0,
+        deterministicId: "cap-face",
+        evaluatedAt: "historyPoint",
+        kind: "planarFace",
+        signature: {
+          entityClass: "face",
+          geometryType: "plane",
+          definingData: { origin: [0, 0, 0], normal: [0, 0, 1] },
+        },
       },
-    },
+    ],
+    solved: [solvedCircle("S_PROFILE", [0, 0, 0]), solvedCircle("S_CAP", [0.01, 0, 0])],
   });
 
   expect(result).toMatchObject({
     tier: "resolved",
-    profiles: [{ interiorPoint: [0, 0] }],
+    profiles: [
+      { kind: "sketchRegion", sketchFeatureId: "S_PROFILE" },
+      {
+        kind: "planarFace",
+        selector: { kind: "topologyOf", expectedKind: "face", source: { deterministicId: "cap-face" } },
+      },
+    ],
   });
 });
 
-test("profile resolver degrades an open translated sketch with needs-region-resolution", () => {
-  const result = resolveProfile([
-    {
-      entityId: "line",
-      entityType: "lineSegment",
-      start3d: [0, 0, 0],
-      end3d: [0.01, 0, 0],
-    },
-  ]);
-
-  expect(result).toEqual({
-    tier: "unresolved",
-    reason: "needs-region-resolution",
-    diagnostics: [],
+test("profile resolver keeps missing witnesses, ambiguous sources, and unordered evidence unresolved", () => {
+  const unresolvedWitness = resolve({
+    parameter: profileParameter("S1"),
+    evidence: [{
+      consumingFeatureId: "E_PROFILE",
+      parameterId: "entities",
+      queryIndex: 0,
+      resultIndex: 0,
+      deterministicId: "face-S1",
+      evaluatedAt: "historyPoint",
+      kind: "sketchRegion",
+      sourceSketchFeatureId: "S1",
+      unresolved: { reason: "evFaceTessellation response schema is unavailable" },
+    }],
+    solved: [solvedCircle("S1", [0, 0, 0])],
   });
+  const unordered = resolve({
+    parameter: profileParameter("S1"),
+    evidence: [sketchEvidence({ sketchFeatureId: "S1", resultIndex: 1, point: [0, 0, 0] })],
+    solved: [solvedCircle("S1", [0, 0, 0])],
+  });
+
+  expect(unresolvedWitness).toMatchObject({ tier: "unresolved", reason: "needs-region-resolution" });
+  expect(unordered).toMatchObject({ tier: "unresolved", reason: "needs-region-resolution" });
 });
 
-test("profile resolver requires exactly one sketch profile query", () => {
+test("profile source parser never decodes compressed query text", () => {
   expect(
     referencedSketchFeatureIdsFromProfileParameter({
       queries: [
-        { queryString: 'qSketchRegion(id + "S1", true)' },
-        { queryString: 'qCreatedBy(makeId("S2"), EntityType.FACE)' },
+        { queryString: 'query = qSketchRegion(id + "S1", true);' },
+        { queryString: 'query=qCompressed(1.0,"S2wireOp",id);' },
       ],
     }),
-  ).toEqual(["S1", "S2"]);
+  ).toEqual(["S1"]);
 });

@@ -5,6 +5,7 @@
  * sketch-profile and exact-prefix topology matching to the shared import seams.
  */
 import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
+import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
 import type { AuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   ExtrudeEndCondition,
@@ -22,13 +23,13 @@ import { translateOnshapeExpression } from "@/domain/import/onshape/expression-t
 import {
   referencedSketchFeatureIdsFromProfileParameter,
   resolveOnshapeSketchProfiles,
-  type DeferredSketchProfile,
+  type DeferredOnshapeProfile,
   type ProfileResolutionDiagnostic,
 } from "@/domain/import/onshape/profile-resolver";
 import type { TopologyResolutionBinding } from "@/domain/import/onshape/topology-reference-resolver";
 import type { TopologyQuerySlot } from "@/domain/import/onshape/topology-query-reader";
 
-export type PlannedExtrudeProfile = DeferredSketchProfile;
+export type PlannedExtrudeProfile = DeferredOnshapeProfile;
 
 interface PlannedTopologyTarget {
   kind: "topologySlot";
@@ -71,9 +72,7 @@ export type PlannedExtrudeBoolean =
     };
 
 export interface PlannedExtrude {
-  /** Onshape feature id of the sketch whose regions this extrude consumes. */
-  sketchFeatureId: string;
-  /** One deferred profile per consumed solid region. */
+  /** Ordered exact query results; each profile carries its own source sketch or face identity. */
   profiles: PlannedExtrudeProfile[];
   extent: PlannedExtrudeExtent;
   operation: AuthoredValue<FeatureBooleanOperation>;
@@ -100,10 +99,15 @@ export type ExtrudePlanResult =
 
 export interface ExtrudePlanInput {
   feature: OnshapeFeatureNode;
-  /** Solved sketch keyed by the extrude's referenced sketch feature id. */
-  solvedSketch: OnshapeSolvedSketch | undefined;
-  /** Plane and tier of the referenced sketch, as planned earlier in history. */
-  referencedSketch: { tier: string; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame } | undefined;
+  /** Exact selected-face evidence captured immediately before this extrude. */
+  profileEvidence: readonly OnshapeProfileEvidence[];
+  /** Solved sketches keyed by exact evidence source ids. */
+  solvedSketchesByFeatureId: ReadonlyMap<string, OnshapeSolvedSketch>;
+  /** Earlier planned sketches keyed by exact evidence source ids. */
+  referencedSketchesByFeatureId: ReadonlyMap<
+    string,
+    { tier: string; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame }
+  >;
   /** Onshape feature ids of prior parametric NEW-body extrudes, in order. */
   priorBodyProducingFeatureIds: readonly string[];
   /** Unique target lineage inferred from rollback body identity for default scope. */
@@ -148,36 +152,9 @@ function hasQueries(feature: OnshapeFeatureNode, parameterId: string): boolean {
   return Array.isArray(queries) && queries.length > 0;
 }
 
-function queryStrings(feature: OnshapeFeatureNode, parameterId: string): string[] {
-  const queries = findParameter(feature, parameterId)?.queries;
-  if (!Array.isArray(queries)) return [];
-  return queries.flatMap((query) =>
-    typeof query === "object" &&
-    query !== null &&
-    typeof (query as { queryString?: unknown }).queryString === "string"
-      ? [(query as { queryString: string }).queryString]
-      : [],
-  );
-}
-
-/** Parse distinct sketch ids from both readable and compressed v6 region queries. */
+/** Parse readable source ids only. Opaque qCompressed source is capture evidence, never text-decoded. */
 export function referencedSketchFeatureIds(feature: OnshapeFeatureNode): string[] {
-  const parameter = findParameter(feature, "entities");
-  const ids = new Set(referencedSketchFeatureIdsFromProfileParameter(parameter));
-  for (const queryString of queryStrings(feature, "entities")) {
-    for (const match of queryString.matchAll(/([A-Za-z0-9_]+)wireOp/g)) {
-      if (match[1]) ids.add(match[1]);
-    }
-  }
-  return [...ids];
-}
-
-function normalizedProfileParameter(feature: OnshapeFeatureNode, sketchFeatureId: string) {
-  const parameter = findParameter(feature, "entities");
-  if (referencedSketchFeatureIdsFromProfileParameter(parameter).length > 0) return parameter;
-  return {
-    queries: [{ queryString: `query = qSketchRegion(id + "${sketchFeatureId}", true);` }],
-  };
+  return referencedSketchFeatureIdsFromProfileParameter(findParameter(feature, "entities"));
 }
 
 const BARE_NUMBER = /^-?\d+(?:\.\d+)?$/;
@@ -386,13 +363,8 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
     return { tier: "baked", reason: "extrude-body-type-unsupported", diagnostics };
   }
 
-  const sketchIds = referencedSketchFeatureIds(feature);
-  if (
-    sketchIds.length !== 1 ||
-    !input.referencedSketch ||
-    input.referencedSketch.tier !== "parametric" ||
-    !input.solvedSketch
-  ) {
+  const profileParameter = findParameter(feature, "entities");
+  if (!profileParameter) {
     return { tier: "baked", reason: "needs-region-resolution", diagnostics };
   }
 
@@ -403,11 +375,13 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   }
 
   const profileResolution = resolveOnshapeSketchProfiles({
-    profileParameter: normalizedProfileParameter(feature, sketchIds[0]!),
+    profileParameter,
+    consumerFeatureId: feature.featureId,
     featureLabel: feature.name ?? feature.featureId,
     featureKind: "extrude",
-    solvedSketch: input.solvedSketch,
-    referencedSketch: input.referencedSketch,
+    profileEvidence: input.profileEvidence,
+    solvedSketchesByFeatureId: input.solvedSketchesByFeatureId,
+    referencedSketchesByFeatureId: input.referencedSketchesByFeatureId,
   });
   diagnostics.push(...profileResolution.diagnostics);
   if (profileResolution.tier === "unresolved") {
@@ -455,7 +429,6 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   }
 
   const plannedExtrude: PlannedExtrude = {
-    sketchFeatureId: profileResolution.sketchFeatureId,
     profiles: profileResolution.profiles,
     extent,
     operation: { source: "literal", value: operation },

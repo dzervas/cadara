@@ -292,16 +292,20 @@ function planSweep(
   if (profileSketchIds.length !== 1) return null;
 
   const sketchFeatureId = profileSketchIds[0]!;
-  const referencedSketch = context.state.sketchPlansByFeatureId.get(sketchFeatureId);
-  const solvedSketch = context.read.solvedSketchesByFeatureId.get(sketchFeatureId);
   const profiles = resolveOnshapeSketchProfiles({
     profileParameter,
+    consumerFeatureId: context.feature.featureId,
     featureLabel: context.label,
     featureKind: "sweep",
-    solvedSketch,
-    referencedSketch,
+    profileEvidence: context.read.studio.profileEvidence ?? [],
+    solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
+    referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
   });
   if (profiles.tier !== "resolved") return null;
+  const sketchProfiles = profiles.profiles.filter(
+    (profile): profile is DeferredSketchProfile => profile.kind === "sketchRegion",
+  );
+  if (sketchProfiles.length !== profiles.profiles.length) return null;
 
   const pathQuery = queryText(findParameter(context.feature, "path"));
   if (!pathQuery) return null;
@@ -340,7 +344,7 @@ function planSweep(
 
   return {
     sketchFeatureId,
-    profiles: profiles.profiles,
+    profiles: sketchProfiles,
     path: {
       sketchFeatureId: pathSketchFeatureId,
       entityId: pathEntity.entityId,
@@ -423,19 +427,25 @@ function planLoft(
     const sketchFeatureId = sketchIds[0]!;
     const resolved = resolveOnshapeSketchProfiles({
       profileParameter,
+      consumerFeatureId: context.feature.featureId,
       featureLabel: context.label,
       featureKind: "loft",
-      solvedSketch: context.read.solvedSketchesByFeatureId.get(sketchFeatureId),
-      referencedSketch: context.state.sketchPlansByFeatureId.get(sketchFeatureId),
+      profileEvidence: context.read.studio.profileEvidence ?? [],
+      solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
+      referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
     });
-    if (resolved.tier !== "resolved" || resolved.profiles.length !== 1) {
+    if (
+      resolved.tier !== "resolved" ||
+      resolved.profiles.length !== 1 ||
+      resolved.profiles[0]?.kind !== "sketchRegion"
+    ) {
       return {
         kind: "baked",
         reason: "loft-profile-unresolved",
         inputFeatureIds: [...new Set(inputFeatureIds)],
       };
     }
-    profiles.push({ sketchFeatureId, profile: resolved.profiles[0]! });
+    profiles.push({ sketchFeatureId, profile: resolved.profiles[0] });
   }
 
   if (profiles.length < 2) {
@@ -519,12 +529,20 @@ function planRevolve(
 
   const profiles = resolveOnshapeSketchProfiles({
     profileParameter,
+    consumerFeatureId: context.feature.featureId,
     featureLabel: context.label,
     featureKind: "revolve",
-    solvedSketch,
-    referencedSketch,
+    profileEvidence: context.read.studio.profileEvidence ?? [],
+    solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
+    referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
   });
   if (profiles.tier !== "resolved") {
+    return { kind: "baked", reason: "revolve-profile-unresolved", inputFeatureIds: sketchIds };
+  }
+  const sketchProfiles = profiles.profiles.filter(
+    (profile): profile is DeferredSketchProfile => profile.kind === "sketchRegion",
+  );
+  if (sketchProfiles.length !== profiles.profiles.length) {
     return { kind: "baked", reason: "revolve-profile-unresolved", inputFeatureIds: sketchIds };
   }
 
@@ -564,7 +582,7 @@ function planRevolve(
     kind: "planned",
     revolve: {
       sketchFeatureId,
-      profiles: profiles.profiles,
+      profiles: sketchProfiles,
       axis,
       startAngle: createLiteralAuthoredValue(0),
       extent,

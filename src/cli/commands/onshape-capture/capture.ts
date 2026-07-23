@@ -18,9 +18,11 @@ import {
   collectDeterministicIdConsumers,
   collectDeterministicIds,
   collectQueryStringConsumers,
+  collectSolidExtrudeProfileQueryConsumers,
   resolveDeterministicIds,
   resolveDeterministicIdsWithHistory,
   resolveQueryStringsWithHistory,
+  resolveSolidExtrudeProfileEvidenceWithHistory,
 } from "@/cli/commands/onshape-capture/references";
 import type { OnshapeDocumentRef } from "@/cli/commands/onshape-capture/url";
 
@@ -254,6 +256,8 @@ async function captureStudio(
   const deterministicIdConsumers = collectDeterministicIdConsumers(features);
   const deterministicIds = collectDeterministicIds(features);
   const queryStringConsumers = collectQueryStringConsumers(features);
+  const solidExtrudeProfileQueryConsumers =
+    collectSolidExtrudeProfileQueryConsumers(features);
   const resolvedReferences = rollbackStudioPath
     ? await resolveDeterministicIdsWithHistory(
         client,
@@ -264,6 +268,13 @@ async function captureStudio(
     : await resolveDeterministicIds(client, studioPath, deterministicIds);
   const resolvedQueryReferences = rollbackStudioPath
     ? await resolveQueryStringsWithHistory(client, studioPath, queryStringConsumers)
+    : [];
+  const profileEvidence = rollbackStudioPath
+    ? await resolveSolidExtrudeProfileEvidenceWithHistory(
+        client,
+        studioPath,
+        solidExtrudeProfileQueryConsumers,
+      )
     : [];
 
   const groundTruth = await captureGroundTruth(client, {
@@ -299,6 +310,7 @@ async function captureStudio(
     featureSpecs,
     resolvedReferences,
     resolvedQueryReferences,
+    profileEvidence,
     groundTruth,
     rollbackSnapshots,
   };

@@ -117,6 +117,35 @@ const cPlane = (featureId: string, name: string) => ({
   ],
 });
 
+function syntheticExtrudeProfileEvidence(features: Record<string, unknown>[]) {
+  const sourceId = /qSketchRegion\(\s*id\s*\+\s*"([A-Za-z0-9_]+)"/;
+  return features.flatMap((feature) => {
+    if (feature.featureType !== "extrude" || typeof feature.featureId !== "string") return [];
+    const entities = (feature.parameters as Record<string, unknown>[] | undefined)?.find(
+      (parameter) => parameter.parameterId === "entities",
+    );
+    const queries = entities?.queries;
+    if (!Array.isArray(queries)) return [];
+    return queries.flatMap((query, queryIndex) => {
+      const text = typeof (query as { queryString?: unknown }).queryString === "string"
+        ? (query as { queryString: string }).queryString
+        : "";
+      const sketchFeatureId = text.match(sourceId)?.[1];
+      return sketchFeatureId ? [{
+        consumingFeatureId: feature.featureId,
+        parameterId: "entities",
+        queryIndex,
+        resultIndex: 0,
+        deterministicId: `synthetic-profile:${feature.featureId}:${queryIndex}`,
+        evaluatedAt: "historyPoint",
+        kind: "sketchRegion",
+        sourceSketchFeatureId: sketchFeatureId,
+        interiorPoint3d: [0, 0, 0],
+      }] : [];
+    });
+  });
+}
+
 function studio(
   elementId: string,
   name: string,
@@ -146,6 +175,7 @@ function studio(
       ...extraResolvedReferences,
     ],
     resolvedQueryReferences,
+    profileEvidence: syntheticExtrudeProfileEvidence(features),
     groundTruth: { hasBodies: false },
     rollbackSnapshots: [],
   };

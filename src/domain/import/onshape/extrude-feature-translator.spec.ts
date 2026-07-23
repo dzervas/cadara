@@ -10,7 +10,7 @@ const BUNDLE_PATH = "405fa226bb150016d09afc09.onshape-capture.json";
 const ELEMENT_ID = "6869c89206c7a4bb97bd9129";
 
 test.skipIf(!existsSync(BUNDLE_PATH))(
-  "real Wave-T extent studio plans its two-side and UP_TO_NEXT extrudes parametrically",
+  "real Wave-T extent studio stays explicitly unresolved until certified profile evidence is captured",
   async () => {
     const validation = validateOnshapeCaptureBundle(
       JSON.parse(await readFile(BUNDLE_PATH, "utf8")),
@@ -19,24 +19,22 @@ test.skipIf(!existsSync(BUNDLE_PATH))(
     if (!validation.success) return;
 
     const plan = planStudioFidelity(readPartStudio(validation.data, ELEMENT_ID));
-    expect(plan.tierCounts).toEqual({ parametric: 6, baked: 0, geometryOnly: 0 });
+    expect(plan.tierCounts).toEqual({ parametric: 3, baked: 3, geometryOnly: 0 });
 
     const twoSide = plan.featurePlans.find(
       (feature) => feature.label === "Two side extrude",
     );
-    expect(twoSide?.plannedExtrude?.extent).toMatchObject({
-      mode: "twoSide",
-      firstEnd: { kind: "blind", direction: "positive" },
-      secondEnd: { kind: "blind", direction: "negative" },
+    expect(twoSide).toMatchObject({
+      tier: "baked",
+      reasonCodes: ["needs-region-resolution"],
     });
 
     const upToNext = plan.featurePlans.find(
       (feature) => feature.label === "Up to next extrude",
     );
-    expect(upToNext).toMatchObject({ tier: "parametric", reasonCodes: [] });
-    expect(upToNext?.plannedExtrude).toMatchObject({
-      extent: { mode: "oneSide", end: { kind: "upToNext" } },
-      boolean: { kind: "deferredBody", sourceFeatureId: "F86KeO4QU8F6rcc_0" },
+    expect(upToNext).toMatchObject({
+      tier: "baked",
+      reasonCodes: ["needs-region-resolution"],
     });
   },
 );

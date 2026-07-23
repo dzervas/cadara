@@ -268,6 +268,32 @@ test("materialized feature requests omit the import-only topology fallback prope
   expect("topologyFallback" in request).toBe(false);
 });
 
+test("materializes an exact deferred planar face profile before an extrude applies", async () => {
+  const request = await materializer().materializeFeatureRequest(
+    {
+      ...basis,
+      definition: {
+        kind: "extrude",
+        featureTypeVersion: "feature-type/extrude/v1alpha1",
+        parameters: {
+          profiles: [selector("face")],
+          startExtent: { kind: "profilePlane" },
+          extent: { mode: "oneSide", end: { kind: "throughAll", direction: "positive" } },
+          operation: { source: "literal", value: "newBody" },
+          booleanScope: { kind: "standalone" },
+        },
+      },
+    } as ImportCreateFeatureRequest,
+    { kind: "createFeature", index: 0 },
+  );
+
+  expect(request.definition).toMatchObject({
+    kind: "extrude",
+    parameters: { profiles: [{ kind: "face", bodyId: "body_live" }] },
+  });
+  expect(JSON.stringify(request)).not.toContain("topologyOf");
+});
+
 test("apply-time topology rematch resolves one body-only checkpoint from render evidence", async () => {
   const bodyId = "body_checkpoint" as BodyId;
 

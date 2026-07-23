@@ -231,6 +231,17 @@ function makeFaceSketchBundle() {
         },
         parts: null,
         featureSpecs: { present: false, reason: "n/a" },
+        profileEvidence: [{
+          consumingFeatureId: "E_BASE",
+          parameterId: "entities",
+          queryIndex: 0,
+          resultIndex: 0,
+          deterministicId: "provider-base-profile",
+          evaluatedAt: "historyPoint",
+          kind: "sketchRegion",
+          sourceSketchFeatureId: "S_BASE",
+          interiorPoint3d: [0.0005, 0.001, 0],
+        }],
         resolvedReferences: [
           {
             deterministicId: "face_ref",
@@ -353,6 +364,20 @@ function makeSegmentedCheckpointBundle(): OnshapeCaptureBundleV2 {
     snapshot("E_AFTER", [body("A", 2), body("B", 1), body("C", 1)]),
     snapshot("CHAMFER_TWO", [body("A", 2), body("B", 2), body("C", 1)]),
   ];
+  studio.profileEvidence?.push(
+    {
+      consumingFeatureId: "E_INDEPENDENT", parameterId: "entities", queryIndex: 0,
+      resultIndex: 0, deterministicId: "provider-independent-profile",
+      evaluatedAt: "historyPoint", kind: "sketchRegion", sourceSketchFeatureId: "S_BASE",
+      interiorPoint3d: [0.0005, 0.001, 0],
+    },
+    {
+      consumingFeatureId: "E_AFTER", parameterId: "entities", queryIndex: 0,
+      resultIndex: 0, deterministicId: "provider-after-profile",
+      evaluatedAt: "historyPoint", kind: "sketchRegion", sourceSketchFeatureId: "S_BASE",
+      interiorPoint3d: [0.0005, 0.001, 0],
+    },
+  );
   studio.groundTruth = {
     hasBodies: true,
     tessellationTolerance: 0.0001,
@@ -401,6 +426,12 @@ function makeCapturedFrameCheckpointBundle(): OnshapeCaptureBundleV2 {
     },
   ];
 
+  studio.profileEvidence?.push({
+    consumingFeatureId: "E_AFTER", parameterId: "entities", queryIndex: 0,
+    resultIndex: 0, deterministicId: "provider-captured-frame-profile",
+    evaluatedAt: "historyPoint", kind: "sketchRegion", sourceSketchFeatureId: "S_FACE",
+    interiorPoint3d: [0.0005, 0.001, 0.003],
+  });
   studio.resolvedReferences = [{
     deterministicId: "face_ref",
     evaluatedAt: "historyPoint",
@@ -700,6 +731,11 @@ function makeStackedTransformChainBundle(): OnshapeCaptureBundleV2 {
       },
       parts: null,
       featureSpecs: { present: false, reason: "n/a" },
+      profileEvidence: [{
+        consumingFeatureId: "E1", parameterId: "entities", queryIndex: 0,
+        resultIndex: 0, deterministicId: "stacked-profile", evaluatedAt: "historyPoint",
+        kind: "sketchRegion", sourceSketchFeatureId: "S1", interiorPoint3d: [0, 0, 0],
+      }],
       resolvedReferences: [{
         deterministicId: "Top",
         evaluatedAt: "finalState",
@@ -897,7 +933,7 @@ test("src/domain/import/onshape/provider.spec.ts emits a deferred parametric rev
 const realBundleCases = [
   [
     "40a51fb8fa82fd4565151114.onshape-capture.json",
-    { parametric: 7, baked: 3, geometryOnly: 0 },
+    { parametric: 6, baked: 4, geometryOnly: 0 },
   ],
   [
     "9841e486906fa2ce62d74d8e.onshape-capture.json",
@@ -1249,21 +1285,9 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
     preparedFixtureSketch?.definition.derivedRelationships?.map((entry) => entry.kind),
   ).toEqual(["offset"]);
 
-  // The fixture extrude consumes a parametric sketch region and must now plan
-  // parametric: a createFeature carrying a deferred regionOf profile that points
-  // back at the sketch commit's ordered position.
-  const extrudeAction = actions.createFeatures?.[0];
-  const regionProfile =
-    extrudeAction?.definition.kind === "extrude"
-      ? extrudeAction.definition.parameters.profiles[0]
-      : undefined;
   expect(
-    regionProfile !== undefined &&
-      "kind" in regionProfile &&
-      regionProfile.kind === "regionOf" &&
-      actions.orderedActions?.[regionProfile.actionIndex]?.kind ===
-        "commitSketch",
-    "The fixture extrude should emit a deferred regionOf profile referencing the sketch commit action.",
+    actions.createFeatures?.some((action) => action.definition.kind === "extrude"),
+    "A captured profile with a certified witness should emit its exact regionOf extrude action.",
   ).toBeTruthy();
 
   expect(
@@ -1307,7 +1331,7 @@ test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives
       history: {
         async evaluateHistoryProbe(input) {
           requestedFinalTessellation = input.includeFinalTessellation === true;
-          return { steps: [], finalTessellation: { points: [] } };
+          return { steps: [], finalTessellation: { points: [0, 0, 0, 1000, 0, 0, 1000, 1000, 0] } };
         },
       },
     },
@@ -1318,10 +1342,8 @@ test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives
 
   expect(requestedFinalTessellation).toBe(true);
   expect(
-    studio?.tierCounts.baked === 0 &&
-      studio.verification.status !== "unavailable" &&
-      studio.verification.status !== "partial",
-    "A probe-equipped fully-parametric plan should compare probe tessellation instead of reporting unavailable/partial verification.",
+    studio?.tierCounts.baked === 0 && studio.verification.status === "passing",
+    "Certified profile evidence and a matching non-empty final tessellation should fully verify the fixture studio.",
   ).toBeTruthy();
 });
 

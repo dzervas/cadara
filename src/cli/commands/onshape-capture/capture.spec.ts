@@ -69,6 +69,37 @@ test("capture.spec.ts full capture happy path produces a valid bundle", async ()
   expect(mounts?.featureSpecs.present).toBe(true);
   expect(bundle.formatVersion).toBe(2);
   expect(bundle.diagnostics).toEqual([]);
+  const profileEvidence = mounts?.profileEvidence;
+  expect(
+    profileEvidence,
+    "Every solid extrude entities query, including one with deterministicIds, should be evaluated before its consumer.",
+  ).toMatchObject([{
+    consumingFeatureId: "FG094ehBlsq34dl_0",
+    parameterId: "entities",
+    queryIndex: 0,
+    evaluatedAt: "historyPoint",
+    kind: "sketchRegion",
+    sourceSketchFeatureId: "FOoap8tw3jKAJf5_0",
+    interiorPoint3d: [0, 0, 0],
+  }]);
+});
+
+
+test("capture.spec.ts certifies profile witnesses on the exact selected face", async () => {
+  const { fetch, calls } = createFixtureFetch();
+  await captureBundle(
+    parseDocumentUrl(FIXTURE_DOCUMENT_URL),
+    CREDENTIALS,
+    createFixtureRuntime(fetch),
+  );
+  const profileCall = calls.find(
+    (call) => call.url.includes("rollbackBarIndex=1") && call.body?.includes("profileQuery0"),
+  );
+  expect(profileCall?.body).toContain("qContainsPoint(selectedFace0, centroid0)");
+  expect(profileCall?.body).toContain("qSketchRegion(id + sketchFeatureId0, false)");
+  expect(profileCall?.body).toContain("[3, 7, 15, 31, 63]");
+  expect(profileCall?.body).toContain("returnUndefinedOutsideFace");
+  expect(profileCall?.body).not.toContain("evFaceTessellation");
 });
 
 test("capture.spec.ts element-scoped capture keeps one studio but full element list", async () => {

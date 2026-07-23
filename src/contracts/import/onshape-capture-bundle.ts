@@ -125,6 +125,58 @@ export type OnshapeResolvedQueryReference =
     };
 
 /**
+ * Exact pre-consumer evidence for one result of a solid extrude's `entities`
+ * query. `deterministicId` is the server-returned transient query identity; it
+ * is retained even when the captured query also carried deterministic IDs.
+ */
+export type OnshapeProfileEvidence =
+  | {
+      consumingFeatureId: string;
+      parameterId: "entities";
+      queryIndex: number;
+      resultIndex: number;
+      deterministicId: string;
+      evaluatedAt: "historyPoint";
+      kind: "sketchRegion";
+      /** Exact prior qSketchRegion source, never inferred from geometry. */
+      sourceSketchFeatureId: string;
+      /** Server-certified point contained by this exact selected face. */
+      interiorPoint3d: [number, number, number];
+    }
+  | {
+      consumingFeatureId: string;
+      parameterId: "entities";
+      queryIndex: number;
+      resultIndex: number;
+      deterministicId: string;
+      evaluatedAt: "historyPoint";
+      kind: "sketchRegion";
+      sourceSketchFeatureId: string;
+      /** Classification was exact, but no certified face witness was available. */
+      unresolved: { reason: string };
+    }
+  | {
+      consumingFeatureId: string;
+      parameterId: "entities";
+      queryIndex: number;
+      resultIndex: number;
+      deterministicId: string;
+      evaluatedAt: "historyPoint";
+      kind: "planarFace";
+      signature: OnshapeGeometricSignature;
+    }
+  | {
+      consumingFeatureId: string;
+      parameterId: "entities";
+      queryIndex: number;
+      resultIndex?: number;
+      deterministicId?: string;
+      evaluatedAt: "historyPoint";
+      kind: "unresolved";
+      unresolved: { reason: string };
+    };
+
+/**
  * Final-state ground-truth geometry for a Part Studio. Empty Part Studios
  * record the absence of bodies explicitly rather than embedding empty payloads.
  */
@@ -174,6 +226,8 @@ export interface OnshapePartStudioCapture {
   resolvedReferences: OnshapeResolvedReference[];
   /** Optional history-point evidence for captured queries whose ID arrays were empty. */
   resolvedQueryReferences?: OnshapeResolvedQueryReference[];
+  /** Exact consumer-indexed selected-face evidence for solid extrude profiles. */
+  profileEvidence?: OnshapeProfileEvidence[];
   /** Final-state ground-truth geometry. */
   groundTruth: OnshapeGroundTruth;
   /** `null` unless v2 snapshot capture was explicitly requested. */

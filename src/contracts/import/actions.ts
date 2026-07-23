@@ -50,6 +50,13 @@ export type ImportDeferredValue =
       selector: {
         kind: "interiorPoint";
         point: SketchPoint2D;
+        /** Optional exact Onshape selected-face provenance retained for import diagnostics. */
+        source?: {
+          consumerFeatureId: string;
+          queryIndex: number;
+          resultIndex: number;
+          deterministicId: string;
+        };
       };
     } & ImportDeferredActionOutputRef)
   | ({ kind: "bodyOf" } & ImportDeferredActionOutputRef)
@@ -140,7 +147,9 @@ export type ImportDeferredPlaneFeatureParameters =
 
 export type ImportDeferredProfileRef =
   | ExtrudeProfileRef
-  | Extract<ImportDeferredValue, { kind: "regionOf" }>;
+  | Extract<ImportDeferredValue, { kind: "regionOf" }>
+  /** A captured planar profile face rematched against live topology at apply. */
+  | ImportDeferredTopologyRef;
 
 /** @deprecated Prefer the feature-agnostic ImportDeferredProfileRef. */
 export type ImportDeferredExtrudeProfileRef = ImportDeferredProfileRef;
@@ -303,6 +312,7 @@ export const IMPORT_DEFERRED_TOPOLOGY_BLESSED_POSITIONS = [
   "createFeatures[].definition.parameters.reference.target",
   "createFeatures[].definition.parameters.booleanScope.bodyId",
   "createFeatures[].definition.parameters.booleanScope.bodyIds[]",
+  "createFeatures[].definition.parameters.profiles[]",
   "commitSketches[].plane.support",
 ] as const;
 

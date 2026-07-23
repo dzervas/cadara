@@ -675,12 +675,14 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
   Local plan dumps confirm 9841 and d3cd9 `Extrude 4` stay baked with the new
   reason while 5151 `Extrude 4` remains correctly parametric because it is a
   solid remove. Changed-file lint and the production build are green.
-- [ ] X.3 **Refresh stale capture evidence.** Recapture `405fa…` and `9841…` with
-      rollback snapshots using the landed geometry-ID and rollback query
-      capture paths. Verify format v2, complete rollback coverage, and expected
-      `resolvedQueryReferences`; do not commit root capture files. `40a51…`,
-      `5151…`, and `d3cd9…` need no evidence-only recapture unless a later
-      diagnosis proves otherwise.
+- [ ] X.3 **Refresh local capture evidence.** Recapture all five root bundles with
+      rollback snapshots using the landed geometry-ID, rollback-query, and X.4
+      consumer-profile capture paths. Verify format v2, complete rollback
+      coverage, expected `resolvedQueryReferences`, and complete
+      `profileEvidence`; do not commit root capture files. The 2026-07-23 405
+      refresh predates X.4 profile evidence and must be refreshed again. Mounts,
+      5151, 9841, and d3cd9 likewise need profile records for strict import; no
+      compatibility fallback for pre-X.4 captures is permitted.
 
 
       **Partial evidence (API quota blocked).** The 405 bundle was recaptured on
@@ -705,6 +707,40 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       the five local bundles plans and applies parametrically; selected-subset
       and mirrored-profile regressions pass through the real sketch solver and
       OCC apply seam.
+
+      **Partial implementation (HTTP 402 blocked; checkbox intentionally open).**
+      The capture envelope now has ordered `profileEvidence` keyed by exact
+      consumer/query/result/transient identity. Every SOLID extrude `entities`
+      query is evaluated at its pre-consumer rollback index regardless of
+      deterministic IDs; opaque `qCompressed` text is rehydrated only inside
+      FeatureScript, never decoded locally. Exact sketch classification compares
+      selected-face identity against explicit preceding `qSketchRegion` queries;
+      planar selected faces carry deferred `topologyOf` profiles.
+
+      A sketch-region interior witness is now found on the exact selected planar
+      face using its approximate area centroid followed by a deterministic adaptive
+      face-parameter grid. Every emitted point is accepted only when
+      `qContainsPoint(selectedFace, candidate)` certifies containment. This is a
+      server-certified authored-query witness, not bbox-centroid or nearest
+      matching; failure remains explicitly unresolved.
+      the generated certification script and decoded witness. Synthetic
+      contract/resolver coverage pins selected subsets, multiple source sketches,
+      nested regions, mirror-derived witnesses, mixed sketch/planar profiles,
+      and unresolved/ambiguous records. Projected-sketch geometry and region
+      extraction beyond synthetic acceptance remain an X.4 live-capture
+      sub-residual.
+
+      Current root bundles predate `profileEvidence`, so strict planning now
+      exposes their stale evidence rather than silently guessing: Mounts browser
+      review is **5/5/0**; Wave-T `Revolve remove` is **3/1/0**, Mirror transform
+      **2/3/0**, and Extrude extents **3/3/0**. These are not acceptance counts.
+      X.4 cannot close until the API quota resets, all five bundles are refreshed,
+      projected boundaries are diagnosed from those records, and the real OCC
+      matrix is green.
+      Current verification is green for lint, build, **609 logic**, **125 UI**,
+      and **24 static** tests. Playwright is **56/62**: all six failures are the
+      expected stale-root-capture consequences above; no baked expectations were
+      weakened.
 - [ ] X.5 **Live face-sketch support after producer recovery.** Once solid
       producers are live, promote face-backed sketches through durable
       `SketchPlaneSupportRef` wiring rather than a detached captured-frame
