@@ -10,6 +10,15 @@ const query = (parameterId: string, deterministicId: string) => ({
   }],
 });
 
+const sketchRegion = (sketchFeatureId: string) => ({
+  btType: "BTMParameterQueryList-148",
+  parameterId: "entities",
+  queries: [{
+    btType: "BTMIndividualQuery-138",
+    queryString: `query = qSketchRegion(id + "${sketchFeatureId}", true);`,
+  }],
+});
+
 const featureList = (featureIds: readonly string[]) => ({
   btType: "BTMParameterFeatureList-1749",
   parameterId: "instanceFunction",
@@ -36,6 +45,17 @@ const quantityParameter = (parameterId: string, expression: string, value: numbe
 });
 
 const topPlaneReference = {
+  deterministicId: "TOP",
+  evaluatedAt: "finalState" as const,
+  signature: {
+    entityClass: "face" as const,
+    geometryType: "plane" as const,
+    definingData: { normal: [0, 0, 1] as [number, number, number] },
+    isDefaultPlane: true,
+  },
+};
+
+const rightPlaneReference = {
   deterministicId: "RIGHT",
   evaluatedAt: "finalState" as const,
   signature: {
@@ -61,10 +81,53 @@ const sourceBodyReference = {
   },
 };
 
+const sketchFeature = (featureId: string, name: string) => ({
+  featureId,
+  featureType: "newSketch",
+  name,
+  parameters: [query("sketchPlane", "TOP")],
+});
+
+const extrudeFeature = (
+  featureId: string,
+  name: string,
+  sketchFeatureId: string,
+  operationType: "NEW" | "ADD",
+  depth: string,
+) => ({
+  featureId,
+  featureType: "extrude",
+  name,
+  parameters: [
+    enumParameter("bodyType", "SOLID"),
+    enumParameter("operationType", operationType),
+    sketchRegion(sketchFeatureId),
+    enumParameter("endBound", "BLIND"),
+    quantityParameter("depth", depth, Number.parseFloat(depth) / 1000),
+    booleanParameter("oppositeDirection", false),
+  ],
+});
+
+const circleSketch = (
+  featureId: string,
+  center: [number, number, number],
+  radius: number,
+) => ({
+  featureId,
+  entities: [{
+    sketchEntityId: `${featureId}_circle`,
+    sketchEntityType: "skCircle",
+    geometry: { center3d: { x: center[0], y: center[1], z: center[2] }, radius },
+    isConstruction: false,
+  }],
+});
+
 /**
- * Proprietary-free representations of the Phase-X.7 captures. FEATURE forms
- * retain their exact ordered FeatureList seed dependencies; PART+ADD retains
- * the exact same source/target body query required by the executable mirror.
+ * Proprietary-free representations of the Phase-X.7 captures. The seed
+ * operations are permanent, executable ADD extrudes so the provider and real
+ * OCC seam can prove replayed deltas without pretending X.4 has promoted the
+ * proprietary source profiles. FEATURE forms retain the exact ordered captured
+ * FeatureList ids; PART+ADD retains the exact same source/target body query.
  */
 export function makeWaveXPatternMirrorCaptureBundle(): OnshapeCaptureBundleV2 {
   return {
@@ -88,15 +151,18 @@ export function makeWaveXPatternMirrorCaptureBundle(): OnshapeCaptureBundleV2 {
         name: "Observed feature patterns",
         features: {
           features: [
-            { featureId: "EXTRUDE_6", featureType: "extrude", name: "Extrude 6", parameters: [] },
+            sketchFeature("BASE_SKETCH", "Replay base sketch"),
+            extrudeFeature("BASE_EXTRUDE", "Replay base", "BASE_SKETCH", "NEW", "5 mm"),
+            sketchFeature("SEED_6_SKETCH", "Extrude 6 seed sketch"),
+            extrudeFeature("FOKYXKU0uqy9EB3_2", "Extrude 6", "SEED_6_SKETCH", "ADD", "10 mm"),
             {
-              featureId: "LINEAR_1",
+              featureId: "FNmvaMWuCDIXPZo_2",
               featureType: "linearPattern",
               name: "Linear pattern 1",
               parameters: [
                 enumParameter("patternType", "FEATURE"),
                 enumParameter("operationType", "NEW"),
-                featureList(["EXTRUDE_6"]),
+                featureList(["FOKYXKU0uqy9EB3_2"]),
                 query("directionOne", "RIGHT"),
                 quantityParameter("distance", "40.2 mm", 0.0402),
                 quantityParameter("instanceCount", "3", 3),
@@ -107,15 +173,16 @@ export function makeWaveXPatternMirrorCaptureBundle(): OnshapeCaptureBundleV2 {
                 booleanParameter("skipInstances", false),
               ],
             },
-            { featureId: "EXTRUDE_7", featureType: "extrude", name: "Extrude 7", parameters: [] },
+            sketchFeature("SEED_7_SKETCH", "Extrude 7 seed sketch"),
+            extrudeFeature("F2B5cy3xMm2MHNU_2", "Extrude 7", "SEED_7_SKETCH", "ADD", "8 mm"),
             {
-              featureId: "LINEAR_2",
+              featureId: "Fvk35GMOaMRxzg8_2",
               featureType: "linearPattern",
               name: "Linear pattern 2",
               parameters: [
                 enumParameter("patternType", "FEATURE"),
                 enumParameter("operationType", "NEW"),
-                featureList(["EXTRUDE_7"]),
+                featureList(["F2B5cy3xMm2MHNU_2"]),
                 query("directionOne", "RIGHT"),
                 quantityParameter("distance", "40.2 mm", 0.0402),
                 quantityParameter("instanceCount", "3", 3),
@@ -127,23 +194,34 @@ export function makeWaveXPatternMirrorCaptureBundle(): OnshapeCaptureBundleV2 {
               ],
             },
             {
-              featureId: "FEATURE_MIRROR",
+              featureId: "FtdzVK4Ok7Ghvzz_2",
               featureType: "mirror",
               name: "Mirror 1",
               parameters: [
                 enumParameter("patternType", "FEATURE"),
                 enumParameter("operationType", "NEW"),
-                featureList(["EXTRUDE_6", "LINEAR_1", "EXTRUDE_7", "LINEAR_2"]),
+                featureList([
+                  "FOKYXKU0uqy9EB3_2",
+                  "FNmvaMWuCDIXPZo_2",
+                  "F2B5cy3xMm2MHNU_2",
+                  "Fvk35GMOaMRxzg8_2",
+                ]),
                 query("mirrorPlane", "RIGHT"),
                 booleanParameter("fullFeaturePattern", true),
               ],
             },
           ],
         },
-        sketches: { sketches: [] },
+        sketches: {
+          sketches: [
+            circleSketch("BASE_SKETCH", [0, 0, 0], 0.1),
+            circleSketch("SEED_6_SKETCH", [0.01, 0.01, 0], 0.005),
+            circleSketch("SEED_7_SKETCH", [0.01, -0.01, 0], 0.005),
+          ],
+        },
         parts: null,
         featureSpecs: { present: false, reason: "synthetic Phase-X.7 fixture" },
-        resolvedReferences: [topPlaneReference],
+        resolvedReferences: [topPlaneReference, rightPlaneReference],
         resolvedQueryReferences: [],
         groundTruth: { hasBodies: false },
         rollbackSnapshots: [],
@@ -168,7 +246,7 @@ export function makeWaveXPatternMirrorCaptureBundle(): OnshapeCaptureBundleV2 {
         sketches: { sketches: [] },
         parts: null,
         featureSpecs: { present: false, reason: "synthetic Phase-X.7 fixture" },
-        resolvedReferences: [topPlaneReference, sourceBodyReference],
+        resolvedReferences: [rightPlaneReference, sourceBodyReference],
         resolvedQueryReferences: [],
         groundTruth: { hasBodies: false },
         rollbackSnapshots: [],

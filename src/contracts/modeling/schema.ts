@@ -32,6 +32,7 @@ import type { RenderExport } from "@/contracts/render/schema";
 import type {
   BakedBodyFeatureSchemaVersion,
   ContractVersion,
+  FeatureReplayFeatureSchemaVersion,
   ExtrudeFeatureSchemaVersion,
   FilletFeatureSchemaVersion,
   PlaneFeatureSchemaVersion,
@@ -44,6 +45,7 @@ import type {
   AdvancedSolidFeatureDefinition,
   AdvancedSolidFeatureKind,
 } from "@/contracts/modeling/advanced-solid";
+import type { FeatureReplayFeatureParameters } from "@/contracts/modeling/feature-replay";
 import type { AuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   GeometryAssetDiagnosticDetail,
@@ -134,6 +136,7 @@ export type SketchPoint = SketchPoint2D;
  */
 export type FeatureKind = "extrude" | "fillet" | "plane" | "revolve" | "shell";
 export type BakedBodyFeatureKind = "bakedBody";
+export type FeatureReplayFeatureKind = "featureReplay";
 export type AuthoredFeatureKind =
   | FeatureKind
   | "sweep"
@@ -151,7 +154,8 @@ export type AuthoredFeatureKind =
 export type ModelingFeatureKind =
   | FeatureKind
   | AdvancedSolidFeatureKind
-  | BakedBodyFeatureKind;
+  | BakedBodyFeatureKind
+  | FeatureReplayFeatureKind;
 
 /** Ordered collection that must contain at least one entry. */
 export type NonEmptyReadonlyArray<T> = readonly [T, ...T[]];
@@ -624,6 +628,14 @@ export type FeatureDefinition =
       featureTypeVersion: BakedBodyFeatureSchemaVersion;
       /** Asset reference and provenance for this non-parametric body. */
       parameters: BakedBodyFeatureParameters;
+    }
+  | {
+      /** Stable discriminant for exact source-operation replay at observed transforms. */
+      kind: "featureReplay";
+      /** Per-variant schema version owned by feature-operation replay. */
+      featureTypeVersion: FeatureReplayFeatureSchemaVersion;
+      /** Ordered source feature lineage and its observed transform form. */
+      parameters: FeatureReplayFeatureParameters;
     }
   | AdvancedSolidFeatureDefinition;
 

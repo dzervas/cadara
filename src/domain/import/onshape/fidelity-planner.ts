@@ -222,6 +222,23 @@ export type PlannedTarget =
   | { kind: "bakedBody" }
   | { kind: "suppressed" };
 
+export type PlannedFeatureReplay =
+  | {
+      kind: "linear";
+      /** Exact ordered Onshape FeatureList source ids. */
+      sourceFeatureIds: readonly string[];
+      direction: { kind: "construction"; constructionId: import("@/contracts/shared/ids").ConstructionId };
+      instanceCount: number;
+      spacing: number;
+      oppositeDirection: boolean;
+    }
+  | {
+      kind: "mirror";
+      /** Exact ordered Onshape FeatureList source ids. */
+      sourceFeatureIds: readonly string[];
+      plane: { kind: "construction"; constructionId: import("@/contracts/shared/ids").ConstructionId };
+    };
+
 export interface FeaturePlan {
   onshapeFeatureId: string;
   featureType: string;
@@ -243,6 +260,8 @@ export interface FeaturePlan {
   plannedBodyTopologyConsumer?: PlannedBodyTopologyConsumer;
   /** Resolved deferred definition, rematched to live durable refs by the orchestrator. */
   plannedAdvancedSolid?: import("@/contracts/import/actions").ImportDeferredFeatureDefinition;
+  /** Exact source-operation replay form for captured FEATURE patterns and mirrors. */
+  plannedFeatureReplay?: PlannedFeatureReplay;
   /** Classified sketch, body, and topology-query inputs consumed by this feature. */
   inputDependencies: FeatureDependencyInput[];
   /** Compatibility projection of sketch/body dependency feature ids. */
@@ -450,11 +469,18 @@ function legacyFeaturePlans(read: StudioReadResult): FeaturePlan[] {
       references: refs,
       state,
     });
-    const blocked = unreachableFeatureDependencies(intrinsicPlan.inputDependencies, {
-      reachableSketchFeatureIds,
-      reachableBodyFeatureIds,
-      knownFeatureIds,
-    }).length > 0;
+    const replaySourcesLive = intrinsicPlan.plannedFeatureReplay?.sourceFeatureIds.every(
+      (sourceFeatureId) =>
+        featurePlans.find((candidate) => candidate.onshapeFeatureId === sourceFeatureId)
+          ?.tier === "parametric",
+    );
+    const blocked = intrinsicPlan.plannedFeatureReplay
+      ? replaySourcesLive !== true
+      : unreachableFeatureDependencies(intrinsicPlan.inputDependencies, {
+          reachableSketchFeatureIds,
+          reachableBodyFeatureIds,
+          knownFeatureIds,
+        }).length > 0;
     const plan = blocked
       ? {
           ...intrinsicPlan,
@@ -545,12 +571,21 @@ function segmentedFeaturePlans(input: {
       reachableBodyFeatureIds: new Set(),
       knownFeatureIds,
     }).some((dependency) => dependency.kind === "sketch");
-    if (input.demotedFeatureIds.has(feature.featureId) || unreachableSketch) {
+    // Feature-operation replay cannot consume a checkpoint or inferred body:
+    // every exact source feature must already be live in the authored prefix.
+    // Keep it pending behind unresolved source operations rather than claiming a
+    // body-copy promotion before X.4 can materialize the seed regions.
+    const unreachableReplaySource = plan.plannedFeatureReplay?.sourceFeatureIds.some(
+      (sourceFeatureId) =>
+        plans.find((candidate) => candidate.onshapeFeatureId === sourceFeatureId)
+          ?.tier !== "parametric",
+    ) ?? false;
+    if (input.demotedFeatureIds.has(feature.featureId) || unreachableSketch || unreachableReplaySource) {
       plan = {
         ...plan,
         tier: "baked",
         target: { kind: "suppressed" },
-        reasonCodes: unreachableSketch
+        reasonCodes: unreachableSketch || unreachableReplaySource
           ? [...new Set([...plan.reasonCodes, "downstream-of-baked" as const])]
           : plan.reasonCodes,
         suppressed: true,

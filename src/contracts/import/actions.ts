@@ -13,7 +13,8 @@ import type {
   ShellFeatureParameters,
 } from "@/contracts/modeling/schema";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
-import type { BodyId, SketchId, SketchPointId } from "@/contracts/shared/ids";
+import type { FeatureReplayFeatureParameters } from "@/contracts/modeling/feature-replay";
+import type { BodyId, FeatureId, SketchId, SketchPointId } from "@/contracts/shared/ids";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
 import type {
   SketchPlaneDefinition,
@@ -52,7 +53,8 @@ export type ImportDeferredValue =
       };
     } & ImportDeferredActionOutputRef)
   | ({ kind: "bodyOf" } & ImportDeferredActionOutputRef)
-  | ({ kind: "constructionOf" } & ImportDeferredActionOutputRef);
+  | ({ kind: "constructionOf" } & ImportDeferredActionOutputRef)
+  | ({ kind: "featureOf" } & ImportDeferredActionOutputRef);
 
 /** Selector rematched against live topology immediately before its consumer applies. */
 export interface ImportDeferredTopologyRef {
@@ -192,10 +194,18 @@ export type ImportDeferredBakedBodyFeatureParameters = Omit<
   "replacement"
 > & { replacement: ImportDeferredBakedBodyReplacement };
 
+export interface ImportDeferredFeatureReplayFeatureParameters
+  extends Omit<FeatureReplayFeatureParameters, "sourceFeatureIds"> {
+  sourceFeatureIds: readonly (
+    | FeatureId
+    | Extract<ImportDeferredValue, { kind: "featureOf" }>
+  )[];
+}
+
 export type ImportDeferredFeatureDefinition =
   | Exclude<
       FeatureDefinition,
-      | { kind: "extrude" | "revolve" | "bakedBody" | "fillet" | "shell" | "plane" }
+      | { kind: "extrude" | "revolve" | "bakedBody" | "fillet" | "shell" | "plane" | "featureReplay" }
       | AdvancedSolidFeatureDefinition
     >
   | {
@@ -228,6 +238,11 @@ export type ImportDeferredFeatureDefinition =
       kind: "bakedBody";
       featureTypeVersion: Extract<FeatureDefinition, { kind: "bakedBody" }>["featureTypeVersion"];
       parameters: ImportDeferredBakedBodyFeatureParameters;
+    }
+  | {
+      kind: "featureReplay";
+      featureTypeVersion: Extract<FeatureDefinition, { kind: "featureReplay" }>["featureTypeVersion"];
+      parameters: ImportDeferredFeatureReplayFeatureParameters;
     };
 
 export type ImportTopologyFallbackCreateFeatureRequest = Omit<
@@ -277,6 +292,7 @@ export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
     "createFeatures[].definition.parameters.participants[].targets[]",
     "commitSketches[].plane.support",
   ],
+  featureOf: ["createFeatures[].definition.parameters.sourceFeatureIds[]"],
 } as const satisfies Record<ImportDeferredValue["kind"], readonly string[]>;
 
 export const IMPORT_DEFERRED_TOPOLOGY_BLESSED_POSITIONS = [

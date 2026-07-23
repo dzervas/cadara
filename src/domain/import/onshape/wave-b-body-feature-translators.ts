@@ -20,6 +20,7 @@ import type { FeatureDependencyInput, OnshapeFeatureTranslator } from "@/domain/
 import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
 import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
 import type { TopologyQuerySlot } from "@/domain/import/onshape/topology-query-reader";
+import type { FeaturePlan, PlannedFeatureReplay } from "@/domain/import/onshape/fidelity-planner";
 export interface PlannedConstructionFromFeatureRef {
   kind: "constructionFromFeature";
   featureId: string;
@@ -122,11 +123,20 @@ function canonicalPlane(feature: OnshapeFeatureNode, parameterId: string, contex
   const queries = parameter(feature, parameterId)?.queries;
   if (!Array.isArray(queries) || queries.length !== 1) return null;
   const queryString = (queries[0] as { queryString?: unknown }).queryString;
-  if (typeof queryString === "string" && /RightplaneOp/i.test(queryString)) {
-    return {
-      kind: "construction" as const,
-      constructionId: "construction_plane-yz" as ConstructionId,
-    };
+  if (typeof queryString === "string") {
+    const canonicalConstructionId = /RightplaneOp/i.test(queryString)
+      ? "construction_plane-yz"
+      : /FrontplaneOp/i.test(queryString)
+        ? "construction_plane-xz"
+        : /TopplaneOp/i.test(queryString)
+          ? "construction_plane-xy"
+          : null;
+    if (canonicalConstructionId) {
+      return {
+        kind: "construction" as const,
+        constructionId: canonicalConstructionId as ConstructionId,
+      };
+    }
   }
   const ids = (queries[0] as { deterministicIds?: unknown }).deterministicIds;
   if (!Array.isArray(ids) || ids.length !== 1 || typeof ids[0] !== "string") return null;
@@ -378,6 +388,52 @@ function featurePatternDependencies(feature: OnshapeFeatureNode): FeatureDepende
   }));
 }
 
+function hasExactFeatureReplaySeeds(
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+): readonly string[] | null {
+  const sourceFeatureIds = featureListIds(context.feature);
+  const features = context.read.features ?? [];
+  const featureIndex = features.findIndex(
+    (feature) => feature.featureId === context.feature.featureId,
+  );
+  if (
+    sourceFeatureIds.length === 0 ||
+    new Set(sourceFeatureIds).size !== sourceFeatureIds.length ||
+    featureIndex < 0 ||
+    sourceFeatureIds.some((featureId) => {
+      const sourceIndex = features.findIndex(
+        (feature) => feature.featureId === featureId,
+      );
+      return sourceIndex < 0 || sourceIndex >= featureIndex;
+    })
+  ) {
+    return null;
+  }
+  return sourceFeatureIds;
+}
+
+function plannedFeatureReplay(
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+  replay: PlannedFeatureReplay,
+): FeaturePlan {
+  const inputDependencies = replay.sourceFeatureIds.map((featureId) => ({
+    kind: "body" as const,
+    featureId,
+  }));
+  return {
+    onshapeFeatureId: context.feature.featureId,
+    featureType: context.feature.featureType,
+    label: context.label,
+    tier: "parametric",
+    target: { kind: "feature" },
+    reasonCodes: [],
+    suppressed: context.onshapeSuppressed,
+    plannedFeatureReplay: replay,
+    inputDependencies,
+    inputFeatureIds: [...replay.sourceFeatureIds],
+  };
+}
+
 function sameSingleDeterministicId(feature: OnshapeFeatureNode, leftId: string, rightId: string): boolean {
   const singleId = (parameterId: string) => {
     const queries = parameter(feature, parameterId)?.queries;
@@ -397,12 +453,29 @@ export const mirrorFeatureTranslator: OnshapeFeatureTranslator = {
     const patternType = enumValue(context.feature, "patternType") ?? "PART";
     const operation = enumValue(context.feature, "operationType") ?? "NEW";
     if (patternType === "FEATURE") {
-      return baked(
-        context,
-        "mirror-operation-unsupported",
-        undefined,
-        featurePatternDependencies(context.feature),
-      );
+      const sourceFeatureIds = hasExactFeatureReplaySeeds(context);
+      const plane = planeReference(context.feature, "mirrorPlane", context);
+      if (
+        operation !== "NEW" ||
+        !booleanValue(context.feature, "fullFeaturePattern") ||
+        !sourceFeatureIds ||
+        hasQueries(context.feature, "entities") ||
+        hasQueries(context.feature, "faces") ||
+        !plane ||
+        plane.kind !== "construction"
+      ) {
+        return baked(
+          context,
+          "mirror-operation-unsupported",
+          undefined,
+          featurePatternDependencies(context.feature),
+        );
+      }
+      return plannedFeatureReplay(context, {
+        kind: "mirror",
+        sourceFeatureIds,
+        plane,
+      });
     }
     if (patternType !== "PART") return baked(context, "mirror-operation-unsupported");
     const plane = planeReference(context.feature, "mirrorPlane", context);
@@ -444,12 +517,14 @@ function integerAtLeast(feature: OnshapeFeatureNode, id: string, minimum: number
 }
 
 function hasSkipInstances(feature: OnshapeFeatureNode): boolean {
-  const entry = parameter(feature, "skipInstances");
-  if (!entry) return false;
-  if (entry.value === true) return true;
-  if (Array.isArray(entry.value) && entry.value.length > 0) return true;
-  const queries = entry.queries;
-  return Array.isArray(queries) && queries.length > 0;
+  return ["skipInstances", "skippedInstances"].some((parameterId) => {
+    const entry = parameter(feature, parameterId);
+    if (!entry) return false;
+    if (entry.value === true) return true;
+    if (Array.isArray(entry.value) && entry.value.length > 0) return true;
+    const queries = entry.queries;
+    return Array.isArray(queries) && queries.length > 0;
+  });
 }
 
 function patternTypeUnsupportedReason(patternType: string): import("@/domain/import/onshape/fidelity-planner").PlanReasonCode {
@@ -468,12 +543,47 @@ export const linearPatternFeatureTranslator: OnshapeFeatureTranslator = {
   plan(context) {
     const patternType = enumValue(context.feature, "patternType") ?? "PART";
     if (patternType === "FEATURE") {
-      return baked(
-        context,
-        "pattern-feature-seed-unsupported",
-        undefined,
-        featurePatternDependencies(context.feature),
-      );
+      const sourceFeatureIds = hasExactFeatureReplaySeeds(context);
+      const direction = planeReference(context.feature, "directionOne", context);
+      if ((enumValue(context.feature, "operationType") ?? "NEW") !== "NEW") {
+        return baked(context, "pattern-operation-unsupported", undefined, featurePatternDependencies(context.feature));
+      }
+      if (
+        !booleanValue(context.feature, "fullFeaturePattern") ||
+        !sourceFeatureIds ||
+        hasQueries(context.feature, "entities") ||
+        hasQueries(context.feature, "faces")
+      ) {
+        return baked(context, "pattern-feature-seed-unsupported", undefined, featurePatternDependencies(context.feature));
+      }
+      if (booleanValue(context.feature, "hasSecondDir")) {
+        return baked(context, "pattern-second-direction-unsupported", undefined, featurePatternDependencies(context.feature));
+      }
+      if (booleanValue(context.feature, "isCentered")) {
+        return baked(context, "pattern-centered-unsupported", undefined, featurePatternDependencies(context.feature));
+      }
+      if (hasSkipInstances(context.feature)) {
+        return baked(context, "pattern-skipping-unsupported", undefined, featurePatternDependencies(context.feature));
+      }
+      const instanceCount = integerAtLeast(context.feature, "instanceCount", 2);
+      if (instanceCount === null) {
+        return baked(context, "pattern-count-unreadable", undefined, featurePatternDependencies(context.feature));
+      }
+      const spacing = positiveQuantity(context.feature, "distance");
+      if (spacing === null) {
+        return baked(context, "pattern-spacing-unreadable", undefined, featurePatternDependencies(context.feature));
+      }
+      if (!direction || direction.kind !== "construction") {
+        return baked(context, "pattern-direction-unresolved", undefined, featurePatternDependencies(context.feature));
+      }
+      return plannedFeatureReplay(context, {
+        kind: "linear",
+        sourceFeatureIds,
+        direction,
+        instanceCount,
+        spacing,
+        oppositeDirection: booleanValue(context.feature, "oppositeDirection"),
+      });
     }
     if (patternType !== "PART") return baked(context, patternTypeUnsupportedReason(patternType));
     const operation = enumValue(context.feature, "operationType") ?? "NEW";

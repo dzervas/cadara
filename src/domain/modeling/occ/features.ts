@@ -28,6 +28,7 @@ import { executeShellFeature } from "@/domain/modeling/occ/features/shell";
 import { executePlaneFeature } from "@/domain/modeling/occ/features/plane";
 import { executeBakedBodyFeature } from "@/domain/modeling/occ/features/baked-body";
 import { executeHoleFeature } from "@/domain/modeling/occ/features/hole";
+import { executeFeatureReplayFeature } from "@/domain/modeling/occ/features/feature-replay";
 import {
   executeCircularPatternFeature,
   executeLinearPatternFeature,
@@ -83,6 +84,12 @@ export function executeOccFeature(
       );
     case "bakedBody":
       return executeBakedBodyFeature(
+        context,
+        ownerFeatureId,
+        definition.parameters,
+      );
+    case "featureReplay":
+      return executeFeatureReplayFeature(
         context,
         ownerFeatureId,
         definition.parameters,

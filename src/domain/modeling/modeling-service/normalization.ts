@@ -102,7 +102,9 @@ import {
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
   BAKED_BODY_FEATURE_SCHEMA_VERSION,
+  FEATURE_REPLAY_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
+import type { FeatureReplayFeatureParameters } from "@/contracts/modeling/feature-replay";
 import {
   isRecord,
   isString,
@@ -807,6 +809,63 @@ function normalizeBakedBodyProvenance(value: unknown): BakedBodyFeatureProvenanc
   return provenance;
 }
 
+function normalizeFeatureReplayFeatureParameters(
+  value: unknown,
+): FeatureReplayFeatureParameters {
+  if (!isRecord(value) || !Array.isArray(value.sourceFeatureIds) || value.sourceFeatureIds.length === 0) {
+    throw new Error("Feature replay requires one or more ordered source feature ids.");
+  }
+  const sourceFeatureIds = value.sourceFeatureIds.map((featureId) => assertFeatureId(featureId));
+  if (new Set(sourceFeatureIds).size !== sourceFeatureIds.length) {
+    throw new Error("Feature replay source feature ids must be unique.");
+  }
+  if (!isRecord(value.transform)) {
+    throw new Error("Feature replay requires a transform.");
+  }
+  if (value.transform.kind === "linear") {
+    const direction = assertDurableRef(value.transform.direction);
+    if (direction.kind !== "construction") {
+      throw new Error("Feature replay linear direction must be a construction plane.");
+    }
+    if (
+      !isAuthoredNumberLike(value.transform.instanceCount) ||
+      !isAuthoredNumberLike(value.transform.spacing) ||
+      typeof getAuthoredLiteralValue(
+        value.transform.oppositeDirection as MaybeAuthoredValue<unknown>,
+      ) !== "boolean"
+    ) {
+      throw new Error("Feature replay linear transform has invalid values.");
+    }
+    return {
+      sourceFeatureIds,
+      transform: {
+        kind: "linear",
+        direction,
+        instanceCount: toContractAuthoredValue<number>(
+          value.transform.instanceCount as MaybeAuthoredValue<number>,
+          2,
+        ),
+        spacing: toContractAuthoredValue<number>(
+          value.transform.spacing as MaybeAuthoredValue<number>,
+          1,
+        ),
+        oppositeDirection: toContractAuthoredValue<boolean>(
+          value.transform.oppositeDirection as MaybeAuthoredValue<boolean>,
+          false,
+        ),
+      },
+    };
+  }
+  if (value.transform.kind === "mirror") {
+    const plane = assertDurableRef(value.transform.plane);
+    if (plane.kind !== "construction") {
+      throw new Error("Feature replay mirror plane must be a construction plane.");
+    }
+    return { sourceFeatureIds, transform: { kind: "mirror", plane } };
+  }
+  throw new Error("Feature replay transform is unsupported.");
+}
+
 function normalizeBakedBodyFeatureParameters(
   value: unknown,
 ): BakedBodyFeatureParameters {
@@ -908,6 +967,15 @@ export function normalizeFeatureDefinition(value: unknown): FeatureDefinition {
             ? value.featureTypeVersion
             : BAKED_BODY_FEATURE_SCHEMA_VERSION,
         parameters: normalizeBakedBodyFeatureParameters(value.parameters),
+      };
+    case "featureReplay":
+      return {
+        kind: "featureReplay",
+        featureTypeVersion:
+          value.featureTypeVersion === FEATURE_REPLAY_FEATURE_SCHEMA_VERSION
+            ? value.featureTypeVersion
+            : FEATURE_REPLAY_FEATURE_SCHEMA_VERSION,
+        parameters: normalizeFeatureReplayFeatureParameters(value.parameters),
       };
     default:
       if (isAdvancedSolidFeatureKind(value.kind)) {

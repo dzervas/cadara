@@ -53,6 +53,8 @@ export interface OccFeatureExecutionContext {
   modelingTolerance: number;
   sketches: readonly SketchSnapshotRecord[];
   constructions: readonly ConstructionSnapshotRecord[];
+  /** Authored variables used when replay resolves a source operation definition. */
+  variables?: readonly import("@/contracts/modeling/schema").DocumentVariableRecord[];
   constructionPlanes: ReadonlyMap<ConstructionId, SketchPlaneDefinition>;
   bodies: readonly OccTrackedBody[];
   assets: { records: readonly GeometryAssetRecord[] };
@@ -62,6 +64,11 @@ export interface OccFeatureExecutionContext {
   bakedShapeCache: Map<GeometryAssetId, OccMaterializedBakedShape[]>;
   referenceState?: OccReferenceState;
   previousTopologyStage: OccFeatureTopologyStage | null;
+  /** Earlier authored feature definitions available to exact operation replay. */
+  authoredFeatures?: readonly {
+    featureId: FeatureId;
+    definition: FeatureDefinition;
+  }[];
 }
 
 export interface OccFeatureExecutionResult {

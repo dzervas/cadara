@@ -37,10 +37,28 @@ import {
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import { validateSketchPlaneFrameContractInvariants } from "@/contracts/shared/sketch-plane-frame-invariants";
 
+function validateFeatureReplayStructuralInvariants(
+  definition: Extract<FeatureDefinition, { kind: "featureReplay" }>,
+): ContractValidationIssue[] {
+  const sourceFeatureIds = definition.parameters.sourceFeatureIds;
+  if (sourceFeatureIds.length > 0 && new Set(sourceFeatureIds).size === sourceFeatureIds.length) {
+    return [];
+  }
+  return [{
+    path: "parameters.sourceFeatureIds",
+    expected: "one or more unique ordered source feature ids",
+    value: sourceFeatureIds,
+    message: "Feature replay requires one or more unique ordered source feature ids.",
+  }];
+}
+
 function validateFeatureDefinitionStructuralInvariants(
   definition: FeatureDefinition,
 ): ContractValidationIssue[] {
   const issues = validateFeatureDefinitionAuthoredValueInvariants(definition);
+  if (definition.kind === "featureReplay") {
+    issues.push(...validateFeatureReplayStructuralInvariants(definition));
+  }
   if (
     definition.kind === "plane" &&
     definition.parameters.mode === "explicitFrame"

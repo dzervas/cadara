@@ -616,6 +616,16 @@ function getFeatureDefinitionChangedTargets(definition: FeatureDefinition) {
       ];
     case "bakedBody":
       return [];
+    case "featureReplay":
+      return [
+        ...definition.parameters.sourceFeatureIds.map((featureId) => ({
+          kind: "feature" as const,
+          featureId,
+        })),
+        definition.parameters.transform.kind === "linear"
+          ? definition.parameters.transform.direction
+          : definition.parameters.transform.plane,
+      ];
     default:
       return definition.parameters.participants.flatMap((participant) => [
         ...participant.targets,

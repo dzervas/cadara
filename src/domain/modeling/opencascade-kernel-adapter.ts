@@ -214,6 +214,8 @@ const OCC_REBUILD_DIAGNOSTIC_CODES = new Set<string>([
   ...Object.values(OCC_CONTRACT_GAP_CODES),
   "unsupported-profile-group",
   "advanced-feature-unsupported-kernel-case",
+  "feature-replay-unsupported",
+  "feature-replay-source-unavailable",
 ]);
 function assertSupportedModelingRequest(
   request: {
@@ -1520,6 +1522,16 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
     case "deleteSolid":
     case "bakedBody":
       return [];
+    case "featureReplay":
+      return [
+        ...definition.parameters.sourceFeatureIds.map((featureId) => ({
+          kind: "feature" as const,
+          featureId,
+        })),
+        definition.parameters.transform.kind === "linear"
+          ? definition.parameters.transform.direction
+          : definition.parameters.transform.plane,
+      ];
     default:
       return definition.parameters.participants.flatMap((participant) => [
         ...participant.targets,

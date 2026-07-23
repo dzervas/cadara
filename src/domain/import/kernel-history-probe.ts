@@ -237,6 +237,7 @@ async function applyProbeAction(
       );
       const result = await service.createFeature({ ...materialized, ...basis });
       if (result.isOk()) {
+        materializer.recordFeatureOutput(orderedPosition, result.value.featureId);
         materializer.recordBodyOutput(
           orderedPosition,
           (result.value.changedTargets ?? []).flatMap((target) =>

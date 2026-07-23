@@ -71,6 +71,9 @@ export type ShellFeatureSchemaVersion = "feature-type/shell/v1alpha1";
  */
 export type BakedBodyFeatureSchemaVersion = "feature-type/baked-body/v1alpha1";
 
+/** Versioned schema for exact authored feature-operation replay definitions. */
+export type FeatureReplayFeatureSchemaVersion = "feature-type/feature-replay/v1alpha1";
+
 /**
  * Closed union of all feature-definition schema versions.
  */
@@ -80,7 +83,8 @@ export type FeatureTypeVersion =
   | PlaneFeatureSchemaVersion
   | RevolveFeatureSchemaVersion
   | ShellFeatureSchemaVersion
-  | BakedBodyFeatureSchemaVersion;
+  | BakedBodyFeatureSchemaVersion
+  | FeatureReplayFeatureSchemaVersion;
 
 /**
  * Render export payload schema version.
@@ -164,6 +168,10 @@ export const SHELL_FEATURE_SCHEMA_VERSION: ShellFeatureSchemaVersion =
  */
 export const BAKED_BODY_FEATURE_SCHEMA_VERSION: BakedBodyFeatureSchemaVersion =
   "feature-type/baked-body/v1alpha1";
+
+/** Current feature-operation replay feature schema version literal. */
+export const FEATURE_REPLAY_FEATURE_SCHEMA_VERSION: FeatureReplayFeatureSchemaVersion =
+  "feature-type/feature-replay/v1alpha1";
 
 /**
  * Current render export schema version literal.
