@@ -95,12 +95,19 @@ test("src/domain/modeling/modeling-service/normalization.spec.ts", () => {
 
 // Lane: logic (per docs/testing.md — shell parameter normalization is a domain
 // contract boundary with no UI or browser dependency).
-// Seam: normalizeShellFeatureParameters distinguishes legacy open-face shells from
-// whole-solid offset shells before OCC execution.
-test("normalizes shell offsetAllFaces without weakening open-face validation", () => {
+// Seam: normalizeShellFeatureParameters distinguishes legacy open-face shells,
+// closed cavities, and whole-solid offsets before OCC execution.
+test("normalizes shell closedHollow and offsetAllFaces without weakening open-face validation", () => {
   const openFaces = normalizeShellFeatureParameters(makeShellPayload());
   expect(openFaces.mode, "Legacy shell payloads should remain open-face shells.").toBeUndefined();
   expect(openFaces.faceTargets.length).toBe(1);
+
+  const closedHollow = normalizeShellFeatureParameters(
+    makeShellPayload({ mode: "closedHollow", faceTargets: [] }),
+  );
+  expect(closedHollow.mode).toBe("closedHollow");
+  expect(closedHollow.faceTargets).toEqual([]);
+  expect(closedHollow.direction).toBe("inside");
 
   const offsetAll = normalizeShellFeatureParameters(
     makeShellPayload({ mode: "offsetAllFaces", faceTargets: [] }),
@@ -114,6 +121,11 @@ test("normalizes shell offsetAllFaces without weakening open-face validation", (
       makeShellPayload({ mode: "offsetAllFaces" }),
     ),
   ).toThrow("cannot include face targets");
+  expect(() =>
+    normalizeShellFeatureParameters(
+      makeShellPayload({ mode: "closedHollow", faceTargets: [], direction: "outside" }),
+    ),
+  ).toThrow("requires an inside direction");
   expect(() =>
     normalizeShellFeatureParameters(makeShellPayload({ faceTargets: [] })),
   ).toThrow("at least one removable face");

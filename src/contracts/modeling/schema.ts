@@ -497,6 +497,16 @@ export interface ShellOpenFacesFeatureParameters extends ShellBaseFeatureParamet
   faceTargets: readonly ShellFaceRef[];
 }
 
+/** Closed hollow that preserves the source body's outer envelope. */
+export interface ShellClosedHollowFeatureParameters extends ShellBaseFeatureParameters {
+  /** Remove no faces and offset the inner cavity inward. */
+  mode: "closedHollow";
+  /** Closed hollow has no removable/open faces. */
+  faceTargets: readonly [];
+  /** Preserving the outer envelope requires an inward cavity offset. */
+  direction: "inside";
+}
+
 /** Whole-solid offset of every face; no removable/open faces are allowed. */
 export interface ShellOffsetAllFacesFeatureParameters extends ShellBaseFeatureParameters {
   /** Offset all faces without creating openings. */
@@ -507,6 +517,7 @@ export interface ShellOffsetAllFacesFeatureParameters extends ShellBaseFeaturePa
 
 export type ShellFeatureParameters =
   | ShellOpenFacesFeatureParameters
+  | ShellClosedHollowFeatureParameters
   | ShellOffsetAllFacesFeatureParameters;
 
 /** Provenance exposed by baked-body features for honest non-parametric editing. */

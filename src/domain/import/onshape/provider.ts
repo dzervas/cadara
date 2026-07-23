@@ -1376,6 +1376,7 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "chamfer-width-unreadable": "chamfer width could not be read",
   "shell-non-hollow-unsupported": "selected-face non-hollow shell is not supported",
   "shell-hollow-without-openings": "hollow shell without removed faces is not supported",
+  "shell-closed-hollow-direction-unsupported": "closed hollow shell must offset its cavity inward",
   "shell-thickness-unreadable": "shell thickness could not be read",
   "hole-style-unsupported": "hole style is not supported",
   "hole-thread-unsupported": "threaded, tapped, and clearance holes are not supported",

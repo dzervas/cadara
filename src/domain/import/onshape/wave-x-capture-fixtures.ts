@@ -120,6 +120,119 @@ export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
  * CI-safe stand-in for Laptop Stand's variable chamfer and default-target
  * UNION. The caller supplies the matching prefix topology probe.
  */
+function shellSnapshotBody(id: string) {
+  const low = { x: -0.004, y: -0.00397084, z: 0 };
+  const high = { x: 0.004, y: 0.00397084, z: 0.01 };
+  return {
+    id,
+    faces: [{
+      id: `${id}_face`,
+      facets: [
+        { vertices: [low, { x: high.x, y: low.y, z: low.z }, high] },
+        { vertices: [low, high, { x: low.x, y: high.y, z: high.z }] },
+      ],
+    }],
+  };
+}
+
+/**
+ * Proprietary-free stand-in for 9841 Shell 1: an exact singleton solid scope,
+ * empty openings, 2.5 mm inward thickness, and an unchanged rollback envelope.
+ */
+export function makeWaveXClosedHollowShellCaptureBundle(): OnshapeCaptureBundleV2 {
+  const bodyId = "SHELL_BODY";
+  const shellId = "SHELL_CLOSED";
+  const baseExtrudeId = "SHELL_BASE";
+  return {
+    formatVersion: 2,
+    provenance: {
+      capturedAt: "2026-07-26T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "h".repeat(24),
+      wvm: "w",
+      wvmId: "w".repeat(24),
+      microversion: "m".repeat(24),
+    },
+    document: {},
+    elements: {},
+    diagnostics: [],
+    partStudios: [{
+      elementId: "wave-x-closed-hollow-shell",
+      name: "Closed hollow shell",
+      features: {
+        features: [
+          sketch("SHELL_SKETCH", "Shell profile"),
+          extrude({
+            featureId: baseExtrudeId,
+            name: "Shell base",
+            sketchId: "SHELL_SKETCH",
+            bodyType: "SOLID",
+            operationType: "NEW",
+          }),
+          {
+            featureType: "shell",
+            featureId: shellId,
+            name: "Shell 1",
+            parameters: [
+              { parameterId: "isHollow", value: true },
+              { parameterId: "entities", queries: [] },
+              {
+                parameterId: "parts",
+                queries: [{
+                  queryString: `query = qCreatedBy(id + "${baseExtrudeId}", EntityType.BODY);`,
+                  deterministicIds: [bodyId],
+                }],
+              },
+              { parameterId: "thickness", expression: "2.5 mm", value: 0.0025 },
+              { parameterId: "oppositeDirection", value: false },
+            ],
+          },
+        ],
+      },
+      sketches: {
+        sketches: [{
+          featureId: "SHELL_SKETCH",
+          sketchSolveStatus: "WELL_DEFINED",
+          entities: [{
+            sketchEntityId: "SHELL_SKETCH_circle",
+            sketchEntityType: "skCircle",
+            geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: 0.004 },
+            isConstruction: false,
+          }],
+        }],
+      },
+      parts: null,
+      featureSpecs: { present: false, reason: "synthetic Phase-X closed hollow fixture" },
+      resolvedReferences: [{
+        deterministicId: "Top",
+        evaluatedAt: "finalState",
+        signature: {
+          entityClass: "face",
+          geometryType: "plane",
+          definingData: { normal: [0, 0, 1] },
+          isDefaultPlane: true,
+        },
+      }],
+      resolvedQueryReferences: [],
+      groundTruth: { hasBodies: false },
+      rollbackSnapshots: [
+        {
+          featureId: baseExtrudeId,
+          tessellationTolerance: 0.0001,
+          tessellatedFaces: { bodies: [shellSnapshotBody(bodyId)] },
+        },
+        {
+          featureId: shellId,
+          tessellationTolerance: 0.0001,
+          tessellatedFaces: { bodies: [shellSnapshotBody(bodyId)] },
+        },
+      ],
+    }],
+  };
+}
+
 export function makeWaveXChamferAndImplicitUnionCaptureBundle(): OnshapeCaptureBundleV2 {
   const bodySignature = (id: string, x: number) => ({
     deterministicId: id,

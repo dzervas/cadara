@@ -27,8 +27,14 @@ function isShellDirection(value: unknown): value is "inside" | "outside" {
   return value === "inside" || value === "outside";
 }
 
-function isShellMode(value: unknown): value is "openFaces" | "offsetAllFaces" {
-  return value === "openFaces" || value === "offsetAllFaces";
+function isShellMode(
+  value: unknown,
+): value is "openFaces" | "closedHollow" | "offsetAllFaces" {
+  return (
+    value === "openFaces" ||
+    value === "closedHollow" ||
+    value === "offsetAllFaces"
+  );
 }
 
 export const shellAuthoringDefinition = {
@@ -105,9 +111,10 @@ export const shellAuthoringDefinition = {
     };
   },
   applyPatch(draft, patch) {
+    const mode = isShellMode(patch.mode) ? patch.mode : draft.mode;
     return {
       ...draft,
-      mode: isShellMode(patch.mode) ? patch.mode : draft.mode,
+      mode,
       bodyTarget:
         patch.bodyTarget === undefined
           ? draft.bodyTarget
@@ -132,9 +139,12 @@ export const shellAuthoringDefinition = {
         draft.thickness,
         (value): value is number => typeof value === "number",
       ),
-      direction: isShellDirection(patch.direction)
-        ? patch.direction
-        : draft.direction,
+      direction:
+        mode === "closedHollow"
+          ? "inside"
+          : isShellDirection(patch.direction)
+            ? patch.direction
+            : draft.direction,
       operation: acceptAuthoredPatch(
         patch.operation,
         draft.operation,
@@ -197,7 +207,9 @@ export const shellAuthoringDefinition = {
           message:
             input.draft.mode === "openFaces"
               ? "Shell preview requires one body and at least one removable face."
-              : "Whole-solid shell offset preview requires one body.",
+              : input.draft.mode === "closedHollow"
+                ? "Closed hollow shell preview requires one body."
+                : "Whole-solid shell offset preview requires one body.",
         }),
       );
     }
@@ -224,7 +236,7 @@ export const shellAuthoringDefinition = {
     const operation = authoredStringLiteral(draft.operation, "newBody");
     const hasRequiredTargets =
       draft.bodyTarget != null &&
-      (draft.mode === "offsetAllFaces" || draft.faceTargets.length > 0);
+      (draft.mode !== "openFaces" || draft.faceTargets.length > 0);
     return hasRequiredTargets &&
       draft.bodyTarget &&
       hasBooleanTargetScope(operation, draft.booleanScope)
@@ -233,11 +245,23 @@ export const shellAuthoringDefinition = {
           featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
           parameters: {
             ...(draft.mode === "offsetAllFaces"
-              ? { mode: "offsetAllFaces" as const, faceTargets: [] as const }
-              : { faceTargets: draft.faceTargets }),
+              ? {
+                  mode: "offsetAllFaces" as const,
+                  faceTargets: [] as const,
+                  direction: draft.direction,
+                }
+              : draft.mode === "closedHollow"
+                ? {
+                    mode: "closedHollow" as const,
+                    faceTargets: [] as const,
+                    direction: "inside" as const,
+                  }
+                : {
+                    faceTargets: draft.faceTargets,
+                    direction: draft.direction,
+                  }),
             bodyTarget: draft.bodyTarget,
             thickness: authoredDefinitionValue(draft.thickness, 1),
-            direction: draft.direction,
             operation: authoredDefinitionValue(draft.operation, operation),
             booleanScope: draft.booleanScope,
           },
@@ -262,6 +286,7 @@ export const shellAuthoringDefinition = {
               value: session.draft.mode,
               options: [
                 { value: "openFaces", label: "Open faces" },
+                { value: "closedHollow", label: "Closed hollow" },
                 { value: "offsetAllFaces", label: "Offset all faces" },
               ],
               patch: { patchKey: "mode" },
@@ -300,12 +325,14 @@ export const shellAuthoringDefinition = {
               value: session.draft.faceTargets,
               emptyLabel: "None selected",
               helper:
-                session.draft.mode === "offsetAllFaces"
-                  ? "Offset-all shell does not use removable faces."
-                  : "The draft preserves each removable face explicitly.",
-              hidden: session.draft.mode === "offsetAllFaces",
+                session.draft.mode === "openFaces"
+                  ? "The draft preserves each removable face explicitly."
+                  : session.draft.mode === "closedHollow"
+                    ? "Closed hollow shells retain every outer face and create an inner cavity."
+                    : "Offset-all shell does not use removable faces.",
+              hidden: session.draft.mode !== "openFaces",
               error:
-                session.draft.mode === "offsetAllFaces" ||
+                session.draft.mode !== "openFaces" ||
                 session.draft.faceTargets.length > 0
                   ? null
                   : { message: "Select at least one removable face." },

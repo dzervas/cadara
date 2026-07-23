@@ -378,14 +378,7 @@ function createSnapshotFeatureDefinition(
       return {
         kind: "shell",
         featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          bodyTarget: definition.parameters.bodyTarget,
-          faceTargets: definition.parameters.faceTargets,
-          thickness: definition.parameters.thickness,
-          direction: definition.parameters.direction,
-          operation: definition.parameters.operation,
-          booleanScope: definition.parameters.booleanScope,
-        },
+        parameters: definition.parameters,
       };
     case "bakedBody":
       return {

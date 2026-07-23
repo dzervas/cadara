@@ -21,7 +21,10 @@ import {
 } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
 import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-capture-fixtures";
-import { makeWaveXSurfaceExtrudeCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
+import {
+  makeWaveXClosedHollowShellCaptureBundle,
+  makeWaveXSurfaceExtrudeCaptureBundle,
+} from "@/domain/import/onshape/wave-x-capture-fixtures";
 import { createImportCapabilities } from "@/domain/import/orchestrator";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { createGeometryAssetRecordFromReference } from "@/contracts/modeling/geometry-assets";
@@ -808,6 +811,36 @@ test("src/domain/import/onshape/provider.spec.ts cannot promote a SURFACE Extrud
       value: expect.stringContaining("only solid extrudes can import as parametric solid features"),
     });
   }
+});
+
+// Lane: logic (per docs/testing.md — this tests the exported importer
+// provider/review/prepare seam, not presentation behavior).
+// Seam: a captured empty-opening hollow shell resolves its exact singleton body
+// scope into a closedHollow action rather than offsetAllFaces or a bake.
+test("src/domain/import/onshape/provider.spec.ts promotes a synthetic closed hollow shell", async () => {
+  const source = sourceFromBundle(makeWaveXClosedHollowShellCaptureBundle());
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([{
+      entityClass: "body",
+      geometryType: "solid",
+      boundingBox: {
+        low: [-4, -3.97084, 0],
+        high: [4, 3.97084, 10],
+      },
+      centroid: [0, 0, 5],
+      reference: { kind: "body", bodyId: "probe_closed_hollow" as BodyId },
+    }]),
+  });
+  const studio = review.providerReview.studios[0];
+  const shell = studio?.featurePlans.find(
+    (feature) => feature.onshapeFeatureId === "SHELL_CLOSED",
+  );
+  expect(shell, JSON.stringify(studio?.featurePlans)).toMatchObject({
+    tier: "parametric",
+    reasonCodes: [],
+  });
+
 });
 
 test("src/domain/import/onshape/provider.spec.ts registration and acceptance", async () => {

@@ -174,7 +174,7 @@ export interface PlaneFeatureParameterDraft {
 
 export interface ShellFeatureParameterDraft {
   bodyTarget: Extract<PrimitiveRef, { kind: "body" }> | null;
-  mode: "openFaces" | "offsetAllFaces";
+  mode: "openFaces" | "closedHollow" | "offsetAllFaces";
   faceTargets: readonly Extract<PrimitiveRef, { kind: "face" }>[];
   thickness: MaybeAuthoredValue<number>;
   direction: "inside" | "outside";

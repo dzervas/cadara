@@ -935,7 +935,7 @@ describe("Wave B body topology translators", () => {
     ]).reasonCodes).toEqual(["chamfer-width-unreadable"]);
   });
 
-  test("maps shell openings and keeps inexpressible shell forms honest", () => {
+  test("maps shell openings, closed hollows, and whole-solid offsets exactly", () => {
     const shell = plan(shellFeatureTranslator, "shell", [
       valueParameter("isHollow", true), queryParameter("parts", ["body"]), queryParameter("entities", ["face"]),
       valueParameter("thickness", 0, "2.5 mm"), valueParameter("oppositeDirection", false),
@@ -949,7 +949,19 @@ describe("Wave B body topology translators", () => {
       valueParameter("thickness", 0, "2.5 mm"),
       valueParameter("oppositeDirection", false),
     ];
-    expect(plan(shellFeatureTranslator, "shell", realRootCaptureEnvelope).reasonCodes).toEqual(["shell-hollow-without-openings"]);
+    const closedHollow = plan(shellFeatureTranslator, "shell", realRootCaptureEnvelope);
+    expect(closedHollow.plannedBodyTopologyConsumer).toMatchObject({
+      featureKind: "shell",
+      shellMode: "closedHollow",
+      thickness: 2.5,
+      direction: "inside",
+      slots: [{ parameterId: "parts", role: "body", cardinality: { min: 1, max: 1 } }],
+    });
+
+    expect(plan(shellFeatureTranslator, "shell", [
+      ...realRootCaptureEnvelope.slice(0, 4),
+      valueParameter("oppositeDirection", true),
+    ]).reasonCodes).toEqual(["shell-closed-hollow-direction-unsupported"]);
 
     const nonHollowOffsetAllFaces = plan(shellFeatureTranslator, "shell", [
       valueParameter("isHollow", false),
@@ -1225,6 +1237,24 @@ describe("Wave B body topology translators", () => {
     expect(JSON.stringify(materializedHole)).not.toContain("topologyOf");
     expect(JSON.stringify(materializedHole)).not.toContain("sketchIdOf");
     expect(validateAdvancedSolidFeatureDefinition(materializedHole as never, holeAdvancedDescriptor)).toEqual([]);
+    const shellClosedHollow = buildResolvedBodyConsumerDefinition({
+      featureKind: "shell",
+      shellMode: "closedHollow",
+      thickness: 2.5,
+      direction: "inside",
+      slots: [{ key: "bodyTarget", parameterId: "parts", role: "body", expectedKinds: ["body"], cardinality: { min: 1, max: 1 } }],
+    }, [shellBodyBinding]);
+    expect(shellClosedHollow).toMatchObject({
+      kind: "shell",
+      parameters: {
+        mode: "closedHollow",
+        bodyTarget: { kind: "topologyOf", expectedKind: "body" },
+        faceTargets: [],
+        thickness: { source: "literal", value: 2.5 },
+        direction: "inside",
+      },
+    });
+
     const shellOffset = buildResolvedBodyConsumerDefinition({
       featureKind: "shell",
       shellMode: "offsetAllFaces",

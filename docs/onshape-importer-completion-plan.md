@@ -762,10 +762,36 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
   feature-instance replay contract with exact source-operation/delta lineage;
   curve, face, table, skipped-instance, and centered variants remain out of
   scope.
-- [ ] X.8 **Closed-hollow shell without openings.** Implement the captured PS1
-      `isHollow=true`, empty-opening, closed-envelope semantics in the existing
-      shell contract/executor. It must preserve the outer envelope and produce a
-      valid manifold hollow solid; it is not the existing offset-all-faces form.
+- [x] X.8 **Closed-hollow shell without openings.** Implemented the captured PS1
+      `isHollow=true`, empty-opening, closed-envelope semantics as the existing
+      shell contract's distinct `closedHollow` mode. It preserves the outer
+      envelope and produces one valid manifold hollow solid; it is not the
+      existing offset-all-faces form.
+
+      **Verification (done).** The local `9841` capture's `Shell 1`
+      (`Fi8k4Db3MmHpaIG_1`) has `parts=[JND]`, `entities=[]`,
+      `isHollow=true`, `thickness="2.5 mm"`, and `oppositeDirection=false`.
+      Its rollback snapshots prove one scoped `JND` solid, unchanged XYZ bbox
+      (`x -0.0675000027..0.0524999984`, `y 0.0074999998..0.1321506351`,
+      `z 0..0.1888916194` meters), and face count **13 → 26**. The translator
+      maps that exact form to `closedHollow`, the singleton `parts` body target,
+      2.5 mm, and `direction: inside`; outward closed hollows remain explicitly
+      baked as `shell-closed-hollow-direction-unsupported` rather than changing
+      the captured outer envelope.
+
+      OCC creates an inward offset cavity then subtracts it from the original
+      scoped body. It rejects failed offsets/cuts, invalid or non-manifold
+      topology, zero/multiple solids, changed outer bounds, and no material
+      removal; it replaces the source body in place and never returns the
+      original geometry. Permanent synthetic translator/provider/apply coverage
+      plus real-OCC tests pin the exact prepared action, unchanged outer bbox,
+      increased cavity faces/reduced volume, singleton retained body identity,
+      and a shell-thickness edit rebuild. Local plan-dump review moves PS1 from
+      **25 / 16 / 0 → 26 / 15 / 0** (parametric / baked / geometryOnly), with
+      Shell 1 parametric and no reason code; the plain **6 / 35 / 0** table is
+      unchanged because its independently unresolved upstream extrude remains
+      baked. Focused logic tests, the complete Onshape suite (206 tests), and
+      `bun run test:all` pass (602 logic, 125 UI, 24 static, 62 Playwright).
 - [ ] X.9 **Complete real-browser acceptance matrix.** Extend the shared
       Playwright Onshape harness, not ad hoc scripts, to cover every studio in
       all five root bundles. Assert the exact non-surface feature timeline, zero
