@@ -314,7 +314,9 @@ async function captureRollbackSnapshots(
   options: Pick<CaptureOptions, "maxTranslationPolls">,
 ): Promise<OnshapeRollbackSnapshot[]> {
   const snapshots: OnshapeRollbackSnapshot[] = [];
+  const rollbackThrottleMs = 5_000;
   for (const point of collectSolidFeatureRollbackPoints(features)) {
+    await runtime.sleep(rollbackThrottleMs);
     await client.postJson(`${rollbackStudioPath}/features/rollback`, {
       rollbackIndex: point.rollbackIndex,
     });

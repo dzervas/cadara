@@ -66,6 +66,61 @@ test("client.spec.ts retries 5xx within the retry budget then throws", async () 
   expect(calls, "Initial attempt plus two retries.").toBe(3);
 });
 
+
+test("client.spec.ts honors Retry-After for rate-limited capture requests", async () => {
+  let calls = 0;
+  const sleeps: number[] = [];
+  const fetch: FetchLike = () => {
+    calls += 1;
+    return Promise.resolve(calls === 1
+      ? {
+          ok: false,
+          status: 429,
+          headers: { get: (name) => name.toLowerCase() === "retry-after" ? "2" : null },
+          text: () => Promise.resolve("rate limited"),
+        }
+      : { ok: true, status: 200, text: () => Promise.resolve("{}") });
+  };
+  const client = new OnshapeClient({
+    baseUrl: "https://x",
+    accessKey: "a",
+    secretKey: "b",
+    fetch,
+    sleep: (ms) => {
+      sleeps.push(ms);
+      return Promise.resolve();
+    },
+  });
+
+  await expect(client.getJson("/rate-limited")).resolves.toEqual({});
+  expect(calls).toBe(2);
+  expect(sleeps).toEqual([2_000]);
+});
+
+test("client.spec.ts uses capture-safe bounded fallback delays for 429 responses", async () => {
+  let calls = 0;
+  const sleeps: number[] = [];
+  const fetch: FetchLike = () => {
+    calls += 1;
+    return Promise.resolve(calls <= 3
+      ? { ok: false, status: 429, text: () => Promise.resolve("rate limited") }
+      : { ok: true, status: 200, text: () => Promise.resolve("{}") });
+  };
+  const client = new OnshapeClient({
+    baseUrl: "https://x",
+    accessKey: "a",
+    secretKey: "b",
+    fetch,
+    sleep: (ms) => {
+      sleeps.push(ms);
+      return Promise.resolve();
+    },
+  });
+
+  await expect(client.getJson("/rate-limited")).resolves.toEqual({});
+  expect(sleeps).toEqual([15_000, 30_000, 60_000]);
+});
+
 test("client.spec.ts caps concurrent in-flight requests", async () => {
   let inFlight = 0;
   let maxInFlight = 0;

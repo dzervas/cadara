@@ -20,6 +20,7 @@ export type FetchLike = (
 export interface FetchResponse {
   ok: boolean;
   status: number;
+  headers?: { get(name: string): string | null };
   text: () => Promise<string>;
 }
 
@@ -135,7 +136,7 @@ export class OnshapeClient {
 
       const retryable = response.status === 429 || response.status >= 500;
       if (retryable && attempt < this.maxRetries) {
-        const delay = 250 * 2 ** attempt;
+        const delay = this.retryDelay(response, attempt);
         attempt += 1;
         await this.sleep(delay);
         continue;
@@ -144,6 +145,21 @@ export class OnshapeClient {
       const detail = await this.safeErrorDetail(response);
       throw new OnshapeRequestError(response.status, url, detail);
     }
+  }
+
+
+  private retryDelay(response: FetchResponse, attempt: number): number {
+    if (response.status !== 429) return 250 * 2 ** attempt;
+
+    const retryAfter = response.headers?.get("retry-after");
+    if (retryAfter !== undefined && retryAfter !== null && retryAfter.trim() !== "") {
+      const seconds = Number(retryAfter);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.min(seconds * 1_000, 300_000);
+      }
+    }
+
+    return Math.min(15_000 * 2 ** attempt, 60_000);
   }
 
   private async safeErrorDetail(response: FetchResponse): Promise<string> {

@@ -681,6 +681,20 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       `resolvedQueryReferences`; do not commit root capture files. `40a51…`,
       `5151…`, and `d3cd9…` need no evidence-only recapture unless a later
       diagnosis proves otherwise.
+
+
+      **Partial evidence (API quota blocked).** The 405 bundle was recaptured on
+      2026-07-23 with all six studios, format v2, complete solid-feature rollback
+      snapshots, no capture diagnostics, and no ID-less feature queries (therefore
+      zero `resolvedQueryReferences` is correct). Its review tables are unchanged;
+      Mirror transform still has a whole-studio replacement-scope residual tracked
+      by X.6. The live run exposed insufficient 429 handling, so the production
+      client now honors `Retry-After`, uses bounded 15/30/60-second fallback waits,
+      and spaces rollback snapshots by five seconds; capture/client tests pass
+      **29/29**, changed-file lint and the build are green. The 9841 recapture then
+      exhausted the account quota with HTTP 402 before producing a file. Retry it
+      after quota reset and ensure temporary workspace
+      `74e39f502861d5b417375498` is deleted before X.3/X.10 completion.
 - [ ] X.4 **Exact sketch-region selection.** Replace guessed “all closed regions”
       behavior with captured, consumer-indexed evidence for the exact Onshape
       profile query. Carry enough sketch/region/entity provenance through
