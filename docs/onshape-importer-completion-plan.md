@@ -619,10 +619,11 @@ Scope and denominator:
   `5151a4c877c9493b733ad52f`, `9841e486906fa2ce62d74d8e`, and
   `d3cd9b09c3c36af1dd2efae9`; every Part Studio in each bundle is included.
 - Onshape `bodyType=SURFACE` extrudes are the only accepted exclusions. The
-  current local captures contain one named `Extrude 4` in each of the `5151`,
-  `9841`, and `d3cd9` bundles. They must remain explicitly and honestly
-  unsupported; they must never be counted or emitted as solid parametric
-  extrudes.
+  current local captures contain one named `Extrude 4` in each of the `9841`
+  and `d3cd9` bundles. They must remain explicitly and honestly unsupported;
+  they must never be counted or emitted as solid parametric extrudes. The
+  similarly named 5151 `Extrude 4` is a `SOLID`/`REMOVE` feature and remains in
+  the required parametric denominator.
 - A supported feature is accepted only when it emits no baked/checkpoint
   replacement, is not suppressed, applies through the browser worker and real
   OCC kernel, and survives a representative upstream parameter or sketch edit
@@ -637,7 +638,7 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
 |---|---:|---:|---|
 | Mounts `40a51…` | **10 / 0 / 0** | **10 / 0 / 0** | Keep as no-regression control. |
 | Wave T `405fa…` | All six studios reach feature-tier 100%; Mirror transform is **5 / 0 / 0** but retains unresolved whole-studio replacement scope | Partial coverage; Mirror transform currently **3 / 2 / 0** | Real apply/replacement attribution and missing studio coverage. |
-| Laptop Stand `5151…` | **12 / 12 / 0** | Not pinned | 7 solid region extrudes, expression chamfer, implicit-target union, two feature patterns, feature mirror; one surface extrude excluded. |
+| Laptop Stand `5151…` | **12 / 12 / 0** | Not pinned | 7 solid region extrudes, expression chamfer, implicit-target union, two feature patterns, and feature mirror. |
 | Part Studio 1 `9841…` | **25 / 16 / 0** | **8 / 33 / 0** | 13 solid region extrudes, checkpoint-backed Sketch 2, closed-hollow shell; one surface extrude excluded. |
 | Part Studio 1 `d3cd9…` | **19 / 5 / 0** | Not pinned | 3 solid region extrudes and PART+ADD mirror; one surface extrude excluded. |
 
@@ -659,11 +660,21 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       suite passes (197/197), changed-file lint is clean, and the production
       build is green. Local review counts remain Mounts **10/0/0**, PS1
       **25/16/0**, 5151 **12/12/0**, and d3cd9 **19/5/0**.
-- [ ] X.2 **Honest solid-extrude boundary.** Inspect `bodyType` before planning a
+- [x] X.2 **Honest solid-extrude boundary.** Inspect `bodyType` before planning a
       solid extrude. Keep `SURFACE` forms baked with a specific reason code and
       review copy; ensure none can enter solid apply, body lineage, or segment
-      promotion. Pin the three local `Extrude 4` exclusions without committing
+      promotion. Pin the two local `Extrude 4` exclusions without committing
       proprietary bundles.
+
+  **Verification (done).** `SURFACE` now returns
+  `extrude-body-type-unsupported` before profile or solid planning, never emits
+  `plannedExtrude`, and never enters new-body lineage. A checked-in synthetic
+  fixture represents both local surface exclusions; planner and probe-backed
+  provider review coverage pin their baked tier, downstream no-lineage behavior,
+  and human review copy (focused tests: 47/47; Onshape import suite: 199/199).
+  Local plan dumps confirm 9841 and d3cd9 `Extrude 4` stay baked with the new
+  reason while 5151 `Extrude 4` remains correctly parametric because it is a
+  solid remove. Changed-file lint and the production build are green.
 - [ ] X.3 **Refresh stale capture evidence.** Recapture `405fa…` and `9841…` with
       rollback snapshots using the landed geometry-ID and rollback query
       capture paths. Verify format v2, complete rollback coverage, and expected

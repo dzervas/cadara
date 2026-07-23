@@ -92,6 +92,7 @@ export type ExtrudePlanResult =
       reason:
         | "needs-region-resolution"
         | "needs-history-probe"
+        | "extrude-body-type-unsupported"
         | "extrude-default-scope-ambiguous"
         | "unsupported-feature";
       diagnostics: ExtrudePlanDiagnostic[];
@@ -381,6 +382,10 @@ const OPERATION_MAP: Record<string, FeatureBooleanOperation> = {
 export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   const diagnostics: ExtrudePlanDiagnostic[] = [];
   const { feature } = input;
+  if ((enumValue(feature, "bodyType") ?? "SOLID") !== "SOLID") {
+    return { tier: "baked", reason: "extrude-body-type-unsupported", diagnostics };
+  }
+
   const sketchIds = referencedSketchFeatureIds(feature);
   if (
     sketchIds.length !== 1 ||

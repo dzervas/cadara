@@ -21,6 +21,7 @@ import {
 } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
 import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-capture-fixtures";
+import { makeWaveXSurfaceExtrudeCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import { createImportCapabilities } from "@/domain/import/orchestrator";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { createGeometryAssetRecordFromReference } from "@/contracts/modeling/geometry-assets";
@@ -777,6 +778,37 @@ function capabilitiesWithProbe(
     },
   };
 }
+
+test("src/domain/import/onshape/provider.spec.ts cannot promote a SURFACE Extrude 4 under review", async () => {
+  const review = await onshapeImportProvider.review({
+    source: sourceFromBundle(makeWaveXSurfaceExtrudeCaptureBundle()),
+    capabilities: capabilitiesWithProbe([]),
+  });
+  expect(review.providerReview.valid).toBe(true);
+  expect(review.providerReview.studios).toHaveLength(2);
+
+  for (const studio of review.providerReview.studios) {
+    const surface = studio.featurePlans.find((feature) => feature.label === "Extrude 4");
+    expect(surface).toMatchObject({
+      tier: "baked",
+      reasonCodes: ["extrude-body-type-unsupported"],
+      suppressed: true,
+    });
+    expect(surface?.plannedExtrude).toBeUndefined();
+
+    const schema = onshapeImportProvider.getReviewFormSchema(review, {
+      studioElementId: studio.elementId,
+      demotedFeatureIds: [],
+    });
+    const field = schema.sections
+      .find((section) => section.id === "fidelity-report")
+      ?.fields.find((candidate) => candidate.id === `feature-${surface?.onshapeFeatureId}`);
+    expect(field).toMatchObject({
+      kind: "summary",
+      value: expect.stringContaining("only solid extrudes can import as parametric solid features"),
+    });
+  }
+});
 
 test("src/domain/import/onshape/provider.spec.ts registration and acceptance", async () => {
   const registry = createBuiltinImportProviderRegistry();
