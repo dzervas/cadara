@@ -603,6 +603,106 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
   known W.1 region-resolution/sketch-on-face fallout and the closed-hollow Shell
   1 gap remain honest residuals.
 
+
+## Phase X — Full-parametric local-capture closure (active)
+
+Phase W closed its original scoped work, but did not satisfy the stronger local
+acceptance goal: every supported feature in every root
+`*.onshape-capture.json` imports as live parametric history. Phase X supersedes
+mock-review tier counts as acceptance. The real browser/worker/OCC apply path is
+the gate; `scripts/onshape-plan-dump.ts --review` remains diagnostic only because
+it echoes captured signatures and does not rebuild OCC geometry.
+
+Scope and denominator:
+
+- Root bundles: `405fa226bb150016d09afc09`, `40a51fb8fa82fd4565151114`,
+  `5151a4c877c9493b733ad52f`, `9841e486906fa2ce62d74d8e`, and
+  `d3cd9b09c3c36af1dd2efae9`; every Part Studio in each bundle is included.
+- Onshape `bodyType=SURFACE` extrudes are the only accepted exclusions. The
+  current local captures contain one named `Extrude 4` in each of the `5151`,
+  `9841`, and `d3cd9` bundles. They must remain explicitly and honestly
+  unsupported; they must never be counted or emitted as solid parametric
+  extrudes.
+- A supported feature is accepted only when it emits no baked/checkpoint
+  replacement, is not suppressed, applies through the browser worker and real
+  OCC kernel, and survives a representative upstream parameter or sketch edit
+  without invalid-reference diagnostics. A parametric review tier alone is not
+  acceptance.
+- Final tree hygiene: no scratch harnesses, temporary diagnostics, migration
+  adapters, compatibility bypasses, or stale baseline assertions remain.
+
+Audit baseline at Phase-X start (parametric / baked / geometryOnly):
+
+| Capture / studio | Logic-lane review | Real browser gate | Known residual |
+|---|---:|---:|---|
+| Mounts `40a51…` | **10 / 0 / 0** | **10 / 0 / 0** | Keep as no-regression control. |
+| Wave T `405fa…` | All six studios reach feature-tier 100%; Mirror transform is **5 / 0 / 0** but retains unresolved whole-studio replacement scope | Partial coverage; Mirror transform currently **3 / 2 / 0** | Real apply/replacement attribution and missing studio coverage. |
+| Laptop Stand `5151…` | **12 / 12 / 0** | Not pinned | 7 solid region extrudes, expression chamfer, implicit-target union, two feature patterns, feature mirror; one surface extrude excluded. |
+| Part Studio 1 `9841…` | **25 / 16 / 0** | **8 / 33 / 0** | 13 solid region extrudes, checkpoint-backed Sketch 2, closed-hollow shell; one surface extrude excluded. |
+| Part Studio 1 `d3cd9…` | **19 / 5 / 0** | Not pinned | 3 solid region extrudes and PART+ADD mirror; one surface extrude excluded. |
+
+- [ ] X.1 **Truthful topology-query fallback.** At the exported resolver/provider
+      seam, make the unique-prefix body fallback eligible only for exactly one
+      slot, one query, body kind, and exact singleton cardinality. Return `null`
+      when the rebuilt prefix has zero or multiple live bodies so captured
+      rollback query evidence is attempted instead of being masked by a
+      degraded fallback. Pin zero/one/many, plural-cardinality, multi-query, and
+      captured-evidence precedence in logic-lane tests.
+- [ ] X.2 **Honest solid-extrude boundary.** Inspect `bodyType` before planning a
+      solid extrude. Keep `SURFACE` forms baked with a specific reason code and
+      review copy; ensure none can enter solid apply, body lineage, or segment
+      promotion. Pin the three local `Extrude 4` exclusions without committing
+      proprietary bundles.
+- [ ] X.3 **Refresh stale capture evidence.** Recapture `405fa…` and `9841…` with
+      rollback snapshots using the landed geometry-ID and rollback query
+      capture paths. Verify format v2, complete rollback coverage, and expected
+      `resolvedQueryReferences`; do not commit root capture files. `40a51…`,
+      `5151…`, and `d3cd9…` need no evidence-only recapture unless a later
+      diagnosis proves otherwise.
+- [ ] X.4 **Exact sketch-region selection.** Replace guessed “all closed regions”
+      behavior with captured, consumer-indexed evidence for the exact Onshape
+      profile query. Carry enough sketch/region/entity provenance through
+      capture, bundle contracts, planning, prepare, and apply to resolve opaque
+      `qCompressed`, mirror-derived, nested, and selected-subset profiles. Never
+      use nearest-geometry scoring. Unsupported or ambiguous evidence remains
+      `needs-region-resolution`. Acceptance: every non-surface solid extrude in
+      the five local bundles plans and applies parametrically; selected-subset
+      and mirrored-profile regressions pass through the real sketch solver and
+      OCC apply seam.
+- [ ] X.5 **Live face-sketch support after producer recovery.** Once solid
+      producers are live, promote face-backed sketches through durable
+      `SketchPlaneSupportRef` wiring rather than a detached captured-frame
+      construction whenever a live support face exists. Captured-frame planes
+      remain an honest checkpoint fallback only. Acceptance: PS1 Sketch 2 and
+      all other supported face sketches follow a representative upstream support
+      edit and rebuild without a checkpoint body.
+- [ ] X.6 **Narrow translator residuals.** Preserve authored variable linkage for
+      expression-valued chamfer dimensions (including `#Wall*(4/5)`), resolve
+      an implicit/default UNION target only from exact singleton prefix lineage,
+      and close Wave-T Mirror-transform replacement attribution. Ambiguous
+      default targets remain honestly baked.
+- [ ] X.7 **Observed pattern and mirror variants.** Support only the captured
+      variants needed by the local goal: `FEATURE` linear patterns, feature
+      mirror, and `PART + ADD` mirror. Reuse existing executable feature kinds
+      or lower to ordered existing operations only when seed, output, target,
+      and replacement lineage are exact. Preserve upstream edit dependency; do
+      not broaden to curve/face/table/skipped-instance pattern families.
+- [ ] X.8 **Closed-hollow shell without openings.** Implement the captured PS1
+      `isHollow=true`, empty-opening, closed-envelope semantics in the existing
+      shell contract/executor. It must preserve the outer envelope and produce a
+      valid manifold hollow solid; it is not the existing offset-all-faces form.
+- [ ] X.9 **Complete real-browser acceptance matrix.** Extend the shared
+      Playwright Onshape harness, not ad hoc scripts, to cover every studio in
+      all five root bundles. Assert the exact non-surface feature timeline, zero
+      baked/checkpoint actions, zero suppressed supported features, zero
+      invalid-reference diagnostics, and at least one meaningful upstream
+      edit/rebuild per studio. Tests skip only when a gitignored bundle is absent.
+- [ ] X.10 **Final verification and cleanup.** Run `bun run test:all`, record exact
+      final tier tables here, remove temporary capture/debug code and stale
+      mock/browser baselines, and verify `jj status` contains only intentional
+      committed work. Phase X is complete only when X.1–X.9 and the full suite
+      are green; no scoped-complete wording may hide residual supported bakes.
+
 Full-parametric math: Mounts = W.2 + W.3. Part Studio 1 = W.1 + W.2 + W.4,
 with W.5 now covering future non-hollow empty-shell forms but not PS1's true
 closed-hollow Shell 1. Highest leverage first: W.1.
