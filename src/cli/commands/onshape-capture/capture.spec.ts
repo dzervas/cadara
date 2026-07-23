@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 
 import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
 
-import { captureBundle } from "@/cli/commands/onshape-capture/capture";
+import { captureBundle, enrichBundleProfileEvidence } from "@/cli/commands/onshape-capture/capture";
 import { OnshapeRequestError } from "@/cli/commands/onshape-capture/client";
 import { parseDocumentUrl } from "@/cli/commands/onshape-capture/url";
 import { captureGroundTruth } from "@/cli/commands/onshape-capture/ground-truth";
@@ -22,6 +22,36 @@ import {
 } from "@/cli/commands/onshape-capture/fixtures/transcript";
 
 const CREDENTIALS = { accessKey: "access", secretKey: "secret" };
+
+function featuresWithSurfaceExtrude(): typeof FEATURES_WITH_REFERENCES {
+  const features = structuredClone(FEATURES_WITH_REFERENCES) as {
+    features: Array<Record<string, unknown>>;
+  };
+  features.features.push(
+    { featureType: "fillet", featureId: "F_ORDINARY", parameters: [] },
+    {
+      featureType: "extrude",
+      featureId: "F_SURFACE",
+      parameters: [{ parameterId: "bodyType", value: "SURFACE" }],
+    },
+  );
+  return features as typeof FEATURES_WITH_REFERENCES;
+}
+
+function featuresWithOpaqueProfile(): typeof FEATURES_WITH_REFERENCES {
+  const features = structuredClone(FEATURES_WITH_REFERENCES) as {
+    features: Array<Record<string, unknown>>;
+  };
+  features.features.push({
+    featureType: "extrude",
+    featureId: "E_OPAQUE",
+    parameters: [{
+      parameterId: "entities",
+      queries: [{ queryString: 'query = qCompressed(1.0, "opaque-profile", id);' }],
+    }],
+  });
+  return features as typeof FEATURES_WITH_REFERENCES;
+}
 
 function featuresWithIdlessChamfer(queryString: string): typeof FEATURES_WITH_REFERENCES {
   const features = structuredClone(FEATURES_WITH_REFERENCES) as {
@@ -65,41 +95,46 @@ test("capture.spec.ts full capture happy path produces a valid bundle", async ()
   const mounts = bundle.partStudios.find(
     (studio) => studio.elementId === FIXTURE_PART_STUDIO_ID,
   );
-  expect(mounts?.groundTruth.hasBodies).toBe(true);
+  expect(mounts?.groundTruth).toEqual({
+    hasBodies: true,
+    omittedReason: "no-final-bake-boundary",
+  });
   expect(mounts?.featureSpecs.present).toBe(true);
   expect(bundle.formatVersion).toBe(2);
   expect(bundle.diagnostics).toEqual([]);
   const profileEvidence = mounts?.profileEvidence;
   expect(
     profileEvidence,
-    "Every solid extrude entities query, including one with deterministicIds, should be evaluated before its consumer.",
-  ).toMatchObject([{
+    "Readable qSketchRegion assignments preserve their local region-set semantics.",
+  ).toEqual([{
     consumingFeatureId: "FG094ehBlsq34dl_0",
     parameterId: "entities",
     queryIndex: 0,
     evaluatedAt: "historyPoint",
-    kind: "sketchRegion",
+    kind: "sketchRegionSet",
     sourceSketchFeatureId: "FOoap8tw3jKAJf5_0",
-    interiorPoint3d: [0, 0, 0],
+    filterInnerLoops: true,
+  }]);
+  expect(mounts?.profileEvidenceManifest).toEqual([{
+    consumingFeatureId: "FG094ehBlsq34dl_0",
+    parameterId: "entities",
+    queryIndex: 0,
+    sourceQueryString: 'query = qSketchRegion(id + "FOoap8tw3jKAJf5_0", true);',
+    kind: "sketchRegionSet",
+    emittedRecordCount: 1,
+    completed: true,
   }]);
 });
 
 
-test("capture.spec.ts certifies profile witnesses on the exact selected face", async () => {
+test("capture.spec.ts keeps readable qSketchRegion evidence local without a profile witness call", async () => {
   const { fetch, calls } = createFixtureFetch();
   await captureBundle(
     parseDocumentUrl(FIXTURE_DOCUMENT_URL),
     CREDENTIALS,
     createFixtureRuntime(fetch),
   );
-  const profileCall = calls.find(
-    (call) => call.url.includes("rollbackBarIndex=1") && call.body?.includes("profileQuery0"),
-  );
-  expect(profileCall?.body).toContain("qContainsPoint(selectedFace0, centroid0)");
-  expect(profileCall?.body).toContain("qSketchRegion(id + sketchFeatureId0, false)");
-  expect(profileCall?.body).toContain("[3, 7, 15, 31, 63]");
-  expect(profileCall?.body).toContain("returnUndefinedOutsideFace");
-  expect(profileCall?.body).not.toContain("evFaceTessellation");
+  expect(calls.filter((call) => call.body?.includes("profileQuery0"))).toHaveLength(0);
 });
 
 test("capture.spec.ts element-scoped capture keeps one studio but full element list", async () => {
@@ -143,9 +178,10 @@ test("capture.spec.ts records final-state and history-point deterministic refere
       : null,
   ).toBe("FkkBVfXRKopMlIW_1");
   expect(
-    calls.filter((call) => call.url.includes("/features/rollback")).length,
-    "Failed IDs at the same rollback index should share one rollback move.",
+    calls.filter((call) => call.url.includes("rollbackBarIndex=2")).length,
+    "Failed IDs at one history point should share one immutable FeatureScript request.",
   ).toBe(1);
+  expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
   const featureRequest = calls.find(
     (call) => call.method === "GET" && call.url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
   );
@@ -226,27 +262,19 @@ test("capture.spec.ts rejects non-qCompressed query strings without evaluating t
   expect(calls.some((call) => call.url.includes("rollbackBarIndex=3"))).toBe(false);
 });
 
-test("capture.spec.ts creates and deletes a temporary rollback workspace", async () => {
+test("capture.spec.ts ordinary capture is immutable and does not create or mutate a workspace", async () => {
   const { fetch, calls } = createFixtureFetch();
-  const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
+  await captureBundle(parseDocumentUrl(FIXTURE_ELEMENT_URL), CREDENTIALS, createFixtureRuntime(fetch));
 
-  await captureBundle(ref, CREDENTIALS, createFixtureRuntime(fetch));
-
-  expect(
-    calls.some(
-      (call) => call.method === "POST" && call.url.includes(`/documents/d/${FIXTURE_DOCUMENT_ID}/workspaces`),
-    ),
-  ).toBeTruthy();
-  expect(
-    calls.some(
-      (call) =>
-        call.method === "DELETE" &&
-        call.url.includes(`/documents/d/${FIXTURE_DOCUMENT_ID}/workspaces/${FIXTURE_TEMP_WORKSPACE_ID}`),
-    ),
-  ).toBeTruthy();
+  expect(calls.filter((call) => call.url.includes("/workspaces"))).toHaveLength(0);
+  expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
+  expect(calls.filter((call) => /\/(tessellatedfaces|translations|externaldata)\b/.test(call.url))).toHaveLength(0);
+  expect(calls.filter((call) => call.url.includes("/featurescript")).every(
+    (call) => call.url.includes(`/m/${FIXTURE_MICROVERSION}/`),
+  )).toBe(true);
 });
 
-test("capture.spec.ts reports an undeleted rollback workspace after capture failure", async () => {
+test("capture.spec.ts reports an undeleted rollback workspace after snapshot capture failure", async () => {
   const routes = buildDefaultRoutes();
   routes.unshift({
     method: "DELETE",
@@ -259,18 +287,23 @@ test("capture.spec.ts reports an undeleted rollback workspace after capture fail
   });
   routes.unshift({
     method: "GET",
-    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/sketches`),
+    match: (url) => url.includes(`/w/${FIXTURE_TEMP_WORKSPACE_ID}/e/${FIXTURE_PART_STUDIO_ID}/tessellatedfaces`),
     respond: (): FetchResponseStub => ({
       ok: false,
       status: 500,
-      text: () => Promise.resolve("sketch failure"),
+      text: () => Promise.resolve("snapshot tessellation failure"),
     }),
+  });
+  routes.unshift({
+    method: "GET",
+    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
+    respond: () => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(featuresWithSurfaceExtrude())) }),
   });
   const { fetch } = createFixtureFetch(routes);
   const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
 
   await expect(
-    captureBundle(ref, CREDENTIALS, createFixtureRuntime(fetch)),
+    captureBundle(ref, { ...CREDENTIALS, rollbackSnapshots: true }, createFixtureRuntime(fetch)),
   ).rejects.toThrow(FIXTURE_TEMP_WORKSPACE_ID);
 });
 
@@ -285,10 +318,19 @@ test("capture.spec.ts degrades to final-state capture with a bundle diagnostic o
       text: () => Promise.resolve("branch rights unavailable"),
     }),
   });
+  routes.unshift({
+    method: "GET",
+    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
+    respond: () => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(featuresWithSurfaceExtrude())) }),
+  });
   const { fetch, calls } = createFixtureFetch(routes);
   const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
 
-  const bundle = await captureBundle(ref, CREDENTIALS, createFixtureRuntime(fetch));
+  const bundle = await captureBundle(
+    ref,
+    { ...CREDENTIALS, rollbackSnapshots: true },
+    createFixtureRuntime(fetch),
+  );
 
   expect(bundle.diagnostics?.[0]?.code).toBe("onshape-rollback-workspace-unavailable");
   expect(bundle.partStudios[0]!.rollbackSnapshots).toBeNull();
@@ -296,43 +338,113 @@ test("capture.spec.ts degrades to final-state capture with a bundle diagnostic o
     bundle.partStudios[0]!.resolvedReferences.some(
       (reference) => reference.evaluatedAt === "historyPoint",
     ),
-  ).toBe(false);
+  ).toBe(true);
+  expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
   expect(calls.some((call) => call.method === "DELETE")).toBe(false);
 });
 
-test("capture.spec.ts captures rollback snapshots only when requested", async () => {
-  const { fetch } = createFixtureFetch();
-  const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
-
-  const withoutSnapshots = await captureBundle(
-    ref,
-    CREDENTIALS,
-    createFixtureRuntime(fetch),
-  );
-  expect(withoutSnapshots.partStudios[0]!.rollbackSnapshots).toBeNull();
-
-  const { fetch: snapshotFetch } = createFixtureFetch();
-  const snapshotSleeps: number[] = [];
-  const withSnapshots = await captureBundle(
-    ref,
+test("capture.spec.ts snapshots only locally proven surface-extrude bake boundaries", async () => {
+  const { fetch: ordinaryFetch, calls: ordinaryCalls } = createFixtureFetch();
+  const noBoundaries = await captureBundle(
+    parseDocumentUrl(FIXTURE_ELEMENT_URL),
     { ...CREDENTIALS, rollbackSnapshots: true },
-    {
-      ...createFixtureRuntime(snapshotFetch),
-      sleep: (ms) => {
-        snapshotSleeps.push(ms);
-        return Promise.resolve();
-      },
-    },
+    createFixtureRuntime(ordinaryFetch),
+  );
+  expect(noBoundaries.partStudios[0]!.rollbackSnapshots).toEqual([]);
+  expect(ordinaryCalls.filter((call) => call.url.includes("/workspaces"))).toHaveLength(0);
+  expect(ordinaryCalls.filter((call) => /\/(tessellatedfaces|translations|externaldata)\b/.test(call.url))).toHaveLength(0);
+
+  const routes = buildDefaultRoutes();
+  routes.unshift({
+    method: "GET",
+    match: (url) => url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
+    respond: () => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(featuresWithSurfaceExtrude())) }),
+  });
+  const { fetch, calls } = createFixtureFetch(routes);
+  const withSnapshots = await captureBundle(
+    parseDocumentUrl(FIXTURE_ELEMENT_URL),
+    { ...CREDENTIALS, rollbackSnapshots: true },
+    createFixtureRuntime(fetch),
   );
 
   expect(withSnapshots.partStudios[0]!.rollbackSnapshots).toEqual([
-    expect.objectContaining({
-      featureId: "FG094ehBlsq34dl_0",
-      tessellationTolerance: 0.001,
-      step: expect.stringContaining("ISO-10303-21"),
-    }),
+    expect.objectContaining({ featureId: "F_SURFACE", tessellationTolerance: 0.001 }),
   ]);
-  expect(snapshotSleeps).toContain(5_000);
+  expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(1);
+  expect(calls.filter((call) => call.url.includes("/tessellatedfaces"))).toHaveLength(1);
+  expect(calls.filter((call) => call.method === "POST" && call.url.includes("/translations"))).toHaveLength(1);
+  expect(calls.filter((call) => call.method === "GET" && call.url.includes("/translations/"))).toHaveLength(1);
+  expect(calls.filter((call) => call.url.includes("/externaldata/"))).toHaveLength(1);
+});
+
+test("capture.spec.ts targeted enrichment evaluates only stale opaque profile evidence", async () => {
+  const { fetch, calls } = createFixtureFetch();
+  const captured = await captureBundle(
+    parseDocumentUrl(FIXTURE_ELEMENT_URL),
+    CREDENTIALS,
+    createFixtureRuntime(fetch),
+  );
+  const stale = structuredClone(captured);
+  stale.partStudios[0]!.features = featuresWithOpaqueProfile();
+  stale.partStudios[0]!.profileEvidence = [];
+  stale.partStudios[0]!.profileEvidenceSchemaVersion = 0;
+
+  const beforeEnrich = calls.length;
+  const enriched = await enrichBundleProfileEvidence(stale, CREDENTIALS, createFixtureRuntime(fetch));
+  const enrichCalls = calls.slice(beforeEnrich);
+  expect(enrichCalls.filter((call) => call.url.includes("/featurescript"))).toHaveLength(1);
+  expect(enrichCalls.every((call) => call.url.includes("/featurescript") && call.url.includes(`/m/${FIXTURE_MICROVERSION}/`))).toBe(true);
+  expect(enrichCalls[0]?.body).toContain("opaque-profile");
+  expect(enrichCalls[0]?.body).not.toContain("qEverything");
+  expect(enriched.partStudios[0]!.profileEvidence).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: "sketchRegionSet", filterInnerLoops: true }),
+    expect.objectContaining({ consumingFeatureId: "E_OPAQUE", kind: "unresolved" }),
+  ]));
+
+  expect(enriched.partStudios[0]!.profileEvidenceManifest).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      consumingFeatureId: "E_OPAQUE",
+      sourceQueryString: 'query = qCompressed(1.0, "opaque-profile", id);',
+      emittedRecordCount: 1,
+      completed: true,
+    }),
+  ]));
+
+  const beforeCurrentRerun = calls.length;
+  await enrichBundleProfileEvidence(enriched, CREDENTIALS, createFixtureRuntime(fetch));
+  expect(calls).toHaveLength(beforeCurrentRerun);
+
+  const staleMarker = structuredClone(enriched);
+  staleMarker.partStudios[0]!.profileEvidenceSchemaVersion = 0;
+  const beforeStaleRerun = calls.length;
+  await enrichBundleProfileEvidence(staleMarker, CREDENTIALS, createFixtureRuntime(fetch));
+  expect(calls.slice(beforeStaleRerun).filter((call) => call.url.includes("/featurescript"))).toHaveLength(1);
+});
+
+test("capture.spec.ts replaces incomplete current evidence for one consumer instead of appending it", async () => {
+  const { fetch, calls } = createFixtureFetch();
+  const captured = await captureBundle(
+    parseDocumentUrl(FIXTURE_ELEMENT_URL), CREDENTIALS, createFixtureRuntime(fetch),
+  );
+  const stale = structuredClone(captured);
+  stale.partStudios[0]!.features = featuresWithOpaqueProfile();
+  stale.partStudios[0]!.profileEvidenceSchemaVersion = 3;
+  stale.partStudios[0]!.profileEvidenceManifest = [{
+    consumingFeatureId: "E_OPAQUE", parameterId: "entities", queryIndex: 0,
+    sourceQueryString: 'query = qCompressed(1.0, "opaque-profile", id);',
+    kind: "faceResults", emittedRecordCount: 2, completed: true,
+  }];
+  const before = calls.length;
+
+  const enriched = await enrichBundleProfileEvidence(stale, CREDENTIALS, createFixtureRuntime(fetch));
+  const records = enriched.partStudios[0]!.profileEvidence?.filter(
+    (record) => record.consumingFeatureId === "E_OPAQUE",
+  );
+  expect(calls.slice(before).filter((call) => call.url.includes("/featurescript"))).toHaveLength(1);
+  expect(records).toHaveLength(1);
+  expect(enriched.partStudios[0]!.profileEvidenceManifest).toEqual(expect.arrayContaining([
+    expect.objectContaining({ consumingFeatureId: "E_OPAQUE", emittedRecordCount: 1 }),
+  ]));
 });
 
 test("capture.spec.ts empty Part Studio records absence of bodies explicitly", async () => {

@@ -316,40 +316,27 @@ const FEATURESCRIPT_RESPONSE = {
 
 const HISTORY_FEATURESCRIPT_RESPONSE = {
   btType: "BTFeatureScriptEvalResponse-1859",
-  result: fsEncode(HISTORY_ENTITY_RECORDS),
+  result: fsEncode({ entityRecords: HISTORY_ENTITY_RECORDS, queryGroups: [], profileGroups: [] }),
   notices: [],
 };
-
 
 const QUERY_HISTORY_FEATURESCRIPT_RESPONSE = {
   btType: "BTFeatureScriptEvalResponse-1859",
-  result: fsEncode([{
-    index: 0,
-    records: [{
-      id: "EDGE-CHAMFER",
-      entityClass: "edge",
-      geometryType: "LINE",
-      box: [0, 0, 0, 0.01, 0, 0],
-      origin: [0, 0, 0],
-      direction: [1, 0, 0],
+  result: fsEncode({
+    entityRecords: [],
+    queryGroups: [{
+      index: 0,
+      records: [{
+        id: "EDGE-CHAMFER",
+        entityClass: "edge",
+        geometryType: "LINE",
+        box: [0, 0, 0, 0.01, 0, 0],
+        origin: [0, 0, 0],
+        direction: [1, 0, 0],
+      }],
     }],
-  }]),
-  notices: [],
-};
-
-
-const PROFILE_FEATURESCRIPT_RESPONSE = {
-  btType: "BTFeatureScriptEvalResponse-1859",
-  result: fsEncode([{
-    index: 0,
-    records: [{
-      resultIndex: 0,
-      id: "JGC",
-      kind: "sketchRegion",
-      sourceSketchFeatureId: "FOoap8tw3jKAJf5_0",
-      interiorPoint: [0, 0, 0],
-    }],
-  }]),
+    profileGroups: [],
+  }),
   notices: [],
 };
 
@@ -365,7 +352,7 @@ function json(status: number, body: unknown): FetchResponse {
 /** A single recorded route: method + URL predicate + response factory. */
 export interface FixtureRoute {
   method: "GET" | "POST" | "DELETE";
-  match: (url: string) => boolean;
+  match: (url: string, body?: string) => boolean;
   respond: () => FetchResponse;
 }
 
@@ -454,21 +441,14 @@ export function buildDefaultRoutes(): FixtureRoute[] {
     {
       method: "POST",
       match: (url) =>
-        url.includes(`/w/${FIXTURE_TEMP_WORKSPACE_ID}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
+        url.includes(`/m/${FIXTURE_MICROVERSION}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
         url.includes("rollbackBarIndex=2"),
       respond: () => json(200, HISTORY_FEATURESCRIPT_RESPONSE),
     },
     {
       method: "POST",
       match: (url) =>
-        url.includes(`/w/${FIXTURE_WVM_ID}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
-        url.includes("rollbackBarIndex=1"),
-      respond: () => json(200, PROFILE_FEATURESCRIPT_RESPONSE),
-    },
-    {
-      method: "POST",
-      match: (url) =>
-        url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
+        url.includes(`/m/${FIXTURE_MICROVERSION}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
         url.includes("rollbackBarIndex=3"),
       respond: () => json(200, QUERY_HISTORY_FEATURESCRIPT_RESPONSE),
     },
@@ -549,7 +529,7 @@ export function createFixtureFetch(
     const method = (init?.method ?? "GET").toUpperCase();
     calls.push({ method, url, ...(init?.body === undefined ? {} : { body: init.body }) });
     const route = routes.find(
-      (candidate) => candidate.method === method && candidate.match(url),
+      (candidate) => candidate.method === method && candidate.match(url, init?.body),
     );
     if (!route) {
       return Promise.resolve(json(404, { message: `no fixture for ${method} ${url}` }));

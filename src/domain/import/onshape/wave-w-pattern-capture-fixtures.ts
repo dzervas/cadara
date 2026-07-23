@@ -176,6 +176,12 @@ function linearStudio() {
       evaluatedAt: "historyPoint" as const, kind: "sketchRegion" as const,
       sourceSketchFeatureId: "S_LINEAR_BASE", interiorPoint3d: [0.001, 0.001, 0] as [number, number, number],
     }],
+    profileEvidenceSchemaVersion: 3,
+    profileEvidenceManifest: [{
+      consumingFeatureId: "E_LINEAR_BASE", parameterId: "entities", queryIndex: 0,
+      sourceQueryString: 'query = qSketchRegion(id + "S_LINEAR_BASE", true);',
+      kind: "faceResults", emittedRecordCount: 1, completed: true,
+    }],
     groundTruth: { hasBodies: true as const, tessellationTolerance: 0.0001, tessellatedFaces: tessellation(copies), step: "" },
     rollbackSnapshots: [
       { featureId: "S_LINEAR_BASE", tessellationTolerance: 0.0001, tessellatedFaces: tessellation([]) },
@@ -227,6 +233,12 @@ function circularStudio() {
       queryIndex: 0, resultIndex: 0, deterministicId: "circular-profile",
       evaluatedAt: "historyPoint" as const, kind: "sketchRegion" as const,
       sourceSketchFeatureId: "S_CIRCULAR_BASE", interiorPoint3d: [0.011, 0, 0] as [number, number, number],
+    }],
+    profileEvidenceSchemaVersion: 3,
+    profileEvidenceManifest: [{
+      consumingFeatureId: "E_CIRCULAR_BASE", parameterId: "entities", queryIndex: 0,
+      sourceQueryString: 'query = qSketchRegion(id + "S_CIRCULAR_BASE", true);',
+      kind: "faceResults", emittedRecordCount: 1, completed: true,
     }],
     groundTruth: { hasBodies: true as const, tessellationTolerance: 0.0001, tessellatedFaces: tessellation(finalBodies), step: "" },
     rollbackSnapshots: [

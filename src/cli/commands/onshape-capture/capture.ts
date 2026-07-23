@@ -1,28 +1,33 @@
 import {
   ONSHAPE_CAPTURE_BUNDLE_FORMAT_VERSION,
+  ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION,
   requireOnshapeCaptureBundle,
   type OnshapeCaptureBundle,
   type OnshapeCaptureDiagnostic,
   type OnshapeOptionalSection,
   type OnshapePartStudioCapture,
+  type OnshapeProfileEvidence,
+  type OnshapeProfileEvidenceManifestEntry,
   type OnshapeRollbackSnapshot,
+  hasCurrentOnshapeProfileEvidence,
 } from "@/contracts/import/onshape-capture-bundle";
 
+import {
+  immutableFeatureScriptEvidenceCacheKey,
+  type ImmutableFeatureScriptEvidenceCache,
+} from "@/cli/commands/onshape-capture/evidence-cache";
 import {
   OnshapeClient,
   OnshapeRequestError,
   type FetchLike,
 } from "@/cli/commands/onshape-capture/client";
-import { DEFAULT_TESSELLATION_TOLERANCE, captureGroundTruth, exportStep } from "@/cli/commands/onshape-capture/ground-truth";
+import { DEFAULT_TESSELLATION_TOLERANCE, captureBoundaryOnlyGroundTruth, exportStep } from "@/cli/commands/onshape-capture/ground-truth";
 import {
   collectDeterministicIdConsumers,
-  collectDeterministicIds,
   collectQueryStringConsumers,
   collectSolidExtrudeProfileQueryConsumers,
-  resolveDeterministicIds,
-  resolveDeterministicIdsWithHistory,
-  resolveQueryStringsWithHistory,
-  resolveSolidExtrudeProfileEvidenceWithHistory,
+  resolveImmutableHistoryEvidence,
+  type SolidExtrudeProfileQueryConsumer,
 } from "@/cli/commands/onshape-capture/references";
 import type { OnshapeDocumentRef } from "@/cli/commands/onshape-capture/url";
 
@@ -45,6 +50,8 @@ export interface CaptureOptions {
   concurrency?: number;
   maxTranslationPolls?: number;
   rollbackSnapshots?: boolean;
+  /** Optional cache for immutable, read-only FeatureScript evidence only. */
+  evidenceCache?: ImmutableFeatureScriptEvidenceCache;
 }
 
 interface RollbackWorkspace {
@@ -52,7 +59,7 @@ interface RollbackWorkspace {
   diagnostics: OnshapeCaptureDiagnostic[];
 }
 
-interface SolidFeatureRollbackPoint {
+export interface SolidFeatureRollbackPoint {
   featureId: string;
   rollbackIndex: number;
 }
@@ -105,20 +112,52 @@ export async function captureBundle(
     );
   }
 
-  const rollbackWorkspace = await createRollbackWorkspace(
-    client,
-    ref.documentId,
-    microversion,
-    runtime,
-  );
+  const immutableRef: OnshapeDocumentRef = {
+    ...ref,
+    wvm: "m",
+    wvmId: microversion,
+  };
   const capturedStudios: OnshapePartStudioCapture[] = [];
+  for (const studio of partStudios) {
+    capturedStudios.push(
+      await captureStudio(
+        client,
+        immutableRef,
+        studio,
+        options,
+        { baseUrl, apiVersion, documentId: ref.documentId, microversion },
+      ),
+    );
+  }
+
+  const rollbackCandidates = options.rollbackSnapshots
+    ? capturedStudios.flatMap((studio) => {
+        const points = collectIntrinsicBakeRollbackPoints(studio.features);
+        return points.length === 0 ? [] : [{ studio, points }];
+      })
+    : [];
+  const rollbackWorkspace = rollbackCandidates.length > 0
+    ? await createRollbackWorkspace(client, ref.documentId, microversion, runtime)
+    : { workspaceId: null, diagnostics: [] };
   let captureError: unknown;
 
   try {
-    for (const studio of partStudios) {
-      capturedStudios.push(
-        await captureStudio(client, ref, studio, runtime, options, rollbackWorkspace.workspaceId),
-      );
+    if (rollbackWorkspace.workspaceId) {
+      for (const candidate of rollbackCandidates) {
+        candidate.studio.rollbackSnapshots = await captureRollbackSnapshots(
+          client,
+          ref,
+          candidate.studio.elementId,
+          `/partstudios/d/${ref.documentId}/w/${rollbackWorkspace.workspaceId}/e/${candidate.studio.elementId}`,
+          candidate.points,
+          runtime,
+          options,
+        );
+      }
+    } else if (rollbackCandidates.length > 0) {
+      for (const studio of capturedStudios) {
+        studio.rollbackSnapshots = null;
+      }
     }
   } catch (error) {
     captureError = error;
@@ -161,6 +200,111 @@ export async function captureBundle(
   return requireOnshapeCaptureBundle(bundle);
 }
 
+/**
+ * Fill only missing or stale exact profile evidence in an already validated
+ * bundle. Raw captures, final geometry, snapshots, and existing reference
+ * resolutions are preserved verbatim.
+ */
+export async function enrichBundleProfileEvidence(
+  bundle: OnshapeCaptureBundle,
+  options: CaptureOptions,
+  runtime: CaptureRuntime,
+): Promise<OnshapeCaptureBundle> {
+  const validated = requireOnshapeCaptureBundle(bundle);
+  const baseUrl = options.baseUrl ?? validated.provenance.baseUrl;
+  const apiVersion = options.apiVersion ?? validated.provenance.apiVersion;
+  const client = new OnshapeClient({
+    baseUrl,
+    accessKey: options.accessKey,
+    secretKey: options.secretKey,
+    fetch: runtime.fetch,
+    sleep: runtime.sleep,
+    concurrency: options.concurrency,
+  });
+  const partStudios: OnshapePartStudioCapture[] = [];
+  for (const studio of validated.partStudios) {
+    const consumers = collectSolidExtrudeProfileQueryConsumers(studio.features);
+    const retained = (studio.profileEvidence ?? []).filter((record) =>
+      consumers.some((consumer) =>
+        record.consumingFeatureId === consumer.consumingFeatureId &&
+        record.queryIndex === consumer.queryIndex,
+      ),
+    );
+    const complete = consumers.filter((consumer) => hasCurrentOnshapeProfileEvidence({
+      schemaVersion: studio.profileEvidenceSchemaVersion,
+      manifest: studio.profileEvidenceManifest,
+      evidence: retained,
+      consumingFeatureId: consumer.consumingFeatureId,
+      queryIndex: consumer.queryIndex,
+      sourceQueryString: consumer.queryString,
+    }));
+    const missing = consumers.filter((consumer) => !complete.includes(consumer));
+    const fresh = missing.length === 0
+      ? []
+      : (await resolveImmutableHistoryEvidence({
+          client,
+          partStudioPath: `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
+          deterministicIdConsumers: [],
+          queryStringConsumers: [],
+          profileConsumers: missing,
+          evaluate: (rollbackBarIndex, script) => evaluateImmutableEvidence(
+            client,
+            `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
+            rollbackBarIndex,
+            script,
+            options.evidenceCache,
+            {
+              baseUrl,
+              apiVersion,
+              documentId: validated.provenance.documentId,
+              microversion: validated.provenance.microversion,
+              elementId: studio.elementId,
+            },
+          ),
+        })).profileEvidence;
+    const evidence = [
+      ...retained.filter((record) => complete.some((consumer) =>
+        record.consumingFeatureId === consumer.consumingFeatureId && record.queryIndex === consumer.queryIndex,
+      )),
+      ...fresh,
+    ];
+    partStudios.push({
+      ...studio,
+      profileEvidence: evidence,
+      profileEvidenceManifest: profileEvidenceManifest(consumers, evidence),
+      profileEvidenceSchemaVersion: ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION,
+    });
+  }
+  return requireOnshapeCaptureBundle({ ...validated, partStudios });
+}
+
+function profileEvidenceManifest(
+  consumers: readonly SolidExtrudeProfileQueryConsumer[],
+  evidence: readonly OnshapeProfileEvidence[],
+): OnshapeProfileEvidenceManifestEntry[] {
+  return consumers.map((consumer) => {
+    const records = evidence.filter((record) =>
+      record.consumingFeatureId === consumer.consumingFeatureId &&
+      record.parameterId === "entities" &&
+      record.queryIndex === consumer.queryIndex &&
+      record.evaluatedAt === "historyPoint",
+    );
+    return {
+      consumingFeatureId: consumer.consumingFeatureId,
+      parameterId: "entities",
+      queryIndex: consumer.queryIndex,
+      sourceQueryString: consumer.queryString,
+      kind: records.length === 1 && records[0]?.kind === "sketchRegionSet"
+        ? "sketchRegionSet"
+        : records.length === 1 && records[0]?.kind === "unresolved" && !("resultIndex" in records[0])
+          ? "unresolved"
+          : "faceResults",
+      emittedRecordCount: records.length,
+      completed: true,
+    };
+  });
+}
+
 function selectPartStudios(
   elements: unknown,
   elementId: string | null,
@@ -201,7 +345,7 @@ async function createRollbackWorkspace(
             severity: "warning",
             code: "onshape-rollback-workspace-unavailable",
             message:
-              "Onshape returned HTTP 403 while creating the temporary rollback workspace; capture degraded to final-state-only references and no rollback snapshots.",
+              "Onshape returned HTTP 403 while creating the temporary rollback workspace; immutable evidence capture continues, but rollback snapshots are unavailable.",
           },
         ],
       };
@@ -230,18 +374,49 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function evaluateImmutableEvidence(
+  client: OnshapeClient,
+  partStudioPath: string,
+  rollbackBarIndex: number,
+  script: string,
+  cache: ImmutableFeatureScriptEvidenceCache | undefined,
+  identity: {
+    baseUrl: string;
+    apiVersion: string;
+    documentId: string;
+    microversion: string;
+    elementId: string;
+  },
+): Promise<unknown> {
+  const key = immutableFeatureScriptEvidenceCacheKey({
+    evidenceSchemaVersion: ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION,
+    ...identity,
+    rollbackBarIndex,
+    script,
+  });
+  const cached = cache?.get(key);
+  if (cached !== undefined) return cached;
+  const response = await client.postJson(
+    `${partStudioPath}/featurescript?rollbackBarIndex=${rollbackBarIndex}`,
+    { script },
+  );
+  cache?.set(key, response);
+  return response;
+}
+
 async function captureStudio(
   client: OnshapeClient,
   ref: OnshapeDocumentRef,
   studio: RawElement,
-  runtime: CaptureRuntime,
-  options: Pick<CaptureOptions, "maxTranslationPolls" | "rollbackSnapshots">,
-  rollbackWorkspaceId: string | null,
+  options: Pick<CaptureOptions, "rollbackSnapshots" | "evidenceCache">,
+  immutableEvidenceIdentity: {
+    baseUrl: string;
+    apiVersion: string;
+    documentId: string;
+    microversion: string;
+  },
 ): Promise<OnshapePartStudioCapture> {
   const studioPath = `/partstudios/d/${ref.documentId}/${ref.wvm}/${ref.wvmId}/e/${studio.id}`;
-  const rollbackStudioPath = rollbackWorkspaceId
-    ? `/partstudios/d/${ref.documentId}/w/${rollbackWorkspaceId}/e/${studio.id}`
-    : null;
   const partsPath = `/parts/d/${ref.documentId}/${ref.wvm}/${ref.wvmId}/e/${studio.id}`;
 
   const features = await client.getJson(
@@ -253,53 +428,25 @@ async function captureStudio(
   const parts = await client.getJson(partsPath);
   const featureSpecs = await captureFeatureSpecs(client, studioPath);
 
-  const deterministicIdConsumers = collectDeterministicIdConsumers(features);
-  const deterministicIds = collectDeterministicIds(features);
-  const queryStringConsumers = collectQueryStringConsumers(features);
-  const solidExtrudeProfileQueryConsumers =
-    collectSolidExtrudeProfileQueryConsumers(features);
-  const resolvedReferences = rollbackStudioPath
-    ? await resolveDeterministicIdsWithHistory(
-        client,
-        studioPath,
-        rollbackStudioPath,
-        deterministicIdConsumers,
-      )
-    : await resolveDeterministicIds(client, studioPath, deterministicIds);
-  const resolvedQueryReferences = rollbackStudioPath
-    ? await resolveQueryStringsWithHistory(client, studioPath, queryStringConsumers)
-    : [];
-  const profileEvidence = rollbackStudioPath
-    ? await resolveSolidExtrudeProfileEvidenceWithHistory(
-        client,
-        studioPath,
-        solidExtrudeProfileQueryConsumers,
-      )
-    : [];
-
-  const groundTruth = await captureGroundTruth(client, {
-    documentId: ref.documentId,
-    wvm: ref.wvm,
-    wvmId: ref.wvmId,
-    elementId: studio.id,
-    studioPath,
-    parts,
-    sleep: runtime.sleep,
-    maxTranslationPolls: options.maxTranslationPolls,
+  const profileConsumers = collectSolidExtrudeProfileQueryConsumers(features);
+  const evidence = await resolveImmutableHistoryEvidence({
+    client,
+    partStudioPath: studioPath,
+    deterministicIdConsumers: collectDeterministicIdConsumers(features),
+    queryStringConsumers: collectQueryStringConsumers(features),
+    profileConsumers,
+    evaluate: (rollbackBarIndex, script) => evaluateImmutableEvidence(
+      client,
+      studioPath,
+      rollbackBarIndex,
+      script,
+      options.evidenceCache,
+      { ...immutableEvidenceIdentity, elementId: studio.id },
+    ),
   });
 
-  const rollbackSnapshots =
-    options.rollbackSnapshots && rollbackStudioPath
-      ? await captureRollbackSnapshots(
-          client,
-          ref,
-          studio.id,
-          rollbackStudioPath,
-          features,
-          runtime,
-          options,
-        )
-      : null;
+  const groundTruth = captureBoundaryOnlyGroundTruth(parts);
+  const rollbackSnapshots = options.rollbackSnapshots ? [] : null;
 
   return {
     elementId: studio.id,
@@ -308,9 +455,11 @@ async function captureStudio(
     sketches,
     parts,
     featureSpecs,
-    resolvedReferences,
-    resolvedQueryReferences,
-    profileEvidence,
+    resolvedReferences: evidence.resolvedReferences,
+    resolvedQueryReferences: evidence.resolvedQueryReferences,
+    profileEvidence: evidence.profileEvidence,
+    profileEvidenceManifest: profileEvidenceManifest(profileConsumers, evidence.profileEvidence),
+    profileEvidenceSchemaVersion: ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION,
     groundTruth,
     rollbackSnapshots,
   };
@@ -321,13 +470,13 @@ async function captureRollbackSnapshots(
   ref: OnshapeDocumentRef,
   elementId: string,
   rollbackStudioPath: string,
-  features: unknown,
+  points: readonly SolidFeatureRollbackPoint[],
   runtime: CaptureRuntime,
   options: Pick<CaptureOptions, "maxTranslationPolls">,
 ): Promise<OnshapeRollbackSnapshot[]> {
   const snapshots: OnshapeRollbackSnapshot[] = [];
   const rollbackThrottleMs = 5_000;
-  for (const point of collectSolidFeatureRollbackPoints(features)) {
+  for (const point of points) {
     await runtime.sleep(rollbackThrottleMs);
     await client.postJson(`${rollbackStudioPath}/features/rollback`, {
       rollbackIndex: point.rollbackIndex,
@@ -359,28 +508,37 @@ async function captureRollbackSnapshots(
   return snapshots;
 }
 
-function collectSolidFeatureRollbackPoints(features: unknown): SolidFeatureRollbackPoint[] {
+/**
+ * Return only feature boundaries proven locally to be intrinsic bakes. Without
+ * geometry, this scoped capture treats only `bodyType=SURFACE` extrudes as
+ * such boundaries; ordinary feature history must not trigger snapshots.
+ */
+export function collectIntrinsicBakeRollbackPoints(features: unknown): SolidFeatureRollbackPoint[] {
   const featureList = (features as { features?: unknown }).features;
-  if (!Array.isArray(featureList)) {
-    return [];
-  }
+  if (!Array.isArray(featureList)) return [];
 
-  const points: SolidFeatureRollbackPoint[] = [];
-  featureList.forEach((feature, index) => {
-    if (!feature || typeof feature !== "object") {
-      return;
-    }
-    const record = feature as { featureId?: unknown; featureType?: unknown };
-    if (
+  return featureList.flatMap((feature, index) => {
+    if (!feature || typeof feature !== "object") return [];
+    const record = feature as {
+      featureId?: unknown;
+      featureType?: unknown;
+      parameters?: unknown;
+    };
+    const bodyType = Array.isArray(record.parameters)
+      ? record.parameters.find(
+          (parameter) =>
+            parameter &&
+            typeof parameter === "object" &&
+            (parameter as { parameterId?: unknown }).parameterId === "bodyType",
+        ) as { value?: unknown } | undefined
+      : undefined;
+    return record.featureType === "extrude" &&
       typeof record.featureId === "string" &&
       record.featureId.length > 0 &&
-      typeof record.featureType === "string" &&
-      record.featureType !== "newSketch"
-    ) {
-      points.push({ featureId: record.featureId, rollbackIndex: index + 1 });
-    }
+      bodyType?.value === "SURFACE"
+      ? [{ featureId: record.featureId, rollbackIndex: index + 1 }]
+      : [];
   });
-  return points;
 }
 
 /**

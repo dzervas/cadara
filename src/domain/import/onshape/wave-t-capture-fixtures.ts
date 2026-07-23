@@ -146,6 +146,29 @@ function syntheticExtrudeProfileEvidence(features: Record<string, unknown>[]) {
   });
 }
 
+function syntheticProfileEvidenceManifest(features: Record<string, unknown>[]) {
+  return features.flatMap((feature) => {
+    if (feature.featureType !== "extrude" || typeof feature.featureId !== "string") return [];
+    const entities = (feature.parameters as Record<string, unknown>[] | undefined)?.find(
+      (parameter) => parameter.parameterId === "entities",
+    );
+    return Array.isArray(entities?.queries) ? entities.queries.flatMap((query, queryIndex) => {
+      const sourceQueryString = typeof (query as { queryString?: unknown }).queryString === "string"
+        ? (query as { queryString: string }).queryString
+        : null;
+      return sourceQueryString?.includes("qSketchRegion") ? [{
+        consumingFeatureId: feature.featureId,
+        parameterId: "entities" as const,
+        queryIndex,
+        sourceQueryString,
+        kind: "faceResults" as const,
+        emittedRecordCount: 1,
+        completed: true as const,
+      }] : [];
+    }) : [];
+  });
+}
+
 function studio(
   elementId: string,
   name: string,
@@ -176,6 +199,8 @@ function studio(
     ],
     resolvedQueryReferences,
     profileEvidence: syntheticExtrudeProfileEvidence(features),
+    profileEvidenceSchemaVersion: 3,
+    profileEvidenceManifest: syntheticProfileEvidenceManifest(features),
     groundTruth: { hasBodies: false },
     rollbackSnapshots: [],
   };

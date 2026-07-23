@@ -1,11 +1,13 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 
 import type { CliEnv, CliIO, CommandModule, CommandResult } from "@/cli/types";
 import {
   captureBundle,
+  enrichBundleProfileEvidence,
   type CaptureRuntime,
 } from "@/cli/commands/onshape-capture/capture";
 import { parseDocumentUrl } from "@/cli/commands/onshape-capture/url";
+import { requireOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
 
 /** Version stamped into capture provenance. */
 export const ONSHAPE_CAPTURE_CLI_VERSION = "0.0.1";
@@ -16,6 +18,7 @@ const TRANSLATION_MAX_POLLS_VAR = "ONSHAPE_TRANSLATION_MAX_POLLS";
 
 const USAGE =
   "Usage: cadara onshape capture [--rollback-snapshots] <onshape-document-url> [output-file]\n" +
+  "       cadara onshape capture --enrich <input-file> [output-file]\n" +
   `Requires ${ACCESS_KEY_VAR} and ${SECRET_KEY_VAR} in the environment.`;
 
 function defaultOutputPath(documentId: string): string {
@@ -44,10 +47,19 @@ export const onshapeCaptureCommand: CommandModule = {
   description: "Capture an Onshape document into an offline import bundle.",
 
   async run(argv: string[], env: CliEnv, io: CliIO): Promise<CommandResult> {
-    const rollbackSnapshots = argv.includes("--rollback-snapshots");
-    const positional = argv.filter((arg) => arg !== "--rollback-snapshots");
+    const rollbackSnapshotCount = argv.filter((arg) => arg === "--rollback-snapshots").length;
+    const enrichCount = argv.filter((arg) => arg === "--enrich").length;
+    const rollbackSnapshots = rollbackSnapshotCount === 1;
+    const enrichIndex = argv.indexOf("--enrich");
+    const positional = argv.filter((arg) => arg !== "--rollback-snapshots" && arg !== "--enrich");
     const [url, outArg, extraArg] = positional;
-    if (!url || extraArg) {
+    if (
+      !url ||
+      extraArg ||
+      rollbackSnapshotCount > 1 ||
+      enrichCount > 1 ||
+      (enrichIndex >= 0 && (rollbackSnapshots || enrichIndex !== 0))
+    ) {
       return { ok: false, kind: "usage", message: USAGE };
     }
 
@@ -69,14 +81,16 @@ export const onshapeCaptureCommand: CommandModule = {
     }
 
     let ref;
-    try {
-      ref = parseDocumentUrl(url);
-    } catch (error) {
-      return {
-        ok: false,
-        kind: "usage",
-        message: error instanceof Error ? error.message : String(error),
-      };
+    if (enrichIndex < 0) {
+      try {
+        ref = parseDocumentUrl(url);
+      } catch (error) {
+        return {
+          ok: false,
+          kind: "usage",
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
 
     const runtime: CaptureRuntime = {
@@ -101,8 +115,20 @@ export const onshapeCaptureCommand: CommandModule = {
     }
 
     try {
+      if (enrichIndex >= 0) {
+        const input = requireOnshapeCaptureBundle(JSON.parse(await readFile(url, "utf8")));
+        const bundle = await enrichBundleProfileEvidence(
+          input,
+          { accessKey, secretKey, maxTranslationPolls: maxTranslationPolls ?? undefined },
+          runtime,
+        );
+        const outputPath = outArg ?? url;
+        await writeFile(outputPath, JSON.stringify(requireOnshapeCaptureBundle(bundle)));
+        io.stdout(`Enriched ${bundle.partStudios.length} Part Studio(s) to ${outputPath}\n`);
+        return { ok: true };
+      }
       const bundle = await captureBundle(
-        ref,
+        ref!,
         {
           accessKey,
           secretKey,
@@ -111,7 +137,7 @@ export const onshapeCaptureCommand: CommandModule = {
         },
         runtime,
       );
-      const outputPath = outArg ?? defaultOutputPath(ref.documentId);
+      const outputPath = outArg ?? defaultOutputPath(ref!.documentId);
       await writeFile(outputPath, JSON.stringify(bundle));
       io.stdout(
         `Captured ${bundle.partStudios.length} Part Studio(s) to ${outputPath}\n`,

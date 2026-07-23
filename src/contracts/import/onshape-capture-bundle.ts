@@ -16,6 +16,9 @@ import {
  */
 export const ONSHAPE_CAPTURE_BUNDLE_FORMAT_VERSION = 2;
 
+/** Current exact-profile evidence contract carried by each freshly captured studio. */
+export const ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION = 3;
+
 /**
  * Workspace / version / microversion selector segment of an Onshape document URL.
  */
@@ -125,11 +128,33 @@ export type OnshapeResolvedQueryReference =
     };
 
 /**
- * Exact pre-consumer evidence for one result of a solid extrude's `entities`
- * query. `deterministicId` is the server-returned transient query identity; it
- * is retained even when the captured query also carried deterministic IDs.
+ * Exact pre-consumer evidence for a solid extrude's `entities` query. Opaque
+ * query results retain transient server identities; readable qSketchRegion
+ * assignments retain their exact local region-set semantics instead.
  */
+export interface OnshapeProfileEvidenceManifestEntry {
+  /** Exact query source owned by this consuming feature/query slot. */
+  consumingFeatureId: string;
+  parameterId: "entities";
+  queryIndex: number;
+  sourceQueryString: string | null;
+  /** The exact profile-evidence shape emitted for this query. */
+  kind: "sketchRegionSet" | "faceResults" | "unresolved";
+  emittedRecordCount: number;
+  completed: true;
+}
+
 export type OnshapeProfileEvidence =
+  | {
+      /** Exact readable qSketchRegion set; no server face witness is needed. */
+      consumingFeatureId: string;
+      parameterId: "entities";
+      queryIndex: number;
+      evaluatedAt: "historyPoint";
+      kind: "sketchRegionSet";
+      sourceSketchFeatureId: string;
+      filterInnerLoops: boolean;
+    }
   | {
       consumingFeatureId: string;
       parameterId: "entities";
@@ -190,7 +215,18 @@ export type OnshapeGroundTruth =
       /** STEP export as text, embedded so import needs no network. */
       step: string;
     }
+  | {
+      hasBodies: true;
+      /** Final geometry was intentionally not captured because no final bake needs it. */
+      omittedReason: "no-final-bake-boundary";
+    }
   | { hasBodies: false };
+
+export function hasOnshapeGroundTruthGeometry(
+  groundTruth: OnshapeGroundTruth,
+): groundTruth is Extract<OnshapeGroundTruth, { tessellatedFaces: unknown }> {
+  return groundTruth.hasBodies && "tessellatedFaces" in groundTruth;
+}
 
 
 /** Geometry captured after a solid feature at its rollback position. */
@@ -228,6 +264,10 @@ export interface OnshapePartStudioCapture {
   resolvedQueryReferences?: OnshapeResolvedQueryReference[];
   /** Exact consumer-indexed selected-face evidence for solid extrude profiles. */
   profileEvidence?: OnshapeProfileEvidence[];
+  /** Optional on v2 bundles produced before profile evidence was versioned. */
+  profileEvidenceSchemaVersion?: number;
+  /** Completion contract binding profile evidence to its exact consumers. */
+  profileEvidenceManifest?: OnshapeProfileEvidenceManifestEntry[];
   /** Final-state ground-truth geometry. */
   groundTruth: OnshapeGroundTruth;
   /** `null` unless v2 snapshot capture was explicitly requested. */
@@ -235,6 +275,47 @@ export interface OnshapePartStudioCapture {
 }
 
 /** Fields shared by v1 and v2 capture envelopes. */
+/**
+ * Accept evidence only when a current manifest proves that this exact source
+ * query emitted a complete, non-duplicated record sequence. Older envelopes
+ * deliberately remain structurally valid but are cache/import misses.
+ */
+export function hasCurrentOnshapeProfileEvidence(input: {
+  schemaVersion: number | undefined;
+  manifest: readonly OnshapeProfileEvidenceManifestEntry[] | undefined;
+  evidence: readonly OnshapeProfileEvidence[] | undefined;
+  consumingFeatureId: string;
+  queryIndex: number;
+  sourceQueryString: string | null;
+}): boolean {
+  if (input.schemaVersion !== ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION || !input.manifest || !input.evidence) {
+    return false;
+  }
+  const entries = input.manifest.filter((entry) =>
+    entry.consumingFeatureId === input.consumingFeatureId &&
+    entry.parameterId === "entities" &&
+    entry.queryIndex === input.queryIndex,
+  );
+  if (entries.length !== 1 || entries[0]?.sourceQueryString !== input.sourceQueryString) return false;
+  const entry = entries[0]!;
+  const records = input.evidence.filter((record) =>
+    record.consumingFeatureId === input.consumingFeatureId &&
+    record.parameterId === "entities" &&
+    record.queryIndex === input.queryIndex &&
+    record.evaluatedAt === "historyPoint",
+  );
+  if (!entry.completed || records.length !== entry.emittedRecordCount || records.length === 0) return false;
+  if (entry.kind === "sketchRegionSet") {
+    return records.length === 1 && records[0]?.kind === "sketchRegionSet";
+  }
+  if (entry.kind === "unresolved") {
+    return records.length === 1 && records[0]?.kind === "unresolved" && !("resultIndex" in records[0]!);
+  }
+  return records.every((record, resultIndex) =>
+    record.kind !== "sketchRegionSet" && "resultIndex" in record && record.resultIndex === resultIndex,
+  );
+}
+
 export interface OnshapeCaptureBundleBase {
   provenance: OnshapeCaptureProvenance;
   /** Raw `/documents/{did}` response. */

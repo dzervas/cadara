@@ -68,6 +68,85 @@ function resolve(input: {
   });
 }
 
+test("profile resolver expands a readable exact region set into closed sketch selectors", () => {
+  const result = resolve({
+    parameter: profileParameter("S_SET"),
+    evidence: [{
+      consumingFeatureId: "E_PROFILE",
+      parameterId: "entities",
+      queryIndex: 0,
+      evaluatedAt: "historyPoint",
+      kind: "sketchRegionSet",
+      sourceSketchFeatureId: "S_SET",
+      filterInnerLoops: true,
+    }],
+    solved: [solvedCircle("S_SET", [0, 0, 0])],
+  });
+
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [{ kind: "sketchRegion", sketchFeatureId: "S_SET", interiorPoint: [0, 0] }],
+  });
+});
+
+test("profile resolver expands true qSketchRegion roots for nested circle annuli", () => {
+  const nested = {
+    featureId: "S_SET_NESTED",
+    entities: [
+      ...solvedCircle("S_SET_OUTER", [0, 0, 0], 0.006).entities,
+      ...solvedCircle("S_SET_INNER", [0, 0, 0], 0.002).entities,
+    ],
+  };
+  const result = resolve({
+    parameter: profileParameter("S_SET_NESTED"),
+    evidence: [{
+      consumingFeatureId: "E_PROFILE",
+      parameterId: "entities",
+      queryIndex: 0,
+      evaluatedAt: "historyPoint",
+      kind: "sketchRegionSet",
+      sourceSketchFeatureId: "S_SET_NESTED",
+      filterInnerLoops: true,
+    }],
+    solved: [nested],
+  });
+
+  expect(result).toMatchObject({ tier: "resolved" });
+  expect(result.tier === "resolved" && result.profiles).toHaveLength(1);
+  expect(result.tier === "resolved" && result.profiles[0]).toMatchObject({
+    kind: "sketchRegion", sketchFeatureId: "S_SET_NESTED",
+  });
+});
+
+test("profile resolver fails closed for false qSketchRegion with inner loops", () => {
+  const nested = {
+    featureId: "S_SET_NESTED",
+    entities: [
+      ...solvedCircle("S_SET_OUTER", [0, 0, 0], 0.006).entities,
+      ...solvedCircle("S_SET_INNER", [0, 0, 0], 0.002).entities,
+    ],
+  };
+  const result = resolve({
+    parameter: profileParameter("S_SET_NESTED"),
+    evidence: [{
+      consumingFeatureId: "E_PROFILE",
+      parameterId: "entities",
+      queryIndex: 0,
+      evaluatedAt: "historyPoint",
+      kind: "sketchRegionSet",
+      sourceSketchFeatureId: "S_SET_NESTED",
+      filterInnerLoops: false,
+    }],
+    solved: [nested],
+  });
+
+  expect(result).toMatchObject({
+    tier: "unresolved",
+    reason: "needs-region-resolution",
+    diagnostics: [{ code: "onshape-region-set-inner-loops-unresolved" }],
+  });
+});
+
 test("profile resolver selects only the captured subset, never all closed regions", () => {
   const result = resolve({
     parameter: profileParameter("S_LEFT"),

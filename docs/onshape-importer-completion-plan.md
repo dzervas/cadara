@@ -675,14 +675,14 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
   Local plan dumps confirm 9841 and d3cd9 `Extrude 4` stay baked with the new
   reason while 5151 `Extrude 4` remains correctly parametric because it is a
   solid remove. Changed-file lint and the production build are green.
-- [ ] X.3 **Refresh local capture evidence.** Recapture all five root bundles with
-      rollback snapshots using the landed geometry-ID, rollback-query, and X.4
-      consumer-profile capture paths. Verify format v2, complete rollback
-      coverage, expected `resolvedQueryReferences`, and complete
-      `profileEvidence`; do not commit root capture files. The 2026-07-23 405
-      refresh predates X.4 profile evidence and must be refreshed again. Mounts,
-      5151, 9841, and d3cd9 likewise need profile records for strict import; no
-      compatibility fallback for pre-X.4 captures is permitted.
+- [ ] X.3 **Refresh local capture evidence.** Target-enrich all five root bundles
+      with the current exact-profile evidence schema. Reuse immutable source,
+      deterministic-ID, query-resolution, final-geometry, and existing boundary
+      evidence when its document microversion and element match; request only
+      missing opaque-profile states and proven bake-boundary geometry. Verify format
+      v2, the current complete profile-evidence manifest, expected
+      `resolvedQueryReferences`, and boundary-only rollback coverage; do not commit
+      root capture files. No compatibility fallback for pre-X.4 evidence is permitted.
 
 
       **Partial evidence (API quota blocked).** The 405 bundle was recaptured on
@@ -694,9 +694,12 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       client now honors `Retry-After`, uses bounded 15/30/60-second fallback waits,
       and spaces rollback snapshots by five seconds; capture/client tests pass
       **29/29**, changed-file lint and the build are green. The 9841 recapture then
-      exhausted the account quota with HTTP 402 before producing a file. Retry it
-      after quota reset and ensure temporary workspace
-      `74e39f502861d5b417375498` is deleted before X.3/X.10 completion.
+      exhausted the account quota with HTTP 402 before producing a file. After
+      quota reset, enrich rather than fully recapture the roots, and ensure temporary
+      workspace `74e39f502861d5b417375498` is deleted before X.3/X.10 completion.
+      The quota audit, endpoint-purpose table, and optimized per-bundle budgets are
+      recorded in `docs/onshape-capture-api-budget.md`; capture optimization is
+      intentionally separate from resuming general X.3 importer completion.
 - [ ] X.4 **Exact sketch-region selection.** Replace guessed “all closed regions”
       behavior with captured, consumer-indexed evidence for the exact Onshape
       profile query. Carry enough sketch/region/entity provenance through

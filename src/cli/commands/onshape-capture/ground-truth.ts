@@ -17,8 +17,18 @@ export function partsHaveBodies(parts: unknown): boolean {
 }
 
 /**
+ * Record body presence without final-state geometry. Root capture uses this
+ * boundary-only form; final geometry is reserved for targeted bake boundaries.
+ */
+export function captureBoundaryOnlyGroundTruth(parts: unknown): OnshapeGroundTruth {
+  return partsHaveBodies(parts)
+    ? { hasBodies: true, omittedReason: "no-final-bake-boundary" }
+    : { hasBodies: false };
+}
+
+/**
  * Capture final-state ground truth for a Part Studio: tessellated faces plus a
- * STEP export. Empty Part Studios record the absence of bodies explicitly.
+ * STEP export. Retained for targeted boundary capture and its focused tests.
  */
 export async function captureGroundTruth(
   client: OnshapeClient,

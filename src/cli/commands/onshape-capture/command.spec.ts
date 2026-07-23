@@ -63,6 +63,17 @@ test("command.spec.ts accepts rollback-snapshots as an option before requiring t
   expect(result.ok === false && result.message).toContain("<onshape-document-url>");
 });
 
+test("command.spec.ts rejects duplicate capture flags before credential or network work", async () => {
+  const credentials = envFrom({ ONSHAPE_ACCESS_KEY: "access", ONSHAPE_SECRET_KEY: "secret" });
+  for (const argv of [
+    ["--rollback-snapshots", "--rollback-snapshots", FIXTURE_DOCUMENT_URL],
+    ["--enrich", "--enrich", "capture.json"],
+  ]) {
+    const result = await onshapeCaptureCommand.run(argv, credentials, makeIO());
+    expect(result.ok === false && result.kind).toBe("usage");
+  }
+});
+
 test("command.spec.ts reports a usage error for a bad url before any network work", async () => {
   const result = await onshapeCaptureCommand.run(
     ["not-a-url"],

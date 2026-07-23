@@ -280,6 +280,16 @@ export function makeWaveARevolveBreadthCaptureBundle() {
     sourceSketchFeatureId: "S_BASE",
     interiorPoint3d: [0, 0, 0],
   }];
+  (studio as { profileEvidenceSchemaVersion?: number }).profileEvidenceSchemaVersion = 3;
+  (studio as { profileEvidenceManifest?: unknown }).profileEvidenceManifest = [{
+    consumingFeatureId: "F_BASE",
+    parameterId: "entities",
+    queryIndex: 0,
+    sourceQueryString: 'query = qSketchRegion(id + "S_BASE", true);',
+    kind: "faceResults",
+    emittedRecordCount: 1,
+    completed: true,
+  }];
   studio.sketches.sketches = [
     {
       featureId: "S_BASE",
