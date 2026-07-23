@@ -281,10 +281,17 @@ test("capture.spec.ts captures rollback snapshots only when requested", async ()
   expect(withoutSnapshots.partStudios[0]!.rollbackSnapshots).toBeNull();
 
   const { fetch: snapshotFetch } = createFixtureFetch();
+  const snapshotSleeps: number[] = [];
   const withSnapshots = await captureBundle(
     ref,
     { ...CREDENTIALS, rollbackSnapshots: true },
-    createFixtureRuntime(snapshotFetch),
+    {
+      ...createFixtureRuntime(snapshotFetch),
+      sleep: (ms) => {
+        snapshotSleeps.push(ms);
+        return Promise.resolve();
+      },
+    },
   );
 
   expect(withSnapshots.partStudios[0]!.rollbackSnapshots).toEqual([
@@ -294,6 +301,7 @@ test("capture.spec.ts captures rollback snapshots only when requested", async ()
       step: expect.stringContaining("ISO-10303-21"),
     }),
   ]);
+  expect(snapshotSleeps).toContain(5_000);
 });
 
 test("capture.spec.ts empty Part Studio records absence of bodies explicitly", async () => {
@@ -388,13 +396,9 @@ test("capture.spec.ts retries with backoff on HTTP 429 before succeeding", async
   });
 
   expect(attempts, "Should retry the 429 responses before succeeding.").toBe(3);
-  // First two sleeps are the exponential backoff on the retried endpoint
+  // First two sleeps are the bounded rate-limit backoff on the retried endpoint
   // (later sleeps belong to STEP translation polling).
-  expect(sleeps[0], "First backoff delay should be the base delay.").toBe(250);
-  expect(
-    sleeps[1]! > sleeps[0]!,
-    "Backoff delay should grow exponentially.",
-  ).toBeTruthy();
+  expect(sleeps.slice(0, 2)).toEqual([15_000, 30_000]);
   expect(
     calls.filter((call) => call.url.includes("/features")).length,
   ).toBeGreaterThanOrEqual(3);
