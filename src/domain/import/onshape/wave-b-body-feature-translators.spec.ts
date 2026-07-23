@@ -36,6 +36,7 @@ import {
 } from "@/domain/import/onshape/provider";
 import { makeWaveTMirrorTransformCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
 import { makeWaveXChamferAndImplicitUnionCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
+import { makeWaveXPatternMirrorCaptureBundle } from "@/domain/import/onshape/wave-x-pattern-mirror-capture-fixtures";
 import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
 
 const query = (id: string) => ({
@@ -420,6 +421,82 @@ describe("Wave B body topology translators", () => {
       featureKind: "mirror",
       options: { copy: true },
       staticParticipants: [{ role: "plane", targets: [{ kind: "construction", constructionId: "construction_plane-xy" }] }],
+    });
+  });
+
+  test("retains captured FeatureList seed dependencies and prepares only the exact PART+ADD mirror", async () => {
+    const source: ResolvedImportSource = {
+      name: "wave-x-pattern-mirror.onshape-capture.json",
+      origin: { kind: "localFile", fileName: "wave-x-pattern-mirror.onshape-capture.json" },
+      mediaType: "application/json",
+      bytes: new TextEncoder().encode(JSON.stringify(makeWaveXPatternMirrorCaptureBundle())),
+      fingerprint: `sha256:${"b".repeat(64)}`,
+    };
+    const partAddCapabilities: ImportCapabilities = {
+      ...providerCapabilities,
+      history: {
+        async evaluateHistoryProbe(input) {
+          const signatures = [{
+            entityClass: "body" as const,
+            geometryType: "solid",
+            boundingBox: { low: [0, 0, 0] as [number, number, number], high: [4, 4, 4] as [number, number, number] },
+            centroid: [2, 2, 2] as [number, number, number],
+            reference: { kind: "body" as const, bodyId: "body_part-1" as never },
+          }];
+          return {
+            steps: Array.from(
+              { length: Math.max(1, input.actions.orderedActions?.length ?? 0) },
+              () => ({ status: "rebuilt" as const, signatures }),
+            ),
+          };
+        },
+      },
+    };
+    const review = await onshapeImportProvider.review({ source, capabilities: partAddCapabilities });
+    const featurePatterns = review.providerReview.studios.find(
+      (studio) => studio.elementId === "wave-x-feature-patterns",
+    )?.featurePlans;
+    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "LINEAR_1")).toMatchObject({
+      reasonCodes: expect.arrayContaining(["pattern-feature-seed-unsupported"]),
+      inputFeatureIds: ["EXTRUDE_6"],
+    });
+    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "LINEAR_2")).toMatchObject({
+      reasonCodes: expect.arrayContaining(["pattern-feature-seed-unsupported"]),
+      inputFeatureIds: ["EXTRUDE_7"],
+    });
+    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "FEATURE_MIRROR")).toMatchObject({
+      reasonCodes: expect.arrayContaining(["mirror-operation-unsupported"]),
+      inputFeatureIds: ["EXTRUDE_6", "LINEAR_1", "EXTRUDE_7", "LINEAR_2"],
+    });
+
+    const partAddStudio = review.providerReview.studios.find(
+      (studio) => studio.elementId === "wave-x-part-add-mirror",
+    );
+    expect(partAddStudio?.featurePlans).toEqual([expect.objectContaining({
+      tier: "parametric",
+      reasonCodes: [],
+      plannedAdvancedSolid: expect.objectContaining({
+        kind: "mirror",
+        parameters: expect.objectContaining({ operationIntent: { source: "literal", value: "add" } }),
+      }),
+    })]);
+    const actions = await onshapeImportProvider.prepare({
+      source,
+      review,
+      selections: { studioElementId: "wave-x-part-add-mirror", demotedFeatureIds: [] },
+      capabilities: partAddCapabilities,
+    });
+    const validation = validateImportPreparedActions(actions);
+    expect(validation.success, JSON.stringify(validation)).toBe(true);
+    expect(actions.createFeatures?.[0]?.definition).toMatchObject({
+      kind: "mirror",
+      parameters: {
+        operationIntent: { source: "literal", value: "add" },
+        participants: expect.arrayContaining([
+          { role: "body", targets: [expect.objectContaining({ kind: "topologyOf", source: expect.objectContaining({ deterministicId: "BODY_SOURCE" }) })] },
+          { role: "targetBody", targets: [expect.objectContaining({ kind: "topologyOf", source: expect.objectContaining({ deterministicId: "BODY_SOURCE" }) })] },
+        ]),
+      },
     });
   });
 

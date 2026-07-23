@@ -121,6 +121,13 @@ function angleDegrees(feature: OnshapeFeatureNode, id: string): number | null {
 function canonicalPlane(feature: OnshapeFeatureNode, parameterId: string, context: Parameters<OnshapeFeatureTranslator["plan"]>[0]) {
   const queries = parameter(feature, parameterId)?.queries;
   if (!Array.isArray(queries) || queries.length !== 1) return null;
+  const queryString = (queries[0] as { queryString?: unknown }).queryString;
+  if (typeof queryString === "string" && /RightplaneOp/i.test(queryString)) {
+    return {
+      kind: "construction" as const,
+      constructionId: "construction_plane-yz" as ConstructionId,
+    };
+  }
   const ids = (queries[0] as { deterministicIds?: unknown }).deterministicIds;
   if (!Array.isArray(ids) || ids.length !== 1 || typeof ids[0] !== "string") return null;
   const reference = context.references.get(ids[0])?.find(
@@ -230,13 +237,22 @@ function slot(key: string, parameterId: string, role: TopologyQuerySlot["role"],
   return { key, parameterId, role, expectedKinds, cardinality: { min, max } };
 }
 
-function baked(context: Parameters<OnshapeFeatureTranslator["plan"]>[0], reason: import("@/domain/import/onshape/fidelity-planner").PlanReasonCode, planned?: PlannedBodyTopologyConsumer) {
+function baked(
+  context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
+  reason: import("@/domain/import/onshape/fidelity-planner").PlanReasonCode,
+  planned?: PlannedBodyTopologyConsumer,
+  declaredDependencies: readonly FeatureDependencyInput[] = [],
+) {
   const queryDependencies = planned?.slots.map((input) => ({
     kind: "query" as const,
     parameterId: input.parameterId,
     slotKey: input.key,
   })) ?? [];
-  const inputDependencies = [...queryDependencies, ...(planned?.inputDependencies ?? [])];
+  const inputDependencies = [
+    ...queryDependencies,
+    ...(planned?.inputDependencies ?? []),
+    ...declaredDependencies,
+  ];
   return {
     onshapeFeatureId: context.feature.featureId,
     featureType: context.feature.featureType,
@@ -348,14 +364,68 @@ export const transformFeatureTranslator: OnshapeFeatureTranslator = {
   apply: ({ apply }) => apply(),
 };
 
+function featureListIds(feature: OnshapeFeatureNode): string[] {
+  const ids = parameter(feature, "instanceFunction")?.featureIds;
+  return Array.isArray(ids)
+    ? ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+}
+
+function featurePatternDependencies(feature: OnshapeFeatureNode): FeatureDependencyInput[] {
+  return featureListIds(feature).map((featureId) => ({
+    kind: "body" as const,
+    featureId,
+  }));
+}
+
+function sameSingleDeterministicId(feature: OnshapeFeatureNode, leftId: string, rightId: string): boolean {
+  const singleId = (parameterId: string) => {
+    const queries = parameter(feature, parameterId)?.queries;
+    if (!Array.isArray(queries) || queries.length !== 1) return null;
+    const ids = (queries[0] as { deterministicIds?: unknown }).deterministicIds;
+    return Array.isArray(ids) && ids.length === 1 && typeof ids[0] === "string"
+      ? ids[0]
+      : null;
+  };
+  const left = singleId(leftId);
+  return left !== null && left === singleId(rightId);
+}
+
 export const mirrorFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["mirror"],
   plan(context) {
     const patternType = enumValue(context.feature, "patternType") ?? "PART";
     const operation = enumValue(context.feature, "operationType") ?? "NEW";
-    if (patternType !== "PART" || operation !== "NEW") return baked(context, "mirror-operation-unsupported");
+    if (patternType === "FEATURE") {
+      return baked(
+        context,
+        "mirror-operation-unsupported",
+        undefined,
+        featurePatternDependencies(context.feature),
+      );
+    }
+    if (patternType !== "PART") return baked(context, "mirror-operation-unsupported");
     const plane = planeReference(context.feature, "mirrorPlane", context);
     if (!plane) return baked(context, "mirror-plane-unresolved");
+    if (operation === "ADD") {
+      // The captured PART+ADD form selects the same single body as both source
+      // and boolean target. Preserve that exact relation rather than inferring a
+      // target from the prefix or accepting a broader mirror-boolean family.
+      if (!sameSingleDeterministicId(context.feature, "entities", "booleanScope")) {
+        return baked(context, "mirror-operation-unsupported");
+      }
+      return topologyCandidate(context, {
+        featureKind: "mirror",
+        operationIntent: "add",
+        options: { copy: true },
+        staticParticipants: [{ role: "plane", targets: [plane] }],
+        slots: [
+          slot("bodies", "entities", "body", 1, 1),
+          slot("targetBody", "booleanScope", "targetBody", 1, 1),
+        ],
+      });
+    }
+    if (operation !== "NEW") return baked(context, "mirror-operation-unsupported");
     return topologyCandidate(context, {
       featureKind: "mirror",
       options: { copy: true },
@@ -397,6 +467,14 @@ export const linearPatternFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["linearPattern"],
   plan(context) {
     const patternType = enumValue(context.feature, "patternType") ?? "PART";
+    if (patternType === "FEATURE") {
+      return baked(
+        context,
+        "pattern-feature-seed-unsupported",
+        undefined,
+        featurePatternDependencies(context.feature),
+      );
+    }
     if (patternType !== "PART") return baked(context, patternTypeUnsupportedReason(patternType));
     const operation = enumValue(context.feature, "operationType") ?? "NEW";
     if (operation !== "NEW") return baked(context, "pattern-operation-unsupported");

@@ -739,6 +739,29 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       or lower to ordered existing operations only when seed, output, target,
       and replacement lineage are exact. Preserve upstream edit dependency; do
       not broaden to curve/face/table/skipped-instance pattern families.
+
+  **Partial (2026-07-25; remains unchecked).** The d3cd9 `PART + ADD` mirror is
+  now a parametric existing-`mirror` operation: both captured queries must name
+  the same singleton deterministic body, the `RightplaneOp` datum maps by its
+  explicit query name, and the OCC executor mirrors then joins that body while
+  retaining the target body identity. The local review plan moves d3cd9 from
+  **19 / 5 / 0** to **20 / 4 / 0** (parametric / baked / geometryOnly); the
+  checked-in synthetic fixture covers translator → provider → ordered apply
+  materialization and the real-OCC join/replacement seam.
+
+  The three 5151 `FEATURE` forms remain honest bakes: Linear pattern 1 has the
+  exact FeatureList seed `[FOKYXKU0uqy9EB3_2]`, Linear pattern 2 has
+  `[F2B5cy3xMm2MHNU_2]`, and Mirror 1 has the ordered seed list
+  `[FOKYXKU0uqy9EB3_2, FNmvaMWuCDIXPZo_2, F2B5cy3xMm2MHNU_2,
+  Fvk35GMOaMRxzg8_2]`. The planner now retains those exact dependencies, but
+  Cadara's existing body-copy pattern/mirror contracts cannot replay a feature
+  operation (including its add target and nested pattern instances) at a new
+  transform while retaining source edit linkage and replacement identity.
+  Lowering them to whole-body copies would be a false representation, so no
+  first-body or geometry-nearest fallback was added. Closing X.7 requires a
+  feature-instance replay contract with exact source-operation/delta lineage;
+  curve, face, table, skipped-instance, and centered variants remain out of
+  scope.
 - [ ] X.8 **Closed-hollow shell without openings.** Implement the captured PS1
       `isHollow=true`, empty-opening, closed-envelope semantics in the existing
       shell contract/executor. It must preserve the outer envelope and produce a

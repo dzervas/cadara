@@ -888,6 +888,52 @@ test("Onshape pattern fixture applies through provider and mock kernel without u
   expect(result.createdEntityIds.featureIds.length).toBeGreaterThan(0);
 });
 
+test("applyImportPreparedActions retains exact source and target roles for a PART+ADD mirror", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const forwarded = recordCreateFeatureInputs(service);
+  const actions: ImportPreparedActions = {
+    createFeatures: [{
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace" as DocumentId,
+      baseRevisionId: "rev_ignored" as RevisionId,
+      featureLabel: "Observed PART+ADD mirror",
+      definition: {
+        kind: "mirror",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: createLiteralAuthoredValue("add"),
+          participants: [
+            { role: "body", targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }] },
+            { role: "targetBody", targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }] },
+            { role: "plane", targets: [{ kind: "construction", constructionId: "construction_plane-yz" as never }] },
+          ],
+          options: { copy: createLiteralAuthoredValue(true) },
+        },
+      },
+    }],
+    orderedActions: [{ kind: "createFeature", index: 0 }],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+
+  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
+  expect(forwarded[0]?.definition).toMatchObject({
+    kind: "mirror",
+    parameters: {
+      operationIntent: { source: "literal", value: "add" },
+      participants: expect.arrayContaining([
+        { role: "body", targets: [{ kind: "body", bodyId: "body_part-1" }] },
+        { role: "targetBody", targets: [{ kind: "body", bodyId: "body_part-1" }] },
+      ]),
+    },
+  });
+});
+
 test("Onshape circular pattern fixture applies through the real OCC import service in four quadrants", async () => {
   const oc = await loadRealOccForImportTest();
   const { service } = createRealOccModelingService(oc);

@@ -37,6 +37,7 @@ import {
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
 import {
+  applyBooleanPolicy,
   resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
   requireUniqueTargetBodies,
@@ -266,18 +267,38 @@ function getMirrorCopyOption(
   return true;
 }
 
+function getMirrorOperation(
+  definition: AdvancedSolidFeatureDefinition & { kind: "mirror" },
+) {
+  const operationIntent = definition.parameters.operationIntent === undefined
+    ? undefined
+    : getAuthoredLiteralValue(definition.parameters.operationIntent);
+  if (operationIntent === undefined) return "newBody" as const;
+  if (operationIntent === "add") return "add" as const;
+  throw new Error(
+    "advanced-feature-unsupported-kernel-case: OCC mirror supports only add operation intent.",
+  );
+}
+
+function getMirrorAddTarget(
+  definition: AdvancedSolidFeatureDefinition & { kind: "mirror" },
+) {
+  const targets = getAdvancedParticipant(definition, "targetBody")?.targets ?? [];
+  if (targets.length !== 1 || targets[0]?.kind !== "body") {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC mirror add requires exactly one body target.",
+    );
+  }
+  return targets[0];
+}
+
 export function executeMirrorFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
   definition: AdvancedSolidFeatureDefinition & { kind: "mirror" },
 ): OccFeatureExecutionResult {
-  if (definition.parameters.operationIntent !== undefined) {
-    throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC mirror does not support operation intents.",
-    );
-  }
-
   getMirrorCopyOption(definition);
+  const operation = getMirrorOperation(definition);
   const bodyTargets = getMirrorBodyTargets(definition);
   requireUniqueTargetBodies(bodyTargets.map((target) => target.bodyId));
   const planeTarget = getMirrorPlaneTarget(definition);
@@ -288,6 +309,50 @@ export function executeMirrorFeature(
   );
   const mirror = new context.oc.gp_Trsf_1();
   mirror.SetMirror_3(buildMirrorAxisPlane(context, plane));
+
+  if (operation === "add") {
+    const target = getMirrorAddTarget(definition);
+    if (bodyTargets.length !== 1 || bodyTargets[0]?.bodyId !== target.bodyId) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC mirror add requires one source body identical to its target.",
+      );
+    }
+    const sourceBody = requireBody(context, target.bodyId);
+    const transform = new context.oc.BRepBuilderAPI_Transform_2(
+      sourceBody.shape,
+      mirror,
+      true,
+    );
+    const progress = new context.oc.Message_ProgressRange_1();
+    try {
+      transform.Build(progress);
+      if (!transform.IsDone()) {
+        throw new Error(
+          "advanced-feature-unsupported-kernel-case: OCC mirror add transform build failed.",
+        );
+      }
+      const joined = applyBooleanPolicy(
+        context,
+        ownerFeatureId,
+        "join",
+        { kind: "targetBody", bodyId: target.bodyId },
+        transform.Shape(),
+      );
+      return {
+        bodies: joined.bodies,
+        constructions: [...context.constructions],
+        constructionPlanes: new Map(context.constructionPlanes),
+        producedTargets: joined.producedTargets,
+        entities: [],
+        renderRecords: [],
+        historyInvalidations: joined.historyInvalidations,
+      };
+    } finally {
+      deleteOccObject(progress);
+      deleteOccObject(transform);
+      deleteOccObject(mirror);
+    }
+  }
 
   const mirroredBodies: OccTrackedBody[] = [];
   for (const [index, bodyTarget] of bodyTargets.entries()) {
