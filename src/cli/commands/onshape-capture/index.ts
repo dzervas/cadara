@@ -8,10 +8,12 @@ import {
 } from "@/cli/commands/onshape-capture/capture";
 import { parseDocumentUrl } from "@/cli/commands/onshape-capture/url";
 import { requireOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
+import type { OnshapeCredentials } from "@/cli/commands/onshape-capture/client";
 
 /** Version stamped into capture provenance. */
 export const ONSHAPE_CAPTURE_CLI_VERSION = "0.0.1";
 
+const COOKIE_ON_VAR = "ONSHAPE_COOKIE_ON";
 const ACCESS_KEY_VAR = "ONSHAPE_ACCESS_KEY";
 const SECRET_KEY_VAR = "ONSHAPE_SECRET_KEY";
 const TRANSLATION_MAX_POLLS_VAR = "ONSHAPE_TRANSLATION_MAX_POLLS";
@@ -19,7 +21,7 @@ const TRANSLATION_MAX_POLLS_VAR = "ONSHAPE_TRANSLATION_MAX_POLLS";
 const USAGE =
   "Usage: cadara onshape capture [--rollback-snapshots] <onshape-document-url> [output-file]\n" +
   "       cadara onshape capture --enrich <input-file> [output-file]\n" +
-  `Requires ${ACCESS_KEY_VAR} and ${SECRET_KEY_VAR} in the environment.`;
+  `Requires ${COOKIE_ON_VAR}, or both ${ACCESS_KEY_VAR} and ${SECRET_KEY_VAR}, in the environment.`;
 
 function defaultOutputPath(documentId: string): string {
   return `${documentId}.onshape-capture.json`;
@@ -37,10 +39,10 @@ function parsePositiveIntegerEnv(value: string | undefined, variableName: string
 }
 
 /**
- * `cadara onshape capture <url> [out]` — authenticate with Onshape API keys
- * from the environment, capture a document into a single bundle file, and write
- * it only after the bundle validates. Credential and URL problems are reported
- * as usage errors before any network request is made.
+ * `cadara onshape capture <url> [out]` — authenticate with the Onshape `on`
+ * cookie or API keys from the environment, capture a document into a single
+ * bundle file, and write it only after the bundle validates. Credential and URL
+ * problems are reported as usage errors before any network request is made.
  */
 export const onshapeCaptureCommand: CommandModule = {
   name: "onshape capture",
@@ -63,21 +65,28 @@ export const onshapeCaptureCommand: CommandModule = {
       return { ok: false, kind: "usage", message: USAGE };
     }
 
-    const accessKey = env(ACCESS_KEY_VAR);
-    const secretKey = env(SECRET_KEY_VAR);
-    if (!accessKey) {
-      return {
-        ok: false,
-        kind: "usage",
-        message: `Missing required environment variable ${ACCESS_KEY_VAR}.`,
-      };
-    }
-    if (!secretKey) {
-      return {
-        ok: false,
-        kind: "usage",
-        message: `Missing required environment variable ${SECRET_KEY_VAR}.`,
-      };
+    const cookieOn = env(COOKIE_ON_VAR);
+    let credentials: OnshapeCredentials;
+    if (cookieOn) {
+      credentials = { cookieOn };
+    } else {
+      const accessKey = env(ACCESS_KEY_VAR);
+      const secretKey = env(SECRET_KEY_VAR);
+      if (!accessKey) {
+        return {
+          ok: false,
+          kind: "usage",
+          message: `Missing required environment variable ${COOKIE_ON_VAR} or ${ACCESS_KEY_VAR}.`,
+        };
+      }
+      if (!secretKey) {
+        return {
+          ok: false,
+          kind: "usage",
+          message: `Missing required environment variable ${COOKIE_ON_VAR} or ${SECRET_KEY_VAR}.`,
+        };
+      }
+      credentials = { accessKey, secretKey };
     }
 
     let ref;
@@ -119,7 +128,7 @@ export const onshapeCaptureCommand: CommandModule = {
         const input = requireOnshapeCaptureBundle(JSON.parse(await readFile(url, "utf8")));
         const bundle = await enrichBundleProfileEvidence(
           input,
-          { accessKey, secretKey, maxTranslationPolls: maxTranslationPolls ?? undefined },
+          { ...credentials, maxTranslationPolls: maxTranslationPolls ?? undefined },
           runtime,
         );
         const outputPath = outArg ?? url;
@@ -130,8 +139,7 @@ export const onshapeCaptureCommand: CommandModule = {
       const bundle = await captureBundle(
         ref!,
         {
-          accessKey,
-          secretKey,
+          ...credentials,
           maxTranslationPolls: maxTranslationPolls ?? undefined,
           rollbackSnapshots,
         },

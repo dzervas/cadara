@@ -43,6 +43,33 @@ test("client.spec.ts sends HTTP Basic auth but never leaks it into errors", asyn
   ).toBe(false);
 });
 
+test("client.spec.ts sends only the Onshape on cookie when cookie credentials are selected", async () => {
+  for (const [cookieOn, expected] of [
+    ["cookie-value", "on=cookie-value"],
+    ["on=cookie-value", "on=cookie-value"],
+  ] as const) {
+    let seenHeaders: Record<string, string> | undefined;
+    const fetch: FetchLike = (_url, init) => {
+      seenHeaders = init?.headers;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve("{}"),
+      });
+    };
+    const client = new OnshapeClient({
+      baseUrl: "https://cad.onshape.com/api/v10",
+      cookieOn,
+      fetch,
+      sleep: NO_SLEEP,
+    });
+
+    await expect(client.getJson("/documents/x")).resolves.toEqual({});
+    expect(seenHeaders?.Cookie).toBe(expected);
+    expect(seenHeaders?.Authorization).toBeUndefined();
+  }
+});
+
 test("client.spec.ts retries 5xx within the retry budget then throws", async () => {
   let calls = 0;
   const fetch: FetchLike = () => {
