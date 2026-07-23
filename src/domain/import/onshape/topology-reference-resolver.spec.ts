@@ -4,6 +4,7 @@ import type { HistoryProbeTopologySignature } from "@/contracts/import/capabilit
 import type { OnshapeResolvedReference } from "@/contracts/import/onshape-capture-bundle";
 import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
 import {
+  resolveImplicitUnionTarget,
   resolveTopologyReferences,
   resolveUniquePrefixBody,
   type ResolveTopologyReferencesInput,
@@ -93,6 +94,63 @@ const liveBody = (bodyId: string): HistoryProbeTopologySignature => ({
   boundingBox: { low: [0, 0, 0], high: [10, 10, 10] },
   centroid: [5, 5, 5],
   reference: { kind: "body", bodyId: bodyId as never },
+});
+
+test("resolves an implicit UNION target only when exact tool lineage leaves one prefix body", () => {
+  const slots: TopologyQuerySlot[] = [
+    { key: "targetBodies", parameterId: "targets", role: "targetBody", expectedKinds: ["body"], cardinality: { min: 1, max: null } },
+    { key: "toolBodies", parameterId: "tools", role: "toolBody", expectedKinds: ["body"], cardinality: { min: 1, max: null } },
+  ];
+  const feature = {
+    featureId: "consumer",
+    featureType: "booleanBodies",
+    parameters: [
+      { parameterId: "targets", queries: [] },
+      { parameterId: "tools", queries: [{ deterministicIds: ["tool"], queryString: "query=tool" }] },
+    ],
+  };
+  const body = (id: string, x: number): HistoryProbeTopologySignature => ({
+    entityClass: "body",
+    geometryType: "solid",
+    boundingBox: { low: [x, 0, 0], high: [x + 1, 1, 1] },
+    centroid: [x + 0.5, 0.5, 0.5],
+    reference: { kind: "body", bodyId: id as never },
+  });
+  const history = (id: string, x: number): OnshapeResolvedReference => ({
+    deterministicId: id,
+    evaluatedAt: "historyPoint",
+    consumingFeatureId: "consumer",
+    signature: {
+      entityClass: "body",
+      geometryType: "solid",
+      boundingBox: { low: [x / 1000, 0, 0], high: [(x + 1) / 1000, 0.001, 0.001] },
+      centroid: [(x + 0.5) / 1000, 0.0005, 0.0005],
+    },
+  });
+  const base = {
+    ...input({
+      queries: [{ consumerFeatureId: "consumer", slotKey: "toolBodies", parameterId: "tools", queryIndex: 0, deterministicId: "tool", queryString: "query=tool", expectedKinds: ["body"] }],
+      capturedReferences: [history("tool", 1)],
+      cadaraSignatures: [body("target", 0), body("tool", 1)],
+    }),
+    feature,
+    slots,
+  };
+  expect(resolveImplicitUnionTarget(base)).toMatchObject({
+    kind: "resolved",
+    bindings: [
+      { query: { slotKey: "targetBodies", deterministicId: "implicit-union-target:target" }, reviewReference: { kind: "body", bodyId: "target" } },
+      { query: { slotKey: "toolBodies" }, reviewReference: { kind: "body", bodyId: "tool" } },
+    ],
+  });
+  expect(resolveImplicitUnionTarget({ ...base, cadaraSignatures: [body("tool", 1)] })).toMatchObject({
+    kind: "degraded",
+    reason: "topology-reference-no-match",
+  });
+  expect(resolveImplicitUnionTarget({ ...base, cadaraSignatures: [body("target-a", 0), body("target-b", 2), body("tool", 1)] })).toMatchObject({
+    kind: "degraded",
+    reason: "topology-reference-ambiguous",
+  });
 });
 
 test("resolves an ID-less singleton body query only when the prefix has exactly one live body", () => {

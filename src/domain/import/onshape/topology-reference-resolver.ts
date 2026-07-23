@@ -300,6 +300,18 @@ export interface ResolveUniquePrefixBodyInput {
   tolerance: TopologyMatchTolerance;
 }
 
+function queryParameter(
+  feature: OnshapeFeatureNode,
+  parameterId: string,
+): { queries?: unknown } | undefined {
+  return (feature.parameters ?? []).find(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { parameterId?: unknown }).parameterId === parameterId,
+  ) as { queries?: unknown } | undefined;
+}
+
 /**
  * Recover a body-only query when Onshape omits geometry IDs but the rebuilt
  * prefix contains exactly one live body. This is identity by cardinality, not
@@ -373,6 +385,122 @@ export function resolveUniquePrefixBody(
       evidence: ["unique-prefix-body"],
       sourceEvidence: "uniquePrefixBody",
     }],
+  };
+}
+
+/**
+ * Recover Onshape UNION's omitted default target only after every explicit tool
+ * resolves to a distinct live prefix body and exactly one other live body
+ * remains. This is set subtraction over exact lineage, never a first-body pick.
+ */
+export function resolveImplicitUnionTarget(input: ResolveTopologyReferencesInput & {
+  feature: OnshapeFeatureNode;
+  slots: readonly TopologyQuerySlot[];
+}): TopologyResolutionResult | null {
+  const targetSlot = input.slots.find((slot) => slot.key === "targetBodies");
+  const toolSlot = input.slots.find((slot) => slot.key === "toolBodies");
+  const targetParameter = targetSlot
+    ? queryParameter(input.feature, targetSlot.parameterId)
+    : undefined;
+  const targets = targetParameter?.queries;
+  if (
+    !targetSlot ||
+    !toolSlot ||
+    (targetParameter !== undefined && (!Array.isArray(targets) || targets.length !== 0))
+  ) return null;
+
+  const toolQueries = input.queries.filter((query) => query.slotKey === toolSlot.key);
+  if (toolQueries.length === 0 || input.queries.length !== toolQueries.length) {
+    return {
+      kind: "degraded",
+      reason: "topology-query-unreadable",
+      details: [{ message: "An implicit UNION target requires one or more explicit tool-body queries." }],
+    };
+  }
+  const toolResolution = resolveTopologyReferences({
+    ...input,
+    queries: toolQueries,
+    queryDiagnostics: input.queryDiagnostics?.filter(
+      (diagnostic) => diagnostic.slotKey === toolSlot.key,
+    ),
+  });
+  if (toolResolution.kind === "degraded") return toolResolution;
+
+  const tools = new Set(
+    toolResolution.bindings.map((binding) =>
+      binding.reviewReference.kind === "body" ? binding.reviewReference.bodyId : null,
+    ),
+  );
+  if (tools.has(null)) {
+    return {
+      kind: "degraded",
+      reason: "topology-source-kind-mismatch",
+      details: [{ message: "An implicit UNION target requires body-only tool lineage." }],
+    };
+  }
+  const bodies = new Map<string, HistoryProbeTopologySignature & {
+    reference: Extract<DurableRef, { kind: "body" }>;
+  }>();
+  for (const signature of input.cadaraSignatures) {
+    if (signature.entityClass === "body" && signature.reference.kind === "body") {
+      bodies.set(signature.reference.bodyId, signature as HistoryProbeTopologySignature & {
+        reference: Extract<DurableRef, { kind: "body" }>;
+      });
+    }
+  }
+  const targetsInPrefix = [...bodies.values()].filter(
+    (signature) => !tools.has(signature.reference.bodyId),
+  );
+  if (targetsInPrefix.length !== 1) {
+    return {
+      kind: "degraded",
+      reason: targetsInPrefix.length === 0
+        ? "topology-reference-no-match"
+        : "topology-reference-ambiguous",
+      details: [{
+        message: targetsInPrefix.length === 0
+          ? "No live prefix body remains after resolving UNION tools."
+          : "More than one live prefix body remains after resolving UNION tools.",
+      }],
+    };
+  }
+  const target = targetsInPrefix[0]!;
+  const capturedSignature: OnshapeGeometricSignature = {
+    entityClass: "body",
+    geometryType: target.geometryType,
+    ...(target.definingData ? { definingData: target.definingData } : {}),
+    ...(target.centroid ? { centroid: target.centroid } : {}),
+    ...(target.boundingBox ? { boundingBox: target.boundingBox } : {}),
+  };
+  const deterministicId = `implicit-union-target:${target.reference.bodyId}`;
+  return {
+    kind: "resolved",
+    bindings: [{
+      query: {
+        consumerFeatureId: input.consumerFeatureId,
+        slotKey: targetSlot.key,
+        parameterId: targetSlot.parameterId,
+        queryIndex: 0,
+        deterministicId,
+        queryString: null,
+        expectedKinds: targetSlot.expectedKinds,
+      },
+      reviewReference: target.reference,
+      deferred: {
+        kind: "topologyOf",
+        expectedKind: "body",
+        capturedSignature,
+        tolerance: input.tolerance,
+        source: {
+          consumerFeatureId: input.consumerFeatureId,
+          parameterId: targetSlot.parameterId,
+          deterministicId,
+        },
+      },
+      score: 0,
+      evidence: ["implicit-union-target", "exact-prefix-body-lineage"],
+      sourceEvidence: "uniquePrefixBody",
+    }, ...toolResolution.bindings],
   };
 }
 

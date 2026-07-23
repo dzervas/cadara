@@ -35,6 +35,7 @@ import {
   resolvePlannedDeferredParticipants,
 } from "@/domain/import/onshape/provider";
 import { makeWaveTMirrorTransformCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
+import { makeWaveXChamferAndImplicitUnionCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
 
 const query = (id: string) => ({
@@ -654,6 +655,7 @@ describe("Wave B body topology translators", () => {
     const review = await onshapeImportProvider.review({ source, capabilities: providerCapabilities });
     const studio = review.providerReview.studios[0]!;
     expect(studio.tierCounts).toEqual({ parametric: 5, baked: 0, geometryOnly: 0 });
+    expect(studio.bakeStrategy).toEqual({ kind: "none" });
     expect(studio.featurePlans.find((candidate) => candidate.featureType === "cPlane")).toMatchObject({
       tier: "parametric",
       reasonCodes: ["plane-from-captured-frame"],
@@ -679,6 +681,94 @@ describe("Wave B body topology translators", () => {
           { role: "plane", targets: [{ kind: "constructionOf", actionIndex: 2 }] },
         ]),
       },
+    });
+  });
+
+  test("prepares a variable-linked chamfer and an implicit UNION only from one remaining prefix body", async () => {
+    const source: ResolvedImportSource = {
+      name: "wave-x-chamfer-union.onshape-capture.json",
+      origin: { kind: "localFile", fileName: "wave-x-chamfer-union.onshape-capture.json" },
+      mediaType: "application/json",
+      bytes: new TextEncoder().encode(JSON.stringify(makeWaveXChamferAndImplicitUnionCaptureBundle())),
+      fingerprint: `sha256:${"x".repeat(64)}`,
+    };
+    const liveBody = (bodyId: string, x: number) => ({
+      entityClass: "body" as const,
+      geometryType: "solid",
+      boundingBox: { low: [x, 0, 0] as [number, number, number], high: [x + 1, 1, 1] as [number, number, number] },
+      centroid: [x + 0.5, 0.5, 0.5] as [number, number, number],
+      reference: { kind: "body" as const, bodyId: bodyId as never },
+    });
+    const capabilities: ImportCapabilities = {
+      ...providerCapabilities,
+      history: {
+        async evaluateHistoryProbe(input) {
+          const signatures = [
+            { entityClass: "edge" as const, geometryType: "line", definingData: { origin: [0, 0, 0], direction: [1, 0, 0] }, reference: { kind: "edge" as const, bodyId: "body_target" as never, edgeId: "edge_live" as never } },
+            liveBody("body_target", 0),
+            liveBody("body_tool_a", 1),
+            liveBody("body_tool_b", 2),
+            liveBody("body_tool_c", 3),
+            liveBody("body_tool_d", 4),
+          ];
+          return { steps: (input.actions.orderedActions ?? []).map(() => ({ status: "rebuilt" as const, signatures })) };
+        },
+      },
+    };
+    const review = await onshapeImportProvider.review({ source, capabilities });
+    const studio = review.providerReview.studios[0]!;
+    expect(studio.tierCounts).toEqual({ parametric: 3, baked: 0, geometryOnly: 0 });
+    expect(studio.bakeStrategy).toEqual({ kind: "none" });
+
+    const actions = await onshapeImportProvider.prepare({
+      source,
+      review,
+      selections: onshapeImportProvider.createDefaultSelections(review),
+      capabilities,
+    });
+    expect(actions.addDocumentVariables?.[0]).toMatchObject({ name: "Wall", valueText: "5" });
+    const chamfer = actions.createFeatures?.find((request) => request.definition.kind === "chamfer");
+    expect(chamfer?.definition).toMatchObject({
+      kind: "chamfer",
+      parameters: { options: { distance: { source: "expression", valueText: "Wall*(4/5)" } } },
+    });
+    const union = actions.createFeatures?.find((request) => request.definition.kind === "combine");
+    expect(union?.definition).toMatchObject({
+      kind: "combine",
+      parameters: {
+        participants: expect.arrayContaining([
+          { role: "targetBody", targets: [expect.objectContaining({ kind: "topologyOf", source: expect.objectContaining({ deterministicId: "implicit-union-target:body_target" }) })] },
+          { role: "toolBody", targets: expect.arrayContaining([expect.objectContaining({ kind: "topologyOf" })]) },
+        ]),
+      },
+    });
+  });
+
+  test("preserves an expression-authored chamfer width through planning", () => {
+    const chamfer = plan(chamferFeatureTranslator, "chamfer", [
+      queryParameter("entities", ["edge"]),
+      valueParameter("chamferMethod", "FACE_OFFSET"),
+      valueParameter("chamferType", "EQUAL_OFFSETS"),
+      valueParameter("width", 0, "#Wall*(4/5)"),
+    ]);
+    expect(chamfer.plannedBodyTopologyConsumer?.options).toEqual({
+      widthForm: "equalOffsets",
+      distance: { source: "expression", valueText: "Wall*(4/5)" },
+    });
+    const definition = buildResolvedBodyConsumerDefinition(
+      chamfer.plannedBodyTopologyConsumer!,
+      [{
+        query: { consumerFeatureId: "CHAMFER", slotKey: "edgeTargets", parameterId: "entities", queryIndex: 0, deterministicId: "edge", queryString: null, expectedKinds: ["edge"] },
+        reviewReference: { kind: "edge", bodyId: "body" as never, edgeId: "edge" as never },
+        deferred: { kind: "topologyOf", expectedKind: "edge", capturedSignature: { entityClass: "edge", geometryType: "line" }, tolerance: { linear: 0.01, angularRadians: 0.001, relative: 0.000001, ambiguityMargin: 0.000001 }, source: { consumerFeatureId: "CHAMFER", parameterId: "entities", deterministicId: "edge" } },
+        score: 0,
+        evidence: [],
+        sourceEvidence: "historyPoint" as const,
+      }],
+    );
+    expect(definition).toMatchObject({
+      kind: "chamfer",
+      parameters: { options: { distance: { source: "expression", valueText: "Wall*(4/5)" } } },
     });
   });
 

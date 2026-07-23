@@ -712,11 +712,27 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       remain an honest checkpoint fallback only. Acceptance: PS1 Sketch 2 and
       all other supported face sketches follow a representative upstream support
       edit and rebuild without a checkpoint body.
-- [ ] X.6 **Narrow translator residuals.** Preserve authored variable linkage for
+- [x] X.6 **Narrow translator residuals.** Preserve authored variable linkage for
       expression-valued chamfer dimensions (including `#Wall*(4/5)`), resolve
       an implicit/default UNION target only from exact singleton prefix lineage,
       and close Wave-T Mirror-transform replacement attribution. Ambiguous
       default targets remain honestly baked.
+
+      **Verification (done).** Chamfer widths now preserve translated authored
+      expressions through planning, prepare, and apply (`#Wall*(4/5)` →
+      `Wall*(4/5)`) rather than substituting the captured zero. Targetless
+      `UNION` resolves each explicit tool first, then accepts exactly one
+      remaining live prefix body as the target; zero or multiple remaining
+      bodies degrade with no-match or ambiguity diagnostics, never by first-body
+      selection. Wave-T Mirror transform's stale `wholeStudioLegacy` attribution
+      was importer-side: review promotions were not replanning a legacy v2
+      strategy. Snapshot-backed recomputation now replans it to `none` (while
+      v1/null-snapshot legacy behavior is unchanged). The refreshed Wave-T local
+      plan confirms **5/0/0** with strategy `none`; 5151 review moves
+      **12/12/0 → 13/11/0** as Chamfer 2 promotes, while Boolean 1 correctly waits
+      for X.4 to expose its unique live target body. Focused tests (70), the
+      Onshape import suite (202), and `bun run test:all` (596 logic, 125 UI,
+      24 static, 62 Playwright) are green.
 - [ ] X.7 **Observed pattern and mirror variants.** Support only the captured
       variants needed by the local goal: `FEATURE` linear patterns, feature
       mirror, and `PART + ADD` mirror. Reuse existing executable feature kinds

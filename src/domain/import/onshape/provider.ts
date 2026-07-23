@@ -97,6 +97,7 @@ import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-se
 import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
 import {
   isUniquePrefixBodyQuery,
+  resolveImplicitUnionTarget,
   resolveTopologyReferences,
   resolveUniquePrefixBody,
 } from "@/domain/import/onshape/topology-reference-resolver";
@@ -533,7 +534,7 @@ function recomputePlanWithFeaturePlans(
   for (const plan of featurePlans) {
     tierCounts[plan.tier] += 1;
   }
-  const segmentResult = read && basePlan.bakeStrategy.kind === "segments"
+  const segmentResult = read && read.studio.rollbackSnapshots !== null
     ? replanStudioBakeStrategy(read, featurePlans)
     : null;
   const bakeStrategy = segmentResult?.strategy ?? basePlan.bakeStrategy;
@@ -963,7 +964,29 @@ async function activateProbeBackedPlanning(input: {
         ...DEFAULT_MATCH_TOLERANCE,
         linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01),
       };
+      const topologyResolutionInput = {
+        consumerFeatureId: candidate.onshapeFeatureId,
+        queries: queryRead.refs,
+        queryDiagnostics: queryRead.diagnostics,
+        capturedReferences: input.read.studio.resolvedReferences,
+        capturedQueryReferences: input.read.studio.resolvedQueryReferences ?? [],
+        rollback: topologyTimeline,
+        cadaraSignatures: prefix.signatures,
+        tolerance: topologyTolerance,
+        durableNamingAvailable: OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming,
+        captureFrameToWorld: topologyCaptureFrameToWorld ?? undefined,
+      };
+      const implicitUnionResolution =
+        candidate.featureType === "booleanBodies" &&
+        candidate.plannedBodyTopologyConsumer?.operationIntent === "add"
+          ? resolveImplicitUnionTarget({
+              ...topologyResolutionInput,
+              feature,
+              slots,
+            })
+          : null;
       const resolution =
+        implicitUnionResolution ??
         resolveUniquePrefixBody({
           consumerFeatureId: candidate.onshapeFeatureId,
           feature,
@@ -971,18 +994,7 @@ async function activateProbeBackedPlanning(input: {
           cadaraSignatures: prefix.signatures,
           tolerance: topologyTolerance,
         }) ??
-        resolveTopologyReferences({
-          consumerFeatureId: candidate.onshapeFeatureId,
-          queries: queryRead.refs,
-          queryDiagnostics: queryRead.diagnostics,
-          capturedReferences: input.read.studio.resolvedReferences,
-          capturedQueryReferences: input.read.studio.resolvedQueryReferences ?? [],
-          rollback: topologyTimeline,
-          cadaraSignatures: prefix.signatures,
-          tolerance: topologyTolerance,
-          durableNamingAvailable: OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming,
-          captureFrameToWorld: topologyCaptureFrameToWorld ?? undefined,
-        });
+        resolveTopologyReferences(topologyResolutionInput);
       workingPlan = recomputePlanWithFeaturePlans(
         workingPlan,
         workingPlan.featurePlans.map((plan) => {

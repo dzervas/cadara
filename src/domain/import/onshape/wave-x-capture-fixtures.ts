@@ -115,3 +115,90 @@ export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
     })),
   };
 }
+
+/**
+ * CI-safe stand-in for Laptop Stand's variable chamfer and default-target
+ * UNION. The caller supplies the matching prefix topology probe.
+ */
+export function makeWaveXChamferAndImplicitUnionCaptureBundle(): OnshapeCaptureBundleV2 {
+  const bodySignature = (id: string, x: number) => ({
+    deterministicId: id,
+    evaluatedAt: "historyPoint" as const,
+    consumingFeatureId: "BOOLEAN",
+    signature: {
+      entityClass: "body" as const,
+      geometryType: "solid" as const,
+      boundingBox: { low: [x / 1000, 0, 0] as [number, number, number], high: [(x + 1) / 1000, 0.001, 0.001] as [number, number, number] },
+      centroid: [(x + 0.5) / 1000, 0.0005, 0.0005] as [number, number, number],
+    },
+  });
+  return {
+    formatVersion: 2,
+    provenance: {
+      capturedAt: "2026-07-24T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "x".repeat(24),
+      wvm: "w",
+      wvmId: "w".repeat(24),
+      microversion: "m".repeat(24),
+    },
+    document: {},
+    elements: {},
+    diagnostics: [],
+    partStudios: [{
+      elementId: "wave-x-chamfer-union",
+      name: "Chamfer and implicit union",
+      features: {
+        features: [{
+          featureType: "assignVariable",
+          featureId: "WALL",
+          name: "Wall",
+          parameters: [
+            { parameterId: "name", value: "Wall" },
+            { parameterId: "value", expression: "5 mm", value: 0.005 },
+          ],
+        }, {
+          featureType: "chamfer",
+          featureId: "CHAMFER",
+          name: "Chamfer 2",
+          parameters: [
+            { parameterId: "entities", queries: [{ queryString: "query=edge", deterministicIds: ["CHAMFER_EDGE"] }] },
+            { parameterId: "chamferMethod", value: "FACE_OFFSET" },
+            { parameterId: "chamferType", value: "EQUAL_OFFSETS" },
+            { parameterId: "width", expression: "#Wall*(4/5)", value: 0 },
+            { parameterId: "directionOverrides", queries: [] },
+          ],
+        }, {
+          featureType: "booleanBodies",
+          featureId: "BOOLEAN",
+          name: "Boolean 1",
+          parameters: [
+            { parameterId: "operationType", value: "UNION" },
+            { parameterId: "tools", queries: ["TOOL_A", "TOOL_B", "TOOL_C", "TOOL_D"].map((id) => ({ queryString: `query=${id}`, deterministicIds: [id] })) },
+            { parameterId: "targets", queries: [] },
+            { parameterId: "offset", value: false },
+            { parameterId: "keepTools", value: false },
+          ],
+        }],
+      },
+      sketches: { sketches: [] },
+      parts: null,
+      featureSpecs: { present: false, reason: "synthetic Phase-X fixture" },
+      resolvedReferences: [{
+        deterministicId: "CHAMFER_EDGE",
+        evaluatedAt: "historyPoint",
+        consumingFeatureId: "CHAMFER",
+        signature: {
+          entityClass: "edge",
+          geometryType: "line",
+          definingData: { origin: [0, 0, 0], direction: [1, 0, 0] },
+        },
+      }, ...["TOOL_A", "TOOL_B", "TOOL_C", "TOOL_D"].map((id, index) => bodySignature(id, index + 1))],
+      resolvedQueryReferences: [],
+      groundTruth: { hasBodies: false },
+      rollbackSnapshots: [],
+    }],
+  };
+}
