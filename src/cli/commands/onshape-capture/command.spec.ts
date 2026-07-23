@@ -42,6 +42,30 @@ test("command.spec.ts reports a usage error naming the missing secret key", asyn
   expect(result.ok === false && result.message).toContain("ONSHAPE_SECRET_KEY");
 });
 
+test("command.spec.ts accepts the on cookie without requiring API keys", async () => {
+  const result = await onshapeCaptureCommand.run(
+    ["not-a-url"],
+    envFrom({ ONSHAPE_COOKIE_ON: "cookie-value" }),
+    makeIO(),
+  );
+
+  expect(result.ok).toBe(false);
+  expect(result.ok === false && result.kind).toBe("usage");
+  expect(result.ok === false && result.message).toContain("Expected");
+});
+
+test("command.spec.ts gives the on cookie precedence over incomplete API keys", async () => {
+  const result = await onshapeCaptureCommand.run(
+    ["not-a-url"],
+    envFrom({ ONSHAPE_COOKIE_ON: "cookie-value", ONSHAPE_ACCESS_KEY: "ignored" }),
+    makeIO(),
+  );
+
+  expect(result.ok).toBe(false);
+  expect(result.ok === false && result.kind).toBe("usage");
+  expect(result.ok === false && result.message).toContain("Expected");
+});
+
 test("command.spec.ts reports a usage error for a missing url argument", async () => {
   const result = await onshapeCaptureCommand.run(
     [],

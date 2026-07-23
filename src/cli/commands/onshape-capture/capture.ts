@@ -20,6 +20,7 @@ import {
   OnshapeClient,
   OnshapeRequestError,
   type FetchLike,
+  type OnshapeCredentials,
 } from "@/cli/commands/onshape-capture/client";
 import { DEFAULT_TESSELLATION_TOLERANCE, captureBoundaryOnlyGroundTruth, exportStep } from "@/cli/commands/onshape-capture/ground-truth";
 import {
@@ -42,9 +43,7 @@ export interface CaptureRuntime {
   cliVersion: string;
 }
 
-export interface CaptureOptions {
-  accessKey: string;
-  secretKey: string;
+export type CaptureOptions = OnshapeCredentials & {
   baseUrl?: string;
   apiVersion?: string;
   concurrency?: number;
@@ -52,7 +51,7 @@ export interface CaptureOptions {
   rollbackSnapshots?: boolean;
   /** Optional cache for immutable, read-only FeatureScript evidence only. */
   evidenceCache?: ImmutableFeatureScriptEvidenceCache;
-}
+};
 
 interface RollbackWorkspace {
   workspaceId: string | null;
@@ -86,9 +85,10 @@ export async function captureBundle(
   const baseUrl = options.baseUrl ?? DEFAULT_ONSHAPE_BASE_URL;
   const apiVersion = options.apiVersion ?? DEFAULT_ONSHAPE_API_VERSION;
   const client = new OnshapeClient({
+    ...(options.cookieOn !== undefined
+      ? { cookieOn: options.cookieOn }
+      : { accessKey: options.accessKey, secretKey: options.secretKey }),
     baseUrl,
-    accessKey: options.accessKey,
-    secretKey: options.secretKey,
     fetch: runtime.fetch,
     sleep: runtime.sleep,
     concurrency: options.concurrency,
@@ -214,9 +214,10 @@ export async function enrichBundleProfileEvidence(
   const baseUrl = options.baseUrl ?? validated.provenance.baseUrl;
   const apiVersion = options.apiVersion ?? validated.provenance.apiVersion;
   const client = new OnshapeClient({
+    ...(options.cookieOn !== undefined
+      ? { cookieOn: options.cookieOn }
+      : { accessKey: options.accessKey, secretKey: options.secretKey }),
     baseUrl,
-    accessKey: options.accessKey,
-    secretKey: options.secretKey,
     fetch: runtime.fetch,
     sleep: runtime.sleep,
     concurrency: options.concurrency,

@@ -1,7 +1,7 @@
 /**
  * Minimal Onshape REST client for capture.
  *
- * - HTTP Basic auth from injected credentials (never logged or embedded).
+ * - HTTP Basic or `on` cookie auth from injected credentials (never logged or embedded).
  * - Injected `fetch` and `sleep` so tests run against recorded transcripts.
  * - Bounded concurrency and exponential backoff on HTTP 429/5xx.
  * - Errors carry the URL and status but never authorization material.
@@ -24,17 +24,19 @@ export interface FetchResponse {
   text: () => Promise<string>;
 }
 
-export interface OnshapeClientOptions {
+export type OnshapeCredentials =
+  | { cookieOn: string; accessKey?: never; secretKey?: never }
+  | { cookieOn?: never; accessKey: string; secretKey: string };
+
+export type OnshapeClientOptions = OnshapeCredentials & {
   baseUrl: string;
-  accessKey: string;
-  secretKey: string;
   fetch: FetchLike;
   sleep: (ms: number) => Promise<void>;
   /** Max in-flight requests (default 2). */
   concurrency?: number;
   /** Retry budget for 429/5xx (default 4). */
   maxRetries?: number;
-}
+};
 
 /** An HTTP failure that intentionally excludes credential material. */
 export class OnshapeRequestError extends Error {
@@ -54,9 +56,13 @@ function toBase64(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
+function serializeOnCookie(value: string): string {
+  return value.startsWith("on=") ? value : `on=${value}`;
+}
+
 export class OnshapeClient {
   private readonly baseUrl: string;
-  private readonly authHeader: string;
+  private readonly credentialHeader: Record<string, string>;
   private readonly fetch: FetchLike;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly concurrency: number;
@@ -66,8 +72,9 @@ export class OnshapeClient {
 
   constructor(options: OnshapeClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.authHeader =
-      "Basic " + toBase64(`${options.accessKey}:${options.secretKey}`);
+    this.credentialHeader = options.cookieOn !== undefined
+      ? { Cookie: serializeOnCookie(options.cookieOn) }
+      : { Authorization: "Basic " + toBase64(`${options.accessKey}:${options.secretKey}`) };
     this.fetch = options.fetch;
     this.sleep = options.sleep;
     this.concurrency = Math.max(1, options.concurrency ?? 2);
@@ -121,7 +128,7 @@ export class OnshapeClient {
       const response = await this.fetch(url, {
         method,
         headers: {
-          Authorization: this.authHeader,
+          ...this.credentialHeader,
           Accept: "application/json;charset=UTF-8; qs=0.09",
           ...(body === undefined
             ? {}

@@ -47,17 +47,24 @@ sections (feature specs) may be absent, and the absence is recorded explicitly.
 
 ### Credentials
 
-The command reads Onshape API keys from the environment and uses HTTP Basic
-auth. Credentials are never written to bundles, logs, or error output.
+The command first checks `ONSHAPE_COOKIE_ON`. When set, its value is sent as the
+Onshape `on` cookie and API-key variables are ignored:
 
 ```bash
-export ONSHAPE_ACCESS_KEY=...   # API access key
-export ONSHAPE_SECRET_KEY=...   # API secret key
+export ONSHAPE_COOKIE_ON=...       # cookie value; `on=...` is also accepted
 ```
 
-Generate a key pair at <https://dev-portal.onshape.com/keys>. Capture is
-read-only against documents the key owner can access; the client backs off on
-HTTP 429 and caps concurrent in-flight requests.
+Alternatively, use an API key pair for HTTP Basic authentication:
+
+```bash
+export ONSHAPE_ACCESS_KEY=...      # API access key
+export ONSHAPE_SECRET_KEY=...      # API secret key
+```
+
+Credentials are never written to bundles, logs, or error output. Generate an API
+key pair at <https://dev-portal.onshape.com/keys>. Capture is read-only against
+documents the selected credential can access; the client backs off on HTTP 429
+and caps concurrent in-flight requests.
 
 Long-running STEP exports can exceed the default poll budget on larger
 studios. Set `ONSHAPE_TRANSLATION_MAX_POLLS` to a positive integer to extend
@@ -72,7 +79,7 @@ export ONSHAPE_TRANSLATION_MAX_POLLS=180
 Automated tests use recorded fixture transcripts with an injected fetch — no
 network. To verify real Onshape connectivity manually:
 
-1. Export valid `ONSHAPE_ACCESS_KEY` / `ONSHAPE_SECRET_KEY`.
+1. Export `ONSHAPE_COOKIE_ON`, or valid `ONSHAPE_ACCESS_KEY` / `ONSHAPE_SECRET_KEY`.
 2. Capture a small document you own:
    ```bash
    bun run cli -- onshape capture \

@@ -131,12 +131,23 @@ The CLI SHALL abort without writing an output file when any mandatory section (d
 - **AND** caps concurrent in-flight requests
 
 ### Requirement: Credentials SHALL come from the environment and never leak into output
-The subcommand SHALL read `ONSHAPE_ACCESS_KEY` and `ONSHAPE_SECRET_KEY` from the environment for HTTP Basic authentication and SHALL NOT write them to bundles, logs, or error output.
+The subcommand SHALL use `ONSHAPE_COOKIE_ON` as the value of the Onshape `on`
+cookie when it is set. Otherwise it SHALL read `ONSHAPE_ACCESS_KEY` and
+`ONSHAPE_SECRET_KEY` for HTTP Basic authentication. It SHALL NOT write any
+credential to bundles, logs, or error output.
+
+#### Scenario: Cookie credentials take precedence
+- **WHEN** `ONSHAPE_COOKIE_ON` is set, with or without API-key variables
+- **THEN** requests contain `Cookie: on=<value>` and no Basic authorization header
+
+#### Scenario: API-key fallback
+- **WHEN** `ONSHAPE_COOKIE_ON` is unset and both API-key variables are set
+- **THEN** requests use HTTP Basic authentication
 
 #### Scenario: Missing credentials
-- **WHEN** either environment variable is unset
-- **THEN** the command exits with a usage error naming the missing variable before any network request
+- **WHEN** the cookie is unset and either API-key variable is unset
+- **THEN** the command exits with a usage error naming the accepted variables before any network request
 
 #### Scenario: Request failure reporting
 - **WHEN** an authenticated request fails and is reported
-- **THEN** the error output contains the URL and status but no authorization header material
+- **THEN** the error output contains the URL and status but no cookie or authorization header material
