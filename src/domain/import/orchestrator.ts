@@ -30,7 +30,7 @@ import type {
   ModelingDiagnostic,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
-import type { BodyId, ConstructionId, SketchId } from "@/contracts/shared/ids";
+import type { BodyId, ConstructionId, FeatureId, SketchId } from "@/contracts/shared/ids";
 import type { RegionRecord, SketchRecord } from "@/contracts/sketch/schema";
 import {
   CONTRACT_VERSION,
@@ -289,6 +289,7 @@ export interface ImportActionOutputRecord {
   sketchId?: SketchId;
   bodyIds?: BodyId[];
   constructionIds?: ConstructionId[];
+  featureId?: FeatureId;
 }
 
 type ImportRegionSketchSource =
@@ -308,7 +309,8 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
     kind === "sketchIdOf" ||
     kind === "regionOf" ||
     kind === "bodyOf" ||
-    kind === "constructionOf"
+    kind === "constructionOf" ||
+    kind === "featureOf"
   );
 }
 
@@ -438,9 +440,15 @@ export class ImportDeferredMaterializer {
   }
 
   recordBodyOutput(orderedPosition: number, bodyIds: BodyId[]) {
-    this.input.outputRecords.set(orderedOutputKey(orderedPosition), {
-      bodyIds,
-    });
+    const key = orderedOutputKey(orderedPosition);
+    const existing = this.input.outputRecords.get(key) ?? {};
+    this.input.outputRecords.set(key, { ...existing, bodyIds });
+  }
+
+  recordFeatureOutput(orderedPosition: number, featureId: FeatureId) {
+    const key = orderedOutputKey(orderedPosition);
+    const existing = this.input.outputRecords.get(key) ?? {};
+    this.input.outputRecords.set(key, { ...existing, featureId });
   }
 
   recordConstructionOutput(
@@ -526,6 +534,14 @@ export class ImportDeferredMaterializer {
           );
         }
         return { kind: "construction" as const, constructionId };
+      }
+      case "featureOf": {
+        if (!output.featureId) {
+          throw new Error(
+            `Unable to resolve deferred featureOf for ${consumer.kind}:${consumer.index}; producer action ${value.actionIndex} produced no feature id.`,
+          );
+        }
+        return output.featureId;
       }
       case "regionOf": {
         if (!output.sketchId) {
@@ -619,6 +635,23 @@ export class ImportDeferredMaterializer {
 
     if (!request.definition) {
       return requestWithoutFallback as CreateFeatureRequest;
+    }
+
+    if (request.definition.kind === "featureReplay") {
+      const sourceFeatureIds = await Promise.all(
+        request.definition.parameters.sourceFeatureIds.map((sourceFeatureId) =>
+          isDeferredValue(sourceFeatureId)
+            ? this.resolveDeferredValue(sourceFeatureId, consumer)
+            : sourceFeatureId,
+        ),
+      );
+      return {
+        ...requestWithoutFallback,
+        definition: {
+          ...request.definition,
+          parameters: { ...request.definition.parameters, sourceFeatureIds },
+        },
+      } as CreateFeatureRequest;
     }
 
     if (request.definition.kind === "fillet") {
@@ -910,6 +943,12 @@ export async function applyImportPreparedActions(input: {
 
     revisionId = accepted.value.revisionId;
     createdEntityIds.featureIds.push(accepted.value.featureId);
+    if (currentOrderedPosition >= 0) {
+      materializer.recordFeatureOutput(
+        currentOrderedPosition,
+        accepted.value.featureId,
+      );
+    }
     const bodyIds = accepted.value.changedTargets.flatMap((target) =>
       target.kind === "body" ? [target.bodyId] : [],
     );

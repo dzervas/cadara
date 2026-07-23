@@ -329,6 +329,26 @@ export function getFeatureValueExpressionFields(
         ["parameters", "options"],
         CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
       );
+    case "featureReplay":
+      return definition.parameters.transform.kind === "linear"
+        ? [
+            {
+              path: ["parameters", "transform", "instanceCount"],
+              label: "Feature replay instance count",
+              valueKind: { kind: "positiveInteger" },
+            },
+            {
+              path: ["parameters", "transform", "spacing"],
+              label: "Feature replay spacing",
+              valueKind: { kind: "positiveNumber" },
+            },
+            {
+              path: ["parameters", "transform", "oppositeDirection"],
+              label: "Feature replay opposite direction",
+              valueKind: { kind: "boolean" },
+            },
+          ]
+        : [];
     case "plane":
     case "split":
     case "deleteSolid":

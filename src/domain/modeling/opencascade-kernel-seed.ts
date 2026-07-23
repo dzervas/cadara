@@ -53,6 +53,7 @@ export const OCC_KERNEL_CAPABILITIES: ModelingKernelCapabilities = {
     "deleteSolid",
     "linearPattern",
     "circularPattern",
+    "featureReplay",
   ],
   previewableFeatureKinds: [
     "extrude",

@@ -733,35 +733,42 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       for X.4 to expose its unique live target body. Focused tests (70), the
       Onshape import suite (202), and `bun run test:all` (596 logic, 125 UI,
       24 static, 62 Playwright) are green.
-- [ ] X.7 **Observed pattern and mirror variants.** Support only the captured
+- [x] X.7 **Observed pattern and mirror variants.** Support only the captured
       variants needed by the local goal: `FEATURE` linear patterns, feature
       mirror, and `PART + ADD` mirror. Reuse existing executable feature kinds
       or lower to ordered existing operations only when seed, output, target,
       and replacement lineage are exact. Preserve upstream edit dependency; do
       not broaden to curve/face/table/skipped-instance pattern families.
 
-  **Partial (2026-07-25; remains unchecked).** The d3cd9 `PART + ADD` mirror is
-  now a parametric existing-`mirror` operation: both captured queries must name
-  the same singleton deterministic body, the `RightplaneOp` datum maps by its
-  explicit query name, and the OCC executor mirrors then joins that body while
-  retaining the target body identity. The local review plan moves d3cd9 from
-  **19 / 5 / 0** to **20 / 4 / 0** (parametric / baked / geometryOnly); the
-  checked-in synthetic fixture covers translator → provider → ordered apply
-  materialization and the real-OCC join/replacement seam.
+  **Verification (done).** The d3cd9 `PART + ADD` mirror remains the existing
+  parametric `mirror` operation: its source and target queries must name the
+  same singleton deterministic body, its `RightplaneOp` maps explicitly, and
+  OCC joins while retaining target-body identity.
 
-  The three 5151 `FEATURE` forms remain honest bakes: Linear pattern 1 has the
-  exact FeatureList seed `[FOKYXKU0uqy9EB3_2]`, Linear pattern 2 has
-  `[F2B5cy3xMm2MHNU_2]`, and Mirror 1 has the ordered seed list
+  The three 5151 forms now map to the durable `featureReplay` contract, not the
+  copy-only body pattern/mirror contracts. Linear pattern 1 preserves exact
+  source `[FOKYXKU0uqy9EB3_2]`; Linear pattern 2 preserves
+  `[F2B5cy3xMm2MHNU_2]`; Mirror 1 preserves ordered sources
   `[FOKYXKU0uqy9EB3_2, FNmvaMWuCDIXPZo_2, F2B5cy3xMm2MHNU_2,
-  Fvk35GMOaMRxzg8_2]`. The planner now retains those exact dependencies, but
-  Cadara's existing body-copy pattern/mirror contracts cannot replay a feature
-  operation (including its add target and nested pattern instances) at a new
-  transform while retaining source edit linkage and replacement identity.
-  Lowering them to whole-body copies would be a false representation, so no
-  first-body or geometry-nearest fallback was added. Closing X.7 requires a
-  feature-instance replay contract with exact source-operation/delta lineage;
-  curve, face, table, skipped-instance, and centered variants remain out of
-  scope.
+  Fvk35GMOaMRxzg8_2]`. Import preparation converts those exact source-feature
+  positions to backward durable `featureOf` references. The OCC executor
+  supports only the captured linear (`NEW`, finite count/spacing, opposite
+  direction, no centered/second/skip form) and construction-plane mirror forms;
+  it replays only source extrude ADD/REMOVE deltas at each transform, including
+  nested replay, against the source's exact target body. It does not copy whole
+  bodies, serialize functions, or use first-body/nearest matching.
+
+  The proprietary-free permanent fixture supplies executable ADD seed extrudes
+  for the translator → provider → ordered apply → real-OCC seam. It proves a
+  source depth edit rebuilds all six direct/linear/mirrored instances, nested
+  pattern/mirror ordering, additive then subtractive replay retains one body
+  identity, and a stale source `FeatureId` fails with an exact missing-feature
+  diagnostic. The real 5151 plan intentionally still reports the three forms
+  `downstream-of-baked` while X.4 leaves Extrude 6/7 region profiles unresolved;
+  no local promotion was fabricated. When those source operations become live,
+  the same exact replay plans prepare and apply. Curve/face/table sources,
+  non-full patterns, active body/face selections, centered/second-direction/
+  skipped forms, and non-construction replay references remain unsupported.
 - [x] X.8 **Closed-hollow shell without openings.** Implemented the captured PS1
       `isHollow=true`, empty-opening, closed-envelope semantics as the existing
       shell contract's distinct `closedHollow` mode. It preserves the outer

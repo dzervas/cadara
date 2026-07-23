@@ -424,7 +424,7 @@ describe("Wave B body topology translators", () => {
     });
   });
 
-  test("retains captured FeatureList seed dependencies and prepares only the exact PART+ADD mirror", async () => {
+  test("retains exact FEATURE replay seeds and prepares the exact PART+ADD mirror", async () => {
     const source: ResolvedImportSource = {
       name: "wave-x-pattern-mirror.onshape-capture.json",
       origin: { kind: "localFile", fileName: "wave-x-pattern-mirror.onshape-capture.json" },
@@ -456,18 +456,67 @@ describe("Wave B body topology translators", () => {
     const featurePatterns = review.providerReview.studios.find(
       (studio) => studio.elementId === "wave-x-feature-patterns",
     )?.featurePlans;
-    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "LINEAR_1")).toMatchObject({
-      reasonCodes: expect.arrayContaining(["pattern-feature-seed-unsupported"]),
-      inputFeatureIds: ["EXTRUDE_6"],
+    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "FNmvaMWuCDIXPZo_2")).toMatchObject({
+      tier: "parametric",
+      reasonCodes: [],
+      inputFeatureIds: ["FOKYXKU0uqy9EB3_2"],
+      plannedFeatureReplay: {
+        kind: "linear",
+        sourceFeatureIds: ["FOKYXKU0uqy9EB3_2"],
+        instanceCount: 3,
+        spacing: 40.2,
+        oppositeDirection: true,
+      },
     });
-    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "LINEAR_2")).toMatchObject({
-      reasonCodes: expect.arrayContaining(["pattern-feature-seed-unsupported"]),
-      inputFeatureIds: ["EXTRUDE_7"],
+    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "Fvk35GMOaMRxzg8_2")).toMatchObject({
+      tier: "parametric",
+      reasonCodes: [],
+      inputFeatureIds: ["F2B5cy3xMm2MHNU_2"],
+      plannedFeatureReplay: {
+        kind: "linear",
+        sourceFeatureIds: ["F2B5cy3xMm2MHNU_2"],
+      },
     });
-    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "FEATURE_MIRROR")).toMatchObject({
-      reasonCodes: expect.arrayContaining(["mirror-operation-unsupported"]),
-      inputFeatureIds: ["EXTRUDE_6", "LINEAR_1", "EXTRUDE_7", "LINEAR_2"],
+    expect(featurePatterns?.find((plan) => plan.onshapeFeatureId === "FtdzVK4Ok7Ghvzz_2")).toMatchObject({
+      tier: "parametric",
+      reasonCodes: [],
+      inputFeatureIds: [
+        "FOKYXKU0uqy9EB3_2",
+        "FNmvaMWuCDIXPZo_2",
+        "F2B5cy3xMm2MHNU_2",
+        "Fvk35GMOaMRxzg8_2",
+      ],
+      plannedFeatureReplay: {
+        kind: "mirror",
+        sourceFeatureIds: [
+          "FOKYXKU0uqy9EB3_2",
+          "FNmvaMWuCDIXPZo_2",
+          "F2B5cy3xMm2MHNU_2",
+          "Fvk35GMOaMRxzg8_2",
+        ],
+      },
     });
+
+    const featureReplayActions = await onshapeImportProvider.prepare({
+      source,
+      review,
+      selections: { studioElementId: "wave-x-feature-patterns", demotedFeatureIds: [] },
+      capabilities: partAddCapabilities,
+    });
+    expect(validateImportPreparedActions(featureReplayActions).success).toBe(true);
+    const featureReplays = featureReplayActions.createFeatures?.filter(
+      (action) => action.definition.kind === "featureReplay",
+    );
+    expect(featureReplays?.map((action) => action.definition.parameters.sourceFeatureIds)).toEqual([
+      [{ kind: "featureOf", actionIndex: 3 }],
+      [{ kind: "featureOf", actionIndex: 6 }],
+      [
+        { kind: "featureOf", actionIndex: 3 },
+        { kind: "featureOf", actionIndex: 4 },
+        { kind: "featureOf", actionIndex: 6 },
+        { kind: "featureOf", actionIndex: 7 },
+      ],
+    ]);
 
     const partAddStudio = review.providerReview.studios.find(
       (studio) => studio.elementId === "wave-x-part-add-mirror",

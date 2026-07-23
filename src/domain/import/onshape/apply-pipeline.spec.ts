@@ -32,6 +32,7 @@ import {
   makeWaveBSegmentedApplyCaptureBundle,
 } from "@/domain/import/onshape/wave-b-capture-fixtures";
 import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
+import { makeWaveXPatternMirrorCaptureBundle } from "@/domain/import/onshape/wave-x-pattern-mirror-capture-fixtures";
 import { makeWaveXClosedHollowShellCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import {
   applyImportPreparedActions,
@@ -1169,6 +1170,184 @@ test("Onshape circular pattern fixture applies through the real OCC import servi
   expect(centers.some(([x, y]) => x < -9 && Math.abs(y) < 2), JSON.stringify(bodyBoxes)).toBe(true);
   expect(centers.some(([x, y]) => y < -9 && Math.abs(x) < 2), JSON.stringify(bodyBoxes)).toBe(true);
 });
+
+test("Onshape FEATURE patterns replay source deltas through nested mirror instances in real OCC", async () => {
+  const oc = await loadRealOccForImportTest();
+  const { service } = createRealOccModelingService(oc);
+  const before = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, before, {
+    history: createKernelHistoryProbeSession({
+      createService: () => createRealOccModelingService(oc).service,
+    }),
+  });
+  const source = sourceFromBundle(makeWaveXPatternMirrorCaptureBundle());
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const studio = review.providerReview.studios.find(
+    (candidate) => candidate.elementId === "wave-x-feature-patterns",
+  );
+  expect(studio?.featurePlans.filter((plan) => plan.featureType === "linearPattern" || plan.featureType === "mirror")).toEqual([
+    expect.objectContaining({
+      onshapeFeatureId: "FNmvaMWuCDIXPZo_2",
+      tier: "parametric",
+      plannedFeatureReplay: expect.objectContaining({
+        kind: "linear",
+        sourceFeatureIds: ["FOKYXKU0uqy9EB3_2"],
+      }),
+    }),
+    expect.objectContaining({
+      onshapeFeatureId: "Fvk35GMOaMRxzg8_2",
+      tier: "parametric",
+      plannedFeatureReplay: expect.objectContaining({
+        kind: "linear",
+        sourceFeatureIds: ["F2B5cy3xMm2MHNU_2"],
+      }),
+    }),
+    expect.objectContaining({
+      onshapeFeatureId: "FtdzVK4Ok7Ghvzz_2",
+      tier: "parametric",
+      plannedFeatureReplay: expect.objectContaining({
+        kind: "mirror",
+        sourceFeatureIds: [
+          "FOKYXKU0uqy9EB3_2",
+          "FNmvaMWuCDIXPZo_2",
+          "F2B5cy3xMm2MHNU_2",
+          "Fvk35GMOaMRxzg8_2",
+        ],
+      }),
+    }),
+  ]);
+
+  const actions = await prepareImportActions({
+    provider: onshapeImportProvider,
+    source,
+    review,
+    selections: { studioElementId: "wave-x-feature-patterns", demotedFeatureIds: [] },
+    capabilities,
+  });
+  const forwarded = recordCreateFeatureInputs(service);
+  const applied = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: before.document.revisionId,
+    actions,
+  });
+  expect(applied.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(applied.diagnostics)).toBe(true);
+  const forwardedReplays = forwarded.filter(
+    (request) => request.definition.kind === "featureReplay",
+  );
+  expect(forwardedReplays).toHaveLength(3);
+  expect(JSON.stringify(forwardedReplays)).not.toContain("featureOf");
+
+  const imported = await service.getCurrentDocumentSnapshot();
+  expect(imported.document.bodies).toHaveLength(1);
+  const retainedBodyId = imported.document.bodies[0]!.bodyId;
+  const sourceExtrude = imported.document.features.find(
+    (feature) => feature.label === "Extrude 6",
+  );
+  const sourceRemove = imported.document.features.find(
+    (feature) => feature.label === "Extrude 7",
+  );
+  const mirror = imported.document.features.find(
+    (feature) => feature.label === "Mirror 1",
+  );
+  if (
+    sourceExtrude?.definition.kind !== "extrude" ||
+    sourceExtrude.definition.parameters.extent.mode !== "oneSide" ||
+    sourceRemove?.definition.kind !== "extrude" ||
+    mirror?.definition.kind !== "featureReplay"
+  ) {
+    throw new Error("Expected imported FEATURE replay seed operations and mirror.");
+  }
+
+  const countTopFacesAt = async (height: number) => {
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const signatures = await deriveLiveBodySignatures({ snapshot, service });
+    expect(signatures.status, JSON.stringify(signatures.diagnostics)).toBe("available");
+    if (signatures.status !== "available") return 0;
+    return signatures.signatures.filter((signature) =>
+      signature.entityClass === "face" &&
+      signature.geometryType === "plane" &&
+      signature.boundingBox &&
+      Math.abs(signature.boundingBox.low[2] - height) < 0.01 &&
+      Math.abs(signature.boundingBox.high[2] - height) < 0.01,
+    ).length;
+  };
+
+  // One source ADD + its two linear instances + the mirrored equivalent of
+  // each gives six distinct top faces. Updating the source parameter must
+  // rebuild every one through the nested replay graph, not copy a prior body.
+  expect(await countTopFacesAt(10)).toBe(6);
+  const edited = await service.updateFeature({
+    baseRevisionId: imported.document.revisionId,
+    featureId: sourceExtrude.featureId,
+    definition: {
+      ...sourceExtrude.definition,
+      parameters: {
+        ...sourceExtrude.definition.parameters,
+        extent: {
+          ...sourceExtrude.definition.parameters.extent,
+          end: {
+            ...sourceExtrude.definition.parameters.extent.end,
+            distance: createLiteralAuthoredValue(14),
+          },
+        },
+      },
+    },
+  });
+  if (edited.isErr()) throw edited.error;
+  expect(edited.value.revisionState.kind).toBe("accepted");
+  const afterSourceEdit = await service.getCurrentDocumentSnapshot();
+  expect(afterSourceEdit.document.bodies).toEqual([
+    expect.objectContaining({ bodyId: retainedBodyId }),
+  ]);
+  expect(await countTopFacesAt(14)).toBe(6);
+
+  // The same exact source target lineage remains one body when a supported
+  // replayed source is switched from ADD to REMOVE.
+  const subtractive = await service.updateFeature({
+    baseRevisionId: afterSourceEdit.document.revisionId,
+    featureId: sourceRemove.featureId,
+    definition: {
+      ...sourceRemove.definition,
+      parameters: {
+        ...sourceRemove.definition.parameters,
+        operation: createLiteralAuthoredValue("cut"),
+      },
+    },
+  });
+  if (subtractive.isErr()) throw subtractive.error;
+  expect(subtractive.value.revisionState.kind).toBe("accepted");
+  const afterSubtractiveReplay = await service.getCurrentDocumentSnapshot();
+  expect(afterSubtractiveReplay.document.bodies).toEqual([
+    expect.objectContaining({ bodyId: retainedBodyId }),
+  ]);
+
+  // A stale durable source id is never substituted from geometry or from a
+  // nearby feature; rebuild rejects the mirror structurally.
+  const stale = await service.updateFeature({
+    baseRevisionId: afterSubtractiveReplay.document.revisionId,
+    featureId: mirror.featureId,
+    definition: {
+      ...mirror.definition,
+      parameters: {
+        ...mirror.definition.parameters,
+        sourceFeatureIds: [
+          ...mirror.definition.parameters.sourceFeatureIds,
+          "feature_stale_source" as never,
+        ],
+      },
+    },
+  });
+  if (stale.isErr()) throw stale.error;
+  expect(stale.value.rebuildResult.kind).toBe("failed");
+  expect(
+    stale.value.diagnostics.some((diagnostic) =>
+      diagnostic.code === "occ-missing-reference" &&
+      diagnostic.target?.kind === "feature" &&
+      diagnostic.target.featureId === "feature_stale_source",
+    ),
+    JSON.stringify(stale.value.diagnostics),
+  ).toBe(true);
+}, 90_000);
 
 test("segmented provider actions apply two checkpoints with rematch, closure, fallback, and neutral continuation", async () => {
   const bundle = makeWaveBSegmentedApplyCaptureBundle();

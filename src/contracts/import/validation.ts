@@ -46,7 +46,8 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
     kind === "sketchIdOf" ||
     kind === "regionOf" ||
     kind === "bodyOf" ||
-    kind === "constructionOf"
+    kind === "constructionOf" ||
+    kind === "featureOf"
   );
 }
 
@@ -67,6 +68,7 @@ function expectedProducerKind(
       return "commitSketch";
     case "bodyOf":
     case "constructionOf":
+    case "featureOf":
       return "createFeature";
   }
 }
@@ -168,6 +170,31 @@ function validateImportDeferredValueInvariants(
     }
     const request = actions.createFeatures?.[ref.index];
     if (!request?.definition) {
+      return;
+    }
+    if (request.definition.kind === "featureReplay") {
+      request.definition.parameters.sourceFeatureIds.forEach((sourceFeatureId, sourceIndex) => {
+        if (!isDeferredValue(sourceFeatureId)) return;
+        const sourcePath = `createFeatures.${ref.index}.definition.parameters.sourceFeatureIds.${sourceIndex}`;
+        blessed.add(sourceFeatureId);
+        if (sourceFeatureId.kind !== "featureOf") {
+          issues.push({
+            path: sourcePath,
+            expected: "featureOf deferred source feature reference",
+            value: sourceFeatureId,
+            message: "Feature replay source feature ids may defer only through featureOf.",
+          });
+          return;
+        }
+        issues.push(
+          ...validateDeferredReference(
+            actions,
+            sourceFeatureId,
+            orderedPosition,
+            sourcePath,
+          ),
+        );
+      });
       return;
     }
     if (request.definition.kind === "bakedBody") {

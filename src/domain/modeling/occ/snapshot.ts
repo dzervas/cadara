@@ -242,6 +242,17 @@ function collectFeatureConsumedTargets(
       break;
     case "bakedBody":
       break;
+    case "featureReplay":
+      targets.push(
+        ...definition.parameters.sourceFeatureIds.map((featureId) => ({
+          kind: "feature" as const,
+          featureId,
+        })),
+        definition.parameters.transform.kind === "linear"
+          ? definition.parameters.transform.direction
+          : definition.parameters.transform.plane,
+      );
+      break;
     default:
       targets.push(
         ...definition.parameters.participants.flatMap((participant) => [
@@ -393,6 +404,12 @@ function createSnapshotFeatureDefinition(
           provenance: structuredClone(definition.parameters.provenance),
           replacement: structuredClone(definition.parameters.replacement),
         },
+      };
+    case "featureReplay":
+      return {
+        kind: "featureReplay",
+        featureTypeVersion: definition.featureTypeVersion,
+        parameters: structuredClone(definition.parameters),
       };
     default:
       return {

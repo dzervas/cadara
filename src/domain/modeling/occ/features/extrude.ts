@@ -688,7 +688,7 @@ function buildExtrudeEndShape(
   }
 }
 
-function buildExtrudeFeatureShape(
+export function buildExtrudeFeatureShape(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
   parameters: ExtrudeFeatureParameters,

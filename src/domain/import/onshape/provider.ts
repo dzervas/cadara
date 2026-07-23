@@ -27,6 +27,7 @@ import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import {
   BAKED_BODY_FEATURE_SCHEMA_VERSION,
+  FEATURE_REPLAY_FEATURE_SCHEMA_VERSION,
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   IMPORT_CONTRACT_SCHEMA_VERSION,
   PLANE_FEATURE_SCHEMA_VERSION,
@@ -2526,6 +2527,55 @@ async function buildPreparedActions(input: {
         orderedActions.length - 1,
         featurePlan.onshapeFeatureId,
       );
+      recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+    }
+
+    if (featurePlan.target.kind === "feature" && featurePlan.plannedFeatureReplay) {
+      const replay = featurePlan.plannedFeatureReplay;
+      const sourceFeatureIds = replay.sourceFeatureIds.map((sourceFeatureId) => {
+        const actionIndex = orderedIndexByFeatureId.get(sourceFeatureId);
+        return actionIndex === undefined ? null : { kind: "featureOf" as const, actionIndex };
+      });
+      const missingFeatureId = replay.sourceFeatureIds.find(
+        (_sourceFeatureId, index) => sourceFeatureIds[index] === null,
+      );
+      if (missingFeatureId) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Feature "${featurePlan.label}" referenced source feature ${missingFeatureId}, which was not emitted; the replay was skipped.`,
+          code: "onshape-feature-missing-deferred-reference",
+        });
+        continue;
+      }
+      const request: ImportCreateFeatureRequest = {
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "featureReplay",
+          featureTypeVersion: FEATURE_REPLAY_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            sourceFeatureIds: sourceFeatureIds as Extract<
+              import("@/contracts/import/actions").ImportDeferredValue,
+              { kind: "featureOf" }
+            >[],
+            transform: replay.kind === "linear"
+              ? {
+                  kind: "linear",
+                  direction: replay.direction,
+                  instanceCount: createLiteralAuthoredValue(replay.instanceCount),
+                  spacing: createLiteralAuthoredValue(replay.spacing),
+                  oppositeDirection: createLiteralAuthoredValue(replay.oppositeDirection),
+                }
+              : { kind: "mirror", plane: replay.plane },
+          },
+        },
+      };
+      createFeatures.push(request);
+      orderedActions.push({ kind: "createFeature", index: createFeatures.length - 1 });
+      orderedIndexByFeatureId.set(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      input.orderedPositionToFeatureId?.set(orderedActions.length - 1, featurePlan.onshapeFeatureId);
       recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
     }
 
