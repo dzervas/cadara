@@ -1304,6 +1304,7 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "document-variable": "document variable was translated",
   "needs-region-resolution": "sketch region could not be resolved",
   "needs-history-probe": "requires captured history topology evidence",
+  "extrude-body-type-unsupported": "only solid extrudes can import as parametric solid features",
   "extrude-default-scope-ambiguous": "default extrude scope affects more than one possible body",
   "sketch-on-probed-face": "sketch is supported on a resolved face",
   "sketch-face-on-checkpoint-body": "sketch plane face exists only on checkpoint-baked body geometry",

@@ -105,7 +105,7 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
     }
 
     if (extrudePlan.tier === "topology") {
-      if (isNewBodyExtrude(feature)) state.bodyProducingFeatureIds.push(feature.featureId);
+      if (isSolidNewBodyExtrude(feature)) state.bodyProducingFeatureIds.push(feature.featureId);
       return {
         onshapeFeatureId: feature.featureId,
         featureType: feature.featureType,
@@ -124,7 +124,7 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
       extrudePlan.tier === "baked"
         ? extrudePlan.reason
         : "needs-region-resolution";
-    if (isNewBodyExtrude(feature)) {
+    if (isSolidNewBodyExtrude(feature)) {
       state.bodyProducingFeatureIds.push(feature.featureId);
     }
     return {
@@ -159,4 +159,9 @@ function hasScopeQueries(feature: OnshapeFeatureNode): boolean {
 function isNewBodyExtrude(feature: OnshapeFeatureNode): boolean {
   const operationType = parameter(feature, "operationType");
   return operationType?.value === undefined || operationType.value === "NEW";
+}
+
+function isSolidNewBodyExtrude(feature: OnshapeFeatureNode): boolean {
+  const bodyType = parameter(feature, "bodyType");
+  return (bodyType?.value === undefined || bodyType.value === "SOLID") && isNewBodyExtrude(feature);
 }

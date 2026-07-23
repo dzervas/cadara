@@ -94,6 +94,7 @@ export type PlanReasonCode =
   | "needs-region-resolution"
   // Consumes body faces/edges/bodies mid-history; needs the sandboxed probe.
   | "needs-history-probe"
+  | "extrude-body-type-unsupported"
   | "extrude-default-scope-ambiguous"
   | "sketch-on-probed-face"
   // The sketch plane face exists only on a checkpoint-baked body lineage, so no

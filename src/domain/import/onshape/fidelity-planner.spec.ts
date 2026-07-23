@@ -10,6 +10,7 @@ import {
 import type { StudioReadResult } from "@/domain/import/onshape/bundle-reader";
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
+import { makeWaveXSurfaceExtrudeCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import {
   projectPointToSketchPlaneFrame,
   translateSketch,
@@ -98,6 +99,29 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
     expect(plan.tierCounts).toEqual(expected);
     expect(plan.bakeStrategy.kind).toBe("segments");
     expect(plan.requiresStudioBake).toBe(false);
+  }
+});
+
+test("src/domain/import/onshape/fidelity-planner.spec.ts keeps the two local SURFACE Extrude 4 forms out of solid plans and body lineage", () => {
+  const bundle = makeWaveXSurfaceExtrudeCaptureBundle();
+  expect(bundle.partStudios).toHaveLength(2);
+  for (const studio of bundle.partStudios) {
+    const plan = planStudioFidelity(readPartStudio(bundle, studio.elementId));
+    const surface = plan.featurePlans.find((feature) => feature.label === "Extrude 4");
+    const downstreamCut = plan.featurePlans.find(
+      (feature) => feature.onshapeFeatureId === "E_SOLID_CUT",
+    );
+
+    expect(surface).toMatchObject({
+      tier: "baked",
+      reasonCodes: ["extrude-body-type-unsupported"],
+      suppressed: true,
+    });
+    expect(surface?.plannedExtrude).toBeUndefined();
+    expect(downstreamCut).toMatchObject({
+      tier: "baked",
+      reasonCodes: ["needs-history-probe"],
+    });
   }
 });
 
