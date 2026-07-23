@@ -14,7 +14,7 @@ poll budget.
 ## Baseline at commit 305aee75
 
 The five bundles contain **85** rollback snapshots: **13 / 8 / 21 / 28 / 15**.
-A complete recapture with `--rollback-snapshots` makes **612 fixed successful
+A complete recapture with the former `--rollback-snapshots` mode makes **612 fixed successful
 requests plus status polls for 95 STEP translations**. With one successful poll
 per translation, that is **707 successful calls**.
 

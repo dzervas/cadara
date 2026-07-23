@@ -303,11 +303,11 @@ test("capture.spec.ts reports an undeleted rollback workspace after snapshot cap
   const ref = parseDocumentUrl(FIXTURE_ELEMENT_URL);
 
   await expect(
-    captureBundle(ref, { ...CREDENTIALS, rollbackSnapshots: true }, createFixtureRuntime(fetch)),
+    captureBundle(ref, CREDENTIALS, createFixtureRuntime(fetch)),
   ).rejects.toThrow(FIXTURE_TEMP_WORKSPACE_ID);
 });
 
-test("capture.spec.ts degrades to final-state capture with a bundle diagnostic on workspace create 403", async () => {
+test("capture.spec.ts preserves immutable evidence and diagnoses unavailable boundary geometry on workspace 403", async () => {
   const routes = buildDefaultRoutes();
   routes.unshift({
     method: "POST",
@@ -315,7 +315,7 @@ test("capture.spec.ts degrades to final-state capture with a bundle diagnostic o
     respond: (): FetchResponseStub => ({
       ok: false,
       status: 403,
-      text: () => Promise.resolve("branch rights unavailable"),
+      text: () => Promise.resolve("workspace rights unavailable"),
     }),
   });
   routes.unshift({
@@ -328,7 +328,7 @@ test("capture.spec.ts degrades to final-state capture with a bundle diagnostic o
 
   const bundle = await captureBundle(
     ref,
-    { ...CREDENTIALS, rollbackSnapshots: true },
+    CREDENTIALS,
     createFixtureRuntime(fetch),
   );
 
@@ -343,11 +343,11 @@ test("capture.spec.ts degrades to final-state capture with a bundle diagnostic o
   expect(calls.some((call) => call.method === "DELETE")).toBe(false);
 });
 
-test("capture.spec.ts snapshots only locally proven surface-extrude bake boundaries", async () => {
+test("capture.spec.ts automatically snapshots only locally proven surface-extrude bake boundaries", async () => {
   const { fetch: ordinaryFetch, calls: ordinaryCalls } = createFixtureFetch();
   const noBoundaries = await captureBundle(
     parseDocumentUrl(FIXTURE_ELEMENT_URL),
-    { ...CREDENTIALS, rollbackSnapshots: true },
+    CREDENTIALS,
     createFixtureRuntime(ordinaryFetch),
   );
   expect(noBoundaries.partStudios[0]!.rollbackSnapshots).toEqual([]);
@@ -363,7 +363,7 @@ test("capture.spec.ts snapshots only locally proven surface-extrude bake boundar
   const { fetch, calls } = createFixtureFetch(routes);
   const withSnapshots = await captureBundle(
     parseDocumentUrl(FIXTURE_ELEMENT_URL),
-    { ...CREDENTIALS, rollbackSnapshots: true },
+    CREDENTIALS,
     createFixtureRuntime(fetch),
   );
 

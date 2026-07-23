@@ -70,8 +70,8 @@ The v2 counts in
 refer to live re-captures that were not checked in. Successful mid-history
 resolution cannot be claimed against the current root files. They are useful
 regression fixtures for the honest legacy fallback, but implementation
-acceptance requires re-capturing both documents with v2 history resolution and
-`--rollback-snapshots`.
+acceptance requires recapturing both documents with automatic v2 history and
+proven-boundary evidence.
 
 ### Actual query shapes
 
@@ -280,14 +280,12 @@ the pre-transform Cadara rebuild would select incorrectly or miss. For edges,
 a rollback snapshot cannot provide the missing identity; a history-point
 signature is mandatory.
 
-This reveals a capture-side requirement that fits the existing v2 schema. When
-`--rollback-snapshots` is requested for a topology-capable import capture,
-`resolveDeterministicIdsWithHistory()` must evaluate all deterministic IDs at
-each consuming feature's point, not merely IDs that failed final-state
-resolution. This conservative rule avoids duplicating translator slot semantics
-inside the CLI. The current cheaper failure-only behavior may remain when
-snapshots are not requested. No bundle schema change is needed; additional
-history-point records are additive.
+This reveals a capture-side requirement that fits the existing v2 schema.
+Topology-capable capture must immutably evaluate all deterministic IDs at each
+consuming feature's point, not merely IDs that failed final-state resolution.
+This conservative rule avoids duplicating translator slot semantics inside the
+CLI and is independent of whether geometry has a proven bake boundary. No bundle
+schema change is needed; additional history-point records are additive.
 
 If no safe pre-consumer evidence exists, return
 `topology-history-evidence-missing`. If Onshape itself reports unresolved at the
@@ -547,11 +545,11 @@ successor, and no fallback bake may have replaced it.
 Tasks are ordered so a coding agent can land and verify each seam independently.
 
 1. **Establish acceptance captures.** In
-   `src/cli/commands/onshape-capture/references.ts`, make snapshot-enabled capture
-   evaluate all deterministic IDs at each consuming history point, even when an
-   ID resolves finally. Re-capture both root documents as v2 with
-   `--rollback-snapshots`; keep the existing envelope. Verify edge consumers have
-   history-point signatures and record any still-unresolved classes.
+   `src/cli/commands/onshape-capture/references.ts`, evaluate all deterministic
+   IDs immutably at each consuming history point, even when an ID resolves
+   finally. Recapture both root documents as v2 with automatic proven-boundary
+   evidence; keep the existing envelope. Verify edge consumers have history-point
+   signatures and record any still-unresolved classes.
 2. **Read rollback topology evidence.** Add
    `src/domain/import/onshape/rollback-topology-reader.ts` with narrow,
    surplus-tolerant readers for tessellation body/face IDs and facets. Expose

@@ -19,7 +19,7 @@ const SECRET_KEY_VAR = "ONSHAPE_SECRET_KEY";
 const TRANSLATION_MAX_POLLS_VAR = "ONSHAPE_TRANSLATION_MAX_POLLS";
 
 const USAGE =
-  "Usage: cadara onshape capture [--rollback-snapshots] <onshape-document-url> [output-file]\n" +
+  "Usage: cadara onshape capture <onshape-document-url> [output-file]\n" +
   "       cadara onshape capture --enrich <input-file> [output-file]\n" +
   `Requires ${COOKIE_ON_VAR}, or both ${ACCESS_KEY_VAR} and ${SECRET_KEY_VAR}, in the environment.`;
 
@@ -49,18 +49,17 @@ export const onshapeCaptureCommand: CommandModule = {
   description: "Capture an Onshape document into an offline import bundle.",
 
   async run(argv: string[], env: CliEnv, io: CliIO): Promise<CommandResult> {
-    const rollbackSnapshotCount = argv.filter((arg) => arg === "--rollback-snapshots").length;
     const enrichCount = argv.filter((arg) => arg === "--enrich").length;
-    const rollbackSnapshots = rollbackSnapshotCount === 1;
     const enrichIndex = argv.indexOf("--enrich");
-    const positional = argv.filter((arg) => arg !== "--rollback-snapshots" && arg !== "--enrich");
+    const unknownOption = argv.find((arg) => arg.startsWith("--") && arg !== "--enrich");
+    const positional = argv.filter((arg) => arg !== "--enrich");
     const [url, outArg, extraArg] = positional;
     if (
       !url ||
       extraArg ||
-      rollbackSnapshotCount > 1 ||
+      unknownOption ||
       enrichCount > 1 ||
-      (enrichIndex >= 0 && (rollbackSnapshots || enrichIndex !== 0))
+      (enrichIndex >= 0 && enrichIndex !== 0)
     ) {
       return { ok: false, kind: "usage", message: USAGE };
     }
@@ -141,7 +140,6 @@ export const onshapeCaptureCommand: CommandModule = {
         {
           ...credentials,
           maxTranslationPolls: maxTranslationPolls ?? undefined,
-          rollbackSnapshots,
         },
         runtime,
       );

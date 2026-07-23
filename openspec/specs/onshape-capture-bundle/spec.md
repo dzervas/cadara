@@ -59,8 +59,11 @@ The CLI SHALL collect every deterministic ID referenced by feature parameters an
 - **WHEN** the feature list contains no reference to a given deterministic ID
 - **THEN** the CLI does not spend requests resolving it
 
-### Requirement: References SHALL resolve at their consuming history point when final-state resolution fails
-The capture CLI SHALL re-evaluate deterministic IDs that fail final-state resolution with the rollback bar positioned immediately before the consuming feature, on a temporary branch, recording `evaluatedAt: "historyPoint"` with the feature id; only IDs unresolvable at both states SHALL remain `unresolved`.
+### Requirement: References SHALL resolve immutably at their consuming history point
+The capture CLI SHALL batch referenced deterministic IDs by consuming rollback
+index and evaluate them against `m/{microversion}` with `rollbackBarIndex`,
+recording `evaluatedAt: "historyPoint"` and the consuming feature id. It SHALL not
+mutate a temporary or user workspace for reference evidence.
 
 #### Scenario: Mid-history-consumed face resolves
 - **WHEN** a chamfer references a face that a later feature destroys
@@ -71,34 +74,42 @@ The capture CLI SHALL re-evaluate deterministic IDs that fail final-state resolu
 - **WHEN** an ID resolves at neither the final state nor its consuming history point
 - **THEN** it is recorded `unresolved` with both attempts' structured reasons
 
-### Requirement: Rollback captures SHALL never mutate the user's workspace
-All rollback-bar movement SHALL occur on a temporary branch created from the captured microversion and deleted after capture; failures SHALL abort with cleanup, and a cleanup failure SHALL be reported loudly with the branch id.
+### Requirement: Bake-boundary geometry capture SHALL never mutate the user's workspace
+Required rollback-bar movement for proven geometry boundaries SHALL occur only
+on a temporary workspace created from the captured microversion and deleted after
+capture. Failures SHALL abort with cleanup, and a cleanup failure SHALL be
+reported loudly with the workspace id.
 
 #### Scenario: Capture completes
-- **WHEN** a v2 capture finishes
+- **WHEN** a v2 capture with a proven boundary finishes
 - **THEN** the source workspace's rollback bar, history, and microversion are untouched
-- **AND** the temporary branch is deleted
+- **AND** the temporary workspace is deleted
 
 #### Scenario: Capture aborts mid-rollback
-- **WHEN** a request fails while the temporary branch's rollback bar is moved
-- **THEN** the CLI attempts branch deletion, reports the failure per the no-partial-output policy
-- **AND** if deletion also fails, the error output names the leftover branch id
+- **WHEN** a request fails while the temporary workspace's rollback bar is moved
+- **THEN** the CLI attempts workspace deletion and reports the failure per the no-partial-output policy
+- **AND** if deletion also fails, the error output names the leftover workspace id
 
-#### Scenario: Branch rights unavailable
-- **WHEN** the credentials cannot create a branch on the document
-- **THEN** capture degrades to v1 behavior (final-state resolution only) with an explicit diagnostic in the bundle
-- **AND** the capture still succeeds
+#### Scenario: Workspace rights unavailable
+- **WHEN** the credentials cannot create a workspace required for boundary geometry
+- **THEN** immutable evidence capture continues, affected snapshots are null, and the bundle carries an explicit diagnostic
 
-### Requirement: Bundles MAY carry per-feature rollback snapshots under format version 2
-With the opt-in flag, the CLI SHALL populate `rollbackSnapshots` with per-solid-feature tessellated geometry (and STEP when available) captured on the temporary branch, and the bundle SHALL declare `formatVersion: 2`; consumers reading v1 bundles SHALL be unaffected.
+### Requirement: Format-v2 bundles SHALL automatically carry proven bake-boundary snapshots
+The CLI SHALL populate `rollbackSnapshots` only for locally proven intrinsic bake
+boundaries, with tessellated geometry and STEP when available. Capture SHALL not
+require an opt-in flag or create a temporary workspace when no boundary exists.
 
-#### Scenario: Opt-in snapshot capture
-- **WHEN** the user passes the rollback-snapshots flag
-- **THEN** each solid feature's post-feature geometry is embedded with its feature id and tolerance
+#### Scenario: Proven boundary capture
+- **WHEN** a Part Studio contains a locally proven intrinsic bake boundary
+- **THEN** its post-feature geometry is embedded with the feature id and tolerance
 
-#### Scenario: Default capture stays cheap
-- **WHEN** the flag is absent
-- **THEN** `rollbackSnapshots` stays null and request volume matches v1 plus only failure-triggered history-point resolutions
+#### Scenario: No boundary exists
+- **WHEN** no Part Studio contains a proven boundary
+- **THEN** `rollbackSnapshots` is an empty array and no temporary workspace is created
+
+#### Scenario: Boundary workspace unavailable
+- **WHEN** required boundary capture cannot create its temporary workspace
+- **THEN** affected studios record `rollbackSnapshots: null` and an explicit diagnostic
 
 #### Scenario: Version negotiation
 - **WHEN** a consumer validates a bundle
