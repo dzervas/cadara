@@ -373,6 +373,12 @@ test("capture.spec.ts preserves immutable evidence and diagnoses unavailable bou
     ),
   ).toBe(true);
   expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
+  const beforeEnrichment = calls.length;
+  const enriched = await enrichBundleHistoryEvidence(
+    bundle, CREDENTIALS, createFixtureRuntime(fetch),
+  );
+  expect(calls).toHaveLength(beforeEnrichment);
+  expect(enriched.partStudios[0]!.rollbackSnapshots).toBeNull();
   expect(calls.some((call) => call.method === "DELETE")).toBe(false);
 });
 
@@ -408,6 +414,30 @@ test("capture.spec.ts automatically snapshots only locally proven surface-extrud
   expect(calls.filter((call) => call.method === "POST" && call.url.includes("/translations"))).toHaveLength(1);
   expect(calls.filter((call) => call.method === "GET" && call.url.includes("/translations/"))).toHaveLength(1);
   expect(calls.filter((call) => call.url.includes("/externaldata/"))).toHaveLength(1);
+});
+
+test("capture.spec.ts enrichment prunes legacy snapshots without recapturing current evidence", async () => {
+  const { fetch, calls } = createFixtureFetch();
+  const captured = await captureBundle(
+    parseDocumentUrl(FIXTURE_ELEMENT_URL), CREDENTIALS, createFixtureRuntime(fetch),
+  );
+  const staleSnapshots = structuredClone(captured);
+  staleSnapshots.partStudios[0]!.features = featuresWithSurfaceExtrude();
+  staleSnapshots.partStudios[0]!.rollbackSnapshots = [
+    { featureId: "F_ORDINARY", tessellationTolerance: 0.001, tessellatedFaces: { legacy: true } },
+    { featureId: "F_SURFACE", tessellationTolerance: 0.001, tessellatedFaces: { boundary: true } },
+  ];
+  const beforeEnrichment = calls.length;
+
+  const enriched = await enrichBundleHistoryEvidence(
+    staleSnapshots, CREDENTIALS, createFixtureRuntime(fetch),
+  );
+
+  expect(calls).toHaveLength(beforeEnrichment);
+  expect(enriched.partStudios[0]!.rollbackSnapshots).toEqual([
+    { featureId: "F_SURFACE", tessellationTolerance: 0.001, tessellatedFaces: { boundary: true } },
+  ]);
+  expect(enriched.partStudios[0]!.groundTruth).toEqual(staleSnapshots.partStudios[0]!.groundTruth);
 });
 
 test("capture.spec.ts targeted enrichment replaces complete immutable history evidence without recapturing immutable sections", async () => {
