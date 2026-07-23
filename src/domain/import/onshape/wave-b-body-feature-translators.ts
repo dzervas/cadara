@@ -49,7 +49,7 @@ export interface PlannedBodyTopologyConsumer {
   radius?: number;
   thickness?: number;
   direction?: "inside" | "outside";
-  shellMode?: "openFaces" | "offsetAllFaces";
+  shellMode?: "openFaces" | "closedHollow" | "offsetAllFaces";
   unavailableReason?: import("@/domain/import/onshape/fidelity-planner").PlanReasonCode;
   inputDependencies?: readonly FeatureDependencyInput[];
 }
@@ -668,8 +668,8 @@ export const shellFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["shell"],
   plan(context) {
     // Onshape has two closed/empty-selection shell meanings:
-    // - isHollow=true with no entities creates a closed hollow that preserves the
-    //   outer envelope, which differs from a whole-solid offset and remains baked.
+    // - isHollow=true with no entities creates an inward closed hollow that
+    //   preserves the outer envelope.
     // - isHollow=false with no entities offsets every face of the selected part.
     const isHollow = booleanValue(context.feature, "isHollow");
     const hasEntityTargets = hasQueries(context.feature, "entities");
@@ -685,7 +685,18 @@ export const shellFeatureTranslator: OnshapeFeatureTranslator = {
         slots: [slot("bodyTarget", "parts", "body", 1, 1, ["body"])],
       });
     }
-    if (!hasEntityTargets) return baked(context, "shell-hollow-without-openings");
+    if (!hasEntityTargets) {
+      if (booleanValue(context.feature, "oppositeDirection")) {
+        return baked(context, "shell-closed-hollow-direction-unsupported");
+      }
+      return topologyCandidate(context, {
+        featureKind: "shell",
+        shellMode: "closedHollow",
+        thickness,
+        direction: "inside",
+        slots: [slot("bodyTarget", "parts", "body", 1, 1, ["body"])],
+      });
+    }
     return topologyCandidate(context, {
       featureKind: "shell",
       thickness,
@@ -873,12 +884,14 @@ export function buildResolvedBodyConsumerDefinition(
       parameters: {
         ...(planned.shellMode === "offsetAllFaces"
           ? { mode: "offsetAllFaces" as const, faceTargets: [] as const }
-          : {
-              faceTargets: (targetsByRole.get("face") ?? []) as import("@/contracts/import/actions").ImportDeferredShellFeatureParameters["faceTargets"],
-            }),
+          : planned.shellMode === "closedHollow"
+            ? { mode: "closedHollow" as const, faceTargets: [] as const }
+            : {
+                faceTargets: (targetsByRole.get("face") ?? []) as import("@/contracts/import/actions").ImportDeferredShellFeatureParameters["faceTargets"],
+              }),
         bodyTarget: targetsByRole.get("body")![0]! as import("@/contracts/import/actions").ImportDeferredShellFeatureParameters["bodyTarget"],
         thickness: createLiteralAuthoredValue(planned.thickness!),
-        direction: planned.direction,
+        direction: planned.shellMode === "closedHollow" ? "inside" : planned.direction,
         operation: createLiteralAuthoredValue("newBody"),
         booleanScope: { kind: "standalone" },
       },

@@ -1,5 +1,6 @@
 import type { ShellFeatureParameters } from "@/contracts/modeling/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
+import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { OccReferenceInvalidationRecord } from "@/domain/modeling/occ/topology";
 import {
@@ -41,6 +42,10 @@ function isOffsetAllFacesShell(parameters: ShellFeatureParameters) {
   return parameters.mode === "offsetAllFaces";
 }
 
+function isClosedHollowShell(parameters: ShellFeatureParameters) {
+  return parameters.mode === "closedHollow";
+}
+
 function getShellSignedThickness(parameters: ShellFeatureParameters) {
   const resolvedThickness = getAuthoredLiteralValue(parameters.thickness);
   if (resolvedThickness === null || resolvedThickness <= 0) {
@@ -50,14 +55,15 @@ function getShellSignedThickness(parameters: ShellFeatureParameters) {
   return parameters.direction === "outside" ? resolvedThickness : -resolvedThickness;
 }
 
-function assertValidSolidOffsetShape(
+function assertValidSingleSolidShellShape(
   context: OccFeatureExecutionContext,
   shape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>,
+  mode: "closedHollow" | "offsetAllFaces",
 ) {
   const analyzer = new context.oc.BRepCheck_Analyzer(shape, true, false);
   try {
     if (!analyzer.IsValid_2()) {
-      throw new Error("OCC shell offsetAllFaces produced invalid topology.");
+      throw new Error(`OCC shell ${mode} produced invalid topology.`);
     }
   } finally {
     analyzer.delete();
@@ -65,12 +71,131 @@ function assertValidSolidOffsetShape(
 
   const solids = extractSolidShapes(context.oc, shape);
   if (solids.length !== 1) {
+    for (const solid of solids) solid.delete();
     throw new Error(
-      `OCC shell offsetAllFaces must produce exactly one solid, received ${solids.length}.`,
+      `OCC shell ${mode} must produce exactly one solid, received ${solids.length}.`,
     );
   }
 
   return solids[0]!;
+}
+
+function getShapeBounds(
+  context: OccFeatureExecutionContext,
+  shape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>,
+) {
+  const points = getShapeVertexPoints(context.oc, shape);
+  const mesher = new context.oc.BRepMesh_IncrementalMesh_2(
+    shape,
+    Math.max(context.modelingTolerance * 10, 0.01),
+    false,
+    0.5,
+    false,
+  );
+  const faces = new context.oc.TopTools_IndexedMapOfShape_1();
+  try {
+    context.oc.TopExp.MapShapes_1(
+      shape,
+      context.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+      faces,
+    );
+    for (let index = 1; index <= faces.Size(); index += 1) {
+      const face = context.oc.TopoDS.Face_1(faces.FindKey(index));
+      const location = new context.oc.TopLoc_Location_1();
+      try {
+        const triangulationHandle = context.oc.BRep_Tool.Triangulation(
+          face,
+          location,
+          0 as never,
+        );
+        if (triangulationHandle.IsNull()) continue;
+        const triangulation = triangulationHandle.get();
+        for (let nodeIndex = 1; nodeIndex <= triangulation.NbNodes(); nodeIndex += 1) {
+          const point = triangulation
+            .Node(nodeIndex)
+            .Transformed(location.Transformation());
+          points.push([point.X(), point.Y(), point.Z()]);
+        }
+      } finally {
+        location.delete();
+      }
+    }
+  } finally {
+    faces.delete();
+    mesher.delete();
+  }
+
+  if (points.length === 0) {
+    throw new Error("OCC closedHollow could not verify the source outer envelope.");
+  }
+
+  return [
+    Math.min(...points.map(([x]) => x)),
+    Math.max(...points.map(([x]) => x)),
+    Math.min(...points.map(([, y]) => y)),
+    Math.max(...points.map(([, y]) => y)),
+    Math.min(...points.map(([, , z]) => z)),
+    Math.max(...points.map(([, , z]) => z)),
+  ] as const;
+}
+
+function getShapeVolume(
+  context: OccFeatureExecutionContext,
+  shape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>,
+) {
+  const properties = new context.oc.GProp_GProps_1();
+  try {
+    context.oc.BRepGProp.VolumeProperties_1(
+      shape,
+      properties,
+      false,
+      false,
+      false,
+    );
+    return properties.Mass();
+  } finally {
+    properties.delete();
+  }
+}
+
+function assertClosedHollowSemantics(
+  context: OccFeatureExecutionContext,
+  sourceShape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>,
+  resultShape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>,
+) {
+  const solid = assertValidSingleSolidShellShape(
+    context,
+    resultShape,
+    "closedHollow",
+  );
+  const sourceBounds = getShapeBounds(context, sourceShape);
+  const resultBounds = getShapeBounds(context, solid);
+  const tolerance = context.modelingTolerance * 10;
+  if (
+    sourceBounds.some(
+      (value, index) => Math.abs(value - resultBounds[index]!) > tolerance,
+    )
+  ) {
+    throw new Error(
+      `OCC closedHollow changed the source outer envelope (${sourceBounds.join(", ")} -> ${resultBounds.join(", ")}).`,
+    );
+  }
+
+  const sourceVolume = getShapeVolume(context, sourceShape);
+  const resultVolume = getShapeVolume(context, solid);
+  const minimumCavityVolume = Math.max(
+    context.modelingTolerance ** 3,
+    Math.abs(sourceVolume) * 1e-10,
+  );
+  if (
+    sourceVolume <= minimumCavityVolume ||
+    resultVolume <= 0 ||
+    resultVolume >= sourceVolume - minimumCavityVolume
+  ) {
+    throw new Error("OCC closedHollow did not produce a valid inner cavity.");
+  }
+
+  return solid;
 }
 
 function buildOffsetAllFacesShellShape(
@@ -105,16 +230,107 @@ function buildOffsetAllFacesShellShape(
 
   return {
     sourceBody,
-    shape: assertValidSolidOffsetShape(context, shell.Shape()),
+    shape: assertValidSingleSolidShellShape(
+      context,
+      shell.Shape(),
+      "offsetAllFaces",
+    ),
   };
+}
+
+function buildClosedHollowShellShape(
+  context: OccFeatureExecutionContext,
+  parameters: ShellFeatureParameters,
+) {
+  if (!isClosedHollowShell(parameters)) {
+    throw new Error("Closed-hollow shell builder received non-closed-hollow parameters.");
+  }
+  if (parameters.faceTargets.length !== 0) {
+    throw new Error("Shell closedHollow mode cannot include removable faces.");
+  }
+  if (parameters.direction !== "inside") {
+    throw new Error("Shell closedHollow mode requires an inside direction.");
+  }
+
+  const sourceBody = requireBody(context, parameters.bodyTarget.bodyId);
+  const cavityOffset = new context.oc.BRepOffsetAPI_MakeOffsetShape();
+  const offsetProgress = new context.oc.Message_ProgressRange_1();
+  const offsetBuildProgress = new context.oc.Message_ProgressRange_1();
+  try {
+    cavityOffset.PerformByJoin(
+      sourceBody.shape,
+      getShellSignedThickness(parameters),
+      context.modelingTolerance,
+      context.oc.BRepOffset_Mode.BRepOffset_Skin as never,
+      false,
+      false,
+      context.oc.GeomAbs_JoinType.GeomAbs_Arc as never,
+      false,
+      offsetProgress,
+    );
+    cavityOffset.Build(offsetBuildProgress);
+    if (!cavityOffset.IsDone()) {
+      throw new Error("OCC shell closedHollow cavity offset failed.");
+    }
+
+    const offsetShape = cavityOffset.Shape();
+    try {
+      const cavity = assertValidSingleSolidShellShape(
+        context,
+        offsetShape,
+        "closedHollow",
+      );
+      try {
+        const cutProgress = new context.oc.Message_ProgressRange_1();
+        const cutBuildProgress = new context.oc.Message_ProgressRange_1();
+        const cut = new context.oc.BRepAlgoAPI_Cut_3(
+          sourceBody.shape,
+          cavity,
+          cutProgress,
+        );
+        try {
+          cut.Build(cutBuildProgress);
+          if (!cut.IsDone()) {
+            throw new Error("OCC shell closedHollow cavity cut failed.");
+          }
+
+          const cutShape = cut.Shape();
+          try {
+            return {
+              sourceBody,
+              shape: assertClosedHollowSemantics(
+                context,
+                sourceBody.shape,
+                cutShape,
+              ),
+            };
+          } finally {
+            cutShape.delete();
+          }
+        } finally {
+          cut.delete();
+          cutBuildProgress.delete();
+          cutProgress.delete();
+        }
+      } finally {
+        cavity.delete();
+      }
+    } finally {
+      offsetShape.delete();
+    }
+  } finally {
+    offsetBuildProgress.delete();
+    offsetProgress.delete();
+    cavityOffset.delete();
+  }
 }
 
 function buildShellFeatureShape(
   context: OccFeatureExecutionContext,
   parameters: ShellFeatureParameters,
 ) {
-  if (isOffsetAllFacesShell(parameters)) {
-    throw new Error("Open-face shell builder received offsetAllFaces parameters.");
+  if (isOffsetAllFacesShell(parameters) || isClosedHollowShell(parameters)) {
+    throw new Error("Open-face shell builder received non-open-face parameters.");
   }
   const resolvedThickness = getAuthoredLiteralValue(parameters.thickness);
   if (resolvedThickness === null || resolvedThickness <= 0) {
@@ -172,8 +388,8 @@ function buildNativeShellFeatureShape(
   context: OccFeatureExecutionContext,
   parameters: ShellFeatureParameters,
 ) {
-  if (isOffsetAllFacesShell(parameters)) {
-    throw new Error("Native open-face shell builder received offsetAllFaces parameters.");
+  if (isOffsetAllFacesShell(parameters) || isClosedHollowShell(parameters)) {
+    throw new Error("Native open-face shell builder received non-open-face parameters.");
   }
   const resolvedThickness = getAuthoredLiteralValue(parameters.thickness);
   if (resolvedThickness === null || resolvedThickness <= 0) {
@@ -229,6 +445,38 @@ function buildNativeShellFeatureShape(
   };
 }
 
+function executeClosedHollowShellFeature(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  parameters: ShellFeatureParameters,
+): OccFeatureExecutionResult {
+  const shellResult = buildClosedHollowShellShape(context, parameters);
+  const replacement = trackReplacementSolidBody(context.oc, {
+    previous: shellResult.sourceBody,
+    ownerFeatureId,
+    shape: shellResult.shape,
+  });
+  const bodies = context.bodies.map((body) =>
+    body.bodyId === shellResult.sourceBody.bodyId ? replacement : body,
+  );
+  const producedTargets = [{ kind: "body" as const, bodyId: replacement.bodyId }];
+
+  return {
+    bodies,
+    constructions: [...context.constructions],
+    constructionPlanes: new Map(context.constructionPlanes),
+    producedTargets,
+    entities: [],
+    renderRecords: [],
+    historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
+    topologyStage: createUnsupportedProducerTopologyStage({
+      featureId: ownerFeatureId,
+      bodies,
+      producedTargets,
+    }),
+  };
+}
+
 function executeOffsetAllFacesShellFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -268,6 +516,9 @@ export function executeShellFeature(
 ): OccFeatureExecutionResult {
   if (isOffsetAllFacesShell(parameters)) {
     return executeOffsetAllFacesShellFeature(context, ownerFeatureId, parameters);
+  }
+  if (isClosedHollowShell(parameters)) {
+    return executeClosedHollowShellFeature(context, ownerFeatureId, parameters);
   }
   const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
   if (!resolvedOperation) {

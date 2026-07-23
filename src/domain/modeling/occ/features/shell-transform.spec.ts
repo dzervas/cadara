@@ -87,6 +87,19 @@ function getShapeBounds(
   };
 }
 
+function bodyVolume(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  const properties = new oc.GProp_GProps_1();
+  try {
+    oc.BRepGProp.VolumeProperties_1(shape, properties, false, false, false);
+    return properties.Mass();
+  } finally {
+    properties.delete();
+  }
+}
+
 function makeSketchLineAxis(
   sketchId: SketchId,
   entityId: SketchEntityId,
@@ -475,6 +488,71 @@ test("executeShellFeature uses native shell transaction before replacement boole
     result.historyInvalidations,
     "Native shell composition",
   );
+});
+
+// Lane: logic (per docs/testing.md — exported OCC feature execution is a
+// deterministic domain seam around the OpenCascade runtime, not UI behavior).
+// Seam: executeShellFeature closedHollow creates one valid in-place solid with
+// an inner cavity while preserving the outer envelope.
+test("executeShellFeature creates an inside closed hollow without changing the outer envelope", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_closed_hollow_seed" as BodyId,
+    "feature_closed_hollow_seed" as FeatureId,
+  );
+  const context = createOccAuthoringState(oc, { bodies: [body] });
+  const sourceBounds = getShapeBounds(oc, body.shape);
+  const sourceVolume = bodyVolume(oc, body.shape);
+
+  const result = executeShellFeature(
+    context,
+    "feature_closed_hollow" as FeatureId,
+    {
+      mode: "closedHollow",
+      bodyTarget: { kind: "body", bodyId: body.bodyId },
+      faceTargets: [],
+      thickness: 0.2,
+      direction: "inside",
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    },
+  );
+  const replacement = result.bodies.find(
+    (candidate) => candidate.bodyId === body.bodyId,
+  );
+
+  expect(result.bodies).toHaveLength(1);
+  expect(
+    replacement,
+    "Closed hollow must replace exactly the scoped source body in place.",
+  ).toBeTruthy();
+  expect(result.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+  expect(getShapeBounds(oc, replacement!.shape)).toEqual(sourceBounds);
+  expect(
+    replacement!.topology.faceIds.length,
+    "The hollow must add inner-cavity topology rather than return the original solid.",
+  ).toBeGreaterThan(body.topology.faceIds.length);
+  expect(
+    bodyVolume(oc, replacement!.shape),
+    "The closed hollow must remove material for its inner cavity.",
+  ).toBeLessThan(sourceVolume);
+
+  expect(() =>
+    executeShellFeature(
+      context,
+      "feature_closed_hollow_excessive" as FeatureId,
+      {
+        mode: "closedHollow",
+        bodyTarget: { kind: "body", bodyId: body.bodyId },
+        faceTargets: [],
+        thickness: 3,
+        direction: "inside",
+        operation: "newBody",
+        booleanScope: { kind: "standalone" },
+      },
+    ),
+  ).toThrow();
 });
 
 // Lane: logic (per docs/testing.md — exported OCC feature execution is a

@@ -160,6 +160,7 @@ export type PlanReasonCode =
   | "chamfer-width-unreadable"
   | "shell-non-hollow-unsupported"
   | "shell-hollow-without-openings"
+  | "shell-closed-hollow-direction-unsupported"
   | "shell-thickness-unreadable"
   | "hole-style-unsupported"
   | "hole-thread-unsupported"

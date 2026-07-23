@@ -32,6 +32,7 @@ import {
   makeWaveBSegmentedApplyCaptureBundle,
 } from "@/domain/import/onshape/wave-b-capture-fixtures";
 import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
+import { makeWaveXClosedHollowShellCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import {
   applyImportPreparedActions,
   createImportCapabilities,
@@ -833,6 +834,185 @@ test("Onshape hole fixture applies through the real OCC import service with mate
   ).toBe(true);
 });
 
+
+// Lane: logic (per docs/testing.md — this crosses the importer/provider/apply
+// seam through the real OCC adapter, without UI or browser behavior).
+// Seam: the captured closed-hollow form resolves one scoped source body,
+// preserves its outer envelope/body identity, and rebuilds after an edit.
+test("Onshape closed hollow shell fixture applies and rebuilds through real OCC", async () => {
+  const oc = await loadRealOccForImportTest();
+  const { service } = createRealOccModelingService(oc);
+  const before = await service.getCurrentDocumentSnapshot();
+  const source = sourceFromBundle(makeWaveXClosedHollowShellCaptureBundle());
+  const capabilities = createImportCapabilities(service, before, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        return {
+          steps: (input.actions.orderedActions ?? []).map(() => ({
+            status: "rebuilt" as const,
+            signatures: [{
+              entityClass: "body" as const,
+              geometryType: "solid",
+              boundingBox: {
+                low: [-4, -3.97084, 0] as [number, number, number],
+                high: [4, 3.97084, 10] as [number, number, number],
+              },
+              centroid: [0, 0, 5] as [number, number, number],
+              reference: {
+                kind: "body" as const,
+                bodyId: "probe_closed_hollow" as BodyId,
+              },
+            }],
+          })),
+        };
+      },
+    },
+  });
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const studio = review.providerReview.studios[0];
+  const shellPlan = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "SHELL_CLOSED",
+  );
+  expect(shellPlan, JSON.stringify(studio?.featurePlans)).toMatchObject({
+    tier: "parametric",
+    reasonCodes: [],
+  });
+
+  const actions = await prepareImportActions({
+    provider: onshapeImportProvider,
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  const preparedShell = actions.createFeatures?.find(
+    (request) => request.definition.kind === "shell",
+  );
+  expect(preparedShell?.definition).toMatchObject({
+    kind: "shell",
+    parameters: {
+      mode: "closedHollow",
+      faceTargets: [],
+      thickness: { source: "literal", value: 2.5 },
+      direction: "inside",
+      bodyTarget: { kind: "topologyOf", expectedKind: "body" },
+    },
+  });
+
+  const forwarded = recordCreateFeatureInputs(service);
+  const applied = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: before.document.revisionId,
+    actions,
+  });
+  expect(
+    applied.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify({ diagnostics: applied.diagnostics, forwarded }),
+  ).toBe(true);
+  expect(applied.rolledBack).toBe(false);
+
+  const imported = await service.getCurrentDocumentSnapshot();
+  const baseFeature = imported.document.features.find(
+    (feature) => feature.definition.kind === "extrude",
+  );
+  const shellFeature = imported.document.features.find(
+    (feature) => feature.definition.kind === "shell",
+  );
+  expect(baseFeature).toBeDefined();
+  expect(shellFeature?.definition, JSON.stringify(shellFeature)).toMatchObject({
+    kind: "shell",
+    parameters: { mode: "closedHollow", direction: "inside" },
+  });
+  if (!baseFeature || !shellFeature || shellFeature.definition.kind !== "shell") {
+    throw new Error("Expected imported base extrude and closed hollow shell features.");
+  }
+
+  const baseCursor = await service.setFeatureCursor({
+    baseRevisionId: imported.document.revisionId,
+    cursor: { kind: "feature", featureId: baseFeature.featureId },
+  });
+  if (baseCursor.isErr()) throw baseCursor.error;
+  const beforeShell = await service.getCurrentDocumentSnapshot();
+  const sourceBody = beforeShell.document.bodies[0];
+  expect(sourceBody, "Base extrude should produce one scoped solid body.").toBeDefined();
+  const sourceSignatures = await deriveLiveBodySignatures({
+    snapshot: beforeShell,
+    service,
+  });
+  expect(sourceSignatures.status).toBe("available");
+  if (sourceSignatures.status !== "available") {
+    throw new Error(JSON.stringify(sourceSignatures.diagnostics));
+  }
+  const sourceSignature = sourceSignatures.signatures.find(
+    (signature) =>
+      signature.entityClass === "body" &&
+      signature.reference.kind === "body" &&
+      signature.reference.bodyId === sourceBody?.bodyId,
+  );
+
+  const shellCursor = await service.setFeatureCursor({
+    baseRevisionId: beforeShell.document.revisionId,
+    cursor: { kind: "feature", featureId: shellFeature.featureId },
+  });
+  if (shellCursor.isErr()) throw shellCursor.error;
+  const hollowed = await service.getCurrentDocumentSnapshot();
+  const hollowedBody = hollowed.document.bodies[0];
+  expect(hollowed.document.bodies).toHaveLength(1);
+  expect(hollowedBody?.bodyId).toBe(sourceBody?.bodyId);
+  expect(
+    hollowedBody!.topology.faceIds.length,
+    "The real OCC hollow must add inner-cavity faces.",
+  ).toBeGreaterThan(sourceBody!.topology.faceIds.length);
+  const hollowedSignatures = await deriveLiveBodySignatures({
+    snapshot: hollowed,
+    service,
+  });
+  expect(hollowedSignatures.status).toBe("available");
+  if (hollowedSignatures.status !== "available") {
+    throw new Error(JSON.stringify(hollowedSignatures.diagnostics));
+  }
+  const hollowedSignature = hollowedSignatures.signatures.find(
+    (signature) =>
+      signature.entityClass === "body" &&
+      signature.reference.kind === "body" &&
+      signature.reference.bodyId === hollowedBody?.bodyId,
+  );
+  expect(hollowedSignature?.boundingBox).toBeDefined();
+  const sourceBounds = sourceSignature?.boundingBox;
+  const hollowedBounds = hollowedSignature?.boundingBox;
+  if (!sourceBounds || !hollowedBounds) {
+    throw new Error("Expected live source and closed-hollow body bounds.");
+  }
+  for (const [sourceValue, hollowedValue] of [
+    ...sourceBounds.low.map((value, index) => [value, hollowedBounds.low[index]!] as const),
+    ...sourceBounds.high.map((value, index) => [value, hollowedBounds.high[index]!] as const),
+  ]) {
+    expect(
+      Math.abs(sourceValue - hollowedValue),
+      "The OCC tessellation may sample a curved outer face differently, but the closed hollow may not move its outer envelope.",
+    ).toBeLessThan(0.05);
+  }
+
+  const rebuilt = await service.updateFeature({
+    baseRevisionId: hollowed.document.revisionId,
+    featureId: shellFeature.featureId,
+    definition: {
+      ...shellFeature.definition,
+      parameters: {
+        ...shellFeature.definition.parameters,
+        thickness: createLiteralAuthoredValue(2),
+      },
+    },
+  });
+  if (rebuilt.isErr()) throw rebuilt.error;
+  expect(rebuilt.value.revisionState.kind).toBe("accepted");
+  const afterEdit = await service.getCurrentDocumentSnapshot();
+  expect(afterEdit.document.bodies).toHaveLength(1);
+  expect(afterEdit.document.bodies[0]?.bodyId).toBe(sourceBody?.bodyId);
+  expect(afterEdit.document.bodies[0]!.topology.faceIds.length).toBeGreaterThan(
+    sourceBody!.topology.faceIds.length,
+  );
+});
 
 test("Onshape pattern fixture applies through provider and mock kernel without unresolved refs", async () => {
   const { adapter, service } = createTestModelingService();

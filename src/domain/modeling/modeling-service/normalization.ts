@@ -628,6 +628,7 @@ export function normalizeShellFeatureParameters(
   if (
     value.mode !== undefined &&
     value.mode !== "openFaces" &&
+    value.mode !== "closedHollow" &&
     value.mode !== "offsetAllFaces"
   ) {
     throw new Error("Invalid shell mode payload.");
@@ -683,6 +684,22 @@ export function normalizeShellFeatureParameters(
     ),
     booleanScope,
   };
+
+  if (value.mode === "closedHollow") {
+    if (value.faceTargets.length !== 0) {
+      throw new Error("Shell closedHollow mode cannot include removable faces.");
+    }
+    if (value.direction !== undefined && value.direction !== "inside") {
+      throw new Error("Shell closedHollow mode requires an inside direction.");
+    }
+
+    return {
+      ...baseParameters,
+      mode: "closedHollow",
+      faceTargets: [],
+      direction: "inside",
+    };
+  }
 
   if (value.mode === "offsetAllFaces") {
     if (value.faceTargets.length !== 0) {
