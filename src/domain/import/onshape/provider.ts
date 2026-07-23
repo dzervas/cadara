@@ -34,6 +34,7 @@ import {
   REVOLVE_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 import {
+  hasOnshapeGroundTruthGeometry,
   validateOnshapeCaptureBundle,
   type OnshapeCaptureBundle,
 } from "@/contracts/import/onshape-capture-bundle";
@@ -513,7 +514,7 @@ function verifyGroundTruth(input: {
   bakedCount: number;
   probeResult: HistoryProbeResult | null;
 }): GroundTruthVerification {
-  if (!input.groundTruth.hasBodies) {
+  if (!hasOnshapeGroundTruthGeometry(input.groundTruth)) {
     return { status: "noGroundTruth" };
   }
   if (input.bakedCount > 0) {
@@ -2623,7 +2624,7 @@ async function buildPreparedActions(input: {
 
   if (input.plan.requiresStudioBake) {
     const bakedMeshBytes =
-      input.materializeBake && input.read.studio.groundTruth.hasBodies
+      input.materializeBake && hasOnshapeGroundTruthGeometry(input.read.studio.groundTruth)
         ? encodeOnshapeTessellationAsBakedMeshBytes(
             input.read.studio.groundTruth.tessellatedFaces,
           )
@@ -2693,8 +2694,9 @@ async function buildPreparedActions(input: {
     } else {
       diagnostics.push({
         severity: "warning",
-        message:
-          "Non-parametric solid geometry could not be materialized: baking requires the geometry-import capability, which is not available. The final-state body was not imported.",
+        message: hasOnshapeGroundTruthGeometry(input.read.studio.groundTruth)
+          ? "Non-parametric solid geometry could not be materialized: baking requires the geometry-import capability, which is not available. The final-state body was not imported."
+          : "Non-parametric solid geometry could not be materialized: final-state geometry was intentionally omitted because no final bake boundary required it. The captured body was not imported.",
         code: "onshape-bake-unavailable",
       });
     }

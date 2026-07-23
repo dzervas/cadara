@@ -1,3 +1,7 @@
+import {
+  hasCurrentOnshapeProfileEvidence,
+  type OnshapeProfileEvidence,
+} from "@/contracts/import/onshape-capture-bundle";
 import { planExtrudeFeature } from "@/domain/import/onshape/extrude-planner";
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 import {
@@ -6,6 +10,33 @@ import {
   type OnshapeFeatureTranslator,
 } from "@/domain/import/onshape/feature-translator-registry";
 import { readRollbackTopologySnapshot } from "@/domain/import/onshape/rollback-topology-reader";
+
+function currentProfileEvidence(
+  feature: OnshapeFeatureNode,
+  studio: Parameters<OnshapeFeatureTranslator["plan"]>[0]["read"]["studio"],
+): readonly OnshapeProfileEvidence[] {
+  const profileParameter = feature.parameters?.find(
+    (parameter) =>
+      parameter !== null &&
+      typeof parameter === "object" &&
+      (parameter as { parameterId?: unknown }).parameterId === "entities",
+  ) as { queries?: unknown } | undefined;
+  const queries = profileParameter?.queries;
+  if (!Array.isArray(queries)) return [];
+  const complete = queries.every((query, queryIndex) => hasCurrentOnshapeProfileEvidence({
+    schemaVersion: studio.profileEvidenceSchemaVersion,
+    manifest: studio.profileEvidenceManifest,
+    evidence: studio.profileEvidence,
+    consumingFeatureId: feature.featureId,
+    queryIndex,
+    sourceQueryString:
+      query !== null && typeof query === "object" &&
+      typeof (query as { queryString?: unknown }).queryString === "string"
+        ? (query as { queryString: string }).queryString
+        : null,
+  }));
+  return complete ? studio.profileEvidence ?? [] : [];
+}
 
 function inferredDefaultScopeFeatureIds(
   feature: OnshapeFeatureNode,
@@ -59,7 +90,7 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
     const inputDependencies: FeatureDependencyInput[] = [];
     const extrudePlan = planExtrudeFeature({
       feature,
-      profileEvidence: read.studio.profileEvidence ?? [],
+      profileEvidence: currentProfileEvidence(feature, read.studio),
       solvedSketchesByFeatureId: read.solvedSketchesByFeatureId,
       referencedSketchesByFeatureId: state.sketchPlansByFeatureId,
       priorBodyProducingFeatureIds: state.bodyProducingFeatureIds,

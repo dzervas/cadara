@@ -121,6 +121,12 @@ export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
         sourceSketchFeatureId: "S_SOLID_CUT",
         interiorPoint3d: [0, 0, 0],
       }],
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: [{
+        consumingFeatureId: "E_SOLID_CUT", parameterId: "entities", queryIndex: 0,
+        sourceQueryString: 'query = qSketchRegion(id + "S_SOLID_CUT", true);',
+        kind: "faceResults", emittedRecordCount: 1, completed: true,
+      }],
       groundTruth: { hasBodies: false },
       rollbackSnapshots: [],
     })),
@@ -237,6 +243,12 @@ export function makeWaveXClosedHollowShellCaptureBundle(): OnshapeCaptureBundleV
         kind: "sketchRegion",
         sourceSketchFeatureId: "SHELL_SKETCH",
         interiorPoint3d: [0, 0, 0],
+      }],
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: [{
+        consumingFeatureId: baseExtrudeId, parameterId: "entities", queryIndex: 0,
+        sourceQueryString: 'query = qSketchRegion(id + "SHELL_SKETCH", true);',
+        kind: "faceResults", emittedRecordCount: 1, completed: true,
       }],
       groundTruth: { hasBodies: false },
       rollbackSnapshots: [

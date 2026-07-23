@@ -331,31 +331,81 @@ function parseCompressedQuery(queryString: string): CompressedQuery | null {
 const SKETCH_REGION_QUERY =
   /^\s*query\s*=\s*qSketchRegion\(\s*id\s*\+\s*("(?:\\.|[^"\\])*")\s*,\s*(true|false)\s*\)\s*;\s*$/;
 
+export type ExactProfileQueryPlan =
+  | {
+      kind: "sketchRegionSet";
+      sourceSketchFeatureId: string;
+      filterInnerLoops: boolean;
+    }
+  | { kind: "opaque" }
+  | { kind: "unresolved"; reason: string };
+
 type ProfileQueryExpression =
   | { kind: "compressed"; compressed: CompressedQuery }
-  | { kind: "sketchRegion"; sourceSketchFeatureId: string; includeConstruction: boolean };
+  | { kind: "sketchRegion"; sourceSketchFeatureId: string; filterInnerLoops: boolean };
 
-function profileQueryExpression(queryString: string | null): ProfileQueryExpression | null {
-  if (!queryString) return null;
-  const compressed = parseCompressedQuery(queryString);
-  if (compressed) return { kind: "compressed", compressed };
+/**
+ * Classify only the exact authored assignment syntax. qCompressed remains
+ * opaque: its payload is never inspected beyond syntactically reconstructing
+ * the FeatureScript query for server evaluation.
+ */
+export function classifyExactProfileQuery(queryString: string | null): ExactProfileQueryPlan {
+  if (!queryString) {
+    return { kind: "unresolved", reason: "profile query is absent" };
+  }
+  if (parseCompressedQuery(queryString)) return { kind: "opaque" };
   const match = queryString.match(SKETCH_REGION_QUERY);
-  if (!match) return null;
+  if (!match) {
+    return {
+      kind: "unresolved",
+      reason: "profile query is not a supported qCompressed or qSketchRegion assignment",
+    };
+  }
   try {
     const sourceSketchFeatureId = JSON.parse(match[1]!) as unknown;
     return typeof sourceSketchFeatureId === "string"
-      ? { kind: "sketchRegion", sourceSketchFeatureId, includeConstruction: match[2] === "true" }
-      : null;
+      ? {
+          kind: "sketchRegionSet",
+          sourceSketchFeatureId,
+          filterInnerLoops: match[2] === "true",
+        }
+      : {
+          kind: "unresolved",
+          reason: "qSketchRegion source sketch id is not a string",
+        };
   } catch {
-    return null;
+    return { kind: "unresolved", reason: "qSketchRegion source sketch id is malformed" };
   }
+}
+
+/** Pure consumer-indexed plan used by capture and targeted enrichment. */
+export function planExactProfileEvidence(
+  consumers: readonly SolidExtrudeProfileQueryConsumer[],
+): Array<{ consumer: SolidExtrudeProfileQueryConsumer; plan: ExactProfileQueryPlan }> {
+  return consumers.map((consumer) => ({
+    consumer,
+    plan: classifyExactProfileQuery(consumer.queryString),
+  }));
+}
+
+function profileQueryExpression(queryString: string | null): ProfileQueryExpression | null {
+  const plan = classifyExactProfileQuery(queryString);
+  if (plan.kind === "sketchRegionSet") {
+    return {
+      kind: "sketchRegion",
+      sourceSketchFeatureId: plan.sourceSketchFeatureId,
+      filterInnerLoops: plan.filterInnerLoops,
+    };
+  }
+  const compressed = queryString ? parseCompressedQuery(queryString) : null;
+  return compressed ? { kind: "compressed", compressed } : null;
 }
 
 function profileQueryFeatureScriptExpression(expression: ProfileQueryExpression): string {
   if (expression.kind === "compressed") {
     return `qCompressed(${expression.compressed.version}, ${JSON.stringify(expression.compressed.payload)}, newId())`;
   }
-  return `qSketchRegion(id + ${JSON.stringify(expression.sourceSketchFeatureId)}, ${expression.includeConstruction})`;
+  return `qSketchRegion(id + ${JSON.stringify(expression.sourceSketchFeatureId)}, ${expression.filterInnerLoops})`;
 }
 
 /**
@@ -364,11 +414,12 @@ function profileQueryFeatureScriptExpression(expression: ProfileQueryExpression)
  * deterministic adaptive plane grid is a witness search, never nearest-geometry
  * matching; failure remains explicit instead of falling back to a bbox midpoint.
  */
-function buildProfileEvidenceScript(
+function buildProfileEvidenceBlocks(
   entries: readonly {
     expression: ProfileQueryExpression;
     priorSketchFeatureIds: readonly string[];
   }[],
+  groupsVariable: string,
 ): string {
   const blocks = entries.map((entry, index) => {
     const queryVariable = `profileQuery${index}`;
@@ -486,11 +537,20 @@ function buildProfileEvidenceScript(
     }
     if (size(${recordsVariable}) == 0)
         ${recordsVariable} = append(${recordsVariable}, { "kind" : "unresolved", "reason" : "captured profile query resolved no faces" });
-    groups = append(groups, { "index" : ${index}, "records" : ${recordsVariable} });`;
+    ${groupsVariable} = append(${groupsVariable}, { "index" : ${index}, "records" : ${recordsVariable} });`;
   });
+  return blocks.join("");
+}
+
+function buildProfileEvidenceScript(
+  entries: readonly {
+    expression: ProfileQueryExpression;
+    priorSketchFeatureIds: readonly string[];
+  }[],
+): string {
   return `function(context is Context, queries)
 {
-    var groups = [];${blocks.join("")}
+    var groups = [];${buildProfileEvidenceBlocks(entries, "groups")}
     return groups;
 }`;
 }
@@ -609,19 +669,33 @@ export async function resolveSolidExtrudeProfileEvidenceWithHistory(
   >();
 
   for (const consumer of consumers) {
-    const expression = profileQueryExpression(consumer.queryString);
-    if (!expression) {
+    const plan = classifyExactProfileQuery(consumer.queryString);
+    if (plan.kind === "sketchRegionSet") {
+      results.push({
+        consumingFeatureId: consumer.consumingFeatureId,
+        parameterId: "entities",
+        queryIndex: consumer.queryIndex,
+        evaluatedAt: "historyPoint",
+        kind: "sketchRegionSet",
+        sourceSketchFeatureId: plan.sourceSketchFeatureId,
+        filterInnerLoops: plan.filterInnerLoops,
+      });
+      continue;
+    }
+    if (plan.kind === "unresolved") {
       results.push({
         consumingFeatureId: consumer.consumingFeatureId,
         parameterId: "entities",
         queryIndex: consumer.queryIndex,
         evaluatedAt: "historyPoint",
         kind: "unresolved",
-        unresolved: {
-          reason: "profile query is not a supported qCompressed or qSketchRegion assignment",
-        },
+        unresolved: { reason: plan.reason },
       });
       continue;
+    }
+    const expression = profileQueryExpression(consumer.queryString);
+    if (!expression || expression.kind !== "compressed") {
+      throw new Error("Opaque profile query could not be reconstructed for FeatureScript.");
     }
     const group = byRollbackIndex.get(consumer.rollbackIndex) ?? [];
     group.push({ consumer, expression });
@@ -739,8 +813,9 @@ function buildEntityLoops(queryVariable: string, recordsVariable: string): strin
     }`;
 }
 
-function buildQueryResolutionScript(
+function buildQueryResolutionBlocks(
   entries: readonly { compressed: CompressedQuery }[],
+  groupsVariable: string,
 ): string {
   const blocks = entries.map((entry, index) => {
     const queryVariable = `capturedQuery${index}`;
@@ -749,11 +824,17 @@ function buildQueryResolutionScript(
     var ${queryVariable} = qCompressed(${entry.compressed.version}, ${JSON.stringify(entry.compressed.payload)}, newId());
     var ${recordsVariable} = [];
     ${buildEntityLoops(queryVariable, recordsVariable)}
-    groups = append(groups, { "index" : ${index}, "records" : ${recordsVariable} });`;
+    ${groupsVariable} = append(${groupsVariable}, { "index" : ${index}, "records" : ${recordsVariable} });`;
   });
+  return blocks.join("");
+}
+
+function buildQueryResolutionScript(
+  entries: readonly { compressed: CompressedQuery }[],
+): string {
   return `function(context is Context, queries)
 {
-    var groups = [];${blocks.join("")}
+    var groups = [];${buildQueryResolutionBlocks(entries, "groups")}
     return groups;
 }`;
 }
@@ -849,6 +930,273 @@ export async function resolveQueryStringsWithHistory(
   return results;
 }
 
+export interface ImmutableHistoryEvidenceResult {
+  resolvedReferences: OnshapeResolvedReference[];
+  resolvedQueryReferences: OnshapeResolvedQueryReference[];
+  profileEvidence: OnshapeProfileEvidence[];
+}
+
+export type ImmutableHistoryFeatureScriptEvaluator = (
+  rollbackBarIndex: number,
+  script: string,
+) => Promise<unknown>;
+
+function buildUnifiedHistoryEvidenceScript(input: {
+  deterministicIds: readonly string[];
+  queryEntries: readonly { compressed: CompressedQuery }[];
+  profileEntries: readonly {
+    expression: ProfileQueryExpression;
+    priorSketchFeatureIds: readonly string[];
+  }[];
+}): string {
+  // Profile-only enrichment needs no global entity scan. When deterministic
+  // consumers do exist, one all-entity query feeds the four typed record loops.
+  const allEntityLoops = input.deterministicIds.length > 0
+    ? `var allEntities = qEverything();${buildEntityLoops("allEntities", "allEntityRecords")}`
+    : "";
+  return `function(context is Context, queries)
+{
+    var allEntityRecords = [];${allEntityLoops}
+    var queryGroups = [];${buildQueryResolutionBlocks(input.queryEntries, "queryGroups")}
+    var profileGroups = [];${buildProfileEvidenceBlocks(input.profileEntries, "profileGroups")}
+    return {
+        "entityRecords" : allEntityRecords,
+        "queryGroups" : queryGroups,
+        "profileGroups" : profileGroups
+    };
+}`;
+}
+
+interface DecodedHistoryGroup {
+  index: number;
+  records: unknown[];
+}
+
+function groupsFromDecoded(value: unknown): DecodedHistoryGroup[] | null {
+  if (!Array.isArray(value)) return null;
+  const groups: DecodedHistoryGroup[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") return null;
+    const record = candidate as { index?: unknown; records?: unknown };
+    if (typeof record.index !== "number" || !Array.isArray(record.records)) return null;
+    groups.push({ index: record.index, records: record.records });
+  }
+  return groups;
+}
+
+function referencesFromEntityRecords(input: {
+  deterministicIds: readonly string[];
+  records: readonly EntityRecord[];
+  evaluatedAt: "finalState" | "historyPoint";
+}): OnshapeResolvedReference[] {
+  const byId = new Map(input.records.map((record) => [record.id, record]));
+  return input.deterministicIds.map((deterministicId) => {
+    const record = byId.get(deterministicId);
+    return record
+      ? { deterministicId, evaluatedAt: input.evaluatedAt, signature: toSignature(record) }
+      : {
+          deterministicId,
+          evaluatedAt: input.evaluatedAt,
+          unresolved: {
+            reason:
+              input.evaluatedAt === "finalState"
+                ? "entity is not present in the final model state"
+                : "entity is not present at the consuming history point",
+          },
+        };
+  }) as OnshapeResolvedReference[];
+}
+
+/**
+ * Evaluate all history evidence needed at a rollback state in one immutable,
+ * read-only FeatureScript request. Readable qSketchRegion plans are local;
+ * unsupported plans are explicit unresolved records and make no request.
+ */
+export async function resolveImmutableHistoryEvidence(input: {
+  client: OnshapeClient;
+  partStudioPath: string;
+  deterministicIdConsumers: readonly DeterministicIdConsumer[];
+  queryStringConsumers: readonly QueryStringConsumer[];
+  profileConsumers: readonly SolidExtrudeProfileQueryConsumer[];
+  evaluate?: ImmutableHistoryFeatureScriptEvaluator;
+}): Promise<ImmutableHistoryEvidenceResult> {
+  const evaluate = input.evaluate ?? ((rollbackBarIndex, script) =>
+    input.client.postJson(
+      `${input.partStudioPath}/featurescript?rollbackBarIndex=${rollbackBarIndex}`,
+      { script },
+    ));
+  const deterministicIds = [...new Set(input.deterministicIdConsumers.map((consumer) => consumer.deterministicId))];
+  let finalRecords: OnshapeResolvedReference[] = [];
+  if (deterministicIds.length > 0) {
+    const response = await evaluate(-1, buildResolutionScript());
+    const parsed = parseEntityRecords(response);
+    finalRecords = referencesFromEntityRecords({
+      deterministicIds,
+      records: parsed.records,
+      evaluatedAt: "finalState",
+    });
+  }
+
+  const results: ImmutableHistoryEvidenceResult = {
+    resolvedReferences: finalRecords,
+    resolvedQueryReferences: [],
+    profileEvidence: [],
+  };
+  const unresolvedFinalIds = new Set(
+    finalRecords.filter((record) => "unresolved" in record).map((record) => record.deterministicId),
+  );
+  const byRollback = new Map<number, {
+    deterministicConsumers: DeterministicIdConsumer[];
+    queryEntries: Array<{ consumer: QueryStringConsumer; compressed: CompressedQuery }>;
+    profileEntries: Array<{ consumer: SolidExtrudeProfileQueryConsumer; expression: ProfileQueryExpression }>;
+  }>();
+  const groupFor = (rollbackIndex: number) => {
+    const existing = byRollback.get(rollbackIndex);
+    if (existing) return existing;
+    const created = { deterministicConsumers: [], queryEntries: [], profileEntries: [] };
+    byRollback.set(rollbackIndex, created);
+    return created;
+  };
+
+  for (const consumer of input.deterministicIdConsumers) {
+    if (unresolvedFinalIds.has(consumer.deterministicId)) {
+      groupFor(consumer.rollbackIndex).deterministicConsumers.push(consumer);
+    }
+  }
+  for (const consumer of input.queryStringConsumers) {
+    const compressed = parseCompressedQuery(consumer.queryString);
+    if (!compressed) {
+      results.resolvedQueryReferences.push({
+        consumingFeatureId: consumer.consumingFeatureId,
+        parameterId: consumer.parameterId,
+        queryIndex: consumer.queryIndex,
+        evaluatedAt: "historyPoint",
+        unresolved: { reason: "queryString is not a supported qCompressed assignment" },
+      });
+      continue;
+    }
+    groupFor(consumer.rollbackIndex).queryEntries.push({ consumer, compressed });
+  }
+  for (const { consumer, plan } of planExactProfileEvidence(input.profileConsumers)) {
+    if (plan.kind === "sketchRegionSet") {
+      results.profileEvidence.push({
+        consumingFeatureId: consumer.consumingFeatureId,
+        parameterId: "entities",
+        queryIndex: consumer.queryIndex,
+        evaluatedAt: "historyPoint",
+        kind: "sketchRegionSet",
+        sourceSketchFeatureId: plan.sourceSketchFeatureId,
+        filterInnerLoops: plan.filterInnerLoops,
+      });
+      continue;
+    }
+    if (plan.kind === "unresolved") {
+      results.profileEvidence.push({
+        consumingFeatureId: consumer.consumingFeatureId,
+        parameterId: "entities",
+        queryIndex: consumer.queryIndex,
+        evaluatedAt: "historyPoint",
+        kind: "unresolved",
+        unresolved: { reason: plan.reason },
+      });
+      continue;
+    }
+    const expression = profileQueryExpression(consumer.queryString);
+    if (!expression || expression.kind !== "compressed") {
+      throw new Error("Opaque profile query could not be reconstructed for FeatureScript.");
+    }
+    groupFor(consumer.rollbackIndex).profileEntries.push({ consumer, expression });
+  }
+
+  for (const [rollbackIndex, group] of byRollback) {
+    const script = buildUnifiedHistoryEvidenceScript({
+      deterministicIds: [...new Set(group.deterministicConsumers.map((consumer) => consumer.deterministicId))],
+      queryEntries: group.queryEntries,
+      profileEntries: group.profileEntries.map((entry) => ({
+        expression: entry.expression,
+        priorSketchFeatureIds: entry.consumer.priorSketchFeatureIds,
+      })),
+    });
+    const decoded = decodeFsValue((await evaluate(rollbackIndex, script) as { result?: unknown }).result);
+    const output = decoded && typeof decoded === "object" ? decoded as {
+      entityRecords?: unknown;
+      queryGroups?: unknown;
+      profileGroups?: unknown;
+    } : {};
+    const entityRecords = Array.isArray(output.entityRecords)
+      ? output.entityRecords.filter(isEntityRecord)
+      : [];
+    const queryGroups = groupsFromDecoded(output.queryGroups);
+    const profileGroups = groupsFromDecoded(output.profileGroups);
+
+    const recordsAtPoint = referencesFromEntityRecords({
+      deterministicIds: [...new Set(group.deterministicConsumers.map((consumer) => consumer.deterministicId))],
+      records: entityRecords,
+      evaluatedAt: "historyPoint",
+    });
+    for (const consumer of group.deterministicConsumers) {
+      const record = recordsAtPoint.find((candidate) => candidate.deterministicId === consumer.deterministicId);
+      results.resolvedReferences.push(record && "signature" in record
+        ? {
+            deterministicId: consumer.deterministicId,
+            evaluatedAt: "historyPoint",
+            consumingFeatureId: consumer.consumingFeatureId,
+            signature: record.signature,
+          }
+        : {
+            deterministicId: consumer.deterministicId,
+            evaluatedAt: "historyPoint",
+            consumingFeatureId: consumer.consumingFeatureId,
+            unresolved: { reason: "entity is not present at the consuming history point" },
+          });
+    }
+    for (const [entryIndex, entry] of group.queryEntries.entries()) {
+      const records = queryGroups
+        ?.find((candidate) => candidate.index === entryIndex)
+        ?.records.filter(isEntityRecord);
+      if (!records || records.length === 0) {
+        results.resolvedQueryReferences.push({
+          consumingFeatureId: entry.consumer.consumingFeatureId,
+          parameterId: entry.consumer.parameterId,
+          queryIndex: entry.consumer.queryIndex,
+          evaluatedAt: "historyPoint",
+          unresolved: { reason: "captured query resolved no entities at the consuming history point" },
+        });
+      } else {
+        records.forEach((record, entityIndex) => results.resolvedQueryReferences.push({
+          consumingFeatureId: entry.consumer.consumingFeatureId,
+          parameterId: entry.consumer.parameterId,
+          queryIndex: entry.consumer.queryIndex,
+          entityIndex,
+          evaluatedAt: "historyPoint",
+          signature: toSignature(record),
+        }));
+      }
+    }
+    for (const [entryIndex, entry] of group.profileEntries.entries()) {
+      const records = profileGroups?.find((candidate) => candidate.index === entryIndex)?.records;
+      if (!records || records.length === 0) {
+        results.profileEvidence.push({
+          consumingFeatureId: entry.consumer.consumingFeatureId,
+          parameterId: "entities",
+          queryIndex: entry.consumer.queryIndex,
+          evaluatedAt: "historyPoint",
+          kind: "unresolved",
+          unresolved: { reason: "profile evidence FeatureScript result was malformed" },
+        });
+      } else {
+        for (const record of records) {
+          results.profileEvidence.push(profileEvidenceFromRecord({
+            consumer: entry.consumer,
+            record: (record ?? {}) as ProfileEvidenceRecord,
+          }));
+        }
+      }
+    }
+  }
+  return results;
+}
+
 /**
  * Resolve collected deterministic IDs to geometric signatures with a single
  * batched FeatureScript evaluation per Part Studio. IDs not present in the final
@@ -867,78 +1215,18 @@ export async function resolveDeterministicIds(
 export async function resolveDeterministicIdsWithHistory(
   client: OnshapeClient,
   finalPartStudioPath: string,
-  rollbackPartStudioPath: string,
+  _rollbackPartStudioPath: string,
   consumers: readonly DeterministicIdConsumer[],
 ): Promise<OnshapeResolvedReference[]> {
-  const deterministicIds = [
-    ...new Set(consumers.map((consumer) => consumer.deterministicId)),
-  ];
-  const finalRecords = await resolveDeterministicIds(
+  // Retained for callers of the former workspace API. History is now evaluated
+  // directly against the immutable path; it never mutates a workspace rollback.
+  return (await resolveImmutableHistoryEvidence({
     client,
-    finalPartStudioPath,
-    deterministicIds,
-  );
-  const unresolvedFinalIds = new Set(
-    finalRecords
-      .filter((record) => "unresolved" in record)
-      .map((record) => record.deterministicId),
-  );
-
-  if (unresolvedFinalIds.size === 0) {
-    return finalRecords;
-  }
-
-  const byRollbackIndex = new Map<number, DeterministicIdConsumer[]>();
-  for (const consumer of consumers) {
-    if (!unresolvedFinalIds.has(consumer.deterministicId)) {
-      continue;
-    }
-    const group = byRollbackIndex.get(consumer.rollbackIndex) ?? [];
-    group.push(consumer);
-    byRollbackIndex.set(consumer.rollbackIndex, group);
-  }
-
-  const historyRecords: OnshapeResolvedReference[] = [];
-  for (const [rollbackIndex, group] of byRollbackIndex) {
-    await client.postJson(`${rollbackPartStudioPath}/features/rollback`, {
-      rollbackIndex,
-    });
-    const idsAtPoint = [...new Set(group.map((consumer) => consumer.deterministicId))];
-    const recordsAtPoint = await resolveAtState(
-      client,
-      rollbackPartStudioPath,
-      idsAtPoint,
-      "historyPoint",
-      rollbackIndex,
-    );
-
-    for (const consumer of group) {
-      const resolved = recordsAtPoint.find(
-        (record) => record.deterministicId === consumer.deterministicId,
-      );
-      if (resolved && "signature" in resolved) {
-        historyRecords.push({
-          deterministicId: consumer.deterministicId,
-          evaluatedAt: "historyPoint",
-          consumingFeatureId: consumer.consumingFeatureId,
-          signature: resolved.signature,
-        });
-      } else {
-        const reason =
-          resolved && "unresolved" in resolved
-            ? resolved.unresolved.reason
-            : "entity is not present at the consuming history point";
-        historyRecords.push({
-          deterministicId: consumer.deterministicId,
-          evaluatedAt: "historyPoint",
-          consumingFeatureId: consumer.consumingFeatureId,
-          unresolved: { reason },
-        });
-      }
-    }
-  }
-
-  return [...finalRecords, ...historyRecords];
+    partStudioPath: finalPartStudioPath,
+    deterministicIdConsumers: consumers,
+    queryStringConsumers: [],
+    profileConsumers: [],
+  })).resolvedReferences;
 }
 
 async function resolveAtState(

@@ -73,6 +73,23 @@ test("src/contracts/import/onshape-capture-bundle.spec.ts accepts a well-formed 
   ).toBe(2);
 });
 
+test("src/contracts/import/onshape-capture-bundle.spec.ts accepts omitted geometry for a nonempty Part Studio", () => {
+  const bundle = makeValidBundle();
+  bundle.partStudios[0]!.groundTruth = {
+    hasBodies: true,
+    omittedReason: "no-final-bake-boundary",
+  };
+  bundle.partStudios[0]!.featureSpecs = {
+    present: false,
+    reason: "featurespecs endpoint returned 404",
+  };
+
+  expect(
+    validateOnshapeCaptureBundle(bundle).success,
+    "Envelope schema should accept an explicit no-final-bake geometry omission.",
+  ).toBeTruthy();
+});
+
 test("src/contracts/import/onshape-capture-bundle.spec.ts accepts an empty Part Studio ground truth", () => {
   const bundle = makeValidBundle();
   bundle.partStudios[0]!.groundTruth = { hasBodies: false };

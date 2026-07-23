@@ -21,6 +21,7 @@ import {
 } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
 import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-capture-fixtures";
+import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
 import {
   makeWaveXClosedHollowShellCaptureBundle,
   makeWaveXSurfaceExtrudeCaptureBundle,
@@ -242,6 +243,12 @@ function makeFaceSketchBundle() {
           sourceSketchFeatureId: "S_BASE",
           interiorPoint3d: [0.0005, 0.001, 0],
         }],
+        profileEvidenceSchemaVersion: 3,
+        profileEvidenceManifest: [{
+          consumingFeatureId: "E_BASE", parameterId: "entities", queryIndex: 0,
+          sourceQueryString: 'query = qSketchRegion(id + "S_BASE", true);',
+          kind: "faceResults", emittedRecordCount: 1, completed: true,
+        }],
         resolvedReferences: [
           {
             deterministicId: "face_ref",
@@ -266,6 +273,19 @@ function makeFaceSketchBundle() {
     ],
   };
 }
+
+test("provider.spec.ts ignores profile evidence without the current completion manifest", async () => {
+  const bundle = makeWaveWPatternCaptureBundle();
+  const studio = bundle.partStudios.find((candidate) => candidate.elementId === "wave-w-pattern-linear")!;
+  studio.profileEvidenceSchemaVersion = 2;
+  delete studio.profileEvidenceManifest;
+
+  const review = await onshapeImportProvider.review({ source: sourceFromBundle(bundle), capabilities });
+  const plan = review.providerReview.studios
+    .find((candidate) => candidate.elementId === studio.elementId)
+    ?.featurePlans.find((candidate) => candidate.onshapeFeatureId === "E_LINEAR_BASE");
+  expect(plan).toMatchObject({ tier: "baked", reasonCodes: ["needs-region-resolution"] });
+});
 
 function makeDurableSubtopologyBundle(): OnshapeCaptureBundleV2 {
   const bundle = makeSegmentedCheckpointBundle();
@@ -378,6 +398,13 @@ function makeSegmentedCheckpointBundle(): OnshapeCaptureBundleV2 {
       interiorPoint3d: [0.0005, 0.001, 0],
     },
   );
+  studio.profileEvidenceManifest?.push(
+    ...["E_INDEPENDENT", "E_AFTER"].map((consumingFeatureId) => ({
+      consumingFeatureId, parameterId: "entities", queryIndex: 0,
+      sourceQueryString: 'query = qSketchRegion(id + "S_BASE", true);',
+      kind: "faceResults" as const, emittedRecordCount: 1, completed: true as const,
+    })),
+  );
   studio.groundTruth = {
     hasBodies: true,
     tessellationTolerance: 0.0001,
@@ -431,6 +458,11 @@ function makeCapturedFrameCheckpointBundle(): OnshapeCaptureBundleV2 {
     resultIndex: 0, deterministicId: "provider-captured-frame-profile",
     evaluatedAt: "historyPoint", kind: "sketchRegion", sourceSketchFeatureId: "S_FACE",
     interiorPoint3d: [0.0005, 0.001, 0.003],
+  });
+  studio.profileEvidenceManifest?.push({
+    consumingFeatureId: "E_AFTER", parameterId: "entities", queryIndex: 0,
+    sourceQueryString: 'query = qSketchRegion(id + "S_FACE", true);',
+    kind: "faceResults", emittedRecordCount: 1, completed: true,
   });
   studio.resolvedReferences = [{
     deterministicId: "face_ref",
@@ -735,6 +767,12 @@ function makeStackedTransformChainBundle(): OnshapeCaptureBundleV2 {
         consumingFeatureId: "E1", parameterId: "entities", queryIndex: 0,
         resultIndex: 0, deterministicId: "stacked-profile", evaluatedAt: "historyPoint",
         kind: "sketchRegion", sourceSketchFeatureId: "S1", interiorPoint3d: [0, 0, 0],
+      }],
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: [{
+        consumingFeatureId: "E1", parameterId: "entities", queryIndex: 0,
+        sourceQueryString: 'query = qSketchRegion(id + "S1", true);',
+        kind: "faceResults", emittedRecordCount: 1, completed: true,
       }],
       resolvedReferences: [{
         deterministicId: "Top",
@@ -1322,6 +1360,18 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
 
 test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives full verification", async () => {
   const bundle = await assembleFixtureCaptureBundle();
+  bundle.partStudios.find((studio) => studio.elementId === FIXTURE_PART_STUDIO_ID)!.groundTruth = {
+    hasBodies: true,
+    tessellationTolerance: 0.001,
+    tessellatedFaces: {
+      bodies: [{
+        faces: [{
+          facets: [{ vertices: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 1, y: 1, z: 0 }] }],
+        }],
+      }],
+    },
+    step: "",
+  };
   const source = sourceFromBundle(bundle);
   let requestedFinalTessellation = false;
   const review = await onshapeImportProvider.review({
@@ -1498,6 +1548,38 @@ test("src/domain/import/onshape/provider.spec.ts studio bake emits a baked body 
       (diagnostic) => diagnostic.code === "onshape-fidelity-summary",
     )?.message,
   ).toContain("bake strategy: legacy whole-studio (capture-v1), 0 checkpoints");
+});
+
+test("src/domain/import/onshape/provider.spec.ts keeps omitted final geometry unavailable without treating bodies as absent", async () => {
+  const bundle = makeFaceSketchBundle();
+  bundle.partStudios[0]!.groundTruth = {
+    hasBodies: true,
+    omittedReason: "no-final-bake-boundary",
+  };
+  const source = sourceFromBundle(bundle);
+  const capabilities = createImportCapabilities(
+    {} as never,
+    {
+      document: { documentId: "doc_workspace", revisionId: "rev_1" },
+    } as never,
+    { assetStore: createMemoryGeometryAssetStore() },
+  );
+
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  expect(review.providerReview.studios[0]?.hasBodies).toBe(true);
+  expect(review.providerReview.studios[0]?.verification).toEqual({ status: "noGroundTruth" });
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  expect(actions.createFeatures?.some((feature) => feature.definition.kind === "bakedBody")).toBe(false);
+  expect(actions.diagnostics).toContainEqual(expect.objectContaining({
+    code: "onshape-bake-unavailable",
+    message: expect.stringContaining("intentionally omitted"),
+  }));
 });
 
 test("src/domain/import/onshape/provider.spec.ts emits selective segment checkpoints at their source boundaries", async () => {

@@ -135,6 +135,12 @@ export function makeWaveBBodyCaptureBundle(
         sourceSketchFeatureId: index === 0 ? "S1" : "S2",
         interiorPoint3d: index === 0 ? [0, 0, 0] as [number, number, number] : [0.002, 0, 0] as [number, number, number],
       })),
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: ["E1", ...(needsTwo ? ["E2"] : [])].map((featureId, index) => ({
+        consumingFeatureId: featureId, parameterId: "entities" as const, queryIndex: 0,
+        sourceQueryString: `query = qSketchRegion(id + "${index === 0 ? "S1" : "S2"}", true);`,
+        kind: "faceResults" as const, emittedRecordCount: 1, completed: true as const,
+      })),
       groundTruth: { hasBodies: false }, rollbackSnapshots: snapshots,
     }],
   };
@@ -254,6 +260,12 @@ function waveBHoleStudio(style: HoleFixtureStyle, elementId: string) {
       queryIndex: 0, resultIndex: 0, deterministicId: `hole-profile:${style}`,
       evaluatedAt: "historyPoint" as const, kind: "sketchRegion" as const,
       sourceSketchFeatureId: baseSketch, interiorPoint3d: [0, 0, 0] as [number, number, number],
+    }],
+    profileEvidenceSchemaVersion: 3,
+    profileEvidenceManifest: [{
+      consumingFeatureId: baseExtrude, parameterId: "entities" as const, queryIndex: 0,
+      sourceQueryString: `query = qSketchRegion(id + "${baseSketch}", true);`,
+      kind: "faceResults" as const, emittedRecordCount: 1, completed: true as const,
     }],
     groundTruth: { hasBodies: false as const },
     rollbackSnapshots: [
@@ -449,6 +461,12 @@ export function makeWaveBSegmentedApplyCaptureBundle(): OnshapeCaptureBundleV2 {
         consumingFeatureId: "E_BASE", parameterId: "entities", queryIndex: 0,
         resultIndex: 0, deterministicId: "segmented-profile", evaluatedAt: "historyPoint",
         kind: "sketchRegion", sourceSketchFeatureId: "S1", interiorPoint3d: [0, 0, 0],
+      }],
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: [{
+        consumingFeatureId: "E_BASE", parameterId: "entities", queryIndex: 0,
+        sourceQueryString: 'query = qSketchRegion(id + "S1", true);',
+        kind: "faceResults", emittedRecordCount: 1, completed: true,
       }],
       groundTruth: {
         hasBodies: true,

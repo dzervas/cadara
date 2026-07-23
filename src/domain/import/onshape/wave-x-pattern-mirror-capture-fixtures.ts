@@ -238,6 +238,16 @@ export function makeWaveXPatternMirrorCaptureBundle(): OnshapeCaptureBundleV2 {
           sourceSketchFeatureId,
           interiorPoint3d: interiorPoint3d as [number, number, number],
         })),
+        profileEvidenceSchemaVersion: 3,
+        profileEvidenceManifest: [
+          ["BASE_EXTRUDE", "BASE_SKETCH"],
+          ["FOKYXKU0uqy9EB3_2", "SEED_6_SKETCH"],
+          ["F2B5cy3xMm2MHNU_2", "SEED_7_SKETCH"],
+        ].map(([consumingFeatureId, sketchId]) => ({
+          consumingFeatureId, parameterId: "entities" as const, queryIndex: 0,
+          sourceQueryString: `query = qSketchRegion(id + "${sketchId}", true);`,
+          kind: "faceResults" as const, emittedRecordCount: 1, completed: true as const,
+        })),
         groundTruth: { hasBodies: false },
         rollbackSnapshots: [],
       },

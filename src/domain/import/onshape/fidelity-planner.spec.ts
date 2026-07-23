@@ -206,6 +206,12 @@ function makeSketchMatrixBundle(input: {
         evaluatedAt: "historyPoint", kind: "sketchRegion", sourceSketchFeatureId: "S_MATRIX",
         interiorPoint3d: [0, 0, 0],
       }],
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: [{
+        consumingFeatureId: "E_MATRIX", parameterId: "entities", queryIndex: 0,
+        sourceQueryString: 'query = qSketchRegion(id + "S_MATRIX", true);',
+        kind: "faceResults", emittedRecordCount: 1, completed: true,
+      }],
       groundTruth: { hasBodies: false },
       rollbackSnapshots: [],
     }],
@@ -529,6 +535,14 @@ function makeStudioRead(input: {
           sourceSketchFeatureId: sketchFeatureId,
           interiorPoint3d: input.sketchEntities.find((entity) => entity.entityType === "circle")?.center3d ?? [0, 0, 0] as [number, number, number],
         })),
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: features
+        .filter((feature) => feature.featureType === "extrude")
+        .map((feature) => ({
+          consumingFeatureId: feature.featureId, parameterId: "entities" as const, queryIndex: 0,
+          sourceQueryString: `query = qSketchRegion(id + "${sketchFeatureId}", true);`,
+          kind: "faceResults" as const, emittedRecordCount: 1, completed: true as const,
+        })),
       groundTruth: { hasBodies: false },
       rollbackSnapshots: null,
     },
@@ -762,6 +776,14 @@ function makeTwoBranchStudioRead(): StudioReadResult {
         kind: "sketchRegion" as const,
         sourceSketchFeatureId,
         interiorPoint3d: interiorPoint3d as [number, number, number],
+      })),
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: [
+        ["E_BAD", "S_BAD"], ["E_GOOD", "S_GOOD"], ["E_CUT", "S_GOOD"],
+      ].map(([consumingFeatureId, sketchFeatureId]) => ({
+        consumingFeatureId, parameterId: "entities" as const, queryIndex: 0,
+        sourceQueryString: `query = qSketchRegion(id + "${sketchFeatureId}", true);`,
+        kind: "faceResults" as const, emittedRecordCount: 1, completed: true as const,
       })),
       groundTruth: { hasBodies: true },
       rollbackSnapshots: null,

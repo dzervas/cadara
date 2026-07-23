@@ -4,6 +4,7 @@ import type { DocumentId, RevisionId, SketchId } from "@/contracts/shared/ids";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
+  type RegionRecord,
   type SketchDefinition,
   type SketchPoint2D,
   type SolvedSketchEntityGeometryRecord,
@@ -260,6 +261,153 @@ function resolveLegacyNonExtrudeProfiles(
     : { tier: "unresolved", reason: "needs-region-resolution", diagnostics: [] };
 }
 
+function loopIdentity(loop: RegionRecord["loops"][number]): string {
+  return JSON.stringify(loop.segments.map((segment) => segment.source));
+}
+
+/**
+ * qSketchRegion(..., true) filters nested region faces. A derived region is a
+ * root exactly when its outer loop is not an inner loop of another derived
+ * region. This uses region topology only; it never compares geometry.
+ */
+function filteredSketchRegions(regions: readonly RegionRecord[]): RegionRecord[] {
+  const innerLoopIdentities = new Set(
+    regions.flatMap((region) => region.loops.filter((loop) => loop.role === "inner").map(loopIdentity)),
+  );
+  return regions.filter((region) => {
+    const outer = region.loops.find((loop) => loop.role === "outer");
+    return outer !== undefined && !innerLoopIdentities.has(loopIdentity(outer));
+  });
+}
+
+function verifiedRegionSelector(
+  sketch: RegionSelectionSketch,
+  region: RegionRecord,
+): SketchPoint2D | null {
+  const candidates = new Map<string, SketchPoint2D>();
+  const add = (point: SketchPoint2D) => {
+    const key = `${point[0]},${point[1]}`;
+    candidates.set(key, point);
+  };
+  const points = [...sketch.solvedPoints.values()];
+  for (const point of points) add([point[0], point[1]]);
+  for (const entity of sketch.definition.entities) {
+    if (entity.kind !== "circle") continue;
+    const center = sketch.solvedPoints.get(entity.centerPointId);
+    if (!center) continue;
+    add([center[0], center[1]]);
+    for (const direction of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
+      add([center[0] + entity.radius * direction[0] * 0.5, center[1] + entity.radius * direction[1] * 0.5]);
+    }
+  }
+  const bounds = [...points];
+  for (const entity of sketch.definition.entities) {
+    if (entity.kind !== "circle") continue;
+    const center = sketch.solvedPoints.get(entity.centerPointId);
+    if (!center) continue;
+    bounds.push(
+      [center[0] - entity.radius, center[1] - entity.radius],
+      [center[0] + entity.radius, center[1] + entity.radius],
+    );
+  }
+  if (bounds.length > 0) {
+    const xs = bounds.map((point) => point[0]);
+    const ys = bounds.map((point) => point[1]);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    for (const divisions of [3, 7, 15, 31]) {
+      for (let row = 0; row < divisions; row += 1) {
+        for (let column = 0; column < divisions; column += 1) {
+          add([
+            minX + ((column + 0.5) / divisions) * (maxX - minX),
+            minY + ((row + 0.5) / divisions) * (maxY - minY),
+          ]);
+        }
+      }
+    }
+  }
+  for (const candidate of candidates.values()) {
+    if (
+      countContainingRegions(sketch, candidate) === 1 &&
+      selectInnermostContainingRegion(sketch, candidate)?.regionId === region.regionId
+    ) return candidate;
+  }
+  return null;
+}
+
+function resolveSketchRegionSet(input: {
+  evidence: Extract<OnshapeProfileEvidence, { kind: "sketchRegionSet" }>;
+  resolution: ProfileResolutionInput;
+  diagnostics: ProfileResolutionDiagnostic[];
+}): DeferredSketchProfile[] | null {
+  const sketchFeatureId = input.evidence.sourceSketchFeatureId;
+  const solved = input.resolution.solvedSketchesByFeatureId.get(sketchFeatureId);
+  const referencedSketch = input.resolution.referencedSketchesByFeatureId.get(sketchFeatureId);
+  if (!solved || !referencedSketch || referencedSketch.tier !== "parametric") {
+    input.diagnostics.push({
+      code: "onshape-region-source-sketch-unavailable",
+      message: `The exact source sketch ${sketchFeatureId} is not a live solved sketch.`,
+    });
+    return null;
+  }
+  const translation = translateSolvedSketch({
+    solved,
+    featureId: sketchFeatureId,
+    label: sketchFeatureId,
+    planeKey: referencedSketch.planeKey,
+    planeFrame: referencedSketch.planeFrame,
+  });
+  const solvedSnapshot = buildSolvedSnapshot(translation.definition);
+  const { regions } = deriveSketchRegionsCore({
+    documentId: "doc_import_verification" as DocumentId,
+    revisionId: "rev_import_verification" as RevisionId,
+    sketchId: VERIFICATION_SKETCH_ID,
+    solvedSnapshot,
+    definition: translation.definition,
+  });
+  const selectionSketch: RegionSelectionSketch = {
+    regions: regions.filter((region) => region.isClosed),
+    solvedPoints: new Map(
+      solvedSnapshot.solvedPoints.map((point) => [point.pointId, point.solvedPosition] as const),
+    ),
+    definition: translation.definition,
+  };
+  const hasInnerLoops = selectionSketch.regions.some((region) =>
+    region.loops.some((loop) => loop.role === "inner"),
+  );
+  if (!input.evidence.filterInnerLoops && hasInnerLoops) {
+    input.diagnostics.push({
+      code: "onshape-region-set-inner-loops-unresolved",
+      message: `The exact qSketchRegion(..., false) semantics for ${input.resolution.featureKind} "${input.resolution.featureLabel}" include inner loops that cannot be represented by local derived regions.`,
+    });
+    return null;
+  }
+  const targetRegions = input.evidence.filterInnerLoops
+    ? filteredSketchRegions(selectionSketch.regions)
+    : selectionSketch.regions;
+  const selectors = targetRegions.map((region) => ({
+    region,
+    interiorPoint: verifiedRegionSelector(selectionSketch, region),
+  }));
+  if (
+    targetRegions.length === 0 ||
+    selectors.some((selector) => selector.interiorPoint === null)
+  ) {
+    input.diagnostics.push({
+      code: "onshape-region-set-selector-unverified",
+      message: `The exact qSketchRegion set for ${input.resolution.featureKind} "${input.resolution.featureLabel}" could not be expanded into one verified selector for every locally derived region.`,
+    });
+    return null;
+  }
+  return selectors.map(({ interiorPoint }) => ({
+    kind: "sketchRegion",
+    sketchFeatureId,
+    interiorPoint: interiorPoint!,
+  }));
+}
+
 function resolveSketchProfile(input: {
   evidence: Extract<OnshapeProfileEvidence, { kind: "sketchRegion" }>;
   resolution: ProfileResolutionInput;
@@ -355,7 +503,11 @@ export function resolveOnshapeSketchProfiles(
   for (let queryIndex = 0; queryIndex < expectedQueries; queryIndex += 1) {
     const queryEvidence = evidence
       .filter((record) => record.queryIndex === queryIndex)
-      .sort((left, right) => (left.resultIndex ?? -1) - (right.resultIndex ?? -1));
+      .sort(
+        (left, right) =>
+          (("resultIndex" in left ? left.resultIndex : -1) ?? -1) -
+          (("resultIndex" in right ? right.resultIndex : -1) ?? -1),
+      );
     if (queryEvidence.length === 0 || queryEvidence.some((record) => record.kind === "unresolved")) {
       diagnostics.push({
         code: "onshape-profile-evidence-unresolved",
@@ -363,14 +515,35 @@ export function resolveOnshapeSketchProfiles(
       });
       return { tier: "unresolved", reason: "needs-region-resolution", diagnostics };
     }
-    if (queryEvidence.some((record, resultIndex) => record.resultIndex !== resultIndex)) {
+    if (queryEvidence.length === 1 && queryEvidence[0]?.kind === "sketchRegionSet") {
+      const regionSetProfiles = resolveSketchRegionSet({
+        evidence: queryEvidence[0],
+        resolution: input,
+        diagnostics,
+      });
+      if (!regionSetProfiles) return { tier: "unresolved", reason: "needs-region-resolution", diagnostics };
+      profiles.push(...regionSetProfiles);
+      continue;
+    }
+    if (queryEvidence.some((record) => record.kind === "sketchRegionSet")) {
+      diagnostics.push({
+        code: "onshape-profile-evidence-order-invalid",
+        message: `Exact qSketchRegion-set evidence for ${input.featureKind} "${input.featureLabel}" query ${queryIndex} is mixed with face-result evidence.`,
+      });
+      return { tier: "unresolved", reason: "needs-region-resolution", diagnostics };
+    }
+    const faceResultEvidence = queryEvidence.filter(
+      (record): record is Exclude<OnshapeProfileEvidence, { kind: "sketchRegionSet" }> =>
+        record.kind !== "sketchRegionSet",
+    );
+    if (faceResultEvidence.some((record, resultIndex) => record.resultIndex !== resultIndex)) {
       diagnostics.push({
         code: "onshape-profile-evidence-order-invalid",
         message: `Exact profile evidence for ${input.featureKind} "${input.featureLabel}" query ${queryIndex} has a missing or duplicate result index.`,
       });
       return { tier: "unresolved", reason: "needs-region-resolution", diagnostics };
     }
-    for (const record of queryEvidence) {
+    for (const record of faceResultEvidence) {
       if (record.kind === "sketchRegion") {
         const profile = resolveSketchProfile({ evidence: record, resolution: input, diagnostics });
         if (!profile) return { tier: "unresolved", reason: "needs-region-resolution", diagnostics };
