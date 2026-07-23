@@ -287,6 +287,60 @@ test("provider.spec.ts ignores profile evidence without the current completion m
   expect(plan).toMatchObject({ tier: "baked", reasonCodes: ["needs-region-resolution"] });
 });
 
+function makeFaceSketchExtrudeBundle(): OnshapeCaptureBundleV2 {
+  const bundle = structuredClone(makeFaceSketchBundle()) as unknown as OnshapeCaptureBundleV2;
+  const studio = bundle.partStudios[0]!;
+  const features = (studio.features as { features: Record<string, unknown>[] }).features;
+  const chamferIndex = features.findIndex((feature) => feature.featureId === "CHAMFER");
+  features.splice(chamferIndex, 0, {
+    featureType: "extrude",
+    featureId: "E_FACE",
+    name: "Face extrude",
+    parameters: [
+      {
+        parameterId: "entities",
+        queries: [{ queryString: 'query = qSketchRegion(id + "S_FACE", true);' }],
+      },
+      { parameterId: "endBound", value: "BLIND" },
+      { parameterId: "depth", expression: "1 mm", value: 0.001 },
+      { parameterId: "operationType", value: "NEW" },
+    ],
+  });
+  studio.profileEvidence?.push({
+    consumingFeatureId: "E_FACE",
+    parameterId: "entities",
+    queryIndex: 0,
+    resultIndex: 0,
+    deterministicId: "provider-face-profile",
+    evaluatedAt: "historyPoint",
+    kind: "sketchRegion",
+    sourceSketchFeatureId: "S_FACE",
+    interiorPoint3d: [0.0005, 0.001, 0.003],
+  });
+  studio.profileEvidenceManifest?.push({
+    consumingFeatureId: "E_FACE",
+    parameterId: "entities",
+    queryIndex: 0,
+    sourceQueryString: 'query = qSketchRegion(id + "S_FACE", true);',
+    kind: "faceResults",
+    emittedRecordCount: 1,
+    completed: true,
+  });
+  studio.resolvedReferences.push({
+    deterministicId: "face_ref",
+    evaluatedAt: "historyPoint",
+    consumingFeatureId: "S_FACE",
+    signature: {
+      entityClass: "face",
+      geometryType: "plane",
+      definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+      centroid: [0.0005, 0.001, 0.003],
+      boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+    },
+  });
+  return bundle;
+}
+
 function makeDurableSubtopologyBundle(): OnshapeCaptureBundleV2 {
   const bundle = makeSegmentedCheckpointBundle();
   const studio = bundle.partStudios[0]!;
@@ -1088,6 +1142,115 @@ test("src/domain/import/onshape/provider.spec.ts chamfer promotes with matching 
     ),
   ).toEqual([]);
   expect(validateImportPreparedActions(actions).success).toBe(true);
+});
+
+test("src/domain/import/onshape/provider.spec.ts unique face probe replans its blocked extrude", async () => {
+  const review = await onshapeImportProvider.review({
+    source: sourceFromBundle(makeFaceSketchExtrudeBundle()),
+    capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
+  });
+  const plans = review.providerReview.studios[0]!.featurePlans;
+  const faceSketch = plans.find((plan) => plan.onshapeFeatureId === "S_FACE");
+  const faceExtrude = plans.find((plan) => plan.onshapeFeatureId === "E_FACE");
+
+  expect(faceSketch).toMatchObject({
+    tier: "parametric",
+    reasonCodes: ["sketch-on-probed-face"],
+  });
+  expect(faceExtrude).toMatchObject({
+    tier: "parametric",
+    target: { kind: "feature" },
+    reasonCodes: [],
+    suppressed: false,
+    plannedExtrude: {
+      profiles: [{ kind: "sketchRegion", sketchFeatureId: "S_FACE" }],
+    },
+    inputDependencies: [{ kind: "sketch", featureId: "S_FACE" }],
+    inputFeatureIds: ["S_FACE"],
+  });
+  expect(plans.findIndex((plan) => plan.onshapeFeatureId === "S_FACE")).toBeLessThan(
+    plans.findIndex((plan) => plan.onshapeFeatureId === "E_FACE"),
+  );
+});
+
+test("src/domain/import/onshape/provider.spec.ts source-ordered replanning promotes dependent FEATURE patterns and mirrors", async () => {
+  const bundle = makeFaceSketchExtrudeBundle();
+  const features = (bundle.partStudios[0]!.features as { features: Record<string, unknown>[] }).features;
+  const featurePattern = (
+    featureId: string,
+    sourceFeatureIds: string[],
+    featureType: "linearPattern" | "mirror",
+  ) => ({
+    featureType,
+    featureId,
+    name: featureId,
+    parameters: [
+      { parameterId: "patternType", value: "FEATURE" },
+      { parameterId: "operationType", value: "NEW" },
+      { parameterId: "fullFeaturePattern", value: true },
+      { parameterId: "instanceFunction", featureIds: sourceFeatureIds },
+      ...(featureType === "linearPattern"
+        ? [
+            { parameterId: "directionOne", queries: [{ queryString: "TopplaneOp" }] },
+            { parameterId: "instanceCount", value: 2 },
+            { parameterId: "distance", expression: "2 mm", value: 0.002 },
+          ]
+        : [{ parameterId: "mirrorPlane", queries: [{ queryString: "TopplaneOp" }] }]),
+    ],
+  });
+  features.push(
+    featurePattern("LINEAR_1", ["E_FACE"], "linearPattern"),
+    featurePattern("LINEAR_2", ["LINEAR_1"], "linearPattern"),
+    featurePattern("MIRROR_1", ["LINEAR_2"], "mirror"),
+  );
+
+  const source = sourceFromBundle(bundle);
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
+  });
+  const plans = review.providerReview.studios[0]!.featurePlans;
+  for (const featureId of ["E_FACE", "LINEAR_1", "LINEAR_2", "MIRROR_1"]) {
+    expect(plans.find((plan) => plan.onshapeFeatureId === featureId)).toMatchObject({
+      tier: "parametric",
+      reasonCodes: [],
+    });
+  }
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: capabilitiesWithProbe([probeSignature("face_match")]),
+  });
+  const replays = actions.createFeatures?.filter(
+    (action) => action.definition.kind === "featureReplay",
+  ) ?? [];
+  expect(replays.map((action) => action.definition.parameters.sourceFeatureIds)).toEqual([
+    [{ kind: "featureOf", actionIndex: 3 }],
+    [{ kind: "featureOf", actionIndex: 4 }],
+    [{ kind: "featureOf", actionIndex: 5 }],
+  ]);
+});
+
+test("src/domain/import/onshape/provider.spec.ts ambiguous probe leaves a face sketch and dependent extrude baked", async () => {
+  const review = await onshapeImportProvider.review({
+    source: sourceFromBundle(makeFaceSketchExtrudeBundle()),
+    capabilities: capabilitiesWithProbe([
+      probeSignature("face_a"),
+      probeSignature("face_b"),
+    ]),
+  });
+  const plans = review.providerReview.studios[0]!.featurePlans;
+
+  expect(plans.find((plan) => plan.onshapeFeatureId === "S_FACE")).toMatchObject({
+    tier: "baked",
+  });
+  expect(plans.find((plan) => plan.onshapeFeatureId === "E_FACE")).toMatchObject({
+    tier: "baked",
+    reasonCodes: ["needs-region-resolution"],
+    suppressed: true,
+  });
 });
 
 test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch stays honestly baked", async () => {

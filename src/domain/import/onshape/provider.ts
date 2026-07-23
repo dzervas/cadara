@@ -555,6 +555,81 @@ function recomputePlanWithFeaturePlans(
   };
 }
 
+function planToLiveSketchMap(
+  featurePlans: readonly FeaturePlan[],
+): Map<string, { tier: FidelityTier; planeKey: "xy" | "yz" | "xz"; planeFrame?: SketchPlaneFrame }> {
+  return new Map(
+    featurePlans.flatMap((plan) =>
+      plan.tier === "parametric" && plan.target.kind === "sketch"
+        ? [[plan.onshapeFeatureId, {
+            tier: plan.tier,
+            planeKey: plan.target.planeKey,
+            planeFrame: plan.target.plane?.frame ?? plan.target.capturedFrame,
+          }] as const]
+        : [],
+    ),
+  );
+}
+
+function replanDependentFeatures(input: {
+  read: ReturnType<typeof readPartStudio>;
+  featurePlans: readonly FeaturePlan[];
+}): FeaturePlan[] {
+  const plansByFeatureId = new Map(
+    input.featurePlans.map((plan) => [plan.onshapeFeatureId, plan]),
+  );
+  const liveSketchPlansByFeatureId = planToLiveSketchMap(input.featurePlans);
+  const references = new Map<string, OnshapeResolvedReference[]>();
+  for (const reference of input.read.studio.resolvedReferences) {
+    const existing = references.get(reference.deterministicId) ?? [];
+    existing.push(reference);
+    references.set(reference.deterministicId, existing);
+  }
+  const state = {
+    sketchPlansByFeatureId: new Map<
+      string,
+      { tier: FidelityTier; planeKey: "xy" | "yz" | "xz"; planeFrame?: SketchPlaneFrame }
+    >(),
+    bodyProducingFeatureIds: [] as string[],
+  };
+
+  return input.read.features.map((feature) => {
+    const currentPlan = plansByFeatureId.get(feature.featureId);
+    if (!currentPlan) {
+      throw new Error(`Missing plan for source feature ${feature.featureId}.`);
+    }
+    const liveSketchPlan = liveSketchPlansByFeatureId.get(feature.featureId);
+    if (liveSketchPlan) state.sketchPlansByFeatureId.set(feature.featureId, liveSketchPlan);
+
+    const translator = onshapeFeatureTranslatorRegistry.forFeatureType(feature.featureType);
+    const context = {
+      feature,
+      label: currentPlan.label,
+      onshapeSuppressed: feature.suppressed === true,
+      read: input.read,
+      references,
+      state,
+    };
+    const replaySourcesAreLive = currentPlan.plannedFeatureReplay?.sourceFeatureIds.every(
+      (sourceFeatureId) => plansByFeatureId.get(sourceFeatureId)?.tier === "parametric",
+    ) === true;
+    const replan =
+      (feature.featureType === "extrude" &&
+        currentPlan.reasonCodes.includes("needs-region-resolution")) ||
+      (currentPlan.reasonCodes.includes("downstream-of-baked") && replaySourcesAreLive);
+    if (replan) {
+      const replanned = translator.plan(context);
+      plansByFeatureId.set(feature.featureId, replanned);
+      return replanned;
+    }
+
+    // Preserve the reviewed plan, but replay preceding translator state so a
+    // promoted extrude sees the same body-producing prefix as initial planning.
+    if (feature.featureType !== "newSketch") translator.plan(context);
+    return currentPlan;
+  });
+}
+
 function activateCapturedFrameTranslation(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: OnshapeStudioPlan;
@@ -675,17 +750,7 @@ function activateCapturedFrameTranslation(input: {
     return featurePlan;
   });
 
-  const sketchPlansByFeatureId = new Map(
-    nextPlans.flatMap((plan) =>
-      plan.target.kind === "sketch"
-        ? [[plan.onshapeFeatureId, {
-            tier: plan.tier,
-            planeKey: plan.target.planeKey,
-            planeFrame: plan.target.plane?.frame ?? plan.target.capturedFrame,
-          }] as const]
-        : [],
-    ),
-  );
+  const sketchPlansByFeatureId = planToLiveSketchMap(nextPlans);
   const replanned = nextPlans.map((plan, index) => {
     if (plan.featureType !== "loft") return plan;
     const feature = input.read.features[index];
@@ -1162,11 +1227,7 @@ async function activateProbeBackedPlanning(input: {
             : null;
       if (!capturedSignature) return featurePlan;
       const match = matchSignature(capturedSignature, probeSignatures);
-      const matchedReference = match.kind === "unique"
-        ? match.reference
-        : match.kind === "ambiguous" && historyReference
-          ? match.candidates[0]?.reference
-          : undefined;
+      const matchedReference = match.kind === "unique" ? match.reference : undefined;
       if (!matchedReference) return featurePlan;
       const probeSignature = probeSignatures.find(
         (signature) => referenceKey(signature.reference) === referenceKey(matchedReference),
@@ -1203,7 +1264,7 @@ async function activateProbeBackedPlanning(input: {
 
     workingPlan = recomputePlanWithFeaturePlans(
       workingPlan,
-      nextPlans,
+      replanDependentFeatures({ read: input.read, featurePlans: nextPlans }),
       input.read.studio.groundTruth.hasBodies,
       input.read,
     );

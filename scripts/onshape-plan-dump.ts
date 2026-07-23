@@ -261,15 +261,17 @@ function createLogicLaneReviewCapabilities(
     },
   );
   const featureIndexById = new Map(
-    featurePlans.map((plan, index) => [plan.onshapeFeatureId, index]),
+    features.map((feature, index) => [feature.featureId, index]),
   );
-  const topologyConsumerIndexes = featurePlans.flatMap((plan, index) =>
-    (plan.plannedBodyTopologyConsumer?.slots.length ?? 0) > 0 ||
-    (plan.plannedExtrude?.topologySlots.length ?? 0) > 0
-      ? [index]
-      : [],
+  const rollbackSnapshotByConsumerFeatureId = new Map(
+    features.flatMap((feature) => {
+      const consumerIndex = featureIndexById.get(feature.featureId)!;
+      const snapshot = [...(rollbackSnapshots ?? [])].reverse().find((candidate) =>
+        (featureIndexById.get(candidate.featureId) ?? Infinity) < consumerIndex,
+      );
+      return snapshot ? [[feature.featureId, snapshot] as const] : [];
+    }),
   );
-  let topologyProbeIndex = 0;
 
   return {
     context: {
@@ -301,14 +303,15 @@ function createLogicLaneReviewCapabilities(
     history: {
       async evaluateHistoryProbe(input) {
         const count = input.actions.orderedActions?.length ?? featurePlans.length;
-        const nextConsumerIndex = input.includeFinalTessellation === false
-          ? topologyConsumerIndexes[topologyProbeIndex++] ?? -1
-          : -1;
-        const boundarySnapshot = nextConsumerIndex < 0
-          ? rollbackSnapshots?.at(-1)
-          : [...(rollbackSnapshots ?? [])].reverse().find((snapshot) =>
-              (featureIndexById.get(snapshot.featureId) ?? Infinity) < nextConsumerIndex,
-            );
+        // Diagnostic caveat: face/edge evidence below is still captured-signature
+        // echoing. Body evidence is keyed by the requested consumer prefix, so a
+        // repeated probe never falls through to the final snapshot or invents a
+        // Boolean target.
+        const boundarySnapshot = input.includeFinalTessellation === false
+          ? (input.consumerFeatureId
+            ? rollbackSnapshotByConsumerFeatureId.get(input.consumerFeatureId) ?? null
+            : null)
+          : rollbackSnapshots?.at(-1) ?? null;
         const signatures = [
           ...rollbackBodySignatures(boundarySnapshot ? [boundarySnapshot] : []),
           ...nonBodySignatures,

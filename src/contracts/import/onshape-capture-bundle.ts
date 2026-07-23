@@ -19,6 +19,9 @@ export const ONSHAPE_CAPTURE_BUNDLE_FORMAT_VERSION = 2;
 /** Current exact-profile evidence contract carried by each freshly captured studio. */
 export const ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION = 3;
 
+/** Current completion contract for deterministic and query history evidence. */
+export const ONSHAPE_IMMUTABLE_HISTORY_EVIDENCE_SCHEMA_VERSION = 1;
+
 /**
  * Workspace / version / microversion selector segment of an Onshape document URL.
  */
@@ -144,6 +147,29 @@ export interface OnshapeProfileEvidenceManifestEntry {
   completed: true;
 }
 
+/** One deterministic-ID consumer covered by immutable history evidence. */
+export interface OnshapeDeterministicHistoryEvidenceManifestEntry {
+  deterministicId: string;
+  consumingFeatureId: string;
+  completed: true;
+}
+
+/** One ID-less query consumer covered by immutable history evidence. */
+export interface OnshapeQueryHistoryEvidenceManifestEntry {
+  consumingFeatureId: string;
+  parameterId: string;
+  queryIndex: number;
+  sourceQueryString: string;
+  emittedRecordCount: number;
+  completed: true;
+}
+
+/** Completion contract for all non-profile immutable history evidence. */
+export interface OnshapeImmutableHistoryEvidenceManifest {
+  deterministicIdConsumers: OnshapeDeterministicHistoryEvidenceManifestEntry[];
+  queryStringConsumers: OnshapeQueryHistoryEvidenceManifestEntry[];
+}
+
 export type OnshapeProfileEvidence =
   | {
       /** Exact readable qSketchRegion set; no server face witness is needed. */
@@ -262,6 +288,10 @@ export interface OnshapePartStudioCapture {
   resolvedReferences: OnshapeResolvedReference[];
   /** Optional history-point evidence for captured queries whose ID arrays were empty. */
   resolvedQueryReferences?: OnshapeResolvedQueryReference[];
+  /** Optional on older bundles; current value proves deterministic/query history completeness. */
+  immutableHistoryEvidenceSchemaVersion?: number;
+  /** Completion contract binding deterministic/query history to exact consumers. */
+  immutableHistoryEvidenceManifest?: OnshapeImmutableHistoryEvidenceManifest;
   /** Exact consumer-indexed selected-face evidence for solid extrude profiles. */
   profileEvidence?: OnshapeProfileEvidence[];
   /** Optional on v2 bundles produced before profile evidence was versioned. */
@@ -309,11 +339,107 @@ export function hasCurrentOnshapeProfileEvidence(input: {
     return records.length === 1 && records[0]?.kind === "sketchRegionSet";
   }
   if (entry.kind === "unresolved") {
-    return records.length === 1 && records[0]?.kind === "unresolved" && !("resultIndex" in records[0]!);
+    return records.length === 1 &&
+      records[0]?.kind === "unresolved" &&
+      !("resultIndex" in records[0]) &&
+      records[0].unresolved.reason !== "profile evidence FeatureScript result was malformed";
   }
   return records.every((record, resultIndex) =>
     record.kind !== "sketchRegionSet" && "resultIndex" in record && record.resultIndex === resultIndex,
   );
+}
+
+/**
+ * Accept deterministic and query history evidence only when a current manifest
+ * binds complete, non-duplicated records to every raw feature consumer. Older
+ * envelopes stay structurally valid but deliberately remain cache misses.
+ */
+export function hasCurrentOnshapeImmutableHistoryEvidence(input: {
+  schemaVersion: number | undefined;
+  manifest: OnshapeImmutableHistoryEvidenceManifest | undefined;
+  resolvedReferences: readonly OnshapeResolvedReference[];
+  resolvedQueryReferences: readonly OnshapeResolvedQueryReference[] | undefined;
+  deterministicIdConsumers: readonly {
+    deterministicId: string;
+    consumingFeatureId: string;
+  }[];
+  queryStringConsumers: readonly {
+    consumingFeatureId: string;
+    parameterId: string;
+    queryIndex: number;
+    queryString: string;
+  }[];
+}): boolean {
+  if (
+    input.schemaVersion !== ONSHAPE_IMMUTABLE_HISTORY_EVIDENCE_SCHEMA_VERSION ||
+    !input.manifest ||
+    !input.resolvedQueryReferences
+  ) return false;
+
+  const deterministicKeys = new Set(input.deterministicIdConsumers.map(
+    (consumer) => `${consumer.deterministicId}\u0000${consumer.consumingFeatureId}`,
+  ));
+  const manifestDeterministicKeys = input.manifest.deterministicIdConsumers.map(
+    (consumer) => `${consumer.deterministicId}\u0000${consumer.consumingFeatureId}`,
+  );
+  if (
+    manifestDeterministicKeys.length !== deterministicKeys.size ||
+    new Set(manifestDeterministicKeys).size !== manifestDeterministicKeys.length ||
+    manifestDeterministicKeys.some((key) => !deterministicKeys.has(key)) ||
+    input.manifest.deterministicIdConsumers.some((consumer) => !consumer.completed)
+  ) return false;
+
+  for (const consumer of input.deterministicIdConsumers) {
+    const history = input.resolvedReferences.filter((record) =>
+      record.evaluatedAt === "historyPoint" &&
+      record.deterministicId === consumer.deterministicId &&
+      record.consumingFeatureId === consumer.consumingFeatureId,
+    );
+    if (history.length !== 1) return false;
+  }
+  const historyRecords = input.resolvedReferences.filter((record) => record.evaluatedAt === "historyPoint");
+  if (historyRecords.length !== deterministicKeys.size) return false;
+  const finalIds = new Set(input.deterministicIdConsumers.map((consumer) => consumer.deterministicId));
+  for (const deterministicId of finalIds) {
+    if (input.resolvedReferences.filter((record) =>
+      record.evaluatedAt === "finalState" && record.deterministicId === deterministicId,
+    ).length !== 1) return false;
+  }
+  if (input.resolvedReferences.filter((record) => record.evaluatedAt === "finalState").length !== finalIds.size) {
+    return false;
+  }
+
+  const queryKeys = new Set(input.queryStringConsumers.map(
+    (consumer) => `${consumer.consumingFeatureId}\u0000${consumer.parameterId}\u0000${consumer.queryIndex}`,
+  ));
+  const manifestQueries = input.manifest.queryStringConsumers;
+  if (
+    manifestQueries.length !== queryKeys.size ||
+    new Set(manifestQueries.map((consumer) =>
+      `${consumer.consumingFeatureId}\u0000${consumer.parameterId}\u0000${consumer.queryIndex}`,
+    )).size !== manifestQueries.length
+  ) return false;
+  let expectedQueryRecordCount = 0;
+  for (const consumer of input.queryStringConsumers) {
+    const entry = manifestQueries.find((candidate) =>
+      candidate.consumingFeatureId === consumer.consumingFeatureId &&
+      candidate.parameterId === consumer.parameterId &&
+      candidate.queryIndex === consumer.queryIndex &&
+      candidate.sourceQueryString === consumer.queryString,
+    );
+    const records = input.resolvedQueryReferences.filter((record) =>
+      record.consumingFeatureId === consumer.consumingFeatureId &&
+      record.parameterId === consumer.parameterId &&
+      record.queryIndex === consumer.queryIndex &&
+      record.evaluatedAt === "historyPoint",
+    );
+    if (!entry || !entry.completed || records.length === 0 || records.length !== entry.emittedRecordCount) return false;
+    if (records.length > 1 && !records.every((record, index) => "entityIndex" in record && record.entityIndex === index)) {
+      return false;
+    }
+    expectedQueryRecordCount += entry.emittedRecordCount;
+  }
+  return input.resolvedQueryReferences.length === expectedQueryRecordCount;
 }
 
 export interface OnshapeCaptureBundleBase {

@@ -35,6 +35,7 @@ export async function probeTopologyConsumerPrefixes(input: {
     if (orderedPosition === undefined || orderedPosition > actionCount) continue;
     const probe = await input.history.evaluateHistoryProbe({
       actions: takePreparedActionPrefix(input.actions, orderedPosition),
+      consumerFeatureId,
       includeFinalTessellation: false,
     });
     const last = probe.steps.at(-1);

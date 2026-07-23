@@ -435,7 +435,7 @@ function buildProfileEvidenceBlocks(
         var matchingSketchIds${index} = [];
         for (var sketchFeatureId${index} in ${sketchIds})
         {
-            for (var regionFace${index} in evaluateQuery(context, qSketchRegion(id + sketchFeatureId${index}, false)))
+            for (var regionFace${index} in evaluateQuery(context, qSketchRegion(makeId(sketchFeatureId${index}), false)))
             {
                 if (transientQueriesToStrings(regionFace${index}) == selectedId${index})
                     matchingSketchIds${index} = append(matchingSketchIds${index}, sketchFeatureId${index});
@@ -1018,6 +1018,8 @@ export async function resolveImmutableHistoryEvidence(input: {
   deterministicIdConsumers: readonly DeterministicIdConsumer[];
   queryStringConsumers: readonly QueryStringConsumer[];
   profileConsumers: readonly SolidExtrudeProfileQueryConsumer[];
+  /** Reuse validated final-state records while refreshing only consumer history. */
+  skipFinalState?: boolean;
   evaluate?: ImmutableHistoryFeatureScriptEvaluator;
 }): Promise<ImmutableHistoryEvidenceResult> {
   const evaluate = input.evaluate ?? ((rollbackBarIndex, script) =>
@@ -1027,7 +1029,7 @@ export async function resolveImmutableHistoryEvidence(input: {
     ));
   const deterministicIds = [...new Set(input.deterministicIdConsumers.map((consumer) => consumer.deterministicId))];
   let finalRecords: OnshapeResolvedReference[] = [];
-  if (deterministicIds.length > 0) {
+  if (!input.skipFinalState && deterministicIds.length > 0) {
     const response = await evaluate(-1, buildResolutionScript());
     const parsed = parseEntityRecords(response);
     finalRecords = referencesFromEntityRecords({
@@ -1042,9 +1044,6 @@ export async function resolveImmutableHistoryEvidence(input: {
     resolvedQueryReferences: [],
     profileEvidence: [],
   };
-  const unresolvedFinalIds = new Set(
-    finalRecords.filter((record) => "unresolved" in record).map((record) => record.deterministicId),
-  );
   const byRollback = new Map<number, {
     deterministicConsumers: DeterministicIdConsumer[];
     queryEntries: Array<{ consumer: QueryStringConsumer; compressed: CompressedQuery }>;
@@ -1058,10 +1057,12 @@ export async function resolveImmutableHistoryEvidence(input: {
     return created;
   };
 
+  // A deterministic ID surviving the final model says nothing about its
+  // geometry or owner at the point its consumer was authored. Preserve final
+  // records for final-state use, and always add a consumer-scoped history
+  // record at the pre-consumer rollback point.
   for (const consumer of input.deterministicIdConsumers) {
-    if (unresolvedFinalIds.has(consumer.deterministicId)) {
-      groupFor(consumer.rollbackIndex).deterministicConsumers.push(consumer);
-    }
+    groupFor(consumer.rollbackIndex).deterministicConsumers.push(consumer);
   }
   for (const consumer of input.queryStringConsumers) {
     const compressed = parseCompressedQuery(consumer.queryString);
@@ -1117,12 +1118,25 @@ export async function resolveImmutableHistoryEvidence(input: {
         priorSketchFeatureIds: entry.consumer.priorSketchFeatureIds,
       })),
     });
-    const decoded = decodeFsValue((await evaluate(rollbackIndex, script) as { result?: unknown }).result);
-    const output = decoded && typeof decoded === "object" ? decoded as {
+    const response = await evaluate(rollbackIndex, script) as { result?: unknown; notices?: unknown };
+    const decoded = decodeFsValue(response.result);
+    if (!decoded || typeof decoded !== "object") {
+      throw new Error(`Onshape history evidence FeatureScript returned no decodable result at rollback index ${rollbackIndex}.`);
+    }
+    const output = decoded as {
       entityRecords?: unknown;
       queryGroups?: unknown;
       profileGroups?: unknown;
-    } : {};
+    };
+    if (group.deterministicConsumers.length > 0 && !Array.isArray(output.entityRecords)) {
+      throw new Error(`Onshape history evidence FeatureScript omitted entity records at rollback index ${rollbackIndex}.`);
+    }
+    if (group.queryEntries.length > 0 && !Array.isArray(output.queryGroups)) {
+      throw new Error(`Onshape history evidence FeatureScript omitted query groups at rollback index ${rollbackIndex}.`);
+    }
+    if (group.profileEntries.length > 0 && !Array.isArray(output.profileGroups)) {
+      throw new Error(`Onshape history evidence FeatureScript omitted profile groups at rollback index ${rollbackIndex}.`);
+    }
     const entityRecords = Array.isArray(output.entityRecords)
       ? output.entityRecords.filter(isEntityRecord)
       : [];
@@ -1176,14 +1190,9 @@ export async function resolveImmutableHistoryEvidence(input: {
     for (const [entryIndex, entry] of group.profileEntries.entries()) {
       const records = profileGroups?.find((candidate) => candidate.index === entryIndex)?.records;
       if (!records || records.length === 0) {
-        results.profileEvidence.push({
-          consumingFeatureId: entry.consumer.consumingFeatureId,
-          parameterId: "entities",
-          queryIndex: entry.consumer.queryIndex,
-          evaluatedAt: "historyPoint",
-          kind: "unresolved",
-          unresolved: { reason: "profile evidence FeatureScript result was malformed" },
-        });
+        throw new Error(
+          `Onshape history evidence FeatureScript omitted profile result ${entryIndex} at rollback index ${rollbackIndex}.`,
+        );
       } else {
         for (const record of records) {
           results.profileEvidence.push(profileEvidenceFromRecord({

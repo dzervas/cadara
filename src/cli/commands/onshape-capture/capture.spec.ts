@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 
 import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
 
-import { captureBundle, enrichBundleProfileEvidence } from "@/cli/commands/onshape-capture/capture";
+import { captureBundle, enrichBundleHistoryEvidence } from "@/cli/commands/onshape-capture/capture";
 import { OnshapeRequestError } from "@/cli/commands/onshape-capture/client";
 import { parseDocumentUrl } from "@/cli/commands/onshape-capture/url";
 import { captureGroundTruth } from "@/cli/commands/onshape-capture/ground-truth";
@@ -47,10 +47,32 @@ function featuresWithOpaqueProfile(): typeof FEATURES_WITH_REFERENCES {
     featureId: "E_OPAQUE",
     parameters: [{
       parameterId: "entities",
-      queries: [{ queryString: 'query = qCompressed(1.0, "opaque-profile", id);' }],
+      queries: [{
+        deterministicIds: [],
+        queryString: 'query = qCompressed(1.0, "opaque-profile", id);',
+      }],
     }],
   });
   return features as typeof FEATURES_WITH_REFERENCES;
+}
+
+function immutableBundleSections(bundle: Awaited<ReturnType<typeof captureBundle>>) {
+  return {
+    provenance: bundle.provenance,
+    document: bundle.document,
+    elements: bundle.elements,
+    diagnostics: bundle.diagnostics,
+    partStudios: bundle.partStudios.map(({
+      resolvedReferences: _resolvedReferences,
+      resolvedQueryReferences: _resolvedQueryReferences,
+      immutableHistoryEvidenceSchemaVersion: _historySchema,
+      immutableHistoryEvidenceManifest: _historyManifest,
+      profileEvidence: _profileEvidence,
+      profileEvidenceSchemaVersion: _profileSchema,
+      profileEvidenceManifest: _profileManifest,
+      ...immutable
+    }) => immutable),
+  };
 }
 
 function featuresWithIdlessChamfer(queryString: string): typeof FEATURES_WITH_REFERENCES {
@@ -160,8 +182,15 @@ test("capture.spec.ts records final-state and history-point deterministic refere
 
   expect(
     references.map((reference) => `${reference.deterministicId}:${reference.evaluatedAt}`).sort(),
-    "Every final-state reference should be present, with failed IDs re-evaluated at their history point.",
-  ).toEqual(["JDC:finalState", "JGC:finalState", "ZZZ:finalState", "ZZZ:historyPoint"]);
+    "Every deterministic-ID consumer should retain final evidence and receive its own history-point record.",
+  ).toEqual([
+    "JDC:finalState",
+    "JDC:historyPoint",
+    "JGC:finalState",
+    "JGC:historyPoint",
+    "ZZZ:finalState",
+    "ZZZ:historyPoint",
+  ]);
 
   const finalUnresolved = references.find(
     (reference) => reference.deterministicId === "ZZZ" && reference.evaluatedAt === "finalState",
@@ -179,8 +208,12 @@ test("capture.spec.ts records final-state and history-point deterministic refere
   ).toBe("FkkBVfXRKopMlIW_1");
   expect(
     calls.filter((call) => call.url.includes("rollbackBarIndex=2")).length,
-    "Failed IDs at one history point should share one immutable FeatureScript request.",
+    "A consumer's history-point evidence should use one immutable FeatureScript request.",
   ).toBe(1);
+  expect(
+    calls.filter((call) => /rollbackBarIndex=[012]/.test(call.url)),
+    "Distinct deterministic-ID consumer points should each be evaluated once without workspace rollback.",
+  ).toHaveLength(3);
   expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
   const featureRequest = calls.find(
     (call) => call.method === "GET" && call.url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
@@ -377,7 +410,7 @@ test("capture.spec.ts automatically snapshots only locally proven surface-extrud
   expect(calls.filter((call) => call.url.includes("/externaldata/"))).toHaveLength(1);
 });
 
-test("capture.spec.ts targeted enrichment evaluates only stale opaque profile evidence", async () => {
+test("capture.spec.ts targeted enrichment replaces complete immutable history evidence without recapturing immutable sections", async () => {
   const { fetch, calls } = createFixtureFetch();
   const captured = await captureBundle(
     parseDocumentUrl(FIXTURE_ELEMENT_URL),
@@ -388,18 +421,61 @@ test("capture.spec.ts targeted enrichment evaluates only stale opaque profile ev
   stale.partStudios[0]!.features = featuresWithOpaqueProfile();
   stale.partStudios[0]!.profileEvidence = [];
   stale.partStudios[0]!.profileEvidenceSchemaVersion = 0;
+  stale.partStudios[0]!.resolvedReferences.push({
+    deterministicId: "JDC",
+    consumingFeatureId: "FOoap8tw3jKAJf5_0",
+    evaluatedAt: "historyPoint",
+    unresolved: { reason: "stale duplicate" },
+  });
+  stale.partStudios[0]!.resolvedQueryReferences = [{
+    consumingFeatureId: "E_OPAQUE",
+    parameterId: "entities",
+    queryIndex: 0,
+    evaluatedAt: "historyPoint",
+    unresolved: { reason: "stale query" },
+  }];
+  const immutableBefore = immutableBundleSections(stale);
+  const finalBefore = stale.partStudios[0]!.resolvedReferences.filter(
+    (record) => record.evaluatedAt === "finalState",
+  );
 
   const beforeEnrich = calls.length;
-  const enriched = await enrichBundleProfileEvidence(stale, CREDENTIALS, createFixtureRuntime(fetch));
+  const enriched = await enrichBundleHistoryEvidence(stale, CREDENTIALS, createFixtureRuntime(fetch));
   const enrichCalls = calls.slice(beforeEnrich);
-  expect(enrichCalls.filter((call) => call.url.includes("/featurescript"))).toHaveLength(1);
+  expect(enrichCalls.filter((call) => call.url.includes("/featurescript"))).toHaveLength(4);
   expect(enrichCalls.every((call) => call.url.includes("/featurescript") && call.url.includes(`/m/${FIXTURE_MICROVERSION}/`))).toBe(true);
-  expect(enrichCalls[0]?.body).toContain("opaque-profile");
-  expect(enrichCalls[0]?.body).not.toContain("qEverything");
+  const opaqueEvaluation = enrichCalls.find((call) => call.body?.includes("opaque-profile"));
+  expect(opaqueEvaluation?.body).toContain("opaque-profile");
+  expect(opaqueEvaluation?.body).not.toContain("qEverything");
+  expect(opaqueEvaluation?.body).toContain("qSketchRegion(makeId(sketchFeatureId0), false)");
+  expect(opaqueEvaluation?.body).not.toContain("qSketchRegion(id + sketchFeatureId0");
+  expect(enriched.partStudios[0]!.resolvedReferences.filter(
+    (record) => record.evaluatedAt === "historyPoint",
+  )).toHaveLength(3);
+  expect(enriched.partStudios[0]!.resolvedReferences.filter(
+    (record) => record.deterministicId === "JDC" && record.evaluatedAt === "historyPoint",
+  )).toHaveLength(1);
+  expect(enriched.partStudios[0]!.resolvedReferences.filter(
+    (record) => record.evaluatedAt === "finalState",
+  )).toEqual(finalBefore);
+  expect(enriched.partStudios[0]!.resolvedQueryReferences).toEqual([{
+    consumingFeatureId: "E_OPAQUE",
+    parameterId: "entities",
+    queryIndex: 0,
+    entityIndex: 0,
+    evaluatedAt: "historyPoint",
+    signature: expect.objectContaining({ entityClass: "edge" }),
+  }]);
   expect(enriched.partStudios[0]!.profileEvidence).toEqual(expect.arrayContaining([
     expect.objectContaining({ kind: "sketchRegionSet", filterInnerLoops: true }),
-    expect.objectContaining({ consumingFeatureId: "E_OPAQUE", kind: "unresolved" }),
+    expect.objectContaining({
+      consumingFeatureId: "E_OPAQUE",
+      kind: "sketchRegion",
+      sourceSketchFeatureId: "FOoap8tw3jKAJf5_0",
+      interiorPoint3d: [0.005, 0.005, 0],
+    }),
   ]));
+  expect(enriched.partStudios[0]!.profileEvidence).toHaveLength(2);
 
   expect(enriched.partStudios[0]!.profileEvidenceManifest).toEqual(expect.arrayContaining([
     expect.objectContaining({
@@ -409,19 +485,60 @@ test("capture.spec.ts targeted enrichment evaluates only stale opaque profile ev
       completed: true,
     }),
   ]));
+  expect(enriched.partStudios[0]!.immutableHistoryEvidenceManifest).toEqual(expect.objectContaining({
+    queryStringConsumers: [expect.objectContaining({
+      consumingFeatureId: "E_OPAQUE",
+      emittedRecordCount: 1,
+      completed: true,
+    })],
+  }));
+  expect(immutableBundleSections(enriched)).toEqual(immutableBefore);
 
   const beforeCurrentRerun = calls.length;
-  await enrichBundleProfileEvidence(enriched, CREDENTIALS, createFixtureRuntime(fetch));
+  await enrichBundleHistoryEvidence(enriched, CREDENTIALS, createFixtureRuntime(fetch));
   expect(calls).toHaveLength(beforeCurrentRerun);
 
   const staleMarker = structuredClone(enriched);
   staleMarker.partStudios[0]!.profileEvidenceSchemaVersion = 0;
   const beforeStaleRerun = calls.length;
-  await enrichBundleProfileEvidence(staleMarker, CREDENTIALS, createFixtureRuntime(fetch));
+  await enrichBundleHistoryEvidence(staleMarker, CREDENTIALS, createFixtureRuntime(fetch));
   expect(calls.slice(beforeStaleRerun).filter((call) => call.url.includes("/featurescript"))).toHaveLength(1);
 });
 
-test("capture.spec.ts replaces incomplete current evidence for one consumer instead of appending it", async () => {
+
+test("capture.spec.ts rejects malformed FeatureScript profile evidence instead of completing its manifest", async () => {
+  const { fetch } = createFixtureFetch();
+  const captured = await captureBundle(
+    parseDocumentUrl(FIXTURE_ELEMENT_URL), CREDENTIALS, createFixtureRuntime(fetch),
+  );
+  const stale = structuredClone(captured);
+  stale.partStudios[0]!.features = featuresWithOpaqueProfile();
+  stale.partStudios[0]!.profileEvidence = [];
+  stale.partStudios[0]!.profileEvidenceSchemaVersion = 0;
+
+  const routes = buildDefaultRoutes();
+  routes.unshift({
+    method: "POST",
+    match: (url) => url.includes(`/m/${FIXTURE_MICROVERSION}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`),
+    respond: (): FetchResponseStub => ({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        btType: "BTFeatureScriptEvalResponse-1859",
+        notices: [{ message: "synthetic compile failure" }],
+      })),
+    }),
+  });
+  const { fetch: malformedFetch } = createFixtureFetch(routes);
+
+  await expect(enrichBundleHistoryEvidence(
+    stale,
+    CREDENTIALS,
+    createFixtureRuntime(malformedFetch),
+  )).rejects.toThrow("returned no decodable result");
+});
+
+test("capture.spec.ts replaces falsely completed malformed evidence instead of retaining it", async () => {
   const { fetch, calls } = createFixtureFetch();
   const captured = await captureBundle(
     parseDocumentUrl(FIXTURE_ELEMENT_URL), CREDENTIALS, createFixtureRuntime(fetch),
@@ -429,18 +546,23 @@ test("capture.spec.ts replaces incomplete current evidence for one consumer inst
   const stale = structuredClone(captured);
   stale.partStudios[0]!.features = featuresWithOpaqueProfile();
   stale.partStudios[0]!.profileEvidenceSchemaVersion = 3;
+  stale.partStudios[0]!.profileEvidence = [{
+    consumingFeatureId: "E_OPAQUE", parameterId: "entities", queryIndex: 0,
+    evaluatedAt: "historyPoint", kind: "unresolved",
+    unresolved: { reason: "profile evidence FeatureScript result was malformed" },
+  }];
   stale.partStudios[0]!.profileEvidenceManifest = [{
     consumingFeatureId: "E_OPAQUE", parameterId: "entities", queryIndex: 0,
     sourceQueryString: 'query = qCompressed(1.0, "opaque-profile", id);',
-    kind: "faceResults", emittedRecordCount: 2, completed: true,
+    kind: "unresolved", emittedRecordCount: 1, completed: true,
   }];
   const before = calls.length;
 
-  const enriched = await enrichBundleProfileEvidence(stale, CREDENTIALS, createFixtureRuntime(fetch));
+  const enriched = await enrichBundleHistoryEvidence(stale, CREDENTIALS, createFixtureRuntime(fetch));
   const records = enriched.partStudios[0]!.profileEvidence?.filter(
     (record) => record.consumingFeatureId === "E_OPAQUE",
   );
-  expect(calls.slice(before).filter((call) => call.url.includes("/featurescript"))).toHaveLength(1);
+  expect(calls.slice(before).filter((call) => call.url.includes("/featurescript"))).toHaveLength(4);
   expect(records).toHaveLength(1);
   expect(enriched.partStudios[0]!.profileEvidenceManifest).toEqual(expect.arrayContaining([
     expect.objectContaining({ consumingFeatureId: "E_OPAQUE", emittedRecordCount: 1 }),

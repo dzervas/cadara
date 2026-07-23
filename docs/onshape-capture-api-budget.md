@@ -50,8 +50,11 @@ counts.
 Evidence required for exact parametric import:
 
 - source features and solved sketches pinned to one immutable microversion;
-- deterministic-ID and ID-less compressed-query evidence when an authored
-  topology reference cannot be represented directly;
+- final-state deterministic-ID evidence plus one consumer-scoped history-point
+  record for every authored topology reference, because surviving IDs can have
+  different geometry or ownership at the consumer point; and ID-less
+  compressed-query evidence when an authored topology reference cannot be
+  represented directly;
 - targeted pre-consumer evaluation of opaque `qCompressed` extrude profiles;
 - exact local region-set semantics for readable `qSketchRegion` assignments;
 - STEP/tessellation only for a proven baked checkpoint boundary.
@@ -75,7 +78,7 @@ are the genuine `bodyType=SURFACE` `Extrude 4` features in 9841 and d3cd9.
    region-set evidence. Unsupported syntax remains explicitly unresolved.
 3. Evaluate opaque `qCompressed` only on the server. Never decode its payload
    locally.
-4. Batch unresolved deterministic IDs, ID-less compressed queries, and opaque
+4. Batch every deterministic-ID consumer, ID-less compressed queries, and opaque
    profiles into one read-only FeatureScript request per required rollback
    index.
 5. Cache only immutable FeatureScript responses. The key includes evidence
@@ -84,39 +87,47 @@ are the genuine `bodyType=SURFACE` `Extrude 4` features in 9841 and d3cd9.
    mutations are never cached.
 6. Create one lazy temporary workspace only when a proven geometry boundary
    exists. Capture one tessellation/STEP chain per such boundary.
-7. Enrich an existing validated bundle by replacing only stale/missing profile
-   evidence. A source-query manifest proves completeness. Old or incomplete
-   evidence is a cache miss, not an importer compatibility path.
+7. Enrich an existing validated bundle by replacing stale deterministic
+   consumer-history, ID-less query-history, and profile evidence against the
+   captured microversion only. Versioned manifests prove deterministic/query
+   and profile completeness independently. Old or incomplete evidence is a
+   cache miss, not an importer compatibility path.
 
 ## Optimized call budget
 
 With API-key authentication, a fresh equivalent capture with targeted boundary
-snapshots uses **148 fixed calls plus status polls for two surface-boundary STEP
-exports**:
+snapshots uses **184 fixed calls plus status polls for two surface-boundary STEP
+exports**. This adds 36 distinct immutable history states from deterministic-ID
+consumers that survive final state, counted from the local root bundles: **23 /
+0 / 3 / 4 / 6** for 405 / Mounts / 5151 / 9841 / d3cd9:
 
 | Bundle | Fixed | With one boundary poll |
 |---|---:|---:|
-| 405 | 34 | 34 |
+| 405 | 57 | 57 |
 | Mounts | 13 | 13 |
-| 5151 | 25 | 25 |
-| 9841 | 48 | 49 |
-| d3cd9 | 28 | 29 |
-| **Total** | **148** | **150** |
+| 5151 | 28 | 28 |
+| 9841 | 52 | 53 |
+| d3cd9 | 34 | 35 |
+| **Total** | **184** | **186** |
 
-Targeted enrichment of the existing bundles needs only the opaque profile
-states:
+Targeted enrichment of the existing bundles makes one immutable FeatureScript
+request per distinct rollback state that has a deterministic-ID consumer, a
+supported ID-less compressed query, or an opaque profile query. Existing valid
+final-state deterministic records are retained, so no final-state evaluation is
+needed:
 
 | 405 | Mounts | 5151 | 9841 | d3cd9 | Total |
 |---:|---:|---:|---:|---:|---:|
-| 1 | 0 | 7 | 9 | 1 | **18** |
+| 24 | 5 | 20 | 38 | 20 | **107** |
 
 Cookie authentication lazily adds one successful `/api/clientinfo/xsrf`
 bootstrap per CLI process that performs a POST or DELETE. Therefore five separate
-fresh cookie-authenticated captures cost **153 fixed / 155 with one boundary
-poll**, while separate targeted enrichment of these existing bundles costs
-**2 / 0 / 8 / 10 / 2 = 22** successful calls. Mounts and repeated current-schema
-enrichment make no request, so they do not bootstrap XSRF.
+fresh cookie-authenticated captures cost **189 fixed / 191 with one boundary
+poll**, while separate targeted enrichments cost
+**25 / 6 / 21 / 39 / 21 = 112** successful calls. A repeated current-schema
+and current-manifest enrichment makes no request, so it does not bootstrap XSRF.
 
-Readable region sets are local, existing deterministic/query evidence and
-geometry are retained, and a second enrichment of a complete current-schema
-bundle makes **zero** API calls.
+Readable region sets and unsupported query syntax remain local evidence; raw
+features, sketches, parts, feature specs, final geometry, rollback snapshots,
+and provenance are never recaptured or changed by enrichment. No recapture was
+performed for this audit.

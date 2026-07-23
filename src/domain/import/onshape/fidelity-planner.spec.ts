@@ -64,7 +64,7 @@ const realBundleCases = [
   ],
   [
     "9841e486906fa2ce62d74d8e.onshape-capture.json",
-    { parametric: 6, baked: 35, geometryOnly: 0 },
+    { parametric: 7, baked: 34, geometryOnly: 0 },
   ],
 ] as const;
 

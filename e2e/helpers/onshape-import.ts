@@ -43,7 +43,26 @@ export async function importBundle(
   }
 
   const commit = page.getByRole("button", { name: "Commit", exact: true });
-  await expect(commit).toBeEnabled({ timeout: 60_000 });
+  const alert = page.getByRole("alert").first();
+  try {
+    const outcome = await Promise.race([
+      commit.waitFor({ state: "visible", timeout: 180_000 }).then(() => ({ kind: "review" as const })),
+      alert.waitFor({ state: "visible", timeout: 180_000 }).then(async () => ({
+        kind: "error" as const,
+        message: await alert.innerText(),
+      })),
+    ]);
+    if (outcome.kind === "error") throw new Error(`Import review failed: ${outcome.message}`);
+    await expect(commit).toBeEnabled({ timeout: 180_000 });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => ({
+      state: window.__cadaraDebug?.getState(),
+      trace: window.__cadaraDebug?.getTrace().entries.slice(-20),
+    }));
+    throw new Error(`Import review did not open. Runtime diagnostics: ${JSON.stringify(diagnostics)}`, {
+      cause: error,
+    });
+  }
   const reviewText = await page.locator("main").innerText();
   await commit.click();
   await waitForRevisionChange(page, beforeRevision);

@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
+import type { OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
 import {
   referencedSketchFeatureIdsFromProfileParameter,
   resolveOnshapeSketchProfiles,
@@ -55,7 +56,7 @@ function sketchEvidence(input: {
 function resolve(input: {
   parameter: ReturnType<typeof profileParameter>;
   evidence: OnshapeProfileEvidence[];
-  solved: ReturnType<typeof solvedCircle>[];
+  solved: OnshapeSolvedSketch[];
 }) {
   return resolveOnshapeSketchProfiles({
     profileParameter: input.parameter,
@@ -202,6 +203,95 @@ test("profile resolver requires a unique projected witness region for nested pro
   });
 
   expect(result).toMatchObject({ tier: "resolved", profiles: [{ interiorPoint: [4, 0] }] });
+});
+
+test("profile resolver resolves a witness in the odd-depth nested cell", () => {
+  const result = resolve({
+    parameter: profileParameter("S_THREE_NESTED"),
+    evidence: [sketchEvidence({
+      sketchFeatureId: "S_THREE_NESTED",
+      point: [0.003, 0, 0],
+    })],
+    solved: [{
+      featureId: "S_THREE_NESTED",
+      entities: [
+        ...solvedCircle("S_THREE_OUTER", [0, 0, 0], 0.006).entities,
+        ...solvedCircle("S_THREE_MIDDLE", [0, 0, 0], 0.004).entities,
+        ...solvedCircle("S_THREE_INNER", [0, 0, 0], 0.002).entities,
+      ],
+    }],
+  });
+
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [{ interiorPoint: [3, 0] }],
+  });
+});
+
+test("profile resolver verifies a witness in a line-circle cell", () => {
+  const result = resolve({
+    parameter: profileParameter("S_LINE_CIRCLE"),
+    evidence: [sketchEvidence({
+      sketchFeatureId: "S_LINE_CIRCLE",
+      point: [0, 0.001, 0],
+    })],
+    solved: [{
+      featureId: "S_LINE_CIRCLE",
+      entities: [
+        ...solvedCircle("S_LINE_CIRCLE", [0, 0, 0], 0.002).entities,
+        {
+          entityId: "S_LINE_CIRCLE_chord",
+          entityType: "lineSegment",
+          onshapeEntityType: "skLineSegment",
+          isConstruction: false,
+          start3d: [-0.002, 0, 0],
+          end3d: [0.002, 0, 0],
+        },
+      ],
+    }],
+  });
+
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [{ interiorPoint: [0, 1] }],
+  });
+});
+
+test("profile resolver ignores open lines that cross a standalone circle", () => {
+  const result = resolve({
+    parameter: profileParameter("S_OPEN_LINES"),
+    evidence: [sketchEvidence({
+      sketchFeatureId: "S_OPEN_LINES",
+      point: [0, 0, 0],
+    })],
+    solved: [{
+      featureId: "S_OPEN_LINES",
+      entities: [
+        ...solvedCircle("S_OPEN_LINES", [0, 0, 0], 0.005).entities,
+        {
+          entityId: "S_OPEN_LINES_seed",
+          entityType: "lineSegment",
+          onshapeEntityType: "skLineSegment",
+          isConstruction: false,
+          start3d: [0, 0, 0],
+          end3d: [0.01, 0, 0],
+        },
+        {
+          entityId: "S_OPEN_LINES_offset",
+          entityType: "lineSegment",
+          onshapeEntityType: "skLineSegment",
+          isConstruction: false,
+          start3d: [0, 0.002, 0],
+          end3d: [0.01, 0.002, 0],
+        },
+      ],
+    }],
+  });
+
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [{ interiorPoint: [0, 0] }],
+  });
 });
 
 test("profile resolver projects a mirror-derived source witness through the sketch frame", () => {
