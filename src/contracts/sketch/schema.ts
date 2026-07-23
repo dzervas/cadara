@@ -1398,6 +1398,12 @@ export interface RegionBoundarySegmentRecord {
   endPointId: SketchPointId | null;
   /** Traversal direction relative to the source geometry's live-derived orientation. */
   traversalDirection?: "forward" | "reverse";
+  /** Stable ordinal of this source's split piece in its source-curve order. */
+  sourceSegmentOrdinal?: number;
+  /** Solved boundary start when an arrangement intersection is not an authored point. */
+  startPosition?: SketchPoint2D;
+  /** Solved boundary end when an arrangement intersection is not an authored point. */
+  endPosition?: SketchPoint2D;
 }
 
 /**

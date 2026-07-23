@@ -195,6 +195,14 @@ function assertLoopCanBuildProfile(
     );
   }
 
+  for (const segment of loop.segments) {
+    if ((segment.startPosition === undefined) !== (segment.endPosition === undefined)) {
+      throw new Error(
+        `Region loop ${loop.loopId} has an incomplete bounded segment.`,
+      );
+    }
+  }
+
   for (const pointId of loop.boundaryPointIds) {
     assertBoundaryPointExists(sketch, pointId);
   }
@@ -707,18 +715,25 @@ function toProjectedBoundarySegmentGeometry(
     { kind: "projectedGeometry" }
   >,
   geometry: ProjectedSketchReferenceGeometry,
-  traversalDirection: RegionBoundarySegmentRecord["traversalDirection"],
+  segment: RegionBoundarySegmentRecord,
 ): BoundarySegmentGeometry {
   const segmentId = getProjectedSegmentId(source);
+  const hasBounds = Boolean(segment.startPosition && segment.endPosition);
 
   if (geometry.kind === "lineSegment") {
     const base = {
       kind: "open" as const,
       segmentId,
-      start: mapSketchPointToWorld(plane, geometry.startPosition),
-      end: mapSketchPointToWorld(plane, geometry.endPosition),
+      start: mapSketchPointToWorld(
+        plane,
+        segment.startPosition ?? geometry.startPosition,
+      ),
+      end: mapSketchPointToWorld(
+        plane,
+        segment.endPosition ?? geometry.endPosition,
+      ),
     };
-    return traversalDirection === "reverse"
+    return !hasBounds && segment.traversalDirection === "reverse"
       ? { ...base, start: base.end, end: base.start }
       : base;
   }
@@ -727,19 +742,32 @@ function toProjectedBoundarySegmentGeometry(
     const base = {
       kind: "open" as const,
       segmentId,
-      start: mapSketchPointToWorld(plane, geometry.startPosition),
-      end: mapSketchPointToWorld(plane, geometry.endPosition),
+      start: mapSketchPointToWorld(
+        plane,
+        segment.startPosition ?? geometry.startPosition,
+      ),
+      end: mapSketchPointToWorld(
+        plane,
+        segment.endPosition ?? geometry.endPosition,
+      ),
     };
-    return traversalDirection === "reverse"
+    return !hasBounds && segment.traversalDirection === "reverse"
       ? { ...base, start: base.end, end: base.start }
       : base;
   }
 
   if (geometry.kind === "circle") {
-    return {
-      kind: "closed",
-      segmentId,
-    };
+    return hasBounds
+      ? {
+          kind: "open",
+          segmentId,
+          start: mapSketchPointToWorld(plane, segment.startPosition!),
+          end: mapSketchPointToWorld(plane, segment.endPosition!),
+        }
+      : {
+          kind: "closed",
+          segmentId,
+        };
   }
 
   const rejection = createProjectedRegionLoopRejection(source);
@@ -760,11 +788,16 @@ function getLoopSegmentTraversal(
 ): BoundarySegmentGeometry {
   const baseGeometry = toBoundarySegmentGeometry(plane, geometry);
 
-  if (baseGeometry.kind === "closed") {
-    return baseGeometry;
+  if (segment.startPosition && segment.endPosition) {
+    return {
+      kind: "open",
+      segmentId: baseGeometry.segmentId,
+      start: mapSketchPointToWorld(plane, segment.startPosition),
+      end: mapSketchPointToWorld(plane, segment.endPosition),
+    };
   }
 
-  if (baseGeometry.kind === "closedPolyline") {
+  if (baseGeometry.kind === "closed" || baseGeometry.kind === "closedPolyline") {
     return baseGeometry;
   }
 
@@ -900,13 +933,21 @@ function buildProjectedBoundaryEdge(
   geometry: ProjectedSketchReferenceGeometry,
   loopGeometry: BoundarySegmentGeometry,
   loopRole: RegionRecord["loops"][number]["role"],
-  traversalDirection: RegionBoundarySegmentRecord["traversalDirection"],
+  segment: RegionBoundarySegmentRecord,
   provenance: MutableSketchProfileProvenance,
 ) {
   const sourceKey = getProjectedSegmentId(source);
 
   switch (geometry.kind) {
     case "lineSegment": {
+      if (segment.startPosition && segment.endPosition) {
+        if (loopGeometry.kind !== "open") {
+          throw new Error(
+            `Projected line ${source.reference.geometryId} did not resolve to open loop geometry.`,
+          );
+        }
+        return buildLineEdgeFromWorld(oc, loopGeometry.start, loopGeometry.end);
+      }
       if (loopGeometry.kind !== "open") {
         throw new Error(
           `Projected line ${source.reference.geometryId} did not resolve to open loop geometry.`,
@@ -925,7 +966,7 @@ function buildProjectedBoundaryEdge(
         mapSketchPointToWorld(plane, geometry.endPosition),
       );
       const baseEdge = buildLineEdge(oc, startVertex, endVertex);
-      if (traversalDirection !== "reverse") {
+      if (segment.traversalDirection !== "reverse") {
         return baseEdge;
       }
       try {
@@ -935,6 +976,19 @@ function buildProjectedBoundaryEdge(
       }
     }
     case "circle": {
+      if (segment.startPosition && segment.endPosition) {
+        return buildArcEdgeFromSketchGeometry(
+          oc,
+          plane,
+          segment.startPosition,
+          segment.endPosition,
+          geometry.centerPosition,
+          segment.traversalDirection === "reverse"
+            ? "clockwise"
+            : "counterClockwise",
+          `projected circle ${source.reference.geometryId}`,
+        );
+      }
       const edge = buildCircleEdgeFromSketchGeometry(
         oc,
         plane,
@@ -951,6 +1005,21 @@ function buildProjectedBoundaryEdge(
       }
     }
     case "arc": {
+      if (segment.startPosition && segment.endPosition) {
+        return buildArcEdgeFromSketchGeometry(
+          oc,
+          plane,
+          segment.startPosition,
+          segment.endPosition,
+          geometry.centerPosition,
+          segment.traversalDirection === "reverse"
+            ? geometry.sweepDirection === "clockwise"
+              ? "counterClockwise"
+              : "clockwise"
+            : geometry.sweepDirection,
+          `projected geometry ${source.reference.geometryId}`,
+        );
+      }
       const startVertex = getOrCreateProfileVertex(
         oc,
         provenance,
@@ -974,7 +1043,7 @@ function buildProjectedBoundaryEdge(
         startVertex,
         endVertex,
       );
-      if (traversalDirection !== "reverse") {
+      if (segment.traversalDirection !== "reverse") {
         return edge;
       }
       try {
@@ -1021,7 +1090,7 @@ function buildLoopWire(
           plane,
           segment.source,
           projectedGeometry,
-          segment.traversalDirection,
+          segment,
         );
         loopGeometry.push(segmentGeometry);
         const edge = buildProjectedBoundaryEdge(
@@ -1031,7 +1100,7 @@ function buildLoopWire(
           projectedGeometry,
           segmentGeometry,
           loop.role,
-          segment.traversalDirection,
+          segment,
           provenance,
         );
         wireBuilder.Add_1(edge);
@@ -1052,6 +1121,19 @@ function buildLoopWire(
 
         switch (geometry.kind) {
           case "lineSegment": {
+            if (segment.startPosition && segment.endPosition) {
+              if (segmentGeometry.kind !== "open") {
+                throw new Error(`Line ${geometry.entityId} did not resolve to open loop geometry.`);
+              }
+              const edge = buildLineEdgeFromWorld(
+                oc,
+                segmentGeometry.start,
+                segmentGeometry.end,
+              );
+              wireBuilder.Add_1(edge);
+              provenance.edges.set(geometry.entityId, edge);
+              break;
+            }
             const entity = getSketchEntityDefinition(sketch, geometry.entityId);
             if (entity.kind !== "lineSegment") {
               throw new Error(
@@ -1085,6 +1167,22 @@ function buildLoopWire(
             break;
           }
           case "circle": {
+            if (segment.startPosition && segment.endPosition) {
+              const edge = buildArcEdgeFromSketchGeometry(
+                oc,
+                plane,
+                segment.startPosition,
+                segment.endPosition,
+                geometry.centerPosition,
+                segment.traversalDirection === "reverse"
+                  ? "clockwise"
+                  : "counterClockwise",
+                `circle segment ${geometry.entityId}`,
+              );
+              wireBuilder.Add_1(edge);
+              provenance.edges.set(geometry.entityId, edge);
+              break;
+            }
             const baseEdge = buildCircleEdge(oc, plane, geometry);
             const edge =
               loop.role === "inner" ? reverseEdge(oc, baseEdge) : baseEdge;
@@ -1096,6 +1194,24 @@ function buildLoopWire(
             break;
           }
           case "arc": {
+            if (segment.startPosition && segment.endPosition) {
+              const edge = buildArcEdgeFromSketchGeometry(
+                oc,
+                plane,
+                segment.startPosition,
+                segment.endPosition,
+                geometry.centerPosition,
+                segment.traversalDirection === "reverse"
+                  ? geometry.sweepDirection === "clockwise"
+                    ? "counterClockwise"
+                    : "clockwise"
+                  : geometry.sweepDirection,
+                `arc segment ${geometry.entityId}`,
+              );
+              wireBuilder.Add_1(edge);
+              provenance.edges.set(geometry.entityId, edge);
+              break;
+            }
             const entity = getSketchEntityDefinition(sketch, geometry.entityId);
             if (entity.kind !== "arc") {
               throw new Error(

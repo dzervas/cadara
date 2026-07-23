@@ -151,6 +151,11 @@ export interface HistoryProbeInput {
    * grouped order is used, mirroring the orchestrator.
    */
   actions: ImportPreparedActions;
+  /**
+   * Source feature whose pre-action prefix is being probed. This is diagnostic
+   * correlation only; kernel history evaluation still depends solely on actions.
+   */
+  consumerFeatureId?: string;
   /** Request final-state tessellation for ground-truth verification. */
   includeFinalTessellation?: boolean;
 }

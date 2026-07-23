@@ -77,6 +77,48 @@ test("references.spec.ts plans readable and unsupported profiles locally without
   ]);
 });
 
+test("references.spec.ts retains final records and captures surviving deterministic IDs at their consumer point", async () => {
+  const calls: number[] = [];
+  const result = await resolveImmutableHistoryEvidence({
+    client: {} as never,
+    partStudioPath: "/immutable",
+    deterministicIdConsumers: [
+      { deterministicId: "SURVIVES", consumingFeatureId: "E_CONSUMER", rollbackIndex: 4 },
+    ],
+    queryStringConsumers: [],
+    profileConsumers: [],
+    evaluate: async (rollbackIndex) => {
+      calls.push(rollbackIndex);
+      return {
+        result: fsEncode(
+          rollbackIndex === -1
+            ? [{ id: "SURVIVES", entityClass: "face", geometryType: "plane" }]
+            : {
+                entityRecords: [{ id: "SURVIVES", entityClass: "face", geometryType: "cylinder" }],
+                queryGroups: [],
+                profileGroups: [],
+              },
+        ),
+      };
+    },
+  });
+
+  expect(calls).toEqual([-1, 4]);
+  expect(result.resolvedReferences).toEqual([
+    expect.objectContaining({
+      deterministicId: "SURVIVES",
+      evaluatedAt: "finalState",
+      signature: expect.objectContaining({ geometryType: "plane" }),
+    }),
+    expect.objectContaining({
+      deterministicId: "SURVIVES",
+      consumingFeatureId: "E_CONSUMER",
+      evaluatedAt: "historyPoint",
+      signature: expect.objectContaining({ geometryType: "cylinder" }),
+    }),
+  ]);
+});
+
 test("references.spec.ts batches all history evidence at shared indices and separates distinct ones", async () => {
   const calls: Array<{ rollbackIndex: number; script: string }> = [];
   await resolveImmutableHistoryEvidence({

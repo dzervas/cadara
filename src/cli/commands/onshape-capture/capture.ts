@@ -1,15 +1,19 @@
 import {
   ONSHAPE_CAPTURE_BUNDLE_FORMAT_VERSION,
+  ONSHAPE_IMMUTABLE_HISTORY_EVIDENCE_SCHEMA_VERSION,
   ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION,
+  hasCurrentOnshapeImmutableHistoryEvidence,
+  hasCurrentOnshapeProfileEvidence,
   requireOnshapeCaptureBundle,
   type OnshapeCaptureBundle,
   type OnshapeCaptureDiagnostic,
+  type OnshapeImmutableHistoryEvidenceManifest,
   type OnshapeOptionalSection,
   type OnshapePartStudioCapture,
   type OnshapeProfileEvidence,
   type OnshapeProfileEvidenceManifestEntry,
+  type OnshapeResolvedReference,
   type OnshapeRollbackSnapshot,
-  hasCurrentOnshapeProfileEvidence,
 } from "@/contracts/import/onshape-capture-bundle";
 
 import {
@@ -198,11 +202,10 @@ export async function captureBundle(
 }
 
 /**
- * Fill only missing or stale exact profile evidence in an already validated
- * bundle. Raw captures, final geometry, snapshots, and existing reference
- * resolutions are preserved verbatim.
+ * Refresh deterministic, ID-less query, and profile history evidence against
+ * the captured microversion without re-reading document metadata or geometry.
  */
-export async function enrichBundleProfileEvidence(
+export async function enrichBundleHistoryEvidence(
   bundle: OnshapeCaptureBundle,
   options: CaptureOptions,
   runtime: CaptureRuntime,
@@ -221,59 +224,141 @@ export async function enrichBundleProfileEvidence(
   });
   const partStudios: OnshapePartStudioCapture[] = [];
   for (const studio of validated.partStudios) {
-    const consumers = collectSolidExtrudeProfileQueryConsumers(studio.features);
-    const retained = (studio.profileEvidence ?? []).filter((record) =>
-      consumers.some((consumer) =>
-        record.consumingFeatureId === consumer.consumingFeatureId &&
-        record.queryIndex === consumer.queryIndex,
+    const deterministicIdConsumers = collectDeterministicIdConsumers(studio.features);
+    const queryStringConsumers = collectQueryStringConsumers(studio.features);
+    const profileConsumers = collectSolidExtrudeProfileQueryConsumers(studio.features);
+    const historyIsCurrent = hasCurrentOnshapeImmutableHistoryEvidence({
+      schemaVersion: studio.immutableHistoryEvidenceSchemaVersion,
+      manifest: studio.immutableHistoryEvidenceManifest,
+      resolvedReferences: studio.resolvedReferences,
+      resolvedQueryReferences: studio.resolvedQueryReferences,
+      deterministicIdConsumers,
+      queryStringConsumers,
+    });
+    const profilesAreCurrent = hasCompleteCurrentProfileEvidence(studio, profileConsumers);
+    if (historyIsCurrent && profilesAreCurrent) {
+      partStudios.push(studio);
+      continue;
+    }
+
+    const retainedFinal = historyIsCurrent
+      ? null
+      : validFinalDeterministicRecords(studio.resolvedReferences, deterministicIdConsumers);
+    const fresh = await resolveImmutableHistoryEvidence({
+      client,
+      partStudioPath: `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
+      deterministicIdConsumers: historyIsCurrent ? [] : deterministicIdConsumers,
+      queryStringConsumers: historyIsCurrent ? [] : queryStringConsumers,
+      profileConsumers: profilesAreCurrent ? [] : profileConsumers,
+      skipFinalState: retainedFinal !== null,
+      evaluate: (rollbackBarIndex, script) => evaluateImmutableEvidence(
+        client,
+        `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
+        rollbackBarIndex,
+        script,
+        options.evidenceCache,
+        {
+          baseUrl,
+          apiVersion,
+          documentId: validated.provenance.documentId,
+          microversion: validated.provenance.microversion,
+          elementId: studio.elementId,
+        },
       ),
-    );
-    const complete = consumers.filter((consumer) => hasCurrentOnshapeProfileEvidence({
-      schemaVersion: studio.profileEvidenceSchemaVersion,
-      manifest: studio.profileEvidenceManifest,
-      evidence: retained,
-      consumingFeatureId: consumer.consumingFeatureId,
-      queryIndex: consumer.queryIndex,
-      sourceQueryString: consumer.queryString,
-    }));
-    const missing = consumers.filter((consumer) => !complete.includes(consumer));
-    const fresh = missing.length === 0
-      ? []
-      : (await resolveImmutableHistoryEvidence({
-          client,
-          partStudioPath: `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
-          deterministicIdConsumers: [],
-          queryStringConsumers: [],
-          profileConsumers: missing,
-          evaluate: (rollbackBarIndex, script) => evaluateImmutableEvidence(
-            client,
-            `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
-            rollbackBarIndex,
-            script,
-            options.evidenceCache,
-            {
-              baseUrl,
-              apiVersion,
-              documentId: validated.provenance.documentId,
-              microversion: validated.provenance.microversion,
-              elementId: studio.elementId,
-            },
-          ),
-        })).profileEvidence;
-    const evidence = [
-      ...retained.filter((record) => complete.some((consumer) =>
-        record.consumingFeatureId === consumer.consumingFeatureId && record.queryIndex === consumer.queryIndex,
-      )),
-      ...fresh,
-    ];
+    });
+    const resolvedReferences = historyIsCurrent
+      ? studio.resolvedReferences
+      : [...(retainedFinal ?? fresh.resolvedReferences.filter((record) => record.evaluatedAt === "finalState")),
+        ...fresh.resolvedReferences.filter((record) => record.evaluatedAt === "historyPoint")];
+    const resolvedQueryReferences = historyIsCurrent
+      ? studio.resolvedQueryReferences ?? []
+      : fresh.resolvedQueryReferences;
+    const profileEvidence = profilesAreCurrent
+      ? studio.profileEvidence ?? []
+      : fresh.profileEvidence;
     partStudios.push({
       ...studio,
-      profileEvidence: evidence,
-      profileEvidenceManifest: profileEvidenceManifest(consumers, evidence),
+      resolvedReferences,
+      resolvedQueryReferences,
+      immutableHistoryEvidenceSchemaVersion: ONSHAPE_IMMUTABLE_HISTORY_EVIDENCE_SCHEMA_VERSION,
+      immutableHistoryEvidenceManifest: immutableHistoryEvidenceManifest(
+        deterministicIdConsumers,
+        queryStringConsumers,
+        resolvedQueryReferences,
+      ),
+      profileEvidence,
+      profileEvidenceManifest: profileEvidenceManifest(profileConsumers, profileEvidence),
       profileEvidenceSchemaVersion: ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION,
     });
   }
   return requireOnshapeCaptureBundle({ ...validated, partStudios });
+}
+
+function validFinalDeterministicRecords(
+  records: readonly OnshapeResolvedReference[],
+  consumers: readonly { deterministicId: string }[],
+): OnshapeResolvedReference[] | null {
+  const ids = [...new Set(consumers.map((consumer) => consumer.deterministicId))];
+  const finalRecords = ids.map((deterministicId) => records.filter((record) =>
+    record.evaluatedAt === "finalState" && record.deterministicId === deterministicId,
+  ));
+  return finalRecords.every((matches) => matches.length === 1)
+    ? finalRecords.map(([record]) => record!)
+    : null;
+}
+
+function immutableHistoryEvidenceManifest(
+  deterministicIdConsumers: readonly { deterministicId: string; consumingFeatureId: string }[],
+  queryStringConsumers: readonly {
+    consumingFeatureId: string;
+    parameterId: string;
+    queryIndex: number;
+    queryString: string;
+  }[],
+  resolvedQueryReferences: readonly { consumingFeatureId: string; parameterId: string; queryIndex: number }[],
+): OnshapeImmutableHistoryEvidenceManifest {
+  return {
+    deterministicIdConsumers: deterministicIdConsumers.map((consumer) => ({
+      deterministicId: consumer.deterministicId,
+      consumingFeatureId: consumer.consumingFeatureId,
+      completed: true,
+    })),
+    queryStringConsumers: queryStringConsumers.map((consumer) => ({
+      consumingFeatureId: consumer.consumingFeatureId,
+      parameterId: consumer.parameterId,
+      queryIndex: consumer.queryIndex,
+      sourceQueryString: consumer.queryString,
+      emittedRecordCount: resolvedQueryReferences.filter((record) =>
+        record.consumingFeatureId === consumer.consumingFeatureId &&
+        record.parameterId === consumer.parameterId &&
+        record.queryIndex === consumer.queryIndex,
+      ).length,
+      completed: true,
+    })),
+  };
+}
+
+function hasCompleteCurrentProfileEvidence(
+  studio: OnshapePartStudioCapture,
+  consumers: readonly SolidExtrudeProfileQueryConsumer[],
+): boolean {
+  const manifest = studio.profileEvidenceManifest;
+  if (!consumers.every((consumer) => hasCurrentOnshapeProfileEvidence({
+    schemaVersion: studio.profileEvidenceSchemaVersion,
+    manifest,
+    evidence: studio.profileEvidence,
+    consumingFeatureId: consumer.consumingFeatureId,
+    queryIndex: consumer.queryIndex,
+    sourceQueryString: consumer.queryString,
+  }))) return false;
+  const expectedRecordCount = consumers.reduce((count, consumer) => count +
+    (manifest?.find((entry) =>
+      entry.consumingFeatureId === consumer.consumingFeatureId &&
+      entry.parameterId === "entities" &&
+      entry.queryIndex === consumer.queryIndex &&
+      entry.sourceQueryString === consumer.queryString,
+    )?.emittedRecordCount ?? 0), 0);
+  return (studio.profileEvidence?.length ?? 0) === expectedRecordCount;
 }
 
 function profileEvidenceManifest(
@@ -455,6 +540,12 @@ async function captureStudio(
     featureSpecs,
     resolvedReferences: evidence.resolvedReferences,
     resolvedQueryReferences: evidence.resolvedQueryReferences,
+    immutableHistoryEvidenceSchemaVersion: ONSHAPE_IMMUTABLE_HISTORY_EVIDENCE_SCHEMA_VERSION,
+    immutableHistoryEvidenceManifest: immutableHistoryEvidenceManifest(
+      collectDeterministicIdConsumers(features),
+      collectQueryStringConsumers(features),
+      evidence.resolvedQueryReferences,
+    ),
     profileEvidence: evidence.profileEvidence,
     profileEvidenceManifest: profileEvidenceManifest(profileConsumers, evidence.profileEvidence),
     profileEvidenceSchemaVersion: ONSHAPE_PROFILE_EVIDENCE_SCHEMA_VERSION,

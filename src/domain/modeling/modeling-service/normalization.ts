@@ -3247,7 +3247,9 @@ export function normalizeRegionRecords(value: unknown): RegionRecord[] {
             if (
               !isRecord(segment) ||
               !isRecord(segment.source) ||
-              !isString(segment.source.kind)
+              !isString(segment.source.kind) ||
+              (segment.startPosition === undefined) !==
+                (segment.endPosition === undefined)
             ) {
               throw new Error("Invalid region boundary segment payload.");
             }
@@ -3316,6 +3318,32 @@ export function normalizeRegionRecords(value: unknown): RegionRecord[] {
                 segment.traversalDirection === "reverse"
                   ? ("reverse" as const)
                   : undefined,
+              sourceSegmentOrdinal:
+                segment.sourceSegmentOrdinal === undefined
+                  ? undefined
+                  : typeof segment.sourceSegmentOrdinal === "number" &&
+                      Number.isInteger(segment.sourceSegmentOrdinal) &&
+                      segment.sourceSegmentOrdinal >= 0
+                    ? segment.sourceSegmentOrdinal
+                    : (() => {
+                        throw new Error(
+                          "Invalid region boundary source segment ordinal payload.",
+                        );
+                      })(),
+              startPosition:
+                segment.startPosition === undefined
+                  ? undefined
+                  : normalizePoint2D(
+                      segment.startPosition,
+                      "Invalid region boundary start position payload.",
+                    ),
+              endPosition:
+                segment.endPosition === undefined
+                  ? undefined
+                  : normalizePoint2D(
+                      segment.endPosition,
+                      "Invalid region boundary end position payload.",
+                    ),
             };
           }),
           boundaryPointIds: loop.boundaryPointIds.map((pointId) =>

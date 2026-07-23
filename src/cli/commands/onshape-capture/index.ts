@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import type { CliEnv, CliIO, CommandModule, CommandResult } from "@/cli/types";
 import {
   captureBundle,
-  enrichBundleProfileEvidence,
+  enrichBundleHistoryEvidence,
   type CaptureRuntime,
 } from "@/cli/commands/onshape-capture/capture";
 import { parseDocumentUrl } from "@/cli/commands/onshape-capture/url";
@@ -20,7 +20,7 @@ const TRANSLATION_MAX_POLLS_VAR = "ONSHAPE_TRANSLATION_MAX_POLLS";
 
 const USAGE =
   "Usage: cadara onshape capture <onshape-document-url> [output-file]\n" +
-  "       cadara onshape capture --enrich <input-file> [output-file]\n" +
+  "       cadara onshape capture --enrich <input-file> [output-file]  # refresh immutable history evidence\n" +
   `Requires ${COOKIE_ON_VAR}, or both ${ACCESS_KEY_VAR} and ${SECRET_KEY_VAR}, in the environment.`;
 
 function defaultOutputPath(documentId: string): string {
@@ -125,14 +125,14 @@ export const onshapeCaptureCommand: CommandModule = {
     try {
       if (enrichIndex >= 0) {
         const input = requireOnshapeCaptureBundle(JSON.parse(await readFile(url, "utf8")));
-        const bundle = await enrichBundleProfileEvidence(
+        const bundle = await enrichBundleHistoryEvidence(
           input,
           { ...credentials, maxTranslationPolls: maxTranslationPolls ?? undefined },
           runtime,
         );
         const outputPath = outArg ?? url;
         await writeFile(outputPath, JSON.stringify(requireOnshapeCaptureBundle(bundle)));
-        io.stdout(`Enriched ${bundle.partStudios.length} Part Studio(s) to ${outputPath}\n`);
+        io.stdout(`Enriched immutable history evidence for ${bundle.partStudios.length} Part Studio(s) to ${outputPath}\n`);
         return { ok: true };
       }
       const bundle = await captureBundle(

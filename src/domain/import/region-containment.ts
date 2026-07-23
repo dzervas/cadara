@@ -17,6 +17,7 @@ import type {
   SketchDefinition,
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
+import { getClosedCurveSampleCount } from "@/contracts/sketch/region-geometry";
 
 /**
  * Minimal solved-sketch projection the selection math needs. `regions` are the
@@ -77,15 +78,77 @@ function circleLoopContainsPoint(
   return Math.hypot(dx, dy) < entity.radius;
 }
 
+function appendLoopSegmentPoints(
+  points: SketchPoint2D[],
+  next: readonly SketchPoint2D[],
+) {
+  points.push(...(points.length === 0 ? next : next.slice(1)));
+}
+
 function loopPolygon(
   sketch: RegionSelectionSketch,
-  region: RegionRecord,
-  loopRole: "outer" | "inner",
+  loop: RegionRecord["loops"][number] | undefined,
 ) {
-  const loop = region.loops.find((candidate) => candidate.role === loopRole);
-  if (!loop) {
-    return [] as readonly (readonly [number, number])[];
+  if (!loop) return [] as readonly SketchPoint2D[];
+  const entityById = new Map(
+    sketch.definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const points: SketchPoint2D[] = [];
+  for (const segment of loop.segments) {
+    if (segment.source.kind !== "entity") return [];
+    const entity = entityById.get(segment.source.entityId);
+    if (!entity) return [];
+    const start =
+      segment.startPosition ??
+      (segment.startPointId
+        ? sketch.solvedPoints.get(segment.startPointId)
+        : undefined);
+    const end =
+      segment.endPosition ??
+      (segment.endPointId
+        ? sketch.solvedPoints.get(segment.endPointId)
+        : undefined);
+    if (entity.kind === "lineSegment") {
+      if (!start || !end) return [];
+      appendLoopSegmentPoints(points, [start, end]);
+      continue;
+    }
+    if (entity.kind !== "arc" && entity.kind !== "circle") return [];
+    const center = sketch.solvedPoints.get(entity.centerPointId);
+    if (!center) return [];
+    const radius = entity.kind === "circle" ? entity.radius : Math.hypot(
+      (start ?? sketch.solvedPoints.get(entity.startPointId) ?? center)[0] - center[0],
+      (start ?? sketch.solvedPoints.get(entity.startPointId) ?? center)[1] - center[1],
+    );
+    const curveStart = start ?? [center[0] + radius, center[1]] as SketchPoint2D;
+    const curveEnd = end ?? curveStart;
+    const direction =
+      entity.kind === "circle"
+        ? segment.traversalDirection === "reverse" ? "clockwise" : "counterClockwise"
+        : segment.traversalDirection === "reverse"
+          ? entity.sweepDirection === "clockwise" ? "counterClockwise" : "clockwise"
+          : entity.sweepDirection;
+    const startAngle = Math.atan2(curveStart[1] - center[1], curveStart[0] - center[0]);
+    const endAngle = Math.atan2(curveEnd[1] - center[1], curveEnd[0] - center[0]);
+    const sweep = !start && !end
+      ? Math.PI * 2
+      : direction === "counterClockwise"
+        ? (endAngle - startAngle + Math.PI * 2) % (Math.PI * 2)
+        : (startAngle - endAngle + Math.PI * 2) % (Math.PI * 2);
+    const count = Math.max(
+      3,
+      Math.ceil(getClosedCurveSampleCount(radius) * (sweep / (Math.PI * 2))),
+    );
+    appendLoopSegmentPoints(
+      points,
+      Array.from({ length: count }, (_, index) => {
+        const angle = startAngle +
+          (direction === "counterClockwise" ? 1 : -1) * sweep * index / (count - 1);
+        return [center[0] + Math.cos(angle) * radius, center[1] + Math.sin(angle) * radius] as SketchPoint2D;
+      }),
+    );
   }
+  if (points.length >= 3) return points;
   return loop.boundaryPointIds.flatMap((pointId) => {
     const point = sketch.solvedPoints.get(pointId);
     return point ? [point] : [];
@@ -93,7 +156,10 @@ function loopPolygon(
 }
 
 function estimateRegionArea(sketch: RegionSelectionSketch, region: RegionRecord) {
-  const polygon = loopPolygon(sketch, region, "outer");
+  const polygon = loopPolygon(
+    sketch,
+    region.loops.find((loop) => loop.role === "outer"),
+  );
   if (polygon.length < 3) {
     // Circle-only regions carry no boundary polygon; approximate from radius.
     const outerLoop = region.loops.find((loop) => loop.role === "outer");
@@ -120,8 +186,8 @@ function regionContainsPoint(
   region: RegionRecord,
   point: readonly [number, number],
 ) {
-  const outer = loopPolygon(sketch, region, "outer");
   const outerLoop = region.loops.find((loop) => loop.role === "outer");
+  const outer = loopPolygon(sketch, outerLoop);
   const outerContains =
     outer.length >= 3
       ? pointInPolygon(point, outer)
@@ -134,10 +200,7 @@ function regionContainsPoint(
   return !region.loops
     .filter((loop) => loop.role === "inner")
     .some((loop) => {
-      const polygon = loop.boundaryPointIds.flatMap((pointId) => {
-        const solved = sketch.solvedPoints.get(pointId);
-        return solved ? [solved] : [];
-      });
+      const polygon = loopPolygon(sketch, loop);
       return polygon.length >= 3
         ? pointInPolygon(point, polygon)
         : circleLoopContainsPoint(sketch, loop, point);

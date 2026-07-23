@@ -2,6 +2,7 @@ import { test, expect } from "vitest";
 
 import { isExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
+  normalizeRegionRecords,
   normalizeShellFeatureParameters,
   normalizeSketchDerivationDefinition,
 } from "@/domain/modeling/modeling-service/normalization";
@@ -97,6 +98,44 @@ test("src/domain/modeling/modeling-service/normalization.spec.ts", () => {
 // contract boundary with no UI or browser dependency).
 // Seam: normalizeShellFeatureParameters distinguishes legacy open-face shells,
 // closed cavities, and whole-solid offsets before OCC execution.
+test("normalizes split-boundary positions without accepting partial positions", () => {
+  const payload = [{
+    ownerDocumentId: "doc_workspace",
+    ownerRevisionId: "rev_0001",
+    ownerFeatureId: null,
+    ownerSketchId: "sketch_split",
+    ownerBodyId: null,
+    regionId: "region_split",
+    label: "Split region",
+    target: { kind: "region", sketchId: "sketch_split", regionId: "region_split" },
+    sourceSketch: { kind: "sketch", sketchId: "sketch_split" },
+    loops: [{
+      loopId: "region_loop_split_0",
+      role: "outer",
+      orientation: "counterClockwise",
+      segments: [{
+        source: { kind: "entity", entityId: "sketch_entity_circle" },
+        startPointId: null,
+        endPointId: null,
+        sourceSegmentOrdinal: 1,
+        startPosition: [2, 0],
+        endPosition: [-2, 0],
+      }],
+      boundaryPointIds: [],
+      isClosed: true,
+    }],
+    isClosed: true,
+  }];
+  const normalized = normalizeRegionRecords(payload);
+  expect(normalized[0]?.loops[0]?.segments[0]?.startPosition).toEqual([2, 0]);
+  expect(normalized[0]?.loops[0]?.segments[0]?.endPosition).toEqual([-2, 0]);
+  expect(normalized[0]?.loops[0]?.segments[0]?.sourceSegmentOrdinal).toBe(1);
+  expect(() => normalizeRegionRecords([{
+    ...payload[0],
+    loops: [{ ...payload[0]!.loops[0], segments: [{ ...payload[0]!.loops[0]!.segments[0], endPosition: undefined }] }],
+  }])).toThrow("Invalid region boundary segment payload");
+});
+
 test("normalizes shell closedHollow and offsetAllFaces without weakening open-face validation", () => {
   const openFaces = normalizeShellFeatureParameters(makeShellPayload());
   expect(openFaces.mode, "Legacy shell payloads should remain open-face shells.").toBeUndefined();

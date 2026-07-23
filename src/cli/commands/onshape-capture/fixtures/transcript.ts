@@ -314,9 +314,34 @@ const FEATURESCRIPT_RESPONSE = {
   notices: [],
 };
 
+const OPAQUE_PROFILE_GROUPS = [{
+  index: 0,
+  records: [{
+    resultIndex: 0,
+    id: "OPAQUE-PROFILE-REGION",
+    kind: "sketchRegion",
+    sourceSketchFeatureId: "FOoap8tw3jKAJf5_0",
+    interiorPoint: [0.005, 0.005, 0],
+  }],
+}];
+
 const HISTORY_FEATURESCRIPT_RESPONSE = {
   btType: "BTFeatureScriptEvalResponse-1859",
-  result: fsEncode({ entityRecords: HISTORY_ENTITY_RECORDS, queryGroups: [], profileGroups: [] }),
+  result: fsEncode({
+    entityRecords: HISTORY_ENTITY_RECORDS,
+    queryGroups: [],
+    profileGroups: OPAQUE_PROFILE_GROUPS,
+  }),
+  notices: [],
+};
+
+const SURVIVING_HISTORY_FEATURESCRIPT_RESPONSE = {
+  btType: "BTFeatureScriptEvalResponse-1859",
+  result: fsEncode({
+    entityRecords: ENTITY_RECORDS,
+    queryGroups: [],
+    profileGroups: [],
+  }),
   notices: [],
 };
 
@@ -335,7 +360,7 @@ const QUERY_HISTORY_FEATURESCRIPT_RESPONSE = {
         direction: [1, 0, 0],
       }],
     }],
-    profileGroups: [],
+    profileGroups: OPAQUE_PROFILE_GROUPS,
   }),
   notices: [],
 };
@@ -437,6 +462,13 @@ export function buildDefaultRoutes(): FixtureRoute[] {
       match: (url) =>
         url.includes(`/w/${FIXTURE_TEMP_WORKSPACE_ID}/e/${FIXTURE_PART_STUDIO_ID}/features/rollback`),
       respond: () => json(200, { rollbackIndex: 2 }),
+    },
+    {
+      method: "POST",
+      match: (url) =>
+        url.includes(`/m/${FIXTURE_MICROVERSION}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
+        (url.includes("rollbackBarIndex=0") || url.includes("rollbackBarIndex=1")),
+      respond: () => json(200, SURVIVING_HISTORY_FEATURESCRIPT_RESPONSE),
     },
     {
       method: "POST",

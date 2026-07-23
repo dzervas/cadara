@@ -1380,6 +1380,53 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     ]);
   }
 
+  async function testSplitCircleChordCellsBuildAsBoundedArcs() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createSketchPlane();
+    const sketchId = "sketch_split_circle_chord" as SketchId;
+    const center = pointId("center");
+    const left = pointId("left");
+    const right = pointId("right");
+    const circle = entityId("circle");
+    const chord = entityId("chord");
+    const definition = createSketchDefinition(sketchId, [
+      { id: center, position: [0, 0] }, { id: left, position: [-2, 0] }, { id: right, position: [2, 0] },
+    ], [{
+      kind: "circle", entityId: circle, label: "circle",
+      target: { kind: "sketchEntity", sketchId, entityId: circle }, isConstruction: false,
+      centerPointId: center, radius: 2,
+    }, {
+      kind: "lineSegment", entityId: chord, label: "chord",
+      target: { kind: "sketchEntity", sketchId, entityId: chord }, isConstruction: false,
+      startPointId: left, endPointId: right,
+    }]);
+    const sketch = createSketchRecord(sketchId, definition, [{
+      kind: "circle", entityId: circle, centerPosition: [0, 0], solvedRadius: 2,
+    }, {
+      kind: "lineSegment", entityId: chord, startPosition: [-2, 0], endPosition: [2, 0],
+    }]);
+    const circleSegment = (startPosition: [number, number], endPosition: [number, number], traversalDirection?: "reverse"): RegionBoundarySegmentRecord => ({
+      source: { kind: "entity", entityId: circle }, startPointId: null, endPointId: null,
+      startPosition, endPosition, traversalDirection,
+    });
+    const chordSegment = (startPointId: SketchPointId, endPointId: SketchPointId): RegionBoundarySegmentRecord => ({
+      source: { kind: "entity", entityId: chord }, startPointId, endPointId,
+    });
+    const top = createRegion(sketchId, "split_circle_top", [{
+      loopId: loopId("split_circle_top"), role: "outer", orientation: "counterClockwise",
+      segments: [circleSegment([2, 0], [-2, 0]), chordSegment(left, right)], boundaryPointIds: [left, right], isClosed: true,
+    }]);
+    const bottom = createRegion(sketchId, "split_circle_bottom", [{
+      loopId: loopId("split_circle_bottom"), role: "outer", orientation: "counterClockwise",
+      segments: [circleSegment([-2, 0], [2, 0]), chordSegment(right, left)], boundaryPointIds: [right, left], isClosed: true,
+    }]);
+
+    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch }, top).face), Math.PI * 2, 1e-5,
+      "The upper split-circle cell must build as a bounded circle arc and chord.");
+    assertClose(await faceArea(buildRegionProfileFace(oc, { plane, sketch }, bottom).face), Math.PI * 2, 1e-5,
+      "The lower split-circle cell must build as a bounded circle arc and chord.");
+  }
+
   async function testRejectsMultipleOuterLoops() {
     const oc = await getDefaultOpenCascadeInstance();
     const plane = createSketchPlane();
@@ -1423,6 +1470,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
   await testProjectedBoundaryInvalidationReportsStructuredCode();
   await testUnauthoredProjectedBoundaryInvalidatesEvenWithProjectionData();
   await testApproximationProvenanceIsExplicit();
+  await testSplitCircleChordCellsBuildAsBoundedArcs();
   await testRejectsMultipleOuterLoops();
 
   console.log("OCC phase 3 sketch profile tests passed.");

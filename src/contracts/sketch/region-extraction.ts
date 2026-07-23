@@ -62,6 +62,7 @@ type SegmentRecord = {
   startAngle: number;
   endAngle: number;
   traversalDirection: "forward" | "reverse";
+  sourceSegmentOrdinal?: number;
   curve:
     | { kind: "lineSegment" }
     | {
@@ -71,6 +72,7 @@ type SegmentRecord = {
         startAngle: number;
         endAngle: number;
         sweepDirection: "clockwise" | "counterClockwise";
+        isFullCircle?: boolean;
       };
 };
 
@@ -78,7 +80,10 @@ type RingBoundarySegment = {
   source: RegionBoundarySegmentRecord["source"];
   startPointId: SketchPointId | null;
   endPointId: SketchPointId | null;
+  start?: SketchPoint2D;
+  end?: SketchPoint2D;
   traversalDirection: "forward" | "reverse";
+  sourceSegmentOrdinal?: number;
 };
 
 type SegmentGraphNode = {
@@ -207,10 +212,22 @@ function getArcSweep(
   startAngle: number,
   endAngle: number,
   direction: "clockwise" | "counterClockwise",
+  isFullCircle = false,
 ) {
+  if (isFullCircle) {
+    return Math.PI * 2;
+  }
   return direction === "counterClockwise"
     ? normalizeAngle(endAngle - startAngle)
     : normalizeAngle(startAngle - endAngle);
+}
+
+function tangentAngle(
+  radialAngle: number,
+  direction: "clockwise" | "counterClockwise",
+) {
+  return radialAngle +
+    (direction === "counterClockwise" ? Math.PI / 2 : -Math.PI / 2);
 }
 
 function signedArea(points: SketchPoint2D[]) {
@@ -351,6 +368,7 @@ function reverseSegment(segment: SegmentRecord): SegmentRecord {
     endAngle: (segment.startAngle + Math.PI) % (Math.PI * 2),
     traversalDirection:
       segment.traversalDirection === "forward" ? "reverse" : "forward",
+    sourceSegmentOrdinal: segment.sourceSegmentOrdinal,
     curve:
       segment.curve.kind === "arc"
         ? {
@@ -358,6 +376,7 @@ function reverseSegment(segment: SegmentRecord): SegmentRecord {
             startAngle: segment.curve.endAngle,
             endAngle: segment.curve.startAngle,
             sweepDirection: reverseSweepDirection(segment.curve.sweepDirection),
+            isFullCircle: segment.curve.isFullCircle,
           }
         : segment.curve,
   };
@@ -369,7 +388,12 @@ function sampleSegmentPoints(segment: SegmentRecord): SketchPoint2D[] {
   }
 
   const arc = segment.curve;
-  const sweep = getArcSweep(arc.startAngle, arc.endAngle, arc.sweepDirection);
+  const sweep = getArcSweep(
+    arc.startAngle,
+    arc.endAngle,
+    arc.sweepDirection,
+    arc.isFullCircle,
+  );
   const sampleCount = Math.max(
     3,
     Math.ceil(getClosedCurveSampleCount(arc.radius) * (sweep / (Math.PI * 2))),
@@ -616,13 +640,19 @@ function buildSegments(
             endPointId: entity.endPointId,
             start: solved.startPosition,
             end: solved.endPosition,
-            startAngle: Math.atan2(
-              solved.startPosition[1] - solved.centerPosition[1],
-              solved.startPosition[0] - solved.centerPosition[0],
+            startAngle: tangentAngle(
+              Math.atan2(
+                solved.startPosition[1] - solved.centerPosition[1],
+                solved.startPosition[0] - solved.centerPosition[0],
+              ),
+              solved.sweepDirection,
             ),
-            endAngle: Math.atan2(
-              solved.endPosition[1] - solved.centerPosition[1],
-              solved.endPosition[0] - solved.centerPosition[0],
+            endAngle: tangentAngle(
+              Math.atan2(
+                solved.endPosition[1] - solved.centerPosition[1],
+                solved.endPosition[0] - solved.centerPosition[0],
+              ),
+              solved.sweepDirection,
             ),
             traversalDirection: "forward" as const,
             curve: {
@@ -697,13 +727,19 @@ function buildProjectedSegments(
             endPointId: null,
             start: geometry.startPosition,
             end: geometry.endPosition,
-            startAngle: Math.atan2(
-              geometry.startPosition[1] - geometry.centerPosition[1],
-              geometry.startPosition[0] - geometry.centerPosition[0],
+            startAngle: tangentAngle(
+              Math.atan2(
+                geometry.startPosition[1] - geometry.centerPosition[1],
+                geometry.startPosition[0] - geometry.centerPosition[0],
+              ),
+              geometry.sweepDirection,
             ),
-            endAngle: Math.atan2(
-              geometry.endPosition[1] - geometry.centerPosition[1],
-              geometry.endPosition[0] - geometry.centerPosition[0],
+            endAngle: tangentAngle(
+              Math.atan2(
+                geometry.endPosition[1] - geometry.centerPosition[1],
+                geometry.endPosition[0] - geometry.centerPosition[0],
+              ),
+              geometry.sweepDirection,
             ),
             traversalDirection: "forward",
             curve: {
@@ -732,7 +768,35 @@ function buildProjectedSegments(
   });
 }
 
-function buildCircleRings(
+function makeCircleSegment(
+  source: RegionBoundarySegmentRecord["source"],
+  center: SketchPoint2D,
+  radius: number,
+): SegmentRecord {
+  const start: SketchPoint2D = [center[0] + radius, center[1]];
+  return {
+    source,
+    sourceKey: getSegmentSourceKey(source),
+    startPointId: null,
+    endPointId: null,
+    start,
+    end: start,
+    startAngle: Math.PI / 2,
+    endAngle: Math.PI / 2,
+    traversalDirection: "forward",
+    curve: {
+      kind: "arc",
+      center,
+      radius,
+      startAngle: 0,
+      endAngle: 0,
+      sweepDirection: "counterClockwise",
+      isFullCircle: true,
+    },
+  };
+}
+
+function buildCircleSegments(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
@@ -749,86 +813,84 @@ function buildCircleRings(
       )
       .map((entity) => [entity.entityId, entity]),
   );
-  const localCircleRings = definition.entities.flatMap((entity) => {
-    if (entity.kind !== "circle" || entity.isConstruction) {
-      return [];
-    }
-
+  const local = definition.entities.flatMap((entity): SegmentRecord[] => {
+    if (entity.kind !== "circle" || entity.isConstruction) return [];
     const solved = solvedCircleMap.get(entity.entityId);
-    if (!solved) {
-      return [];
-    }
-
-    const sampleCount = getClosedCurveSampleCount(solved.solvedRadius);
-    const points = Array.from({ length: sampleCount }, (_, index) => {
-      const angle = (Math.PI * 2 * index) / sampleCount;
-      return [
-        solved.centerPosition[0] + Math.cos(angle) * solved.solvedRadius,
-        solved.centerPosition[1] + Math.sin(angle) * solved.solvedRadius,
-      ] satisfies SketchPoint2D;
-    });
-
-    return [
-      {
-        kind: "segments" as const,
-        boundarySegments: [
-          {
-            source: { kind: "entity", entityId: entity.entityId },
-            startPointId: null,
-            endPointId: null,
-            traversalDirection: "forward",
-          },
-        ],
-        boundaryEntityIds: [entity.entityId],
-        boundaryPointIds: [],
-        points,
-        signedArea: signedArea(points),
-      } satisfies SketchRingCandidate,
-    ];
+    return solved
+      ? [
+          makeCircleSegment(
+            { kind: "entity", entityId: entity.entityId },
+            solved.centerPosition,
+            solved.solvedRadius,
+          ),
+        ]
+      : [];
   });
-
-  const projectedCircleRings = projectedReferences.flatMap((reference) => {
-    if (reference.status !== "projected") {
-      return [];
-    }
-
-    return reference.geometry.flatMap((geometry) => {
-      if (geometry.kind !== "circle") {
-        return [];
-      }
-
-      const sampleCount = getClosedCurveSampleCount(geometry.radius);
-      const points = Array.from({ length: sampleCount }, (_, index) => {
-        const angle = (Math.PI * 2 * index) / sampleCount;
-        return [
-          geometry.centerPosition[0] + Math.cos(angle) * geometry.radius,
-          geometry.centerPosition[1] + Math.sin(angle) * geometry.radius,
-        ] satisfies SketchPoint2D;
-      });
-
-      return [
-        {
-          kind: "segments" as const,
-          boundarySegments: [
-            {
-              source: getProjectedGeometrySource(reference, geometry),
-              startPointId: null,
-              endPointId: null,
-              traversalDirection: "forward",
-            },
-          ],
-          boundaryEntityIds: [],
-          boundaryPointIds: [],
-          points,
-          signedArea: signedArea(points),
-        } satisfies SketchRingCandidate,
-      ];
-    });
-  });
-
-  return [...localCircleRings, ...projectedCircleRings].filter((ring) =>
-    isValidRing(ring.points, ring.signedArea, { checkSelfIntersection: false }),
+  const projected = projectedReferences.flatMap((reference) =>
+    reference.status !== "projected"
+      ? []
+      : reference.geometry.flatMap((geometry): SegmentRecord[] =>
+          geometry.kind === "circle"
+            ? [
+                makeCircleSegment(
+                  getProjectedGeometrySource(reference, geometry),
+                  geometry.centerPosition,
+                  geometry.radius,
+                ),
+              ]
+            : [],
+        ),
   );
+  return [...local, ...projected];
+}
+
+function buildCircleRing(segments: readonly SegmentRecord[]) {
+  const points = buildRingPoints(segments);
+  const ring = {
+    kind: "segments" as const,
+    boundarySegments: segments.map((segment) => ({
+      source: segment.source,
+      startPointId: segment.startPointId,
+      endPointId: segment.endPointId,
+      sourceSegmentOrdinal: segment.sourceSegmentOrdinal,
+      start:
+        segment.curve.kind === "arc" && segment.curve.isFullCircle
+          ? undefined
+          : segment.start,
+      end:
+        segment.curve.kind === "arc" && segment.curve.isFullCircle
+          ? undefined
+          : segment.end,
+      traversalDirection: segment.traversalDirection,
+    })),
+    boundaryEntityIds: segments.flatMap((segment) =>
+      segment.source.kind === "entity" ? [segment.source.entityId] : [],
+    ),
+    boundaryPointIds: [],
+    points,
+    signedArea: signedArea(points),
+  } satisfies SketchRingCandidate;
+  return isValidRing(ring.points, ring.signedArea, {
+    checkSelfIntersection: false,
+  })
+    ? ring
+    : null;
+}
+
+function buildCircleRings(
+  circles: readonly SegmentRecord[],
+  segments: readonly SegmentRecord[],
+  usedSourceKeys: ReadonlySet<string>,
+) {
+  return circles.flatMap((circle) => {
+    if (usedSourceKeys.has(circle.sourceKey)) return [];
+    const pieces = segments.filter(
+      (segment) =>
+        segment.sourceKey === circle.sourceKey && segment.curve.kind === "arc",
+    );
+    const ring = buildCircleRing(pieces.length > 0 ? pieces : [circle]);
+    return ring ? [ring] : [];
+  });
 }
 
 function buildAdvancedClosedRings(
@@ -895,6 +957,208 @@ function buildAdvancedClosedRings(
   });
 }
 
+function pointOnCurve(segment: SegmentRecord, point: SketchPoint2D) {
+  if (segment.curve.kind === "lineSegment") {
+    return pointOnSegment(point, segment.start, segment.end);
+  }
+  const curve = segment.curve;
+  if (
+    Math.abs(distanceBetweenPoints(point, curve.center) - curve.radius) >
+    REGION_POINT_TOLERANCE
+  ) {
+    return false;
+  }
+  if (curve.isFullCircle) return true;
+  const angle = Math.atan2(point[1] - curve.center[1], point[0] - curve.center[0]);
+  return (
+    getArcSweep(curve.startAngle, angle, curve.sweepDirection) <=
+    getArcSweep(
+      curve.startAngle,
+      curve.endAngle,
+      curve.sweepDirection,
+    ) + REGION_POINT_TOLERANCE
+  );
+}
+
+function lineCircleIntersections(
+  line: SegmentRecord,
+  curve: SegmentRecord,
+): SketchPoint2D[] {
+  if (line.curve.kind !== "lineSegment" || curve.curve.kind !== "arc") return [];
+  const { center, radius } = curve.curve;
+  const dx = line.end[0] - line.start[0];
+  const dy = line.end[1] - line.start[1];
+  const fx = line.start[0] - center[0];
+  const fy = line.start[1] - center[1];
+  const a = dx * dx + dy * dy;
+  const b = 2 * (fx * dx + fy * dy);
+  const c = fx * fx + fy * fy - radius * radius;
+  const discriminant = b * b - 4 * a * c;
+  if (a <= Number.EPSILON || discriminant < -REGION_POINT_TOLERANCE) return [];
+  const root = Math.sqrt(Math.max(0, discriminant));
+  return [-root, root].flatMap((offset) => {
+    const t = (-b + offset) / (2 * a);
+    const point: SketchPoint2D = [line.start[0] + dx * t, line.start[1] + dy * t];
+    return pointOnCurve(line, point) && pointOnCurve(curve, point) ? [point] : [];
+  });
+}
+
+function arcIntersections(
+  left: SegmentRecord,
+  right: SegmentRecord,
+): SketchPoint2D[] {
+  if (left.curve.kind === "lineSegment" && right.curve.kind === "arc") {
+    return lineCircleIntersections(left, right);
+  }
+  if (left.curve.kind === "arc" && right.curve.kind === "lineSegment") {
+    return lineCircleIntersections(right, left);
+  }
+  if (left.curve.kind !== "arc" || right.curve.kind !== "arc") return [];
+  const dx = right.curve.center[0] - left.curve.center[0];
+  const dy = right.curve.center[1] - left.curve.center[1];
+  const distance = Math.hypot(dx, dy);
+  if (
+    distance <= REGION_POINT_TOLERANCE ||
+    distance > left.curve.radius + right.curve.radius + REGION_POINT_TOLERANCE ||
+    distance < Math.abs(left.curve.radius - right.curve.radius) - REGION_POINT_TOLERANCE
+  ) {
+    return [];
+  }
+  const along =
+    (left.curve.radius ** 2 - right.curve.radius ** 2 + distance ** 2) /
+    (2 * distance);
+  const height = Math.sqrt(Math.max(0, left.curve.radius ** 2 - along ** 2));
+  const x = left.curve.center[0] + (along * dx) / distance;
+  const y = left.curve.center[1] + (along * dy) / distance;
+  const perpendicular: SketchPoint2D = [(-dy * height) / distance, (dx * height) / distance];
+  const points: SketchPoint2D[] = [
+    [x + perpendicular[0], y + perpendicular[1]],
+    [x - perpendicular[0], y - perpendicular[1]],
+  ];
+  return points.flatMap((point) =>
+    pointOnCurve(left, point) && pointOnCurve(right, point) ? [point] : [],
+  );
+}
+
+function parameterTolerance(segment: SegmentRecord) {
+  const length =
+    segment.curve.kind === "lineSegment"
+      ? distanceBetweenPoints(segment.start, segment.end)
+      : segment.curve.radius *
+        getArcSweep(
+          segment.curve.startAngle,
+          segment.curve.endAngle,
+          segment.curve.sweepDirection,
+          segment.curve.isFullCircle,
+        );
+  return REGION_POINT_TOLERANCE / Math.max(length, REGION_POINT_TOLERANCE);
+}
+
+function parameterOnSegment(segment: SegmentRecord, point: SketchPoint2D) {
+  if (segment.curve.kind === "lineSegment") {
+    const dx = segment.end[0] - segment.start[0];
+    const dy = segment.end[1] - segment.start[1];
+    return ((point[0] - segment.start[0]) * dx + (point[1] - segment.start[1]) * dy) /
+      (dx * dx + dy * dy);
+  }
+  const curve = segment.curve;
+  const angle = Math.atan2(point[1] - curve.center[1], point[0] - curve.center[0]);
+  return getArcSweep(curve.startAngle, angle, curve.sweepDirection) /
+    getArcSweep(
+      curve.startAngle,
+      curve.endAngle,
+      curve.sweepDirection,
+      curve.isFullCircle,
+    );
+}
+
+function splitSegmentAtPoints(
+  segment: SegmentRecord,
+  points: readonly SketchPoint2D[],
+): SegmentRecord[] {
+  const tolerance = parameterTolerance(segment);
+  const parameters = points
+    .map((point) => ({ point, parameter: parameterOnSegment(segment, point) }))
+    .filter(({ parameter }) => parameter >= -tolerance && parameter <= 1 + tolerance)
+    .sort((left, right) => left.parameter - right.parameter)
+    .filter((entry, index, entries) =>
+      index === 0 || Math.abs(entry.parameter - entries[index - 1]!.parameter) > tolerance,
+    );
+  const isFullCircle = segment.curve.kind === "arc" && segment.curve.isFullCircle;
+  if (isFullCircle && parameters.length < 2) return [];
+  const boundaries = isFullCircle
+    ? parameters
+    : [{ point: segment.start, parameter: 0 }, ...parameters.filter(({ parameter }) => parameter > tolerance && parameter < 1 - tolerance), { point: segment.end, parameter: 1 }];
+  const count = isFullCircle ? boundaries.length : boundaries.length - 1;
+  return Array.from({ length: count }, (_, index) => {
+    const start = boundaries[index]!;
+    const end = boundaries[(index + 1) % boundaries.length]!;
+    if (segment.curve.kind === "lineSegment") {
+      const direction = Math.atan2(end.point[1] - start.point[1], end.point[0] - start.point[0]);
+      return {
+        ...segment,
+        start: start.point,
+        end: end.point,
+        startPointId: start.parameter <= tolerance ? segment.startPointId : null,
+        endPointId: end.parameter >= 1 - tolerance ? segment.endPointId : null,
+        sourceSegmentOrdinal: index,
+        startAngle: direction,
+        endAngle: direction,
+      };
+    }
+    const curve = segment.curve;
+    const startAngle = Math.atan2(start.point[1] - curve.center[1], start.point[0] - curve.center[0]);
+    const endAngle = Math.atan2(end.point[1] - curve.center[1], end.point[0] - curve.center[0]);
+    return {
+      ...segment,
+      start: start.point,
+      end: end.point,
+      startPointId: start.parameter <= tolerance && !isFullCircle ? segment.startPointId : null,
+      endPointId: end.parameter >= 1 - tolerance && !isFullCircle ? segment.endPointId : null,
+      sourceSegmentOrdinal: index,
+      startAngle: tangentAngle(startAngle, curve.sweepDirection),
+      endAngle: tangentAngle(endAngle, curve.sweepDirection),
+      curve: { ...curve, startAngle, endAngle, isFullCircle: false },
+    };
+  }).filter((entry) => !isDegenerateSegment(entry));
+}
+
+function subdivideCircleIntersections(segments: readonly SegmentRecord[]) {
+  const pointsBySegment = new Map<SegmentRecord, SketchPoint2D[]>();
+  const circles = segments.filter(
+    (segment) => segment.curve.kind === "arc" && segment.curve.isFullCircle,
+  );
+  for (const circle of circles) pointsBySegment.set(circle, []);
+  for (let leftIndex = 0; leftIndex < segments.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < segments.length; rightIndex += 1) {
+      const left = segments[leftIndex]!;
+      const right = segments[rightIndex]!;
+      if (left.curve.kind !== "arc" && right.curve.kind !== "arc") continue;
+      for (const point of arcIntersections(left, right)) {
+        (pointsBySegment.get(left) ?? pointsBySegment.set(left, []).get(left)!).push(point);
+        (pointsBySegment.get(right) ?? pointsBySegment.set(right, []).get(right)!).push(point);
+      }
+    }
+  }
+  const standaloneCircles = circles.filter((circle) => {
+    const points = pointsBySegment.get(circle) ?? [];
+    return points.filter(
+      (point, index) =>
+        points.slice(0, index).every((candidate) => !equalsPoint(candidate, point)),
+    ).length < 2;
+  });
+  return {
+    standaloneCircles,
+    segments: segments.flatMap((segment) =>
+      standaloneCircles.includes(segment)
+        ? []
+        : pointsBySegment.has(segment)
+          ? splitSegmentAtPoints(segment, pointsBySegment.get(segment)!)
+          : [segment],
+    ),
+  };
+}
+
 export function findSketchRings(
   definition: SketchDefinition,
   solvedSnapshot: SolvedSketchSnapshot,
@@ -909,29 +1173,39 @@ export function findSketchRings(
     definition,
     projectedReferences,
   );
-  const builtSegments = buildSegments(
+  const circleSegments = buildCircleSegments(
     definition,
     solvedSnapshot,
     authoredProjectedReferences,
   );
-  const degenerateSegments = builtSegments.filter(isDegenerateSegment);
-  const initialSegments = builtSegments.filter(
+  const builtSegments = buildSegments(
+    definition,
+    solvedSnapshot,
+    authoredProjectedReferences,
+  ).concat(circleSegments);
+  const subdivision = subdivideCircleIntersections(builtSegments);
+  const degenerateSegments = subdivision.segments.filter(isDegenerateSegment);
+  const initialSegments = subdivision.segments.filter(
     (segment) => !isDegenerateSegment(segment),
   );
   const rings: SketchRingCandidate[] = [
-    ...buildCircleRings(
-      definition,
-      solvedSnapshot,
-      authoredProjectedReferences,
-    ),
     ...buildAdvancedClosedRings(definition, solvedSnapshot),
   ];
   const segmentFaceExtraction = extractSegmentGraphRings(initialSegments);
-  rings.push(...segmentFaceExtraction.rings);
+  rings.push(
+    ...segmentFaceExtraction.rings,
+    ...buildCircleRings(
+      circleSegments,
+      subdivision.segments,
+      segmentFaceExtraction.usedSourceKeys,
+    ),
+  );
 
   rings.sort(compareRingsByAreaThenKey);
-  const unusedSegments = initialSegments.filter(
-    (segment) => !segmentFaceExtraction.usedSourceKeys.has(segment.sourceKey),
+  const unusedSegments = builtSegments.filter(
+    (segment) =>
+      !circleSegments.includes(segment) &&
+      !segmentFaceExtraction.usedSourceKeys.has(segment.sourceKey),
   );
   return {
     rings,
@@ -1117,6 +1391,9 @@ function createRingFromGraphFace(
       source: entry.source,
       startPointId: entry.startPointId,
       endPointId: entry.endPointId,
+      sourceSegmentOrdinal: entry.sourceSegmentOrdinal,
+      start: entry.start,
+      end: entry.end,
       traversalDirection: entry.traversalDirection,
     })),
     boundaryEntityIds: faceEdges.flatMap((entry) =>
@@ -1145,13 +1422,19 @@ function compareRingsByAreaThenKey(
 
 function getRingStableKey(ring: SketchRingCandidate) {
   return ring.boundarySegments
-    .map((segment) => getSegmentSourceKey(segment.source))
+    .map(
+      (segment) =>
+        `${getSegmentSourceKey(segment.source)}:${segment.sourceSegmentOrdinal ?? 0}:${segment.traversalDirection}`,
+    )
     .join("|");
 }
 
 function getRegionStableKey(ring: SketchRingCandidate) {
   return ring.boundarySegments
-    .map((segment) => getSegmentSourceKey(segment.source))
+    .map(
+      (segment) =>
+        `${getSegmentSourceKey(segment.source)}:${segment.sourceSegmentOrdinal ?? 0}:${segment.traversalDirection}`,
+    )
     .sort()
     .join("|");
 }
@@ -1185,7 +1468,12 @@ function createRegionId(
     ? sketchId.slice("sketch_".length)
     : sketchId;
   const stableKey = getRegionStableKey(ring);
-  const sourceLabel = stableKey.split("|")[0]?.split(":").at(-1) ?? "profile";
+  const sourceLabel =
+    ring.boundarySegments
+      .map((segment) => getSegmentSourceKey(segment.source))
+      .sort()[0]
+      ?.split(":")
+      .at(-1) ?? "profile";
   return `region_${sanitizeRegionIdPart(suffix)}-${sanitizeRegionIdPart(sourceLabel)}-${hashStableString(stableKey)}` as RegionId;
 }
 
@@ -1241,7 +1529,6 @@ export function deriveSketchRegionsCore(
     );
   const sorted = [...rings].sort(compareRingsByAreaThenKey);
   const childrenByParent = new Map<number, number[]>();
-  const parentByRing = new Map<number, number | null>();
 
   for (let childIndex = 0; childIndex < sorted.length; childIndex += 1) {
     const child = sorted[childIndex]!;
@@ -1270,7 +1557,6 @@ export function deriveSketchRegionsCore(
       }
     }
 
-    parentByRing.set(childIndex, parent);
     if (parent !== null) {
       const children = childrenByParent.get(parent) ?? [];
       children.push(childIndex);
@@ -1278,32 +1564,14 @@ export function deriveSketchRegionsCore(
     }
   }
 
-  const depthByRing = new Map<number, number>();
-  const getRingDepth = (index: number): number => {
-    const cached = depthByRing.get(index);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const parent = parentByRing.get(index);
-    const depth =
-      parent === null || parent === undefined ? 0 : getRingDepth(parent) + 1;
-    depthByRing.set(index, depth);
-    return depth;
-  };
-
-  const solidRings = sorted
-    .map((ring, index) => ({ ring, index, depth: getRingDepth(index) }))
-    .filter((entry) => entry.depth % 2 === 0);
-
-  const regions = solidRings.map(({ ring, index }, regionIndex) => {
+  const regions = sorted.map((ring, index, allRings) => {
+    const regionIndex = index;
     const regionId = createRegionId(input.sketchId, ring);
     const outerLoop = createLoopRecord(regionId, 0, "outer", ring, false);
 
     const innerLoops = (childrenByParent.get(index) ?? [])
-      .filter((childIndex) => getRingDepth(childIndex) % 2 === 1)
       .map((childIndex, loopOrdinal) => {
-        const child = sorted[childIndex]!;
+        const child = allRings[childIndex]!;
         return createLoopRecord(
           regionId,
           loopOrdinal + 1,
@@ -1548,8 +1816,14 @@ function toRegionSegmentRecord(
     source: segment.source,
     startPointId: segment.startPointId,
     endPointId: segment.endPointId,
+    ...(segment.start && segment.end
+      ? { startPosition: segment.start, endPosition: segment.end }
+      : {}),
     ...(segment.traversalDirection === "reverse"
       ? { traversalDirection: "reverse" as const }
+      : {}),
+    ...(segment.sourceSegmentOrdinal
+      ? { sourceSegmentOrdinal: segment.sourceSegmentOrdinal }
       : {}),
   };
 }
@@ -1561,6 +1835,9 @@ function reverseRingBoundarySegment(
     source: segment.source,
     startPointId: segment.endPointId,
     endPointId: segment.startPointId,
+    sourceSegmentOrdinal: segment.sourceSegmentOrdinal,
+    start: segment.end,
+    end: segment.start,
     traversalDirection:
       segment.traversalDirection === "forward" ? "reverse" : "forward",
   };

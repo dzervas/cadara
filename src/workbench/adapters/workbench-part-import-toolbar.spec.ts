@@ -7,6 +7,9 @@ import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain
 import { createHookTestHarness } from "./controller-test-harness";
 
 const hookHarness = createHookTestHarness();
+const { browserGeometryAssetStore } = vi.hoisted(() => ({
+  browserGeometryAssetStore: {} as never,
+}));
 vi.mock("react", () => hookHarness.reactModule);
 vi.mock("@/hooks/use-runtime-extension-registry", () => ({
   useRuntimeExtensionRegistry() {
@@ -32,6 +35,11 @@ vi.mock("@/hooks/use-durable-history", () => ({
         return null;
       },
     };
+  },
+}));
+vi.mock("@/infrastructure/modeling/browser-geometry-asset-store", () => ({
+  getBrowserGeometryAssetComposition() {
+    return { assetStore: browserGeometryAssetStore };
   },
 }));
 
@@ -174,6 +182,11 @@ test("useWorkbenchPartImport starts an import session for a matching provider", 
     ),
     "Import review must wire the kernel history probe so cPlane translation runs before tiers are assigned.",
   ).toBe(true);
+  expect(
+    (createCapabilitiesCalls[0] as { options?: { assetStore?: unknown } })
+      .options?.assetStore,
+    "Import review must bake into the app composition store the browser kernel resolves from.",
+  ).toBe(browserGeometryAssetStore);
   expect(
     createSessionCalls.length,
     "Import review should create exactly one import session.",

@@ -24,6 +24,8 @@ import {
 } from "@/domain/import/orchestrator";
 import type { ImportProviderRegistry } from "@/domain/import/provider-registry";
 import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
+import type { GeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import { getBrowserGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
 import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser-import-history-probe";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
@@ -131,6 +133,8 @@ interface WorkbenchPartImportControllerInput {
 interface WorkbenchPartImportDependencies {
   createCapabilities: typeof createImportCapabilities;
   createImportHistoryProbe: () => ImportHistoryProbeCapabilities;
+  /** Shared browser composition store used by review baking and kernel reads. */
+  geometryAssetStore: GeometryAssetStore;
   createSession: typeof createImportSession;
   documentOwner: Pick<
     ReturnType<typeof useWorkbenchDocumentOwner>,
@@ -170,6 +174,8 @@ export function useWorkbenchPartImport({
     deps?.createCapabilities ?? createImportCapabilities;
   const createImportHistoryProbe =
     deps?.createImportHistoryProbe ?? createBrowserOccImportHistoryProbe;
+  const geometryAssetStore =
+    deps?.geometryAssetStore ?? getBrowserGeometryAssetComposition().assetStore;
   const createSession = deps?.createSession ?? createImportSession;
   const promptForProvider = deps?.promptForProvider ?? promptForImportProvider;
 
@@ -316,6 +322,7 @@ export function useWorkbenchPartImport({
         source: resolvedSource,
         capabilities: createCapabilities(modelingService, snapshot, {
           history: createImportHistoryProbe(),
+          assetStore: geometryAssetStore,
         }),
       });
       dispatch({ type: "import.fileSelected", session });
@@ -346,6 +353,7 @@ export function useWorkbenchPartImport({
     createCapabilities,
     createImportHistoryProbe,
     createSession,
+    geometryAssetStore,
     dispatch,
     errorReporter,
     importProviders,

@@ -804,8 +804,8 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     ).toBe(0);
     expect(
       derived.regions.length,
-      "Nested rectangles should derive one even-parity solid region.",
-    ).toBe(1);
+      "Nested rectangles should derive the annular cell and inner cell.",
+    ).toBe(2);
     expect(
       derived.regions[0]?.loops.length,
       "Derived region should contain outer and inner loops.",
@@ -818,6 +818,10 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       derived.regions[0]?.loops[1]?.role,
       "Second loop should be inner.",
     ).toBe("inner");
+    expect(
+      derived.regions[1]?.loops.length,
+      "The nested boundary should also produce its own bounded cell.",
+    ).toBe(1);
   }
 
   async function testThreeLevelNestingKeepsIslandSolid() {
@@ -898,23 +902,27 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
 
     expect(
       derived.regions.length,
-      "Outer/hole/island nesting should derive the outer solid and island solid.",
-    ).toBe(2);
+      "Three nested loops should derive every bounded cell.",
+    ).toBe(3);
     expect(
       derived.regions[0]?.loops.length,
       "Outer solid should use the middle loop as a hole.",
     ).toBe(2);
     expect(
       derived.regions[1]?.loops.length,
-      "Island solid should not be treated as an inner loop of the hole.",
+      "The middle cell should use the innermost loop as its hole.",
+    ).toBe(2);
+    expect(
+      derived.regions[2]?.loops.length,
+      "The innermost loop should derive its own cell.",
     ).toBe(1);
     expect(
-      derived.regions[1]?.loops[0]?.segments.some(
+      derived.regions[2]?.loops[0]?.segments.some(
         (segment) =>
           segment.source.kind === "entity" &&
           segment.source.entityId === "sketch_entity_ij",
       ),
-      "Island region should be bounded by the innermost loop.",
+      "Innermost region should be bounded by the innermost loop.",
     ).toBeTruthy();
   }
 
@@ -1280,8 +1288,8 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
 
     expect(
       derived.regions.length,
-      "A square with an inner circle should derive one even-parity solid region.",
-    ).toBe(1);
+      "A square with an inner circle should derive the annular and circular cells.",
+    ).toBe(2);
     expect(
       derived.regions[0]?.loops.length,
       "Outer cell should include the circle as an inner loop.",
@@ -1292,6 +1300,191 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
           "sketch_entity_circle",
       "The inner loop should be bounded by the circle entity.",
     ).toBeTruthy();
+  }
+
+  async function testLineCircleIntersectionsDeriveBothBoundedCells() {
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        "sketch_point_center",
+        "sketch_point_left",
+        "sketch_point_right",
+      ],
+      points: [
+        makePoint("sketch_point_center", "Center", 0, 0),
+        makePoint("sketch_point_left", "Left", -2, 0),
+        makePoint("sketch_point_right", "Right", 2, 0),
+      ],
+      entityIds: ["sketch_entity_circle", "sketch_entity_chord"],
+      entities: [
+        makeCircle("sketch_entity_circle", "Circle", "sketch_point_center", 2),
+        makeLine(
+          "sketch_entity_chord",
+          "Chord",
+          "sketch_point_left",
+          "sketch_point_right",
+        ),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+    };
+    const derived = deriveSketchRegionsCore({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_primary",
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+    });
+
+    expect(
+      derived.regions.length,
+      "A chord ending on a circle should derive both line-circle cells.",
+    ).toBe(2);
+    expect(
+      derived.regions.every((region) =>
+        region.loops[0]?.segments.some(
+          (segment) =>
+            segment.source.kind === "entity" &&
+            segment.source.entityId === "sketch_entity_circle",
+        ) &&
+        region.loops[0]?.segments.some(
+          (segment) =>
+            segment.source.kind === "entity" &&
+            segment.source.entityId === "sketch_entity_chord",
+        ),
+      ),
+      "Every line-circle cell should retain both exact source boundaries.",
+    ).toBeTruthy();
+    expect(
+      new Set(derived.regions.map((region) => region.regionId)).size,
+      "Each line-circle cell should have a distinct stable region identity.",
+    ).toBe(2);
+  }
+
+  async function testSplitCircleCellsKeepStableIdsAcrossTranslation() {
+    const makeDefinition = (dx: number, dy: number): SketchDefinition => ({
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: ["sketch_point_center", "sketch_point_left", "sketch_point_right"],
+      points: [
+        makePoint("sketch_point_center", "Center", dx, dy),
+        makePoint("sketch_point_left", "Left", dx - 2, dy),
+        makePoint("sketch_point_right", "Right", dx + 2, dy),
+      ],
+      entityIds: ["sketch_entity_circle", "sketch_entity_chord"],
+      entities: [
+        makeCircle("sketch_entity_circle", "Circle", "sketch_point_center", 2),
+        makeLine("sketch_entity_chord", "Chord", "sketch_point_left", "sketch_point_right"),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    });
+    const base = makeDefinition(0, 0);
+    const translated = makeDefinition(100, -250);
+    const extract = (definition: SketchDefinition) =>
+      deriveSketchRegionsCore({
+        documentId: "doc_workspace",
+        revisionId: "rev_0001",
+        sketchId: "sketch_primary",
+        definition,
+        solvedSnapshot: makeSolvedSnapshot(definition),
+      }).regions.map((region) => region.regionId).sort();
+
+    expect(
+      extract(translated),
+      "Split-circle cell identities must use source topology rather than solved coordinates.",
+    ).toEqual(extract(base));
+  }
+
+  async function testLargeCircleKeepsDistinctNearbyIntersections() {
+    const radius = 1_000_000_000;
+    const chordX = Math.sqrt(radius * radius - 1_000 * 1_000);
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        "sketch_point_center", "sketch_point_a0", "sketch_point_b0",
+        "sketch_point_a1", "sketch_point_b1",
+      ],
+      points: [
+        makePoint("sketch_point_center", "Center", 0, 0),
+        makePoint("sketch_point_a0", "A0", -radius, 0),
+        makePoint("sketch_point_b0", "B0", radius, 0),
+        makePoint("sketch_point_a1", "A1", -chordX, 1_000),
+        makePoint("sketch_point_b1", "B1", chordX, 1_000),
+      ],
+      entityIds: ["sketch_entity_circle", "sketch_entity_chord_0", "sketch_entity_chord_1"],
+      entities: [
+        makeCircle("sketch_entity_circle", "Circle", "sketch_point_center", radius),
+        makeLine("sketch_entity_chord_0", "Chord 0", "sketch_point_a0", "sketch_point_b0"),
+        makeLine("sketch_entity_chord_1", "Chord 1", "sketch_point_a1", "sketch_point_b1"),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+    const derived = deriveSketchRegionsCore({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_primary",
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+    });
+
+    expect(
+      derived.regions.length,
+      "Large-circle intersections separated in world space must not collapse in normalized parameter space.",
+    ).toBe(3);
+  }
+
+  async function testArcLineIntersectionsSplitBoundedCells() {
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        "sketch_point_center", "sketch_point_left", "sketch_point_right",
+        "sketch_point_divider_start", "sketch_point_divider_end",
+      ],
+      points: [
+        makePoint("sketch_point_center", "Center", 0, 0),
+        makePoint("sketch_point_left", "Left", -2, 0),
+        makePoint("sketch_point_right", "Right", 2, 0),
+        makePoint("sketch_point_divider_start", "Divider start", 0, 0),
+        makePoint("sketch_point_divider_end", "Divider end", 0, 2),
+      ],
+      entityIds: ["sketch_entity_arc", "sketch_entity_chord_left", "sketch_entity_chord_right", "sketch_entity_divider"],
+      entities: [
+        makeArc("sketch_entity_arc", "Arc", "sketch_point_center", "sketch_point_right", "sketch_point_left"),
+        makeLine("sketch_entity_chord_left", "Chord left", "sketch_point_left", "sketch_point_divider_start"),
+        makeLine("sketch_entity_chord_right", "Chord right", "sketch_point_divider_start", "sketch_point_right"),
+        makeLine("sketch_entity_divider", "Divider", "sketch_point_divider_start", "sketch_point_divider_end"),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+    const derived = deriveSketchRegionsCore({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_primary",
+      definition,
+      solvedSnapshot: makeSolvedSnapshot(definition),
+    });
+
+    expect(
+      derived.regions.length,
+      "An interior arc-line intersection must split a bounded arc-and-chord cell.",
+    ).toBe(2);
   }
 
   async function testConstructionGeometryDoesNotSplitNormalProfile() {
@@ -1641,6 +1834,10 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     await testProjectedReferenceMissingAuthoredRecordIsRejected();
     await testFindCircleRegion();
     await testSquareWithInnerCircleDerivesAllBoundedCells();
+    await testLineCircleIntersectionsDeriveBothBoundedCells();
+    await testSplitCircleCellsKeepStableIdsAcrossTranslation();
+    await testLargeCircleKeepsDistinctNearbyIntersections();
+    await testArcLineIntersectionsSplitBoundedCells();
     await testConstructionGeometryDoesNotSplitNormalProfile();
     await testClosedConstructionCircleDoesNotCreateRegion();
     await testSelfIntersectingProfileIsRejectedWithDiagnostic();
@@ -1648,8 +1845,5 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     await testArcAndChordDeriveSingleClosedRegion();
   }
 
-  run().catch((error: unknown) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+  await run();
 });

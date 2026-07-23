@@ -1124,12 +1124,12 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
 
     expect(
       derived.regions.length,
-      "Nested square/circle sketch should derive one even-parity bounded profile cell.",
-    ).toBe(1);
+      "Nested square/circle sketch should derive both bounded profile cells.",
+    ).toBe(2);
     expect(
       regionMeshes.length,
       "Render export must include one pickable mesh per bounded sketch region.",
-    ).toBe(1);
+    ).toBe(2);
     expect(
       derived.regions.every((region) =>
         regionMeshes.some(

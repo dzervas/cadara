@@ -685,21 +685,25 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       root capture files. No compatibility fallback for pre-X.4 evidence is permitted.
 
 
-      **Partial evidence (API quota blocked).** The 405 bundle was recaptured on
-      2026-07-23 with all six studios, format v2, complete solid-feature rollback
-      snapshots, no capture diagnostics, and no ID-less feature queries (therefore
-      zero `resolvedQueryReferences` is correct). Its review tables are unchanged;
-      Mirror transform still has a whole-studio replacement-scope residual tracked
-      by X.6. The live run exposed insufficient 429 handling, so the production
-      client now honors `Retry-After`, uses bounded 15/30/60-second fallback waits,
-      and spaces rollback snapshots by five seconds; capture/client tests pass
-      **29/29**, changed-file lint and the build are green. The 9841 recapture then
-      exhausted the account quota with HTTP 402 before producing a file. After
-      quota reset, enrich rather than fully recapture the roots, and ensure temporary
-      workspace `74e39f502861d5b417375498` is deleted before X.3/X.10 completion.
-      The quota audit, endpoint-purpose table, and optimized per-bundle budgets are
-      recorded in `docs/onshape-capture-api-budget.md`; capture optimization is
-      intentionally separate from resuming general X.3 importer completion.
+      **Current evidence (target enrichment resumed).** Capture now uses cookie auth,
+      browser XSRF bootstrap, bounded rate-limit retries, automatic proven bake
+      boundaries, and immutable rollback-indexed FeatureScript evaluation. Deterministic,
+      ID-less query, and opaque-profile evidence share one batched request per required
+      rollback index; readable `qSketchRegion` queries remain exact local semantics.
+      The API budget and endpoint-purpose audit are recorded in
+      `docs/onshape-capture-api-budget.md`.
+
+      All five roots now carry complete profile-evidence schema v3 records with no
+      unresolved opaque profile and server-certified three-component witnesses for
+      every exact sketch region. The `9841` root has also been target-enriched with
+      the current versioned deterministic/query immutable-history manifest. The other
+      four roots still require that newer all-history enrichment; a second pass over
+      every root must make zero API calls. Completion additionally requires proving no
+      duplicate history records, preserving immutable raw/final geometry sections,
+      and replacing the older broad rollback-snapshot coverage with boundary-only
+      coverage only when that cleanup can be proved safe. Root bundles remain
+      gitignored and uncommitted. Temporary workspace `74e39f502861d5b417375498`
+      has been deleted.
 - [ ] X.4 **Exact sketch-region selection.** Replace guessed “all closed regions”
       behavior with captured, consumer-indexed evidence for the exact Onshape
       profile query. Carry enough sketch/region/entity provenance through
@@ -711,39 +715,31 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       and mirrored-profile regressions pass through the real sketch solver and
       OCC apply seam.
 
-      **Partial implementation (HTTP 402 blocked; checkbox intentionally open).**
-      The capture envelope now has ordered `profileEvidence` keyed by exact
-      consumer/query/result/transient identity. Every SOLID extrude `entities`
-      query is evaluated at its pre-consumer rollback index regardless of
-      deterministic IDs; opaque `qCompressed` text is rehydrated only inside
-      FeatureScript, never decoded locally. Exact sketch classification compares
-      selected-face identity against explicit preceding `qSketchRegion` queries;
-      planar selected faces carry deferred `topologyOf` profiles.
+      **Current implementation (acceptance still open).** Profile evidence is schema
+      v3 and complete in all five roots. Opaque `qCompressed` selections are evaluated
+      only by Onshape at the exact pre-consumer rollback index; readable
+      `qSketchRegion` queries are exact local region sets and are never decoded as
+      compressed queries. Exact selected planar faces carry an interior witness found
+      from an adaptive face-parameter grid and certified by `qContainsPoint`; failure
+      remains unresolved rather than falling back to bbox centroids, nearest geometry,
+      or all closed regions.
 
-      A sketch-region interior witness is now found on the exact selected planar
-      face using its approximate area centroid followed by a deterministic adaptive
-      face-parameter grid. Every emitted point is accepted only when
-      `qContainsPoint(selectedFace, candidate)` certifies containment. This is a
-      server-certified authored-query witness, not bbox-centroid or nearest
-      matching; failure remains explicitly unresolved.
-      the generated certification script and decoded witness. Synthetic
-      contract/resolver coverage pins selected subsets, multiple source sketches,
-      nested regions, mirror-derived witnesses, mixed sketch/planar profiles,
-      and unresolved/ambiguous records. Projected-sketch geometry and region
-      extraction beyond synthetic acceptance remain an X.4 live-capture
-      sub-residual.
+      Local planar subdivision emits every bounded nested cell with immediate-child
+      holes, analytically splits line/arc/circle intersections, uses curve-aware
+      containment, and preserves stable source/split provenance. OCC reconstruction
+      rebuilds bounded split circles and arcs as open arcs and preserves synthetic
+      endpoints and split ordinals. Synthetic and real-OCC regressions cover selected
+      subsets, nested regions, mirror-derived witnesses, mixed curves, and ambiguous
+      evidence.
 
-      Current root bundles predate `profileEvidence`, so strict planning now
-      exposes their stale evidence rather than silently guessing: Mounts browser
-      review is **5/5/0**; Wave-T `Revolve remove` is **3/1/0**, Mirror transform
-      **2/3/0**, and Extrude extents **3/3/0**. These are not acceptance counts.
-      X.4 cannot close until the API quota resets, all five bundles are refreshed,
-      projected boundaries are diagnosed from those records, and the real OCC
-      matrix is green.
-      Current verification is green for lint, build, **609 logic**, **125 UI**,
-      and **24 static** tests. Playwright is **56/62**: all six failures are the
-      expected stale-root-capture consequences above; no baked expectations were
-      weakened.
+      Current logic-lane review counts are: Wave T `405` **2/0/0**, Mounts `40a51`
+      **10/0/0**, Laptop Stand `5151` **23/1/0**, PS1 `9841` **30/11/0**, and `d3cd9`
+      **23/1/0**. These are diagnostic, not acceptance. In `9841`, four supported
+      extrudes (`Extrude 5`, `6`, `16`, and `15`) still report
+      `needs-region-resolution`; any downstream sketch/topology fallout must be
+      re-evaluated in source order after each profile producer becomes live. X.4 closes
+      only when every non-surface solid extrude resolves its exact selected cell and
+      applies through the real browser/OCC seam.
 - [ ] X.5 **Live face-sketch support after producer recovery.** Once solid
       producers are live, promote face-backed sketches through durable
       `SketchPlaneSupportRef` wiring rather than a detached captured-frame
@@ -838,16 +834,42 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       unchanged because its independently unresolved upstream extrude remains
       baked. Focused logic tests, the complete Onshape suite (206 tests), and
       `bun run test:all` pass (602 logic, 125 UI, 24 static, 62 Playwright).
-- [ ] X.9 **Complete real-browser acceptance matrix.** Extend the shared
-      Playwright Onshape harness, not ad hoc scripts, to cover every studio in
-      all five root bundles. Assert the exact non-surface feature timeline, zero
-      baked/checkpoint actions, zero suppressed supported features, zero
-      invalid-reference diagnostics, and at least one meaningful upstream
-      edit/rebuild per studio. Tests skip only when a gitignored bundle is absent.
+- [ ] X.9 **Close runtime/import acceptance gaps and complete the browser matrix.**
+  - [ ] X.9.1 **Resolve every extrude topology slot before apply.** `UP_TO_VERTEX`,
+        `UP_TO_FACE`, and `UP_TO_PART` already execute in Cadara; this item closes the
+        importer lifecycle that currently lets internal `{ kind: "topologySlot" }`
+        placeholders reach a validated `CreateFeatureRequest` (observed on 9841
+        `Extrude 1` as `firstEndVertex`). Detect unresolved extent and boolean slots,
+        resolve them atomically against the exact pre-consumer OCC prefix, and prove
+        prepared actions contain only runtime `ImportDeferredTopologyRef`/live
+        primitive references. Run whole-plan verification only after topology
+        resolution reaches a fixed point. Pin all three extent forms at the validated
+        browser-worker/OCC boundary; logic-only mock probes are insufficient.
+  - [ ] X.9.2 **Close residual exact-topology ambiguity.** Resolve, without tolerance
+        relaxation or nearest-geometry selection, Laptop Stand 5151 `Boolean 1` and
+        the currently diagnostic 9841 residuals `Chamfer 2`, `Extrude 12`, and
+        `Extrude 10`. Use consumer-time signatures, exact ownership/adjacency, and
+        source-ordered live prefix lineage. Re-run after each preceding region or
+        face-sketch producer promotes so cascade failures are not mistaken for four
+        independent matcher defects. Preserve zero/one/many honesty and never
+        fabricate `owningFeatureId`.
+  - [ ] X.9.3 **Make probe and large-bundle failures observable and stable.** Preserve
+        the first failed kernel-probe diagnostic instead of collapsing every failed
+        prefix to `topology-history-evidence-missing`. The shared Playwright import
+        helper must distinguish a visible review error from a timeout and reliably
+        load/review/commit the 227 MB `9841` bundle without ad hoc harnesses or stale
+        Typia/HMR compatibility bypasses. Diagnose performance or worker composition;
+        do not merely inflate every unrelated wait.
+  - [ ] X.9.4 **Complete the real-browser acceptance matrix.** Extend the shared
+        Playwright Onshape harness, not ad hoc scripts, to cover every studio in all
+        five root bundles. Assert the exact non-surface feature timeline, zero
+        baked/checkpoint actions, zero suppressed supported features, zero
+        invalid-reference diagnostics, and at least one meaningful upstream
+        edit/rebuild per studio. Tests skip only when a gitignored bundle is absent.
 - [ ] X.10 **Final verification and cleanup.** Run `bun run test:all`, record exact
       final tier tables here, remove temporary capture/debug code and stale
       mock/browser baselines, and verify `jj status` contains only intentional
-      committed work. Phase X is complete only when X.1–X.9 and the full suite
+      committed work. Phase X is complete only when X.1–X.9.4 and the full suite
       are green; no scoped-complete wording may hide residual supported bakes.
 
 Full-parametric math: Mounts = W.2 + W.3. Part Studio 1 = W.1 + W.2 + W.4,
