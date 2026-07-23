@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   BodyId,
   FeatureId,
@@ -557,6 +558,48 @@ test("executeShellFeature offsets all shell faces as an in-place body replacemen
       },
     ),
   ).toThrow();
+});
+
+test("executeMirrorFeature joins the exact PART+ADD source/target body and preserves target identity", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_mirror_add_target" as BodyId,
+    "feature_mirror_add_seed" as FeatureId,
+  );
+  const context = createOccAuthoringState(oc, { bodies: [body] });
+
+  const result = executeMirrorFeature(
+    context,
+    "feature_mirror_add" as FeatureId,
+    {
+      kind: "mirror",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: createLiteralAuthoredValue("add"),
+        participants: [
+          { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+          { role: "targetBody", targets: [{ kind: "body", bodyId: body.bodyId }] },
+          {
+            role: "plane",
+            targets: [{ kind: "construction", constructionId: "construction_plane-yz" }],
+          },
+        ],
+        options: { copy: true },
+      },
+    } satisfies AdvancedSolidFeatureDefinition & { kind: "mirror" },
+  );
+
+  expect(result.bodies.map((candidate) => candidate.bodyId)).toEqual([body.bodyId]);
+  expect(result.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+  expect(getShapeBounds(oc, result.bodies[0]!.shape)).toMatchObject({
+    minX: -4,
+    maxX: 4,
+    minY: 0,
+    maxY: 4,
+    minZ: 0,
+    maxZ: 4,
+  });
 });
 
 test("executeMirrorFeature uses native transform transaction for copied topology", async () => {
