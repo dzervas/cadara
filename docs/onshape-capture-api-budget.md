@@ -5,10 +5,11 @@ This audit is scoped to the five ignored root capture bundles used by Phase X:
 `5151a4c877c9493b733ad52f`, `9841e486906fa2ce62d74d8e`, and
 `d3cd9b09c3c36af1dd2efae9`.
 
-No live API calls were used. Counts come from the capture control flow and the
-local bundles. A translation-status poll is listed separately because an export
-can complete in its initial response or require up to the configured poll
-budget.
+The baseline counts were derived from capture control flow and local bundles
+without live requests. Targeted enrichment was later verified against the live
+browser-authenticated API. A translation-status poll is listed separately because
+an export can complete in its initial response or require up to the configured
+poll budget.
 
 ## Baseline at commit 305aee75
 
@@ -89,8 +90,9 @@ are the genuine `bodyType=SURFACE` `Extrude 4` features in 9841 and d3cd9.
 
 ## Optimized call budget
 
-A fresh equivalent capture with targeted boundary snapshots uses **148 fixed
-calls plus status polls for two surface-boundary STEP exports**:
+With API-key authentication, a fresh equivalent capture with targeted boundary
+snapshots uses **148 fixed calls plus status polls for two surface-boundary STEP
+exports**:
 
 | Bundle | Fixed | With one boundary poll |
 |---|---:|---:|
@@ -107,6 +109,13 @@ states:
 | 405 | Mounts | 5151 | 9841 | d3cd9 | Total |
 |---:|---:|---:|---:|---:|---:|
 | 1 | 0 | 7 | 9 | 1 | **18** |
+
+Cookie authentication lazily adds one successful `/api/clientinfo/xsrf`
+bootstrap per CLI process that performs a POST or DELETE. Therefore five separate
+fresh cookie-authenticated captures cost **153 fixed / 155 with one boundary
+poll**, while separate targeted enrichment of these existing bundles costs
+**2 / 0 / 8 / 10 / 2 = 22** successful calls. Mounts and repeated current-schema
+enrichment make no request, so they do not bootstrap XSRF.
 
 Readable region sets are local, existing deterministic/query evidence and
 geometry are retained, and a second enrichment of a complete current-schema

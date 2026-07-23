@@ -138,7 +138,8 @@ credential to bundles, logs, or error output.
 
 #### Scenario: Cookie credentials take precedence
 - **WHEN** `ONSHAPE_COOKIE_ON` is set, with or without API-key variables
-- **THEN** requests contain `Cookie: on=<value>` and no Basic authorization header
+- **THEN** GET requests contain `Cookie: on=<value>` and no Basic authorization header
+- **AND** before the first POST or DELETE, the client obtains and reuses the transient cookie and header names issued by `/api/clientinfo/xsrf`
 
 #### Scenario: API-key fallback
 - **WHEN** `ONSHAPE_COOKIE_ON` is unset and both API-key variables are set

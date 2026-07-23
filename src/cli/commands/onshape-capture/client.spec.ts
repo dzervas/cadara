@@ -70,6 +70,50 @@ test("client.spec.ts sends only the Onshape on cookie when cookie credentials ar
   }
 });
 
+test("client.spec.ts bootstraps and reuses browser XSRF credentials for cookie-authenticated posts", async () => {
+  const calls: Array<{ url: string; headers: Record<string, string> | undefined }> = [];
+  const fetch: FetchLike = (url, init) => {
+    calls.push({ url, headers: init?.headers });
+    if (url.endsWith("/api/clientinfo/xsrf")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: {
+          get: () => null,
+          getSetCookie: () => ["XSRF-TOKEN=xsrf-value; Path=/; Secure; SameSite=Lax"],
+        },
+        text: () => Promise.resolve(JSON.stringify({
+          xsrfTokenName: "XSRF-TOKEN",
+          xsrfHeaderName: "X-XSRF-TOKEN",
+        })),
+      });
+    }
+    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("{}") });
+  };
+  const client = new OnshapeClient({
+    baseUrl: "https://cad.onshape.com/api/v14",
+    cookieOn: "cookie-value",
+    fetch,
+    sleep: NO_SLEEP,
+  });
+
+  await client.postJson("/partstudios/one/featurescript", { script: "one" });
+  await client.postJson("/partstudios/two/featurescript", { script: "two" });
+
+  expect(calls).toHaveLength(3);
+  expect(calls[0]).toEqual({
+    url: "https://cad.onshape.com/api/clientinfo/xsrf",
+    headers: expect.objectContaining({ Cookie: "on=cookie-value" }),
+  });
+  for (const call of calls.slice(1)) {
+    expect(call.headers).toEqual(expect.objectContaining({
+      Cookie: "on=cookie-value; XSRF-TOKEN=xsrf-value",
+      "X-XSRF-TOKEN": "xsrf-value",
+    }));
+    expect(call.headers?.Authorization).toBeUndefined();
+  }
+});
+
 test("client.spec.ts retries 5xx within the retry budget then throws", async () => {
   let calls = 0;
   const fetch: FetchLike = () => {
