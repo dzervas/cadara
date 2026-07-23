@@ -1,7 +1,4 @@
-import {
-  planExtrudeFeature,
-  referencedSketchFeatureIds,
-} from "@/domain/import/onshape/extrude-planner";
+import { planExtrudeFeature } from "@/domain/import/onshape/extrude-planner";
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 import {
   dependencyFeatureIds,
@@ -59,26 +56,26 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["extrude"],
   plan: (context) => {
     const { feature, label, onshapeSuppressed, read, state } = context;
-    const sketchFeatureIds = referencedSketchFeatureIds(feature);
-    const inputDependencies: FeatureDependencyInput[] = sketchFeatureIds.map(
-      (featureId) => ({ kind: "sketch", featureId }),
-    );
-    const referencedSketch = sketchFeatureIds
-      .map((id) => state.sketchPlansByFeatureId.get(id))
-      .find((plan) => plan !== undefined);
-    const solvedSketch = sketchFeatureIds
-      .map((id) => read.solvedSketchesByFeatureId.get(id))
-      .find((solved) => solved !== undefined);
+    const inputDependencies: FeatureDependencyInput[] = [];
     const extrudePlan = planExtrudeFeature({
       feature,
-      solvedSketch,
-      referencedSketch,
+      profileEvidence: read.studio.profileEvidence ?? [],
+      solvedSketchesByFeatureId: read.solvedSketchesByFeatureId,
+      referencedSketchesByFeatureId: state.sketchPlansByFeatureId,
       priorBodyProducingFeatureIds: state.bodyProducingFeatureIds,
       inferredDefaultScopeFeatureIds: inferredDefaultScopeFeatureIds(
         feature,
         context,
       ),
     });
+
+    if (extrudePlan.tier !== "baked") {
+      for (const profile of extrudePlan.plannedExtrude.profiles) {
+        if (profile.kind === "sketchRegion") {
+          inputDependencies.push({ kind: "sketch", featureId: profile.sketchFeatureId });
+        }
+      }
+    }
 
     if (extrudePlan.tier === "parametric") {
       if (extrudePlan.plannedExtrude.boolean.kind === "deferredBody") {

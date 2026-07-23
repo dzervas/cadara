@@ -288,6 +288,7 @@ function validateImportDeferredValueInvariants(
     }
 
     request.definition.parameters.profiles.forEach((profile, profileIndex) => {
+      const profilePath = `createFeatures.${ref.index}.definition.parameters.profiles.${profileIndex}`;
       if (isDeferredValue(profile)) {
         blessed.add(profile);
         issues.push(
@@ -295,9 +296,31 @@ function validateImportDeferredValueInvariants(
             actions,
             profile,
             orderedPosition,
-            `createFeatures.${ref.index}.definition.parameters.profiles.${profileIndex}`,
+            profilePath,
           ),
         );
+      }
+      if (isDeferredTopologyRef(profile)) {
+        if (profile.expectedKind !== "face") {
+          issues.push({
+            path: `${profilePath}.expectedKind`,
+            expected: "face",
+            value: profile.expectedKind,
+            message: "A topologyOf profile selector must resolve a planar face.",
+          });
+        }
+        const hasEarlierProducer =
+          actions.orderedActions
+            ?.slice(0, orderedPosition)
+            .some((entry) => entry.kind === "createFeature") ?? false;
+        if (!hasEarlierProducer) {
+          issues.push({
+            path: profilePath,
+            expected: "an earlier createFeature producer action",
+            value: orderedPosition,
+            message: "A topologyOf profile selector must follow its face producer.",
+          });
+        }
       }
     });
 

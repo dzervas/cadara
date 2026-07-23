@@ -769,11 +769,14 @@ export class ImportDeferredMaterializer {
     }
 
     const profiles = await Promise.all(
-      request.definition.parameters.profiles.map(async (profile) =>
-        isDeferredValue(profile)
-          ? await this.resolveDeferredValue(profile, consumer)
-          : profile,
-      ),
+      request.definition.parameters.profiles.map(async (profile) => {
+        if (isDeferredTopologyRef(profile)) {
+          return this.resolveDeferredTopologyRef(profile);
+        }
+        return isDeferredValue(profile)
+          ? this.resolveDeferredValue(profile, consumer)
+          : profile;
+      }),
     );
     const booleanScope = request.definition.parameters.booleanScope;
     const materializedBooleanScope =

@@ -225,7 +225,7 @@ const TESSELLATED_FACES_RESPONSE = {
       faces: [
         {
           id: "face1",
-          facets: [{ vertices: [[0, 0, 0], [1, 0, 0], [1, 1, 0]] }],
+          facets: [{ vertices: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 1, y: 1, z: 0 }] }],
         },
       ],
     },
@@ -332,6 +332,22 @@ const QUERY_HISTORY_FEATURESCRIPT_RESPONSE = {
       box: [0, 0, 0, 0.01, 0, 0],
       origin: [0, 0, 0],
       direction: [1, 0, 0],
+    }],
+  }]),
+  notices: [],
+};
+
+
+const PROFILE_FEATURESCRIPT_RESPONSE = {
+  btType: "BTFeatureScriptEvalResponse-1859",
+  result: fsEncode([{
+    index: 0,
+    records: [{
+      resultIndex: 0,
+      id: "JGC",
+      kind: "sketchRegion",
+      sourceSketchFeatureId: "FOoap8tw3jKAJf5_0",
+      interiorPoint: [0, 0, 0],
     }],
   }]),
   notices: [],
@@ -445,6 +461,13 @@ export function buildDefaultRoutes(): FixtureRoute[] {
     {
       method: "POST",
       match: (url) =>
+        url.includes(`/w/${FIXTURE_WVM_ID}/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
+        url.includes("rollbackBarIndex=1"),
+      respond: () => json(200, PROFILE_FEATURESCRIPT_RESPONSE),
+    },
+    {
+      method: "POST",
+      match: (url) =>
         url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/featurescript`) &&
         url.includes("rollbackBarIndex=3"),
       respond: () => json(200, QUERY_HISTORY_FEATURESCRIPT_RESPONSE),
@@ -511,7 +534,7 @@ export function buildDefaultRoutes(): FixtureRoute[] {
 /** A fetch spy that records every call it serves. */
 export interface FixtureFetch {
   fetch: FetchLike;
-  calls: Array<{ method: string; url: string }>;
+  calls: Array<{ method: string; url: string; body?: string }>;
 }
 
 /**
@@ -521,10 +544,10 @@ export interface FixtureFetch {
 export function createFixtureFetch(
   routes: FixtureRoute[] = buildDefaultRoutes(),
 ): FixtureFetch {
-  const calls: Array<{ method: string; url: string }> = [];
+  const calls: Array<{ method: string; url: string; body?: string }> = [];
   const fetch: FetchLike = (url, init) => {
     const method = (init?.method ?? "GET").toUpperCase();
-    calls.push({ method, url });
+    calls.push({ method, url, ...(init?.body === undefined ? {} : { body: init.body }) });
     const route = routes.find(
       (candidate) => candidate.method === method && candidate.match(url),
     );

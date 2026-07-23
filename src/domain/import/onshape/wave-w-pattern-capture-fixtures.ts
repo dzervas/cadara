@@ -170,6 +170,12 @@ function linearStudio() {
     parts: null,
     featureSpecs: { present: false as const, reason: "synthetic pattern translator fixture" },
     resolvedReferences: [topReference, bodyReference("BODY_LINEAR", "P_LINEAR", seed.low, seed.high)],
+    profileEvidence: [{
+      consumingFeatureId: "E_LINEAR_BASE", parameterId: "entities" as const,
+      queryIndex: 0, resultIndex: 0, deterministicId: "linear-profile",
+      evaluatedAt: "historyPoint" as const, kind: "sketchRegion" as const,
+      sourceSketchFeatureId: "S_LINEAR_BASE", interiorPoint3d: [0.001, 0.001, 0] as [number, number, number],
+    }],
     groundTruth: { hasBodies: true as const, tessellationTolerance: 0.0001, tessellatedFaces: tessellation(copies), step: "" },
     rollbackSnapshots: [
       { featureId: "S_LINEAR_BASE", tessellationTolerance: 0.0001, tessellatedFaces: tessellation([]) },
@@ -216,6 +222,12 @@ function circularStudio() {
     parts: null,
     featureSpecs: { present: false as const, reason: "synthetic pattern translator fixture" },
     resolvedReferences: [topReference, bodyReference("BODY_CIRCULAR", "P_CIRCULAR", seed.low, seed.high)],
+    profileEvidence: [{
+      consumingFeatureId: "E_CIRCULAR_BASE", parameterId: "entities" as const,
+      queryIndex: 0, resultIndex: 0, deterministicId: "circular-profile",
+      evaluatedAt: "historyPoint" as const, kind: "sketchRegion" as const,
+      sourceSketchFeatureId: "S_CIRCULAR_BASE", interiorPoint3d: [0.011, 0, 0] as [number, number, number],
+    }],
     groundTruth: { hasBodies: true as const, tessellationTolerance: 0.0001, tessellatedFaces: tessellation(finalBodies), step: "" },
     rollbackSnapshots: [
       { featureId: "S_CIRCULAR_BASE", tessellationTolerance: 0.0001, tessellatedFaces: tessellation([]) },

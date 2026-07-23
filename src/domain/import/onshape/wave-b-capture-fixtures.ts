@@ -124,6 +124,17 @@ export function makeWaveBBodyCaptureBundle(
       ] },
       parts: null, featureSpecs: { present: false, reason: "not required by synthetic fixture" },
       resolvedReferences: [{ deterministicId: "Top", evaluatedAt: "finalState", signature: { entityClass: "face", geometryType: "plane", definingData: { normal: [0, 0, 1] }, isDefaultPlane: true } }],
+      profileEvidence: ["E1", ...(needsTwo ? ["E2"] : [])].map((featureId, index) => ({
+        consumingFeatureId: featureId,
+        parameterId: "entities" as const,
+        queryIndex: 0,
+        resultIndex: 0,
+        deterministicId: `wave-b-profile:${featureId}`,
+        evaluatedAt: "historyPoint" as const,
+        kind: "sketchRegion" as const,
+        sourceSketchFeatureId: index === 0 ? "S1" : "S2",
+        interiorPoint3d: index === 0 ? [0, 0, 0] as [number, number, number] : [0.002, 0, 0] as [number, number, number],
+      })),
       groundTruth: { hasBodies: false }, rollbackSnapshots: snapshots,
     }],
   };
@@ -238,6 +249,12 @@ function waveBHoleStudio(style: HoleFixtureStyle, elementId: string) {
     parts: null,
     featureSpecs: { present: false as const, reason: "synthetic hole translator fixture" },
     resolvedReferences: [{ deterministicId: "Top", evaluatedAt: "finalState" as const, signature: { entityClass: "face" as const, geometryType: "plane" as const, definingData: { normal: [0, 0, 1] as [number, number, number] }, isDefaultPlane: true } }],
+    profileEvidence: [{
+      consumingFeatureId: baseExtrude, parameterId: "entities" as const,
+      queryIndex: 0, resultIndex: 0, deterministicId: `hole-profile:${style}`,
+      evaluatedAt: "historyPoint" as const, kind: "sketchRegion" as const,
+      sourceSketchFeatureId: baseSketch, interiorPoint3d: [0, 0, 0] as [number, number, number],
+    }],
     groundTruth: { hasBodies: false as const },
     rollbackSnapshots: [
       { featureId: baseExtrude, tessellationTolerance: 0.0001, tessellatedFaces: tessellation([{ id: bodyId, low: [-0.004, -0.003, 0.012], high: [0.004, 0.003, 0.012] }]) },
@@ -427,6 +444,11 @@ export function makeWaveBSegmentedApplyCaptureBundle(): OnshapeCaptureBundleV2 {
           definingData: { normal: [0, 0, 1] },
           isDefaultPlane: true,
         },
+      }],
+      profileEvidence: [{
+        consumingFeatureId: "E_BASE", parameterId: "entities", queryIndex: 0,
+        resultIndex: 0, deterministicId: "segmented-profile", evaluatedAt: "historyPoint",
+        kind: "sketchRegion", sourceSketchFeatureId: "S1", interiorPoint3d: [0, 0, 0],
       }],
       groundTruth: {
         hasBodies: true,

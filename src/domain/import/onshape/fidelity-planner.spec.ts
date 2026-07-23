@@ -47,31 +47,20 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
 
   const extrude = byId.get("FG094ehBlsq34dl_0");
   expect(
-    extrude?.tier === "parametric" &&
-      extrude.target.kind === "feature" &&
-      extrude.plannedExtrude !== undefined &&
-      extrude.plannedExtrude.boolean.kind === "standalone" &&
-      extrude.plannedExtrude.profiles.length === 1,
-    "An extrude consuming a verified region of a parametric sketch should now plan parametric with a deferred standalone profile.",
+    extrude?.tier === "parametric" && extrude.reasonCodes.length === 0,
+    "A server-certified profile witness should promote the captured extrude without guessing.",
   ).toBeTruthy();
 
   expect(plan.bakeStrategy).toEqual({ kind: "none" });
-  expect(
-    !plan.requiresStudioBake,
-    "With every feature parametric, no whole-studio bake is required.",
-  ).toBeTruthy();
-
-  expect(
-    plan.tierCounts.parametric === 3 && plan.tierCounts.baked === 0,
-    "Tier counts should reflect the fully-parametric plan (two sketches + one extrude).",
-  ).toBeTruthy();
+  expect(plan.requiresStudioBake).toBe(false);
+  expect(plan.tierCounts).toEqual({ parametric: 3, baked: 0, geometryOnly: 0 });
 });
 
 
 const realBundleCases = [
   [
     "40a51fb8fa82fd4565151114.onshape-capture.json",
-    { parametric: 8, baked: 2, geometryOnly: 0 },
+    { parametric: 5, baked: 5, geometryOnly: 0 },
   ],
   [
     "9841e486906fa2ce62d74d8e.onshape-capture.json",
@@ -211,6 +200,12 @@ function makeSketchMatrixBundle(input: {
       parts: {},
       featureSpecs: { present: false, reason: "n/a" },
       resolvedReferences: input.resolvedReferences ?? [],
+      profileEvidence: [{
+        consumingFeatureId: "E_MATRIX", parameterId: "entities",
+        queryIndex: 0, resultIndex: 0, deterministicId: "matrix-profile",
+        evaluatedAt: "historyPoint", kind: "sketchRegion", sourceSketchFeatureId: "S_MATRIX",
+        interiorPoint3d: [0, 0, 0],
+      }],
       groundTruth: { hasBodies: false },
       rollbackSnapshots: [],
     }],
@@ -397,40 +392,10 @@ test.skipIf(!existsSync("40a51fb8fa82fd4565151114.onshape-capture.json"))(
     });
     const sketchPlan = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "FkkBVfXRKopMlIW_1");
     expect(sketchPlan).toMatchObject({
-      tier: "parametric",
-      reasonCodes: ["sketch-on-captured-frame"],
-      target: { kind: "sketch", planeKey: "xy" },
+      tier: "baked",
+      reasonCodes: ["needs-history-probe"],
+      target: { kind: "suppressed" },
     });
-    if (sketchPlan?.target.kind !== "sketch" || !sketchPlan.target.capturedFrame) {
-      throw new Error("Expected real Sketch 2 captured frame.");
-    }
-    const line = read.solvedSketchesByFeatureId
-      .get("FkkBVfXRKopMlIW_1")
-      ?.entities.find((entity) => entity.entityId === "VdyB64MBDSdx");
-    if (!line?.start3d || !line.end3d) throw new Error("Expected real Sketch 2 line endpoints.");
-    const start = projectPointToSketchPlaneFrame(line.start3d, sketchPlan.target.capturedFrame);
-    const end = projectPointToSketchPlaneFrame(line.end3d, sketchPlan.target.capturedFrame);
-    expect(Math.hypot(start[0] - end[0], start[1] - end[1])).toBeCloseTo(10, 6);
-    expect(start).not.toEqual(end);
-    const translation = translateSketch({
-      featureId: "FkkBVfXRKopMlIW_1",
-      label: "Sketch 2",
-      planeKey: "xy",
-      plane: {
-        support: { kind: "construction", constructionId: "construction_pending_FkkBVfXRKopMlIW_1" },
-        frame: sketchPlan.target.capturedFrame,
-        key: null,
-      },
-      entities: [{
-        entityId: line.entityId,
-        entityType: "lineSegment",
-        isConstruction: line.isConstruction,
-        start,
-        end,
-      }],
-    });
-    expect(translation.definition.points[0]?.position).not.toEqual(translation.definition.points[1]?.position);
-    await expectNoDegenerateLineDiagnostic(translation);
   },
 );
 
@@ -551,6 +516,19 @@ function makeStudioRead(input: {
       parts: null,
       featureSpecs: { present: false, reason: "n/a" },
       resolvedReferences: [],
+      profileEvidence: features
+        .filter((feature) => feature.featureType === "extrude")
+        .map((feature) => ({
+          consumingFeatureId: feature.featureId,
+          parameterId: "entities" as const,
+          queryIndex: 0,
+          resultIndex: 0,
+          deterministicId: `synthetic-profile:${feature.featureId}`,
+          evaluatedAt: "historyPoint" as const,
+          kind: "sketchRegion" as const,
+          sourceSketchFeatureId: sketchFeatureId,
+          interiorPoint3d: input.sketchEntities.find((entity) => entity.entityType === "circle")?.center3d ?? [0, 0, 0] as [number, number, number],
+        })),
       groundTruth: { hasBodies: false },
       rollbackSnapshots: null,
     },
@@ -770,6 +748,21 @@ function makeTwoBranchStudioRead(): StudioReadResult {
       parts: null,
       featureSpecs: { present: false, reason: "n/a" },
       resolvedReferences: [],
+      profileEvidence: [
+        ["E_BAD", "S_BAD", [0, 0, 0]],
+        ["E_GOOD", "S_GOOD", [0.05, 0.05, 0]],
+        ["E_CUT", "S_GOOD", [0.05, 0.05, 0]],
+      ].map(([consumingFeatureId, sourceSketchFeatureId, interiorPoint3d]) => ({
+        consumingFeatureId,
+        parameterId: "entities" as const,
+        queryIndex: 0,
+        resultIndex: 0,
+        deterministicId: `two-branch-profile:${consumingFeatureId}`,
+        evaluatedAt: "historyPoint" as const,
+        kind: "sketchRegion" as const,
+        sourceSketchFeatureId,
+        interiorPoint3d: interiorPoint3d as [number, number, number],
+      })),
       groundTruth: { hasBodies: true },
       rollbackSnapshots: null,
     },

@@ -1,5 +1,6 @@
 import type {
   OnshapeGeometricSignature,
+  OnshapeProfileEvidence,
   OnshapeResolvedQueryReference,
   OnshapeResolvedReference,
 } from "@/contracts/import/onshape-capture-bundle";
@@ -18,6 +19,16 @@ export interface QueryStringConsumer {
   queryIndex: number;
   queryString: string;
   rollbackIndex: number;
+}
+
+/** One authored `entities` query on a solid extrude, evaluated before that extrude. */
+export interface SolidExtrudeProfileQueryConsumer {
+  consumingFeatureId: string;
+  queryIndex: number;
+  queryString: string | null;
+  rollbackIndex: number;
+  /** Only sketches preceding this consumer may certify qSketchRegion provenance. */
+  priorSketchFeatureIds: readonly string[];
 }
 
 interface CompressedQuery {
@@ -41,6 +52,70 @@ export function collectDeterministicIds(features: unknown): string[] {
       ),
     ),
   ];
+}
+
+export function collectSolidExtrudeProfileQueryConsumers(
+  features: unknown,
+): SolidExtrudeProfileQueryConsumer[] {
+  const featureList = (features as { features?: unknown }).features;
+  if (!Array.isArray(featureList)) return [];
+
+  const consumers: SolidExtrudeProfileQueryConsumer[] = [];
+  const priorSketchFeatureIds: string[] = [];
+  for (const [rollbackIndex, rawFeature] of featureList.entries()) {
+    if (!rawFeature || typeof rawFeature !== "object") continue;
+    const feature = rawFeature as {
+      featureType?: unknown;
+      featureId?: unknown;
+      parameters?: unknown;
+    };
+    if (feature.featureType === "newSketch" && typeof feature.featureId === "string") {
+      priorSketchFeatureIds.push(feature.featureId);
+      continue;
+    }
+    if (feature.featureType !== "extrude" || typeof feature.featureId !== "string") continue;
+    const consumingFeatureId = feature.featureId;
+    const parameters = Array.isArray(feature.parameters) ? feature.parameters : [];
+    const bodyType = parameters.find(
+      (parameter) =>
+        parameter &&
+        typeof parameter === "object" &&
+        (parameter as { parameterId?: unknown }).parameterId === "bodyType",
+    ) as { value?: unknown } | undefined;
+    if (bodyType?.value !== undefined && bodyType.value !== "SOLID") continue;
+    const entities = parameters.find(
+      (parameter) =>
+        parameter &&
+        typeof parameter === "object" &&
+        (parameter as { parameterId?: unknown }).parameterId === "entities",
+    ) as { queries?: unknown } | undefined;
+    const queries = entities?.queries;
+    if (!Array.isArray(queries)) {
+      consumers.push({
+        consumingFeatureId,
+        queryIndex: 0,
+        queryString: null,
+        rollbackIndex,
+        priorSketchFeatureIds: [...priorSketchFeatureIds],
+      });
+      continue;
+    }
+    queries.forEach((query, queryIndex) => {
+      consumers.push({
+        consumingFeatureId,
+        queryIndex,
+        queryString:
+          query &&
+          typeof query === "object" &&
+          typeof (query as { queryString?: unknown }).queryString === "string"
+            ? (query as { queryString: string }).queryString
+            : null,
+        rollbackIndex,
+        priorSketchFeatureIds: [...priorSketchFeatureIds],
+      });
+    });
+  }
+  return consumers;
 }
 
 export function collectQueryStringConsumers(features: unknown): QueryStringConsumer[] {
@@ -251,6 +326,350 @@ function parseCompressedQuery(queryString: string): CompressedQuery | null {
   } catch {
     return null;
   }
+}
+
+const SKETCH_REGION_QUERY =
+  /^\s*query\s*=\s*qSketchRegion\(\s*id\s*\+\s*("(?:\\.|[^"\\])*")\s*,\s*(true|false)\s*\)\s*;\s*$/;
+
+type ProfileQueryExpression =
+  | { kind: "compressed"; compressed: CompressedQuery }
+  | { kind: "sketchRegion"; sourceSketchFeatureId: string; includeConstruction: boolean };
+
+function profileQueryExpression(queryString: string | null): ProfileQueryExpression | null {
+  if (!queryString) return null;
+  const compressed = parseCompressedQuery(queryString);
+  if (compressed) return { kind: "compressed", compressed };
+  const match = queryString.match(SKETCH_REGION_QUERY);
+  if (!match) return null;
+  try {
+    const sourceSketchFeatureId = JSON.parse(match[1]!) as unknown;
+    return typeof sourceSketchFeatureId === "string"
+      ? { kind: "sketchRegion", sourceSketchFeatureId, includeConstruction: match[2] === "true" }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function profileQueryFeatureScriptExpression(expression: ProfileQueryExpression): string {
+  if (expression.kind === "compressed") {
+    return `qCompressed(${expression.compressed.version}, ${JSON.stringify(expression.compressed.payload)}, newId())`;
+  }
+  return `qSketchRegion(id + ${JSON.stringify(expression.sourceSketchFeatureId)}, ${expression.includeConstruction})`;
+}
+
+/**
+ * Server-side exact profile-query evaluation. Sketch-region witnesses are found
+ * only on the exact selected face and certified with qContainsPoint. The
+ * deterministic adaptive plane grid is a witness search, never nearest-geometry
+ * matching; failure remains explicit instead of falling back to a bbox midpoint.
+ */
+function buildProfileEvidenceScript(
+  entries: readonly {
+    expression: ProfileQueryExpression;
+    priorSketchFeatureIds: readonly string[];
+  }[],
+): string {
+  const blocks = entries.map((entry, index) => {
+    const queryVariable = `profileQuery${index}`;
+    const recordsVariable = `profileRecords${index}`;
+    const sketchIds = JSON.stringify(entry.priorSketchFeatureIds);
+    return `
+    var ${queryVariable} = ${profileQueryFeatureScriptExpression(entry.expression)};
+    var ${recordsVariable} = [];
+    var profileResultIndex${index} = 0;
+    for (var selectedFace${index} in evaluateQuery(context, qEntityFilter(${queryVariable}, EntityType.FACE)))
+    {
+        var selectedId${index} = transientQueriesToStrings(selectedFace${index});
+        var matchingSketchIds${index} = [];
+        for (var sketchFeatureId${index} in ${sketchIds})
+        {
+            for (var regionFace${index} in evaluateQuery(context, qSketchRegion(id + sketchFeatureId${index}, false)))
+            {
+                if (transientQueriesToStrings(regionFace${index}) == selectedId${index})
+                    matchingSketchIds${index} = append(matchingSketchIds${index}, sketchFeatureId${index});
+            }
+        }
+        if (size(matchingSketchIds${index}) == 1)
+        {
+            var rec${index} = {
+                "resultIndex" : profileResultIndex${index},
+                "id" : selectedId${index},
+                "kind" : "sketchRegion",
+                "sourceSketchFeatureId" : matchingSketchIds${index}[0]
+            };
+            try
+            {
+                var selectedSurface${index} = evSurfaceDefinition(context, { "face" : selectedFace${index} });
+                if (selectedSurface${index}.surfaceType == SurfaceType.PLANE)
+                {
+                    var witness${index} = undefined;
+                    var centroid${index} = evApproximateCentroid(context, { "entities" : selectedFace${index} });
+                    if (size(evaluateQuery(context, qContainsPoint(selectedFace${index}, centroid${index}))) == 1)
+                        witness${index} = centroid${index};
+                    for (var divisions${index} in [3, 7, 15, 31, 63])
+                    {
+                        if (witness${index} != undefined)
+                            break;
+                        var parameters${index} = [];
+                        for (var row${index} = 0; row${index} < divisions${index}; row${index} += 1)
+                        {
+                            for (var column${index} = 0; column${index} < divisions${index}; column${index} += 1)
+                            {
+                                parameters${index} = append(parameters${index}, vector(
+                                    (column${index} + 0.5) / divisions${index},
+                                    (row${index} + 0.5) / divisions${index}
+                                ));
+                            }
+                        }
+                        var tangentPlanes${index} = evFaceTangentPlanes(context, {
+                            "face" : selectedFace${index},
+                            "parameters" : parameters${index},
+                            "returnUndefinedOutsideFace" : true
+                        });
+                        for (var tangentPlane${index} in tangentPlanes${index})
+                        {
+                            if (tangentPlane${index} != undefined &&
+                                size(evaluateQuery(context, qContainsPoint(selectedFace${index}, tangentPlane${index}.origin))) == 1)
+                            {
+                                witness${index} = tangentPlane${index}.origin;
+                                break;
+                            }
+                        }
+                    }
+                    if (witness${index} != undefined)
+                        rec${index}.interiorPoint = witness${index};
+                    else
+                        rec${index}.reason = "exact selected sketch-region face contained no certified adaptive-grid witness";
+                }
+                else
+                    rec${index}.reason = "exact selected sketch-region face is not planar";
+            }
+            catch (error)
+            {
+                rec${index}.reason = "exact selected sketch-region witness certification failed";
+            }
+            ${recordsVariable} = append(${recordsVariable}, rec${index});
+        }
+        else
+        {
+            var rec${index} = {
+                "resultIndex" : profileResultIndex${index},
+                "id" : selectedId${index},
+                "kind" : "unresolved"
+            };
+            if (size(matchingSketchIds${index}) > 1)
+                rec${index}.reason = "selected profile face has more than one exact qSketchRegion source";
+            else
+            {
+                try
+                {
+                    var surface${index} = evSurfaceDefinition(context, { "face" : selectedFace${index} });
+                    if (surface${index}.surfaceType == SurfaceType.PLANE)
+                    {
+                        rec${index}.kind = "planarFace";
+                        rec${index}.geometryType = surface${index}.surfaceType;
+                        rec${index}.origin = surface${index}.origin;
+                        rec${index}.normal = surface${index}.normal;
+                    }
+                    else
+                        rec${index}.reason = "selected profile face is not a sketch region or planar face";
+                }
+                catch (error)
+                {
+                    rec${index}.reason = "selected profile face could not be classified";
+                }
+            }
+            ${recordsVariable} = append(${recordsVariable}, rec${index});
+        }
+        profileResultIndex${index} += 1;
+    }
+    if (size(${recordsVariable}) == 0)
+        ${recordsVariable} = append(${recordsVariable}, { "kind" : "unresolved", "reason" : "captured profile query resolved no faces" });
+    groups = append(groups, { "index" : ${index}, "records" : ${recordsVariable} });`;
+  });
+  return `function(context is Context, queries)
+{
+    var groups = [];${blocks.join("")}
+    return groups;
+}`;
+}
+
+interface ProfileEvidenceRecord {
+  resultIndex?: unknown;
+  id?: unknown;
+  kind?: unknown;
+  sourceSketchFeatureId?: unknown;
+  interiorPoint?: unknown;
+  geometryType?: unknown;
+  origin?: unknown;
+  normal?: unknown;
+  reason?: unknown;
+}
+
+function profileEvidenceFromRecord(input: {
+  consumer: SolidExtrudeProfileQueryConsumer;
+  record: ProfileEvidenceRecord;
+}): OnshapeProfileEvidence {
+  const resultIndex =
+    typeof input.record.resultIndex === "number" && Number.isInteger(input.record.resultIndex)
+      ? input.record.resultIndex
+      : undefined;
+  const deterministicId = typeof input.record.id === "string" ? input.record.id : undefined;
+  const common = {
+    consumingFeatureId: input.consumer.consumingFeatureId,
+    parameterId: "entities" as const,
+    queryIndex: input.consumer.queryIndex,
+    evaluatedAt: "historyPoint" as const,
+  };
+  if (
+    input.record.kind === "sketchRegion" &&
+    resultIndex !== undefined &&
+    deterministicId &&
+    typeof input.record.sourceSketchFeatureId === "string"
+  ) {
+    const interiorPoint = input.record.interiorPoint;
+    if (
+      Array.isArray(interiorPoint) &&
+      interiorPoint.length === 3 &&
+      interiorPoint.every((component) => typeof component === "number" && Number.isFinite(component))
+    ) {
+      return {
+        ...common,
+        resultIndex,
+        deterministicId,
+        kind: "sketchRegion",
+        sourceSketchFeatureId: input.record.sourceSketchFeatureId,
+        interiorPoint3d: interiorPoint as [number, number, number],
+      };
+    }
+    return {
+      ...common,
+      resultIndex,
+      deterministicId,
+      kind: "sketchRegion",
+      sourceSketchFeatureId: input.record.sourceSketchFeatureId,
+      unresolved: {
+        reason:
+          typeof input.record.reason === "string"
+            ? input.record.reason
+            : "exact sketch-region source had no certified interior witness",
+      },
+    };
+  }
+  if (
+    input.record.kind === "planarFace" &&
+    resultIndex !== undefined &&
+    deterministicId &&
+    typeof input.record.geometryType === "string"
+  ) {
+    const definingData: Record<string, unknown> = {};
+    if (input.record.origin !== undefined) definingData.origin = input.record.origin;
+    if (input.record.normal !== undefined) definingData.normal = input.record.normal;
+    return {
+      ...common,
+      resultIndex,
+      deterministicId,
+      kind: "planarFace",
+      signature: {
+        entityClass: "face",
+        geometryType: input.record.geometryType.toLowerCase(),
+        ...(Object.keys(definingData).length > 0 ? { definingData } : {}),
+      },
+    };
+  }
+  return {
+    ...common,
+    ...(resultIndex === undefined ? {} : { resultIndex }),
+    ...(deterministicId ? { deterministicId } : {}),
+    kind: "unresolved",
+    unresolved: {
+      reason:
+        typeof input.record.reason === "string"
+          ? input.record.reason
+          : "captured profile query result lacked exact face classification",
+    },
+  };
+}
+
+/**
+ * Capture every solid-extrude profile query at its exact pre-consumer state.
+ * This never decodes qCompressed payloads or searches geometry for a likely
+ * sketch: qCompressed is reconstructed and evaluated only by FeatureScript.
+ */
+export async function resolveSolidExtrudeProfileEvidenceWithHistory(
+  client: OnshapeClient,
+  partStudioPath: string,
+  consumers: readonly SolidExtrudeProfileQueryConsumer[],
+): Promise<OnshapeProfileEvidence[]> {
+  const results: OnshapeProfileEvidence[] = [];
+  const byRollbackIndex = new Map<
+    number,
+    Array<{ consumer: SolidExtrudeProfileQueryConsumer; expression: ProfileQueryExpression }>
+  >();
+
+  for (const consumer of consumers) {
+    const expression = profileQueryExpression(consumer.queryString);
+    if (!expression) {
+      results.push({
+        consumingFeatureId: consumer.consumingFeatureId,
+        parameterId: "entities",
+        queryIndex: consumer.queryIndex,
+        evaluatedAt: "historyPoint",
+        kind: "unresolved",
+        unresolved: {
+          reason: "profile query is not a supported qCompressed or qSketchRegion assignment",
+        },
+      });
+      continue;
+    }
+    const group = byRollbackIndex.get(consumer.rollbackIndex) ?? [];
+    group.push({ consumer, expression });
+    byRollbackIndex.set(consumer.rollbackIndex, group);
+  }
+
+  for (const [rollbackIndex, entries] of byRollbackIndex) {
+    const response = await client.postJson(
+      `${partStudioPath}/featurescript?rollbackBarIndex=${rollbackIndex}`,
+      {
+        script: buildProfileEvidenceScript(
+          entries.map((entry) => ({
+            expression: entry.expression,
+            priorSketchFeatureIds: entry.consumer.priorSketchFeatureIds,
+          })),
+        ),
+      },
+    );
+    const decoded = decodeFsValue((response as { result?: unknown }).result);
+    const groups = Array.isArray(decoded) ? decoded : [];
+    for (const [entryIndex, entry] of entries.entries()) {
+      const group = groups.find(
+        (candidate) =>
+          candidate &&
+          typeof candidate === "object" &&
+          (candidate as { index?: unknown }).index === entryIndex,
+      ) as { records?: unknown } | undefined;
+      const records = Array.isArray(group?.records) ? group.records : [];
+      if (records.length === 0) {
+        results.push({
+          consumingFeatureId: entry.consumer.consumingFeatureId,
+          parameterId: "entities",
+          queryIndex: entry.consumer.queryIndex,
+          evaluatedAt: "historyPoint",
+          kind: "unresolved",
+          unresolved: { reason: "profile evidence FeatureScript result was malformed" },
+        });
+        continue;
+      }
+      for (const record of records) {
+        results.push(profileEvidenceFromRecord({
+          consumer: entry.consumer,
+          record: (record ?? {}) as ProfileEvidenceRecord,
+        }));
+      }
+    }
+  }
+  return results;
 }
 
 function buildEntityLoops(queryVariable: string, recordsVariable: string): string {

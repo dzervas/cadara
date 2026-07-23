@@ -391,7 +391,11 @@ function inferredSweptFaceSignature(input: {
     return null;
   }
 
-  const solved = input.read.solvedSketchesByFeatureId.get(extrude.sketchFeatureId);
+  const sketchProfile = extrude.profiles.find(
+    (profile) => profile.kind === "sketchRegion",
+  );
+  if (!sketchProfile || sketchProfile.kind !== "sketchRegion") return null;
+  const solved = input.read.solvedSketchesByFeatureId.get(sketchProfile.sketchFeatureId);
   const queryEntityBaseId = query.sketchEntityId.match(/^(.+?)R\d+C\d+S\d+$/)?.[1] ?? query.sketchEntityId;
   const curve = solved?.entities.find(
     (entity) =>
@@ -2224,28 +2228,37 @@ async function buildPreparedActions(input: {
 
     if (featurePlan.target.kind === "feature" && featurePlan.plannedExtrude) {
       const extrude = featurePlan.plannedExtrude;
-      const sketchOrderedIndex = orderedIndexByFeatureId.get(
-        extrude.sketchFeatureId,
-      );
-      if (sketchOrderedIndex === undefined) {
+      const profiles: ImportDeferredExtrudeProfileRef[] = [];
+      let missingSketchFeatureId: string | null = null;
+      for (const profile of extrude.profiles) {
+        if (profile.kind === "planarFace") {
+          profiles.push(profile.selector);
+          continue;
+        }
+        const sketchOrderedIndex = orderedIndexByFeatureId.get(profile.sketchFeatureId);
+        if (sketchOrderedIndex === undefined) {
+          missingSketchFeatureId = profile.sketchFeatureId;
+          break;
+        }
+        profiles.push({
+          kind: "regionOf",
+          actionIndex: sketchOrderedIndex,
+          selector: {
+            kind: "interiorPoint",
+            point: profile.interiorPoint,
+            ...(profile.evidence ? { source: profile.evidence } : {}),
+          },
+        });
+      }
+      if (missingSketchFeatureId) {
         diagnostics.push({
           severity: "warning",
-          message: `Extrude "${featurePlan.label}" referenced sketch ${extrude.sketchFeatureId}, which was not committed; the extrude was skipped.`,
+          message: `Extrude "${featurePlan.label}" referenced sketch ${missingSketchFeatureId}, which was not committed; the extrude was skipped.`,
           code: "onshape-extrude-missing-sketch",
         });
         continue;
       }
-
-      const profiles = extrude.profiles.map(
-        (profile): ImportDeferredExtrudeProfileRef => ({
-          kind: "regionOf",
-          actionIndex: sketchOrderedIndex,
-          selector: { kind: "interiorPoint", point: profile.interiorPoint },
-        }),
-      );
-      if (profiles.length === 0) {
-        continue;
-      }
+      if (profiles.length === 0) continue;
 
       let booleanScope: ImportDeferredFeatureBooleanScope;
       if (extrude.boolean.kind === "standalone") {
