@@ -20,7 +20,10 @@ export type FetchLike = (
 export interface FetchResponse {
   ok: boolean;
   status: number;
-  headers?: { get(name: string): string | null };
+  headers?: {
+    get(name: string): string | null;
+    getSetCookie?: () => string[];
+  };
   text: () => Promise<string>;
 }
 
@@ -60,20 +63,44 @@ function serializeOnCookie(value: string): string {
   return value.startsWith("on=") ? value : `on=${value}`;
 }
 
+interface XsrfCredential {
+  cookieName: string;
+  headerName: string;
+  value: string;
+}
+
+function readSetCookie(response: FetchResponse, name: string): string | null {
+  const headers = response.headers?.getSetCookie?.() ?? [response.headers?.get("set-cookie") ?? ""];
+  const marker = `${name}=`;
+  for (const header of headers) {
+    const start = header.indexOf(marker);
+    if (start < 0) continue;
+    const valueStart = start + marker.length;
+    const valueEnd = header.indexOf(";", valueStart);
+    return header.slice(valueStart, valueEnd < 0 ? undefined : valueEnd);
+  }
+  return null;
+}
+
 export class OnshapeClient {
   private readonly baseUrl: string;
   private readonly credentialHeader: Record<string, string>;
+  private readonly cookieHeader: string | null;
   private readonly fetch: FetchLike;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly concurrency: number;
   private readonly maxRetries: number;
+  private xsrfCredential: Promise<XsrfCredential> | null = null;
   private active = 0;
   private readonly waiters: Array<() => void> = [];
 
   constructor(options: OnshapeClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.credentialHeader = options.cookieOn !== undefined
-      ? { Cookie: serializeOnCookie(options.cookieOn) }
+    this.cookieHeader = options.cookieOn !== undefined
+      ? serializeOnCookie(options.cookieOn)
+      : null;
+    this.credentialHeader = this.cookieHeader !== null
+      ? { Cookie: this.cookieHeader }
       : { Authorization: "Basic " + toBase64(`${options.accessKey}:${options.secretKey}`) };
     this.fetch = options.fetch;
     this.sleep = options.sleep;
@@ -122,24 +149,31 @@ export class OnshapeClient {
     body: string | undefined,
   ): Promise<string> {
     const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
+    const response = await this.fetchWithRetry(
+      url,
+      method,
+      {
+        ...(await this.requestCredentialHeader(method)),
+        Accept: "application/json;charset=UTF-8; qs=0.09",
+        ...(body === undefined
+          ? {}
+          : { "Content-Type": "application/json" }),
+      },
+      body,
+    );
+    return response.text();
+  }
+
+  private async fetchWithRetry(
+    url: string,
+    method: string,
+    headers: Record<string, string>,
+    body?: string,
+  ): Promise<FetchResponse> {
     let attempt = 0;
-
     for (;;) {
-      const response = await this.fetch(url, {
-        method,
-        headers: {
-          ...this.credentialHeader,
-          Accept: "application/json;charset=UTF-8; qs=0.09",
-          ...(body === undefined
-            ? {}
-            : { "Content-Type": "application/json" }),
-        },
-        body,
-      });
-
-      if (response.ok) {
-        return response.text();
-      }
+      const response = await this.fetch(url, { method, headers, body });
+      if (response.ok) return response;
 
       const retryable = response.status === 429 || response.status >= 500;
       if (retryable && attempt < this.maxRetries) {
@@ -154,6 +188,48 @@ export class OnshapeClient {
     }
   }
 
+  private async requestCredentialHeader(method: string): Promise<Record<string, string>> {
+    if (this.cookieHeader === null || (method !== "POST" && method !== "DELETE")) {
+      return this.credentialHeader;
+    }
+    this.xsrfCredential ??= this.loadXsrfCredential();
+    const xsrf = await this.xsrfCredential;
+    return {
+      Cookie: `${this.cookieHeader}; ${xsrf.cookieName}=${xsrf.value}`,
+      [xsrf.headerName]: xsrf.value,
+    };
+  }
+
+  private async loadXsrfCredential(): Promise<XsrfCredential> {
+    const url = `${new URL(this.baseUrl).origin}/api/clientinfo/xsrf`;
+    const response = await this.fetchWithRetry(
+      url,
+      "GET",
+      {
+        ...this.credentialHeader,
+        Accept: "application/json;charset=UTF-8; qs=0.09",
+      },
+    );
+    let data: unknown;
+    try {
+      data = JSON.parse(await response.text());
+    } catch {
+      throw new Error("Onshape XSRF bootstrap returned invalid JSON.");
+    }
+    const names = data as { xsrfTokenName?: unknown; xsrfHeaderName?: unknown };
+    if (typeof names.xsrfTokenName !== "string" || typeof names.xsrfHeaderName !== "string") {
+      throw new Error("Onshape XSRF bootstrap omitted its cookie or header name.");
+    }
+    const value = readSetCookie(response, names.xsrfTokenName);
+    if (!value) {
+      throw new Error(`Onshape XSRF bootstrap did not issue the ${names.xsrfTokenName} cookie.`);
+    }
+    return {
+      cookieName: names.xsrfTokenName,
+      headerName: names.xsrfHeaderName,
+      value,
+    };
+  }
 
   private retryDelay(response: FetchResponse, attempt: number): number {
     if (response.status !== 429) return 250 * 2 ** attempt;

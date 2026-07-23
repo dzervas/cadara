@@ -48,7 +48,9 @@ sections (feature specs) may be absent, and the absence is recorded explicitly.
 ### Credentials
 
 The command first checks `ONSHAPE_COOKIE_ON`. When set, its value is sent as the
-Onshape `on` cookie and API-key variables are ignored:
+Onshape `on` cookie and API-key variables are ignored. Before the first
+cookie-authenticated `POST` or `DELETE`, the client follows Onshape's browser flow
+to obtain an in-memory XSRF credential from `/api/clientinfo/xsrf`:
 
 ```bash
 export ONSHAPE_COOKIE_ON=...       # cookie value; `on=...` is also accepted

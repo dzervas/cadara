@@ -10,7 +10,7 @@ const BUNDLE_PATH = "405fa226bb150016d09afc09.onshape-capture.json";
 const ELEMENT_ID = "6869c89206c7a4bb97bd9129";
 
 test.skipIf(!existsSync(BUNDLE_PATH))(
-  "real Wave-T extent studio stays explicitly unresolved until certified profile evidence is captured",
+  "real Wave-T extent studio uses certified profile evidence and fails closed on the remaining exact region",
   async () => {
     const validation = validateOnshapeCaptureBundle(
       JSON.parse(await readFile(BUNDLE_PATH, "utf8")),
@@ -19,14 +19,14 @@ test.skipIf(!existsSync(BUNDLE_PATH))(
     if (!validation.success) return;
 
     const plan = planStudioFidelity(readPartStudio(validation.data, ELEMENT_ID));
-    expect(plan.tierCounts).toEqual({ parametric: 3, baked: 3, geometryOnly: 0 });
+    expect(plan.tierCounts).toEqual({ parametric: 5, baked: 1, geometryOnly: 0 });
 
     const twoSide = plan.featurePlans.find(
       (feature) => feature.label === "Two side extrude",
     );
     expect(twoSide).toMatchObject({
-      tier: "baked",
-      reasonCodes: ["needs-region-resolution"],
+      tier: "parametric",
+      reasonCodes: [],
     });
 
     const upToNext = plan.featurePlans.find(

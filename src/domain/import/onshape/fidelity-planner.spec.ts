@@ -60,7 +60,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
 const realBundleCases = [
   [
     "40a51fb8fa82fd4565151114.onshape-capture.json",
-    { parametric: 5, baked: 5, geometryOnly: 0 },
+    { parametric: 8, baked: 2, geometryOnly: 0 },
   ],
   [
     "9841e486906fa2ce62d74d8e.onshape-capture.json",
@@ -398,9 +398,9 @@ test.skipIf(!existsSync("40a51fb8fa82fd4565151114.onshape-capture.json"))(
     });
     const sketchPlan = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "FkkBVfXRKopMlIW_1");
     expect(sketchPlan).toMatchObject({
-      tier: "baked",
-      reasonCodes: ["needs-history-probe"],
-      target: { kind: "suppressed" },
+      tier: "parametric",
+      reasonCodes: ["sketch-on-captured-frame"],
+      target: { kind: "sketch" },
     });
   },
 );
