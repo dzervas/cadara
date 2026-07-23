@@ -274,7 +274,8 @@ export function isUniquePrefixBodyQuery(
   if (
     slot.expectedKinds.length !== 1 ||
     slot.expectedKinds[0] !== "body" ||
-    slot.cardinality.min !== 1
+    slot.cardinality.min !== 1 ||
+    slot.cardinality.max !== 1
   ) {
     return false;
   }
@@ -284,12 +285,11 @@ export function isUniquePrefixBodyQuery(
       entry !== null &&
       (entry as { parameterId?: unknown }).parameterId === slot.parameterId,
   ) as { queries?: unknown } | undefined;
-  if (!parameter || !Array.isArray(parameter.queries) || parameter.queries.length === 0) {
+  if (!parameter || !Array.isArray(parameter.queries) || parameter.queries.length !== 1) {
     return false;
   }
-  return (parameter.queries as Array<{ deterministicIds?: unknown }>).every(
-    (query) => Array.isArray(query?.deterministicIds) && query.deterministicIds.length === 0,
-  );
+  const query = parameter.queries[0] as { deterministicIds?: unknown };
+  return Array.isArray(query?.deterministicIds) && query.deterministicIds.length === 0;
 }
 
 export interface ResolveUniquePrefixBodyInput {
@@ -332,15 +332,7 @@ export function resolveUniquePrefixBody(
       },
     );
   }
-  if (bodySignatures.size !== 1) {
-    return {
-      kind: "degraded",
-      reason: "topology-query-unreadable",
-      details: [{
-        message: `Body query ${slot.parameterId} omitted geometry IDs and the prefix exposes ${bodySignatures.size} live bodies; exactly one is required.`,
-      }],
-    };
-  }
+  if (bodySignatures.size !== 1) return null;
 
   const signature = [...bodySignatures.values()][0]!;
   const capturedSignature: OnshapeGeometricSignature = {
