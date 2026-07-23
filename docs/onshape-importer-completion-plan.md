@@ -51,8 +51,8 @@ bundle is absent). After each item: `bun run test:all` relevant slices green.
 ## Phase 0 — Captures & harness (parallel-safe, do first)
 
 - [x] 0.1 **Restore the second capture + make real-bundle specs skip cleanly.**
-      Recapture `9841e486906fa2ce62d74d8e` with `--rollback-snapshots` into the
-      repo root (stays gitignored). Change every spec that loads root
+      Recapture `9841e486906fa2ce62d74d8e` with automatic proven-boundary
+      snapshots into the repo root (stays gitignored). Change every spec that loads root
       `*.onshape-capture.json` (fidelity-planner, provider, apply-pipeline,
       e2e helpers) to `test.skipIf(!existsSync(...))` instead of failing, so CI
       and fresh clones stay green while local runs still pin tier baselines.
@@ -65,7 +65,7 @@ bundle is absent). After each item: `bun run test:all` relevant slices green.
       sketch), loft (two parallel-plane profiles, no guides), thicken-from-face,
       mirror across a translated cPlane, transform distance, booleans on
       parametric producers, extrude UP_TO_FACE/NEXT and two-side. Capture with
-      `--rollback-snapshots`. For each new behavior also add a checked-in
+      automatic proven-boundary snapshots. For each new behavior also add a checked-in
       **transcript fixture** (pattern: `src/cli/commands/onshape-capture/fixtures/capture-bundle-fixture.ts`)
       or synthetic bundle (pattern: `wave-a-capture-fixtures.ts`) so CI covers
       it without the proprietary bundle.

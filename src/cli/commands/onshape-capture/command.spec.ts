@@ -76,26 +76,26 @@ test("command.spec.ts reports a usage error for a missing url argument", async (
   expect(result.ok === false && result.kind).toBe("usage");
 });
 
-test("command.spec.ts accepts rollback-snapshots as an option before requiring the url", async () => {
+test("command.spec.ts rejects the removed rollback-snapshots option before credential work", async () => {
   const result = await onshapeCaptureCommand.run(
-    ["--rollback-snapshots"],
-    envFrom({ ONSHAPE_ACCESS_KEY: "access", ONSHAPE_SECRET_KEY: "secret" }),
+    ["--rollback-snapshots", FIXTURE_DOCUMENT_URL],
+    envFrom({}),
     makeIO(),
   );
 
+  expect(result.ok).toBe(false);
   expect(result.ok === false && result.kind).toBe("usage");
-  expect(result.ok === false && result.message).toContain("<onshape-document-url>");
+  expect(result.ok === false && result.message).toContain("Usage:");
 });
 
-test("command.spec.ts rejects duplicate capture flags before credential or network work", async () => {
-  const credentials = envFrom({ ONSHAPE_ACCESS_KEY: "access", ONSHAPE_SECRET_KEY: "secret" });
-  for (const argv of [
-    ["--rollback-snapshots", "--rollback-snapshots", FIXTURE_DOCUMENT_URL],
+test("command.spec.ts rejects duplicate enrich flags before credential or network work", async () => {
+  const result = await onshapeCaptureCommand.run(
     ["--enrich", "--enrich", "capture.json"],
-  ]) {
-    const result = await onshapeCaptureCommand.run(argv, credentials, makeIO());
-    expect(result.ok === false && result.kind).toBe("usage");
-  }
+    envFrom({ ONSHAPE_ACCESS_KEY: "access", ONSHAPE_SECRET_KEY: "secret" }),
+    makeIO(),
+  );
+  expect(result.ok).toBe(false);
+  expect(result.ok === false && result.kind).toBe("usage");
 });
 
 test("command.spec.ts reports a usage error for a bad url before any network work", async () => {

@@ -48,7 +48,6 @@ export type CaptureOptions = OnshapeCredentials & {
   apiVersion?: string;
   concurrency?: number;
   maxTranslationPolls?: number;
-  rollbackSnapshots?: boolean;
   /** Optional cache for immutable, read-only FeatureScript evidence only. */
   evidenceCache?: ImmutableFeatureScriptEvidenceCache;
 };
@@ -58,7 +57,7 @@ interface RollbackWorkspace {
   diagnostics: OnshapeCaptureDiagnostic[];
 }
 
-export interface SolidFeatureRollbackPoint {
+interface SolidFeatureRollbackPoint {
   featureId: string;
   rollbackIndex: number;
 }
@@ -130,12 +129,10 @@ export async function captureBundle(
     );
   }
 
-  const rollbackCandidates = options.rollbackSnapshots
-    ? capturedStudios.flatMap((studio) => {
-        const points = collectIntrinsicBakeRollbackPoints(studio.features);
-        return points.length === 0 ? [] : [{ studio, points }];
-      })
-    : [];
+  const rollbackCandidates = capturedStudios.flatMap((studio) => {
+    const points = collectIntrinsicBakeRollbackPoints(studio.features);
+    return points.length === 0 ? [] : [{ studio, points }];
+  });
   const rollbackWorkspace = rollbackCandidates.length > 0
     ? await createRollbackWorkspace(client, ref.documentId, microversion, runtime)
     : { workspaceId: null, diagnostics: [] };
@@ -155,8 +152,8 @@ export async function captureBundle(
         );
       }
     } else if (rollbackCandidates.length > 0) {
-      for (const studio of capturedStudios) {
-        studio.rollbackSnapshots = null;
+      for (const candidate of rollbackCandidates) {
+        candidate.studio.rollbackSnapshots = null;
       }
     }
   } catch (error) {
@@ -346,7 +343,7 @@ async function createRollbackWorkspace(
             severity: "warning",
             code: "onshape-rollback-workspace-unavailable",
             message:
-              "Onshape returned HTTP 403 while creating the temporary rollback workspace; immutable evidence capture continues, but rollback snapshots are unavailable.",
+              "Onshape returned HTTP 403 while creating the temporary rollback workspace; immutable evidence capture continues, but required bake-boundary snapshots are unavailable.",
           },
         ],
       };
@@ -409,7 +406,7 @@ async function captureStudio(
   client: OnshapeClient,
   ref: OnshapeDocumentRef,
   studio: RawElement,
-  options: Pick<CaptureOptions, "rollbackSnapshots" | "evidenceCache">,
+  options: Pick<CaptureOptions, "evidenceCache">,
   immutableEvidenceIdentity: {
     baseUrl: string;
     apiVersion: string;
@@ -447,7 +444,7 @@ async function captureStudio(
   });
 
   const groundTruth = captureBoundaryOnlyGroundTruth(parts);
-  const rollbackSnapshots = options.rollbackSnapshots ? [] : null;
+  const rollbackSnapshots: OnshapeRollbackSnapshot[] = [];
 
   return {
     elementId: studio.id,
@@ -514,7 +511,7 @@ async function captureRollbackSnapshots(
  * geometry, this scoped capture treats only `bodyType=SURFACE` extrudes as
  * such boundaries; ordinary feature history must not trigger snapshots.
  */
-export function collectIntrinsicBakeRollbackPoints(features: unknown): SolidFeatureRollbackPoint[] {
+function collectIntrinsicBakeRollbackPoints(features: unknown): SolidFeatureRollbackPoint[] {
   const featureList = (features as { features?: unknown }).features;
   if (!Array.isArray(featureList)) return [];
 

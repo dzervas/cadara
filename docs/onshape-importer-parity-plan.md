@@ -122,8 +122,8 @@ Wave C (cheap long tail, needs 1.1 only):
   preserve downstream baked bodies, and every baked row carries a specific
   family/topology reason instead of `custom-feature`. Parametric tier gains for
   revolve/boolean/transform/split/delete/mirror are proven by synthetic v2
-  fixtures and will apply to real bundles after v2 re-capture
-  (`--rollback-snapshots` + all-IDs history resolution).
+  fixtures and will apply to real bundles after v2 recapture with automatic
+  proven-boundary snapshots and all-IDs history resolution.
 
 - Wave A verification (2026-07-15): both root captures contain zero `revolve`,
   `thicken`, `sweep`, or `loft` history entries. Tier counts therefore remain

@@ -270,7 +270,7 @@ export interface OnshapePartStudioCapture {
   profileEvidenceManifest?: OnshapeProfileEvidenceManifestEntry[];
   /** Final-state ground-truth geometry. */
   groundTruth: OnshapeGroundTruth;
-  /** `null` unless v2 snapshot capture was explicitly requested. */
+  /** Proven bake-boundary snapshots; `null` only when required capture was unavailable. */
   rollbackSnapshots: OnshapeRollbackSnapshots;
 }
 
