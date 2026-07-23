@@ -8,12 +8,17 @@ import {
   type AdvancedSolidFeatureKind,
   type AdvancedSolidOperationIntent,
 } from "@/contracts/modeling/advanced-solid";
-import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import {
+  createExpressionAuthoredValue,
+  createLiteralAuthoredValue,
+  isAuthoredValue,
+} from "@/contracts/modeling/authored-values";
 import { FILLET_FEATURE_SCHEMA_VERSION, SHELL_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { ConstructionId, SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type { OnshapeFeatureNode, OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
 import type { FeatureDependencyInput, OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
 import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
+import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
 import type { TopologyQuerySlot } from "@/domain/import/onshape/topology-query-reader";
 export interface PlannedConstructionFromFeatureRef {
   kind: "constructionFromFeature";
@@ -257,6 +262,10 @@ export const booleanBodiesFeatureTranslator: OnshapeFeatureTranslator = {
     const operation = enumValue(context.feature, "operationType") ?? "SUBTRACTION";
     const operationIntent = ({ UNION: "add", ADD: "add", SUBTRACTION: "subtract", INTERSECTION: "intersect" } as const)[operation];
     if (!operationIntent) return baked(context, "boolean-operation-unsupported");
+    const targetQueries = parameter(context.feature, "targets")?.queries;
+    if (operation !== "UNION" && (!Array.isArray(targetQueries) || targetQueries.length === 0)) {
+      return baked(context, "topology-query-unreadable");
+    }
     return topologyCandidate(context, {
       featureKind: "combine",
       operationIntent,
@@ -464,6 +473,19 @@ function positiveQuantity(feature: OnshapeFeatureNode, id: string): number | nul
   return value !== null && value > 0 ? value : null;
 }
 
+function authoredPositiveQuantity(feature: OnshapeFeatureNode, id: string) {
+  const entry = parameter(feature, id);
+  if (typeof entry?.expression === "string") {
+    const translated = translateOnshapeExpression({ expression: entry.expression });
+    if (!translated.translated) return null;
+    const literal = Number(translated.valueText);
+    return Number.isFinite(literal)
+      ? literal > 0 ? literal : null
+      : createExpressionAuthoredValue(translated.valueText);
+  }
+  return positiveQuantity(feature, id);
+}
+
 function executableChamferAngle(feature: OnshapeFeatureNode, id: string): number | null {
   const value = angleDegrees(feature, id);
   return value !== null && value > 0 && value < 90 ? value : null;
@@ -495,7 +517,7 @@ export const chamferFeatureTranslator: OnshapeFeatureTranslator = {
     if (hasQueries(context.feature, "directionOverrides")) return baked(context, "chamfer-direction-overrides-unsupported");
 
     if (style === "EQUAL_OFFSETS") {
-      const width = positiveQuantity(context.feature, "width");
+      const width = authoredPositiveQuantity(context.feature, "width");
       if (width === null) return baked(context, "chamfer-width-unreadable");
       return topologyCandidate(context, {
         featureKind: "chamfer",
@@ -788,9 +810,11 @@ export function buildResolvedBodyConsumerDefinition(
     ? Object.fromEntries(
         Object.entries(planned.options).map(([key, value]) => [
           key,
-          typeof value === "number" || typeof value === "string" || typeof value === "boolean"
-            ? createLiteralAuthoredValue(value)
-            : value,
+          isAuthoredValue(value)
+            ? value
+            : typeof value === "number" || typeof value === "string" || typeof value === "boolean"
+              ? createLiteralAuthoredValue(value)
+              : value,
         ]),
       )
     : planned.options;

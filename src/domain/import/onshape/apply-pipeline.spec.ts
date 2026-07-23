@@ -1291,7 +1291,7 @@ test("legacy v1 preparation and apply remain equivalent with or without history 
   }
 });
 
-test("import apply accepts an authored imported two-distance chamfer", async () => {
+test("import apply preserves an authored chamfer expression for later variable edits", async () => {
   const created: CreateFeatureRequest[] = [];
   const service = {
     createFeature(request: CreateFeatureRequest) {
@@ -1329,7 +1329,7 @@ test("import apply accepts an authored imported two-distance chamfer", async () 
             }],
             options: {
               widthForm: "twoOffsets",
-              distance1: { source: "literal", value: 2 },
+              distance1: { source: "expression", valueText: "Wall*(4/5)" },
               distance2: { source: "literal", value: 3 },
             },
           },
@@ -1343,7 +1343,7 @@ test("import apply accepts an authored imported two-distance chamfer", async () 
   expect(created[0]?.definition.kind).toBe("chamfer");
   expect(created[0]?.definition.parameters.options).toMatchObject({
     widthForm: "twoOffsets",
-    distance1: { source: "literal", value: 2 },
+    distance1: { source: "expression", valueText: "Wall*(4/5)" },
     distance2: { source: "literal", value: 3 },
 });
 });
