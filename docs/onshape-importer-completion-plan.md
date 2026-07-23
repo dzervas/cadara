@@ -705,6 +705,16 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       gitignored and uncommitted. Temporary workspace `74e39f502861d5b417375498`
       has been deleted.
 - [ ] X.4 **Exact sketch-region selection.** Replace guessed “all closed regions”
+
+      **2026-07-24 capture attempt.** Targeted enrichment of `405fa226…` was blocked
+      before writing output by Onshape `HTTP 402 API limit exceeded` on its first
+      immutable FeatureScript evaluation. No root bundle or temporary output changed;
+      do not retry the other roots until the API quota recovers. Successful enrichment
+      now also prunes legacy rollback snapshots to the currently proven `SURFACE`
+      extrude boundaries while preserving `null` when boundary capture was unavailable.
+      The permanent capture-enrichment logic test pins this cleanup and the zero-request
+      current-evidence path; actual local snapshot cleanup remains pending the quota-gated
+      successful enrichment.
       behavior with captured, consumer-indexed evidence for the exact Onshape
       profile query. Carry enough sketch/region/entity provenance through
       capture, bundle contracts, planning, prepare, and apply to resolve opaque

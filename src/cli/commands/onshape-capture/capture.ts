@@ -227,6 +227,7 @@ export async function enrichBundleHistoryEvidence(
     const deterministicIdConsumers = collectDeterministicIdConsumers(studio.features);
     const queryStringConsumers = collectQueryStringConsumers(studio.features);
     const profileConsumers = collectSolidExtrudeProfileQueryConsumers(studio.features);
+    const rollbackSnapshots = retainIntrinsicBakeRollbackSnapshots(studio);
     const historyIsCurrent = hasCurrentOnshapeImmutableHistoryEvidence({
       schemaVersion: studio.immutableHistoryEvidenceSchemaVersion,
       manifest: studio.immutableHistoryEvidenceManifest,
@@ -237,7 +238,7 @@ export async function enrichBundleHistoryEvidence(
     });
     const profilesAreCurrent = hasCompleteCurrentProfileEvidence(studio, profileConsumers);
     if (historyIsCurrent && profilesAreCurrent) {
-      partStudios.push(studio);
+      partStudios.push({ ...studio, rollbackSnapshots });
       continue;
     }
 
@@ -278,6 +279,7 @@ export async function enrichBundleHistoryEvidence(
       : fresh.profileEvidence;
     partStudios.push({
       ...studio,
+      rollbackSnapshots,
       resolvedReferences,
       resolvedQueryReferences,
       immutableHistoryEvidenceSchemaVersion: ONSHAPE_IMMUTABLE_HISTORY_EVIDENCE_SCHEMA_VERSION,
@@ -628,6 +630,22 @@ function collectIntrinsicBakeRollbackPoints(features: unknown): SolidFeatureRoll
       ? [{ featureId: record.featureId, rollbackIndex: index + 1 }]
       : [];
   });
+}
+
+/**
+ * Retain rollback geometry only for bake boundaries that are still proven by
+ * the immutable feature history. Enrichment never recaptures geometry, and a
+ * `null` value remains an honest record that required boundary capture was
+ * unavailable.
+ */
+function retainIntrinsicBakeRollbackSnapshots(
+  studio: OnshapePartStudioCapture,
+): OnshapeRollbackSnapshot[] | null {
+  if (studio.rollbackSnapshots === null) return null;
+  const boundaryFeatureIds = new Set(
+    collectIntrinsicBakeRollbackPoints(studio.features).map((point) => point.featureId),
+  );
+  return studio.rollbackSnapshots.filter((snapshot) => boundaryFeatureIds.has(snapshot.featureId));
 }
 
 /**
