@@ -106,6 +106,7 @@ export const onshapeCaptureCommand: CommandModule = {
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       now: () => new Date(),
       cliVersion: ONSHAPE_CAPTURE_CLI_VERSION,
+      log: io.stdout,
     };
 
     let maxTranslationPolls: number | null;
@@ -125,6 +126,7 @@ export const onshapeCaptureCommand: CommandModule = {
     try {
       if (enrichIndex >= 0) {
         const input = requireOnshapeCaptureBundle(JSON.parse(await readFile(url, "utf8")));
+        io.stdout(`Enriching immutable history evidence for ${input.partStudios.length} Part Studio(s) from ${url}\n`);
         const bundle = await enrichBundleHistoryEvidence(
           input,
           { ...credentials, maxTranslationPolls: maxTranslationPolls ?? undefined },

@@ -45,6 +45,8 @@ export interface CaptureRuntime {
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
   cliVersion: string;
+  /** Optional safe progress sink for long-running capture/enrichment operations. */
+  log?: (text: string) => void;
 }
 
 export type CaptureOptions = OnshapeCredentials & {
@@ -223,10 +225,11 @@ export async function enrichBundleHistoryEvidence(
     concurrency: options.concurrency,
   });
   const partStudios: OnshapePartStudioCapture[] = [];
-  for (const studio of validated.partStudios) {
+  for (const [studioIndex, studio] of validated.partStudios.entries()) {
     const deterministicIdConsumers = collectDeterministicIdConsumers(studio.features);
     const queryStringConsumers = collectQueryStringConsumers(studio.features);
     const profileConsumers = collectSolidExtrudeProfileQueryConsumers(studio.features);
+    const progressPrefix = `Enrichment ${studioIndex + 1}/${validated.partStudios.length}: ${studio.name || studio.elementId}`;
     const rollbackSnapshots = retainIntrinsicBakeRollbackSnapshots(studio);
     const historyIsCurrent = hasCurrentOnshapeImmutableHistoryEvidence({
       schemaVersion: studio.immutableHistoryEvidenceSchemaVersion,
@@ -238,6 +241,7 @@ export async function enrichBundleHistoryEvidence(
     });
     const profilesAreCurrent = hasCompleteCurrentProfileEvidence(studio, profileConsumers);
     if (historyIsCurrent && profilesAreCurrent) {
+      runtime.log?.(`${progressPrefix} — evidence is current; no FeatureScript request.\n`);
       partStudios.push({ ...studio, rollbackSnapshots });
       continue;
     }
@@ -245,6 +249,7 @@ export async function enrichBundleHistoryEvidence(
     const retainedFinal = historyIsCurrent
       ? null
       : validFinalDeterministicRecords(studio.resolvedReferences, deterministicIdConsumers);
+    let featureScriptRequestCount = 0;
     const fresh = await resolveImmutableHistoryEvidence({
       client,
       partStudioPath: `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
@@ -252,20 +257,23 @@ export async function enrichBundleHistoryEvidence(
       queryStringConsumers: historyIsCurrent ? [] : queryStringConsumers,
       profileConsumers: profilesAreCurrent ? [] : profileConsumers,
       skipFinalState: retainedFinal !== null,
-      evaluate: (rollbackBarIndex, script) => evaluateImmutableEvidence(
-        client,
-        `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
-        rollbackBarIndex,
-        script,
-        options.evidenceCache,
-        {
-          baseUrl,
-          apiVersion,
-          documentId: validated.provenance.documentId,
-          microversion: validated.provenance.microversion,
-          elementId: studio.elementId,
-        },
-      ),
+      evaluate: (rollbackBarIndex, script) => {
+        runtime.log?.(`${progressPrefix} — requesting FeatureScript evidence #${++featureScriptRequestCount} at rollback index ${rollbackBarIndex}.\n`);
+        return evaluateImmutableEvidence(
+          client,
+          `/partstudios/d/${validated.provenance.documentId}/m/${validated.provenance.microversion}/e/${studio.elementId}`,
+          rollbackBarIndex,
+          script,
+          options.evidenceCache,
+          {
+            baseUrl,
+            apiVersion,
+            documentId: validated.provenance.documentId,
+            microversion: validated.provenance.microversion,
+            elementId: studio.elementId,
+          },
+        );
+      },
     });
     const resolvedReferences = historyIsCurrent
       ? studio.resolvedReferences

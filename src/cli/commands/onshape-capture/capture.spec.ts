@@ -374,10 +374,16 @@ test("capture.spec.ts preserves immutable evidence and diagnoses unavailable bou
   ).toBe(true);
   expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
   const beforeEnrichment = calls.length;
+  const progress: string[] = [];
   const enriched = await enrichBundleHistoryEvidence(
-    bundle, CREDENTIALS, createFixtureRuntime(fetch),
+    bundle,
+    CREDENTIALS,
+    { ...createFixtureRuntime(fetch), log: (message) => progress.push(message) },
   );
   expect(calls).toHaveLength(beforeEnrichment);
+  expect(progress).toEqual([
+    `Enrichment 1/1: ${bundle.partStudios[0]!.name} — evidence is current; no FeatureScript request.\n`,
+  ]);
   expect(enriched.partStudios[0]!.rollbackSnapshots).toBeNull();
   expect(calls.some((call) => call.method === "DELETE")).toBe(false);
 });
@@ -470,10 +476,19 @@ test("capture.spec.ts targeted enrichment replaces complete immutable history ev
   );
 
   const beforeEnrich = calls.length;
-  const enriched = await enrichBundleHistoryEvidence(stale, CREDENTIALS, createFixtureRuntime(fetch));
+  const progress: string[] = [];
+  const enriched = await enrichBundleHistoryEvidence(
+    stale,
+    CREDENTIALS,
+    { ...createFixtureRuntime(fetch), log: (message) => progress.push(message) },
+  );
   const enrichCalls = calls.slice(beforeEnrich);
   expect(enrichCalls.filter((call) => call.url.includes("/featurescript"))).toHaveLength(4);
   expect(enrichCalls.every((call) => call.url.includes("/featurescript") && call.url.includes(`/m/${FIXTURE_MICROVERSION}/`))).toBe(true);
+  expect(progress).toHaveLength(4);
+  expect(progress).toEqual(expect.arrayContaining([
+    `Enrichment 1/1: ${stale.partStudios[0]!.name} — requesting FeatureScript evidence #1 at rollback index 0.\n`,
+  ]));
   const opaqueEvaluation = enrichCalls.find((call) => call.body?.includes("opaque-profile"));
   expect(opaqueEvaluation?.body).toContain("opaque-profile");
   expect(opaqueEvaluation?.body).not.toContain("qEverything");
