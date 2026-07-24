@@ -214,7 +214,10 @@ test("capture.spec.ts records final-state and history-point deterministic refere
     calls.filter((call) => /rollbackBarIndex=[012]/.test(call.url)),
     "Distinct deterministic-ID consumer points should each be evaluated once without workspace rollback.",
   ).toHaveLength(3);
-  expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
+  expect(
+    calls.filter((call) => call.url.includes("/features/rollback")),
+    "The lone non-sketch extrude is a required bake boundary, so exactly one workspace rollback snapshot is captured.",
+  ).toHaveLength(1);
   const featureRequest = calls.find(
     (call) => call.method === "GET" && call.url.includes(`/e/${FIXTURE_PART_STUDIO_ID}/features?`),
   );
@@ -295,9 +298,10 @@ test("capture.spec.ts rejects non-qCompressed query strings without evaluating t
   expect(calls.some((call) => call.url.includes("rollbackBarIndex=3"))).toBe(false);
 });
 
-test("capture.spec.ts ordinary capture is immutable and does not create or mutate a workspace", async () => {
+test("capture.spec.ts a studio with no bake boundaries never creates or mutates a workspace", async () => {
   const { fetch, calls } = createFixtureFetch();
-  await captureBundle(parseDocumentUrl(FIXTURE_ELEMENT_URL), CREDENTIALS, createFixtureRuntime(fetch));
+  const url = `https://cad.onshape.com/documents/${FIXTURE_DOCUMENT_ID}/w/a14bbd18c43e1cd99d2cfc48/e/${FIXTURE_EMPTY_STUDIO_ID}`;
+  await captureBundle(parseDocumentUrl(url), CREDENTIALS, createFixtureRuntime(fetch));
 
   expect(calls.filter((call) => call.url.includes("/workspaces"))).toHaveLength(0);
   expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
@@ -380,7 +384,11 @@ test("capture.spec.ts preserves immutable evidence and diagnoses unavailable bou
     CREDENTIALS,
     { ...createFixtureRuntime(fetch), log: (message) => progress.push(message) },
   );
-  expect(calls).toHaveLength(beforeEnrichment);
+  // Enrichment retries the temporary workspace to backfill the still-missing
+  // boundaries; the persistent 403 keeps the snapshots honestly null.
+  const enrichCalls = calls.slice(beforeEnrichment);
+  expect(enrichCalls.filter((call) => call.url.includes("/workspaces"))).toHaveLength(1);
+  expect(enrichCalls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(0);
   expect(progress).toEqual([
     `Enrichment 1/1: ${bundle.partStudios[0]!.name} — evidence is current; no FeatureScript request.\n`,
   ]);
@@ -388,17 +396,7 @@ test("capture.spec.ts preserves immutable evidence and diagnoses unavailable bou
   expect(calls.some((call) => call.method === "DELETE")).toBe(false);
 });
 
-test("capture.spec.ts automatically snapshots only locally proven surface-extrude bake boundaries", async () => {
-  const { fetch: ordinaryFetch, calls: ordinaryCalls } = createFixtureFetch();
-  const noBoundaries = await captureBundle(
-    parseDocumentUrl(FIXTURE_ELEMENT_URL),
-    CREDENTIALS,
-    createFixtureRuntime(ordinaryFetch),
-  );
-  expect(noBoundaries.partStudios[0]!.rollbackSnapshots).toEqual([]);
-  expect(ordinaryCalls.filter((call) => call.url.includes("/workspaces"))).toHaveLength(0);
-  expect(ordinaryCalls.filter((call) => /\/(tessellatedfaces|translations|externaldata)\b/.test(call.url))).toHaveLength(0);
-
+test("capture.spec.ts snapshots every non-sketch feature as a required bake boundary", async () => {
   const routes = buildDefaultRoutes();
   routes.unshift({
     method: "GET",
@@ -406,29 +404,36 @@ test("capture.spec.ts automatically snapshots only locally proven surface-extrud
     respond: () => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(featuresWithSurfaceExtrude())) }),
   });
   const { fetch, calls } = createFixtureFetch(routes);
-  const withSnapshots = await captureBundle(
+  const bundle = await captureBundle(
     parseDocumentUrl(FIXTURE_ELEMENT_URL),
     CREDENTIALS,
     createFixtureRuntime(fetch),
   );
 
-  expect(withSnapshots.partStudios[0]!.rollbackSnapshots).toEqual([
-    expect.objectContaining({ featureId: "F_SURFACE", tessellationTolerance: 0.001 }),
+  // Sketches never change solid bodies, so every other feature — the parametric
+  // extrude, the fillet, and the surface extrude — is a snapshot boundary the
+  // bake-segment planner needs both sides of a body delta for.
+  expect(bundle.partStudios[0]!.rollbackSnapshots?.map((snapshot) => snapshot.featureId)).toEqual([
+    "FG094ehBlsq34dl_0",
+    "F_ORDINARY",
+    "F_SURFACE",
   ]);
-  expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(1);
-  expect(calls.filter((call) => call.url.includes("/tessellatedfaces"))).toHaveLength(1);
-  expect(calls.filter((call) => call.method === "POST" && call.url.includes("/translations"))).toHaveLength(1);
-  expect(calls.filter((call) => call.method === "GET" && call.url.includes("/translations/"))).toHaveLength(1);
-  expect(calls.filter((call) => call.url.includes("/externaldata/"))).toHaveLength(1);
+  expect(calls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(3);
+  expect(calls.filter((call) => call.url.includes("/tessellatedfaces"))).toHaveLength(3);
+  expect(calls.filter((call) => call.method === "POST" && call.url.includes("/translations"))).toHaveLength(3);
+  expect(calls.filter((call) => call.method === "POST" && call.url.includes("/workspaces"))).toHaveLength(1);
+  expect(calls.filter((call) => call.method === "DELETE")).toHaveLength(1);
 });
 
-test("capture.spec.ts enrichment prunes legacy snapshots without recapturing current evidence", async () => {
+test("capture.spec.ts enrichment backfills missing snapshots and retains existing ones without re-capture", async () => {
   const { fetch, calls } = createFixtureFetch();
   const captured = await captureBundle(
     parseDocumentUrl(FIXTURE_ELEMENT_URL), CREDENTIALS, createFixtureRuntime(fetch),
   );
   const staleSnapshots = structuredClone(captured);
   staleSnapshots.partStudios[0]!.features = featuresWithSurfaceExtrude();
+  // Two of the three non-sketch boundaries already have snapshots; the parametric
+  // extrude FG094ehBlsq34dl_0 is the only one missing.
   staleSnapshots.partStudios[0]!.rollbackSnapshots = [
     { featureId: "F_ORDINARY", tessellationTolerance: 0.001, tessellatedFaces: { legacy: true } },
     { featureId: "F_SURFACE", tessellationTolerance: 0.001, tessellatedFaces: { boundary: true } },
@@ -439,11 +444,28 @@ test("capture.spec.ts enrichment prunes legacy snapshots without recapturing cur
     staleSnapshots, CREDENTIALS, createFixtureRuntime(fetch),
   );
 
-  expect(calls).toHaveLength(beforeEnrichment);
-  expect(enriched.partStudios[0]!.rollbackSnapshots).toEqual([
-    { featureId: "F_SURFACE", tessellationTolerance: 0.001, tessellatedFaces: { boundary: true } },
+  const enrichCalls = calls.slice(beforeEnrichment);
+  // Exactly one workspace, one rollback for the single missing boundary, one delete.
+  expect(enrichCalls.filter((call) => call.method === "POST" && call.url.includes("/workspaces"))).toHaveLength(1);
+  expect(enrichCalls.filter((call) => call.url.includes("/features/rollback"))).toHaveLength(1);
+  expect(enrichCalls.filter((call) => call.method === "DELETE")).toHaveLength(1);
+  expect(enriched.partStudios[0]!.rollbackSnapshots?.map((snapshot) => snapshot.featureId)).toEqual([
+    "FG094ehBlsq34dl_0",
+    "F_ORDINARY",
+    "F_SURFACE",
   ]);
+  // The already-present snapshots are retained byte-for-byte, never re-captured.
+  expect(enriched.partStudios[0]!.rollbackSnapshots).toEqual(expect.arrayContaining([
+    { featureId: "F_ORDINARY", tessellationTolerance: 0.001, tessellatedFaces: { legacy: true } },
+    { featureId: "F_SURFACE", tessellationTolerance: 0.001, tessellatedFaces: { boundary: true } },
+  ]));
   expect(enriched.partStudios[0]!.groundTruth).toEqual(staleSnapshots.partStudios[0]!.groundTruth);
+
+  // Re-enriching a now-complete bundle issues zero geometry requests.
+  const beforeRerun = calls.length;
+  const rerun = await enrichBundleHistoryEvidence(enriched, CREDENTIALS, createFixtureRuntime(fetch));
+  expect(calls).toHaveLength(beforeRerun);
+  expect(rerun.partStudios[0]!.rollbackSnapshots).toEqual(enriched.partStudios[0]!.rollbackSnapshots);
 });
 
 test("capture.spec.ts targeted enrichment replaces complete immutable history evidence without recapturing immutable sections", async () => {
@@ -455,6 +477,12 @@ test("capture.spec.ts targeted enrichment replaces complete immutable history ev
   );
   const stale = structuredClone(captured);
   stale.partStudios[0]!.features = featuresWithOpaqueProfile();
+  // Both non-sketch boundaries already have snapshots so enrichment only touches
+  // immutable evidence, not geometry.
+  stale.partStudios[0]!.rollbackSnapshots = [
+    ...(captured.partStudios[0]!.rollbackSnapshots ?? []),
+    { featureId: "E_OPAQUE", tessellationTolerance: 0.001, tessellatedFaces: { bodies: [] } },
+  ];
   stale.partStudios[0]!.profileEvidence = [];
   stale.partStudios[0]!.profileEvidenceSchemaVersion = 0;
   stale.partStudios[0]!.resolvedReferences.push({
