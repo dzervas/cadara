@@ -1064,6 +1064,7 @@ test("src/domain/import/onshape/provider.spec.ts keeps an UP_TO_VERTEX without i
     tier: "baked",
     target: { kind: "suppressed" },
     suppressed: true,
+    reasonCodes: ["extrude-extent-topology-unresolved"],
   });
 
   const actions = await onshapeImportProvider.prepare({
@@ -1072,8 +1073,14 @@ test("src/domain/import/onshape/provider.spec.ts keeps an UP_TO_VERTEX without i
     selections: onshapeImportProvider.createDefaultSelections(review),
     capabilities: capabilitiesWithProbe([vertexProbeSignature()]),
   });
+  // Feature-level fail-closed: the unresolvable extrude emits no create action,
+  // but the rest of the studio still prepares (no whole-studio throw).
   expect(actions.createFeatures?.some((action) => action.featureLabel === "Up to vertex"))
     .toBe(false);
+  expect(actions.createFeatures?.some((action) => action.featureLabel === "Base extrude"))
+    .toBe(true);
+  expect(JSON.stringify(actions)).not.toContain("topologySlot");
+  expect(validateImportPreparedActions(actions).success).toBe(true);
 });
 
 test("src/domain/import/onshape/provider.spec.ts resolves extent and scope atomically", async () => {
@@ -1104,6 +1111,23 @@ test("src/domain/import/onshape/provider.spec.ts resolves extent and scope atomi
   expect(actions.createFeatures?.some((action) => action.featureLabel === "Up to vertex"))
     .toBe(false);
   expect(JSON.stringify(actions)).not.toContain("firstEndVertex");
+});
+
+test("src/domain/import/onshape/provider.spec.ts surfaces human-readable review copy for an unresolved extrude extent", async () => {
+  const source = sourceFromBundle(makeUpToVertexExtrudeBundle(false));
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([vertexProbeSignature()]),
+  });
+  const schema = onshapeImportProvider.getReviewFormSchema(
+    review,
+    onshapeImportProvider.createDefaultSelections(review),
+  );
+  // The new reason code must render dedicated review copy (REVIEW_REASON_COPY is
+  // an exhaustive Record<PlanReasonCode, string>, so this also guards the entry).
+  expect(JSON.stringify(schema)).toContain(
+    "extrude up-to or boolean-scope topology could not be resolved as a durable reference",
+  );
 });
 
 test("src/domain/import/onshape/provider.spec.ts cannot promote a SURFACE Extrude 4 under review", async () => {
