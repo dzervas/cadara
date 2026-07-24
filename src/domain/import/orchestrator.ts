@@ -4,6 +4,8 @@ import type {
   HistoryProbeTopologySignature,
 } from "@/contracts/import/capabilities";
 import type {
+  ImportDeferredExtrudeEndCondition,
+  ImportDeferredExtrudeExtent,
   ImportDeferredSketchEntityRef,
   ImportDeferredSketchPointRef,
   ImportDeferredTopologyRef,
@@ -27,6 +29,8 @@ import { requireBakedMeshGeometryAssetData } from "@/contracts/modeling/geometry
 import type {
   CommitSketchRequest,
   CreateFeatureRequest,
+  ExtrudeEndCondition,
+  ExtrudeFeatureExtent,
   ModelingDiagnostic,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
@@ -574,6 +578,50 @@ export class ImportDeferredMaterializer {
     }
   }
 
+  private async materializeExtrudeEnd(
+    end: ImportDeferredExtrudeEndCondition,
+  ): Promise<ExtrudeEndCondition> {
+    if (
+      end.kind !== "upToFace" &&
+      end.kind !== "upToPart" &&
+      end.kind !== "upToVertex"
+    ) {
+      return end;
+    }
+
+    const target = isDeferredTopologyRef(end.target)
+      ? await this.resolveDeferredTopologyRef(end.target)
+      : end.target;
+    const expectedKind =
+      end.kind === "upToFace"
+        ? "face"
+        : end.kind === "upToPart"
+          ? "body"
+          : "vertex";
+    if (target.kind !== expectedKind) {
+      throw new Error(
+        `Deferred ${end.kind} target resolved as ${target.kind}, expected ${expectedKind}.`,
+      );
+    }
+    return { ...end, target } as Extract<ExtrudeEndCondition, { kind: typeof end.kind }>;
+  }
+
+  private async materializeExtrudeExtent(
+    extent: ImportDeferredExtrudeExtent,
+  ): Promise<ExtrudeFeatureExtent> {
+    if (extent.mode === "twoSide") {
+      return {
+        mode: "twoSide",
+        firstEnd: await this.materializeExtrudeEnd(extent.firstEnd),
+        secondEnd: await this.materializeExtrudeEnd(extent.secondEnd),
+      };
+    }
+    return {
+      ...extent,
+      end: await this.materializeExtrudeEnd(extent.end),
+    } as ExtrudeFeatureExtent;
+  }
+
   async materializeFeatureRequest(
     request: ImportPreparedActions["createFeatures"] extends
       | (infer Entry)[]
@@ -802,6 +850,11 @@ export class ImportDeferredMaterializer {
             }
           : booleanScope;
 
+    const extent =
+      request.definition.kind === "extrude"
+        ? await this.materializeExtrudeExtent(request.definition.parameters.extent)
+        : null;
+
     if (request.definition.kind === "revolve") {
       const axis = request.definition.parameters.axis;
       const materializedAxis =
@@ -831,6 +884,7 @@ export class ImportDeferredMaterializer {
         parameters: {
           ...request.definition.parameters,
           profiles,
+          extent: extent!,
           booleanScope: materializedBooleanScope,
         },
       },

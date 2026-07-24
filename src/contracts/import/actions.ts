@@ -2,6 +2,7 @@ import type {
   AddDocumentVariableRequest,
   CommitSketchRequest,
   CreateFeatureRequest,
+  ExtrudeEndCondition,
   ExtrudeFeatureParameters,
   ExtrudeProfileRef,
   FeatureBooleanScope,
@@ -168,12 +169,52 @@ export type ImportDeferredFeatureBooleanScope =
       bodyIds: readonly (BodyId | ImportDeferredTopologyRef)[];
     };
 
+type ImportDeferredTopologyRefOf<Kind extends ImportDeferredTopologyRef["expectedKind"]> =
+  Omit<ImportDeferredTopologyRef, "expectedKind"> & { expectedKind: Kind };
+
+export type ImportDeferredExtrudeEndCondition =
+  | Exclude<
+      ExtrudeEndCondition,
+      { kind: "upToFace" | "upToPart" | "upToVertex" }
+    >
+  | (Omit<Extract<ExtrudeEndCondition, { kind: "upToFace" }>, "target"> & {
+      target:
+        | Extract<ExtrudeEndCondition, { kind: "upToFace" }>["target"]
+        | ImportDeferredTopologyRefOf<"face">;
+    })
+  | (Omit<Extract<ExtrudeEndCondition, { kind: "upToPart" }>, "target"> & {
+      target:
+        | Extract<ExtrudeEndCondition, { kind: "upToPart" }>["target"]
+        | ImportDeferredTopologyRefOf<"body">;
+    })
+  | (Omit<Extract<ExtrudeEndCondition, { kind: "upToVertex" }>, "target"> & {
+      target:
+        | Extract<ExtrudeEndCondition, { kind: "upToVertex" }>["target"]
+        | ImportDeferredTopologyRefOf<"vertex">;
+    });
+
+export type ImportDeferredExtrudeExtent =
+  | { mode: "oneSide"; end: ImportDeferredExtrudeEndCondition }
+  | {
+      mode: "symmetric";
+      end: Extract<ImportDeferredExtrudeEndCondition, { kind: "blind" | "throughAll" }>;
+    }
+  | {
+      mode: "twoSide";
+      firstEnd: ImportDeferredExtrudeEndCondition;
+      secondEnd: ImportDeferredExtrudeEndCondition;
+    };
+
 export interface ImportDeferredExtrudeFeatureParameters
-  extends Omit<ExtrudeFeatureParameters, "profiles" | "booleanScope"> {
+  extends Omit<
+    ExtrudeFeatureParameters,
+    "profiles" | "booleanScope" | "extent"
+  > {
   profiles: readonly [
     ImportDeferredExtrudeProfileRef,
     ...ImportDeferredExtrudeProfileRef[],
   ];
+  extent: ImportDeferredExtrudeExtent;
   booleanScope: ImportDeferredFeatureBooleanScope;
 }
 
@@ -313,6 +354,9 @@ export const IMPORT_DEFERRED_TOPOLOGY_BLESSED_POSITIONS = [
   "createFeatures[].definition.parameters.booleanScope.bodyId",
   "createFeatures[].definition.parameters.booleanScope.bodyIds[]",
   "createFeatures[].definition.parameters.profiles[]",
+  "createFeatures[].definition.parameters.extent.end.target",
+  "createFeatures[].definition.parameters.extent.firstEnd.target",
+  "createFeatures[].definition.parameters.extent.secondEnd.target",
   "commitSketches[].plane.support",
 ] as const;
 

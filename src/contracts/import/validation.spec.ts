@@ -328,6 +328,125 @@ test("src/contracts/import/validation.spec.ts", async () => {
     "Prepared action validation should reject deferred values at non-blessed positions for their kind.",
   ).toBeFalsy();
 
+  const directProfile = {
+    kind: "region" as const,
+    sketchId: "sketch_profile",
+    regionId: "region_profile",
+  };
+  const deferredFaceTarget = {
+    kind: "topologyOf" as const,
+    expectedKind: "face" as const,
+    capturedSignature: { entityClass: "face" as const, geometryType: "plane" },
+    tolerance: {
+      linear: 0.01,
+      angularRadians: 0.01,
+      relative: 0.001,
+      ambiguityMargin: 0.25,
+    },
+    source: {
+      consumerFeatureId: "EXTRUDE_FACE",
+      parameterId: "endBoundEntityFace",
+      deterministicId: "face_1",
+    },
+  };
+  const deferredFaceExtrude = {
+    ...extrudeRequest(0),
+    definition: {
+      ...extrudeRequest(0).definition,
+      parameters: {
+        ...extrudeRequest(0).definition.parameters,
+        profiles: [directProfile],
+        extent: {
+          mode: "oneSide" as const,
+          end: {
+            kind: "upToFace" as const,
+            direction: "positive" as const,
+            target: deferredFaceTarget,
+          },
+        },
+      },
+    },
+  };
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [
+        {
+          ...deferredFaceExtrude,
+          definition: {
+            ...deferredFaceExtrude.definition,
+            parameters: {
+              ...deferredFaceExtrude.definition.parameters,
+              extent: {
+                mode: "oneSide",
+                end: {
+                  kind: "blind",
+                  direction: "positive",
+                  distance: { source: "literal", value: 10 },
+                },
+              },
+            },
+          },
+        },
+        deferredFaceExtrude,
+      ],
+      orderedActions: [
+        { kind: "createFeature", index: 0 },
+        { kind: "createFeature", index: 1 },
+      ],
+    }).success,
+    "Prepared action validation should accept a deferred upToFace target after its producer.",
+  ).toBeTruthy();
+
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [
+        {
+          ...deferredFaceExtrude,
+          definition: {
+            ...deferredFaceExtrude.definition,
+            parameters: {
+              ...deferredFaceExtrude.definition.parameters,
+              extent: {
+                mode: "oneSide" as const,
+                end: {
+                  kind: "upToFace" as const,
+                  direction: "positive" as const,
+                  target: { ...deferredFaceTarget, expectedKind: "body" as const },
+                },
+              },
+            },
+          },
+        },
+      ],
+    }).success,
+    "Prepared action validation should reject deferred end targets with the wrong expected kind.",
+  ).toBeFalsy();
+
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [
+        {
+          ...deferredFaceExtrude,
+          definition: {
+            ...deferredFaceExtrude.definition,
+            parameters: {
+              ...deferredFaceExtrude.definition.parameters,
+              extent: {
+                mode: "oneSide" as const,
+                end: {
+                  kind: "upToFace" as const,
+                  direction: "positive" as const,
+                  target: { kind: "topologySlot" as const, slotKey: "firstEndFace" },
+                },
+              },
+            },
+          },
+        },
+      ],
+    }).success,
+    "Prepared action validation should reject planner-only topologySlot targets.",
+  ).toBeFalsy();
+
   expect(
     validateImportPreparedActions({
       commitSketches: [sketchRequest()],

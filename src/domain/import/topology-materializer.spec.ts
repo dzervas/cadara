@@ -27,7 +27,7 @@ const livePayload = payload("body_live" as BodyId);
 const derived = deriveKernelTopologySignaturesFromExactBrepPayload(livePayload);
 if (derived.status !== "available") throw new Error("Expected fixture signatures.");
 
-function selector(kind: "body" | "face" | "edge"): ImportDeferredTopologyRef {
+function selector(kind: "body" | "face" | "edge" | "vertex"): ImportDeferredTopologyRef {
   const signature = derived.signatures.find((entry) => entry.entityClass === kind)!;
   return {
     kind: "topologyOf",
@@ -292,6 +292,85 @@ test("materializes an exact deferred planar face profile before an extrude appli
     parameters: { profiles: [{ kind: "face", bodyId: "body_live" }] },
   });
   expect(JSON.stringify(request)).not.toContain("topologyOf");
+});
+
+test("materializes one-side deferred extrude face, part, and vertex targets", async () => {
+  const ends = [
+    ["upToFace", "face"],
+    ["upToPart", "body"],
+    ["upToVertex", "vertex"],
+  ] as const;
+
+  for (const [kind, expectedKind] of ends) {
+    const request = await materialize({
+      kind: "extrude",
+      featureTypeVersion: "feature-type/extrude/v1alpha1",
+      parameters: {
+        profiles: [{ kind: "region", sketchId: "sketch_live", regionId: "region_live" }],
+        startExtent: { kind: "profilePlane" },
+        extent: {
+          mode: "oneSide",
+          end: { kind, direction: "positive", target: selector(expectedKind) },
+        },
+        operation: { source: "literal", value: "newBody" },
+        booleanScope: { kind: "standalone" },
+      },
+    });
+    if (request.definition.kind !== "extrude" || request.definition.parameters.extent.mode !== "oneSide") {
+      throw new Error("Expected a one-side extrude.");
+    }
+    expect(request.definition.parameters.extent.end.target.kind).toBe(expectedKind);
+    expect(JSON.stringify(request)).not.toContain("topologyOf");
+  }
+});
+
+test("materializes both deferred two-side extrude targets", async () => {
+  const request = await materialize({
+    kind: "extrude",
+    featureTypeVersion: "feature-type/extrude/v1alpha1",
+    parameters: {
+      profiles: [{ kind: "region", sketchId: "sketch_live", regionId: "region_live" }],
+      startExtent: { kind: "profilePlane" },
+      extent: {
+        mode: "twoSide",
+        firstEnd: { kind: "upToFace", direction: "positive", target: selector("face") },
+        secondEnd: { kind: "upToVertex", direction: "negative", target: selector("vertex") },
+      },
+      operation: { source: "literal", value: "newBody" },
+      booleanScope: { kind: "standalone" },
+    },
+  });
+
+  expect(request.definition).toMatchObject({
+    kind: "extrude",
+    parameters: {
+      extent: {
+        mode: "twoSide",
+        firstEnd: { kind: "upToFace", target: { kind: "face" } },
+        secondEnd: { kind: "upToVertex", target: { kind: "vertex" } },
+      },
+    },
+  });
+  expect(JSON.stringify(request)).not.toContain("topologyOf");
+});
+
+test("rejects an extrude end whose resolved target kind does not match the end kind", async () => {
+  await expect(
+    materialize({
+      kind: "extrude",
+      featureTypeVersion: "feature-type/extrude/v1alpha1",
+      parameters: {
+        profiles: [{ kind: "region", sketchId: "sketch_live", regionId: "region_live" }],
+        startExtent: { kind: "profilePlane" },
+        extent: {
+          mode: "oneSide",
+          end: { kind: "upToFace", direction: "positive", target: selector("body") },
+        },
+        operation: { source: "literal", value: "newBody" },
+        booleanScope: { kind: "standalone" },
+      },
+    }),
+  ).rejects.toThrow("Deferred upToFace target resolved as body, expected face");
 });
 
 test("apply-time topology rematch resolves one body-only checkpoint from render evidence", async () => {
