@@ -63,6 +63,7 @@ type SegmentRecord = {
   endAngle: number;
   traversalDirection: "forward" | "reverse";
   sourceSegmentOrdinal?: number;
+  coincidentSources?: readonly RegionBoundarySegmentRecord["source"][];
   curve:
     | { kind: "lineSegment" }
     | {
@@ -78,6 +79,7 @@ type SegmentRecord = {
 
 type RingBoundarySegment = {
   source: RegionBoundarySegmentRecord["source"];
+  coincidentSources?: readonly RegionBoundarySegmentRecord["source"][];
   startPointId: SketchPointId | null;
   endPointId: SketchPointId | null;
   start?: SketchPoint2D;
@@ -369,6 +371,7 @@ function reverseSegment(segment: SegmentRecord): SegmentRecord {
     traversalDirection:
       segment.traversalDirection === "forward" ? "reverse" : "forward",
     sourceSegmentOrdinal: segment.sourceSegmentOrdinal,
+    coincidentSources: segment.coincidentSources,
     curve:
       segment.curve.kind === "arc"
         ? {
@@ -1003,6 +1006,52 @@ function lineCircleIntersections(
   });
 }
 
+function lineLineIntersections(
+  left: SegmentRecord,
+  right: SegmentRecord,
+): SketchPoint2D[] {
+  if (
+    left.curve.kind !== "lineSegment" ||
+    right.curve.kind !== "lineSegment" ||
+    isDegenerateSegment(left) ||
+    isDegenerateSegment(right)
+  ) {
+    return [];
+  }
+
+  const leftDx = left.end[0] - left.start[0];
+  const leftDy = left.end[1] - left.start[1];
+  const rightDx = right.end[0] - right.start[0];
+  const rightDy = right.end[1] - right.start[1];
+  const denominator = leftDx * rightDy - leftDy * rightDx;
+  const parallelTolerance = REGION_POINT_TOLERANCE * Math.max(
+    distanceBetweenPoints(left.start, left.end),
+    distanceBetweenPoints(right.start, right.end),
+  );
+
+  if (Math.abs(denominator) <= parallelTolerance) {
+    return [left.start, left.end, right.start, right.end].filter(
+      (point, index, points) =>
+        pointOnSegment(point, left.start, left.end) &&
+        pointOnSegment(point, right.start, right.end) &&
+        points.slice(0, index).every((candidate) => !equalsPoint(candidate, point)),
+    );
+  }
+
+  const startDx = right.start[0] - left.start[0];
+  const startDy = right.start[1] - left.start[1];
+  const leftParameter =
+    (startDx * rightDy - startDy * rightDx) / denominator;
+  const point: SketchPoint2D = [
+    left.start[0] + leftParameter * leftDx,
+    left.start[1] + leftParameter * leftDy,
+  ];
+  return pointOnSegment(point, left.start, left.end) &&
+    pointOnSegment(point, right.start, right.end)
+    ? [point]
+    : [];
+}
+
 function arcIntersections(
   left: SegmentRecord,
   right: SegmentRecord,
@@ -1123,7 +1172,52 @@ function splitSegmentAtPoints(
   }).filter((entry) => !isDegenerateSegment(entry));
 }
 
-function subdivideCircleIntersections(segments: readonly SegmentRecord[]) {
+function canonicalizeCoincidentLineSpans(segments: readonly SegmentRecord[]) {
+  const canonical: SegmentRecord[] = [];
+
+  for (const segment of segments) {
+    if (segment.curve.kind !== "lineSegment") {
+      canonical.push(segment);
+      continue;
+    }
+
+    const matchIndex = canonical.findIndex(
+      (candidate) =>
+        candidate.curve.kind === "lineSegment" &&
+        ((equalsPoint(candidate.start, segment.start) &&
+          equalsPoint(candidate.end, segment.end)) ||
+          (equalsPoint(candidate.start, segment.end) &&
+            equalsPoint(candidate.end, segment.start))),
+    );
+    if (matchIndex < 0) {
+      canonical.push({
+        ...segment,
+        coincidentSources: segment.coincidentSources ?? [segment.source],
+      });
+      continue;
+    }
+
+    const current = canonical[matchIndex]!;
+    const sources = [
+      ...(current.coincidentSources ?? [current.source]),
+      ...(segment.coincidentSources ?? [segment.source]),
+    ].sort((left, right) =>
+      getSegmentSourceKey(left).localeCompare(getSegmentSourceKey(right)),
+    ).filter((source, index, entries) =>
+      index === 0 || getSegmentSourceKey(source) !== getSegmentSourceKey(entries[index - 1]!),
+    );
+    const representative =
+      segment.sourceKey.localeCompare(current.sourceKey) < 0 ? segment : current;
+    canonical[matchIndex] = {
+      ...representative,
+      coincidentSources: sources,
+    };
+  }
+
+  return canonical;
+}
+
+function subdivideIntersections(segments: readonly SegmentRecord[]) {
   const pointsBySegment = new Map<SegmentRecord, SketchPoint2D[]>();
   const circles = segments.filter(
     (segment) => segment.curve.kind === "arc" && segment.curve.isFullCircle,
@@ -1133,8 +1227,11 @@ function subdivideCircleIntersections(segments: readonly SegmentRecord[]) {
     for (let rightIndex = leftIndex + 1; rightIndex < segments.length; rightIndex += 1) {
       const left = segments[leftIndex]!;
       const right = segments[rightIndex]!;
-      if (left.curve.kind !== "arc" && right.curve.kind !== "arc") continue;
-      for (const point of arcIntersections(left, right)) {
+      const intersections =
+        left.curve.kind === "lineSegment" && right.curve.kind === "lineSegment"
+          ? lineLineIntersections(left, right)
+          : arcIntersections(left, right);
+      for (const point of intersections) {
         (pointsBySegment.get(left) ?? pointsBySegment.set(left, []).get(left)!).push(point);
         (pointsBySegment.get(right) ?? pointsBySegment.set(right, []).get(right)!).push(point);
       }
@@ -1149,12 +1246,14 @@ function subdivideCircleIntersections(segments: readonly SegmentRecord[]) {
   });
   return {
     standaloneCircles,
-    segments: segments.flatMap((segment) =>
-      standaloneCircles.includes(segment)
-        ? []
-        : pointsBySegment.has(segment)
-          ? splitSegmentAtPoints(segment, pointsBySegment.get(segment)!)
-          : [segment],
+    segments: canonicalizeCoincidentLineSpans(
+      segments.flatMap((segment) =>
+        standaloneCircles.includes(segment)
+          ? []
+          : pointsBySegment.has(segment)
+            ? splitSegmentAtPoints(segment, pointsBySegment.get(segment)!)
+            : [segment],
+      ),
     ),
   };
 }
@@ -1183,7 +1282,7 @@ export function findSketchRings(
     solvedSnapshot,
     authoredProjectedReferences,
   ).concat(circleSegments);
-  const subdivision = subdivideCircleIntersections(builtSegments);
+  const subdivision = subdivideIntersections(builtSegments);
   const degenerateSegments = subdivision.segments.filter(isDegenerateSegment);
   const initialSegments = subdivision.segments.filter(
     (segment) => !isDegenerateSegment(segment),
@@ -1248,8 +1347,10 @@ function extractSegmentGraphRings(segments: readonly SegmentRecord[]) {
       !selfIntersects
     ) {
       rings.push(ring);
-      for (const segment of ring.boundarySegments) {
-        usedSourceKeys.add(getSegmentSourceKey(segment.source));
+      for (const segment of faceEdges) {
+        for (const source of segment.coincidentSources ?? [segment.source]) {
+          usedSourceKeys.add(getSegmentSourceKey(source));
+        }
       }
     } else if (
       ring.signedArea > MIN_REGION_AREA ||
@@ -1389,6 +1490,9 @@ function createRingFromGraphFace(
     kind: "segments",
     boundarySegments: faceEdges.map((entry) => ({
       source: entry.source,
+      coincidentSources: entry.coincidentSources?.filter(
+        (source) => getSegmentSourceKey(source) !== entry.sourceKey,
+      ),
       startPointId: entry.startPointId,
       endPointId: entry.endPointId,
       sourceSegmentOrdinal: entry.sourceSegmentOrdinal,
@@ -1814,6 +1918,9 @@ function toRegionSegmentRecord(
 ): RegionBoundarySegmentRecord {
   return {
     source: segment.source,
+    ...(segment.coincidentSources && segment.coincidentSources.length > 0
+      ? { coincidentSources: [...segment.coincidentSources] }
+      : {}),
     startPointId: segment.startPointId,
     endPointId: segment.endPointId,
     ...(segment.start && segment.end
@@ -1822,7 +1929,7 @@ function toRegionSegmentRecord(
     ...(segment.traversalDirection === "reverse"
       ? { traversalDirection: "reverse" as const }
       : {}),
-    ...(segment.sourceSegmentOrdinal
+    ...(segment.sourceSegmentOrdinal !== undefined
       ? { sourceSegmentOrdinal: segment.sourceSegmentOrdinal }
       : {}),
   };
@@ -1833,6 +1940,7 @@ function reverseRingBoundarySegment(
 ): RingBoundarySegment {
   return {
     source: segment.source,
+    coincidentSources: segment.coincidentSources,
     startPointId: segment.endPointId,
     endPointId: segment.startPointId,
     sourceSegmentOrdinal: segment.sourceSegmentOrdinal,

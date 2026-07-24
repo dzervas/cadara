@@ -33,7 +33,10 @@ import {
 } from "@/domain/import/onshape/wave-b-capture-fixtures";
 import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
 import { makeWaveXPatternMirrorCaptureBundle } from "@/domain/import/onshape/wave-x-pattern-mirror-capture-fixtures";
-import { makeWaveXClosedHollowShellCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
+import {
+  makeWaveXClosedHollowShellCaptureBundle,
+  makeWaveXRegionSelectionCaptureBundle,
+} from "@/domain/import/onshape/wave-x-capture-fixtures";
 import {
   applyImportPreparedActions,
   createImportCapabilities,
@@ -1014,6 +1017,138 @@ test("Onshape closed hollow shell fixture applies and rebuilds through real OCC"
     sourceBody!.topology.faceIds.length,
   );
 });
+
+// Lane: logic (per docs/testing.md — provider review/prepare/apply crosses the
+// non-UI importer boundary into the real OCC adapter).
+// Seam: X.4 synthetic schema-v3 profile evidence becomes concrete OCC region
+// profiles, never a deferred regionOf request, for opaque and readable forms.
+test("Onshape X.4 region selections apply through real OCC with exact live solids", async () => {
+  const oc = await loadRealOccForImportTest();
+  const source = sourceFromBundle(makeWaveXRegionSelectionCaptureBundle());
+
+  async function prepareAndApplyStudio(elementId: string) {
+    const { service } = createRealOccModelingService(oc);
+    const before = await service.getCurrentDocumentSnapshot();
+    const capabilities = createImportCapabilities(service, before, {
+      history: createKernelHistoryProbeSession({
+        createService: () => createRealOccModelingService(oc).service,
+      }),
+    });
+    const review = await onshapeImportProvider.review({ source, capabilities });
+    const studio = review.providerReview.studios.find(
+      (candidate) => candidate.elementId === elementId,
+    );
+    const extrudePlan = studio?.featurePlans.find(
+      (plan) => plan.featureType === "extrude",
+    );
+    expect(extrudePlan, JSON.stringify(studio?.featurePlans)).toMatchObject({
+      tier: "parametric",
+      reasonCodes: [],
+    });
+
+    const actions = await prepareImportActions({
+      provider: onshapeImportProvider,
+      source,
+      review,
+      selections: { studioElementId: elementId, demotedFeatureIds: [] },
+      capabilities,
+    });
+    const preparedExtrudes = actions.createFeatures?.filter(
+      (request) => request.definition.kind === "extrude",
+    ) ?? [];
+    expect(preparedExtrudes, JSON.stringify(actions)).toHaveLength(1);
+
+    const forwarded = recordCreateFeatureInputs(service);
+    const applied = await applyImportPreparedActions({
+      modelingService: service,
+      baseRevisionId: before.document.revisionId,
+      actions,
+    });
+    expect(
+      applied.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+      JSON.stringify({ diagnostics: applied.diagnostics, forwarded }),
+    ).toBe(true);
+    expect(applied.rolledBack).toBe(false);
+
+    const forwardedExtrudes = forwarded.filter(
+      (request) => request.definition.kind === "extrude",
+    );
+    expect(forwardedExtrudes).toHaveLength(1);
+    expect(JSON.stringify(forwardedExtrudes)).not.toContain("regionOf");
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const signatureResult = await deriveLiveBodySignatures({ snapshot, service });
+    expect(signatureResult.status, JSON.stringify(signatureResult.diagnostics)).toBe("available");
+    if (signatureResult.status !== "available") {
+      throw new Error("Expected live OCC topology signatures.");
+    }
+    return { actions, snapshot, signatures: signatureResult.signatures };
+  }
+
+  const rightCell = await prepareAndApplyStudio("wave-x4-right-cell");
+  const rightExtrude = rightCell.actions.createFeatures?.find(
+    (request) => request.definition.kind === "extrude",
+  );
+  expect(rightExtrude?.definition).toMatchObject({
+    kind: "extrude",
+    parameters: {
+      profiles: [{
+        kind: "regionOf",
+        actionIndex: 0,
+        selector: { kind: "interiorPoint", point: [25, 5] },
+      }],
+    },
+  });
+  expect(rightCell.snapshot.document.bodies).toHaveLength(1);
+  const rightBounds = rightCell.signatures.find(
+    (signature) => signature.entityClass === "body" && signature.boundingBox,
+  )?.boundingBox;
+  if (!rightBounds) throw new Error("Expected a live OCC bound for the selected right cell.");
+  expect(rightBounds.low).toEqual([20, 0, 0]);
+  expect(rightBounds.high).toEqual([30, 10, 10]);
+
+  const annuli = await prepareAndApplyStudio("wave-x4-annuli");
+  const annulusExtrude = annuli.actions.createFeatures?.find(
+    (request) => request.definition.kind === "extrude",
+  );
+  if (annulusExtrude?.definition.kind !== "extrude") {
+    throw new Error("Expected the annulus studio to prepare one extrude.");
+  }
+  const annulusSelectors = annulusExtrude.definition.parameters.profiles;
+  expect(annulusSelectors).toHaveLength(6);
+  for (const profile of annulusSelectors) {
+    expect(profile.kind).toBe("regionOf");
+    if (profile.kind !== "regionOf") throw new Error("Expected a deferred annulus region selector.");
+    expect(profile.actionIndex).toBe(0);
+    expect(profile.selector.kind).toBe("interiorPoint");
+    if (profile.selector.kind !== "interiorPoint") throw new Error("Expected an annulus interior-point selector.");
+    const [x, y] = profile.selector.point;
+    const radialDistance = Math.min(...[
+      [0, 0], [0, 96.5], [0, 193], [102, 0], [102, 96.5], [102, 193],
+    ].map(([centerX, centerY]) => Math.hypot(x - centerX, y - centerY)));
+    expect(radialDistance).toBeCloseTo(3.25, 6);
+  }
+
+  expect(annuli.snapshot.document.bodies).toHaveLength(6);
+  const annulusBodyBounds = annuli.signatures
+    .filter((signature) => signature.entityClass === "body" && signature.boundingBox)
+    .map((signature) => signature.boundingBox!);
+  expect(annulusBodyBounds).toHaveLength(6);
+  const annulusCenters = annulusBodyBounds.map((bounds) => [
+    (bounds.low[0] + bounds.high[0]) / 2,
+    (bounds.low[1] + bounds.high[1]) / 2,
+  ] as const);
+  for (const [x, y] of [[0, 0], [0, 96.5], [0, 193], [102, 0], [102, 96.5], [102, 193]]) {
+    expect(annulusCenters.some(([centerX, centerY]) =>
+      Math.abs(centerX - x) < 0.01 && Math.abs(centerY - y) < 0.01,
+    ), JSON.stringify(annulusBodyBounds)).toBe(true);
+  }
+  const annulusCylinderRadii = annuli.signatures
+    .filter((signature) => signature.entityClass === "face" && signature.geometryType === "cylinder")
+    .map(signatureRadius)
+    .filter((radius): radius is number => radius !== null);
+  expect(annulusCylinderRadii.filter((radius) => Math.abs(radius - 2.75) < 0.01)).toHaveLength(6);
+  expect(annulusCylinderRadii.filter((radius) => Math.abs(radius - 3.75) < 0.01)).toHaveLength(6);
+}, 90_000);
 
 test("Onshape pattern fixture applies through provider and mock kernel without unresolved refs", async () => {
   const { adapter, service } = createTestModelingService();

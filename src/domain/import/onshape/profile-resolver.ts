@@ -12,6 +12,7 @@ import {
   type SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
+import { REGION_POINT_TOLERANCE } from "@/contracts/sketch/region-geometry";
 import {
   countContainingRegions,
   selectInnermostContainingRegion,
@@ -280,6 +281,45 @@ function filteredSketchRegions(regions: readonly RegionRecord[]): RegionRecord[]
   });
 }
 
+function circleLoopGeometry(
+  sketch: RegionSelectionSketch,
+  loop: RegionRecord["loops"][number],
+): { center: SketchPoint2D; radius: number } | null {
+  if (loop.segments.length !== 1) return null;
+  const source = loop.segments[0]?.source;
+  if (source?.kind !== "entity") return null;
+  const entity = sketch.definition.entities.find(
+    (candidate) => candidate.entityId === source.entityId,
+  );
+  if (entity?.kind !== "circle") return null;
+  const center = sketch.solvedPoints.get(entity.centerPointId);
+  return center ? { center: [center[0], center[1]], radius: entity.radius } : null;
+}
+
+function concentricAnnulusCandidates(
+  sketch: RegionSelectionSketch,
+  region: RegionRecord,
+): SketchPoint2D[] {
+  const outerLoop = region.loops.find((loop) => loop.role === "outer");
+  const innerLoops = region.loops.filter((loop) => loop.role === "inner");
+  if (!outerLoop || innerLoops.length !== 1) return [];
+  const outer = circleLoopGeometry(sketch, outerLoop);
+  const inner = circleLoopGeometry(sketch, innerLoops[0]!);
+  if (
+    !outer ||
+    !inner ||
+    Math.hypot(
+      outer.center[0] - inner.center[0],
+      outer.center[1] - inner.center[1],
+    ) > REGION_POINT_TOLERANCE ||
+    outer.radius - inner.radius <= REGION_POINT_TOLERANCE
+  ) return [];
+  const radius = (outer.radius + inner.radius) / 2;
+  return ([[1, 0], [0, 1], [-1, 0], [0, -1]] as const).map(
+    ([x, y]) => [outer.center[0] + radius * x, outer.center[1] + radius * y],
+  );
+}
+
 function verifiedRegionSelector(
   sketch: RegionSelectionSketch,
   region: RegionRecord,
@@ -289,6 +329,7 @@ function verifiedRegionSelector(
     const key = `${point[0]},${point[1]}`;
     candidates.set(key, point);
   };
+  for (const point of concentricAnnulusCandidates(sketch, region)) add(point);
   const points = [...sketch.solvedPoints.values()];
   for (const point of points) add([point[0], point[1]]);
   for (const entity of sketch.definition.entities) {
