@@ -4,6 +4,7 @@ import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import {
   planExtrudeFeature,
   referencedSketchFeatureIds,
+  resolvedExtrudeExtent,
   resolvePlannedExtrudeTopology,
 } from "@/domain/import/onshape/extrude-planner";
 import { makeWaveTCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
@@ -201,5 +202,17 @@ test("declares and resolves exact-prefix slots for up-to-face and explicit body 
   expect(resolved?.boolean).toMatchObject({
     kind: "topologyTargets",
     targets: [{ kind: "topologyOf", expectedKind: "body" }],
+  });
+
+  expect(() => resolvedExtrudeExtent(result.plannedExtrude)).toThrow(
+    "unresolved topologySlot",
+  );
+  expect(resolved).not.toBeNull();
+  expect(resolvedExtrudeExtent(resolved!)).toMatchObject({
+    mode: "oneSide",
+    end: {
+      kind: "upToFace",
+      target: { kind: "topologyOf", expectedKind: "face" },
+    },
   });
 });

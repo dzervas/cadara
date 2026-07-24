@@ -872,6 +872,23 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         primitive references. Run whole-plan verification only after topology
         resolution reaches a fixed point. Pin all three extent forms at the validated
         browser-worker/OCC boundary; logic-only mock probes are insufficient.
+
+        **Current implementation (acceptance still open).** The import-only extrude
+        extent contract now permits kind-correlated `topologyOf` targets only for
+        `upToFace` (face), `upToPart` (body), and `upToVertex` (vertex), including
+        both two-side ends. Prepared-action validation rejects wrong-kind selectors
+        and every planner-only `topologySlot`; the planner boundary also fails closed
+        instead of casting an unresolved slot. Apply explicitly rematches all active
+        extent targets and forwards only concrete durable references. Focused
+        contract/planner/materializer tests, lint, and build are green.
+
+        Provider fixed-point convergence remains open: it must discover standalone
+        extent slots regardless of current tier, atomically resolve extent plus body
+        scope, degrade failures without emitting a partial request, and run final
+        whole-plan verification afterward. Available local captures do not currently
+        prove all three forms through the browser-worker/OCC prefix boundary, so no
+        synthetic or mock result is being presented as that acceptance. `test:all`
+        still stops on the three X.3 ignored-capture assertions recorded under X.4.
   - [ ] X.9.2 **Close residual exact-topology ambiguity.** Resolve, without tolerance
         relaxation or nearest-geometry selection, Laptop Stand 5151 `Boolean 1` and
         the currently diagnostic 9841 residuals `Chamfer 2`, `Extrude 12`, and

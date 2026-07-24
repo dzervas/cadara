@@ -4,12 +4,15 @@
  * Keeps extent and boolean-lineage concerns local while delegating reusable
  * sketch-profile and exact-prefix topology matching to the shared import seams.
  */
-import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
+import type {
+  ImportDeferredExtrudeEndCondition,
+  ImportDeferredExtrudeExtent,
+  ImportDeferredTopologyRef,
+} from "@/contracts/import/actions";
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
 import type { AuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   ExtrudeEndCondition,
-  ExtrudeFeatureExtent,
   FeatureBooleanOperation,
   LinearExtentDirection,
   LinearUpToOffset,
@@ -493,7 +496,37 @@ export function extrudeUsesDeferredTopology(planned: PlannedExtrude): boolean {
   return planned.topologySlots.length > 0;
 }
 
-/** Narrow cast at the provider boundary after all topology slots have resolved. */
-export function resolvedExtrudeExtent(planned: PlannedExtrude): ExtrudeFeatureExtent {
-  return planned.extent as unknown as ExtrudeFeatureExtent;
+function isPreparedExtrudeEnd(
+  end: PlannedExtrudeEndCondition,
+): end is PlannedExtrudeEndCondition & ImportDeferredExtrudeEndCondition {
+  return (
+    (end.kind !== "upToFace" &&
+      end.kind !== "upToPart" &&
+      end.kind !== "upToVertex") ||
+    end.target.kind !== "topologySlot"
+  );
+}
+
+function isPreparedExtrudeExtent(
+  extent: PlannedExtrudeExtent,
+): extent is PlannedExtrudeExtent & ImportDeferredExtrudeExtent {
+  if (extent.mode === "twoSide") {
+    return (
+      isPreparedExtrudeEnd(extent.firstEnd) &&
+      isPreparedExtrudeEnd(extent.secondEnd)
+    );
+  }
+  return isPreparedExtrudeEnd(extent.end);
+}
+
+/** Reject planner-only slots while retaining apply-time topologyOf selectors. */
+export function resolvedExtrudeExtent(
+  planned: PlannedExtrude,
+): ImportDeferredExtrudeExtent {
+  if (!isPreparedExtrudeExtent(planned.extent)) {
+    throw new Error(
+      "Extrude extent contains unresolved topologySlot targets and cannot be prepared.",
+    );
+  }
+  return planned.extent;
 }

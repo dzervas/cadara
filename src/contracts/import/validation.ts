@@ -59,6 +59,32 @@ function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologyR
   );
 }
 
+function collectTopologySlots(
+  value: unknown,
+  path: string,
+  issues: ContractValidationIssue[],
+) {
+  if (!value || typeof value !== "object") return;
+  if ((value as { kind?: unknown }).kind === "topologySlot") {
+    issues.push({
+      path,
+      expected: "prepared import reference",
+      value,
+      message: "Internal topologySlot references must be resolved before preparing import actions.",
+    });
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) =>
+      collectTopologySlots(entry, `${path}.${index}`, issues),
+    );
+    return;
+  }
+  Object.entries(value).forEach(([key, entry]) =>
+    collectTopologySlots(entry, path ? `${path}.${key}` : key, issues),
+  );
+}
+
 function expectedProducerKind(
   value: ImportDeferredValue,
 ): ImportPreparedActionRef["kind"] {
@@ -156,6 +182,47 @@ function collectUnblessedDeferredValues(
   Object.entries(value).forEach(([key, entry]) =>
     collectUnblessedDeferredValues(entry, path ? `${path}.${key}` : key, blessed, issues),
   );
+}
+
+function validateDeferredExtrudeEndTarget(input: {
+  actions: ImportPreparedActions;
+  end: unknown;
+  orderedPosition: number;
+  path: string;
+  issues: ContractValidationIssue[];
+}) {
+  if (!input.end || typeof input.end !== "object") return;
+  const end = input.end as { kind?: unknown; target?: unknown };
+  const expectedKind =
+    end.kind === "upToFace"
+      ? "face"
+      : end.kind === "upToPart"
+        ? "body"
+        : end.kind === "upToVertex"
+          ? "vertex"
+          : null;
+  if (!expectedKind || !isDeferredTopologyRef(end.target)) return;
+
+  if (end.target.expectedKind !== expectedKind) {
+    input.issues.push({
+      path: `${input.path}.target.expectedKind`,
+      expected: expectedKind,
+      value: end.target.expectedKind,
+      message: `${String(end.kind)} topologyOf target must resolve a ${expectedKind}.`,
+    });
+  }
+  const hasEarlierProducer =
+    input.actions.orderedActions
+      ?.slice(0, input.orderedPosition)
+      .some((entry) => entry.kind === "createFeature") ?? false;
+  if (!hasEarlierProducer) {
+    input.issues.push({
+      path: `${input.path}.target`,
+      expected: "an earlier createFeature producer action",
+      value: input.orderedPosition,
+      message: `${String(end.kind)} topologyOf target must follow its topology producer.`,
+    });
+  }
 }
 
 function validateImportDeferredValueInvariants(
@@ -324,6 +391,34 @@ function validateImportDeferredValueInvariants(
       }
     });
 
+    if (request.definition.kind === "extrude") {
+      const extent = request.definition.parameters.extent;
+      if (extent.mode === "oneSide" || extent.mode === "symmetric") {
+        validateDeferredExtrudeEndTarget({
+          actions,
+          end: extent.end,
+          orderedPosition,
+          path: `createFeatures.${ref.index}.definition.parameters.extent.end`,
+          issues,
+        });
+      } else {
+        validateDeferredExtrudeEndTarget({
+          actions,
+          end: extent.firstEnd,
+          orderedPosition,
+          path: `createFeatures.${ref.index}.definition.parameters.extent.firstEnd`,
+          issues,
+        });
+        validateDeferredExtrudeEndTarget({
+          actions,
+          end: extent.secondEnd,
+          orderedPosition,
+          path: `createFeatures.${ref.index}.definition.parameters.extent.secondEnd`,
+          issues,
+        });
+      }
+    }
+
     if (request.definition.kind === "revolve") {
       const axis = request.definition.parameters.axis;
       if (axis.kind === "sketchEntity" && isDeferredValue(axis.sketchId)) {
@@ -426,6 +521,7 @@ function validateImportDeferredValueInvariants(
   });
 
   collectUnblessedDeferredValues(actions, "", blessed, issues);
+  collectTopologySlots(actions, "", issues);
 
   if (blessed.size > 0 && !actions.orderedActions) {
     issues.push({
