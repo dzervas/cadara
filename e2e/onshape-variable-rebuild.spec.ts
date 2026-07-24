@@ -29,8 +29,11 @@ test("Mounts import, history-at-end nail edit, and reload keep Chamfer live", as
   const rebuilt = await editVariable(page, "nail", "4.1");
   expect(rebuilt.featureIds.at(-1)).toBe("feature_chamfer-1");
   expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
+  // Region durable id derives from the exact-region arrangement (source keys,
+  // split ordinals, traversal), which the exact-Onshape-region resolution work
+  // deterministically re-derived; the region still rebuilds cleanly here.
   expect(rebuilt.selectableTargets).toContain(
-    "sketch_primary.region_primary-sketch_entity_FOoap8tw3jKAJf5_0_ATLNdmpEpWg5-3h5wtq1po7fut",
+    "sketch_primary.region_primary-sketch_entity_FOoap8tw3jKAJf5_0_ATLNdmpEpWg5-2nko3yikmohbt",
   );
 
   await harness.reloadPreservingRepositoryStorage();

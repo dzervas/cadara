@@ -790,6 +790,25 @@ function toProjectedBoundarySegmentGeometry(
   throw error;
 }
 
+// A boundary segment is only "trimmed" (a partial span of its source curve)
+// when at least one endpoint is an arrangement intersection rather than an
+// authored sketch point. Region extraction records solved start/end positions
+// for every segment, so a segment that still resolves to both authored points
+// is the full entity and must build through the authored-point path to preserve
+// shared-vertex profile provenance (and therefore downstream side-edge lineage).
+function isTrimmedEntitySegment(
+  segment: RegionBoundarySegmentRecord,
+): segment is RegionBoundarySegmentRecord & {
+  startPosition: SketchPoint2D;
+  endPosition: SketchPoint2D;
+} {
+  return (
+    segment.startPosition !== undefined &&
+    segment.endPosition !== undefined &&
+    (segment.startPointId === null || segment.endPointId === null)
+  );
+}
+
 function getLoopSegmentTraversal(
   plane: SketchPlaneDefinition,
   sketch: SketchRecord,
@@ -798,7 +817,7 @@ function getLoopSegmentTraversal(
 ): BoundarySegmentGeometry {
   const baseGeometry = toBoundarySegmentGeometry(plane, geometry);
 
-  if (segment.startPosition && segment.endPosition) {
+  if (isTrimmedEntitySegment(segment)) {
     return {
       kind: "open",
       segmentId: baseGeometry.segmentId,
@@ -1141,7 +1160,7 @@ function buildLoopWire(
 
         switch (geometry.kind) {
           case "lineSegment": {
-            if (segment.startPosition && segment.endPosition) {
+            if (isTrimmedEntitySegment(segment)) {
               if (segmentGeometry.kind !== "open") {
                 throw new Error(`Line ${geometry.entityId} did not resolve to open loop geometry.`);
               }
@@ -1187,7 +1206,7 @@ function buildLoopWire(
             break;
           }
           case "circle": {
-            if (segment.startPosition && segment.endPosition) {
+            if (isTrimmedEntitySegment(segment)) {
               if (segmentGeometry.kind !== "open") {
                 throw new Error(`Circle ${geometry.entityId} did not resolve to open loop geometry.`);
               }
@@ -1219,7 +1238,7 @@ function buildLoopWire(
             break;
           }
           case "arc": {
-            if (segment.startPosition && segment.endPosition) {
+            if (isTrimmedEntitySegment(segment)) {
               if (segmentGeometry.kind !== "open") {
                 throw new Error(`Arc ${geometry.entityId} did not resolve to open loop geometry.`);
               }
