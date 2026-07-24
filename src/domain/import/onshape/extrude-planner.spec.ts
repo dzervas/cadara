@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import {
+  hasUnresolvedExtrudeTopology,
   planExtrudeFeature,
   referencedSketchFeatureIds,
   resolvedExtrudeExtent,
@@ -161,6 +162,7 @@ test("declares and resolves exact-prefix slots for up-to-face and explicit body 
     { key: "firstEndFace", parameterId: "endBoundEntityFace", expectedKinds: ["face"] },
     { key: "booleanScope", parameterId: "booleanScope", expectedKinds: ["body"] },
   ]);
+  expect(hasUnresolvedExtrudeTopology(result.plannedExtrude)).toBe(true);
 
   const faceSelector = {
     kind: "topologyOf" as const,
@@ -208,6 +210,8 @@ test("declares and resolves exact-prefix slots for up-to-face and explicit body 
     "unresolved topologySlot",
   );
   expect(resolved).not.toBeNull();
+  expect(resolved!.topologySlots).toHaveLength(2);
+  expect(hasUnresolvedExtrudeTopology(resolved!)).toBe(false);
   expect(resolvedExtrudeExtent(resolved!)).toMatchObject({
     mode: "oneSide",
     end: {

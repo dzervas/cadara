@@ -910,6 +910,202 @@ function capabilitiesWithProbe(
   };
 }
 
+function makeUpToVertexExtrudeBundle(
+  includeVertexHistoryBinding: boolean,
+  includeUnboundBooleanScope = false,
+): OnshapeCaptureBundleV2 {
+  const bundle = structuredClone(makeFaceSketchBundle()) as unknown as OnshapeCaptureBundleV2;
+  bundle.formatVersion = 2;
+  const studio = bundle.partStudios[0]!;
+  const features = (studio.features as { features: Record<string, unknown>[] }).features;
+  features.splice(2, 0, {
+    featureType: "extrude",
+    featureId: "E_VERTEX",
+    name: "Up to vertex",
+    parameters: [
+      {
+        parameterId: "entities",
+        queries: [{ queryString: 'query = qSketchRegion(id + "S_BASE", true);' }],
+      },
+      { parameterId: "endBound", value: "UP_TO_VERTEX" },
+      {
+        parameterId: "endBoundEntityVertex",
+        queries: [{ queryString: "query = qVertexTarget();", deterministicIds: ["vertex_target"] }],
+      },
+      { parameterId: "operationType", value: includeUnboundBooleanScope ? "REMOVE" : "NEW" },
+      ...(includeUnboundBooleanScope
+        ? [{
+            parameterId: "booleanScope",
+            queries: [{ queryString: "query = qBodyTarget();", deterministicIds: ["body_target"] }],
+          }]
+        : []),
+    ],
+  });
+  studio.profileEvidence?.push({
+    consumingFeatureId: "E_VERTEX",
+    parameterId: "entities",
+    queryIndex: 0,
+    resultIndex: 0,
+    deterministicId: "provider-vertex-profile",
+    evaluatedAt: "historyPoint",
+    kind: "sketchRegion",
+    sourceSketchFeatureId: "S_BASE",
+    interiorPoint3d: [0.0005, 0.001, 0],
+  });
+  studio.profileEvidenceManifest?.push({
+    consumingFeatureId: "E_VERTEX",
+    parameterId: "entities",
+    queryIndex: 0,
+    sourceQueryString: 'query = qSketchRegion(id + "S_BASE", true);',
+    kind: "faceResults",
+    emittedRecordCount: 1,
+    completed: true,
+  });
+  if (includeVertexHistoryBinding) {
+    studio.resolvedReferences.push({
+      deterministicId: "vertex_target",
+      evaluatedAt: "historyPoint",
+      consumingFeatureId: "E_VERTEX",
+      signature: {
+        entityClass: "vertex",
+        geometryType: "point",
+        centroid: [0, 0, 0.003],
+        boundingBox: { low: [0, 0, 0.003], high: [0, 0, 0.003] },
+      },
+    });
+  }
+  studio.rollbackSnapshots = [];
+  return bundle;
+}
+
+function vertexProbeSignature(): HistoryProbeTopologySignature {
+  return {
+    entityClass: "vertex",
+    geometryType: "point",
+    centroid: [0, 0, 3],
+    boundingBox: { low: [0, 0, 3], high: [0, 0, 3] },
+    reference: {
+      kind: "vertex",
+      bodyId: "body_probe" as BodyId,
+      vertexId: "vertex_match" as VertexId,
+    },
+  };
+}
+
+test("src/domain/import/onshape/provider.spec.ts resolves a standalone UP_TO_VERTEX once without probing its unresolved action", async () => {
+  const prefixConsumers: (string | undefined)[] = [];
+  const wholePlanContainsTopologySlot: boolean[] = [];
+  const probeCapabilities: ImportCapabilities = {
+    ...capabilities,
+    history: {
+      async evaluateHistoryProbe(input) {
+        prefixConsumers.push(input.consumerFeatureId);
+        if (input.consumerFeatureId === undefined) {
+          wholePlanContainsTopologySlot.push(JSON.stringify(input.actions).includes("topologySlot"));
+        }
+        if (input.consumerFeatureId === "E_VERTEX") {
+          expect(JSON.stringify(input.actions)).not.toContain("topologySlot");
+        }
+        return {
+          steps: Array.from(
+            { length: Math.max(1, input.actions.orderedActions?.length ?? 0) },
+            () => ({ status: "rebuilt" as const, signatures: [vertexProbeSignature()] }),
+          ),
+        };
+      },
+    },
+  };
+  const source = sourceFromBundle(makeUpToVertexExtrudeBundle(true));
+  const review = await onshapeImportProvider.review({ source, capabilities: probeCapabilities });
+  const vertexPlan = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "E_VERTEX",
+  );
+
+  expect(vertexPlan).toMatchObject({
+    tier: "parametric",
+    target: { kind: "feature" },
+    reasonCodes: [],
+    suppressed: false,
+    plannedExtrude: {
+      extent: {
+        mode: "oneSide",
+        end: { kind: "upToVertex", target: { kind: "topologyOf", expectedKind: "vertex" } },
+      },
+    },
+  });
+  expect(prefixConsumers.filter((consumerId) => consumerId === "E_VERTEX"))
+    .toEqual(["E_VERTEX"]);
+  expect(wholePlanContainsTopologySlot.length).toBeGreaterThan(0);
+  expect(wholePlanContainsTopologySlot).toEqual(
+    Array.from({ length: wholePlanContainsTopologySlot.length }, () => false),
+  );
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: probeCapabilities,
+  });
+  expect(actions.createFeatures?.find((action) => action.featureLabel === "Up to vertex"))
+    .toMatchObject({ definition: { kind: "extrude" } });
+  expect(JSON.stringify(actions)).not.toContain("topologySlot");
+});
+
+test("src/domain/import/onshape/provider.spec.ts keeps an UP_TO_VERTEX without its exact binding baked and unprepared", async () => {
+  const source = sourceFromBundle(makeUpToVertexExtrudeBundle(false));
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([vertexProbeSignature()]),
+  });
+  const vertexPlan = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "E_VERTEX",
+  );
+  expect(vertexPlan).toMatchObject({
+    tier: "baked",
+    target: { kind: "suppressed" },
+    suppressed: true,
+  });
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: capabilitiesWithProbe([vertexProbeSignature()]),
+  });
+  expect(actions.createFeatures?.some((action) => action.featureLabel === "Up to vertex"))
+    .toBe(false);
+});
+
+test("src/domain/import/onshape/provider.spec.ts resolves extent and scope atomically", async () => {
+  const source = sourceFromBundle(makeUpToVertexExtrudeBundle(true, true));
+  const probeCapabilities = capabilitiesWithProbe([
+    vertexProbeSignature(),
+    bodyProbeSignature("scope-body", [0, 0, 0], [10, 10, 10]),
+  ]);
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: probeCapabilities,
+  });
+  const vertexPlan = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "E_VERTEX",
+  );
+  expect(vertexPlan).toMatchObject({
+    tier: "baked",
+    target: { kind: "suppressed" },
+    suppressed: true,
+  });
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: probeCapabilities,
+  });
+  expect(actions.createFeatures?.some((action) => action.featureLabel === "Up to vertex"))
+    .toBe(false);
+  expect(JSON.stringify(actions)).not.toContain("firstEndVertex");
+});
+
 test("src/domain/import/onshape/provider.spec.ts cannot promote a SURFACE Extrude 4 under review", async () => {
   const review = await onshapeImportProvider.review({
     source: sourceFromBundle(makeWaveXSurfaceExtrudeCaptureBundle()),

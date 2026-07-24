@@ -113,6 +113,7 @@ import { DEFAULT_MATCH_TOLERANCE } from "@/domain/import/onshape/signature-match
 import { buildResolvedBodyConsumerDefinition } from "@/domain/import/onshape/wave-b-body-feature-translators";
 import { prepareRollbackCheckpointBake } from "@/domain/import/onshape/rollback-bake";
 import {
+  hasUnresolvedExtrudeTopology,
   resolvePlannedExtrudeTopology,
   resolvedExtrudeExtent,
 } from "@/domain/import/onshape/extrude-planner";
@@ -808,9 +809,24 @@ async function activateProbeBackedPlanning(input: {
   const maxDemotions = input.plan.featurePlans.filter(isCapturedFrameTranslation).length;
   for (let attempt = 0; ; attempt += 1) {
     const orderedPositionToFeatureId = new Map<number, string>();
+    const verificationPlan = recomputePlanWithFeaturePlans(
+      workingPlan,
+      workingPlan.featurePlans.map((plan) =>
+        plan.plannedExtrude && hasUnresolvedExtrudeTopology(plan.plannedExtrude)
+          ? {
+              ...plan,
+              tier: "baked" as const,
+              target: { kind: "suppressed" as const },
+              suppressed: true,
+            }
+          : plan,
+      ),
+      input.read.studio.groundTruth.hasBodies,
+      input.read,
+    );
     const candidate = await buildPreparedActions({
       read: input.read,
-      plan: workingPlan,
+      plan: verificationPlan,
       capabilities: input.capabilities,
       materializeBake: false,
       orderedPositionToFeatureId,
@@ -875,18 +891,16 @@ async function activateProbeBackedPlanning(input: {
         candidate.plannedBodyTopologyConsumer?.slots ??
         candidate.plannedExtrude?.topologySlots ??
         [];
-      // A parametric extrude planned from initial fidelity still enters the loop
-      // with an unresolved boolean scope (extrude-planner seeds
-      // `topologyTargets` with empty `targets`); its target body must be matched
-      // against the parametric prefix here or the applied extrude has no body to
-      // cut. Only skip parametric candidates whose topology is already resolved,
-      // which also keeps the fixed-point from re-resolving a settled consumer.
-      const hasUnresolvedExtrudeTopology =
-        candidate.plannedExtrude?.boolean.kind === "topologyTargets" &&
-        candidate.plannedExtrude.boolean.targets.length === 0;
+      // `topologySlots` deliberately retains declarations after resolution, so
+      // candidate lifecycle must inspect live extent/boolean placeholders rather
+      // than slot count. An unresolved extrude is eligible from either tier;
+      // only a settled parametric candidate is skipped.
+      const unresolvedExtrudeTopology = candidate.plannedExtrude
+        ? hasUnresolvedExtrudeTopology(candidate.plannedExtrude)
+        : false;
       if (
         slots.length === 0 ||
-        (candidate.tier === "parametric" && !hasUnresolvedExtrudeTopology)
+        (candidate.tier === "parametric" && !unresolvedExtrudeTopology)
       ) {
         continue;
       }
@@ -933,8 +947,21 @@ async function activateProbeBackedPlanning(input: {
             input.read,
           )
         : workingPlan;
+      // This is a pre-consumer probe, not a speculative apply. Suppress the
+      // candidate even if it temporarily entered the parametric tier so an
+      // unresolved extent slot can never reach buildPreparedActions.
       const prefixPlan: OnshapeStudioPlan = {
         ...workingPlan,
+        featurePlans: workingPlan.featurePlans.map((plan) =>
+          plan.onshapeFeatureId === candidate.onshapeFeatureId
+            ? {
+                ...plan,
+                tier: "baked" as const,
+                target: { kind: "suppressed" as const },
+                suppressed: true,
+              }
+            : plan,
+        ),
         bakeStrategy: provisionalPlan.bakeStrategy,
         requiresStudioBake: provisionalPlan.requiresStudioBake,
         bakeDiagnostics: provisionalPlan.bakeDiagnostics,
@@ -944,7 +971,13 @@ async function activateProbeBackedPlanning(input: {
           workingPlan,
           workingPlan.featurePlans.map((plan) =>
             plan.onshapeFeatureId === candidate.onshapeFeatureId
-              ? { ...plan, reasonCodes: [reason], suppressed: true }
+              ? {
+                  ...plan,
+                  tier: "baked" as const,
+                  target: { kind: "suppressed" as const },
+                  reasonCodes: [reason],
+                  suppressed: true,
+                }
               : plan,
           ),
           input.read.studio.groundTruth.hasBodies,
@@ -1071,11 +1104,19 @@ async function activateProbeBackedPlanning(input: {
         workingPlan.featurePlans.map((plan) => {
           if (plan.onshapeFeatureId !== candidate.onshapeFeatureId) return plan;
           if (resolution.kind === "degraded") {
-            return { ...plan, reasonCodes: [resolution.reason], suppressed: true };
+            return {
+              ...plan,
+              tier: "baked" as const,
+              target: { kind: "suppressed" as const },
+              reasonCodes: [resolution.reason],
+              suppressed: true,
+            };
           }
           if (candidate.plannedBodyTopologyConsumer?.unavailableReason) {
             return {
               ...plan,
+              tier: "baked" as const,
+              target: { kind: "suppressed" as const },
               reasonCodes: [candidate.plannedBodyTopologyConsumer.unavailableReason],
               suppressed: true,
             };
@@ -1094,7 +1135,13 @@ async function activateProbeBackedPlanning(input: {
                   suppressed: false,
                   plannedExtrude,
                 }
-              : { ...plan, reasonCodes: ["topology-query-unreadable"], suppressed: true };
+              : {
+                  ...plan,
+                  tier: "baked" as const,
+                  target: { kind: "suppressed" as const },
+                  reasonCodes: ["topology-query-unreadable"],
+                  suppressed: true,
+                };
           }
           return {
             ...plan,
