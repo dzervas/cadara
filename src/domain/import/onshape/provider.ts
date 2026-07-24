@@ -795,6 +795,28 @@ function demoteCapturedFrameToBaked(plan: FeaturePlan): FeaturePlan {
   };
 }
 
+/**
+ * Fail closed at the feature level: any feature still selecting the parametric
+ * tier while carrying a live extrude `topologySlot` cannot be prepared
+ * (`resolvedExtrudeExtent` throws for the whole studio). Degrade only that
+ * feature to baked/suppressed with a specific reason so a single unresolved
+ * slot never aborts the import, and every plan handed to `buildPreparedActions`
+ * stays free of planner-only extent placeholders.
+ */
+function bakeUnresolvedExtrudeTopology(featurePlans: FeaturePlan[]): FeaturePlan[] {
+  return featurePlans.map((plan) =>
+    plan.plannedExtrude && hasUnresolvedExtrudeTopology(plan.plannedExtrude)
+      ? {
+          ...plan,
+          tier: "baked" as const,
+          target: { kind: "suppressed" as const },
+          reasonCodes: ["extrude-extent-topology-unresolved" as const],
+          suppressed: true,
+        }
+      : plan,
+  );
+}
+
 async function activateProbeBackedPlanning(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: ReturnType<typeof planStudioFidelity>;
@@ -811,16 +833,7 @@ async function activateProbeBackedPlanning(input: {
     const orderedPositionToFeatureId = new Map<number, string>();
     const verificationPlan = recomputePlanWithFeaturePlans(
       workingPlan,
-      workingPlan.featurePlans.map((plan) =>
-        plan.plannedExtrude && hasUnresolvedExtrudeTopology(plan.plannedExtrude)
-          ? {
-              ...plan,
-              tier: "baked" as const,
-              target: { kind: "suppressed" as const },
-              suppressed: true,
-            }
-          : plan,
-      ),
+      bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
       input.read.studio.groundTruth.hasBodies,
       input.read,
     );
@@ -952,15 +965,17 @@ async function activateProbeBackedPlanning(input: {
       // unresolved extent slot can never reach buildPreparedActions.
       const prefixPlan: OnshapeStudioPlan = {
         ...workingPlan,
-        featurePlans: workingPlan.featurePlans.map((plan) =>
-          plan.onshapeFeatureId === candidate.onshapeFeatureId
-            ? {
-                ...plan,
-                tier: "baked" as const,
-                target: { kind: "suppressed" as const },
-                suppressed: true,
-              }
-            : plan,
+        featurePlans: bakeUnresolvedExtrudeTopology(
+          workingPlan.featurePlans.map((plan) =>
+            plan.onshapeFeatureId === candidate.onshapeFeatureId
+              ? {
+                  ...plan,
+                  tier: "baked" as const,
+                  target: { kind: "suppressed" as const },
+                  suppressed: true,
+                }
+              : plan,
+          ),
         ),
         bakeStrategy: provisionalPlan.bakeStrategy,
         requiresStudioBake: provisionalPlan.requiresStudioBake,
@@ -1103,6 +1118,36 @@ async function activateProbeBackedPlanning(input: {
         workingPlan,
         workingPlan.featurePlans.map((plan) => {
           if (plan.onshapeFeatureId !== candidate.onshapeFeatureId) return plan;
+          if (candidate.plannedExtrude) {
+            // An extrude only reaches the loop with live extent/scope topology
+            // slots. If exact-prefix resolution fails (degraded match) or leaves
+            // any slot unbound, it can never be prepared as a parametric feature;
+            // fail closed to baked at the feature level with a specific reason so
+            // one unresolved slot never aborts the whole studio.
+            const plannedExtrude =
+              resolution.kind === "degraded"
+                ? null
+                : resolvePlannedExtrudeTopology(
+                    candidate.plannedExtrude,
+                    resolution.bindings,
+                  );
+            return plannedExtrude
+              ? {
+                  ...plan,
+                  tier: "parametric" as const,
+                  target: { kind: "feature" as const },
+                  reasonCodes: [],
+                  suppressed: false,
+                  plannedExtrude,
+                }
+              : {
+                  ...plan,
+                  tier: "baked" as const,
+                  target: { kind: "suppressed" as const },
+                  reasonCodes: ["extrude-extent-topology-unresolved"],
+                  suppressed: true,
+                };
+          }
           if (resolution.kind === "degraded") {
             return {
               ...plan,
@@ -1120,28 +1165,6 @@ async function activateProbeBackedPlanning(input: {
               reasonCodes: [candidate.plannedBodyTopologyConsumer.unavailableReason],
               suppressed: true,
             };
-          }
-          if (candidate.plannedExtrude) {
-            const plannedExtrude = resolvePlannedExtrudeTopology(
-              candidate.plannedExtrude,
-              resolution.bindings,
-            );
-            return plannedExtrude
-              ? {
-                  ...plan,
-                  tier: "parametric" as const,
-                  target: { kind: "feature" as const },
-                  reasonCodes: [],
-                  suppressed: false,
-                  plannedExtrude,
-                }
-              : {
-                  ...plan,
-                  tier: "baked" as const,
-                  target: { kind: "suppressed" as const },
-                  reasonCodes: ["topology-query-unreadable"],
-                  suppressed: true,
-                };
           }
           return {
             ...plan,
@@ -1189,6 +1212,7 @@ async function activateProbeBackedPlanning(input: {
       : workingPlan;
     const sketchPrefixPlan: OnshapeStudioPlan = {
       ...workingPlan,
+      featurePlans: bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
       bakeStrategy: provisionalSketchPlan.bakeStrategy,
       requiresStudioBake: provisionalSketchPlan.requiresStudioBake,
       bakeDiagnostics: provisionalSketchPlan.bakeDiagnostics,
@@ -1319,6 +1343,21 @@ async function activateProbeBackedPlanning(input: {
     if (planFingerprint(workingPlan) === beforeIteration) break;
   }
 
+  // Last-resort feature-level invariant: the fixed point degrades every
+  // unresolvable topology consumer, but should any extrude reach here still
+  // parametric with a live extent/scope `topologySlot`, degrade only that
+  // feature (and cascade its dependents) rather than letting a whole-studio
+  // prepare throw. `resolvedExtrudeExtent` remains a hard invariant behind this.
+  const swept = bakeUnresolvedExtrudeTopology(workingPlan.featurePlans);
+  if (swept.some((plan, index) => plan !== workingPlan.featurePlans[index])) {
+    workingPlan = recomputePlanWithFeaturePlans(
+      workingPlan,
+      replanDependentFeatures({ read: input.read, featurePlans: swept }),
+      input.read.studio.groundTruth.hasBodies,
+      input.read,
+    );
+  }
+
   return { plan: workingPlan, probeResult };
 }
 
@@ -1432,6 +1471,7 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "needs-history-probe": "requires captured history topology evidence",
   "extrude-body-type-unsupported": "only solid extrudes can import as parametric solid features",
   "extrude-default-scope-ambiguous": "default extrude scope affects more than one possible body",
+  "extrude-extent-topology-unresolved": "extrude up-to or boolean-scope topology could not be resolved as a durable reference",
   "sketch-on-probed-face": "sketch is supported on a resolved face",
   "sketch-face-on-checkpoint-body": "sketch plane face exists only on checkpoint-baked body geometry",
   "sketch-on-captured-frame": "sketch is supported from its captured frame",
@@ -3070,7 +3110,17 @@ export const onshapeImportProvider: ImportProvider<
           bakeDiagnostics: reviewedStudio.bakeDiagnostics,
           requiresStudioBake: reviewedStudio.requiresStudioBake,
         }
-      : planStudioFidelity(read);
+      : (() => {
+          // Fallback only: review normally supplies the post-fixed-point plan. A
+          // raw fidelity plan can still carry an optimistically promoted extrude
+          // whose extent/scope topology never resolved; bake it closed so
+          // `resolvedExtrudeExtent` cannot abort the whole studio at prepare.
+          const fallback = planStudioFidelity(read);
+          return {
+            ...fallback,
+            featurePlans: bakeUnresolvedExtrudeTopology(fallback.featurePlans),
+          };
+        })();
     return await buildPreparedActions({
       source,
       read,

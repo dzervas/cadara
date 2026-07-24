@@ -96,6 +96,10 @@ export type PlanReasonCode =
   | "needs-history-probe"
   | "extrude-body-type-unsupported"
   | "extrude-default-scope-ambiguous"
+  // The extrude's up-to (extent) or explicit boolean-scope topology slot could
+  // not be resolved against the exact pre-consumer prefix, so it can never be
+  // prepared as a parametric feature; fail closed to baked at the feature level.
+  | "extrude-extent-topology-unresolved"
   | "sketch-on-probed-face"
   // The sketch plane face exists only on a checkpoint-baked body lineage, so no
   // live face can ever be probed or rematched in the parametric prefix.
