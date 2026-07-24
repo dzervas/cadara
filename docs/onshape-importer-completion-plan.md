@@ -1516,3 +1516,53 @@ resolution picked a keyless openrouter provider once). Real bundles + the
   which restores the pre-W.1 resolution while keeping the fixed-point from
   re-resolving a settled consumer. All six real-kernel Onshape e2e tests
   (Mounts ×2, Part Studio 1, Wave T ×3) and `bun run test:all` are green.
+- **Review-pass containment closure (this session, 4 commits +1 e2e budget).**
+  An end-to-end review found and fixed four issues; `bun run test:all` is now
+  fully green (648 logic + 125 UI + 24 static + 62 Playwright).
+  - **Snapshot prune regression fixed** (`Recapture every Onshape bake
+    boundary`): the X.3 boundary cleanup had pruned rollback snapshots down to
+    `SURFACE`-extrude boundaries only, starving the bake-segment planner
+    (Wave-T Mirror transform silently lost its `bakedBody-1` checkpoint; the
+    9841 rollback body-delta pin and Wave-T 6/0/0 pin went red). Retention now
+    covers every non-`newSketch` feature (derived from
+    `bodyDeltaBetweenFeatures` needing both delta sides), and `--enrich`
+    backfills missing required snapshots (one lazy workspace per document,
+    one rollback+tessellation(+STEP) per missing boundary, existing snapshots
+    never re-captured, zero requests when current). A live backfill restored
+    405 (13 snapshots) and 9841 (28 snapshots); all three staleness failures
+    from the X.4 note are green with no baseline edits.
+  - **X.9.1 feature-level fail-close** (`Bake unresolved extrude topology per
+    feature`): 9841 `Extrude 1`'s `firstEndVertex` slot reached prepare
+    unresolved and the whole-studio throw aborted the PS1 import. The provider
+    now degrades any parametric extrude with a live topology slot to baked with
+    new reason `extrude-extent-topology-unresolved` at every boundary
+    (verification probe, per-candidate and sketch-consumer prefixes,
+    post-fixed-point sweep, prepare fallback); `resolvedExtrudeExtent`'s throw
+    remains as an unreachable invariant.
+  - **Apply-time rematch containment** (`Bake features that fail apply-time
+    rematch`): PS1 Shell 1's `parts`/`JND` body scope matched
+    tessellation-backed review signatures but failed live-OCC rematch at apply
+    (`TopologyApplyRematchError`), aborting the import. `reviewStudio` now
+    retries activation with the offending feature pinned baked
+    (`topology-apply-rematch-failed`), dependents cascade, repeated failure
+    rethrows, non-topology errors still propagate. PS1 browser review now opens
+    and commits at **9 / 32 / 0**.
+  - **Durable side-edge lineage regression fixed** (`Fix side-edge lineage for
+    full sketch segments`): `3d3fb213`'s bounded-segment path fired for full
+    authored segments (region extraction populates start/end positions for
+    every segment), bypassing `provenance.vertices` and leaving extrude side
+    edges without lineage — durable edge ids degraded to fresh `t0002_N` on any
+    rebuild, breaking 6 e2e (fillet/chamfer/revolve/sweep/feature-chain +
+    face-backed sketch reopen). A `isTrimmedEntitySegment` guard routes only
+    genuinely trimmed segments through the bounded path. One legitimate
+    deterministic Mounts region-id pin updated; the 9841 `walls` e2e got a
+    360 s budget for the 237 MB double-probe review.
+  - **API-budget review outcome:** enrichment remains one batched FeatureScript
+    request per required rollback index with zero-request second passes (405
+    and 9841 verified live: "evidence is current; no FeatureScript request").
+    Per user decision, no on-disk evidence cache — captures are one-shot.
+  - **Honest residual:** Wave-T Mirror transform plan-dump review is now
+    **2 / 3 / 0** with `wholeStudioLegacy` (restored snapshots expose the mock
+    probe's missing live body signatures honestly instead of `none`/silent
+    drop); the real browser gate stays 3 / 2 / 0 with its checkpoint and all
+    62 e2e pass.
