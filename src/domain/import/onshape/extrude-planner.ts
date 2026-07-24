@@ -491,6 +491,26 @@ export function resolvePlannedExtrudeTopology(
   return { ...planned, extent, boolean };
 }
 
+function endHasUnresolvedTopology(
+  end: PlannedExtrudeEndCondition,
+): boolean {
+  return (
+    (end.kind === "upToFace" || end.kind === "upToPart" || end.kind === "upToVertex") &&
+    end.target.kind === "topologySlot"
+  );
+}
+
+/** True only while an extent target or explicit boolean scope still needs prefix resolution. */
+export function hasUnresolvedExtrudeTopology(planned: PlannedExtrude): boolean {
+  const unresolvedExtent =
+    planned.extent.mode === "twoSide"
+      ? endHasUnresolvedTopology(planned.extent.firstEnd) ||
+        endHasUnresolvedTopology(planned.extent.secondEnd)
+      : endHasUnresolvedTopology(planned.extent.end);
+  return unresolvedExtent ||
+    (planned.boolean.kind === "topologyTargets" && planned.boolean.targets.length === 0);
+}
+
 /** True when a resolved plan still carries live apply-time topology selectors. */
 export function extrudeUsesDeferredTopology(planned: PlannedExtrude): boolean {
   return planned.topologySlots.length > 0;
