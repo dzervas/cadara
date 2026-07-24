@@ -734,22 +734,39 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       remains unresolved rather than falling back to bbox centroids, nearest geometry,
       or all closed regions.
 
-      Local planar subdivision emits every bounded nested cell with immediate-child
-      holes, analytically splits line/arc/circle intersections, uses curve-aware
-      containment, and preserves stable source/split provenance. OCC reconstruction
-      rebuilds bounded split circles and arcs as open arcs and preserves synthetic
-      endpoints and split ordinals. Synthetic and real-OCC regressions cover selected
-      subsets, nested regions, mirror-derived witnesses, mixed curves, and ambiguous
-      evidence.
+      Local planar subdivision now emits every bounded nested cell with
+      immediate-child holes; analytically splits line/line (including
+      T-junction), line/arc/circle, and arc/circle intersections; and records
+      deterministic coincident-source aliases instead of hiding duplicate shared
+      edges. Thin concentric annuli use an analytically interior mid-radius
+      selector that is still verified through exact containment—no grid luck,
+      nearest-region scoring, or all-region fallback. OCC loop construction reuses
+      coincident vertices for bounded segments so wire welding cannot replace the
+      source edges retained for extrude history.
 
-      Current logic-lane review counts are: Wave T `405` **2/0/0**, Mounts `40a51`
-      **10/0/0**, Laptop Stand `5151` **23/1/0**, PS1 `9841` **30/11/0**, and `d3cd9`
-      **23/1/0**. These are diagnostic, not acceptance. In `9841`, four supported
-      extrudes (`Extrude 5`, `6`, `16`, and `15`) still report
-      `needs-region-resolution`; any downstream sketch/topology fallout must be
-      re-evaluated in source order after each profile producer becomes live. X.4 closes
-      only when every non-surface solid extrude resolves its exact selected cell and
-      applies through the real browser/OCC seam.
+      Current logic-lane review counts are: Wave T first studio `405` **2/0/0**,
+      Mounts `40a51` **10/0/0**, Laptop Stand `5151` **23/1/0**, PS1 `9841`
+      **34/7/0**, and `d3cd9` **23/1/0**. In PS1, `Extrude 5`, `6`, `16`, and
+      `15` move from `needs-region-resolution` to parametric in source order;
+      `Extrude 2`'s ten captured witnesses also each select one exact local cell
+      and its remaining degradation is `topology-reference-no-match`, not profile
+      resolution. No supported solid feature in the five review plans now reports
+      `needs-region-resolution`; the two `SURFACE` Extrude 4 exclusions remain
+      honest.
+
+      Proprietary-free logic coverage proves a synthetic schema-v3 selected
+      subset and six sparse mirrored annuli through provider review/prepare, the
+      real sketch solver, deferred `regionOf` materialization, and real OCC apply.
+      That fixture proves the contract pipeline, not Onshape server semantics;
+      the ignored roots remain the capture-backed evidence. X.4 stays open until
+      those roots pass the real browser gate with no supported solid extrude bake.
+
+      Validation: changed-file lint, production build, focused region/resolver/OCC
+      specs, and the provider-to-real-OCC acceptance case are green. `bun run
+      test:all` currently stops in logic on three ignored-root assertions: stale
+      Wave-T `6/0/0` scope evidence, stale PS1 `7/34/0` tier counts, and a missing
+      broad rollback delta. These are X.3 capture-refresh/boundary-cleanup gates;
+      they were not weakened to make this partial X.4 slice appear complete.
 - [ ] X.5 **Live face-sketch support after producer recovery.** Once solid
       producers are live, promote face-backed sketches through durable
       `SketchPlaneSupportRef` wiring rather than a detached captured-frame

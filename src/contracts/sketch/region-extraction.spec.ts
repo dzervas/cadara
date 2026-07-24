@@ -1629,7 +1629,7 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     ).toBe(0);
   }
 
-  async function testSelfIntersectingProfileIsRejectedWithDiagnostic() {
+  async function testCrossingLinesSubdivideIntoBoundedProfiles() {
     const definition: SketchDefinition = {
       schemaVersion: "sketch-definition/v1alpha1",
       referenceIds: [],
@@ -1642,9 +1642,9 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
       ],
       points: [
         makePoint("sketch_point_a", "A", 0, 0),
-        makePoint("sketch_point_b", "B", 2, 2),
-        makePoint("sketch_point_c", "C", 0, 2),
-        makePoint("sketch_point_d", "D", 2, 0),
+        makePoint("sketch_point_b", "B", 0.0005, 0.0005),
+        makePoint("sketch_point_c", "C", 0, 0.0005),
+        makePoint("sketch_point_d", "D", 0.0005, 0),
       ],
       entityIds: [
         "sketch_entity_ab",
@@ -1676,18 +1676,18 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
 
     expect(
       found.rings.length,
-      "Self-intersecting profile loops should not produce valid rings.",
-    ).toBe(0);
+      "Crossing line segments should subdivide into their two bounded triangular rings.",
+    ).toBe(2);
     expect(
       derived.regions.length,
-      "Self-intersecting profile loops should not become selectable regions.",
-    ).toBe(0);
+      "Crossing line segments should derive both bounded triangular regions.",
+    ).toBe(2);
     expect(
       derived.diagnostics.some(
         (diagnostic) => diagnostic.code === "profile-invalid-ring",
       ),
-      "Rejected self-intersections should emit a diagnostic before reaching OCC.",
-    ).toBeTruthy();
+      "Planar subdivision should not reject its bounded faces as self-intersecting.",
+    ).toBeFalsy();
   }
 
   async function testOpenAndDegenerateSegmentsAreSurfacedAsDiagnostics() {
@@ -1818,6 +1818,174 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     ).toBeTruthy();
   }
 
+  async function testLineTjunctionsSplitProfilesDespiteDistinctEndpointIds() {
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        "sketch_point_bottom_left",
+        "sketch_point_bottom_right",
+        "sketch_point_top_right",
+        "sketch_point_top_left",
+        "sketch_point_split_bottom",
+        "sketch_point_split_top",
+      ],
+      points: [
+        makePoint("sketch_point_bottom_left", "Bottom left", 0, 0),
+        makePoint("sketch_point_bottom_right", "Bottom right", 4, 0),
+        makePoint("sketch_point_top_right", "Top right", 4, 2),
+        makePoint("sketch_point_top_left", "Top left", 0, 2),
+        makePoint("sketch_point_split_bottom", "Split bottom", 2, 0),
+        makePoint("sketch_point_split_top", "Split top", 2, 2),
+      ],
+      entityIds: [
+        "sketch_entity_bottom",
+        "sketch_entity_right",
+        "sketch_entity_top",
+        "sketch_entity_left",
+        "sketch_entity_split",
+      ],
+      entities: [
+        makeLine("sketch_entity_bottom", "Bottom", "sketch_point_bottom_left", "sketch_point_bottom_right"),
+        makeLine("sketch_entity_right", "Right", "sketch_point_bottom_right", "sketch_point_top_right"),
+        makeLine("sketch_entity_top", "Top", "sketch_point_top_right", "sketch_point_top_left"),
+        makeLine("sketch_entity_left", "Left", "sketch_point_top_left", "sketch_point_bottom_left"),
+        makeLine("sketch_entity_split", "Split", "sketch_point_split_bottom", "sketch_point_split_top"),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+    const solvedSnapshot = makeSolvedSnapshot(definition);
+    const found = findSketchRings(definition, solvedSnapshot);
+    const derived = deriveSketchRegionsCore({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_primary",
+      definition,
+      solvedSnapshot,
+    });
+
+    expect(
+      found.rings.length,
+      "A line ending geometrically on rectangle edges must split the profile even when its endpoint IDs differ.",
+    ).toBe(2);
+    expect(
+      found.unusedSegments.length,
+      "Both split cells must account for every source boundary.",
+    ).toBe(0);
+    expect(derived.regions.length).toBe(2);
+    expect(
+      derived.regions.every((region) =>
+        region.loops[0]?.segments.some(
+          (segment) =>
+            segment.source.kind === "entity" &&
+            segment.source.entityId === "sketch_entity_split" &&
+            segment.sourceSegmentOrdinal === 0,
+        ),
+      ),
+      "Each cell must retain the splitter's stable source and split ordinal.",
+    ).toBeTruthy();
+  }
+
+  async function testCoincidentSharedEdgesUseCanonicalProvenance() {
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: [
+        "sketch_point_left_bottom_left",
+        "sketch_point_left_bottom_right",
+        "sketch_point_left_top_right",
+        "sketch_point_left_top_left",
+        "sketch_point_right_bottom_left",
+        "sketch_point_right_bottom_right",
+        "sketch_point_right_top_right",
+        "sketch_point_right_top_left",
+      ],
+      points: [
+        makePoint("sketch_point_left_bottom_left", "Left bottom left", 0, 0),
+        makePoint("sketch_point_left_bottom_right", "Left bottom right", 2, 0),
+        makePoint("sketch_point_left_top_right", "Left top right", 2, 2),
+        makePoint("sketch_point_left_top_left", "Left top left", 0, 2),
+        makePoint("sketch_point_right_bottom_left", "Right bottom left", 2, 0),
+        makePoint("sketch_point_right_bottom_right", "Right bottom right", 4, 0),
+        makePoint("sketch_point_right_top_right", "Right top right", 4, 2),
+        makePoint("sketch_point_right_top_left", "Right top left", 2, 2),
+      ],
+      entityIds: [
+        "sketch_entity_left_bottom",
+        "sketch_entity_left_shared",
+        "sketch_entity_left_top",
+        "sketch_entity_left_outer",
+        "sketch_entity_right_bottom",
+        "sketch_entity_right_outer",
+        "sketch_entity_right_top",
+        "sketch_entity_right_shared",
+      ],
+      entities: [
+        makeLine("sketch_entity_left_bottom", "Left bottom", "sketch_point_left_bottom_left", "sketch_point_left_bottom_right"),
+        makeLine("sketch_entity_left_shared", "Left shared", "sketch_point_left_bottom_right", "sketch_point_left_top_right"),
+        makeLine("sketch_entity_left_top", "Left top", "sketch_point_left_top_right", "sketch_point_left_top_left"),
+        makeLine("sketch_entity_left_outer", "Left outer", "sketch_point_left_top_left", "sketch_point_left_bottom_left"),
+        makeLine("sketch_entity_right_bottom", "Right bottom", "sketch_point_right_bottom_left", "sketch_point_right_bottom_right"),
+        makeLine("sketch_entity_right_outer", "Right outer", "sketch_point_right_bottom_right", "sketch_point_right_top_right"),
+        makeLine("sketch_entity_right_top", "Right top", "sketch_point_right_top_right", "sketch_point_right_top_left"),
+        makeLine("sketch_entity_right_shared", "Right shared", "sketch_point_right_top_left", "sketch_point_right_bottom_left"),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+    const solvedSnapshot = makeSolvedSnapshot(definition);
+    const found = findSketchRings(definition, solvedSnapshot);
+    const derived = deriveSketchRegionsCore({
+      documentId: "doc_workspace",
+      revisionId: "rev_0001",
+      sketchId: "sketch_primary",
+      definition,
+      solvedSnapshot,
+    });
+
+    expect(
+      found.rings.length,
+      "Adjacent rectangles with duplicate geometric shared edges must remain two bounded cells.",
+    ).toBe(2);
+    expect(
+      found.unusedSegments.length,
+      "The discarded duplicate provenance must still be accounted for as used.",
+    ).toBe(0);
+    expect(derived.regions.length).toBe(2);
+    expect(
+      derived.regions.every((region) =>
+        region.loops[0]?.segments.some(
+          (segment) =>
+            segment.source.kind === "entity" &&
+            segment.source.entityId === "sketch_entity_left_shared" &&
+            segment.sourceSegmentOrdinal === 0 &&
+            segment.coincidentSources?.some(
+              (source) =>
+                source.kind === "entity" &&
+                source.entityId === "sketch_entity_right_shared",
+            ),
+        ),
+      ),
+      "Coincident spans must retain the canonical source, split ordinal, and exact aliases.",
+    ).toBeTruthy();
+    expect(
+      derived.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "profile-open-segment" &&
+          diagnostic.target?.kind === "entity" &&
+          diagnostic.target.entityId === "sketch_entity_right_shared",
+      ),
+      "Canonicalization must not report the duplicate source as unused.",
+    ).toBeFalsy();
+  }
+
   async function run() {
     await testFindRingsNone();
     await testFindRingsOne();
@@ -1840,9 +2008,11 @@ test("src/contracts/sketch/region-extraction.spec.ts", async () => {
     await testArcLineIntersectionsSplitBoundedCells();
     await testConstructionGeometryDoesNotSplitNormalProfile();
     await testClosedConstructionCircleDoesNotCreateRegion();
-    await testSelfIntersectingProfileIsRejectedWithDiagnostic();
+    await testCrossingLinesSubdivideIntoBoundedProfiles();
     await testOpenAndDegenerateSegmentsAreSurfacedAsDiagnostics();
     await testArcAndChordDeriveSingleClosedRegion();
+    await testLineTjunctionsSplitProfilesDespiteDistinctEndpointIds();
+    await testCoincidentSharedEdgesUseCanonicalProvenance();
   }
 
   await run();

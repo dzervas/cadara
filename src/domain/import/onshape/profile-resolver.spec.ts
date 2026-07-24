@@ -119,6 +119,44 @@ test("profile resolver expands true qSketchRegion roots for nested circle annuli
   });
 });
 
+test("profile resolver derives exact selectors for a sparse layout of thin annuli", () => {
+  const featureId = "S_SET_THIN_ANNULI";
+  const centers = Array.from({ length: 6 }, (_, index) => [
+    (index % 2) * 0.102,
+    Math.floor(index / 2) * 0.0965,
+    0,
+  ] as [number, number, number]);
+  const entities = centers.flatMap((center, index) => [
+    ...solvedCircle(`${featureId}_OUTER_${index}`, center, 0.00375).entities,
+    ...solvedCircle(`${featureId}_INNER_${index}`, center, 0.00275).entities,
+  ]);
+  const result = resolve({
+    parameter: profileParameter(featureId),
+    evidence: [{
+      consumingFeatureId: "E_PROFILE",
+      parameterId: "entities",
+      queryIndex: 0,
+      evaluatedAt: "historyPoint",
+      kind: "sketchRegionSet",
+      sourceSketchFeatureId: featureId,
+      filterInnerLoops: true,
+    }],
+    solved: [{ featureId, entities }],
+  });
+
+  expect(result).toMatchObject({ tier: "resolved" });
+  expect(result.tier === "resolved" && result.profiles).toHaveLength(6);
+  expect(result.tier === "resolved" && result.profiles.every((profile) => {
+    if (profile.kind !== "sketchRegion") return false;
+    return centers.some((center) =>
+      Math.abs(Math.hypot(
+        profile.interiorPoint[0] - center[0] * 1_000,
+        profile.interiorPoint[1] - center[1] * 1_000,
+      ) - 3.25) < 1e-9,
+    );
+  })).toBeTruthy();
+});
+
 test("profile resolver fails closed for false qSketchRegion with inner loops", () => {
   const nested = {
     featureId: "S_SET_NESTED",

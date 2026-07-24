@@ -1392,6 +1392,8 @@ export interface RegionBoundarySegmentRecord {
   source:
     | { kind: "entity"; entityId: SketchEntityId }
     | { kind: "projectedGeometry"; reference: ProjectedSketchGeometryRef };
+  /** Additional authored/projected sources exactly coincident with this span. */
+  coincidentSources?: Array<RegionBoundarySegmentRecord["source"]>;
   /** Boundary start point when the segment starts at an authored point. */
   startPointId: SketchPointId | null;
   /** Boundary end point when the segment ends at an authored point. */

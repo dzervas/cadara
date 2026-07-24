@@ -267,6 +267,239 @@ export function makeWaveXClosedHollowShellCaptureBundle(): OnshapeCaptureBundleV
   };
 }
 
+/**
+ * Proprietary-free X.4 contract fixture. The opaque profile proves that one
+ * complete schema-v3 witness record controls subset selection; the readable
+ * profile proves qSketchRegion(..., true) expands its six root ring regions.
+ * It does not claim to certify Onshape server query semantics.
+ */
+export function makeWaveXRegionSelectionCaptureBundle(): OnshapeCaptureBundleV2 {
+  const topPlane = {
+    deterministicId: "Top",
+    evaluatedAt: "finalState" as const,
+    signature: {
+      entityClass: "face" as const,
+      geometryType: "plane" as const,
+      definingData: { normal: [0, 0, 1] as [number, number, number] },
+      isDefaultPlane: true,
+    },
+  };
+  const rectangleSketchId = "S_X4_DIVIDED_RECTANGLE";
+  const annulusSketchId = "S_X4_ANNULI";
+  const rectangleExtrudeId = "E_X4_RIGHT_CELL";
+  const annulusExtrudeId = "E_X4_ANNULI";
+  const annulusCenters = [
+    [0, 0], [0, 96.5], [0, 193],
+    [102, 0], [102, 96.5], [102, 193],
+  ] as const;
+  const annulusEntities = annulusCenters.flatMap(([x, y], index) => [
+    {
+      sketchEntityId: `annulus_outer_${index}`,
+      sketchEntityType: "skCircle",
+      geometry: { center3d: { x: x / 1000, y: y / 1000, z: 0 }, radius: 0.00375 },
+      isConstruction: false,
+    },
+    {
+      sketchEntityId: `annulus_inner_${index}`,
+      sketchEntityType: "skCircle",
+      geometry: { center3d: { x: x / 1000, y: y / 1000, z: 0 }, radius: 0.00275 },
+      isConstruction: false,
+    },
+  ]);
+  const rectangleSegments: readonly [
+    string,
+    readonly [number, number],
+    readonly [number, number],
+  ][] = [
+    ["rectangle_bottom_left", [0, 0], [10, 0]],
+    ["rectangle_bottom_middle", [10, 0], [20, 0]],
+    ["rectangle_bottom_right", [20, 0], [30, 0]],
+    ["rectangle_right", [30, 0], [30, 10]],
+    ["rectangle_top_right", [30, 10], [20, 10]],
+    ["rectangle_top_middle", [20, 10], [10, 10]],
+    ["rectangle_top_left", [10, 10], [0, 10]],
+    ["rectangle_left", [0, 10], [0, 0]],
+    // The dividers deliberately carry independent endpoint identities.
+    ["divider_10", [10, 0], [10, 10]],
+    ["divider_20", [20, 0], [20, 10]],
+  ];
+  const mirrorRelationships = [0, 1, 2].flatMap((row) => ["outer", "inner"].map((kind) => ({
+
+    constraintType: "MIRROR",
+    entityId: `annulus_${kind}_mirror_${row}`,
+    parameters: [
+      { parameterId: "localFirst", value: `annulus_${kind}_${row}` },
+      { parameterId: "localSecond", value: `annulus_${kind}_${row + 3}` },
+      { parameterId: "localMirror", value: "annulus_mirror_axis" },
+    ],
+  })));
+  const newSolidExtrude = (
+    featureId: string,
+    name: string,
+    queryString: string,
+    depth: number,
+  ) => ({
+    featureType: "extrude",
+    featureId,
+    name,
+    parameters: [
+      { parameterId: "bodyType", value: "SOLID" },
+      { parameterId: "operationType", value: "NEW" },
+      { parameterId: "entities", queries: [{ queryString }] },
+      { parameterId: "endBound", value: "BLIND" },
+      { parameterId: "depth", expression: `${depth} mm`, value: depth / 1000 },
+    ],
+  });
+  return {
+    formatVersion: 2,
+    provenance: {
+      capturedAt: "2026-07-27T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "r".repeat(24),
+      wvm: "w",
+      wvmId: "w".repeat(24),
+      microversion: "m".repeat(24),
+    },
+    document: {},
+    elements: {},
+    diagnostics: [],
+    partStudios: [
+      {
+        elementId: "wave-x4-right-cell",
+        name: "X.4 selected divided rectangle",
+        features: { features: [
+          {
+            ...sketch(rectangleSketchId, "Divided rectangle"),
+            constraints: [
+              ["rectangle_bottom_left.end", "rectangle_bottom_middle.start"],
+              ["rectangle_bottom_middle.end", "rectangle_bottom_right.start"],
+              ["rectangle_bottom_left.end", "divider_10.start"],
+              ["rectangle_bottom_middle.end", "divider_20.start"],
+              ["rectangle_bottom_right.end", "rectangle_right.start"],
+              ["rectangle_right.end", "rectangle_top_right.start"],
+              ["rectangle_top_right.end", "rectangle_top_middle.start"],
+              ["rectangle_top_middle.end", "rectangle_top_left.start"],
+              ["rectangle_top_right.end", "divider_20.end"],
+              ["rectangle_top_middle.end", "divider_10.end"],
+              ["rectangle_top_left.end", "rectangle_left.start"],
+              ["rectangle_left.end", "rectangle_bottom_left.start"],
+            ].map(([localFirst, localSecond], index) => ({
+              constraintType: "COINCIDENT",
+              entityId: `rectangle_coincident_${index}`,
+              parameters: [
+                { parameterId: "localFirst", value: localFirst },
+                { parameterId: "localSecond", value: localSecond },
+              ],
+            })),
+          },
+          newSolidExtrude(
+            rectangleExtrudeId,
+            "Right cell",
+            'query=qCompressed(1.0,"opaque-x4-right-cell",id);',
+            10,
+          ),
+        ] },
+        sketches: { sketches: [{
+          featureId: rectangleSketchId,
+          entities: rectangleSegments.map(([sketchEntityId, start, end]) => ({
+
+            sketchEntityId,
+            sketchEntityType: "skLineSegment",
+            startPosition3d: { x: start[0] / 1000, y: start[1] / 1000, z: 0 },
+            endPosition3d: { x: end[0] / 1000, y: end[1] / 1000, z: 0 },
+            isConstruction: false,
+          })),
+        }] },
+        parts: null,
+        featureSpecs: { present: false, reason: "synthetic X.4 fixture" },
+        resolvedReferences: [topPlane],
+        resolvedQueryReferences: [],
+        profileEvidence: [{
+          consumingFeatureId: rectangleExtrudeId,
+          parameterId: "entities",
+          queryIndex: 0,
+          resultIndex: 0,
+          deterministicId: "x4-right-cell-profile",
+          evaluatedAt: "historyPoint",
+          kind: "sketchRegion",
+          sourceSketchFeatureId: rectangleSketchId,
+          interiorPoint3d: [0.025, 0.005, 0],
+        }],
+        profileEvidenceSchemaVersion: 3,
+        profileEvidenceManifest: [{
+          consumingFeatureId: rectangleExtrudeId,
+          parameterId: "entities",
+          queryIndex: 0,
+          sourceQueryString: 'query=qCompressed(1.0,"opaque-x4-right-cell",id);',
+          kind: "faceResults",
+          emittedRecordCount: 1,
+          completed: true,
+        }],
+        groundTruth: { hasBodies: false },
+        rollbackSnapshots: [],
+      },
+      {
+        elementId: "wave-x4-annuli",
+        name: "X.4 sparse mirrored annuli",
+        features: { features: [
+          {
+            ...sketch(annulusSketchId, "Sparse annuli"),
+            // This synthetic relationship uses the MIRROR form supported by
+            // sketch-translator; it is not inferred from the ring layout.
+            constraints: mirrorRelationships,
+          },
+          newSolidExtrude(
+            annulusExtrudeId,
+            "Six annuli",
+            `query = qSketchRegion(id + "${annulusSketchId}", true);`,
+            8,
+          ),
+        ] },
+        sketches: { sketches: [{
+          featureId: annulusSketchId,
+          entities: [
+            ...annulusEntities,
+            {
+              sketchEntityId: "annulus_mirror_axis",
+              sketchEntityType: "skLineSegment",
+              startPosition3d: { x: 0.051, y: -0.01, z: 0 },
+              endPosition3d: { x: 0.051, y: 0.203, z: 0 },
+              isConstruction: true,
+            },
+          ],
+        }] },
+        parts: null,
+        featureSpecs: { present: false, reason: "synthetic X.4 fixture" },
+        resolvedReferences: [topPlane],
+        resolvedQueryReferences: [],
+        profileEvidence: [{
+          consumingFeatureId: annulusExtrudeId,
+          parameterId: "entities",
+          queryIndex: 0,
+          evaluatedAt: "historyPoint",
+          kind: "sketchRegionSet",
+          sourceSketchFeatureId: annulusSketchId,
+          filterInnerLoops: true,
+        }],
+        profileEvidenceSchemaVersion: 3,
+        profileEvidenceManifest: [{
+          consumingFeatureId: annulusExtrudeId,
+          parameterId: "entities",
+          queryIndex: 0,
+          sourceQueryString: `query = qSketchRegion(id + "${annulusSketchId}", true);`,
+          kind: "sketchRegionSet",
+          emittedRecordCount: 1,
+          completed: true,
+        }],
+        groundTruth: { hasBodies: false },
+        rollbackSnapshots: [],
+      },
+    ],
+  };
+}
+
 export function makeWaveXChamferAndImplicitUnionCaptureBundle(): OnshapeCaptureBundleV2 {
   const bodySignature = (id: string, x: number) => ({
     deterministicId: id,
