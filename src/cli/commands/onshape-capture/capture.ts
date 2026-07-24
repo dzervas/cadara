@@ -224,13 +224,16 @@ export async function enrichBundleHistoryEvidence(
     sleep: runtime.sleep,
     concurrency: options.concurrency,
   });
+  // Re-capture any required rollback boundary snapshots the bundle is missing
+  // before touching immutable evidence, reusing one temporary workspace.
+  const backfilledSnapshots = await backfillRollbackSnapshots(client, validated, runtime, options);
   const partStudios: OnshapePartStudioCapture[] = [];
   for (const [studioIndex, studio] of validated.partStudios.entries()) {
     const deterministicIdConsumers = collectDeterministicIdConsumers(studio.features);
     const queryStringConsumers = collectQueryStringConsumers(studio.features);
     const profileConsumers = collectSolidExtrudeProfileQueryConsumers(studio.features);
     const progressPrefix = `Enrichment ${studioIndex + 1}/${validated.partStudios.length}: ${studio.name || studio.elementId}`;
-    const rollbackSnapshots = retainIntrinsicBakeRollbackSnapshots(studio);
+    const rollbackSnapshots = backfilledSnapshots.get(studio.elementId) ?? studio.rollbackSnapshots;
     const historyIsCurrent = hasCurrentOnshapeImmutableHistoryEvidence({
       schemaVersion: studio.immutableHistoryEvidenceSchemaVersion,
       manifest: studio.immutableHistoryEvidenceManifest,
@@ -608,9 +611,15 @@ async function captureRollbackSnapshots(
 }
 
 /**
- * Return only feature boundaries proven locally to be intrinsic bakes. Without
- * geometry, this scoped capture treats only `bodyType=SURFACE` extrudes as
- * such boundaries; ordinary feature history must not trigger snapshots.
+ * Return every feature boundary the importer's bake-segment planner needs a
+ * rollback snapshot for. The planner computes a per-feature body delta at every
+ * body-affecting feature (parametric producers register as body producers; baked
+ * features become `bakedBody` checkpoints), and each delta needs the snapshot at
+ * the feature AND at its immediate predecessor. `newSketch` features never change
+ * solid bodies, so snapshotting every non-sketch feature is the smallest set
+ * that guarantees both sides of every delta are always available. Narrower sets
+ * (e.g. `SURFACE` extrudes only) silently drop checkpoint and producer evidence
+ * the planner requires, so they are never used.
  */
 function collectIntrinsicBakeRollbackPoints(features: unknown): SolidFeatureRollbackPoint[] {
   const featureList = (features as { features?: unknown }).features;
@@ -618,42 +627,109 @@ function collectIntrinsicBakeRollbackPoints(features: unknown): SolidFeatureRoll
 
   return featureList.flatMap((feature, index) => {
     if (!feature || typeof feature !== "object") return [];
-    const record = feature as {
-      featureId?: unknown;
-      featureType?: unknown;
-      parameters?: unknown;
-    };
-    const bodyType = Array.isArray(record.parameters)
-      ? record.parameters.find(
-          (parameter) =>
-            parameter &&
-            typeof parameter === "object" &&
-            (parameter as { parameterId?: unknown }).parameterId === "bodyType",
-        ) as { value?: unknown } | undefined
-      : undefined;
-    return record.featureType === "extrude" &&
-      typeof record.featureId === "string" &&
+    const record = feature as { featureId?: unknown; featureType?: unknown };
+    return typeof record.featureId === "string" &&
       record.featureId.length > 0 &&
-      bodyType?.value === "SURFACE"
+      typeof record.featureType === "string" &&
+      record.featureType !== "newSketch"
       ? [{ featureId: record.featureId, rollbackIndex: index + 1 }]
       : [];
   });
 }
 
 /**
- * Retain rollback geometry only for bake boundaries that are still proven by
- * the immutable feature history. Enrichment never recaptures geometry, and a
- * `null` value remains an honest record that required boundary capture was
- * unavailable.
+ * Backfill rollback snapshots for every required boundary that a bundle is
+ * missing, without ever discarding evidence it already has. Existing snapshots
+ * are always retained (losing them costs a live re-capture; keeping them costs
+ * only file size), and only the missing boundaries are re-captured through the
+ * same temporary-workspace machinery {@link captureBundle} uses. A single
+ * temporary workspace is created lazily per document — and only when some studio
+ * actually needs snapshots — then deleted. When workspace creation fails again
+ * (HTTP 403), studios keep whatever they had, so an honest `null` stays `null`.
  */
-function retainIntrinsicBakeRollbackSnapshots(
-  studio: OnshapePartStudioCapture,
-): OnshapeRollbackSnapshot[] | null {
-  if (studio.rollbackSnapshots === null) return null;
-  const boundaryFeatureIds = new Set(
-    collectIntrinsicBakeRollbackPoints(studio.features).map((point) => point.featureId),
+async function backfillRollbackSnapshots(
+  client: OnshapeClient,
+  bundle: OnshapeCaptureBundle,
+  runtime: CaptureRuntime,
+  options: Pick<CaptureOptions, "maxTranslationPolls">,
+): Promise<Map<string, OnshapeRollbackSnapshot[]>> {
+  const backfilled = new Map<string, OnshapeRollbackSnapshot[]>();
+  const pending = bundle.partStudios.flatMap((studio) => {
+    const existing = studio.rollbackSnapshots;
+    const existingIds = new Set((existing ?? []).map((snapshot) => snapshot.featureId));
+    const missing = collectIntrinsicBakeRollbackPoints(studio.features).filter(
+      (point) => !existingIds.has(point.featureId),
+    );
+    return missing.length === 0 ? [] : [{ studio, existing, missing }];
+  });
+  if (pending.length === 0) return backfilled;
+
+  const workspace = await createRollbackWorkspace(
+    client,
+    bundle.provenance.documentId,
+    bundle.provenance.microversion,
+    runtime,
   );
-  return studio.rollbackSnapshots.filter((snapshot) => boundaryFeatureIds.has(snapshot.featureId));
+  // Workspace creation still forbidden: keep existing evidence untouched so a
+  // `null` studio stays null-honest until a future privileged enrichment.
+  if (!workspace.workspaceId) return backfilled;
+
+  const ref: OnshapeDocumentRef = {
+    documentId: bundle.provenance.documentId,
+    wvm: bundle.provenance.wvm,
+    wvmId: bundle.provenance.wvmId,
+    elementId: null,
+  };
+  let captureError: unknown;
+  try {
+    for (const { studio, existing, missing } of pending) {
+      const captured = await captureRollbackSnapshots(
+        client,
+        ref,
+        studio.elementId,
+        `/partstudios/d/${bundle.provenance.documentId}/w/${workspace.workspaceId}/e/${studio.elementId}`,
+        missing,
+        runtime,
+        options,
+      );
+      backfilled.set(
+        studio.elementId,
+        mergeRollbackSnapshots(studio.features, existing ?? [], captured),
+      );
+    }
+  } catch (error) {
+    captureError = error;
+  }
+
+  const cleanupError = await cleanupRollbackWorkspace(
+    client,
+    bundle.provenance.documentId,
+    workspace.workspaceId,
+  );
+  if (cleanupError) {
+    const baseMessage = captureError ? `${errorMessage(captureError)}\n` : "";
+    throw new Error(
+      `${baseMessage}Temporary Onshape workspace ${workspace.workspaceId} could not be deleted; delete it manually. ${errorMessage(cleanupError)}`,
+    );
+  }
+  if (captureError) throw captureError;
+  return backfilled;
+}
+
+/** Merge captured snapshots into existing ones, ordered by feature-list index. */
+function mergeRollbackSnapshots(
+  features: unknown,
+  existing: readonly OnshapeRollbackSnapshot[],
+  captured: readonly OnshapeRollbackSnapshot[],
+): OnshapeRollbackSnapshot[] {
+  const order = new Map(
+    collectIntrinsicBakeRollbackPoints(features).map((point, index) => [point.featureId, index]),
+  );
+  return [...existing, ...captured].sort(
+    (left, right) =>
+      (order.get(left.featureId) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(right.featureId) ?? Number.MAX_SAFE_INTEGER),
+  );
 }
 
 /**
