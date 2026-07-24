@@ -28,10 +28,9 @@ const MOUNTS_FULL_FEATURE_IDS = [
   "feature_transform-1",
   "feature_chamfer-1",
 ];
-const PART_STUDIO_BAKED_BODIES = [
-  "body_feature_bakedBody-1_1",
-  "body_feature_bakedBody-1_2",
-];
+// Shell 1 now bakes (apply-time topology rematch containment), so bake segment 1
+// resolves to a single committed baked body instead of the earlier two.
+const PART_STUDIO_BAKED_BODIES = ["body_feature_bakedBody-1"];
 const INVALID_REFERENCE_ALERT =
   /does not resolve|invalid reference|missing reference|solver|workbench action failed/i;
 
@@ -189,7 +188,14 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
     "Real Onshape Part Studio 1 capture is not present locally.",
   );
   const { reviewText } = await importBundle(page, PART_STUDIO_BUNDLE_PATH, true);
-  expect(reviewText).toContain("8 parametric, 33 baked, 0 geometry-only features.");
+  // Shell 1 (the X.8 closedHollow shell) is promoted parametrically at review but
+  // its `parts` body-scope reference fails apply-time topology rematch against the
+  // live OCC prefix; containment bakes only that feature (and cascades dependents)
+  // instead of aborting the studio, so the studio now reviews and commits.
+  expect(reviewText).toContain("9 parametric, 32 baked, 0 geometry-only features.");
+  expect(reviewText).toMatch(
+    /Shell 1\s+baked \(suppressed\) — topology reference could not be rematched while applying/,
+  );
   for (const label of ["Split 1", "Boolean 1", "Delete part 1"]) {
     expect(reviewText).toMatch(
       new RegExp(`${label}\\s+baked \\(suppressed\\) — topology reference did not match`),

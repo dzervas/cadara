@@ -117,6 +117,7 @@ import {
   resolvePlannedExtrudeTopology,
   resolvedExtrudeExtent,
 } from "@/domain/import/onshape/extrude-planner";
+import { isTopologyApplyRematchError } from "@/domain/import/orchestrator";
 
 const ACCEPTED_EXTENSION = ".onshape-capture.json";
 
@@ -821,12 +822,40 @@ async function activateProbeBackedPlanning(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: ReturnType<typeof planStudioFidelity>;
   capabilities: ImportCapabilities;
+  /**
+   * Features whose apply-time topology rematch already failed in a prior probe.
+   * They stay baked/suppressed for this attempt and are never re-promoted, so a
+   * single feature that the live kernel rejects at apply cannot abort the studio.
+   */
+  forcedBakeFeatureIds?: ReadonlySet<string>;
 }) {
   if (!input.capabilities.history) {
     return { plan: input.plan, probeResult: null };
   }
 
-  let workingPlan: OnshapeStudioPlan = input.plan;
+  const forcedBakeFeatureIds = input.forcedBakeFeatureIds ?? new Set<string>();
+  let workingPlan: OnshapeStudioPlan =
+    forcedBakeFeatureIds.size === 0
+      ? input.plan
+      : recomputePlanWithFeaturePlans(
+          input.plan,
+          replanDependentFeatures({
+            read: input.read,
+            featurePlans: input.plan.featurePlans.map((plan) =>
+              forcedBakeFeatureIds.has(plan.onshapeFeatureId)
+                ? {
+                    ...plan,
+                    tier: "baked" as const,
+                    target: { kind: "suppressed" as const },
+                    reasonCodes: ["topology-apply-rematch-failed" as const],
+                    suppressed: true,
+                  }
+                : plan,
+            ),
+          }),
+          input.read.studio.groundTruth.hasBodies,
+          input.read,
+        );
   let probeResult: HistoryProbeResult;
   const maxDemotions = input.plan.featurePlans.filter(isCapturedFrameTranslation).length;
   for (let attempt = 0; ; attempt += 1) {
@@ -900,6 +929,9 @@ async function activateProbeBackedPlanning(input: {
     // Resolve translator-declared topology consumers in source order. Each successful
     // consumer is inserted before probing the next one, preserving the exact prefix.
     for (const candidate of [...workingPlan.featurePlans]) {
+      // A feature the live kernel already rejected at apply stays baked; never
+      // re-promote it, or the same rematch throw would abort the studio again.
+      if (forcedBakeFeatureIds.has(candidate.onshapeFeatureId)) continue;
       const slots =
         candidate.plannedBodyTopologyConsumer?.slots ??
         candidate.plannedExtrude?.topologySlots ??
@@ -1235,6 +1267,7 @@ async function activateProbeBackedPlanning(input: {
       prefixResults.map((result) => [result.consumerFeatureId, result.signatures]),
     );
     const nextPlans: FeaturePlan[] = workingPlan.featurePlans.map((featurePlan) => {
+      if (forcedBakeFeatureIds.has(featurePlan.onshapeFeatureId)) return featurePlan;
       if (
         featurePlan.featureType !== "newSketch" ||
         featurePlan.tier !== "baked" ||
@@ -1397,11 +1430,32 @@ async function reviewStudio(
   const capturedFramePlan = capabilities.history
     ? activateCapturedFrameTranslation({ read, plan: basePlan })
     : basePlan;
-  const activation = await activateProbeBackedPlanning({
-    read,
-    plan: capturedFramePlan,
-    capabilities,
-  });
+  // Contain apply-time topology rematch failures at the feature level. A feature
+  // the review promoted parametrically can still be rejected when a probe applies
+  // it against the live OCC prefix (the captured signature no longer rematches).
+  // Demote only that feature to baked/suppressed with a specific reason and
+  // re-plan; its dependents cascade to baked on the retried probe pass. This keeps
+  // one rejected feature from aborting the whole studio import.
+  const forcedBakeFeatureIds = new Set<string>();
+  let activation: Awaited<ReturnType<typeof activateProbeBackedPlanning>>;
+  for (;;) {
+    try {
+      activation = await activateProbeBackedPlanning({
+        read,
+        plan: capturedFramePlan,
+        capabilities,
+        forcedBakeFeatureIds,
+      });
+      break;
+    } catch (error) {
+      if (!isTopologyApplyRematchError(error)) throw error;
+      const offendingFeatureId = error.selector.source.consumerFeatureId;
+      // No progress means the demotion did not prevent the throw; surface it
+      // loudly rather than looping. Genuine non-topology errors already rethrew.
+      if (forcedBakeFeatureIds.has(offendingFeatureId)) throw error;
+      forcedBakeFeatureIds.add(offendingFeatureId);
+    }
+  }
   const { plan, probeResult } = activation;
   const sketchRelationshipSummaries = plan.featurePlans
     .map((featurePlan) => {

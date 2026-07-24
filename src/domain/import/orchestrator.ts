@@ -340,15 +340,32 @@ function isDeferredSketchTargetRef(
   );
 }
 
-class TopologyApplyRematchError extends Error {
+export class TopologyApplyRematchError extends Error {
   readonly selector: ImportDeferredTopologyRef;
 
   constructor(selector: ImportDeferredTopologyRef) {
     super(
       `Live topology rematch failed for ${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}.`,
     );
+    this.name = "TopologyApplyRematchError";
     this.selector = selector;
   }
+}
+
+/**
+ * Structural guard so the review/apply seam can recognize an apply-time topology
+ * rematch failure without relying on `instanceof` surviving module boundaries.
+ */
+export function isTopologyApplyRematchError(
+  error: unknown,
+): error is TopologyApplyRematchError {
+  return (
+    error instanceof TopologyApplyRematchError ||
+    (error instanceof Error &&
+      error.name === "TopologyApplyRematchError" &&
+      typeof (error as { selector?: unknown }).selector === "object" &&
+      (error as { selector?: unknown }).selector !== null)
+  );
 }
 
 function getSketchRegions(

@@ -26,7 +26,11 @@ import {
   makeWaveXClosedHollowShellCaptureBundle,
   makeWaveXSurfaceExtrudeCaptureBundle,
 } from "@/domain/import/onshape/wave-x-capture-fixtures";
-import { createImportCapabilities } from "@/domain/import/orchestrator";
+import {
+  createImportCapabilities,
+  TopologyApplyRematchError,
+} from "@/domain/import/orchestrator";
+import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { createGeometryAssetRecordFromReference } from "@/contracts/modeling/geometry-assets";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
@@ -1189,6 +1193,76 @@ test("src/domain/import/onshape/provider.spec.ts promotes a synthetic closed hol
     reasonCodes: [],
   });
 
+});
+
+// Lane: logic (per docs/testing.md — exercises the exported importer
+// review/apply seam, not presentation behavior).
+// Seam: when a probe rejects a feature's topology reference at apply time
+// (TopologyApplyRematchError), review must degrade only that feature to
+// baked/suppressed with `topology-apply-rematch-failed`, cascade its dependents,
+// keep independent features parametric, and never let the throw escape review.
+test("src/domain/import/onshape/provider.spec.ts contains an apply-time topology rematch failure at the offending feature", async () => {
+  const rematchSelector: ImportDeferredTopologyRef = {
+    kind: "topologyOf",
+    expectedKind: "face",
+    capturedSignature: {
+      entityClass: "face",
+      geometryType: "plane",
+      definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+      centroid: [0.0005, 0.001, 0.003],
+      boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+    },
+    tolerance: { linear: 0.01, angularRadians: 0.01, relative: 0.01, ambiguityMargin: 0.5 },
+    source: {
+      consumerFeatureId: "S_FACE",
+      parameterId: "sketchPlane",
+      deterministicId: "face_ref",
+    },
+  };
+
+  const base = capabilitiesWithProbe([probeSignature("face_match")]);
+  const innerProbe = base.history!;
+  let injectedFailure = false;
+  const capabilitiesWithApplyRematchFailure: ImportCapabilities = {
+    ...base,
+    history: {
+      async evaluateHistoryProbe(input) {
+        // Simulate the live OCC prefix rejecting S_FACE's captured topology
+        // reference the first time a probe applies it, exactly as the real
+        // kernel materializer throws when the recorded signature no longer
+        // rematches. Subsequent probes (after S_FACE is baked) proceed.
+        if (!injectedFailure) {
+          injectedFailure = true;
+          throw new TopologyApplyRematchError(rematchSelector);
+        }
+        return innerProbe.evaluateHistoryProbe(input);
+      },
+    },
+  };
+
+  const source = sourceFromBundle(makeFaceSketchExtrudeBundle());
+  const review = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithApplyRematchFailure,
+  });
+
+  expect(injectedFailure, "the probe should have reported an apply-time rematch failure").toBe(true);
+  const plans = review.providerReview.studios[0]!.featurePlans;
+  const byId = (id: string) => plans.find((plan) => plan.onshapeFeatureId === id);
+
+  expect(byId("S_FACE"), JSON.stringify(plans)).toMatchObject({
+    tier: "baked",
+    suppressed: true,
+  });
+  expect(byId("S_FACE")?.reasonCodes).toContain("topology-apply-rematch-failed");
+
+  // The dependent extrude on S_FACE's region cascades to baked rather than
+  // referencing a suppressed sketch.
+  expect(byId("E_FACE")?.tier).toBe("baked");
+
+  // Independent upstream geometry stays parametric: one rejected feature does
+  // not bake the rest of the studio.
+  expect(byId("E_BASE")?.tier).toBe("parametric");
 });
 
 test("src/domain/import/onshape/provider.spec.ts registration and acceptance", async () => {
