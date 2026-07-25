@@ -295,6 +295,52 @@ export function extractSolidShapes(
   return solids;
 }
 
+/**
+ * Canonical enumeration order for the solids of one shape.
+ *
+ * Sorting by exact vertex bounds (then volume) makes the enumeration of a shape
+ * reproducible across rebuilds, so the pieces of a severing cut can be minted
+ * deterministic identities. This orders an already-known set; it never matches
+ * one solid to another or relaxes any tolerance.
+ */
+export function orderSolidShapesCanonically(
+  oc: OpenCascadeInstance,
+  solids: readonly InstanceType<OpenCascadeInstance["TopoDS_Solid"]>[],
+) {
+  const keyed = solids.map((solid) => {
+    const vertexMap = new oc.TopTools_IndexedMapOfShape_1();
+    oc.TopExp.MapShapes_1(solid, vertexShapeType(oc) as never, vertexMap);
+    const low = [Infinity, Infinity, Infinity];
+    const high = [-Infinity, -Infinity, -Infinity];
+    for (let index = 1; index <= vertexMap.Size(); index += 1) {
+      const point = oc.BRep_Tool.Pnt(oc.TopoDS.Vertex_1(vertexMap.FindKey(index)));
+      const coordinates = [point.X(), point.Y(), point.Z()];
+      for (const axis of [0, 1, 2]) {
+        low[axis] = Math.min(low[axis]!, coordinates[axis]!);
+        high[axis] = Math.max(high[axis]!, coordinates[axis]!);
+      }
+    }
+    vertexMap.delete();
+
+    const properties = new oc.GProp_GProps_1();
+    oc.BRepGProp.VolumeProperties_1(solid, properties, false, false, false);
+    const volume = properties.Mass();
+    properties.delete();
+
+    return { solid, key: [...low, ...high, volume] };
+  });
+
+  keyed.sort((left, right) => {
+    for (let index = 0; index < left.key.length; index += 1) {
+      const difference = left.key[index]! - right.key[index]!;
+      if (difference !== 0) return difference;
+    }
+    return 0;
+  });
+
+  return keyed.map((entry) => entry.solid);
+}
+
 function enumerateFaces(
   oc: OpenCascadeInstance,
   bodyId: BodyId,
@@ -1393,13 +1439,14 @@ export function trackReplacementSolidBodyFromNativePayload(
     nativePayload: OccNativeShimPayload;
     meshExportFallback?: OccTrackedBody["meshExportFallback"];
   },
-): OccTrackedBody {
+): OccTrackedBody | null {
   const solids = extractSolidShapes(oc, input.shape);
 
+  // A severing result has no single native replacement identity. Report that
+  // structurally so the caller can fall back to the JS path, which owns the
+  // one implementation of multi-piece identity and invalidation.
   if (solids.length !== 1) {
-    throw new Error(
-      `Native replacement body ${input.previous.bodyId} must resolve to exactly one solid shape, received ${solids.length}.`,
-    );
+    return null;
   }
 
   const [solid] = solids;
