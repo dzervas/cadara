@@ -1434,6 +1434,67 @@ async function activateProbeBackedPlanning(input: {
     );
   }
 
+  // Final containment pass. Everything above resolves topology; this proves the
+  // resulting plan actually BUILDS in the live kernel, using the same ordered
+  // action sequence apply will run (checkpoints included). A feature the kernel
+  // rejects is demoted to baked with a specific reason and its dependents are
+  // re-planned, so one unbuildable feature never aborts the studio.
+  //
+  // Attribution is exact: `orderedPositionToFeatureId` is recorded by
+  // `buildPreparedActions` while it emits each action, so the failed ordinal
+  // names its owning feature rather than being inferred from plan ordering.
+  for (let attempt = 0; attempt < workingPlan.featurePlans.length; attempt += 1) {
+    const orderedPositionToFeatureId = new Map<number, string>();
+    const buildActions = await buildPreparedActions({
+      read: input.read,
+      plan: workingPlan,
+      capabilities: input.capabilities,
+      materializeBake: false,
+      emitBakeCheckpoints: true,
+      orderedPositionToFeatureId,
+    });
+    const buildProbe = await input.capabilities.history.evaluateHistoryProbe({
+      actions: buildActions,
+    });
+    const failedOrdinal = buildProbe.steps.findIndex(
+      (step) => step.status === "failed",
+    );
+    if (failedOrdinal < 0) break;
+    const failedFeatureId = orderedPositionToFeatureId.get(failedOrdinal);
+    const failedPlan = failedFeatureId
+      ? workingPlan.featurePlans.find(
+          (plan) =>
+            plan.onshapeFeatureId === failedFeatureId &&
+            plan.tier === "parametric",
+        )
+      : undefined;
+    // Nothing parametric to demote means the failure is not contained by this
+    // pass; leave the plan as is so the real error surfaces at apply instead of
+    // silently mutating an unrelated feature.
+    if (!failedPlan) break;
+    workingPlan = recomputePlanWithFeaturePlans(
+      workingPlan,
+      replanDependentFeatures({
+        read: input.read,
+        featurePlans: bakeConsumersOfBakedSketches(
+          workingPlan.featurePlans.map((plan) =>
+            plan.onshapeFeatureId === failedFeatureId
+              ? {
+                  ...plan,
+                  tier: "baked" as const,
+                  target: { kind: "suppressed" as const },
+                  reasonCodes: ["feature-kernel-build-failed" as const],
+                  suppressed: true,
+                }
+              : plan,
+          ),
+        ),
+      }),
+      input.read.studio.groundTruth.hasBodies,
+      input.read,
+    );
+  }
+
   return { plan: workingPlan, probeResult };
 }
 
