@@ -62,6 +62,7 @@ import {
   listPartStudios,
   readPartStudio,
 } from "@/domain/import/onshape/bundle-reader";
+import { unreachableFeatureDependencies } from "@/domain/import/onshape/bake-segment-planner";
 import {
   extractSketchPlaneDeterministicId,
   onshapeFeatureTranslatorRegistry,
@@ -818,6 +819,46 @@ function bakeUnresolvedExtrudeTopology(featurePlans: FeaturePlan[]): FeaturePlan
   );
 }
 
+/**
+ * Fail closed at the feature level for sketch lineage: review can promote a
+ * consumer whose profile sketch stayed baked. `buildPreparedActions` would then
+ * silently drop that consumer with a warning, so review would claim a
+ * parametric feature the commit never contains. Cascade to a fixed point so the
+ * reviewed tier counts equal what apply actually creates.
+ */
+function bakeConsumersOfBakedSketches(featurePlans: FeaturePlan[]): FeaturePlan[] {
+  let current = featurePlans;
+  for (;;) {
+    const reachableSketchFeatureIds = new Set(
+      current.flatMap((plan) =>
+        plan.tier === "parametric" && plan.target.kind === "sketch"
+          ? [plan.onshapeFeatureId]
+          : [],
+      ),
+    );
+    const knownFeatureIds = new Set(current.map((plan) => plan.onshapeFeatureId));
+    const next = current.map((plan) =>
+      plan.tier === "parametric" &&
+      unreachableFeatureDependencies(plan.inputDependencies, {
+        reachableSketchFeatureIds,
+        reachableBodyFeatureIds: new Set(knownFeatureIds),
+        knownFeatureIds,
+      }).some((dependency) => dependency.kind === "sketch")
+        ? {
+            ...plan,
+            tier: "baked" as const,
+            target: { kind: "suppressed" as const },
+            reasonCodes: [
+              ...new Set([...plan.reasonCodes, "downstream-of-baked" as const]),
+            ],
+            suppressed: true,
+          }
+        : plan,
+    );
+    if (next.every((plan, index) => plan === current[index])) return next;
+    current = next;
+  }
+}
 async function activateProbeBackedPlanning(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: ReturnType<typeof planStudioFidelity>;
@@ -1381,7 +1422,9 @@ async function activateProbeBackedPlanning(input: {
   // parametric with a live extent/scope `topologySlot`, degrade only that
   // feature (and cascade its dependents) rather than letting a whole-studio
   // prepare throw. `resolvedExtrudeExtent` remains a hard invariant behind this.
-  const swept = bakeUnresolvedExtrudeTopology(workingPlan.featurePlans);
+  const swept = bakeConsumersOfBakedSketches(
+    bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
+  );
   if (swept.some((plan, index) => plan !== workingPlan.featurePlans[index])) {
     workingPlan = recomputePlanWithFeaturePlans(
       workingPlan,

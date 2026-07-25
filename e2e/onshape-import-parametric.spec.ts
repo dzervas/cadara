@@ -30,9 +30,13 @@ const MOUNTS_FULL_FEATURE_IDS = [
   "feature_transform-1",
   "feature_chamfer-1",
 ];
-// Shell 1 now bakes (apply-time topology rematch containment), so bake segment 1
-// resolves to a single committed baked body instead of the earlier two.
-const PART_STUDIO_BAKED_BODIES = ["body_feature_bakedBody-1"];
+// Shell 1 bakes (apply-time topology rematch containment) and one further
+// consumer bakes as `downstream-of-baked`; bake segment 1 therefore commits its
+// two checkpoint bodies.
+const PART_STUDIO_BAKED_BODIES = [
+  "body_feature_bakedBody-1_1",
+  "body_feature_bakedBody-1_2",
+];
 const INVALID_REFERENCE_ALERT =
   /does not resolve|invalid reference|missing reference|solver|workbench action failed/i;
 
@@ -193,8 +197,10 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // Shell 1 (the X.8 closedHollow shell) is promoted parametrically at review but
   // its `parts` body-scope reference fails apply-time topology rematch against the
   // live OCC prefix; containment bakes only that feature (and cascades dependents)
-  // instead of aborting the studio, so the studio now reviews and commits.
-  expect(reviewText).toContain("9 parametric, 32 baked, 0 geometry-only features.");
+  // instead of aborting the studio, so the studio now reviews and commits. One
+  // further consumer bakes as `downstream-of-baked` rather than being silently
+  // dropped at prepare, so the reviewed tiers equal the committed timeline.
+  expect(reviewText).toContain("8 parametric, 33 baked, 0 geometry-only features.");
   expect(reviewText).toMatch(
     /Shell 1\s+baked \(suppressed\) — topology reference could not be rematched while applying/,
   );
@@ -293,18 +299,19 @@ for (const fixture of WAVE_T_TIMELINES) {
   });
 }
 
-// Rollback acceptance: Laptop Stand and Second Part Studio still fail apply in
-// the real OCC kernel with an extrude profile-selection error (a separate
-// profile/region-resolution defect). The contract these two protect is that a
+// Rollback acceptance: Laptop Stand still fails apply in the real OCC kernel
+// (its Extrude 2 boolean target does not resolve against the live prefix — a
+// separate topology-resolution defect). The contract it protects is that a
 // failed import ABORTS CLEANLY: the apply failure surfaces exactly one visible
-// "profile selection is incorrect" alert and the atomic rollback restores the
-// pristine pre-import document (no partial features, no debris bodies, no
-// empty-doc corruption, and no 90s undo-sync hang). Flip either to assert its
-// committed timeline once its profile-selection apply defect is fixed.
+// alert and the atomic rollback restores the pristine pre-import document (no
+// partial features, no debris bodies, no empty-doc corruption, and no 90s
+// undo-sync hang). Flip it to assert its committed timeline once that apply
+// defect is fixed.
 
-async function importBundleExpectingProfileFailure(
+async function importBundleExpectingApplyFailure(
   page: Page,
   bundlePath: string,
+  alertPattern: RegExp,
 ) {
   await page.addInitScript(() =>
     Object.defineProperty(globalThis, "showOpenFilePicker", {
@@ -331,9 +338,7 @@ async function importBundleExpectingProfileFailure(
   // former 90s repository-undo-synchronization hang. The 120s budget covers the
   // slow real-kernel apply plus the restore while still failing if that hang
   // ever returns (apply + 90s would exceed it).
-  const alert = page
-    .getByRole("alert")
-    .filter({ hasText: /profile selection is incorrect/i });
+  const alert = page.getByRole("alert").filter({ hasText: alertPattern });
   await expect(alert).toBeVisible({ timeout: 120_000 });
 
   const state = await page.evaluate(() => window.__cadaraDebug!.getState());
@@ -361,19 +366,71 @@ test("Laptop Stand studio import fails cleanly and leaves a pristine document", 
   // A residual 90s undo-sync hang would push this past the budget; the atomic
   // restore keeps the failure path fast even after the ~93s apply attempt.
   test.setTimeout(170_000);
-  await importBundleExpectingProfileFailure(page, LAPTOP_STAND_BUNDLE_PATH);
+  await importBundleExpectingApplyFailure(
+    page,
+    LAPTOP_STAND_BUNDLE_PATH,
+    /Extrude 2 boolean target is incorrect/i,
+  );
 });
 
-test("Second Part Studio import fails cleanly and leaves a pristine document", async ({
+// d3cd9 now commits in the real kernel. Its reviewed tiers equal what apply
+// actually creates: every consumer whose profile sketch stayed baked is baked
+// (`downstream-of-baked`) instead of being silently dropped at prepare.
+test("Second Part Studio commits its honest real-kernel tier split", async ({
   page,
 }) => {
   test.skip(
     !existsSync(SECOND_PART_STUDIO_BUNDLE_PATH),
     "Real Onshape second Part Studio capture is not present locally.",
   );
-  test.setTimeout(170_000);
-  await importBundleExpectingProfileFailure(page, SECOND_PART_STUDIO_BUNDLE_PATH);
+  test.setTimeout(400_000);
+  const { reviewText } = await importBundle(page, SECOND_PART_STUDIO_BUNDLE_PATH, true);
+  expect(reviewText).toContain("13 parametric, 11 baked, 0 geometry-only features.");
+  for (const [label, reason] of [
+    ["Extrude 2", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
+    ["Extrude 3", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
+    ["Mirror 1", "topology reference could not be rematched while applying"],
+    ["Extrude 4", "only solid extrudes can import as parametric solid features"],
+    ["Split 1", "topology reference did not match"],
+    ["Sketch 7", "requires captured history topology evidence"],
+    ["Extrude 5", "depends on previously baked geometry"],
+    ["Extrude 6", "depends on previously baked geometry"],
+    ["Sketch 8", "requires captured history topology evidence"],
+    ["Extrude 7", "depends on previously baked geometry"],
+    ["Extrude 8", "depends on previously baked geometry"],
+  ] as const) {
+    expect(reviewText, `${label} must state its honest bake reason.`).toMatch(
+      new RegExp(`${label}\\s+baked \\(suppressed\\) — [^\\n]*${escapeRegExp(reason)}`),
+    );
+  }
+
+  const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
+  expect(imported.snapshotDiagnosticsCount).toBe(0);
+  expect(imported.featureIds).toEqual([
+    "feature_extrude-1",
+    "feature_plane-1",
+    "feature_plane-2",
+    "feature_plane-3",
+    "feature_plane-4",
+    "feature_bakedBody-1",
+    "feature_extrude-2",
+  ]);
+  await expectNoWorkbenchAlerts(page);
+
+  // The bundle carries real document variables; a `screwHole` edit proves the
+  // committed parametric prefix still rebuilds against the baked checkpoint.
+  // (`walls` is a separate lever: it reshapes Sketch 1, whose region durable ids
+  // then no longer resolve for Extrude 1 — a pre-existing region-identity defect
+  // unrelated to this import gate.)
+  const rebuilt = await editVariable(page, "screwHole", "6");
+  expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
+  expect(rebuilt.featureIds).toEqual(imported.featureIds);
+  await expectNoReferenceAlerts(page);
 });
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 // Wave T "Extrude extents" now imports cleanly in the real kernel (the parallel
 // up-to-next profile fix landed), committing its three-extrude timeline.
