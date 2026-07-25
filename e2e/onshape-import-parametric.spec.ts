@@ -7,8 +7,10 @@ import {
   currentRevision,
   editVariable,
   importBundle,
+  LAPTOP_STAND_BUNDLE_PATH,
   MOUNTS_BUNDLE_PATH,
   PART_STUDIO_BUNDLE_PATH,
+  SECOND_PART_STUDIO_BUNDLE_PATH,
   WAVE_T_BUNDLE_PATH,
   waitForMachineIdle,
   waitForRevisionChange,
@@ -253,6 +255,18 @@ const WAVE_T_TIMELINES = [
     ],
     tierSummary: "3 parametric, 2 baked, 0 geometry-only features.",
   },
+  // Full-revolve studio: the review lists two features (Sketch 1 + Revolve 1) and
+  // commits a single live revolve; the trailing sketch session finishes cleanly.
+  {
+    studio: "Part Studio 1",
+    featureIds: ["feature_revolve-1"],
+    tierSummary: "2 parametric, 0 baked, 0 geometry-only features.",
+  },
+  {
+    studio: "Loft",
+    featureIds: ["feature_plane-1", "feature_loft-1"],
+    tierSummary: "4 parametric, 0 baked, 0 geometry-only features.",
+  },
 ] as const;
 
 for (const fixture of WAVE_T_TIMELINES) {
@@ -278,6 +292,103 @@ for (const fixture of WAVE_T_TIMELINES) {
     await expectNoReferenceAlerts(page);
   });
 }
+
+// X.9.4 real-browser acceptance: the following three studios do NOT import in the
+// real OCC kernel. Apply aborts with an extrude profile-selection error and the
+// atomic rollback then times out on repository undo synchronization (90000ms),
+// leaving a partial document. These are genuine apply-pipeline defects (extrude
+// profile/region resolution), not harness issues, so they are pinned as fixme
+// with the honest observed tiers and the intended committed timeline. Remove the
+// fixme once the profile-selection apply failure and rollback-undo timeout are
+// fixed; the mock logic-lane review reports 23/1/0 (5151), 23/1/0 (d3cd9), and
+// 6/0/0 (Wave T Extrude extents), all rosier than the real kernel.
+
+test.fixme(
+  "Laptop Stand studio imports its baked segments and rebuilds against LaptopWidth",
+  async ({ page }) => {
+    test.skip(
+      !existsSync(LAPTOP_STAND_BUNDLE_PATH),
+      "Real Onshape Laptop Stand capture is not present locally.",
+    );
+    // Observed import: apply fails "Extrude 2 profile selection is incorrect";
+    // rollback times out after 90s. Budget beyond the file-wide 180s default so
+    // the clean-import path (post-fix) has headroom for the ~93s apply.
+    test.setTimeout(300_000);
+
+    const { reviewText } = await importBundle(page, LAPTOP_STAND_BUNDLE_PATH, true);
+    // Honest browser tier (mock review is 23 parametric, 1 baked): the real
+    // kernel bakes 14 of the boolean/topology-scoped features into 2 checkpoints.
+    expect(reviewText).toContain("10 parametric, 14 baked, 0 geometry-only features.");
+    const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
+    expect(imported.snapshotDiagnosticsCount).toBe(0);
+    expect(imported.featureIds).toEqual(["feature_extrude-1"]);
+    await expectNoReferenceAlerts(page);
+
+    const beforeGeometry = await page.locator("main canvas").first().screenshot();
+    // LaptopWidth is a translated document variable; edit it to a value distinct
+    // from the captured default so the live extrude rebuilds visibly.
+    const rebuilt = await editVariable(page, "LaptopWidth", "160");
+    await page.locator("[data-workbench-variables-fab]").click();
+    await page.waitForSelector('[data-render-idle="true"]', { timeout: 30_000 });
+    const afterGeometry = await page.locator("main canvas").first().screenshot();
+    expect(meanPixelDelta(beforeGeometry, afterGeometry)).toBeGreaterThan(0.05);
+    expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
+  },
+);
+
+test.fixme(
+  "Second Part Studio bundle imports its baked segment and rebuilds against walls",
+  async ({ page }) => {
+    test.skip(
+      !existsSync(SECOND_PART_STUDIO_BUNDLE_PATH),
+      "Real Onshape second Part Studio capture is not present locally.",
+    );
+    // Observed import: apply fails "Extrude 1 profile selection is incorrect";
+    // rollback times out after 90s, leaving a document with the sketch only and
+    // zero solid bodies (featureIds === []).
+    test.setTimeout(300_000);
+
+    const { reviewText } = await importBundle(page, SECOND_PART_STUDIO_BUNDLE_PATH, true);
+    // Honest browser tier (mock review is 23 parametric, 1 baked): the real
+    // kernel bakes 11 boolean/topology-scoped features into 1 checkpoint.
+    expect(reviewText).toContain("13 parametric, 11 baked, 0 geometry-only features.");
+    const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
+    expect(imported.snapshotDiagnosticsCount).toBe(0);
+    // Intended committed timeline once the apply defect is fixed: the live
+    // Extrude 1 plus the bake-segment body. Currently the studio commits an
+    // empty solid timeline, so this assertion documents the target state.
+    expect(imported.featureIds.length).toBeGreaterThan(0);
+    await expectNoReferenceAlerts(page);
+
+    const beforeGeometry = await page.locator("main canvas").first().screenshot();
+    const rebuilt = await editVariable(page, "walls", "3");
+    await page.locator("[data-workbench-variables-fab]").click();
+    await page.waitForSelector('[data-render-idle="true"]', { timeout: 30_000 });
+    const afterGeometry = await page.locator("main canvas").first().screenshot();
+    expect(meanPixelDelta(beforeGeometry, afterGeometry)).toBeGreaterThan(0.05);
+    expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
+  },
+);
+
+test.fixme(
+  "Wave T Extrude extents commits its real-kernel feature timeline",
+  async ({ page }) => {
+    test.skip(
+      !existsSync(WAVE_T_BUNDLE_PATH),
+      "Real Onshape Wave T capture is not present locally.",
+    );
+    // Observed import: apply fails "Up to next extrude profile selection is
+    // incorrect"; rollback times out after 90s. The review tier itself is clean.
+    test.setTimeout(300_000);
+
+    const { reviewText } = await importBundle(page, WAVE_T_BUNDLE_PATH, true, "Extrude extents");
+    expect(reviewText).toContain("6 parametric, 0 baked, 0 geometry-only features.");
+    const state = await page.evaluate(() => window.__cadaraDebug!.getState());
+    expect(state.snapshotDiagnosticsCount).toBe(0);
+    expect(state.featureIds).toEqual(["feature_extrude-1", "feature_extrude-2"]);
+    await expectNoReferenceAlerts(page);
+  },
+);
 
 async function editRevolveAngleAndExpectGeometryChange(page: Page) {
   const beforeGeometry = await page.locator("main canvas").first().screenshot();
