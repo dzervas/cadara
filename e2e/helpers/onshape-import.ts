@@ -50,10 +50,12 @@ export async function importBundle(
 
   const commit = page.getByRole("button", { name: "Commit", exact: true });
   const alert = page.getByRole("alert").first();
-  // The heaviest real captures run a double real-kernel probe during review; the
-  // budget must absorb that plus contention from the other parallel workers. It
-  // is only a wait cap: a real review failure still resolves through the alert.
-  const reviewBudget = 300_000;
+  // The heaviest real captures run several real-kernel probes during review
+  // (per-consumer prefixes, the verification pass, and the final build
+  // containment pass), and the budget must absorb all of them plus contention
+  // from the other parallel workers. It is only a wait cap: a real review
+  // failure still resolves immediately through the alert branch below.
+  const reviewBudget = 600_000;
   try {
     const outcome = await Promise.race([
       commit.waitFor({ state: "visible", timeout: reviewBudget }).then(() => ({ kind: "review" as const })),
@@ -75,7 +77,7 @@ export async function importBundle(
   }
   const reviewText = await page.locator("main").innerText();
   await commit.click();
-  await waitForRevisionChange(page, beforeRevision);
+  await waitForRevisionChange(page, beforeRevision, reviewBudget);
 
   if (finishSketch) {
     await page.waitForFunction(
@@ -134,12 +136,18 @@ export async function currentRevision(page: Page) {
   return page.evaluate(() => window.__cadaraDebug!.getState().revision);
 }
 
-export async function waitForRevisionChange(page: Page, revision: string) {
+export async function waitForRevisionChange(
+  page: Page,
+  revision: string,
+  // The largest captures commit dozens of real-kernel features in one apply, so
+  // callers that drive a whole studio import raise this. It is only a wait cap.
+  timeout = 60_000,
+) {
   await page.waitForFunction(
     (previousRevision) =>
       window.__cadaraDebug?.getState().revision !== previousRevision,
     revision,
-    { timeout: 60_000 },
+    { timeout },
   );
 }
 

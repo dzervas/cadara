@@ -1837,7 +1837,10 @@ test("src/domain/import/onshape/provider.spec.ts probe final tessellation drives
       ...capabilities,
       history: {
         async evaluateHistoryProbe(input) {
-          requestedFinalTessellation = input.includeFinalTessellation === true;
+          // Review runs several probes; only the verification probe needs the
+          // final tessellation, so record that one happened rather than what
+          // the last probe asked for.
+          requestedFinalTessellation ||= input.includeFinalTessellation === true;
           return { steps: [], finalTessellation: { points: [0, 0, 0, 1000, 0, 0, 1000, 1000, 0] } };
         },
       },
