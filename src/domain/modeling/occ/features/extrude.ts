@@ -29,6 +29,7 @@ import {
   requireRegion,
   requireBody,
   requireFace,
+  runInRebuildSlot,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
@@ -561,11 +562,13 @@ function buildExtrudeEndShape(
       ? input.baseNormal
       : scale(input.baseNormal, -1),
   );
-  const distance = resolveExtrudeDistance(
-    context,
-    input.profileShape,
-    extrusionDirection,
-    input.end,
+  const distance = runInRebuildSlot("extent", () =>
+    resolveExtrudeDistance(
+      context,
+      input.profileShape,
+      extrusionDirection,
+      input.end,
+    ),
   );
   const profileRange = getShapeProjectionRange(
     context.oc,
@@ -737,22 +740,22 @@ export function executeExtrudeFeature(
   ownerFeatureId: FeatureId,
   parameters: ExtrudeFeatureParameters,
 ): OccFeatureExecutionResult {
-  const featureShape = buildExtrudeFeatureShape(
-    context,
-    ownerFeatureId,
-    parameters,
+  const featureShape = runInRebuildSlot("profile", () =>
+    buildExtrudeFeatureShape(context, ownerFeatureId, parameters),
   );
   const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
   if (!resolvedOperation) {
     throw new Error("Extrude operation must be a resolved literal value.");
   }
-  const result = applyBooleanPolicy(
-    context,
-    ownerFeatureId,
-    resolvedOperation,
-    parameters.booleanScope,
-    featureShape.shape,
-    { sourceShapes: featureShape.sourceShapes },
+  const result = runInRebuildSlot("scope", () =>
+    applyBooleanPolicy(
+      context,
+      ownerFeatureId,
+      resolvedOperation,
+      parameters.booleanScope,
+      featureShape.shape,
+      { sourceShapes: featureShape.sourceShapes },
+    ),
   );
   const producedBodyIds = new Set(
     result.producedTargets

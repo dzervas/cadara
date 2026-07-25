@@ -103,7 +103,11 @@ import {
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
 } from "@/domain/modeling/occ/runtime";
-import { resolveCompatibleRegion } from "@/domain/modeling/occ/features/shared";
+import {
+  resolveCompatibleRegion,
+  getRebuildSlot,
+  type RebuildSlot,
+} from "@/domain/modeling/occ/features/shared";
 import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
@@ -496,27 +500,109 @@ function createRebuildFailureDiagnostic(
   affectedFeatureIds: FeatureId[],
   affectedTargets: NonNullable<ModelingDiagnostic["target"]>[],
   feature?: OccAuthoringFeatureRecord,
+  attributedTarget?: NonNullable<ModelingDiagnostic["target"]> | null,
 ): ModelingDiagnostic {
-  const diagnostic = createDiagnostic(
-    code,
-    "error",
-    message,
-    affectedTargets[0] ?? null,
-    {
-      kind: "rebuildFailure",
-      affectedFeatureIds,
-      affectedTargets,
-    },
-  );
+  const primaryTarget =
+    attributedTarget === undefined
+      ? (affectedTargets[0] ?? null)
+      : attributedTarget;
+  const diagnostic = createDiagnostic(code, "error", message, primaryTarget, {
+    kind: "rebuildFailure",
+    affectedFeatureIds,
+    affectedTargets,
+  });
 
-  return feature
-    ? createFeatureFieldDiagnostic({
-        code: diagnostic.code,
-        feature,
-        target: diagnostic.target,
-        detail: diagnostic.detail,
-      })
-    : diagnostic;
+  if (!feature) {
+    return diagnostic;
+  }
+
+  // A raw kernel throw with no attributable slot must not blame an authored
+  // field. Keep the diagnostic feature-level and preserve the kernel message.
+  if (primaryTarget === null) {
+    return {
+      ...diagnostic,
+      featureId: feature.featureId,
+      target: { kind: "feature", featureId: feature.featureId },
+    };
+  }
+
+  return createFeatureFieldDiagnostic({
+    code: diagnostic.code,
+    feature,
+    target: diagnostic.target,
+    detail: diagnostic.detail,
+  });
+}
+
+/**
+ * Resolve the consumed target that owns a tagged rebuild slot so the failure is
+ * attributed to the correct authored field. Returns null when the slot has no
+ * durable target (e.g. blind extent or standalone scope), which keeps the
+ * diagnostic feature-level rather than guessing a field.
+ */
+function getRebuildSlotTarget(
+  definition: FeatureDefinition,
+  slot: RebuildSlot,
+): NonNullable<ModelingDiagnostic["target"]> | null {
+  if (definition.kind !== "extrude") {
+    return null;
+  }
+
+  const parameters = definition.parameters;
+
+  if (slot === "profile") {
+    return parameters.profiles[0] ?? null;
+  }
+
+  if (slot === "extent") {
+    const extent = getExtrudeFeatureExtent(parameters);
+    const ends =
+      extent.mode === "twoSide"
+        ? [extent.firstEnd, extent.secondEnd]
+        : [extent.end];
+    for (const end of ends) {
+      if ("target" in end) {
+        return end.target;
+      }
+    }
+    return null;
+  }
+
+  const scope = parameters.booleanScope;
+  if (scope.kind === "targetBody") {
+    return { kind: "body", bodyId: scope.bodyId };
+  }
+  if (scope.kind === "targetBodies") {
+    const bodyId = scope.bodyIds[0];
+    return bodyId ? { kind: "body", bodyId } : null;
+  }
+  return null;
+}
+
+/**
+ * Attribution seam for a feature rebuild failure. Reads the slot tagged at the
+ * throw site (profile, extent, or scope) and routes the diagnostic to the
+ * authored field that owns the failure, falling back to a feature-level
+ * diagnostic that preserves the raw kernel message when no slot resolves.
+ */
+export function createFeatureRebuildFailureDiagnostic(
+  feature: OccAuthoringFeatureRecord,
+  error: unknown,
+  affectedTargets: NonNullable<ModelingDiagnostic["target"]>[],
+): ModelingDiagnostic {
+  const rebuildSlot = getRebuildSlot(error);
+  const attributedTarget = rebuildSlot
+    ? getRebuildSlotTarget(feature.definition, rebuildSlot)
+    : null;
+
+  return createRebuildFailureDiagnostic(
+    deriveRebuildFailureCode(error),
+    error instanceof Error ? error.message : "OCC rebuild failed.",
+    [feature.featureId],
+    affectedTargets,
+    feature,
+    attributedTarget,
+  );
 }
 
 function createAdvancedUnsupportedDiagnostic(
@@ -2560,12 +2646,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         }
 
         diagnostics.push(
-          createRebuildFailureDiagnostic(
-            deriveRebuildFailureCode(error),
-            error instanceof Error ? error.message : "OCC rebuild failed.",
-            [feature.featureId],
-            uniqueTargets(consumedTargets),
+          createFeatureRebuildFailureDiagnostic(
             feature,
+            error,
+            uniqueTargets(consumedTargets),
           ),
         );
         failedFeatures.push(createFailedFeatureRecord(feature));
