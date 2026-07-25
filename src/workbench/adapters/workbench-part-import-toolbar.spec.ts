@@ -28,15 +28,6 @@ vi.mock("@/hooks/use-workbench-document-owner", () => ({
     };
   },
 }));
-vi.mock("@/hooks/use-durable-history", () => ({
-  useDurableHistory() {
-    return {
-      async undo() {
-        return null;
-      },
-    };
-  },
-}));
 vi.mock("@/infrastructure/modeling/browser-geometry-asset-store", () => ({
   getBrowserGeometryAssetComposition() {
     return { assetStore: browserGeometryAssetStore };
@@ -59,6 +50,19 @@ function makeSnapshot() {
     revisionId: "rev_part_import",
     presentation: {
       documentHistory: [],
+    },
+  } as never;
+}
+
+// Commit-path controllers capture the pre-import authored document (for atomic
+// rollback) via exportCurrentDocument before delegating to the mocked
+// documentOwner, so the commit specs need a modeling service that returns a
+// parseable payload. importDocument/waitForPersistence are never reached
+// because the mocked commitPartImport does not invoke rollback.
+function makeCommitModelingServiceStub() {
+  return {
+    async exportCurrentDocument() {
+      return { ok: true as const, payload: "{}" };
     },
   } as never;
 }
@@ -524,7 +528,7 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
         events.push(event);
       },
       errorReporter: createTestErrorReporter(),
-      modelingService: {} as never,
+      modelingService: makeCommitModelingServiceStub(),
       showWorkbenchError(message) {
         errors.push(message);
       },
@@ -588,7 +592,7 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
         failedEvents.push(event);
       },
       errorReporter: createTestErrorReporter(),
-      modelingService: {} as never,
+      modelingService: makeCommitModelingServiceStub(),
       showWorkbenchError(message) {
         errors.push(message);
       },
@@ -622,7 +626,7 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
         thrownEvents.push(event);
       },
       errorReporter: createTestErrorReporter(),
-      modelingService: {} as never,
+      modelingService: makeCommitModelingServiceStub(),
       showWorkbenchError(message) {
         errors.push(message);
       },
@@ -687,4 +691,104 @@ test("useWorkbenchPartImport commits the active session, reopens a created sketc
       "Browser worker rejected the render snapshot handoff.",
     ]),
   );
+});
+test("useWorkbenchPartImport rolls a failed mid-apply import back to the captured document", async () => {
+  const events: unknown[] = [];
+  const errors: string[] = [];
+  const importCalls: unknown[] = [];
+  const orderOfCalls: string[] = [];
+  const session = {
+    diagnostics: [],
+    formSchema: { fields: [] },
+    providerId: "step",
+    resolvedSource: { name: "bracket.step" },
+    review: { diagnostics: [], summary: [], value: {} },
+    selections: {},
+  } as never;
+
+  const controller = hookHarness.render(() =>
+    useWorkbenchPartImport({
+      activeEditSession: null,
+      activeImportSession: session,
+      deps: {
+        documentOwner: {
+          // Simulate a mid-apply failure: the orchestrator invokes the injected
+          // atomic rollback, then reports the structured apply diagnostic.
+          async commitPartImport(_session, options) {
+            orderOfCalls.push("commit");
+            await options?.rollback?.(2);
+            return {
+              ok: false as const,
+              rolledBack: true as const,
+              diagnostics: [
+                {
+                  code: "import-apply-failed",
+                  detail: null,
+                  message: "Extrude 2 profile selection is incorrect.",
+                  severity: "error" as const,
+                  target: null,
+                },
+              ],
+            };
+          },
+        },
+        importProviders: createImportProviderRegistry([]),
+      },
+      dispatch(event) {
+        events.push(event);
+      },
+      errorReporter: createTestErrorReporter(),
+      modelingService: {
+        async exportCurrentDocument() {
+          orderOfCalls.push("export");
+          return {
+            ok: true as const,
+            payload: '{"documentId":"doc_workspace","marker":"pre-import"}',
+          };
+        },
+        async waitForPersistence() {
+          orderOfCalls.push("waitForPersistence");
+        },
+        async importDocument(input: { document: unknown }) {
+          orderOfCalls.push("importDocument");
+          importCalls.push(input.document);
+          return { ok: true as const, revisionId: "rev_restored", diagnostics: [] };
+        },
+      } as never,
+      showWorkbenchError(message) {
+        errors.push(message);
+      },
+      showWorkbenchInfo() {
+        throw new Error("Failed imports should not show success information.");
+      },
+      snapshot: makeSnapshot(),
+    }),
+  );
+
+  await controller.commitImportSession();
+
+  expect(
+    JSON.stringify(importCalls),
+    "Rollback should restore the captured pre-import document verbatim.",
+  ).toBe(
+    JSON.stringify([{ documentId: "doc_workspace", marker: "pre-import" }]),
+  );
+  expect(
+    orderOfCalls,
+    "The pre-import document must be captured before apply, and persistence flushed before the restore lands.",
+  ).toEqual([
+    "export",
+    "commit",
+    "waitForPersistence",
+    "importDocument",
+  ]);
+  expect(
+    events.filter((event) => (event as { type: string }).type === "import.failed")
+      .length,
+    "A failed import should surface exactly one structured failure event.",
+  ).toBe(1);
+  expect(
+    JSON.stringify(errors),
+    "A failed import should surface exactly one visible apply error.",
+  ).toBe(JSON.stringify(["Extrude 2 profile selection is incorrect."]));
 });

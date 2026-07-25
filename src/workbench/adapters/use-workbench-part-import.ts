@@ -30,8 +30,6 @@ import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
-import { useDurableHistory } from "@/hooks/use-durable-history";
-import type { DurableHistoryService } from "@/workbench/history/durable-history";
 import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";
 import { showOpenImportFilePicker } from "@/lib/import-file-picker";
 
@@ -140,7 +138,6 @@ interface WorkbenchPartImportDependencies {
     ReturnType<typeof useWorkbenchDocumentOwner>,
     "commitPartImport"
   >;
-  durableHistory: Pick<DurableHistoryService, "undo">;
   importProviders: ImportProviderRegistry;
   openImportFilePicker: typeof showOpenImportFilePicker;
   promptForProvider: typeof promptForImportProvider;
@@ -161,9 +158,7 @@ export function useWorkbenchPartImport({
 }: WorkbenchPartImportControllerInput) {
   const hookDocumentOwner = useWorkbenchDocumentOwner();
   const runtimeExtensionRegistry = useRuntimeExtensionRegistry();
-  const contextDurableHistory = useDurableHistory();
   const documentOwner = deps?.documentOwner ?? hookDocumentOwner;
-  const durableHistory = deps?.durableHistory ?? contextDurableHistory;
   const importProviders =
     deps?.importProviders ?? runtimeExtensionRegistry.importProviders;
   const openImportFilePicker =
@@ -187,13 +182,27 @@ export function useWorkbenchPartImport({
     dispatch({ type: "import.commitRequested" });
 
     try {
-      const documentId = snapshot.document.documentId;
-      // Atomic rollback: revert every operation the import committed before a
-      // mid-sequence failure, using the durable-history revert (the only path
-      // that reverses document variables too).
-      const rollback = async (appliedOperationCount: number) => {
-        for (let index = 0; index < appliedOperationCount; index += 1) {
-          await durableHistory.undo({ documentId, sketchSession: null });
+      // Capture the pristine pre-import authored document so that a mid-apply
+      // failure can be undone with a single atomic restore instead of replaying
+      // N durable-history undos. The per-operation undo path could strand a
+      // half-built document or hang for 90s on repository undo synchronization
+      // when the apply pipeline failed mid-sequence; restoring the captured
+      // document rebuilds the exact pre-import state in one step.
+      const exported = await modelingService.exportCurrentDocument();
+      const preImportDocument = JSON.parse(
+        typeof exported.payload === "string"
+          ? exported.payload
+          : new TextDecoder().decode(exported.payload),
+      ) as unknown;
+      const rollback = async () => {
+        // Flush any in-flight background persistence first so a queued write
+        // cannot re-commit the half-built document after the restore lands.
+        await modelingService.waitForPersistence();
+        const restored = await modelingService.importDocument({
+          document: preImportDocument,
+        });
+        if (!restored.ok) {
+          throw new Error(describeImportDiagnostics(restored.diagnostics));
         }
       };
       const result = await documentOwner.commitPartImport(activeImportSession, {
@@ -253,7 +262,7 @@ export function useWorkbenchPartImport({
     activeImportSession,
     dispatch,
     documentOwner,
-    durableHistory,
+    modelingService,
     errorReporter,
     showWorkbenchError,
     showWorkbenchInfo,
