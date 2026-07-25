@@ -50,16 +50,20 @@ export async function importBundle(
 
   const commit = page.getByRole("button", { name: "Commit", exact: true });
   const alert = page.getByRole("alert").first();
+  // The heaviest real captures run a double real-kernel probe during review; the
+  // budget must absorb that plus contention from the other parallel workers. It
+  // is only a wait cap: a real review failure still resolves through the alert.
+  const reviewBudget = 300_000;
   try {
     const outcome = await Promise.race([
-      commit.waitFor({ state: "visible", timeout: 180_000 }).then(() => ({ kind: "review" as const })),
-      alert.waitFor({ state: "visible", timeout: 180_000 }).then(async () => ({
+      commit.waitFor({ state: "visible", timeout: reviewBudget }).then(() => ({ kind: "review" as const })),
+      alert.waitFor({ state: "visible", timeout: reviewBudget }).then(async () => ({
         kind: "error" as const,
         message: await alert.innerText(),
       })),
     ]);
     if (outcome.kind === "error") throw new Error(`Import review failed: ${outcome.message}`);
-    await expect(commit).toBeEnabled({ timeout: 180_000 });
+    await expect(commit).toBeEnabled({ timeout: reviewBudget });
   } catch (error) {
     const diagnostics = await page.evaluate(() => ({
       state: window.__cadaraDebug?.getState(),
