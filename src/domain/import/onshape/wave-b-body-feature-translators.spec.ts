@@ -722,7 +722,7 @@ describe("Wave B body topology translators", () => {
         async evaluateHistoryProbe(input) {
           const signatures = [
             { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [0, 0, 0] as [number, number, number], high: [2, 2, 2] as [number, number, number] }, centroid: [1, 1, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_linear" as never } },
-            { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [10, -0.992709, 0] as [number, number, number], high: [12, 0.992709, 2] as [number, number, number] }, centroid: [11, 0, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_circular" as never } },
+            { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [10, -1, 0] as [number, number, number], high: [12, 1, 2] as [number, number, number] }, centroid: [11, 0, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_circular" as never } },
           ];
           return { steps: (input.actions.orderedActions ?? []).map(() => ({ status: "rebuilt" as const, signatures })) };
         },

@@ -258,9 +258,10 @@ const WAVE_T_TIMELINES = [
     featureIds: [
       "feature_extrude-1",
       "feature_plane-1",
-      "feature_bakedBody-1",
+      "feature_mirror-1",
+      "feature_transform-1",
     ],
-    tierSummary: "3 parametric, 2 baked, 0 geometry-only features.",
+    tierSummary: "5 parametric, 0 baked, 0 geometry-only features.",
   },
   // Full-revolve studio: the review lists two features (Sketch 1 + Revolve 1) and
   // commits a single live revolve; the trailing sketch session finishes cleanly.
