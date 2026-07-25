@@ -150,6 +150,13 @@ export type PlanReasonCode =
   | "topology-durable-naming-unavailable"
   | "topology-upstream-baked"
   | "topology-apply-rematch-failed"
+  // The feature's boolean severed its target body into several solids on a
+  // kernel path that cannot replace one body with many; bake this feature
+  // instead of aborting the studio.
+  | "extrude-boolean-severs-target-body"
+  // The live kernel refused to build this feature against the real prefix
+  // (invalid or unsupported result geometry); bake it rather than abort.
+  | "feature-kernel-build-failed"
   | "topology-bake-snapshot-missing"
   | "bake-segment-boundary-snapshot-missing"
   | "bake-segment-boundary-tessellation-unreadable"

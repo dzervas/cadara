@@ -16,6 +16,7 @@ import {
   advanceTopologyToken,
   extractSolidShapes,
   getOccDurableRefKey,
+  orderSolidShapesCanonically,
   OCC_REFERENCE_INVALIDATION_REASONS,
   reconcileReplacementSolidBody,
   rewriteNativeTopologyPayloadIds,
@@ -86,7 +87,7 @@ function appendUniqueShape(
   }
 }
 
-function projectFeatureSourceShapes(
+export function projectFeatureSourceShapes(
   oc: OpenCascadeInstance,
   sourceShapes: OccFeatureSourceShapeMap,
   historySources: readonly OccTopologyHistorySource[],
@@ -615,6 +616,102 @@ export function collectNativeFeatureHistoryInvalidations(
   }).invalidations;
 }
 
+/**
+ * Assign durable ids to the fresh native topology of a replacement body.
+ *
+ * A preserved id claimed through native history must win over the fresh native
+ * id that happens to spell the same string, and every fresh entity must keep an
+ * id: dropping one would leave the tracked body smaller than its own shape and
+ * break native payload aliasing later. Preserved claims are therefore resolved
+ * first, and any remaining entity keeps its fresh id unless that id was already
+ * claimed, in which case it is suffixed to stay unique within the body.
+ */
+function assignNativeHistoryIds<Id extends FaceId | EdgeId | VertexId>(input: {
+  kind: "face" | "edge" | "vertex";
+  bodyId: BodyId;
+  freshIds: readonly Id[];
+  preservedTargetsBySuccessorKey: ReadonlyMap<string, DurableRef>;
+  ownerFeatureId: FeatureId;
+  previousContributingFeatureIdsById: ReadonlyMap<Id, readonly FeatureId[]>;
+  freshContributingFeatureIdsById: ReadonlyMap<Id, readonly FeatureId[]>;
+}) {
+  const preservedIdByFreshId = new Map<Id, Id>();
+  const claimed = new Set<Id>();
+
+  for (const freshId of input.freshIds) {
+    const successorKey = getOccDurableRefKey(
+      topologyRefFor(input.kind, input.bodyId, freshId),
+    );
+    const preservedTarget =
+      input.preservedTargetsBySuccessorKey.get(successorKey);
+    if (preservedTarget?.kind !== input.kind) continue;
+    const preservedId = topologyRefId(preservedTarget) as Id;
+    if (claimed.has(preservedId)) continue;
+    claimed.add(preservedId);
+    preservedIdByFreshId.set(freshId, preservedId);
+  }
+
+  const ids: Id[] = [];
+  const idsByNativeId = new Map<Id, Id>();
+  const contributingFeatureIdsById = new Map<Id, FeatureId[]>();
+
+  for (const freshId of input.freshIds) {
+    const preservedId = preservedIdByFreshId.get(freshId);
+    let id = preservedId ?? freshId;
+    if (!preservedId) {
+      let disambiguator = 1;
+      while (claimed.has(id)) {
+        disambiguator += 1;
+        id = `${freshId}_${disambiguator}` as Id;
+      }
+      claimed.add(id);
+    }
+
+    ids.push(id);
+    idsByNativeId.set(freshId, id);
+    contributingFeatureIdsById.set(
+      id,
+      preservedId
+        ? appendOwnerFeature(
+            input.previousContributingFeatureIdsById.get(preservedId) ?? [],
+            input.ownerFeatureId,
+          )
+        : [...(input.freshContributingFeatureIdsById.get(freshId) ?? [])],
+    );
+  }
+
+  return { ids, idsByNativeId, contributingFeatureIdsById };
+}
+
+function topologyRefFor(
+  kind: "face" | "edge" | "vertex",
+  bodyId: BodyId,
+  id: FaceId | EdgeId | VertexId,
+): DurableRef {
+  switch (kind) {
+    case "face":
+      return { kind, bodyId, faceId: id as FaceId };
+    case "edge":
+      return { kind, bodyId, edgeId: id as EdgeId };
+    case "vertex":
+      return { kind, bodyId, vertexId: id as VertexId };
+  }
+}
+
+function topologyRefId(target: DurableRef) {
+  switch (target.kind) {
+    case "face":
+      return target.faceId;
+    case "edge":
+      return target.edgeId;
+    case "vertex":
+      return target.vertexId;
+    default:
+      throw new Error(
+        `Native history successor ${target.kind} is not a topology target.`,
+      );
+  }
+}
 function reconcileNativeHistoryReplacement(
   current: OccTrackedBody,
   replacement: OccTrackedBody,
@@ -639,124 +736,74 @@ function reconcileNativeHistoryReplacement(
     history,
     currentNativePayload,
   });
-  const faceIds: FaceId[] = [];
+  const faces = assignNativeHistoryIds<FaceId>({
+    kind: "face",
+    bodyId: replacement.bodyId,
+    freshIds: replacement.topology.faceIds,
+    preservedTargetsBySuccessorKey,
+    ownerFeatureId,
+    previousContributingFeatureIdsById: current.faceContributingFeatureIdsById,
+    freshContributingFeatureIdsById:
+      replacement.faceContributingFeatureIdsById,
+  });
   const facesById = new Map<
     FaceId,
     OccTrackedBody["facesById"] extends Map<FaceId, infer Face> ? Face : never
   >();
-  const faceContributingFeatureIdsById = new Map<FaceId, FeatureId[]>();
-  const faceIdsByNativeId = new Map<FaceId, FaceId>();
-
-  for (const freshId of replacement.topology.faceIds) {
-    const preservedTarget = preservedTargetsBySuccessorKey.get(
-      getOccDurableRefKey({
-        kind: "face",
-        bodyId: replacement.bodyId,
-        faceId: freshId,
-      }),
-    );
-    const faceId =
-      preservedTarget?.kind === "face" ? preservedTarget.faceId : freshId;
+  for (const [freshId, faceId] of faces.idsByNativeId) {
     const face = replacement.facesById.get(freshId);
-
-    if (!face || facesById.has(faceId)) {
-      continue;
-    }
-
-    faceIds.push(faceId);
-    faceIdsByNativeId.set(freshId, faceId);
-    facesById.set(faceId, face as never);
-    faceContributingFeatureIdsById.set(
-      faceId,
-      preservedTarget?.kind === "face"
-        ? appendOwnerFeature(
-            current.faceContributingFeatureIdsById.get(faceId) ?? [],
-            ownerFeatureId,
-          )
-        : [...(replacement.faceContributingFeatureIdsById.get(freshId) ?? [])],
-    );
+    if (face) facesById.set(faceId, face as never);
   }
+  const faceIds = faces.ids;
+  const faceContributingFeatureIdsById = faces.contributingFeatureIdsById;
+  const faceIdsByNativeId = faces.idsByNativeId;
 
-  const edgeIds: EdgeId[] = [];
+  const edges = assignNativeHistoryIds<EdgeId>({
+    kind: "edge",
+    bodyId: replacement.bodyId,
+    freshIds: replacement.topology.edgeIds,
+    preservedTargetsBySuccessorKey,
+    ownerFeatureId,
+    previousContributingFeatureIdsById: current.edgeContributingFeatureIdsById,
+    freshContributingFeatureIdsById:
+      replacement.edgeContributingFeatureIdsById,
+  });
   const edgesById = new Map<
     EdgeId,
     OccTrackedBody["edgesById"] extends Map<EdgeId, infer Edge> ? Edge : never
   >();
-  const edgeContributingFeatureIdsById = new Map<EdgeId, FeatureId[]>();
-  const edgeIdsByNativeId = new Map<EdgeId, EdgeId>();
-
-  for (const freshId of replacement.topology.edgeIds) {
-    const preservedTarget = preservedTargetsBySuccessorKey.get(
-      getOccDurableRefKey({
-        kind: "edge",
-        bodyId: replacement.bodyId,
-        edgeId: freshId,
-      }),
-    );
-    const edgeId =
-      preservedTarget?.kind === "edge" ? preservedTarget.edgeId : freshId;
+  for (const [freshId, edgeId] of edges.idsByNativeId) {
     const edge = replacement.edgesById.get(freshId);
-
-    if (!edge || edgesById.has(edgeId)) {
-      continue;
-    }
-
-    edgeIds.push(edgeId);
-    edgeIdsByNativeId.set(freshId, edgeId);
-    edgesById.set(edgeId, edge as never);
-    edgeContributingFeatureIdsById.set(
-      edgeId,
-      preservedTarget?.kind === "edge"
-        ? appendOwnerFeature(
-            current.edgeContributingFeatureIdsById.get(edgeId) ?? [],
-            ownerFeatureId,
-          )
-        : [...(replacement.edgeContributingFeatureIdsById.get(freshId) ?? [])],
-    );
+    if (edge) edgesById.set(edgeId, edge as never);
   }
+  const edgeIds = edges.ids;
+  const edgeContributingFeatureIdsById = edges.contributingFeatureIdsById;
+  const edgeIdsByNativeId = edges.idsByNativeId;
 
-  const vertexIds: VertexId[] = [];
+  const vertices = assignNativeHistoryIds<VertexId>({
+    kind: "vertex",
+    bodyId: replacement.bodyId,
+    freshIds: replacement.topology.vertexIds,
+    preservedTargetsBySuccessorKey,
+    ownerFeatureId,
+    previousContributingFeatureIdsById:
+      current.vertexContributingFeatureIdsById,
+    freshContributingFeatureIdsById:
+      replacement.vertexContributingFeatureIdsById,
+  });
   const verticesById = new Map<
     VertexId,
     OccTrackedBody["verticesById"] extends Map<VertexId, infer Vertex>
       ? Vertex
       : never
   >();
-  const vertexContributingFeatureIdsById = new Map<VertexId, FeatureId[]>();
-  const vertexIdsByNativeId = new Map<VertexId, VertexId>();
-
-  for (const freshId of replacement.topology.vertexIds) {
-    const preservedTarget = preservedTargetsBySuccessorKey.get(
-      getOccDurableRefKey({
-        kind: "vertex",
-        bodyId: replacement.bodyId,
-        vertexId: freshId,
-      }),
-    );
-    const vertexId =
-      preservedTarget?.kind === "vertex" ? preservedTarget.vertexId : freshId;
+  for (const [freshId, vertexId] of vertices.idsByNativeId) {
     const vertex = replacement.verticesById.get(freshId);
-
-    if (!vertex || verticesById.has(vertexId)) {
-      continue;
-    }
-
-    vertexIds.push(vertexId);
-    vertexIdsByNativeId.set(freshId, vertexId);
-    verticesById.set(vertexId, vertex as never);
-    vertexContributingFeatureIdsById.set(
-      vertexId,
-      preservedTarget?.kind === "vertex"
-        ? appendOwnerFeature(
-            current.vertexContributingFeatureIdsById.get(vertexId) ?? [],
-            ownerFeatureId,
-          )
-        : [
-            ...(replacement.vertexContributingFeatureIdsById.get(freshId) ??
-              []),
-          ],
-    );
+    if (vertex) verticesById.set(vertexId, vertex as never);
   }
+  const vertexIds = vertices.ids;
+  const vertexContributingFeatureIdsById = vertices.contributingFeatureIdsById;
+  const vertexIdsByNativeId = vertices.idsByNativeId;
 
   const successorTargetsByPreviousKey = new Map<string, DurableRef>();
   for (const [previousKey, successor] of rawSuccessorTargetsByPreviousKey) {
@@ -868,6 +915,11 @@ export function resolveNativeFeatureTransactionReplacement(
     >,
     nativePayload: payload,
   });
+  // A severing result has no single native replacement identity; fall back to
+  // the JS path, which owns multi-piece identity and invalidation.
+  if (!replacement) {
+    return null;
+  }
   const nativeHost =
     context.oc as unknown as OpenCascadeNativeTopologyKernelHost;
   const currentNativePayloadJson =
@@ -1061,6 +1113,32 @@ export function createUnsupportedHistoryInvalidations(body: OccTrackedBody) {
   return invalidations;
 }
 
+/**
+ * Marker for a boolean whose result severed its target body into several
+ * solids on a code path that has not opted into multi-body replacement. The
+ * import seam recognizes it structurally so it can contain the failure to the
+ * one offending feature instead of aborting a whole studio.
+ */
+export const BOOLEAN_SEVERS_TARGET_BODY_NAME = "BooleanSeversTargetBodyError";
+
+export function createBooleanSeversTargetBodyError(
+  ownerFeatureId: FeatureId,
+  bodyId: BodyId,
+  solidCount: number,
+) {
+  const error = new Error(
+    `Feature ${ownerFeatureId} severed body ${bodyId} into ${solidCount} solids; this operation does not support disconnecting results.`,
+  );
+  error.name = BOOLEAN_SEVERS_TARGET_BODY_NAME;
+  return error;
+}
+
+export function isBooleanSeversTargetBodyError(error: unknown) {
+  return (
+    error instanceof Error && error.name === BOOLEAN_SEVERS_TARGET_BODY_NAME
+  );
+}
+
 export function resolveReplacementBodies(
   context: OccFeatureExecutionContext,
   bodyId: BodyId,
@@ -1070,6 +1148,14 @@ export function resolveReplacementBodies(
     allowEmpty: boolean;
     historySource?: OccTopologyHistorySource;
     historySources?: readonly OccTopologyHistorySource[];
+    /**
+     * How to handle a feature that severs its target into several solids.
+     * `reject` (the default for callers whose downstream handling of several
+     * bodies has not been audited) throws a structured severing error;
+     * `freshIdentities` mints one deterministic body per piece and invalidates
+     * every reference to the source body, which is what Onshape itself does.
+     */
+    onSever?: "reject" | "freshIdentities";
   },
 ) {
   const current = requireBody(context, bodyId);
@@ -1113,9 +1199,42 @@ export function resolveReplacementBodies(
   }
 
   if (solids.length !== 1) {
-    throw new Error(
-      `Feature ${ownerFeatureId} produced ${solids.length} solids while replacing body ${bodyId}; single-body replacement is required in Phase 4.`,
+    if (options.onSever !== "freshIdentities") {
+      throw createBooleanSeversTargetBodyError(
+        ownerFeatureId,
+        bodyId,
+        solids.length,
+      );
+    }
+
+    // Severing replacement: the source body no longer exists, so every piece
+    // gets a fresh deterministic identity and every reference to the source is
+    // invalidated. Pieces are enumerated canonically so a rebuild reproduces
+    // the same ids; no piece inherits the source identity.
+    const ordered = orderSolidShapesCanonically(context.oc, solids);
+    const replacements = ordered.map((solid, index) =>
+      trackNewSolidBody(context.oc, {
+        bodyId: `body_${ownerFeatureId}_split_${index + 1}` as BodyId,
+        label: `${current.label}_${index + 1}`,
+        ownerFeatureId,
+        shape: solid,
+      }),
     );
+
+    // The source body is gone, so its own reference and every face/edge/vertex
+    // on it are deleted outright; anything the history only marked as modified
+    // is downgraded to ambiguous because no single piece inherits it.
+    historyInvalidations = markSplitAmbiguousInvalidations(historyInvalidations);
+    mergeHistoryInvalidations(
+      historyInvalidations,
+      createDeletedBodyInvalidations(current),
+    );
+
+    return {
+      replacements,
+      historyInvalidations,
+      successorTargetsByPreviousKey: new Map<string, DurableRef>(),
+    };
   }
 
   const replacement =
@@ -1264,6 +1383,9 @@ export function applyBooleanPolicy(
         {
           allowEmpty: true,
           historySources: result.historySources,
+          // A single-target boolean is the disconnecting-cut route: a cut that
+          // severs its target replaces it with one body per resulting piece.
+          onSever: "freshIdentities",
         },
       );
     }

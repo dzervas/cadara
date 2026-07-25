@@ -1613,6 +1613,10 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "topology-durable-naming-unavailable": "feature is understood, but durable topology naming is not qualified",
   "topology-upstream-baked": "topology source depends on baked geometry",
   "topology-apply-rematch-failed": "topology reference could not be rematched while applying",
+  "extrude-boolean-severs-target-body":
+    "the boolean split its target body into several solids, which this operation cannot replace parametrically",
+  "feature-kernel-build-failed":
+    "the modeling kernel could not build this feature against the live prefix",
   "topology-bake-snapshot-missing": "rollback bake snapshot is missing",
   "bake-segment-boundary-snapshot-missing": "bake segment boundary snapshot is missing",
   "bake-segment-boundary-tessellation-unreadable": "bake segment boundary tessellation is unreadable",

@@ -1489,6 +1489,115 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     );
   }
 
+  // Lane: logic (per docs/testing.md — exported kernel behavior under
+  // src/domain/, real OCC, no UI or browser surface).
+  // Seam: resolveReplacementBodies through executeOccFeature — what a cut that
+  // severs its target body replaces that body with.
+  async function testExtrudeCutSeveringTargetMintsFreshBodyIdentities() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const bar = await makeBoxBody(
+      oc,
+      "body_sever_bar" as BodyId,
+      12,
+      3,
+      3,
+      "feature_sever_bar" as FeatureId,
+      [-6, 0, 0],
+    );
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_sever_cut" as SketchId,
+      plane,
+      { origin: [-1, -1], width: 2, height: 5 },
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [bar],
+    })();
+    const ownerFeatureId = "feature_sever_cut" as FeatureId;
+
+    const result = executeOccFeature(context, ownerFeatureId, {
+      kind: "extrude",
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        profiles: [
+          { kind: "region", sketchId: sketch.sketchId, regionId: region.regionId },
+        ],
+        startExtent: { kind: "profilePlane" },
+        extent: {
+          mode: "oneSide",
+          end: { kind: "blind", direction: "positive", distance: 6 },
+        },
+        operation: "cut",
+        booleanScope: { kind: "targetBody", bodyId: bar.bodyId },
+      },
+    });
+
+    expect(
+      result.bodies.map((body) => body.bodyId),
+      "A severing cut should replace its target with one fresh body per piece.",
+    ).toEqual([
+      "body_feature_sever_cut_split_1",
+      "body_feature_sever_cut_split_2",
+    ]);
+    expect(
+      result.bodies.some((body) => body.bodyId === bar.bodyId),
+      "No piece may inherit the severed source body identity.",
+    ).toBe(false);
+
+    const leftVolume = await bodyVolume(context.oc, result.bodies[0]!.shape);
+    const rightVolume = await bodyVolume(context.oc, result.bodies[1]!.shape);
+    assertClose(
+      leftVolume + rightVolume,
+      12 * 3 * 3 - 2 * 3 * 3,
+      1e-6,
+      "The two severed pieces should account for the bar minus the cut slot.",
+    );
+
+    const invalidatedKeys = new Set(result.historyInvalidations.keys());
+    for (const target of [
+      { kind: "body" as const, bodyId: bar.bodyId },
+      ...bar.topology.faceIds.map((faceId) => ({
+        kind: "face" as const,
+        bodyId: bar.bodyId,
+        faceId,
+      })),
+      ...bar.topology.edgeIds.map((edgeId) => ({
+        kind: "edge" as const,
+        bodyId: bar.bodyId,
+        edgeId,
+      })),
+      ...bar.topology.vertexIds.map((vertexId) => ({
+        kind: "vertex" as const,
+        bodyId: bar.bodyId,
+        vertexId,
+      })),
+    ]) {
+      const key = getOccDurableRefKey(target);
+      expect(
+        invalidatedKeys.has(key),
+        `Severing must invalidate every reference to the source body; ${key} was left live.`,
+      ).toBe(true);
+      expect(
+        [
+          OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted,
+          OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
+        ],
+        `Severed reference ${key} must report a deleted or ambiguous reason.`,
+      ).toContain(result.historyInvalidations.get(key)!.reason);
+    }
+
+    const stageSlots = [...result.topologyStage!.outputs.values()].map(
+      (output) => output.outputSlot,
+    );
+    expect(
+      stageSlots,
+      "Each severed piece should own a topology stage output slot.",
+    ).toEqual([
+      "body_feature_sever_cut_split_1",
+      "body_feature_sever_cut_split_2",
+    ]);
+  }
   async function testExtrudeJoinRejectsMultiSolidResultShapes() {
     const oc = await getDefaultOpenCascadeInstance();
     const bodyA = await makeBoxBody(
@@ -1550,9 +1659,9 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     }
 
     expect(
-      thrownMessage?.includes("Phase 4") === true &&
-        thrownMessage.includes("single-body replacement"),
-      "Disjoint sequential joins should reject multi-solid replacement results explicitly.",
+      thrownMessage?.includes("severed body") === true &&
+        thrownMessage.includes("does not support disconnecting results"),
+      `Disjoint sequential joins should reject a severing replacement result explicitly; got: ${thrownMessage}`,
     ).toBeTruthy();
   }
 
@@ -4219,6 +4328,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy();
   await testExtrudeJoinRefinesSameDomainTopology();
   await testExtrudeJoinRejectsMultiSolidResultShapes();
+  await testExtrudeCutSeveringTargetMintsFreshBodyIdentities();
   await testExtrudeRejectsInvalidExtentAndBooleanScope();
   await testAdvancedEndConditionDiagnostics();
   await testCutAndIntersectApplyPerTargetPolicy();

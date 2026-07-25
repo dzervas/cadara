@@ -648,7 +648,7 @@ export function executeTransformFeature(
       transform,
       "transform",
     );
-    const replacementResult = nativeTransaction
+    const nativeReplacementResult = nativeTransaction
       ? resolveNativeFeatureTransactionReplacement(
           context,
           body,
@@ -656,7 +656,10 @@ export function executeTransformFeature(
           "transform",
           ownerFeatureId,
         )
-      : (() => {
+      : null;
+    const replacementResult =
+      nativeReplacementResult ??
+      (() => {
           const builder = new context.oc.BRepBuilderAPI_Transform_2(
             body.shape,
             transform,
@@ -690,8 +693,8 @@ export function executeTransformFeature(
               })),
             }),
           );
-          return fallbackResult;
-        })();
+        return fallbackResult;
+      })();
     const index = nextBodies.findIndex((entry) => entry.bodyId === body.bodyId);
     nextBodies.splice(index, 1, ...replacementResult.replacements);
     for (const replacement of replacementResult.replacements) {
@@ -700,7 +703,7 @@ export function executeTransformFeature(
     for (const [key, value] of replacementResult.historyInvalidations) {
       historyInvalidations.set(key, value);
     }
-    if (nativeTransaction) {
+    if (nativeReplacementResult) {
       for (const replacement of replacementResult.replacements) {
         topologyStages.push(
           createRigidTransformTopologyStage({
