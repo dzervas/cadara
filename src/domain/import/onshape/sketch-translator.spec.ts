@@ -429,3 +429,69 @@ test("grounds residual rigid motion from dropped external anchors on a WELL_DEFI
   ]);
   expect(validateSketchDefinition(verified.definition).success).toBe(true);
 });
+
+test("a circle OFFSET carries the shrink-positive distance the offset contract expects", () => {
+  // The offset contract measures to the LEFT of traversal, so a
+  // counter-clockwise circle shrinks under a positive distance. Reporting the
+  // raw radius delta inverts the sign and makes an authored outward offset
+  // collapse the circle at solve time.
+  const result = translateSketch({
+    featureId: "sketch_circle_offset",
+    label: "Circle offset",
+    planeKey: "xy",
+    entities: [
+      { entityId: "seed_circle", entityType: "circle", center: [0, 0], radius: 0.9 },
+      { entityId: "offset_circle", entityType: "circle", center: [0, 0], radius: 2.4 },
+    ],
+    constraints: [
+      relationship("OFFSET", "circle-offset-rel", [
+        { parameterId: "localMaster", value: "seed_circle" },
+        { parameterId: "localOffset", value: "offset_circle" },
+      ]),
+    ],
+  });
+
+  const offset = result.definition.derivedRelationships?.find(
+    (entry) => entry.kind === "offset",
+  );
+  expect(
+    offset?.kind === "offset" && offset.distance,
+    "Growing a circle must yield a negative offset distance under the left-of-travel contract.",
+  ).toEqual({ source: "literal", value: -1.5 });
+});
+
+test("Onshape DISTANCE against a circle is dropped instead of forging a line dimension", () => {
+  // `lineDistance`/`linePointDistance` accept only line segments; the solver
+  // rejects anything else and fails the entire sketch. Onshape's radial-gap
+  // DISTANCE has no Cadara equivalent, so it must degrade honestly.
+  const result = translateSketch({
+    featureId: "sketch_circle_distance",
+    label: "Circle distance",
+    planeKey: "xy",
+    entities: [
+      { entityId: "inner", entityType: "circle", center: [0, 0], radius: 1 },
+      { entityId: "outer", entityType: "circle", center: [0, 0], radius: 3 },
+      { entityId: "edge", entityType: "lineSegment", start: [0, 10], end: [10, 10] },
+    ],
+    constraints: [
+      relationship("DISTANCE", "circle-to-circle", [
+        { parameterId: "localFirst", value: "inner" },
+        { parameterId: "localSecond", value: "outer" },
+        { parameterId: "length", value: 2 },
+      ]),
+      relationship("DISTANCE", "point-to-circle", [
+        { parameterId: "localFirst", value: "edge.end" },
+        { parameterId: "localSecond", value: "outer" },
+        { parameterId: "length", value: 2 },
+      ]),
+    ],
+  });
+
+  expect(result.definition.dimensions ?? []).toEqual([]);
+  expect(result.relationshipSummary.dimensions.dropped).toBe(2);
+  expect(
+    result.definition.entities.length,
+    "Dropping unsupported dimensions must not drop the translated geometry.",
+  ).toBe(3);
+  expect(validateSketchDefinition(result.definition).success).toBe(true);
+});
