@@ -916,10 +916,19 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       multiKeys.some((key) => key.includes("profile:1:end:second-end")),
       "Multi-profile provenance should disambiguate the second profile and second end.",
     ).toBe(true);
+    // One extrude is one operation: the per-end prisms are fused, so the shared
+    // profile plane at the two-sided seam becomes interior and disappears, along
+    // with its bounding edges and vertices. Each of the 4 profile/end pairs
+    // therefore publishes 17 live roles (26 minus the seam's 1 cap face, 4
+    // first-edges, and 4 first-vertices) instead of a spurious internal face.
     expect(
       new Set(multiKeys).size,
-      "Two profiles with two ends should retain one distinct 26-role key set per profile/end pair.",
-    ).toBe(104);
+      "Each profile/end pair should retain its 17 roles that survive the two-sided seam fuse.",
+    ).toBe(68);
+    expect(
+      multiKeys.some((key) => key.includes(":profile:first-face")),
+      "The fused two-sided seam face must not be published as a live prism role.",
+    ).toBe(false);
 
     const drafted = executeOccFeature(
       context,
