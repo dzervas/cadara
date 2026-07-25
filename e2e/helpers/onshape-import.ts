@@ -11,6 +11,12 @@ export const PART_STUDIO_BUNDLE_PATH = resolve(
 export const WAVE_T_BUNDLE_PATH = resolve(
   "405fa226bb150016d09afc09.onshape-capture.json",
 );
+export const LAPTOP_STAND_BUNDLE_PATH = resolve(
+  "5151a4c877c9493b733ad52f.onshape-capture.json",
+);
+export const SECOND_PART_STUDIO_BUNDLE_PATH = resolve(
+  "d3cd9b09c3c36af1dd2efae9.onshape-capture.json",
+);
 
 export async function importBundle(
   page: Page,
