@@ -1460,6 +1460,203 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
     ).toBe(`Region ${region.regionId} must contain exactly one outer loop.`);
   }
 
+  async function testMixedTrimmedAndAuthoredLoopSharesCornerVertices() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createSketchPlane();
+    const sketchId = "sketch_mixed_trimmed_authored" as SketchId;
+    const points = [
+      { id: pointId("mixed_bottom_left"), position: [0, 0] as const },
+      { id: pointId("mixed_bottom_right"), position: [4, 0] as const },
+      { id: pointId("mixed_top_right"), position: [4, 3] as const },
+      { id: pointId("mixed_top_left"), position: [0, 3] as const },
+      { id: pointId("mixed_right_rail_start"), position: [4, -2] as const },
+      { id: pointId("mixed_right_rail_end"), position: [4, 5] as const },
+      { id: pointId("mixed_left_rail_start"), position: [0, 5] as const },
+      { id: pointId("mixed_left_rail_end"), position: [0, -2] as const },
+    ];
+    const definition = createSketchDefinition(sketchId, points, [
+      {
+        kind: "lineSegment",
+        entityId: entityId("mixed_bottom"),
+        label: "bottom",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId("mixed_bottom"),
+        },
+        isConstruction: false,
+        startPointId: pointId("mixed_bottom_left"),
+        endPointId: pointId("mixed_bottom_right"),
+      },
+      {
+        kind: "lineSegment",
+        entityId: entityId("mixed_right_rail"),
+        label: "right rail",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId("mixed_right_rail"),
+        },
+        isConstruction: false,
+        startPointId: pointId("mixed_right_rail_start"),
+        endPointId: pointId("mixed_right_rail_end"),
+      },
+      {
+        kind: "lineSegment",
+        entityId: entityId("mixed_top"),
+        label: "top",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId("mixed_top"),
+        },
+        isConstruction: false,
+        startPointId: pointId("mixed_top_right"),
+        endPointId: pointId("mixed_top_left"),
+      },
+      {
+        kind: "lineSegment",
+        entityId: entityId("mixed_left_rail"),
+        label: "left rail",
+        target: {
+          kind: "sketchEntity",
+          sketchId,
+          entityId: entityId("mixed_left_rail"),
+        },
+        isConstruction: false,
+        startPointId: pointId("mixed_left_rail_start"),
+        endPointId: pointId("mixed_left_rail_end"),
+      },
+    ]);
+    const sketch = createSketchRecord(sketchId, definition, [
+      {
+        kind: "lineSegment",
+        entityId: entityId("mixed_bottom"),
+        startPosition: [0, 0],
+        endPosition: [4, 0],
+      },
+      {
+        kind: "lineSegment",
+        entityId: entityId("mixed_right_rail"),
+        startPosition: [4, -2],
+        endPosition: [4, 5],
+      },
+      {
+        kind: "lineSegment",
+        entityId: entityId("mixed_top"),
+        startPosition: [4, 3],
+        endPosition: [0, 3],
+      },
+      {
+        kind: "lineSegment",
+        entityId: entityId("mixed_left_rail"),
+        startPosition: [0, 5],
+        endPosition: [0, -2],
+      },
+    ]);
+    const region = createRegion(sketchId, "mixed_trimmed_authored", [
+      {
+        loopId: loopId("mixed_trimmed_authored_outer"),
+        role: "outer",
+        orientation: "counterClockwise",
+        segments: [
+          {
+            source: { kind: "entity", entityId: entityId("mixed_bottom") },
+            startPointId: pointId("mixed_bottom_left"),
+            endPointId: pointId("mixed_bottom_right"),
+          },
+          {
+            source: { kind: "entity", entityId: entityId("mixed_right_rail") },
+            startPointId: null,
+            endPointId: null,
+            startPosition: [4, 0],
+            endPosition: [4, 3],
+          },
+          {
+            source: { kind: "entity", entityId: entityId("mixed_top") },
+            startPointId: pointId("mixed_top_right"),
+            endPointId: pointId("mixed_top_left"),
+          },
+          {
+            source: { kind: "entity", entityId: entityId("mixed_left_rail") },
+            startPointId: null,
+            endPointId: null,
+            startPosition: [0, 3],
+            endPosition: [0, 0],
+          },
+        ],
+        boundaryPointIds: [
+          pointId("mixed_bottom_left"),
+          pointId("mixed_bottom_right"),
+          pointId("mixed_top_right"),
+          pointId("mixed_top_left"),
+        ],
+        isClosed: true,
+      },
+    ]);
+
+    const profile = buildRegionProfileFace(oc, { plane, sketch }, region);
+
+    assertClose(
+      await faceArea(profile.face),
+      12,
+      1e-5,
+      "A loop mixing trimmed and authored segments must build its full area",
+    );
+
+    function collectFaceSubshapes(shapeEnum: number) {
+      const explorer = new oc.TopExp_Explorer_2(
+        profile.face,
+        shapeEnum as never,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+      );
+      const found: Array<{ IsSame(other: never): boolean }> = [];
+      while (explorer.More()) {
+        found.push(explorer.Current());
+        explorer.Next();
+      }
+      return found;
+    }
+
+    const faceEdges = collectFaceSubshapes(
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE as unknown as number,
+    );
+    const orphanedEdgeKeys = [...profile.provenance.edges.entries()]
+      .filter(
+        ([, edge]) => !faceEdges.some((faceEdge) => faceEdge.IsSame(edge as never)),
+      )
+      .map(([sourceKey]) => sourceKey);
+    expect(
+      orphanedEdgeKeys,
+      "Provenance edges must stay subshapes of the built face so prism side-edge lineage resolves.",
+    ).toEqual([]);
+
+    const faceVertices = collectFaceSubshapes(
+      oc.TopAbs_ShapeEnum.TopAbs_VERTEX as unknown as number,
+    );
+    const orphanedVertexKeys = [...profile.provenance.vertices.entries()]
+      .filter(
+        ([, vertex]) =>
+          !faceVertices.some((faceVertex) => faceVertex.IsSame(vertex as never)),
+      )
+      .map(([sourceKey]) => sourceKey);
+    expect(
+      orphanedVertexKeys,
+      "Provenance vertices must stay subshapes of the built face so prism side-face lineage resolves.",
+    ).toEqual([]);
+
+    const distinctFaceVertices: Array<{ IsSame(other: never): boolean }> = [];
+    for (const vertex of faceVertices) {
+      if (!distinctFaceVertices.some((seen) => seen.IsSame(vertex as never))) {
+        distinctFaceVertices.push(vertex);
+      }
+    }
+    expect(
+      distinctFaceVertices.length,
+      "Corners shared between a trimmed and an authored segment must reuse one vertex, not two coincident ones.",
+    ).toBe(4);
+  }
+
   await testRectangleProfileBuildsExpectedArea();
   await testCircleProfileUsesSolvedCenterOffset();
   await testArcProfileRespectsReversedLoopTraversal();
@@ -1472,6 +1669,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
   await testApproximationProvenanceIsExplicit();
   await testSplitCircleChordCellsBuildAsBoundedArcs();
   await testRejectsMultipleOuterLoops();
+  await testMixedTrimmedAndAuthoredLoopSharesCornerVertices();
 
   console.log("OCC phase 3 sketch profile tests passed.");
 });
