@@ -96,8 +96,33 @@ function deriveBodySignatures(
   const bodyId = body.bodyKey as BodyId;
   const topology = body.topology;
   const signatures: HistoryProbeTopologySignature[] = [];
-  const bodyPoints = topology.faces.flatMap((face) => face.meshVertices);
-  const bodyBox = boundingBox(bodyPoints);
+
+  // Exact analytic edge extents per edge index. Face and body mesh vertices are a
+  // chordal approximation that under-reports curved silhouettes (a 12 mm cylinder
+  // tessellates to 11.9125 mm), which no-matches exact captured Onshape evidence.
+  // Unioning the exact edge extents restores the true extent without relaxing any
+  // match tolerance.
+  const edgeBoxes = topology.edges.map((edge) =>
+    boundingBoxForCurve(
+      edge.curve,
+      edge.vertices
+        .map((vertexIndex) => topology.vertices[vertexIndex]?.point)
+        .filter((point): point is GeometryAssetPoint3 => point != null),
+    ),
+  );
+
+  const faceBoxes = topology.faces.map((face) =>
+    unionBoundingBoxes([
+      boundingBox(face.meshVertices),
+      ...face.loopIndices.flatMap((loopIndex) =>
+        (topology.loops[loopIndex]?.coedgeIndices ?? []).map(
+          (coedgeIndex) => edgeBoxes[topology.coedges[coedgeIndex]?.edgeIndex ?? -1],
+        ),
+      ),
+    ]),
+  );
+
+  const bodyBox = unionBoundingBoxes(faceBoxes);
   signatures.push({
     entityClass: "body",
     geometryType: "solid",
@@ -106,8 +131,8 @@ function deriveBodySignatures(
     reference: { kind: "body", bodyId },
   });
 
-  for (const face of topology.faces) {
-    const bbox = boundingBox(face.meshVertices);
+  for (const [faceIndex, face] of topology.faces.entries()) {
+    const bbox = faceBoxes[faceIndex];
     signatures.push({
       entityClass: "face",
       geometryType: geometryTypeForSurface(face.surface),
@@ -118,11 +143,8 @@ function deriveBodySignatures(
     });
   }
 
-  for (const edge of topology.edges) {
-    const vertices = edge.vertices
-      .map((vertexIndex) => topology.vertices[vertexIndex]?.point)
-      .filter((point): point is GeometryAssetPoint3 => point != null);
-    const bbox = boundingBoxForCurve(edge.curve, vertices);
+  for (const [edgeIndex, edge] of topology.edges.entries()) {
+    const bbox = edgeBoxes[edgeIndex];
     signatures.push({
       entityClass: "edge",
       geometryType: geometryTypeForCurve(edge.curve),
@@ -221,15 +243,68 @@ function boundingBoxForCurve(
   vertices: readonly GeometryAssetPoint3[],
 ) {
   if (curve.kind === "circle") {
-    const [x, y, z] = curve.center;
-    const radius = curve.radius;
-    return {
-      low: [x - radius, y - radius, z - radius] as [number, number, number],
-      high: [x + radius, y + radius, z + radius] as [number, number, number],
-    };
+    return boundingBoxForCircularArc(curve) ?? boundingBox(vertices);
   }
 
   return boundingBox(vertices);
+}
+
+/**
+ * Exact axis-aligned extent of the swept arc. Each coordinate traces
+ * `center + radius * (cos t * xDirection + sin t * yDirection)`, a single
+ * sinusoid whose extrema are the parameter endpoints plus any interior phase
+ * peak, so no tessellation approximation enters the box.
+ */
+function boundingBoxForCircularArc(
+  curve: Extract<CadaraBrepCurve3Record, { kind: "circle" }>,
+): AxisAlignedBox | undefined {
+  const yDirection = crossProduct(curve.axisDirection, curve.xDirection);
+  const [start, end] = curve.parameterRange;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return undefined;
+
+  const low: [number, number, number] = [Infinity, Infinity, Infinity];
+  const high: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (const axis of [0, 1, 2] as const) {
+    const phase = Math.atan2(yDirection[axis], curve.xDirection[axis]);
+    const coordinate = (t: number) =>
+      curve.center[axis] +
+      curve.radius * (Math.cos(t) * curve.xDirection[axis] + Math.sin(t) * yDirection[axis]);
+    const parameters = [start, end];
+    for (
+      let peak = phase - Math.PI * Math.ceil((phase - start) / Math.PI);
+      peak <= end;
+      peak += Math.PI
+    ) {
+      if (peak >= start) parameters.push(peak);
+    }
+    for (const parameter of parameters) {
+      const value = coordinate(parameter);
+      low[axis] = Math.min(low[axis], value);
+      high[axis] = Math.max(high[axis], value);
+    }
+  }
+  return { low, high };
+}
+
+function crossProduct(
+  a: GeometryAssetPoint3,
+  b: GeometryAssetPoint3,
+): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+type AxisAlignedBox = { low: [number, number, number]; high: [number, number, number] };
+
+function unionBoundingBoxes(
+  boxes: readonly (AxisAlignedBox | undefined)[],
+): AxisAlignedBox | undefined {
+  const present = boxes.filter((box): box is AxisAlignedBox => box !== undefined);
+  if (present.length === 0) return undefined;
+  return boundingBox(present.flatMap((box) => [box.low, box.high]));
 }
 
 function boundingBox(points: readonly GeometryAssetPoint3[]) {
@@ -260,3 +335,4 @@ function centerOfBoundingBox(box: {
     (box.low[2] + box.high[2]) / 2,
   ];
 }
+

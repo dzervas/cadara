@@ -193,7 +193,10 @@ function linearStudio() {
 }
 
 function circularStudio() {
-  const seed = { id: "BODY_CIRCULAR", low: [0.01, -0.000992709, 0] as [number, number, number], high: [0.012, 0.000992709, 0.002] as [number, number, number] };
+  // Exact analytic envelope, consistent with the Q2/Q3/Q4 copies below. Kernel
+  // signatures derive curved extents from exact arc geometry, so a
+  // chord-deficient seed would itself be the artifact.
+  const seed = { id: "BODY_CIRCULAR", low: [0.01, -0.001, 0] as [number, number, number], high: [0.012, 0.001, 0.002] as [number, number, number] };
   const finalBodies = [
     seed,
     { id: "BODY_CIRCULAR_Q2", low: [-0.001, 0.01, 0] as [number, number, number], high: [0.001, 0.012, 0.002] as [number, number, number] },

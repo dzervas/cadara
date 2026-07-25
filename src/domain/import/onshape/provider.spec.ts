@@ -1177,8 +1177,8 @@ test("src/domain/import/onshape/provider.spec.ts promotes a synthetic closed hol
       entityClass: "body",
       geometryType: "solid",
       boundingBox: {
-        low: [-4, -3.97084, 0],
-        high: [4, 3.97084, 10],
+        low: [-4, -4, 0],
+        high: [4, 4, 10],
       },
       centroid: [0, 0, 5],
       reference: { kind: "body", bodyId: "probe_closed_hollow" as BodyId },

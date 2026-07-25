@@ -138,8 +138,11 @@ export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
  * UNION. The caller supplies the matching prefix topology probe.
  */
 function shellSnapshotBody(id: string) {
-  const low = { x: -0.004, y: -0.00397084, z: 0 };
-  const high = { x: 0.004, y: 0.00397084, z: 0.01 };
+  // Exact analytic envelope of the 4 mm circular profile, matching what Onshape
+  // reports for this solid. Kernel signatures derive curved extents from exact
+  // arc geometry, so a chord-deficient stand-in would itself be the artifact.
+  const low = { x: -0.004, y: -0.004, z: 0 };
+  const high = { x: 0.004, y: 0.004, z: 0.01 };
   return {
     id,
     faces: [{

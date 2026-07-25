@@ -114,6 +114,96 @@ test("derives supported topology signatures from native exact-B-rep payload fixt
   ).toBeTruthy();
 });
 
+test("curved body and face extents come from exact arc geometry, not the chordal mesh", () => {
+  // Onshape captures exact analytic extents. A cylindrical body whose extent is
+  // derived from tessellated face vertices under-reports its silhouette by the
+  // chord sagitta, which no-matches captured evidence at any honest tolerance.
+  const payload = structuredClone(
+    exactBrepPayloadFromFixture(
+      cylinderBossFixture,
+      "body_signature_fixture_cylinder_boss" as BodyId,
+    ),
+  ) as OccNativeExactBrepPayload;
+  // Emulate the real chordal deficit the OCC tessellator produces: every mesh
+  // vertex sits slightly inside the exact analytic silhouette.
+  const chordalDeficit = 0.99;
+  for (const face of payload.brep.bodies[0]?.topology.faces ?? []) {
+    face.meshVertices = face.meshVertices.map((vertex) => [
+      vertex[0] * chordalDeficit,
+      vertex[1] * chordalDeficit,
+      vertex[2],
+    ]);
+  }
+
+  const result = deriveKernelTopologySignaturesFromExactBrepPayload(payload);
+  expect(result.status).toBe("available");
+  if (result.status !== "available") return;
+
+  const body = result.signatures.find((signature) => signature.entityClass === "body");
+  const cylinderFace = result.signatures.find(
+    (signature) =>
+      signature.entityClass === "face" && signature.geometryType === "cylinder",
+  );
+
+  expect(body?.boundingBox?.high[0]).toBeCloseTo(0.75, 9);
+  expect(body?.boundingBox?.low[0]).toBeCloseTo(-0.75, 9);
+  expect(cylinderFace?.boundingBox?.high[0]).toBeCloseTo(0.75, 9);
+});
+
+test("a partial arc edge reports only its swept extent, never the full circle", () => {
+  const payload = structuredClone(
+    exactBrepPayloadFromFixture(
+      cylinderBossFixture,
+      "body_signature_fixture_cylinder_boss" as BodyId,
+    ),
+  ) as OccNativeExactBrepPayload;
+  const edge = payload.brep.bodies[0]?.topology.edges.find(
+    (candidate) => candidate.curve.kind === "circle",
+  );
+  if (!edge || edge.curve.kind !== "circle") {
+    throw new Error("Fixture must include a circular edge for arc-extent coverage.");
+  }
+  // Quarter arc from +xDirection to +yDirection: it spans neither −x nor −y.
+  edge.curve = { ...edge.curve, parameterRange: [0, Math.PI / 2] };
+
+  const result = deriveKernelTopologySignaturesFromExactBrepPayload(payload);
+  expect(result.status).toBe("available");
+  if (result.status !== "available") return;
+
+  const arc = result.signatures.find(
+    (signature) =>
+      signature.reference.kind === "edge" && signature.reference.edgeId === edge.edgeKey,
+  );
+  const radius = edge.curve.radius;
+  const xAxis = edge.curve.xDirection;
+  const center = edge.curve.center;
+  const yAxis: [number, number, number] = [
+    edge.curve.axisDirection[1] * xAxis[2] - edge.curve.axisDirection[2] * xAxis[1],
+    edge.curve.axisDirection[2] * xAxis[0] - edge.curve.axisDirection[0] * xAxis[2],
+    edge.curve.axisDirection[0] * xAxis[1] - edge.curve.axisDirection[1] * xAxis[0],
+  ];
+  for (const axis of [0, 1, 2] as const) {
+    const endpoints = [
+      center[axis] + radius * xAxis[axis],
+      center[axis] + radius * yAxis[axis],
+    ];
+    expect(arc?.boundingBox?.low[axis]).toBeLessThanOrEqual(Math.min(...endpoints) + 1e-9);
+    expect(arc?.boundingBox?.high[axis]).toBeGreaterThanOrEqual(
+      Math.max(...endpoints) - 1e-9,
+    );
+    // A full-circle box would always reach center ± radius on every axis the
+    // plane spans; the quarter arc must stay inside it on at least one side.
+    expect(arc?.boundingBox?.low[axis]).toBeGreaterThanOrEqual(center[axis] - radius - 1e-9);
+    expect(arc?.boundingBox?.high[axis]).toBeLessThanOrEqual(center[axis] + radius + 1e-9);
+  }
+  const spansNegativeX =
+    (arc?.boundingBox?.low[0] ?? 0) < center[0] - radius + 1e-9 &&
+    Math.abs(xAxis[0]) + Math.abs(yAxis[0]) > 0;
+  expect(spansNegativeX, "A quarter arc must not report the full-circle extent.").toBe(
+    false,
+  );
+});
+
 test("derives generic signatures for unsupported exact-B-rep geometry without fabricating defining data", () => {
   const payload = structuredClone(
     exactBrepPayloadFromFixture(boxFixture, "body_signature_fixture_box" as BodyId),
