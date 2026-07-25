@@ -387,3 +387,56 @@ export function trackNewBodyResults(
     }),
   );
 }
+
+/**
+ * Rebuild-failure attribution slots. A thrown error tagged with a slot lets the
+ * kernel adapter attribute the failure to the authored field that owns it
+ * (profile selection, extent end condition, or boolean scope) instead of
+ * blaming the profile by default.
+ */
+export const REBUILD_SLOTS = ["profile", "extent", "scope"] as const;
+
+export type RebuildSlot = (typeof REBUILD_SLOTS)[number];
+
+/**
+ * Tag an error with the rebuild slot that owns the failure. The first (inner)
+ * tag wins so the most specific attribution is preserved as the error unwinds.
+ * The error is annotated and rethrown by the caller; it is never swallowed.
+ */
+export function tagRebuildSlot(error: unknown, slot: RebuildSlot): unknown {
+  if (error instanceof Error && !("rebuildSlot" in error)) {
+    Object.defineProperty(error, "rebuildSlot", {
+      value: slot,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return error;
+}
+
+export function getRebuildSlot(error: unknown): RebuildSlot | null {
+  if (
+    error instanceof Error &&
+    "rebuildSlot" in error &&
+    typeof (error as { rebuildSlot?: unknown }).rebuildSlot === "string"
+  ) {
+    const slot = (error as { rebuildSlot: string }).rebuildSlot;
+    return (REBUILD_SLOTS as readonly string[]).includes(slot)
+      ? (slot as RebuildSlot)
+      : null;
+  }
+  return null;
+}
+
+/**
+ * Run a rebuild sub-phase, tagging any thrown error with `slot` before
+ * rethrowing so upstream diagnostics can attribute the failure honestly.
+ */
+export function runInRebuildSlot<T>(slot: RebuildSlot, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    throw tagRebuildSlot(error, slot);
+  }
+}
