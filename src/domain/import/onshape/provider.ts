@@ -1054,7 +1054,7 @@ async function activateProbeBackedPlanning(input: {
         requiresStudioBake: provisionalPlan.requiresStudioBake,
         bakeDiagnostics: provisionalPlan.bakeDiagnostics,
       };
-      const degradeConsumer = (reason: PlanReasonCode) => {
+      const degradeConsumer = (reason: PlanReasonCode, detail?: string) => {
         workingPlan = recomputePlanWithFeaturePlans(
           workingPlan,
           workingPlan.featurePlans.map((plan) =>
@@ -1064,6 +1064,11 @@ async function activateProbeBackedPlanning(input: {
                   tier: "baked" as const,
                   target: { kind: "suppressed" as const },
                   reasonCodes: [reason],
+                  // Preserve the FIRST specific failure seen for this feature so
+                  // later generic degradations cannot hide the root cause.
+                  ...(plan.reasonDetail ?? detail
+                    ? { reasonDetail: plan.reasonDetail ?? detail }
+                    : {}),
                   suppressed: true,
                 }
               : plan,
@@ -1113,8 +1118,17 @@ async function activateProbeBackedPlanning(input: {
       if (!prefix || prefix.status === "failed") {
         // The parametric prefix itself did not rebuild in the probe session, so no
         // safe pre-consumer evidence exists in the Cadara prefix. Report that
-        // instead of silently falling through to the translator-unavailable rewrite.
-        degradeConsumer("topology-history-evidence-missing");
+        // instead of silently falling through to the translator-unavailable rewrite,
+        // and keep the kernel's own first diagnostic so the next root cause is
+        // visible rather than collapsed into the generic reason.
+        degradeConsumer(
+          "topology-history-evidence-missing",
+          prefix
+            ? prefix.diagnostics
+                .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
+                .join("; ") || undefined
+            : "The consumer has no ordered prefix position in the prepared actions.",
+        );
         continue;
       }
       const captureFrameToWorld = computeCaptureFrameToWorld({
@@ -1472,6 +1486,15 @@ async function activateProbeBackedPlanning(input: {
     // pass; leave the plan as is so the real error surfaces at apply instead of
     // silently mutating an unrelated feature.
     if (!failedPlan) break;
+    const failedStep = buildProbe.steps[failedOrdinal];
+    // Keep the kernel's own first message: `feature-kernel-build-failed` alone
+    // says nothing about which invariant the live prefix rejected.
+    const failureDetail =
+      failedStep?.status === "failed"
+        ? failedStep.diagnostics
+            .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
+            .join("; ") || undefined
+        : undefined;
     workingPlan = recomputePlanWithFeaturePlans(
       workingPlan,
       replanDependentFeatures({
@@ -1484,6 +1507,9 @@ async function activateProbeBackedPlanning(input: {
                   tier: "baked" as const,
                   target: { kind: "suppressed" as const },
                   reasonCodes: ["feature-kernel-build-failed" as const],
+                  ...(plan.reasonDetail ?? failureDetail
+                    ? { reasonDetail: plan.reasonDetail ?? failureDetail }
+                    : {}),
                   suppressed: true,
                 }
               : plan,
@@ -1843,7 +1869,8 @@ function reviewFeatureDiagnostic(plan: FeaturePlan, studio: OnshapeStudioReview)
   const dependencyStatus = dependencySegment && studio.bakeStrategy.kind === "segments"
     ? ` — body dependency satisfied by checkpoint ${studio.bakeStrategy.segments.indexOf(dependencySegment) + 1} (${dependencySegment.segmentId})`
     : "";
-  return `${plan.tier}${status} — ${reasons}${segmentStatus}${dependencyStatus}`;
+  const detail = plan.reasonDetail ? ` [${plan.reasonDetail}]` : "";
+  return `${plan.tier}${status} — ${reasons}${detail}${segmentStatus}${dependencyStatus}`;
 }
 
 function sanitizeCorrelationPart(raw: string): string {

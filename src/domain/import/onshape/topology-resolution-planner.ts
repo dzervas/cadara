@@ -1,4 +1,5 @@
 import type {
+  HistoryProbeStepDiagnostic,
   HistoryProbeTopologySignature,
   ImportHistoryProbeCapabilities,
 } from "@/contracts/import/capabilities";
@@ -13,6 +14,8 @@ export interface TopologyConsumerPrefixResult {
   orderedPosition: number;
   signatures: readonly HistoryProbeTopologySignature[];
   status: "rebuilt" | "failed";
+  /** Structured kernel diagnostics from the failed step, preserved verbatim. */
+  diagnostics: readonly HistoryProbeStepDiagnostic[];
 }
 
 /**
@@ -44,6 +47,7 @@ export async function probeTopologyConsumerPrefixes(input: {
       orderedPosition,
       status: last?.status === "failed" ? "failed" : "rebuilt",
       signatures: last?.status === "rebuilt" ? last.signatures : [],
+      diagnostics: last?.status === "failed" ? last.diagnostics : [],
     });
   }
   return results;
