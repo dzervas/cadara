@@ -35,6 +35,8 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import {
   applyBooleanPolicy,
+  projectFeatureSourceShapes,
+  runBoolean,
   type OccFeatureSourceShapeMap,
 } from "@/domain/modeling/occ/features/boolean-operations";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
@@ -713,26 +715,57 @@ export function buildExtrudeFeatureShape(
     return extrudedShapes[0]!;
   }
 
-  const builder = new context.oc.BRep_Builder();
-  const compound = new context.oc.TopoDS_Compound();
-  const sourceShapes = new Map<
+  return fuseExtrudedShapes(context, extrudedShapes);
+}
+
+/**
+ * Combine the per-profile / per-end prisms of one extrude into a single feature
+ * shape.
+ *
+ * Onshape treats one extrude as one operation: lobes that touch (adjacent
+ * regions, or the two halves of a symmetric/two-sided extent) become ONE solid,
+ * and only genuinely disjoint lobes stay separate. A raw `TopoDS_Compound` of
+ * the prisms cannot express that — it always reports one solid per lobe, which
+ * later reads as a severed body. Fusing the lobes reproduces Onshape's
+ * semantics exactly: the fuse of disjoint solids is still a compound of those
+ * solids, so disjoint regions keep producing one body each.
+ *
+ * Stage lineage is preserved by projecting every prism source shape (FirstShape
+ * / LastShape / Generated) through the fuse history, so profile faces, side
+ * faces, and sketch-entity edges stay resolvable on the fused result.
+ */
+function fuseExtrudedShapes(
+  context: OccFeatureExecutionContext,
+  extrudedShapes: readonly BuiltExtrudeShape[],
+): BuiltExtrudeShape {
+  const first = extrudedShapes[0]!;
+  let shape = first.shape;
+  let sourceShapes = new Map<
     OccTopologySourceKey,
     InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
   >();
-  const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
-  builder.MakeCompound(compound);
-  for (const built of extrudedShapes) {
-    builder.Add(compound, built.shape);
-    for (const [sourceKey, shapes] of built.sourceShapes) {
+  for (const [sourceKey, shapes] of first.sourceShapes) {
+    registerSourceShapes(sourceShapes, sourceKey, shapes);
+  }
+  const unsupportedSourceKeys = new Set(first.unsupportedSourceKeys);
+
+  for (const next of extrudedShapes.slice(1)) {
+    const result = runBoolean(context.oc, "join", shape, next.shape);
+    for (const [sourceKey, shapes] of next.sourceShapes) {
       registerSourceShapes(sourceShapes, sourceKey, shapes);
     }
-    for (const sourceKey of built.unsupportedSourceKeys) {
+    sourceShapes = projectFeatureSourceShapes(
+      context.oc,
+      sourceShapes,
+      result.historySources,
+    );
+    for (const sourceKey of next.unsupportedSourceKeys) {
       unsupportedSourceKeys.add(sourceKey);
     }
+    shape = result.shape;
   }
-  deleteOccObject(builder);
 
-  return { shape: compound, sourceShapes, unsupportedSourceKeys };
+  return { shape, sourceShapes, unsupportedSourceKeys };
 }
 
 export function executeExtrudeFeature(
