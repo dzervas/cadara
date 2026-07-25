@@ -2230,6 +2230,56 @@ test("a failed pre-consumer prefix probe degrades to topology-history-evidence-m
   });
 });
 
+test("a failed prefix probe preserves the kernel's first specific diagnostic (X.9.3)", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  let prefixProbeOrdinal = 0;
+  const capabilities = createImportCapabilities(service, snapshot, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        const count = input.actions.orderedActions?.length ?? 0;
+        if (!input.includeFinalTessellation) {
+          prefixProbeOrdinal += 1;
+          // The FIRST failure names the real root cause; later failures are
+          // generic. Collapsing to the last one would hide the actual defect.
+          return {
+            steps: [{
+              status: "failed" as const,
+              diagnostics: [{
+                severity: "error" as const,
+                code: "kernel-history-probe-step-failed",
+                message: prefixProbeOrdinal === 1
+                  ? "Offset distance collapses the circle radius."
+                  : "A later generic prefix failure.",
+              }],
+            }],
+          };
+        }
+        return {
+          steps: Array.from({ length: count }, () => ({
+            status: "rebuilt" as const,
+            signatures: [],
+          })),
+        };
+      },
+    },
+  });
+  const source = sourceFromBundle(makeWaveBBodyCaptureBundle("delete"));
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const consumer = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "C",
+  );
+
+  expect(consumer?.reasonCodes).toEqual(["topology-history-evidence-missing"]);
+  expect(
+    consumer?.reasonDetail,
+    "The first specific kernel probe failure must survive the generic reason code.",
+  ).toBe(
+    "kernel-history-probe-step-failed: Offset distance collapses the circle radius.",
+  );
+  expect(prefixProbeOrdinal).toBeGreaterThan(0);
+});
+
 
 test("apply pipeline materializes the provider-produced parametric revolve profile and local axis", async () => {
   const { service } = createTestModelingService();

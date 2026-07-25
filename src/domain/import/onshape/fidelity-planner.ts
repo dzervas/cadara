@@ -257,6 +257,12 @@ export interface FeaturePlan {
   tier: FidelityTier;
   target: PlannedTarget;
   reasonCodes: PlanReasonCode[];
+  /**
+   * The first specific kernel/probe failure recorded for this feature, preserved
+   * so a generic reason code never hides the actual root cause. Purely
+   * diagnostic: it never participates in tier selection or matching.
+   */
+  reasonDetail?: string;
   /** True when the feature was suppressed in Onshape or degraded downstream. */
   suppressed: boolean;
   /** Present when a region-consuming solid feature planned parametric (task 3). */
