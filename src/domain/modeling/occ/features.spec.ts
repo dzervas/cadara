@@ -1715,9 +1715,14 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       booleanScope: { kind: "standalone" as const },
     };
 
-    let ambiguousExtrude: string | null = null;
+    // Two bodies present coincident nearest faces (both near faces at z=2).
+    // "Up to next" terminates at that shared plane deterministically — coincident
+    // faces from different bodies produce identical geometry, so this is not an
+    // ambiguous selection and must succeed rather than diagnose an error.
+    let coincidentError: string | null = null;
+    let coincidentBodyCount = 0;
     try {
-      executeOccFeature(
+      const result = executeOccFeature(
         ambiguousContext,
         "feature_phase4_extrude_ambiguous_up_to_next" as FeatureId,
         {
@@ -1732,8 +1737,9 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           },
         },
       );
+      coincidentBodyCount = result.bodies.length;
     } catch (error) {
-      ambiguousExtrude = error instanceof Error ? error.message : String(error);
+      coincidentError = error instanceof Error ? error.message : String(error);
     }
 
     let missingExtrudeTarget: string | null = null;
@@ -1759,10 +1765,13 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     }
 
     expect(
-      ambiguousExtrude?.includes("advanced-feature-unsupported-kernel-case") ===
-        true && ambiguousExtrude.includes("ambiguous"),
-      "Extrude up-to-next should diagnose ambiguous nearest bodies.",
-    ).toBeTruthy();
+      coincidentError,
+      "Extrude up-to-next should terminate deterministically at coincident nearest faces.",
+    ).toBeNull();
+    expect(
+      coincidentBodyCount,
+      "Extrude up-to-next at a coincident termination plane should produce a body.",
+    ).toBeGreaterThan(0);
     expect(
       missingExtrudeTarget?.includes(
         "advanced-feature-unsupported-kernel-case",

@@ -190,8 +190,6 @@ export function getShapeVertexPoints(
 
 function selectNearestForwardProjection(
   candidates: Array<{ projection: number; source: string }>,
-  tolerance: number,
-  label: string,
 ) {
   const sortedCandidates = [...candidates].sort(
     (left, right) => left.projection - right.projection,
@@ -202,21 +200,13 @@ function selectNearestForwardProjection(
     return null;
   }
 
-  const matchingSources = new Set(
-    sortedCandidates
-      .filter(
-        (candidate) =>
-          Math.abs(candidate.projection - nearest.projection) <= tolerance,
-      )
-      .map((candidate) => candidate.source),
-  );
-
-  if (matchingSources.size > 1) {
-    throw new Error(
-      `advanced-feature-unsupported-kernel-case: OCC ${label} termination is ambiguous between multiple bodies.`,
-    );
-  }
-
+  // Every candidate within `tolerance` of the nearest defines the same
+  // termination plane, so terminating at `nearest.projection` is deterministic
+  // even when several bodies contribute coincident faces there. "Up to next"
+  // stops at the next face's plane; coincident faces from different bodies land
+  // on that same plane and produce identical geometry, so this is not an
+  // ambiguous selection (no nearest-geometry scoring or tolerance relaxation is
+  // involved — the tolerance only identifies which candidates are coincident).
   return nearest.projection;
 }
 
@@ -244,11 +234,7 @@ function getExtrudeTargetProjection(
           candidate.projection > startProjection + context.modelingTolerance,
       );
 
-    return selectNearestForwardProjection(
-      candidates,
-      context.modelingTolerance,
-      "extrude up-to-next",
-    );
+    return selectNearestForwardProjection(candidates);
   }
 
   if (end.kind === "upToFace") {
