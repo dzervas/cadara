@@ -315,10 +315,14 @@ for (const fixture of WAVE_T_TIMELINES) {
 //    cannot abort the studio.
 //
 // The remaining bakes are honest and each names a specific reason; they are not
-// tuned away. Extrude 4 (the real severing THROUGH_ALL cut) and Sketch 5 do not
-// build against the live prefix and are contained as `feature-kernel-build-
-// failed`; the rest are unresolved extent topology, missing history evidence, or
-// cascades from those.
+// tuned away. Extrude 4 (the real severing THROUGH_ALL cut) does not build
+// against the live prefix and is contained as `feature-kernel-build-failed`; its
+// preserved probe diagnostic (X.9.3) names the exact kernel cause, and the
+// downstream extent/evidence bakes all quote that same first failure rather than
+// a generic no-match. Sketch 5 is now parametric: its Onshape circle OFFSET was
+// being translated with an inverted sign (collapsing the circle at solve time)
+// and its radial-gap DISTANCE dimensions were being forged into line dimensions
+// the solver rejects; both now translate honestly.
 
 const LAPTOP_STAND_FEATURE_IDS = [
   "feature_extrude-1",
@@ -338,20 +342,19 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
   );
   test.setTimeout(700_000);
   const { reviewText } = await importBundle(page, LAPTOP_STAND_BUNDLE_PATH, true);
-  expect(reviewText).toContain("10 parametric, 14 baked, 0 geometry-only features.");
+  expect(reviewText).toContain("11 parametric, 13 baked, 0 geometry-only features.");
   for (const [label, reason] of [
     ["Fillet 2", "topology reference did not match"],
     ["Chamfer 1", "topology reference could not be rematched while applying"],
     ["Extrude 4", "the modeling kernel could not build this feature against the live prefix"],
-    ["Sketch 5", "the modeling kernel could not build this feature against the live prefix"],
-    ["Chamfer 2", "captured history topology evidence is missing"],
+    ["Chamfer 2", "topology reference could not be rematched while applying"],
     ["Extrude 6", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
     ["Linear pattern 1", "depends on previously baked geometry"],
     ["Extrude 7", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
     ["Linear pattern 2", "depends on previously baked geometry"],
     ["Mirror 1", "depends on previously baked geometry"],
     ["Boolean 1", "captured history topology evidence is missing"],
-    ["Chamfer 3", "captured history topology evidence is missing"],
+    ["Chamfer 3", "topology reference did not match"],
     ["Extrude 8", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
     ["Extrude 3", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
   ] as const) {
@@ -359,6 +362,14 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
       new RegExp(`${label}\\s+baked \\(suppressed\\) — [^\\n]*${escapeRegExp(reason)}`),
     );
   }
+
+  // X.9.3: the first specific kernel probe failure must survive next to the
+  // generic reason code, so each iteration names the next real root cause
+  // instead of collapsing every downstream bake into "evidence missing".
+  expect(
+    reviewText,
+    "Extrude 4 must expose the kernel's own first build diagnostic.",
+  ).toMatch(/Extrude 4 boolean target is incorrect\./);
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect(imported.snapshotDiagnosticsCount).toBe(0);

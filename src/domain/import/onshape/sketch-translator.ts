@@ -623,34 +623,57 @@ function translateDimensionRecord(input: {
         return { dimensionId: id, kind: "distance", label, axis: "aligned", pointIds: [first.pointId, second.pointId], value };
       }
       if (first.kind === "entity" && second.kind === "entity") {
-        return {
-          dimensionId: id,
-          kind: "lineDistance",
-          label,
-          lines: [
-            { kind: "localEntity", entityId: first.entityId },
-            { kind: "localEntity", entityId: second.entityId },
-          ],
-          value,
-        };
+        // `lineDistance` is line-to-line only; the solver rejects any other
+        // entity kind outright, which would fail the whole sketch. Onshape also
+        // uses DISTANCE between circles/arcs (a radial gap), which has no
+        // equivalent Cadara dimension: drop that relationship honestly rather
+        // than emit a dimension the solver cannot build.
+        const firstEntity = maps.entitiesByRawId.get(first.raw);
+        const secondEntity = maps.entitiesByRawId.get(second.raw);
+        if (
+          firstEntity?.kind === "lineSegment" &&
+          secondEntity?.kind === "lineSegment"
+        ) {
+          return {
+            dimensionId: id,
+            kind: "lineDistance",
+            label,
+            lines: [
+              { kind: "localEntity", entityId: first.entityId },
+              { kind: "localEntity", entityId: second.entityId },
+            ],
+            value,
+          };
+        }
+        dropRelationship(
+          diagnostics,
+          record,
+          "entity-to-entity distance is supported only between two line segments",
+        );
+        return null;
       }
-      if (first.kind === "entity" && second.kind === "point") {
+      // `linePointDistance` also accepts only a line segment. Onshape's
+      // point-to-circle/arc distance (a radial gap) has no Cadara equivalent;
+      // dropping it honestly keeps the rest of the sketch solvable.
+      const lineOperand =
+        first.kind === "entity" ? first : second.kind === "entity" ? second : null;
+      const pointOperandValue =
+        first.kind === "point" ? first : second.kind === "point" ? second : null;
+      if (lineOperand && pointOperandValue) {
+        if (maps.entitiesByRawId.get(lineOperand.raw)?.kind !== "lineSegment") {
+          dropRelationship(
+            diagnostics,
+            record,
+            "point-to-entity distance is supported only against a line segment",
+          );
+          return null;
+        }
         return {
           dimensionId: id,
           kind: "linePointDistance",
           label,
-          line: { kind: "localEntity", entityId: first.entityId },
-          point: { kind: "localPoint", pointId: second.pointId },
-          value,
-        };
-      }
-      if (first.kind === "point" && second.kind === "entity") {
-        return {
-          dimensionId: id,
-          kind: "linePointDistance",
-          label,
-          line: { kind: "localEntity", entityId: second.entityId },
-          point: { kind: "localPoint", pointId: first.pointId },
+          line: { kind: "localEntity", entityId: lineOperand.entityId },
+          point: { kind: "localPoint", pointId: pointOperandValue.pointId },
           value,
         };
       }
@@ -857,7 +880,15 @@ function signedOffsetDistance(input: {
     if (seedRadius == null || outputRadius == null) {
       return null;
     }
-    const signed = outputRadius - seedRadius;
+    // The offset contract measures distance to the left of traversal: a
+    // counter-clockwise circle/arc SHRINKS by a positive distance, and a
+    // clockwise arc grows. Reporting the raw radius delta inverts that sign and
+    // makes an authored outward offset collapse the curve at solve time.
+    const shrinksWithPositiveDistance =
+      seed.kind === "circle" || seed.sweepDirection === "counterClockwise";
+    const signed = shrinksWithPositiveDistance
+      ? seedRadius - outputRadius
+      : outputRadius - seedRadius;
     return halfSpaceSign === null ? signed : Math.abs(signed) * halfSpaceSign;
   }
 
