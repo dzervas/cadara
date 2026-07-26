@@ -6,6 +6,7 @@ import type {
 import type {
   ImportDeferredExtrudeEndCondition,
   ImportDeferredExtrudeExtent,
+  ImportDeferredExtrudeStartExtent,
   ImportDeferredSketchEntityRef,
   ImportDeferredSketchPointRef,
   ImportDeferredTopologyRef,
@@ -31,6 +32,7 @@ import type {
   CreateFeatureRequest,
   ExtrudeEndCondition,
   ExtrudeFeatureExtent,
+  ExtrudeStartExtent,
   ModelingDiagnostic,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
@@ -643,6 +645,28 @@ export class ImportDeferredMaterializer {
     return { ...end, target } as Extract<ExtrudeEndCondition, { kind: typeof end.kind }>;
   }
 
+  /** Resolve the sketch id of a deferred sketch-point start offset. */
+  private async materializeExtrudeStartExtent(
+    startExtent: ImportDeferredExtrudeStartExtent,
+    consumer: ImportPreparedActionRef,
+  ): Promise<ExtrudeStartExtent> {
+    if (
+      startExtent.kind !== "sketchPointOffset" ||
+      !isDeferredValue(startExtent.target.sketchId)
+    ) {
+      return startExtent as ExtrudeStartExtent;
+    }
+    return {
+      ...startExtent,
+      target: {
+        ...startExtent.target,
+        sketchId: (await this.resolveDeferredValue(
+          startExtent.target.sketchId,
+          consumer,
+        )) as SketchId,
+      },
+    };
+  }
   private async materializeExtrudeExtent(
     extent: ImportDeferredExtrudeExtent,
     consumer: ImportPreparedActionRef,
@@ -895,6 +919,13 @@ export class ImportDeferredMaterializer {
             consumer,
           )
         : null;
+    const startExtent =
+      request.definition.kind === "extrude"
+        ? await this.materializeExtrudeStartExtent(
+            request.definition.parameters.startExtent,
+            consumer,
+          )
+        : null;
 
     if (request.definition.kind === "revolve") {
       const axis = request.definition.parameters.axis;
@@ -926,6 +957,7 @@ export class ImportDeferredMaterializer {
           ...request.definition.parameters,
           profiles,
           extent: extent!,
+          startExtent: startExtent!,
           booleanScope: materializedBooleanScope,
         },
       },

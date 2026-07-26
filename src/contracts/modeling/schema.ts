@@ -260,6 +260,26 @@ export type UpToVertexTarget =
   | { kind: "vertex"; bodyId: BodyId; vertexId: VertexId }
   | { kind: "sketchPoint"; sketchId: SketchId; pointId: SketchPointId };
 
+/**
+ * Start condition for an extrusion path. `profilePlane` starts the prism on the
+ * profile's own plane. The offset forms start it on a plane parallel to the
+ * profile plane, displaced along the extrude direction: `blindOffset` by an
+ * authored distance, `sketchPointOffset` by the plane through an exact authored
+ * sketch point. They express Onshape's `startOffset` start bounds exactly; no
+ * form infers a start plane from nearby geometry.
+ */
+export type ExtrudeStartExtent =
+  | { kind: "profilePlane" }
+  | {
+      kind: "blindOffset";
+      distance: AuthoredValue<number>;
+      direction: LinearExtentDirection;
+    }
+  | {
+      kind: "sketchPointOffset";
+      target: Extract<UpToVertexTarget, { kind: "sketchPoint" }>;
+    };
+
 export type ExtrudeEndCondition =
   | {
       kind: "blind";
@@ -373,7 +393,7 @@ export interface ExtrudeFeatureParameters {
   /** Non-empty ordered profile seeds for the extrude operation. */
   profiles: NonEmptyReadonlyArray<ExtrudeProfileRef>;
   /** Explicit start condition for the extrusion path. */
-  startExtent: { kind: "profilePlane" };
+  startExtent: ExtrudeStartExtent;
   /** Explicit end controls for all active extrude sides. */
   extent: ExtrudeFeatureExtent;
   /** Boolean behavior applied to the extrude result. */

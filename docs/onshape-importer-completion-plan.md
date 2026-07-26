@@ -1039,27 +1039,31 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
 
 All numbers below are the REAL browser/worker/OCC gate
 (`e2e/onshape-import-parametric.spec.ts`, `e2e/onshape-variable-rebuild.spec.ts`),
-not logic-lane review. 14/14 Onshape browser tests pass.
+not mock review. 14/14 Onshape browser tests pass on a clean Vite server at
+`127.0.0.1:3123`.
 
 | Studio | Before item D | After item D | Change |
 |---|---:|---:|---|
-| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** | Regression control, unchanged. |
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** | Regression control, unchanged and fully parametric. |
+| Wave-T Part Studio 1 | 2 / 0 / 0 | **2 / 0 / 0** | Full-revolve control, unchanged. |
 | Wave-T Revolve remove | 4 / 0 / 0 | **4 / 0 / 0** | Unchanged. |
 | Wave-T Sweep | 3 / 0 / 0 | **3 / 0 / 0** | Unchanged. |
-| Wave-T Part Studio 1 (full revolve) | 2 / 0 / 0 | **2 / 0 / 0** | Unchanged. |
 | Wave-T Loft | 4 / 0 / 0 | **4 / 0 / 0** | Unchanged. |
 | Wave-T Extrude extents | 6 / 0 / 0 | **6 / 0 / 0** | Unchanged. |
-| Wave-T **Mirror transform** | 3 / 2 / 0 | **5 / 0 / 0** | **Fully parametric.** |
-| Laptop Stand `5151…` | 10 / 14 / 0 | **11 / 13 / 0** | `Sketch 5` promoted. |
-| Part Studio 1 `9841…` | 8 / 33 / 0 | **9 / 32 / 0** | `Extrude 1` promoted: the `UP_TO_VERTEX` sketch-point contract gap is closed. |
-| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** | Unchanged. |
+| Wave-T **Mirror transform** | 5 / 0 / 0 | **5 / 0 / 0** | Fully parametric; the earlier 3 / 2 / 0 browser gap stays closed. |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** | Count unchanged; `Extrude 6` / `7` now name the intrinsic start-extent reason. |
+| Part Studio 1 `9841…` | 8 / 33 / 0 | **10 / 31 / 0** | `Extrude 1` and `Chamfer 1` promote from the start-extent contract. |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** | Count unchanged; `Extrude 8` names the intrinsic start-extent reason. |
 
-Wave-T Mirror transform reached 5/0/0 because `Part mirror` and
-`XYZ translation` both query the same extrude body, whose live signature was
-under-reporting its curved extent. It is the smallest reproduction of that whole
-class, exactly as scoped. Both consumers now resolve from exact evidence with no
-tolerance change, and the studio's bake strategy dropped from
-`wholeStudioLegacy` to `none`.
+Wave-T is all-parametric in every covered studio, including Mirror transform at
+**5 / 0 / 0**. Mounts remains the full-parametric no-regression control. 9841 is
+now the meaningful item-D closure: `Extrude 1` builds the Onshape ground-truth
+120 mm body span (`x ∈ [-67.5,+52.5] mm`) because its authored
+`startOffsetBound=ENTITY` sketch point is threaded as an exact
+`sketchPointOffset` start extent, and `Chamfer 1` then matches the live 120 mm
+edge. The BLIND start-offset forms in 9841 `Extrude 10` / `11` remain baked with
+`extrude-start-extent-unsupported`; there is no capture-grounded sign convention
+to implement without guessing.
 
 #### Remaining baked features and their honest status
 
@@ -1067,64 +1071,66 @@ tolerance change, and the studio's bake strategy dropped from
 `Extrude 4 boolean target is incorrect` share ONE root cause and will be
 re-evaluated together once it is fixed:
 
-| Feature | Reason code | Status |
+| Feature | Reason code | Classification |
 |---|---|---|
-| `Fillet 2` | `topology-reference-no-match` | Needs follow-up (X.9.2). |
-| `Chamfer 1` | `topology-apply-rematch-failed` | Needs follow-up (X.9.2). |
-| `Extrude 4` | `feature-kernel-build-failed` | **Root blocker.** Live kernel rejects its boolean target; diagnostic now preserved. |
-| `Chamfer 2` | `topology-apply-rematch-failed` | Needs follow-up. |
-| `Extrude 6` / `7` / `8` / `3` | `extrude-extent-topology-unresolved` | Downstream of `Extrude 4`; each quotes its diagnostic. |
-| `Linear pattern 1` / `2`, `Mirror 1` | `downstream-of-baked` | Pure cascade; evaporates when producers promote. |
-| `Boolean 1` | `topology-history-evidence-missing` | Downstream of `Extrude 4` (X.9.2 target). |
-| `Chamfer 3` | `topology-reference-no-match` | Needs follow-up. |
+| `Fillet 2` | `topology-reference-no-match` | Needs follow-up (X.9.2 exact topology). |
+| `Chamfer 1` | `topology-apply-rematch-failed` | Needs follow-up (X.9.2 apply-time rematch). |
+| `Extrude 4` | `feature-kernel-build-failed` | Needs follow-up root blocker; the live kernel rejects its boolean target and X.9.3 preserves that diagnostic. |
+| `Chamfer 2` | `topology-apply-rematch-failed` | Needs follow-up after the `Extrude 4` root blocker is fixed. |
+| `Extrude 6` / `7` | `extrude-start-extent-unsupported` | Honestly unresolvable for now: authored `startOffsetBound=ENTITY` start plane is intrinsic and no solid can be promoted short of it. |
+| `Linear pattern 1` / `2`, `Mirror 1` | `downstream-of-baked` | Cascade behind the baked producers. |
+| `Boolean 1` | `topology-history-evidence-missing` | Needs follow-up (X.9.2), currently downstream of the `Extrude 4` root blocker. |
+| `Chamfer 3` | `topology-reference-no-match` | Needs follow-up (X.9.2 exact topology). |
+| `Extrude 8` / `3` | `extrude-extent-topology-unresolved` | Needs follow-up after the upstream topology/body blockers; each quotes the preserved root diagnostic. |
 
-**Part Studio 1 `9841…` (32 baked).** The `UP_TO_VERTEX` contract gap recorded
-under X.9.1 is now CLOSED, and `Extrude 1` is parametric in the real browser
-gate. The extrude extent contract gained an exact sketch-point terminator
-(`{ kind: "sketchPoint", sketchId, pointId }` on `UpToVertexTarget`), threaded
-through import actions, prepared-action validation, the deferred materializer,
-normalization/validation, and the OCC extent resolver, which terminates the
-prism on the plane through the referenced sketch point normal to the extrude
-direction. The importer decodes the consumer's own `qCompressed` query exactly
-(length-prefixed `SKETCH_ENTITY` vertex payload) and maps it onto the same
-translated sketch the provider commits, so the reference is durable and live
-across upstream edits. Nothing was matched by proximity: the terminator's
-authored x (`-0.0675 m`) equals Onshape's ground-truth body `minx`
-(`-0.06750000268 m`) to 2.7e-6 mm, i.e. tessellation noise only.
+**Part Studio 1 `9841…` (31 baked).** X.9.1 is CLOSED: the extrude contract now
+supports both the sketch-point `UP_TO_VERTEX` terminator and the sketch-point
+`startOffsetBound=ENTITY` start extent used by `Extrude 1`. X.9.2 is partially
+closed for this studio: `Chamfer 1` is parametric, proving the previous no-match
+was wrong-body fallout rather than matcher ambiguity. The residuals are now
+honest per-feature bakes, and review applies the same refusal rule as commit-time
+apply so `Chamfer 2` cannot abort the studio.
 
-Remaining rows, classified honestly:
-
-| Feature(s) | Reason code | Status |
+| Feature(s) | Reason code | Classification |
 |---|---|---|
-| `Chamfer 1`, `Chamfer 2`, `Chamfer 3`, `Chamfer 4` | `topology-reference-no-match` | **Needs follow-up (X.9.2).** Now the single upstream blocker of the remaining cascade: `Chamfer 1` consumes a `SWEPT_EDGE`-derived edge over the live `Extrude 1` body. |
+| `Chamfer 2` | `topology-apply-rematch-failed` with diagnostic `occ-topology-unsupported-history` | Honestly contained kernel-history refusal. Needs follow-up only if cadara later proves conservative post-chamfer edge history. |
+| `Chamfer 3`, `Chamfer 4` | `downstream-of-baked` / topology diagnostics from `Chamfer 2` | Cascade behind `Chamfer 2`; not independent matcher defects. |
 | `Shell 1` | `topology-apply-rematch-failed` | Needs follow-up (X.9.2); its `parts` body scope still fails apply-time rematch. |
-| `Extrude 2`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16` | `extrude-extent-topology-unresolved` | Cascade downstream of the chamfer/shell blockers, not independent defects. |
+| `Extrude 10`, `Extrude 11` | `extrude-start-extent-unsupported` | Honestly unresolvable BLIND start offsets; no ground truth for the sign convention, so they stay baked. |
+| `Extrude 2`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` | `extrude-extent-topology-unresolved` / `downstream-of-baked` as applicable | Cascade behind the chamfer/shell and face-sketch blockers, not independent contract gaps. |
 | `Extrude 3` | `downstream-of-baked` | Pure cascade. |
-| `Boolean 1`, `Delete part 1` | `topology-reference-no-match` | Cascade downstream of the same blockers. |
-| `Extrude 4` | `extrude-body-type-unsupported` | **Honestly unresolvable / permanently baked** (SURFACE, excluded by design). |
-| `Split 1`, `Sketch 3`, `Sketch 4` | `topology-reference-no-match` / `needs-history-probe` | **Excluded scope** (split-face dependent). |
-| `Sketch 2`, `Cutter`, `Sketch 5`–`Sketch 10` | `needs-history-probe` | X.5 face-backed sketches; evaluable only once their producer bodies are live. |
+| `Boolean 1`, `Delete part 1` | `downstream-of-baked` / topology diagnostics | Cascade behind the same contained blockers. |
+| `Extrude 4` | `extrude-body-type-unsupported` | **Excluded scope / permanently baked** (SURFACE, not a solid extrude). |
+| `Split 1` | split/topology reason-code level, baked suppressed | **Excluded scope** (split-face dependent); pinned at reason-code level and no longer allowed to abort the studio. |
+| `Sketch 3`, `Sketch 4` | `needs-history-probe` / topology diagnostics | **Excluded scope** until split/face-backed evidence is in scope. |
+| `Sketch 2`, `Cutter`, `Sketch 5`–`Sketch 10` | `needs-history-probe` | X.5 face-backed sketches; evaluable only once their producer bodies are live at the relevant history points. |
 
-The ≥ 30 target was not reached and no partial credit is claimed: the honest
-browser number is **9 / 32 / 0**. What changed is the nature of the blocker —
-it is no longer a contract gap (that is closed) but the X.9.2 exact-topology
-matcher work on the chamfer/shell consumers, which must not be closed by
-relaxing tolerance or picking a nearby edge.
+The ≥ 30 target is now reached honestly: the browser number is **10 / 31 / 0**,
+not a mock-review-only promotion. No tolerance was relaxed, no nearest geometry
+was selected, and no identity was fabricated.
 
-**Part Studio 1 `d3cd9…` (8 baked).** `Extrude 4` is the permanent SURFACE
-exclusion. `Split 1`, `Sketch 7`, `Sketch 8`, and `Extrude 8` are excluded scope
-(split-face dependent); `Extrude 5`, `6`, `7` are `downstream-of-baked` cascades
-from them.
+**Part Studio 1 `d3cd9…` (8 baked).**
+
+| Feature | Reason code | Classification |
+|---|---|---|
+| `Extrude 4` | `extrude-body-type-unsupported` | **Excluded scope / permanently baked** (SURFACE). |
+| `Split 1` | split/topology kernel diagnostic (`not a closed two-manifold shell`) | **Excluded scope** (split-face dependent). |
+| `Sketch 7`, `Sketch 8` | `needs-history-probe` | **Excluded scope** face/split-backed sketches. |
+| `Extrude 5`, `Extrude 6`, `Extrude 7` | `downstream-of-baked` | Cascade behind excluded split/face-backed geometry. |
+| `Extrude 8` | `extrude-start-extent-unsupported` | Honestly unresolvable start offset; named before the split-dependent cascade. |
 
 **Upstream-edit survival.** Every promotion was proven against a representative
-upstream edit in the browser: Mounts (`nail` variable plus an `Extrude 1` depth
-edit plus a constrained sketch drag), Wave-T Revolve remove (angle edit), Wave-T
-Sweep (sketch path drag), 5151 (`Wall` variable), 9841 (`walls` variable), and
-d3cd9 (`screwHole` variable).
+browser edit: Mounts (`nail` variable plus an `Extrude 1` depth edit plus a
+constrained sketch drag), Wave-T Revolve remove (angle edit), Wave-T Sweep
+(sketch path drag), 5151 (`Wall` variable), 9841 (`walls` variable), and d3cd9
+(`screwHole` variable).
 
-Full-parametric math: Mounts = W.2 + W.3. Part Studio 1 = W.1 + W.2 + W.4,
-with W.5 now covering future non-hollow empty-shell forms but not PS1's true
-closed-hollow Shell 1. Highest leverage first: W.1.
+**Phase-X verdicts after item D.** X.9.1 is closed. X.9.2 is partially closed:
+9841 `Chamfer 1` and the Wave-T Mirror transform curved-extent class are closed,
+while 5151 exact topology/apply rematches and 9841 `Shell 1` remain follow-up.
+X.5 remains open for face-/split-backed sketches. X.9.3 is closed for diagnostic
+preservation and fail-closed single-feature containment; the helper reliability
+work is now covered by the 14/14 browser gate.
 
 Session notes for the next orchestrator: subagent model routing —
 `dzerv-art/gpt-5.6-sol` had a multi-day quota cooldown (check before use),
@@ -1802,71 +1808,48 @@ X.9.1 pinned only the terminator end (`minx`, to 2.7e-6 mm) and never checked
 and d3cd9 `Extrude 8` use `startOffsetBound=ENTITY`; 9841 `Extrude 10/11` use
 `BLIND` start offsets.
 
-#### Landed: fail-closed demotion (commit `8fa4a373`)
+#### Landed: fail-closed demotion plus start-extent contract
 
-New `PlanReasonCode` `extrude-start-extent-unsupported`: any extrude authoring
-`startOffset=true` bakes with that specific reason rather than promoting a solid
-short by the offset. The X.9.3 `reasonDetail` enrichment (per-candidate
-rejection reasons + live-prefix entity-class census) landed with it.
-
-Browser gate after the demotion (clean server on port 3123, never 3000):
-
-| Studio | Before | After | Change |
-|---|---:|---:|---|
-| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** | Unchanged. |
-| Wave-T (all six studios) | as pinned | unchanged | Unchanged. |
-| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** | Count unchanged; `Extrude 6` / `7` move to the honest start-extent reason. |
-| Part Studio 1 `9841…` | 9 / 32 / 0 | **8 / 33 / 0** | `Extrude 1` demoted. **Lower and honest**: it had been promoting a geometrically wrong body. |
-| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** | Count unchanged; `Extrude 8` moves to the honest start-extent reason. |
-
-`bun run test:all` fully green at this commit: 660 logic, 126 UI, 24 static,
-**67 / 67 Playwright**.
-
-#### Parked, NOT landed: the start-extent contract (`a92f03c5`)
-
-The real fix is implemented and logic-green but **the browser gate is red**, so
-it was deliberately not landed on the mainline. It is preserved at commit
-`a92f03c5` ("WIP: extrude start-extent contract (browser gate red)").
-
-What it does: extends `ExtrudeFeatureParameters.startExtent` to
-`profilePlane | blindOffset | sketchPointOffset`, threaded exactly like X.9.1's
-sketch-point up-to-vertex extension — `contracts/modeling/schema.ts`, import
-actions (`ImportDeferredExtrudeStartExtent`), prepared-action validation
-(`sketchIdOf`-only deferral), the deferred materializer, modeling-service
-normalization (a malformed payload throws instead of silently falling back to
-the profile plane), and an OCC start-plane resolver that translates the profile
-onto the authored start plane **inside** the existing
-`runInRebuildSlot("extent", ...)` slot, carrying sketch provenance through the
-transform so side-face/side-edge lineage survives. The importer reads
-`startOffsetBound=ENTITY` through the same `qCompressed` sketch-point reader
-from `c53b4181`. `BLIND` start offsets stay honestly baked: this capture set
-cannot pin their authored sign convention against ground truth, and guessing it
-would displace geometry.
+The fail-closed demotion and the start-extent contract are now both landed. The
+contract extends `ExtrudeFeatureParameters.startExtent` to
+`profilePlane | blindOffset | sketchPointOffset`, threaded like X.9.1's
+sketch-point up-to-vertex extension through `contracts/modeling/schema.ts`,
+import actions (`ImportDeferredExtrudeStartExtent`), prepared-action validation,
+the deferred materializer, modeling-service normalization, and the OCC start-plane
+resolver. The importer reads `startOffsetBound=ENTITY` through the exact
+`qCompressed` sketch-point reader. Malformed payloads throw or bake with a
+specific reason; they do not silently fall back to the profile plane.
 
 Verified real-OCC pin (`apply-pipeline.spec.ts`, logic lane): a sketch-point
-start offset builds between **both** authored abscissae to 1e-6 —
-`high[0] = +52.5`, `low[0] = −67.5`. Before the contract existed the high bound
-was 0. Logic lane fully green (453 tests across import/contracts/modeling).
+start offset builds between **both** authored abscissae to 1e-6 — `high[0] =
++52.5`, `low[0] = −67.5`. Before the contract existed the high bound was 0.
+Browser verification proves the same through apply/commit: 9841 `Extrude 1` and
+`Chamfer 1` both promote, the committed timeline contains those two live
+features, and the `walls` variable rebuild survives with zero snapshot
+diagnostics.
 
-**Why it is parked.** At the browser gate it does exactly what was predicted —
-9841 review reaches **11 / 30 / 0**, with `Extrude 1`, `Chamfer 1`, and
-`Chamfer 2` all parametric, and `Chamfer 1`'s 120 mm edge matching its live edge
-exactly (the X.9.2 blocker is genuinely resolved). But `Chamfer 2` then fails at
-**commit-time apply** with `occ-topology-unsupported-history` on five
-`body_feature_extrude-1` edges, and that failure **aborts the whole studio
-import** — violating the hard ground rule that a single feature failure must
-never abort a studio.
+`BLIND` start offsets stay honestly baked (`extrude-start-extent-unsupported`):
+this capture set cannot pin their authored sign convention against ground truth,
+and guessing it would displace geometry. That affects 9841 `Extrude 10` /
+`Extrude 11`; entity-bound start offsets in 5151 `Extrude 6` / `7` and d3cd9
+`Extrude 8` still bake because their other live-prefix blockers fire first or the
+same exact start-plane support is not sufficient to make their downstream split /
+boolean context build.
 
-The gap is real and structural, not a flake: `Chamfer 1`'s conservative stage
-history invalidates the edges `Chamfer 2` selects, but review's build-containment
-probe does not reproduce the commit-time reference-state invalidation, so review
-promotes a feature that apply then rejects. Existing containment
-(`forcedBakeFeatureIds` / `TopologyApplyRematchError`) does not catch it because
-the failure surfaces as a topology-invalidation error, not a rematch error.
+The earlier parked red gate is also closed: review now applies the same
+commit-time refusal rule, so 9841 `Chamfer 2` is baked with the real
+`occ-topology-unsupported-history` diagnostic instead of being promoted and then
+aborting the whole studio. A single feature failure is contained; the studio
+commits.
 
-**Next step (the honest one):** extend apply-time containment to treat
-`occ-topology-unsupported-history` on a promoted consumer the same way
-`topology-apply-rematch-failed` is already treated — bake that one feature,
-cascade its dependents, retry — and only then land the contract commit. The
-9841 ≥30 target remains unreached; the honest mainline number is **8 / 33 / 0**,
-and the demonstrated-but-uncommitted review number is 11 / 30 / 0.
+Final item-D browser gate on clean port 3123:
+
+| Studio | Final browser gate |
+|---|---:|
+| Mounts `40a51…` | **10 / 0 / 0** |
+| Wave-T all covered studios | **all parametric** (`2/0/0`, `4/0/0`, `3/0/0`, `4/0/0`, `6/0/0`, Mirror transform `5/0/0`) |
+| Laptop Stand `5151…` | **11 / 13 / 0** |
+| Part Studio 1 `9841…` | **10 / 31 / 0** |
+| Part Studio 1 `d3cd9…` | **16 / 8 / 0** |
+
+`bun run test:all` is the final validation gate for the landing commit.

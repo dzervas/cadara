@@ -459,6 +459,32 @@ function validateImportDeferredValueInvariants(
       }
     }
 
+    if (
+      request.definition.kind === "extrude" &&
+      request.definition.parameters.startExtent.kind === "sketchPointOffset"
+    ) {
+      // A sketch-point start offset defers only through `sketchIdOf`, exactly
+      // like the up-to-vertex sketch-point terminator: it is an exact authored
+      // reference committed earlier in this import, not a topology rematch.
+      const sketchId = request.definition.parameters.startExtent.target.sketchId;
+      const startPath = `createFeatures.${ref.index}.definition.parameters.startExtent.target.sketchId`;
+      if (isDeferredValue(sketchId)) {
+        blessed.add(sketchId);
+        if (sketchId.kind === "sketchIdOf") {
+          issues.push(
+            ...validateDeferredReference(actions, sketchId, orderedPosition, startPath),
+          );
+        } else {
+          issues.push({
+            path: startPath,
+            expected: "sketchIdOf deferred reference",
+            value: sketchId.kind,
+            message:
+              "An extrude sketch-point start offset may defer only through sketchIdOf.",
+          });
+        }
+      }
+    }
     if (request.definition.kind === "revolve") {
       const axis = request.definition.parameters.axis;
       if (axis.kind === "sketchEntity" && isDeferredValue(axis.sketchId)) {

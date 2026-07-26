@@ -3,6 +3,7 @@ import type {
   CommitSketchRequest,
   CreateFeatureRequest,
   ExtrudeEndCondition,
+  ExtrudeStartExtent,
   ExtrudeFeatureParameters,
   ExtrudeProfileRef,
   FeatureBooleanScope,
@@ -194,6 +195,18 @@ export type ImportDeferredExtrudeEndCondition =
         | ImportDeferredSketchPointRef;
     });
 
+/**
+ * A sketch-point start offset defers only its sketch id, exactly like the
+ * up-to-vertex sketch-point terminator: the point is an exact authored
+ * reference, not a live-topology rematch.
+ */
+export type ImportDeferredExtrudeStartExtent =
+  | Exclude<ExtrudeStartExtent, { kind: "sketchPointOffset" }>
+  | (Omit<Extract<ExtrudeStartExtent, { kind: "sketchPointOffset" }>, "target"> & {
+      target:
+        | Extract<ExtrudeStartExtent, { kind: "sketchPointOffset" }>["target"]
+        | ImportDeferredSketchPointRef;
+    });
 export type ImportDeferredExtrudeExtent =
   | { mode: "oneSide"; end: ImportDeferredExtrudeEndCondition }
   | {
@@ -209,13 +222,14 @@ export type ImportDeferredExtrudeExtent =
 export interface ImportDeferredExtrudeFeatureParameters
   extends Omit<
     ExtrudeFeatureParameters,
-    "profiles" | "booleanScope" | "extent"
+    "profiles" | "booleanScope" | "extent" | "startExtent"
   > {
   profiles: readonly [
     ImportDeferredExtrudeProfileRef,
     ...ImportDeferredExtrudeProfileRef[],
   ];
   extent: ImportDeferredExtrudeExtent;
+  startExtent: ImportDeferredExtrudeStartExtent;
   booleanScope: ImportDeferredFeatureBooleanScope;
 }
 

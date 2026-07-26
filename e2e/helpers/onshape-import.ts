@@ -23,6 +23,8 @@ export async function importBundle(
   bundlePath: string,
   finishSketch = false,
   studioName?: string,
+  /** Raise only for captures whose live prefix genuinely builds more solids. */
+  reviewBudgetMs = 600_000,
 ) {
   await page.addInitScript(() =>
     Object.defineProperty(globalThis, "showOpenFilePicker", {
@@ -55,7 +57,7 @@ export async function importBundle(
   // containment pass), and the budget must absorb all of them plus contention
   // from the other parallel workers. It is only a wait cap: a real review
   // failure still resolves immediately through the alert branch below.
-  const reviewBudget = 600_000;
+  const reviewBudget = reviewBudgetMs;
   try {
     const outcome = await Promise.race([
       commit.waitFor({ state: "visible", timeout: reviewBudget }).then(() => ({ kind: "review" as const })),
