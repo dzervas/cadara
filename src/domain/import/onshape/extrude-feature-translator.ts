@@ -2,7 +2,10 @@ import {
   hasCurrentOnshapeProfileEvidence,
   type OnshapeProfileEvidence,
 } from "@/contracts/import/onshape-capture-bundle";
-import { planExtrudeFeature } from "@/domain/import/onshape/extrude-planner";
+import {
+  extrudeSketchPointExtentFeatureIds,
+  planExtrudeFeature,
+} from "@/domain/import/onshape/extrude-planner";
 import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
 import {
   dependencyFeatureIds,
@@ -105,6 +108,13 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
         if (profile.kind === "sketchRegion") {
           inputDependencies.push({ kind: "sketch", featureId: profile.sketchFeatureId });
         }
+      }
+      // A sketch-point up-to-vertex extent depends on its terminator's sketch
+      // exactly as strongly as on a profile sketch.
+      for (const sketchFeatureId of extrudeSketchPointExtentFeatureIds(
+        extrudePlan.plannedExtrude,
+      )) {
+        inputDependencies.push({ kind: "sketch", featureId: sketchFeatureId });
       }
     }
 

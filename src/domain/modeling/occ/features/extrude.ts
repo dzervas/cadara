@@ -6,7 +6,7 @@ import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getExtrudeFeatureExtent } from "@/contracts/modeling/feature-extents";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
-import type { Vec3 } from "@/domain/modeling/occ/math";
+import { mapSketchPointToWorld, type Vec3 } from "@/domain/modeling/occ/math";
 import {
   buildRegionProfileFace,
   getExtrusionNormalForPlanarFace,
@@ -213,6 +213,36 @@ function selectNearestForwardProjection(
   return nearest.projection;
 }
 
+/**
+ * Exact world position of an authored sketch point used as an up-to-vertex
+ * terminator. The solved position wins when the solver produced one; otherwise
+ * the authored position is already exact. No geometry is searched or
+ * approximated.
+ */
+function resolveSketchPointWorldPosition(
+  context: OccFeatureExecutionContext,
+  target: { sketchId: string; pointId: string },
+): Vec3 {
+  const snapshot = requireSketchSnapshot(
+    context,
+    target.sketchId as Parameters<typeof requireSketchSnapshot>[1],
+  );
+  const solved = snapshot.sketch.solvedSnapshot.solvedPoints.find(
+    (entry) => entry.pointId === target.pointId,
+  );
+  if (solved) {
+    return mapSketchPointToWorld(snapshot.plane.frame, solved.solvedPosition);
+  }
+  const authored = snapshot.sketch.definition.points.find(
+    (entry) => entry.pointId === target.pointId,
+  );
+  if (!authored) {
+    throw new Error(
+      `Sketch point ${target.pointId} does not resolve on sketch ${target.sketchId}.`,
+    );
+  }
+  return mapSketchPointToWorld(snapshot.plane.frame, authored.position);
+}
 function getExtrudeTargetProjection(
   context: OccFeatureExecutionContext,
   end: ExtrudeEndCondition,
@@ -252,6 +282,9 @@ function getExtrudeTargetProjection(
   }
 
   if (end.kind === "upToVertex") {
+    if (end.target.kind === "sketchPoint") {
+      return dot(resolveSketchPointWorldPosition(context, end.target), direction);
+    }
     const body = requireBody(context, end.target.bodyId);
     const vertex = body.verticesById.get(end.target.vertexId);
     if (!vertex) {

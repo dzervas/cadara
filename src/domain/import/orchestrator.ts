@@ -597,6 +597,7 @@ export class ImportDeferredMaterializer {
 
   private async materializeExtrudeEnd(
     end: ImportDeferredExtrudeEndCondition,
+    consumer: ImportPreparedActionRef,
   ): Promise<ExtrudeEndCondition> {
     if (
       end.kind !== "upToFace" &&
@@ -604,6 +605,25 @@ export class ImportDeferredMaterializer {
       end.kind !== "upToVertex"
     ) {
       return end;
+    }
+
+    // An up-to-vertex extent may terminate at an exact authored sketch point
+    // committed earlier in this import; only its owning sketch id is deferred.
+    if (
+      end.kind === "upToVertex" &&
+      end.target.kind === "sketchPoint" &&
+      isDeferredValue(end.target.sketchId)
+    ) {
+      return {
+        ...end,
+        target: {
+          ...end.target,
+          sketchId: (await this.resolveDeferredValue(
+            end.target.sketchId,
+            consumer,
+          )) as SketchId,
+        },
+      };
     }
 
     const target = isDeferredTopologyRef(end.target)
@@ -615,7 +635,7 @@ export class ImportDeferredMaterializer {
         : end.kind === "upToPart"
           ? "body"
           : "vertex";
-    if (target.kind !== expectedKind) {
+    if (target.kind !== expectedKind && target.kind !== "sketchPoint") {
       throw new Error(
         `Deferred ${end.kind} target resolved as ${target.kind}, expected ${expectedKind}.`,
       );
@@ -625,17 +645,18 @@ export class ImportDeferredMaterializer {
 
   private async materializeExtrudeExtent(
     extent: ImportDeferredExtrudeExtent,
+    consumer: ImportPreparedActionRef,
   ): Promise<ExtrudeFeatureExtent> {
     if (extent.mode === "twoSide") {
       return {
         mode: "twoSide",
-        firstEnd: await this.materializeExtrudeEnd(extent.firstEnd),
-        secondEnd: await this.materializeExtrudeEnd(extent.secondEnd),
+        firstEnd: await this.materializeExtrudeEnd(extent.firstEnd, consumer),
+        secondEnd: await this.materializeExtrudeEnd(extent.secondEnd, consumer),
       };
     }
     return {
       ...extent,
-      end: await this.materializeExtrudeEnd(extent.end),
+      end: await this.materializeExtrudeEnd(extent.end, consumer),
     } as ExtrudeFeatureExtent;
   }
 
@@ -869,7 +890,10 @@ export class ImportDeferredMaterializer {
 
     const extent =
       request.definition.kind === "extrude"
-        ? await this.materializeExtrudeExtent(request.definition.parameters.extent)
+        ? await this.materializeExtrudeExtent(
+            request.definition.parameters.extent,
+            consumer,
+          )
         : null;
 
     if (request.definition.kind === "revolve") {

@@ -381,6 +381,8 @@ export function assertRevolveAxisRef(value: unknown): RevolveAxisRef {
 export function assertUpToTargetForKind(
   kind: "upToFace" | "upToPart" | "upToVertex",
   value: unknown,
+  /** Only the extrude contract accepts a sketch point as an up-to-vertex terminator. */
+  options: { allowSketchPoint?: boolean } = {},
 ) {
   const target = assertPrimitiveRef(value);
   if (kind === "upToFace" && target.kind === "face") {
@@ -389,7 +391,11 @@ export function assertUpToTargetForKind(
   if (kind === "upToPart" && target.kind === "body") {
     return target;
   }
-  if (kind === "upToVertex" && target.kind === "vertex") {
+  if (
+    kind === "upToVertex" &&
+    (target.kind === "vertex" ||
+      (options.allowSketchPoint === true && target.kind === "sketchPoint"))
+  ) {
     return target;
   }
 

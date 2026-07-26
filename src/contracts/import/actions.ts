@@ -190,7 +190,8 @@ export type ImportDeferredExtrudeEndCondition =
   | (Omit<Extract<ExtrudeEndCondition, { kind: "upToVertex" }>, "target"> & {
       target:
         | Extract<ExtrudeEndCondition, { kind: "upToVertex" }>["target"]
-        | ImportDeferredTopologyRefOf<"vertex">;
+        | ImportDeferredTopologyRefOf<"vertex">
+        | ImportDeferredSketchPointRef;
     });
 
 export type ImportDeferredExtrudeExtent =
@@ -337,6 +338,9 @@ export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
   sketchIdOf: [
     "createFeatures[].definition.parameters.axis.sketchId",
     "createFeatures[].definition.parameters.participants[].targets[].sketchId",
+    "createFeatures[].definition.parameters.extent.end.target.sketchId",
+    "createFeatures[].definition.parameters.extent.firstEnd.target.sketchId",
+    "createFeatures[].definition.parameters.extent.secondEnd.target.sketchId",
   ],
   constructionOf: [
     "createFeatures[].definition.parameters.participants[].targets[]",

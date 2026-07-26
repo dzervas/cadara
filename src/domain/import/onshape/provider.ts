@@ -114,6 +114,8 @@ import { DEFAULT_MATCH_TOLERANCE } from "@/domain/import/onshape/signature-match
 import { buildResolvedBodyConsumerDefinition } from "@/domain/import/onshape/wave-b-body-feature-translators";
 import { prepareRollbackCheckpointBake } from "@/domain/import/onshape/rollback-bake";
 import {
+  extrudeAwaitsLiveSketchPointExtent,
+  extrudeSketchPointExtentFeatureIds,
   hasUnresolvedExtrudeTopology,
   resolvePlannedExtrudeTopology,
   resolvedExtrudeExtent,
@@ -618,7 +620,19 @@ function replanDependentFeatures(input: {
     ) === true;
     const replan =
       (feature.featureType === "extrude" &&
-        currentPlan.reasonCodes.includes("needs-region-resolution")) ||
+        (currentPlan.reasonCodes.includes("needs-region-resolution") ||
+          // An up-to-vertex extent terminating at a sketch point can only be
+          // read once that sketch is live. Replan strictly when the exact
+          // terminator has become readable and the plan still lacks it.
+          (currentPlan.plannedExtrude !== undefined &&
+            hasUnresolvedExtrudeTopology(currentPlan.plannedExtrude) &&
+            extrudeAwaitsLiveSketchPointExtent(feature, {
+              feature,
+              profileEvidence: [],
+              solvedSketchesByFeatureId: input.read.solvedSketchesByFeatureId,
+              referencedSketchesByFeatureId: state.sketchPlansByFeatureId,
+              priorBodyProducingFeatureIds: state.bodyProducingFeatureIds,
+            })))) ||
       (currentPlan.reasonCodes.includes("downstream-of-baked") && replaySourcesAreLive);
     if (replan) {
       const replanned = translator.plan(context);
@@ -2588,6 +2602,14 @@ async function buildPreparedActions(input: {
           },
         });
       }
+      // An up-to-vertex extent terminating at a sketch point needs its
+      // producing sketch committed earlier in this import; without it the
+      // reference cannot stay durable, so the extrude is skipped honestly.
+      for (const sketchFeatureId of extrudeSketchPointExtentFeatureIds(extrude)) {
+        if (orderedIndexByFeatureId.get(sketchFeatureId) === undefined) {
+          missingSketchFeatureId = sketchFeatureId;
+        }
+      }
       if (missingSketchFeatureId) {
         diagnostics.push({
           severity: "warning",
@@ -2639,7 +2661,7 @@ async function buildPreparedActions(input: {
               ...ImportDeferredExtrudeProfileRef[],
             ],
             startExtent: { kind: "profilePlane" },
-            extent: resolvedExtrudeExtent(extrude),
+            extent: resolvedExtrudeExtent(extrude, orderedIndexByFeatureId),
             operation: extrude.operation,
             booleanScope,
           },
