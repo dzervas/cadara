@@ -24,6 +24,7 @@ import type {
   HoleAdvancedOptions,
   LoftAdvancedOptions,
   SweepAdvancedOptions,
+  UpToVertexTarget,
 } from "@/contracts/modeling/schema";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
 import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
@@ -93,7 +94,7 @@ export type ExtrudeFeatureEndConditionDraft =
   | {
       kind: "upToVertex";
       direction: LinearExtentDirection;
-      target: Extract<PrimitiveRef, { kind: "vertex" }>;
+      target: UpToVertexTarget;
       offset?: {
         distance: MaybeAuthoredValue<number>;
         direction: UpToOffsetDirection;

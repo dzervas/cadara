@@ -503,7 +503,10 @@ workerScope.addEventListener(
       postOccWorkerMessage(
         normalizeOccWorkerFailure(
           requestId,
-          parsed.errors[0]?.description ?? parsed.errors[0]?.expected,
+          parsed.errors[0]
+            ? (parsed.errors[0].description ??
+              `${parsed.errors[0].path} must match ${parsed.errors[0].expected}`)
+            : undefined,
           "occ-worker-request-failed",
         ),
       );

@@ -16,6 +16,7 @@ import type {
   RequestId,
   RevisionId,
   SketchId,
+  SketchPointId,
   SnapshotEntityId,
   VertexId,
 } from "@/contracts/shared/ids";
@@ -249,6 +250,16 @@ export interface AngularUpToOffset {
   direction: UpToOffsetDirection;
 }
 
+/**
+ * Terminating point accepted by an up-to-vertex extent. A solid-body vertex is
+ * the durable topology form; a sketch point is the exact authored form Onshape
+ * and Cadara both express when the terminator belongs to sketch geometry rather
+ * than to a built body.
+ */
+export type UpToVertexTarget =
+  | { kind: "vertex"; bodyId: BodyId; vertexId: VertexId }
+  | { kind: "sketchPoint"; sketchId: SketchId; pointId: SketchPointId };
+
 export type ExtrudeEndCondition =
   | {
       kind: "blind";
@@ -279,7 +290,7 @@ export type ExtrudeEndCondition =
   | {
       kind: "upToVertex";
       direction: LinearExtentDirection;
-      target: { kind: "vertex"; bodyId: BodyId; vertexId: VertexId };
+      target: UpToVertexTarget;
       offset?: LinearUpToOffset;
       draftAngle?: AuthoredValue<number>;
     }

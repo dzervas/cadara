@@ -7,6 +7,7 @@
 import type {
   ImportDeferredExtrudeEndCondition,
   ImportDeferredExtrudeExtent,
+  ImportDeferredSketchPointRef,
   ImportDeferredTopologyRef,
 } from "@/contracts/import/actions";
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
@@ -18,6 +19,7 @@ import type {
   LinearUpToOffset,
 } from "@/contracts/modeling/schema";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
+import type { SketchPointId } from "@/contracts/shared/ids";
 import type {
   OnshapeFeatureNode,
   OnshapeSolvedSketch,
@@ -31,6 +33,8 @@ import {
 } from "@/domain/import/onshape/profile-resolver";
 import type { TopologyResolutionBinding } from "@/domain/import/onshape/topology-reference-resolver";
 import type { TopologyQuerySlot } from "@/domain/import/onshape/topology-query-reader";
+import { readSketchEntityVertexQuery } from "@/domain/import/onshape/sketch-point-query-reader";
+import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
 
 export type PlannedExtrudeProfile = DeferredOnshapeProfile;
 
@@ -39,7 +43,23 @@ interface PlannedTopologyTarget {
   slotKey: string;
 }
 
-type PlannedExtrudeTarget = PlannedTopologyTarget | ImportDeferredTopologyRef;
+/**
+ * Exact authored sketch point that terminates an up-to-vertex extent. It is
+ * resolved from the consumer's own decoded query, not from live topology, so it
+ * carries the producing Onshape sketch feature id until the provider can bind
+ * that feature's committed sketch id.
+ */
+export interface PlannedSketchPointExtentTarget {
+  kind: "sketchPointFromFeature";
+  sketchFeatureId: string;
+  pointId: SketchPointId;
+}
+
+type PlannedExtrudeTarget =
+  | PlannedTopologyTarget
+  | PlannedSketchPointExtentTarget
+  | ImportDeferredTopologyRef
+  | ImportDeferredSketchPointRef;
 
 type PlannedExtrudeEndCondition =
   | Extract<ExtrudeEndCondition, { kind: "blind" | "upToNext" | "throughAll" }>
@@ -236,11 +256,72 @@ function topologySlot(
   return { key, parameterId, role, expectedKinds, cardinality: { min, max } };
 }
 
+/**
+ * Resolve an `UP_TO_VERTEX` bound whose query names a sketch entity endpoint.
+ *
+ * Onshape expresses this terminator against sketch geometry, not against a
+ * built body, so it can never resolve through live-topology matching. The
+ * query is decoded exactly and mapped onto the same translated sketch the
+ * provider commits, yielding the precise authored point. Anything that is not
+ * an exact single-query sketch-entity vertex over an already-parametric sketch
+ * returns `null` and leaves the caller on the topology-slot path.
+ */
+function resolveSketchPointExtentTarget(
+  feature: OnshapeFeatureNode,
+  parameterId: string,
+  input: ExtrudePlanInput,
+): PlannedSketchPointExtentTarget | null {
+  const queries = findParameter(feature, parameterId)?.queries;
+  if (!Array.isArray(queries) || queries.length !== 1) return null;
+  const query = queries[0] as { queryString?: unknown } | null;
+  const decoded = readSketchEntityVertexQuery(
+    typeof query?.queryString === "string" ? query.queryString : null,
+  );
+  if (!decoded) return null;
+
+  const solved = input.solvedSketchesByFeatureId.get(decoded.sketchFeatureId);
+  const sketchPlan = input.referencedSketchesByFeatureId.get(decoded.sketchFeatureId);
+  if (!solved || sketchPlan?.tier !== "parametric") return null;
+
+  const translation = translateSolvedSketch({
+    solved,
+    featureId: decoded.sketchFeatureId,
+    label: decoded.sketchFeatureId,
+    planeKey: sketchPlan.planeKey,
+    planeFrame: sketchPlan.planeFrame,
+  });
+  const entity = translation.definition.entities.find(
+    (candidate) => candidate.label === decoded.sketchEntityId,
+  );
+  if (!entity) return null;
+
+  // Read the point the translated entity actually owns, so coincident-point
+  // normalization is followed rather than re-derived.
+  const pointId =
+    decoded.role === "start" && "startPointId" in entity
+      ? entity.startPointId
+      : decoded.role === "end" && "endPointId" in entity
+        ? entity.endPointId
+        : decoded.role === "center" && "centerPointId" in entity
+          ? entity.centerPointId
+          : decoded.role === "point" && entity.kind === "point"
+            ? entity.pointId
+            : null;
+  if (!pointId) return null;
+
+  return {
+    kind: "sketchPointFromFeature",
+    sketchFeatureId: decoded.sketchFeatureId,
+    pointId,
+  };
+}
+
 function translateEnd(
   feature: OnshapeFeatureNode,
   side: "first" | "second",
   diagnostics: ExtrudePlanDiagnostic[],
   slots: TopologyQuerySlot[],
+  input: ExtrudePlanInput,
 ): PlannedExtrudeEndCondition | null {
   const second = side === "second";
   const boundId = second ? "secondDirectionBound" : "endBound";
@@ -313,9 +394,26 @@ function translateEnd(
       };
     }
     case "UP_TO_VERTEX": {
+      const parameterId = second
+        ? "secondDirectionBoundEntityVertex"
+        : "endBoundEntityVertex";
+      const sketchPointTarget = resolveSketchPointExtentTarget(
+        feature,
+        parameterId,
+        input,
+      );
+      if (sketchPointTarget) {
+        return {
+          kind: "upToVertex",
+          direction,
+          target: sketchPointTarget,
+          offset,
+          draftAngle,
+        };
+      }
       const slot = topologySlot(
         `${slotPrefix}Vertex`,
-        second ? "secondDirectionBoundEntityVertex" : "endBoundEntityVertex",
+        parameterId,
         "body",
         ["vertex"],
       );
@@ -337,11 +435,12 @@ function translateExtent(
   feature: OnshapeFeatureNode,
   diagnostics: ExtrudePlanDiagnostic[],
   slots: TopologyQuerySlot[],
+  input: ExtrudePlanInput,
 ): PlannedExtrudeExtent | null {
-  const firstEnd = translateEnd(feature, "first", diagnostics, slots);
+  const firstEnd = translateEnd(feature, "first", diagnostics, slots, input);
   if (!firstEnd) return null;
   if (booleanValue(feature, "hasSecondDirection")) {
-    const secondEnd = translateEnd(feature, "second", diagnostics, slots);
+    const secondEnd = translateEnd(feature, "second", diagnostics, slots, input);
     return secondEnd ? { mode: "twoSide", firstEnd, secondEnd } : null;
   }
   if ((enumValue(feature, "endBound") ?? "BLIND") === "SYMMETRIC") {
@@ -372,7 +471,7 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   }
 
   const topologySlots: TopologyQuerySlot[] = [];
-  const extent = translateExtent(feature, diagnostics, topologySlots);
+  const extent = translateExtent(feature, diagnostics, topologySlots, input);
   if (!extent) {
     return { tier: "baked", reason: "unsupported-feature", diagnostics };
   }
@@ -523,7 +622,8 @@ function isPreparedExtrudeEnd(
     (end.kind !== "upToFace" &&
       end.kind !== "upToPart" &&
       end.kind !== "upToVertex") ||
-    end.target.kind !== "topologySlot"
+    (end.target.kind !== "topologySlot" &&
+      end.target.kind !== "sketchPointFromFeature")
   );
 }
 
@@ -539,14 +639,102 @@ function isPreparedExtrudeExtent(
   return isPreparedExtrudeEnd(extent.end);
 }
 
-/** Reject planner-only slots while retaining apply-time topologyOf selectors. */
+function endSketchPointExtentFeatureId(
+  end: PlannedExtrudeEndCondition,
+): string | null {
+  return (end.kind === "upToFace" ||
+    end.kind === "upToPart" ||
+    end.kind === "upToVertex") &&
+    end.target.kind === "sketchPointFromFeature"
+    ? end.target.sketchFeatureId
+    : null;
+}
+
+/**
+ * True when this extrude's up-to-vertex bound names a sketch entity vertex
+ * whose owning sketch is live now but was not when the extrude was planned. The
+ * plan must be recomputed for the exact terminator to be readable at all.
+ */
+export function extrudeAwaitsLiveSketchPointExtent(
+  feature: OnshapeFeatureNode,
+  input: ExtrudePlanInput,
+): boolean {
+  return [
+    "endBoundEntityVertex",
+    "secondDirectionBoundEntityVertex",
+  ].some(
+    (parameterId) =>
+      resolveSketchPointExtentTarget(feature, parameterId, input) !== null,
+  );
+}
+
+/** Onshape sketch features whose committed sketch ids an extent still needs. */
+export function extrudeSketchPointExtentFeatureIds(
+  planned: PlannedExtrude,
+): readonly string[] {
+  const ends =
+    planned.extent.mode === "twoSide"
+      ? [planned.extent.firstEnd, planned.extent.secondEnd]
+      : [planned.extent.end];
+  return [
+    ...new Set(
+      ends.flatMap((end) => {
+        const featureId = endSketchPointExtentFeatureId(end);
+        return featureId ? [featureId] : [];
+      }),
+    ),
+  ];
+}
+
+function bindEndSketchPoint(
+  end: PlannedExtrudeEndCondition,
+  sketchActionIndexByFeatureId: ReadonlyMap<string, number>,
+): PlannedExtrudeEndCondition {
+  const featureId = endSketchPointExtentFeatureId(end);
+  if (featureId === null) return end;
+  const actionIndex = sketchActionIndexByFeatureId.get(featureId);
+  if (actionIndex === undefined) return end;
+  const target = (end as { target: PlannedSketchPointExtentTarget }).target;
+  return {
+    ...end,
+    target: {
+      kind: "sketchPoint" as const,
+      sketchId: { kind: "sketchIdOf" as const, actionIndex },
+      pointId: target.pointId,
+    },
+  } as PlannedExtrudeEndCondition;
+}
+
+/**
+ * Reject planner-only slots while retaining apply-time topologyOf selectors and
+ * binding sketch-point terminators to their committed producing sketch action.
+ */
 export function resolvedExtrudeExtent(
   planned: PlannedExtrude,
+  sketchActionIndexByFeatureId: ReadonlyMap<string, number> = new Map(),
 ): ImportDeferredExtrudeExtent {
-  if (!isPreparedExtrudeExtent(planned.extent)) {
+  const bound: PlannedExtrudeExtent =
+    planned.extent.mode === "twoSide"
+      ? {
+          mode: "twoSide",
+          firstEnd: bindEndSketchPoint(
+            planned.extent.firstEnd,
+            sketchActionIndexByFeatureId,
+          ),
+          secondEnd: bindEndSketchPoint(
+            planned.extent.secondEnd,
+            sketchActionIndexByFeatureId,
+          ),
+        }
+      : ({
+          ...planned.extent,
+          end: bindEndSketchPoint(planned.extent.end, sketchActionIndexByFeatureId),
+        } as PlannedExtrudeExtent);
+
+  if (!isPreparedExtrudeExtent(bound)) {
     throw new Error(
-      "Extrude extent contains unresolved topologySlot targets and cannot be prepared.",
+      "Extrude extent contains unresolved topologySlot or sketch-point targets and cannot be prepared.",
     );
   }
-  return planned.extent;
+  return bound;
 }

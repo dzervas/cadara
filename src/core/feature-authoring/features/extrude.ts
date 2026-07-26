@@ -208,7 +208,9 @@ function endHasRequiredTarget(end: ExtrudeFeatureEndConditionDraft) {
     return end.target.bodyId.length > 0;
   }
   if (end.kind === "upToVertex") {
-    return end.target.bodyId.length > 0 && end.target.vertexId.length > 0;
+    return end.target.kind === "sketchPoint"
+      ? end.target.sketchId.length > 0 && end.target.pointId.length > 0
+      : end.target.bodyId.length > 0 && end.target.vertexId.length > 0;
   }
   return true;
 }

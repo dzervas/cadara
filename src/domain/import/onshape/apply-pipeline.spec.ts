@@ -3712,3 +3712,142 @@ test("applyImportPreparedActions rolls back prior operations when a modeling mut
     expect.objectContaining({ code: "import-apply-failed" }),
   ]));
 });
+
+test("an up-to-vertex extent terminating at a sketch point builds exactly in real OCC", async () => {
+  const oc = await loadRealOccForImportTest();
+  const { service } = createRealOccModelingService(oc);
+  const snapshot = await service.getCurrentDocumentSnapshot();
+
+  // A profile square on XY, plus a separate sketch whose line endpoint sits at
+  // an exact height. The extrude must terminate on the plane through that
+  // point, so the resulting solid height equals the point's Z exactly.
+  const profileTranslation = translateSketch({
+    featureId: "up_to_vertex_profile",
+    label: "Profile",
+    planeKey: "xy",
+    entities: [
+      { entityId: "b", entityType: "lineSegment", start: [-5, -5], end: [5, -5] },
+      { entityId: "r", entityType: "lineSegment", start: [5, -5], end: [5, 5] },
+      { entityId: "t", entityType: "lineSegment", start: [5, 5], end: [-5, 5] },
+      { entityId: "l", entityType: "lineSegment", start: [-5, 5], end: [-5, -5] },
+    ],
+  });
+  const TERMINATION_HEIGHT = 7;
+  const terminatorTranslation = translateSketch({
+    featureId: "up_to_vertex_terminator",
+    label: "Terminator",
+    planeKey: "xz",
+    entities: [
+      {
+        entityId: "rise",
+        entityType: "lineSegment",
+        start: [0, 0],
+        end: [3, TERMINATION_HEIGHT],
+      },
+    ],
+  });
+  const terminatorEntity = terminatorTranslation.definition.entities.find(
+    (entity) => entity.kind === "lineSegment",
+  );
+  if (terminatorEntity?.kind !== "lineSegment") {
+    throw new Error("The terminator sketch must translate to a line segment.");
+  }
+
+  const commitSketch = (
+    featureId: string,
+    label: string,
+    translation: ReturnType<typeof translateSketch>,
+  ) => ({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace" as DocumentId,
+    baseRevisionId: "rev_ignored" as RevisionId,
+    solverCorrelation: {
+      requestId: `request_${featureId}`,
+      projectionRequestId: `request_${featureId}_project`,
+      validationRequestId: `request_${featureId}_validate`,
+      solveRequestId: `request_${featureId}_solve`,
+      regionRequestId: `request_${featureId}_regions`,
+    },
+    sketchId: null,
+    sketchLabel: label,
+    plane: translation.plane,
+    definition: translation.definition,
+  });
+
+  const actions: ImportPreparedActions = {
+    commitSketches: [
+      commitSketch("up_to_vertex_profile", "Profile", profileTranslation),
+      commitSketch("up_to_vertex_terminator", "Terminator", terminatorTranslation),
+    ],
+    createFeatures: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Up to sketch vertex",
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          parameters: {
+            profiles: [
+              {
+                kind: "regionOf",
+                actionIndex: 0,
+                selector: { kind: "interiorPoint", point: [0, 0] },
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "upToVertex",
+                direction: "positive",
+                target: {
+                  kind: "sketchPoint",
+                  sketchId: { kind: "sketchIdOf", actionIndex: 1 },
+                  pointId: terminatorEntity.endPointId,
+                },
+              },
+            },
+            operation: { source: "literal", value: "newBody" },
+            booleanScope: { kind: "standalone" },
+          },
+        },
+      } as NonNullable<ImportPreparedActions["createFeatures"]>[number],
+    ],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "commitSketch", index: 1 },
+      { kind: "createFeature", index: 0 },
+    ],
+  };
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+
+  expect(
+    result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    "An exact sketch-point up-to-vertex extent must apply without error diagnostics.",
+  ).toEqual([]);
+  expect(result.rolledBack).toBe(false);
+
+  const applied = await service.getCurrentDocumentSnapshot();
+  expect(applied.document.bodies.length).toBe(1);
+
+  const signatures = await deriveLiveBodySignatures({ snapshot: applied, service });
+  if (signatures.status !== "available") {
+    throw new Error("Expected live OCC body signatures for the applied extrude.");
+  }
+  const bounds = signatures.signatures.find(
+    (signature) => signature.entityClass === "body" && signature.boundingBox,
+  )?.boundingBox;
+  if (!bounds) throw new Error("Expected a live OCC bound for the applied extrude.");
+
+  // The terminator point's exact Z is the extrude's exact height; nothing here
+  // is a tolerance-relaxed approximation.
+  expect(Math.abs(bounds.high[2] - TERMINATION_HEIGHT)).toBeLessThan(1e-6);
+  expect(Math.abs(bounds.low[2])).toBeLessThan(1e-6);
+});

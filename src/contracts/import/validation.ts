@@ -190,6 +190,7 @@ function validateDeferredExtrudeEndTarget(input: {
   orderedPosition: number;
   path: string;
   issues: ContractValidationIssue[];
+  blessed: Set<unknown>;
 }) {
   if (!input.end || typeof input.end !== "object") return;
   const end = input.end as { kind?: unknown; target?: unknown };
@@ -201,7 +202,43 @@ function validateDeferredExtrudeEndTarget(input: {
         : end.kind === "upToVertex"
           ? "vertex"
           : null;
-  if (!expectedKind || !isDeferredTopologyRef(end.target)) return;
+  if (!expectedKind) return;
+
+  // An up-to-vertex extent may instead terminate at an exact authored sketch
+  // point committed earlier in this import. That reference is durable, not a
+  // live-topology rematch, so it is validated as a deferred sketch id.
+  if (
+    end.kind === "upToVertex" &&
+    typeof end.target === "object" &&
+    end.target !== null &&
+    (end.target as { kind?: unknown }).kind === "sketchPoint"
+  ) {
+    const sketchId = (end.target as { sketchId?: unknown }).sketchId;
+    if (!isDeferredValue(sketchId)) return;
+    input.blessed.add(sketchId);
+    const sketchPath = `${input.path}.target.sketchId`;
+    if (sketchId.kind !== "sketchIdOf") {
+      input.issues.push({
+        path: sketchPath,
+        expected: "sketchIdOf deferred reference",
+        value: sketchId.kind,
+        message:
+          "An up-to-vertex sketch-point target may defer only through sketchIdOf.",
+      });
+      return;
+    }
+    input.issues.push(
+      ...validateDeferredReference(
+        input.actions,
+        sketchId,
+        input.orderedPosition,
+        sketchPath,
+      ),
+    );
+    return;
+  }
+
+  if (!isDeferredTopologyRef(end.target)) return;
 
   if (end.target.expectedKind !== expectedKind) {
     input.issues.push({
@@ -400,6 +437,7 @@ function validateImportDeferredValueInvariants(
           orderedPosition,
           path: `createFeatures.${ref.index}.definition.parameters.extent.end`,
           issues,
+          blessed,
         });
       } else {
         validateDeferredExtrudeEndTarget({
@@ -408,6 +446,7 @@ function validateImportDeferredValueInvariants(
           orderedPosition,
           path: `createFeatures.${ref.index}.definition.parameters.extent.firstEnd`,
           issues,
+          blessed,
         });
         validateDeferredExtrudeEndTarget({
           actions,
@@ -415,6 +454,7 @@ function validateImportDeferredValueInvariants(
           orderedPosition,
           path: `createFeatures.${ref.index}.definition.parameters.extent.secondEnd`,
           issues,
+          blessed,
         });
       }
     }

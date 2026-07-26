@@ -195,13 +195,15 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   );
   test.setTimeout(700_000);
   const { reviewText } = await importBundle(page, PART_STUDIO_BUNDLE_PATH, true);
+  // `Extrude 1` now imports parametrically: its `UP_TO_VERTEX` extent terminates
+  // at an exact `Screen Outline` sketch point, carried through the extent
+  // contract's sketch-point target rather than a body vertex it could never own.
   // Shell 1 (the X.8 closedHollow shell) is promoted parametrically at review but
   // its `parts` body-scope reference fails apply-time topology rematch against the
   // live OCC prefix; containment bakes only that feature (and cascades dependents)
-  // instead of aborting the studio, so the studio now reviews and commits. One
-  // further consumer bakes as `downstream-of-baked` rather than being silently
-  // dropped at prepare, so the reviewed tiers equal the committed timeline.
-  expect(reviewText).toContain("8 parametric, 33 baked, 0 geometry-only features.");
+  // instead of aborting the studio, so the studio still reviews and commits.
+  expect(reviewText).toContain("9 parametric, 32 baked, 0 geometry-only features.");
+  expect(reviewText).toMatch(/Extrude 1\s+parametric/);
   expect(reviewText).toMatch(
     /Shell 1\s+baked \(suppressed\) — topology reference could not be rematched while applying/,
   );
@@ -215,6 +217,8 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   expect.soft(imported.snapshotDiagnosticsCount).toBe(0);
   expect.soft(imported.featureIds).toEqual([
     "feature_plane-1",
+    // The promoted sketch-point up-to-vertex extrude, live in the committed timeline.
+    "feature_extrude-1",
     "feature_bakedBody-1",
   ]);
   expect.soft(imported.selectableTargets).toEqual(

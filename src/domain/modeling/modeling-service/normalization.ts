@@ -283,7 +283,9 @@ export function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
       return {
         kind: value.kind,
         direction,
-        target: assertUpToTargetForKind(value.kind, value.target),
+        target: assertUpToTargetForKind(value.kind, value.target, {
+          allowSketchPoint: true,
+        }),
         ...(offset && "distance" in offset ? { offset } : {}),
         ...(draftAngle !== undefined
           ? {
