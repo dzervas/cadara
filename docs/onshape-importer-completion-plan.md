@@ -893,6 +893,42 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         browser-worker/OCC prefix boundary, so no synthetic or mock result is being
         presented as that acceptance. `test:all` still stops on the three X.3
         ignored-capture assertions recorded under X.4.
+
+        **Item-D root cause for the whole 9841 cascade (still open, precisely
+        located).** With X.9.3's diagnostics in place, the entire 9841 studio
+        resolves to ONE blocker, not a class of matcher defects. Every one of the
+        23 topology consumers in that studio probes against an **empty** prefix
+        (zero live signatures of any entity class), because the studio's first
+        solid feature — `Extrude 1` — never builds.
+
+        `Extrude 1` uses `UP_TO_VERTEX`, and its captured evidence is exact and
+        present (deterministic id `KHoF`, an exact vertex signature at the
+        consumer's own history point). It is unresolvable for a structural
+        reason, not an evidence or tolerance one: the decoded query is
+        `entityType=VERTEX, queryType=SKETCH_ENTITY, sketchEntityId=QXXzcFIdjHpM.top,
+        start` — the START VERTEX OF A SKETCH ENTITY in the `Screen Outline`
+        sketch. Cadara's `upToVertex` extent contract
+        (`contracts/modeling/schema.ts`) accepts only a solid-body vertex
+        (`{ kind: "vertex"; bodyId; vertexId }`), and the OCC executor
+        correspondingly does `requireBody(...)` then `body.verticesById.get(...)`.
+        No live body can ever carry that vertex, and at `Extrude 1` no body
+        exists at all.
+
+        Closing this is a genuine contract extension (a sketch-point extent
+        target threaded through `ExtrudeEndCondition`, import actions,
+        normalization/validation, the deferred materializer, and the OCC extent
+        resolver) — it is NOT reachable by improving matching, and it must never
+        be faked by picking a nearby body vertex. It is recorded here rather than
+        attempted, because a wrong match here would silently mis-size the whole
+        studio. Once it lands, the 9841 prefix becomes non-empty and the
+        remaining 9841 rows (Chamfer 1/2, Shell 1, the boolean-scope extrudes,
+        and the face-backed sketches under X.5) can be re-evaluated against real
+        evidence for the first time.
+
+        Local capture extent-form census (for scoping this work): 9841 has 4
+        `BLIND`, 3 `THROUGH_ALL`, 3 `UP_TO_NEXT`, 4 `UP_TO_SURFACE`, 1
+        `UP_TO_BODY`, 1 `UP_TO_VERTEX`; d3cd9 has only `BLIND`/`THROUGH_ALL`;
+        5151 has 6 `BLIND`, 1 `THROUGH_ALL`, 1 `UP_TO_SURFACE`.
   - [ ] X.9.2 **Close residual exact-topology ambiguity.** Resolve, without tolerance
         relaxation or nearest-geometry selection, Laptop Stand 5151 `Boolean 1` and
         the currently diagnostic 9841 residuals `Chamfer 2`, `Extrude 12`, and
@@ -901,6 +937,24 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         face-sketch producer promotes so cascade failures are not mistaken for four
         independent matcher defects. Preserve zero/one/many honesty and never
         fabricate `owningFeatureId`.
+
+        **Item-D progress (partially closed).** Two of the four residuals were not
+        matcher defects at all. `topology-signatures` derived every body/face
+        extent from **tessellated** mesh vertices, so any curved silhouette
+        under-reported by the chord sagitta (a 12 mm cylinder measured
+        11.9125 mm) and no-matched exact Onshape evidence at any honest
+        tolerance. Face and body extents now union the **exact** analytic edge
+        boxes, and circular edges report only their swept arc extent (endpoints
+        plus interior phase peaks) rather than the full circle. No tolerance was
+        relaxed and no nearest-geometry scoring was added.
+
+        The three synthetic fixtures that encoded the old chordal numbers
+        (`shellSnapshotBody`, `makeRealOccHoleReviewBundle`, the circular-pattern
+        seed, and two stub probe signatures) were corrected to the exact analytic
+        envelope, because the chord-deficient stand-ins were themselves the
+        artifact. 5151 `Boolean 1` remains open (see the tier table below); the
+        9841 residuals are blocked behind the `UP_TO_VERTEX` gap recorded in
+        X.9.1.
   - [ ] X.9.3 **Make probe and large-bundle failures observable and stable.** Preserve
         the first failed kernel-probe diagnostic instead of collapsing every failed
         prefix to `topology-history-evidence-missing`. The shared Playwright import
@@ -908,6 +962,46 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         load/review/commit the 227 MB `9841` bundle without ad hoc harnesses or stale
         Typia/HMR compatibility bypasses. Diagnose performance or worker composition;
         do not merely inflate every unrelated wait.
+
+        **Diagnostic preservation (done).** `FeaturePlan.reasonDetail` now carries
+        the FIRST specific kernel-probe failure recorded for a feature and is never
+        overwritten by a later, more generic degradation. Both collapse points are
+        covered: the failed pre-consumer prefix probe (previously flattened to a
+        bare `topology-history-evidence-missing`) and the final build-containment
+        pass (`feature-kernel-build-failed`). Review copy renders it in brackets
+        after the reason text. It is purely diagnostic and never participates in
+        tier selection, matching, or evidence.
+
+        This was the debugging flywheel the item promised, and it paid out twice on
+        its first use against 5151:
+
+        1. It named `Offset distance collapses the circle radius` on `Sketch 5`.
+           Root cause: the sketch translator reported an OFFSET circle/arc distance
+           as the raw radius delta, but the offset contract measures to the LEFT of
+           traversal, so a counter-clockwise circle SHRINKS under a positive
+           distance. Every authored outward circle offset therefore collapsed the
+           circle at solve time. Fixed by matching the contract's sign convention.
+        2. It then named `Dimension ... references a missing line`. Root cause: the
+           translator emitted `lineDistance` / `linePointDistance` for ANY
+           entity operand, including Onshape's radial-gap DISTANCE between circles
+           (and between a point and a circle). Those solver dimension kinds accept
+           only line segments, so the whole sketch failed. Cadara has no equivalent
+           radial-gap dimension, so those records now drop honestly with a specific
+           diagnostic instead of being forged into a dimension the solver rejects.
+
+        Together those promoted 5151 `Sketch 5` and moved every downstream 5151
+        bake off the generic evidence-missing code onto its real reason. The
+        browser now also surfaces `Extrude 4 boolean target is incorrect` as the
+        single named cause behind eight further 5151 bakes.
+
+        Still open under this item: the shared Playwright helper's
+        review-error-versus-timeout distinction and the `9841` load/commit
+        reliability work were not part of this pass.
+
+        Pinned by a logic-lane spec at the provider/probe seam
+        (`apply-pipeline.spec.ts`, "preserves the kernel's first specific
+        diagnostic (X.9.3)") and asserted in the browser by the Laptop Stand
+        Playwright gate.
   - [ ] X.9.4 **Complete the real-browser acceptance matrix.** Extend the shared
         Playwright Onshape harness, not ad hoc scripts, to cover every studio in all
         five root bundles. Assert the exact non-surface feature timeline, zero
@@ -919,6 +1013,74 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       mock/browser baselines, and verify `jj status` contains only intentional
       committed work. Phase X is complete only when X.1–X.9.4 and the full suite
       are green; no scoped-complete wording may hide residual supported bakes.
+
+### Item-D verification: real-browser tier tables (Playwright gate)
+
+All numbers below are the REAL browser/worker/OCC gate
+(`e2e/onshape-import-parametric.spec.ts`, `e2e/onshape-variable-rebuild.spec.ts`),
+not logic-lane review. 14/14 Onshape browser tests pass.
+
+| Studio | Before item D | After item D | Change |
+|---|---:|---:|---|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** | Regression control, unchanged. |
+| Wave-T Revolve remove | 4 / 0 / 0 | **4 / 0 / 0** | Unchanged. |
+| Wave-T Sweep | 3 / 0 / 0 | **3 / 0 / 0** | Unchanged. |
+| Wave-T Part Studio 1 (full revolve) | 2 / 0 / 0 | **2 / 0 / 0** | Unchanged. |
+| Wave-T Loft | 4 / 0 / 0 | **4 / 0 / 0** | Unchanged. |
+| Wave-T Extrude extents | 6 / 0 / 0 | **6 / 0 / 0** | Unchanged. |
+| Wave-T **Mirror transform** | 3 / 2 / 0 | **5 / 0 / 0** | **Fully parametric.** |
+| Laptop Stand `5151…` | 10 / 14 / 0 | **11 / 13 / 0** | `Sketch 5` promoted. |
+| Part Studio 1 `9841…` | 8 / 33 / 0 | **8 / 33 / 0** | Blocked on the `UP_TO_VERTEX` gap under X.9.1. |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** | Unchanged. |
+
+Wave-T Mirror transform reached 5/0/0 because `Part mirror` and
+`XYZ translation` both query the same extrude body, whose live signature was
+under-reporting its curved extent. It is the smallest reproduction of that whole
+class, exactly as scoped. Both consumers now resolve from exact evidence with no
+tolerance change, and the studio's bake strategy dropped from
+`wholeStudioLegacy` to `none`.
+
+#### Remaining baked features and their honest status
+
+**Laptop Stand `5151…` (13 baked).** All eight rows carrying
+`Extrude 4 boolean target is incorrect` share ONE root cause and will be
+re-evaluated together once it is fixed:
+
+| Feature | Reason code | Status |
+|---|---|---|
+| `Fillet 2` | `topology-reference-no-match` | Needs follow-up (X.9.2). |
+| `Chamfer 1` | `topology-apply-rematch-failed` | Needs follow-up (X.9.2). |
+| `Extrude 4` | `feature-kernel-build-failed` | **Root blocker.** Live kernel rejects its boolean target; diagnostic now preserved. |
+| `Chamfer 2` | `topology-apply-rematch-failed` | Needs follow-up. |
+| `Extrude 6` / `7` / `8` / `3` | `extrude-extent-topology-unresolved` | Downstream of `Extrude 4`; each quotes its diagnostic. |
+| `Linear pattern 1` / `2`, `Mirror 1` | `downstream-of-baked` | Pure cascade; evaporates when producers promote. |
+| `Boolean 1` | `topology-history-evidence-missing` | Downstream of `Extrude 4` (X.9.2 target). |
+| `Chamfer 3` | `topology-reference-no-match` | Needs follow-up. |
+
+**Part Studio 1 `9841…` (33 baked).** Every topology consumer probes an EMPTY
+prefix, so no row here is an independent matcher defect: `Extrude 1`
+(`extrude-extent-topology-unresolved`) is the single upstream blocker, and its
+precise cause is the sketch-vertex `UP_TO_VERTEX` contract gap documented under
+X.9.1. `Extrude 4` stays permanently baked as
+`extrude-body-type-unsupported` (SURFACE, excluded by design). `Split 1` and the
+split-face-dependent `Sketch 3`/`Sketch 4` are excluded scope. The
+`needs-history-probe` sketches (`Sketch 2`, `Cutter`, `Sketch 5`–`Sketch 10`) are
+the X.5 face-backed sketches, which cannot be evaluated until a live body exists.
+The target of ≥ 30 parametric was NOT reached and no partial credit is claimed:
+the honest number is **8 / 33 / 0**, because the one blocker gating it is a
+contract extension rather than a matching improvement, and faking it would
+mis-size the studio.
+
+**Part Studio 1 `d3cd9…` (8 baked).** `Extrude 4` is the permanent SURFACE
+exclusion. `Split 1`, `Sketch 7`, `Sketch 8`, and `Extrude 8` are excluded scope
+(split-face dependent); `Extrude 5`, `6`, `7` are `downstream-of-baked` cascades
+from them.
+
+**Upstream-edit survival.** Every promotion was proven against a representative
+upstream edit in the browser: Mounts (`nail` variable plus an `Extrude 1` depth
+edit plus a constrained sketch drag), Wave-T Revolve remove (angle edit), Wave-T
+Sweep (sketch path drag), 5151 (`Wall` variable), 9841 (`walls` variable), and
+d3cd9 (`screwHole` variable).
 
 Full-parametric math: Mounts = W.2 + W.3. Part Studio 1 = W.1 + W.2 + W.4,
 with W.5 now covering future non-hollow empty-shell forms but not PS1's true
