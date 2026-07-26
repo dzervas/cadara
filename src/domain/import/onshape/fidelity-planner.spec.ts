@@ -64,7 +64,10 @@ const realBundleCases = [
   ],
   [
     "9841e486906fa2ce62d74d8e.onshape-capture.json",
-    { parametric: 7, baked: 34, geometryOnly: 0 },
+    // Extrude 1 authors a `startOffset` start plane Cadara cannot yet express,
+    // so it bakes as `extrude-start-extent-unsupported` rather than promoting a
+    // solid short by the offset.
+    { parametric: 6, baked: 35, geometryOnly: 0 },
   ],
 ] as const;
 

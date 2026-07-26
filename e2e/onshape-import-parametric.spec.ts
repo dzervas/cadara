@@ -195,17 +195,19 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   );
   test.setTimeout(700_000);
   const { reviewText } = await importBundle(page, PART_STUDIO_BUNDLE_PATH, true);
-  // `Extrude 1` now imports parametrically: its `UP_TO_VERTEX` extent terminates
-  // at an exact `Screen Outline` sketch point, carried through the extent
-  // contract's sketch-point target rather than a body vertex it could never own.
+  // `Extrude 1`'s `UP_TO_VERTEX` END extent resolves exactly (X.9.1), but the
+  // feature also authors an Onshape START offset (`startOffset=true`,
+  // `startOffsetBound=ENTITY`) that moves the prism's start plane 52.5 mm off
+  // the profile plane. Cadara's `startExtent` is profile-plane-only, so
+  // promoting it would build a solid short by exactly that offset. It bakes
+  // honestly instead, and its whole downstream cascade bakes with it.
   // Shell 1 (the X.8 closedHollow shell) is promoted parametrically at review but
   // its `parts` body-scope reference fails apply-time topology rematch against the
   // live OCC prefix; containment bakes only that feature (and cascades dependents)
   // instead of aborting the studio, so the studio still reviews and commits.
-  expect(reviewText).toContain("9 parametric, 32 baked, 0 geometry-only features.");
-  expect(reviewText).toMatch(/Extrude 1\s+parametric/);
+  expect(reviewText).toContain("8 parametric, 33 baked, 0 geometry-only features.");
   expect(reviewText).toMatch(
-    /Shell 1\s+baked \(suppressed\) — topology reference could not be rematched while applying/,
+    /Extrude 1\s+baked \(suppressed\) — [^\n]*extrude starts at an offset start plane, which is not supported yet/,
   );
   for (const label of ["Split 1", "Boolean 1", "Delete part 1"]) {
     expect(reviewText).toMatch(
@@ -217,8 +219,8 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   expect.soft(imported.snapshotDiagnosticsCount).toBe(0);
   expect.soft(imported.featureIds).toEqual([
     "feature_plane-1",
-    // The promoted sketch-point up-to-vertex extrude, live in the committed timeline.
-    "feature_extrude-1",
+    // Extrude 1 stays baked while its `startOffset` start plane is unsupported,
+    // so no parametric extrude reaches the committed timeline here.
     "feature_bakedBody-1",
   ]);
   expect.soft(imported.selectableTargets).toEqual(
@@ -352,9 +354,11 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
     ["Chamfer 1", "topology reference could not be rematched while applying"],
     ["Extrude 4", "the modeling kernel could not build this feature against the live prefix"],
     ["Chamfer 2", "topology reference could not be rematched while applying"],
-    ["Extrude 6", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
+    // Extrude 6 / 7 author an Onshape `startOffset` start plane (bound ENTITY),
+    // which Cadara's profile-plane-only `startExtent` cannot express yet.
+    ["Extrude 6", "extrude starts at an offset start plane, which is not supported yet"],
     ["Linear pattern 1", "depends on previously baked geometry"],
-    ["Extrude 7", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
+    ["Extrude 7", "extrude starts at an offset start plane, which is not supported yet"],
     ["Linear pattern 2", "depends on previously baked geometry"],
     ["Mirror 1", "depends on previously baked geometry"],
     ["Boolean 1", "captured history topology evidence is missing"],
@@ -423,7 +427,9 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
     ["Extrude 6", "depends on previously baked geometry"],
     ["Sketch 8", "requires captured history topology evidence"],
     ["Extrude 7", "depends on previously baked geometry"],
-    ["Extrude 8", "depends on previously baked geometry"],
+    // d3cd9's Extrude 8 also authors a `startOffset` start plane, so it now
+    // names that intrinsic reason ahead of its split-dependent cascade.
+    ["Extrude 8", "extrude starts at an offset start plane, which is not supported yet"],
   ] as const) {
     expect(reviewText, `${label} must state its honest bake reason.`).toMatch(
       new RegExp(`${label}\\s+baked \\(suppressed\\) — [^\\n]*${escapeRegExp(reason)}`),
