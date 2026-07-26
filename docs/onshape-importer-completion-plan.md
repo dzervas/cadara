@@ -1768,3 +1768,105 @@ resolution picked a keyless openrouter provider once). Real bundles + the
     probe's missing live body signatures honestly instead of `none`/silent
     drop); the real browser gate stays 3 / 2 / 0 with its checkpoint and all
     62 e2e pass.
+
+### Item-D continuation: the `startOffset` start-extent root cause
+
+**Root cause of the 9841 `Chamfer 1` no-match — not a matcher defect.** The
+X.9.2 framing ("residual exact-topology ambiguity") was wrong for 9841. The
+captured evidence is exact, the matcher is correct, and no tolerance or
+nearest-geometry change was warranted or made. `Extrude 1` was building the
+**wrong solid**, and every downstream consumer then honestly no-matched.
+
+Diagnosed in the real-OCC node harness (never the mock), with the X.9.3
+`reasonDetail` flywheel extended to print each live candidate's rejection
+reasons plus a live-prefix census:
+
+- `Chamfer 1`'s captured `historyPoint` edge `JNB`: `origin [-67.5, 0, 0]`,
+  `direction [1,0,0]`, bbox `[-67.5,0,0] → [+52.5,0,0]` — **length 120 mm**.
+- The one live edge agreeing on *both* analytic gates (`direction-angle` and
+  `line-support` — i.e. the same infinite line) was `[-67.5,0,0] → [0,0,0]`,
+  **length 67.5 mm**, rejected *solely* on `bounding-box-out-of-tolerance`.
+
+`Extrude 1` is `UP_TO_VERTEX` (terminator `KHoF` at x = −67.5) **plus**
+`startOffset=true`, `startOffsetBound=ENTITY`, `startOffsetEntity=KHsF` — a
+second sketch point at x = **+52.5**. Cadara's contract hard-coded
+`startExtent: { kind: "profilePlane" }`, and the importer dropped `startOffset*`
+entirely, so the prism started at x = 0 instead of x = +52.5. Live body was
+x ∈ [−67.5, 0]; Onshape rollback snapshot 4 ground truth is x ∈
+[−67.5, +52.5] mm. The missing 52.5 mm is exactly the dropped start plane.
+
+X.9.1 pinned only the terminator end (`minx`, to 2.7e-6 mm) and never checked
+`maxx`, which is why the wrong body looked exact.
+
+**Census of the same form:** 9841 `Extrude 1/3/15/16` and 5151 `Extrude 6/7`
+and d3cd9 `Extrude 8` use `startOffsetBound=ENTITY`; 9841 `Extrude 10/11` use
+`BLIND` start offsets.
+
+#### Landed: fail-closed demotion (commit `8fa4a373`)
+
+New `PlanReasonCode` `extrude-start-extent-unsupported`: any extrude authoring
+`startOffset=true` bakes with that specific reason rather than promoting a solid
+short by the offset. The X.9.3 `reasonDetail` enrichment (per-candidate
+rejection reasons + live-prefix entity-class census) landed with it.
+
+Browser gate after the demotion (clean server on port 3123, never 3000):
+
+| Studio | Before | After | Change |
+|---|---:|---:|---|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** | Unchanged. |
+| Wave-T (all six studios) | as pinned | unchanged | Unchanged. |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** | Count unchanged; `Extrude 6` / `7` move to the honest start-extent reason. |
+| Part Studio 1 `9841…` | 9 / 32 / 0 | **8 / 33 / 0** | `Extrude 1` demoted. **Lower and honest**: it had been promoting a geometrically wrong body. |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** | Count unchanged; `Extrude 8` moves to the honest start-extent reason. |
+
+`bun run test:all` fully green at this commit: 660 logic, 126 UI, 24 static,
+**67 / 67 Playwright**.
+
+#### Parked, NOT landed: the start-extent contract (`a92f03c5`)
+
+The real fix is implemented and logic-green but **the browser gate is red**, so
+it was deliberately not landed on the mainline. It is preserved at commit
+`a92f03c5` ("WIP: extrude start-extent contract (browser gate red)").
+
+What it does: extends `ExtrudeFeatureParameters.startExtent` to
+`profilePlane | blindOffset | sketchPointOffset`, threaded exactly like X.9.1's
+sketch-point up-to-vertex extension — `contracts/modeling/schema.ts`, import
+actions (`ImportDeferredExtrudeStartExtent`), prepared-action validation
+(`sketchIdOf`-only deferral), the deferred materializer, modeling-service
+normalization (a malformed payload throws instead of silently falling back to
+the profile plane), and an OCC start-plane resolver that translates the profile
+onto the authored start plane **inside** the existing
+`runInRebuildSlot("extent", ...)` slot, carrying sketch provenance through the
+transform so side-face/side-edge lineage survives. The importer reads
+`startOffsetBound=ENTITY` through the same `qCompressed` sketch-point reader
+from `c53b4181`. `BLIND` start offsets stay honestly baked: this capture set
+cannot pin their authored sign convention against ground truth, and guessing it
+would displace geometry.
+
+Verified real-OCC pin (`apply-pipeline.spec.ts`, logic lane): a sketch-point
+start offset builds between **both** authored abscissae to 1e-6 —
+`high[0] = +52.5`, `low[0] = −67.5`. Before the contract existed the high bound
+was 0. Logic lane fully green (453 tests across import/contracts/modeling).
+
+**Why it is parked.** At the browser gate it does exactly what was predicted —
+9841 review reaches **11 / 30 / 0**, with `Extrude 1`, `Chamfer 1`, and
+`Chamfer 2` all parametric, and `Chamfer 1`'s 120 mm edge matching its live edge
+exactly (the X.9.2 blocker is genuinely resolved). But `Chamfer 2` then fails at
+**commit-time apply** with `occ-topology-unsupported-history` on five
+`body_feature_extrude-1` edges, and that failure **aborts the whole studio
+import** — violating the hard ground rule that a single feature failure must
+never abort a studio.
+
+The gap is real and structural, not a flake: `Chamfer 1`'s conservative stage
+history invalidates the edges `Chamfer 2` selects, but review's build-containment
+probe does not reproduce the commit-time reference-state invalidation, so review
+promotes a feature that apply then rejects. Existing containment
+(`forcedBakeFeatureIds` / `TopologyApplyRematchError`) does not catch it because
+the failure surfaces as a topology-invalidation error, not a rematch error.
+
+**Next step (the honest one):** extend apply-time containment to treat
+`occ-topology-unsupported-history` on a promoted consumer the same way
+`topology-apply-rematch-failed` is already treated — bake that one feature,
+cascade its dependents, retry — and only then land the contract commit. The
+9841 ≥30 target remains unreached; the honest mainline number is **8 / 33 / 0**,
+and the demonstrated-but-uncommitted review number is 11 / 30 / 0.
