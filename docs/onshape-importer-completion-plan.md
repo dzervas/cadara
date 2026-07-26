@@ -914,16 +914,27 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         No live body can ever carry that vertex, and at `Extrude 1` no body
         exists at all.
 
-        Closing this is a genuine contract extension (a sketch-point extent
-        target threaded through `ExtrudeEndCondition`, import actions,
+        **Closed.** The contract extension landed exactly as scoped: a
+        sketch-point extent target (`UpToVertexTarget`) threaded through
+        `ExtrudeEndCondition`, import actions, prepared-action validation,
         normalization/validation, the deferred materializer, and the OCC extent
-        resolver) — it is NOT reachable by improving matching, and it must never
-        be faked by picking a nearby body vertex. It is recorded here rather than
-        attempted, because a wrong match here would silently mis-size the whole
-        studio. Once it lands, the 9841 prefix becomes non-empty and the
-        remaining 9841 rows (Chamfer 1/2, Shell 1, the boolean-scope extrudes,
-        and the face-backed sketches under X.5) can be re-evaluated against real
-        evidence for the first time.
+        resolver. The OCC resolver reads the referenced sketch's solved (else
+        authored) point, maps it to world through the sketch plane frame, and
+        terminates the prism on the plane through that point — inside the
+        existing `runInRebuildSlot("extent", ...)` slot, so the reference stays
+        live across upstream edits. The importer decodes the consumer's own
+        `qCompressed` payload exactly rather than inferring; a payload that is
+        not a complete `SKETCH_ENTITY` vertex query stays on the honest
+        topology-slot path. No nearby body vertex was ever substituted.
+
+        Pinned by `sketch-point-query-reader.spec.ts` (exact decode plus
+        rejection of every non-exact form) and by a real-OCC case in
+        `apply-pipeline.spec.ts` proving the built solid's height equals the
+        terminator point's Z to 1e-6. The browser gate now reports 9841
+        `Extrude 1` parametric, and the `walls` upstream edit still rebuilds.
+        The 9841 prefix is non-empty for the first time, so the remaining rows
+        (Chamfer 1–4, Shell 1, the cascade extrudes, and the X.5 face-backed
+        sketches) are now evaluable against real live evidence under X.9.2.
 
         Local capture extent-form census (for scoping this work): 9841 has 4
         `BLIND`, 3 `THROUGH_ALL`, 3 `UP_TO_NEXT`, 4 `UP_TO_SURFACE`, 1
@@ -947,6 +958,16 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         boxes, and circular edges report only their swept arc extent (endpoints
         plus interior phase peaks) rather than the full circle. No tolerance was
         relaxed and no nearest-geometry scoring was added.
+
+        **Item-D follow-up (now the 9841 blocker).** With the X.9.1
+        `UP_TO_VERTEX` contract gap closed and `Extrude 1` live, 9841's cascade
+        resolves to `Chamfer 1` (`topology-reference-no-match`), whose captured
+        evidence is an exact `SWEPT_EDGE`-derived line edge
+        (`origin [-0.0675, ~0, ~0]`, `direction [1,0,0]`, length 120 mm) over
+        the now-live `Extrude 1` body. `Chamfer 2/3/4`, `Boolean 1`, and
+        `Delete part 1` share that reason code and are cascade, not independent
+        defects. `Shell 1` remains `topology-apply-rematch-failed` on its
+        `parts` body scope.
 
         The three synthetic fixtures that encoded the old chordal numbers
         (`shellSnapshotBody`, `makeRealOccHoleReviewBundle`, the circular-pattern
@@ -1030,7 +1051,7 @@ not logic-lane review. 14/14 Onshape browser tests pass.
 | Wave-T Extrude extents | 6 / 0 / 0 | **6 / 0 / 0** | Unchanged. |
 | Wave-T **Mirror transform** | 3 / 2 / 0 | **5 / 0 / 0** | **Fully parametric.** |
 | Laptop Stand `5151…` | 10 / 14 / 0 | **11 / 13 / 0** | `Sketch 5` promoted. |
-| Part Studio 1 `9841…` | 8 / 33 / 0 | **8 / 33 / 0** | Blocked on the `UP_TO_VERTEX` gap under X.9.1. |
+| Part Studio 1 `9841…` | 8 / 33 / 0 | **9 / 32 / 0** | `Extrude 1` promoted: the `UP_TO_VERTEX` sketch-point contract gap is closed. |
 | Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** | Unchanged. |
 
 Wave-T Mirror transform reached 5/0/0 because `Part mirror` and
@@ -1057,19 +1078,38 @@ re-evaluated together once it is fixed:
 | `Boolean 1` | `topology-history-evidence-missing` | Downstream of `Extrude 4` (X.9.2 target). |
 | `Chamfer 3` | `topology-reference-no-match` | Needs follow-up. |
 
-**Part Studio 1 `9841…` (33 baked).** Every topology consumer probes an EMPTY
-prefix, so no row here is an independent matcher defect: `Extrude 1`
-(`extrude-extent-topology-unresolved`) is the single upstream blocker, and its
-precise cause is the sketch-vertex `UP_TO_VERTEX` contract gap documented under
-X.9.1. `Extrude 4` stays permanently baked as
-`extrude-body-type-unsupported` (SURFACE, excluded by design). `Split 1` and the
-split-face-dependent `Sketch 3`/`Sketch 4` are excluded scope. The
-`needs-history-probe` sketches (`Sketch 2`, `Cutter`, `Sketch 5`–`Sketch 10`) are
-the X.5 face-backed sketches, which cannot be evaluated until a live body exists.
-The target of ≥ 30 parametric was NOT reached and no partial credit is claimed:
-the honest number is **8 / 33 / 0**, because the one blocker gating it is a
-contract extension rather than a matching improvement, and faking it would
-mis-size the studio.
+**Part Studio 1 `9841…` (32 baked).** The `UP_TO_VERTEX` contract gap recorded
+under X.9.1 is now CLOSED, and `Extrude 1` is parametric in the real browser
+gate. The extrude extent contract gained an exact sketch-point terminator
+(`{ kind: "sketchPoint", sketchId, pointId }` on `UpToVertexTarget`), threaded
+through import actions, prepared-action validation, the deferred materializer,
+normalization/validation, and the OCC extent resolver, which terminates the
+prism on the plane through the referenced sketch point normal to the extrude
+direction. The importer decodes the consumer's own `qCompressed` query exactly
+(length-prefixed `SKETCH_ENTITY` vertex payload) and maps it onto the same
+translated sketch the provider commits, so the reference is durable and live
+across upstream edits. Nothing was matched by proximity: the terminator's
+authored x (`-0.0675 m`) equals Onshape's ground-truth body `minx`
+(`-0.06750000268 m`) to 2.7e-6 mm, i.e. tessellation noise only.
+
+Remaining rows, classified honestly:
+
+| Feature(s) | Reason code | Status |
+|---|---|---|
+| `Chamfer 1`, `Chamfer 2`, `Chamfer 3`, `Chamfer 4` | `topology-reference-no-match` | **Needs follow-up (X.9.2).** Now the single upstream blocker of the remaining cascade: `Chamfer 1` consumes a `SWEPT_EDGE`-derived edge over the live `Extrude 1` body. |
+| `Shell 1` | `topology-apply-rematch-failed` | Needs follow-up (X.9.2); its `parts` body scope still fails apply-time rematch. |
+| `Extrude 2`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16` | `extrude-extent-topology-unresolved` | Cascade downstream of the chamfer/shell blockers, not independent defects. |
+| `Extrude 3` | `downstream-of-baked` | Pure cascade. |
+| `Boolean 1`, `Delete part 1` | `topology-reference-no-match` | Cascade downstream of the same blockers. |
+| `Extrude 4` | `extrude-body-type-unsupported` | **Honestly unresolvable / permanently baked** (SURFACE, excluded by design). |
+| `Split 1`, `Sketch 3`, `Sketch 4` | `topology-reference-no-match` / `needs-history-probe` | **Excluded scope** (split-face dependent). |
+| `Sketch 2`, `Cutter`, `Sketch 5`–`Sketch 10` | `needs-history-probe` | X.5 face-backed sketches; evaluable only once their producer bodies are live. |
+
+The ≥ 30 target was not reached and no partial credit is claimed: the honest
+browser number is **9 / 32 / 0**. What changed is the nature of the blocker —
+it is no longer a contract gap (that is closed) but the X.9.2 exact-topology
+matcher work on the chamfer/shell consumers, which must not be closed by
+relaxing tolerance or picking a nearby edge.
 
 **Part Studio 1 `d3cd9…` (8 baked).** `Extrude 4` is the permanent SURFACE
 exclusion. `Split 1`, `Sketch 7`, `Sketch 8`, and `Extrude 8` are excluded scope
