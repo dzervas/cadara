@@ -7,6 +7,7 @@
 import type {
   ImportDeferredExtrudeEndCondition,
   ImportDeferredExtrudeExtent,
+  ImportDeferredExtrudeStartExtent,
   ImportDeferredSketchPointRef,
   ImportDeferredTopologyRef,
 } from "@/contracts/import/actions";
@@ -85,6 +86,22 @@ export type PlannedExtrudeExtent =
       secondEnd: PlannedExtrudeEndCondition;
     };
 
+/**
+ * Onshape's `startOffset` start bound, translated exactly. A sketch-point
+ * offset carries its producing sketch feature id until the provider binds that
+ * feature's committed sketch id, exactly like the up-to-vertex terminator.
+ */
+export type PlannedExtrudeStartExtent =
+  | { kind: "profilePlane" }
+  | {
+      kind: "blindOffset";
+      distance: AuthoredValue<number>;
+      direction: LinearExtentDirection;
+    }
+  | {
+      kind: "sketchPointOffset";
+      target: PlannedSketchPointExtentTarget | ImportDeferredSketchPointRef;
+    };
 export type PlannedExtrudeBoolean =
   | { kind: "standalone" }
   | { kind: "deferredBody"; sourceFeatureId: string }
@@ -98,6 +115,7 @@ export interface PlannedExtrude {
   /** Ordered exact query results; each profile carries its own source sketch or face identity. */
   profiles: PlannedExtrudeProfile[];
   extent: PlannedExtrudeExtent;
+  startExtent: PlannedExtrudeStartExtent;
   operation: AuthoredValue<FeatureBooleanOperation>;
   boolean: PlannedExtrudeBoolean;
   /** Active topology roles resolved atomically against the exact pre-consumer prefix. */
@@ -317,6 +335,26 @@ function resolveSketchPointExtentTarget(
   };
 }
 
+/**
+ * Translate Onshape's start bound. `startOffset=false` starts on the profile
+ * plane. `startOffsetBound=ENTITY` with exactly one decodable sketch-entity
+ * vertex query becomes an exact `sketchPointOffset`. Every other authored form
+ * returns `null` so the caller bakes with a specific reason; nothing is
+ * inferred and no distance sign is guessed.
+ */
+function translateStartExtent(
+  feature: OnshapeFeatureNode,
+  input: ExtrudePlanInput,
+): PlannedExtrudeStartExtent | null {
+  if (!booleanValue(feature, "startOffset")) return { kind: "profilePlane" };
+  if (enumValue(feature, "startOffsetBound") !== "ENTITY") return null;
+  const target = resolveSketchPointExtentTarget(
+    feature,
+    "startOffsetEntity",
+    input,
+  );
+  return target ? { kind: "sketchPointOffset", target } : null;
+}
 function translateEnd(
   feature: OnshapeFeatureNode,
   side: "first" | "second",
@@ -467,12 +505,12 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   }
 
   // Onshape's `startOffset` moves the prism's START plane off the profile
-  // plane, either to a referenced entity's plane (`ENTITY`) or by a blind
-  // distance (`BLIND`). Cadara's extrude contract fixes `startExtent` at
-  // `profilePlane`, so translating this feature would build a solid short by
-  // exactly that offset while still reporting parametric. Bake it with its own
-  // reason instead of silently producing wrong geometry.
-  if (booleanValue(feature, "startOffset")) {
+  // plane. The `ENTITY` form names an exact sketch point and translates to the
+  // contract's `sketchPointOffset`; every other form (notably `BLIND`, whose
+  // authored sign convention this capture set cannot pin against ground truth)
+  // stays baked rather than building a solid displaced by a guessed offset.
+  const startExtent = translateStartExtent(feature, input);
+  if (!startExtent) {
     return { tier: "baked", reason: "extrude-start-extent-unsupported", diagnostics };
   }
 
@@ -544,6 +582,7 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   const plannedExtrude: PlannedExtrude = {
     profiles: profileResolution.profiles,
     extent,
+    startExtent,
     operation: { source: "literal", value: operation },
     boolean,
     topologySlots,
@@ -673,6 +712,9 @@ export function extrudeAwaitsLiveSketchPointExtent(
   return [
     "endBoundEntityVertex",
     "secondDirectionBoundEntityVertex",
+    // A start offset's entity is read by the same decoder and is live-gated the
+    // same way, so it must also trigger a replan once its sketch is live.
+    "startOffsetEntity",
   ].some(
     (parameterId) =>
       resolveSketchPointExtentTarget(feature, parameterId, input) !== null,
@@ -687,13 +729,19 @@ export function extrudeSketchPointExtentFeatureIds(
     planned.extent.mode === "twoSide"
       ? [planned.extent.firstEnd, planned.extent.secondEnd]
       : [planned.extent.end];
+  const startFeatureId =
+    planned.startExtent.kind === "sketchPointOffset" &&
+    planned.startExtent.target.kind === "sketchPointFromFeature"
+      ? planned.startExtent.target.sketchFeatureId
+      : null;
   return [
-    ...new Set(
-      ends.flatMap((end) => {
+    ...new Set([
+      ...ends.flatMap((end) => {
         const featureId = endSketchPointExtentFeatureId(end);
         return featureId ? [featureId] : [];
       }),
-    ),
+      ...(startFeatureId ? [startFeatureId] : []),
+    ]),
   ];
 }
 
@@ -716,6 +764,37 @@ function bindEndSketchPoint(
   } as PlannedExtrudeEndCondition;
 }
 
+/**
+ * Bind a sketch-point start offset to its committed producing sketch action.
+ * An unbound sketch-point offset can never be prepared, so it throws exactly
+ * like an unresolved extent target rather than degrading to the profile plane.
+ */
+export function resolvedExtrudeStartExtent(
+  planned: PlannedExtrude,
+  sketchActionIndexByFeatureId: ReadonlyMap<string, number> = new Map(),
+): ImportDeferredExtrudeStartExtent {
+  const startExtent = planned.startExtent;
+  if (startExtent.kind !== "sketchPointOffset") return startExtent;
+  if (startExtent.target.kind !== "sketchPointFromFeature") {
+    return { kind: "sketchPointOffset", target: startExtent.target };
+  }
+  const actionIndex = sketchActionIndexByFeatureId.get(
+    startExtent.target.sketchFeatureId,
+  );
+  if (actionIndex === undefined) {
+    throw new Error(
+      "Extrude start extent references a sketch point whose producing sketch is not committed.",
+    );
+  }
+  return {
+    kind: "sketchPointOffset",
+    target: {
+      kind: "sketchPoint",
+      sketchId: { kind: "sketchIdOf", actionIndex },
+      pointId: startExtent.target.pointId,
+    },
+  };
+}
 /**
  * Reject planner-only slots while retaining apply-time topologyOf selectors and
  * binding sketch-point terminators to their committed producing sketch action.

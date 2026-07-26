@@ -1,6 +1,7 @@
 import type {
   ExtrudeEndCondition,
   ExtrudeFeatureParameters,
+  ExtrudeStartExtent,
 } from "@/contracts/modeling/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getExtrudeFeatureExtent } from "@/contracts/modeling/feature-extents";
@@ -369,6 +370,7 @@ function buildExtrudeProfileShapes(
   profile: ExtrudeFeatureParameters["profiles"][number],
   profileSlot: number,
   extent: ReturnType<typeof getExtrudeFeatureExtent>,
+  startExtent: ExtrudeStartExtent,
 ) {
   let profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
   let baseNormal: Vec3;
@@ -425,6 +427,7 @@ function buildExtrudeProfileShapes(
       profileShape,
       baseNormal,
       end,
+      startExtent,
       profileSlot,
       endRole: role,
       sketchId,
@@ -576,6 +579,82 @@ function applyExtrudeDraft(
   };
 }
 
+/**
+ * Signed displacement, along the extrude direction, from the profile plane to
+ * the authored start plane. `profilePlane` never displaces. The offset forms
+ * express Onshape's `startOffset` bounds exactly: a blind distance, or the plane
+ * through an exact authored sketch point. Nothing is inferred from nearby
+ * geometry.
+ */
+function resolveStartExtentOffset(
+  context: OccFeatureExecutionContext,
+  startExtent: ExtrudeStartExtent,
+  profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  direction: Vec3,
+): number {
+  if (startExtent.kind === "profilePlane") return 0;
+  if (startExtent.kind === "blindOffset") {
+    const distance = getAuthoredLiteralValue(startExtent.distance) ?? 0;
+    if (!(distance > 0)) {
+      throw new Error("Extrude start offset distance must be positive.");
+    }
+    return startExtent.direction === "positive" ? distance : -distance;
+  }
+  const point = resolveSketchPointWorldPosition(context, startExtent.target);
+  const profileRange = getShapeProjectionRange(context.oc, profileShape, direction);
+  return dot(point, direction) - profileRange.max;
+}
+
+/** Translate the profile onto the authored start plane before prismatic sweep. */
+function translateProfileToStartPlane(
+  context: OccFeatureExecutionContext,
+  input: {
+    profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+    sketchProvenance:
+      | ReturnType<typeof buildRegionProfileFace>["provenance"]
+      | null;
+    direction: Vec3;
+    offset: number;
+  },
+) {
+  const translation = new context.oc.gp_Trsf_1();
+  translation.SetTranslation_1(
+    toGpVec(context.oc, scale(input.direction, input.offset)),
+  );
+  const transform = new context.oc.BRepBuilderAPI_Transform_2(
+    input.profileShape,
+    translation,
+    true,
+  );
+  transform.Build(new context.oc.Message_ProgressRange_1());
+  if (!transform.IsDone()) {
+    deleteOccObject(transform);
+    throw new Error("OCC extrude start-plane transform failed.");
+  }
+
+  // Carry sketch provenance through the translation so start-offset extrudes
+  // keep durable side-face/side-edge lineage exactly like unoffset ones.
+  const sketchProvenance = input.sketchProvenance
+    ? {
+        ...input.sketchProvenance,
+        edges: new Map(
+          [...input.sketchProvenance.edges].map(([sourceKey, shape]) => [
+            sourceKey,
+            context.oc.TopoDS.Edge_1(transform.ModifiedShape(shape)),
+          ]),
+        ),
+        vertices: new Map(
+          [...input.sketchProvenance.vertices].map(([sourceKey, shape]) => [
+            sourceKey,
+            context.oc.TopoDS.Vertex_1(transform.ModifiedShape(shape)),
+          ]),
+        ),
+      }
+    : null;
+  const profileShape = transform.Shape();
+  deleteOccObject(transform);
+  return { profileShape, sketchProvenance };
+}
 function buildExtrudeEndShape(
   context: OccFeatureExecutionContext,
   input: {
@@ -583,6 +662,7 @@ function buildExtrudeEndShape(
     profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
     baseNormal: Vec3;
     end: ExtrudeEndCondition;
+    startExtent: ExtrudeStartExtent;
     profileSlot: number;
     endRole: string;
     sketchId: string | null;
@@ -597,22 +677,48 @@ function buildExtrudeEndShape(
       ? input.baseNormal
       : scale(input.baseNormal, -1),
   );
-  const distance = runInRebuildSlot("extent", () =>
-    resolveExtrudeDistance(
+  // The start plane and the end distance are one extent decision: both are
+  // resolved inside the same rebuild slot so an upstream edit to either the
+  // start sketch point or the terminator rebuilds the prism live.
+  const started = runInRebuildSlot("extent", () => {
+    const startOffset = resolveStartExtentOffset(
       context,
+      input.startExtent,
       input.profileShape,
       extrusionDirection,
-      input.end,
-    ),
-  );
+    );
+    const moved =
+      startOffset === 0
+        ? { profileShape: input.profileShape, sketchProvenance: input.sketchProvenance }
+        : translateProfileToStartPlane(context, {
+            profileShape: input.profileShape,
+            sketchProvenance: input.sketchProvenance,
+            direction: extrusionDirection,
+            offset: startOffset,
+          });
+    return {
+      ...moved,
+      // Measured from the authored start plane, so an up-to terminator spans
+      // start→terminator and a blind depth is the authored depth from start.
+      distance: resolveExtrudeDistance(
+        context,
+        moved.profileShape,
+        extrusionDirection,
+        input.end,
+      ),
+    };
+  });
+  const profileShape = started.profileShape;
+  const sketchProvenance = started.sketchProvenance;
+  const distance = started.distance;
   const profileRange = getShapeProjectionRange(
     context.oc,
-    input.profileShape,
+    profileShape,
     extrusionDirection,
   );
 
   const prism = new context.oc.BRepPrimAPI_MakePrism_1(
-    input.profileShape,
+    profileShape,
     toGpVec(context.oc, scale(extrusionDirection, distance)),
     false,
     true,
@@ -643,8 +749,8 @@ function buildExtrudeEndShape(
     prism.LastShape_1(),
   );
 
-  if (input.sketchId && input.sketchProvenance) {
-    for (const [sourceKey, edge] of input.sketchProvenance.edges) {
+  if (input.sketchId && sketchProvenance) {
+    for (const [sourceKey, edge] of sketchProvenance.edges) {
       const prefix = `${slotPrefix}:sketch-entity:${input.sketchId}:${sourceKey}`;
       registerSourceShapes(
         sourceShapes,
@@ -663,7 +769,7 @@ function buildExtrudeEndShape(
       );
     }
 
-    for (const [sourceKey, vertex] of input.sketchProvenance.vertices) {
+    for (const [sourceKey, vertex] of sketchProvenance.vertices) {
       const prefix = `${slotPrefix}:sketch-point:${input.sketchId}:${sourceKey}`;
       registerSourceShapes(
         sourceShapes,
@@ -682,7 +788,7 @@ function buildExtrudeEndShape(
       );
     }
 
-    for (const unsupported of input.sketchProvenance.unsupportedSources) {
+    for (const unsupported of sketchProvenance.unsupportedSources) {
       unsupportedSourceKeys.add(
         `${slotPrefix}:sketch-source:${input.sketchId}:${unsupported.sourceKey}:unsupported-profile-history`,
       );
@@ -717,9 +823,6 @@ export function buildExtrudeFeatureShape(
   ownerFeatureId: FeatureId,
   parameters: ExtrudeFeatureParameters,
 ): BuiltExtrudeShape {
-  if (parameters.startExtent.kind !== "profilePlane") {
-    throw new Error("Extrude startExtent.kind must be profilePlane.");
-  }
 
   const extent = getExtrudeFeatureExtent(parameters);
 
@@ -741,6 +844,7 @@ export function buildExtrudeFeatureShape(
       profile,
       profileSlot,
       extent,
+      parameters.startExtent,
     ),
   );
 

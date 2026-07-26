@@ -121,6 +121,7 @@ import {
   hasUnresolvedExtrudeTopology,
   resolvePlannedExtrudeTopology,
   resolvedExtrudeExtent,
+  resolvedExtrudeStartExtent,
 } from "@/domain/import/onshape/extrude-planner";
 import { isTopologyApplyRematchError } from "@/domain/import/orchestrator";
 
@@ -626,8 +627,12 @@ function replanDependentFeatures(input: {
           // An up-to-vertex extent terminating at a sketch point can only be
           // read once that sketch is live. Replan strictly when the exact
           // terminator has become readable and the plan still lacks it.
-          (currentPlan.plannedExtrude !== undefined &&
-            hasUnresolvedExtrudeTopology(currentPlan.plannedExtrude) &&
+          // A start offset is read by the same live-gated decoder, but its
+          // feature bakes without a plannedExtrude at all, so it is gated on
+          // its own reason code rather than on unresolved extent topology.
+          ((currentPlan.reasonCodes.includes("extrude-start-extent-unsupported") ||
+            (currentPlan.plannedExtrude !== undefined &&
+              hasUnresolvedExtrudeTopology(currentPlan.plannedExtrude))) &&
             extrudeAwaitsLiveSketchPointExtent(feature, {
               feature,
               profileEvidence: [],
@@ -2716,7 +2721,7 @@ async function buildPreparedActions(input: {
               ImportDeferredExtrudeProfileRef,
               ...ImportDeferredExtrudeProfileRef[],
             ],
-            startExtent: { kind: "profilePlane" },
+            startExtent: resolvedExtrudeStartExtent(extrude, orderedIndexByFeatureId),
             extent: resolvedExtrudeExtent(extrude, orderedIndexByFeatureId),
             operation: extrude.operation,
             booleanScope,

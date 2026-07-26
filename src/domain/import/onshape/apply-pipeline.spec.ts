@@ -10,6 +10,7 @@ import type {
 } from "@/contracts/import/capabilities";
 import type { OnshapeCaptureBundleV2 } from "@/contracts/import/onshape-capture-bundle";
 import type { ResolvedImportSource } from "@/contracts/import/source";
+import { validateImportPreparedActions } from "@/contracts/import/validation";
 import type {
   CommitSketchRequest,
   CreateFeatureRequest,
@@ -3850,4 +3851,155 @@ test("an up-to-vertex extent terminating at a sketch point builds exactly in rea
   // is a tolerance-relaxed approximation.
   expect(Math.abs(bounds.high[2] - TERMINATION_HEIGHT)).toBeLessThan(1e-6);
   expect(Math.abs(bounds.low[2])).toBeLessThan(1e-6);
+});
+// Lane: logic (per docs/testing.md — the importer/prepared-action/apply seam
+// through the real OCC adapter; no UI or browser behavior).
+// Seam: an extrude whose START plane is an exact authored sketch point must
+// build between that start plane and its terminator, on BOTH ends. This is the
+// 9841 `Extrude 1` form (`startOffset=true`, `startOffsetBound=ENTITY`), which
+// previously started at the profile plane and silently built a short solid.
+test("a sketch-point start offset moves the extrude's start plane in real OCC", async () => {
+  const oc = await loadRealOccForImportTest();
+  const { service } = createRealOccModelingService(oc);
+  const snapshot = await service.getCurrentDocumentSnapshot();
+
+  // A profile on XZ extruded along -Y, plus a bounds sketch on XY whose line
+  // runs from the start abscissa to the terminator abscissa. The built solid
+  // must span exactly between those two authored points.
+  const START_ABSCISSA = 52.5;
+  const TERMINATOR_ABSCISSA = -67.5;
+  const profileTranslation = translateSketch({
+    featureId: "start_offset_profile",
+    label: "Profile",
+    planeKey: "yz",
+    entities: [
+      { entityId: "b", entityType: "lineSegment", start: [-5, 0], end: [5, 0] },
+      { entityId: "r", entityType: "lineSegment", start: [5, 0], end: [5, 10] },
+      { entityId: "t", entityType: "lineSegment", start: [5, 10], end: [-5, 10] },
+      { entityId: "l", entityType: "lineSegment", start: [-5, 10], end: [-5, 0] },
+    ],
+  });
+  const boundsTranslation = translateSketch({
+    featureId: "start_offset_bounds",
+    label: "Bounds",
+    planeKey: "xy",
+    entities: [
+      {
+        entityId: "span",
+        entityType: "lineSegment",
+        start: [START_ABSCISSA, 0],
+        end: [TERMINATOR_ABSCISSA, 0],
+      },
+    ],
+  });
+  const boundsEntity = boundsTranslation.definition.entities.find(
+    (entity) => entity.kind === "lineSegment",
+  );
+  if (boundsEntity?.kind !== "lineSegment") {
+    throw new Error("The bounds sketch must translate to a line segment.");
+  }
+
+  const commitSketch = (
+    featureId: string,
+    label: string,
+    translation: ReturnType<typeof translateSketch>,
+  ) => ({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace" as DocumentId,
+    baseRevisionId: "rev_ignored" as RevisionId,
+    solverCorrelation: {
+      requestId: `request_${featureId}`,
+      projectionRequestId: `request_${featureId}_project`,
+      validationRequestId: `request_${featureId}_validate`,
+      solveRequestId: `request_${featureId}_solve`,
+      regionRequestId: `request_${featureId}_regions`,
+    },
+    sketchId: null,
+    sketchLabel: label,
+    plane: translation.plane,
+    definition: translation.definition,
+  });
+
+  const actions: ImportPreparedActions = {
+    commitSketches: [
+      commitSketch("start_offset_profile", "Profile", profileTranslation),
+      commitSketch("start_offset_bounds", "Bounds", boundsTranslation),
+    ],
+    createFeatures: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: "rev_ignored" as RevisionId,
+        featureLabel: "Offset start extrude",
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          parameters: {
+            profiles: [
+              {
+                kind: "regionOf",
+                actionIndex: 0,
+                selector: { kind: "interiorPoint", point: [0, 5] },
+              },
+            ],
+            startExtent: {
+              kind: "sketchPointOffset",
+              target: {
+                kind: "sketchPoint",
+                sketchId: { kind: "sketchIdOf", actionIndex: 1 },
+                pointId: boundsEntity.startPointId,
+              },
+            },
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "upToVertex",
+                direction: "negative",
+                target: {
+                  kind: "sketchPoint",
+                  sketchId: { kind: "sketchIdOf", actionIndex: 1 },
+                  pointId: boundsEntity.endPointId,
+                },
+              },
+            },
+            operation: { source: "literal", value: "newBody" },
+            booleanScope: { kind: "standalone" },
+          },
+        },
+      } as NonNullable<ImportPreparedActions["createFeatures"]>[number],
+    ],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "commitSketch", index: 1 },
+      { kind: "createFeature", index: 0 },
+    ],
+  };
+
+  expect(validateImportPreparedActions(actions).success).toBe(true);
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+  expect(
+    result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    "An exact sketch-point start offset must apply without error diagnostics.",
+  ).toEqual([]);
+  expect(result.rolledBack).toBe(false);
+
+  const applied = await service.getCurrentDocumentSnapshot();
+  const signatures = await deriveLiveBodySignatures({ snapshot: applied, service });
+  if (signatures.status !== "available") {
+    throw new Error("Expected live OCC body signatures for the applied extrude.");
+  }
+  const bounds = signatures.signatures.find(
+    (signature) => signature.entityClass === "body" && signature.boundingBox,
+  )?.boundingBox;
+  if (!bounds) throw new Error("Expected a live OCC bound for the applied extrude.");
+
+  // BOTH ends are authored points. Before the start-extent contract existed the
+  // prism began at the profile plane (x = 0) and this high bound was 0.
+  expect(Math.abs(bounds.high[0] - START_ABSCISSA)).toBeLessThan(1e-6);
+  expect(Math.abs(bounds.low[0] - TERMINATOR_ABSCISSA)).toBeLessThan(1e-6);
 });

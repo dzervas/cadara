@@ -193,40 +193,47 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
     !existsSync(PART_STUDIO_BUNDLE_PATH),
     "Real Onshape Part Studio 1 capture is not present locally.",
   );
-  test.setTimeout(700_000);
-  const { reviewText } = await importBundle(page, PART_STUDIO_BUNDLE_PATH, true);
-  // `Extrude 1`'s `UP_TO_VERTEX` END extent resolves exactly (X.9.1), but the
-  // feature also authors an Onshape START offset (`startOffset=true`,
-  // `startOffsetBound=ENTITY`) that moves the prism's start plane 52.5 mm off
-  // the profile plane. Cadara's `startExtent` is profile-plane-only, so
-  // promoting it would build a solid short by exactly that offset. It bakes
-  // honestly instead, and its whole downstream cascade bakes with it.
-  // Shell 1 (the X.8 closedHollow shell) is promoted parametrically at review but
-  // its `parts` body-scope reference fails apply-time topology rematch against the
-  // live OCC prefix; containment bakes only that feature (and cascades dependents)
-  // instead of aborting the studio, so the studio still reviews and commits.
-  expect(reviewText).toContain("8 parametric, 33 baked, 0 geometry-only features.");
-  expect(reviewText).toMatch(
-    /Extrude 1\s+baked \(suppressed\) — [^\n]*extrude starts at an offset start plane, which is not supported yet/,
+  // The start-extent contract makes Extrude 1 and its cascade live, so this
+  // 237 MB studio now builds real solids through every review probe pass.
+  test.setTimeout(1_800_000);
+  const { reviewText } = await importBundle(
+    page,
+    PART_STUDIO_BUNDLE_PATH,
+    true,
+    undefined,
+    1_500_000,
   );
-  for (const label of ["Boolean 1", "Delete part 1"]) {
-    expect(reviewText).toMatch(
-      new RegExp(`${label}\\s+baked \\(suppressed\\) — topology reference did not match`),
-    );
-  }
-  // `Split 1` is excluded scope. The probe now applies apply's own acceptance
-  // rule, so it names the kernel's real refusal (its baked mesh is not a closed
-  // two-manifold shell) instead of the misleading downstream no-match.
+  // `Extrude 1` is fully parametric: its `UP_TO_VERTEX` END extent resolves at
+  // an exact `Screen Outline` sketch point (X.9.1), and its Onshape START offset
+  // (`startOffset=true`, `startOffsetBound=ENTITY`) resolves through the extrude
+  // contract's `sketchPointOffset` start extent. With the correct 120 mm body
+  // live, `Chamfer 1`'s captured edge finally matches its live edge exactly.
+  //
+  // `Chamfer 2` stays baked honestly: `Chamfer 1`'s conservative stage history
+  // invalidates the edges it selects, so the live kernel refuses it. The probe
+  // now applies apply's own acceptance rule, so review reports that refusal
+  // instead of promoting a feature commit would reject (which used to abort the
+  // whole studio). Shell 1 likewise fails apply-time rematch and is contained.
+  expect(reviewText).toContain("10 parametric, 31 baked, 0 geometry-only features.");
+  expect(reviewText).toMatch(/Extrude 1\s+parametric/);
+  expect(reviewText).toMatch(/Chamfer 1\s+parametric/);
   expect(reviewText).toMatch(
-    /Split 1\s+baked \(suppressed\) — [^\n]*not a closed two-manifold shell/,
+    /Chamfer 2\s+baked \(suppressed\) — [^\n]*occ-topology-unsupported-history/,
   );
+  // `Split 1` is excluded scope and now cascades behind `Chamfer 2`, which fails
+  // earlier in source order. Assert only that it stays baked and suppressed; the
+  // quoted diagnostic names whichever upstream feature the kernel refused first.
+  expect(reviewText).toMatch(/Split 1\s+baked \(suppressed\) —/);
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect.soft(imported.snapshotDiagnosticsCount).toBe(0);
   expect.soft(imported.featureIds).toEqual([
     "feature_plane-1",
-    // Extrude 1 stays baked while its `startOffset` start plane is unsupported,
-    // so no parametric extrude reaches the committed timeline here.
+    // Both promoted features reach the committed timeline: the extrude built
+    // between its authored start plane and its sketch-point terminator, and the
+    // chamfer that consumes the resulting 120 mm edge.
+    "feature_extrude-1",
+    "feature_chamfer-1",
     "feature_bakedBody-1",
   ]);
   expect.soft(imported.selectableTargets).toEqual(

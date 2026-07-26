@@ -16,6 +16,7 @@ import type {
   DocumentHistoryItemRecord,
   ExtrudeEndCondition,
   ExtrudeFeatureExtent,
+  ExtrudeStartExtent,
   ExtrudeFeatureParameters,
   FeatureBooleanOperation,
   FeatureBooleanScope,
@@ -302,6 +303,47 @@ export function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
   }
 }
 
+/**
+ * An absent start extent means the prism starts on the profile plane, which is
+ * the only historical form. The offset forms must state their displacement
+ * exactly; a malformed payload throws rather than silently falling back to the
+ * profile plane, which would build a solid short by the intended offset.
+ */
+export function normalizeExtrudeStartExtent(value: unknown): ExtrudeStartExtent {
+  if (value === undefined || value === null) return { kind: "profilePlane" };
+  if (!isRecord(value)) {
+    throw new Error("Invalid extrude start extent payload.");
+  }
+  if (value.kind === "profilePlane") return { kind: "profilePlane" };
+  if (value.kind === "blindOffset") {
+    if (!isAuthoredNumberLike(value.distance)) {
+      throw new Error("Invalid extrude blind start-offset distance payload.");
+    }
+    if (value.direction !== "positive" && value.direction !== "negative") {
+      throw new Error("Invalid extrude blind start-offset direction payload.");
+    }
+    const distance = toContractAuthoredValue(
+      value.distance as MaybeAuthoredValue<number>,
+      0,
+    );
+    if (!((getAuthoredLiteralValue(distance) ?? 0) > 0)) {
+      throw new Error("Extrude blind start-offset distance must be positive.");
+    }
+    return { kind: "blindOffset", distance, direction: value.direction };
+  }
+  if (value.kind === "sketchPointOffset") {
+    const target = assertUpToTargetForKind("upToVertex", value.target, {
+      allowSketchPoint: true,
+    });
+    if (target.kind !== "sketchPoint") {
+      throw new Error(
+        "An extrude sketch-point start offset requires a sketch-point target.",
+      );
+    }
+    return { kind: "sketchPointOffset", target };
+  }
+  throw new Error("Invalid extrude start extent payload.");
+}
 export function normalizeExtrudeExtent(value: unknown): ExtrudeFeatureExtent {
   if (!isRecord(value)) {
     throw new Error("Invalid extrude extent payload.");
@@ -360,7 +402,7 @@ export function normalizeExtrudeFeatureParameters(
 
   return {
     profiles: assertExtrudeProfileRefs(value.profiles, "Extrude"),
-    startExtent: { kind: "profilePlane" },
+    startExtent: normalizeExtrudeStartExtent(value.startExtent),
     extent,
     operation: toContractAuthoredValue(
       value.operation as MaybeAuthoredValue<FeatureBooleanOperation>,
