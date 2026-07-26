@@ -323,6 +323,70 @@ test("kernel history probe returns completed prefix results and failing-step dia
 });
 
 
+// Lane: logic (per docs/testing.md — non-UI behavior at an exported domain
+// boundary). Seam: the probe's acceptance rule must equal apply's. A kernel
+// result whose Result envelope is Ok but that carries an error diagnostic (or a
+// non-accepted revision state) is REFUSED by apply via
+// `requireAcceptedModelingResult`. If the probe accepted it, review would
+// promote a feature that commit then rejects, aborting the whole studio instead
+// of baking that one feature. This is the 9841 `Chamfer 2` class: an earlier
+// feature's conservative stage history invalidates the edges it selects, which
+// surfaces only as an `occ-topology-unsupported-history` error diagnostic.
+test("kernel history probe fails a step whose result apply would refuse", async () => {
+  const rejectingProbe = (value: unknown) =>
+    createKernelHistoryProbeSession({
+      service: {
+        async getCurrentDocumentSnapshot() {
+          return makeSnapshot("rev_probe_reject" as RevisionId, []);
+        },
+        async createFeature() {
+          return ok(value) as never;
+        },
+        async commitSketch() {
+          return ok({}) as never;
+        },
+        async addDocumentVariable() {
+          return ok({}) as never;
+        },
+        async buildNativeExactBrepPayload() {
+          return { kind: "nativeTopologyPayload", payload: makeExactPayload("body_probe" as BodyId), diagnostics: [] };
+        },
+      },
+    });
+  const actions = { createFeatures: [{ requestId: "request_rejected" } as never] };
+
+  const invalidated = await rejectingProbe({
+    revisionState: { kind: "accepted" },
+    diagnostics: [
+      {
+        severity: "error",
+        code: "occ-topology-unsupported-history",
+        message: "Chamfer 2 edge selection is incorrect.",
+      },
+    ],
+  }).evaluateHistoryProbe({ actions });
+  expect(invalidated.steps[0]?.status).toBe("failed");
+  expect(
+    invalidated.steps[0]?.status === "failed"
+      ? invalidated.steps[0].diagnostics[0]?.message
+      : null,
+    "The kernel's own invalidation reason must survive into the probe diagnostic.",
+  ).toContain("occ-topology-unsupported-history: Chamfer 2 edge selection is incorrect.");
+
+  const rejectedRevision = await rejectingProbe({
+    revisionState: { kind: "rejected" },
+    diagnostics: [],
+  }).evaluateHistoryProbe({ actions });
+  expect(rejectedRevision.steps[0]?.status).toBe("failed");
+
+  // An accepted result with only non-error diagnostics still rebuilds, so this
+  // does not make the probe pessimistic.
+  const accepted = await rejectingProbe({
+    revisionState: { kind: "accepted" },
+    diagnostics: [{ severity: "warning", code: "noise", message: "noise" }],
+  }).evaluateHistoryProbe({ actions });
+  expect(accepted.steps[0]?.status).toBe("rebuilt");
+});
 test("import capabilities expose the real kernel history probe when platform composition supplies it", async () => {
   const probe = createKernelHistoryProbeSession({
     service: {

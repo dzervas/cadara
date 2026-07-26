@@ -236,6 +236,17 @@ async function applyProbeAction(
         actionRef,
       );
       const result = await service.createFeature({ ...materialized, ...basis });
+      // Apply rejects a feature whose result carries an error diagnostic or a
+      // non-accepted revision state, even though the Result envelope is Ok
+      // (see `requireAcceptedModelingResult` in the orchestrator). The probe
+      // must reject on exactly the same condition, or review promotes a feature
+      // that commit then refuses — which aborts the whole studio instead of
+      // baking one feature. Reference invalidations raised by an earlier
+      // feature's conservative stage history surface only this way.
+      if (result.isOk()) {
+        const rejection = describeRejectedFeatureResult(result.value);
+        if (rejection) return { ok: false, message: rejection };
+      }
       if (result.isOk()) {
         materializer.recordFeatureOutput(orderedPosition, result.value.featureId);
         materializer.recordBodyOutput(
@@ -258,6 +269,27 @@ async function applyProbeAction(
   }
 }
 
+/**
+ * Describe why apply would refuse this feature result, or `null` when apply
+ * would accept it. Mirrors the orchestrator's acceptance rule exactly: an error
+ * diagnostic or a non-accepted revision state is a refusal, and the kernel's own
+ * first error message is preserved so the reason names the real cause.
+ */
+function describeRejectedFeatureResult(value: {
+  revisionState?: { kind?: string };
+  diagnostics?: readonly { severity: string; code?: string; message: string }[];
+}): string | null {
+  const errorDiagnostic = (value.diagnostics ?? []).find(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (errorDiagnostic) {
+    return `${errorDiagnostic.code ?? "feature-rejected"}: ${errorDiagnostic.message}`;
+  }
+  const revisionKind = value.revisionState?.kind;
+  return revisionKind !== undefined && revisionKind !== "accepted"
+    ? `feature-rejected: the kernel returned revision state ${revisionKind}.`
+    : null;
+}
 function missingAction(actionRef: ImportPreparedActionRef) {
   return {
     ok: false as const,
