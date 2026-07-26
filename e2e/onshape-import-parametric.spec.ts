@@ -209,11 +209,17 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   expect(reviewText).toMatch(
     /Extrude 1\s+baked \(suppressed\) — [^\n]*extrude starts at an offset start plane, which is not supported yet/,
   );
-  for (const label of ["Split 1", "Boolean 1", "Delete part 1"]) {
+  for (const label of ["Boolean 1", "Delete part 1"]) {
     expect(reviewText).toMatch(
       new RegExp(`${label}\\s+baked \\(suppressed\\) — topology reference did not match`),
     );
   }
+  // `Split 1` is excluded scope. The probe now applies apply's own acceptance
+  // rule, so it names the kernel's real refusal (its baked mesh is not a closed
+  // two-manifold shell) instead of the misleading downstream no-match.
+  expect(reviewText).toMatch(
+    /Split 1\s+baked \(suppressed\) — [^\n]*not a closed two-manifold shell/,
+  );
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect.soft(imported.snapshotDiagnosticsCount).toBe(0);
@@ -421,7 +427,8 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   expect(reviewText).toContain("16 parametric, 8 baked, 0 geometry-only features.");
   for (const [label, reason] of [
     ["Extrude 4", "only solid extrudes can import as parametric solid features"],
-    ["Split 1", "topology reference did not match"],
+    // Excluded scope; the probe now names the kernel's real refusal.
+    ["Split 1", "not a closed two-manifold shell"],
     ["Sketch 7", "requires captured history topology evidence"],
     ["Extrude 5", "depends on previously baked geometry"],
     ["Extrude 6", "depends on previously baked geometry"],
