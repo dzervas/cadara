@@ -115,6 +115,7 @@ export type ExtrudePlanResult =
         | "needs-region-resolution"
         | "needs-history-probe"
         | "extrude-body-type-unsupported"
+        | "extrude-start-extent-unsupported"
         | "extrude-default-scope-ambiguous"
         | "unsupported-feature";
       diagnostics: ExtrudePlanDiagnostic[];
@@ -463,6 +464,16 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   const { feature } = input;
   if ((enumValue(feature, "bodyType") ?? "SOLID") !== "SOLID") {
     return { tier: "baked", reason: "extrude-body-type-unsupported", diagnostics };
+  }
+
+  // Onshape's `startOffset` moves the prism's START plane off the profile
+  // plane, either to a referenced entity's plane (`ENTITY`) or by a blind
+  // distance (`BLIND`). Cadara's extrude contract fixes `startExtent` at
+  // `profilePlane`, so translating this feature would build a solid short by
+  // exactly that offset while still reporting parametric. Bake it with its own
+  // reason instead of silently producing wrong geometry.
+  if (booleanValue(feature, "startOffset")) {
+    return { tier: "baked", reason: "extrude-start-extent-unsupported", diagnostics };
   }
 
   const profileParameter = findParameter(feature, "entities");

@@ -100,6 +100,11 @@ export type PlanReasonCode =
   // not be resolved against the exact pre-consumer prefix, so it can never be
   // prepared as a parametric feature; fail closed to baked at the feature level.
   | "extrude-extent-topology-unresolved"
+  // Onshape authored a start offset (`startOffset=true`) moving the prism's
+  // START plane off the profile plane. Cadara's extrude contract starts every
+  // prism at the profile plane, so importing the feature would silently build a
+  // solid short by that offset. Fail closed instead of promoting a wrong body.
+  | "extrude-start-extent-unsupported"
   | "sketch-on-probed-face"
   // The sketch plane face exists only on a checkpoint-baked body lineage, so no
   // live face can ever be probed or rematched in the parametric prefix.

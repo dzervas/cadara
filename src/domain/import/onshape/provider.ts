@@ -53,6 +53,7 @@ import type {
   SketchPlaneFrame,
 } from "@/contracts/shared/sketch-plane";
 import type { ConstructionId, RequestId } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
 import type {
   FeatureEditorFormSchema,
   FeatureEditorFormField,
@@ -103,6 +104,7 @@ import {
   resolveImplicitUnionTarget,
   resolveTopologyReferences,
   resolveUniquePrefixBody,
+  type TopologyResolutionResult,
 } from "@/domain/import/onshape/topology-reference-resolver";
 import {
   composeCaptureFrameTransforms,
@@ -873,6 +875,58 @@ function bakeConsumersOfBakedSketches(featurePlans: FeaturePlan[]): FeaturePlan[
     current = next;
   }
 }
+
+/**
+ * Render the exact reason each live candidate was rejected (or which candidates
+ * tied) so a `topology-reference-no-match` / `-ambiguous` bake names the real
+ * mismatch instead of only its reason code. Purely diagnostic.
+ */
+function describeResolutionFailure(
+  resolution: Extract<TopologyResolutionResult, { kind: "degraded" }>,
+  liveSignatures: readonly HistoryProbeTopologySignature[],
+): string | undefined {
+  const parts: string[] = [];
+  for (const detail of resolution.details) {
+    const rejected = (detail.rejected ?? [])
+      .map((entry) => `${durableRefLabel(entry.reference)}: ${entry.reasons.join(",")}`)
+      .join(" | ");
+    const candidates = (detail.candidates ?? [])
+      .map((entry) => `${durableRefLabel(entry.reference)}@${entry.score}`)
+      .join(" | ");
+    parts.push(
+      [detail.message, rejected && `rejected ${rejected}`, candidates && `tied ${candidates}`]
+        .filter(Boolean)
+        .join("; "),
+    );
+  }
+  const census = new Map<string, number>();
+  for (const signature of liveSignatures) {
+    const key = `${signature.entityClass}/${signature.geometryType}`;
+    census.set(key, (census.get(key) ?? 0) + 1);
+  }
+  parts.push(
+    `live prefix ${liveSignatures.length}: ${
+      [...census].map(([key, count]) => `${key}x${count}`).join(",") || "empty"
+    }`,
+  );
+  const detail = parts.filter(Boolean).join(" || ");
+  return detail.length > 0 ? detail : undefined;
+}
+
+function durableRefLabel(reference: DurableRef): string {
+  switch (reference.kind) {
+    case "body":
+      return reference.bodyId;
+    case "face":
+      return reference.faceId;
+    case "edge":
+      return reference.edgeId;
+    case "vertex":
+      return reference.vertexId;
+    default:
+      return reference.kind;
+  }
+}
 async function activateProbeBackedPlanning(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: ReturnType<typeof planStudioFidelity>;
@@ -1255,6 +1309,7 @@ async function activateProbeBackedPlanning(input: {
               tier: "baked" as const,
               target: { kind: "suppressed" as const },
               reasonCodes: [resolution.reason],
+              reasonDetail: describeResolutionFailure(resolution, prefix.signatures),
               suppressed: true,
             };
           }
@@ -1670,6 +1725,7 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "extrude-body-type-unsupported": "only solid extrudes can import as parametric solid features",
   "extrude-default-scope-ambiguous": "default extrude scope affects more than one possible body",
   "extrude-extent-topology-unresolved": "extrude up-to or boolean-scope topology could not be resolved as a durable reference",
+  "extrude-start-extent-unsupported": "extrude starts at an offset start plane, which is not supported yet",
   "sketch-on-probed-face": "sketch is supported on a resolved face",
   "sketch-face-on-checkpoint-body": "sketch plane face exists only on checkpoint-baked body geometry",
   "sketch-on-captured-frame": "sketch is supported from its captured frame",
