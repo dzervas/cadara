@@ -500,6 +500,13 @@ test("Wave T Extrude extents commits its real-kernel feature timeline", async ({
     "feature_extrude-2",
     "feature_extrude-3",
   ]);
+  const bodyTargets = state.selectableTargets.filter(
+    (target) => target.startsWith("body_feature_") && !target.includes("."),
+  );
+  expect(bodyTargets).toEqual(["body_feature_extrude-1", "body_feature_extrude-2"]);
+  expect(bodyTargets).not.toEqual(
+    expect.arrayContaining(["body_feature_extrude-2_1", "body_feature_extrude-2_2"]),
+  );
   await expectNoReferenceAlerts(page);
 });
 
