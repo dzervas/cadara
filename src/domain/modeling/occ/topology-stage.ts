@@ -94,12 +94,12 @@ export function serializeOccFeatureTopologyLineage(
   return [...records.values()];
 }
 
-type RigidTransformSubtopologyRef = Extract<
+type ExactSuccessorSubtopologyRef = Extract<
   DurableRef,
   { kind: "face" | "edge" | "vertex" }
 >;
 
-function rigidTransformSourceId(target: RigidTransformSubtopologyRef) {
+function exactSuccessorSourceId(target: ExactSuccessorSubtopologyRef) {
   if (target.kind === "face") {
     return target.faceId;
   }
@@ -109,9 +109,9 @@ function rigidTransformSourceId(target: RigidTransformSubtopologyRef) {
   return target.vertexId;
 }
 
-function getRigidTransformSuccessor(
+function getExactSuccessor(
   sourceBody: OccTrackedBody,
-  source: RigidTransformSubtopologyRef,
+  source: ExactSuccessorSubtopologyRef,
   successorsBySourceKey: ReadonlyMap<string, DurableRef>,
 ) {
   const direct = successorsBySourceKey.get(getOccDurableRefKey(source));
@@ -125,7 +125,7 @@ function getRigidTransformSuccessor(
       : source.kind === "edge"
         ? sourceBody.nativeTopologyIdAliases?.edgeIdsByNativeId
         : sourceBody.nativeTopologyIdAliases?.vertexIdsByNativeId;
-  const publicId = rigidTransformSourceId(source);
+  const publicId = exactSuccessorSourceId(source);
   for (const [nativeId, aliasedPublicId] of aliases ?? []) {
     if (aliasedPublicId !== publicId) {
       continue;
@@ -146,24 +146,24 @@ function getRigidTransformSuccessor(
   return undefined;
 }
 
-function getRigidTransformSourceTargets(body: OccTrackedBody) {
+function getExactSuccessorSourceTargets(body: OccTrackedBody) {
   return [
     ...body.topology.faceIds.map(
-      (faceId): RigidTransformSubtopologyRef => ({
+      (faceId): ExactSuccessorSubtopologyRef => ({
         kind: "face",
         bodyId: body.bodyId,
         faceId,
       }),
     ),
     ...body.topology.edgeIds.map(
-      (edgeId): RigidTransformSubtopologyRef => ({
+      (edgeId): ExactSuccessorSubtopologyRef => ({
         kind: "edge",
         bodyId: body.bodyId,
         edgeId,
       }),
     ),
     ...body.topology.vertexIds.map(
-      (vertexId): RigidTransformSubtopologyRef => ({
+      (vertexId): ExactSuccessorSubtopologyRef => ({
         kind: "vertex",
         bodyId: body.bodyId,
         vertexId,
@@ -172,23 +172,33 @@ function getRigidTransformSourceTargets(body: OccTrackedBody) {
   ];
 }
 
-function sameRigidTransformKind(
-  source: RigidTransformSubtopologyRef,
+function sameExactSuccessorKind(
+  source: ExactSuccessorSubtopologyRef,
   successor: DurableRef,
-): successor is RigidTransformSubtopologyRef {
+): successor is ExactSuccessorSubtopologyRef {
   return source.kind === successor.kind;
 }
 
-export function formatRigidTransformTopologySourceKey(input: {
+export function formatExactSuccessorTopologySourceKey(input: {
   featureId: FeatureId;
   bodyId: BodyId;
   kind: "face" | "edge" | "vertex";
   sourcePublicId: FaceId | EdgeId | VertexId;
 }) {
-  return `rigid-transform:${input.featureId}:${input.bodyId}:${input.kind}:${input.sourcePublicId}`;
+  return `exact-successor:${input.featureId}:${input.bodyId}:${input.kind}:${input.sourcePublicId}`;
 }
 
-export function createRigidTransformTopologyStage(input: {
+/**
+ * Build stage lineage from a feature's own exact kernel history successors.
+ *
+ * Applies to any feature that replaces one body and reports, per prior
+ * subtopology, at most one successor claimed exactly once (rigid transforms,
+ * and local operations like fillet/chamfer whose `BRepFilletAPI` history maps
+ * untouched faces/edges/vertices one-to-one). Anything the kernel left
+ * ambiguous, deleted, or unclaimed becomes an unsupported source key, so a
+ * later rebuild invalidates it instead of guessing.
+ */
+export function createExactSuccessorTopologyStage(input: {
   featureId: FeatureId;
   sourceBody: OccTrackedBody;
   outputBody: OccTrackedBody;
@@ -198,14 +208,14 @@ export function createRigidTransformTopologyStage(input: {
   const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
   const claimedTargetKeys = new Map<string, OccTopologySourceKey>();
 
-  for (const source of getRigidTransformSourceTargets(input.sourceBody)) {
-    const sourceKey = formatRigidTransformTopologySourceKey({
+  for (const source of getExactSuccessorSourceTargets(input.sourceBody)) {
+    const sourceKey = formatExactSuccessorTopologySourceKey({
       featureId: input.featureId,
       bodyId: input.sourceBody.bodyId,
       kind: source.kind,
-      sourcePublicId: rigidTransformSourceId(source),
+      sourcePublicId: exactSuccessorSourceId(source),
     });
-    const successor = getRigidTransformSuccessor(
+    const successor = getExactSuccessor(
       input.sourceBody,
       source,
       input.successorsBySourceKey,
@@ -213,7 +223,7 @@ export function createRigidTransformTopologyStage(input: {
 
     if (
       !successor ||
-      !sameRigidTransformKind(source, successor) ||
+      !sameExactSuccessorKind(source, successor) ||
       successor.bodyId !== input.outputBody.bodyId
     ) {
       unsupportedSourceKeys.add(sourceKey);

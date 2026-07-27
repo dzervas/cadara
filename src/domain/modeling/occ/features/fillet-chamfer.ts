@@ -12,6 +12,7 @@ import type { DurableRef } from "@/contracts/shared/references";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
 import {
   advanceTopologyToken,
+  getOccDurableRefKey,
   type OccReferenceInvalidationRecord,
   type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
@@ -27,6 +28,148 @@ import {
   resolveReplacementBodies,
 } from "@/domain/modeling/occ/features/boolean-operations";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
+import {
+  createExactSuccessorTopologyStage,
+  createUnsupportedProducerTopologyStage,
+  type OccFeatureTopologyStage,
+} from "@/domain/modeling/occ/topology-stage";
+
+type OccSubtopologyShape = { IsSame(other: never): boolean };
+
+/**
+ * Exact identity successors for one local-operation replacement body.
+ *
+ * `BRepFilletAPI`'s `IsDeleted` over-reports: for a chamfer/fillet it answers
+ * `true` for every prior edge and vertex it did not itself modify, including
+ * ones the result still contains as the *identical* `TopoDS` shape. Taking that
+ * answer at face value invalidates untouched topology, and a later feature that
+ * selects one of those edges is then refused with
+ * `occ-topology-unsupported-history`.
+ *
+ * Shape identity is exact ground truth, not a geometric match: a previous
+ * subtopology that is `IsSame` as a subtopology of the result IS that entity.
+ * Only a one-to-one identity is claimed; anything shared or absent is left to
+ * the kernel's own history classification.
+ */
+function collectExactIdentitySuccessors(
+  sourceBody: OccTrackedBody,
+  replacement: OccTrackedBody,
+) {
+  const successors = new Map<string, DurableRef>();
+
+  const claimKind = <Id extends string>(
+    previousShapesById: ReadonlyMap<Id, OccSubtopologyShape>,
+    currentShapesById: ReadonlyMap<Id, OccSubtopologyShape>,
+    toRef: (bodyId: BodyId, id: Id) => DurableRef,
+  ) => {
+    const claimedCurrentIds = new Set<Id>();
+    const claims = new Map<Id, Id>();
+
+    for (const [previousId, previousShape] of previousShapesById) {
+      const identical = [...currentShapesById].filter(([, currentShape]) =>
+        previousShape.IsSame(currentShape as never),
+      );
+      if (identical.length !== 1) {
+        continue;
+      }
+      const currentId = identical[0]![0];
+      if (claimedCurrentIds.has(currentId)) {
+        // Two prior entities cannot both be the same result entity.
+        for (const [otherPreviousId, otherCurrentId] of claims) {
+          if (otherCurrentId === currentId) claims.delete(otherPreviousId);
+        }
+        continue;
+      }
+      claimedCurrentIds.add(currentId);
+      claims.set(previousId, currentId);
+    }
+
+    for (const [previousId, currentId] of claims) {
+      successors.set(
+        getOccDurableRefKey(toRef(sourceBody.bodyId, previousId)),
+        toRef(replacement.bodyId, currentId),
+      );
+    }
+  };
+
+  claimKind(sourceBody.facesById, replacement.facesById, (bodyId, faceId) => ({
+    kind: "face",
+    bodyId,
+    faceId,
+  }));
+  claimKind(sourceBody.edgesById, replacement.edgesById, (bodyId, edgeId) => ({
+    kind: "edge",
+    bodyId,
+    edgeId,
+  }));
+  claimKind(
+    sourceBody.verticesById,
+    replacement.verticesById,
+    (bodyId, vertexId) => ({ kind: "vertex", bodyId, vertexId }),
+  );
+
+  return successors;
+}
+
+/**
+ * Record stage lineage for one local operation (fillet/chamfer) on one body.
+ *
+ * With native history, untouched faces/edges/vertices carry exact one-to-one
+ * successors, so a later rebuild can prove them live again instead of leaving
+ * them invalidated — which is what previously made a second chamfer refuse the
+ * edges its predecessor never touched. Without native history there is no exact
+ * claim to make, so the replacement stays conservatively unsupported.
+ */
+function collectLocalOperationTopologyStages(input: {
+  topologyStages: OccFeatureTopologyStage[];
+  ownerFeatureId: FeatureId;
+  sourceBody: OccTrackedBody;
+  historyInvalidations: Map<string, OccReferenceInvalidationRecord>;
+  replacementResult: {
+    replacements: readonly OccTrackedBody[];
+    successorTargetsByPreviousKey?: ReadonlyMap<string, DurableRef>;
+  };
+  hasNativeHistory: boolean;
+}) {
+  if (!input.hasNativeHistory) {
+    input.topologyStages.push(
+      createUnsupportedProducerTopologyStage({
+        featureId: input.ownerFeatureId,
+        bodies: input.replacementResult.replacements,
+        producedTargets: input.replacementResult.replacements.map(
+          (replacement) => ({
+            kind: "body" as const,
+            bodyId: replacement.bodyId,
+          }),
+        ),
+      }),
+    );
+    return;
+  }
+
+  for (const replacement of input.replacementResult.replacements) {
+    const successorsBySourceKey = new Map(
+      collectExactIdentitySuccessors(input.sourceBody, replacement),
+    );
+    // The kernel's own claims win where it made one; identity only fills the
+    // gaps its over-eager `IsDeleted` left behind.
+    for (const [key, successor] of input.replacementResult
+      .successorTargetsByPreviousKey ?? []) {
+      successorsBySourceKey.set(key, successor);
+    }
+    for (const key of successorsBySourceKey.keys()) {
+      input.historyInvalidations.delete(key);
+    }
+    input.topologyStages.push(
+      createExactSuccessorTopologyStage({
+        featureId: input.ownerFeatureId,
+        sourceBody: input.sourceBody,
+        outputBody: replacement,
+        successorsBySourceKey,
+      }),
+    );
+  }
+}
 
 function serializeNativeEdgeTargets(
   body: OccTrackedBody,
@@ -153,20 +296,22 @@ export function executeFilletFeature(
     string,
     OccReferenceInvalidationRecord
   >();
+  const topologyStages: OccFeatureTopologyStage[] = [];
 
   for (const [bodyId, targets] of targetsByBody.entries()) {
     const body = requireBody(context, bodyId);
     for (const target of targets) {
       requireEdge(context, body, target.edgeId);
     }
+    const nativeReplacementResult = resolveNativeFilletReplacement(
+      context,
+      body,
+      targets,
+      resolvedRadius,
+      ownerFeatureId,
+    );
     const replacementResult =
-      resolveNativeFilletReplacement(
-        context,
-        body,
-        targets,
-        resolvedRadius,
-        ownerFeatureId,
-      ) ??
+      nativeReplacementResult ??
       (() => {
         const fillet = new context.oc.BRepFilletAPI_MakeFillet(
           body.shape,
@@ -205,6 +350,14 @@ export function executeFilletFeature(
     for (const [key, value] of replacementResult.historyInvalidations) {
       historyInvalidations.set(key, value);
     }
+    collectLocalOperationTopologyStages({
+      topologyStages,
+      ownerFeatureId,
+      sourceBody: body,
+      historyInvalidations,
+      replacementResult,
+      hasNativeHistory: nativeReplacementResult !== null,
+    });
   }
 
   return {
@@ -215,6 +368,10 @@ export function executeFilletFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations,
+    topologyStage: {
+      featureId: ownerFeatureId,
+      outputs: new Map(topologyStages.flatMap((stage) => [...stage.outputs])),
+    },
   };
 }
 
@@ -413,14 +570,15 @@ export function executeChamferFeature(
     string,
     OccReferenceInvalidationRecord
   >();
+  const topologyStages: OccFeatureTopologyStage[] = [];
 
   for (const [bodyId, targets] of targetsByBody.entries()) {
     const body = requireBody(context, bodyId);
     for (const target of targets) {
       requireEdge(context, body, target.edgeId);
     }
-    const replacementResult =
-      (width.widthForm === "equalOffsets"
+    const nativeReplacementResult =
+      width.widthForm === "equalOffsets"
         ? resolveNativeChamferReplacement(
             context,
             body,
@@ -428,7 +586,9 @@ export function executeChamferFeature(
             width.distance,
             ownerFeatureId,
           )
-        : null) ??
+        : null;
+    const replacementResult =
+      nativeReplacementResult ??
       (() => {
         const chamfer = new context.oc.BRepFilletAPI_MakeChamfer(body.shape);
         for (const target of targets) {
@@ -468,6 +628,14 @@ export function executeChamferFeature(
     for (const [key, value] of replacementResult.historyInvalidations) {
       historyInvalidations.set(key, value);
     }
+    collectLocalOperationTopologyStages({
+      topologyStages,
+      ownerFeatureId,
+      sourceBody: body,
+      historyInvalidations,
+      replacementResult,
+      hasNativeHistory: nativeReplacementResult !== null,
+    });
   }
 
   return {
@@ -478,5 +646,9 @@ export function executeChamferFeature(
     entities: [],
     renderRecords: [],
     historyInvalidations,
+    topologyStage: {
+      featureId: ownerFeatureId,
+      outputs: new Map(topologyStages.flatMap((stage) => [...stage.outputs])),
+    },
   };
 }

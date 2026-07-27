@@ -9,6 +9,7 @@ import {
 } from "@/contracts/modeling/authored-values";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
+import { getOccDurableRefKey } from "@/domain/modeling/occ/topology";
 import {
   executeChamferFeature,
   executeFilletFeature,
@@ -307,4 +308,66 @@ test("executeChamferFeature uses native transaction history for replacement topo
     result.historyInvalidations,
     "Native chamfer",
   );
+});
+
+// Lane: logic (per docs/testing.md — exported OCC feature-execution behavior in
+// src/domain/modeling, proven through the real kernel with pure inputs).
+// Seam: `executeChamferFeature`'s topology-stage lineage. `BRepFilletAPI`'s
+// `IsDeleted` answers `true` for prior edges/vertices the chamfer never touched
+// and that the result still contains as the IDENTICAL TopoDS shape. Taking that
+// answer literally invalidated untouched topology, so a LATER chamfer selecting
+// one of those edges was refused with `occ-topology-unsupported-history` (9841
+// `Chamfer 2`, 5151 `Chamfer 2`/`3`). Only exact shape identity is claimed here;
+// the genuinely consumed edge must still be reported unsupported.
+test("executeChamferFeature keeps untouched topology in its stage lineage", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_chamfer_lineage_seed" as BodyId,
+    "feature_chamfer_lineage_seed" as FeatureId,
+  );
+  const chamferedEdgeId = body.topology.edgeIds[0]!;
+  const untouchedEdgeId = body.topology.edgeIds[6]!;
+  const context = createOccAuthoringState(oc, { bodies: [body] });
+
+  const result = executeChamferFeature(
+    context,
+    "feature_chamfer_lineage" as FeatureId,
+    chamferDefinition(body.bodyId, chamferedEdgeId, {
+      widthForm: createLiteralAuthoredValue("equalOffsets"),
+      distance: createLiteralAuthoredValue(0.15),
+    }),
+  );
+
+  const output = result.topologyStage?.outputs.get(body.bodyId);
+  expect(
+    output,
+    "A chamfer must publish stage lineage for the body it replaces.",
+  ).toBeDefined();
+
+  const claimedSourceIds = new Set(
+    [...output!.sourceTargets.keys()].map((key) => key.split(":").at(-1)),
+  );
+  expect(
+    claimedSourceIds.has(untouchedEdgeId),
+    "An edge the chamfer never touched, still present as the identical shape, must keep an exact successor claim.",
+  ).toBe(true);
+  expect(
+    result.historyInvalidations.has(
+      getOccDurableRefKey({ kind: "edge", bodyId: body.bodyId, edgeId: untouchedEdgeId }),
+    ),
+    "An exactly preserved edge must not be reported as invalidated.",
+  ).toBe(false);
+
+  const unsupportedSourceIds = new Set(
+    [...output!.unsupportedSourceKeys].map((key) => key.split(":").at(-1)),
+  );
+  expect(
+    unsupportedSourceIds.has(chamferedEdgeId),
+    "The edge the chamfer actually consumed must stay unsupported rather than claim a fabricated successor.",
+  ).toBe(true);
+  expect(
+    claimedSourceIds.has(chamferedEdgeId),
+    "The consumed edge must never receive an exact successor claim.",
+  ).toBe(false);
 });
