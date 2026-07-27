@@ -1087,7 +1087,14 @@ async function activateProbeBackedPlanning(input: {
   // fails wholesale and every face-backed sketch behind it sees an empty live
   // prefix. Containing the refusal first makes the probe present the same body
   // state apply does.
+  //
+  // The pass is memoized on the plan fingerprint it already proved buildable, so
+  // re-running it inside the fixed-point loop costs nothing when the plan has not
+  // changed. Each attempt rebuilds the whole studio in the kernel, and the
+  // largest captures cannot afford a redundant one per iteration.
+  let containedPlanFingerprint: string | null = null;
   const containUnbuildableFeatures = async () => {
+    if (containedPlanFingerprint === planFingerprint(workingPlan)) return;
     for (let attempt = 0; attempt < workingPlan.featurePlans.length; attempt += 1) {
       const orderedPositionToFeatureId = new Map<number, string>();
       const buildActions = await buildPreparedActions({
@@ -1151,6 +1158,7 @@ async function activateProbeBackedPlanning(input: {
         input.read,
       );
     }
+    containedPlanFingerprint = planFingerprint(workingPlan);
   };
 
   const maxPromotionIterations = Math.max(1, workingPlan.featurePlans.length);
@@ -1469,49 +1477,61 @@ async function activateProbeBackedPlanning(input: {
           featurePlan.reasonCodes.includes("needs-history-probe"),
       )
       .map((featurePlan) => featurePlan.onshapeFeatureId);
-    // Contain any feature the live kernel refuses BEFORE probing face-backed
-    // sketch planes, so each sketch prefix is the one apply will actually build.
-    if (consumerIds.length > 0) await containUnbuildableFeatures();
     const sketchConsumerIds = new Set(consumerIds);
-    const provisionalSketchPlan = workingPlan.bakeStrategy.kind === "segments"
-      ? recomputePlanWithFeaturePlans(
-          workingPlan,
-          workingPlan.featurePlans.map((featurePlan) =>
-            sketchConsumerIds.has(featurePlan.onshapeFeatureId)
-              ? {
-                  ...featurePlan,
-                  tier: "parametric" as const,
-                  target: { kind: "sketch" as const, planeKey: "xy" as const },
-                  reasonCodes: [],
-                  suppressed: false,
-                }
-              : featurePlan,
-          ),
-          input.read.studio.groundTruth.hasBodies,
-          input.read,
-        )
-      : workingPlan;
-    const sketchPrefixPlan: OnshapeStudioPlan = {
-      ...workingPlan,
-      featurePlans: bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
-      bakeStrategy: provisionalSketchPlan.bakeStrategy,
-      requiresStudioBake: provisionalSketchPlan.requiresStudioBake,
-      bakeDiagnostics: provisionalSketchPlan.bakeDiagnostics,
+    const probeSketchPrefixes = async () => {
+      const provisionalSketchPlan = workingPlan.bakeStrategy.kind === "segments"
+        ? recomputePlanWithFeaturePlans(
+            workingPlan,
+            workingPlan.featurePlans.map((featurePlan) =>
+              sketchConsumerIds.has(featurePlan.onshapeFeatureId)
+                ? {
+                    ...featurePlan,
+                    tier: "parametric" as const,
+                    target: { kind: "sketch" as const, planeKey: "xy" as const },
+                    reasonCodes: [],
+                    suppressed: false,
+                  }
+                : featurePlan,
+            ),
+            input.read.studio.groundTruth.hasBodies,
+            input.read,
+          )
+        : workingPlan;
+      const sketchPrefixPlan: OnshapeStudioPlan = {
+        ...workingPlan,
+        featurePlans: bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
+        bakeStrategy: provisionalSketchPlan.bakeStrategy,
+        requiresStudioBake: provisionalSketchPlan.requiresStudioBake,
+        bakeDiagnostics: provisionalSketchPlan.bakeDiagnostics,
+      };
+      const featureIdToOrderedPrefixPosition = new Map<string, number>();
+      const prefixActions = await buildPreparedActions({
+        read: input.read,
+        plan: sketchPrefixPlan,
+        capabilities: input.capabilities,
+        materializeBake: false,
+        featureIdToOrderedPrefixPosition,
+      });
+      return probeTopologyConsumerPrefixes({
+        actions: prefixActions,
+        featureIdToOrderedPrefixPosition,
+        consumerFeatureIds: consumerIds,
+        history: input.capabilities.history!,
+      });
     };
-    const featureIdToOrderedPrefixPosition = new Map<string, number>();
-    const prefixActions = await buildPreparedActions({
-      read: input.read,
-      plan: sketchPrefixPlan,
-      capabilities: input.capabilities,
-      materializeBake: false,
-      featureIdToOrderedPrefixPosition,
-    });
-    const prefixResults = await probeTopologyConsumerPrefixes({
-      actions: prefixActions,
-      featureIdToOrderedPrefixPosition,
-      consumerFeatureIds: consumerIds,
-      history: input.capabilities.history,
-    });
+
+    let prefixResults = await probeSketchPrefixes();
+    // A face-backed sketch can only be lifted onto a live face that apply will
+    // actually present. When a sketch prefix does not rebuild, the prefix still
+    // contains a feature the live kernel refuses, so the probe exposes no live
+    // faces at all — a probe-session artifact, not a matching failure. Contain
+    // that refusal and re-probe once, so the prefix is the one apply will build.
+    // This is deliberately lazy: containment rebuilds the whole studio in the
+    // kernel, which the largest captures cannot afford on every iteration.
+    if (prefixResults.some((result) => result.status === "failed")) {
+      await containUnbuildableFeatures();
+      prefixResults = await probeSketchPrefixes();
+    }
     const prefixByConsumerFeatureId = new Map(
       prefixResults.map((result) => [result.consumerFeatureId, result]),
     );

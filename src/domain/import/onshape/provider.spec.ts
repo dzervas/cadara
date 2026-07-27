@@ -1625,13 +1625,15 @@ test("src/domain/import/onshape/provider.spec.ts an unresolved face sketch recor
   ).toContain("live prefix 0: empty");
 });
 
-test("src/domain/import/onshape/provider.spec.ts contains an unbuildable feature before probing face-backed sketch planes", async () => {
+test("src/domain/import/onshape/provider.spec.ts contains an unbuildable feature and re-probes a failed face-backed sketch prefix", async () => {
   // A face-backed sketch can only be lifted onto a live face that apply will
-  // actually present. If the prefix still contains a feature the live kernel
-  // refuses, probing it fails wholesale and every face sketch behind it sees an
-  // empty live prefix — a probe-session artifact, not a matching failure. The
-  // containment pass must therefore run BEFORE the sketch pass, so the sketch
-  // probe sees a prefix that rebuilds and its bake (if any) is honest.
+  // actually present. When its prefix still contains a feature the live kernel
+  // refuses, the prefix probe fails wholesale and the sketch sees no live faces
+  // at all - a probe-session artifact, not a matching failure. The provider must
+  // contain that refusal and re-probe, so the prefix is the one apply will build.
+  //
+  // Containment is deliberately lazy (it rebuilds the whole studio in the
+  // kernel), so it must fire only after a sketch prefix actually failed.
   const bundle = structuredClone(
     makeFaceSketchBundle(),
   ) as unknown as OnshapeCaptureBundleV2;
@@ -1650,23 +1652,33 @@ test("src/domain/import/onshape/provider.spec.ts contains an unbuildable feature
     },
   ];
 
-  // Record the ordered probe kinds. The containment pass is the whole-plan probe
-  // that requests neither a consumer prefix nor final tessellation; the sketch
-  // pass is the per-consumer `S_FACE` prefix. A containment probe must precede
-  // the first sketch probe.
+  // The first `S_FACE` prefix probe refuses, standing in for a prefix that still
+  // contains a feature the kernel cannot build; every later probe rebuilds.
   const probeOrder: string[] = [];
+  let sketchPrefixProbes = 0;
   const probeCapabilities: ImportCapabilities = {
     ...capabilities,
     history: {
       async evaluateHistoryProbe(input) {
-        probeOrder.push(
-          input.consumerFeatureId === "S_FACE"
-            ? "sketchPrefix"
-            : input.includeFinalTessellation === undefined
-              ? "containment"
-              : "other",
-        );
         const count = Math.max(1, input.actions.orderedActions?.length ?? 0);
+        if (input.consumerFeatureId === "S_FACE") {
+          sketchPrefixProbes += 1;
+          probeOrder.push("sketchPrefix");
+          if (sketchPrefixProbes === 1) {
+            return {
+              steps: [{
+                status: "failed" as const,
+                diagnostics: [{
+                  severity: "error" as const,
+                  code: "kernel-history-probe-step-failed",
+                  message: "A prefix feature the kernel refuses.",
+                }],
+              }],
+            };
+          }
+        } else if (input.includeFinalTessellation === undefined) {
+          probeOrder.push("containment");
+        }
         return {
           steps: Array.from({ length: count }, () => ({
             status: "rebuilt" as const,
@@ -1685,19 +1697,19 @@ test("src/domain/import/onshape/provider.spec.ts contains an unbuildable feature
     (plan) => plan.onshapeFeatureId === "S_FACE",
   );
 
-  const firstContainment = probeOrder.indexOf("containment");
-  const firstSketchPrefix = probeOrder.indexOf("sketchPrefix");
-  expect(firstContainment, JSON.stringify(probeOrder)).toBeGreaterThanOrEqual(0);
-  expect(firstSketchPrefix, JSON.stringify(probeOrder)).toBeGreaterThanOrEqual(0);
   expect(
-    firstContainment,
-    "The containment pass must run before the face-backed sketch pass, so each sketch prefix is the one apply will build.",
-  ).toBeLessThan(firstSketchPrefix);
+    probeOrder[0],
+    "Containment must be lazy: the sketch prefix is probed first, and containment only runs after it fails.",
+  ).toBe("sketchPrefix");
+  expect(
+    probeOrder.slice(0, 3),
+    JSON.stringify(probeOrder),
+  ).toEqual(["sketchPrefix", "containment", "sketchPrefix"]);
   expect(
     OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming
       ? faceSketch?.reasonCodes.includes("sketch-on-probed-face")
       : faceSketch?.tier === "baked",
-    "A rebuilt prefix with one exact live face must promote the sketch.",
+    "The re-probed prefix with one exact live face must promote the sketch.",
   ).toBeTruthy();
 });
 
