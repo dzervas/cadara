@@ -1567,6 +1567,140 @@ test("src/domain/import/onshape/provider.spec.ts ambiguous probe face sketch sta
   ).toBeTruthy();
 });
 
+test("src/domain/import/onshape/provider.spec.ts an unresolved face sketch records why it stayed baked", async () => {
+  // X.9.3 flywheel at the face-backed sketch seam. Both non-unique outcomes used
+  // to return the plan unchanged, so the generic `needs-history-probe` copy hid
+  // the real next root cause. The detail must name the wanted entity class, the
+  // zero/one/many outcome, and a live-prefix census, without changing the tier.
+  // The shipped fixture carries only `finalState` evidence, which exits earlier
+  // at `sketch-face-on-checkpoint-body`. Give the sketch its own historyPoint
+  // reference so the matcher is actually reached.
+  const bundle = structuredClone(
+    makeFaceSketchBundle(),
+  ) as unknown as OnshapeCaptureBundleV2;
+  bundle.partStudios[0]!.resolvedReferences = [
+    {
+      deterministicId: "face_ref",
+      evaluatedAt: "historyPoint",
+      consumingFeatureId: "S_FACE",
+      signature: {
+        entityClass: "face",
+        geometryType: "plane",
+        definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+        centroid: [0.0005, 0.001, 0.003],
+        boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+      },
+    },
+  ];
+  const source = sourceFromBundle(bundle);
+
+  const ambiguous = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([
+      probeSignature("face_a"),
+      probeSignature("face_b"),
+    ]),
+  });
+  const ambiguousSketch = ambiguous.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_FACE",
+  );
+  expect(ambiguousSketch?.tier).toBe("baked");
+  expect(
+    ambiguousSketch?.reasonDetail,
+    "An ambiguous face sketch must name the tied live candidates and the live prefix.",
+  ).toMatch(/matched 2 live faces, none uniquely/);
+  expect(ambiguousSketch?.reasonDetail).toContain("live prefix 2:");
+
+  const noMatch = await onshapeImportProvider.review({
+    source,
+    capabilities: capabilitiesWithProbe([]),
+  });
+  const noMatchSketch = noMatch.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_FACE",
+  );
+  expect(noMatchSketch?.tier).toBe("baked");
+  expect(
+    noMatchSketch?.reasonDetail,
+    "An empty live prefix must be reported as such, not as a silent unchanged plan.",
+  ).toContain("live prefix 0: empty");
+});
+
+test("src/domain/import/onshape/provider.spec.ts contains an unbuildable feature before probing face-backed sketch planes", async () => {
+  // A face-backed sketch can only be lifted onto a live face that apply will
+  // actually present. If the prefix still contains a feature the live kernel
+  // refuses, probing it fails wholesale and every face sketch behind it sees an
+  // empty live prefix — a probe-session artifact, not a matching failure. The
+  // containment pass must therefore run BEFORE the sketch pass, so the sketch
+  // probe sees a prefix that rebuilds and its bake (if any) is honest.
+  const bundle = structuredClone(
+    makeFaceSketchBundle(),
+  ) as unknown as OnshapeCaptureBundleV2;
+  bundle.partStudios[0]!.resolvedReferences = [
+    {
+      deterministicId: "face_ref",
+      evaluatedAt: "historyPoint",
+      consumingFeatureId: "S_FACE",
+      signature: {
+        entityClass: "face",
+        geometryType: "plane",
+        definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+        centroid: [0.0005, 0.001, 0.003],
+        boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+      },
+    },
+  ];
+
+  // Record the ordered probe kinds. The containment pass is the whole-plan probe
+  // that requests neither a consumer prefix nor final tessellation; the sketch
+  // pass is the per-consumer `S_FACE` prefix. A containment probe must precede
+  // the first sketch probe.
+  const probeOrder: string[] = [];
+  const probeCapabilities: ImportCapabilities = {
+    ...capabilities,
+    history: {
+      async evaluateHistoryProbe(input) {
+        probeOrder.push(
+          input.consumerFeatureId === "S_FACE"
+            ? "sketchPrefix"
+            : input.includeFinalTessellation === undefined
+              ? "containment"
+              : "other",
+        );
+        const count = Math.max(1, input.actions.orderedActions?.length ?? 0);
+        return {
+          steps: Array.from({ length: count }, () => ({
+            status: "rebuilt" as const,
+            signatures: [probeSignature("face_match")],
+          })),
+        };
+      },
+    },
+  };
+
+  const review = await onshapeImportProvider.review({
+    source: sourceFromBundle(bundle),
+    capabilities: probeCapabilities,
+  });
+  const faceSketch = review.providerReview.studios[0]?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "S_FACE",
+  );
+
+  const firstContainment = probeOrder.indexOf("containment");
+  const firstSketchPrefix = probeOrder.indexOf("sketchPrefix");
+  expect(firstContainment, JSON.stringify(probeOrder)).toBeGreaterThanOrEqual(0);
+  expect(firstSketchPrefix, JSON.stringify(probeOrder)).toBeGreaterThanOrEqual(0);
+  expect(
+    firstContainment,
+    "The containment pass must run before the face-backed sketch pass, so each sketch prefix is the one apply will build.",
+  ).toBeLessThan(firstSketchPrefix);
+  expect(
+    OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming
+      ? faceSketch?.reasonCodes.includes("sketch-on-probed-face")
+      : faceSketch?.tier === "baked",
+    "A rebuilt prefix with one exact live face must promote the sketch.",
+  ).toBeTruthy();
+});
+
 test("src/domain/import/onshape/provider.spec.ts prefers the consumer-scoped historyPoint reference among duplicate deterministicIds", async () => {
   // Two resolved references share the deterministicId `face_ref`. The first is a
   // historyPoint captured for a *different* consumer and carries a signature that
