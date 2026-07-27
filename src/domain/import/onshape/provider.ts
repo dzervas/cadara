@@ -88,7 +88,10 @@ import {
   type SolvedSketchEntityGeometry,
 } from "@/domain/import/onshape/sketch-translator";
 import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
-import { matchSignature } from "@/domain/import/onshape/signature-matcher";
+import {
+  matchSignature,
+  type TopologyMatchOutcome,
+} from "@/domain/import/onshape/signature-matcher";
 import { normalizeOnshapeTopologySignature } from "@/domain/import/onshape/topology-signature-normalizer";
 import type {
   OnshapeGeometricSignature,
@@ -918,6 +921,38 @@ function describeResolutionFailure(
   return detail.length > 0 ? detail : undefined;
 }
 
+/**
+ * Describe why a face-backed sketch plane did not resolve to exactly one live
+ * face. Zero/one/many honesty: a `noMatch` names each rejected live candidate's
+ * gates, an `ambiguous` names the tied candidates, and both carry a live-prefix
+ * census so the next root cause is visible instead of collapsing into the
+ * generic `needs-history-probe` copy. Purely diagnostic; never affects matching.
+ */
+function describeSketchPlaneMatchFailure(
+  match: Extract<TopologyMatchOutcome, { kind: "noMatch" | "ambiguous" }>,
+  captured: OnshapeGeometricSignature,
+  liveSignatures: readonly HistoryProbeTopologySignature[],
+): string {
+  const census = new Map<string, number>();
+  for (const signature of liveSignatures) {
+    const key = `${signature.entityClass}/${signature.geometryType}`;
+    census.set(key, (census.get(key) ?? 0) + 1);
+  }
+  const prefix = `live prefix ${liveSignatures.length}: ${
+    [...census].map(([key, count]) => `${key}x${count}`).join(",") || "empty"
+  }`;
+  const wanted = `sketch plane wants ${captured.entityClass}/${captured.geometryType}`;
+  const body =
+    match.kind === "ambiguous"
+      ? `matched ${match.candidates.length} live faces, none uniquely: ${match.candidates
+          .map((entry) => `${durableRefLabel(entry.reference)}@${entry.score}`)
+          .join(" | ")}`
+      : `no live face matched; rejected ${match.rejected
+          .map((entry) => `${durableRefLabel(entry.reference)}: ${entry.reasons.join(",")}`)
+          .join(" | ") || "nothing (the live prefix exposed no candidates)"}`;
+  return [wanted, body, prefix].join(" || ");
+}
+
 function durableRefLabel(reference: DurableRef): string {
   switch (reference.kind) {
     case "body":
@@ -1035,6 +1070,88 @@ async function activateProbeBackedPlanning(input: {
       bakeStrategy: plan.bakeStrategy,
       requiresStudioBake: plan.requiresStudioBake,
     });
+
+  // Containment pass: prove the current plan actually BUILDS in the live kernel,
+  // using the same ordered action sequence apply will run (checkpoints included).
+  // A feature the kernel rejects is demoted to baked with a specific reason and
+  // its dependents are re-planned, so one unbuildable feature never aborts the
+  // studio.
+  //
+  // Attribution is exact: `orderedPositionToFeatureId` is recorded by
+  // `buildPreparedActions` while it emits each action, so the failed ordinal
+  // names its owning feature rather than being inferred from plan ordering.
+  //
+  // This runs BEFORE the face-backed sketch pass as well as at the end. A sketch
+  // can only be lifted onto a live face that apply will actually present, and a
+  // prefix containing a feature the kernel refuses is not that prefix: probing it
+  // fails wholesale and every face-backed sketch behind it sees an empty live
+  // prefix. Containing the refusal first makes the probe present the same body
+  // state apply does.
+  const containUnbuildableFeatures = async () => {
+    for (let attempt = 0; attempt < workingPlan.featurePlans.length; attempt += 1) {
+      const orderedPositionToFeatureId = new Map<number, string>();
+      const buildActions = await buildPreparedActions({
+        read: input.read,
+        plan: workingPlan,
+        capabilities: input.capabilities,
+        materializeBake: false,
+        emitBakeCheckpoints: true,
+        orderedPositionToFeatureId,
+      });
+      const buildProbe = await input.capabilities.history!.evaluateHistoryProbe({
+        actions: buildActions,
+      });
+      const failedOrdinal = buildProbe.steps.findIndex(
+        (step) => step.status === "failed",
+      );
+      if (failedOrdinal < 0) break;
+      const failedFeatureId = orderedPositionToFeatureId.get(failedOrdinal);
+      const failedPlan = failedFeatureId
+        ? workingPlan.featurePlans.find(
+            (plan) =>
+              plan.onshapeFeatureId === failedFeatureId &&
+              plan.tier === "parametric",
+          )
+        : undefined;
+      // Nothing parametric to demote means the failure is not contained by this
+      // pass; leave the plan as is so the real error surfaces at apply instead of
+      // silently mutating an unrelated feature.
+      if (!failedPlan) break;
+      const failedStep = buildProbe.steps[failedOrdinal];
+      // Keep the kernel's own first message: `feature-kernel-build-failed` alone
+      // says nothing about which invariant the live prefix rejected.
+      const failureDetail =
+        failedStep?.status === "failed"
+          ? failedStep.diagnostics
+              .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
+              .join("; ") || undefined
+          : undefined;
+      workingPlan = recomputePlanWithFeaturePlans(
+        workingPlan,
+        replanDependentFeatures({
+          read: input.read,
+          featurePlans: bakeConsumersOfBakedSketches(
+            workingPlan.featurePlans.map((plan) =>
+              plan.onshapeFeatureId === failedFeatureId
+                ? {
+                    ...plan,
+                    tier: "baked" as const,
+                    target: { kind: "suppressed" as const },
+                    reasonCodes: ["feature-kernel-build-failed" as const],
+                    ...(plan.reasonDetail ?? failureDetail
+                      ? { reasonDetail: plan.reasonDetail ?? failureDetail }
+                      : {}),
+                    suppressed: true,
+                  }
+                : plan,
+            ),
+          ),
+        }),
+        input.read.studio.groundTruth.hasBodies,
+        input.read,
+      );
+    }
+  };
 
   const maxPromotionIterations = Math.max(1, workingPlan.featurePlans.length);
   for (let iteration = 0; iteration < maxPromotionIterations; iteration += 1) {
@@ -1352,6 +1469,9 @@ async function activateProbeBackedPlanning(input: {
           featurePlan.reasonCodes.includes("needs-history-probe"),
       )
       .map((featurePlan) => featurePlan.onshapeFeatureId);
+    // Contain any feature the live kernel refuses BEFORE probing face-backed
+    // sketch planes, so each sketch prefix is the one apply will actually build.
+    if (consumerIds.length > 0) await containUnbuildableFeatures();
     const sketchConsumerIds = new Set(consumerIds);
     const provisionalSketchPlan = workingPlan.bakeStrategy.kind === "segments"
       ? recomputePlanWithFeaturePlans(
@@ -1392,8 +1512,8 @@ async function activateProbeBackedPlanning(input: {
       consumerFeatureIds: consumerIds,
       history: input.capabilities.history,
     });
-    const prefixSignatures = new Map(
-      prefixResults.map((result) => [result.consumerFeatureId, result.signatures]),
+    const prefixByConsumerFeatureId = new Map(
+      prefixResults.map((result) => [result.consumerFeatureId, result]),
     );
     const nextPlans: FeaturePlan[] = workingPlan.featurePlans.map((featurePlan) => {
       if (forcedBakeFeatureIds.has(featurePlan.onshapeFeatureId)) return featurePlan;
@@ -1423,7 +1543,8 @@ async function activateProbeBackedPlanning(input: {
         };
       }
 
-      const probeSignatures = prefixSignatures.get(featurePlan.onshapeFeatureId) ?? [];
+      const prefixResult = prefixByConsumerFeatureId.get(featurePlan.onshapeFeatureId);
+      const probeSignatures = prefixResult?.signatures ?? [];
       const feature = featuresById.get(featurePlan.onshapeFeatureId);
       const deterministicId = feature ? extractSketchPlaneDeterministicId(feature) : null;
       const records = deterministicId ? references.get(deterministicId) ?? [] : [];
@@ -1447,6 +1568,26 @@ async function activateProbeBackedPlanning(input: {
           reasonCodes: ["sketch-face-on-checkpoint-body"],
         };
       }
+      // Every remaining exit is a bake. Record WHY (X.9.3 flywheel): without a
+      // detail these paths return the plan unchanged and the generic
+      // `needs-history-probe` copy hides the real next root cause.
+      const bakeSketchWithDetail = (detail: string): FeaturePlan => ({
+        ...featurePlan,
+        ...(featurePlan.reasonDetail ? {} : { reasonDetail: detail }),
+      });
+      // The sketch's own parametric prefix must rebuild before any live face can
+      // exist to match. Name the kernel's refusal (or the missing prefix position)
+      // rather than reporting an empty live prefix as a matching failure.
+      if (!prefixResult || prefixResult.status === "failed") {
+        return bakeSketchWithDetail(
+          prefixResult
+            ? prefixResult.diagnostics
+                .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
+                .join("; ") ||
+                "The sketch's parametric prefix did not rebuild in the probe session."
+            : "The sketch has no ordered prefix position in the prepared actions.",
+        );
+      }
       const reference = historyReference ?? finalStateReference;
       const capturedSignature =
         reference && "signature" in reference
@@ -1458,15 +1599,33 @@ async function activateProbeBackedPlanning(input: {
                 plan: workingPlan,
               })
             : null;
-      if (!capturedSignature) return featurePlan;
+      if (!capturedSignature) {
+        return bakeSketchWithDetail(
+          deterministicId
+            ? `No captured sketch-plane signature for ${deterministicId} (${records.length} reference records) and no swept-face signature could be inferred.`
+            : "The sketch feature declares no resolvable sketch-plane query id.",
+        );
+      }
       const match = matchSignature(capturedSignature, probeSignatures);
-      const matchedReference = match.kind === "unique" ? match.reference : undefined;
-      if (!matchedReference) return featurePlan;
+      if (match.kind !== "unique") {
+        return bakeSketchWithDetail(
+          describeSketchPlaneMatchFailure(match, capturedSignature, probeSignatures),
+        );
+      }
+      const matchedReference = match.reference;
       const probeSignature = probeSignatures.find(
         (signature) => referenceKey(signature.reference) === referenceKey(matchedReference),
       );
       const plane = probeSignature ? planeFromProbeSignature(probeSignature) : null;
-      if (!plane) return featurePlan;
+      if (!plane) {
+        return bakeSketchWithDetail(
+          `The matched live face ${durableRefLabel(matchedReference)} exposes no planar frame (${
+            probeSignature
+              ? `${probeSignature.entityClass}/${probeSignature.geometryType}`
+              : "the probe signature was not found"
+          }).`,
+        );
+      }
       const probedFaceSelector: ImportDeferredTopologyRef = {
         kind: "topologyOf",
         expectedKind: "face",
@@ -1522,78 +1681,7 @@ async function activateProbeBackedPlanning(input: {
     );
   }
 
-  // Final containment pass. Everything above resolves topology; this proves the
-  // resulting plan actually BUILDS in the live kernel, using the same ordered
-  // action sequence apply will run (checkpoints included). A feature the kernel
-  // rejects is demoted to baked with a specific reason and its dependents are
-  // re-planned, so one unbuildable feature never aborts the studio.
-  //
-  // Attribution is exact: `orderedPositionToFeatureId` is recorded by
-  // `buildPreparedActions` while it emits each action, so the failed ordinal
-  // names its owning feature rather than being inferred from plan ordering.
-  for (let attempt = 0; attempt < workingPlan.featurePlans.length; attempt += 1) {
-    const orderedPositionToFeatureId = new Map<number, string>();
-    const buildActions = await buildPreparedActions({
-      read: input.read,
-      plan: workingPlan,
-      capabilities: input.capabilities,
-      materializeBake: false,
-      emitBakeCheckpoints: true,
-      orderedPositionToFeatureId,
-    });
-    const buildProbe = await input.capabilities.history.evaluateHistoryProbe({
-      actions: buildActions,
-    });
-    const failedOrdinal = buildProbe.steps.findIndex(
-      (step) => step.status === "failed",
-    );
-    if (failedOrdinal < 0) break;
-    const failedFeatureId = orderedPositionToFeatureId.get(failedOrdinal);
-    const failedPlan = failedFeatureId
-      ? workingPlan.featurePlans.find(
-          (plan) =>
-            plan.onshapeFeatureId === failedFeatureId &&
-            plan.tier === "parametric",
-        )
-      : undefined;
-    // Nothing parametric to demote means the failure is not contained by this
-    // pass; leave the plan as is so the real error surfaces at apply instead of
-    // silently mutating an unrelated feature.
-    if (!failedPlan) break;
-    const failedStep = buildProbe.steps[failedOrdinal];
-    // Keep the kernel's own first message: `feature-kernel-build-failed` alone
-    // says nothing about which invariant the live prefix rejected.
-    const failureDetail =
-      failedStep?.status === "failed"
-        ? failedStep.diagnostics
-            .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
-            .join("; ") || undefined
-        : undefined;
-    workingPlan = recomputePlanWithFeaturePlans(
-      workingPlan,
-      replanDependentFeatures({
-        read: input.read,
-        featurePlans: bakeConsumersOfBakedSketches(
-          workingPlan.featurePlans.map((plan) =>
-            plan.onshapeFeatureId === failedFeatureId
-              ? {
-                  ...plan,
-                  tier: "baked" as const,
-                  target: { kind: "suppressed" as const },
-                  reasonCodes: ["feature-kernel-build-failed" as const],
-                  ...(plan.reasonDetail ?? failureDetail
-                    ? { reasonDetail: plan.reasonDetail ?? failureDetail }
-                    : {}),
-                  suppressed: true,
-                }
-              : plan,
-          ),
-        ),
-      }),
-      input.read.studio.groundTruth.hasBodies,
-      input.read,
-    );
-  }
+  await containUnbuildableFeatures();
 
   return { plan: workingPlan, probeResult };
 }
