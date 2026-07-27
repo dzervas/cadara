@@ -222,7 +222,7 @@ test("executeTransformFeature uses native transaction history for replacement to
   ).toBeTruthy();
   const output = result.topologyStage?.outputs.get(body.bodyId);
   expect(output, "Native transform should publish a topology stage.").toBeTruthy();
-  const sourceKeyPrefix = `rigid-transform:feature_native_transform_history:${body.bodyId}:`;
+  const sourceKeyPrefix = `exact-successor:feature_native_transform_history:${body.bodyId}:`;
   const expectedSourceCount =
     body.topology.faceIds.length +
     body.topology.edgeIds.length +

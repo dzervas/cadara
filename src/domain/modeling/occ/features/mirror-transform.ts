@@ -49,7 +49,7 @@ import type {
   OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
 import {
-  createRigidTransformTopologyStage,
+  createExactSuccessorTopologyStage,
   createUnsupportedProducerTopologyStage,
   type OccFeatureTopologyStage,
 } from "@/domain/modeling/occ/topology-stage";
@@ -706,7 +706,7 @@ export function executeTransformFeature(
     if (nativeReplacementResult) {
       for (const replacement of replacementResult.replacements) {
         topologyStages.push(
-          createRigidTransformTopologyStage({
+          createExactSuccessorTopologyStage({
             featureId: ownerFeatureId,
             sourceBody: body,
             outputBody: replacement,
