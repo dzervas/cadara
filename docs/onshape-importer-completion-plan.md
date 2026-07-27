@@ -1853,3 +1853,118 @@ Final item-D browser gate on clean port 3123:
 | Part Studio 1 `d3cd9…` | **16 / 8 / 0** |
 
 `bun run test:all` is the final validation gate for the landing commit.
+
+### Item-D follow-ups: the chamfer/fillet lineage root cause (X.9.2)
+
+**Root cause found and fixed: `BRepFilletAPI::IsDeleted` over-reports.** The
+X.9.2 framing ("Chamfer 1's conservative stage history invalidates the edges
+Chamfer 2 consumes") named the symptom correctly but not the mechanism. It was
+not a missing-history gap and not a matcher gap; it was a kernel answer taken too
+literally.
+
+Diagnosed in the real OCC kernel (never the mock). For a single chamfer on one
+edge of a box, OCC reports, per prior subtopology:
+
+| prior entity | `IsDeleted` | `Modified` | still present as the IDENTICAL `TopoDS` shape |
+|---|---|---:|---|
+| the chamfered edge | `true` | 0 | no (genuinely consumed) |
+| 4 adjacent edges | `false` | 1 | no (genuinely modified) |
+| **7 untouched edges** | **`true`** | **0** | **yes** |
+| **6 untouched vertices** | **`true`** | **0** | **yes** |
+
+So `IsDeleted` answers `true` for every prior edge/vertex the operation did not
+itself modify — including ones the result still contains as the *same* shape.
+Cadara believed it, invalidated that untouched topology, and any later feature
+selecting one of those edges was refused at `assertTopologyReferenceLive` with
+`occ-topology-unsupported-history`. Two facts made this invisible until now:
+sequential *apply* survives it (the invalidation is only consulted on replay),
+and only the **rebuild** path — which is what apply and the probe actually run
+once a later feature exists — fails.
+
+**The fix is exact identity, never a match.** Fillet and chamfer now publish
+stage lineage (they previously published none at all, which is why every prior
+subtopology was reconciled as unsupported on rebuild). A prior subtopology that
+is `IsSame` as a subtopology of the result IS that entity — shape identity, not
+geometry, not tolerance. Only one-to-one claims are made: anything shared by two
+prior entities, absent, or already claimed by the kernel's own history is left to
+the kernel's classification. The genuinely consumed edge stays unsupported. The
+rigid-transform stage builder was already exactly this, so it was generalized
+(`createRigidTransformTopologyStage` → `createExactSuccessorTopologyStage`,
+source-key prefix `rigid-transform:` → `exact-successor:`) rather than duplicated.
+
+Real-kernel effect, visible in the X.9.3 flywheel: the stale-reference refusals
+are gone and the affected features now report the kernel's real build outcome.
+
+| Feature | Before | After |
+|---|---|---|
+| 9841 `Chamfer 2` | `occ-topology-unsupported-history` (stale reference) | `feature-kernel-build-failed` (real build refusal) |
+| 5151 `Chamfer 2` / `Chamfer 3` | `occ-topology-unsupported-history` | `advanced-feature-unsupported-kernel-case: OCC chamfer build failed` |
+| 5151 `Extrude 3` | quoted Chamfer 1's stale-reference refusal | quotes the real chamfer build failure |
+
+Pinned in the logic lane (`fillet-chamfer.spec.ts`, real OCC): an untouched edge
+keeps an exact successor claim and is not invalidated, while the consumed edge
+stays unsupported and never receives a fabricated successor.
+
+**Honest residual — tiers do not move.** The lineage gap was real and is closed,
+but it was not the *binding* constraint for any feature in these captures. Every
+affected chamfer now fails one step later, on its own geometry, for a reason the
+kernel owns. Tier counts are unchanged and are reported as such rather than being
+tuned:
+
+| Studio | Before | After |
+|---|---:|---:|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** |
+| Wave-T (all six studios) | all parametric | **all parametric** |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** |
+| Part Studio 1 `9841…` | 10 / 31 / 0 | **10 / 31 / 0** |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** |
+
+#### Remaining baked features, classified
+
+*Needs follow-up (a real next root cause, now visible because the lineage gap no
+longer masks it):*
+- 9841 `Chamfer 2`, 5151 `Chamfer 2` / `3`: the live chamfer **build** fails on
+  the live prefix geometry. This is the next flywheel iteration and is a chamfer
+  *geometry/width-form* question, not a naming one.
+- 9841 `Shell 1`, `Boolean 1`, `Delete part 1`, `Split 1` and the extrudes
+  quoting `baked-body-assetMissing`: the probe cannot rebuild a prefix that
+  contains a bake checkpoint because the checkpoint's geometry asset is not
+  materialized in the probe session (`materializeBake: false`). This is a probe
+  *session* limitation, not a topology-evidence gap, and it is what the generic
+  `topology-history-evidence-missing` copy is currently hiding.
+- 5151 `Fillet 2`: honest `topology-reference-no-match` — the captured `JIR` edge
+  agrees with no live candidate on the analytic gates (per-candidate rejections
+  are preserved in `reasonDetail`).
+
+*Honestly unresolvable with this capture set:*
+- 9841 `Extrude 10` / `11` / `15` / `16`, 5151 `Extrude 6` / `7`, d3cd9
+  `Extrude 8`: `extrude-start-extent-unsupported`. BLIND start offsets have no
+  sign ground truth here; guessing would displace geometry.
+
+*Excluded scope (unchanged):*
+- 9841 `Extrude 4` and d3cd9 `Extrude 4`: `extrude-body-type-unsupported`
+  (SURFACE), permanently baked.
+- `Split 1` (both studios), 9841 `Sketch 3` / `4`, d3cd9 `Sketch 7` / `8` +
+  `Extrude 8`, and their direct dependents.
+
+#### X.5 face-backed sketches: not attempted, and why
+
+9841 `Sketch 2` / `5` / `6` / `9` / `10` and `Cutter` remain
+`needs-history-probe`. Promotion requires a live body face to resolve against,
+and in this capture every one of those sketches sits **behind** a prefix the
+probe cannot currently rebuild (the `baked-body-assetMissing` class above).
+Wiring durable `SketchPlaneSupportRef` onto live faces without first fixing that
+would either resolve against a body apply never presents, or fabricate an
+`owningFeatureId`. Both are excluded by the ground rules, so X.5 stays open with
+its blocker now precisely named rather than being closed on a guess.
+
+#### Verdicts
+
+- **X.9.2 (chamfer/fillet lineage):** the diagnosed defect is **fixed and pinned**.
+  It did not raise tiers in these captures; the next blockers are named above.
+- **X.5 (face-backed sketches):** **open**, blocked on probe-session checkpoint
+  materialization rather than on matching.
+
+Validation: `bun run lint`, `bun run build`, `bun run test` (logic + UI +
+static), and `bun run test:e2e` (**67 passed / 0 failed**, real bundles, clean
+port 3123) are all green.
