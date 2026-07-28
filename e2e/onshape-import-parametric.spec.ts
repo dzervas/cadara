@@ -209,31 +209,37 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // contract's `sketchPointOffset` start extent. With the correct 120 mm body
   // live, `Chamfer 1`'s captured edge finally matches its live edge exactly.
   //
-  // `Chamfer 2` stays baked honestly: `Chamfer 1`'s conservative stage history
-  // invalidates the edges it selects, so the live kernel refuses it. The probe
-  // now applies apply's own acceptance rule, so review reports that refusal
-  // instead of promoting a feature commit would reject (which used to abort the
-  // whole studio). Shell 1 likewise fails apply-time rematch and is contained.
-  expect(reviewText).toContain("10 parametric, 31 baked, 0 geometry-only features.");
+  // `Chamfer 2` is now parametric too. It selects `Chamfer 1`'s own boundary
+  // edges, which no builder history names: `BRepFilletAPI::Generated` answers
+  // with the chamfer SURFACE only. Those edges are now identified by the faces
+  // they bound (exact combinatorial identity), so the rebuild keeps them live
+  // instead of refusing them with `occ-topology-unsupported-history`.
+  //
+  // `Shell 1` still fails apply-time rematch and is contained, which is what now
+  // gates `Extrude 2` and the face-backed sketches behind it.
+  expect(reviewText).toContain("11 parametric, 30 baked, 0 geometry-only features.");
   expect(reviewText).toMatch(/Extrude 1\s+parametric/);
   expect(reviewText).toMatch(/Chamfer 1\s+parametric/);
+  expect(reviewText).toMatch(/Chamfer 2\s+parametric/);
   expect(reviewText).toMatch(
-    /Chamfer 2\s+baked \(suppressed\) — [^\n]*occ-topology-unsupported-history/,
+    /Shell 1\s+baked \(suppressed\) — [^\n]*topology reference could not be rematched while applying/,
   );
-  // `Split 1` is excluded scope and now cascades behind `Chamfer 2`, which fails
-  // earlier in source order. Assert only that it stays baked and suppressed; the
-  // quoted diagnostic names whichever upstream feature the kernel refused first.
+  // `Split 1` is excluded scope and cascades behind an earlier failure. Assert
+  // only that it stays baked and suppressed; the quoted diagnostic names
+  // whichever upstream feature the kernel refused first.
   expect(reviewText).toMatch(/Split 1\s+baked \(suppressed\) —/);
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect.soft(imported.snapshotDiagnosticsCount).toBe(0);
   expect.soft(imported.featureIds).toEqual([
     "feature_plane-1",
-    // Both promoted features reach the committed timeline: the extrude built
-    // between its authored start plane and its sketch-point terminator, and the
-    // chamfer that consumes the resulting 120 mm edge.
+    // Every promoted feature reaches the committed timeline: the extrude built
+    // between its authored start plane and its sketch-point terminator, the
+    // chamfer that consumes the resulting 120 mm edge, and the chamfer that
+    // consumes the first chamfer's own generated boundary edges.
     "feature_extrude-1",
     "feature_chamfer-1",
+    "feature_chamfer-2",
     "feature_bakedBody-1",
   ]);
   expect.soft(imported.selectableTargets).toEqual(
@@ -255,6 +261,11 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
 
   expect.soft(meanPixelDelta(beforeGeometry, afterGeometry)).toBeGreaterThan(0.05);
   expect.soft(rebuilt.snapshotDiagnosticsCount).toBe(0);
+  // Upstream-edit proof for the newly promoted generated-topology class: the
+  // `walls` edit rebuilds the whole timeline, so `Chamfer 2`'s reference to
+  // `Chamfer 1`'s generated boundary edges must resolve again from the adjacency
+  // claims alone. Losing it would drop the feature instead of raising an alert.
+  expect.soft(rebuilt.featureIds).toContain("feature_chamfer-2");
   expect.soft(rebuilt.selectableTargets).toEqual(
     expect.arrayContaining(PART_STUDIO_BAKED_BODIES),
   );
