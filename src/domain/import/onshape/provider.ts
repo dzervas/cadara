@@ -162,6 +162,18 @@ export interface OnshapeImportSelections {
   demotedFeatureIds: string[];
 }
 
+/**
+ * Tolerance for every captured→live topology match in a review. A rebuilt live
+ * body reproduces captured Onshape geometry to well under a micron but not to
+ * the bit, so the same tolerance must be used everywhere the two are compared —
+ * and, critically, review must not match more strictly than the apply-time
+ * selector it emits, or it rejects faces apply would accept.
+ */
+const LIVE_TOPOLOGY_MATCH_TOLERANCE = {
+  ...DEFAULT_MATCH_TOLERANCE,
+  linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01),
+};
+
 function decodeBundle(source: ResolvedImportSource): OnshapeCaptureBundle | null {
   let parsed: unknown;
   try {
@@ -942,16 +954,46 @@ function describeSketchPlaneMatchFailure(
   const prefix = `live prefix ${liveSignatures.length}: ${
     [...census].map(([key, count]) => `${key}x${count}`).join(",") || "empty"
   }`;
-  const wanted = `sketch plane wants ${captured.entityClass}/${captured.geometryType}`;
+  const liveByKey = new Map(
+    liveSignatures.map((signature) => [referenceKey(signature.reference), signature]),
+  );
+  const frameOf = (reference: DurableRef): string => {
+    const signature = liveByKey.get(referenceKey(reference));
+    return signature ? describePlaneFrame(signature) : "";
+  };
+  const wanted = `sketch plane wants ${captured.entityClass}/${captured.geometryType}${
+    describePlaneFrame(captured)
+  }`;
   const body =
     match.kind === "ambiguous"
       ? `matched ${match.candidates.length} live faces, none uniquely: ${match.candidates
           .map((entry) => `${durableRefLabel(entry.reference)}@${entry.score}`)
           .join(" | ")}`
       : `no live face matched; rejected ${match.rejected
-          .map((entry) => `${durableRefLabel(entry.reference)}: ${entry.reasons.join(",")}`)
+          .map(
+            (entry) =>
+              `${durableRefLabel(entry.reference)}: ${entry.reasons.join(",")}${
+                frameOf(entry.reference)
+              }`,
+          )
           .join(" | ") || "nothing (the live prefix exposed no candidates)"}`;
   return [wanted, body, prefix].join(" || ");
+}
+
+/** Diagnostic-only plane frame summary; empty for anything that is not a plane. */
+function describePlaneFrame(
+  signature: OnshapeGeometricSignature | HistoryProbeTopologySignature,
+): string {
+  if (signature.geometryType.toLowerCase() !== "plane") return "";
+  const data = signature.definingData ?? {};
+  const round = (value: unknown): string =>
+    Array.isArray(value) && value.length === 3
+      ? `[${value.map((entry) => (typeof entry === "number" ? entry.toFixed(4) : "?")).join(",")}]`
+      : "none";
+  const box = signature.boundingBox
+    ? ` box=${round(signature.boundingBox.low)}..${round(signature.boundingBox.high)}`
+    : "";
+  return ` (origin=${round(data.origin)} normal=${round(data.normal)}${box})`;
 }
 
 function durableRefLabel(reference: DurableRef): string {
@@ -1370,10 +1412,7 @@ async function activateProbeBackedPlanning(input: {
         captureFrameToWorld,
         parametricReframe,
       );
-      const topologyTolerance = {
-        ...DEFAULT_MATCH_TOLERANCE,
-        linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01),
-      };
+      const topologyTolerance = LIVE_TOPOLOGY_MATCH_TOLERANCE;
       const topologyResolutionInput = {
         consumerFeatureId: candidate.onshapeFeatureId,
         queries: queryRead.refs,
@@ -1632,7 +1671,13 @@ async function activateProbeBackedPlanning(input: {
             : "The sketch feature declares no resolvable sketch-plane query id.",
         );
       }
-      const match = matchSignature(capturedSignature, probeSignatures);
+      // Match with the same live-topology tolerance this selector carries into
+      // apply. Reviewing more strictly than apply rejects faces apply accepts.
+      const match = matchSignature(
+        capturedSignature,
+        probeSignatures,
+        LIVE_TOPOLOGY_MATCH_TOLERANCE,
+      );
       if (match.kind !== "unique") {
         return bakeSketchWithDetail(
           describeSketchPlaneMatchFailure(match, capturedSignature, probeSignatures),
@@ -1656,10 +1701,7 @@ async function activateProbeBackedPlanning(input: {
         kind: "topologyOf",
         expectedKind: "face",
         capturedSignature,
-        tolerance: {
-          ...DEFAULT_MATCH_TOLERANCE,
-          linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01),
-        },
+        tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
         source: {
           consumerFeatureId: featurePlan.onshapeFeatureId,
           parameterId: "sketchPlane",
@@ -2491,10 +2533,7 @@ async function buildPreparedActions(input: {
             capturedSignature: normalizeOnshapeTopologySignature(
               binding.capturedSignature,
             ),
-            tolerance: {
-              ...DEFAULT_MATCH_TOLERANCE,
-              linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01),
-            },
+            tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
             source: {
               consumerFeatureId: boundaryFeatureId,
               parameterId: "checkpointBody",
