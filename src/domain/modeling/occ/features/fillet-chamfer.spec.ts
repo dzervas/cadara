@@ -384,9 +384,8 @@ test("executeChamferFeature keeps untouched topology in its stage lineage", asyn
 // `BRepFilletAPI::Generated` is the only exact answer for a generated entity,
 // and it exists solely while the builder that produced the committed shape is
 // alive. This exercises the two-offset width form, which builds in JS; the
-// equal-offset form commits through the native transaction, whose builder the
-// shim destroys and whose history payload enumerates prior subshapes only, so
-// it still has no generated-entity claim to make.
+// native equal-offset form carries the same attribution through the shim's own
+// `generated` history records and is pinned separately below.
 test("executeChamferFeature claims producer identity for generated topology", async () => {
   const oc = await loadCustomOpenCascadeForTest();
 
@@ -520,4 +519,101 @@ test("executeChamferFeature claims producer identity for generated topology", as
     )?.reason,
     "A producer key reaching two successors is many, and must be reported ambiguous rather than resolved.",
   ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous);
+});
+
+// Lane: logic (per docs/testing.md — exported OCC feature-execution behavior in
+// src/domain/modeling, proven through the real kernel with pure inputs).
+// Seam: `executeChamferFeature`'s topology-stage lineage on the NATIVE
+// equal-offset transaction path, whose `BRepFilletAPI` the shim destroys. Its
+// producer identity can therefore only arrive through the shim's own
+// `reason: "generated"` history records, parsed by `collectNativeGeneratedClaims`
+// and keyed identically to the JS builder path. This pins the whole native
+// round trip end to end: the equal-offset form 9841 `Chamfer 1` and 5151
+// `Chamfer 1` actually use must claim the face it generates and keep that face
+// live across an upstream edit.
+test("executeChamferFeature claims producer identity through native generated history", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+
+  const chamferBox = (distance: number) => {
+    const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 2, 2, 2);
+    box.Build(new oc.Message_ProgressRange_1());
+    const body = trackNewSolidBody(oc, {
+      bodyId: "body_native_generated_lineage" as BodyId,
+      label: "body_native_generated_lineage",
+      ownerFeatureId: "feature_native_generated_lineage_seed" as FeatureId,
+      shape: box.Shape(),
+    });
+    const result = executeChamferFeature(
+      createOccAuthoringState(oc, { bodies: [body] }),
+      "feature_native_generated_lineage" as FeatureId,
+      chamferDefinition(body.bodyId, body.topology.edgeIds[0]!, {
+        widthForm: createLiteralAuthoredValue("equalOffsets"),
+        distance: createLiteralAuthoredValue(distance),
+      }),
+    );
+    return {
+      body,
+      output: result.topologyStage!.outputs.get(body.bodyId)!,
+      replacement: result.bodies.find(
+        (candidate) => candidate.bodyId === body.bodyId,
+      )!,
+      invalidations: result.historyInvalidations,
+    };
+  };
+
+  const original = chamferBox(0.3);
+  assertNativeHistoryDidNotFallBack(
+    original.invalidations,
+    "The equal-offset chamfer",
+  );
+
+  const generatedFaceIds = original.replacement.topology.faceIds.filter(
+    (faceId) => !original.body.topology.faceIds.includes(faceId),
+  );
+  expect(
+    generatedFaceIds.length,
+    "A single-edge chamfer must generate exactly one face for this pin to mean anything.",
+  ).toBe(1);
+  const generatedFaceId = generatedFaceIds[0]!;
+
+  const producerEntries = [...original.output.sourceTargets].filter(([key]) =>
+    key.startsWith("generated-from:"),
+  );
+  expect(
+    producerEntries.map(([key]) => key),
+    "The native transaction's `generated` history records must reach the topology stage as producer keys; an empty set means the Wasm shim emitted none.",
+  ).toEqual([
+    `generated-from:feature_native_generated_lineage:body_native_generated_lineage:edge:${original.body.topology.edgeIds[0]}:generated-face`,
+  ]);
+  expect(
+    producerEntries[0]![1],
+    "The producer key must claim exactly the face the chamfer generated.",
+  ).toEqual([
+    {
+      kind: "face",
+      bodyId: original.body.bodyId,
+      faceId: generatedFaceId,
+    },
+  ]);
+
+  // An upstream edit must reproduce the same key, or the downstream reference to
+  // the generated face is lost on rebuild.
+  const rebuilt = chamferBox(0.45);
+  expect(
+    [...rebuilt.output.sourceTargets.keys()].filter((key) =>
+      key.startsWith("generated-from:"),
+    ),
+    "A rebuild over an edited upstream must reproduce identical native producer keys.",
+  ).toEqual(producerEntries.map(([key]) => key));
+
+  const reconciliation = classifySemanticStageTopology({
+    previous: original.output,
+    current: rebuilt.output,
+  });
+  expect(
+    reconciliation.invalidations.has(
+      `face:${original.body.bodyId}:${generatedFaceId}`,
+    ),
+    "The natively generated chamfer face must survive the rebuild instead of being invalidated as unsupported history.",
+  ).toBe(false);
 });
