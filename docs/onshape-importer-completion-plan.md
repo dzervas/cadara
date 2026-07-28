@@ -2322,3 +2322,181 @@ carrying `generated` records produces the expected
 one-to-one claim, claims nothing when two sources reach one entity, claims
 nothing when one record names two entities, and never invalidates the attributed
 prior entity.
+
+### Item-D follow-up: the regenerated Wasm, and the first cascade promotion
+
+**The rebuilt Wasm works, and it moved a tier for the first time in three
+iterations: 9841 `Chamfer 2` is parametric.** It took the native records *plus*
+one more exact identity the kernel cannot supply.
+
+#### Wasm sanity: the shim change is live and well formed
+
+The full logic suite for `src/domain/modeling` + `src/domain/import` is green
+(74 files / 397 tests) against the regenerated `public/cadara-occ.wasm`, and a
+real-OCC scratch harness over the native `EQUAL_OFFSETS` chamfer transaction
+confirms the payload directly. For one chamfer on one edge of a box:
+
+| history reason | records |
+|---|---:|
+| `unique-successor` | 10 |
+| `deleted` | 16 |
+| **`generated`** | **1** |
+
+The single `generated` record is exactly the intended attribution — target: the
+chamfered edge, successor: the chamfer face, of a *different* kind than its
+target — and it reaches `executeChamferFeature`'s topology stage as
+`generated-from:<feature>:<body>:edge:<priorEdgeId>:generated-face`. Nothing is
+malformed and no shim change is outstanding. Pinned in the logic lane
+(`fillet-chamfer.spec.ts`, real OCC, seam: `executeChamferFeature` on the native
+equal-offset path): the producer key exists, claims exactly the generated face,
+reproduces byte-identically across an upstream parameter edit, and
+`classifySemanticStageTopology` keeps that face live across the rebuild.
+
+#### The honest gap the Wasm could not close, and the exact fix
+
+`BRepFilletAPI::Generated` answers with the chamfer/fillet **surface only**. The
+shim faithfully forwards exactly what the builder knows, so of the 9 entities a
+single chamfer creates, the payload names **1**:
+
+| created entity | count | claimed after the Wasm rebuild |
+|---|---:|---:|
+| faces | 1 | 1 |
+| edges | 4 | **0** |
+| vertices | 4 | **0** |
+
+And 9841 `Chamfer 2` selects an **edge**. The X.9.3 flywheel was extended to name
+the refused durable target in a probe refusal (the authored-field message says
+only "edge selection is incorrect"), which pinned it to one entity:
+`edge_body_feature_extrude-1_g7965235ff6189076`, invalidated with
+`occ-topology-unsupported-history` — the reason reserved for an entity present in
+the live body that carries no source key at all. Deleted and ambiguous entities
+own different reason codes, so the class was identified by exclusion using only
+reasons the kernel itself owns.
+
+There is no kernel answer for those edges and vertices, and inventing one from
+geometry was excluded. The one exact route left is **combinatorial**: a
+subtopology is uniquely determined by the faces it bounds, and after the two
+existing passes every one of those faces already carries a stage claim. So a
+created edge/vertex is now keyed by its bounding faces' own claim keys:
+
+```
+generated-from:<owner>:<body>:adjacent(<sorted adjacent claim keys>):<role>
+```
+
+No coordinates, no tolerance, and no traversal order participate; the input is
+the shape's topology graph. Honesty rules, all pinned: a bounding face without a
+claim makes the signature unreproducible, so the entity stays unclaimed; a
+signature reached by two entities is many, so neither claims it; an entity the
+exact passes already claimed is never overridden; and adjacency claims never run
+for faces (`Generated` owns those).
+
+Pinned in the logic lane (`fillet-chamfer.spec.ts`, real OCC): a native
+equal-offset chamfer claims all 4 created edges and all 4 created vertices, an
+upstream parameter edit reproduces identical adjacency keys, every one of those
+entities survives `classifySemanticStageTopology` across that rebuild, nothing
+previously claimed is disturbed (`invalidations.size === 0`), and an unsupported
+adjacency key still invalidates its entity honestly.
+
+#### Cascade re-walk (real browser gate, clean port 3123)
+
+| Studio | Before | After |
+|---|---:|---:|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** |
+| Wave-T (all six studios) | all parametric | **all parametric** |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** |
+| Part Studio 1 `9841…` | 10 / 31 / 0 | **11 / 30 / 0** |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** |
+
+9841 per-feature outcomes:
+
+| Feature | Before | After |
+|---|---|---|
+| `Chamfer 2` | `occ-topology-unsupported-history` (refused `edge_…g7965235ff6189076`) | **parametric**, committed as `feature_chamfer-2` |
+| `Shell 1` | `topology-apply-rematch-failed` (no detail) | same code, now with detail: `wants body for JND; live match noMatch \|\| rejected nothing \|\| live prefix 0: empty` |
+| `Chamfer 3` / `4` | quoted `Chamfer 2`'s refusal | own honest `topology-reference-no-match` (`J0x`, `J2J`) |
+| `Boolean 1`, `Delete part 1` | quoted `Chamfer 2`'s refusal | own honest `topology-reference-no-match` (`JbH`, `J5D`) against the live baked bodies |
+| `Extrude 2` | quoted `Chamfer 2`'s refusal | `extrude-extent-topology-unresolved` behind `Shell 1` |
+| face sketches (`Sketch 2`/`5`/`6`/`9`/`10`, `Cutter`) | live prefix 39 signatures | live prefix **61** signatures (13 planar faces), still no face of the owning body |
+
+The upstream-edit proof is in the browser gate: the `walls` variable edit
+rebuilds the whole committed timeline and `feature_chamfer-2` survives it with
+zero snapshot diagnostics, which is only possible if the adjacency claims
+re-derive identically through the rebuild.
+
+5151 and d3cd9 did not move and their pinned reasons are unchanged: 5151
+`Chamfer 1`/`2` are `topology-apply-rematch-failed`, `Chamfer 3` and `Fillet 2`
+are `topology-reference-no-match` (`Jcl`, `JIR`), `Boolean 1` quotes `Extrude 4`'s
+real kernel build failure, and d3cd9's `Extrude 5`/`6`/`7` are all
+`downstream-of-baked` behind the excluded `Sketch 7`/`8`. 5151 `Extrude 6`/`7`
+stay `extrude-start-extent-unsupported`; their producer sketches did not become
+live, so nothing unlocked there.
+
+#### X.5: still open, with a new and much more specific blocker
+
+No `SketchPlaneSupportRef` wiring was landed, and the reason is again evidence
+rather than assumption. With `Chamfer 2` live the face-sketch live prefix grew
+from 39 to 61 signatures, but it still contains exactly one body
+(`body_feature_extrude-1`): every one of its 13 planar faces is rejected on
+`normal-angle` / `plane-offset` / `bounding-box` gates, which is the correct
+answer for faces of the wrong body. The sketches are authored on faces of the
+body `Extrude 2` produces, and `Extrude 2` is baked behind **`Shell 1`**.
+
+So X.5's blocker moved from 9841 `Chamfer 2` to 9841 `Shell 1`, and the flywheel
+now names `Shell 1`'s cause precisely. The apply-time rematch detail is new this
+iteration (`TopologyApplyRematchError` carries a verbatim zero/one/many detail
+that the contained bake preserves), and it says the match ran against an **empty
+live prefix**: `live prefix 0: empty`, `rejected nothing`. That is not a matching
+failure. `deriveLiveBodySignatures` reported `available` — the unavailable branch
+would now print its own diagnostics verbatim instead of degrading silently to a
+no-match — so the snapshot that resolution ran against genuinely contained no
+bodies at all. `Shell 1`'s deferred `parts`/`JND` body selector is therefore being
+resolved against a session that has not built the prefix, which is an ordering
+question at the deferred-materializer seam, not a naming or tolerance one. It is
+recorded as the single next root cause rather than worked around.
+
+Logic-lane pin (`provider.spec.ts`, seam: review's contained apply-rematch bake):
+a `TopologyApplyRematchError` carrying a detail must surface it verbatim as the
+baked plan's `reasonDetail`.
+
+#### Remaining bakes, classified
+
+*Needs follow-up (a real next root cause, each now named):*
+- 9841 `Shell 1`: `topology-apply-rematch-failed` against an empty live prefix
+  (above). Gates `Extrude 2` and all of X.5.
+- 9841 `Chamfer 3` / `4`, `Boolean 1`, `Delete part 1`: honest
+  `topology-reference-no-match`. Their captured entities live on bodies later
+  extrudes produce, so they cascade behind the extrude gaps rather than behind a
+  lineage gap.
+- 9841 `Extrude 3` / `15` / `16`: `extrude-start-extent-unsupported` even though
+  the census lists them as `startOffsetBound=ENTITY`. `Extrude 1` proves that
+  form is supported, so these three author something the exact `qCompressed`
+  sketch-point reader does not accept; worth one flywheel iteration.
+- 5151 `Chamfer 1` / `2`: `topology-apply-rematch-failed` (same class as 9841
+  `Shell 1`). 5151 `Chamfer 3` / `Fillet 2`: honest `topology-reference-no-match`.
+- 5151 `Boolean 1` / `Extrude 3` / `8`: quote `Extrude 4`'s real kernel build
+  failure.
+
+*Honestly unresolvable with this capture set:*
+- 9841 `Extrude 10` / `11`, 5151 `Extrude 6` / `7`, d3cd9 `Extrude 8`:
+  BLIND start offsets have no sign ground truth here.
+
+*Excluded scope (unchanged):*
+- 9841 `Extrude 4` and d3cd9 `Extrude 4`: `extrude-body-type-unsupported`
+  (SURFACE), permanently baked.
+- `Split 1` (both studios), 9841 `Sketch 3` / `4`, d3cd9 `Sketch 7` / `8` +
+  `Extrude 8`, and their direct dependents (d3cd9 `Extrude 5` / `6` / `7` are
+  `downstream-of-baked` behind `Sketch 7` / `8`).
+
+#### Verdicts (updated)
+
+- **X.9.2 (generated-entity producer identity):** **closed.** The native records
+  are live and pinned, and the half `Generated` cannot answer — created edges and
+  vertices — is now named by exact bounding-face identity. This is the change that
+  finally promoted 9841 `Chamfer 2` and its committed timeline entry.
+- **X.5 (face-backed sketches):** **open**, no wiring landed, blocker moved from
+  9841 `Chamfer 2` to 9841 `Shell 1`'s empty-live-prefix rematch. Promoting
+  against a body apply never presents, or fabricating an `owningFeatureId`, both
+  stay excluded.
+
+Validation: `bun run lint`, `bun run build`, `bun run test` (logic + UI + static),
+and `bun run test:e2e` (67 passed / 0 failed, real bundles, clean port 3123).
