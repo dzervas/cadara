@@ -189,6 +189,25 @@ export function formatExactSuccessorTopologySourceKey(input: {
 }
 
 /**
+ * Producer-identity key for a subtopology a local operation CREATED.
+ *
+ * A generated entity has no prior subtopology to be a successor of, so it can
+ * only be named after the feature that produced it plus the exact source the
+ * kernel's own `Generated` history attributes it to. Both halves come from the
+ * builder, never from geometry, so two executions of the same feature over the
+ * same source keys reproduce the same key.
+ */
+export function formatGeneratedProducerTopologySourceKey(input: {
+  featureId: FeatureId;
+  bodyId: BodyId;
+  sourceKind: "face" | "edge" | "vertex";
+  sourcePublicId: FaceId | EdgeId | VertexId;
+  role: string;
+}) {
+  return `generated-from:${input.featureId}:${input.bodyId}:${input.sourceKind}:${input.sourcePublicId}:${input.role}`;
+}
+
+/**
  * Build stage lineage from a feature's own exact kernel history successors.
  *
  * Applies to any feature that replaces one body and reports, per prior
@@ -197,12 +216,19 @@ export function formatExactSuccessorTopologySourceKey(input: {
  * untouched faces/edges/vertices one-to-one). Anything the kernel left
  * ambiguous, deleted, or unclaimed becomes an unsupported source key, so a
  * later rebuild invalidates it instead of guessing.
+ *
+ * `generatedTargetsBySourceKey` carries the complementary half: subtopology the
+ * operation CREATED, which is a successor of nothing and would otherwise reach
+ * rebuild with no source key at all. Those keys claim the producing feature's
+ * identity via `formatGeneratedProducerTopologySourceKey`, and the caller must
+ * derive them from builder history only.
  */
 export function createExactSuccessorTopologyStage(input: {
   featureId: FeatureId;
   sourceBody: OccTrackedBody;
   outputBody: OccTrackedBody;
   successorsBySourceKey: ReadonlyMap<string, DurableRef>;
+  generatedTargetsBySourceKey?: ReadonlyMap<OccTopologySourceKey, DurableRef>;
 }): OccFeatureTopologyStage {
   const sourceTargets = new Map<OccTopologySourceKey, DurableRef[]>();
   const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
@@ -240,6 +266,30 @@ export function createExactSuccessorTopologyStage(input: {
 
     claimedTargetKeys.set(targetKey, sourceKey);
     sourceTargets.set(sourceKey, [successor]);
+  }
+
+  for (const [sourceKey, target] of input.generatedTargetsBySourceKey ?? []) {
+    if (
+      !isOutputSubtopologyTarget(target, input.outputBody.bodyId) ||
+      sourceTargets.has(sourceKey)
+    ) {
+      unsupportedSourceKeys.add(sourceKey);
+      continue;
+    }
+
+    const targetKey = getOccDurableRefKey(target);
+    const claimedBy = claimedTargetKeys.get(targetKey);
+    if (claimedBy) {
+      // A result entity cannot both survive a prior entity and be newly
+      // generated, and two producer claims on one entity are ambiguous.
+      unsupportedSourceKeys.add(sourceKey);
+      unsupportedSourceKeys.add(claimedBy);
+      sourceTargets.delete(claimedBy);
+      continue;
+    }
+
+    claimedTargetKeys.set(targetKey, sourceKey);
+    sourceTargets.set(sourceKey, [target]);
   }
 
   return {

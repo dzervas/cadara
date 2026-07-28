@@ -90,7 +90,7 @@ function registerSourceShapes(
   }
 }
 
-function listOccShapes(
+export function listOccShapes(
   oc: OpenCascadeInstance,
   list: InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>,
 ) {

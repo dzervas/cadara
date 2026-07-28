@@ -15,6 +15,7 @@ import {
   executeFilletFeature,
 } from "@/domain/modeling/occ/features/fillet-chamfer";
 import { toGpPnt } from "@/domain/modeling/occ/planes";
+import { classifySemanticStageTopology } from "@/domain/modeling/occ/topology-naming";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   OCC_REFERENCE_INVALIDATION_REASONS,
@@ -370,4 +371,153 @@ test("executeChamferFeature keeps untouched topology in its stage lineage", asyn
     claimedSourceIds.has(chamferedEdgeId),
     "The consumed edge must never receive an exact successor claim.",
   ).toBe(false);
+});
+
+// Lane: logic (per docs/testing.md — exported OCC feature-execution behavior in
+// src/domain/modeling, proven through the real kernel with pure inputs).
+// Seam: `executeChamferFeature`'s topology-stage lineage for subtopology the
+// chamfer GENERATES, reconciled across a rebuild by
+// `classifySemanticStageTopology`. Exact-successor lineage can only name prior
+// subtopology, so the chamfer's own surface reached rebuild with no source key
+// and was invalidated as `occ-topology-unsupported-history` — which is what
+// refused 9841 `Chamfer 2`, whose edges are `Chamfer 1`'s own boundary.
+// `BRepFilletAPI::Generated` is the only exact answer for a generated entity,
+// and it exists solely while the builder that produced the committed shape is
+// alive. This exercises the two-offset width form, which builds in JS; the
+// equal-offset form commits through the native transaction, whose builder the
+// shim destroys and whose history payload enumerates prior subshapes only, so
+// it still has no generated-entity claim to make.
+test("executeChamferFeature claims producer identity for generated topology", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+
+  const chamferBox = (distance2: number) => {
+    const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 2, 2, 2);
+    box.Build(new oc.Message_ProgressRange_1());
+    const body = trackNewSolidBody(oc, {
+      bodyId: "body_generated_lineage" as BodyId,
+      label: "body_generated_lineage",
+      ownerFeatureId: "feature_generated_lineage_seed" as FeatureId,
+      shape: box.Shape(),
+    });
+    const result = executeChamferFeature(
+      createOccAuthoringState(oc, { bodies: [body] }),
+      "feature_generated_lineage" as FeatureId,
+      chamferDefinition(body.bodyId, body.topology.edgeIds[0]!, {
+        widthForm: createLiteralAuthoredValue("twoOffsets"),
+        distance1: createLiteralAuthoredValue(0.2),
+        distance2: createLiteralAuthoredValue(distance2),
+      }),
+    );
+    return {
+      body,
+      output: result.topologyStage!.outputs.get(body.bodyId)!,
+      replacement: result.bodies.find(
+        (candidate) => candidate.bodyId === body.bodyId,
+      )!,
+    };
+  };
+
+  const original = chamferBox(0.35);
+  const claimedTargetIds = new Set(
+    [...original.output.sourceTargets.values()]
+      .flat()
+      .map((target) =>
+        target.kind === "face"
+          ? target.faceId
+          : target.kind === "edge"
+            ? target.edgeId
+            : target.kind === "vertex"
+              ? target.vertexId
+              : null,
+      ),
+  );
+  const producerKeys = [...original.output.sourceTargets.keys()].filter((key) =>
+    key.startsWith("generated-from:"),
+  );
+
+  expect(
+    producerKeys.length,
+    "A chamfer must claim producer identity for the topology it generated, or a downstream feature selecting it is refused on rebuild.",
+  ).toBeGreaterThan(0);
+
+  const generatedFaceIds = original.replacement.topology.faceIds.filter(
+    (faceId) => !original.body.topology.faceIds.includes(faceId),
+  );
+  expect(
+    generatedFaceIds.every((faceId) => claimedTargetIds.has(faceId)),
+    "Every face the chamfer generated must carry a stage source key.",
+  ).toBe(true);
+
+  // Determinism across an upstream edit: the same feature over the same source
+  // keys must reproduce the same producer keys, so a downstream reference to a
+  // generated entity still resolves after the rebuild.
+  const rebuilt = chamferBox(0.5);
+  const rebuiltProducerKeys = [...rebuilt.output.sourceTargets.keys()].filter(
+    (key) => key.startsWith("generated-from:"),
+  );
+  expect(
+    rebuiltProducerKeys.sort(),
+    "A rebuild over an edited upstream must reproduce identical producer keys; otherwise the downstream reference is lost.",
+  ).toEqual(producerKeys.sort());
+
+  const reconciliation = classifySemanticStageTopology({
+    previous: original.output,
+    current: rebuilt.output,
+  });
+  for (const faceId of generatedFaceIds) {
+    expect(
+      reconciliation.invalidations.has(
+        `face:${original.body.bodyId}:${faceId}`,
+      ),
+      "A generated face proved by one producer key on both sides must survive the rebuild instead of being invalidated.",
+    ).toBe(false);
+  }
+
+  // Zero/many stay honest: an unsupported producer key must invalidate, and a
+  // key claiming two successors must be ambiguous, never guessed.
+  const generatedFaceId = generatedFaceIds[0]!;
+  const producerKeyForFace = [...original.output.sourceTargets].find(
+    ([key, targets]) =>
+      key.startsWith("generated-from:") &&
+      targets.some(
+        (target) => target.kind === "face" && target.faceId === generatedFaceId,
+      ),
+  )![0];
+
+  const unsupported = classifySemanticStageTopology({
+    previous: original.output,
+    current: {
+      ...rebuilt.output,
+      unsupportedSourceKeys: new Set([producerKeyForFace]),
+    },
+  });
+  expect(
+    unsupported.invalidations.get(
+      `face:${original.body.bodyId}:${generatedFaceId}`,
+    )?.reason,
+    "An unsupported producer key must invalidate the generated entity honestly.",
+  ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory);
+
+  const ambiguous = classifySemanticStageTopology({
+    previous: original.output,
+    current: {
+      ...rebuilt.output,
+      sourceTargets: new Map(rebuilt.output.sourceTargets).set(
+        producerKeyForFace,
+        rebuilt.replacement.topology.faceIds
+          .slice(0, 2)
+          .map((faceId) => ({
+            kind: "face" as const,
+            bodyId: rebuilt.body.bodyId,
+            faceId,
+          })),
+      ),
+    },
+  });
+  expect(
+    ambiguous.invalidations.get(
+      `face:${original.body.bodyId}:${generatedFaceId}`,
+    )?.reason,
+    "A producer key reaching two successors is many, and must be reported ambiguous rather than resolved.",
+  ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous);
 });
