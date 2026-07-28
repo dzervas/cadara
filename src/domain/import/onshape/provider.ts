@@ -977,6 +977,8 @@ async function activateProbeBackedPlanning(input: {
    * single feature that the live kernel rejects at apply cannot abort the studio.
    */
   forcedBakeFeatureIds?: ReadonlySet<string>;
+  /** Verbatim zero/one/many detail per forced bake, when the failure carried one. */
+  forcedBakeReasonDetails?: ReadonlyMap<string, string>;
 }) {
   if (!input.capabilities.history) {
     return { plan: input.plan, probeResult: null };
@@ -997,6 +999,9 @@ async function activateProbeBackedPlanning(input: {
                     tier: "baked" as const,
                     target: { kind: "suppressed" as const },
                     reasonCodes: ["topology-apply-rematch-failed" as const],
+                    reasonDetail:
+                      input.forcedBakeReasonDetails?.get(plan.onshapeFeatureId) ??
+                      plan.reasonDetail,
                     suppressed: true,
                   }
                 : plan,
@@ -1749,6 +1754,7 @@ async function reviewStudio(
   // re-plan; its dependents cascade to baked on the retried probe pass. This keeps
   // one rejected feature from aborting the whole studio import.
   const forcedBakeFeatureIds = new Set<string>();
+  const forcedBakeReasonDetails = new Map<string, string>();
   let activation: Awaited<ReturnType<typeof activateProbeBackedPlanning>>;
   for (;;) {
     try {
@@ -1757,6 +1763,7 @@ async function reviewStudio(
         plan: capturedFramePlan,
         capabilities,
         forcedBakeFeatureIds,
+        forcedBakeReasonDetails,
       });
       break;
     } catch (error) {
@@ -1766,6 +1773,9 @@ async function reviewStudio(
       // loudly rather than looping. Genuine non-topology errors already rethrew.
       if (forcedBakeFeatureIds.has(offendingFeatureId)) throw error;
       forcedBakeFeatureIds.add(offendingFeatureId);
+      if (error.detail) {
+        forcedBakeReasonDetails.set(offendingFeatureId, error.detail);
+      }
     }
   }
   const { plan, probeResult } = activation;
