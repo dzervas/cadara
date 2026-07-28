@@ -208,6 +208,44 @@ export function formatGeneratedProducerTopologySourceKey(input: {
 }
 
 /**
+ * Producer-identity key for subtopology a local operation created that its
+ * builder's `Generated` cannot name.
+ *
+ * `BRepFilletAPI::Generated` answers with the chamfer/fillet SURFACE only; the
+ * boundary edges and corner vertices of that surface are attributed to nothing,
+ * so they reach a rebuild with no source key and are invalidated even though the
+ * kernel built them deterministically. Their identity is nevertheless exact and
+ * available: a subtopology is uniquely determined by the faces it bounds, and
+ * every one of those faces already carries a stage claim. So the key is built
+ * from the adjacent faces' own claim keys, sorted for order independence.
+ *
+ * This is combinatorial identity, not a geometric match: no coordinates, no
+ * tolerance, and no traversal order participate. A signature reached by more
+ * than one entity, or one whose adjacent faces are not all claimed, is left
+ * unclaimed.
+ */
+export function formatGeneratedAdjacencyTopologySourceKey(input: {
+  featureId: FeatureId;
+  bodyId: BodyId;
+  adjacentSourceKeys: readonly OccTopologySourceKey[];
+  role: string;
+}) {
+  const adjacency = [...input.adjacentSourceKeys].sort().join("+");
+  return `generated-from:${input.featureId}:${input.bodyId}:adjacent(${adjacency}):${input.role}`;
+}
+
+/**
+ * One created subtopology plus the faces of the SAME output body that bound it.
+ *
+ * The caller owns the kernel traversal (it holds the live shapes); the stage
+ * builder owns identity, because only it knows which faces carry a claim.
+ */
+export interface OccGeneratedAdjacencyEntry {
+  target: DurableRef;
+  adjacentFaceIds: readonly FaceId[];
+}
+
+/**
  * Build stage lineage from a feature's own exact kernel history successors.
  *
  * Applies to any feature that replaces one body and reports, per prior
@@ -222,6 +260,11 @@ export function formatGeneratedProducerTopologySourceKey(input: {
  * rebuild with no source key at all. Those keys claim the producing feature's
  * identity via `formatGeneratedProducerTopologySourceKey`, and the caller must
  * derive them from builder history only.
+ *
+ * `generatedAdjacency` closes the last gap: created subtopology the builder's
+ * history cannot name at all (the boundary of a chamfer surface). Those entities
+ * are keyed by the claims of the faces that bound them, which is exact
+ * combinatorial identity — see `formatGeneratedAdjacencyTopologySourceKey`.
  */
 export function createExactSuccessorTopologyStage(input: {
   featureId: FeatureId;
@@ -229,6 +272,7 @@ export function createExactSuccessorTopologyStage(input: {
   outputBody: OccTrackedBody;
   successorsBySourceKey: ReadonlyMap<string, DurableRef>;
   generatedTargetsBySourceKey?: ReadonlyMap<OccTopologySourceKey, DurableRef>;
+  generatedAdjacency?: readonly OccGeneratedAdjacencyEntry[];
 }): OccFeatureTopologyStage {
   const sourceTargets = new Map<OccTopologySourceKey, DurableRef[]>();
   const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
@@ -289,6 +333,67 @@ export function createExactSuccessorTopologyStage(input: {
     }
 
     claimedTargetKeys.set(targetKey, sourceKey);
+    sourceTargets.set(sourceKey, [target]);
+  }
+
+  // Adjacency claims run last: they can only name an entity once every face
+  // bounding it already carries a claim, and they must never override one.
+  const adjacencyTargetsBySourceKey = new Map<OccTopologySourceKey, DurableRef>();
+  const droppedAdjacencySourceKeys = new Set<OccTopologySourceKey>();
+  for (const entry of input.generatedAdjacency ?? []) {
+    if (
+      !isOutputSubtopologyTarget(entry.target, input.outputBody.bodyId) ||
+      entry.target.kind === "face" ||
+      entry.adjacentFaceIds.length === 0
+    ) {
+      continue;
+    }
+    const targetKey = getOccDurableRefKey(entry.target);
+    if (claimedTargetKeys.has(targetKey)) {
+      continue;
+    }
+
+    const adjacentSourceKeys: OccTopologySourceKey[] = [];
+    for (const faceId of new Set(entry.adjacentFaceIds)) {
+      const claim = claimedTargetKeys.get(
+        getOccDurableRefKey({
+          kind: "face",
+          bodyId: input.outputBody.bodyId,
+          faceId,
+        }),
+      );
+      if (claim === undefined) {
+        // An unnamed bounding face makes the signature unreproducible, so the
+        // entity stays honestly unclaimed.
+        adjacentSourceKeys.length = 0;
+        break;
+      }
+      adjacentSourceKeys.push(claim);
+    }
+    if (adjacentSourceKeys.length === 0) {
+      continue;
+    }
+
+    const sourceKey = formatGeneratedAdjacencyTopologySourceKey({
+      featureId: input.featureId,
+      bodyId: input.sourceBody.bodyId,
+      adjacentSourceKeys,
+      role: `generated-${entry.target.kind}`,
+    });
+    if (sourceTargets.has(sourceKey) || adjacencyTargetsBySourceKey.has(sourceKey)) {
+      // Two entities share one signature: many, so neither may claim it.
+      adjacencyTargetsBySourceKey.delete(sourceKey);
+      droppedAdjacencySourceKeys.add(sourceKey);
+      continue;
+    }
+    if (droppedAdjacencySourceKeys.has(sourceKey)) {
+      continue;
+    }
+    adjacencyTargetsBySourceKey.set(sourceKey, entry.target);
+  }
+
+  for (const [sourceKey, target] of adjacencyTargetsBySourceKey) {
+    claimedTargetKeys.set(getOccDurableRefKey(target), sourceKey);
     sourceTargets.set(sourceKey, [target]);
   }
 
