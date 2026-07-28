@@ -17,7 +17,7 @@ import {
 } from "./helpers/onshape-import";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
-test.setTimeout(180_000);
+test.setTimeout(600_000);
 test.use({ viewport: { width: 1440, height: 960 } });
 
 const MOUNTS_CONSTRAINED_VERTEX =
@@ -390,7 +390,7 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
     !existsSync(LAPTOP_STAND_BUNDLE_PATH),
     "Real Onshape Laptop Stand capture is not present locally.",
   );
-  test.setTimeout(700_000);
+  test.setTimeout(1_800_000);
   const { reviewText } = await importBundle(page, LAPTOP_STAND_BUNDLE_PATH, true);
   expect(reviewText).toContain("11 parametric, 13 baked, 0 geometry-only features.");
   for (const [label, reason] of [
@@ -398,17 +398,19 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
     ["Chamfer 1", "topology reference could not be rematched while applying"],
     ["Extrude 4", "the modeling kernel could not build this feature against the live prefix"],
     ["Chamfer 2", "topology reference could not be rematched while applying"],
-    // Extrude 6 / 7 author an Onshape `startOffset` start plane (bound ENTITY),
-    // which Cadara's profile-plane-only `startExtent` cannot express yet.
-    ["Extrude 6", "extrude starts at an offset start plane, which is not supported yet"],
+    // Extrude 6 / 7 author an Onshape `startOffset` start plane (bound ENTITY)
+    // over live body topology. The start extent now binds to a durable entity, so
+    // their honest reason is the unresolved start-entity slot behind their baked
+    // producer rather than an unsupported start extent.
+    ["Extrude 6", "could not be resolved as a durable reference"],
     ["Linear pattern 1", "depends on previously baked geometry"],
-    ["Extrude 7", "extrude starts at an offset start plane, which is not supported yet"],
+    ["Extrude 7", "could not be resolved as a durable reference"],
     ["Linear pattern 2", "depends on previously baked geometry"],
     ["Mirror 1", "depends on previously baked geometry"],
     ["Boolean 1", "captured history topology evidence is missing"],
     ["Chamfer 3", "topology reference did not match"],
-    ["Extrude 8", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
-    ["Extrude 3", "extrude up-to or boolean-scope topology could not be resolved as a durable reference"],
+    ["Extrude 8", "could not be resolved as a durable reference"],
+    ["Extrude 3", "could not be resolved as a durable reference"],
   ] as const) {
     expect(reviewText, `${label} must state its honest bake reason.`).toMatch(
       new RegExp(`${label}\\s+baked \\(suppressed\\) — [^\\n]*${escapeRegExp(reason)}`),
@@ -460,7 +462,7 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
     !existsSync(SECOND_PART_STUDIO_BUNDLE_PATH),
     "Real Onshape second Part Studio capture is not present locally.",
   );
-  test.setTimeout(700_000);
+  test.setTimeout(1_800_000);
   const { reviewText } = await importBundle(page, SECOND_PART_STUDIO_BUNDLE_PATH, true);
   expect(reviewText).toContain("16 parametric, 8 baked, 0 geometry-only features.");
   for (const [label, reason] of [
@@ -472,9 +474,10 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
     ["Extrude 6", "depends on previously baked geometry"],
     ["Sketch 8", "requires captured history topology evidence"],
     ["Extrude 7", "depends on previously baked geometry"],
-    // d3cd9's Extrude 8 also authors a `startOffset` start plane, so it now
-    // names that intrinsic reason ahead of its split-dependent cascade.
-    ["Extrude 8", "extrude starts at an offset start plane, which is not supported yet"],
+    // d3cd9's Extrude 8 authors an `ENTITY` start plane over live body topology.
+    // The start extent now binds to a durable entity, so its honest reason is the
+    // unresolved start-entity slot: the feature producing that entity is baked.
+    ["Extrude 8", "could not be resolved as a durable reference"],
   ] as const) {
     expect(reviewText, `${label} must state its honest bake reason.`).toMatch(
       new RegExp(`${label}\\s+baked \\(suppressed\\) — [^\\n]*${escapeRegExp(reason)}`),

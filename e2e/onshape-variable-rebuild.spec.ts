@@ -102,7 +102,7 @@ test("second real Onshape bundle updates walls against the latest revision", asy
   // distinct probe prefix in the kernel during review, and now promotes two more
   // features (`Shell 1`, `Extrude 2`), so each rebuild carries more geometry
   // (~7 min end to end). Budget beyond the file-wide 120 s default.
-  test.setTimeout(900_000);
+  test.setTimeout(2_400_000);
   test.skip(
     !existsSync(PART_STUDIO_BUNDLE_PATH),
     "Second real Onshape capture is not present locally.",

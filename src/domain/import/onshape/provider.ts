@@ -1897,7 +1897,7 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "needs-history-probe": "requires captured history topology evidence",
   "extrude-body-type-unsupported": "only solid extrudes can import as parametric solid features",
   "extrude-default-scope-ambiguous": "default extrude scope affects more than one possible body",
-  "extrude-extent-topology-unresolved": "extrude up-to or boolean-scope topology could not be resolved as a durable reference",
+  "extrude-extent-topology-unresolved": "extrude start-entity, up-to, or boolean-scope topology could not be resolved as a durable reference",
   "extrude-start-extent-unsupported": "extrude starts at an offset start plane, which is not supported yet",
   "sketch-on-probed-face": "sketch is supported on a resolved face",
   "sketch-face-on-checkpoint-body": "sketch plane face exists only on checkpoint-baked body geometry",

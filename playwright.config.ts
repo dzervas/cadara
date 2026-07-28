@@ -30,7 +30,10 @@ export default defineConfig({
     timeout: 1_000,
   },
   fullyParallel: true,
-  workers: 4,
+  // The real-capture import specs each drive a full real-OCC review in their own
+  // browser worker. Four of those at once starves them of CPU, which shows up as
+  // review wait-cap timeouts rather than as real failures.
+  workers: 2,
   retries: 0,
   use: {
     baseURL,

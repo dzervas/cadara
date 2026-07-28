@@ -1130,7 +1130,7 @@ test("src/domain/import/onshape/provider.spec.ts surfaces human-readable review 
   // The new reason code must render dedicated review copy (REVIEW_REASON_COPY is
   // an exhaustive Record<PlanReasonCode, string>, so this also guards the entry).
   expect(JSON.stringify(schema)).toContain(
-    "extrude up-to or boolean-scope topology could not be resolved as a durable reference",
+    "extrude start-entity, up-to, or boolean-scope topology could not be resolved as a durable reference",
   );
 });
 
