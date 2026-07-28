@@ -98,10 +98,11 @@ test("Mounts Transform reference and Chamfer edit preview stay valid", async ({
 test("second real Onshape bundle updates walls against the latest revision", async ({
   page,
 }) => {
-  // The 9841 bundle (~237 MB with full bake-boundary snapshots) runs a
-  // double kernel probe during review (~2.5 min); budget beyond the
-  // file-wide 120 s default, matching onshape-import-parametric's PS1 budget.
-  test.setTimeout(360_000);
+  // The 9841 bundle (~237 MB with full bake-boundary snapshots) rebuilds every
+  // distinct probe prefix in the kernel during review, and now promotes two more
+  // features (`Shell 1`, `Extrude 2`), so each rebuild carries more geometry
+  // (~7 min end to end). Budget beyond the file-wide 120 s default.
+  test.setTimeout(900_000);
   test.skip(
     !existsSync(PART_STUDIO_BUNDLE_PATH),
     "Second real Onshape capture is not present locally.",

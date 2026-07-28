@@ -2,7 +2,10 @@ import { err, ok } from "neverthrow";
 import { expect, test } from "vitest";
 
 import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
-import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
+import {
+  createKernelHistoryProbeSession,
+  createMemoizedHistoryProbe,
+} from "@/domain/import/kernel-history-probe";
 import {
   createOccNativeExactBrepPayloadFromShimPayload,
   parseNativeShimPayloadJson,
@@ -431,4 +434,78 @@ test("import capabilities expose the real kernel history probe when platform com
   await expect(capabilities.history?.evaluateHistoryProbe({ actions: {} })).resolves.toEqual({
     steps: [],
   });
+});
+
+// Probe evaluation rebuilds the prefix in a fresh isolated session, so it is a
+// pure function of the prepared-action payload. Review probes the same prefix
+// many times, and the largest captures cannot afford redundant kernel rebuilds.
+test("memoized history probe evaluates each distinct action payload exactly once", async () => {
+  let evaluations = 0;
+  const memoized = createMemoizedHistoryProbe({
+    async evaluateHistoryProbe(input) {
+      evaluations += 1;
+      return {
+        steps: (input.actions.orderedActions ?? []).map(() => ({
+          status: "rebuilt" as const,
+          signatures: [],
+        })),
+      };
+    },
+  });
+
+  const prefix: ImportPreparedActions = {
+    addDocumentVariables: [{ name: "a" }] as never,
+    orderedActions: [{ kind: "addDocumentVariable", index: 0 }],
+  };
+  const first = await memoized.evaluateHistoryProbe({
+    actions: prefix,
+    consumerFeatureId: "consumer-a",
+  });
+  const second = await memoized.evaluateHistoryProbe({
+    actions: prefix,
+    consumerFeatureId: "consumer-b",
+  });
+  expect(second).toEqual(first);
+  expect(evaluations).toBe(1);
+
+  // A changed plan is a changed payload and must miss the cache.
+  await memoized.evaluateHistoryProbe({ actions: { ...prefix, commitSketches: [] } });
+  expect(evaluations).toBe(2);
+  // The whole-plan verification pass asks for tessellation; that is a different
+  // request and must not be answered from the prefix entry.
+  await memoized.evaluateHistoryProbe({ actions: prefix, includeFinalTessellation: true });
+  expect(evaluations).toBe(3);
+});
+
+// A failed probe is the input to review's containment pass, which exists to
+// change the conditions the probe failed under. Retaining it would freeze the
+// failure and skip the re-probe that proves the contained prefix builds.
+test("memoized history probe never retains a failed evaluation", async () => {
+  let evaluations = 0;
+  const memoized = createMemoizedHistoryProbe({
+    async evaluateHistoryProbe() {
+      evaluations += 1;
+      return evaluations === 1
+        ? {
+            steps: [{
+              status: "failed" as const,
+              diagnostics: [{
+                severity: "error" as const,
+                code: "kernel-history-probe-step-failed",
+                message: "A prefix feature the kernel refuses.",
+              }],
+            }],
+          }
+        : { steps: [{ status: "rebuilt" as const, signatures: [] }] };
+    },
+  });
+  const actions: ImportPreparedActions = {
+    addDocumentVariables: [{ name: "a" }] as never,
+    orderedActions: [{ kind: "addDocumentVariable", index: 0 }],
+  };
+
+  expect((await memoized.evaluateHistoryProbe({ actions })).steps[0]?.status).toBe("failed");
+  expect((await memoized.evaluateHistoryProbe({ actions })).steps[0]?.status).toBe("rebuilt");
+  await memoized.evaluateHistoryProbe({ actions });
+  expect(evaluations).toBe(2);
 });

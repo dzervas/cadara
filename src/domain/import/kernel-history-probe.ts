@@ -33,6 +33,49 @@ export interface KernelHistoryProbeSessionOptions {
   createService?: () => KernelHistoryProbeService & { dispose?: () => void };
 }
 
+/**
+ * Memoize probe evaluations on the exact prepared-action payload they run.
+ *
+ * Each evaluation rebuilds the whole prefix in a fresh isolated session, so it
+ * is a pure function of that payload: the same actions always produce the same
+ * steps and signatures. Review probes the same prefix many times — once per
+ * topology consumer and once per fixed-point iteration — and the largest
+ * captures cannot afford those redundant kernel rebuilds. The cache is keyed on
+ * the payload itself (never on a consumer id or plan revision), so a changed
+ * plan always misses it.
+ *
+ * Only a fully rebuilt evaluation is retained. A failed or throwing evaluation
+ * is the input to review's containment pass, which exists to change the
+ * conditions the probe failed under, so it is always re-evaluated.
+ */
+export function createMemoizedHistoryProbe(
+  history: ImportHistoryProbeCapabilities,
+): ImportHistoryProbeCapabilities {
+  const cache = new Map<string, Promise<HistoryProbeResult>>();
+  return {
+    evaluateHistoryProbe(input) {
+      const key = JSON.stringify({
+        actions: input.actions,
+        includeFinalTessellation: input.includeFinalTessellation ?? false,
+      });
+      const cached = cache.get(key);
+      if (cached) return cached;
+      const pending = history.evaluateHistoryProbe(input).then(
+        (result) => {
+          if (result.steps.some((step) => step.status === "failed")) cache.delete(key);
+          return result;
+        },
+        (error: unknown) => {
+          cache.delete(key);
+          throw error;
+        },
+      );
+      cache.set(key, pending);
+      return pending;
+    },
+  };
+}
+
 export function createKernelHistoryProbeSession(
   options: KernelHistoryProbeSessionOptions,
 ): ImportHistoryProbeCapabilities {
