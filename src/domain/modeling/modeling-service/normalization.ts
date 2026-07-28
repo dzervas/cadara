@@ -342,6 +342,15 @@ export function normalizeExtrudeStartExtent(value: unknown): ExtrudeStartExtent 
     }
     return { kind: "sketchPointOffset", target };
   }
+  if (value.kind === "entityOffset") {
+    const target = assertPrimitiveRef(value.target);
+    if (target.kind !== "edge" && target.kind !== "face") {
+      throw new Error(
+        "An extrude entity start offset requires a durable edge or face target.",
+      );
+    }
+    return { kind: "entityOffset", target };
+  }
   throw new Error("Invalid extrude start extent payload.");
 }
 export function normalizeExtrudeExtent(value: unknown): ExtrudeFeatureExtent {
