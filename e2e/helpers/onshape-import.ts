@@ -24,7 +24,7 @@ export async function importBundle(
   finishSketch = false,
   studioName?: string,
   /** Raise only for captures whose live prefix genuinely builds more solids. */
-  reviewBudgetMs = 600_000,
+  reviewBudgetMs = 1_500_000,
 ) {
   await page.addInitScript(() =>
     Object.defineProperty(globalThis, "showOpenFilePicker", {

@@ -2661,3 +2661,137 @@ step.
 
 Validation: `bun run lint`, `bun run build`, `bun run test` (logic + UI + static),
 and `bun run test:e2e` on a clean port 3123.
+
+### Item-D follow-up: X.5 closes — face-backed sketches promote, and the start
+plane binds to a durable entity
+
+**Four 9841 face-backed sketches are parametric (`Cutter`, `Sketch 7`,
+`Sketch 9`, `Sketch 10`), committed onto live faces through the durable
+`topologyOf` sketch-plane support ref.** The blocker was neither a frame nor a
+gate: it was **review matching more strictly than its own apply**.
+
+#### The root cause, from per-candidate frames in the bake detail
+
+The sketch-plane bake detail now prints the captured plane frame and box plus
+those of every rejected live candidate. For 9841 `Sketch 2` against the
+post-`Extrude 1` prefix:
+
+| | origin (mm) | normal | box (mm) |
+|---|---|---|---|
+| captured `JI+` | `-7.5, 55.25, 95.6958` | `0, -0.866, 0.5` | `-67.5, 0, 0` .. `52.5, 110.5, 191.3916` |
+| live `face_…g65dbcfc539ab43e4` | `52.5, 110.5, 191.3920` | `0, -0.866, 0.5` | `-67.5, 0, 0` .. `52.5, 110.5, 191.3920` |
+
+Same plane, same box, same face — differing by **~4e-4 mm** of rebuild
+precision. The reframe hypothesis was wrong: `Incline` is a `cPlane`, not a
+transform, so no capture→world reframe exists or is needed, and the captured
+signatures are already world-frame. What differed was the tolerance: the sketch
+loop matched with `DEFAULT_MATCH_TOLERANCE` (`linear` 1e-4 mm) while the
+apply-time `topologyOf` support ref it emits carries the live-topology tolerance
+(`linear` 0.01 mm) that every other captured→live match in a review already
+uses. Review rejected on `plane-offset` / `bounding-box` faces that apply would
+have accepted.
+
+#### The fix: one tolerance for every captured→live comparison
+
+`LIVE_TOPOLOGY_MATCH_TOLERANCE` is now the single source for the sketch-plane
+match, the emitted selector, the topology resolver, and checkpoint-body
+selectors. No gate is relaxed, no candidate is matched by proximity, and
+zero/one/many honesty is unchanged: coplanar-but-different faces are still
+rejected (the nearest other candidate on `Sketch 2`'s plane is 25 mm away).
+Sketch-plane promotion wiring (`probedFaceSelector` →
+`SketchPlaneSupportRef`/`ImportDeferredTopologyRef` → apply-time rematch) already
+existed; only the matching gate blocked it.
+
+#### Cascade re-walk (9841 at the real browser gate; the rest at the real-OCC node review)
+
+| Studio | Before | After |
+|---|---:|---:|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** |
+| Wave-T (all six studios) | all parametric | **all parametric** |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** |
+| Part Studio 1 `9841…` | 13 / 28 / 0 | **17 / 24 / 0** |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** |
+
+The upstream-edit proof is in the browser gate: the `walls` variable edit
+rebuilds the committed timeline with zero snapshot diagnostics, so each promoted
+sketch's support face rematches through the rebuild. The 9841 Playwright test
+now takes 23.4 min (review cap raised to 3 000 000 ms, test timeout to
+3 600 000 ms — wait caps only); the real-OCC node review of the same bundle
+takes ~33 min.
+
+9841 `Sketch 2` matched at review but its **apply-time** rematch failed
+honestly: at apply its prefix presents a tessellation-backed checkpoint body
+(`face_body_feature_extrude-1_t0008_*`), which exposes body identity only, so no
+face of it can exist. It is contained at the feature level with a verbatim
+detail, and `Extrude 3` cascades as `downstream-of-baked`. That is the same
+checkpoint-replacement wall 5151's chamfers sit behind, not a matching question.
+
+#### The edge-bound start extent
+
+`ExtrudeStartExtent` gained an `entityOffset` form bound to a durable edge or
+face, threaded exactly like the previous two extent contract extensions: a
+`startEntity` topology slot resolved atomically against the exact pre-consumer
+prefix, a deferred `topologyOf` selector in the prepared action, apply-time
+rematch, and an OCC start plane resolved inside `runInRebuildSlot("extent", …)`
+as the plane through the resolved entity perpendicular to the extrude direction.
+Honesty rules, pinned in the logic lane with real OCC (`features.spec.ts`, seam:
+`executeOccFeature` extrude): a face- or edge-bound start extent starts the prism
+exactly on the entity's plane and sweeps the authored depth from there; an entity
+that spans the direction names no single start plane and is refused rather than
+resolved to one of its ends; an unresolved slot fails the plan instead of
+starting on the profile plane (`extrude-planner.spec.ts`).
+
+The capture evidence confirms the form: `Extrude 3`'s `startOffsetEntity`
+(`KTqB`) resolves to a **planar face** (`normal 0, 0.866, -0.5`), and
+`Extrude 15`/`16` (`KW9C`, `KzVB`) to **circular edges** whose axis is the
+incline direction — all perpendicular to their extrude direction. All three
+nevertheless stay baked, now behind their own upstream cascade
+(`extrude-extent-topology-unresolved`, because the features producing those
+entities are themselves baked) rather than `extrude-start-extent-unsupported`.
+d3cd9 `Extrude 8` is the same class (its census `BLIND` label in earlier notes
+was wrong: it is `ENTITY`), and it remains excluded scope behind `Sketch 7`/`8`.
+
+#### Remaining bakes, classified
+
+*Needs follow-up (each named):*
+- 9841 `Sketch 2`, `Sketch 3`/`4`, `Sketch 5`/`6`: `Sketch 2` fails its
+  apply-time rematch against a checkpoint body (above); the others still find no
+  coplanar live face in their prefix, because the features that own their faces
+  are baked.
+- 9841 `Chamfer 3`/`4`, `Boolean 1`, `Delete part 1`: honest
+  `topology-reference-no-match` against checkpoint bodies.
+- 9841 `Extrude 3`/`15`/`16`, d3cd9 `Extrude 8`: entity-bound start extents whose
+  producing features are baked (above).
+- 5151 `Chamfer 1`/`2`: a bake checkpoint replaces their target body. 5151
+  `Fillet 2`/`Chamfer 3`: honest `topology-reference-no-match`. 5151 `Extrude 4`:
+  real kernel build failure; `Boolean 1`, `Extrude 3`/`6`/`7`/`8` cascade behind
+  it.
+
+*Honestly unresolvable with this capture set:* 9841 `Extrude 10`/`11` (BLIND
+start offsets, no sign ground truth).
+
+*Excluded scope (unchanged):* 9841 `Extrude 4` and d3cd9 `Extrude 4` (SURFACE),
+`Split 1` (both studios), 9841 `Sketch 3`/`4`, d3cd9 `Sketch 7`/`8` +
+`Extrude 8`, and their direct dependents.
+
+#### Verdicts (updated)
+
+- **X.5 (face-backed sketches):** **closed.** The wiring was already in place;
+  the blocker was a review gate stricter than the apply gate it emits. Four 9841
+  sketches are committed on live faces and survive an upstream edit. The
+  remaining face sketches are blocked by baked owners or by checkpoint bodies,
+  which are body-identity-only by construction.
+- **Edge-bound start extent:** **contract closed, cascade open.** The form,
+  resolution, apply rematch and kernel start plane are live and pinned against
+  real OCC; every local instance is still waiting on an upstream promotion.
+
+Reproducing the real-OCC node review: instantiate `OpenCascadeKernelAdapter`
+over `public/cadara-occ.{js,wasm}` (the `loadRealOccForImportTest` pattern in
+`apply-pipeline.spec.ts`), give **one** `createMemoryGeometryAssetStore` to both
+`createImportCapabilities` and every probe service created by
+`createKernelHistoryProbeSession` (a probe service without the shared asset store
+reports `baked-body-assetMissing` and diverges from the browser), then call
+`onshapeImportProvider.review` on the local bundle.
+
+Validation: `bun run lint`, `bun run build`, `bun run test` (logic + UI +
+static), and `bun run test:e2e` on a clean port 3123.
