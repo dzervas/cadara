@@ -8,6 +8,7 @@ import {
   getOrderedActionRefs,
   takePreparedActionPrefix,
 } from "@/domain/import/kernel-history-probe";
+import { isTopologyApplyRematchError } from "@/domain/import/orchestrator";
 
 export interface TopologyConsumerPrefixResult {
   consumerFeatureId: string;
@@ -36,11 +37,44 @@ export async function probeTopologyConsumerPrefixes(input: {
   for (const consumerFeatureId of input.consumerFeatureIds) {
     const orderedPosition = input.featureIdToOrderedPrefixPosition.get(consumerFeatureId);
     if (orderedPosition === undefined || orderedPosition > actionCount) continue;
-    const probe = await input.history.evaluateHistoryProbe({
-      actions: takePreparedActionPrefix(input.actions, orderedPosition),
-      consumerFeatureId,
-      includeFinalTessellation: false,
-    });
+    let probe: Awaited<ReturnType<ImportHistoryProbeCapabilities["evaluateHistoryProbe"]>>;
+    try {
+      probe = await input.history.evaluateHistoryProbe({
+        actions: takePreparedActionPrefix(input.actions, orderedPosition),
+        consumerFeatureId,
+        includeFinalTessellation: false,
+      });
+    } catch (error) {
+      if (!isTopologyApplyRematchError(error)) throw error;
+      // A pre-consumer prefix is a deliberately reduced action list: bake
+      // checkpoints are suppressed for sub-topology consumers, so a baked run
+      // inside the prefix contributes no bodies at all. Another feature's
+      // apply-time rematch failing against that prefix is therefore a
+      // probe-session artifact, not evidence about apply, and it must not
+      // decide that feature's tier. Report a failed prefix for THIS consumer
+      // (verbatim, so the cause stays visible) and leave the offending feature
+      // eligible; the whole-plan probes, which build the same sequence apply
+      // does, own that decision.
+      results.push({
+        consumerFeatureId,
+        orderedPosition,
+        status: "failed",
+        signatures: [],
+        diagnostics: [
+          {
+            severity: "error",
+            code: "topology-apply-rematch-failed",
+            message: [
+              `The pre-consumer prefix probe could not materialize ${error.selector.source.consumerFeatureId}:${error.selector.source.parameterId}:${error.selector.source.deterministicId}`,
+              error.detail,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join(": "),
+          },
+        ],
+      });
+      continue;
+    }
     const last = probe.steps.at(-1);
     results.push({
       consumerFeatureId,

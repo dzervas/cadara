@@ -30,9 +30,8 @@ const MOUNTS_FULL_FEATURE_IDS = [
   "feature_transform-1",
   "feature_chamfer-1",
 ];
-// Shell 1 bakes (apply-time topology rematch containment) and one further
-// consumer bakes as `downstream-of-baked`; bake segment 1 therefore commits its
-// two checkpoint bodies.
+// The first bake segment commits its two checkpoint bodies for the baked run
+// that follows the promoted parametric prefix.
 const PART_STUDIO_BAKED_BODIES = [
   "body_feature_bakedBody-1_1",
   "body_feature_bakedBody-1_2",
@@ -215,15 +214,18 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // they bound (exact combinatorial identity), so the rebuild keeps them live
   // instead of refusing them with `occ-topology-unsupported-history`.
   //
-  // `Shell 1` still fails apply-time rematch and is contained, which is what now
-  // gates `Extrude 2` and the face-backed sketches behind it.
-  expect(reviewText).toContain("11 parametric, 30 baked, 0 geometry-only features.");
+  // `Shell 1` and `Extrude 2` are parametric now. A pre-consumer prefix probe
+  // suppresses bake checkpoints for sub-topology consumers, so a baked run in
+  // that prefix contributes no bodies at all; `Shell 1`'s body rematch used to
+  // run against that empty prefix and force-bake itself for the whole studio.
+  // Such a failure is now contained at the prefix-probe boundary, so `Shell 1`
+  // is decided by the whole-plan probes that build the sequence apply runs.
+  expect(reviewText).toContain("13 parametric, 28 baked, 0 geometry-only features.");
   expect(reviewText).toMatch(/Extrude 1\s+parametric/);
   expect(reviewText).toMatch(/Chamfer 1\s+parametric/);
   expect(reviewText).toMatch(/Chamfer 2\s+parametric/);
-  expect(reviewText).toMatch(
-    /Shell 1\s+baked \(suppressed\) — [^\n]*topology reference could not be rematched while applying/,
-  );
+  expect(reviewText).toMatch(/Shell 1\s+parametric/);
+  expect(reviewText).toMatch(/Extrude 2\s+parametric/);
   // `Split 1` is excluded scope and cascades behind an earlier failure. Assert
   // only that it stays baked and suppressed; the quoted diagnostic names
   // whichever upstream feature the kernel refused first.
@@ -240,6 +242,8 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
     "feature_extrude-1",
     "feature_chamfer-1",
     "feature_chamfer-2",
+    "feature_shell-1",
+    "feature_extrude-2",
     "feature_bakedBody-1",
   ]);
   expect.soft(imported.selectableTargets).toEqual(
@@ -266,6 +270,10 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // `Chamfer 1`'s generated boundary edges must resolve again from the adjacency
   // claims alone. Losing it would drop the feature instead of raising an alert.
   expect.soft(rebuilt.featureIds).toContain("feature_chamfer-2");
+  // Same proof for this iteration's promotions: `Shell 1`'s deferred body
+  // selector and `Extrude 2` behind it must rematch through the rebuild.
+  expect.soft(rebuilt.featureIds).toContain("feature_shell-1");
+  expect.soft(rebuilt.featureIds).toContain("feature_extrude-2");
   expect.soft(rebuilt.selectableTargets).toEqual(
     expect.arrayContaining(PART_STUDIO_BAKED_BODIES),
   );
