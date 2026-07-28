@@ -7,7 +7,13 @@ import type {
   AdvancedSolidFeatureDefinition,
   ChamferWidthForm,
 } from "@/contracts/modeling/advanced-solid";
-import type { BodyId, FeatureId } from "@/contracts/shared/ids";
+import type {
+  BodyId,
+  EdgeId,
+  FaceId,
+  FeatureId,
+  VertexId,
+} from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
 import {
@@ -27,10 +33,12 @@ import {
   resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
 } from "@/domain/modeling/occ/features/boolean-operations";
+import { listOccShapes } from "@/domain/modeling/occ/features/extrude";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 import {
   createExactSuccessorTopologyStage,
   createUnsupportedProducerTopologyStage,
+  formatGeneratedProducerTopologySourceKey,
   type OccFeatureTopologyStage,
 } from "@/domain/modeling/occ/topology-stage";
 
@@ -112,6 +120,107 @@ function collectExactIdentitySuccessors(
 }
 
 /**
+ * Producer-identity claims for subtopology a local operation CREATED.
+ *
+ * A generated entity is the successor of nothing, so exact-successor lineage
+ * cannot name it: a rebuild sees `sourceKeys.length === 0` and invalidates it
+ * as `occ-topology-unsupported-history`. That is precisely what refused a
+ * second chamfer selecting the first chamfer's own surface.
+ *
+ * The only exact answer available is the builder's `Generated(source)`: the
+ * entity it reports is owned by this feature and attributed to that one source
+ * shape, which is identity, not a match. Anything reachable from two sources,
+ * or not resolvable to exactly one result entity, is left unclaimed so the
+ * rebuild stays honest.
+ */
+function collectGeneratedProducerTargets(input: {
+  oc: OccFeatureExecutionContext["oc"];
+  ownerFeatureId: FeatureId;
+  sourceBody: OccTrackedBody;
+  replacement: OccTrackedBody;
+  builder: { Generated(source: never): never };
+}) {
+  const claims = new Map<string, DurableRef>();
+  const claimedSourceKeysByTarget = new Map<string, string>();
+
+  const claimFrom = (
+    sourceKind: "face" | "edge" | "vertex",
+    sourcePublicId: FaceId | EdgeId | VertexId,
+    sourceShape: OccSubtopologyShape,
+  ) => {
+    for (const shape of listOccShapes(
+      input.oc,
+      input.builder.Generated(sourceShape as never),
+    )) {
+      const matches: DurableRef[] = [];
+      for (const [faceId, face] of input.replacement.facesById) {
+        if ((face as OccSubtopologyShape).IsSame(shape as never)) {
+          matches.push({
+            kind: "face",
+            bodyId: input.replacement.bodyId,
+            faceId,
+          });
+        }
+      }
+      for (const [edgeId, edge] of input.replacement.edgesById) {
+        if ((edge as OccSubtopologyShape).IsSame(shape as never)) {
+          matches.push({
+            kind: "edge",
+            bodyId: input.replacement.bodyId,
+            edgeId,
+          });
+        }
+      }
+      for (const [vertexId, vertex] of input.replacement.verticesById) {
+        if ((vertex as OccSubtopologyShape).IsSame(shape as never)) {
+          matches.push({
+            kind: "vertex",
+            bodyId: input.replacement.bodyId,
+            vertexId,
+          });
+        }
+      }
+
+      if (matches.length !== 1) {
+        continue;
+      }
+
+      const target = matches[0]!;
+      const targetKey = getOccDurableRefKey(target);
+      const sourceKey = formatGeneratedProducerTopologySourceKey({
+        featureId: input.ownerFeatureId,
+        bodyId: input.sourceBody.bodyId,
+        sourceKind,
+        sourcePublicId,
+        role: `generated-${target.kind}`,
+      });
+
+      const alreadyClaimedBy = claimedSourceKeysByTarget.get(targetKey);
+      if (alreadyClaimedBy !== undefined) {
+        // Reachable from two sources: many, so nobody may claim it.
+        claims.delete(alreadyClaimedBy);
+        continue;
+      }
+
+      claimedSourceKeysByTarget.set(targetKey, sourceKey);
+      claims.set(sourceKey, target);
+    }
+  };
+
+  for (const [faceId, face] of input.sourceBody.facesById) {
+    claimFrom("face", faceId, face as OccSubtopologyShape);
+  }
+  for (const [edgeId, edge] of input.sourceBody.edgesById) {
+    claimFrom("edge", edgeId, edge as OccSubtopologyShape);
+  }
+  for (const [vertexId, vertex] of input.sourceBody.verticesById) {
+    claimFrom("vertex", vertexId, vertex as OccSubtopologyShape);
+  }
+
+  return claims;
+}
+
+/**
  * Record stage lineage for one local operation (fillet/chamfer) on one body.
  *
  * With native history, untouched faces/edges/vertices carry exact one-to-one
@@ -119,8 +228,12 @@ function collectExactIdentitySuccessors(
  * them invalidated — which is what previously made a second chamfer refuse the
  * edges its predecessor never touched. Without native history there is no exact
  * claim to make, so the replacement stays conservatively unsupported.
+ *
+ * Subtopology the operation itself generated is the successor of nothing, so it
+ * needs the complementary producer-identity claim from the live builder.
  */
 function collectLocalOperationTopologyStages(input: {
+  oc: OccFeatureExecutionContext["oc"];
   topologyStages: OccFeatureTopologyStage[];
   ownerFeatureId: FeatureId;
   sourceBody: OccTrackedBody;
@@ -130,8 +243,12 @@ function collectLocalOperationTopologyStages(input: {
     successorTargetsByPreviousKey?: ReadonlyMap<string, DurableRef>;
   };
   hasNativeHistory: boolean;
+  generatedHistorySource: { Generated(source: never): never } | null;
 }) {
-  if (!input.hasNativeHistory) {
+  // Exact history comes from either the native transaction's successor claims
+  // or a live JS builder. With neither there is no exact claim to make, so the
+  // replacement stays conservatively unsupported.
+  if (!input.hasNativeHistory && !input.generatedHistorySource) {
     input.topologyStages.push(
       createUnsupportedProducerTopologyStage({
         featureId: input.ownerFeatureId,
@@ -166,6 +283,15 @@ function collectLocalOperationTopologyStages(input: {
         sourceBody: input.sourceBody,
         outputBody: replacement,
         successorsBySourceKey,
+        generatedTargetsBySourceKey: input.generatedHistorySource
+          ? collectGeneratedProducerTargets({
+              oc: input.oc,
+              ownerFeatureId: input.ownerFeatureId,
+              sourceBody: input.sourceBody,
+              replacement,
+              builder: input.generatedHistorySource,
+            })
+          : undefined,
       }),
     );
   }
@@ -310,6 +436,10 @@ export function executeFilletFeature(
       resolvedRadius,
       ownerFeatureId,
     );
+    // The native transaction disposes its builder inside the shim, so only the
+    // JS builder can answer `Generated` for the build that actually ran.
+    let generatedHistorySource: { Generated(source: never): never } | null =
+      null;
     const replacementResult =
       nativeReplacementResult ??
       (() => {
@@ -331,6 +461,10 @@ export function executeFilletFeature(
           throw new Error(`OCC fillet build failed for body ${bodyId}.`);
         }
 
+        generatedHistorySource = fillet as unknown as {
+          Generated(source: never): never;
+        };
+
         return resolveReplacementBodies(
           context,
           bodyId,
@@ -351,12 +485,14 @@ export function executeFilletFeature(
       historyInvalidations.set(key, value);
     }
     collectLocalOperationTopologyStages({
+      oc: context.oc,
       topologyStages,
       ownerFeatureId,
       sourceBody: body,
       historyInvalidations,
       replacementResult,
       hasNativeHistory: nativeReplacementResult !== null,
+      generatedHistorySource,
     });
   }
 
@@ -587,6 +723,10 @@ export function executeChamferFeature(
             ownerFeatureId,
           )
         : null;
+    // The native transaction disposes its builder inside the shim, so only the
+    // JS builder can answer `Generated` for the build that actually ran.
+    let generatedHistorySource: { Generated(source: never): never } | null =
+      null;
     const replacementResult =
       nativeReplacementResult ??
       (() => {
@@ -609,6 +749,10 @@ export function executeChamferFeature(
           );
         }
 
+        generatedHistorySource = chamfer as unknown as {
+          Generated(source: never): never;
+        };
+
         return resolveReplacementBodies(
           context,
           bodyId,
@@ -629,12 +773,14 @@ export function executeChamferFeature(
       historyInvalidations.set(key, value);
     }
     collectLocalOperationTopologyStages({
+      oc: context.oc,
       topologyStages,
       ownerFeatureId,
       sourceBody: body,
       historyInvalidations,
       replacementResult,
       hasNativeHistory: nativeReplacementResult !== null,
+      generatedHistorySource,
     });
   }
 
