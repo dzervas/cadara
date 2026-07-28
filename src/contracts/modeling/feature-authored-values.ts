@@ -86,6 +86,11 @@ export function getFeatureValueExpressionFields(
     case "extrude":
       return [
         {
+          path: ["parameters", "startExtent", "distance"],
+          label: "Extrude start offset",
+          valueKind: { kind: "positiveNumber" },
+        },
+        {
           path: ["parameters", "extent", "end", "distance"],
           label: "Extrude depth",
           valueKind: { kind: "positiveNumber" },

@@ -1329,6 +1329,83 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       "An entity that spans the extrude direction must be refused, never resolved to one of its ends.",
     ).toBeTruthy();
   }
+
+  // `blindOffset.direction` is signed along the EXTRUDE direction, not along the
+  // profile plane normal: flipping the end direction flips the start offset with
+  // it. The Onshape importer's capture-pinned BLIND mapping depends on exactly
+  // this, so it is pinned here against the real kernel.
+  async function testExtrudeBlindStartOffsetIsSignedAlongExtrudeDirection() {
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_extrude_blind_start_offset" as SketchId,
+      plane,
+    );
+    const context = await createContext({ sketches: [sketch] })();
+    const zRange = (shape: InstanceType<typeof context.oc.TopoDS_Shape>) => {
+      const zs = getShapeVertexPoints(context.oc, shape).map((point) => point[2]);
+      return { min: Math.min(...zs), max: Math.max(...zs) };
+    };
+
+    const cases = [
+      ["positive", "positive", 3, 5],
+      ["positive", "negative", -3, -1],
+      ["negative", "positive", -5, -3],
+      ["negative", "negative", 1, 3],
+    ] as const;
+
+    for (const [endDirection, startDirection, low, high] of cases) {
+      const result = executeOccFeature(
+        context,
+        `feature_extrude_blind_start_${endDirection}_${startDirection}` as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            profiles: [
+              { kind: "region", sketchId: sketch.sketchId, regionId: region.regionId },
+            ],
+            startExtent: {
+              kind: "blindOffset",
+              distance: 3,
+              direction: startDirection,
+            },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: endDirection, distance: 2 },
+            },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
+          },
+        },
+      );
+      const producedBody = result.bodies.find(
+        (body) => body.bodyId === result.producedTargets[0]?.bodyId,
+      );
+      expect(
+        producedBody != null,
+        "A blind start offset must produce a body.",
+      ).toBeTruthy();
+      assertClose(
+        await bodyVolume(context.oc, producedBody!.shape),
+        24,
+        1e-6,
+        "A blind start offset must sweep the authored depth from the displaced start plane",
+      );
+      const range = zRange(producedBody!.shape);
+      assertClose(
+        range.min,
+        low,
+        1e-6,
+        `A ${startDirection} blind start offset under a ${endDirection} end must start the prism at z = ${low}`,
+      );
+      assertClose(
+        range.max,
+        high,
+        1e-6,
+        `A ${startDirection} blind start offset under a ${endDirection} end must end the prism at z = ${high}`,
+      );
+    }
+  }
   async function testExtrudeDraftsOneSideSymmetricAndTwoSideEnds() {
     const plane = createStandardPlaneDefinition("xy");
     const { sketch, region } = createRectangleSketch(
@@ -4488,6 +4565,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testExtrudePublishesSemanticPrismHistoryProvenance();
   await testExtrudeUpToNextSkipsCoplanarStartFace();
   await testExtrudeStartExtentBoundToDurableEntity();
+  await testExtrudeBlindStartOffsetIsSignedAlongExtrudeDirection();
   await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds();
   await testExtrudeFeatureCreatesBodiesFromMultipleRegions();
   await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy();
