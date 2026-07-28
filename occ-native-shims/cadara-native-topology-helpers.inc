@@ -806,6 +806,96 @@ namespace {
     }
   }
 
+  /**
+   * Producer-identity records for subtopology the builder CREATED.
+   *
+   * `CadaraAppendHistoryRecordsForKind` can only ever name successors of the
+   * same kind as the prior subshape it iterates, so an entity the operation
+   * generated (a chamfer's new face, and its edges/vertices) is named in no
+   * record at all and reaches the TS side with no source key. `Generated` is
+   * answerable only while the builder is alive, and this shim destroys it, so
+   * the attribution has to be emitted here.
+   *
+   * Each record names the prior subshape it is attributed to and carries the
+   * generated entities, whatever their own kind. Ordering and dedup follow the
+   * modified/deleted records: previous-map order, first occurrence wins.
+   */
+  template <typename Builder>
+  void CadaraAppendGeneratedHistoryRecordsForKind(
+    std::ostringstream& out,
+    Builder& builder,
+    const TopoDS_Shape& previousShape,
+    const TopoDS_Shape& finalShape,
+    const TopAbs_ShapeEnum shapeType,
+    const std::string& bodyId,
+    bool& needsRecordComma
+  ) {
+    TopTools_IndexedMapOfShape previousShapeMap;
+    TopTools_IndexedMapOfShape finalFaceMap;
+    TopTools_IndexedMapOfShape finalEdgeMap;
+    TopTools_IndexedMapOfShape finalVertexMap;
+    TopExp::MapShapes(previousShape, shapeType, previousShapeMap);
+    TopExp::MapShapes(finalShape, TopAbs_FACE, finalFaceMap);
+    TopExp::MapShapes(finalShape, TopAbs_EDGE, finalEdgeMap);
+    TopExp::MapShapes(finalShape, TopAbs_VERTEX, finalVertexMap);
+
+    for (int previousIndex = 1; previousIndex <= previousShapeMap.Size(); previousIndex += 1) {
+      const TopoDS_Shape previousSubshape = previousShapeMap.FindKey(previousIndex);
+      TopTools_ListOfShape generated(builder.Generated(previousSubshape));
+      std::ostringstream successorsJson;
+      bool needsSuccessorComma = false;
+      std::vector<std::string> successorIds;
+
+      while (generated.Size() > 0) {
+        const TopoDS_Shape generatedShape = generated.First();
+        generated.RemoveFirst();
+
+        if (generatedShape.IsNull()) {
+          continue;
+        }
+
+        const TopAbs_ShapeEnum generatedType = generatedShape.ShapeType();
+        const TopTools_IndexedMapOfShape* finalMap =
+          generatedType == TopAbs_FACE ? &finalFaceMap
+          : generatedType == TopAbs_EDGE ? &finalEdgeMap
+          : generatedType == TopAbs_VERTEX ? &finalVertexMap
+          : nullptr;
+
+        if (finalMap == nullptr || finalMap->FindIndex(generatedShape) <= 0) {
+          continue;
+        }
+
+        const std::string generatedId =
+          CadaraTopologyIdForShape(generatedType, bodyId, generatedShape);
+        if (std::find(successorIds.begin(), successorIds.end(), generatedId) != successorIds.end()) {
+          continue;
+        }
+        successorIds.push_back(generatedId);
+
+        if (needsSuccessorComma) {
+          successorsJson << ",";
+        }
+        needsSuccessorComma = true;
+        CadaraAppendDurableTopologyTargetJson(successorsJson, generatedType, bodyId, generatedShape);
+      }
+
+      if (successorIds.empty()) {
+        continue;
+      }
+
+      if (needsRecordComma) {
+        out << ",";
+      }
+      needsRecordComma = true;
+
+      out << "{\"target\":";
+      CadaraAppendDurableTopologyTargetJson(out, shapeType, bodyId, previousSubshape);
+      out
+        << ",\"reason\":\"generated\""
+        << ",\"successors\":[" << successorsJson.str() << "]}";
+    }
+  }
+
   template <typename Builder>
   std::string CadaraBuildFeatureHistoryJson(
     Builder& builder,
@@ -821,6 +911,9 @@ namespace {
     CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_FACE, bodyId, previousTopologyToken, topologyToken, needsRecordComma);
     CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_EDGE, bodyId, previousTopologyToken, topologyToken, needsRecordComma);
     CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_VERTEX, bodyId, previousTopologyToken, topologyToken, needsRecordComma);
+    CadaraAppendGeneratedHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_FACE, bodyId, needsRecordComma);
+    CadaraAppendGeneratedHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_EDGE, bodyId, needsRecordComma);
+    CadaraAppendGeneratedHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_VERTEX, bodyId, needsRecordComma);
 
     std::ostringstream out;
     out

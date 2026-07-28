@@ -316,6 +316,7 @@ export type OccNativeFeatureTransactionHistoryReason =
   | "unique-successor"
   | "ambiguous"
   | "deleted"
+  | "generated"
   | "missing";
 
 export interface OccNativeFeatureTransactionHistoryRecord {
@@ -1016,6 +1017,11 @@ export function createOccNativeReferenceInvalidationsFromHistoryPayload(
   for (const record of history.records) {
     switch (record.reason) {
       case "unique-successor":
+        break;
+      case "generated":
+        // A generated record names topology the operation CREATED, attributed
+        // to the prior entity it came from. It is producer identity, not a
+        // statement that the prior entity lost its reference.
         break;
       case "ambiguous":
         invalidations.push({

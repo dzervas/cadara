@@ -552,3 +552,134 @@ test("applyBooleanPolicy uses native boolean transactions for per-target multi-b
     "Native multi-body cut should not fall back to unsupported or JS-side modified-history invalidations.",
   ).toBeFalsy();
 });
+
+test("resolveNativeFeatureTransactionReplacement claims producer identity from native generated history records", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const body = makeTrackedBox(
+    oc,
+    "body_native_generated_history_seed" as BodyId,
+    "feature_native_generated_history_seed" as FeatureId,
+    [1, 1, 1],
+  );
+  const context = createOccAuthoringState(oc, { bodies: [body] });
+  const ownerFeatureId =
+    "feature_native_generated_history_replace" as FeatureId;
+  const sourceEdgeId = body.topology.edgeIds[0]!;
+  const otherSourceEdgeId = body.topology.edgeIds[1]!;
+  const generatedFaceId = `face_${body.bodyId}_native_payload_1`;
+
+  const makeTransaction = (
+    records: readonly Record<string, unknown>[],
+  ) => ({
+    IsDone: () => true,
+    Shape: () => body.shape,
+    PayloadJson: () =>
+      JSON.stringify({
+        schemaVersion: "occ-native-topology-payload/v1alpha1",
+        source: "occt7-shim",
+        topology: [
+          ...body.topology.faceIds.map((_, index) => ({
+            id: `face_${body.bodyId}_native_payload_${index + 1}`,
+            kind: "face",
+            bodyId: body.bodyId,
+            index: index + 1,
+          })),
+          ...body.topology.edgeIds.map((_, index) => ({
+            id: `edge_${body.bodyId}_native_payload_${index + 1}`,
+            kind: "edge",
+            bodyId: body.bodyId,
+            index: index + 1,
+          })),
+          ...body.topology.vertexIds.map((_, index) => ({
+            id: `vertex_${body.bodyId}_native_payload_${index + 1}`,
+            kind: "vertex",
+            bodyId: body.bodyId,
+            index: index + 1,
+          })),
+        ],
+        edgeVertices: [],
+        diagnostics: [],
+      }),
+    HistoryJson: () =>
+      JSON.stringify({
+        schemaVersion: "occ-native-history-payload/v1alpha1",
+        source: "occt7-shim",
+        status: "available",
+        records,
+        diagnostics: [],
+      }),
+  });
+
+  const generatedRecord = (edgeId: string) => ({
+    target: { kind: "edge", bodyId: body.bodyId, edgeId },
+    reason: "generated",
+    successors: [
+      { kind: "face", bodyId: body.bodyId, faceId: generatedFaceId },
+    ],
+  });
+
+  const oneToOne = resolveNativeFeatureTransactionReplacement(
+    context,
+    body,
+    makeTransaction([generatedRecord(sourceEdgeId)]),
+    "native-generated-history",
+    ownerFeatureId,
+  );
+
+  expect(
+    oneToOne?.generatedTargetsBySourceKey.get(
+      `generated-from:${ownerFeatureId}:${body.bodyId}:edge:${sourceEdgeId}:generated-face`,
+    ),
+    "A native generated record naming exactly one entity should claim producer identity for the entity its builder created.",
+  ).toEqual({
+    kind: "face",
+    bodyId: body.bodyId,
+    faceId: generatedFaceId,
+  });
+
+  const many = resolveNativeFeatureTransactionReplacement(
+    context,
+    body,
+    makeTransaction([
+      generatedRecord(sourceEdgeId),
+      generatedRecord(otherSourceEdgeId),
+    ]),
+    "native-generated-history",
+    ownerFeatureId,
+  );
+
+  expect(
+    many?.generatedTargetsBySourceKey.size,
+    "An entity reachable from two native generated sources is many, so neither source may claim it.",
+  ).toBe(0);
+
+  const ambiguousRecord = resolveNativeFeatureTransactionReplacement(
+    context,
+    body,
+    makeTransaction([
+      {
+        target: { kind: "edge", bodyId: body.bodyId, edgeId: sourceEdgeId },
+        reason: "generated",
+        successors: [
+          { kind: "face", bodyId: body.bodyId, faceId: generatedFaceId },
+          {
+            kind: "face",
+            bodyId: body.bodyId,
+            faceId: `face_${body.bodyId}_native_payload_2`,
+          },
+        ],
+      },
+    ]),
+    "native-generated-history",
+    ownerFeatureId,
+  );
+
+  expect(
+    ambiguousRecord?.generatedTargetsBySourceKey.size,
+    "A native generated record resolving to more than one entity is not one-to-one and must claim nothing.",
+  ).toBe(0);
+  expect(
+    ambiguousRecord?.historyInvalidations.size,
+    "Native generated records carry producer identity only and must not invalidate the prior entity they are attributed to.",
+  ).toBe(0);
+});
