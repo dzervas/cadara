@@ -362,6 +362,11 @@ test("kernel history probe fails a step whose result apply would refuse", async 
         severity: "error",
         code: "occ-topology-unsupported-history",
         message: "Chamfer 2 edge selection is incorrect.",
+        target: {
+          kind: "edge",
+          bodyId: "body_probe" as BodyId,
+          edgeId: "edge_body_probe_g1",
+        },
       },
     ],
   }).evaluateHistoryProbe({ actions });
@@ -372,6 +377,14 @@ test("kernel history probe fails a step whose result apply would refuse", async 
       : null,
     "The kernel's own invalidation reason must survive into the probe diagnostic.",
   ).toContain("occ-topology-unsupported-history: Chamfer 2 edge selection is incorrect.");
+  // The authored-field message names no reference, so a stage-lineage refusal is
+  // unattributable without the refused durable target.
+  expect(
+    invalidated.steps[0]?.status === "failed"
+      ? invalidated.steps[0].diagnostics[0]?.message
+      : null,
+    "The refused durable target must survive into the probe diagnostic, or the offending entity has to be guessed.",
+  ).toContain("[refused target edge edge_body_probe_g1]");
 
   const rejectedRevision = await rejectingProbe({
     revisionState: { kind: "rejected" },
