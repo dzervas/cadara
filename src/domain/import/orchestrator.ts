@@ -344,13 +344,20 @@ function isDeferredSketchTargetRef(
 
 export class TopologyApplyRematchError extends Error {
   readonly selector: ImportDeferredTopologyRef;
+  /**
+   * Zero/one/many detail for the live match that failed, preserved verbatim so a
+   * contained bake names the real mismatch instead of only its reason code.
+   * Purely diagnostic; it never participates in matching.
+   */
+  readonly detail: string | null;
 
-  constructor(selector: ImportDeferredTopologyRef) {
+  constructor(selector: ImportDeferredTopologyRef, detail: string | null = null) {
     super(
       `Live topology rematch failed for ${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}.`,
     );
     this.name = "TopologyApplyRematchError";
     this.selector = selector;
+    this.detail = detail;
   }
 }
 
@@ -368,6 +375,60 @@ export function isTopologyApplyRematchError(
       typeof (error as { selector?: unknown }).selector === "object" &&
       (error as { selector?: unknown }).selector !== null)
   );
+}
+
+/**
+ * Zero/one/many detail for an apply-time rematch failure: which live candidates
+ * were rejected and on which analytic gates, or which candidates tied, plus a
+ * census of the live prefix the match ran against. Same shape as the review-time
+ * flywheel detail, so a contained bake names the real next root cause. Purely
+ * diagnostic.
+ */
+function describeApplyRematchFailure(
+  selector: ImportDeferredTopologyRef,
+  match: ReturnType<typeof matchSignature>,
+  signatures: readonly HistoryProbeTopologySignature[],
+) {
+  const refLabel = (reference: DurableRef) =>
+    reference.kind === "body"
+      ? reference.bodyId
+      : reference.kind === "face"
+        ? reference.faceId
+        : reference.kind === "edge"
+          ? reference.edgeId
+          : reference.kind === "vertex"
+            ? reference.vertexId
+            : reference.kind;
+  const parts = [
+    `wants ${selector.expectedKind} for ${selector.source.deterministicId}; live match ${match.kind}`,
+  ];
+  if (match.kind === "noMatch") {
+    const rejected = match.rejected
+      .map((entry) => `${refLabel(entry.reference)}: ${entry.reasons.join(",")}`)
+      .join(" | ");
+    parts.push(rejected.length > 0 ? `rejected ${rejected}` : "rejected nothing");
+  }
+  if (match.kind === "ambiguous") {
+    parts.push(
+      `tied ${match.candidates
+        .map((entry) => `${refLabel(entry.reference)}@${entry.score}`)
+        .join(" | ")}`,
+    );
+  }
+  if (match.kind === "unique") {
+    parts.push(`resolved ${refLabel(match.reference)} of kind ${match.reference.kind}`);
+  }
+  const census = new Map<string, number>();
+  for (const signature of signatures) {
+    const key = `${signature.entityClass}/${signature.geometryType}`;
+    census.set(key, (census.get(key) ?? 0) + 1);
+  }
+  parts.push(
+    `live prefix ${signatures.length}: ${
+      [...census].map(([key, count]) => `${key}x${count}`).join(",") || "empty"
+    }`,
+  );
+  return parts.join(" || ");
 }
 
 function getSketchRegions(
@@ -505,7 +566,20 @@ export class ImportDeferredMaterializer {
       selector.tolerance,
     );
     if (match.kind !== "unique" || match.reference.kind !== selector.expectedKind) {
-      throw new TopologyApplyRematchError(selector);
+      // An unavailable signature derivation is not a no-match: its own
+      // diagnostics are the real cause and must not be dropped on the floor.
+      const unavailable =
+        signatureResult.status === "available"
+          ? null
+          : `live signatures unavailable: ${signatureResult.diagnostics
+              .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+              .join(" | ")}`;
+      throw new TopologyApplyRematchError(
+        selector,
+        [describeApplyRematchFailure(selector, match, signatures), unavailable]
+          .filter((part): part is string => part !== null)
+          .join(" || "),
+      );
     }
     return match.reference;
   }
@@ -513,7 +587,10 @@ export class ImportDeferredMaterializer {
   async resolveDeferredBodyId(selector: ImportDeferredTopologyRef): Promise<BodyId> {
     const reference = await this.resolveDeferredTopologyRef(selector);
     if (reference.kind !== "body") {
-      throw new TopologyApplyRematchError(selector);
+      throw new TopologyApplyRematchError(
+        selector,
+        `live match resolved a ${reference.kind}, but the consumer needs a body`,
+      );
     }
     return reference.bodyId;
   }

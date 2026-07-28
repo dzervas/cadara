@@ -1233,7 +1233,10 @@ test("src/domain/import/onshape/provider.spec.ts contains an apply-time topology
         // rematches. Subsequent probes (after S_FACE is baked) proceed.
         if (!injectedFailure) {
           injectedFailure = true;
-          throw new TopologyApplyRematchError(rematchSelector);
+          throw new TopologyApplyRematchError(
+            rematchSelector,
+            "wants face for face_ref; live match noMatch || rejected nothing || live prefix 0: empty",
+          );
         }
         return innerProbe.evaluateHistoryProbe(input);
       },
@@ -1255,6 +1258,14 @@ test("src/domain/import/onshape/provider.spec.ts contains an apply-time topology
     suppressed: true,
   });
   expect(byId("S_FACE")?.reasonCodes).toContain("topology-apply-rematch-failed");
+  // X.9.3: the contained bake must keep the failure's zero/one/many detail, or the
+  // next root cause behind an apply-time rematch has to be guessed.
+  expect(
+    byId("S_FACE")?.reasonDetail,
+    "A contained apply-rematch bake must preserve the live-match detail verbatim.",
+  ).toBe(
+    "wants face for face_ref; live match noMatch || rejected nothing || live prefix 0: empty",
+  );
 
   // The dependent extrude on S_FACE's region cascades to baked rather than
   // referencing a suppressed sketch.
