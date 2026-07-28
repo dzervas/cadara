@@ -274,21 +274,51 @@ async function applyProbeAction(
  * would accept it. Mirrors the orchestrator's acceptance rule exactly: an error
  * diagnostic or a non-accepted revision state is a refusal, and the kernel's own
  * first error message is preserved so the reason names the real cause.
+ *
+ * The user-facing message names the authored field but not the reference, so the
+ * refused durable target is appended verbatim. Without it a stage-lineage
+ * refusal reads only as "edge selection is incorrect" and the offending entity
+ * has to be guessed.
  */
 function describeRejectedFeatureResult(value: {
   revisionState?: { kind?: string };
-  diagnostics?: readonly { severity: string; code?: string; message: string }[];
+  diagnostics?: readonly {
+    severity: string;
+    code?: string;
+    message: string;
+    target?: DurableRef | null;
+  }[];
 }): string | null {
   const errorDiagnostic = (value.diagnostics ?? []).find(
     (diagnostic) => diagnostic.severity === "error",
   );
   if (errorDiagnostic) {
-    return `${errorDiagnostic.code ?? "feature-rejected"}: ${errorDiagnostic.message}`;
+    const target = describeRefusedTarget(errorDiagnostic.target);
+    return `${errorDiagnostic.code ?? "feature-rejected"}: ${errorDiagnostic.message}${target}`;
   }
   const revisionKind = value.revisionState?.kind;
   return revisionKind !== undefined && revisionKind !== "accepted"
     ? `feature-rejected: the kernel returned revision state ${revisionKind}.`
     : null;
+}
+
+function describeRefusedTarget(target: DurableRef | null | undefined) {
+  if (!target) {
+    return "";
+  }
+  const suffix =
+    target.kind === "face"
+      ? target.faceId
+      : target.kind === "edge"
+        ? target.edgeId
+        : target.kind === "vertex"
+          ? target.vertexId
+          : target.kind === "body"
+            ? target.bodyId
+            : null;
+  return suffix === null
+    ? ` [refused target ${target.kind}]`
+    : ` [refused target ${target.kind} ${suffix}]`;
 }
 function missingAction(actionRef: ImportPreparedActionRef) {
   return {
