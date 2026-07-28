@@ -261,11 +261,21 @@ export type UpToVertexTarget =
   | { kind: "sketchPoint"; sketchId: SketchId; pointId: SketchPointId };
 
 /**
+ * Terminating entity accepted by an entity-bound start extent: a durable body
+ * edge or face whose own position fixes the start plane. Both forms are exact
+ * durable topology references; no geometry is inferred.
+ */
+export type ExtrudeStartEntityTarget =
+  | { kind: "edge"; bodyId: BodyId; edgeId: EdgeId }
+  | { kind: "face"; bodyId: BodyId; faceId: FaceId };
+
+/**
  * Start condition for an extrusion path. `profilePlane` starts the prism on the
  * profile's own plane. The offset forms start it on a plane parallel to the
  * profile plane, displaced along the extrude direction: `blindOffset` by an
  * authored distance, `sketchPointOffset` by the plane through an exact authored
- * sketch point. They express Onshape's `startOffset` start bounds exactly; no
+ * sketch point, and `entityOffset` by the plane through a resolved durable body
+ * edge or face. They express Onshape's `startOffset` start bounds exactly; no
  * form infers a start plane from nearby geometry.
  */
 export type ExtrudeStartExtent =
@@ -278,6 +288,10 @@ export type ExtrudeStartExtent =
   | {
       kind: "sketchPointOffset";
       target: Extract<UpToVertexTarget, { kind: "sketchPoint" }>;
+    }
+  | {
+      kind: "entityOffset";
+      target: ExtrudeStartEntityTarget;
     };
 
 export type ExtrudeEndCondition =

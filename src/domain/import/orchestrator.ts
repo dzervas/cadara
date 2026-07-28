@@ -722,11 +722,26 @@ export class ImportDeferredMaterializer {
     return { ...end, target } as Extract<ExtrudeEndCondition, { kind: typeof end.kind }>;
   }
 
-  /** Resolve the sketch id of a deferred sketch-point start offset. */
+  /**
+   * Resolve the sketch id of a deferred sketch-point start offset, or rematch a
+   * deferred entity start offset against live topology.
+   */
   private async materializeExtrudeStartExtent(
     startExtent: ImportDeferredExtrudeStartExtent,
     consumer: ImportPreparedActionRef,
   ): Promise<ExtrudeStartExtent> {
+    if (startExtent.kind === "entityOffset") {
+      if (!isDeferredTopologyRef(startExtent.target)) {
+        return startExtent as ExtrudeStartExtent;
+      }
+      const target = await this.resolveDeferredTopologyRef(startExtent.target);
+      if (target.kind !== "edge" && target.kind !== "face") {
+        throw new Error(
+          `Deferred extrude start entity resolved as ${target.kind}, expected edge or face.`,
+        );
+      }
+      return { kind: "entityOffset", target };
+    }
     if (
       startExtent.kind !== "sketchPointOffset" ||
       !isDeferredValue(startExtent.target.sketchId)

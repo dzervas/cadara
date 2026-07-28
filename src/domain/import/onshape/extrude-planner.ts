@@ -89,7 +89,9 @@ export type PlannedExtrudeExtent =
 /**
  * Onshape's `startOffset` start bound, translated exactly. A sketch-point
  * offset carries its producing sketch feature id until the provider binds that
- * feature's committed sketch id, exactly like the up-to-vertex terminator.
+ * feature's committed sketch id, exactly like the up-to-vertex terminator. An
+ * entity offset names a live body edge or face through a topology slot resolved
+ * against the exact pre-consumer prefix.
  */
 export type PlannedExtrudeStartExtent =
   | { kind: "profilePlane" }
@@ -101,6 +103,12 @@ export type PlannedExtrudeStartExtent =
   | {
       kind: "sketchPointOffset";
       target: PlannedSketchPointExtentTarget | ImportDeferredSketchPointRef;
+    }
+  | {
+      kind: "entityOffset";
+      target:
+        | { kind: "topologySlot"; slotKey: string }
+        | Extract<ImportDeferredExtrudeStartExtent, { kind: "entityOffset" }>["target"];
     };
 export type PlannedExtrudeBoolean =
   | { kind: "standalone" }
@@ -338,13 +346,16 @@ function resolveSketchPointExtentTarget(
 /**
  * Translate Onshape's start bound. `startOffset=false` starts on the profile
  * plane. `startOffsetBound=ENTITY` with exactly one decodable sketch-entity
- * vertex query becomes an exact `sketchPointOffset`. Every other authored form
- * returns `null` so the caller bakes with a specific reason; nothing is
+ * vertex query becomes an exact `sketchPointOffset`; an `ENTITY` bound whose
+ * query names live body topology becomes an `entityOffset` bound to a topology
+ * slot, resolved exactly against the pre-consumer prefix. Every other authored
+ * form returns `null` so the caller bakes with a specific reason; nothing is
  * inferred and no distance sign is guessed.
  */
 function translateStartExtent(
   feature: OnshapeFeatureNode,
   input: ExtrudePlanInput,
+  slots: TopologyQuerySlot[],
 ): PlannedExtrudeStartExtent | null {
   if (!booleanValue(feature, "startOffset")) return { kind: "profilePlane" };
   if (enumValue(feature, "startOffsetBound") !== "ENTITY") return null;
@@ -353,7 +364,16 @@ function translateStartExtent(
     "startOffsetEntity",
     input,
   );
-  return target ? { kind: "sketchPointOffset", target } : null;
+  if (target) return { kind: "sketchPointOffset", target };
+  if (!hasQueries(feature, "startOffsetEntity")) return null;
+  const slot = topologySlot(
+    "startEntity",
+    "startOffsetEntity",
+    "edge",
+    ["edge", "face"],
+  );
+  slots.push(slot);
+  return { kind: "entityOffset", target: { kind: "topologySlot", slotKey: slot.key } };
 }
 function translateEnd(
   feature: OnshapeFeatureNode,
@@ -504,12 +524,15 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
     return { tier: "baked", reason: "extrude-body-type-unsupported", diagnostics };
   }
 
+  const topologySlots: TopologyQuerySlot[] = [];
   // Onshape's `startOffset` moves the prism's START plane off the profile
-  // plane. The `ENTITY` form names an exact sketch point and translates to the
-  // contract's `sketchPointOffset`; every other form (notably `BLIND`, whose
-  // authored sign convention this capture set cannot pin against ground truth)
-  // stays baked rather than building a solid displaced by a guessed offset.
-  const startExtent = translateStartExtent(feature, input);
+  // plane. The `ENTITY` form names either an exact sketch point (translated to
+  // the contract's `sketchPointOffset`) or live body topology (translated to an
+  // `entityOffset` bound to a resolved topology slot); every other form (notably
+  // `BLIND`, whose authored sign convention this capture set cannot pin against
+  // ground truth) stays baked rather than building a solid displaced by a
+  // guessed offset.
+  const startExtent = translateStartExtent(feature, input, topologySlots);
   if (!startExtent) {
     return { tier: "baked", reason: "extrude-start-extent-unsupported", diagnostics };
   }
@@ -519,7 +542,6 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
     return { tier: "baked", reason: "needs-region-resolution", diagnostics };
   }
 
-  const topologySlots: TopologyQuerySlot[] = [];
   const extent = translateExtent(feature, diagnostics, topologySlots, input);
   if (!extent) {
     return { tier: "baked", reason: "unsupported-feature", diagnostics };
@@ -628,6 +650,19 @@ export function resolvePlannedExtrudeTopology(
     extent = { ...planned.extent, end } as PlannedExtrudeExtent;
   }
 
+  // The start plane's entity is one more slot in the same atomic resolution: an
+  // unbound slot fails the whole plan rather than silently starting the prism on
+  // the profile plane.
+  let startExtent = planned.startExtent;
+  if (startExtent.kind === "entityOffset" && startExtent.target.kind === "topologySlot") {
+    const target = bindingFor(startExtent.target.slotKey, bindings);
+    if (!target) return null;
+    // A start plane can only be fixed by an edge or a face; a slot that resolved
+    // to a body or vertex names no plane, so the whole plan fails honestly.
+    if (target.expectedKind !== "edge" && target.expectedKind !== "face") return null;
+    startExtent = { kind: "entityOffset", target: { ...target, expectedKind: target.expectedKind } };
+  }
+
   let boolean = planned.boolean;
   if (boolean.kind === "topologyTargets") {
     const slotKey = boolean.slotKey;
@@ -637,7 +672,7 @@ export function resolvePlannedExtrudeTopology(
     if (targets.length === 0) return null;
     boolean = { ...boolean, targets };
   }
-  return { ...planned, extent, boolean };
+  return { ...planned, extent, startExtent, boolean };
 }
 
 function endHasUnresolvedTopology(
@@ -657,6 +692,8 @@ export function hasUnresolvedExtrudeTopology(planned: PlannedExtrude): boolean {
         endHasUnresolvedTopology(planned.extent.secondEnd)
       : endHasUnresolvedTopology(planned.extent.end);
   return unresolvedExtent ||
+    (planned.startExtent.kind === "entityOffset" &&
+      planned.startExtent.target.kind === "topologySlot") ||
     (planned.boolean.kind === "topologyTargets" && planned.boolean.targets.length === 0);
 }
 
@@ -768,12 +805,22 @@ function bindEndSketchPoint(
  * Bind a sketch-point start offset to its committed producing sketch action.
  * An unbound sketch-point offset can never be prepared, so it throws exactly
  * like an unresolved extent target rather than degrading to the profile plane.
+ * An entity offset carries its resolved apply-time selector through unchanged;
+ * an unresolved slot throws for the same reason.
  */
 export function resolvedExtrudeStartExtent(
   planned: PlannedExtrude,
   sketchActionIndexByFeatureId: ReadonlyMap<string, number> = new Map(),
 ): ImportDeferredExtrudeStartExtent {
   const startExtent = planned.startExtent;
+  if (startExtent.kind === "entityOffset") {
+    if (startExtent.target.kind === "topologySlot") {
+      throw new Error(
+        "Extrude start extent references an unresolved topology slot and cannot be prepared.",
+      );
+    }
+    return { kind: "entityOffset", target: startExtent.target };
+  }
   if (startExtent.kind !== "sketchPointOffset") return startExtent;
   if (startExtent.target.kind !== "sketchPointFromFeature") {
     return { kind: "sketchPointOffset", target: startExtent.target };

@@ -55,6 +55,7 @@ import {
   type SketchRecord,
 } from "@/contracts/sketch/schema";
 import { extractPlanarFaceData, toGpPnt } from "@/domain/modeling/occ/planes";
+import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
 
 test("src/domain/modeling/occ/features.spec.ts", async () => {
@@ -1174,6 +1175,160 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     ).toBeGreaterThan(0);
   }
 
+  async function testExtrudeStartExtentBoundToDurableEntity() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const sourceBody = await makeBoxBody(
+      oc,
+      "body_extrude_start_entity_source" as BodyId,
+      4,
+      3,
+      5,
+      "feature_extrude_start_entity_source" as FeatureId,
+    );
+    const topFaceId = sourceBody.topology.faceIds.find((faceId) => {
+      const face = sourceBody.facesById.get(faceId);
+      if (!face) return false;
+      const facePlane = extractPlanarFaceData(oc, face);
+      const normal = getExtrusionNormalForPlanarFace(oc, face, "positive");
+      return (
+        Math.abs(facePlane.frame.origin[2] - 5) < 0.001 &&
+        Math.abs(dot(normal, [0, 0, 1])) > 0.999
+      );
+    });
+    expect(
+      topFaceId != null,
+      "Expected the source box to expose a top face at z = 5.",
+    ).toBeTruthy();
+    const zRange = (shape: InstanceType<typeof oc.TopoDS_Shape>) => {
+      const projections = getShapeVertexPoints(oc, shape).map((point) => point[2]);
+      return { min: Math.min(...projections), max: Math.max(...projections) };
+    };
+    const capEdgeId = sourceBody.topology.edgeIds.find((edgeId) => {
+      const edge = sourceBody.edgesById.get(edgeId);
+      if (!edge) return false;
+      const range = zRange(edge);
+      return Math.abs(range.min - 5) < 0.001 && Math.abs(range.max - 5) < 0.001;
+    });
+    const spanningEdgeId = sourceBody.topology.edgeIds.find((edgeId) => {
+      const edge = sourceBody.edgesById.get(edgeId);
+      if (!edge) return false;
+      const range = zRange(edge);
+      return range.max - range.min > 1;
+    });
+    expect(
+      capEdgeId != null && spanningEdgeId != null,
+      "Expected the source box to expose both a cap edge at z = 5 and an edge spanning z.",
+    ).toBeTruthy();
+
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_extrude_start_entity" as SketchId,
+      plane,
+    );
+    const context = await createContext({
+      sketches: [sketch],
+      bodies: [sourceBody],
+    })();
+    const baseParameters = {
+      profiles: [
+        {
+          kind: "region" as const,
+          sketchId: sketch.sketchId,
+          regionId: region.regionId,
+        },
+      ],
+      extent: {
+        mode: "oneSide" as const,
+        end: {
+          kind: "blind" as const,
+          direction: "positive" as const,
+          distance: 2,
+        },
+      },
+      operation: "newBody" as const,
+      booleanScope: { kind: "standalone" as const },
+    };
+
+    for (const [label, target] of [
+      [
+        "face",
+        { kind: "face" as const, bodyId: sourceBody.bodyId, faceId: topFaceId! },
+      ],
+      [
+        "edge",
+        { kind: "edge" as const, bodyId: sourceBody.bodyId, edgeId: capEdgeId! },
+      ],
+    ] as const) {
+      const result = executeOccFeature(
+        context,
+        `feature_extrude_start_entity_${label}` as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            ...baseParameters,
+            startExtent: { kind: "entityOffset", target },
+          },
+        },
+      );
+      const producedTarget = result.producedTargets[0];
+      const producedBody = result.bodies.find(
+        (body) => body.bodyId === producedTarget?.bodyId,
+      );
+      expect(
+        producedBody != null,
+        `An ${label}-bound start extent must produce a body.`,
+      ).toBeTruthy();
+      assertClose(
+        await bodyVolume(context.oc, producedBody!.shape),
+        24,
+        1e-6,
+        `An ${label}-bound start extent must sweep the authored depth from the entity's plane`,
+      );
+      const range = zRange(producedBody!.shape);
+      assertClose(
+        range.min,
+        5,
+        1e-6,
+        `An ${label}-bound start extent must start the prism on the entity's own plane`,
+      );
+      assertClose(
+        range.max,
+        7,
+        1e-6,
+        `An ${label}-bound start extent must end the prism the authored depth beyond its start plane`,
+      );
+    }
+
+    let spanningRefusal: string | null = null;
+    try {
+      executeOccFeature(
+        context,
+        "feature_extrude_start_entity_spanning" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            ...baseParameters,
+            startExtent: {
+              kind: "entityOffset",
+              target: {
+                kind: "edge",
+                bodyId: sourceBody.bodyId,
+                edgeId: spanningEdgeId!,
+              },
+            },
+          },
+        },
+      );
+    } catch (error) {
+      spanningRefusal = error instanceof Error ? error.message : String(error);
+    }
+    expect(
+      spanningRefusal?.includes("defines no single start plane") === true,
+      "An entity that spans the extrude direction must be refused, never resolved to one of its ends.",
+    ).toBeTruthy();
+  }
   async function testExtrudeDraftsOneSideSymmetricAndTwoSideEnds() {
     const plane = createStandardPlaneDefinition("xy");
     const { sketch, region } = createRectangleSketch(
@@ -4332,6 +4487,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion();
   await testExtrudePublishesSemanticPrismHistoryProvenance();
   await testExtrudeUpToNextSkipsCoplanarStartFace();
+  await testExtrudeStartExtentBoundToDurableEntity();
   await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds();
   await testExtrudeFeatureCreatesBodiesFromMultipleRegions();
   await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy();

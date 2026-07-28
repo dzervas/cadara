@@ -198,14 +198,22 @@ export type ImportDeferredExtrudeEndCondition =
 /**
  * A sketch-point start offset defers only its sketch id, exactly like the
  * up-to-vertex sketch-point terminator: the point is an exact authored
- * reference, not a live-topology rematch.
+ * reference, not a live-topology rematch. An entity start offset defers its
+ * durable edge/face through the same apply-time topology rematch every other
+ * live-topology selector uses.
  */
 export type ImportDeferredExtrudeStartExtent =
-  | Exclude<ExtrudeStartExtent, { kind: "sketchPointOffset" }>
+  | Exclude<ExtrudeStartExtent, { kind: "sketchPointOffset" | "entityOffset" }>
   | (Omit<Extract<ExtrudeStartExtent, { kind: "sketchPointOffset" }>, "target"> & {
       target:
         | Extract<ExtrudeStartExtent, { kind: "sketchPointOffset" }>["target"]
         | ImportDeferredSketchPointRef;
+    })
+  | (Omit<Extract<ExtrudeStartExtent, { kind: "entityOffset" }>, "target"> & {
+      target:
+        | Extract<ExtrudeStartExtent, { kind: "entityOffset" }>["target"]
+        | ImportDeferredTopologyRefOf<"edge">
+        | ImportDeferredTopologyRefOf<"face">;
     });
 export type ImportDeferredExtrudeExtent =
   | { mode: "oneSide"; end: ImportDeferredExtrudeEndCondition }

@@ -30,6 +30,7 @@ import {
   requireRegion,
   requireBody,
   requireFace,
+  requireEdge,
   runInRebuildSlot,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
@@ -582,9 +583,9 @@ function applyExtrudeDraft(
 /**
  * Signed displacement, along the extrude direction, from the profile plane to
  * the authored start plane. `profilePlane` never displaces. The offset forms
- * express Onshape's `startOffset` bounds exactly: a blind distance, or the plane
- * through an exact authored sketch point. Nothing is inferred from nearby
- * geometry.
+ * express Onshape's `startOffset` bounds exactly: a blind distance, the plane
+ * through an exact authored sketch point, or the plane through a resolved
+ * durable body edge or face. Nothing is inferred from nearby geometry.
  */
 function resolveStartExtentOffset(
   context: OccFeatureExecutionContext,
@@ -599,6 +600,25 @@ function resolveStartExtentOffset(
       throw new Error("Extrude start offset distance must be positive.");
     }
     return startExtent.direction === "positive" ? distance : -distance;
+  }
+  if (startExtent.kind === "entityOffset") {
+    const body = requireBody(context, startExtent.target.bodyId);
+    const entity =
+      startExtent.target.kind === "face"
+        ? requireFace(context, body, startExtent.target.faceId)
+        : requireEdge(context, body, startExtent.target.edgeId);
+    const entityRange = getShapeProjectionRange(context.oc, entity, direction);
+    // The start plane is the plane through the entity perpendicular to the
+    // extrude direction, so the entity must lie in exactly one such plane. An
+    // entity spanning the direction names no single start plane; refuse it
+    // rather than picking one of its ends.
+    if (entityRange.max - entityRange.min > context.modelingTolerance) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC extrude start entity is not perpendicular to the extrude direction, so it defines no single start plane.",
+      );
+    }
+    const profileSpan = getShapeProjectionRange(context.oc, profileShape, direction);
+    return entityRange.max - profileSpan.max;
   }
   const point = resolveSketchPointWorldPosition(context, startExtent.target);
   const profileRange = getShapeProjectionRange(context.oc, profileShape, direction);

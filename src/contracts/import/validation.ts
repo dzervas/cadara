@@ -485,6 +485,40 @@ function validateImportDeferredValueInvariants(
         }
       }
     }
+    if (
+      request.definition.kind === "extrude" &&
+      request.definition.parameters.startExtent.kind === "entityOffset"
+    ) {
+      // An entity start offset names live topology, so it rematches at apply
+      // exactly like an up-to terminator: the selector must want an edge or a
+      // face and must follow the action that produces it.
+      const target: unknown = request.definition.parameters.startExtent.target;
+      const startPath = `createFeatures.${ref.index}.definition.parameters.startExtent.target`;
+      if (isDeferredTopologyRef(target)) {
+        if (target.expectedKind !== "edge" && target.expectedKind !== "face") {
+          issues.push({
+            path: `${startPath}.expectedKind`,
+            expected: "edge or face",
+            value: target.expectedKind,
+            message:
+              "An extrude entity start offset topologyOf selector must resolve an edge or a face.",
+          });
+        }
+        const hasEarlierProducer =
+          actions.orderedActions
+            ?.slice(0, orderedPosition)
+            .some((entry) => entry.kind === "createFeature") ?? false;
+        if (!hasEarlierProducer) {
+          issues.push({
+            path: startPath,
+            expected: "an earlier createFeature producer action",
+            value: orderedPosition,
+            message:
+              "An extrude entity start offset must follow its topology producer.",
+          });
+        }
+      }
+    }
     if (request.definition.kind === "revolve") {
       const axis = request.definition.parameters.axis;
       if (axis.kind === "sketchEntity" && isDeferredValue(axis.sketchId)) {

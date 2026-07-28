@@ -6,6 +6,7 @@ import {
   planExtrudeFeature,
   referencedSketchFeatureIds,
   resolvedExtrudeExtent,
+  resolvedExtrudeStartExtent,
   resolvePlannedExtrudeTopology,
 } from "@/domain/import/onshape/extrude-planner";
 import { makeWaveTCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
@@ -219,4 +220,80 @@ test("declares and resolves exact-prefix slots for up-to-face and explicit body 
       target: { kind: "topologyOf", expectedKind: "face" },
     },
   });
+});
+
+test("binds an ENTITY start bound over live body topology to a resolved start entity", () => {
+  const input = fixtureInput("WT_UP_TO_NEXT");
+  ensureParameter(input.feature, "startOffset").value = true;
+  ensureParameter(input.feature, "startOffsetBound").value = "ENTITY";
+  // A body edge query, not a decodable sketch-entity vertex: the only exact
+  // route is a topology slot resolved against the pre-consumer prefix.
+  ensureParameter(input.feature, "startOffsetEntity").queries = [{
+    queryString: "query = qCompressed(1.0,\"start-edge\",id);",
+    deterministicIds: ["start-edge"],
+  }];
+
+  const result = planExtrudeFeature({
+    feature: input.feature,
+    ...profileInput(input),
+    priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
+    inferredDefaultScopeFeatureIds: ["WT_EXTENT_BASE"],
+  });
+  expect(result.tier).toBe("topology");
+  if (result.tier !== "topology") return;
+  expect(result.plannedExtrude.topologySlots).toMatchObject([
+    { key: "startEntity", parameterId: "startOffsetEntity", expectedKinds: ["edge", "face"] },
+  ]);
+  expect(hasUnresolvedExtrudeTopology(result.plannedExtrude)).toBe(true);
+  expect(() => resolvedExtrudeStartExtent(result.plannedExtrude)).toThrow(
+    "unresolved topology slot",
+  );
+
+  const edgeSelector = {
+    kind: "topologyOf" as const,
+    expectedKind: "edge" as const,
+    capturedSignature: { entityClass: "edge" as const, geometryType: "circle" },
+    tolerance: { linear: 0.01, angularRadians: 0.001, relative: 0.001, ambiguityMargin: 0.01 },
+    source: {
+      consumerFeatureId: input.feature.featureId,
+      parameterId: "startOffsetEntity",
+      deterministicId: "start-edge",
+    },
+  };
+  const binding = {
+    query: {
+      consumerFeatureId: input.feature.featureId,
+      slotKey: "startEntity",
+      parameterId: "startOffsetEntity",
+      queryIndex: 0,
+      deterministicId: "start-edge",
+      queryString: null,
+      expectedKinds: ["edge", "face"] as const,
+    },
+    reviewReference: {
+      kind: "edge" as const,
+      bodyId: "body_review" as never,
+      edgeId: "edge_review" as never,
+    },
+    deferred: edgeSelector,
+    score: 0,
+    evidence: [],
+    sourceEvidence: "historyPoint" as const,
+  };
+  const resolved = resolvePlannedExtrudeTopology(result.plannedExtrude, [binding]);
+  expect(resolved).not.toBeNull();
+  expect(hasUnresolvedExtrudeTopology(resolved!)).toBe(false);
+  expect(resolvedExtrudeStartExtent(resolved!)).toMatchObject({
+    kind: "entityOffset",
+    target: { kind: "topologyOf", expectedKind: "edge" },
+  });
+
+  // A slot that resolved to something that names no plane fails the whole plan
+  // instead of silently starting the prism on the profile plane.
+  const bodyBinding = {
+    ...binding,
+    reviewReference: { kind: "body" as const, bodyId: "body_review" as never },
+    deferred: { ...edgeSelector, expectedKind: "body" as const },
+  };
+  expect(resolvePlannedExtrudeTopology(result.plannedExtrude, [bodyBinding])).toBeNull();
 });
