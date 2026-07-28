@@ -194,13 +194,13 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   );
   // The start-extent contract makes Extrude 1 and its cascade live, so this
   // 237 MB studio now builds real solids through every review probe pass.
-  test.setTimeout(1_800_000);
+  test.setTimeout(3_600_000);
   const { reviewText } = await importBundle(
     page,
     PART_STUDIO_BUNDLE_PATH,
     true,
     undefined,
-    1_500_000,
+    3_000_000,
   );
   // `Extrude 1` is fully parametric: its `UP_TO_VERTEX` END extent resolves at
   // an exact `Screen Outline` sketch point (X.9.1), and its Onshape START offset
@@ -220,12 +220,24 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // run against that empty prefix and force-bake itself for the whole studio.
   // Such a failure is now contained at the prefix-probe boundary, so `Shell 1`
   // is decided by the whole-plan probes that build the sequence apply runs.
-  expect(reviewText).toContain("13 parametric, 28 baked, 0 geometry-only features.");
+  //
+  // Four face-backed sketches are parametric now. Review used to match their
+  // captured sketch-plane face with the 1e-4 mm default tolerance while the
+  // apply-time selector it emits carries the 0.01 mm live-topology tolerance, so
+  // review rejected live faces apply would have accepted over ~4e-4 mm of
+  // rebuild precision. Both ends now use the same tolerance, and each promoted
+  // sketch is committed onto its live face through a durable `topologyOf`
+  // support ref.
+  expect(reviewText).toContain("17 parametric, 24 baked, 0 geometry-only features.");
   expect(reviewText).toMatch(/Extrude 1\s+parametric/);
   expect(reviewText).toMatch(/Chamfer 1\s+parametric/);
   expect(reviewText).toMatch(/Chamfer 2\s+parametric/);
   expect(reviewText).toMatch(/Shell 1\s+parametric/);
   expect(reviewText).toMatch(/Extrude 2\s+parametric/);
+  expect(reviewText).toMatch(/Cutter\s+parametric/);
+  expect(reviewText).toMatch(/Sketch 7\s+parametric/);
+  expect(reviewText).toMatch(/Sketch 9\s+parametric/);
+  expect(reviewText).toMatch(/Sketch 10\s+parametric/);
   // `Split 1` is excluded scope and cascades behind an earlier failure. Assert
   // only that it stays baked and suppressed; the quoted diagnostic names
   // whichever upstream feature the kernel refused first.
