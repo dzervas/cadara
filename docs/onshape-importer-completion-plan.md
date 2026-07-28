@@ -1926,12 +1926,12 @@ longer masks it):*
 - 9841 `Chamfer 2`, 5151 `Chamfer 2` / `3`: the live chamfer **build** fails on
   the live prefix geometry. This is the next flywheel iteration and is a chamfer
   *geometry/width-form* question, not a naming one.
-- 9841 `Shell 1`, `Boolean 1`, `Delete part 1`, `Split 1` and the extrudes
-  quoting `baked-body-assetMissing`: the probe cannot rebuild a prefix that
-  contains a bake checkpoint because the checkpoint's geometry asset is not
-  materialized in the probe session (`materializeBake: false`). This is a probe
-  *session* limitation, not a topology-evidence gap, and it is what the generic
-  `topology-history-evidence-missing` copy is currently hiding.
+- 9841 `Shell 1`, `Boolean 1`, `Delete part 1`, `Split 1` and the extrudes then
+  read as quoting `baked-body-assetMissing`. **Superseded** — see "the probe's
+  bake-checkpoint blind spot" below: that reading was not reproducible against the
+  real browser gate (no studio review contains `assetMissing` at all). These
+  features cascade behind 9841 `Chamfer 2`, whose real root cause is
+  generated-entity stage lineage.
 - 5151 `Fillet 2`: honest `topology-reference-no-match` — the captured `JIR` edge
   agrees with no live candidate on the analytic gates (per-candidate rejections
   are preserved in `reasonDetail`).
@@ -1949,6 +1949,10 @@ longer masks it):*
 
 #### X.5 face-backed sketches: not attempted, and why
 
+**Superseded** — see "the probe's bake-checkpoint blind spot" below. X.5 was
+subsequently attempted; the `baked-body-assetMissing` blocker named here was
+disproved, and the real blocker is that these sketches' owning bodies are absent
+from the live prefix, gated on 9841 `Chamfer 2`.
 9841 `Sketch 2` / `5` / `6` / `9` / `10` and `Cutter` remain
 `needs-history-probe`. Promotion requires a live body face to resolve against,
 and in this capture every one of those sketches sits **behind** a prefix the
@@ -1963,8 +1967,143 @@ its blocker now precisely named rather than being closed on a guess.
 - **X.9.2 (chamfer/fillet lineage):** the diagnosed defect is **fixed and pinned**.
   It did not raise tiers in these captures; the next blockers are named above.
 - **X.5 (face-backed sketches):** **open**, blocked on probe-session checkpoint
-  materialization rather than on matching.
+  materialization rather than on matching. *(Superseded below: that blocker was
+  disproved; the real one is the missing owning body in the live prefix.)*
 
 Validation: `bun run lint`, `bun run build`, `bun run test` (logic + UI +
 static), and `bun run test:e2e` (**67 passed / 0 failed**, real bundles, clean
 port 3123) are all green.
+
+### Item-D follow-ups: the probe's bake-checkpoint blind spot (X.5 prerequisite)
+
+**The named `baked-body-assetMissing` blocker did not exist.** The previous
+iteration's framing — that the probe runs prefixes with `materializeBake: false`
+so any prefix containing a bake checkpoint fails with `baked-body-assetMissing` —
+was checked against the real browser gate first and is **not reproducible**. A
+full review dump of all three studios contains **zero** occurrences of
+`assetMissing` (`grep -c` over the rendered review text: 9841 `0`, 5151 `0`,
+d3cd9 `0`). Nothing was "fixed" there because nothing was broken: `materializeBake`
+gates the monolithic whole-studio bake, while `emitBakeCheckpoints` (already
+`true` on the containment probe) emits the segment checkpoints, and the browser
+probe resolves their asset bytes through the shared geometry-asset composition.
+The X.4 note's "checkpoint materialization is browser-inert" caveat is likewise
+stale — the browser gate now commits `feature_bakedBody-1` in every affected
+studio.
+
+**The real blind spot was ordering, and it was invisible.** The face-backed
+sketch pass ran *before* the containment pass. So it probed a prefix that still
+contained features the live kernel refuses (9841 `Chamfer 2`). Such a prefix
+fails wholesale, the probe returns no signatures at all, and every face-backed
+sketch behind it saw an **empty live prefix** — a probe-session artifact, not a
+matching failure. Four exits in that loop returned the plan unchanged with no
+`reasonDetail`, so the generic `needs-history-probe` copy hid it completely.
+That is exactly why the previous iteration had to guess at a cause.
+
+Fix, at the honest seam and in two commits:
+
+1. **Extend the X.9.3 `reasonDetail` flywheel into the sketch loop.** All four
+   silent exits now name their cause: no captured signature, a failed prefix
+   (kernel diagnostic preserved verbatim), a non-unique match (zero/one/many with
+   each live candidate's rejection gates plus a live-prefix census), and a matched
+   face exposing no planar frame. Purely diagnostic; it never participates in
+   matching or tier selection.
+2. **Contain before probing, lazily.** When a sketch prefix fails to rebuild, the
+   provider now runs the existing containment pass and re-probes once, so the
+   prefix the sketch matches against is the one apply will actually build.
+   Containment rebuilds the whole studio in the kernel, so running it eagerly on
+   every fixed-point iteration cost d3cd9 ~160 s (571 s → 731 s) and blew its
+   Playwright review budget. It is therefore triggered only by an actual prefix
+   failure and memoized on the plan fingerprint it already proved buildable
+   (d3cd9 back to 576 s).
+
+The flywheel paid out immediately, in three steps, on 9841's face sketches:
+
+| Iteration | 9841 `Sketch 2` / `5` / `6` / `9` / `10` / `Cutter` `reasonDetail` |
+|---|---|
+| before | *(none — silent `needs-history-probe`)* |
+| after (1) | `sketch plane wants face/plane \|\| no live face matched; rejected nothing (the live prefix exposed no candidates) \|\| live prefix 0: empty` |
+| after (1), prefix status surfaced | `kernel-history-probe-step-failed: History probe failed at step 10: occ-topology-unsupported-history: Chamfer 2 edge selection is incorrect.` |
+| after (2) | `sketch plane wants face/plane \|\| no live face matched; rejected face_body_feature_extrude-1_…: normal-angle-out-of-tolerance,plane-offset-out-of-tolerance,… \|\| live prefix 39: body/solidx1,face/planex8,edge/linex18,vertex/pointx12` |
+
+The probe now presents the same body state apply does, and the bake is honest
+per-candidate matching against a real live prefix instead of an empty one.
+
+#### X.5 face-backed sketches: attempted, and the honest blocker
+
+X.5 was attempted and is **still open**, but its blocker is now proven rather
+than assumed, and it is a *different* blocker than the one previously recorded.
+
+With containment ordered correctly, 9841's face-backed sketches probe a live
+prefix of **39 signatures — but only one body, `body_feature_extrude-1`.** Those
+sketches are authored on faces of bodies produced by extrudes that are themselves
+still baked, so no live face they could resolve against exists in the prefix at
+all. Every one of the 8 live planar faces is rejected on
+`normal-angle`/`plane-offset`/`bounding-box` gates — the correct answer for faces
+of the wrong body.
+
+So no `SketchPlaneSupportRef` wiring was landed: with zero candidate faces from
+the owning body, any promotion would resolve against a body apply never presents
+or require fabricating an `owningFeatureId`. Both are excluded by the ground
+rules. **X.5 is gated on 9841 `Chamfer 2`** (below) and the extrude cascade behind
+it, not on face resolution or on `SketchPlaneSupportRef` plumbing.
+
+#### 9841 `Chamfer 2`: root cause found (generated-entity lineage)
+
+The chamfer/fillet lineage fix recorded above closed the `IsDeleted`
+over-reporting gap for *prior* subtopology. It did not cover subtopology the
+chamfer **generates**, and that is what 9841 `Chamfer 2` selects.
+
+Diagnosed in the real OCC kernel (never the mock), with a temporary harness over
+`executeChamferFeature` on a single-chamfer box:
+
+| result entity | count | has a stage source key |
+|---|---:|---|
+| faces | 7 | 6 |
+| edges | 15 | 11 |
+| vertices | 10 | 6 |
+| **generated by the chamfer** | **9** | **none** |
+
+`createExactSuccessorTopologyStage` enumerates only `getExactSuccessorSourceTargets(sourceBody)`
+— the *prior* body's subtopology. The chamfer's new face, its 4 new edges and 4
+new vertices are in the output body but appear in no `sourceTargets` entry. On
+rebuild, `classifySemanticStageTopology` sees `sourceKeys.length === 0` for each
+of them and invalidates them as `occ-topology-unsupported-history`.
+
+That is precisely 9841 `Chamfer 2`'s failure: its captured edges (`JNR`, `JPZ`,
+`JPd`, `JPF`, `JPJ`) are the chamfer surface's own boundary edges, created by
+`Chamfer 1`. Sequential apply survives it (the invalidation is only consulted on
+replay); the rebuild path — which the probe and apply both run — refuses it.
+
+The fix is a producer-identity claim for generated entities (an entity a feature
+created is owned by that feature, which is exact identity, not a match) and is
+**not landed here**: it changes the topology-stage contract for every local
+operation, needs its own real-kernel rebuild pins, and this session's budget went
+to proving the cause rather than guessing at it. It is recorded as the single
+next root cause for 9841, and it is what gates X.5 in this capture.
+
+#### Verdicts (updated)
+
+- **X.5 (face-backed sketches):** **open**. Its previously recorded blocker
+  (probe-session checkpoint materialization / `baked-body-assetMissing`) was
+  disproved. Its real blocker is that the sketches' owning bodies are not in the
+  live prefix, gated on 9841 `Chamfer 2`'s generated-entity lineage.
+- **X.9.2 residuals:** 9841 `Chamfer 2` is root-caused (generated-entity stage
+  lineage) and awaiting the contract change. 5151 `Chamfer 2` / `3` and
+  `Fillet 2` are unchanged and still name their own kernel/matching reasons.
+- **Probe blind spot:** **closed** for observability (every face-sketch bake now
+  names its cause) and **closed** for ordering (containment precedes the sketch
+  match whenever a prefix fails).
+
+Tiers are unchanged and are reported as such rather than tuned:
+
+| Studio | Before | After |
+|---|---:|---:|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** |
+| Wave-T (all six studios) | all parametric | **all parametric** |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** |
+| Part Studio 1 `9841…` | 10 / 31 / 0 | **10 / 31 / 0** |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** |
+
+Logic-lane pins (`provider.spec.ts`): an unresolved face sketch records the
+zero/one/many detail plus a live-prefix census, and containment stays lazy but
+fires and re-probes once a sketch prefix fails.
