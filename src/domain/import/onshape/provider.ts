@@ -100,6 +100,7 @@ import type {
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { encodeOnshapeTessellationAsBakedMeshBytes } from "@/domain/import/onshape/rollback-bake";
 import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-resolution-planner";
+import { createMemoizedHistoryProbe } from "@/domain/import/kernel-history-probe";
 import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
 import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
 import {
@@ -1714,8 +1715,15 @@ async function activateProbeBackedPlanning(input: {
 async function reviewStudio(
   bundle: OnshapeCaptureBundle,
   elementId: string,
-  capabilities: ImportCapabilities,
+  rawCapabilities: ImportCapabilities,
 ): Promise<OnshapeStudioReview> {
+  // Review probes the same prefixes repeatedly (once per topology consumer, once
+  // per fixed-point iteration). Memoizing on the exact prepared-action payload
+  // keeps the kernel evidence identical while paying for each distinct prefix
+  // rebuild only once.
+  const capabilities: ImportCapabilities = rawCapabilities.history
+    ? { ...rawCapabilities, history: createMemoizedHistoryProbe(rawCapabilities.history) }
+    : rawCapabilities;
   const read = readPartStudio(bundle, elementId);
   const planned = planStudioFidelity(read, {
     captureFormatVersion: bundle.formatVersion,
