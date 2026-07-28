@@ -297,3 +297,55 @@ test("binds an ENTITY start bound over live body topology to a resolved start en
   };
   expect(resolvePlannedExtrudeTopology(result.plannedExtrude, [bodyBinding])).toBeNull();
 });
+
+// The BLIND start-offset sign convention is pinned by the two
+// `9841e486906fa2ce62d74d8e` instances (`Extrude 10` / `Extrude 11`, derived in
+// `translateStartExtent`): the start plane moves `+startOffsetDistance` along
+// the extrude direction whenever `startOffsetOppositeDirection` equals
+// `oppositeDirection`. The authored expression is preserved, never collapsed to
+// the captured literal.
+test("translates a capture-pinned BLIND start offset and refuses the undiscriminated flag combination", () => {
+  for (const opposite of [false, true]) {
+    const input = fixtureInput("WT_UP_TO_NEXT");
+    ensureParameter(input.feature, "startOffset").value = true;
+    ensureParameter(input.feature, "startOffsetBound").value = "BLIND";
+    ensureParameter(input.feature, "startOffsetDistance").expression = "#tolerance*2";
+    ensureParameter(input.feature, "startOffsetOppositeDirection").value = opposite;
+    ensureParameter(input.feature, "oppositeDirection").value = opposite;
+
+    const result = planExtrudeFeature({
+      feature: input.feature,
+      ...profileInput(input),
+      priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
+      inferredDefaultScopeFeatureIds: ["WT_EXTENT_BASE"],
+    });
+
+    expect(result.tier).toBe("parametric");
+    if (result.tier !== "parametric") return;
+    expect(result.plannedExtrude.startExtent).toEqual({
+      kind: "blindOffset",
+      distance: { source: "expression", valueText: "tolerance*2" },
+      direction: "positive",
+    });
+    expect(resolvedExtrudeStartExtent(result.plannedExtrude)).toEqual(
+      result.plannedExtrude.startExtent,
+    );
+    expect(result.plannedExtrude.topologySlots).toEqual([]);
+  }
+
+  const mismatched = fixtureInput("WT_UP_TO_NEXT");
+  ensureParameter(mismatched.feature, "startOffset").value = true;
+  ensureParameter(mismatched.feature, "startOffsetBound").value = "BLIND";
+  ensureParameter(mismatched.feature, "startOffsetDistance").expression = "2 mm";
+  ensureParameter(mismatched.feature, "startOffsetOppositeDirection").value = true;
+  ensureParameter(mismatched.feature, "oppositeDirection").value = false;
+
+  expect(
+    planExtrudeFeature({
+      feature: mismatched.feature,
+      ...profileInput(mismatched),
+      priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
+      inferredDefaultScopeFeatureIds: ["WT_EXTENT_BASE"],
+    }),
+  ).toMatchObject({ tier: "baked", reason: "extrude-start-extent-unsupported" });
+});

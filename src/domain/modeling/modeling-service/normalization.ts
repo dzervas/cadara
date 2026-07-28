@@ -326,7 +326,11 @@ export function normalizeExtrudeStartExtent(value: unknown): ExtrudeStartExtent 
       value.distance as MaybeAuthoredValue<number>,
       0,
     );
-    if (!((getAuthoredLiteralValue(distance) ?? 0) > 0)) {
+    // An authored expression (Onshape's `#tolerance*2` start offsets) resolves
+    // to a literal later, exactly like the blind end distance, so only a
+    // non-positive LITERAL is rejected here.
+    const literalDistance = getAuthoredLiteralValue(distance);
+    if (literalDistance !== null && literalDistance <= 0) {
       throw new Error("Extrude blind start-offset distance must be positive.");
     }
     return { kind: "blindOffset", distance, direction: value.direction };

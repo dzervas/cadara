@@ -348,17 +348,72 @@ function resolveSketchPointExtentTarget(
  * plane. `startOffsetBound=ENTITY` with exactly one decodable sketch-entity
  * vertex query becomes an exact `sketchPointOffset`; an `ENTITY` bound whose
  * query names live body topology becomes an `entityOffset` bound to a topology
- * slot, resolved exactly against the pre-consumer prefix. Every other authored
- * form returns `null` so the caller bakes with a specific reason; nothing is
- * inferred and no distance sign is guessed.
+ * slot, resolved exactly against the pre-consumer prefix.
+ *
+ * `startOffsetBound=BLIND` displaces the start plane by `startOffsetDistance`.
+ * The contract's `blindOffset.direction` is signed along the EXTRUDE direction
+ * (`ExtrudeEndCondition.direction` already flips the profile normal), so the
+ * authored sign has to be pinned against ground truth rather than assumed. The
+ * `9841e486906fa2ce62d74d8e` capture pins it exactly, on both of its BLIND
+ * instances, by projecting the rollback tessellation onto the extrude direction
+ * u = (0, 0.8660254037844385, -0.5000000000000004):
+ *
+ * - `Extrude 10` (`FnqLWtKC5loyWcj_1`, snapshots 17 → 18 on body `JbH`):
+ *   profile sketch `Sketch 7` lies on the plane u = 0 (its `sketchMatrix`
+ *   normal is -u through the origin) and `oppositeDirection=true`, so the
+ *   extrude direction is +u. The six added start caps (facet normal -u) all sit
+ *   at u = +2.000000 mm and the end caps at u = 17.000000 mm (the
+ *   `UP_TO_SURFACE` face `JhK` plane). Authored `startOffsetDistance=2 mm`,
+ *   `startOffsetOppositeDirection=true`.
+ * - `Extrude 11` (`FarVWY13vdeW4u9_1`, snapshots 18 → 19 on body `JbD`):
+ *   its profile is `Extrude 10`'s end cap at u = 17.000000 mm and
+ *   `oppositeDirection=false`, so the extrude direction is again +u. Its added
+ *   start caps sit at u = 17.200000 mm. Authored
+ *   `startOffsetDistance=#tolerance*2` (= 0.2 mm),
+ *   `startOffsetOppositeDirection=false`.
+ *
+ * Both instances therefore displace the start plane by exactly
+ * `+startOffsetDistance` ALONG the extrude direction, and in both
+ * `startOffsetOppositeDirection` equals `oppositeDirection`. That is all the
+ * capture set discriminates: when the two flags disagree the observed data
+ * cannot separate "offset along the un-flipped profile normal, negated by
+ * `startOffsetOppositeDirection`" from "offset always along the extrude
+ * direction", which are the two conventions consistent with both instances.
+ * That combination therefore stays baked instead of guessing a sign that would
+ * displace geometry.
+ *
+ * Every other authored form returns `null` so the caller bakes with a specific
+ * reason; nothing is inferred and no distance sign is guessed.
  */
 function translateStartExtent(
   feature: OnshapeFeatureNode,
   input: ExtrudePlanInput,
   slots: TopologyQuerySlot[],
+  diagnostics: ExtrudePlanDiagnostic[],
 ): PlannedExtrudeStartExtent | null {
   if (!booleanValue(feature, "startOffset")) return { kind: "profilePlane" };
-  if (enumValue(feature, "startOffsetBound") !== "ENTITY") return null;
+  const bound = enumValue(feature, "startOffsetBound");
+  if (bound === "BLIND") {
+    // The pinned displacement is measured along the first direction's extrude
+    // direction, so a symmetric or two-sided extent names no single start plane.
+    if (booleanValue(feature, "hasSecondDirection")) return null;
+    if ((enumValue(feature, "endBound") ?? "BLIND") === "SYMMETRIC") return null;
+    if (
+      booleanValue(feature, "startOffsetOppositeDirection") !==
+      booleanValue(feature, "oppositeDirection")
+    ) {
+      return null;
+    }
+    return {
+      kind: "blindOffset",
+      distance: authoredDistance(
+        quantityExpression(feature, "startOffsetDistance"),
+        diagnostics,
+      ),
+      direction: "positive",
+    };
+  }
+  if (bound !== "ENTITY") return null;
   const target = resolveSketchPointExtentTarget(
     feature,
     "startOffsetEntity",
@@ -528,11 +583,16 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   // Onshape's `startOffset` moves the prism's START plane off the profile
   // plane. The `ENTITY` form names either an exact sketch point (translated to
   // the contract's `sketchPointOffset`) or live body topology (translated to an
-  // `entityOffset` bound to a resolved topology slot); every other form (notably
-  // `BLIND`, whose authored sign convention this capture set cannot pin against
-  // ground truth) stays baked rather than building a solid displaced by a
-  // guessed offset.
-  const startExtent = translateStartExtent(feature, input, topologySlots);
+  // `entityOffset` bound to a resolved topology slot); the `BLIND` form carries
+  // the capture-pinned signed distance. Every form whose displacement this
+  // capture set cannot pin against ground truth stays baked rather than building
+  // a solid displaced by a guessed offset.
+  const startExtent = translateStartExtent(
+    feature,
+    input,
+    topologySlots,
+    diagnostics,
+  );
   if (!startExtent) {
     return { tier: "baked", reason: "extrude-start-extent-unsupported", diagnostics };
   }
