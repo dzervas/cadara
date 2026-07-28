@@ -40,6 +40,7 @@ import {
   createUnsupportedProducerTopologyStage,
   formatGeneratedProducerTopologySourceKey,
   type OccFeatureTopologyStage,
+  type OccGeneratedAdjacencyEntry,
 } from "@/domain/modeling/occ/topology-stage";
 
 type OccSubtopologyShape = { IsSame(other: never): boolean };
@@ -221,6 +222,101 @@ function collectGeneratedProducerTargets(input: {
 }
 
 /**
+ * Created subtopology of one replacement body, with the faces that bound it.
+ *
+ * `BRepFilletAPI::Generated` names the chamfer/fillet SURFACE and nothing else,
+ * so the boundary edges and corner vertices of that surface reach a rebuild
+ * unnamed. This enumerates exactly those entities — the ones that are `IsSame`
+ * as no prior subtopology of the same kind, i.e. genuinely new — together with
+ * the output body's faces they bound, which is what makes their identity
+ * expressible. Nothing here reads coordinates or applies a tolerance.
+ */
+function collectGeneratedAdjacency(input: {
+  oc: OccFeatureExecutionContext["oc"];
+  sourceBody: OccTrackedBody;
+  replacement: OccTrackedBody;
+}): OccGeneratedAdjacencyEntry[] {
+  const faceIdsByShape = (shape: OccSubtopologyShape) => {
+    const faceIds: FaceId[] = [];
+    for (const [faceId, face] of input.replacement.facesById) {
+      if ((face as OccSubtopologyShape).IsSame(shape as never)) {
+        faceIds.push(faceId);
+      }
+    }
+    return faceIds;
+  };
+
+  const collectKind = <Id extends EdgeId | VertexId>(
+    kind: "edge" | "vertex",
+    previousShapesById: ReadonlyMap<Id, OccSubtopologyShape>,
+    currentShapesById: ReadonlyMap<Id, OccSubtopologyShape>,
+    toRef: (id: Id) => DurableRef,
+  ) => {
+    const ancestors = new input.oc.TopTools_IndexedDataMapOfShapeListOfShape_1();
+    input.oc.TopExp.MapShapesAndAncestors(
+      input.replacement.shape,
+      (kind === "edge"
+        ? input.oc.TopAbs_ShapeEnum.TopAbs_EDGE
+        : input.oc.TopAbs_ShapeEnum.TopAbs_VERTEX) as never,
+      input.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+      ancestors,
+    );
+
+    const entries: OccGeneratedAdjacencyEntry[] = [];
+    for (const [currentId, currentShape] of currentShapesById) {
+      const survives = [...previousShapesById.values()].some((previousShape) =>
+        previousShape.IsSame(currentShape as never),
+      );
+      if (survives) {
+        continue;
+      }
+
+      const index = ancestors.FindIndex(currentShape as never);
+      if (index <= 0) {
+        continue;
+      }
+      // The map owns the list it returns, so iterate a copy and leave the
+      // original alive for the remaining lookups.
+      const faces = new input.oc.TopTools_ListOfShape_3(
+        ancestors.FindFromIndex(index),
+      );
+      const adjacentFaceIds: FaceId[] = [];
+      while (faces.Size() > 0) {
+        adjacentFaceIds.push(
+          ...faceIdsByShape(faces.First_1() as unknown as OccSubtopologyShape),
+        );
+        faces.RemoveFirst();
+      }
+      entries.push({ target: toRef(currentId), adjacentFaceIds });
+    }
+    return entries;
+  };
+
+  return [
+    ...collectKind(
+      "edge",
+      input.sourceBody.edgesById,
+      input.replacement.edgesById,
+      (edgeId) => ({
+        kind: "edge",
+        bodyId: input.replacement.bodyId,
+        edgeId,
+      }),
+    ),
+    ...collectKind(
+      "vertex",
+      input.sourceBody.verticesById,
+      input.replacement.verticesById,
+      (vertexId) => ({
+        kind: "vertex",
+        bodyId: input.replacement.bodyId,
+        vertexId,
+      }),
+    ),
+  ];
+}
+
+/**
  * Record stage lineage for one local operation (fillet/chamfer) on one body.
  *
  * With native history, untouched faces/edges/vertices carry exact one-to-one
@@ -296,6 +392,13 @@ function collectLocalOperationTopologyStages(input: {
               builder: input.generatedHistorySource,
             })
           : input.replacementResult.generatedTargetsBySourceKey,
+        // Neither builder history names the boundary of the surface it created,
+        // so those entities are identified by the faces they bound.
+        generatedAdjacency: collectGeneratedAdjacency({
+          oc: input.oc,
+          sourceBody: input.sourceBody,
+          replacement,
+        }),
       }),
     );
   }

@@ -576,17 +576,18 @@ test("executeChamferFeature claims producer identity through native generated hi
   ).toBe(1);
   const generatedFaceId = generatedFaceIds[0]!;
 
+  // Only the `generated-face` role comes from the shim's history records; the
+  // adjacency-derived roles are a separate seam with its own pin.
+  const nativeProducerKey = `generated-from:feature_native_generated_lineage:body_native_generated_lineage:edge:${original.body.topology.edgeIds[0]}:generated-face`;
   const producerEntries = [...original.output.sourceTargets].filter(([key]) =>
     key.startsWith("generated-from:"),
   );
   expect(
     producerEntries.map(([key]) => key),
-    "The native transaction's `generated` history records must reach the topology stage as producer keys; an empty set means the Wasm shim emitted none.",
-  ).toEqual([
-    `generated-from:feature_native_generated_lineage:body_native_generated_lineage:edge:${original.body.topology.edgeIds[0]}:generated-face`,
-  ]);
+    "The native transaction's `generated` history records must reach the topology stage as producer keys; a missing key means the Wasm shim emitted none.",
+  ).toContain(nativeProducerKey);
   expect(
-    producerEntries[0]![1],
+    original.output.sourceTargets.get(nativeProducerKey),
     "The producer key must claim exactly the face the chamfer generated.",
   ).toEqual([
     {
@@ -616,4 +617,66 @@ test("executeChamferFeature claims producer identity through native generated hi
     ),
     "The natively generated chamfer face must survive the rebuild instead of being invalidated as unsupported history.",
   ).toBe(false);
+
+  // The boundary of the generated surface is what a following chamfer selects,
+  // and no builder history names it. Adjacency identity must keep every one of
+  // those entities live across the same upstream edit, and must not disturb the
+  // entities the exact passes already claimed.
+  const generatedEdgeIds = original.replacement.topology.edgeIds.filter(
+    (edgeId) => !original.body.topology.edgeIds.includes(edgeId),
+  );
+  const generatedVertexIds = original.replacement.topology.vertexIds.filter(
+    (vertexId) => !original.body.topology.vertexIds.includes(vertexId),
+  );
+  expect(
+    [generatedEdgeIds.length, generatedVertexIds.length],
+    "A single-edge chamfer must create four boundary edges and four corner vertices for this pin to mean anything.",
+  ).toEqual([4, 4]);
+
+  const adjacencyKeys = [...original.output.sourceTargets.keys()].filter((key) =>
+    key.includes(":adjacent("),
+  );
+  expect(
+    adjacencyKeys.length,
+    "Every created edge and vertex must carry an adjacency claim; an unclaimed one is invalidated on rebuild.",
+  ).toBe(generatedEdgeIds.length + generatedVertexIds.length);
+  expect(
+    [...rebuilt.output.sourceTargets.keys()]
+      .filter((key) => key.includes(":adjacent("))
+      .sort(),
+    "A rebuild over an edited upstream must reproduce identical adjacency keys, or the downstream reference is lost.",
+  ).toEqual([...adjacencyKeys].sort());
+
+  for (const edgeId of generatedEdgeIds) {
+    expect(
+      reconciliation.invalidations.has(`edge:${original.body.bodyId}:${edgeId}`),
+      "A created boundary edge named by its bounding faces must survive the rebuild.",
+    ).toBe(false);
+  }
+  for (const vertexId of generatedVertexIds) {
+    expect(
+      reconciliation.invalidations.has(
+        `vertex:${original.body.bodyId}:${vertexId}`,
+      ),
+      "A created corner vertex named by its bounding faces must survive the rebuild.",
+    ).toBe(false);
+  }
+  expect(
+    reconciliation.invalidations.size,
+    "Adjacency identity must not invalidate anything the exact passes already claimed.",
+  ).toBe(0);
+
+  // Zero/many honesty: a signature whose bounding faces are not all claimed, or
+  // that two entities share, must claim nothing rather than guess.
+  const unsupportedAdjacency = classifySemanticStageTopology({
+    previous: original.output,
+    current: {
+      ...rebuilt.output,
+      unsupportedSourceKeys: new Set([adjacencyKeys[0]!]),
+    },
+  });
+  expect(
+    unsupportedAdjacency.invalidations.size,
+    "An unsupported adjacency key must invalidate its entity honestly.",
+  ).toBe(1);
 });
