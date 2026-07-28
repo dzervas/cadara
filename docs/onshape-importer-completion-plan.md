@@ -2500,3 +2500,164 @@ baked plan's `reasonDetail`.
 
 Validation: `bun run lint`, `bun run build`, `bun run test` (logic + UI + static),
 and `bun run test:e2e` (67 passed / 0 failed, real bundles, clean port 3123).
+
+### Item-D follow-up: the speculative prefix probe, and the Shell 1 promotion
+
+**9841 `Shell 1` and `Extrude 2` are parametric.** The
+`topology-apply-rematch-failed` detail (`live prefix 0: empty`) was accurate and
+its cause was ordering, exactly as recorded — but the empty prefix was not the
+*apply* prefix. It was a **speculative pre-consumer prefix belonging to a
+different feature**.
+
+#### The root cause, from a real-kernel review of the actual bundles
+
+A node-side real-OCC review of each local capture (real `public/cadara-occ.wasm`,
+never the mock) reproduces the browser gate exactly (9841 `11 / 30 / 0`), and
+instrumenting the probe capability names the offending probe unambiguously:
+
+| probe | consumer | ordered action sequence |
+|---|---|---|
+| 8 | `Ff2Ps8hMrKL549G_1` (face/edge consumer) | `…, Sketch 1, Incline, Screen Outline, Side Outline, Shell 1` |
+
+`Extrude 1`, `Chamfer 1` and `Chamfer 2` are **absent** from that sequence. A
+pre-consumer prefix for a face/edge consumer deliberately suppresses bake
+checkpoints (`emitBakeCheckpoints: consumesOnlyBodies`), so at that iteration —
+when those three features were still baked — the whole baked run contributed
+*nothing*: no parametric features and no checkpoint bodies. `Shell 1` sat inside
+that prefix, its deferred `parts`/`JND` body selector was materialized against a
+genuinely empty session, and the resulting throw escaped
+`activateProbeBackedPlanning`. `reviewStudio` treats such a throw as apply-time
+evidence and force-bakes the feature for the rest of the review
+(`forcedBakeFeatureIds` is never re-promoted), so `Shell 1` was condemned by a
+probe that could not have built it, iterations before the prefix it needed
+existed. 5151 `Chamfer 1` / `Chamfer 2` were condemned the same way, from
+prefixes that placed a `Fillet 2` / `Extrude 4` checkpoint ahead of them.
+
+#### The fix: contain the failure at the seam that owns it
+
+`probeTopologyConsumerPrefixes` now catches `TopologyApplyRematchError` and
+reports it as a **failed prefix for the consumer being probed**, with the
+verbatim zero/one/many detail preserved in the step diagnostic. The offending
+feature stays eligible. Nothing is relaxed and nothing is matched by proximity:
+the whole-plan verification and containment probes — which build the same ordered
+sequence apply runs, checkpoints included — still throw, and `reviewStudio` still
+force-bakes from those. Only the speculative, deliberately-reduced prefix loses
+the authority to decide another feature's tier.
+
+Pinned in the logic lane (`topology-resolution-planner.spec.ts`, seam:
+`probeTopologyConsumerPrefixes`): a rematch failure becomes a failed prefix
+carrying the detail verbatim, and any other error still propagates.
+
+#### The cost, and the memoization that paid for it
+
+Keeping `Shell 1` eligible costs iterations: 9841 went from 94 probe evaluations
+in 268 s to 94 in 1299 s (each rebuild now carries more live geometry), which blew
+the browser review budget. Only **28** of those 94 payloads were distinct. A probe
+evaluation rebuilds its prefix in a fresh isolated session, so it is a pure
+function of the prepared-action payload; `createMemoizedHistoryProbe` memoizes on
+that payload for the duration of one studio review. A failed or throwing
+evaluation is never retained, because it is the input to the containment pass that
+exists to change the conditions it failed under (pinned in
+`kernel-history-probe.spec.ts`).
+
+| studio | review before | review after |
+|---|---:|---:|
+| Mounts `40a51…` | 7 s / 5 probes | **7 s / 5 probes** |
+| Laptop Stand `5151…` | 235 s / 39 probes | **104 s / 22 probes** |
+| Part Studio 1 `9841…` | 268 s / 94 probes | **349 s / 28 probes** |
+| Part Studio 1 `d3cd9…` | 489 s / 13 probes | **228 s / 8 probes** |
+
+The 9841 Playwright gate went from exceeding its 1 500 000 ms review cap to
+**7.1 min for the whole test**, including the `walls` rebuild.
+
+#### Cascade re-walk (9841 at the real browser gate; the rest at the real-OCC node review)
+
+| Studio | Before | After |
+|---|---:|---:|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** |
+| Wave-T (all six studios) | all parametric | **all parametric** |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** |
+| Part Studio 1 `9841…` | 11 / 30 / 0 | **13 / 28 / 0** |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** |
+
+9841 per-feature outcomes:
+
+| Feature | Before | After |
+|---|---|---|
+| `Shell 1` | `topology-apply-rematch-failed` (empty speculative prefix) | **parametric**, committed as `feature_shell-1` |
+| `Extrude 2` | `extrude-extent-topology-unresolved` behind `Shell 1` | **parametric**, committed as `feature_extrude-2` |
+| face sketches (`Sketch 2`/`3`/`4`/`5`/`6`/`7`/`9`/`10`, `Cutter`) | live prefix exposed no face of the owning body | live prefix now exposes the post-`Extrude 2` body; every planar face is rejected on `normal-angle` / `plane-offset` / `bounding-box` |
+
+The upstream-edit proof is in the browser gate: the `walls` variable edit rebuilds
+the committed timeline and both `feature_shell-1` and `feature_extrude-2` survive
+it with zero snapshot diagnostics, which is only possible if `Shell 1`'s deferred
+body selector rematches identically through the rebuild.
+
+5151 did not move, and its two rematch failures are now attributed by the
+apply-order probes instead of a speculative one. Their detail names the real
+obstacle exactly: the only live candidate is `body_feature_bakedBody-1` — a bake
+checkpoint **replaces the very body whose edge they select** before they run. A
+tessellation-backed checkpoint body exposes body identity only, so no
+sub-topology of it can exist; recovering those chamfers needs their checkpoint's
+boundary feature (`Fillet 2`, `Extrude 4`) to become parametric, not a matching or
+tolerance change.
+
+#### 9841 `Extrude 3` / `15` / `16`: the census label was right, the entity is not a vertex
+
+Dumped from the bundle with `jq`, all three author `startOffset=true`,
+`startOffsetBound=ENTITY` — and their `startOffsetEntity` query is
+`entityType=EDGE`, not `VERTEX`:
+
+| feature | `startOffsetEntity` query shape |
+|---|---|
+| `Extrude 1` (works) | `entityType=VERTEX`, `queryType=SKETCH_ENTITY`, `operationId=…wireOp`, `sketchEntityId=…top.end` |
+| `Extrude 3` | `entityType=EDGE`, `queryType=SKETCH_ENTITY`, `disambiguationData` → `derivedFrom` `FACE` of `Extrude 1` (`SWEPT_FACE`) and `FACE` of `Shell 1` (`OFFSET_FACE`) |
+| `Extrude 15` / `16` | `entityType=EDGE`, `queryType=SKETCH_ENTITY`, `derivedFrom` `FACE` of a prior extrude (`CAP_EDGE`), `isStart=F` |
+
+So the start bound is a **live body edge**, named through its bounding faces, not
+a sketch vertex. `readSketchEntityVertexQuery` rejects them on
+`entityType !== "VERTEX"`, which is correct: there is no vertex in the payload to
+decode, and mapping an edge onto a start plane is not decoding. Extending the
+sketch-point reader would be fabrication. These need a start extent bound to a
+resolved topology slot (a new `ExtrudeStartExtent` form plus a kernel start plane
+derived from a durable edge) — a contract-level item, not a reader extension.
+`extrude-start-extent-unsupported` stays the honest reason, now with a named next
+step.
+
+#### Remaining bakes, classified
+
+*Needs follow-up (each named):*
+- 9841 face-backed sketches (X.5): the live prefix finally exposes the owning
+  body, and every candidate face is rejected on analytic gates
+  (`normal-angle` / `plane-offset` / `bounding-box`). The next root cause is the
+  frame the captured sketch-plane signature is expressed in versus the live face
+  frame — a per-candidate matching question, no longer an empty prefix.
+- 9841 `Chamfer 3` / `4`, `Boolean 1`, `Delete part 1`: honest
+  `topology-reference-no-match` (`J0x`, `J2J`, `JbH`, `J5D`). `Boolean 1` and
+  `Delete part 1` reject the two checkpoint bodies on `bounding-box`, so they sit
+  behind the same checkpoint-replacement wall as 5151's chamfers.
+- 5151 `Chamfer 1` / `2`: blocked by a bake checkpoint replacing their target
+  body (above). 5151 `Chamfer 3` / `Fillet 2`: honest
+  `topology-reference-no-match`.
+- 9841 `Extrude 3` / `15` / `16`: an `ENTITY` start bound against a live body edge
+  (above). 5151 `Extrude 6` / `7` stay `extrude-start-extent-unsupported`.
+
+*Honestly unresolvable with this capture set:*
+- 9841 `Extrude 10` / `11`, d3cd9 `Extrude 8`: BLIND start offsets have no sign
+  ground truth here.
+
+*Excluded scope (unchanged):* 9841 `Extrude 4` and d3cd9 `Extrude 4` (SURFACE),
+`Split 1` (both studios), 9841 `Sketch 3` / `4`, d3cd9 `Sketch 7` / `8` +
+`Extrude 8`, and their direct dependents.
+
+#### Verdicts (updated)
+
+- **Apply-time rematch containment:** **closed for the speculative path.** The
+  authority to condemn a feature belongs only to the probes that build the apply
+  sequence. This is what promoted 9841 `Shell 1` and `Extrude 2`.
+- **X.5 (face-backed sketches):** **open**, no wiring landed. Its blocker moved
+  again — from 9841 `Shell 1` to per-candidate face-signature matching against a
+  live prefix that now genuinely exposes the owning body.
+
+Validation: `bun run lint`, `bun run build`, `bun run test` (logic + UI + static),
+and `bun run test:e2e` on a clean port 3123.
