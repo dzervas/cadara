@@ -40,6 +40,7 @@ import {
   isOccTopologyHistoryDeleted,
   type OccTopologyHistorySource,
 } from "@/domain/modeling/occ/topology-naming";
+import { formatGeneratedProducerTopologySourceKey } from "@/domain/modeling/occ/topology-stage";
 import {
   requireBody,
   trackNewBodyResults,
@@ -507,11 +508,75 @@ function isCurrentTopologyTarget(current: OccTrackedBody, target: DurableRef) {
   return false;
 }
 
+type OccNativeSubtopologyRef = Extract<
+  DurableRef,
+  { kind: "face" | "edge" | "vertex" }
+>;
+
 type OccNativeSuccessorClaim = {
-  previous: Extract<DurableRef, { kind: "face" | "edge" | "vertex" }>;
-  successor: Extract<DurableRef, { kind: "face" | "edge" | "vertex" }>;
+  previous: OccNativeSubtopologyRef;
+  successor: OccNativeSubtopologyRef;
 };
 
+type OccNativeGeneratedClaim = {
+  source: OccNativeSubtopologyRef;
+  generated: OccNativeSubtopologyRef;
+};
+
+function isNativeSubtopologyRef(
+  target: DurableRef,
+): target is OccNativeSubtopologyRef {
+  return (
+    target.kind === "face" || target.kind === "edge" || target.kind === "vertex"
+  );
+}
+
+/**
+ * Producer-identity claims carried by native `generated` history records.
+ *
+ * A generated entity is the successor of nothing, so it reaches a rebuild with
+ * no source key unless the feature that produced it names it. The native shim
+ * emits, per prior subshape, the entities its builder's `Generated` attributes
+ * to that subshape; the honesty rules match the JS builder path exactly: a
+ * record naming anything other than exactly one entity claims nothing, and an
+ * entity reachable from two sources is many, so both claims are dropped.
+ */
+function collectNativeGeneratedClaims(input: {
+  record: OccNativeFeatureTransactionHistoryRecord;
+  source: DurableRef;
+  current: OccTrackedBody;
+  generatedClaims: OccNativeGeneratedClaim[];
+  generatedSourceKeysByTargetKey: Map<string, string>;
+}) {
+  if (
+    input.record.successors.length !== 1 ||
+    !isNativeSubtopologyRef(input.source) ||
+    !isCurrentTopologyTarget(input.current, input.source)
+  ) {
+    return;
+  }
+
+  const generated = input.record.successors[0]!;
+  if (!isNativeSubtopologyRef(generated)) {
+    return;
+  }
+
+  const sourceKey = getOccDurableRefKey(input.source);
+  const targetKey = getOccDurableRefKey(generated);
+  const claimedBy = input.generatedSourceKeysByTargetKey.get(targetKey);
+  if (claimedBy !== undefined) {
+    const index = input.generatedClaims.findIndex(
+      (claim) => getOccDurableRefKey(claim.generated) === targetKey,
+    );
+    if (index >= 0) {
+      input.generatedClaims.splice(index, 1);
+    }
+    return;
+  }
+
+  input.generatedSourceKeysByTargetKey.set(targetKey, sourceKey);
+  input.generatedClaims.push({ source: input.source, generated });
+}
 function collectNativeHistoryResolution(input: {
   current: OccTrackedBody;
   history: OccNativeFeatureTransactionHistoryPayload;
@@ -525,6 +590,8 @@ function collectNativeHistoryResolution(input: {
     input.currentNativePayload ?? null,
   );
   const claims: OccNativeSuccessorClaim[] = [];
+  const generatedClaims: OccNativeGeneratedClaim[] = [];
+  const generatedSourceKeysByTargetKey = new Map<string, string>();
 
   for (const record of input.history.records) {
     const target =
@@ -551,6 +618,16 @@ function collectNativeHistoryResolution(input: {
       continue;
     }
 
+    if (record.reason === "generated") {
+      collectNativeGeneratedClaims({
+        record,
+        source: exactTarget,
+        current: input.current,
+        generatedClaims,
+        generatedSourceKeysByTargetKey,
+      });
+      continue;
+    }
     const reason =
       record.reason === "unique-successor"
         ? OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous
@@ -598,6 +675,7 @@ function collectNativeHistoryResolution(input: {
   return {
     preservedTargetsBySuccessorKey,
     successorTargetsByPreviousKey,
+    generatedClaims,
     invalidations,
   };
 }
@@ -712,6 +790,36 @@ function topologyRefId(target: DurableRef) {
       );
   }
 }
+
+function nativeSubtopologyRefId(target: OccNativeSubtopologyRef) {
+  if (target.kind === "face") {
+    return target.faceId;
+  }
+  if (target.kind === "edge") {
+    return target.edgeId;
+  }
+  return target.vertexId;
+}
+
+function rewriteNativeSubtopologyRef(
+  target: OccNativeSubtopologyRef,
+  aliases: {
+    faceIdsByNativeId: ReadonlyMap<FaceId, FaceId>;
+    edgeIdsByNativeId: ReadonlyMap<EdgeId, EdgeId>;
+    vertexIdsByNativeId: ReadonlyMap<VertexId, VertexId>;
+  },
+): OccNativeSubtopologyRef | null {
+  if (target.kind === "face") {
+    const faceId = aliases.faceIdsByNativeId.get(target.faceId);
+    return faceId ? { ...target, faceId } : null;
+  }
+  if (target.kind === "edge") {
+    const edgeId = aliases.edgeIdsByNativeId.get(target.edgeId);
+    return edgeId ? { ...target, edgeId } : null;
+  }
+  const vertexId = aliases.vertexIdsByNativeId.get(target.vertexId);
+  return vertexId ? { ...target, vertexId } : null;
+}
 function reconcileNativeHistoryReplacement(
   current: OccTrackedBody,
   replacement: OccTrackedBody,
@@ -724,12 +832,14 @@ function reconcileNativeHistoryReplacement(
       body: replacement,
       historyInvalidations: createUnsupportedHistoryInvalidations(current),
       successorTargetsByPreviousKey: new Map<string, DurableRef>(),
+      generatedTargetsBySourceKey: new Map<string, DurableRef>(),
     };
   }
 
   const {
     preservedTargetsBySuccessorKey,
     successorTargetsByPreviousKey: rawSuccessorTargetsByPreviousKey,
+    generatedClaims,
     invalidations,
   } = collectNativeHistoryResolution({
     current,
@@ -828,6 +938,27 @@ function reconcileNativeHistoryReplacement(
       }
     }
   }
+  const generatedTargetsBySourceKey = new Map<string, DurableRef>();
+  for (const claim of generatedClaims) {
+    const generated = rewriteNativeSubtopologyRef(claim.generated, {
+      faceIdsByNativeId,
+      edgeIdsByNativeId,
+      vertexIdsByNativeId,
+    });
+    if (!generated) {
+      continue;
+    }
+    generatedTargetsBySourceKey.set(
+      formatGeneratedProducerTopologySourceKey({
+        featureId: ownerFeatureId,
+        bodyId: current.bodyId,
+        sourceKind: claim.source.kind,
+        sourcePublicId: nativeSubtopologyRefId(claim.source),
+        role: `generated-${generated.kind}`,
+      }),
+      generated,
+    );
+  }
 
   const reconciledBody = {
     ...replacement,
@@ -871,6 +1002,7 @@ function reconcileNativeHistoryReplacement(
     body: reconciledBody,
     historyInvalidations: invalidations,
     successorTargetsByPreviousKey,
+    generatedTargetsBySourceKey,
   };
 }
 
@@ -945,6 +1077,7 @@ export function resolveNativeFeatureTransactionReplacement(
     replacements: [reconciled.body],
     historyInvalidations: reconciled.historyInvalidations,
     successorTargetsByPreviousKey: reconciled.successorTargetsByPreviousKey,
+    generatedTargetsBySourceKey: reconciled.generatedTargetsBySourceKey,
   };
 }
 
@@ -1190,6 +1323,7 @@ export function resolveReplacementBodies(
         replacements: [] as OccTrackedBody[],
         historyInvalidations,
         successorTargetsByPreviousKey: new Map<string, DurableRef>(),
+        generatedTargetsBySourceKey: new Map<string, DurableRef>(),
       };
     }
 
@@ -1234,6 +1368,7 @@ export function resolveReplacementBodies(
       replacements,
       historyInvalidations,
       successorTargetsByPreviousKey: new Map<string, DurableRef>(),
+      generatedTargetsBySourceKey: new Map<string, DurableRef>(),
     };
   }
 
@@ -1260,6 +1395,7 @@ export function resolveReplacementBodies(
     replacements: [replacement.body],
     historyInvalidations,
     successorTargetsByPreviousKey: new Map<string, DurableRef>(),
+    generatedTargetsBySourceKey: new Map<string, DurableRef>(),
   };
 }
 

@@ -241,6 +241,7 @@ function collectLocalOperationTopologyStages(input: {
   replacementResult: {
     replacements: readonly OccTrackedBody[];
     successorTargetsByPreviousKey?: ReadonlyMap<string, DurableRef>;
+    generatedTargetsBySourceKey?: ReadonlyMap<string, DurableRef>;
   };
   hasNativeHistory: boolean;
   generatedHistorySource: { Generated(source: never): never } | null;
@@ -283,6 +284,9 @@ function collectLocalOperationTopologyStages(input: {
         sourceBody: input.sourceBody,
         outputBody: replacement,
         successorsBySourceKey,
+        // The JS builder is live, so it answers `Generated` for the build that
+        // actually ran; on the native path the shim's own generated records
+        // carry the same producer identity.
         generatedTargetsBySourceKey: input.generatedHistorySource
           ? collectGeneratedProducerTargets({
               oc: input.oc,
@@ -291,7 +295,7 @@ function collectLocalOperationTopologyStages(input: {
               replacement,
               builder: input.generatedHistorySource,
             })
-          : undefined,
+          : input.replacementResult.generatedTargetsBySourceKey,
       }),
     );
   }
