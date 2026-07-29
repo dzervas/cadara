@@ -4,6 +4,7 @@ import {
   FeatureWorkbenchHarness,
   FEATURE_FIXTURE,
   meanPixelDelta,
+  OPEN_CURVE_FIXTURE,
 } from "./helpers/feature-workbench";
 
 test.setTimeout(90_000);
@@ -124,6 +125,80 @@ test("thicken previews and commits from a durable planar face", async ({
 
   await workbench.expectFeaturePreviewReady("thicken");
   await workbench.commitFeature("feature_thicken-1");
+});
+
+test("surface extrude commits a sheet body from an open connected sketch chain", async ({
+  page,
+}) => {
+  const workbench = new FeatureWorkbenchHarness(page);
+
+  const fixture = await workbench.openWithOpenCurveSketchFixture();
+  await workbench.activateFeature("extrude");
+  await workbench.setResultBodyType("surface");
+  await workbench.expectNoOperationField();
+
+  for (const profileTarget of fixture.profileTargets) {
+    await workbench.selectReference(profileTarget);
+  }
+
+  await workbench.expectFeaturePreviewReady("extrude");
+  await workbench.expectNoOperationField();
+  await workbench.commitFeature("feature_extrude-1");
+
+  await workbench.expectBodyPresent(OPEN_CURVE_FIXTURE.sheetBody);
+  await workbench.expectBodyEulerCharacteristic(
+    OPEN_CURVE_FIXTURE.sheetBody,
+    1,
+  );
+  await workbench.expectFeatureTimelineEntry("Extrude 1");
+});
+
+test("surface revolve commits a sheet body and restores newBody when toggled back to solid", async ({
+  page,
+}) => {
+  const workbench = new FeatureWorkbenchHarness(page);
+
+  await workbench.openWithBaseExtrudeFixture();
+  await workbench.activateFeature("revolve");
+  await workbench.setResultBodyType("surface");
+  await workbench.expectNoOperationField();
+  await workbench.selectFirstReferenceMatching(
+    /^Select .* body_feature_extrude-1\.face_/,
+  );
+  await workbench.selectFirstReferenceMatching(
+    /^Select .* body_feature_extrude-1\.edge_/,
+  );
+  await workbench.expectFeaturePreviewReady("revolve");
+
+  await workbench.setResultBodyType("solid");
+  await workbench.expectOperationSelected("newBody");
+  await workbench.expectNoBooleanTargetSelected();
+
+  await workbench.setResultBodyType("surface");
+  await workbench.expectNoOperationField();
+  await workbench.expectFeaturePreviewReady("revolve");
+  await workbench.commitFeature("feature_revolve-1");
+
+  await workbench.expectBodyPresent("body_feature_revolve-1");
+  await workbench.expectFeatureTimelineEntry("Revolve 1");
+});
+
+test("thicken sheet body commits a closed solid body", async ({ page }) => {
+  const workbench = new FeatureWorkbenchHarness(page);
+
+  const fixture = await workbench.openWithSheetBodyFixture();
+  await workbench.expectBodyPresent(fixture.sheetBody);
+  await workbench.expectBodyEulerCharacteristic(fixture.sheetBody, 1);
+
+  await workbench.activateFeature("thicken");
+  await workbench.selectBodyTarget(fixture.sheetBody);
+  await workbench.setNumericField("Thickness", 0.5);
+
+  await workbench.expectFeaturePreviewReady("thicken");
+  await workbench.commitFeature("feature_thicken-1");
+  await workbench.expectBodyPresent("body_feature_thicken-1");
+  await workbench.expectBodyEulerCharacteristic("body_feature_thicken-1", 2);
+  await workbench.expectFeatureTimelineEntry("Thicken 1");
 });
 
 test("split previews and commits from explicit target and tool bodies", async ({

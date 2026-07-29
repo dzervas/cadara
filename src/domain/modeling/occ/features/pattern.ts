@@ -9,7 +9,7 @@ import { deleteOccObject } from "@/domain/modeling/occ/memory";
 import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
 import { createUnsupportedProducerTopologyStage } from "@/domain/modeling/occ/topology-stage";
 import {
-  requireBody,
+  requireSolidBody,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
@@ -224,7 +224,7 @@ export function executeLinearPatternFeature(
   // Output order is deterministic: seed participant order outer, copy instance
   // index inner. The selected seed bodies remain unchanged in context.bodies.
   for (const [seedIndex, target] of bodyTargets.entries()) {
-    const body = requireBody(context, target.bodyId);
+    const body = requireSolidBody(context, target.bodyId, definition.kind);
     for (let instanceIndex = 1; instanceIndex < instanceCount; instanceIndex += 1) {
       const translation = new context.oc.gp_Trsf_1();
       const vector = toGpVec(context.oc, scale(signedDirection, spacing * instanceIndex));
@@ -304,7 +304,7 @@ export function executeCircularPatternFeature(
     // Output order is deterministic: seed participant order outer, copy instance
     // index inner. The selected seed bodies remain unchanged in context.bodies.
     for (const [seedIndex, target] of bodyTargets.entries()) {
-      const body = requireBody(context, target.bodyId);
+      const body = requireSolidBody(context, target.bodyId, definition.kind);
       for (let instanceIndex = 1; instanceIndex < instanceCount; instanceIndex += 1) {
         const rotation = new context.oc.gp_Trsf_1();
         try {

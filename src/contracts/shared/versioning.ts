@@ -9,7 +9,7 @@ export type ContractVersion = "modeling-contract/v1alpha1";
  * Document snapshot payload schema version.
  * This version applies only to `WorkspaceSnapshot` payload structure.
  */
-export type SnapshotSchemaVersion = "document-snapshot/v1alpha1";
+export type SnapshotSchemaVersion = "document-snapshot/v1alpha2";
 
 /**
  * Modeling operation-history payload schema version.
@@ -44,7 +44,7 @@ export type ImportContractSchemaVersion = "import-contract/v1alpha1";
 /**
  * Versioned schema for extrude feature definitions.
  */
-export type ExtrudeFeatureSchemaVersion = "feature-type/extrude/v1alpha1";
+export type ExtrudeFeatureSchemaVersion = "feature-type/extrude/v1alpha2";
 
 /**
  * Versioned schema for fillet feature definitions.
@@ -59,7 +59,7 @@ export type PlaneFeatureSchemaVersion = "feature-type/plane/v1alpha1";
 /**
  * Versioned schema for revolve feature definitions.
  */
-export type RevolveFeatureSchemaVersion = "feature-type/revolve/v1alpha1";
+export type RevolveFeatureSchemaVersion = "feature-type/revolve/v1alpha2";
 
 /**
  * Versioned schema for shell feature definitions.
@@ -101,7 +101,7 @@ export const CONTRACT_VERSION: ContractVersion = "modeling-contract/v1alpha1";
  * Current document snapshot schema version literal.
  */
 export const SNAPSHOT_SCHEMA_VERSION: SnapshotSchemaVersion =
-  "document-snapshot/v1alpha1";
+  "document-snapshot/v1alpha2";
 
 /**
  * Current modeling operation-history schema version literal.
@@ -137,7 +137,7 @@ export const IMPORT_CONTRACT_SCHEMA_VERSION: ImportContractSchemaVersion =
  * Current extrude feature schema version literal.
  */
 export const EXTRUDE_FEATURE_SCHEMA_VERSION: ExtrudeFeatureSchemaVersion =
-  "feature-type/extrude/v1alpha1";
+  "feature-type/extrude/v1alpha2";
 
 /**
  * Current fillet feature schema version literal.
@@ -155,7 +155,7 @@ export const PLANE_FEATURE_SCHEMA_VERSION: PlaneFeatureSchemaVersion =
  * Current revolve feature schema version literal.
  */
 export const REVOLVE_FEATURE_SCHEMA_VERSION: RevolveFeatureSchemaVersion =
-  "feature-type/revolve/v1alpha1";
+  "feature-type/revolve/v1alpha2";
 
 /**
  * Current shell feature schema version literal.

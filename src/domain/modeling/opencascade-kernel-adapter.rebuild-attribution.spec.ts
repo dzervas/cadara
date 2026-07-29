@@ -50,6 +50,7 @@ function makeExtrudeFeature(overrides: {
     kind: "extrude",
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
     parameters: {
+      resultBodyType: "solid",
       profiles: [profileRegion],
       startExtent: { kind: "profilePlane" },
       extent: overrides.extent,

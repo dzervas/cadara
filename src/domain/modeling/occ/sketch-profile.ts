@@ -1457,6 +1457,322 @@ export function buildRegionProfileFace(
   }
 }
 
+/**
+ * A profile boundary kept as a wire, for surface features that sweep the
+ * boundary itself instead of a face built from it.
+ */
+export interface BuiltSketchProfileWire {
+  wire: InstanceType<OpenCascadeInstance["TopoDS_Wire"]>;
+  plane: SketchPlaneDefinition;
+  normal: Vec3;
+  provenance: SketchProfileProvenance;
+}
+
+function releaseProfileProvenance(provenance: MutableSketchProfileProvenance) {
+  for (const edge of provenance.edges.values()) {
+    deleteOccObject(edge);
+  }
+  for (const vertex of provenance.vertices.values()) {
+    deleteOccObject(vertex);
+  }
+}
+
+/**
+ * Outer boundary wire of a closed region, without face construction.
+ *
+ * Sweeping a wire yields a sheet; sweeping a face yields a solid. Inner loops
+ * have no sheet meaning here — a sweep of two independent boundary wires cannot
+ * produce one sheet body — so they are rejected instead of silently dropped.
+ */
+export function buildRegionProfileWire(
+  oc: OpenCascadeInstance,
+  snapshotSketch: {
+    plane: SketchPlaneDefinition;
+    sketch: SketchRecord;
+    projectedReferences?: readonly ProjectedSketchReferenceRecord[];
+  },
+  region: RegionRecord,
+): BuiltSketchProfileWire {
+  assertRegionBelongsToSketch(snapshotSketch.sketch, region);
+
+  const outerLoops = region.loops.filter((loop) => loop.role === "outer");
+
+  if (outerLoops.length !== 1) {
+    throw new Error(
+      `Region ${region.regionId} must contain exactly one outer loop.`,
+    );
+  }
+
+  const [outerLoop] = outerLoops;
+  assertLoopCanBuildProfile(snapshotSketch.sketch, region, outerLoop);
+
+  const plane = snapshotSketch.plane;
+  const provenance: MutableSketchProfileProvenance = {
+    edges: new Map(),
+    vertices: new Map(),
+    unsupportedSources: [],
+  };
+
+  try {
+    const wire = buildLoopWire(
+      oc,
+      plane,
+      snapshotSketch.sketch,
+      outerLoop,
+      snapshotSketch.projectedReferences ??
+        snapshotSketch.sketch.projectedReferences ??
+        [],
+      provenance,
+    );
+    return { wire, plane, normal: plane.frame.normal, provenance };
+  } catch (error) {
+    releaseProfileProvenance(provenance);
+    throw error;
+  }
+}
+
+interface OpenCurveSegment {
+  entityId: SketchEntityId;
+  start: Vec3;
+  end: Vec3;
+  closed: boolean;
+  startPointId?: SketchPointId;
+  endPointId?: SketchPointId;
+}
+
+function resolveOpenCurveSegment(
+  plane: SketchPlaneDefinition,
+  sketch: SketchRecord,
+  entityId: SketchEntityId,
+): OpenCurveSegment {
+  const geometry = getSolvedEntityGeometry(sketch, entityId);
+  assertLoopSegmentOwnership(sketch, geometry);
+
+  if (geometry.kind === "circle") {
+    const center = mapSketchPointToWorld(plane, geometry.centerPosition);
+    return { entityId, start: center, end: center, closed: true };
+  }
+
+  if (geometry.kind === "lineSegment" || geometry.kind === "arc") {
+    const entity = getSketchEntityDefinition(sketch, entityId);
+
+    if (entity.kind !== geometry.kind) {
+      throw new Error(
+        `Solved entity ${entityId} does not match its authored entity kind.`,
+      );
+    }
+
+    return {
+      entityId,
+      start: getSolvedBoundaryPointPosition(plane, sketch, entity.startPointId),
+      end: getSolvedBoundaryPointPosition(plane, sketch, entity.endPointId),
+      closed: false,
+      startPointId: entity.startPointId,
+      endPointId: entity.endPointId,
+    };
+  }
+
+  throw new Error(
+    `unsupported-profile-group: Sketch entity ${entityId} of kind ${geometry.kind} cannot define an open surface profile curve.`,
+  );
+}
+
+function assertOpenCurveSegmentsFormChain(
+  segments: readonly OpenCurveSegment[],
+) {
+  if (segments.length === 1 && segments[0]!.closed) {
+    return;
+  }
+
+  const endpoints: Array<{ position: Vec3; degree: number }> = [];
+  for (const segment of segments) {
+    for (const position of [segment.start, segment.end]) {
+      const endpoint = endpoints.find((candidate) =>
+        arePointsCoincident(candidate.position, position),
+      );
+      if (endpoint) {
+        endpoint.degree += 1;
+      } else {
+        endpoints.push({ position, degree: 1 });
+      }
+    }
+  }
+
+  if (endpoints.some((endpoint) => endpoint.degree > 2)) {
+    throw new Error(
+      "unsupported-profile-group: Open sketch curves branch and do not form one sweepable chain.",
+    );
+  }
+  const openEndpointCount = endpoints.filter(
+    (endpoint) => endpoint.degree === 1,
+  ).length;
+  if (openEndpointCount !== 0 && openEndpointCount !== 2) {
+    throw new Error(
+      "unsupported-profile-group: Open sketch curves do not form one continuous chain.",
+    );
+  }
+}
+
+/**
+ * Order open-curve segments so each one after the first shares an endpoint with
+ * the segments already placed.
+ *
+ * `BRepBuilderAPI_MakeWire` only accepts an edge that touches the wire built so
+ * far, so ordering IS the connectivity proof: if no remaining segment touches
+ * the accumulated endpoints, the submitted set is not one chain. Nothing is
+ * sewn or bridged — a disconnected set is reported.
+ */
+function orderConnectedOpenCurveSegments(
+  segments: readonly OpenCurveSegment[],
+) {
+  const remaining = [...segments];
+  const ordered: OpenCurveSegment[] = [remaining.shift()!];
+  const endpoints: Vec3[] = ordered[0]!.closed
+    ? []
+    : [ordered[0]!.start, ordered[0]!.end];
+
+  while (remaining.length > 0) {
+    const index = remaining.findIndex(
+      (segment) =>
+        !segment.closed &&
+        endpoints.some(
+          (endpoint) =>
+            arePointsCoincident(endpoint, segment.start) ||
+            arePointsCoincident(endpoint, segment.end),
+        ),
+    );
+
+    if (index < 0) {
+      throw new Error(
+        `unsupported-profile-group: Open sketch curves ${remaining
+          .map((segment) => segment.entityId)
+          .join(", ")} are not connected to the rest of the surface profile chain.`,
+      );
+    }
+
+    const [segment] = remaining.splice(index, 1);
+    ordered.push(segment!);
+    endpoints.push(segment!.start, segment!.end);
+  }
+
+  return ordered;
+}
+
+/**
+ * One wire built from durable open sketch-curve refs.
+ *
+ * Every submitted entity must belong to a single connected chain; the wire is
+ * the sweep profile of a surface extrude or revolve, and its edges/vertices
+ * carry the same provenance keys a closed region profile would, so sheet
+ * topology stays nameable.
+ */
+export function buildOpenSketchCurveWire(
+  oc: OpenCascadeInstance,
+  snapshotSketch: { plane: SketchPlaneDefinition; sketch: SketchRecord },
+  entityIds: readonly SketchEntityId[],
+): BuiltSketchProfileWire {
+  if (entityIds.length === 0) {
+    throw new Error(
+      "unsupported-profile-group: An open sketch-curve surface profile requires at least one sketch entity.",
+    );
+  }
+
+  if (new Set(entityIds).size !== entityIds.length) {
+    throw new Error(
+      "unsupported-profile-group: An open sketch-curve surface profile must not repeat a sketch entity.",
+    );
+  }
+
+  const plane = snapshotSketch.plane;
+  const sketch = snapshotSketch.sketch;
+  const segments = entityIds.map((entityId) =>
+    resolveOpenCurveSegment(plane, sketch, entityId),
+  );
+
+  if (segments.length > 1 && segments.some((segment) => segment.closed)) {
+    throw new Error(
+      "unsupported-profile-group: A closed sketch curve cannot be chained with other open surface profile curves.",
+    );
+  }
+  assertOpenCurveSegmentsFormChain(segments);
+
+  const provenance: MutableSketchProfileProvenance = {
+    edges: new Map(),
+    vertices: new Map(),
+    unsupportedSources: [],
+  };
+  const vertexPool: Array<{ position: Vec3; vertex: OccProfileVertex }> = [];
+  const resolveProfileVertex: ProfileVertexResolver = (position, sourceKey) => {
+    const registered = sourceKey
+      ? provenance.vertices.get(sourceKey)
+      : undefined;
+    if (registered) {
+      return registered;
+    }
+
+    const coincident = vertexPool.find((entry) =>
+      arePointsCoincident(entry.position, position),
+    );
+    if (coincident) {
+      if (sourceKey) {
+        provenance.vertices.set(sourceKey, coincident.vertex);
+      }
+      return coincident.vertex;
+    }
+
+    const vertex = createProfileVertex(oc, position);
+    vertexPool.push({ position, vertex });
+    if (sourceKey) {
+      provenance.vertices.set(sourceKey, vertex);
+    }
+    return vertex;
+  };
+  const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1();
+  let succeeded = false;
+
+  try {
+    for (const segment of orderConnectedOpenCurveSegments(segments)) {
+      const geometry = getSolvedEntityGeometry(sketch, segment.entityId);
+      const edge =
+        geometry.kind === "circle"
+          ? buildCircleEdge(oc, plane, geometry)
+          : geometry.kind === "lineSegment"
+            ? buildLineEdge(
+                oc,
+                resolveProfileVertex(segment.start, segment.startPointId),
+                resolveProfileVertex(segment.end, segment.endPointId),
+              )
+            : buildArcEdge(
+                oc,
+                plane,
+                geometry as Extract<
+                  SolvedSketchEntityGeometryRecord,
+                  { kind: "arc" }
+                >,
+                resolveProfileVertex(segment.start, segment.startPointId),
+                resolveProfileVertex(segment.end, segment.endPointId),
+              );
+      wireBuilder.Add_1(edge);
+      provenance.edges.set(segment.entityId, edge);
+    }
+
+    if (!wireBuilder.IsDone()) {
+      throw new Error(
+        `unsupported-profile-group: Open sketch curves ${entityIds.join(", ")} do not build one connected OCC wire.`,
+      );
+    }
+
+    const wire = wireBuilder.Wire();
+    succeeded = true;
+    return { wire, plane, normal: plane.frame.normal, provenance };
+  } finally {
+    deleteOccObject(wireBuilder);
+    if (!succeeded) {
+      releaseProfileProvenance(provenance);
+    }
+  }
+}
+
 export function getExtrusionNormalForSketchProfile(
   plane: SketchPlaneDefinition,
   direction: "positive" | "negative",

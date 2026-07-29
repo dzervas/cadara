@@ -4,14 +4,14 @@ import type {
   CreateFeatureRequest,
   ExtrudeEndCondition,
   ExtrudeStartExtent,
-  ExtrudeFeatureParameters,
+  ExtrudeSolidFeatureParameters,
   ExtrudeProfileRef,
   FeatureBooleanScope,
   FeatureDefinition,
   FilletFeatureParameters,
   PlaneFeatureParameters,
   RevolveAxisRef,
-  RevolveFeatureParameters,
+  RevolveSolidFeatureParameters,
   ShellFeatureParameters,
 } from "@/contracts/modeling/schema";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
@@ -229,7 +229,7 @@ export type ImportDeferredExtrudeExtent =
 
 export interface ImportDeferredExtrudeFeatureParameters
   extends Omit<
-    ExtrudeFeatureParameters,
+    ExtrudeSolidFeatureParameters,
     "profiles" | "booleanScope" | "extent" | "startExtent"
   > {
   profiles: readonly [
@@ -250,7 +250,7 @@ export type ImportDeferredRevolveAxisRef =
     };
 
 export interface ImportDeferredRevolveFeatureParameters
-  extends Omit<RevolveFeatureParameters, "profiles" | "axis" | "booleanScope"> {
+  extends Omit<RevolveSolidFeatureParameters, "profiles" | "axis" | "booleanScope"> {
   profiles: readonly [ImportDeferredProfileRef, ...ImportDeferredProfileRef[]];
   axis: ImportDeferredRevolveAxisRef;
   booleanScope: ImportDeferredFeatureBooleanScope;

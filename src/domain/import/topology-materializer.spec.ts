@@ -249,8 +249,9 @@ test("materialized feature requests omit the import-only topology fallback prope
       topologyFallback: undefined,
       definition: {
         kind: "extrude",
-        featureTypeVersion: "feature-type/extrude/v1alpha1",
+        featureTypeVersion: "feature-type/extrude/v1alpha2",
         parameters: {
+          resultBodyType: "solid",
           profiles: [{ kind: "region", sketchId: "sketch_live", regionId: "region_live" }],
           startExtent: { kind: "profilePlane" },
           extent: {
@@ -274,8 +275,9 @@ test("materializes an exact deferred planar face profile before an extrude appli
       ...basis,
       definition: {
         kind: "extrude",
-        featureTypeVersion: "feature-type/extrude/v1alpha1",
+        featureTypeVersion: "feature-type/extrude/v1alpha2",
         parameters: {
+          resultBodyType: "solid",
           profiles: [selector("face")],
           startExtent: { kind: "profilePlane" },
           extent: { mode: "oneSide", end: { kind: "throughAll", direction: "positive" } },
@@ -304,8 +306,9 @@ test("materializes one-side deferred extrude face, part, and vertex targets", as
   for (const [kind, expectedKind] of ends) {
     const request = await materialize({
       kind: "extrude",
-      featureTypeVersion: "feature-type/extrude/v1alpha1",
+      featureTypeVersion: "feature-type/extrude/v1alpha2",
       parameters: {
+        resultBodyType: "solid",
         profiles: [{ kind: "region", sketchId: "sketch_live", regionId: "region_live" }],
         startExtent: { kind: "profilePlane" },
         extent: {
@@ -327,8 +330,9 @@ test("materializes one-side deferred extrude face, part, and vertex targets", as
 test("materializes both deferred two-side extrude targets", async () => {
   const request = await materialize({
     kind: "extrude",
-    featureTypeVersion: "feature-type/extrude/v1alpha1",
+    featureTypeVersion: "feature-type/extrude/v1alpha2",
     parameters: {
+      resultBodyType: "solid",
       profiles: [{ kind: "region", sketchId: "sketch_live", regionId: "region_live" }],
       startExtent: { kind: "profilePlane" },
       extent: {
@@ -358,8 +362,9 @@ test("rejects an extrude end whose resolved target kind does not match the end k
   await expect(
     materialize({
       kind: "extrude",
-      featureTypeVersion: "feature-type/extrude/v1alpha1",
+      featureTypeVersion: "feature-type/extrude/v1alpha2",
       parameters: {
+        resultBodyType: "solid",
         profiles: [{ kind: "region", sketchId: "sketch_live", regionId: "region_live" }],
         startExtent: { kind: "profilePlane" },
         extent: {
@@ -463,8 +468,9 @@ test("materializes topologyOf body selectors in extrude and revolve boolean scop
     const definition = kind === "extrude"
       ? {
           kind,
-          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          featureTypeVersion: "feature-type/extrude/v1alpha2",
           parameters: {
+            resultBodyType: "solid",
             profiles: [{ kind: "region", sketchId: "sketch_profile", regionId: "region_profile" }],
             startExtent: { kind: "profilePlane" },
             extent: { mode: "oneSide", end: { kind: "blind", direction: "positive", distance: { source: "literal", value: 1 } } },
@@ -474,8 +480,9 @@ test("materializes topologyOf body selectors in extrude and revolve boolean scop
         }
       : {
           kind,
-          featureTypeVersion: "feature-type/revolve/v1alpha1",
+          featureTypeVersion: "feature-type/revolve/v1alpha2",
           parameters: {
+            resultBodyType: "solid",
             profiles: [{ kind: "region", sketchId: "sketch_profile", regionId: "region_profile" }],
             axis: { kind: "sketchEntity", sketchId: "sketch_axis", entityId: "sketch_entity_axis" },
             startAngle: { source: "literal", value: 0 },
@@ -524,8 +531,9 @@ test("materializes deferred revolve body scope and advanced construction partici
     ...basis,
     definition: {
       kind: "revolve",
-      featureTypeVersion: "feature-type/revolve/v1alpha1",
+      featureTypeVersion: "feature-type/revolve/v1alpha2",
       parameters: {
+        resultBodyType: "solid",
         profiles: [{ kind: "region", sketchId: "sketch_profile", regionId: "region_profile" }],
         axis: { kind: "sketchEntity", sketchId: "sketch_axis", entityId: "sketch_entity_axis" },
         startAngle: { source: "literal", value: 0 },

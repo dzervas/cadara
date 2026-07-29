@@ -2927,3 +2927,208 @@ test("feature session creation replays ordered activation-time selections", () =
     "Mirror activation should replay later adopted targets in order so the mirror plane is seeded.",
   ).toBe(planeTarget.constructionId);
 });
+
+test("extrude and revolve surface toggles build variant-specific definitions", () => {
+  function findField(
+    session: Parameters<typeof getFeatureEditorFormSchema>[0],
+    fieldId: string,
+  ) {
+    return getFeatureEditorFormSchema(session)
+      .sections.flatMap((section) => section.fields)
+      .find((field) => field.id === fieldId);
+  }
+
+  const profile = {
+    kind: "region" as const,
+    sketchId: "sketch_a" as const,
+    regionId: "region_a" as const,
+  };
+  const openCurve = {
+    kind: "sketchEntity" as const,
+    sketchId: "sketch_a" as const,
+    entityId: "sketch_entity_a" as const,
+  };
+  const targetBody = { kind: "body" as const, bodyId: "body_target" as const };
+
+  const solidSession = createFeatureEditSession({
+    featureType: "extrude",
+    selectedTarget: profile,
+  });
+  const resultBodyTypeField = findField(
+    solidSession,
+    "extrude-result-body-type",
+  );
+
+  expect(
+    resultBodyTypeField?.kind,
+    "Extrude should expose the result body type as a generic enum field.",
+  ).toBe("enum");
+  expect(
+    resultBodyTypeField.value,
+    "Extrude drafts should default to solid results.",
+  ).toBe("solid");
+  expect(
+    findField(solidSession, "extrude-operation")?.kind,
+    "Solid extrude should expose the boolean operation field.",
+  ).toBe("enum");
+  expect(
+    findField(solidSession, "extrude-draft-angle")?.kind,
+    "Solid extrude should expose the draft angle field.",
+  ).toBe("numeric");
+
+  const joinSession = patchFeatureEditSession(solidSession, {
+    operation: "join",
+    booleanTargetBodyId: targetBody.bodyId,
+  });
+  const surfaceSession = patchFeatureEditSession(
+    joinSession,
+    createFeatureEditorFieldPatch(resultBodyTypeField, "surface"),
+  );
+
+  expect(
+    findField(surfaceSession, "extrude-operation"),
+    "Surface extrude should not expose boolean operation fields.",
+  ).toBe(undefined);
+  expect(
+    findField(surfaceSession, "extrude-target-bodies"),
+    "Surface extrude should not expose boolean target body fields.",
+  ).toBe(undefined);
+  expect(
+    findField(surfaceSession, "extrude-draft-angle"),
+    "Surface extrude should not expose draft angle fields.",
+  ).toBe(undefined);
+  expect(
+    surfaceSession.featureType === "extrude" &&
+      surfaceSession.draft.profileTargets[0],
+    "Switching to surface should preserve the selected profile targets.",
+  ).toBe(profile);
+  expect(
+    findField(surfaceSession, "extrude-depth")?.kind === "numeric" &&
+      findField(surfaceSession, "extrude-depth").value,
+    "Switching to surface should preserve the authored depth value.",
+  ).toBe(
+    findField(solidSession, "extrude-depth")?.kind === "numeric"
+      ? findField(solidSession, "extrude-depth").value
+      : null,
+  );
+
+  const surfaceDefinition = buildFeatureDefinition(surfaceSession);
+
+  expect(
+    surfaceDefinition?.kind === "extrude" &&
+      surfaceDefinition.parameters.resultBodyType,
+    "Surface extrude drafts should build surface-discriminated parameters.",
+  ).toBe("surface");
+  expect(
+    surfaceDefinition?.kind === "extrude" &&
+      "operation" in surfaceDefinition.parameters,
+    "Surface extrude payloads should omit boolean operation state.",
+  ).toBe(false);
+  expect(
+    surfaceDefinition?.kind === "extrude" &&
+      surfaceDefinition.parameters.extent.mode === "oneSide" &&
+      "draftAngle" in surfaceDefinition.parameters.extent.end,
+    "Surface extrude payloads should omit inactive draft angle values.",
+  ).toBe(false);
+
+  const openCurveSession = applySelectionToFeatureEditSession(
+    surfaceSession,
+    openCurve,
+  );
+  const openCurveDefinition = buildFeatureDefinition(openCurveSession);
+
+  expect(
+    openCurveDefinition?.kind === "extrude" &&
+      openCurveDefinition.parameters.profiles[1],
+    "Surface extrude should accept open sketch-curve profile selections.",
+  ).toBe(openCurve);
+  expect(
+    applySelectionToFeatureEditSession(solidSession, openCurve).draft
+      .profileTargets.length,
+    "Solid extrude should reject open sketch-curve profile selections.",
+  ).toBe(1);
+
+  const backToSolidSession = patchFeatureEditSession(
+    openCurveSession,
+    createFeatureEditorFieldPatch(resultBodyTypeField, "solid"),
+  );
+  const backToSolidDefinition = buildFeatureDefinition(backToSolidSession);
+
+  expect(
+    backToSolidSession.featureType === "extrude" &&
+      backToSolidSession.draft.profileTargets.length,
+    "Switching back to solid should drop open sketch-curve profiles.",
+  ).toBe(1);
+  expect(
+    backToSolidDefinition?.kind === "extrude" &&
+      backToSolidDefinition.parameters.resultBodyType === "solid" &&
+      getAuthoredLiteralValue(backToSolidDefinition.parameters.operation),
+    "Switching back to solid should restore the default newBody operation.",
+  ).toBe("newBody");
+  expect(
+    backToSolidDefinition?.kind === "extrude" &&
+      backToSolidDefinition.parameters.resultBodyType === "solid" &&
+      backToSolidDefinition.parameters.booleanScope.kind,
+    "Switching back to solid should restore the standalone boolean scope.",
+  ).toBe("standalone");
+
+  const axis = {
+    kind: "edge" as const,
+    bodyId: "body_axis" as const,
+    edgeId: "edge_axis" as const,
+  };
+  const revolveSession = applySelectionToFeatureEditSession(
+    createFeatureEditSession({
+      featureType: "revolve",
+      selectedTarget: profile,
+    }),
+    axis,
+  );
+  const revolveResultBodyTypeField = findField(
+    revolveSession,
+    "revolve-result-body-type",
+  );
+  const revolveSurfaceSession = patchFeatureEditSession(
+    revolveSession,
+    createFeatureEditorFieldPatch(revolveResultBodyTypeField, "surface"),
+  );
+  const revolveSurfaceDefinition = buildFeatureDefinition(
+    revolveSurfaceSession,
+  );
+
+  expect(
+    findField(revolveSurfaceSession, "revolve-operation"),
+    "Surface revolve should not expose boolean operation fields.",
+  ).toBe(undefined);
+  expect(
+    revolveSurfaceDefinition?.kind === "revolve" &&
+      revolveSurfaceDefinition.parameters.resultBodyType,
+    "Surface revolve drafts should build surface-discriminated parameters.",
+  ).toBe("surface");
+  expect(
+    revolveSurfaceDefinition?.kind === "revolve" &&
+      revolveSurfaceDefinition.parameters.axis,
+    "Surface revolve should keep the axis reference separate from profiles.",
+  ).toBe(axis);
+  expect(
+    revolveSurfaceDefinition?.kind === "revolve" &&
+      "booleanScope" in revolveSurfaceDefinition.parameters,
+    "Surface revolve payloads should omit boolean scope state.",
+  ).toBe(false);
+
+  const revolveBackToSolidDefinition = buildFeatureDefinition(
+    patchFeatureEditSession(
+      revolveSurfaceSession,
+      createFeatureEditorFieldPatch(revolveResultBodyTypeField, "solid"),
+    ),
+  );
+
+  expect(
+    revolveBackToSolidDefinition?.kind === "revolve" &&
+      revolveBackToSolidDefinition.parameters.resultBodyType === "solid" &&
+      getAuthoredLiteralValue(
+        revolveBackToSolidDefinition.parameters.operation,
+      ),
+    "Switching revolve back to solid should restore the default newBody operation.",
+  ).toBe("newBody");
+});

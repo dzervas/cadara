@@ -23,7 +23,7 @@ import {
   type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
 import {
-  requireBody,
+  requireSolidBody,
   requireEdge,
   resolveNativeTopologyTargetId,
   type OccFeatureExecutionContext,
@@ -532,7 +532,7 @@ export function executeFilletFeature(
   const topologyStages: OccFeatureTopologyStage[] = [];
 
   for (const [bodyId, targets] of targetsByBody.entries()) {
-    const body = requireBody(context, bodyId);
+    const body = requireSolidBody(context, bodyId, "fillet");
     for (const target of targets) {
       requireEdge(context, body, target.edgeId);
     }
@@ -816,7 +816,7 @@ export function executeChamferFeature(
   const topologyStages: OccFeatureTopologyStage[] = [];
 
   for (const [bodyId, targets] of targetsByBody.entries()) {
-    const body = requireBody(context, bodyId);
+    const body = requireSolidBody(context, bodyId, "chamfer");
     for (const target of targets) {
       requireEdge(context, body, target.edgeId);
     }

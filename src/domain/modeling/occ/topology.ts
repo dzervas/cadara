@@ -9,6 +9,7 @@ import type {
   VertexId,
 } from "@/contracts/shared/ids";
 import type {
+  BodyKind,
   BodySnapshotRecord,
   BodyTopologyPresentation,
   ConstructionSnapshotRecord,
@@ -37,6 +38,10 @@ function solidShapeType(oc: OpenCascadeInstance) {
   return oc.TopAbs_ShapeEnum.TopAbs_SOLID as unknown as number;
 }
 
+function shellShapeType(oc: OpenCascadeInstance) {
+  return oc.TopAbs_ShapeEnum.TopAbs_SHELL as unknown as number;
+}
+
 function faceShapeType(oc: OpenCascadeInstance) {
   return oc.TopAbs_ShapeEnum.TopAbs_FACE as unknown as number;
 }
@@ -56,6 +61,8 @@ function anyShapeType(oc: OpenCascadeInstance) {
 export interface OccTrackedBody {
   bodyId: BodyId;
   label: string;
+  /** Explicit result shape family tracked for this body. */
+  bodyKind: BodyKind;
   ownerFeatureId: FeatureId | null;
   topologyToken: string;
   shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
@@ -296,6 +303,71 @@ export function extractSolidShapes(
 }
 
 /**
+ * Sheet-typed shapes of one result shape.
+ *
+ * A swept wire is already shell-typed, so shells are the primary result. A lone
+ * free face (a sweep degenerated to one surface, or a face-typed sheet input) is
+ * wrapped in a shell so every sheet body tracks shell topology, never a bare
+ * face. Nothing is sewn: separate shells stay separate and the caller decides
+ * whether that count is acceptable.
+ */
+export function extractSheetShapes(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  const shells: InstanceType<OpenCascadeInstance["TopoDS_Shell"]>[] = [];
+
+  if (extractSolidShapes(oc, shape).length > 0) {
+    return shells;
+  }
+
+  if ((shape.ShapeType() as unknown as number) === shellShapeType(oc)) {
+    shells.push(oc.TopoDS.Shell_1(shape));
+    return shells;
+  }
+
+  const explorer = new oc.TopExp_Explorer_2(
+    shape,
+    shellShapeType(oc) as never,
+    anyShapeType(oc) as never,
+  );
+
+  while (explorer.More()) {
+    shells.push(oc.TopoDS.Shell_1(explorer.Current()));
+    explorer.Next();
+  }
+
+  const shellFaces: InstanceType<OpenCascadeInstance["TopoDS_Face"]>[] = [];
+  for (const shell of shells) {
+    const shellFaceMap = new oc.TopTools_IndexedMapOfShape_1();
+    oc.TopExp.MapShapes_1(shell, faceShapeType(oc) as never, shellFaceMap);
+    for (let index = 1; index <= shellFaceMap.Size(); index += 1) {
+      shellFaces.push(oc.TopoDS.Face_1(shellFaceMap.FindKey(index)));
+    }
+    shellFaceMap.delete();
+  }
+
+  const faceMap = new oc.TopTools_IndexedMapOfShape_1();
+  oc.TopExp.MapShapes_1(shape, faceShapeType(oc) as never, faceMap);
+
+  for (let index = 1; index <= faceMap.Size(); index += 1) {
+    const face = oc.TopoDS.Face_1(faceMap.FindKey(index));
+    if (shellFaces.some((shellFace) => shellFace.IsSame(face))) {
+      continue;
+    }
+    const builder = new oc.BRep_Builder();
+    const shell = new oc.TopoDS_Shell();
+    builder.MakeShell(shell);
+    builder.Add(shell, face);
+    builder.delete();
+    shells.push(shell);
+  }
+
+  faceMap.delete();
+  return shells;
+}
+
+/**
  * Canonical enumeration order for the solids of one shape.
  *
  * Sorting by exact vertex bounds (then volume) makes the enumeration of a shape
@@ -339,6 +411,45 @@ export function orderSolidShapesCanonically(
   });
 
   return keyed.map((entry) => entry.solid);
+}
+
+/** Canonical sheet ordering uses exact bounds and surface area, never volume. */
+export function orderSheetShapesCanonically(
+  oc: OpenCascadeInstance,
+  sheets: readonly InstanceType<OpenCascadeInstance["TopoDS_Shell"]>[],
+) {
+  const keyed = sheets.map((sheet) => {
+    const vertexMap = new oc.TopTools_IndexedMapOfShape_1();
+    oc.TopExp.MapShapes_1(sheet, vertexShapeType(oc) as never, vertexMap);
+    const low = [Infinity, Infinity, Infinity];
+    const high = [-Infinity, -Infinity, -Infinity];
+    for (let index = 1; index <= vertexMap.Size(); index += 1) {
+      const point = oc.BRep_Tool.Pnt(oc.TopoDS.Vertex_1(vertexMap.FindKey(index)));
+      const coordinates = [point.X(), point.Y(), point.Z()];
+      for (const axis of [0, 1, 2]) {
+        low[axis] = Math.min(low[axis]!, coordinates[axis]!);
+        high[axis] = Math.max(high[axis]!, coordinates[axis]!);
+      }
+    }
+    vertexMap.delete();
+
+    const properties = new oc.GProp_GProps_1();
+    oc.BRepGProp.SurfaceProperties_1(sheet, properties, false, false);
+    const area = Math.abs(properties.Mass());
+    properties.delete();
+
+    return { sheet, key: [...low, ...high, area] };
+  });
+
+  keyed.sort((left, right) => {
+    for (let index = 0; index < left.key.length; index += 1) {
+      const difference = left.key[index]! - right.key[index]!;
+      if (difference !== 0) return difference;
+    }
+    return 0;
+  });
+
+  return keyed.map((entry) => entry.sheet);
 }
 
 function enumerateFaces(
@@ -545,11 +656,12 @@ function indexVerticesByNativePayload(
   return { vertexIds, verticesById };
 }
 
-function buildNativeTopologyPayloadForTrackedSolid(
+function buildNativeTopologyPayloadForTrackedBody(
   oc: OpenCascadeInstance,
   input: {
     bodyId: BodyId;
     topologyToken: string;
+    bodyKind: BodyKind;
     solid: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
   },
 ) {
@@ -589,7 +701,7 @@ function buildNativeTopologyPayloadForTrackedSolid(
     input.solid,
     input.bodyId,
     nativePayload,
-    "tracked solid body",
+    input.bodyKind === "sheet" ? "tracked sheet body" : "tracked solid body",
   );
 
   return nativePayload;
@@ -898,19 +1010,21 @@ export function rewriteNativeTopologyPayloadIds(
   };
 }
 
+interface TrackedBodyInput {
+  bodyId: BodyId;
+  label: string;
+  ownerFeatureId: FeatureId | null;
+  topologyToken: string;
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+  naming?: OccTopologyNamingBodyState;
+  seedNaming?: boolean;
+  meshExportFallback?: OccTrackedBody["meshExportFallback"];
+  topologyPresentation?: BodyTopologyPresentation;
+}
+
 function buildTrackedSolidBody(
   oc: OpenCascadeInstance,
-  input: {
-    bodyId: BodyId;
-    label: string;
-    ownerFeatureId: FeatureId | null;
-    topologyToken: string;
-    shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
-    naming?: OccTopologyNamingBodyState;
-    seedNaming?: boolean;
-    meshExportFallback?: OccTrackedBody["meshExportFallback"];
-    topologyPresentation?: BodyTopologyPresentation;
-  },
+  input: TrackedBodyInput,
 ): OccTrackedBody {
   const solids = extractSolidShapes(oc, input.shape);
 
@@ -920,7 +1034,33 @@ function buildTrackedSolidBody(
     );
   }
 
-  const [solid] = solids;
+  return buildTrackedBodyFromResolvedShape(oc, input, "solid", solids[0]!);
+}
+
+function buildTrackedSheetBody(
+  oc: OpenCascadeInstance,
+  input: TrackedBodyInput,
+): OccTrackedBody {
+  const sheets = orderSheetShapesCanonically(
+    oc,
+    extractSheetShapes(oc, input.shape),
+  );
+
+  if (sheets.length !== 1) {
+    throw new Error(
+      `Body ${input.bodyId} must resolve to exactly one sheet shape, received ${sheets.length}.`,
+    );
+  }
+
+  return buildTrackedBodyFromResolvedShape(oc, input, "sheet", sheets[0]!);
+}
+
+function buildTrackedBodyFromResolvedShape(
+  oc: OpenCascadeInstance,
+  input: TrackedBodyInput,
+  bodyKind: BodyKind,
+  solid: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+): OccTrackedBody {
   const topologyToken = input.topologyToken;
   const bodyOnlyMesh = input.topologyPresentation === "bodyOnlyMesh";
   // Baked body-only meshes retain their authoritative OCC shape and source mesh,
@@ -928,9 +1068,10 @@ function buildTrackedSolidBody(
   // exporter. No face/edge/vertex ids are promised for this presentation mode.
   const nativePayload = bodyOnlyMesh
     ? undefined
-    : buildNativeTopologyPayloadForTrackedSolid(oc, {
+    : buildNativeTopologyPayloadForTrackedBody(oc, {
         bodyId: input.bodyId,
         topologyToken,
+        bodyKind,
         solid,
       });
   const faces = bodyOnlyMesh
@@ -952,6 +1093,7 @@ function buildTrackedSolidBody(
   const body = {
     bodyId: input.bodyId,
     label: input.label,
+    bodyKind,
     ownerFeatureId: input.ownerFeatureId,
     topologyToken,
     shape: solid,
@@ -1109,6 +1251,22 @@ export function trackNewSolidBody(
   },
 ) {
   return buildTrackedSolidBody(oc, {
+    ...input,
+    topologyToken: createInitialTopologyToken(),
+  });
+}
+
+export function trackNewSheetBody(
+  oc: OpenCascadeInstance,
+  input: {
+    bodyId: BodyId;
+    label: string;
+    ownerFeatureId: FeatureId | null;
+    shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+    seedNaming?: boolean;
+  },
+) {
+  return buildTrackedSheetBody(oc, {
     ...input,
     topologyToken: createInitialTopologyToken(),
   });
@@ -1483,6 +1641,7 @@ export function trackReplacementSolidBodyFromNativePayload(
   return {
     bodyId: input.previous.bodyId,
     label: input.previous.label,
+    bodyKind: "solid",
     ownerFeatureId: input.ownerFeatureId,
     topologyToken: advanceTopologyToken(input.previous.topologyToken),
     shape: solid,
@@ -1588,6 +1747,7 @@ export function createBodySnapshotRecord(
     ownerBodyId: body.bodyId,
     bodyId: body.bodyId,
     label: body.label,
+    bodyKind: body.bodyKind,
     topology: {
       faceIds: [...body.topology.faceIds],
       edgeIds: [...body.topology.edgeIds],

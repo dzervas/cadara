@@ -9,7 +9,7 @@ import {
   type OccReferenceInvalidationRecord,
 } from "@/domain/modeling/occ/topology";
 import {
-  requireBody,
+  requireSolidBody,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
@@ -77,8 +77,8 @@ function resolveNativeCombineReplacement(input: {
   operation: Exclude<FeatureBooleanOperation, "newBody">;
   ownerFeatureId: FeatureId;
 }) {
-  const targetBody = requireBody(input.context, input.targetBodyId);
-  const toolBody = requireBody(input.context, input.toolBodyId);
+  const targetBody = requireSolidBody(input.context, input.targetBodyId, "combine");
+  const toolBody = requireSolidBody(input.context, input.toolBodyId, "combine");
   const nativeHost = input.context
     .oc as unknown as OpenCascadeNativeTopologyKernelHost;
   const nativeBuilder =
@@ -136,7 +136,7 @@ export function executeCombineFeature(
 
   if (operation === "join") {
     const [firstTargetBodyId, ...remainingTargetBodyIds] = targetBodyIds;
-    const firstTargetBody = requireBody(context, firstTargetBodyId!);
+    const firstTargetBody = requireSolidBody(context, firstTargetBodyId!, "combine");
     const replacementResult =
       remainingTargetBodyIds.length === 0 && toolBodyIds.length === 1
         ? (resolveNativeCombineReplacement({
@@ -147,7 +147,7 @@ export function executeCombineFeature(
             ownerFeatureId,
           }) ??
           (() => {
-            const toolBody = requireBody(context, toolBodyIds[0]!);
+            const toolBody = requireSolidBody(context, toolBodyIds[0]!, "combine");
             const result = runBoolean(
               context.oc,
               "join",
@@ -171,7 +171,7 @@ export function executeCombineFeature(
               [];
 
             for (const bodyId of [...remainingTargetBodyIds, ...toolBodyIds]) {
-              const body = requireBody(context, bodyId);
+              const body = requireSolidBody(context, bodyId, "combine");
               const result = runBoolean(
                 context.oc,
                 "join",
@@ -206,7 +206,7 @@ export function executeCombineFeature(
       ...remainingTargetBodyIds,
       ...(keepTools ? [] : toolBodyIds),
     ]) {
-      const body = requireBody(context, bodyId);
+      const body = requireSolidBody(context, bodyId, "combine");
       const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId);
       if (index >= 0) nextBodies.splice(index, 1);
       mergeHistoryInvalidations(historyInvalidations, createDeletedBodyInvalidations(body));
@@ -217,7 +217,7 @@ export function executeCombineFeature(
     }
   } else {
     for (const targetBodyId of targetBodyIds) {
-      const targetBody = requireBody(context, targetBodyId);
+      const targetBody = requireSolidBody(context, targetBodyId, "combine");
       const replacementResult =
         toolBodyIds.length === 1
           ? (resolveNativeCombineReplacement({
@@ -228,7 +228,7 @@ export function executeCombineFeature(
               ownerFeatureId,
             }) ??
             (() => {
-              const toolBody = requireBody(context, toolBodyIds[0]!);
+              const toolBody = requireSolidBody(context, toolBodyIds[0]!, "combine");
               const result = runBoolean(
                 context.oc,
                 operation,
@@ -252,7 +252,7 @@ export function executeCombineFeature(
                 [];
 
               for (const toolBodyId of toolBodyIds) {
-                const toolBody = requireBody(context, toolBodyId);
+                const toolBody = requireSolidBody(context, toolBodyId, "combine");
                 const result = runBoolean(
                   context.oc,
                   operation,
@@ -290,7 +290,7 @@ export function executeCombineFeature(
 
     if (!keepTools) {
       for (const toolBodyId of toolBodyIds) {
-        const toolBody = requireBody(context, toolBodyId);
+        const toolBody = requireSolidBody(context, toolBodyId, "combine");
         const index = nextBodies.findIndex((entry) => entry.bodyId === toolBodyId);
         if (index >= 0) nextBodies.splice(index, 1);
         mergeHistoryInvalidations(
@@ -376,8 +376,8 @@ export function executeSplitFeature(
     );
   }
 
-  const targetBody = requireBody(context, targetBodyRef.bodyId);
-  const toolBody = requireBody(context, toolBodyRef.bodyId);
+  const targetBody = requireSolidBody(context, targetBodyRef.bodyId, "split");
+  const toolBody = requireSolidBody(context, toolBodyRef.bodyId, "split");
   const nativeHost =
     context.oc as unknown as OpenCascadeNativeTopologyKernelHost;
   const nativeBuilder =
@@ -534,7 +534,7 @@ export function executeDeleteSolidFeature(
     OccReferenceInvalidationRecord
   >();
   for (const target of bodyTargets) {
-    const body = requireBody(context, target.bodyId);
+    const body = requireSolidBody(context, target.bodyId, "deleteSolid");
     for (const [key, value] of createDeletedBodyInvalidations(body)) {
       historyInvalidations.set(key, value);
     }

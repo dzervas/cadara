@@ -1,5 +1,6 @@
 import type { AuthoredFeatureRecord } from "@/contracts/modeling/authored-document";
 import type {
+  FeatureBooleanScope,
   FeatureDefinition,
   ModelingDiagnostic,
 } from "@/contracts/modeling/schema";
@@ -61,13 +62,10 @@ function getRevolveEndTargets(
 }
 
 function scopeContainsTarget(
-  scope: Extract<
-    FeatureDefinition,
-    { kind: "extrude" | "revolve" | "shell" }
-  >["parameters"]["booleanScope"],
+  scope: FeatureBooleanScope | undefined,
   target: DurableRef,
 ) {
-  if (target.kind !== "body") {
+  if (scope === undefined || target.kind !== "body") {
     return false;
   }
 
@@ -139,7 +137,14 @@ export function getFeatureFieldAttribution(
           label: "end condition target",
         };
       }
-      if (scopeContainsTarget(definition.parameters.booleanScope, target)) {
+      if (
+        scopeContainsTarget(
+          definition.parameters.resultBodyType === "solid"
+            ? definition.parameters.booleanScope
+            : undefined,
+          target,
+        )
+      ) {
         return {
           fieldId: "booleanScope",
           fieldPath: ["parameters", "booleanScope"],
@@ -184,7 +189,14 @@ export function getFeatureFieldAttribution(
           label: "end condition target",
         };
       }
-      if (scopeContainsTarget(definition.parameters.booleanScope, target)) {
+      if (
+        scopeContainsTarget(
+          definition.parameters.resultBodyType === "solid"
+            ? definition.parameters.booleanScope
+            : undefined,
+          target,
+        )
+      ) {
         return {
           fieldId: "booleanScope",
           fieldPath: ["parameters", "booleanScope"],

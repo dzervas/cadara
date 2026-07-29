@@ -278,6 +278,7 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
     kind: "extrude",
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
     parameters: {
+      resultBodyType: "solid",
       profiles: [{ kind: "region", sketchId, regionId }],
       startExtent: { kind: "profilePlane" },
       extent: {

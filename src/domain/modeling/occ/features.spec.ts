@@ -20,6 +20,7 @@ import {
 } from "@/domain/modeling/occ/sketch-profile";
 import { getDefaultOpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
+  extractSolidShapes,
   getOccDurableRefKey,
   OCC_REFERENCE_INVALIDATION_REASONS,
   trackNewSolidBody,
@@ -744,6 +745,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     const context = await makeContext();
     const featureId = "feature_phase4_extrude_new_body" as FeatureId;
     const parameters: ExtrudeFeatureParameters = {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region",
@@ -785,6 +787,226 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     );
   }
 
+  async function testSurfaceExtrudeRevolveAndThickenUseSheetBodies() {
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_surface_body_kernel" as SketchId,
+      plane,
+    );
+    const bottom = sketch.sketch.definition.entities.find(
+      (entity) => entity.label === "bottom",
+    )!;
+    const right = sketch.sketch.definition.entities.find(
+      (entity) => entity.label === "right",
+    )!;
+    const top = sketch.sketch.definition.entities.find(
+      (entity) => entity.label === "top",
+    )!;
+    const context = await createContext({ sketches: [sketch] })();
+
+    const extrude = executeOccFeature(
+      context,
+      "feature_surface_extrude_kernel" as FeatureId,
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "surface",
+          profiles: [
+            {
+              kind: "sketchEntity",
+              sketchId: sketch.sketchId,
+              entityId: bottom.entityId,
+            },
+            {
+              kind: "sketchEntity",
+              sketchId: sketch.sketchId,
+              entityId: right.entityId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 2 },
+          },
+        },
+      },
+    );
+    const extrudeBodyTarget = extrude.producedTargets[0];
+    if (!extrudeBodyTarget || extrudeBodyTarget.kind !== "body") {
+      throw new Error("Surface extrude did not produce a body target.");
+    }
+    const sheet = extrude.bodies.find(
+      (body) => body.bodyId === extrudeBodyTarget.bodyId,
+    )!;
+    expect(sheet.bodyKind).toBe("sheet");
+    expect(extractSolidShapes(context.oc, sheet.shape)).toHaveLength(0);
+    const extrudeSourceKeys = [
+      ...extrude.topologyStage!.outputs.get(sheet.bodyId)!.sourceTargets.keys(),
+    ];
+    expect(
+      extrudeSourceKeys.some((key) =>
+        key.endsWith(":profile:first-boundary-edge"),
+      ),
+    ).toBe(true);
+    expect(
+      extrudeSourceKeys.some((key) => key.endsWith(":profile:first-face")),
+    ).toBe(false);
+
+    expect(() =>
+      executeOccFeature(
+        { ...context, bodies: [sheet] },
+        "feature_sheet_fillet_rejection" as FeatureId,
+        {
+          kind: "fillet",
+          featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            edgeTargets: [
+              {
+                kind: "edge",
+                bodyId: sheet.bodyId,
+                edgeId: sheet.topology.edgeIds[0]!,
+              },
+            ],
+            radius: 0.1,
+          },
+        },
+      ),
+    ).toThrow(/advanced-feature-unsupported-kernel-case: .*sheet body/);
+
+    expect(() =>
+      executeOccFeature(
+        { ...context, bodies: [sheet] },
+        "feature_sheet_boolean_rejection" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "solid",
+            profiles: [
+              {
+                kind: "region",
+                sketchId: sketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 1 },
+            },
+            operation: "join",
+            booleanScope: { kind: "targetBody", bodyId: sheet.bodyId },
+          },
+        },
+      ),
+    ).toThrow(/advanced-feature-unsupported-kernel-case: .*sheet body/);
+
+    const revolve = executeOccFeature(
+      context,
+      "feature_surface_revolve_kernel" as FeatureId,
+      {
+        kind: "revolve",
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "surface",
+          profiles: [
+            {
+              kind: "sketchEntity",
+              sketchId: sketch.sketchId,
+              entityId: top.entityId,
+            },
+          ],
+          axis: {
+            kind: "sketchEntity",
+            sketchId: sketch.sketchId,
+            entityId: bottom.entityId,
+          },
+          startAngle: 0,
+          extent: { mode: "oneSide", end: { kind: "full" } },
+        },
+      },
+    );
+    const revolveTarget = revolve.producedTargets[0];
+    if (!revolveTarget || revolveTarget.kind !== "body") {
+      throw new Error("Surface revolve did not produce a body target.");
+    }
+    expect(
+      revolve.bodies.find((body) => body.bodyId === revolveTarget.bodyId)
+        ?.bodyKind,
+    ).toBe("sheet");
+
+    const thicken = executeOccFeature(
+      { ...context, bodies: [sheet] },
+      "feature_thicken_sheet_kernel" as FeatureId,
+      {
+        kind: "thicken",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "create",
+          participants: [
+            {
+              role: "face",
+              targets: [{ kind: "body", bodyId: sheet.bodyId }],
+            },
+          ],
+          options: {
+            thickness: 0.25,
+            side: "oneSide",
+            direction: "positive",
+          },
+        },
+      },
+    );
+    const thickenedTarget = thicken.producedTargets[0];
+    if (!thickenedTarget || thickenedTarget.kind !== "body") {
+      throw new Error("Sheet thicken did not produce a body target.");
+    }
+    const thickened = thicken.bodies.find(
+      (body) => body.bodyId === thickenedTarget.bodyId,
+    )!;
+    expect(thickened.bodyKind).toBe("solid");
+    expect(extractSolidShapes(context.oc, thickened.shape)).toHaveLength(1);
+
+    const faceThicken = executeOccFeature(
+      { ...context, bodies: [sheet] },
+      "feature_thicken_face_kernel" as FeatureId,
+      {
+        kind: "thicken",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "create",
+          participants: [
+            {
+              role: "face",
+              targets: [
+                {
+                  kind: "face",
+                  bodyId: sheet.bodyId,
+                  faceId: sheet.topology.faceIds[0]!,
+                },
+              ],
+            },
+          ],
+          options: {
+            thickness: 0.1,
+            side: "symmetric",
+            direction: "positive",
+          },
+        },
+      },
+    );
+    const faceThickenTarget = faceThicken.producedTargets[0];
+    if (!faceThickenTarget || faceThickenTarget.kind !== "body") {
+      throw new Error("Face thicken did not produce a body target.");
+    }
+    expect(
+      faceThicken.bodies.find(
+        (body) => body.bodyId === faceThickenTarget.bodyId,
+      )?.bodyKind,
+    ).toBe("solid");
+  }
+
   async function testExtrudePublishesSemanticPrismHistoryProvenance() {
     const plane = createStandardPlaneDefinition("xy");
     const primary = createRectangleSketch(
@@ -804,6 +1026,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       kind: "extrude",
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters: {
+        resultBodyType: "solid",
         profiles: [
           {
             kind: "region",
@@ -874,6 +1097,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -938,6 +1162,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -989,6 +1214,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -1032,6 +1258,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude" as const,
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region" as const,
@@ -1131,6 +1358,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             { kind: "face", bodyId: sourceBody.bodyId, faceId: startFaceId },
           ],
@@ -1230,6 +1458,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       bodies: [sourceBody],
     })();
     const baseParameters = {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region" as const,
@@ -1361,6 +1590,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               { kind: "region", sketchId: sketch.sketchId, regionId: region.regionId },
             ],
@@ -1418,6 +1648,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     );
     const context = await createContext({ sketches: [sketch] })();
     const baseParameters = {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region" as const,
@@ -1537,6 +1768,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -1623,6 +1855,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -1687,6 +1920,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -1761,6 +1995,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       kind: "extrude",
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters: {
+        resultBodyType: "solid",
         profiles: [
           { kind: "region", sketchId: sketch.sketchId, regionId: region.regionId },
         ],
@@ -1876,6 +2111,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -1923,6 +2159,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -1953,6 +2190,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -1983,6 +2221,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -2053,6 +2292,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     })();
     const noTargetContext = await createContext({ sketches: [sketch] })();
     const baseExtrudeParameters = {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region" as const,
@@ -2172,6 +2412,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -2213,6 +2454,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -2541,6 +2783,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "revolve",
           featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -2578,6 +2821,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "revolve",
         featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -2616,6 +2860,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "revolve",
         featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",
@@ -2712,6 +2957,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       bodies: [axisBody, targetBody],
     })();
     const baseParameters = {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region" as const,
@@ -2932,6 +3178,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "revolve",
           featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -3028,6 +3275,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "revolve",
           featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               { kind: "face", bodyId: body.bodyId, faceId: nonPlanarFaceId },
             ],
@@ -4309,6 +4557,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -4380,6 +4629,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         kind: "extrude" as const,
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region" as const,
@@ -4513,6 +4763,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -4562,6 +4813,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testPlaneFeatureBuildsExplicitFrameConstructionPlane();
   await testRegionResolutionAcceptsLegacyTraversalLabel();
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion();
+  await testSurfaceExtrudeRevolveAndThickenUseSheetBodies();
   await testExtrudePublishesSemanticPrismHistoryProvenance();
   await testExtrudeUpToNextSkipsCoplanarStartFace();
   await testExtrudeStartExtentBoundToDurableEntity();

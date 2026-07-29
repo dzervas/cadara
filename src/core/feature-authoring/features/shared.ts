@@ -1,7 +1,9 @@
 import type {
   ExtrudeProfileRef,
+  ExtrudeSurfaceProfileRef,
   RevolveAxisRef,
 } from "@/contracts/modeling/schema";
+import type { FeatureResultBodyType } from "@/core/feature-authoring/definition";
 import type {
   PrimitiveRef,
   SelectionFilter,
@@ -30,6 +32,7 @@ export {
   createAdvancedOperationIntentFields,
   createBooleanOperationFields,
   createReferenceCollectionField,
+  createResultBodyTypeField,
 } from "@/core/feature-authoring/features/form-field-factories";
 
 export function asExtrudeProfileRef(
@@ -46,6 +49,19 @@ export function asExtrudeProfileRef(
     default:
       return null;
   }
+}
+
+/**
+ * Coerces a selection target into a profile seed for the active result body
+ * type. Open sketch curves are accepted only while surface mode is active.
+ */
+export function asResultBodyTypeProfileRef(
+  value: PrimitiveRef | null,
+  resultBodyType: FeatureResultBodyType,
+): ExtrudeSurfaceProfileRef | null {
+  return resultBodyType === "surface" && value?.kind === "sketchEntity"
+    ? value
+    : asExtrudeProfileRef(value);
 }
 
 export function asRevolveAxisRef(

@@ -1,5 +1,7 @@
 import type {
   AngularExtentDirection,
+  ExtrudeProfileRef,
+  RevolveSurfaceProfileRef,
   RevolveEndCondition,
   RevolveFeatureExtent,
   UpToOffsetDirection,
@@ -12,8 +14,8 @@ import { getRevolveFeatureExtent } from "@/contracts/modeling/feature-extents";
 import {
   getBooleanScopeBodyTargets,
   hasBooleanTargetScope,
-  isBooleanOperation,
-  toBooleanScope,
+  isResultBodyType,
+  resolveResultBodyTypeVariant,
 } from "@/core/feature-authoring/definition";
 import {
   createSelectionFilterForRequirement,
@@ -25,6 +27,7 @@ import {
   appendUniqueTarget,
   asBodyRef,
   asExtrudeProfileRef,
+  asResultBodyTypeProfileRef,
   asRevolveAxisRef,
   asUpToTargetRef,
   authoredDefinitionValue,
@@ -32,6 +35,7 @@ import {
   authoredStringLiteral,
   createBooleanOperationFields,
   createMissingInputDiagnostic,
+  createResultBodyTypeField,
   createSingleTargetSelectionFilter,
   expressionCapableAuthoredValue,
   isFiniteAuthoredNumber,
@@ -474,6 +478,7 @@ export const revolveAuthoringDefinition = {
   createDraft(input) {
     const profileTarget = asExtrudeProfileRef(input.selectedTarget);
     return {
+      resultBodyType: "solid",
       profileTargets: profileTarget ? [profileTarget] : [],
       axisTarget: asRevolveAxisRef(input.selectedTarget),
       startAngle: 0,
@@ -485,42 +490,56 @@ export const revolveAuthoringDefinition = {
     };
   },
   hydrateDraft(feature) {
-    const extent = getRevolveFeatureExtent(feature.parameters);
+    const parameters = feature.parameters;
+    const extent = getRevolveFeatureExtent(parameters);
     return {
-      profileTargets: [...feature.parameters.profiles],
-      axisTarget: feature.parameters.axis,
-      startAngle: feature.parameters.startAngle,
+      resultBodyType: parameters.resultBodyType,
+      profileTargets: parameters.profiles as readonly RevolveSurfaceProfileRef[],
+      axisTarget: parameters.axis,
+      startAngle: parameters.startAngle,
       extentMode: extent.mode,
       firstEnd: extent.mode === "twoSide" ? extent.firstEnd : extent.end,
       secondEnd:
         extent.mode === "twoSide" ? extent.secondEnd : DEFAULT_SECOND_END,
-      operation: feature.parameters.operation,
-      booleanScope: feature.parameters.booleanScope,
+      operation:
+        parameters.resultBodyType === "solid"
+          ? parameters.operation
+          : "newBody",
+      booleanScope:
+        parameters.resultBodyType === "solid"
+          ? parameters.booleanScope
+          : { kind: "standalone" },
     };
   },
   applyPatch(draft, patch) {
     const extentMode = isExtentMode(patch.extentMode)
       ? patch.extentMode
       : draft.extentMode;
+    const resultBodyType = isResultBodyType(patch.resultBodyType)
+      ? patch.resultBodyType
+      : draft.resultBodyType;
+    const patchedProfileTargets =
+      patch.profileTargets === undefined && patch.profileTarget === undefined
+        ? draft.profileTargets
+        : Array.isArray(patch.profileTargets)
+          ? patch.profileTargets.filter(
+              (entry): entry is (typeof draft.profileTargets)[number] =>
+                asResultBodyTypeProfileRef(
+                  entry as Parameters<typeof asResultBodyTypeProfileRef>[0],
+                  resultBodyType,
+                ) !== null,
+            )
+          : asResultBodyTypeProfileRef(
+                patch.profileTarget as Parameters<
+                  typeof asResultBodyTypeProfileRef
+                >[0],
+                resultBodyType,
+              )
+            ? [patch.profileTarget as (typeof draft.profileTargets)[number]]
+            : draft.profileTargets;
     return {
       ...draft,
-      profileTargets:
-        patch.profileTargets === undefined && patch.profileTarget === undefined
-          ? draft.profileTargets
-          : Array.isArray(patch.profileTargets)
-            ? patch.profileTargets.filter(
-                (entry): entry is (typeof draft.profileTargets)[number] =>
-                  asExtrudeProfileRef(
-                    entry as Parameters<typeof asExtrudeProfileRef>[0],
-                  ) !== null,
-              )
-            : asExtrudeProfileRef(
-                  patch.profileTarget as Parameters<
-                    typeof asExtrudeProfileRef
-                  >[0],
-                )
-              ? [patch.profileTarget as (typeof draft.profileTargets)[number]]
-              : draft.profileTargets,
+      ...resolveResultBodyTypeVariant(draft, patch, patchedProfileTargets),
       axisTarget:
         patch.axisTarget === undefined
           ? draft.axisTarget
@@ -541,19 +560,20 @@ export const revolveAuthoringDefinition = {
         "twoSide",
         patchEnd(draft.secondEnd, patch, "second"),
       ) as Exclude<RevolveFeatureEndConditionDraft, { kind: "full" }>,
-      operation: acceptAuthoredPatch(
-        patch.operation,
-        draft.operation,
-        isBooleanOperation,
-      ),
-      booleanScope: toBooleanScope(patch, draft.booleanScope),
     };
   },
   applySelection(draft, target) {
-    if (target.kind === "region" || target.kind === "face") {
+    const profileTarget = asResultBodyTypeProfileRef(
+      target,
+      draft.resultBodyType,
+    );
+    if (profileTarget) {
       return {
         ...draft,
-        profileTargets: appendUniqueTarget(draft.profileTargets, target),
+        profileTargets: appendUniqueTarget(
+          draft.profileTargets,
+          profileTarget,
+        ),
       };
     }
     if (target.kind === "edge" || target.kind === "construction") {
@@ -667,22 +687,47 @@ export const revolveAuthoringDefinition = {
               >,
             }
           : { mode: "oneSide", end: definitionEnd(firstEnd) };
-    return draft.profileTargets.length > 0 &&
-      draft.axisTarget &&
-      hasBooleanTargetScope(operation, draft.booleanScope) &&
-      endHasValidScalars(firstEnd) &&
-      endHasRequiredTarget(firstEnd) &&
-      (draft.extentMode !== "twoSide" ||
-        (endHasValidScalars(draft.secondEnd) &&
-          endHasRequiredTarget(draft.secondEnd)))
+    const solidProfiles = draft.profileTargets.filter(
+      (entry): entry is ExtrudeProfileRef => entry.kind !== "sketchEntity",
+    );
+
+    if (
+      draft.profileTargets.length === 0 ||
+      !draft.axisTarget ||
+      !endHasValidScalars(firstEnd) ||
+      !endHasRequiredTarget(firstEnd) ||
+      (draft.extentMode === "twoSide" &&
+        (!endHasValidScalars(draft.secondEnd) ||
+          !endHasRequiredTarget(draft.secondEnd)))
+    ) {
+      return null;
+    }
+
+    if (draft.resultBodyType === "surface") {
+      return {
+        kind: "revolve",
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "surface",
+          profiles: draft.profileTargets as readonly [
+            RevolveSurfaceProfileRef,
+            ...RevolveSurfaceProfileRef[],
+          ],
+          axis: draft.axisTarget,
+          startAngle: authoredDefinitionValue(draft.startAngle, 0),
+          extent,
+        },
+      };
+    }
+
+    return solidProfiles.length === draft.profileTargets.length &&
+      hasBooleanTargetScope(operation, draft.booleanScope)
       ? {
           kind: "revolve",
           featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            profiles: draft.profileTargets as readonly [
-              (typeof draft.profileTargets)[number],
-              ...(typeof draft.profileTargets)[number][],
-            ],
+            resultBodyType: "solid",
+            profiles: [solidProfiles[0]!, ...solidProfiles.slice(1)],
             axis: draft.axisTarget,
             startAngle: authoredDefinitionValue(draft.startAngle, 0),
             extent,
@@ -710,7 +755,9 @@ export const revolveAuthoringDefinition = {
               value: session.draft.profileTargets,
               emptyLabel: "None selected",
               helper:
-                "Accepted targets: derived sketch regions or planar faces.",
+                session.draft.resultBodyType === "surface"
+                  ? "Accepted targets: derived sketch regions, planar faces, or open sketch curves."
+                  : "Accepted targets: derived sketch regions or planar faces.",
               error:
                 session.draft.profileTargets.length > 0
                   ? null
@@ -726,7 +773,9 @@ export const revolveAuthoringDefinition = {
                 allowsMultiple: true,
                 selectionFilter: createSelectionFilterForRequirement(
                   revolveSelectionFilter,
-                  "revolve-profile",
+                  session.draft.resultBodyType === "surface"
+                    ? "revolve-surface-profile"
+                    : "revolve-profile",
                   "Revolve profile",
                 ),
                 itemLabel: "Profile",
@@ -767,6 +816,10 @@ export const revolveAuthoringDefinition = {
           id: "parameters",
           title: "Parameters",
           fields: [
+            createResultBodyTypeField({
+              prefix: "revolve",
+              resultBodyType: session.draft.resultBodyType,
+            }),
             {
               kind: "enum",
               id: "revolve-extent-mode",
@@ -805,15 +858,17 @@ export const revolveAuthoringDefinition = {
               ),
               patch: { patchKey: "startAngle" },
             },
-            ...createBooleanOperationFields({
-              prefix: "revolve",
-              operation,
-              operationValue: session.draft.operation,
-              booleanTargetBodies,
-              selectionFilter: revolveSelectionFilter,
-              selectionRequirementId: "revolve-boolean-target",
-              selectionRequirementLabel: "Revolve target body",
-            }),
+            ...(session.draft.resultBodyType === "surface"
+              ? []
+              : createBooleanOperationFields({
+                  prefix: "revolve",
+                  operation,
+                  operationValue: session.draft.operation,
+                  booleanTargetBodies,
+                  selectionFilter: revolveSelectionFilter,
+                  selectionRequirementId: "revolve-boolean-target",
+                  selectionRequirementLabel: "Revolve target body",
+                })),
           ],
         },
         {

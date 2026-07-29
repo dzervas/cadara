@@ -254,8 +254,9 @@ function extrudeRequest(input: {
     featureLabel: input.featureLabel,
     definition: {
       kind: "extrude",
-      featureTypeVersion: "feature-type/extrude/v1alpha1",
+      featureTypeVersion: "feature-type/extrude/v1alpha2",
       parameters: {
+        resultBodyType: "solid",
         profiles: [
           {
             kind: "regionOf",
@@ -1095,6 +1096,7 @@ test("Onshape X.4 region selections apply through real OCC with exact live solid
   expect(rightExtrude?.definition).toMatchObject({
     kind: "extrude",
     parameters: {
+      resultBodyType: "solid",
       profiles: [{
         kind: "regionOf",
         actionIndex: 0,
@@ -2744,8 +2746,9 @@ test("generic prepared pattern bodyOf outputs reject multi-body consumers", asyn
         featureLabel: "Invalid bodyOf cut",
         definition: {
           kind: "extrude",
-          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          featureTypeVersion: "feature-type/extrude/v1alpha2",
           parameters: {
+            resultBodyType: "solid",
             profiles: [profile],
             startExtent: { kind: "profilePlane" },
             extent: { mode: "oneSide", end: { kind: "blind", direction: "positive", distance: 1 } },
@@ -3788,8 +3791,9 @@ test("an up-to-vertex extent terminating at a sketch point builds exactly in rea
         featureLabel: "Up to sketch vertex",
         definition: {
           kind: "extrude",
-          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          featureTypeVersion: "feature-type/extrude/v1alpha2",
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "regionOf",
@@ -3933,8 +3937,9 @@ test("a sketch-point start offset moves the extrude's start plane in real OCC", 
         featureLabel: "Offset start extrude",
         definition: {
           kind: "extrude",
-          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          featureTypeVersion: "feature-type/extrude/v1alpha2",
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "regionOf",

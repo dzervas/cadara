@@ -135,11 +135,18 @@ export function getFeatureValueExpressionFields(
           label: "Extrude second up-to offset",
           valueKind: { kind: "finiteNumber" },
         },
-        {
-          path: ["parameters", "operation"],
-          label: "Extrude operation",
-          valueKind: { kind: "enumString", options: BOOLEAN_OPERATION_OPTIONS },
-        },
+        ...(definition.parameters.resultBodyType === "solid"
+          ? [
+              {
+                path: ["parameters", "operation"],
+                label: "Extrude operation",
+                valueKind: {
+                  kind: "enumString",
+                  options: BOOLEAN_OPERATION_OPTIONS,
+                } as const,
+              },
+            ]
+          : []),
       ];
     case "fillet":
       return [
@@ -186,11 +193,18 @@ export function getFeatureValueExpressionFields(
           label: "Revolve second up-to offset",
           valueKind: { kind: "angle" },
         },
-        {
-          path: ["parameters", "operation"],
-          label: "Revolve operation",
-          valueKind: { kind: "enumString", options: BOOLEAN_OPERATION_OPTIONS },
-        },
+        ...(definition.parameters.resultBodyType === "solid"
+          ? [
+              {
+                path: ["parameters", "operation"],
+                label: "Revolve operation",
+                valueKind: {
+                  kind: "enumString",
+                  options: BOOLEAN_OPERATION_OPTIONS,
+                } as const,
+              },
+            ]
+          : []),
       ];
     case "shell":
       return [

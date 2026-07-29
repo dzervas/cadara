@@ -417,9 +417,25 @@ export const sectionViewSelectionFilter: SelectionFilter = {
 
 export const extrudeSelectionFilter: SelectionFilter = {
   kind: "extrudeProfile",
-  allowedKinds: ["region", "face", "body"],
+  allowedKinds: ["region", "face", "sketchEntity", "body"],
   label: "Extrude profiles, planar faces, or boolean bodies",
   requirements: [
+    {
+      id: "extrude-surface-profile",
+      label: "Extrude surface seed",
+      description:
+        "Surface extrude accepts one or more explicit derived sketch regions, planar faces, or open sketch curves.",
+      slots: [
+        {
+          id: "extrude-surface-seed",
+          label: "Extrude surface seed",
+          description:
+            "Select one or more derived sketch regions, planar faces, or open sketch curves.",
+          acceptedKinds: ["region", "face", "sketchEntity"],
+          acceptedSemantics: ["regionProfile", "planarFace", "sketchEntity"],
+        },
+      ],
+    },
     {
       id: "extrude-profile",
       label: "Extrude seed",
@@ -559,9 +575,32 @@ export const holeSelectionFilter: SelectionFilter = {
 
 export const revolveSelectionFilter: SelectionFilter = {
   kind: "revolveReferences",
-  allowedKinds: ["region", "face", "edge", "construction", "body"],
+  allowedKinds: [
+    "region",
+    "face",
+    "edge",
+    "sketchEntity",
+    "construction",
+    "body",
+  ],
   label: "Revolve references",
   requirements: [
+    {
+      id: "revolve-surface-profile",
+      label: "Surface profile target",
+      description:
+        "Surface revolve accepts one or more explicit region, planar face, or open sketch curve profiles.",
+      slots: [
+        {
+          id: "revolve-surface-profile",
+          label: "Revolve surface profile",
+          description:
+            "Select one or more derived sketch regions, planar faces, or open sketch curves.",
+          acceptedKinds: ["region", "face", "sketchEntity"],
+          acceptedSemantics: ["regionProfile", "planarFace", "sketchEntity"],
+        },
+      ],
+    },
     {
       id: "revolve-profile",
       label: "Profile target",
@@ -1158,6 +1197,20 @@ export const thickenSelectionFilter: SelectionFilter = {
           description: "Select one face to offset into a solid.",
           acceptedKinds: ["face"],
           acceptedSemantics: ["face", "planarFace"],
+        },
+      ],
+    },
+    {
+      id: "thicken-sheet-body",
+      label: "Sheet body source",
+      description: "Thicken accepts one explicit sheet body source target.",
+      slots: [
+        {
+          id: "thicken-sheet-body",
+          label: "Sheet body source",
+          description: "Select one sheet body to thicken into a solid.",
+          acceptedKinds: ["body"],
+          acceptedSemantics: ["body"],
         },
       ],
     },

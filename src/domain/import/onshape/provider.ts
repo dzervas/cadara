@@ -2882,6 +2882,7 @@ async function buildPreparedActions(input: {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: profiles as [
               ImportDeferredExtrudeProfileRef,
               ...ImportDeferredExtrudeProfileRef[],
@@ -2965,6 +2966,7 @@ async function buildPreparedActions(input: {
           kind: "revolve",
           featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: profiles as [
               ImportDeferredProfileRef,
               ...ImportDeferredProfileRef[],

@@ -568,6 +568,10 @@ function getRebuildSlotTarget(
     return null;
   }
 
+  if (parameters.resultBodyType !== "solid") {
+    return null;
+  }
+
   const scope = parameters.booleanScope;
   if (scope.kind === "targetBody") {
     return { kind: "body", bodyId: scope.bodyId };
@@ -1545,13 +1549,17 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
           targets.push(end.target);
         }
       }
-      const scope = definition.parameters.booleanScope;
-      if (scope.kind === "targetBody") {
-        targets.push({ kind: "body", bodyId: scope.bodyId });
-      } else if (scope.kind === "targetBodies") {
-        targets.push(
-          ...scope.bodyIds.map((bodyId) => ({ kind: "body", bodyId }) as const),
-        );
+      if (definition.parameters.resultBodyType === "solid") {
+        const scope = definition.parameters.booleanScope;
+        if (scope.kind === "targetBody") {
+          targets.push({ kind: "body", bodyId: scope.bodyId });
+        } else if (scope.kind === "targetBodies") {
+          targets.push(
+            ...scope.bodyIds.map(
+              (bodyId) => ({ kind: "body", bodyId }) as const,
+            ),
+          );
+        }
       }
 
       return targets;
@@ -1577,13 +1585,17 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
           targets.push(end.target);
         }
       }
-      const scope = definition.parameters.booleanScope;
-      if (scope.kind === "targetBody") {
-        targets.push({ kind: "body", bodyId: scope.bodyId });
-      } else if (scope.kind === "targetBodies") {
-        targets.push(
-          ...scope.bodyIds.map((bodyId) => ({ kind: "body", bodyId }) as const),
-        );
+      if (definition.parameters.resultBodyType === "solid") {
+        const scope = definition.parameters.booleanScope;
+        if (scope.kind === "targetBody") {
+          targets.push({ kind: "body", bodyId: scope.bodyId });
+        } else if (scope.kind === "targetBodies") {
+          targets.push(
+            ...scope.bodyIds.map(
+              (bodyId) => ({ kind: "body", bodyId }) as const,
+            ),
+          );
+        }
       }
 
       return targets;
@@ -2846,7 +2858,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     if (target.kind !== "body") {
       const diagnostic = createNativeTopologyDiagnostic(
         "occ-native-topology-unexportable-target",
-        "Only live solid body targets can be exported through the native topology payload boundary.",
+        "Only live body targets can be exported through the native topology payload boundary.",
         { kind: "unsupportedTargetKind", targetKind: target.kind },
         target,
       );
@@ -3072,6 +3084,22 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             missingBodyId: leftBody ? rightBodyId : leftBodyId,
           },
           { kind: "body", bodyId: leftBody ? rightBodyId : leftBodyId },
+        ),
+      ]);
+    }
+
+    if (leftBody.bodyKind !== "solid" || rightBody.bodyKind !== "solid") {
+      const sheetBody = leftBody.bodyKind === "sheet" ? leftBody : rightBody;
+      return createDiagnosticPayload([
+        createNativeTopologyDiagnostic(
+          "occ-native-topology-unsupported-sheet-body",
+          `Native boolean transaction does not support sheet body ${sheetBody.bodyId}.`,
+          {
+            kind: "unsupportedSheetBody",
+            bodyId: sheetBody.bodyId,
+            operation,
+          },
+          { kind: "body", bodyId: sheetBody.bodyId },
         ),
       ]);
     }

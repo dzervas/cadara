@@ -246,6 +246,184 @@ export const SECONDARY_EXTRUDE_FIXTURE = {
   regionId: SECONDARY_PROFILE_REGION_ID,
 } as const;
 
+const OPEN_CURVE_SKETCH_ID = "sketch_primary" as const;
+const OPEN_CURVE_FIRST_ENTITY_ID = "sketch_entity_open_first" as const;
+const OPEN_CURVE_SECOND_ENTITY_ID = "sketch_entity_open_second" as const;
+
+export const OPEN_CURVE_FIXTURE = {
+  sketchId: OPEN_CURVE_SKETCH_ID,
+  profiles: [
+    `${OPEN_CURVE_SKETCH_ID}.${OPEN_CURVE_FIRST_ENTITY_ID}`,
+    `${OPEN_CURVE_SKETCH_ID}.${OPEN_CURVE_SECOND_ENTITY_ID}`,
+  ],
+  sheetBody: "body_feature_extrude-1",
+} as const;
+
+function createOpenCurveSketchDefinition(): CommitSketchRequest["definition"] {
+  const startPointId = "sketch_point_open_start" as const;
+  const middlePointId = "sketch_point_open_middle" as const;
+  const endPointId = "sketch_point_open_end" as const;
+
+  return {
+    schemaVersion: SKETCH_SCHEMA_VERSION,
+    referenceIds: [],
+    references: [],
+    pointIds: [startPointId, middlePointId, endPointId],
+    points: [
+      {
+        pointId: startPointId,
+        label: "Open chain start",
+        target: {
+          kind: "sketchPoint",
+          sketchId: OPEN_CURVE_SKETCH_ID,
+          pointId: startPointId,
+        },
+        position: [5, -5],
+        isConstruction: false,
+      },
+      {
+        pointId: middlePointId,
+        label: "Open chain middle",
+        target: {
+          kind: "sketchPoint",
+          sketchId: OPEN_CURVE_SKETCH_ID,
+          pointId: middlePointId,
+        },
+        position: [12, -5],
+        isConstruction: false,
+      },
+      {
+        pointId: endPointId,
+        label: "Open chain end",
+        target: {
+          kind: "sketchPoint",
+          sketchId: OPEN_CURVE_SKETCH_ID,
+          pointId: endPointId,
+        },
+        position: [12, 3],
+        isConstruction: false,
+      },
+    ],
+    entityIds: [OPEN_CURVE_FIRST_ENTITY_ID, OPEN_CURVE_SECOND_ENTITY_ID],
+    entities: [
+      {
+        kind: "lineSegment",
+        entityId: OPEN_CURVE_FIRST_ENTITY_ID,
+        label: "Open chain first",
+        target: {
+          kind: "sketchEntity",
+          sketchId: OPEN_CURVE_SKETCH_ID,
+          entityId: OPEN_CURVE_FIRST_ENTITY_ID,
+        },
+        isConstruction: false,
+        startPointId,
+        endPointId: middlePointId,
+      },
+      {
+        kind: "lineSegment",
+        entityId: OPEN_CURVE_SECOND_ENTITY_ID,
+        label: "Open chain second",
+        target: {
+          kind: "sketchEntity",
+          sketchId: OPEN_CURVE_SKETCH_ID,
+          entityId: OPEN_CURVE_SECOND_ENTITY_ID,
+        },
+        isConstruction: false,
+        startPointId: middlePointId,
+        endPointId,
+      },
+    ],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+  };
+}
+
+function createOpenCurveCommitSketchRequest(): CommitSketchRequest {
+  return {
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: DOCUMENT_ID,
+    baseRevisionId: BASE_REVISION_ID,
+    solverCorrelation: SOLVER_CORRELATION,
+    sketchId: OPEN_CURVE_SKETCH_ID,
+    sketchLabel: "Open Chain Sketch",
+    plane: {
+      key: "xy",
+      support: {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      frame: {
+        origin: [0, 0, 0],
+        xAxis: [1, 0, 0],
+        yAxis: [0, 1, 0],
+        normal: [0, 0, 1],
+        linearUnit: "documentLength",
+        handedness: "rightHanded",
+      },
+    },
+    definition: createOpenCurveSketchDefinition(),
+  };
+}
+
+function createSurfaceExtrudeFeatureRequest(): CreateFeatureRequest {
+  return {
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: DOCUMENT_ID,
+    baseRevisionId: BASE_REVISION_ID,
+    definition: {
+      kind: "extrude",
+      featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        resultBodyType: "surface",
+        profiles: [
+          {
+            kind: "sketchEntity",
+            sketchId: OPEN_CURVE_SKETCH_ID,
+            entityId: OPEN_CURVE_FIRST_ENTITY_ID,
+          },
+          {
+            kind: "sketchEntity",
+            sketchId: OPEN_CURVE_SKETCH_ID,
+            entityId: OPEN_CURVE_SECOND_ENTITY_ID,
+          },
+        ],
+        startExtent: { kind: "profilePlane" },
+        extent: {
+          mode: "oneSide",
+          end: { kind: "blind", direction: "positive", distance: 6 },
+        },
+      },
+    },
+  };
+}
+
+export function createOpenCurveSketchOperationHistory(): ModelingOperationHistoryPayload {
+  return {
+    ...createEmptyOperationHistory(DOCUMENT_ID),
+    entries: [
+      createCommitSketchHistoryEntry(
+        createOpenCurveCommitSketchRequest(),
+        OPEN_CURVE_SKETCH_ID,
+      ),
+    ],
+  };
+}
+
+export function createSheetBodyOperationHistory(): ModelingOperationHistoryPayload {
+  return {
+    ...createEmptyOperationHistory(DOCUMENT_ID),
+    entries: [
+      createCommitSketchHistoryEntry(
+        createOpenCurveCommitSketchRequest(),
+        OPEN_CURVE_SKETCH_ID,
+      ),
+      createCreateFeatureHistoryEntry(createSurfaceExtrudeFeatureRequest()),
+    ],
+  };
+}
+
 function createCommitSketchRequest(
   sketchId: `sketch_${string}`,
   label: string,
@@ -290,6 +468,7 @@ function createExtrudeFeatureRequest(
       kind: "extrude",
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters: {
+        resultBodyType: "solid",
         profiles: [{ kind: "region", sketchId, regionId }],
         startExtent: { kind: "profilePlane" },
         extent: {

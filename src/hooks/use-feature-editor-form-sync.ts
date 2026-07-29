@@ -3,6 +3,7 @@ import type { UseFormReturn } from "react-hook-form";
 
 import {
   createFeatureEditorFormValues,
+  featureEditorFormValuesMissingSchemaFields,
   normalizeFeatureEditorFormValues,
   shouldResetFeatureEditorFormValues,
   type FeatureEditorFormValues,
@@ -30,12 +31,14 @@ export function useFeatureEditorFormSync({
     }
 
     const nextValues = createFeatureEditorFormValues(formSchema);
+    const rawValues = form.getValues();
     const currentValues = normalizeFeatureEditorFormValues(
       formSchema,
-      form.getValues(),
+      rawValues,
     );
 
     if (
+      featureEditorFormValuesMissingSchemaFields(formSchema, rawValues) ||
       shouldResetFeatureEditorFormValues({
         schema: formSchema,
         sessionKey,

@@ -96,8 +96,9 @@ function sketchExtrudeCandidate(documentId: DocumentId): ImportPreparedActions {
         featureLabel: "Probe extrude",
         definition: {
           kind: "extrude",
-          featureTypeVersion: "feature-type/extrude/v1alpha1",
+          featureTypeVersion: "feature-type/extrude/v1alpha2",
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "regionOf",

@@ -4,14 +4,20 @@ import type {
   ExtrudeStartExtent,
 } from "@/contracts/modeling/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
-import { getExtrudeFeatureExtent } from "@/contracts/modeling/feature-extents";
+import {
+  getExtrudeExtentEnds,
+  getExtrudeFeatureExtent,
+} from "@/contracts/modeling/feature-extents";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { mapSketchPointToWorld, type Vec3 } from "@/domain/modeling/occ/math";
 import {
+  buildOpenSketchCurveWire,
   buildRegionProfileFace,
+  buildRegionProfileWire,
   getExtrusionNormalForPlanarFace,
   getExtrusionNormalForSketchProfile,
+  type BuiltSketchProfileWire,
 } from "@/domain/modeling/occ/sketch-profile";
 import {
   cross,
@@ -39,6 +45,7 @@ import {
   applyBooleanPolicy,
   projectFeatureSourceShapes,
   runBoolean,
+  trackSurfaceFeatureResult,
   type OccFeatureSourceShapeMap,
 } from "@/domain/modeling/occ/features/boolean-operations";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
@@ -365,6 +372,176 @@ function resolveExtrudeDistance(
   return distance;
 }
 
+interface BuiltSurfaceExtrudeProfile {
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Wire"]>;
+  baseNormal: Vec3;
+  sketchId: string | null;
+  sketchProvenance: BuiltSketchProfileWire["provenance"] | null;
+  faceProfileKey: string | null;
+}
+
+function buildSurfaceExtrudeProfile(
+  context: OccFeatureExecutionContext,
+  parameters: Extract<ExtrudeFeatureParameters, { resultBodyType: "surface" }>,
+): BuiltSurfaceExtrudeProfile {
+  const openProfiles = parameters.profiles.filter(
+    (profile): profile is Extract<typeof profile, { kind: "sketchEntity" }> =>
+      profile.kind === "sketchEntity",
+  );
+
+  if (openProfiles.length > 0) {
+    if (openProfiles.length !== parameters.profiles.length) {
+      throw new Error(
+        "unsupported-profile-group: OCC surface extrude cannot combine open sketch curves with region or face profile wires without sewing.",
+      );
+    }
+    const sketchId = openProfiles[0]!.sketchId;
+    if (openProfiles.some((profile) => profile.sketchId !== sketchId)) {
+      throw new Error(
+        "unsupported-profile-group: OCC surface extrude open sketch curves must belong to one sketch.",
+      );
+    }
+    const sketch = requireSketchSnapshot(context, sketchId);
+    const built = buildOpenSketchCurveWire(
+      context.oc,
+      { plane: sketch.plane, sketch: sketch.sketch },
+      openProfiles.map((profile) => profile.entityId),
+    );
+    return {
+      shape: built.wire,
+      baseNormal: getExtrusionNormalForSketchProfile(built.plane, "positive"),
+      sketchId,
+      sketchProvenance: built.provenance,
+      faceProfileKey: null,
+    };
+  }
+
+  if (parameters.profiles.length !== 1) {
+    throw new Error(
+      "unsupported-profile-group: OCC surface extrude requires one region/face wire or one connected open sketch-curve chain.",
+    );
+  }
+
+  const profile = parameters.profiles[0]!;
+  if (profile.kind === "region") {
+    const sketch = requireSketchSnapshot(context, profile.sketchId);
+    const region = requireRegion(sketch, profile.regionId);
+    const built = buildRegionProfileWire(
+      context.oc,
+      { plane: sketch.plane, sketch: sketch.sketch },
+      region,
+    );
+    return {
+      shape: built.wire,
+      baseNormal: getExtrusionNormalForSketchProfile(built.plane, "positive"),
+      sketchId: profile.sketchId,
+      sketchProvenance: built.provenance,
+      faceProfileKey: null,
+    };
+  }
+
+  if (profile.kind === "sketchEntity") {
+    throw new Error(
+      "unsupported-profile-group: OCC surface extrude could not group the open sketch-curve profile.",
+    );
+  }
+
+  const body = requireBody(context, profile.bodyId);
+  const face = requireFace(context, body, profile.faceId);
+  return {
+    shape: context.oc.BRepTools.OuterWire(face),
+    baseNormal: getExtrusionNormalForPlanarFace(context.oc, face, "positive"),
+    sketchId: null,
+    sketchProvenance: null,
+    faceProfileKey: getOccDurableRefKey(profile),
+  };
+}
+
+function listShapeEdges(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  const edgeMap = new oc.TopTools_IndexedMapOfShape_1();
+  oc.TopExp.MapShapes_1(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_EDGE as never,
+    edgeMap,
+  );
+  const edges = Array.from({ length: edgeMap.Size() }, (_, index) =>
+    oc.TopoDS.Edge_1(edgeMap.FindKey(index + 1)),
+  );
+  edgeMap.delete();
+  return edges;
+}
+
+function registerSurfaceExtrudeProvenance(
+  context: OccFeatureExecutionContext,
+  input: {
+    ownerFeatureId: FeatureId;
+    profileSlot: number;
+    endRole: string;
+    prism: InstanceType<OpenCascadeInstance["BRepPrimAPI_MakePrism_1"]>;
+    profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+    sketchId: string | null;
+    sketchProvenance: BuiltSketchProfileWire["provenance"] | null;
+    faceProfileKey: string | null;
+  },
+) {
+  const sourceShapes = new Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >();
+  const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
+  const slotPrefix = `extrude:${input.ownerFeatureId}:profile:${input.profileSlot}:end:${input.endRole}`;
+
+  for (const edge of listShapeEdges(context.oc, input.profileShape)) {
+    registerSourceShape(
+      sourceShapes,
+      `${slotPrefix}:profile:first-boundary-edge`,
+      input.prism.FirstShape_2(edge),
+    );
+    registerSourceShape(
+      sourceShapes,
+      `${slotPrefix}:profile:last-boundary-edge`,
+      input.prism.LastShape_2(edge),
+    );
+  }
+
+  if (input.sketchId && input.sketchProvenance) {
+    for (const [sourceKey, edge] of input.sketchProvenance.edges) {
+      const prefix = `${slotPrefix}:sketch-entity:${input.sketchId}:${sourceKey}`;
+      registerSourceShapes(
+        sourceShapes,
+        `${prefix}:generated-side-face`,
+        listOccShapes(context.oc, input.prism.Generated(edge)),
+      );
+      registerSourceShape(sourceShapes, `${prefix}:first-edge`, input.prism.FirstShape_2(edge));
+      registerSourceShape(sourceShapes, `${prefix}:last-edge`, input.prism.LastShape_2(edge));
+    }
+    for (const [sourceKey, vertex] of input.sketchProvenance.vertices) {
+      const prefix = `${slotPrefix}:sketch-point:${input.sketchId}:${sourceKey}`;
+      registerSourceShapes(
+        sourceShapes,
+        `${prefix}:generated-side-edge`,
+        listOccShapes(context.oc, input.prism.Generated(vertex)),
+      );
+      registerSourceShape(sourceShapes, `${prefix}:first-vertex`, input.prism.FirstShape_2(vertex));
+      registerSourceShape(sourceShapes, `${prefix}:last-vertex`, input.prism.LastShape_2(vertex));
+    }
+    for (const unsupported of input.sketchProvenance.unsupportedSources) {
+      unsupportedSourceKeys.add(
+        `${slotPrefix}:sketch-source:${input.sketchId}:${unsupported.sourceKey}:unsupported-profile-history`,
+      );
+    }
+  } else if (input.faceProfileKey) {
+    unsupportedSourceKeys.add(
+      `${slotPrefix}:face-profile:${input.faceProfileKey}:unsupported-profile-history`,
+    );
+  }
+
+  return { sourceShapes, unsupportedSourceKeys };
+}
+
 function buildExtrudeProfileShapes(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -379,6 +556,12 @@ function buildExtrudeProfileShapes(
     | ReturnType<typeof buildRegionProfileFace>["provenance"]
     | null = null;
   let sketchId: string | null = null;
+
+  if (profile.kind === "sketchEntity") {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC extrude does not implement open sketch-curve surface profiles yet.",
+    );
+  }
 
   if (profile.kind === "region") {
     const sketch = requireSketchSnapshot(context, profile.sketchId);
@@ -838,6 +1021,207 @@ function buildExtrudeEndShape(
   }
 }
 
+function resolveStartedSurfaceExtrudeEnd(
+  context: OccFeatureExecutionContext,
+  profile: BuiltSurfaceExtrudeProfile,
+  startExtent: ExtrudeStartExtent,
+  end: ExtrudeEndCondition,
+) {
+  const direction = normalize(
+    end.direction === "positive"
+      ? profile.baseNormal
+      : scale(profile.baseNormal, -1),
+  );
+  const startOffset = resolveStartExtentOffset(
+    context,
+    startExtent,
+    profile.shape,
+    direction,
+  );
+  const moved =
+    startOffset === 0
+      ? {
+          profileShape: profile.shape as InstanceType<
+            OpenCascadeInstance["TopoDS_Shape"]
+          >,
+          sketchProvenance: profile.sketchProvenance,
+        }
+      : translateProfileToStartPlane(context, {
+          profileShape: profile.shape,
+          sketchProvenance: profile.sketchProvenance,
+          direction,
+          offset: startOffset,
+        });
+  const distance = resolveExtrudeDistance(
+    context,
+    moved.profileShape,
+    direction,
+    end,
+  );
+  return { direction, distance, ...moved };
+}
+
+function buildSurfaceExtrudePrism(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  profile: BuiltSurfaceExtrudeProfile,
+  profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  sketchProvenance: BuiltSketchProfileWire["provenance"] | null,
+  direction: Vec3,
+  distance: number,
+  endRole: string,
+): BuiltExtrudeShape {
+  const prism = new context.oc.BRepPrimAPI_MakePrism_1(
+    profileShape,
+    toGpVec(context.oc, scale(direction, distance)),
+    false,
+    true,
+  );
+  prism.Build(new context.oc.Message_ProgressRange_1());
+  if (!prism.IsDone()) {
+    deleteOccObject(prism);
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC surface extrude prism build failed.",
+    );
+  }
+
+  try {
+    const provenance = registerSurfaceExtrudeProvenance(context, {
+      ownerFeatureId,
+      profileSlot: 0,
+      endRole,
+      prism,
+      profileShape,
+      sketchId: profile.sketchId,
+      sketchProvenance,
+      faceProfileKey: profile.faceProfileKey,
+    });
+    return { shape: prism.Shape(), ...provenance };
+  } finally {
+    deleteOccObject(prism);
+  }
+}
+
+function buildSurfaceExtrudeFeatureShape(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  parameters: Extract<ExtrudeFeatureParameters, { resultBodyType: "surface" }>,
+): BuiltExtrudeShape {
+  for (const end of getExtrudeExtentEnds(parameters.extent)) {
+    if (end.draftAngle !== undefined) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: unsupported-surface-draft: OCC surface extrude does not support draft angles.",
+      );
+    }
+  }
+
+  const profile = buildSurfaceExtrudeProfile(context, parameters);
+  const extent = getExtrudeFeatureExtent(parameters);
+  const ends: Array<{ end: ExtrudeEndCondition; role: string }> =
+    extent.mode === "twoSide"
+      ? [
+          { end: extent.firstEnd, role: "first-end" },
+          { end: extent.secondEnd, role: "second-end" },
+        ]
+      : extent.mode === "symmetric"
+        ? [
+            { end: extent.end, role: "symmetric-first-end" },
+            {
+              end: {
+                ...extent.end,
+                direction:
+                  extent.end.direction === "positive" ? "negative" : "positive",
+              },
+              role: "symmetric-second-end",
+            },
+          ]
+        : [{ end: extent.end, role: "one-side-end" }];
+
+  if (ends.length === 1) {
+    const started = runInRebuildSlot("extent", () =>
+      resolveStartedSurfaceExtrudeEnd(
+        context,
+        profile,
+        parameters.startExtent,
+        ends[0]!.end,
+      ),
+    );
+    return buildSurfaceExtrudePrism(
+      context,
+      ownerFeatureId,
+      profile,
+      started.profileShape,
+      started.sketchProvenance,
+      started.direction,
+      started.distance,
+      ends[0]!.role,
+    );
+  }
+
+  const first = runInRebuildSlot("extent", () =>
+    resolveStartedSurfaceExtrudeEnd(
+      context,
+      profile,
+      parameters.startExtent,
+      ends[0]!.end,
+    ),
+  );
+  const second = runInRebuildSlot("extent", () =>
+    resolveStartedSurfaceExtrudeEnd(
+      context,
+      profile,
+      parameters.startExtent,
+      ends[1]!.end,
+    ),
+  );
+  if (dot(first.direction, second.direction) > -1 + context.modelingTolerance) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC two-sided surface extrude ends must use opposite directions to produce one sheet.",
+    );
+  }
+
+  const firstStart = getShapeProjectionRange(
+    context.oc,
+    first.profileShape,
+    first.direction,
+  ).max;
+  const secondStart = getShapeProjectionRange(
+    context.oc,
+    second.profileShape,
+    first.direction,
+  ).max;
+  const firstEnd = firstStart + first.distance;
+  const secondEnd = secondStart - second.distance;
+  const totalDistance = firstEnd - secondEnd;
+  if (totalDistance <= context.modelingTolerance) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC two-sided surface extrude has no positive combined span.",
+    );
+  }
+
+  const originalProjection = getShapeProjectionRange(
+    context.oc,
+    profile.shape,
+    first.direction,
+  ).max;
+  const moved = translateProfileToStartPlane(context, {
+    profileShape: profile.shape,
+    sketchProvenance: profile.sketchProvenance,
+    direction: first.direction,
+    offset: secondEnd - originalProjection,
+  });
+  return buildSurfaceExtrudePrism(
+    context,
+    ownerFeatureId,
+    profile,
+    moved.profileShape,
+    moved.sketchProvenance,
+    first.direction,
+    totalDistance,
+    "combined-ends",
+  );
+}
+
 export function buildExtrudeFeatureShape(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -931,22 +1315,29 @@ export function executeExtrudeFeature(
   parameters: ExtrudeFeatureParameters,
 ): OccFeatureExecutionResult {
   const featureShape = runInRebuildSlot("profile", () =>
-    buildExtrudeFeatureShape(context, ownerFeatureId, parameters),
+    parameters.resultBodyType === "surface"
+      ? buildSurfaceExtrudeFeatureShape(context, ownerFeatureId, parameters)
+      : buildExtrudeFeatureShape(context, ownerFeatureId, parameters),
   );
-  const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
-  if (!resolvedOperation) {
-    throw new Error("Extrude operation must be a resolved literal value.");
-  }
-  const result = runInRebuildSlot("scope", () =>
-    applyBooleanPolicy(
-      context,
-      ownerFeatureId,
-      resolvedOperation,
-      parameters.booleanScope,
-      featureShape.shape,
-      { sourceShapes: featureShape.sourceShapes },
-    ),
-  );
+  const result =
+    parameters.resultBodyType === "surface"
+      ? trackSurfaceFeatureResult(context, ownerFeatureId, featureShape.shape, {
+          sourceShapes: featureShape.sourceShapes,
+        })
+      : runInRebuildSlot("scope", () => {
+          const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
+          if (!resolvedOperation) {
+            throw new Error("Extrude operation must be a resolved literal value.");
+          }
+          return applyBooleanPolicy(
+            context,
+            ownerFeatureId,
+            resolvedOperation,
+            parameters.booleanScope,
+            featureShape.shape,
+            { sourceShapes: featureShape.sourceShapes },
+          );
+        });
   const producedBodyIds = new Set(
     result.producedTargets
       .filter(

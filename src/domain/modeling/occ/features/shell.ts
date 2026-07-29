@@ -11,6 +11,7 @@ import {
 } from "@/domain/modeling/occ/topology";
 import {
   requireBody,
+  requireSolidBody,
   requireFace,
   resolveNativeTopologyTargetId,
   type OccFeatureExecutionContext,
@@ -209,7 +210,11 @@ function buildOffsetAllFacesShellShape(
     throw new Error("Shell offsetAllFaces mode cannot include removable faces.");
   }
 
-  const sourceBody = requireBody(context, parameters.bodyTarget.bodyId);
+  const sourceBody = requireSolidBody(
+    context,
+    parameters.bodyTarget.bodyId,
+    "shell",
+  );
   const shell = new context.oc.BRepOffsetAPI_MakeOffsetShape();
   shell.PerformByJoin(
     sourceBody.shape,
@@ -252,7 +257,11 @@ function buildClosedHollowShellShape(
     throw new Error("Shell closedHollow mode requires an inside direction.");
   }
 
-  const sourceBody = requireBody(context, parameters.bodyTarget.bodyId);
+  const sourceBody = requireSolidBody(
+    context,
+    parameters.bodyTarget.bodyId,
+    "shell",
+  );
   const cavityOffset = new context.oc.BRepOffsetAPI_MakeOffsetShape();
   const offsetProgress = new context.oc.Message_ProgressRange_1();
   const offsetBuildProgress = new context.oc.Message_ProgressRange_1();
@@ -341,7 +350,11 @@ function buildShellFeatureShape(
     throw new Error("Shell requires at least one removable face.");
   }
 
-  const sourceBody = requireBody(context, parameters.bodyTarget.bodyId);
+  const sourceBody = requireSolidBody(
+    context,
+    parameters.bodyTarget.bodyId,
+    "shell",
+  );
   const closingFaces = new context.oc.TopTools_ListOfShape_1();
 
   for (const target of parameters.faceTargets) {
@@ -400,7 +413,11 @@ function buildNativeShellFeatureShape(
     throw new Error("Shell requires at least one removable face.");
   }
 
-  const sourceBody = requireBody(context, parameters.bodyTarget.bodyId);
+  const sourceBody = requireSolidBody(
+    context,
+    parameters.bodyTarget.bodyId,
+    "shell",
+  );
 
   for (const target of parameters.faceTargets) {
     if (target.bodyId !== parameters.bodyTarget.bodyId) {

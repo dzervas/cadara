@@ -44,7 +44,7 @@ Current version literals:
 
 - `contractVersion = "modeling-contract/v1alpha1"`
 - `solverSchemaVersion = "sketch-solver/v1alpha1"`
-- `DocumentSnapshot.schemaVersion = "document-snapshot/v1alpha1"`
+- `DocumentSnapshot.schemaVersion = "document-snapshot/v1alpha2"`
 - `SketchDefinition.schemaVersion = "sketch-definition/v1alpha1"`
 - `SolvedSketchSnapshot.schemaVersion = "solved-sketch/v1alpha1"`
 - `RenderExport.schemaVersion = "render-export/v1alpha1"`
