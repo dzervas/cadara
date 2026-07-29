@@ -229,6 +229,17 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // sketch is committed onto its live face through a durable `topologyOf`
   // support ref.
   expect(reviewText).toContain("17 parametric, 24 baked, 0 geometry-only features.");
+  // The two BLIND start offsets (`Extrude 10` / `Extrude 11`) are no longer
+  // blocked by the start plane itself: the capture pins that displacement
+  // exactly. They now wait on their own `UP_TO_SURFACE` / `UP_TO_BODY`
+  // terminators and boolean scopes, which name bodies the excluded-scope
+  // `Split 1` produces, so they name the upstream cascade instead of the
+  // start-extent gap.
+  for (const label of ["Extrude 10", "Extrude 11"]) {
+    expect(reviewText).toContain(
+      `${label}\n\nbaked (suppressed) — extrude start-entity, up-to, or boolean-scope topology could not be resolved as a durable reference`,
+    );
+  }
   expect(reviewText).toMatch(/Extrude 1\s+parametric/);
   expect(reviewText).toMatch(/Chamfer 1\s+parametric/);
   expect(reviewText).toMatch(/Chamfer 2\s+parametric/);
