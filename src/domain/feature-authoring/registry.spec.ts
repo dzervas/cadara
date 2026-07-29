@@ -1391,6 +1391,10 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       toolField.advancedParticipant?.role,
       "Split tool field should expose the toolBody participant role.",
     ).toBe("toolBody");
+    expect(
+      toolField.helper,
+      "Split tool copy must accept sheet bodies, which are valid split tools.",
+    ).toContain("sheet");
 
     const completedSession = patchFeatureEditSession(
       initialSession,

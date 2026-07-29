@@ -114,7 +114,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
       revolve: "Create a revolved solid or surface.",
       sweep: "Create a swept solid or surface.",
       loft: "Create a lofted solid from ordered profiles.",
-      split: "Split one solid body with another solid tool body.",
+      split: "Split one solid body with a solid or sheet tool body.",
       fillet: "Round selected edges.",
       chamfer: "Bevel selected edges.",
       thicken: "Offset selected faces into a solid.",

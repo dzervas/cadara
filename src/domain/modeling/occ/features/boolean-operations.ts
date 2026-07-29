@@ -335,6 +335,43 @@ export function runBoolean(
   };
 }
 
+/**
+ * Split a solid by a sheet tool.
+ *
+ * A sheet has no volume, so cut/common boolean semantics cannot express this;
+ * OCC's splitter subdivides the arguments by the tools and never keeps the
+ * tools in the result. The result is not unified afterwards: the freshly created
+ * split faces are the topology this operation exists to produce.
+ */
+export function runSheetSplit(
+  oc: OpenCascadeInstance,
+  target: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  tool: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  const argumentShapes = new oc.TopTools_ListOfShape_1();
+  const toolShapes = new oc.TopTools_ListOfShape_1();
+  argumentShapes.Append_1(target);
+  toolShapes.Append_1(tool);
+
+  const builder = new oc.BRepAlgoAPI_Splitter_1();
+  builder.SetArguments(argumentShapes);
+  builder.SetTools(toolShapes);
+  builder.SetToFillHistory(true);
+  builder.Build(new oc.Message_ProgressRange_1());
+
+  if (!builder.IsDone()) {
+    throw new Error("OCC sheet-tool split failed to build.");
+  }
+
+  builder.SimplifyResult(true, true, 1e-7);
+
+  return {
+    shape: builder.Shape(),
+    builder,
+    historySources: [builder] satisfies OccTopologyHistorySource[],
+  };
+}
+
 function appendOwnerFeature(
   contributors: readonly FeatureId[],
   ownerFeatureId: FeatureId | null,
