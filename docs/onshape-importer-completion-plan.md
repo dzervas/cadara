@@ -1096,7 +1096,7 @@ apply so `Chamfer 2` cannot abort the studio.
 | `Chamfer 2` | `topology-apply-rematch-failed` with diagnostic `occ-topology-unsupported-history` | Honestly contained kernel-history refusal. Needs follow-up only if cadara later proves conservative post-chamfer edge history. |
 | `Chamfer 3`, `Chamfer 4` | `downstream-of-baked` / topology diagnostics from `Chamfer 2` | Cascade behind `Chamfer 2`; not independent matcher defects. |
 | `Shell 1` | `topology-apply-rematch-failed` | Needs follow-up (X.9.2); its `parts` body scope still fails apply-time rematch. |
-| `Extrude 10`, `Extrude 11` | `extrude-start-extent-unsupported` | Honestly unresolvable BLIND start offsets; no ground truth for the sign convention, so they stay baked. |
+| `Extrude 10`, `Extrude 11` | `extrude-start-extent-unsupported` | Honestly unresolvable BLIND start offsets; no ground truth for the sign convention, so they stay baked. **Superseded** — the sign is now pinned from rollback ground truth; both are excluded-scope cascade (`extrude-extent-topology-unresolved`). |
 | `Extrude 2`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` | `extrude-extent-topology-unresolved` / `downstream-of-baked` as applicable | Cascade behind the chamfer/shell and face-sketch blockers, not independent contract gaps. |
 | `Extrude 3` | `downstream-of-baked` | Pure cascade. |
 | `Boolean 1`, `Delete part 1` | `downstream-of-baked` / topology diagnostics | Cascade behind the same contained blockers. |
@@ -2768,7 +2768,9 @@ was wrong: it is `ENTITY`), and it remains excluded scope behind `Sketch 7`/`8`.
   it.
 
 *Honestly unresolvable with this capture set:* 9841 `Extrude 10`/`11` (BLIND
-start offsets, no sign ground truth).
+start offsets, no sign ground truth). **Superseded** — see "the BLIND start
+offset, pinned against rollback ground truth" below: the capture does pin the
+sign on both instances, and the two features are excluded-scope cascade now.
 
 *Excluded scope (unchanged):* 9841 `Extrude 4` and d3cd9 `Extrude 4` (SURFACE),
 `Split 1` (both studios), 9841 `Sketch 3`/`4`, d3cd9 `Sketch 7`/`8` +
@@ -2795,3 +2797,119 @@ reports `baked-body-assetMissing` and diverges from the browser), then call
 
 Validation: `bun run lint`, `bun run build`, `bun run test` (logic + UI +
 static), and `bun run test:e2e` on a clean port 3123.
+
+### Item-D follow-up: the BLIND start offset, pinned against rollback ground truth
+
+**The BLIND start-offset sign convention is no longer a guess, and it is no
+longer what bakes 9841 `Extrude 10` / `Extrude 11`.** Earlier notes recorded
+"no sign ground truth here"; that was wrong. The capture does contain the ground
+truth, in the rollback tessellation of the two features themselves.
+
+#### Census of every BLIND start offset in the five root bundles
+
+`jq` over every `extrude` feature in every Part Studio of all five roots
+(`startOffset=true`), reading `startOffsetBound`, `startOffsetDistance`,
+`startOffsetOppositeDirection`, `oppositeDirection`, `endBound`, `depth`:
+
+| bundle / feature | bound | distance | startOffsetOpposite | oppositeDirection | endBound |
+|---|---|---|---|---|---|
+| 9841 `Extrude 10` (`FnqLWtKC5loyWcj_1`) | **BLIND** | `2 mm` | `true` | `true` | `UP_TO_SURFACE` (`JhK`) |
+| 9841 `Extrude 11` (`FarVWY13vdeW4u9_1`) | **BLIND** | `#tolerance*2` (= 0.2 mm) | `false` | `false` | `UP_TO_BODY` (`JbD`) |
+| 9841 `Extrude 1` / `3` / `15` / `16` | `ENTITY` | — | — | — | — |
+| 5151 `Extrude 6` / `7` | `ENTITY` | — | — | — | — |
+| d3cd9 `Extrude 8` | `ENTITY` | — | — | — | — |
+| `405fa…`, `40a51…` | *no `startOffset` extrude at all* | | | | |
+
+So the BLIND form has exactly two instances in the whole local set, both in
+9841. Nothing else had to be re-checked.
+
+#### The evidence arithmetic
+
+Project the rollback tessellation onto the incline direction
+`u = (0, 0.8660254037844385, -0.5000000000000004)` (the exact `definingData.normal`
+of the captured `JhK` plane) and diff the per-face bounding boxes across the
+snapshot pair that brackets each feature. Tessellation noise is ≤ 7e-6 mm.
+
+| | `Extrude 10` (snapshots 17 → 18, body `JbH`) | `Extrude 11` (snapshots 18 → 19, body `JbD`) |
+|---|---|---|
+| profile plane | `Sketch 7` (`FH6MWczB8BMDAEB_1`): `sketchMatrix` normal `-u` through the origin ⇒ **u = 0** | `Extrude 10`'s end cap (`CAP_FACE`, `isStart=F`), i.e. the `JhK` plane ⇒ **u = 17.000000 mm** |
+| extrude direction | sketch normal `-u`, `oppositeDirection=true` ⇒ **+u** | face normal `+u`, `oppositeDirection=false` ⇒ **+u** |
+| added start caps (facet normal `-u`) | 6 faces, all at **u = +2.000000 mm** | 6 faces, all at **u = +17.200000 mm** |
+| added end caps (facet normal `+u`) | 6 faces, all at u = 17.000000 mm (= the `UP_TO_SURFACE` plane) | terminated on `JbD` |
+| ⇒ start-plane displacement | **+2.000 mm along the extrude direction** = authored `2 mm` | **+0.200 mm along the extrude direction** = authored `#tolerance*2` |
+
+The independent cross-check is that the two instances carry *different* flag
+values (`true/true` and `false/false`) and *different* distances (a literal and
+a variable expression), yet both displace by `+distance` along the extrude
+direction. `Extrude 11` corroborates `Extrude 10` a second way: its own profile
+plane is `Extrude 10`'s end cap, which the arithmetic above independently places
+at u = 17.000000 mm.
+
+#### What is pinned, and what is deliberately still refused
+
+Both instances have `startOffsetOppositeDirection === oppositeDirection`. That is
+the whole of what the capture set discriminates. For that combination the answer
+is measured, not inferred: the contract's `blindOffset.direction` is signed along
+the extrude direction (`resolveStartExtentOffset` receives the already-flipped
+direction), so the importer emits `direction: "positive"` with the authored
+distance.
+
+When the two flags disagree the data cannot separate "offset along the un-flipped
+profile normal, negated by `startOffsetOppositeDirection`" from "offset always
+along the extrude direction" — the two conventions consistent with both
+instances. That combination therefore keeps baking with
+`extrude-start-extent-unsupported`, as do symmetric and two-sided extents, for
+which a single start plane is not defined. No sign was guessed.
+
+A second, previously unexercised gap had to close for `Extrude 11`: its authored
+distance is the variable expression `#tolerance*2`. The start offset is now one
+of the extrude's resolved expression fields, and normalization rejects only a
+non-positive *literal*, exactly like the blind end distance. The authored
+variable linkage is preserved rather than substituted with the captured value.
+
+#### Cascade re-walk (9841 at the real browser gate, clean port 3123)
+
+| Studio | Before | After |
+|---|---:|---:|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** |
+| Wave-T (all six studios) | all parametric | **all parametric** |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** |
+| Part Studio 1 `9841…` | 17 / 24 / 0 | **17 / 24 / 0** |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **16 / 8 / 0** |
+
+Tier counts do not move, and are reported as such rather than tuned. The change
+is in the two features' reasons:
+
+| Feature | Before | After |
+|---|---|---|
+| 9841 `Extrude 10` | `extrude-start-extent-unsupported` | `extrude-extent-topology-unresolved` |
+| 9841 `Extrude 11` | `extrude-start-extent-unsupported` | `extrude-extent-topology-unresolved` |
+
+Neither promotes, and the remaining blocker is not the start plane. Both name
+their own terminator and boolean scope: `Extrude 10` needs `UP_TO_SURFACE` face
+`JhK` plus scope `JbH`, and `Extrude 11` needs `UP_TO_BODY` / scope `JbD`. `JbH`
+and `JbD` are outputs of `Split 1`, which is excluded scope, so these two now sit
+in exactly the same cascade as `Extrude 3` / `15` / `16`. The `walls` rebuild
+still passes with zero snapshot diagnostics and the committed timeline is
+unchanged, so nothing regressed.
+
+Because the two real features never build, their prisms cannot be compared
+against the snapshot bounding boxes at the kernel; that is honestly out of reach
+until the excluded `Split 1` cascade opens. What is pinned instead: the kernel
+sign semantics against real OCC (`features.spec.ts`, seam `executeOccFeature`
+extrude — all four combinations of end direction × start-offset direction land
+the prism on the exact expected planes to 1e-6), the planner mapping and its
+refusal of the undiscriminated combination (`extrude-planner.spec.ts`, seam
+`planExtrudeFeature`), and the derivation's premises against the real bundle
+(same file, skipped when the gitignored bundle is absent).
+
+#### Verdicts (updated)
+
+- **BLIND start extent:** **convention pinned, cascade open.** The sign is
+  measured from rollback ground truth on both local instances; the
+  undiscriminated flag combination stays refused. `Extrude 10` / `11` are no
+  longer listed as "honestly unresolvable" — they are ordinary excluded-scope
+  cascade now.
+
+Validation: `bun run lint`, `bun run build`, and `bun run test:all` on a clean
+port 3123.
