@@ -25,3 +25,33 @@ feature and SHALL NOT require boolean scope for surface variants.
 - **WHEN** an open sketch-curve profile reference defers its sketch id through any deferred kind other
   than `sketchIdOf`
 - **THEN** validation fails before any action applies
+
+## MODIFIED Requirements
+
+### Requirement: Import capabilities SHALL offer a sandboxed history evaluation probe
+`ImportCapabilities` SHALL provide a history evaluation probe that executes a candidate ordered action sequence in a sandboxed kernel session and returns per-step topology signatures and diagnostics, without mutating any document, history, or persistent state. Because each evaluation rebuilds its whole prefix in a fresh isolated session, the probe is a pure function of the prepared-action payload it runs, and a review SHALL evaluate each distinct payload at most once per plan — including a payload whose evaluation fails or throws, which SHALL be retained until the review's containment pass has run against a changed plan.
+
+#### Scenario: Provider probes a candidate history during review
+- **WHEN** a provider invokes the history probe with a candidate ordered action sequence during `review()` or `prepare()`
+- **THEN** the probe rebuilds the sequence in an isolated kernel session on the existing kernel worker path
+- **AND** returns, per step, the resulting topology signatures (entity class, geometry type, defining data, centroid, bounding box)
+- **AND** no authored document, operation history, or undo state is affected
+
+#### Scenario: Probe step fails to rebuild
+- **WHEN** a step in the probed sequence fails in the kernel
+- **THEN** the probe returns structured diagnostics for that step and the completed prefix results
+- **AND** the failure is not thrown away or silently swallowed
+
+#### Scenario: The same unbuildable prefix is probed by several consumers
+- **WHEN** one review probes the identical prepared-action payload more than once within a single planning pass and its evaluation fails or throws
+- **THEN** every later request for that payload is answered with the retained failure instead of rebuilding it in the kernel again
+
+#### Scenario: The containment pass revisits a failed prefix
+- **WHEN** the review's containment pass has run against a changed plan after a probe failure
+- **THEN** the retained failures are released, so the contained plan reaches the kernel again even when it reproduces an identical payload
+- **AND** successful evaluations stay retained for the whole review
+
+#### Scenario: Probe is unavailable on the platform
+- **WHEN** the injected capabilities do not support history probing
+- **THEN** the capability is explicitly absent rather than a stub that fabricates signatures
+- **AND** providers can detect the absence and degrade their planning accordingly
