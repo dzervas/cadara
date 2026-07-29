@@ -28,8 +28,10 @@ import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-pol
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import type { OccFeatureTopologyStage } from "@/domain/modeling/occ/topology-stage";
 import {
+  extractSheetShapes,
   extractSolidShapes,
   getOccDurableRefKey,
+  trackNewSheetBody,
   trackNewSolidBody,
   type OccTrackedBody,
   type OccReferenceInvalidationRecord,
@@ -189,6 +191,30 @@ export function requireBody(
   if (!body) {
     throw new Error(
       `Body ${bodyId} does not resolve in the current OCC authoring state.`,
+    );
+  }
+
+  return body;
+}
+
+/**
+ * Resolve a body a solid-only feature path consumes.
+ *
+ * Sheet bodies reach these paths through ordinary durable body references, so
+ * the kind check has to happen here: solid shelling, filleting, and boolean
+ * composition against shell topology are unsupported, and must be reported as
+ * such instead of running and producing invalid results.
+ */
+export function requireSolidBody(
+  context: OccFeatureExecutionContext,
+  bodyId: BodyId,
+  operation: string,
+) {
+  const body = requireBody(context, bodyId);
+
+  if (body.bodyKind !== "solid") {
+    throw new Error(
+      `advanced-feature-unsupported-kernel-case: OCC ${operation} does not support sheet body ${bodyId}.`,
     );
   }
 
@@ -360,12 +386,58 @@ export function trackSingleResultBody(
   });
 }
 
-export function trackNewBodyResults(
+/**
+ * Track the single sheet body a surface-producing feature must yield.
+ *
+ * A `resultBodyType: "surface"` request has no boolean scope, so there is no
+ * policy step to absorb an unexpected result count: no shell, several shells, or
+ * a solid are each reported explicitly instead of picking one interpretation.
+ */
+function trackSingleSheetResultBody(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
   label: string,
   shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
 ) {
+  if (extractSolidShapes(context.oc, shape).length > 0) {
+    throw new Error(
+      `advanced-feature-unsupported-kernel-case: OCC feature ${ownerFeatureId} produced a solid result for a surface request (result-shape-mismatch).`,
+    );
+  }
+
+  const sheets = extractSheetShapes(context.oc, shape);
+
+  if (sheets.length === 0) {
+    throw new Error(
+      `advanced-feature-unsupported-kernel-case: OCC feature ${ownerFeatureId} produced no sheet result body (no-sheet-result).`,
+    );
+  }
+
+  if (sheets.length > 1) {
+    throw new Error(
+      `advanced-feature-unsupported-kernel-case: OCC feature ${ownerFeatureId} produced ${sheets.length} sheet result bodies (multi-sheet-result).`,
+    );
+  }
+
+  return trackNewSheetBody(context.oc, {
+    bodyId: allocateBodyId(ownerFeatureId),
+    label,
+    ownerFeatureId,
+    shape: sheets[0]!,
+  });
+}
+
+export function trackNewBodyResults(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  label: string,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  resultBodyKind: OccTrackedBody["bodyKind"] = "solid",
+) {
+  if (resultBodyKind === "sheet") {
+    return [trackSingleSheetResultBody(context, ownerFeatureId, label, shape)];
+  }
+
   const solids = extractSolidShapes(context.oc, shape);
 
   if (solids.length === 1) {

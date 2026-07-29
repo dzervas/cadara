@@ -2,11 +2,29 @@ import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { AdvancedParticipantDescriptor } from "@/contracts/modeling/schema";
 import type {
   FeatureEditorFormField,
+  FeatureEnumField,
   FeatureReferenceCollectionField,
 } from "@/core/feature-authoring/form-schema";
 import type { PrimitiveRef, SelectionFilter } from "@/core/editor/schema";
 import { createSelectionFilterForRequirement } from "@/core/editor/schema";
 import { expressionCapableAuthoredValue } from "@/core/feature-authoring/features/authored-value-helpers";
+
+export function createResultBodyTypeField(input: {
+  prefix: string;
+  resultBodyType: "solid" | "surface";
+}): FeatureEnumField {
+  return {
+    kind: "enum",
+    id: `${input.prefix}-result-body-type`,
+    label: "Result body type",
+    value: input.resultBodyType,
+    options: [
+      { value: "solid", label: "Solid" },
+      { value: "surface", label: "Surface" },
+    ],
+    patch: { patchKey: "resultBodyType" },
+  };
+}
 
 export function createBooleanOperationFields(input: {
   prefix: string;

@@ -1,6 +1,7 @@
 import type {
   ExtrudeFeatureParameters,
-  ExtrudeProfileRef,
+  ExtrudeSurfaceProfileRef,
+  RevolveSurfaceProfileRef,
   LinearExtentDirection,
   UpToOffsetDirection,
   FeatureBooleanOperation,
@@ -45,9 +46,14 @@ import type {
 } from "@/core/editor/schema";
 import type { ToolMetadataBase } from "@/core/tools/metadata";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
+import { acceptAuthoredPatch } from "@/core/feature-authoring/features/authored-value-helpers";
+
+/** Result body variant selected by a discriminated profile-based feature draft. */
+export type FeatureResultBodyType = "solid" | "surface";
 
 export interface ExtrudeFeatureParameterDraft {
-  profileTargets: readonly ExtrudeProfileRef[];
+  resultBodyType: FeatureResultBodyType;
+  profileTargets: readonly ExtrudeSurfaceProfileRef[];
   extentMode: "oneSide" | "symmetric" | "twoSide";
   firstEnd: ExtrudeFeatureEndConditionDraft;
   secondEnd: ExtrudeFeatureEndConditionDraft;
@@ -108,7 +114,8 @@ export type ExtrudeFeatureEndConditionDraft =
     };
 
 export interface RevolveFeatureParameterDraft {
-  profileTargets: readonly ExtrudeProfileRef[];
+  resultBodyType: FeatureResultBodyType;
+  profileTargets: readonly RevolveSurfaceProfileRef[];
   axisTarget: RevolveAxisRef | null;
   startAngle: MaybeAuthoredValue<number>;
   extentMode: "oneSide" | "symmetric" | "twoSide";
@@ -231,6 +238,7 @@ export interface HoleFeatureParameterDraft {
 
 export interface ThickenFeatureParameterDraft {
   faceTargets: readonly Extract<PrimitiveRef, { kind: "face" }>[];
+  sourceBodyTarget: Extract<PrimitiveRef, { kind: "body" }> | null;
   operationIntent: MaybeAuthoredValue<AdvancedSolidOperationIntent>;
   targetBodyTargets: readonly Extract<PrimitiveRef, { kind: "body" }>[];
   options: {
@@ -503,6 +511,68 @@ export interface FeatureAuthoringDefinition<
   getFormSchema(
     session: FeatureEditSessionStateForKind<TKind>,
   ): FeatureEditorFormSchema;
+}
+
+export function isResultBodyType(
+  value: unknown,
+): value is FeatureResultBodyType {
+  return value === "solid" || value === "surface";
+}
+
+/**
+ * Shared draft-variant state of the discriminated profile-based features.
+ * Surface variants have no boolean state, so the draft keeps the solid defaults
+ * while surface mode is active and builders omit them from durable payloads.
+ */
+export interface ResultBodyTypeDraftVariant<
+  TProfileRef extends ExtrudeSurfaceProfileRef,
+> {
+  resultBodyType: FeatureResultBodyType;
+  profileTargets: readonly TProfileRef[];
+  operation: MaybeAuthoredValue<FeatureBooleanOperation>;
+  booleanScope: FeatureBooleanScope;
+}
+
+/**
+ * Resolves the discriminated variant fields of a profile-based draft.
+ * Shared fields are preserved by the caller; switching the result body type
+ * drops open sketch-curve profiles that solid mode cannot represent and resets
+ * boolean state to the standalone `newBody` default.
+ */
+export function resolveResultBodyTypeVariant<
+  TProfileRef extends ExtrudeSurfaceProfileRef,
+>(
+  draft: ResultBodyTypeDraftVariant<TProfileRef>,
+  patch: FeatureDraftPatch,
+  profileTargets: readonly TProfileRef[],
+): ResultBodyTypeDraftVariant<TProfileRef> {
+  const resultBodyType = isResultBodyType(patch.resultBodyType)
+    ? patch.resultBodyType
+    : draft.resultBodyType;
+  const scopedProfileTargets =
+    resultBodyType === "solid"
+      ? profileTargets.filter((entry) => entry.kind !== "sketchEntity")
+      : profileTargets;
+
+  if (resultBodyType !== draft.resultBodyType) {
+    return {
+      resultBodyType,
+      profileTargets: scopedProfileTargets,
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    };
+  }
+
+  return {
+    resultBodyType,
+    profileTargets: scopedProfileTargets,
+    operation: acceptAuthoredPatch(
+      patch.operation,
+      draft.operation,
+      isBooleanOperation,
+    ),
+    booleanScope: toBooleanScope(patch, draft.booleanScope),
+  };
 }
 
 export function isBooleanOperation(

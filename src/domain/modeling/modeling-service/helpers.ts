@@ -74,7 +74,7 @@ import {
 import { normalizeFeatureDefinition } from "./normalization";
 
 export const CONTRACT_VERSION = "modeling-contract/v1alpha1" as const;
-export const SNAPSHOT_SCHEMA_VERSION = "document-snapshot/v1alpha1" as const;
+export const SNAPSHOT_SCHEMA_VERSION = "document-snapshot/v1alpha2" as const;
 
 export function withContractVersion<
   TRequest extends { contractVersion: typeof CONTRACT_VERSION },

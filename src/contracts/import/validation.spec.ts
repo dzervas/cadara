@@ -187,8 +187,9 @@ test("src/contracts/import/validation.spec.ts", async () => {
     featureLabel: "Imported extrude",
     definition: {
       kind: "extrude" as const,
-      featureTypeVersion: "feature-type/extrude/v1alpha1" as const,
+      featureTypeVersion: "feature-type/extrude/v1alpha2" as const,
       parameters: {
+        resultBodyType: "solid",
         profiles: [
           {
             kind: "regionOf" as const,
@@ -645,8 +646,9 @@ test("validates deferred revolve boolean scope and advanced construction partici
     featureLabel: "Cut revolve",
     definition: {
       kind: "revolve" as const,
-      featureTypeVersion: "feature-type/revolve/v1alpha1" as const,
+      featureTypeVersion: "feature-type/revolve/v1alpha2" as const,
       parameters: {
+        resultBodyType: "solid",
         profiles: [{ kind: "regionOf" as const, actionIndex: 0, selector: { kind: "interiorPoint" as const, point: [0, 0] as const } }],
         axis: { kind: "sketchEntity" as const, sketchId: { kind: "sketchIdOf" as const, actionIndex: 0 }, entityId: "sketch_entity_axis" },
         startAngle: { source: "literal" as const, value: 0 },

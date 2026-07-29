@@ -891,6 +891,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
+          resultBodyType: "solid",
           profiles: [
             {
               kind: "region",

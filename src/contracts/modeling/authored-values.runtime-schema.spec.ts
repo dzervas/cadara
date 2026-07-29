@@ -16,6 +16,7 @@ test("src/contracts/modeling/authored-values.runtime-schema.spec.ts", () => {
     kind: "extrude",
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
     parameters: {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region",

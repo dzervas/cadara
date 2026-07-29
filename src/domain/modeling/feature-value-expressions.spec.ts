@@ -14,6 +14,7 @@ test("src/domain/modeling/feature-value-expressions.spec.ts", () => {
     kind: "extrude",
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
     parameters: {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region",

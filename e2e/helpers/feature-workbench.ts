@@ -4,13 +4,16 @@ import { expect } from "@playwright/test";
 import { SketchWorkbenchHarness } from "./sketch-workbench";
 import {
   createBaseExtrudeOperationHistory,
+  createOpenCurveSketchOperationHistory,
   createRectangleProfileOperationHistory,
+  createSheetBodyOperationHistory,
   createTwoExtrudeBodiesOperationHistory,
   FEATURE_FIXTURE,
+  OPEN_CURVE_FIXTURE,
   SECONDARY_EXTRUDE_FIXTURE,
 } from "./modeling-fixtures";
 
-export { FEATURE_FIXTURE } from "./modeling-fixtures";
+export { FEATURE_FIXTURE, OPEN_CURVE_FIXTURE } from "./modeling-fixtures";
 
 type FeatureKind =
   | "extrude"
@@ -65,6 +68,24 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     return {
       profileTarget: FEATURE_FIXTURE.profile,
       bodyTarget: FEATURE_FIXTURE.body,
+    };
+  }
+
+  async openWithOpenCurveSketchFixture() {
+    await this.openWithOperationHistory(
+      createOpenCurveSketchOperationHistory(),
+    );
+
+    return {
+      profileTargets: OPEN_CURVE_FIXTURE.profiles,
+    };
+  }
+
+  async openWithSheetBodyFixture() {
+    await this.openWithOperationHistory(createSheetBodyOperationHistory());
+
+    return {
+      sheetBody: OPEN_CURVE_FIXTURE.sheetBody,
     };
   }
 
@@ -195,6 +216,27 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     await this.selectOperation(operation);
   }
 
+  async setResultBodyType(resultBodyType: "solid" | "surface") {
+    await this.selectEnumOption(
+      "Result body type",
+      resultBodyType === "solid" ? "Solid" : "Surface",
+    );
+  }
+
+  async expectNoOperationField() {
+    await expect(
+      this.featureInspector().getByRole("combobox", { name: "Operation" }),
+    ).toHaveCount(0, { timeout: 10_000 });
+  }
+
+  async expectFeatureTimelineEntry(label: string) {
+    await expect(
+      this.page.getByRole("button", {
+        name: `Select ${label}. Double-click to reopen.`,
+      }),
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
   async expectOperationSelected(
     operation: "newBody" | "join" | "cut" | "intersect",
   ) {
@@ -297,6 +339,27 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
       .not.toContain(bodyId);
   }
 
+  /**
+   * Euler characteristic (vertices - edges + faces) of the durable body topology:
+   * 2 for a closed solid shell, 1 for an open sheet body.
+   */
+  async expectBodyEulerCharacteristic(bodyId: string, expected: number) {
+    await expect
+      .poll(
+        () =>
+          this.evaluateWithNavigationRetry((id) => {
+            const body = window.__cadaraDebug
+              ?.getState()
+              ?.topologyDebug.bodies.find((entry) => entry.bodyId === id);
+            return body
+              ? body.vertices - body.edges + body.faces
+              : "missing body";
+          }, bodyId),
+        { timeout: 30_000 },
+      )
+      .toBe(expected);
+  }
+
   async expectBodyCountAtLeast(count: number) {
     await expect
       .poll(async () => (await this.listVisibleBodyIds()).length, {
@@ -332,6 +395,23 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     }
 
     throw new Error(`No current UI selector is configured for ${targetId}.`);
+  }
+
+  private async selectEnumOption(fieldName: string, optionLabel: string) {
+    const field = this.page.getByRole("combobox", { name: fieldName });
+    const currentValue = (await field.inputValue().catch(() => "")).trim();
+
+    if (currentValue.toLowerCase() === optionLabel.toLowerCase()) {
+      return;
+    }
+
+    await field.click();
+    await this.page
+      .getByRole("option", {
+        name: new RegExp(`^${escapeRegExp(optionLabel)}$`, "i"),
+      })
+      .click();
+    await expect(field).toHaveValue(optionLabel, { timeout: 10_000 });
   }
 
   private async selectOperation(operation: string) {

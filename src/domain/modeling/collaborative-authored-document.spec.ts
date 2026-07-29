@@ -146,6 +146,7 @@ test("src/domain/modeling/collaborative-authored-document.spec.ts", async () => 
     kind: "extrude",
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
     parameters: {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region",

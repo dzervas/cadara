@@ -47,6 +47,7 @@ function getReferenceSectionTitle(section: FeatureEditorFormSection) {
 function isOutputField(field: FeatureEditorFormField) {
   return (
     field.label === "Operation" ||
+    field.id.endsWith("-result-body-type") ||
     field.id.endsWith("-operation") ||
     field.id.endsWith("-operation-intent") ||
     field.id.endsWith("-target-bodies")

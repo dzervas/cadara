@@ -13,8 +13,11 @@ import {
 import type { Vec3 } from "@/domain/modeling/occ/math";
 import {
   buildAxisFromLineEdge,
+  buildOpenSketchCurveWire,
   buildRegionProfileFace,
+  buildRegionProfileWire,
   getExtrusionNormalForPlanarFace,
+  type BuiltSketchProfileWire,
 } from "@/domain/modeling/occ/sketch-profile";
 import {
   cross,
@@ -38,7 +41,10 @@ import {
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
-import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
+import {
+  applyBooleanPolicy,
+  trackSurfaceFeatureResult,
+} from "@/domain/modeling/occ/features/boolean-operations";
 import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
 import { getOccDurableRefKey } from "@/domain/modeling/occ/topology";
@@ -52,6 +58,7 @@ interface BuiltRevolveProfile {
   sketchId: string | null;
   sketchProvenance:
     | ReturnType<typeof buildRegionProfileFace>["provenance"]
+    | BuiltSketchProfileWire["provenance"]
     | null;
   faceProfileKey: string | null;
 }
@@ -140,6 +147,81 @@ export function buildAxisFromSketchLine(
   );
 }
 
+function buildSurfaceRevolveProfile(
+  context: OccFeatureExecutionContext,
+  parameters: Extract<RevolveFeatureParameters, { resultBodyType: "surface" }>,
+): BuiltRevolveProfile {
+  const openProfiles = parameters.profiles.filter(
+    (profile): profile is Extract<typeof profile, { kind: "sketchEntity" }> =>
+      profile.kind === "sketchEntity",
+  );
+
+  if (openProfiles.length > 0) {
+    if (openProfiles.length !== parameters.profiles.length) {
+      throw new Error(
+        "unsupported-profile-group: OCC surface revolve cannot combine open sketch curves with region or face profile wires without sewing.",
+      );
+    }
+    const sketchId = openProfiles[0]!.sketchId;
+    if (openProfiles.some((profile) => profile.sketchId !== sketchId)) {
+      throw new Error(
+        "unsupported-profile-group: OCC surface revolve open sketch curves must belong to one sketch.",
+      );
+    }
+    const sketch = requireSketchSnapshot(context, sketchId);
+    const built = buildOpenSketchCurveWire(
+      context.oc,
+      { plane: sketch.plane, sketch: sketch.sketch },
+      openProfiles.map((profile) => profile.entityId),
+    );
+    return {
+      shape: built.wire,
+      sketchId,
+      sketchProvenance: built.provenance,
+      faceProfileKey: null,
+    };
+  }
+
+  if (parameters.profiles.length !== 1) {
+    throw new Error(
+      "unsupported-profile-group: OCC surface revolve requires one region/face wire or one connected open sketch-curve chain.",
+    );
+  }
+
+  const profile = parameters.profiles[0]!;
+  if (profile.kind === "region") {
+    const sketch = requireSketchSnapshot(context, profile.sketchId);
+    const region = requireRegion(sketch, profile.regionId);
+    const built = buildRegionProfileWire(
+      context.oc,
+      { plane: sketch.plane, sketch: sketch.sketch },
+      region,
+    );
+    return {
+      shape: built.wire,
+      sketchId: profile.sketchId,
+      sketchProvenance: built.provenance,
+      faceProfileKey: null,
+    };
+  }
+
+  if (profile.kind === "sketchEntity") {
+    throw new Error(
+      "unsupported-profile-group: OCC surface revolve could not group the open sketch-curve profile.",
+    );
+  }
+
+  const body = requireBody(context, profile.bodyId);
+  const face = requireFace(context, body, profile.faceId);
+  getExtrusionNormalForPlanarFace(context.oc, face, "positive");
+  return {
+    shape: context.oc.BRepTools.OuterWire(face),
+    sketchId: null,
+    sketchProvenance: null,
+    faceProfileKey: getOccDurableRefKey(profile),
+  };
+}
+
 function buildRevolveFeatureShape(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -151,39 +233,43 @@ function buildRevolveFeatureShape(
     );
   }
 
-  if (parameters.profiles.length > 1) {
-    throw new Error(
-      "unsupported-profile-group: OCC revolve does not support multi-profile groups yet.",
-    );
-  }
-
-  const profile = parameters.profiles[0];
   let builtProfile: BuiltRevolveProfile;
 
-  if (profile.kind === "region") {
-    const sketch = requireSketchSnapshot(context, profile.sketchId);
-    const region = requireRegion(sketch, profile.regionId);
-    const profileFace = buildRegionProfileFace(
-      context.oc,
-      { plane: sketch.plane, sketch: sketch.sketch },
-      region,
-    );
-    builtProfile = {
-      shape: profileFace.face,
-      sketchId: profile.sketchId,
-      sketchProvenance: profileFace.provenance,
-      faceProfileKey: null,
-    };
+  if (parameters.resultBodyType === "surface") {
+    builtProfile = buildSurfaceRevolveProfile(context, parameters);
   } else {
-    const body = requireBody(context, profile.bodyId);
-    const face = requireFace(context, body, profile.faceId);
-    getExtrusionNormalForPlanarFace(context.oc, face, "positive");
-    builtProfile = {
-      shape: face,
-      sketchId: null,
-      sketchProvenance: null,
-      faceProfileKey: getOccDurableRefKey(profile),
-    };
+    if (parameters.profiles.length > 1) {
+      throw new Error(
+        "unsupported-profile-group: OCC revolve does not support multi-profile groups yet.",
+      );
+    }
+
+    const profile = parameters.profiles[0];
+    if (profile.kind === "region") {
+      const sketch = requireSketchSnapshot(context, profile.sketchId);
+      const region = requireRegion(sketch, profile.regionId);
+      const profileFace = buildRegionProfileFace(
+        context.oc,
+        { plane: sketch.plane, sketch: sketch.sketch },
+        region,
+      );
+      builtProfile = {
+        shape: profileFace.face,
+        sketchId: profile.sketchId,
+        sketchProvenance: profileFace.provenance,
+        faceProfileKey: null,
+      };
+    } else {
+      const body = requireBody(context, profile.bodyId);
+      const face = requireFace(context, body, profile.faceId);
+      getExtrusionNormalForPlanarFace(context.oc, face, "positive");
+      builtProfile = {
+        shape: face,
+        sketchId: null,
+        sketchProvenance: null,
+        faceProfileKey: getOccDurableRefKey(profile),
+      };
+    }
   }
 
   const axis =
@@ -271,6 +357,16 @@ function buildRevolveFeatureShape(
             },
           ]
         : [{ end: extent.end, role: "one-side-end" }];
+  if (parameters.resultBodyType === "surface") {
+    return buildSurfaceRevolveShape(
+      context,
+      ownerFeatureId,
+      builtProfile,
+      axis,
+      ends,
+    );
+  }
+
   const shapes = ends.map(({ end, role }) =>
     buildRevolveEndShape(
       context,
@@ -573,6 +669,219 @@ function resolveRevolveAngle(
   return angle;
 }
 
+function listRevolveProfileEdges(
+  oc: OpenCascadeInstance,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  const edgeMap = new oc.TopTools_IndexedMapOfShape_1();
+  oc.TopExp.MapShapes_1(
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_EDGE as never,
+    edgeMap,
+  );
+  const edges = Array.from({ length: edgeMap.Size() }, (_, index) =>
+    oc.TopoDS.Edge_1(edgeMap.FindKey(index + 1)),
+  );
+  edgeMap.delete();
+  return edges;
+}
+
+function rotateSurfaceRevolveProfile(
+  context: OccFeatureExecutionContext,
+  profile: BuiltRevolveProfile,
+  axis: InstanceType<OpenCascadeInstance["gp_Ax1_2"]>,
+  angle: number,
+) {
+  if (angle === 0) {
+    return profile;
+  }
+  const rotation = new context.oc.gp_Trsf_1();
+  rotation.SetRotation_1(axis, angle);
+  const transform = new context.oc.BRepBuilderAPI_Transform_2(
+    profile.shape,
+    rotation,
+    true,
+  );
+  transform.Build(new context.oc.Message_ProgressRange_1());
+  if (!transform.IsDone()) {
+    deleteOccObject(transform);
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC surface revolve profile rotation failed.",
+    );
+  }
+
+  const shape = transform.Shape();
+  const sketchProvenance = profile.sketchProvenance
+    ? {
+        ...profile.sketchProvenance,
+        edges: new Map(
+          [...profile.sketchProvenance.edges].map(([sourceKey, source]) => [
+            sourceKey,
+            context.oc.TopoDS.Edge_1(transform.ModifiedShape(source)),
+          ]),
+        ),
+        vertices: new Map(
+          [...profile.sketchProvenance.vertices].map(([sourceKey, source]) => [
+            sourceKey,
+            context.oc.TopoDS.Vertex_1(transform.ModifiedShape(source)),
+          ]),
+        ),
+      }
+    : null;
+  deleteOccObject(transform);
+  return { ...profile, shape, sketchProvenance };
+}
+
+function buildSurfaceRevolveEndShape(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  profile: BuiltRevolveProfile,
+  axis: InstanceType<OpenCascadeInstance["gp_Ax1_2"]>,
+  signedExtent: number,
+  endRole: string,
+): BuiltRevolveShape {
+  const revol = new context.oc.BRepPrimAPI_MakeRevol_1(
+    profile.shape,
+    axis,
+    signedExtent,
+    false,
+  );
+  revol.Build(new context.oc.Message_ProgressRange_1());
+  if (!revol.IsDone()) {
+    deleteOccObject(revol);
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC surface revolve build failed.",
+    );
+  }
+
+  const sourceShapes = new Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >();
+  const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
+  const slotPrefix = `revolve:${ownerFeatureId}:profile:0:end:${endRole}`;
+
+  for (const edge of listRevolveProfileEdges(context.oc, profile.shape)) {
+    registerSourceShape(
+      sourceShapes,
+      `${slotPrefix}:profile:first-boundary-edge`,
+      revol.FirstShape_2(edge),
+    );
+    registerSourceShape(
+      sourceShapes,
+      `${slotPrefix}:profile:last-boundary-edge`,
+      revol.LastShape_2(edge),
+    );
+  }
+
+  if (profile.sketchId && profile.sketchProvenance) {
+    for (const [sourceKey, edge] of profile.sketchProvenance.edges) {
+      const prefix = `${slotPrefix}:sketch-entity:${profile.sketchId}:${sourceKey}`;
+      registerSourceShapes(
+        sourceShapes,
+        `${prefix}:generated-swept-face`,
+        listOccShapes(context.oc, revol.Generated(edge)),
+      );
+      registerSourceShape(sourceShapes, `${prefix}:first-edge`, revol.FirstShape_2(edge));
+      registerSourceShape(sourceShapes, `${prefix}:last-edge`, revol.LastShape_2(edge));
+    }
+    for (const [sourceKey, vertex] of profile.sketchProvenance.vertices) {
+      const prefix = `${slotPrefix}:sketch-point:${profile.sketchId}:${sourceKey}`;
+      registerSourceShapes(
+        sourceShapes,
+        `${prefix}:generated-swept-edge`,
+        listOccShapes(context.oc, revol.Generated(vertex)),
+      );
+      registerSourceShape(sourceShapes, `${prefix}:first-vertex`, revol.FirstShape_2(vertex));
+      registerSourceShape(sourceShapes, `${prefix}:last-vertex`, revol.LastShape_2(vertex));
+    }
+    for (const unsupported of profile.sketchProvenance.unsupportedSources) {
+      unsupportedSourceKeys.add(
+        `${slotPrefix}:sketch-source:${profile.sketchId}:${unsupported.sourceKey}:unsupported-profile-history`,
+      );
+    }
+  } else if (profile.faceProfileKey) {
+    unsupportedSourceKeys.add(
+      `${slotPrefix}:face-profile:${profile.faceProfileKey}:unsupported-profile-history`,
+    );
+  }
+
+  const shape = revol.Shape();
+  deleteOccObject(revol);
+  return { shape, sourceShapes, unsupportedSourceKeys };
+}
+
+function buildSurfaceRevolveShape(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  profile: BuiltRevolveProfile,
+  axis: InstanceType<OpenCascadeInstance["gp_Ax1_2"]>,
+  ends: readonly { end: RevolveEndCondition; role: string }[],
+): BuiltRevolveShape {
+  if (ends.length === 1) {
+    const angle = resolveRevolveAngle(context, profile.shape, axis, ends[0]!.end);
+    const signedExtent =
+      ends[0]!.end.kind !== "full" &&
+      ends[0]!.end.direction === "clockwise"
+        ? -angle
+        : angle;
+    return buildSurfaceRevolveEndShape(
+      context,
+      ownerFeatureId,
+      profile,
+      axis,
+      signedExtent,
+      ends[0]!.role,
+    );
+  }
+
+  const clockwise = ends.find(
+    ({ end }) => end.kind !== "full" && end.direction === "clockwise",
+  );
+  const counterClockwise = ends.find(
+    ({ end }) => end.kind !== "full" && end.direction === "counterClockwise",
+  );
+  if (!clockwise || !counterClockwise) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC two-sided surface revolve ends must use opposite directions to produce one sheet.",
+    );
+  }
+
+  const clockwiseAngle = resolveRevolveAngle(
+    context,
+    profile.shape,
+    axis,
+    clockwise.end,
+  );
+  const counterClockwiseAngle = resolveRevolveAngle(
+    context,
+    profile.shape,
+    axis,
+    counterClockwise.end,
+  );
+  const totalAngle = clockwiseAngle + counterClockwiseAngle;
+  if (totalAngle > Math.PI * 2 + context.modelingTolerance) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC two-sided surface revolve extents overlap beyond one full revolution.",
+    );
+  }
+
+  const rotated = rotateSurfaceRevolveProfile(
+    context,
+    profile,
+    axis,
+    -clockwiseAngle,
+  );
+  return buildSurfaceRevolveEndShape(
+    context,
+    ownerFeatureId,
+    rotated,
+    axis,
+    totalAngle,
+    "combined-ends",
+  );
+}
+
 function buildRevolveEndShape(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -682,18 +991,25 @@ export function executeRevolveFeature(
     ownerFeatureId,
     parameters,
   );
-  const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
-  if (!resolvedOperation) {
-    throw new Error("Revolve operation must be a resolved literal value.");
-  }
-  const result = applyBooleanPolicy(
-    context,
-    ownerFeatureId,
-    resolvedOperation,
-    parameters.booleanScope,
-    featureShape.shape,
-    { sourceShapes: featureShape.sourceShapes },
-  );
+  const result =
+    parameters.resultBodyType === "surface"
+      ? trackSurfaceFeatureResult(context, ownerFeatureId, featureShape.shape, {
+          sourceShapes: featureShape.sourceShapes,
+        })
+      : (() => {
+          const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
+          if (!resolvedOperation) {
+            throw new Error("Revolve operation must be a resolved literal value.");
+          }
+          return applyBooleanPolicy(
+            context,
+            ownerFeatureId,
+            resolvedOperation,
+            parameters.booleanScope,
+            featureShape.shape,
+            { sourceShapes: featureShape.sourceShapes },
+          );
+        })();
   const producedBodyIds = new Set(
     result.producedTargets
       .filter(

@@ -100,6 +100,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       kind: "extrude",
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters: {
+        resultBodyType: "solid",
         profiles: [
           {
             kind: "region",
@@ -896,6 +897,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
             kind: "extrude",
             featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
             parameters: {
+              resultBodyType: "solid",
               profiles: [
                 {
                   kind: "region",
@@ -942,6 +944,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
             kind: "extrude",
             featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
             parameters: {
+              resultBodyType: "solid",
               profiles: [
                 {
                   kind: "region",
@@ -975,6 +978,7 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
             kind: "revolve",
             featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
             parameters: {
+              resultBodyType: "solid",
               profiles: [
                 {
                   kind: "region",

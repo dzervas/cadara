@@ -187,24 +187,28 @@ function replayExtrude(
   definition: Extract<FeatureDefinition, { kind: "extrude" }>,
   transforms: readonly ReplayTransform[],
 ) {
-  const operation = getAuthoredLiteralValue(definition.parameters.operation);
+  const parameters = definition.parameters;
+  if (parameters.resultBodyType !== "solid") {
+    unsupported("Only solid extrude source operations are replayable.");
+  }
+  const operation = getAuthoredLiteralValue(parameters.operation);
   if (operation !== "join" && operation !== "cut") {
     unsupported("Only additive and subtractive extrude source operations are replayable.");
   }
-  if (definition.parameters.booleanScope.kind !== "targetBody") {
+  if (parameters.booleanScope.kind !== "targetBody") {
     unsupported("Replayed extrude operations require one exact target body lineage.");
   }
   const sourceShape = buildExtrudeFeatureShape(
     state.context,
     ownerFeatureId,
-    definition.parameters,
+    parameters,
   );
   const shape = transformShape(state.context, ownerFeatureId, sourceShape.shape, transforms);
   const result = applyBooleanPolicy(
     state.context,
     ownerFeatureId,
     operation,
-    definition.parameters.booleanScope,
+    parameters.booleanScope,
     shape,
   );
   const producedBodyIds = result.producedTargets.flatMap((target) =>

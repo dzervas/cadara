@@ -30,10 +30,10 @@ import {
 export const thickenParticipants = [
   {
     role: "face",
-    label: "Face targets",
+    label: "Face or sheet body sources",
     required: true,
     cardinality: { min: 1, max: null },
-    acceptedKinds: ["face"],
+    acceptedKinds: ["face", "body"],
   },
   {
     role: "targetBody",
@@ -98,7 +98,9 @@ function getTargetsForRole(
 ) {
   switch (role) {
     case "face":
-      return draft.faceTargets;
+      return draft.sourceBodyTarget
+        ? [draft.sourceBodyTarget]
+        : draft.faceTargets;
     case "targetBody":
       return draft.targetBodyTargets;
     default:
@@ -145,6 +147,16 @@ function getThickenValidationDiagnostics(draft: ThickenFeatureParameterDraft) {
     },
   );
 
+  if (draft.sourceBodyTarget && draft.faceTargets.length > 0) {
+    diagnostics.push({
+      code: "advanced-feature-invalid-target-kind",
+      severity: "error",
+      role: "face",
+      target: draft.sourceBodyTarget,
+      message: "Thicken source must be faces or one sheet body, not both.",
+    });
+  }
+
   if (!isThickenSide(authoredStringLiteral(draft.options.side, "oneSide"))) {
     diagnostics.push({
       code: "advanced-feature-invalid-option",
@@ -184,8 +196,10 @@ export const thickenAuthoringDefinition = {
   operationIntent: thickenOperationIntent,
   createDraft(input) {
     const faceTarget = asFaceRef(input.selectedTarget);
+    const sourceBodyTarget = asBodyRef(input.selectedTarget);
     return {
       faceTargets: faceTarget ? [faceTarget] : [],
+      sourceBodyTarget,
       operationIntent: "create",
       targetBodyTargets: [],
       options: {
@@ -204,8 +218,13 @@ export const thickenAuthoringDefinition = {
     const side = feature.parameters.options?.side;
     const direction = feature.parameters.options?.direction;
 
+    const sourceTargets = getParticipantTargets("face");
     return {
-      faceTargets: filterTargets(getParticipantTargets("face"), asFaceRef),
+      faceTargets: filterTargets(sourceTargets, asFaceRef),
+      sourceBodyTarget:
+        filterTargets(sourceTargets, asBodyRef).length === 1
+          ? filterTargets(sourceTargets, asBodyRef)[0]!
+          : null,
       operationIntent: feature.parameters.operationIntent ?? "create",
       targetBodyTargets: filterTargets(
         getParticipantTargets("targetBody"),
@@ -239,6 +258,14 @@ export const thickenAuthoringDefinition = {
             : asFaceRef(patch.faceTarget as PrimitiveRef | null)
               ? [patch.faceTarget as (typeof draft.faceTargets)[number]]
               : draft.faceTargets,
+      sourceBodyTarget:
+        patch.sourceBodyTarget === undefined
+          ? draft.sourceBodyTarget
+          : asBodyRef(
+              (Array.isArray(patch.sourceBodyTarget)
+                ? patch.sourceBodyTarget[0]
+                : patch.sourceBodyTarget) as PrimitiveRef | null,
+            ),
       operationIntent: acceptAuthoredPatch(
         patch.operationIntent,
         draft.operationIntent,
@@ -277,12 +304,18 @@ export const thickenAuthoringDefinition = {
       return {
         ...draft,
         faceTargets: appendUniqueTarget(draft.faceTargets, faceTarget),
+        sourceBodyTarget: null,
       };
     }
 
     const bodyTarget = asBodyRef(target);
-    return bodyTarget &&
-      authoredStringLiteral(draft.operationIntent, "create") !== "create"
+    if (!bodyTarget) {
+      return draft;
+    }
+    if (!draft.sourceBodyTarget && draft.faceTargets.length === 0) {
+      return { ...draft, sourceBodyTarget: bodyTarget };
+    }
+    return authoredStringLiteral(draft.operationIntent, "create") !== "create"
       ? this.applyPatch(draft, {
           targetBodyTargets: appendUniqueTarget(
             draft.targetBodyTargets,
@@ -292,11 +325,16 @@ export const thickenAuthoringDefinition = {
       : draft;
   },
   getPrimarySelectionTarget(draft) {
-    return draft.faceTargets[0] ?? draft.targetBodyTargets[0] ?? null;
+    return (
+      draft.sourceBodyTarget ??
+      draft.faceTargets[0] ??
+      draft.targetBodyTargets[0] ??
+      null
+    );
   },
   getPreviewLabel(draft, prefix) {
-    if (draft.faceTargets.length === 0) {
-      return "Select one or more faces for thicken";
+    if (draft.faceTargets.length === 0 && !draft.sourceBodyTarget) {
+      return "Select faces or one sheet body for thicken";
     }
     const thickness = authoredNumberLiteral(draft.options.thickness);
     if (thickness !== null && thickness <= 0) {
@@ -308,7 +346,9 @@ export const thickenAuthoringDefinition = {
     ) {
       return "Select a target body for thicken boolean operation";
     }
-    return `${prefix} thicken on ${draft.faceTargets.length} face${draft.faceTargets.length === 1 ? "" : "s"}`;
+    return draft.sourceBodyTarget
+      ? `${prefix} thicken sheet body`
+      : `${prefix} thicken on ${draft.faceTargets.length} face${draft.faceTargets.length === 1 ? "" : "s"}`;
   },
   getMissingInputsDiagnostics(input) {
     const diagnostics = getThickenValidationDiagnostics(input.draft);
@@ -332,7 +372,7 @@ export const thickenAuthoringDefinition = {
         phase: input.phase,
         suffix: "references",
         message:
-          "Thicken preview requires at least one face target and a positive thickness.",
+          "Thicken preview requires face targets or one sheet body and a positive thickness.",
       }),
     ];
   },
@@ -363,9 +403,10 @@ export const thickenAuthoringDefinition = {
               helper:
                 "Accepted targets: durable body faces. Each selected face is stored explicitly.",
               error:
-                session.draft.faceTargets.length > 0
+                session.draft.faceTargets.length > 0 ||
+                session.draft.sourceBodyTarget
                   ? null
-                  : { message: "Select at least one face target." },
+                  : { message: "Select faces or one sheet body." },
               advancedParticipant: {
                 role: "face",
                 required: true,
@@ -383,6 +424,34 @@ export const thickenAuthoringDefinition = {
                 itemLabel: "Face",
               },
               patch: { patchKey: "faceTargets" },
+            },
+            {
+              kind: "referenceCollection",
+              id: "thicken-sheet-body",
+              label: "Sheet body source",
+              value: session.draft.sourceBodyTarget
+                ? [session.draft.sourceBodyTarget]
+                : [],
+              emptyLabel: "None selected",
+              helper: "Select one sheet body instead of individual faces.",
+              error: null,
+              advancedParticipant: {
+                role: "face",
+                required: false,
+                cardinality: { min: 0, max: 1 },
+                selectedCount: session.draft.sourceBodyTarget ? 1 : 0,
+              },
+              picker: {
+                mode: "replace",
+                allowsMultiple: false,
+                selectionFilter: createSelectionFilterForRequirement(
+                  thickenSelectionFilter,
+                  "thicken-sheet-body",
+                  "Thicken sheet body",
+                ),
+                itemLabel: "Sheet body",
+              },
+              patch: { patchKey: "sourceBodyTarget" },
             },
             {
               kind: "referenceCollection",

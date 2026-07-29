@@ -14,6 +14,7 @@ import type {
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import type {
   ExtrudeProfileRef,
+  ExtrudeSurfaceProfileRef,
   FilletEdgeRef,
   RevolveAxisRef,
   UpToOffsetDirection,
@@ -311,10 +312,30 @@ export function assertExtrudeProfileRef(value: unknown): ExtrudeProfileRef {
   }
 }
 
-export function assertExtrudeProfileRefs(
+/**
+ * Surface-producing features additionally accept exactly-one-entity open sketch
+ * curve seeds; solid-producing features must not.
+ */
+export function assertSurfaceProfileRef(
+  value: unknown,
+): ExtrudeSurfaceProfileRef {
+  const target = assertPrimitiveRef(value);
+
+  switch (target.kind) {
+    case "region":
+    case "face":
+    case "sketchEntity":
+      return target;
+    default:
+      throw new Error("Invalid surface profile reference payload.");
+  }
+}
+
+function assertProfileRefCollection<Ref extends PrimitiveRef>(
   value: unknown,
   featureLabel: string,
-): readonly [ExtrudeProfileRef, ...ExtrudeProfileRef[]] {
+  assertRef: (entry: unknown) => Ref,
+): readonly [Ref, ...Ref[]] {
   if (!Array.isArray(value)) {
     throw new Error(`${featureLabel} parameters must include profiles.`);
   }
@@ -325,7 +346,7 @@ export function assertExtrudeProfileRefs(
     );
   }
 
-  const [first, ...rest] = value.map((entry) => assertExtrudeProfileRef(entry));
+  const [first, ...rest] = value.map((entry) => assertRef(entry));
   const profiles = [first!, ...rest] as const;
   const seen = new Set<string>();
 
@@ -339,7 +360,29 @@ export function assertExtrudeProfileRefs(
     seen.add(key);
   }
 
-  return profiles as readonly [ExtrudeProfileRef, ...ExtrudeProfileRef[]];
+  return profiles as readonly [Ref, ...Ref[]];
+}
+
+export function assertExtrudeProfileRefs(
+  value: unknown,
+  featureLabel: string,
+): readonly [ExtrudeProfileRef, ...ExtrudeProfileRef[]] {
+  return assertProfileRefCollection(
+    value,
+    featureLabel,
+    assertExtrudeProfileRef,
+  );
+}
+
+export function assertSurfaceProfileRefs(
+  value: unknown,
+  featureLabel: string,
+): readonly [ExtrudeSurfaceProfileRef, ...ExtrudeSurfaceProfileRef[]] {
+  return assertProfileRefCollection(
+    value,
+    featureLabel,
+    assertSurfaceProfileRef,
+  );
 }
 
 export function assertFilletEdgeRef(value: unknown): FilletEdgeRef {

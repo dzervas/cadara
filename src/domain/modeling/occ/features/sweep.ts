@@ -31,7 +31,7 @@ import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   requireSketchSnapshot,
   requireRegion,
-  requireBody,
+  requireSolidBody,
   requireFace,
   requireEdge,
   requireConstructionPlaneDefinition,
@@ -67,7 +67,7 @@ function buildSweepProfileShape(
   }
 
   if (profile.kind === "face") {
-    const body = requireBody(context, profile.bodyId);
+    const body = requireSolidBody(context, profile.bodyId, "sweep");
     const face = requireFace(context, body, profile.faceId);
     getExtrusionNormalForPlanarFace(context.oc, face, "positive");
     return face;
@@ -145,7 +145,7 @@ function buildSweepPathWire(
       );
     }
   } else if (path.kind === "edge") {
-    edge = requireEdge(context, requireBody(context, path.bodyId), path.edgeId);
+    edge = requireEdge(context, requireSolidBody(context, path.bodyId, "sweep"), path.edgeId);
   } else {
     throw new Error(
       "advanced-feature-unsupported-kernel-case: OCC sweep path must be a durable edge or sketch-entity target.",
@@ -274,7 +274,7 @@ export function getSweepLinearPathData(
     );
   }
 
-  const body = requireBody(context, path.bodyId);
+  const body = requireSolidBody(context, path.bodyId, "sweep");
   const edge = requireEdge(context, body, path.edgeId);
   buildAxisFromLineEdge(context.oc, edge);
   const curve = new context.oc.BRepAdaptor_Curve_2(edge);
@@ -438,7 +438,7 @@ function resolveSweepLockDirection(
   if (target.kind === "edge") {
     const axis = buildAxisFromLineEdge(
       context.oc,
-      requireEdge(context, requireBody(context, target.bodyId), target.edgeId),
+      requireEdge(context, requireSolidBody(context, target.bodyId, "sweep"), target.edgeId),
     );
     return normalize(toVec3FromGpPoint(axis.Direction()));
   }
@@ -478,7 +478,7 @@ function resolveSweepLockProfileFaceDirection(
 
     const normal = getExtrusionNormalForPlanarFace(
       context.oc,
-      requireFace(context, requireBody(context, target.bodyId), target.faceId),
+      requireFace(context, requireSolidBody(context, target.bodyId, "sweep"), target.faceId),
       "positive",
     );
     direction ??= normal;

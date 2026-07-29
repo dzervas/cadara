@@ -123,6 +123,15 @@ export function featureEditorFormValuesEqual(
   return true;
 }
 
+export function featureEditorFormValuesMissingSchemaFields(
+  schema: FeatureEditorFormSchema,
+  values: Record<string, unknown>,
+): boolean {
+  return getFeatureEditorInputFields(schema).some(
+    (field) => !(field.id in values),
+  );
+}
+
 export function shouldResetFeatureEditorFormValues(input: {
   schema: FeatureEditorFormSchema;
   sessionKey: string;

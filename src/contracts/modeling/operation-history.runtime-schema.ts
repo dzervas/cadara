@@ -143,7 +143,7 @@ function findEntryInvariantIssue(
 
         const profileKeys = params.profiles.map((profile) =>
           isRecord(profile)
-            ? `${profile.kind}:${profile.sketchId}:${profile.regionId ?? profile.bodyId ?? profile.faceId ?? ""}`
+            ? `${profile.kind}:${profile.sketchId}:${profile.regionId ?? profile.entityId ?? profile.bodyId ?? profile.faceId ?? ""}`
             : `invalid:${entryIndex}`,
         );
         if (new Set(profileKeys).size !== profileKeys.length) {

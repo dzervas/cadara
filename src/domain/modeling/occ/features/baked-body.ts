@@ -473,6 +473,20 @@ export function executeBakedBodyFeature(
     };
   }
 
+  if (parameters.replacement.kind === "replaceBodies") {
+    const sheetBody = context.bodies.find(
+      (body) =>
+        parameters.replacement.kind === "replaceBodies" &&
+        parameters.replacement.bodyIds.includes(body.bodyId) &&
+        body.bodyKind === "sheet",
+    );
+    if (sheetBody) {
+      throw new Error(
+        `advanced-feature-unsupported-kernel-case: OCC baked-body replacement does not support sheet body ${sheetBody.bodyId}.`,
+      );
+    }
+  }
+
   try {
     const materialized = materializeBakedMeshShape(
       context,

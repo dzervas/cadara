@@ -1,5 +1,6 @@
 import type {
   BodySnapshotRecord,
+  FeatureBooleanScope,
   DocumentPresentationSnapshot,
   FeatureSnapshotRecord,
   FeatureTreeNodeRecord,
@@ -198,25 +199,15 @@ function collectFeatureConsumedTargets(
   definition: OccAuthoringState["features"][number]["definition"],
 ) {
   const targets: DurableRef[] = [];
-  let booleanScope:
-    | Extract<
-        typeof definition,
-        { kind: "extrude" }
-      >["parameters"]["booleanScope"]
-    | Extract<
-        typeof definition,
-        { kind: "revolve" }
-      >["parameters"]["booleanScope"]
-    | Extract<
-        typeof definition,
-        { kind: "shell" }
-      >["parameters"]["booleanScope"]
-    | null = null;
+  let booleanScope: FeatureBooleanScope | null = null;
 
   switch (definition.kind) {
     case "extrude":
       targets.push(...definition.parameters.profiles);
-      booleanScope = definition.parameters.booleanScope;
+      booleanScope =
+        definition.parameters.resultBodyType === "solid"
+          ? definition.parameters.booleanScope
+          : null;
       break;
     case "fillet":
       targets.push(...definition.parameters.edgeTargets);
@@ -231,7 +222,10 @@ function collectFeatureConsumedTargets(
         ...definition.parameters.profiles,
         definition.parameters.axis,
       );
-      booleanScope = definition.parameters.booleanScope;
+      booleanScope =
+        definition.parameters.resultBodyType === "solid"
+          ? definition.parameters.booleanScope
+          : null;
       break;
     case "shell":
       targets.push(
@@ -348,13 +342,22 @@ function createSnapshotFeatureDefinition(
       return {
         kind: "extrude",
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          profiles: definition.parameters.profiles,
-          startExtent: { kind: "profilePlane" },
-          extent: definition.parameters.extent,
-          operation: definition.parameters.operation,
-          booleanScope: definition.parameters.booleanScope,
-        },
+        parameters:
+          definition.parameters.resultBodyType === "solid"
+            ? {
+                resultBodyType: "solid",
+                profiles: definition.parameters.profiles,
+                startExtent: { kind: "profilePlane" },
+                extent: definition.parameters.extent,
+                operation: definition.parameters.operation,
+                booleanScope: definition.parameters.booleanScope,
+              }
+            : {
+                resultBodyType: "surface",
+                profiles: definition.parameters.profiles,
+                startExtent: { kind: "profilePlane" },
+                extent: definition.parameters.extent,
+              },
       };
     case "fillet":
       return {
@@ -375,14 +378,24 @@ function createSnapshotFeatureDefinition(
       return {
         kind: "revolve",
         featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          profiles: definition.parameters.profiles,
-          axis: definition.parameters.axis,
-          startAngle: definition.parameters.startAngle,
-          extent: definition.parameters.extent,
-          operation: definition.parameters.operation,
-          booleanScope: definition.parameters.booleanScope,
-        },
+        parameters:
+          definition.parameters.resultBodyType === "solid"
+            ? {
+                resultBodyType: "solid",
+                profiles: definition.parameters.profiles,
+                axis: definition.parameters.axis,
+                startAngle: definition.parameters.startAngle,
+                extent: definition.parameters.extent,
+                operation: definition.parameters.operation,
+                booleanScope: definition.parameters.booleanScope,
+              }
+            : {
+                resultBodyType: "surface",
+                profiles: definition.parameters.profiles,
+                axis: definition.parameters.axis,
+                startAngle: definition.parameters.startAngle,
+                extent: definition.parameters.extent,
+              },
       };
     }
     case "shell":
@@ -567,7 +580,7 @@ function buildSnapshotPresentationRecords(
     objects.push({
       id: createObjectTreeNodeId("body", target),
       label: body.label,
-      description: "Solid body",
+      description: body.bodyKind === "sheet" ? "Sheet body" : "Solid body",
       kind: "body",
       target,
       ownerBodyId: body.bodyId,

@@ -6,6 +6,7 @@ import {
   createFeatureEditorPatchFromExpression,
   createFeatureEditorPatchFromFormValue,
   featureEditorFormValuesEqual,
+  featureEditorFormValuesMissingSchemaFields,
   getFeatureEditorExpressionSourceState,
   normalizeFeatureEditorFormValues,
 } from "@/core/feature-authoring/form-adapter";
@@ -149,6 +150,33 @@ test("src/domain/feature-authoring/form-adapter.spec.ts", async () => {
       Math.abs(patchedRevolve.draft.firstEnd.angle - Math.PI) < 0.000001,
     "Adapter angle values should preserve the degree-to-radian patch translation owned by the feature domain.",
   ).toBeTruthy();
+
+  const surfaceRevolveSession = patchFeatureEditSession(revolveSession, {
+    resultBodyType: "surface",
+  });
+  const surfaceRevolveValues = createFeatureEditorFormValues(
+    getFeatureEditorFormSchema(surfaceRevolveSession),
+  );
+  const solidRevolveSchema = getFeatureEditorFormSchema(
+    patchFeatureEditSession(surfaceRevolveSession, {
+      resultBodyType: "solid",
+    }),
+  );
+
+  expect(
+    featureEditorFormValuesMissingSchemaFields(
+      solidRevolveSchema,
+      surfaceRevolveValues,
+    ),
+    "Adapter should report missing form values when a variant toggle re-adds fields such as the revolve boolean operation.",
+  ).toBeTruthy();
+  expect(
+    featureEditorFormValuesMissingSchemaFields(
+      solidRevolveSchema,
+      createFeatureEditorFormValues(solidRevolveSchema),
+    ),
+    "Adapter should report no missing form values when every schema field already has a form value.",
+  ).toBeFalsy();
 
   const populatedShellSession = patchFeatureEditSession(shellSession, {
     faceTargets: [

@@ -1,6 +1,8 @@
 import type {
   ExtrudeEndCondition,
   ExtrudeFeatureExtent,
+  ExtrudeProfileRef,
+  ExtrudeSurfaceProfileRef,
   LinearExtentDirection,
   ModelingDiagnostic,
   UpToOffsetDirection,
@@ -8,13 +10,14 @@ import type {
 import type {
   ExtrudeFeatureEndConditionDraft,
   FeatureAuthoringDefinition,
+  FeatureResultBodyType,
 } from "@/core/feature-authoring/definition";
 import { getExtrudeFeatureExtent } from "@/contracts/modeling/feature-extents";
 import {
   getBooleanScopeBodyTargets,
   hasBooleanTargetScope,
-  isBooleanOperation,
-  toBooleanScope,
+  isResultBodyType,
+  resolveResultBodyTypeVariant,
 } from "@/core/feature-authoring/definition";
 import {
   createSelectionFilterForRequirement,
@@ -229,21 +232,31 @@ function endHasValidScalars(end: ExtrudeFeatureEndConditionDraft) {
 
 function definitionEnd(
   end: ExtrudeFeatureEndConditionDraft,
+  resultBodyType: FeatureResultBodyType,
 ): ExtrudeEndCondition {
+  const draft =
+    resultBodyType === "surface"
+      ? {}
+      : {
+          draftAngle: shared.authoredDefinitionValue(end.draftAngle ?? 0, 0),
+        };
   switch (end.kind) {
     case "blind":
       return {
-        ...end,
+        kind: "blind",
+        direction: end.direction,
         distance: shared.authoredDefinitionValue(end.distance, 12),
-        draftAngle: shared.authoredDefinitionValue(end.draftAngle ?? 0, 0),
+        ...draft,
       };
     case "upToNext":
     case "upToFace":
     case "upToPart":
     case "upToVertex":
       return {
-        ...end,
-        draftAngle: shared.authoredDefinitionValue(end.draftAngle ?? 0, 0),
+        kind: end.kind,
+        direction: end.direction,
+        ...("target" in end ? { target: end.target } : {}),
+        ...draft,
         ...(end.offset
           ? {
               offset: {
@@ -257,10 +270,7 @@ function definitionEnd(
           : {}),
       } as ExtrudeEndCondition;
     case "throughAll":
-      return {
-        ...end,
-        draftAngle: shared.authoredDefinitionValue(end.draftAngle ?? 0, 0),
-      };
+      return { kind: "throughAll", direction: end.direction, ...draft };
   }
 }
 
@@ -284,6 +294,7 @@ function endConditionLabel(kind: ExtrudeEndCondition["kind"]) {
 function endFields(
   prefix: "first" | "second",
   end: ExtrudeFeatureEndConditionDraft,
+  resultBodyType: FeatureResultBodyType,
 ): FeatureEditorFormField[] {
   const idPrefix = prefix === "first" ? "extrude" : "extrude-second";
   const labelPrefix = prefix === "first" ? "" : "Second ";
@@ -434,6 +445,10 @@ function endFields(
     );
   }
 
+  if (resultBodyType === "surface") {
+    return fields;
+  }
+
   fields.push({
     kind: "numeric",
     id: `${idPrefix}-draft-angle`,
@@ -497,6 +512,7 @@ export const extrudeAuthoringDefinition = {
   createDraft(input) {
     const profileTarget = shared.asExtrudeProfileRef(input.selectedTarget);
     return {
+      resultBodyType: "solid",
       profileTargets: profileTarget ? [profileTarget] : [],
       extentMode: "oneSide",
       firstEnd: DEFAULT_FIRST_END,
@@ -506,59 +522,76 @@ export const extrudeAuthoringDefinition = {
     };
   },
   hydrateDraft(feature) {
-    const extent = getExtrudeFeatureExtent(feature.parameters);
+    const parameters = feature.parameters;
+    const extent = getExtrudeFeatureExtent(parameters);
     return {
-      profileTargets: [...feature.parameters.profiles],
+      resultBodyType: parameters.resultBodyType,
+      profileTargets: parameters.profiles as readonly ExtrudeSurfaceProfileRef[],
       extentMode: extent.mode,
       firstEnd: extent.mode === "twoSide" ? extent.firstEnd : extent.end,
       secondEnd:
         extent.mode === "twoSide" ? extent.secondEnd : DEFAULT_SECOND_END,
-      operation: feature.parameters.operation,
-      booleanScope: feature.parameters.booleanScope,
+      operation:
+        parameters.resultBodyType === "solid"
+          ? parameters.operation
+          : "newBody",
+      booleanScope:
+        parameters.resultBodyType === "solid"
+          ? parameters.booleanScope
+          : { kind: "standalone" },
     };
   },
   applyPatch(draft, patch) {
     const extentMode = isExtentMode(patch.extentMode)
       ? patch.extentMode
       : draft.extentMode;
+    const resultBodyType = isResultBodyType(patch.resultBodyType)
+      ? patch.resultBodyType
+      : draft.resultBodyType;
+    const patchedProfileTargets =
+      patch.profileTargets === undefined && patch.profileTarget === undefined
+        ? draft.profileTargets
+        : Array.isArray(patch.profileTargets)
+          ? patch.profileTargets.filter(
+              (entry): entry is (typeof draft.profileTargets)[number] =>
+                shared.asResultBodyTypeProfileRef(
+                  entry as Parameters<
+                    typeof shared.asResultBodyTypeProfileRef
+                  >[0],
+                  resultBodyType,
+                ) !== null,
+            )
+          : shared.asResultBodyTypeProfileRef(
+                patch.profileTarget as Parameters<
+                  typeof shared.asResultBodyTypeProfileRef
+                >[0],
+                resultBodyType,
+              )
+            ? [patch.profileTarget as (typeof draft.profileTargets)[number]]
+            : draft.profileTargets;
     return {
       ...draft,
-      profileTargets:
-        patch.profileTargets === undefined && patch.profileTarget === undefined
-          ? draft.profileTargets
-          : Array.isArray(patch.profileTargets)
-            ? patch.profileTargets.filter(
-                (entry): entry is (typeof draft.profileTargets)[number] =>
-                  shared.asExtrudeProfileRef(
-                    entry as Parameters<typeof shared.asExtrudeProfileRef>[0],
-                  ) !== null,
-              )
-            : shared.asExtrudeProfileRef(
-                  patch.profileTarget as Parameters<
-                    typeof shared.asExtrudeProfileRef
-                  >[0],
-                )
-              ? [patch.profileTarget as (typeof draft.profileTargets)[number]]
-              : draft.profileTargets,
+      ...resolveResultBodyTypeVariant(draft, patch, patchedProfileTargets),
       extentMode,
       firstEnd: ensureEndSupportsMode(
         extentMode,
         patchEnd(draft.firstEnd, patch, "first"),
       ),
       secondEnd: patchEnd(draft.secondEnd, patch, "second"),
-      operation: shared.acceptAuthoredPatch(
-        patch.operation,
-        draft.operation,
-        isBooleanOperation,
-      ),
-      booleanScope: toBooleanScope(patch, draft.booleanScope),
     };
   },
   applySelection(draft, target) {
-    if (target.kind === "region" || target.kind === "face") {
+    const profileTarget = shared.asResultBodyTypeProfileRef(
+      target,
+      draft.resultBodyType,
+    );
+    if (profileTarget) {
       return {
         ...draft,
-        profileTargets: shared.appendUniqueTarget(draft.profileTargets, target),
+        profileTargets: shared.appendUniqueTarget(
+          draft.profileTargets,
+          profileTarget,
+        ),
       };
     }
 
@@ -643,38 +676,63 @@ export const extrudeAuthoringDefinition = {
   buildDefinition(draft) {
     const operation = shared.authoredStringLiteral(draft.operation, "newBody");
     const firstEnd = ensureEndSupportsMode(draft.extentMode, draft.firstEnd);
+    const buildEnd = (end: ExtrudeFeatureEndConditionDraft) =>
+      definitionEnd(end, draft.resultBodyType);
     const extent: ExtrudeFeatureExtent =
       draft.extentMode === "twoSide"
         ? {
             mode: "twoSide",
-            firstEnd: definitionEnd(firstEnd),
-            secondEnd: definitionEnd(draft.secondEnd),
+            firstEnd: buildEnd(firstEnd),
+            secondEnd: buildEnd(draft.secondEnd),
           }
         : draft.extentMode === "symmetric"
           ? {
               mode: "symmetric",
-              end: definitionEnd(firstEnd) as Extract<
+              end: buildEnd(firstEnd) as Extract<
                 ExtrudeEndCondition,
                 { kind: "blind" | "throughAll" }
               >,
             }
-          : { mode: "oneSide", end: definitionEnd(firstEnd) };
+          : { mode: "oneSide", end: buildEnd(firstEnd) };
+    const solidProfiles = draft.profileTargets.filter(
+      (entry): entry is ExtrudeProfileRef => entry.kind !== "sketchEntity",
+    );
 
-    return draft.profileTargets.length > 0 &&
-      hasBooleanTargetScope(operation, draft.booleanScope) &&
-      endHasValidScalars(firstEnd) &&
-      endHasRequiredTarget(firstEnd) &&
-      (draft.extentMode !== "twoSide" ||
-        (endHasValidScalars(draft.secondEnd) &&
-          endHasRequiredTarget(draft.secondEnd)))
+    if (
+      draft.profileTargets.length === 0 ||
+      !endHasValidScalars(firstEnd) ||
+      !endHasRequiredTarget(firstEnd) ||
+      (draft.extentMode === "twoSide" &&
+        (!endHasValidScalars(draft.secondEnd) ||
+          !endHasRequiredTarget(draft.secondEnd)))
+    ) {
+      return null;
+    }
+
+    if (draft.resultBodyType === "surface") {
+      return {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "surface",
+          profiles: draft.profileTargets as readonly [
+            ExtrudeSurfaceProfileRef,
+            ...ExtrudeSurfaceProfileRef[],
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent,
+        },
+      };
+    }
+
+    return solidProfiles.length === draft.profileTargets.length &&
+      hasBooleanTargetScope(operation, draft.booleanScope)
       ? {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
-            profiles: draft.profileTargets as readonly [
-              (typeof draft.profileTargets)[number],
-              ...(typeof draft.profileTargets)[number][],
-            ],
+            resultBodyType: "solid",
+            profiles: [solidProfiles[0]!, ...solidProfiles.slice(1)],
             startExtent: { kind: "profilePlane" },
             extent,
             operation: shared.authoredDefinitionValue(
@@ -707,7 +765,9 @@ export const extrudeAuthoringDefinition = {
               value: session.draft.profileTargets,
               emptyLabel: "None selected",
               helper:
-                "Accepted targets: derived sketch regions or planar faces.",
+                session.draft.resultBodyType === "surface"
+                  ? "Accepted targets: derived sketch regions, planar faces, or open sketch curves."
+                  : "Accepted targets: derived sketch regions or planar faces.",
               error:
                 session.draft.profileTargets.length > 0
                   ? null
@@ -723,7 +783,9 @@ export const extrudeAuthoringDefinition = {
                 allowsMultiple: true,
                 selectionFilter: createSelectionFilterForRequirement(
                   extrudeSelectionFilter,
-                  "extrude-profile",
+                  session.draft.resultBodyType === "surface"
+                    ? "extrude-surface-profile"
+                    : "extrude-profile",
                   "Extrude profile",
                 ),
                 itemLabel: "Profile",
@@ -736,6 +798,10 @@ export const extrudeAuthoringDefinition = {
           id: "parameters",
           title: "Parameters",
           fields: [
+            shared.createResultBodyTypeField({
+              prefix: "extrude",
+              resultBodyType: session.draft.resultBodyType,
+            }),
             {
               kind: "enum",
               id: "extrude-extent-mode",
@@ -754,19 +820,26 @@ export const extrudeAuthoringDefinition = {
                 session.draft.extentMode,
                 session.draft.firstEnd,
               ),
+              session.draft.resultBodyType,
             ),
             ...(session.draft.extentMode === "twoSide"
-              ? endFields("second", session.draft.secondEnd)
+              ? endFields(
+                  "second",
+                  session.draft.secondEnd,
+                  session.draft.resultBodyType,
+                )
               : []),
-            ...shared.createBooleanOperationFields({
-              prefix: "extrude",
-              operation,
-              operationValue: session.draft.operation,
-              booleanTargetBodies,
-              selectionFilter: extrudeSelectionFilter,
-              selectionRequirementId: "extrude-target-body",
-              selectionRequirementLabel: "Extrude target body",
-            }),
+            ...(session.draft.resultBodyType === "surface"
+              ? []
+              : shared.createBooleanOperationFields({
+                  prefix: "extrude",
+                  operation,
+                  operationValue: session.draft.operation,
+                  booleanTargetBodies,
+                  selectionFilter: extrudeSelectionFilter,
+                  selectionRequirementId: "extrude-target-body",
+                  selectionRequirementLabel: "Extrude target body",
+                })),
           ],
         },
         {

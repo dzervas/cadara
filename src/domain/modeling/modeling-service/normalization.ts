@@ -126,6 +126,7 @@ import {
   assertDurableRef,
   assertSketchPlaneSupportRef,
   assertExtrudeProfileRefs,
+  assertSurfaceProfileRefs,
   assertFilletEdgeRef,
   assertShellFaceRef,
   assertRevolveAxisRef,
@@ -387,6 +388,19 @@ export function normalizeExtrudeExtent(value: unknown): ExtrudeFeatureExtent {
   throw new Error("Invalid extrude extent mode payload.");
 }
 
+function normalizeResultBodyType(
+  value: unknown,
+  featureLabel: string,
+): "solid" | "surface" {
+  if (value === "solid" || value === "surface") {
+    return value;
+  }
+
+  throw new Error(
+    `${featureLabel} parameters must declare an explicit resultBodyType of "solid" or "surface".`,
+  );
+}
+
 export function normalizeExtrudeFeatureParameters(
   value: unknown,
 ): ExtrudeFeatureParameters {
@@ -398,6 +412,17 @@ export function normalizeExtrudeFeatureParameters(
     throw new Error(
       "Legacy extrude profile, depth, and direction aliases are not supported; use profiles and extent.",
     );
+  }
+
+  const resultBodyType = normalizeResultBodyType(value.resultBodyType, "Extrude");
+
+  if (resultBodyType === "surface") {
+    return {
+      resultBodyType,
+      profiles: assertSurfaceProfileRefs(value.profiles, "Extrude"),
+      startExtent: normalizeExtrudeStartExtent(value.startExtent),
+      extent: normalizeExtrudeExtent(value.extent),
+    };
   }
 
   if (
@@ -414,6 +439,7 @@ export function normalizeExtrudeFeatureParameters(
   const extent = normalizeExtrudeExtent(value.extent);
 
   return {
+    resultBodyType,
     profiles: assertExtrudeProfileRefs(value.profiles, "Extrude"),
     startExtent: normalizeExtrudeStartExtent(value.startExtent),
     extent,
@@ -615,6 +641,21 @@ export function normalizeRevolveFeatureParameters(
     );
   }
 
+  const resultBodyType = normalizeResultBodyType(value.resultBodyType, "Revolve");
+  const startAngle = isAuthoredNumberLike(value.startAngle)
+    ? toContractAuthoredValue(value.startAngle as MaybeAuthoredValue<number>, 0)
+    : toContractAuthoredValue(0, 0);
+
+  if (resultBodyType === "surface") {
+    return {
+      resultBodyType,
+      profiles: assertSurfaceProfileRefs(value.profiles, "Revolve"),
+      axis: assertRevolveAxisRef(value.axis),
+      startAngle,
+      extent: normalizeRevolveExtent(value.extent),
+    };
+  }
+
   if (
     !isAuthoredEnumLike(value.operation, [
       "newBody",
@@ -629,14 +670,10 @@ export function normalizeRevolveFeatureParameters(
   const extent = normalizeRevolveExtent(value.extent);
 
   return {
+    resultBodyType,
     profiles: assertExtrudeProfileRefs(value.profiles, "Revolve"),
     axis: assertRevolveAxisRef(value.axis),
-    startAngle: isAuthoredNumberLike(value.startAngle)
-      ? toContractAuthoredValue(
-          value.startAngle as MaybeAuthoredValue<number>,
-          0,
-        )
-      : toContractAuthoredValue(0, 0),
+    startAngle,
     extent,
     operation: toContractAuthoredValue(
       value.operation as MaybeAuthoredValue<FeatureBooleanOperation>,
@@ -3494,6 +3531,7 @@ export function normalizeBodies(value: unknown): BodySnapshotRecord[] {
       !isRecord(entry) ||
       !isString(entry.bodyId) ||
       !isString(entry.label) ||
+      (entry.bodyKind !== "solid" && entry.bodyKind !== "sheet") ||
       !isRecord(entry.topology) ||
       !Array.isArray(entry.topology.faceIds) ||
       !Array.isArray(entry.topology.edgeIds) ||
@@ -3512,6 +3550,7 @@ export function normalizeBodies(value: unknown): BodySnapshotRecord[] {
       ...normalizeOwnership(entry),
       bodyId: assertBodyId(entry.bodyId),
       label: entry.label,
+      bodyKind: entry.bodyKind === "sheet" ? "sheet" : "solid",
       topology: {
         faceIds: entry.topology.faceIds.map((faceId) => {
           if (!isString(faceId)) {

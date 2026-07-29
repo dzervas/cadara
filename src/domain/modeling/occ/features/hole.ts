@@ -32,7 +32,7 @@ import {
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
 import {
-  requireBody,
+  requireSolidBody,
   requireSketchSnapshot,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
@@ -321,7 +321,7 @@ function getProjectionRange(
   let max = Number.NEGATIVE_INFINITY;
 
   for (const bodyId of bodyIds) {
-    const body = requireBody(context, bodyId);
+    const body = requireSolidBody(context, bodyId, "hole");
     for (const point of getShapeVertexPoints(context.oc, body.shape)) {
       const projection = dot(point, direction);
       min = Math.min(min, projection);

@@ -459,6 +459,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -640,6 +641,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
             kind: "extrude",
             featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
             parameters: {
+              resultBodyType: "solid",
               profiles: [
                 {
                   kind: "region",
@@ -719,6 +721,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
             kind: "extrude",
             featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
             parameters: {
+              resultBodyType: "solid",
               profiles: [{ kind: "face", bodyId: body.bodyId, faceId }],
               startExtent: { kind: "profilePlane" },
               extent: {
@@ -775,6 +778,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       kind: "extrude",
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters: {
+        resultBodyType: "solid",
         profiles: [
           {
             kind: "region",
@@ -1168,6 +1172,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
           parameters: {
+            resultBodyType: "solid",
             profiles: [
               {
                 kind: "region",
@@ -1445,7 +1450,110 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     ).toBe(0);
   }
 
+  async function testSheetBodySnapshotExportStaysShapeAgnostic() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch } = createRectangleSketch(
+      "sketch_sheet_snapshot" as SketchId,
+      plane,
+    );
+    const chain = sketch.sketch.definition.entities.filter((entity) =>
+      ["bottom", "right"].includes(entity.label),
+    );
+    const initialState = createOccAuthoringState(oc, {
+      sketches: [sketch],
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    });
+    const rebuilt = rebuildOccAuthoringState(initialState, [
+      {
+        featureId: "feature_sheet_snapshot_extrude" as FeatureId,
+        suppressed: false,
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "surface",
+            profiles: chain.map((entity) => ({
+              kind: "sketchEntity" as const,
+              sketchId: sketch.sketchId,
+              entityId: entity.entityId,
+            })),
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "blind",
+                direction: "positive",
+                distance: { source: "literal", value: 2 },
+              },
+            },
+          },
+        },
+      },
+    ]);
+    const snapshot = buildOccWorkspaceSnapshot(rebuilt);
+    const validator = createModelingSnapshotValidator(snapshot);
+    const normalized = await validator.getCurrentDocumentSnapshot();
+
+    const sheetBody = normalized.document.bodies.find(
+      (body) => body.bodyKind === "sheet",
+    );
+    expect(
+      sheetBody,
+      "Surface extrude must persist a sheet body snapshot record.",
+    ).toBeTruthy();
+    expect(
+      normalized.document.objects.some(
+        (object) =>
+          object.target.kind === "body" &&
+          object.target.bodyId === sheetBody.bodyId &&
+          object.description === "Sheet body",
+      ),
+      "Object-tree presentation must describe sheet bodies by body kind.",
+    ).toBeTruthy();
+
+    const sheetRenderRecords = normalized.document.render.records.filter(
+      (record) => record.ownerBodyId === sheetBody.bodyId,
+    );
+    expect(
+      sheetRenderRecords.some(
+        (record) =>
+          record.binding.topology === "face" && record.geometry.kind === "mesh",
+      ),
+      "Tessellation must export sheet faces as meshes through the shared shape-agnostic path.",
+    ).toBeTruthy();
+    expect(
+      sheetRenderRecords.some(
+        (record) =>
+          record.binding.topology === "edge" &&
+          record.geometry.kind === "polyline",
+      ),
+      "Tessellation must export sheet edges as polylines through the shared shape-agnostic path.",
+    ).toBeTruthy();
+
+    const sheetEntityTargetKinds = new Set(
+      normalized.document.entities
+        .filter(
+          (entry) =>
+            entry.ownerBodyId === sheetBody.bodyId &&
+            entry.target.kind !== "body",
+        )
+        .map((entry) => entry.target.kind),
+    );
+    expect(
+      [...sheetEntityTargetKinds].sort(),
+      "Sheet bodies must publish face, edge, and vertex picking target records like solids.",
+    ).toEqual(["edge", "face", "vertex"]);
+    expect(
+      sheetBody.topology.faceIds.length > 0 &&
+        sheetBody.topology.edgeIds.length > 0 &&
+        sheetBody.topology.vertexIds.length > 0,
+      "Sheet body topology snapshots must carry durable face, edge, and vertex ids.",
+    ).toBeTruthy();
+  }
+
   await testWorkspaceSnapshotBuildsContractValidRenderExport();
+  await testSheetBodySnapshotExportStaysShapeAgnostic();
   await testSketchOwnedProfilesMarkConsumedSketchOwnership();
   await testPlanarFaceProfilesDoNotInventConsumedSketchOwnership();
   await testShellSnapshotEntitiesExposeContributorAncestry();

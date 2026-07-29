@@ -553,6 +553,7 @@ function createExtrudeDefinition(
     kind: "extrude",
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
     parameters: {
+      resultBodyType: "solid",
       profiles: [
         {
           kind: "region",

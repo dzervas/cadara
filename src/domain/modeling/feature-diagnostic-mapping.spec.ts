@@ -27,6 +27,7 @@ test("src/domain/modeling/feature-diagnostic-mapping.spec.ts", () => {
     kind: "extrude",
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
     parameters: {
+      resultBodyType: "solid",
       profiles: [missingRegion],
       startExtent: { kind: "profilePlane" },
       extent: {

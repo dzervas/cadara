@@ -217,6 +217,31 @@ export type ExtrudeProfileRef =
   | { kind: "face"; bodyId: BodyId; faceId: FaceId };
 
 /**
+ * Durable reference to exactly one open sketch curve used as a surface profile
+ * seed. One ref names one sketch entity; connected chains are expressed as
+ * several refs and grouped into a single wire by the modeling adapter.
+ */
+export type OpenSketchCurveProfileRef = {
+  kind: "sketchEntity";
+  sketchId: SketchId;
+  entityId: import("@/contracts/shared/ids").SketchEntityId;
+};
+
+/** Profile seeds accepted by solid-producing extrudes. */
+export type ExtrudeSolidProfileRef = ExtrudeProfileRef;
+
+/** Profile seeds accepted by surface-producing extrudes. */
+export type ExtrudeSurfaceProfileRef =
+  | ExtrudeProfileRef
+  | OpenSketchCurveProfileRef;
+
+/**
+ * Explicit result body shape produced by a body-creating feature.
+ * `solid` is a closed volumetric body; `sheet` is a surface/shell body.
+ */
+export type BodyKind = "solid" | "sheet";
+
+/**
  * Explicit participant scope for boolean feature evaluation.
  * Kernels must not infer boolean participants from hidden selection state.
  */
@@ -398,14 +423,16 @@ export type RevolveFeatureExtent =
     };
 
 /**
- * Fully typed extrude parameters.
+ * Solid-producing extrude parameters.
  * `profiles` is the single authoritative ordered profile seed collection;
  * callers must not repeat the same meaning in side-band generic arrays.
  * Blind extrude distances are expressed in document modeling units and must be strictly positive.
  */
-export interface ExtrudeFeatureParameters {
-  /** Non-empty ordered profile seeds for the extrude operation. */
-  profiles: NonEmptyReadonlyArray<ExtrudeProfileRef>;
+export interface ExtrudeSolidFeatureParameters {
+  /** Explicit solid result discriminant. */
+  resultBodyType: "solid";
+  /** Non-empty ordered closed profile seeds for the extrude operation. */
+  profiles: NonEmptyReadonlyArray<ExtrudeSolidProfileRef>;
   /** Explicit start condition for the extrusion path. */
   startExtent: ExtrudeStartExtent;
   /** Explicit end controls for all active extrude sides. */
@@ -415,6 +442,26 @@ export interface ExtrudeFeatureParameters {
   /** Explicit participant scope for non-standalone boolean operations. */
   booleanScope: FeatureBooleanScope;
 }
+
+/**
+ * Surface-producing extrude parameters.
+ * Boolean operation state is unrepresentable for sheet creation.
+ */
+export interface ExtrudeSurfaceFeatureParameters {
+  /** Explicit sheet result discriminant. */
+  resultBodyType: "surface";
+  /** Non-empty ordered profile seeds, including open sketch curves. */
+  profiles: NonEmptyReadonlyArray<ExtrudeSurfaceProfileRef>;
+  /** Explicit start condition for the extrusion path. */
+  startExtent: ExtrudeStartExtent;
+  /** Explicit end controls for all active extrude sides. */
+  extent: ExtrudeFeatureExtent;
+}
+
+/** Result-body discriminated extrude parameters. */
+export type ExtrudeFeatureParameters =
+  | ExtrudeSolidFeatureParameters
+  | ExtrudeSurfaceFeatureParameters;
 
 /**
  * Fillet edge reference accepted by the kernel contract.
@@ -480,6 +527,14 @@ export type PlaneFeatureParameters =
  */
 export type RevolveProfileRef = ExtrudeProfileRef;
 
+/** Profile seeds accepted by solid-producing revolves. */
+export type RevolveSolidProfileRef = RevolveProfileRef;
+
+/** Profile seeds accepted by surface-producing revolves. */
+export type RevolveSurfaceProfileRef =
+  | RevolveProfileRef
+  | OpenSketchCurveProfileRef;
+
 /**
  * Placeholder revolve axis reference.
  * Axis ownership must remain durable and explicit.
@@ -494,9 +549,11 @@ export type RevolveAxisRef =
  * The kernel may reject these requests as unsupported, but the request shape is
  * already specific enough for an implementer to build against without guessing.
  */
-export interface RevolveFeatureParameters {
+export interface RevolveSolidFeatureParameters {
+  /** Explicit solid result discriminant. */
+  resultBodyType: "solid";
   /** Non-empty ordered closed profile seeds to revolve. */
-  profiles: NonEmptyReadonlyArray<RevolveProfileRef>;
+  profiles: NonEmptyReadonlyArray<RevolveSolidProfileRef>;
   /** Explicit axis reference used by the revolve. */
   axis: RevolveAxisRef;
   /** Explicit start angle in radians from the profile's zero-angle pose. */
@@ -508,6 +565,28 @@ export interface RevolveFeatureParameters {
   /** Explicit participant scope for non-standalone boolean operations. */
   booleanScope: FeatureBooleanScope;
 }
+
+/**
+ * Surface-producing revolve parameters.
+ * Boolean operation state is unrepresentable for sheet creation.
+ */
+export interface RevolveSurfaceFeatureParameters {
+  /** Explicit sheet result discriminant. */
+  resultBodyType: "surface";
+  /** Non-empty ordered profile seeds, including open sketch curves. */
+  profiles: NonEmptyReadonlyArray<RevolveSurfaceProfileRef>;
+  /** Explicit axis reference used by the revolve. */
+  axis: RevolveAxisRef;
+  /** Explicit start angle in radians from the profile's zero-angle pose. */
+  startAngle: AuthoredValue<number>;
+  /** Explicit angular end controls for all active revolve sides. */
+  extent: RevolveFeatureExtent;
+}
+
+/** Result-body discriminated revolve parameters. */
+export type RevolveFeatureParameters =
+  | RevolveSolidFeatureParameters
+  | RevolveSurfaceFeatureParameters;
 
 /**
  * Durable face reference accepted by the shell contract.
@@ -1087,6 +1166,8 @@ export interface BodySnapshotRecord extends SnapshotOwnershipRecord {
   bodyId: BodyId;
   /** Human-readable body label. */
   label: string;
+  /** Explicit result shape family owned by this body. */
+  bodyKind: BodyKind;
   /** Explicit topology membership owned by the body snapshot. */
   topology: BodyTopologySnapshotRecord;
   /**

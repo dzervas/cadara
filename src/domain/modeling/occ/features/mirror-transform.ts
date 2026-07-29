@@ -30,6 +30,7 @@ import { advanceTopologyToken } from "@/domain/modeling/occ/topology";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
 import {
   requireBody,
+  requireSolidBody,
   requireEdge,
   requireFace,
   requireConstructionPlaneDefinition,
@@ -317,7 +318,7 @@ export function executeMirrorFeature(
         "advanced-feature-unsupported-kernel-case: OCC mirror add requires one source body identical to its target.",
       );
     }
-    const sourceBody = requireBody(context, target.bodyId);
+    const sourceBody = requireSolidBody(context, target.bodyId, "mirror");
     const transform = new context.oc.BRepBuilderAPI_Transform_2(
       sourceBody.shape,
       mirror,
@@ -356,7 +357,7 @@ export function executeMirrorFeature(
 
   const mirroredBodies: OccTrackedBody[] = [];
   for (const [index, bodyTarget] of bodyTargets.entries()) {
-    const body = requireBody(context, bodyTarget.bodyId);
+    const body = requireSolidBody(context, bodyTarget.bodyId, "mirror");
     const transformedShape = (() => {
       const nativeTransaction = buildNativeTransformTransaction(
         context,
@@ -641,7 +642,7 @@ export function executeTransformFeature(
 
   const topologyStages: OccFeatureTopologyStage[] = [];
   for (const bodyTarget of bodyTargets) {
-    const body = requireBody(context, bodyTarget.bodyId);
+    const body = requireSolidBody(context, bodyTarget.bodyId, "transform");
     const nativeTransaction = buildNativeTransformTransaction(
       context,
       body,

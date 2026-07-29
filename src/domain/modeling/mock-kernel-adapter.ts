@@ -661,6 +661,7 @@ function createMockBakedBodyArtifacts(input: {
       ownerBodyId: bodyId,
       bodyId,
       label: input.featureLabel,
+      bodyKind: "solid" as const,
       topology: {
         faceIds: [faceId],
         edgeIds,
@@ -1530,6 +1531,7 @@ function createMockPatternBodyArtifacts(input: {
         ownerBodyId: bodyId,
         bodyId,
         label,
+        bodyKind: "solid",
         topology: { faceIds: [], edgeIds: [], vertexIds: [] },
         topologyPresentation: "bodyOnlyMesh",
       });
@@ -3940,8 +3942,9 @@ async function buildSnapshot(
       suppressed: false,
       definition: {
         kind: "extrude",
-        featureTypeVersion: "feature-type/extrude/v1alpha1",
+        featureTypeVersion: "feature-type/extrude/v1alpha2",
         parameters: {
+          resultBodyType: "solid",
           profiles: [primaryRegion.target],
           startExtent: {
             kind: "profilePlane",
@@ -4136,6 +4139,7 @@ async function buildSnapshot(
         ownerBodyId: "body_part-1",
         bodyId: "body_part-1",
         label: "Part 1",
+        bodyKind: "solid",
         topology: {
           faceIds: [
             "face_top",

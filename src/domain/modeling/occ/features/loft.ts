@@ -20,7 +20,7 @@ import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   requireSketchSnapshot,
   requireRegion,
-  requireBody,
+  requireSolidBody,
   requireFace,
   requireEdge,
   requireVertex,
@@ -54,7 +54,7 @@ function buildLoftSectionWire(
   }
 
   if (profile.kind === "face") {
-    const body = requireBody(context, profile.bodyId);
+    const body = requireSolidBody(context, profile.bodyId, "loft");
     const face = requireFace(context, body, profile.faceId);
     getExtrusionNormalForPlanarFace(context.oc, face, "positive");
     return context.oc.BRepTools.OuterWire(face);
@@ -159,7 +159,7 @@ function assertLoftGuideTargetsResolve(
 ) {
   for (const target of guideCurveTargets) {
     if (target.kind === "edge") {
-      requireEdge(context, requireBody(context, target.bodyId), target.edgeId);
+      requireEdge(context, requireSolidBody(context, target.bodyId, "loft"), target.edgeId);
       continue;
     }
 
@@ -203,13 +203,13 @@ function assertSupportedLoftConnections(
     if (endpoint?.kind === "edge") {
       requireEdge(
         context,
-        requireBody(context, endpoint.bodyId),
+        requireSolidBody(context, endpoint.bodyId, "loft"),
         endpoint.edgeId,
       );
     } else if (endpoint?.kind === "vertex") {
       requireVertex(
         context,
-        requireBody(context, endpoint.bodyId),
+        requireSolidBody(context, endpoint.bodyId, "loft"),
         endpoint.vertexId,
       );
     } else {

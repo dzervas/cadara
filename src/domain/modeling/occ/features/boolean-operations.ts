@@ -42,7 +42,7 @@ import {
 } from "@/domain/modeling/occ/topology-naming";
 import { formatGeneratedProducerTopologySourceKey } from "@/domain/modeling/occ/topology-stage";
 import {
-  requireBody,
+  requireSolidBody,
   trackNewBodyResults,
   type OccFeatureExecutionContext,
 } from "@/domain/modeling/occ/features/shared";
@@ -1291,7 +1291,7 @@ export function resolveReplacementBodies(
     onSever?: "reject" | "freshIdentities";
   },
 ) {
-  const current = requireBody(context, bodyId);
+  const current = requireSolidBody(context, bodyId, "boolean replacement");
   const solids = extractSolidShapes(context.oc, shape);
   for (const solid of solids) {
     assertValidFeatureResultShape(context, solid, String(ownerFeatureId));
@@ -1428,6 +1428,40 @@ export function requireUniqueTargetBodies(targetBodyIds: readonly BodyId[]) {
   }
 }
 
+/**
+ * Result of a surface-producing feature.
+ *
+ * `resultBodyType: "surface"` payloads carry no operation and no boolean scope,
+ * so a sheet result never participates in boolean composition: it is tracked as
+ * one new sheet body and existing bodies are untouched.
+ */
+export function trackSurfaceFeatureResult(
+  context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
+  featureShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  options: { sourceShapes?: OccFeatureSourceShapeMap } = {},
+) {
+  const newBodies = trackNewBodyResults(
+    context,
+    ownerFeatureId,
+    ownerFeatureId,
+    featureShape,
+    "sheet",
+  );
+
+  return {
+    bodies: [...context.bodies, ...newBodies],
+    producedTargets: newBodies.map(
+      (body) => ({ kind: "body", bodyId: body.bodyId }) as DurableRef,
+    ),
+    historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
+    featureSourceTargets: mapFeatureSourceTargets(
+      newBodies,
+      options.sourceShapes,
+    ),
+  };
+}
+
 export function applyBooleanPolicy(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -1485,7 +1519,7 @@ export function applyBooleanPolicy(
 
   if (!policy) {
     const bodyId = targetBodyIds[0]!;
-    const targetBody = requireBody(context, bodyId);
+    const targetBody = requireSolidBody(context, bodyId, `boolean ${operation}`);
     let projectedSourceShapes = options.sourceShapes;
     let replacementResult = options.sourceShapes
       ? null
@@ -1551,7 +1585,11 @@ export function applyBooleanPolicy(
 
   if (policy.application === "sequential") {
     const [firstBodyId, ...restBodyIds] = targetBodyIds;
-    const firstBody = requireBody(context, firstBodyId!);
+    const firstBody = requireSolidBody(
+      context,
+      firstBodyId!,
+      `boolean ${policy.operation}`,
+    );
     const combinedHistoryInvalidations = new Map<
       string,
       OccReferenceInvalidationRecord
@@ -1578,7 +1616,11 @@ export function applyBooleanPolicy(
           break;
         }
 
-        const body = requireBody(context, bodyId);
+        const body = requireSolidBody(
+          context,
+          bodyId,
+          `boolean ${policy.operation}`,
+        );
         replacementResult = resolveNativeBooleanReplacement(
           context,
           currentBody,
@@ -1623,7 +1665,11 @@ export function applyBooleanPolicy(
       }
 
       for (const bodyId of restBodyIds) {
-        const body = requireBody(context, bodyId);
+        const body = requireSolidBody(
+          context,
+          bodyId,
+          `boolean ${policy.operation}`,
+        );
         currentResult = runBoolean(
           context.oc,
           policy.operation,
@@ -1664,7 +1710,11 @@ export function applyBooleanPolicy(
     nextBodies.splice(firstIndex, 1, ...replacementResult.replacements);
 
     for (const bodyId of targetBodyIds.slice(1)) {
-      const consumedBody = requireBody(context, bodyId);
+      const consumedBody = requireSolidBody(
+        context,
+        bodyId,
+        `boolean ${policy.operation}`,
+      );
       const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId);
       if (index >= 0) {
         nextBodies.splice(index, 1);
@@ -1710,7 +1760,11 @@ export function applyBooleanPolicy(
   const inheritedSourceTargets = new Map<string, DurableRef[]>();
 
   for (const bodyId of targetBodyIds) {
-    const targetBody = requireBody(context, bodyId);
+    const targetBody = requireSolidBody(
+      context,
+      bodyId,
+      `boolean ${policy.operation}`,
+    );
     let targetSourceShapes = options.sourceShapes;
     let replacementResult = options.sourceShapes
       ? null
