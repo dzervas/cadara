@@ -5,6 +5,7 @@ import type {
   ExtrudeEndCondition,
   ExtrudeStartExtent,
   ExtrudeSolidFeatureParameters,
+  ExtrudeSurfaceFeatureParameters,
   ExtrudeProfileRef,
   FeatureBooleanScope,
   FeatureDefinition,
@@ -153,8 +154,14 @@ export type ImportDeferredProfileRef =
   /** A captured planar profile face rematched against live topology at apply. */
   | ImportDeferredTopologyRef;
 
-/** @deprecated Prefer the feature-agnostic ImportDeferredProfileRef. */
-export type ImportDeferredExtrudeProfileRef = ImportDeferredProfileRef;
+/**
+ * Profile seeds accepted by a surface extrude. An open sketch curve defers only
+ * its sketch id, exactly like the revolve axis: the entity is an exact authored
+ * reference, never a live-topology rematch.
+ */
+export type ImportDeferredSurfaceProfileRef =
+  | ImportDeferredProfileRef
+  | ImportDeferredSketchEntityRef;
 
 export type ImportDeferredFeatureBooleanScope =
   | Exclude<FeatureBooleanScope, { kind: "targetBody" | "targetBodies" }>
@@ -227,19 +234,37 @@ export type ImportDeferredExtrudeExtent =
       secondEnd: ImportDeferredExtrudeEndCondition;
     };
 
-export interface ImportDeferredExtrudeFeatureParameters
+export interface ImportDeferredExtrudeSolidFeatureParameters
   extends Omit<
     ExtrudeSolidFeatureParameters,
     "profiles" | "booleanScope" | "extent" | "startExtent"
   > {
   profiles: readonly [
-    ImportDeferredExtrudeProfileRef,
-    ...ImportDeferredExtrudeProfileRef[],
+    ImportDeferredProfileRef,
+    ...ImportDeferredProfileRef[],
   ];
   extent: ImportDeferredExtrudeExtent;
   startExtent: ImportDeferredExtrudeStartExtent;
   booleanScope: ImportDeferredFeatureBooleanScope;
 }
+
+/** Surface extrudes carry no boolean state, exactly like the durable contract. */
+export interface ImportDeferredExtrudeSurfaceFeatureParameters
+  extends Omit<
+    ExtrudeSurfaceFeatureParameters,
+    "profiles" | "extent" | "startExtent"
+  > {
+  profiles: readonly [
+    ImportDeferredSurfaceProfileRef,
+    ...ImportDeferredSurfaceProfileRef[],
+  ];
+  extent: ImportDeferredExtrudeExtent;
+  startExtent: ImportDeferredExtrudeStartExtent;
+}
+
+export type ImportDeferredExtrudeFeatureParameters =
+  | ImportDeferredExtrudeSolidFeatureParameters
+  | ImportDeferredExtrudeSurfaceFeatureParameters;
 
 export type ImportDeferredRevolveAxisRef =
   | Exclude<RevolveAxisRef, { kind: "sketchEntity" }>
@@ -359,6 +384,7 @@ export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
   bodyOf: ["createFeatures[].definition.parameters.booleanScope.bodyId"],
   sketchIdOf: [
     "createFeatures[].definition.parameters.axis.sketchId",
+    "createFeatures[].definition.parameters.profiles[].sketchId",
     "createFeatures[].definition.parameters.participants[].targets[].sketchId",
     "createFeatures[].definition.parameters.extent.end.target.sketchId",
     "createFeatures[].definition.parameters.extent.firstEnd.target.sketchId",

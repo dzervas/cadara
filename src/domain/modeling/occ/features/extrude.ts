@@ -559,7 +559,7 @@ function buildExtrudeProfileShapes(
 
   if (profile.kind === "sketchEntity") {
     throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC extrude does not implement open sketch-curve surface profiles yet.",
+      "advanced-feature-unsupported-kernel-case: OCC solid extrude cannot consume open sketch-curve profiles; open curves are surface-only profile seeds.",
     );
   }
 

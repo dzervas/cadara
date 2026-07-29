@@ -95,6 +95,10 @@ export type PlanReasonCode =
   // Consumes body faces/edges/bodies mid-history; needs the sandboxed probe.
   | "needs-history-probe"
   | "extrude-body-type-unsupported"
+  // Surface extrude forms the surface contract or the adapter cannot express.
+  | "extrude-surface-operation-unsupported"
+  | "extrude-surface-draft-unsupported"
+  | "extrude-surface-profile-unresolved"
   | "extrude-default-scope-ambiguous"
   // The extrude's up-to (extent) or explicit boolean-scope topology slot could
   // not be resolved against the exact pre-consumer prefix, so it can never be

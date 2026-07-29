@@ -29,7 +29,9 @@ import { translateOnshapeExpression } from "@/domain/import/onshape/expression-t
 import {
   referencedSketchFeatureIdsFromProfileParameter,
   resolveOnshapeSketchProfiles,
+  resolveOnshapeOpenSketchCurveProfiles,
   type DeferredOnshapeProfile,
+  type DeferredOpenSketchCurveProfile,
   type ProfileResolutionDiagnostic,
 } from "@/domain/import/onshape/profile-resolver";
 import type { TopologyResolutionBinding } from "@/domain/import/onshape/topology-reference-resolver";
@@ -119,16 +121,29 @@ export type PlannedExtrudeBoolean =
       targets: readonly ImportDeferredTopologyRef[];
     };
 
-export interface PlannedExtrude {
-  /** Ordered exact query results; each profile carries its own source sketch or face identity. */
-  profiles: PlannedExtrudeProfile[];
+interface PlannedExtrudeShared {
   extent: PlannedExtrudeExtent;
   startExtent: PlannedExtrudeStartExtent;
-  operation: AuthoredValue<FeatureBooleanOperation>;
-  boolean: PlannedExtrudeBoolean;
   /** Active topology roles resolved atomically against the exact pre-consumer prefix. */
   topologySlots: readonly TopologyQuerySlot[];
 }
+
+export interface PlannedSolidExtrude extends PlannedExtrudeShared {
+  resultBodyType: "solid";
+  /** Ordered exact query results; each profile carries its own source sketch or face identity. */
+  profiles: PlannedExtrudeProfile[];
+  operation: AuthoredValue<FeatureBooleanOperation>;
+  boolean: PlannedExtrudeBoolean;
+}
+
+/** Surface extrudes create one sheet body, so no boolean state is representable. */
+export interface PlannedSurfaceExtrude extends PlannedExtrudeShared {
+  resultBodyType: "surface";
+  /** Ordered durable open sketch curves forming exactly one connected chain. */
+  profiles: DeferredOpenSketchCurveProfile[];
+}
+
+export type PlannedExtrude = PlannedSolidExtrude | PlannedSurfaceExtrude;
 
 export type ExtrudePlanDiagnostic = ProfileResolutionDiagnostic;
 
@@ -143,6 +158,9 @@ export type ExtrudePlanResult =
         | "extrude-body-type-unsupported"
         | "extrude-start-extent-unsupported"
         | "extrude-default-scope-ambiguous"
+        | "extrude-surface-operation-unsupported"
+        | "extrude-surface-draft-unsupported"
+        | "extrude-surface-profile-unresolved"
         | "unsupported-feature";
       diagnostics: ExtrudePlanDiagnostic[];
     };
@@ -397,7 +415,7 @@ function translateStartExtent(
     // The pinned displacement is measured along the first direction's extrude
     // direction, so a symmetric or two-sided extent names no single start plane.
     if (booleanValue(feature, "hasSecondDirection")) return null;
-    if ((enumValue(feature, "endBound") ?? "BLIND") === "SYMMETRIC") return null;
+    if (isSymmetricExtrude(feature)) return null;
     if (
       booleanValue(feature, "startOffsetOppositeDirection") !==
       booleanValue(feature, "oppositeDirection")
@@ -545,6 +563,19 @@ function translateEnd(
   }
 }
 
+function isSymmetricExtrude(feature: OnshapeFeatureNode): boolean {
+  return (
+    booleanValue(feature, "symmetric") ||
+    (enumValue(feature, "endBound") ?? "BLIND") === "SYMMETRIC"
+  );
+}
+
+function halvedDistance(distance: AuthoredValue<number>): AuthoredValue<number> {
+  return distance.source === "literal"
+    ? { source: "literal", value: distance.value / 2 }
+    : { source: "expression", valueText: `((${distance.valueText}) / 2)` };
+}
+
 function translateExtent(
   feature: OnshapeFeatureNode,
   diagnostics: ExtrudePlanDiagnostic[],
@@ -557,9 +588,18 @@ function translateExtent(
     const secondEnd = translateEnd(feature, "second", diagnostics, slots, input);
     return secondEnd ? { mode: "twoSide", firstEnd, secondEnd } : null;
   }
-  if ((enumValue(feature, "endBound") ?? "BLIND") === "SYMMETRIC") {
-    return firstEnd.kind === "blind" || firstEnd.kind === "throughAll"
-      ? { mode: "symmetric", end: firstEnd }
+  // Onshape's `symmetric` flag distributes the authored blind depth evenly about
+  // the profile plane: the `d3cd9b09c3c36af1dd2efae9` `Extrude 4` sheet authors
+  // `depth = 50 mm, symmetric = true` and its captured rollback body spans
+  // z ∈ [-25 mm, +25 mm]. Cadara's symmetric extent applies its end distance in
+  // BOTH directions, so the faithful translation halves the authored depth.
+  if (isSymmetricExtrude(feature)) {
+    if (firstEnd.kind === "throughAll") return { mode: "symmetric", end: firstEnd };
+    return firstEnd.kind === "blind"
+      ? {
+          mode: "symmetric",
+          end: { ...firstEnd, distance: halvedDistance(firstEnd.distance) },
+        }
       : null;
   }
   return { mode: "oneSide", end: firstEnd };
@@ -572,10 +612,62 @@ const OPERATION_MAP: Record<string, FeatureBooleanOperation> = {
   INTERSECT: "intersect",
 };
 
+/**
+ * Plan an Onshape `bodyType: SURFACE` extrude as a surface extrude feature. The
+ * surface contract carries no boolean state and the adapter cannot draft a swept
+ * sheet, so a non-`NEW` surface operation or an authored draft angle bakes with
+ * its own reason instead of dropping authored intent.
+ */
+function planSurfaceExtrude(
+  input: ExtrudePlanInput,
+  diagnostics: ExtrudePlanDiagnostic[],
+  startExtent: PlannedExtrudeStartExtent,
+  extent: PlannedExtrudeExtent,
+  topologySlots: TopologyQuerySlot[],
+): ExtrudePlanResult {
+  const { feature } = input;
+  const operationType =
+    enumValue(feature, "surfaceOperationType") ??
+    enumValue(feature, "operationType") ??
+    "NEW";
+  if (operationType !== "NEW") {
+    return { tier: "baked", reason: "extrude-surface-operation-unsupported", diagnostics };
+  }
+  const ends =
+    extent.mode === "twoSide" ? [extent.firstEnd, extent.secondEnd] : [extent.end];
+  if (ends.some((end) => end.draftAngle !== undefined)) {
+    return { tier: "baked", reason: "extrude-surface-draft-unsupported", diagnostics };
+  }
+
+  const profileResolution = resolveOnshapeOpenSketchCurveProfiles({
+    profileParameter: findParameter(feature, "surfaceEntities"),
+    featureKind: "surface extrude",
+    featureLabel: feature.name ?? feature.featureId,
+    solvedSketchesByFeatureId: input.solvedSketchesByFeatureId,
+    referencedSketchesByFeatureId: input.referencedSketchesByFeatureId,
+  });
+  diagnostics.push(...profileResolution.diagnostics);
+  if (profileResolution.tier === "unresolved") {
+    return { tier: "baked", reason: "extrude-surface-profile-unresolved", diagnostics };
+  }
+
+  const plannedExtrude: PlannedSurfaceExtrude = {
+    resultBodyType: "surface",
+    profiles: profileResolution.profiles,
+    extent,
+    startExtent,
+    topologySlots,
+  };
+  return topologySlots.length > 0
+    ? { tier: "topology", plannedExtrude, diagnostics }
+    : { tier: "parametric", plannedExtrude, diagnostics };
+}
+
 export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   const diagnostics: ExtrudePlanDiagnostic[] = [];
   const { feature } = input;
-  if ((enumValue(feature, "bodyType") ?? "SOLID") !== "SOLID") {
+  const bodyType = enumValue(feature, "bodyType") ?? "SOLID";
+  if (bodyType !== "SOLID" && bodyType !== "SURFACE") {
     return { tier: "baked", reason: "extrude-body-type-unsupported", diagnostics };
   }
 
@@ -595,6 +687,14 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
   );
   if (!startExtent) {
     return { tier: "baked", reason: "extrude-start-extent-unsupported", diagnostics };
+  }
+
+  if (bodyType === "SURFACE") {
+    const extent = translateExtent(feature, diagnostics, topologySlots, input);
+    if (!extent) {
+      return { tier: "baked", reason: "unsupported-feature", diagnostics };
+    }
+    return planSurfaceExtrude(input, diagnostics, startExtent, extent, topologySlots);
   }
 
   const profileParameter = findParameter(feature, "entities");
@@ -661,7 +761,8 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
     }
   }
 
-  const plannedExtrude: PlannedExtrude = {
+  const plannedExtrude: PlannedSolidExtrude = {
+    resultBodyType: "solid",
     profiles: profileResolution.profiles,
     extent,
     startExtent,
@@ -723,6 +824,10 @@ export function resolvePlannedExtrudeTopology(
     startExtent = { kind: "entityOffset", target: { ...target, expectedKind: target.expectedKind } };
   }
 
+  if (planned.resultBodyType === "surface") {
+    return { ...planned, extent, startExtent };
+  }
+
   let boolean = planned.boolean;
   if (boolean.kind === "topologyTargets") {
     const slotKey = boolean.slotKey;
@@ -754,7 +859,9 @@ export function hasUnresolvedExtrudeTopology(planned: PlannedExtrude): boolean {
   return unresolvedExtent ||
     (planned.startExtent.kind === "entityOffset" &&
       planned.startExtent.target.kind === "topologySlot") ||
-    (planned.boolean.kind === "topologyTargets" && planned.boolean.targets.length === 0);
+    (planned.resultBodyType === "solid" &&
+      planned.boolean.kind === "topologyTargets" &&
+      planned.boolean.targets.length === 0);
 }
 
 /** True when a resolved plan still carries live apply-time topology selectors. */

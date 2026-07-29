@@ -1134,9 +1134,13 @@ test("src/domain/import/onshape/provider.spec.ts surfaces human-readable review 
   );
 });
 
-test("src/domain/import/onshape/provider.spec.ts cannot promote a SURFACE Extrude 4 under review", async () => {
+// Lane: logic (per docs/testing.md — exported importer review/prepare seam).
+// Seam: an Onshape SURFACE extrude becomes a surface extrude feature definition
+// carrying deferred open sketch-curve profiles and no boolean state.
+test("src/domain/import/onshape/provider.spec.ts prepares a SURFACE Extrude 4 as a surface extrude feature", async () => {
+  const source = sourceFromBundle(makeWaveXSurfaceExtrudeCaptureBundle());
   const review = await onshapeImportProvider.review({
-    source: sourceFromBundle(makeWaveXSurfaceExtrudeCaptureBundle()),
+    source,
     capabilities: capabilitiesWithProbe([]),
   });
   expect(review.providerReview.valid).toBe(true);
@@ -1145,24 +1149,44 @@ test("src/domain/import/onshape/provider.spec.ts cannot promote a SURFACE Extrud
   for (const studio of review.providerReview.studios) {
     const surface = studio.featurePlans.find((feature) => feature.label === "Extrude 4");
     expect(surface).toMatchObject({
-      tier: "baked",
-      reasonCodes: ["extrude-body-type-unsupported"],
-      suppressed: true,
+      tier: "parametric",
+      reasonCodes: [],
+      suppressed: false,
     });
-    expect(surface?.plannedExtrude).toBeUndefined();
-
-    const schema = onshapeImportProvider.getReviewFormSchema(review, {
-      studioElementId: studio.elementId,
-      demotedFeatureIds: [],
-    });
-    const field = schema.sections
-      .find((section) => section.id === "fidelity-report")
-      ?.fields.find((candidate) => candidate.id === `feature-${surface?.onshapeFeatureId}`);
-    expect(field).toMatchObject({
-      kind: "summary",
-      value: expect.stringContaining("only solid extrudes can import as parametric solid features"),
-    });
+    expect(surface?.plannedExtrude?.resultBodyType).toBe("surface");
   }
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: capabilitiesWithProbe([]),
+  });
+  const surfaceExtrude = actions.createFeatures?.find(
+    (request) =>
+      request.definition.kind === "extrude" &&
+      request.definition.parameters.resultBodyType === "surface",
+  );
+  if (surfaceExtrude?.definition.kind !== "extrude") {
+    throw new Error("Expected a prepared surface extrude feature.");
+  }
+  const parameters = surfaceExtrude.definition.parameters;
+  expect(parameters.resultBodyType).toBe("surface");
+  expect(parameters).not.toHaveProperty("operation");
+  expect(parameters).not.toHaveProperty("booleanScope");
+  expect(parameters.profiles).toEqual([
+    {
+      kind: "sketchEntity",
+      sketchId: { kind: "sketchIdOf", actionIndex: 0 },
+      entityId: "sketch_entity_S_SURFACE_S_SURFACE_chainSegA",
+    },
+    {
+      kind: "sketchEntity",
+      sketchId: { kind: "sketchIdOf", actionIndex: 0 },
+      entityId: "sketch_entity_S_SURFACE_S_SURFACE_chainSegB",
+    },
+  ]);
+  expect(validateImportPreparedActions(actions).success).toBe(true);
 });
 
 // Lane: logic (per docs/testing.md — this tests the exported importer

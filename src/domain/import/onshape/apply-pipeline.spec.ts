@@ -37,6 +37,7 @@ import { makeWaveXPatternMirrorCaptureBundle } from "@/domain/import/onshape/wav
 import {
   makeWaveXClosedHollowShellCaptureBundle,
   makeWaveXRegionSelectionCaptureBundle,
+  makeWaveXSurfaceExtrudeCaptureBundle,
 } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import {
   applyImportPreparedActions,
@@ -4007,4 +4008,55 @@ test("a sketch-point start offset moves the extrude's start plane in real OCC", 
   // prism began at the profile plane (x = 0) and this high bound was 0.
   expect(Math.abs(bounds.high[0] - START_ABSCISSA)).toBeLessThan(1e-6);
   expect(Math.abs(bounds.low[0] - TERMINATOR_ABSCISSA)).toBeLessThan(1e-6);
+});
+
+// Lane: logic (per docs/testing.md — the importer/prepared-action/apply seam
+// through the real OCC adapter; no UI or browser behavior).
+// Seam: an Onshape SURFACE extrude prepared as a surface extrude feature rebuilds
+// into one sheet body on the real kernel, with no boolean state anywhere in the
+// applied request.
+test("a prepared Onshape surface extrude rebuilds into a sheet body in real OCC", async () => {
+  const oc = await loadRealOccForImportTest();
+  const { service } = createRealOccModelingService(oc);
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, snapshot);
+  const source = sourceFromBundle(makeWaveXSurfaceExtrudeCaptureBundle());
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  // Apply only the surface extrude and its profile sketch: the fixture's trailing
+  // solid cut exists to prove the sheet is not solid body lineage and bakes.
+  const surfaceIndex = actions.createFeatures?.findIndex(
+    (request) =>
+      request.definition.kind === "extrude" &&
+      request.definition.parameters.resultBodyType === "surface",
+  ) ?? -1;
+  expect(surfaceIndex).toBeGreaterThanOrEqual(0);
+  const surfaceActions: ImportPreparedActions = {
+    commitSketches: [actions.commitSketches![0]!],
+    createFeatures: [actions.createFeatures![surfaceIndex]!],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+    ],
+  };
+  expect(validateImportPreparedActions(surfaceActions).success).toBe(true);
+
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions: surfaceActions,
+  });
+  expect(
+    result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    "A prepared surface extrude must apply without error diagnostics.",
+  ).toEqual([]);
+  expect(result.rolledBack).toBe(false);
+
+  const applied = await service.getCurrentDocumentSnapshot();
+  expect(applied.document.bodies.map((body) => body.bodyKind)).toEqual(["sheet"]);
 });

@@ -95,7 +95,7 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
   }
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts keeps the two local SURFACE Extrude 4 forms out of solid plans and body lineage", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts plans the two local SURFACE Extrude 4 forms as surface features outside solid body lineage", () => {
   const bundle = makeWaveXSurfaceExtrudeCaptureBundle();
   expect(bundle.partStudios).toHaveLength(2);
   for (const studio of bundle.partStudios) {
@@ -106,11 +106,17 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts keeps the two local SUR
     );
 
     expect(surface).toMatchObject({
-      tier: "baked",
-      reasonCodes: ["extrude-body-type-unsupported"],
-      suppressed: true,
+      tier: "parametric",
+      reasonCodes: [],
+      suppressed: false,
     });
-    expect(surface?.plannedExtrude).toBeUndefined();
+    expect(surface?.plannedExtrude?.resultBodyType).toBe("surface");
+    expect(surface?.plannedExtrude?.profiles).toEqual([
+      { kind: "sketchCurve", sketchFeatureId: "S_SURFACE", entityId: "sketch_entity_S_SURFACE_S_SURFACE_chainSegA" },
+      { kind: "sketchCurve", sketchFeatureId: "S_SURFACE", entityId: "sketch_entity_S_SURFACE_S_SURFACE_chainSegB" },
+    ]);
+    // A sheet result is not solid body lineage, so the following default-scope
+    // cut still has no upstream body candidate at all.
     expect(downstreamCut).toMatchObject({
       tier: "baked",
       reasonCodes: ["needs-history-probe"],

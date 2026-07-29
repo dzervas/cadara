@@ -4,6 +4,7 @@ import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-
 import type { OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
 import {
   referencedSketchFeatureIdsFromProfileParameter,
+  resolveOnshapeOpenSketchCurveProfiles,
   resolveOnshapeSketchProfiles,
 } from "@/domain/import/onshape/profile-resolver";
 
@@ -415,4 +416,167 @@ test("profile source parser never decodes compressed query text", () => {
       ],
     }),
   ).toEqual(["S1"]);
+});
+
+// Lane: logic (per docs/testing.md — exported import profile-resolution seam).
+// Seam: Onshape surface-extrude `surfaceEntities` queries resolve to durable open
+// sketch-curve profile refs of the translated solved sketch, or stay unresolved.
+function solvedOpenChain(featureId: string, entityCount: 1 | 2 | 3) {
+  const positions: [number, number, number][] = [
+    [0, 0, 0],
+    [0.01, 0, 0],
+    [0.01, 0.01, 0],
+    [0, 0.01, 0],
+  ];
+  return {
+    featureId,
+    entities: Array.from({ length: entityCount }, (_, index) => ({
+      entityId: `${featureId}_seg${index}`,
+      entityType: "lineSegment" as const,
+      onshapeEntityType: "skLineSegment",
+      isConstruction: false,
+      start3d: positions[index]!,
+      end3d: positions[index + 1]!,
+    })),
+  };
+}
+
+function compressedEdgeQuery(sketchFeatureId: string, sketchEntityId: string) {
+  return {
+    queryString:
+      `query=qCompressed(1.0,"%B5$QueryM5Sa$entityTypeBa$EntityTypeS4$EDGESb$historyTypeS8$CREATIONSb$operationIdB2$IdA1S${sketchFeatureId.length.toString(16)}.6$${sketchFeatureId}wireOpS9$queryTypeSd$SKETCH_ENTITYSe$sketchEntityIdS${sketchEntityId.length.toString(16)}$${sketchEntityId}",id);`,
+  };
+}
+
+function wireQuery(sketchFeatureId: string) {
+  return {
+    queryString: `query = qConstructionFilter(qBodyType(qCreatedBy(id + "${sketchFeatureId}", EntityType.EDGE), BodyType.WIRE), ConstructionObject.NO);`,
+  };
+}
+
+function resolveOpenCurves(input: {
+  queries: { queryString: string }[];
+  solved: OnshapeSolvedSketch[];
+  tier?: string;
+}) {
+  return resolveOnshapeOpenSketchCurveProfiles({
+    profileParameter: { parameterId: "surfaceEntities", queries: input.queries },
+    featureKind: "surface extrude",
+    featureLabel: "Extrude 4",
+    solvedSketchesByFeatureId: new Map(input.solved.map((sketch) => [sketch.featureId, sketch])),
+    referencedSketchesByFeatureId: new Map(
+      input.solved.map((sketch) => [
+        sketch.featureId,
+        { ...frame, tier: input.tier ?? frame.tier },
+      ]),
+    ),
+  });
+}
+
+test("profile resolver reads compressed sketch-entity edge queries into durable open-curve profiles", () => {
+  const result = resolveOpenCurves({
+    queries: [
+      compressedEdgeQuery("S_OPEN", "S_OPEN_seg0"),
+      compressedEdgeQuery("S_OPEN", "S_OPEN_seg1"),
+    ],
+    solved: [solvedOpenChain("S_OPEN", 2)],
+  });
+
+  expect(result).toEqual({
+    tier: "resolved",
+    diagnostics: [],
+    profiles: [
+      { kind: "sketchCurve", sketchFeatureId: "S_OPEN", entityId: "sketch_entity_S_OPEN_S_OPEN_seg0" },
+      { kind: "sketchCurve", sketchFeatureId: "S_OPEN", entityId: "sketch_entity_S_OPEN_S_OPEN_seg1" },
+    ],
+  });
+});
+
+test("profile resolver expands a whole-sketch wire query over a region-free sketch", () => {
+  const result = resolveOpenCurves({
+    queries: [wireQuery("S_OPEN")],
+    solved: [solvedOpenChain("S_OPEN", 3)],
+  });
+
+  expect(result).toMatchObject({
+    tier: "resolved",
+    profiles: [
+      { entityId: "sketch_entity_S_OPEN_S_OPEN_seg0" },
+      { entityId: "sketch_entity_S_OPEN_S_OPEN_seg1" },
+      { entityId: "sketch_entity_S_OPEN_S_OPEN_seg2" },
+    ],
+  });
+});
+
+test("profile resolver rejects a whole-sketch wire query whose sketch derives closed regions", () => {
+  const result = resolveOpenCurves({
+    queries: [wireQuery("S_CLOSED")],
+    solved: [solvedCircle("S_CLOSED", [0, 0, 0])],
+  });
+
+  expect(result.tier).toBe("unresolved");
+  expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+    "onshape-surface-profile-wire-filter-ambiguous",
+  ]);
+});
+
+test("profile resolver rejects unreadable, cross-sketch, unmatched, and disconnected surface profiles", () => {
+  const unreadable = resolveOpenCurves({
+    queries: [{ queryString: 'query = qCreatedBy(id + "S_OPEN", EntityType.EDGE);' }],
+    solved: [solvedOpenChain("S_OPEN", 2)],
+  });
+  const crossSketch = resolveOpenCurves({
+    queries: [
+      compressedEdgeQuery("S_OPEN", "S_OPEN_seg0"),
+      compressedEdgeQuery("S_OTHER", "S_OTHER_seg0"),
+    ],
+    solved: [solvedOpenChain("S_OPEN", 2), solvedOpenChain("S_OTHER", 2)],
+  });
+  const unmatched = resolveOpenCurves({
+    queries: [compressedEdgeQuery("S_OPEN", "S_OPEN_missing")],
+    solved: [solvedOpenChain("S_OPEN", 2)],
+  });
+  const bakedSketch = resolveOpenCurves({
+    queries: [compressedEdgeQuery("S_OPEN", "S_OPEN_seg0")],
+    solved: [solvedOpenChain("S_OPEN", 2)],
+    tier: "baked",
+  });
+  // Two segments that share no endpoint cannot be grouped into one wire.
+  const disconnected = resolveOpenCurves({
+    queries: [
+      compressedEdgeQuery("S_SPLIT", "S_SPLIT_seg0"),
+      compressedEdgeQuery("S_SPLIT", "S_SPLIT_seg1"),
+    ],
+    solved: [{
+      featureId: "S_SPLIT",
+      entities: [
+        {
+          entityId: "S_SPLIT_seg0",
+          entityType: "lineSegment" as const,
+          onshapeEntityType: "skLineSegment",
+          isConstruction: false,
+          start3d: [0, 0, 0] as [number, number, number],
+          end3d: [0.01, 0, 0] as [number, number, number],
+        },
+        {
+          entityId: "S_SPLIT_seg1",
+          entityType: "lineSegment" as const,
+          onshapeEntityType: "skLineSegment",
+          isConstruction: false,
+          start3d: [0, 0.05, 0] as [number, number, number],
+          end3d: [0.01, 0.05, 0] as [number, number, number],
+        },
+      ],
+    }],
+  });
+
+  expect([unreadable, crossSketch, unmatched, bakedSketch, disconnected].map(
+    (result) => [result.tier, result.diagnostics.at(-1)?.code],
+  )).toEqual([
+    ["unresolved", "onshape-surface-profile-query-unreadable"],
+    ["unresolved", "onshape-surface-profile-multi-sketch"],
+    ["unresolved", "onshape-surface-profile-entity-unmatched"],
+    ["unresolved", "onshape-surface-profile-source-sketch-unavailable"],
+    ["unresolved", "onshape-surface-profile-chain-disconnected"],
+  ]);
 });
