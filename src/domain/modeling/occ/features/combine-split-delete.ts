@@ -9,12 +9,14 @@ import {
   type OccReferenceInvalidationRecord,
 } from "@/domain/modeling/occ/topology";
 import {
+  requireBody,
   requireSolidBody,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features/shared";
 import {
   runBoolean,
+  runSheetSplit,
   resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
   requireUniqueTargetBodies,
@@ -377,7 +379,8 @@ export function executeSplitFeature(
   }
 
   const targetBody = requireSolidBody(context, targetBodyRef.bodyId, "split");
-  const toolBody = requireSolidBody(context, toolBodyRef.bodyId, "split");
+  // A split tool may be a solid or a sheet body; the target must stay solid.
+  const toolBody = requireBody(context, toolBodyRef.bodyId);
   const nativeHost =
     context.oc as unknown as OpenCascadeNativeTopologyKernelHost;
   const nativeBuilder =
@@ -419,6 +422,48 @@ export function executeSplitFeature(
       historyInvalidations,
       collectNativeFeatureHistoryInvalidations(targetBody, nativeHistory),
     );
+
+    return {
+      bodies: nextBodies,
+      constructions: [...context.constructions],
+      constructionPlanes: new Map(context.constructionPlanes),
+      producedTargets: splitBodies.map((body) => ({
+        kind: "body" as const,
+        bodyId: body.bodyId,
+      })),
+      entities: [],
+      renderRecords: [],
+      historyInvalidations,
+    };
+  }
+
+  if (toolBody.bodyKind === "sheet") {
+    const splitResult = runSheetSplit(
+      context.oc,
+      targetBody.shape,
+      toolBody.shape,
+    );
+    const splitBodies = trackBodiesFromShape(
+      context,
+      ownerFeatureId,
+      "Split result",
+      splitResult.shape,
+      "split",
+    );
+    const nextBodies = context.bodies
+      .filter(
+        (body) =>
+          body.bodyId !== targetBody.bodyId &&
+          (keepTool || body.bodyId !== toolBody.bodyId),
+      )
+      .concat(splitBodies);
+    const historyInvalidations = createDeletedBodyInvalidations(targetBody);
+
+    for (const [key, value] of markSplitAmbiguousInvalidations(
+      collectTopologyHistoryInvalidations(targetBody, splitResult.builder),
+    )) {
+      historyInvalidations.set(key, value);
+    }
 
     return {
       bodies: nextBodies,

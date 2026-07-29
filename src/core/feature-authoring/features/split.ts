@@ -61,7 +61,7 @@ export const splitAuthoringDefinition = {
   metadata: {
     kind: "split",
     name: "Split",
-    tooltip: "Split one solid body with another solid tool body.",
+    tooltip: "Split one solid body with a solid or sheet tool body.",
     icon: "split",
     toolId: "split",
     groupId: "features",
@@ -206,7 +206,7 @@ export const splitAuthoringDefinition = {
               value: session.draft.toolBodyTarget,
               emptyLabel: "No split tool body selected",
               helper:
-                "Select the durable body used to cut the target into separate result bodies.",
+                "Select the solid or sheet body used to cut the target into separate result bodies.",
               error: session.draft.toolBodyTarget
                 ? null
                 : { message: "Select one split tool body." },

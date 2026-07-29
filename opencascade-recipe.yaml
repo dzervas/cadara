@@ -15,6 +15,7 @@ mainBuild:
     - symbol: BRepAlgoAPI_Common
     - symbol: BRepAlgoAPI_Cut
     - symbol: BRepAlgoAPI_Fuse
+    - symbol: BRepAlgoAPI_Splitter
     - symbol: BRepBuilderAPI_Command
     - symbol: BRepBuilderAPI_EdgeError
     - symbol: BRepBuilderAPI_FaceError

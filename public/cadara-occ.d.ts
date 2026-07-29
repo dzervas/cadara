@@ -485,6 +485,21 @@ export declare class BRepAlgoAPI_Fuse extends BRepAlgoAPI_BooleanOperation {
     constructor(S1: TopoDS_Shape, S2: TopoDS_Shape, aDSF: BOPAlgo_PaveFiller, theRange: Message_ProgressRange);
   }
 
+export declare class BRepAlgoAPI_Splitter extends BRepAlgoAPI_BuilderAlgo {
+  SetTools(theLS: TopTools_ListOfShape): void;
+  Tools(): TopTools_ListOfShape;
+  Build(theRange: Message_ProgressRange): void;
+  delete(): void;
+}
+
+  export declare class BRepAlgoAPI_Splitter_1 extends BRepAlgoAPI_Splitter {
+    constructor();
+  }
+
+  export declare class BRepAlgoAPI_Splitter_2 extends BRepAlgoAPI_Splitter {
+    constructor(thePF: BOPAlgo_PaveFiller);
+  }
+
 export declare class BRepBuilderAPI_Command {
   IsDone(): Standard_Boolean;
   Check(): void;
@@ -3791,6 +3806,9 @@ export type OpenCascadeInstance = {FS: typeof FS} & {
   BRepAlgoAPI_Fuse_2: typeof BRepAlgoAPI_Fuse_2;
   BRepAlgoAPI_Fuse_3: typeof BRepAlgoAPI_Fuse_3;
   BRepAlgoAPI_Fuse_4: typeof BRepAlgoAPI_Fuse_4;
+  BRepAlgoAPI_Splitter: typeof BRepAlgoAPI_Splitter;
+  BRepAlgoAPI_Splitter_1: typeof BRepAlgoAPI_Splitter_1;
+  BRepAlgoAPI_Splitter_2: typeof BRepAlgoAPI_Splitter_2;
   BRepBuilderAPI_Command: typeof BRepBuilderAPI_Command;
   BRepBuilderAPI_EdgeError: BRepBuilderAPI_EdgeError;
   BRepBuilderAPI_FaceError: BRepBuilderAPI_FaceError;

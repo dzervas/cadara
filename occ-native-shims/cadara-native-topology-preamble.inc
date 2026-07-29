@@ -10,6 +10,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Curve2d.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Splitter.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <Geom_BezierCurve.hxx>

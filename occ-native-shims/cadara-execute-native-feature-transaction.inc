@@ -188,6 +188,69 @@ public:
     const double linearDeflection,
     const double angularDeflection
   ) {
+    // A sheet tool has no volume, so cut/common cannot express the split. OCC's
+    // splitter subdivides the target by the tool and never keeps the tool.
+    if (tool.ShapeType() == TopAbs_SHELL || tool.ShapeType() == TopAbs_FACE) {
+      TopTools_ListOfShape splitArguments;
+      TopTools_ListOfShape splitTools;
+      splitArguments.Append(target);
+      splitTools.Append(tool);
+
+      BRepAlgoAPI_Splitter splitBuilder;
+      splitBuilder.SetArguments(splitArguments);
+      splitBuilder.SetTools(splitTools);
+      splitBuilder.SetToFillHistory(true);
+
+      Message_ProgressRange splitProgress;
+      splitBuilder.Build(splitProgress);
+
+      if (!splitBuilder.IsDone()) {
+        const TopoDS_Shape emptyShape;
+        return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
+          emptyShape,
+          bodyId,
+          topologyToken,
+          linearDeflection,
+          angularDeflection,
+          true,
+          CadaraDiagnosticJson(
+            "occ-native-feature-transaction-failed",
+            "error",
+            "Native OCC sheet-tool split feature transaction failed to build.",
+            bodyId,
+            "featureTransaction",
+            "operation",
+            "split"
+          )
+        ), CadaraBuildUnsupportedHistoryJson("split", bodyId), false);
+      }
+
+      splitBuilder.SimplifyResult(true, true, 1.0e-7);
+      const TopoDS_Shape splitShape = CadaraPrepareCommittedShape(
+        splitBuilder.Shape(),
+        linearDeflection,
+        angularDeflection
+      );
+
+      // The split history builder unions both builder arguments' successors and
+      // deletes only what both deleted, so one splitter passed twice is exactly
+      // that single builder's history.
+      return CadaraNativeFeatureTransactionResult(
+        splitShape,
+        CadaraBuildTopologyJson(splitShape, bodyId, topologyToken, linearDeflection, angularDeflection, true),
+        CadaraBuildSplitFeatureHistoryJson(
+          splitBuilder,
+          splitBuilder,
+          bodyId,
+          previousTopologyToken,
+          topologyToken,
+          target,
+          splitShape
+        ),
+        true
+      );
+    }
+
     BRepAlgoAPI_Cut cutBuilder(target, tool);
     BRepAlgoAPI_Common commonBuilder(target, tool);
     cutBuilder.SetToFillHistory(true);
