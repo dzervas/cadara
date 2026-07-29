@@ -1023,6 +1023,12 @@ async function activateProbeBackedPlanning(input: {
   forcedBakeFeatureIds?: ReadonlySet<string>;
   /** Verbatim zero/one/many detail per forced bake, when the failure carried one. */
   forcedBakeReasonDetails?: ReadonlyMap<string, string>;
+  /**
+   * Drop probe failures the memo retained. Called once per containment pass: the
+   * pass exists to change the conditions a probe failed under, so the contained
+   * plan must be allowed to reach the kernel again.
+   */
+  forgetFailedProbes?: () => void;
 }) {
   if (!input.capabilities.history) {
     return { plan: input.plan, probeResult: null };
@@ -1208,6 +1214,10 @@ async function activateProbeBackedPlanning(input: {
       );
     }
     containedPlanFingerprint = planFingerprint(workingPlan);
+    // The pass ran against a changed plan, so every probe failure it took as
+    // input has had its conditions revisited. Release those retained failures;
+    // the passes that follow probe the contained plan for real.
+    input.forgetFailedProbes?.();
   };
 
   const maxPromotionIterations = Math.max(1, workingPlan.featurePlans.length);
@@ -1764,8 +1774,11 @@ async function reviewStudio(
   // per fixed-point iteration). Memoizing on the exact prepared-action payload
   // keeps the kernel evidence identical while paying for each distinct prefix
   // rebuild only once.
-  const capabilities: ImportCapabilities = rawCapabilities.history
-    ? { ...rawCapabilities, history: createMemoizedHistoryProbe(rawCapabilities.history) }
+  const memoizedHistory = rawCapabilities.history
+    ? createMemoizedHistoryProbe(rawCapabilities.history)
+    : null;
+  const capabilities: ImportCapabilities = memoizedHistory
+    ? { ...rawCapabilities, history: memoizedHistory }
     : rawCapabilities;
   const read = readPartStudio(bundle, elementId);
   const planned = planStudioFidelity(read, {
@@ -1815,6 +1828,7 @@ async function reviewStudio(
         capabilities,
         forcedBakeFeatureIds,
         forcedBakeReasonDetails,
+        forgetFailedProbes: memoizedHistory?.forgetFailedEvaluations,
       });
       break;
     } catch (error) {

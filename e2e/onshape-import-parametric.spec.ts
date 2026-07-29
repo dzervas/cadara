@@ -475,11 +475,13 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   );
   test.setTimeout(1_800_000);
   const { reviewText } = await importBundle(page, SECOND_PART_STUDIO_BUNDLE_PATH, true);
-  expect(reviewText).toContain("16 parametric, 8 baked, 0 geometry-only features.");
+  // `Extrude 4` authors `bodyType: SURFACE`, `operationType: NEW`, `depth = 50 mm`,
+  // `symmetric = true`; it now imports as a parametric surface extrude whose sheet
+  // spans the captured z ∈ [-25 mm, +25 mm]. `Split 1` uses exactly that sheet as
+  // its split tool, which the kernel now accepts, so both features left the baked
+  // tier: 16 parametric / 8 baked became 18 / 6.
+  expect(reviewText).toContain("18 parametric, 6 baked, 0 geometry-only features.");
   for (const [label, reason] of [
-    ["Extrude 4", "only solid extrudes can import as parametric solid features"],
-    // Excluded scope; the probe now names the kernel's real refusal.
-    ["Split 1", "not a closed two-manifold shell"],
     ["Sketch 7", "requires captured history topology evidence"],
     ["Extrude 5", "depends on previously baked geometry"],
     ["Extrude 6", "depends on previously baked geometry"],
@@ -506,8 +508,13 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
     "feature_extrude-2",
     "feature_extrude-3",
     "feature_mirror-1",
-    "feature_bakedBody-1",
+    // The surface extrude commits its sheet, and `Split 1` splits the mirrored
+    // solid with exactly that sheet, so both reach the timeline before the baked
+    // run that closes the still-baked cut cascade.
     "feature_extrude-4",
+    "feature_split-1",
+    "feature_bakedBody-1",
+    "feature_extrude-5",
   ]);
   await expectNoWorkbenchAlerts(page);
 

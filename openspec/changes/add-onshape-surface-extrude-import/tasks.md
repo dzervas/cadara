@@ -27,3 +27,4 @@
 - [x] 4.2 Update planner/provider/fidelity specs so the two `Extrude 4` features are feature-tier surface extrudes instead of baked.
 - [x] 4.3 Prove a prepared surface extrude rebuilds to a `bodyKind: "sheet"` body through the real kernel apply path.
 - [x] 4.4 Re-measure pinned real-bundle tier baselines and run `bun run test:logic`, `bun run test:static`, and `bun x tsc -b tsconfig.app.json --noEmit`.
+- [x] 4.5 Retain failed probe evaluations in the review memo until the containment pass runs, so a newly reachable unbuildable prefix is rebuilt once per pass instead of once per downstream consumer, and update the real-capture e2e review baselines.

@@ -33,6 +33,14 @@ export interface KernelHistoryProbeSessionOptions {
   createService?: () => KernelHistoryProbeService & { dispose?: () => void };
 }
 
+export interface MemoizedHistoryProbe extends ImportHistoryProbeCapabilities {
+  /**
+   * Drop retained failures so the contained plan is probed again. Review calls
+   * this exactly when its containment pass has run against a changed plan.
+   */
+  forgetFailedEvaluations(): void;
+}
+
 /**
  * Memoize probe evaluations on the exact prepared-action payload they run.
  *
@@ -44,14 +52,19 @@ export interface KernelHistoryProbeSessionOptions {
  * the payload itself (never on a consumer id or plan revision), so a changed
  * plan always misses it.
  *
- * Only a fully rebuilt evaluation is retained. A failed or throwing evaluation
- * is the input to review's containment pass, which exists to change the
- * conditions the probe failed under, so it is always re-evaluated.
+ * A failed or throwing evaluation is retained too, but only until the plan it was
+ * probed against changes. It is the input to review's containment pass, which
+ * exists to change the conditions the probe failed under; until that pass runs,
+ * re-evaluating the identical payload can only reproduce the identical failure at
+ * full kernel cost. 9841 probes one unbuildable prefix from every downstream
+ * consumer inside a single pass, and paying for each of those rebuilds put its
+ * review past its wait cap.
  */
 export function createMemoizedHistoryProbe(
   history: ImportHistoryProbeCapabilities,
-): ImportHistoryProbeCapabilities {
+): MemoizedHistoryProbe {
   const cache = new Map<string, Promise<HistoryProbeResult>>();
+  const failedKeys = new Set<string>();
   return {
     evaluateHistoryProbe(input) {
       const key = JSON.stringify({
@@ -62,16 +75,20 @@ export function createMemoizedHistoryProbe(
       if (cached) return cached;
       const pending = history.evaluateHistoryProbe(input).then(
         (result) => {
-          if (result.steps.some((step) => step.status === "failed")) cache.delete(key);
+          if (result.steps.some((step) => step.status === "failed")) failedKeys.add(key);
           return result;
         },
         (error: unknown) => {
-          cache.delete(key);
+          failedKeys.add(key);
           throw error;
         },
       );
       cache.set(key, pending);
       return pending;
+    },
+    forgetFailedEvaluations() {
+      for (const key of failedKeys) cache.delete(key);
+      failedKeys.clear();
     },
   };
 }

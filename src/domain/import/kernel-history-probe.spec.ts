@@ -478,26 +478,27 @@ test("memoized history probe evaluates each distinct action payload exactly once
   expect(evaluations).toBe(3);
 });
 
-// A failed probe is the input to review's containment pass, which exists to
-// change the conditions the probe failed under. Retaining it would freeze the
-// failure and skip the re-probe that proves the contained prefix builds.
-test("memoized history probe never retains a failed evaluation", async () => {
+// A failed probe is the input to review's containment pass, which exists to change
+// the conditions the probe failed under. Until that pass runs, re-evaluating the
+// identical payload can only reproduce the identical failure at full kernel cost,
+// and 9841 probes one unbuildable prefix from every downstream consumer inside a
+// single pass. Once containment has run, the retained failure is released.
+test("memoized history probe retains a failed evaluation until containment forgets it", async () => {
   let evaluations = 0;
+  const failedResult = {
+    steps: [{
+      status: "failed" as const,
+      diagnostics: [{
+        severity: "error" as const,
+        code: "kernel-history-probe-step-failed",
+        message: "A prefix feature the kernel refuses.",
+      }],
+    }],
+  };
   const memoized = createMemoizedHistoryProbe({
     async evaluateHistoryProbe() {
       evaluations += 1;
-      return evaluations === 1
-        ? {
-            steps: [{
-              status: "failed" as const,
-              diagnostics: [{
-                severity: "error" as const,
-                code: "kernel-history-probe-step-failed",
-                message: "A prefix feature the kernel refuses.",
-              }],
-            }],
-          }
-        : { steps: [{ status: "rebuilt" as const, signatures: [] }] };
+      return failedResult;
     },
   });
   const actions: ImportPreparedActions = {
@@ -506,7 +507,17 @@ test("memoized history probe never retains a failed evaluation", async () => {
   };
 
   expect((await memoized.evaluateHistoryProbe({ actions })).steps[0]?.status).toBe("failed");
-  expect((await memoized.evaluateHistoryProbe({ actions })).steps[0]?.status).toBe("rebuilt");
+  expect((await memoized.evaluateHistoryProbe({ actions })).steps[0]?.status).toBe("failed");
   await memoized.evaluateHistoryProbe({ actions });
+  expect(evaluations).toBe(1);
+
+  // The contained plan is a different payload, so it is evaluated on its own.
+  await memoized.evaluateHistoryProbe({ actions: { ...actions, commitSketches: [] } });
   expect(evaluations).toBe(2);
+
+  // Containment ran: the prefix it contained must be able to reach the kernel
+  // again even when the contained plan reproduces the same payload.
+  memoized.forgetFailedEvaluations();
+  await memoized.evaluateHistoryProbe({ actions });
+  expect(evaluations).toBe(3);
 });
