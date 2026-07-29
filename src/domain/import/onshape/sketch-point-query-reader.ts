@@ -51,14 +51,10 @@ const ROLE_BY_SUFFIX: Record<string, OnshapeSketchEntityVertexQuery["role"]> = {
   center: "center",
 };
 
-/**
- * Read an exact `entityType=VERTEX, queryType=SKETCH_ENTITY` query. Every other
- * shape (body/face lineage, non-vertex entity types, missing operation id,
- * unknown endpoint role) is rejected rather than guessed at.
- */
-export function readSketchEntityVertexQuery(
+/** Decode the payload's ordered key/value string fields, or null when unreadable. */
+function readSketchEntityQueryValues(
   queryString: string | null | undefined,
-): OnshapeSketchEntityVertexQuery | null {
+): Map<string, string[]> | null {
   if (typeof queryString !== "string") return null;
   const payload = COMPRESSED_ASSIGNMENT.exec(queryString)?.[1];
   if (payload === undefined) return null;
@@ -70,9 +66,21 @@ export function readSketchEntityVertexQuery(
     if (key.length !== 1) continue;
     values.set(key[0]!, fields[index + 1]!);
   }
+  return values.get("queryType")?.[0] === "SKETCH_ENTITY" ? values : null;
+}
+
+/**
+ * Read an exact `entityType=VERTEX, queryType=SKETCH_ENTITY` query. Every other
+ * shape (body/face lineage, non-vertex entity types, missing operation id,
+ * unknown endpoint role) is rejected rather than guessed at.
+ */
+export function readSketchEntityVertexQuery(
+  queryString: string | null | undefined,
+): OnshapeSketchEntityVertexQuery | null {
+  const values = readSketchEntityQueryValues(queryString);
+  if (!values) return null;
 
   if (values.get("entityType")?.[0] !== "VERTEX") return null;
-  if (values.get("queryType")?.[0] !== "SKETCH_ENTITY") return null;
 
   const operation = values.get("operationId");
   if (!operation || operation.length !== 2 || operation[1] !== "wireOp") return null;
@@ -93,4 +101,29 @@ export function readSketchEntityVertexQuery(
     sketchEntityId: entity.slice(0, -1).join("."),
     role,
   };
+}
+
+/**
+ * Read an exact `entityType=EDGE, queryType=SKETCH_ENTITY` query, the form
+ * Onshape authors for a surface extrude's open sketch-curve profile. The payload
+ * names exactly one sketch entity; an endpoint-suffixed id, a different entity
+ * type, or a missing sketch operation id is rejected rather than guessed at.
+ */
+export function readSketchEntityEdgeQuery(
+  queryString: string | null | undefined,
+): { sketchFeatureId: string; sketchEntityId: string } | null {
+  const values = readSketchEntityQueryValues(queryString);
+  if (!values) return null;
+
+  if (values.get("entityType")?.[0] !== "EDGE") return null;
+
+  const operation = values.get("operationId");
+  if (!operation || operation.length !== 2 || operation[1] !== "wireOp") return null;
+  const sketchFeatureId = operation[0]!;
+  if (sketchFeatureId.length === 0) return null;
+
+  const entity = values.get("sketchEntityId");
+  if (!entity || entity.length !== 1 || entity[0]!.length === 0) return null;
+
+  return { sketchFeatureId, sketchEntityId: entity[0]! };
 }

@@ -105,7 +105,7 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
 
     if (extrudePlan.tier !== "baked") {
       for (const profile of extrudePlan.plannedExtrude.profiles) {
-        if (profile.kind === "sketchRegion") {
+        if (profile.kind === "sketchRegion" || profile.kind === "sketchCurve") {
           inputDependencies.push({ kind: "sketch", featureId: profile.sketchFeatureId });
         }
       }
@@ -119,14 +119,19 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
     }
 
     if (extrudePlan.tier === "parametric") {
-      if (extrudePlan.plannedExtrude.boolean.kind === "deferredBody") {
-        inputDependencies.push({
-          kind: "body",
-          featureId: extrudePlan.plannedExtrude.boolean.sourceFeatureId,
-        });
-      }
-      if (extrudePlan.plannedExtrude.boolean.kind === "standalone") {
-        state.bodyProducingFeatureIds.push(feature.featureId);
+      const planned = extrudePlan.plannedExtrude;
+      // A surface extrude creates a sheet body, so it never seeds the solid body
+      // lineage default boolean scope is inferred from.
+      if (planned.resultBodyType === "solid") {
+        if (planned.boolean.kind === "deferredBody") {
+          inputDependencies.push({
+            kind: "body",
+            featureId: planned.boolean.sourceFeatureId,
+          });
+        }
+        if (planned.boolean.kind === "standalone") {
+          state.bodyProducingFeatureIds.push(feature.featureId);
+        }
       }
       return {
         onshapeFeatureId: feature.featureId,

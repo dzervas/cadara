@@ -7,6 +7,7 @@ import type {
   ImportDeferredExtrudeEndCondition,
   ImportDeferredExtrudeExtent,
   ImportDeferredExtrudeStartExtent,
+  ImportDeferredFeatureBooleanScope,
   ImportDeferredSketchEntityRef,
   ImportDeferredSketchPointRef,
   ImportDeferredTopologyRef,
@@ -975,12 +976,25 @@ export class ImportDeferredMaterializer {
         if (isDeferredTopologyRef(profile)) {
           return this.resolveDeferredTopologyRef(profile);
         }
+        // An open sketch-curve surface profile defers only its sketch id.
+        if (isDeferredSketchTargetRef(profile)) {
+          return {
+            ...profile,
+            sketchId: await this.resolveDeferredValue(profile.sketchId, consumer),
+          };
+        }
         return isDeferredValue(profile)
           ? this.resolveDeferredValue(profile, consumer)
           : profile;
       }),
     );
-    const booleanScope = request.definition.parameters.booleanScope;
+    // A surface extrude has no boolean state to materialize.
+    const parameters = request.definition.parameters;
+    const surfaceExtrude = !("booleanScope" in parameters);
+    const booleanScope: ImportDeferredFeatureBooleanScope =
+      "booleanScope" in parameters
+        ? parameters.booleanScope
+        : { kind: "standalone" };
     const materializedBooleanScope =
       booleanScope.kind === "targetBody"
         ? {
@@ -1050,7 +1064,7 @@ export class ImportDeferredMaterializer {
           profiles,
           extent: extent!,
           startExtent: startExtent!,
-          booleanScope: materializedBooleanScope,
+          ...(surfaceExtrude ? {} : { booleanScope: materializedBooleanScope }),
         },
       },
     } as unknown as CreateFeatureRequest;

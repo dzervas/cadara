@@ -12,11 +12,12 @@
 import type {
   ImportCommitSketchRequest,
   ImportCreateFeatureRequest,
-  ImportDeferredExtrudeProfileRef,
+  ImportDeferredExtrudeFeatureParameters,
   ImportDeferredFeatureBooleanScope,
   ImportDeferredFeatureDefinition,
   ImportDeferredTopologyRef,
   ImportDeferredProfileRef,
+  ImportDeferredSurfaceProfileRef,
   ImportPreparedActions,
   ImportPreparedActionRef,
 } from "@/contracts/import/actions";
@@ -1895,7 +1896,10 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "document-variable": "document variable was translated",
   "needs-region-resolution": "sketch region could not be resolved",
   "needs-history-probe": "requires captured history topology evidence",
-  "extrude-body-type-unsupported": "only solid extrudes can import as parametric solid features",
+  "extrude-body-type-unsupported": "only solid and surface extrudes can import as parametric features",
+  "extrude-surface-operation-unsupported": "surface extrudes can only create a new sheet body, not a boolean result",
+  "extrude-surface-draft-unsupported": "surface extrudes cannot carry a draft angle",
+  "extrude-surface-profile-unresolved": "surface extrude open-curve profiles could not be resolved as durable sketch entities",
   "extrude-default-scope-ambiguous": "default extrude scope affects more than one possible body",
   "extrude-extent-topology-unresolved": "extrude start-entity, up-to, or boolean-scope topology could not be resolved as a durable reference",
   "extrude-start-extent-unsupported": "extrude starts at an offset start plane, which is not supported yet",
@@ -2806,7 +2810,7 @@ async function buildPreparedActions(input: {
 
     if (featurePlan.target.kind === "feature" && featurePlan.plannedExtrude) {
       const extrude = featurePlan.plannedExtrude;
-      const profiles: ImportDeferredExtrudeProfileRef[] = [];
+      const profiles: ImportDeferredSurfaceProfileRef[] = [];
       let missingSketchFeatureId: string | null = null;
       for (const profile of extrude.profiles) {
         if (profile.kind === "planarFace") {
@@ -2817,6 +2821,16 @@ async function buildPreparedActions(input: {
         if (sketchOrderedIndex === undefined) {
           missingSketchFeatureId = profile.sketchFeatureId;
           break;
+        }
+        // An open sketch curve is an exact authored entity; only its owning
+        // sketch id defers to that sketch's commit action.
+        if (profile.kind === "sketchCurve") {
+          profiles.push({
+            kind: "sketchEntity",
+            sketchId: { kind: "sketchIdOf", actionIndex: sketchOrderedIndex },
+            entityId: profile.entityId,
+          });
+          continue;
         }
         profiles.push({
           kind: "regionOf",
@@ -2846,31 +2860,61 @@ async function buildPreparedActions(input: {
       }
       if (profiles.length === 0) continue;
 
-      let booleanScope: ImportDeferredFeatureBooleanScope;
-      if (extrude.boolean.kind === "standalone") {
-        booleanScope = { kind: "standalone" };
-      } else if (extrude.boolean.kind === "topologyTargets") {
-        booleanScope = {
-          kind: extrude.boolean.targets.length === 1 ? "targetBody" : "targetBodies",
-          ...(extrude.boolean.targets.length === 1
-            ? { bodyId: extrude.boolean.targets[0] }
-            : { bodyIds: extrude.boolean.targets }),
-        } as unknown as ImportDeferredFeatureBooleanScope;
+      const orderedProfiles = profiles as [
+        ImportDeferredSurfaceProfileRef,
+        ...ImportDeferredSurfaceProfileRef[],
+      ];
+      const startExtent = resolvedExtrudeStartExtent(extrude, orderedIndexByFeatureId);
+      const extent = resolvedExtrudeExtent(extrude, orderedIndexByFeatureId);
+
+      let parameters: ImportDeferredExtrudeFeatureParameters;
+      if (extrude.resultBodyType === "surface") {
+        // A surface extrude creates one sheet body; boolean state is
+        // unrepresentable in the surface contract variant.
+        parameters = {
+          resultBodyType: "surface",
+          profiles: orderedProfiles,
+          startExtent,
+          extent,
+        };
       } else {
-        const deferredBody = deferredBodyForSourceFeature(
-          extrude.boolean.sourceFeatureId,
-          featurePlan.onshapeFeatureId,
-          "booleanScope",
-        );
-        if (!deferredBody) {
-          diagnostics.push({
-            severity: "warning",
-            message: `Extrude "${featurePlan.label}" referenced an upstream body from ${extrude.boolean.sourceFeatureId}, which was not emitted or was not uniquely attributable; the extrude was skipped.`,
-            code: "onshape-extrude-missing-body",
-          });
-          continue;
+        let booleanScope: ImportDeferredFeatureBooleanScope;
+        if (extrude.boolean.kind === "standalone") {
+          booleanScope = { kind: "standalone" };
+        } else if (extrude.boolean.kind === "topologyTargets") {
+          booleanScope = {
+            kind: extrude.boolean.targets.length === 1 ? "targetBody" : "targetBodies",
+            ...(extrude.boolean.targets.length === 1
+              ? { bodyId: extrude.boolean.targets[0] }
+              : { bodyIds: extrude.boolean.targets }),
+          } as unknown as ImportDeferredFeatureBooleanScope;
+        } else {
+          const deferredBody = deferredBodyForSourceFeature(
+            extrude.boolean.sourceFeatureId,
+            featurePlan.onshapeFeatureId,
+            "booleanScope",
+          );
+          if (!deferredBody) {
+            diagnostics.push({
+              severity: "warning",
+              message: `Extrude "${featurePlan.label}" referenced an upstream body from ${extrude.boolean.sourceFeatureId}, which was not emitted or was not uniquely attributable; the extrude was skipped.`,
+              code: "onshape-extrude-missing-body",
+            });
+            continue;
+          }
+          booleanScope = { kind: "targetBody", bodyId: deferredBody };
         }
-        booleanScope = { kind: "targetBody", bodyId: deferredBody };
+        parameters = {
+          resultBodyType: "solid",
+          profiles: orderedProfiles as [
+            ImportDeferredProfileRef,
+            ...ImportDeferredProfileRef[],
+          ],
+          startExtent,
+          extent,
+          operation: extrude.operation,
+          booleanScope,
+        };
       }
 
       const request: ImportCreateFeatureRequest = {
@@ -2881,17 +2925,7 @@ async function buildPreparedActions(input: {
         definition: {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-          parameters: {
-            resultBodyType: "solid",
-            profiles: profiles as [
-              ImportDeferredExtrudeProfileRef,
-              ...ImportDeferredExtrudeProfileRef[],
-            ],
-            startExtent: resolvedExtrudeStartExtent(extrude, orderedIndexByFeatureId),
-            extent: resolvedExtrudeExtent(extrude, orderedIndexByFeatureId),
-            operation: extrude.operation,
-            booleanScope,
-          },
+          parameters,
         },
       };
       await prepareTopologyFallback(featurePlan, request);

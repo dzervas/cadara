@@ -1,6 +1,6 @@
 import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
-import type { DocumentId, RevisionId, SketchId } from "@/contracts/shared/ids";
+import type { DocumentId, RevisionId, SketchEntityId, SketchId } from "@/contracts/shared/ids";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
@@ -20,6 +20,7 @@ import {
 } from "@/domain/import/region-containment";
 import type { OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
 import { DEFAULT_MATCH_TOLERANCE } from "@/domain/import/onshape/signature-matcher";
+import { readSketchEntityEdgeQuery } from "@/domain/import/onshape/sketch-point-query-reader";
 import { projectPointToPlane, projectPointToSketchPlaneFrame } from "@/domain/import/onshape/sketch-translator";
 import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
 
@@ -47,6 +48,16 @@ export type DeferredPlanarFaceProfile = {
 };
 
 export type DeferredOnshapeProfile = DeferredSketchProfile | DeferredPlanarFaceProfile;
+
+/**
+ * Exact open sketch curve consumed as a surface profile seed. One ref names one
+ * durable translated sketch entity; the kernel groups connected refs into a wire.
+ */
+export type DeferredOpenSketchCurveProfile = {
+  kind: "sketchCurve";
+  sketchFeatureId: string;
+  entityId: SketchEntityId;
+};
 
 export interface ProfileResolutionDiagnostic {
   code: string;
@@ -623,4 +634,249 @@ export function resolveOnshapeSketchProfiles(
   return profiles.length > 0
     ? { tier: "resolved", profiles, diagnostics }
     : { tier: "unresolved", reason: "needs-region-resolution", diagnostics };
+}
+
+/**
+ * Exact readable whole-sketch wire query: every non-construction edge created by
+ * one sketch. Onshape authors this form when a surface extrude consumes a whole
+ * open sketch.
+ */
+const WHOLE_SKETCH_WIRE_QUERY =
+  /^\s*query\s*=\s*qConstructionFilter\(\s*qBodyType\(\s*qCreatedBy\(\s*id\s*\+\s*"([A-Za-z0-9_]+)"\s*,\s*EntityType\.EDGE\s*\)\s*,\s*BodyType\.WIRE\s*\)\s*,\s*ConstructionObject\.NO\s*\)\s*;?\s*$/;
+
+type DecodedSurfaceProfileQuery =
+  | { form: "entity"; sketchFeatureId: string; sketchEntityId: string }
+  | { form: "wholeSketchWire"; sketchFeatureId: string };
+
+function decodeSurfaceProfileQuery(
+  queryString: unknown,
+): DecodedSurfaceProfileQuery | null {
+  if (typeof queryString !== "string") return null;
+  const wholeSketch = WHOLE_SKETCH_WIRE_QUERY.exec(queryString);
+  if (wholeSketch) {
+    return { form: "wholeSketchWire", sketchFeatureId: wholeSketch[1]! };
+  }
+  const decoded = readSketchEntityEdgeQuery(queryString);
+  return decoded
+    ? {
+        form: "entity",
+        sketchFeatureId: decoded.sketchFeatureId,
+        sketchEntityId: decoded.sketchEntityId,
+      }
+    : null;
+}
+
+function entityEndpoints(
+  entity: SketchDefinition["entities"][number],
+  definition: SketchDefinition,
+): SketchPoint2D[] {
+  const pointIds =
+    entity.kind === "lineSegment" || entity.kind === "arc"
+      ? [entity.startPointId, entity.endPointId]
+      : [];
+  return pointIds.flatMap((pointId) => {
+    const point = definition.points.find((candidate) => candidate.pointId === pointId);
+    return point ? [point.position] : [];
+  });
+}
+
+function arePointsCoincident(left: SketchPoint2D, right: SketchPoint2D): boolean {
+  return (
+    Math.abs(left[0] - right[0]) <= REGION_POINT_TOLERANCE &&
+    Math.abs(left[1] - right[1]) <= REGION_POINT_TOLERANCE
+  );
+}
+
+/**
+ * True when the selected entities form exactly one connected chain, using the
+ * same endpoint-coincidence rules the adapter applies when it groups open curves
+ * into one wire: no endpoint of degree above two, either zero or two free ends,
+ * and one connected component. A set the adapter would reject is rejected here so
+ * the whole import is not rolled back at apply time.
+ */
+function formsOneConnectedChain(
+  entities: readonly SketchDefinition["entities"][number][],
+  definition: SketchDefinition,
+): boolean {
+  if (entities.length === 0) return false;
+  if (entities.length === 1) return true;
+  // A closed curve cannot be chained with anything else.
+  const endpointsByEntity = entities.map((entity) => entityEndpoints(entity, definition));
+  if (endpointsByEntity.some((endpoints) => endpoints.length !== 2)) return false;
+
+  const nodes: Array<{ position: SketchPoint2D; degree: number }> = [];
+  const nodeIndexes = endpointsByEntity.map((endpoints) =>
+    endpoints.map((position) => {
+      const existing = nodes.findIndex((node) => arePointsCoincident(node.position, position));
+      if (existing >= 0) {
+        nodes[existing]!.degree += 1;
+        return existing;
+      }
+      nodes.push({ position, degree: 1 });
+      return nodes.length - 1;
+    }),
+  );
+  if (nodes.some((node) => node.degree > 2)) return false;
+  const freeEnds = nodes.filter((node) => node.degree === 1).length;
+  if (freeEnds !== 0 && freeEnds !== 2) return false;
+
+  const remaining = nodeIndexes.slice(1);
+  const chain = new Set(nodeIndexes[0]!);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (let index = remaining.length - 1; index >= 0; index -= 1) {
+      if (remaining[index]!.some((node) => chain.has(node))) {
+        for (const node of remaining[index]!) chain.add(node);
+        remaining.splice(index, 1);
+        grew = true;
+      }
+    }
+  }
+  return remaining.length === 0;
+}
+
+export type OpenSketchCurveResolutionResult =
+  | {
+      tier: "resolved";
+      profiles: DeferredOpenSketchCurveProfile[];
+      diagnostics: ProfileResolutionDiagnostic[];
+    }
+  | { tier: "unresolved"; diagnostics: ProfileResolutionDiagnostic[] };
+
+/**
+ * Resolve an Onshape surface extrude's `surfaceEntities` queries into durable
+ * open sketch-curve profile seeds of the translated solved sketch.
+ *
+ * Only the two exactly readable Onshape forms are decoded: a compressed
+ * `SKETCH_ENTITY` edge query naming one entity, and a readable whole-sketch wire
+ * `qCreatedBy` query. Everything else — an opaque query, several source sketches,
+ * an entity the translated sketch does not own, a whole-sketch reference over a
+ * sketch that derives closed regions (whose `BodyType.WIRE` filtering is not
+ * observable from the capture), or a set that is not one connected chain — stays
+ * unresolved with a specific diagnostic instead of guessing a profile.
+ */
+export function resolveOnshapeOpenSketchCurveProfiles(input: {
+  /** The Onshape `surfaceEntities` parameter carrying open-curve queries. */
+  profileParameter: unknown;
+  featureKind: string;
+  featureLabel: string;
+  solvedSketchesByFeatureId: ReadonlyMap<string, OnshapeSolvedSketch>;
+  referencedSketchesByFeatureId: ReadonlyMap<
+    string,
+    { tier: string; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame }
+  >;
+}): OpenSketchCurveResolutionResult {
+  const diagnostics: ProfileResolutionDiagnostic[] = [];
+  const label = `${input.featureKind} "${input.featureLabel}"`;
+  const unresolved = (code: string, message: string): OpenSketchCurveResolutionResult => {
+    diagnostics.push({ code, message });
+    return { tier: "unresolved", diagnostics };
+  };
+
+  const queries =
+    typeof input.profileParameter === "object" && input.profileParameter !== null
+      ? (input.profileParameter as { queries?: unknown }).queries
+      : undefined;
+  if (!Array.isArray(queries) || queries.length === 0) {
+    return unresolved(
+      "onshape-surface-profile-parameter-unreadable",
+      `The surface profile parameter for ${label} carries no readable queries.`,
+    );
+  }
+
+  const decoded = queries.map((query) =>
+    decodeSurfaceProfileQuery(
+      typeof query === "object" && query !== null
+        ? (query as { queryString?: unknown }).queryString
+        : null,
+    ),
+  );
+  if (decoded.some((entry) => entry === null)) {
+    return unresolved(
+      "onshape-surface-profile-query-unreadable",
+      `A surface profile query for ${label} is not an exact sketch-entity or whole-sketch wire query.`,
+    );
+  }
+  const readable = decoded as DecodedSurfaceProfileQuery[];
+  const sketchFeatureIds = new Set(readable.map((entry) => entry.sketchFeatureId));
+  if (sketchFeatureIds.size !== 1) {
+    return unresolved(
+      "onshape-surface-profile-multi-sketch",
+      `The surface profile queries for ${label} name ${sketchFeatureIds.size} source sketches; one connected chain must come from one sketch.`,
+    );
+  }
+  const sketchFeatureId = [...sketchFeatureIds][0]!;
+
+  const solved = input.solvedSketchesByFeatureId.get(sketchFeatureId);
+  const referencedSketch = input.referencedSketchesByFeatureId.get(sketchFeatureId);
+  if (!solved || !referencedSketch || referencedSketch.tier !== "parametric") {
+    return unresolved(
+      "onshape-surface-profile-source-sketch-unavailable",
+      `The exact source sketch ${sketchFeatureId} for ${label} is not a live solved sketch.`,
+    );
+  }
+  const translation = translateSolvedSketch({
+    solved,
+    featureId: sketchFeatureId,
+    label: sketchFeatureId,
+    planeKey: referencedSketch.planeKey,
+    planeFrame: referencedSketch.planeFrame,
+  });
+
+  const selected: SketchDefinition["entities"][number][] = [];
+  for (const entry of readable) {
+    if (entry.form === "wholeSketchWire") {
+      const solvedSnapshot = buildSolvedSnapshot(translation.definition);
+      const { regions } = deriveSketchRegionsCore({
+        documentId: "doc_import_verification" as DocumentId,
+        revisionId: "rev_import_verification" as RevisionId,
+        sketchId: VERIFICATION_SKETCH_ID,
+        solvedSnapshot,
+        definition: translation.definition,
+      });
+      if (regions.some((region) => region.isClosed)) {
+        return unresolved(
+          "onshape-surface-profile-wire-filter-ambiguous",
+          `The whole-sketch wire query for ${label} names sketch ${sketchFeatureId}, which derives closed regions; the exact BodyType.WIRE selection cannot be read from the capture.`,
+        );
+      }
+      selected.push(
+        ...translation.definition.entities.filter(
+          (entity) => entity.kind !== "point" && !entity.isConstruction,
+        ),
+      );
+      continue;
+    }
+    const entity = translation.definition.entities.find(
+      (candidate) => candidate.label === entry.sketchEntityId,
+    );
+    if (!entity || entity.kind === "point" || entity.isConstruction) {
+      return unresolved(
+        "onshape-surface-profile-entity-unmatched",
+        `The surface profile entity ${entry.sketchEntityId} for ${label} is not a translated open curve of sketch ${sketchFeatureId}.`,
+      );
+    }
+    selected.push(entity);
+  }
+
+  const unique = [
+    ...new Map(selected.map((entity) => [entity.entityId, entity])).values(),
+  ];
+  if (!formsOneConnectedChain(unique, translation.definition)) {
+    return unresolved(
+      "onshape-surface-profile-chain-disconnected",
+      `The surface profile entities for ${label} do not form exactly one connected chain.`,
+    );
+  }
+
+  return {
+    tier: "resolved",
+    profiles: unique.map((entity) => ({
+      kind: "sketchCurve" as const,
+      sketchFeatureId,
+      entityId: entity.entityId,
+    })),
+    diagnostics,
+  };
 }

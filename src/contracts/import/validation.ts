@@ -2,6 +2,7 @@ import typia from "typia";
 
 import type {
   ImportDeferredTopologyRef,
+  ImportDeferredFeatureBooleanScope,
   ImportDeferredValue,
   ImportPreparedActions,
   ImportPreparedActionRef,
@@ -426,6 +427,33 @@ function validateImportDeferredValueInvariants(
           });
         }
       }
+      // An open sketch-curve profile is an exact authored entity reference whose
+      // owning sketch is committed earlier in this import, so only its sketch id
+      // defers, exactly like the revolve axis.
+      if (
+        profile &&
+        typeof profile === "object" &&
+        (profile as { kind?: unknown }).kind === "sketchEntity"
+      ) {
+        const sketchId = (profile as { sketchId?: unknown }).sketchId;
+        if (isDeferredValue(sketchId)) {
+          blessed.add(sketchId);
+          const sketchPath = `${profilePath}.sketchId`;
+          if (sketchId.kind === "sketchIdOf") {
+            issues.push(
+              ...validateDeferredReference(actions, sketchId, orderedPosition, sketchPath),
+            );
+          } else {
+            issues.push({
+              path: sketchPath,
+              expected: "sketchIdOf deferred reference",
+              value: sketchId.kind,
+              message:
+                "An open sketch-curve profile may defer only through sketchIdOf.",
+            });
+          }
+        }
+      }
     });
 
     if (request.definition.kind === "extrude") {
@@ -534,7 +562,11 @@ function validateImportDeferredValueInvariants(
       }
     }
 
-    const scope = request.definition.parameters.booleanScope;
+    // A surface extrude carries no boolean state at all, so there is no scope to
+    // validate; the structural union already rejects boolean fields there.
+    const parameters = request.definition.parameters;
+    const scope: ImportDeferredFeatureBooleanScope =
+      "booleanScope" in parameters ? parameters.booleanScope : { kind: "standalone" };
     if (scope.kind === "targetBody" && isDeferredValue(scope.bodyId)) {
       blessed.add(scope.bodyId);
       issues.push(

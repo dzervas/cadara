@@ -42,9 +42,96 @@ function extrude(input: {
 }
 
 /**
+ * Exact readable whole-sketch wire query, the `9841e486906fa2ce62d74d8e`
+ * `Extrude 4` surface profile form.
+ */
+function wholeSketchWireQuery(sketchFeatureId: string) {
+  return {
+    queryString: `query = qConstructionFilter(qBodyType(qCreatedBy(id + "${sketchFeatureId}", EntityType.EDGE), BodyType.WIRE), ConstructionObject.NO);`,
+    deterministicIds: ["JYB", "JYF"],
+  };
+}
+
+/**
+ * Exact compressed `SKETCH_ENTITY` edge query, the `d3cd9b09c3c36af1dd2efae9`
+ * `Extrude 4` surface profile form. The payload's length prefixes are hex byte
+ * counts of the concatenated string fields, exactly as Onshape encodes them.
+ */
+function compressedSketchEntityEdgeQuery(
+  sketchFeatureId: string,
+  sketchEntityId: string,
+) {
+  const operationLengths = `${sketchFeatureId.length.toString(16)}.6`;
+  const entityLength = sketchEntityId.length.toString(16);
+  return {
+    queryString:
+      `query=qCompressed(1.0,"%B5$QueryM5Sa$entityTypeBa$EntityTypeS4$EDGESb$historyTypeS8$CREATIONSb$operationIdB2$IdA1S${operationLengths}$${sketchFeatureId}wireOpS9$queryTypeSd$SKETCH_ENTITYSe$sketchEntityIdS${entityLength}$${sketchEntityId}",id);`,
+    deterministicIds: [`JW_${sketchEntityId}`],
+  };
+}
+
+/** Open two-segment chain: no closed region derives from it. */
+const SURFACE_CHAIN_ENTITY_IDS = ["chainSegA", "chainSegB"] as const;
+
+function surfaceChainSketchEntities(featureId: string) {
+  return [
+    {
+      sketchEntityId: `${featureId}_${SURFACE_CHAIN_ENTITY_IDS[0]}`,
+      sketchEntityType: "skLineSegment",
+      startPosition3d: { x: 0, y: 0, z: 0 },
+      endPosition3d: { x: 0.01, y: 0, z: 0 },
+      isConstruction: false,
+    },
+    {
+      sketchEntityId: `${featureId}_${SURFACE_CHAIN_ENTITY_IDS[1]}`,
+      sketchEntityType: "skLineSegment",
+      startPosition3d: { x: 0.01, y: 0, z: 0 },
+      endPosition3d: { x: 0.01, y: 0.01, z: 0 },
+      isConstruction: false,
+    },
+  ];
+}
+
+/**
+ * Surface extrude mirroring the two local `Extrude 4` forms: profiles come from
+ * `surfaceEntities`, the surface operation is `NEW`, and the `d3cd` studio also
+ * authors Onshape's `symmetric` flag.
+ */
+function surfaceExtrude(input: {
+  featureId: string;
+  name: string;
+  surfaceEntitiesQueries: readonly { queryString: string; deterministicIds: string[] }[];
+  symmetric?: boolean;
+}) {
+  return {
+    featureType: "extrude",
+    featureId: input.featureId,
+    name: input.name,
+    parameters: [
+      { parameterId: "bodyType", value: "SURFACE" },
+      { parameterId: "operationType", value: "NEW" },
+      { parameterId: "surfaceOperationType", value: "NEW" },
+      { parameterId: "surfaceEntities", queries: input.surfaceEntitiesQueries },
+      { parameterId: "endBound", value: "BLIND" },
+      { parameterId: "depth", expression: "10 mm", value: 0.01 },
+      { parameterId: "symmetric", value: input.symmetric === true },
+    ],
+  };
+}
+
+const SURFACE_PROFILE_QUERIES = {
+  "wave-x-9841": [wholeSketchWireQuery("S_SURFACE")],
+  "wave-x-d3cd9": SURFACE_CHAIN_ENTITY_IDS.map((entityId) =>
+    compressedSketchEntityEdgeQuery("S_SURFACE", `S_SURFACE_${entityId}`),
+  ),
+} as const satisfies Record<string, readonly { queryString: string; deterministicIds: string[] }[]>;
+
+/**
  * Proprietary-free stand-ins for the two local Phase-X `Extrude 4` surface
- * forms. The following cut proves a surface result never becomes solid body
- * lineage for downstream planning.
+ * forms: an open sketch chain consumed through the whole-sketch wire query
+ * (`9841`) and through per-entity compressed sketch-entity queries with the
+ * `symmetric` flag (`d3cd`). The following cut proves a surface result never
+ * becomes solid body lineage for downstream planning.
  */
 export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
   return {
@@ -68,12 +155,11 @@ export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
       features: {
         features: [
           sketch("S_SURFACE", "Surface profile"),
-          extrude({
+          surfaceExtrude({
             featureId: "E_SURFACE_4",
             name: "Extrude 4",
-            sketchId: "S_SURFACE",
-            bodyType: "SURFACE",
-            operationType: "NEW",
+            surfaceEntitiesQueries: SURFACE_PROFILE_QUERIES[elementId],
+            symmetric: elementId === "wave-x-d3cd9",
           }),
           sketch("S_SOLID_CUT", "Solid cut profile"),
           extrude({
@@ -86,16 +172,23 @@ export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
         ],
       },
       sketches: {
-        sketches: ["S_SURFACE", "S_SOLID_CUT"].map((featureId) => ({
-          featureId,
-          sketchSolveStatus: "WELL_DEFINED",
-          entities: [{
-            sketchEntityId: `${featureId}_circle`,
-            sketchEntityType: "skCircle",
-            geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: 0.004 },
-            isConstruction: false,
-          }],
-        })),
+        sketches: [
+          {
+            featureId: "S_SURFACE",
+            sketchSolveStatus: "WELL_DEFINED",
+            entities: surfaceChainSketchEntities("S_SURFACE"),
+          },
+          {
+            featureId: "S_SOLID_CUT",
+            sketchSolveStatus: "WELL_DEFINED",
+            entities: [{
+              sketchEntityId: "S_SOLID_CUT_circle",
+              sketchEntityType: "skCircle",
+              geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: 0.004 },
+              isConstruction: false,
+            }],
+          },
+        ],
       },
       parts: null,
       featureSpecs: { present: false, reason: "synthetic Phase-X fixture" },
@@ -111,9 +204,7 @@ export function makeWaveXSurfaceExtrudeCaptureBundle(): OnshapeCaptureBundleV2 {
       }],
       resolvedQueryReferences: [],
       profileEvidence: [{
-        consumingFeatureId: "E_SOLID_CUT",
-        parameterId: "entities",
-        queryIndex: 0,
+        consumingFeatureId: "E_SOLID_CUT", parameterId: "entities", queryIndex: 0,
         resultIndex: 0,
         deterministicId: "surface-fixture-cut-profile",
         evaluatedAt: "historyPoint",

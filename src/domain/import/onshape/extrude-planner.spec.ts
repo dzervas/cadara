@@ -14,6 +14,7 @@ import {
   resolvePlannedExtrudeTopology,
 } from "@/domain/import/onshape/extrude-planner";
 import { makeWaveTCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
+import { makeWaveXSurfaceExtrudeCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
 
 const ELEMENT_ID = "wave-t-extrude-extents";
 
@@ -401,3 +402,115 @@ test.skipIf(!existsSync(BLIND_START_BUNDLE))(
     }
   },
 );
+
+// Lane: logic (per docs/testing.md — exported extrude planning seam).
+// Seam: an Onshape SURFACE extrude plans as a surface extrude, or bakes with the
+// specific reason its authored form cannot be represented.
+function surfaceInput(elementId: "wave-x-9841" | "wave-x-d3cd9") {
+  const bundle = makeWaveXSurfaceExtrudeCaptureBundle();
+  const read = readPartStudio(bundle as never, elementId);
+  const feature = read.features.find(
+    (candidate) => candidate.featureId === "E_SURFACE_4",
+  )!;
+  return {
+    feature,
+    profileEvidence: [],
+    solvedSketchesByFeatureId: read.solvedSketchesByFeatureId,
+    referencedSketchesByFeatureId: new Map([
+      ["S_SURFACE", { tier: "parametric", planeKey: "xy" as const }],
+    ]),
+    priorBodyProducingFeatureIds: [],
+  };
+}
+
+test("plans a SURFACE extrude with open sketch-curve profiles and no boolean state", () => {
+  const result = planExtrudeFeature(surfaceInput("wave-x-9841"));
+
+  expect(result.tier).toBe("parametric");
+  if (result.tier !== "parametric") return;
+  expect(result.plannedExtrude.resultBodyType).toBe("surface");
+  expect(result.plannedExtrude).not.toHaveProperty("operation");
+  expect(result.plannedExtrude).not.toHaveProperty("boolean");
+  expect(result.plannedExtrude.profiles).toMatchObject([
+    { kind: "sketchCurve" },
+    { kind: "sketchCurve" },
+  ]);
+  expect(result.plannedExtrude.extent).toEqual({
+    mode: "oneSide",
+    end: {
+      kind: "blind",
+      direction: "positive",
+      distance: { source: "literal", value: 10 },
+      draftAngle: undefined,
+    },
+  });
+});
+
+test("halves the authored depth of a symmetric extrude", () => {
+  const literal = planExtrudeFeature(surfaceInput("wave-x-d3cd9"));
+  expect(literal.tier).toBe("parametric");
+  if (literal.tier !== "parametric") return;
+  // Pinned by the d3cd capture: a 50 mm symmetric depth spans ±25 mm, and cadara's
+  // symmetric extent applies its end distance in both directions.
+  expect(literal.plannedExtrude.extent).toEqual({
+    mode: "symmetric",
+    end: {
+      kind: "blind",
+      direction: "positive",
+      distance: { source: "literal", value: 5 },
+      draftAngle: undefined,
+    },
+  });
+
+  const expression = surfaceInput("wave-x-d3cd9");
+  const depth = parameter(expression.feature, "depth")!;
+  depth.expression = "#walls";
+  const result = planExtrudeFeature(expression);
+  expect(result.tier === "parametric" && result.plannedExtrude.extent).toMatchObject({
+    mode: "symmetric",
+    end: { distance: { source: "expression", valueText: "((walls) / 2)" } },
+  });
+});
+
+test("keeps an UP_TO_SURFACE surface extrude on the topology-slot path", () => {
+  const input = surfaceInput("wave-x-9841");
+  const endBound = parameter(input.feature, "endBound")!;
+  endBound.value = "UP_TO_SURFACE";
+  ensureParameter(input.feature, "endBoundEntityFace").queries = [{
+    queryString: 'query = qCreatedBy(id + "E_BASE", EntityType.FACE);',
+    deterministicIds: ["JQm"],
+  }];
+
+  const result = planExtrudeFeature(input);
+
+  expect(result.tier).toBe("topology");
+  if (result.tier !== "topology") return;
+  expect(result.plannedExtrude.resultBodyType).toBe("surface");
+  expect(result.plannedExtrude.topologySlots).toMatchObject([
+    { key: "firstEndFace", parameterId: "endBoundEntityFace", role: "face" },
+  ]);
+  expect(hasUnresolvedExtrudeTopology(result.plannedExtrude)).toBe(true);
+});
+
+test("bakes surface extrudes whose boolean operation or draft angle is unrepresentable", () => {
+  const booleanInput = surfaceInput("wave-x-9841");
+  parameter(booleanInput.feature, "surfaceOperationType")!.value = "ADD";
+
+  const draftInput = surfaceInput("wave-x-9841");
+  ensureParameter(draftInput.feature, "hasDraft").value = true;
+  ensureParameter(draftInput.feature, "draftAngle").expression = "3 deg";
+
+  const profileInput = surfaceInput("wave-x-9841");
+  parameter(profileInput.feature, "surfaceEntities")!.queries = [{
+    queryString: "query = qEverything(EntityType.EDGE);",
+  }];
+
+  expect([booleanInput, draftInput, profileInput].map((input) => {
+    const result = planExtrudeFeature(input);
+    return result.tier === "baked" ? result.reason : result.tier;
+  })).toEqual([
+    "extrude-surface-operation-unsupported",
+    "extrude-surface-draft-unsupported",
+    "extrude-surface-profile-unresolved",
+  ]);
+});

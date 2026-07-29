@@ -840,3 +840,103 @@ test("validates deferred advanced sketch-point participant sketch producers", ()
     ).toBe(false);
   }
 });
+
+// Lane: logic (per docs/testing.md — contract validation seam).
+// Seam: prepared surface extrude actions accept deferred open sketch-curve
+// profiles only through `sketchIdOf`, and carry no boolean state.
+test("validates deferred open sketch-curve profiles on surface extrude actions", () => {
+  const sketchRequest = {
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    solverCorrelation: null,
+    sketchId: null,
+    sketchLabel: "Open chain",
+    plane: {
+      support: { kind: "construction" as const, constructionId: "construction_plane-xy" },
+      frame: {
+        origin: [0, 0, 0] as const,
+        xAxis: [1, 0, 0] as const,
+        yAxis: [0, 1, 0] as const,
+        normal: [0, 0, 1] as const,
+        linearUnit: "documentLength" as const,
+        handedness: "rightHanded" as const,
+      },
+      key: "xy" as const,
+    },
+    definition: {
+      schemaVersion: "sketch-definition/v1alpha1" as const,
+      referenceIds: [], references: [], pointIds: [], points: [], entityIds: [], entities: [],
+      constraintIds: [], constraints: [], dimensionIds: [], dimensions: [], styleIds: [], styles: [],
+      svgRenderingEnabled: true, derivedRelationships: [], authoringOperations: [],
+    },
+  };
+  const surfaceExtrude = (sketchId: unknown) => ({
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Extrude 4",
+    definition: {
+      kind: "extrude" as const,
+      featureTypeVersion: "feature-type/extrude/v1alpha2" as const,
+      parameters: {
+        resultBodyType: "surface",
+        profiles: [{ kind: "sketchEntity" as const, sketchId, entityId: "sketch_entity_open" }],
+        startExtent: { kind: "profilePlane" as const },
+        extent: {
+          mode: "oneSide" as const,
+          end: {
+            kind: "blind" as const,
+            direction: "positive" as const,
+            distance: { source: "literal" as const, value: 10 },
+          },
+        },
+      },
+    },
+  });
+  const orderedActions = [
+    { kind: "commitSketch" as const, index: 0 },
+    { kind: "createFeature" as const, index: 0 },
+  ];
+
+  const accepted = validateImportPreparedActions({
+    commitSketches: [sketchRequest],
+    createFeatures: [surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 })],
+    orderedActions,
+  });
+  expect(accepted.success, JSON.stringify(accepted.issues)).toBe(true);
+
+  for (const [name, sketchId] of [
+    ["forward reference", { kind: "sketchIdOf", actionIndex: 1 }],
+    ["wrong deferred kind", { kind: "bodyOf", actionIndex: 0 }],
+  ] as const) {
+    expect(
+      validateImportPreparedActions({
+        commitSketches: [sketchRequest],
+        createFeatures: [surfaceExtrude(sketchId)],
+        orderedActions,
+      }).success,
+      `Prepared action validation should reject a ${name} open sketch-curve profile.`,
+    ).toBe(false);
+  }
+
+  const withBooleanState = validateImportPreparedActions({
+    commitSketches: [sketchRequest],
+    createFeatures: [{
+      ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }),
+      definition: {
+        ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }).definition,
+        parameters: {
+          ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }).definition.parameters,
+          operation: { source: "literal", value: "newBody" },
+          booleanScope: { kind: "standalone" },
+        },
+      },
+    }],
+    orderedActions,
+  });
+  expect(
+    withBooleanState.success,
+    "A surface extrude action must not carry boolean operation state.",
+  ).toBe(false);
+});
