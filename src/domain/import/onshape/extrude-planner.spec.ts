@@ -1,5 +1,9 @@
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+
 import { expect, test } from "vitest";
 
+import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import {
   hasUnresolvedExtrudeTopology,
@@ -349,3 +353,51 @@ test("translates a capture-pinned BLIND start offset and refuses the undiscrimin
     }),
   ).toMatchObject({ tier: "baked", reason: "extrude-start-extent-unsupported" });
 });
+
+// Guards the premises of the sign derivation documented in
+// `translateStartExtent`: the two capture instances it was measured from must
+// still author the discriminated flag combination, and the start plane must no
+// longer be what bakes them.
+const BLIND_START_BUNDLE = "9841e486906fa2ce62d74d8e.onshape-capture.json";
+
+test.skipIf(!existsSync(BLIND_START_BUNDLE))(
+  "passes the capture's two BLIND start offsets through the start-extent gate",
+  async () => {
+    const parsed = validateOnshapeCaptureBundle(
+      JSON.parse(await readFile(BLIND_START_BUNDLE, "utf8")),
+    );
+    if (!parsed.success) throw new Error(`${BLIND_START_BUNDLE} must validate.`);
+    const studio = parsed.data.partStudios[0]!;
+    const read = readPartStudio(parsed.data, studio.elementId);
+
+    for (const [featureId, distanceExpression] of [
+      ["FnqLWtKC5loyWcj_1", "2 mm"],
+      ["FarVWY13vdeW4u9_1", "#tolerance*2"],
+    ] as const) {
+      const feature = read.features.find(
+        (candidate) => candidate.featureId === featureId,
+      )!;
+      expect(parameter(feature, "startOffset")?.value).toBe(true);
+      expect(parameter(feature, "startOffsetBound")?.value).toBe("BLIND");
+      expect(parameter(feature, "startOffsetDistance")?.expression).toBe(
+        distanceExpression,
+      );
+      // The derivation only discriminates the sign when these agree.
+      expect(parameter(feature, "startOffsetOppositeDirection")?.value).toBe(
+        parameter(feature, "oppositeDirection")?.value,
+      );
+
+      const result = planExtrudeFeature({
+        feature,
+        profileEvidence: [],
+        solvedSketchesByFeatureId: new Map(),
+        referencedSketchesByFeatureId: new Map(),
+        priorBodyProducingFeatureIds: [],
+      });
+      expect(
+        result.tier === "baked" && result.reason === "extrude-start-extent-unsupported",
+        "A capture-pinned BLIND start offset must not bake on its start plane.",
+      ).toBe(false);
+    }
+  },
+);
