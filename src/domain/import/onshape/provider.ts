@@ -109,6 +109,7 @@ import {
   resolveImplicitUnionTarget,
   resolveTopologyReferences,
   resolveUniquePrefixBody,
+  scopeLiveSignaturesToCapturedBody,
   type TopologyResolutionResult,
 } from "@/domain/import/onshape/topology-reference-resolver";
 import {
@@ -1682,16 +1683,33 @@ async function activateProbeBackedPlanning(input: {
             : "The sketch feature declares no resolvable sketch-plane query id.",
         );
       }
+      // A split leaves both pieces carrying the same coincident face, so the
+      // plane can only be named per body. Scope the live candidates to the one
+      // live body the captured face's own captured body resolves to; when that
+      // correspondence is not exact, nothing is scoped and the outcome stays
+      // honestly zero/one/many.
+      const bodyScope = scopeLiveSignaturesToCapturedBody({
+        snapshot: topologyTimeline.snapshotBeforeFeature(
+          featurePlan.onshapeFeatureId,
+        ),
+        deterministicId,
+        liveSignatures: probeSignatures,
+        tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+      });
       // Match with the same live-topology tolerance this selector carries into
       // apply. Reviewing more strictly than apply rejects faces apply accepts.
       const match = matchSignature(
         capturedSignature,
-        probeSignatures,
+        bodyScope.signatures,
         LIVE_TOPOLOGY_MATCH_TOLERANCE,
       );
       if (match.kind !== "unique") {
         return bakeSketchWithDetail(
-          describeSketchPlaneMatchFailure(match, capturedSignature, probeSignatures),
+          `${describeSketchPlaneMatchFailure(
+            match,
+            capturedSignature,
+            bodyScope.signatures,
+          )} || ${bodyScope.detail}`,
         );
       }
       const matchedReference = match.reference;
@@ -1718,6 +1736,11 @@ async function activateProbeBackedPlanning(input: {
           parameterId: "sketchPlane",
           deterministicId: deterministicId ?? referenceKey(matchedReference),
         },
+        // Apply rebuilds the same prefix, so the scoped body id is the same
+        // deterministic identity review matched against.
+        ...(bodyScope.liveBodyId === null
+          ? {}
+          : { bodyScope: bodyScope.liveBodyId }),
       };
       return {
         ...featurePlan,

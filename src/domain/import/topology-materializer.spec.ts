@@ -566,3 +566,24 @@ test("materializes deferred revolve body scope and advanced construction partici
     },
   });
 });
+
+
+test("honors an exact body scope during apply-time topology rematching", async () => {
+  const scopedBodyId = "body_scoped" as BodyId;
+  const instance = materializer(["body_live" as BodyId, scopedBodyId]);
+  const scopedSelector = {
+    ...selector("face"),
+    bodyScope: scopedBodyId,
+  };
+
+  await expect(instance.resolveDeferredTopologyRef(scopedSelector)).resolves.toMatchObject({
+    kind: "face",
+    bodyId: scopedBodyId,
+  });
+  await expect(
+    instance.resolveDeferredTopologyRef({
+      ...scopedSelector,
+      bodyScope: "body_absent" as BodyId,
+    }),
+  ).rejects.toThrow("Live topology rematch failed");
+});
