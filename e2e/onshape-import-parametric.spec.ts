@@ -249,6 +249,14 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   expect(reviewText).toMatch(/Sketch 7\s+parametric/);
   expect(reviewText).toMatch(/Sketch 9\s+parametric/);
   expect(reviewText).toMatch(/Sketch 10\s+parametric/);
+  // `Extrude 4` is no longer refused for authoring a `SURFACE` body: it plans as
+  // a surface extrude, resolves its open sketch-curve chain, and reaches the
+  // kernel. What refuses it now is its own `UP_TO_SURFACE` terminator — the live
+  // face the captured `JQm` target resolves to is invalidated by the time the
+  // probe replays the feature, so the kernel refuses the end condition target.
+  expect(reviewText).toContain(
+    "Extrude 4\n\nbaked (suppressed) — the modeling kernel could not build this feature against the live prefix",
+  );
   // `Split 1` is excluded scope and cascades behind an earlier failure. Assert
   // only that it stays baked and suppressed; the quoted diagnostic names
   // whichever upstream feature the kernel refused first.
