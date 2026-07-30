@@ -7,7 +7,6 @@ import {
   advanceTopologyToken,
   extractSolidShapes,
   trackDerivedSolidBody,
-  trackReplacementSolidBody,
 } from "@/domain/modeling/occ/topology";
 import {
   requireBody,
@@ -19,10 +18,13 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import {
   applyBooleanPolicy,
+  resolveReplacementBodies,
   validateNativeFeatureTransaction,
 } from "@/domain/modeling/occ/features/boolean-operations";
+import { collectLocalOperationTopologyStages } from "@/domain/modeling/occ/features/fillet-chamfer";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
-import { createUnsupportedProducerTopologyStage } from "@/domain/modeling/occ/topology-stage";
+import type { OccTopologyHistorySource } from "@/domain/modeling/occ/topology-naming";
+import type { OccFeatureTopologyStage } from "@/domain/modeling/occ/topology-stage";
 
 function serializeNativeFaceTargets(
   body: ReturnType<typeof requireBody>,
@@ -235,6 +237,10 @@ function buildOffsetAllFacesShellShape(
 
   return {
     sourceBody,
+    // `BRepOffsetAPI_MakeOffsetShape` answers `Modified` for every offset face,
+    // which is the only exact identity this mode has; the builder therefore
+    // outlives the call so the caller can reconcile instead of re-minting ids.
+    builder: shell,
     shape: assertValidSingleSolidShellShape(
       context,
       shell.Shape(),
@@ -292,6 +298,10 @@ function buildClosedHollowShellShape(
       try {
         const cutProgress = new context.oc.Message_ProgressRange_1();
         const cutBuildProgress = new context.oc.Message_ProgressRange_1();
+        // The cut builder is the closed-hollow shell's only exact history: it
+        // maps every outer face of the source solid onto its survivor. It must
+        // outlive this function so the caller can reconcile identities instead
+        // of minting a fresh positional id for the whole body on every rebuild.
         const cut = new context.oc.BRepAlgoAPI_Cut_3(
           sourceBody.shape,
           cavity,
@@ -307,6 +317,7 @@ function buildClosedHollowShellShape(
           try {
             return {
               sourceBody,
+              builder: cut,
               shape: assertClosedHollowSemantics(
                 context,
                 sourceBody.shape,
@@ -316,8 +327,10 @@ function buildClosedHollowShellShape(
           } finally {
             cutShape.delete();
           }
-        } finally {
+        } catch (error) {
           cut.delete();
+          throw error;
+        } finally {
           cutBuildProgress.delete();
           cutProgress.delete();
         }
@@ -462,21 +475,59 @@ function buildNativeShellFeatureShape(
   };
 }
 
-function executeClosedHollowShellFeature(
+/**
+ * Replace one solid with a whole-body shell result, carrying the builder's own
+ * exact history.
+ *
+ * Both whole-body modes rebuild the source solid from scratch, so without a
+ * history source every face of the result is a fresh positional id. The ids
+ * then change on every rebuild (the topology token advances each replay), which
+ * silently renames the whole body and invalidates every downstream claim keyed
+ * on those ids. The builder answers `Modified` for each surviving outer face,
+ * so identity is exact and reproducible; anything it cannot name stays honestly
+ * unclaimed.
+ */
+function executeWholeBodyShellFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
-  parameters: ShellFeatureParameters,
+  shellResult: {
+    sourceBody: ReturnType<typeof requireSolidBody>;
+    builder: OccTopologyHistorySource;
+    shape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>;
+  },
 ): OccFeatureExecutionResult {
-  const shellResult = buildClosedHollowShellShape(context, parameters);
-  const replacement = trackReplacementSolidBody(context.oc, {
-    previous: shellResult.sourceBody,
+  const replacementResult = resolveReplacementBodies(
+    context,
+    shellResult.sourceBody.bodyId,
+    shellResult.shape,
     ownerFeatureId,
-    shape: shellResult.shape,
-  });
-  const bodies = context.bodies.map((body) =>
-    body.bodyId === shellResult.sourceBody.bodyId ? replacement : body,
+    { allowEmpty: false, historySource: shellResult.builder },
   );
-  const producedTargets = [{ kind: "body" as const, bodyId: replacement.bodyId }];
+  const bodies = context.bodies.flatMap((body) =>
+    body.bodyId === shellResult.sourceBody.bodyId
+      ? replacementResult.replacements
+      : [body],
+  );
+  const producedTargets = replacementResult.replacements.map((replacement) => ({
+    kind: "body" as const,
+    bodyId: replacement.bodyId,
+  }));
+  const historyInvalidations = new Map<string, OccReferenceInvalidationRecord>(
+    replacementResult.historyInvalidations,
+  );
+  const topologyStages: OccFeatureTopologyStage[] = [];
+  collectLocalOperationTopologyStages({
+    oc: context.oc,
+    topologyStages,
+    ownerFeatureId,
+    sourceBody: shellResult.sourceBody,
+    historyInvalidations,
+    replacementResult,
+    hasNativeHistory: false,
+    generatedHistorySource: shellResult.builder as unknown as {
+      Generated(source: never): never;
+    },
+  });
 
   return {
     bodies,
@@ -485,44 +536,11 @@ function executeClosedHollowShellFeature(
     producedTargets,
     entities: [],
     renderRecords: [],
-    historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
-    topologyStage: createUnsupportedProducerTopologyStage({
+    historyInvalidations,
+    topologyStage: {
       featureId: ownerFeatureId,
-      bodies,
-      producedTargets,
-    }),
-  };
-}
-
-function executeOffsetAllFacesShellFeature(
-  context: OccFeatureExecutionContext,
-  ownerFeatureId: FeatureId,
-  parameters: ShellFeatureParameters,
-): OccFeatureExecutionResult {
-  const shellResult = buildOffsetAllFacesShellShape(context, parameters);
-  const replacement = trackReplacementSolidBody(context.oc, {
-    previous: shellResult.sourceBody,
-    ownerFeatureId,
-    shape: shellResult.shape,
-  });
-  const bodies = context.bodies.map((body) =>
-    body.bodyId === shellResult.sourceBody.bodyId ? replacement : body,
-  );
-  const producedTargets = [{ kind: "body" as const, bodyId: replacement.bodyId }];
-
-  return {
-    bodies,
-    constructions: [...context.constructions],
-    constructionPlanes: new Map(context.constructionPlanes),
-    producedTargets,
-    entities: [],
-    renderRecords: [],
-    historyInvalidations: new Map<string, OccReferenceInvalidationRecord>(),
-    topologyStage: createUnsupportedProducerTopologyStage({
-      featureId: ownerFeatureId,
-      bodies,
-      producedTargets,
-    }),
+      outputs: new Map(topologyStages.flatMap((stage) => [...stage.outputs])),
+    },
   };
 }
 
@@ -532,10 +550,18 @@ export function executeShellFeature(
   parameters: ShellFeatureParameters,
 ): OccFeatureExecutionResult {
   if (isOffsetAllFacesShell(parameters)) {
-    return executeOffsetAllFacesShellFeature(context, ownerFeatureId, parameters);
+    return executeWholeBodyShellFeature(
+      context,
+      ownerFeatureId,
+      buildOffsetAllFacesShellShape(context, parameters),
+    );
   }
   if (isClosedHollowShell(parameters)) {
-    return executeClosedHollowShellFeature(context, ownerFeatureId, parameters);
+    return executeWholeBodyShellFeature(
+      context,
+      ownerFeatureId,
+      buildClosedHollowShellShape(context, parameters),
+    );
   }
   const resolvedOperation = getAuthoredLiteralValue(parameters.operation);
   if (!resolvedOperation) {

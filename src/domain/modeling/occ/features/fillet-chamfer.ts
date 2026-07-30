@@ -328,7 +328,7 @@ function collectGeneratedAdjacency(input: {
  * Subtopology the operation itself generated is the successor of nothing, so it
  * needs the complementary producer-identity claim from the live builder.
  */
-function collectLocalOperationTopologyStages(input: {
+export function collectLocalOperationTopologyStages(input: {
   oc: OccFeatureExecutionContext["oc"];
   topologyStages: OccFeatureTopologyStage[];
   ownerFeatureId: FeatureId;

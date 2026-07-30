@@ -587,7 +587,21 @@ test("executeShellFeature offsets all shell faces as an in-place body replacemen
   expect(inward.bodies.length).toBe(1);
   expect(inwardBody, "Offset-all shell should retain the source body id.").toBeTruthy();
   expect(inward.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
-  expect(inward.topologyStage?.outputs.get(body.bodyId)?.sourceTargets.size).toBe(0);
+  // The offset builder answers `Modified` for every face of the source box, so
+  // the stage carries one exact successor per source subtopology (6 faces,
+  // 12 edges, 8 vertices) instead of leaving the whole body unclaimed.
+  const inwardStage = inward.topologyStage?.outputs.get(body.bodyId);
+  expect(inwardStage?.sourceTargets.size).toBe(26);
+  // The offset rebuilds every face, so the builder names them through
+  // `Generated`, not `Modified`: the successor keys stay honestly unsupported
+  // while the producer keys carry the exact reproducible identity.
+  expect(inwardStage?.unsupportedSourceKeys.size).toBe(26);
+  expect(
+    [...(inwardStage?.sourceTargets.values() ?? [])].every(
+      (targets) => targets.length === 1,
+    ),
+    "Every offset-all shell claim must name exactly one successor.",
+  ).toBe(true);
 
   const inwardBounds = getShapeBounds(oc, inwardBody!.shape);
   expect(inwardBounds.minX).toBeCloseTo(0.2, 5);
