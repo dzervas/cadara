@@ -82,6 +82,17 @@ export interface ImportDeferredTopologyRef {
     parameterId: string;
     deterministicId: string;
   };
+  /**
+   * Live body the rematch must stay inside.
+   *
+   * Split pieces share a coincident face, so a geometric signature alone names
+   * two live faces. Review derives this scope from the captured body that owns
+   * the captured entity (exact per-face evidence, see
+   * `scopeLiveSignaturesToCapturedBody`) and carries it into apply, where the
+   * same prefix reproduces the same deterministic body ids. Absent means no
+   * scope was provable and the rematch stays unrestricted.
+   */
+  bodyScope?: BodyId;
 }
 
 export type ImportDeferredSketchEntityRef = Omit<

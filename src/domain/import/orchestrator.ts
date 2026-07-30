@@ -559,8 +559,18 @@ export class ImportDeferredMaterializer {
       snapshot,
       service: this.input.modelingService,
     });
-    const signatures: HistoryProbeTopologySignature[] =
+    const allSignatures: HistoryProbeTopologySignature[] =
       signatureResult.status === "available" ? signatureResult.signatures : [];
+    // A body scope is exact evidence review derived from the capture, so honour
+    // it verbatim: an empty scoped set is a no-match, never a silent widening.
+    const signatures =
+      selector.bodyScope === undefined
+        ? allSignatures
+        : allSignatures.filter(
+            (signature) =>
+              "bodyId" in signature.reference &&
+              signature.reference.bodyId === selector.bodyScope,
+          );
     const match = matchSignature(
       selector.capturedSignature,
       signatures,

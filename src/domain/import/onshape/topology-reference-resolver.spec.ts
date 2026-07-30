@@ -7,6 +7,7 @@ import {
   resolveImplicitUnionTarget,
   resolveTopologyReferences,
   resolveUniquePrefixBody,
+  scopeLiveSignaturesToCapturedBody,
   type ResolveTopologyReferencesInput,
 } from "@/domain/import/onshape/topology-reference-resolver";
 import type {
@@ -374,4 +375,86 @@ test("rollback tessellation cannot fabricate edge identity and final-only mutabl
     rollback,
   }));
   expect(result).toMatchObject({ kind: "degraded", reason: "topology-history-evidence-missing" });
+});
+
+
+test("scopes a coincident captured face only through unambiguous sibling-face ownership", () => {
+  const rollback = createRollbackTopologyTimeline({
+    featureIds: ["split", "consumer"],
+    snapshots: [
+      {
+        featureId: "split",
+        tessellationTolerance: 0.0001,
+        tessellatedFaces: {
+          bodies: [
+            {
+              id: "captured-piece",
+              faces: [
+                {
+                  id: "captured-target",
+                  facets: [{ vertices: [
+                    { x: 0, y: 0, z: 0 },
+                    { x: 0.01, y: 0, z: 0 },
+                    { x: 0, y: 0.01, z: 0 },
+                  ] }],
+                },
+                {
+                  id: "captured-sibling",
+                  facets: [{ vertices: [
+                    { x: 0.02, y: 0, z: 0 },
+                    { x: 0.03, y: 0, z: 0 },
+                    { x: 0.02, y: 0.01, z: 0 },
+                  ] }],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+  });
+  const face = (
+    faceId: string,
+    bodyId: string,
+    lowX: number,
+    highX: number,
+  ): HistoryProbeTopologySignature => ({
+    entityClass: "face",
+    geometryType: "unknown",
+    boundingBox: { low: [lowX, 0, 0], high: [highX, 10, 0] },
+    reference: {
+      kind: "face",
+      bodyId: bodyId as never,
+      faceId: faceId as never,
+    },
+  });
+  const coincidentOnA = face("target-a", "live-a", 0, 10);
+  const coincidentOnB = face("target-b", "live-b", 0, 10);
+  const siblingOnA = face("sibling-a", "live-a", 20, 30);
+
+  const scoped = scopeLiveSignaturesToCapturedBody({
+    snapshot: rollback.snapshotBeforeFeature("consumer"),
+    deterministicId: "captured-target",
+    liveSignatures: [coincidentOnA, coincidentOnB, siblingOnA],
+    tolerance,
+  });
+  expect(scoped).toMatchObject({ liveBodyId: "live-a" });
+  expect(scoped.signatures.map(({ reference }) => reference)).toEqual([
+    coincidentOnA.reference,
+    siblingOnA.reference,
+  ]);
+
+  const undiscriminated = scopeLiveSignaturesToCapturedBody({
+    snapshot: rollback.snapshotBeforeFeature("consumer"),
+    deterministicId: "captured-target",
+    liveSignatures: [
+      coincidentOnA,
+      coincidentOnB,
+      siblingOnA,
+      face("sibling-b-nearer", "live-b", 20.0005, 30.0005),
+    ],
+    tolerance,
+  });
+  expect(undiscriminated.liveBodyId).toBeNull();
+  expect(undiscriminated.signatures).toHaveLength(4);
 });

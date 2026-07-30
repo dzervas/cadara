@@ -6,6 +6,7 @@ import type {
 } from "@/contracts/import/onshape-capture-bundle";
 import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
 import type { DurableRef } from "@/contracts/shared/references";
+import type { BodyId } from "@/contracts/shared/ids";
 import type { RollbackTopologySnapshot, RollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
 import {
   matchSignature,
@@ -131,6 +132,97 @@ function rollbackEvidence(
     if (face) return signatureFromPoints("face", pointsForFace(face));
   }
   return null;
+}
+
+function liveBodyIdOf(reference: DurableRef): BodyId | null {
+  return "bodyId" in reference ? reference.bodyId : null;
+}
+
+export interface CapturedBodyScopeResult {
+  signatures: readonly HistoryProbeTopologySignature[];
+  /** The live body the captured face's own body resolved to, or null. */
+  liveBodyId: BodyId | null;
+  /** Diagnostic-only summary of why scoping did or did not apply. */
+  detail: string;
+}
+
+/**
+ * Restrict live candidates to the one live body that the captured face's OWN
+ * captured body resolves to.
+ *
+ * A split leaves its two pieces sharing a coincident face, so a purely
+ * geometric face signature cannot separate them — but Onshape's capture names
+ * the face *of a specific body*, and the rollback snapshot records which body
+ * owns it. The correspondence between that captured body and a live body is
+ * derived only from the captured body's OTHER faces: each is matched with the
+ * same exact gate used for the target, and only unique matches vote. Every
+ * vote must name the same live body, otherwise nothing is scoped and the caller
+ * keeps its honest zero/one/many outcome.
+ *
+ * This is exact per-face evidence aggregated combinatorially. No proximity, no
+ * nearest-candidate pick, and no relaxed tolerance participates: a captured
+ * body with no uniquely matching face, or with faces that disagree, scopes
+ * nothing.
+ */
+export function scopeLiveSignaturesToCapturedBody(input: {
+  snapshot: RollbackTopologySnapshot | null;
+  deterministicId: string | null;
+  liveSignatures: readonly HistoryProbeTopologySignature[];
+  tolerance: TopologyMatchTolerance;
+}): CapturedBodyScopeResult {
+  const unscoped = (detail: string): CapturedBodyScopeResult => ({
+    signatures: input.liveSignatures,
+    liveBodyId: null,
+    detail,
+  });
+  if (!input.snapshot || !input.deterministicId) {
+    return unscoped("no rollback snapshot or deterministic id for body scoping");
+  }
+  const capturedBody = input.snapshot.bodies.find((body) =>
+    body.faces.some((face) => face.id === input.deterministicId),
+  );
+  if (!capturedBody) {
+    return unscoped(
+      `captured face ${input.deterministicId} has no owning body in the rollback snapshot`,
+    );
+  }
+
+  const votes = new Set<BodyId>();
+  let matchedSiblings = 0;
+  for (const face of capturedBody.faces) {
+    if (face.id === input.deterministicId) continue;
+    const points = pointsForFace(face);
+    const signature = signatureFromPoints("face", points);
+    if (!signature) continue;
+    // Body attribution is all-or-nothing: unlike ordinary feature selection,
+    // it may not choose the nearer of multiple geometrically admissible faces.
+    // An infinite ambiguity margin makes `matchSignature` return `ambiguous`
+    // whenever more than one candidate passes the exact tolerance gates.
+    const match = matchSignature(
+      normalizeOnshapeTopologySignature(signature),
+      input.liveSignatures,
+      { ...input.tolerance, ambiguityMargin: Number.POSITIVE_INFINITY },
+    );
+    if (match.kind !== "unique") continue;
+    const bodyId = liveBodyIdOf(match.reference);
+    if (bodyId === null) continue;
+    matchedSiblings += 1;
+    votes.add(bodyId);
+  }
+
+  if (votes.size !== 1) {
+    return unscoped(
+      `captured body ${capturedBody.id} scoped no live body (${matchedSiblings} sibling faces matched uniquely, ${votes.size} live bodies implied)`,
+    );
+  }
+  const liveBodyId = [...votes][0]!;
+  return {
+    signatures: input.liveSignatures.filter(
+      (signature) => liveBodyIdOf(signature.reference) === liveBodyId,
+    ),
+    liveBodyId,
+    detail: `captured body ${capturedBody.id} scoped to live body ${liveBodyId} from ${matchedSiblings} uniquely matched sibling faces`,
+  };
 }
 
 function sameBox(
