@@ -14,6 +14,7 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import {
   ImportDeferredMaterializer,
+  isTopologyApplyRematchError,
   type ImportActionOutputRecord,
 } from "@/domain/import/orchestrator";
 
@@ -139,13 +140,26 @@ async function evaluateHistoryProbeInKernelSession(
   });
 
   for (const [orderedPosition, actionRef] of actionRefs.entries()) {
-    const applyResult = await applyProbeAction(
-      service,
-      input.actions,
-      actionRef,
-      orderedPosition,
-      materializer,
-    );
+    let applyResult: Awaited<ReturnType<typeof applyProbeAction>>;
+    try {
+      applyResult = await applyProbeAction(
+        service,
+        input.actions,
+        actionRef,
+        orderedPosition,
+        materializer,
+      );
+    } catch (error) {
+      // A rematch error carries structured selector evidence used by the
+      // consumer-prefix containment pass, so preserve that exception type.
+      if (isTopologyApplyRematchError(error)) throw error;
+      // Other action/materialization failures are feature-local probe results,
+      // not studio-fatal exceptions. Preserve the raw error text verbatim.
+      applyResult = {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
     if (!applyResult.ok) {
       steps.push({
         status: "failed",
