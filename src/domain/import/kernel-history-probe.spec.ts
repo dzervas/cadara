@@ -162,6 +162,41 @@ test("kernel history probe materializes deferred sketch-region extrudes", async 
   ).toBeTruthy();
 });
 
+
+test("kernel history probe contains deferred materialization failures at their feature step", async () => {
+  const documentId = "doc_workspace" as DocumentId;
+  const actions = sketchExtrudeCandidate(documentId);
+  const feature = actions.createFeatures?.[0];
+  if (!feature || feature.definition.kind !== "extrude") {
+    throw new Error("Expected the probe extrude fixture.");
+  }
+  feature.definition.parameters.profiles = [
+    {
+      kind: "regionOf",
+      actionIndex: 0,
+      selector: { kind: "interiorPoint", point: [100, 100] },
+    },
+  ];
+  const service = createModelingService(
+    new MockKernelAdapter({ solverAdapter: createRevisionAgnosticRealSolver() }),
+    { currentDocumentId: documentId },
+  );
+  const probe = createKernelHistoryProbeSession({ service });
+
+  const result = await probe.evaluateHistoryProbe({ actions });
+
+  expect(result.steps[0]?.status).toBe("rebuilt");
+  expect(result.steps[1]).toMatchObject({
+    status: "failed",
+    diagnostics: [
+      {
+        code: "kernel-history-probe-step-failed",
+        message: expect.stringContaining("Unable to resolve deferred regionOf"),
+      },
+    ],
+  });
+});
+
 test("kernel history probe derives body-only checkpoint signatures from render meshes", async () => {
   const bodyId = "body_checkpoint" as BodyId;
   const probe = createKernelHistoryProbeSession({
