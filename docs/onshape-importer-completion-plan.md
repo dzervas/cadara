@@ -2913,3 +2913,100 @@ refusal of the undiscriminated combination (`extrude-planner.spec.ts`, seam
 
 Validation: `bun run lint`, `bun run build`, and `bun run test:all` on a clean
 port 3123.
+
+### Item-D follow-up: surface bodies land — d3cd9's SURFACE/Split cascade opens, 9841's does not
+
+**The three gaps that kept `Extrude 4` and `Split 1` out of scope are closed at
+the kernel and at the importer; only one of the two real instances promotes.**
+The surface substrate (`resultBodyType` extrude/revolve/thicken contract, open
+sketch-curve wire profiles, sheet-body tracking), the sheet-tool split
+(`BRepAlgoAPI_Splitter` bound into the custom build plus a `runSheetSplit`
+JavaScript fallback), and the Onshape `SURFACE` extrude translation all landed.
+
+#### Cascade re-walk (real browser gate, clean port 3123)
+
+| Studio | Before | After |
+|---|---:|---:|
+| Mounts `40a51…` | 10 / 0 / 0 | **10 / 0 / 0** |
+| Wave-T (all six studios) | all parametric | **all parametric** |
+| Laptop Stand `5151…` | 11 / 13 / 0 | **11 / 13 / 0** |
+| Part Studio 1 `9841…` | 17 / 24 / 0 | **17 / 24 / 0** |
+| Part Studio 1 `d3cd9…` | 16 / 8 / 0 | **18 / 6 / 0** |
+
+d3cd9 `Extrude 4` (SURFACE, BLIND, `symmetric`) and `Split 1` (solid target,
+sheet tool, `keepTools=false`) are both committed parametrically, and the sheet
+reaches the timeline as `feature_extrude-4` followed by `feature_split-1`.
+
+Two premises had to be measured, not assumed. Onshape distributes a `symmetric`
+depth evenly while cadara's symmetric extent applies its end distance in *both*
+directions, so the authored depth is halved: d3cd9 `Extrude 4` authors
+`depth = 50 mm, symmetric = true` and its rollback sheet spans
+z ∈ [−25 mm, +25 mm]. The same flag also corrects three previously mistranslated
+solid extrudes (d3cd9 `Extrude 2`/`3`/`5`, 5151 `Extrude 4`), which carried
+`symmetric = true` under a non-`SYMMETRIC` `endBound` and were being planned
+one-sided.
+
+#### 9841 `Extrude 4`: the blocker moved from the body type to its own terminator
+
+`Extrude 4` now plans as a surface extrude, resolves its whole-sketch wire query
+(`qConstructionFilter(qBodyType(qCreatedBy("FPdEtb3tuGCfOlr_1", EDGE), WIRE), NO)`)
+to the two open segments of that sketch, and reaches the kernel. It is refused
+there, verbatim:
+
+```
+Extrude 4 | feature-kernel-build-failed |
+kernel-history-probe-step-failed: History probe failed at step 14:
+occ-topology-deleted: Extrude 4 end condition target is incorrect.
+[refused target face face_body_feature_extrude-1_t0010_6]
+```
+
+So the `UP_TO_SURFACE` terminator (captured face `JQm`) does resolve to a live
+face of `body_feature_extrude-1`, but that face is invalidated with
+`occ-topology-deleted` by the time the probe replays the feature. The next root
+cause is that invalidation's lineage across `Chamfer 2` / `Shell 1` / `Extrude 2`
+— not the surface path, the profile chain, or the split tool. `Split 1` follows
+one step behind with `topology-history-evidence-missing` (`No Cadara topology
+matches JaD.`), because its tool body is exactly the sheet `Extrude 4` never
+built. Every downstream consumer (`Extrude 5`/`6`/`12`/`13`/`14`/`15`/`16`,
+`Sketch 3`/`4`) quotes that same step-14 failure, so 9841 has one blocker, not
+nine. The e2e pin now names `Extrude 4`'s moved reason instead of leaving it
+unasserted.
+
+#### d3cd9's next blocker, named
+
+With the split committed, `Sketch 7` / `8` are the frontier and they fail
+honestly on many, not zero:
+
+```
+Sketch 7 | needs-history-probe | matched 2 live faces, none uniquely:
+face_body_feature_split-1_split_2_gb3f0a7f5dede8557 |
+face_body_feature_split-1_split_4_gb3f0a7f5dede8557
+```
+
+A split leaves the two pieces sharing a coincident face, so a purely geometric
+signature cannot separate them; Onshape's query names the face *of a specific
+body*. Resolving it needs body-scoped candidate filtering for split outputs, not
+a tolerance change or a nearest-candidate pick. `Extrude 5`/`6`/`7` cascade
+behind those two sketches, and `Extrude 8` stays
+`extrude-extent-topology-unresolved`.
+
+#### Verdicts
+
+- **Kernel open-curve surface extrude:** **closed.** Real-OCC pins in
+  `features.spec.ts` (seam `executeOccFeature`) prove a wire profile sweeps to a
+  `bodyKind: "sheet"` body, that a sheet is refused by solid-only paths
+  (fillet/boolean), and that thicken turns it back into a solid.
+- **Sheet-tool split:** **closed.** The native shim branches on the tool's
+  `ShapeType()` into `BRepAlgoAPI_Splitter` with the same history payload, and
+  the JavaScript fallback mirrors it; both are pinned in
+  `combine-split-delete.spec.ts` against the custom build. Split outputs keep
+  riding the existing fresh `body_<feature>_split_N` identities with
+  split-ambiguous invalidations — no source-id guessing, matching Onshape, which
+  also mints fresh ids for the pieces.
+- **Importer SURFACE translation:** **closed for `NEW` surface extrudes.**
+  Non-`NEW` surface operations, authored draft, and unreadable/branching profile
+  queries bake with their own reason codes.
+- **The 9841 SURFACE→Split cascade:** **open**, behind one named kernel refusal
+  (`occ-topology-deleted` on the `UP_TO_SURFACE` target face).
+
+Validation: `bun run test:all` on a clean port 3123.
