@@ -228,7 +228,7 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // rebuild precision. Both ends now use the same tolerance, and each promoted
   // sketch is committed onto its live face through a durable `topologyOf`
   // support ref.
-  expect(reviewText).toContain("17 parametric, 24 baked, 0 geometry-only features.");
+  expect(reviewText).toContain("16 parametric, 25 baked, 0 geometry-only features.");
   // The two BLIND start offsets (`Extrude 10` / `Extrude 11`) are no longer
   // blocked by the start plane itself: the capture pins that displacement
   // exactly. They now wait on their own `UP_TO_SURFACE` / `UP_TO_BODY`
@@ -245,22 +245,21 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   expect(reviewText).toMatch(/Chamfer 2\s+parametric/);
   expect(reviewText).toMatch(/Shell 1\s+parametric/);
   expect(reviewText).toMatch(/Extrude 2\s+parametric/);
-  expect(reviewText).toMatch(/Cutter\s+parametric/);
+  expect(reviewText).toMatch(/Cutter\s+baked \(suppressed\) — topology reference could not be rematched while applying/);
   expect(reviewText).toMatch(/Sketch 7\s+parametric/);
   expect(reviewText).toMatch(/Sketch 9\s+parametric/);
   expect(reviewText).toMatch(/Sketch 10\s+parametric/);
-  // `Extrude 4` is no longer refused for authoring a `SURFACE` body: it plans as
-  // a surface extrude, resolves its open sketch-curve chain, and reaches the
-  // kernel. What refuses it now is its own `UP_TO_SURFACE` terminator — the live
-  // face the captured `JQm` target resolves to is invalidated by the time the
-  // probe replays the feature, so the kernel refuses the end condition target.
+  // Whole-body shell history now preserves every surviving outer-face identity,
+  // so Extrude 4's UP_TO_SURFACE target itself is no longer invalidated. The
+  // newly reachable full-plan probe instead exposes the earlier honest wall:
+  // Sketch 2 / Extrude 3 cannot build their live region, which inserts a mesh
+  // checkpoint before Cutter. Cutter cannot recover a face from that body-only
+  // checkpoint, so Extrude 4 stays downstream-of-baked and Split 1 cannot see
+  // its sheet tool. This is not a surface-extrude or split-kernel refusal.
   expect(reviewText).toContain(
-    "Extrude 4\n\nbaked (suppressed) — the modeling kernel could not build this feature against the live prefix",
+    "Extrude 4\n\nbaked (suppressed) — depends on previously baked geometry",
   );
-  // `Split 1` is excluded scope and cascades behind an earlier failure. Assert
-  // only that it stays baked and suppressed; the quoted diagnostic names
-  // whichever upstream feature the kernel refused first.
-  expect(reviewText).toMatch(/Split 1\s+baked \(suppressed\) —/);
+  expect(reviewText).toMatch(/Split 1\s+baked \(suppressed\) — topology reference did not match/);
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect.soft(imported.snapshotDiagnosticsCount).toBe(0);
@@ -486,18 +485,18 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   // `Extrude 4` authors `bodyType: SURFACE`, `operationType: NEW`, `depth = 50 mm`,
   // `symmetric = true`; it now imports as a parametric surface extrude whose sheet
   // spans the captured z ∈ [-25 mm, +25 mm]. `Split 1` uses exactly that sheet as
-  // its split tool, which the kernel now accepts, so both features left the baked
-  // tier: 16 parametric / 8 baked became 18 / 6.
-  expect(reviewText).toContain("18 parametric, 6 baked, 0 geometry-only features.");
+  // its split tool. Body-scoped support-face matching then disambiguates the two
+  // coincident cut faces and promotes Sketch 7: 18 / 6 became 19 / 5.
+  expect(reviewText).toContain("19 parametric, 5 baked, 0 geometry-only features.");
+  expect(reviewText).toMatch(/Sketch 7\s+parametric/);
   for (const [label, reason] of [
-    ["Sketch 7", "requires captured history topology evidence"],
-    ["Extrude 5", "depends on previously baked geometry"],
-    ["Extrude 6", "depends on previously baked geometry"],
-    ["Sketch 8", "requires captured history topology evidence"],
+    ["Extrude 5", "the modeling kernel could not build this feature against the live prefix"],
+    ["Extrude 6", "the modeling kernel could not build this feature against the live prefix"],
+    ["Sketch 8", "topology reference could not be rematched while applying"],
     ["Extrude 7", "depends on previously baked geometry"],
     // d3cd9's Extrude 8 authors an `ENTITY` start plane over live body topology.
     // The start extent now binds to a durable entity, so its honest reason is the
-    // unresolved start-entity slot: the feature producing that entity is baked.
+    // unresolved start-entity slot behind its baked producer.
     ["Extrude 8", "could not be resolved as a durable reference"],
   ] as const) {
     expect(reviewText, `${label} must state its honest bake reason.`).toMatch(
@@ -516,9 +515,8 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
     "feature_extrude-2",
     "feature_extrude-3",
     "feature_mirror-1",
-    // The surface extrude commits its sheet, and `Split 1` splits the mirrored
-    // solid with exactly that sheet, so both reach the timeline before the baked
-    // run that closes the still-baked cut cascade.
+    // The surface extrude and sheet split commit, and body scoping commits Sketch
+    // 7 on exactly one split piece before the remaining cut cascade is baked.
     "feature_extrude-4",
     "feature_split-1",
     "feature_bakedBody-1",

@@ -3010,3 +3010,61 @@ behind those two sketches, and `Extrude 8` stays
   (`occ-topology-deleted` on the `UP_TO_SURFACE` target face).
 
 Validation: `bun run test:all` on a clean port 3123.
+
+
+### Item-D second follow-up: shell lineage and split-face ownership
+
+The two blockers named above were re-walked through the real browser worker and
+custom OCC build.
+
+#### 9841: the `JQm` / `t0010_6` invalidation is closed
+
+The loss occurred at `Shell 1`, not at `Extrude 2`. Whole-body shell modes used
+`trackReplacementSolidBody` plus an unsupported producer stage, discarding the
+OCC offset builder's exact `Modified` / `Generated` history. Every replay then
+minted positional `tNNNN_*` face ids; `Extrude 2` correctly reported the old
+`t0010_6` face deleted because Shell had already severed its lineage.
+
+Whole-body shell replacement now reconciles through the builder's own history
+and emits the same exact local-operation topology stage used by fillet/chamfer.
+The 13 surviving outer faces retain their existing generated ids through Shell;
+only subtopology the builder cannot name remains unsupported. The real 9841
+prefix consequently builds `Extrude 4` and `Split 1` when isolated: the surface
+extrude's `UP_TO_SURFACE` target is no longer refused.
+
+The complete studio does not promote those two yet. Reaching this deeper prefix
+exposes an earlier failure that the old surface refusal masked: `Sketch 2` /
+`Extrude 3` cannot materialize their live profile region. Their checkpoint is
+body-only, so `Cutter` cannot recover its supporting face; `Extrude 4` is then
+honestly `downstream-of-baked`, and `Split 1` cannot resolve sheet `JaD`. This is
+now a profile/region checkpoint frontier, not a surface, sheet-split, or shell
+lineage defect. The honest browser tier is **16 / 25 / 0** (previously
+17 / 24 / 0 because the masked prefix failure had not been contained).
+
+#### d3cd9: one coincident split face is exactly body-scoped
+
+The rollback snapshot records which captured split body owns each support face.
+Review now resolves that captured body only when its other captured faces each
+have a unique live match and every match votes for the same live body. More than
+one admissible candidate is always ambiguous—body attribution disables the
+ordinary score-margin winner—so this cannot become nearest-geometry matching.
+The proven live `BodyId` is carried on the deferred selector and applied as the
+same hard scope during commit; an empty scoped set stays no-match.
+
+That promotes `Sketch 7`, moving d3cd9 from **18 / 6 / 0** to **19 / 5 / 0**.
+`Extrude 5` and `Extrude 6` now reach their own next blocker: their deferred
+region selector does not resolve in committed Sketch 7, so each is contained as
+`feature-kernel-build-failed` with the raw `regionOf` diagnostic. `Sketch 8`
+stays behind those baked cuts and cannot recover its support face from the
+body-only checkpoint; `Extrude 7` cascades, and `Extrude 8` remains an unresolved
+live-topology extent. The `screwHole` upstream rebuild still passes with zero
+snapshot diagnostics.
+
+Probe action/materialization exceptions are now converted to a failed feature
+step with their original message; structured topology-rematch exceptions still
+bubble to their dedicated consumer-prefix containment path. This prevents a
+newly reachable profile failure from aborting the entire studio.
+
+Validation: focused modeling/import/contracts tests, lint, build, 9841 `walls`
+rebuild, and d3cd9 `screwHole` rebuild passed on clean port 3123. Full
+`bun run test:all` remains the final gate.
