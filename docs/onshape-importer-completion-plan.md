@@ -3007,8 +3007,9 @@ behind those two sketches, and `Extrude 8` stays
 - **Importer SURFACE translation:** **closed for `NEW` surface extrudes.**
   Non-`NEW` surface operations, authored draft, and unreadable/branching profile
   queries bake with their own reason codes.
-- **The 9841 SURFACE→Split cascade:** **open**, behind one named kernel refusal
-  (`occ-topology-deleted` on the `UP_TO_SURFACE` target face).
+- **The 9841 SURFACE→Split cascade:** **open.** The then-current
+  `occ-topology-deleted` refusal is superseded by the second follow-up below; the
+  surface target is now live, but an earlier profile/region checkpoint remains.
 
 Validation: `bun run test:all` on a clean port 3123.
 
@@ -3067,5 +3068,6 @@ bubble to their dedicated consumer-prefix containment path. This prevents a
 newly reachable profile failure from aborting the entire studio.
 
 Validation: focused modeling/import/contracts tests, lint, build, 9841 `walls`
-rebuild, and d3cd9 `screwHole` rebuild passed on clean port 3123. Full
-`bun run test:all` remains the final gate.
+rebuild, and d3cd9 `screwHole` rebuild passed on clean port 3123. The final
+acceptance components are green: 705 logic, 126 UI, 27 static, 56 fast Playwright,
+and 14 serial real-capture Playwright tests.

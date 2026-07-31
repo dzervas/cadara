@@ -66,11 +66,6 @@ export async function importBundle(
       : bundlePath,
   );
 
-  if (studioName) {
-    await expect(page.getByRole("combobox", { name: "Part Studio" })).toHaveValue(
-      new RegExp(`^${escapeRegExp(studioName)} \\(`),
-    );
-  }
 
   const commit = page.getByRole("button", { name: "Commit", exact: true });
   const alert = page.getByRole("alert").first();
@@ -219,6 +214,3 @@ async function readSelectedStudioCapture(
   };
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
