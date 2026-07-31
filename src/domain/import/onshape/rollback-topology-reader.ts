@@ -149,9 +149,15 @@ export function readRollbackTopologySnapshot(
   return { ...snapshot, bodies, diagnostics, source: snapshot };
 }
 
+const rollbackBodyShapeKeys = new WeakMap<RollbackBodyTopology, string>();
+
 /** Exact parsed tessellation key. Source payload surplus and STEP order are excluded. */
 export function rollbackBodyShapeKey(body: RollbackBodyTopology): string {
-  return JSON.stringify(body.faces);
+  const cached = rollbackBodyShapeKeys.get(body);
+  if (cached !== undefined) return cached;
+  const key = JSON.stringify(body.faces);
+  rollbackBodyShapeKeys.set(body, key);
+  return key;
 }
 
 /** Compare complete before/after body states by deterministic ID and exact shape key. */
@@ -191,14 +197,27 @@ export function diffRollbackTopologySnapshots(
   };
 }
 
+const rollbackTimelineCache = new WeakMap<
+  readonly OnshapeRollbackSnapshot[],
+  Map<string, RollbackTopologyTimeline>
+>();
+
 /** Build feature-order lookup. STEP text is intentionally never inspected for identity. */
 export function createRollbackTopologyTimeline(input: {
   featureIds: readonly string[];
   snapshots: readonly OnshapeRollbackSnapshot[] | null;
 }): RollbackTopologyTimeline {
+  const featureOrderKey = input.featureIds.join("\u0000");
+  const cached = input.snapshots
+    ? rollbackTimelineCache.get(input.snapshots)?.get(featureOrderKey)
+    : undefined;
+  if (cached) return cached;
+
   const diagnostics: RollbackTopologyDiagnostic[] = [];
   const featureIndex = new Map(input.featureIds.map((id, index) => [id, index]));
   const snapshots = new Map<string, RollbackTopologySnapshot>();
+  const bodyDeltaCache = new Map<string, RollbackBodyDelta | null>();
+  const bodyModifierCache = new Map<string, readonly string[]>();
   for (const snapshot of input.snapshots ?? []) {
     if (!featureIndex.has(snapshot.featureId)) {
       diagnostics.push({
@@ -211,7 +230,7 @@ export function createRollbackTopologyTimeline(input: {
     snapshots.set(snapshot.featureId, readRollbackTopologySnapshot(snapshot));
   }
 
-  return {
+  const timeline: RollbackTopologyTimeline = {
     diagnostics,
     snapshotAfterFeature(featureId) {
       return snapshots.get(featureId) ?? null;
@@ -226,16 +245,23 @@ export function createRollbackTopologyTimeline(input: {
       return null;
     },
     bodyDeltaBetweenFeatures(fromFeatureId, toFeatureId) {
+      const key = JSON.stringify([fromFeatureId, toFeatureId]);
+      if (bodyDeltaCache.has(key)) return bodyDeltaCache.get(key) ?? null;
       const before = this.snapshotBeforeFeature(fromFeatureId);
       const after = this.snapshotAfterFeature(toFeatureId);
-      return before &&
-        before.diagnostics.length === 0 &&
-        after &&
-        after.diagnostics.length === 0
+      const delta = before &&
+          before.diagnostics.length === 0 &&
+          after &&
+          after.diagnostics.length === 0
         ? diffRollbackTopologySnapshots(before, after)
         : null;
+      bodyDeltaCache.set(key, delta);
+      return delta;
     },
     featuresModifyingBody(bodyDeterministicId, beforeFeatureId) {
+      const key = JSON.stringify([bodyDeterministicId, beforeFeatureId]);
+      const cachedModifiers = bodyModifierCache.get(key);
+      if (cachedModifiers) return cachedModifiers;
       const limit = featureIndex.get(beforeFeatureId) ?? input.featureIds.length;
       const modifiers: string[] = [];
       let previousShape: string | null = null;
@@ -249,7 +275,15 @@ export function createRollbackTopologyTimeline(input: {
         if (shape !== previousShape) modifiers.push(snapshot.featureId);
         previousShape = shape;
       }
+      bodyModifierCache.set(key, modifiers);
       return modifiers;
     },
   };
+
+  if (input.snapshots) {
+    const timelines = rollbackTimelineCache.get(input.snapshots) ?? new Map();
+    timelines.set(featureOrderKey, timeline);
+    rollbackTimelineCache.set(input.snapshots, timelines);
+  }
+  return timeline;
 }

@@ -1,4 +1,6 @@
 import { plugin } from "bun";
 import UnpluginTypia from "@typia/unplugin/bun";
 
-plugin(UnpluginTypia({ tsconfig: "./tsconfig.app.json" }));
+import { createTypiaPluginOptions } from "./typia-plugin-options";
+
+plugin(UnpluginTypia(createTypiaPluginOptions(process.cwd())));

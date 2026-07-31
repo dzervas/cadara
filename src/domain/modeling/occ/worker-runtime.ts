@@ -17,5 +17,6 @@ export function createBrowserOccWorkerClient(options: {
       type: "module",
     }),
     assetResolver: options.assetResolver,
+    requestTimeoutMs: 30 * 60 * 1000,
   });
 }

@@ -1,7 +1,21 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+
 import { test, expect } from "vitest";
 import type { UserConfig } from "vite";
 
-import viteConfig, { getOpenCascadeAssetHeaders } from "../../vite.config";
+import { shouldTransformWithTypia } from "../../typia-plugin-options";
+import viteConfig, {
+  getBuildSourcemap,
+  getOpenCascadeAssetHeaders,
+} from "../../vite.config";
+
+function sourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+    return entry.isDirectory() ? sourceFiles(entryPath) : [entryPath];
+  });
+}
 
 function collectPluginNames(pluginOption: UserConfig["plugins"]): string[] {
   const names: string[] = [];
@@ -32,10 +46,22 @@ function collectPluginNames(pluginOption: UserConfig["plugins"]): string[] {
   return names;
 }
 
+test("every Typia call site is inside the cached transform scope", () => {
+  const uncovered = sourceFiles(path.resolve("src"))
+    .filter((filePath) => /\.tsx?$/.test(filePath))
+    .filter((filePath) => /\btypia\.create[A-Z]/.test(readFileSync(filePath, "utf8")))
+    .filter((filePath) => !shouldTransformWithTypia(filePath));
+
+  expect(
+    uncovered,
+    "A Typia call outside the narrowed plugin scope would reach runtime untransformed.",
+  ).toEqual([]);
+});
+
 test("test/static/build-config.spec.ts", async () => {
   expect(
-    (viteConfig as UserConfig).build?.sourcemap === "hidden",
-    "Production build should emit hidden JavaScript source maps for private Sentry upload.",
+    getBuildSourcemap(true) === "hidden" && getBuildSourcemap(false) === false,
+    "Builds should emit hidden source maps only when private Sentry upload is active.",
   ).toBeTruthy();
   expect(
     collectPluginNames((viteConfig as UserConfig).plugins).some((pluginName) =>

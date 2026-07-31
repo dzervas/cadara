@@ -53,6 +53,7 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
           embeddedBinaryAssets: [],
         };
       },
+      async releaseDocument() {},
       async getDocumentSnapshot() {
         snapshotCalls += 1;
         return {

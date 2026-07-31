@@ -49,6 +49,39 @@ test("uses feature-list order for before/after snapshots and reads exact tessell
   expect(timeline.snapshotBeforeFeature("transform")?.bodies[0]).toMatchObject({ id: "JHD", faces: [{ id: "JNC" }] });
 });
 
+test("memoizes one immutable rollback timeline per snapshot identity and feature order", () => {
+  const snapshots = [
+    {
+      featureId: "extrude",
+      tessellationTolerance: 0.0001,
+      tessellatedFaces: tessellation("body", "face-a"),
+    },
+    {
+      featureId: "fillet",
+      tessellationTolerance: 0.0001,
+      tessellatedFaces: tessellation("body", "face-b"),
+    },
+  ];
+  const first = createRollbackTopologyTimeline({
+    featureIds: ["extrude", "fillet"],
+    snapshots,
+  });
+  const second = createRollbackTopologyTimeline({
+    featureIds: ["extrude", "fillet"],
+    snapshots,
+  });
+  const reordered = createRollbackTopologyTimeline({
+    featureIds: ["fillet", "extrude"],
+    snapshots,
+  });
+
+  expect(second).toBe(first);
+  expect(reordered).not.toBe(first);
+  expect(second.bodyDeltaBetweenFeatures("fillet", "fillet")).toEqual(
+    first.bodyDeltaBetweenFeatures("fillet", "fillet"),
+  );
+});
+
 test("attributes a body to every feature that introduced or reshaped it before the consumer", () => {
   const unchanged = tessellation("JHD", "face-a");
   const timeline = createRollbackTopologyTimeline({
@@ -159,8 +192,8 @@ test("reports a no-change feature without inventing a body delta", () => {
 });
 
 const realBundleFiles = [
-  "40a51fb8fa82fd4565151114.onshape-capture.json",
-  "9841e486906fa2ce62d74d8e.onshape-capture.json",
+  "test/fixtures/onshape-captures/40a51fb8fa82fd4565151114.onshape-capture.json",
+  "test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json",
 ] as const;
 
 test.skipIf(realBundleFiles.some((fileName) => !existsSync(fileName)))(

@@ -260,6 +260,9 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       return getWorkerAdapter(
         operation.documentId,
       ).exportAuthoredModelDocument?.(operation.documentId);
+    case "releaseDocument":
+      adapters.delete(operation.documentId);
+      return undefined;
     case "getDocumentSnapshot": {
       const workerAdapter = getWorkerAdapter(operation.request.documentId);
       workerAdapter.setSnapshotLodTier(operation.lodTierId ?? "startup");

@@ -1353,11 +1353,11 @@ test("src/domain/import/onshape/provider.spec.ts emits a deferred parametric rev
 
 const realBundleCases = [
   [
-    "40a51fb8fa82fd4565151114.onshape-capture.json",
+    "test/fixtures/onshape-captures/40a51fb8fa82fd4565151114.onshape-capture.json",
     { parametric: 7, baked: 3, geometryOnly: 0 },
   ],
   [
-    "9841e486906fa2ce62d74d8e.onshape-capture.json",
+    "test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json",
     { parametric: 6, baked: 35, geometryOnly: 0 },
   ],
 ] as const;
@@ -1978,6 +1978,21 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
     ),
     "Prepare should emit an honest per-tier fidelity summary diagnostic.",
   ).toBeTruthy();
+
+  const cachedActions = await onshapeImportProvider.prepare({
+    source: {
+      ...source,
+      bytes: new TextEncoder().encode("{ no second decode should occur }"),
+    },
+    review,
+    selections,
+    capabilities,
+  });
+  expect(
+    validateImportPreparedActions(cachedActions).success,
+    "Prepare should reuse the validated bundle and parsed studio owned by its review session.",
+  ).toBeTruthy();
+  expect(cachedActions.orderedActions).toEqual(actions.orderedActions);
 
   const invalidSource: ResolvedImportSource = {
     ...source,

@@ -109,6 +109,10 @@ export type OccWorkerOperation =
       documentId: AuthoredModelDocument["documentId"];
     }
   | {
+      kind: "releaseDocument";
+      documentId: AuthoredModelDocument["documentId"];
+    }
+  | {
       kind: "getDocumentSnapshot";
       request: GetDocumentSnapshotRequest;
       lodTierId?: OccTessellationTierId;

@@ -6,3 +6,4 @@ occ-native-shims
 .claude
 .codex
 openspec
+test/fixtures/onshape-captures/*.onshape-capture.json

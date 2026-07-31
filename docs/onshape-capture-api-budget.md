@@ -1,6 +1,7 @@
 # Onshape capture API budget
 
-This audit is scoped to the five ignored root capture bundles used by Phase X:
+This audit is scoped to the five source captures represented by the curated
+fixtures in `test/fixtures/onshape-captures`:
 `405fa226bb150016d09afc09`, `40a51fb8fa82fd4565151114`,
 `5151a4c877c9493b733ad52f`, `9841e486906fa2ce62d74d8e`, and
 `d3cd9b09c3c36af1dd2efae9`.

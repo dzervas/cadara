@@ -359,7 +359,8 @@ test("translates a capture-pinned BLIND start offset and refuses the undiscrimin
 // `translateStartExtent`: the two capture instances it was measured from must
 // still author the discriminated flag combination, and the start plane must no
 // longer be what bakes them.
-const BLIND_START_BUNDLE = "9841e486906fa2ce62d74d8e.onshape-capture.json";
+const BLIND_START_BUNDLE =
+  "test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json";
 
 test.skipIf(!existsSync(BLIND_START_BUNDLE))(
   "passes the capture's two BLIND start offsets through the start-extent gate",

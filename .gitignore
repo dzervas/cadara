@@ -41,5 +41,10 @@ tmp-*
 /coverage
 *-capture.json
 
-# Onshape capture bundles (user-owned, may contain proprietary geometry)
+# Local Onshape captures remain private; curated acceptance fixtures are tracked.
 *.onshape-capture.json
+!test/fixtures/onshape-captures/*.onshape-capture.json
+
+# Quite big files, they don't fit in git (100MB)
+test/fixtures/onshape-captures/5151a4c877c9493b733ad52f.onshape-capture.json
+test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json

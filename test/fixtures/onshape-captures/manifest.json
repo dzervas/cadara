@@ -1,0 +1,47 @@
+{
+  "formatVersion": 1,
+  "fixtures": [
+    {
+      "file": "40a51fb8fa82fd4565151114.onshape-capture.json",
+      "sourceBytes": 10418805,
+      "fixtureBytes": 492436,
+      "sourceSha256": "98a7f163a84c3f4a2db220316c878d869da328058fd1565a77c47b32c3fee405",
+      "fixtureSha256": "ee6c294f421688382320e3e0c38d55b4ab04250e2adb1a02d01b5ce73434cdf2"
+    },
+    {
+      "file": "9841e486906fa2ce62d74d8e.onshape-capture.json",
+      "sourceBytes": 237586677,
+      "fixtureBytes": 103503692,
+      "sourceSha256": "940fd7ea28a747140708991f24df71ad5adbe366b9113dcddc8d57dd9f5a10aa",
+      "fixtureSha256": "8d083f616054f700732f302dce75e4aa0a03278b2c17602e37f49238e3e2ca3b"
+    },
+    {
+      "file": "405fa226bb150016d09afc09.onshape-capture.json",
+      "sourceBytes": 71185194,
+      "fixtureBytes": 6977096,
+      "sourceSha256": "6c58fbc020dfc1a5ba1757f88db1439a6e00fef9ad32db2ebb5fc0cf3ce4ab13",
+      "fixtureSha256": "ee22550f149c9803cca5c0a26f24c16f84bf478b792c1ffb041a4dd716d6a14c"
+    },
+    {
+      "file": "5151a4c877c9493b733ad52f.onshape-capture.json",
+      "sourceBytes": 38030878,
+      "fixtureBytes": 13488116,
+      "sourceSha256": "d233a3439cc42897b737d89ef478a3b54f6500c0e7f65e1536131ddd086228ba",
+      "fixtureSha256": "4558bd23f6dd4692317ecbb421a2b3eeac56450d0d591f274e2f9131b1baa5ac"
+    },
+    {
+      "file": "d3cd9b09c3c36af1dd2efae9.onshape-capture.json",
+      "sourceBytes": 24095696,
+      "fixtureBytes": 6753614,
+      "sourceSha256": "d58fc94dd77b35c2c5816ec5c92684fa2582e9f54280f276d8e6d75f330bff8e",
+      "fixtureSha256": "f4fca07c075d4a9f22a41ae1dc742767ca7c245e054454bf6ffcaebf985837bb"
+    }
+  ],
+  "omittedPayloads": [
+    "raw document, element, and parts responses",
+    "bundle diagnostics and immutable-history enrichment manifests",
+    "feature-spec responses",
+    "ground-truth and rollback STEP text",
+    "tessellation metadata, normals, indices, appearances, and type tags"
+  ]
+}

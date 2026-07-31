@@ -91,6 +91,12 @@ class InstrumentedOccWorkerClient implements OccWorkerSnapshotClient {
     );
   }
 
+  releaseDocument(documentId: AuthoredModelDocument["documentId"]) {
+    return this.measure("releaseDocument", () =>
+      this.inner.releaseDocument(documentId),
+    );
+  }
+
   getDocumentSnapshot(
     request: GetDocumentSnapshotRequest,
     lodTierId?: OccTessellationTierId,

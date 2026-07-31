@@ -14,32 +14,83 @@ import type {
 import { normalizeOccWorkerFailure } from "@/domain/modeling/occ/worker-protocol";
 
 class FakeOccWorker implements OccWorkerLike {
-  private listener: ((event: MessageEvent<OccWorkerResponse>) => void) | null =
-    null;
+  private messageListener:
+    | ((event: MessageEvent<OccWorkerResponse>) => void)
+    | null = null;
+  private errorListener: ((event: Event) => void) | null = null;
+  private messageErrorListener: ((event: Event) => void) | null = null;
   readonly posted: OccWorkerRequest[] = [];
+  postMessageError: Error | null = null;
+  terminateCalls = 0;
 
   postMessage(message: OccWorkerRequest): void {
+    if (this.postMessageError) {
+      throw this.postMessageError;
+    }
     this.posted.push(message);
   }
 
   addEventListener(
-    _type: "message",
+    type: "message",
     listener: (event: MessageEvent<OccWorkerResponse>) => void,
+  ): void;
+  addEventListener(
+    type: "error" | "messageerror",
+    listener: (event: Event) => void,
+  ): void;
+  addEventListener(
+    type: "message" | "error" | "messageerror",
+    listener:
+      | ((event: MessageEvent<OccWorkerResponse>) => void)
+      | ((event: Event) => void),
   ): void {
-    this.listener = listener;
-  }
-
-  removeEventListener(
-    _type: "message",
-    listener: (event: MessageEvent<OccWorkerResponse>) => void,
-  ): void {
-    if (this.listener === listener) {
-      this.listener = null;
+    if (type === "message") {
+      this.messageListener = listener as (event: MessageEvent<OccWorkerResponse>) => void;
+    } else if (type === "error") {
+      this.errorListener = listener as (event: Event) => void;
+    } else {
+      this.messageErrorListener = listener as (event: Event) => void;
     }
   }
 
+  removeEventListener(
+    type: "message",
+    listener: (event: MessageEvent<OccWorkerResponse>) => void,
+  ): void;
+  removeEventListener(
+    type: "error" | "messageerror",
+    listener: (event: Event) => void,
+  ): void;
+  removeEventListener(
+    type: "message" | "error" | "messageerror",
+    listener:
+      | ((event: MessageEvent<OccWorkerResponse>) => void)
+      | ((event: Event) => void),
+  ): void {
+    if (type === "message" && this.messageListener === listener) {
+      this.messageListener = null;
+    } else if (type === "error" && this.errorListener === listener) {
+      this.errorListener = null;
+    } else if (type === "messageerror" && this.messageErrorListener === listener) {
+      this.messageErrorListener = null;
+    }
+  }
+
+  terminate() {
+    this.terminateCalls += 1;
+  }
+
   emit(message: OccWorkerResponse) {
-    this.listener?.({ data: message } as MessageEvent<OccWorkerResponse>);
+    this.messageListener?.({ data: message } as MessageEvent<OccWorkerResponse>);
+  }
+
+  emitTransportError(type: "error" | "messageerror") {
+    const event = { type } as Event;
+    if (type === "error") {
+      this.errorListener?.(event);
+    } else {
+      this.messageErrorListener?.(event);
+    }
   }
 }
 
@@ -223,6 +274,32 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
   }
 
 
+  async function testReleaseDocumentDoesNotTerminateTheSharedWorker() {
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const promise = client.releaseDocument("doc_release");
+    const request = worker.posted[0];
+
+    expect(
+      request?.kind === "invoke" &&
+        request.operation.kind === "releaseDocument" &&
+        request.operation.documentId === "doc_release",
+      "Releasing a probe document should use the dedicated worker operation.",
+    ).toBeTruthy();
+
+    worker.emit({
+      kind: "invoked",
+      requestId: request.requestId,
+      operation: "releaseDocument",
+    });
+    await promise;
+
+    expect(
+      worker.terminateCalls,
+      "Releasing one document must retain the shared OCC worker runtime.",
+    ).toBe(0);
+  }
+
   async function testSynchronousKernelWorkHasNoClientRequestDeadline() {
     const worker = new FakeOccWorker();
     const client = new OccWorkerClient({ worker });
@@ -230,8 +307,8 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     const request = worker.posted[0];
 
     // Real baked-body materialization can take about 65 seconds. This
-    // compressed delay proves the client stays pending for synchronous kernel
-    // work and still observes the eventual worker response.
+    // compressed delay proves the default client stays pending for synchronous
+    // kernel work and still observes the eventual worker response.
     await new Promise((resolve) => setTimeout(resolve, 25));
     worker.emit({
       kind: "invoked",
@@ -240,6 +317,91 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     });
 
     await promise;
+  }
+
+  async function testConfigurableTimeoutAllowsLaterRequestsAfterLateResponses() {
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker, requestTimeoutMs: 10 });
+    const timedOut = client.warmup();
+    const timedOutRequest = worker.posted[0];
+
+    await expect(timedOut).rejects.toThrow(
+      "OCC worker request timed out after 10ms.",
+    );
+    worker.emit({
+      kind: "invoked",
+      requestId: timedOutRequest.requestId,
+      operation: "warmup",
+    });
+
+    const next = client.warmup();
+    const nextRequest = worker.posted[1];
+    worker.emit({
+      kind: "invoked",
+      requestId: nextRequest.requestId,
+      operation: "warmup",
+    });
+    await next;
+    expect(
+      worker.terminateCalls,
+      "An individual request timeout must not terminate the shared worker.",
+    ).toBe(0);
+  }
+
+  async function testTransportErrorsRejectAllPendingRequests() {
+    for (const type of ["error", "messageerror"] as const) {
+      const worker = new FakeOccWorker();
+      const client = new OccWorkerClient({ worker });
+      const first = client.warmup();
+      const second = client.releaseDocument("doc_transport_failure");
+
+      worker.emitTransportError(type);
+
+      await expect(Promise.all([first, second])).rejects.toThrow(
+        type === "error"
+          ? "OCC worker transport failed."
+          : "OCC worker message deserialization failed.",
+      );
+      await expect(client.warmup()).rejects.toThrow(
+        type === "error"
+          ? "OCC worker transport failed."
+          : "OCC worker message deserialization failed.",
+      );
+      expect(
+        worker.posted,
+        "Terminal worker transport failures must prevent new postMessage calls.",
+      ).toHaveLength(2);
+    }
+  }
+
+  async function testPostMessageFailuresBecomeTerminalAndRejectAllRequests() {
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const first = client.warmup();
+    worker.postMessageError = new Error("DataCloneError");
+    const second = client.releaseDocument("doc_post_failure");
+
+    await expect(Promise.all([first, second])).rejects.toThrow(
+      "OCC worker postMessage failed: DataCloneError",
+    );
+    worker.postMessageError = null;
+    await expect(client.warmup()).rejects.toThrow(
+      "OCC worker postMessage failed: DataCloneError",
+    );
+    expect(worker.posted).toHaveLength(1);
+  }
+
+  async function testDisposeRejectsPendingAndFutureRequests() {
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const pending = client.warmup();
+
+    client.dispose();
+    client.dispose();
+
+    await expect(pending).rejects.toThrow("OCC worker client disposed.");
+    await expect(client.warmup()).rejects.toThrow("OCC worker client disposed.");
+    expect(worker.terminateCalls).toBe(1);
   }
 
   function testWorkerFailureNormalizerPreservesUsefulMessages() {
@@ -266,6 +428,11 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
   await testSnapshotResponsesAreUnpacked();
   await testWarmupFailuresSurfaceToCaller();
   await testExportCapabilitiesCreateCloneSafeWorkerRequests();
+  await testReleaseDocumentDoesNotTerminateTheSharedWorker();
   await testSynchronousKernelWorkHasNoClientRequestDeadline();
+  await testConfigurableTimeoutAllowsLaterRequestsAfterLateResponses();
+  await testTransportErrorsRejectAllPendingRequests();
+  await testPostMessageFailuresBecomeTerminalAndRejectAllRequests();
+  await testDisposeRejectsPendingAndFutureRequests();
   testWorkerFailureNormalizerPreservesUsefulMessages();
 });

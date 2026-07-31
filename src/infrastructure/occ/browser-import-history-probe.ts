@@ -2,7 +2,10 @@ import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabili
 import type { DocumentId } from "@/contracts/shared/ids";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { createModelingService } from "@/domain/modeling/modeling-service";
-import { createBrowserOccKernelAdapter } from "@/infrastructure/occ/browser-kernel-runtime";
+import {
+  createBrowserOccKernelAdapter,
+  getBrowserOccWorkerClient,
+} from "@/infrastructure/occ/browser-kernel-runtime";
 
 let probeOrdinal = 0;
 
@@ -11,11 +14,21 @@ export function createBrowserOccImportHistoryProbe(): ImportHistoryProbeCapabili
     createService() {
       probeOrdinal += 1;
       const documentId = `doc_occ_history_probe_${probeOrdinal}` as DocumentId;
-      return createModelingService(createBrowserOccKernelAdapter(documentId), {
-        currentDocumentId: documentId,
-        documentRepository: null,
-        operationHistoryStore: null,
-      });
+      const service = createModelingService(
+        createBrowserOccKernelAdapter(documentId),
+        {
+          currentDocumentId: documentId,
+          documentRepository: null,
+          operationHistoryStore: null,
+        },
+      );
+      return {
+        ...service,
+        async dispose() {
+          service.dispose();
+          await getBrowserOccWorkerClient()?.releaseDocument(documentId);
+        },
+      };
     },
   });
 }

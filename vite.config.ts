@@ -7,9 +7,14 @@ import UnpluginTypia from "@typia/unplugin/vite";
 import path from "node:path";
 
 import {
-  createBuildMetadataPlugin,
-  readSentryBuildMetadata,
+  createBuildMetadataDefines,
+  readBuildMetadata,
 } from "./build-metadata";
+import { createTypiaPluginOptions } from "./typia-plugin-options";
+
+export function getBuildSourcemap(uploadToSentry: boolean) {
+  return uploadToSentry ? ("hidden" as const) : false;
+}
 
 export function getOpenCascadeAssetHeaders(
   value: string,
@@ -77,25 +82,23 @@ function createOpenCascadeAssetHeadersPlugin() {
   };
 }
 
-const sentryBuildMetadata = readSentryBuildMetadata(__dirname);
+const buildMetadata = readBuildMetadata(__dirname);
 const shouldUploadSentrySourceMaps = Boolean(
-  process.env.SENTRY_AUTH_TOKEN && sentryBuildMetadata.release,
+  process.env.SENTRY_AUTH_TOKEN && buildMetadata.sentryRelease,
 );
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: createBuildMetadataDefines(buildMetadata),
   test: {
     testTimeout: 15_000,
   },
   worker: {
-    plugins: () => [
-      UnpluginTypia({ tsconfig: path.resolve(__dirname, "tsconfig.app.json") }),
-    ],
+    plugins: () => [UnpluginTypia(createTypiaPluginOptions(__dirname))],
   },
   plugins: [
-    createBuildMetadataPlugin(__dirname),
     createOpenCascadeAssetHeadersPlugin(),
-    UnpluginTypia({ tsconfig: path.resolve(__dirname, "tsconfig.app.json") }),
+    UnpluginTypia(createTypiaPluginOptions(__dirname)),
     react(),
     tailwindcss(),
     sentryVitePlugin({
@@ -107,8 +110,8 @@ export default defineConfig({
         filesToDeleteAfterUpload: ["dist/**/*.map"],
       },
       release: {
-        name: sentryBuildMetadata.release ?? undefined,
-        dist: sentryBuildMetadata.dist ?? undefined,
+        name: buildMetadata.sentryRelease ?? undefined,
+        dist: buildMetadata.sentryDist ?? undefined,
         inject: true,
         create: true,
         finalize: true,
@@ -117,7 +120,7 @@ export default defineConfig({
           ignoreMissing: true,
         },
         deploy: {
-          env: sentryBuildMetadata.environment,
+          env: buildMetadata.sentryEnvironment,
           url: process.env.CF_PAGES_URL,
         },
       },
@@ -165,7 +168,8 @@ export default defineConfig({
     ],
   },
   build: {
-    sourcemap: "hidden",
+    sourcemap: getBuildSourcemap(shouldUploadSentrySourceMaps),
+    reportCompressedSize: false,
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {

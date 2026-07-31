@@ -27,11 +27,15 @@ type KernelHistoryProbeService = Pick<
   | "getCurrentDocumentSnapshot"
 >;
 
+type DisposableKernelHistoryProbeService = KernelHistoryProbeService & {
+  dispose?: () => void | Promise<void>;
+};
+
 export interface KernelHistoryProbeSessionOptions {
   /** Must be an isolated modeling service/session owned by the probe caller. */
-  service?: KernelHistoryProbeService;
+  service?: DisposableKernelHistoryProbeService;
   /** Creates a fresh isolated session for each probe evaluation. */
-  createService?: () => KernelHistoryProbeService & { dispose?: () => void };
+  createService?: () => DisposableKernelHistoryProbeService;
 }
 
 export interface MemoizedHistoryProbe extends ImportHistoryProbeCapabilities {
@@ -71,6 +75,8 @@ export function createMemoizedHistoryProbe(
       const key = JSON.stringify({
         actions: input.actions,
         includeFinalTessellation: input.includeFinalTessellation ?? false,
+        requestedSignatureStepOrdinals: input.requestedSignatureStepOrdinals ?? null,
+        containTopologyRematchFailures: input.containTopologyRematchFailures ?? false,
       });
       const cached = cache.get(key);
       if (cached) return cached;
@@ -99,9 +105,7 @@ export function createKernelHistoryProbeSession(
 ): ImportHistoryProbeCapabilities {
   return {
     async evaluateHistoryProbe(input) {
-      const service = (options.createService?.() ?? options.service) as
-        | (KernelHistoryProbeService & { dispose?: () => void })
-        | undefined;
+      const service = options.createService?.() ?? options.service;
       if (!service) {
         return {
           steps: [
@@ -122,7 +126,7 @@ export function createKernelHistoryProbeSession(
       try {
         return await evaluateHistoryProbeInKernelSession(input, service);
       } finally {
-        service.dispose?.();
+        await service.dispose?.();
       }
     },
   };
@@ -133,6 +137,9 @@ async function evaluateHistoryProbeInKernelSession(
   service: KernelHistoryProbeService,
 ): Promise<HistoryProbeResult> {
   const actionRefs = getOrderedActionRefs(input.actions);
+  const requestedSignatureStepOrdinals = input.requestedSignatureStepOrdinals === undefined
+    ? null
+    : new Set(input.requestedSignatureStepOrdinals);
   const steps: HistoryProbeResult["steps"] = [];
   const materializer = new ImportDeferredMaterializer({
     modelingService: service,
@@ -151,8 +158,16 @@ async function evaluateHistoryProbeInKernelSession(
       );
     } catch (error) {
       // A rematch error carries structured selector evidence used by the
-      // consumer-prefix containment pass, so preserve that exception type.
-      if (isTopologyApplyRematchError(error)) throw error;
+      // consumer-prefix containment pass. Prefix probes can opt into receiving
+      // it at the exact action boundary; legacy callers keep the thrown error.
+      if (isTopologyApplyRematchError(error)) {
+        if (!input.containTopologyRematchFailures) throw error;
+        steps.push({
+          status: "failed",
+          diagnostics: [topologyApplyRematchDiagnostic(error, orderedPosition)],
+        });
+        return { steps };
+      }
       // Other action/materialization failures are feature-local probe results,
       // not studio-fatal exceptions. Preserve the raw error text verbatim.
       applyResult = {
@@ -172,6 +187,14 @@ async function evaluateHistoryProbeInKernelSession(
         ],
       });
       return { steps };
+    }
+
+    if (
+      requestedSignatureStepOrdinals !== null &&
+      !requestedSignatureStepOrdinals.has(orderedPosition)
+    ) {
+      steps.push({ status: "rebuilt", signatures: [] });
+      continue;
     }
 
     const snapshot = await service.getCurrentDocumentSnapshot();
@@ -394,6 +417,31 @@ function describeRefusedTarget(target: DurableRef | null | undefined) {
     ? ` [refused target ${target.kind}]`
     : ` [refused target ${target.kind} ${suffix}]`;
 }
+function topologyApplyRematchDiagnostic(
+  error: {
+    selector: {
+      source: {
+        consumerFeatureId: string;
+        parameterId: string;
+        deterministicId: string;
+      };
+    };
+    detail: string | null;
+  },
+  orderedPosition: number,
+): HistoryProbeStepDiagnostic {
+  return {
+    severity: "error",
+    code: "topology-apply-rematch-failed",
+    message: [
+      `History probe topology rematch failed at step ${orderedPosition + 1} for ${error.selector.source.consumerFeatureId}:${error.selector.source.parameterId}:${error.selector.source.deterministicId}`,
+      error.detail,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(": "),
+  };
+}
+
 function missingAction(actionRef: ImportPreparedActionRef) {
   return {
     ok: false as const,

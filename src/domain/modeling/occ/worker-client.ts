@@ -71,9 +71,17 @@ export interface OccWorkerLike {
     type: "message",
     listener: (event: MessageEvent<OccWorkerResponse>) => void,
   ): void;
+  addEventListener(
+    type: "error" | "messageerror",
+    listener: (event: Event) => void,
+  ): void;
   removeEventListener(
     type: "message",
     listener: (event: MessageEvent<OccWorkerResponse>) => void,
+  ): void;
+  removeEventListener(
+    type: "error" | "messageerror",
+    listener: (event: Event) => void,
   ): void;
   terminate?(): void;
 }
@@ -82,11 +90,13 @@ type PendingRequest = {
   operation: OccWorkerOperation["kind"];
   resolve: (value?: unknown) => void;
   reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout> | null;
 };
 
 export interface OccWorkerClientOptions {
   worker: OccWorkerLike;
   assetResolver?: GeometryAssetResolver;
+  requestTimeoutMs?: number | null;
 }
 
 export interface OccWorkerSnapshotClient {
@@ -105,6 +115,7 @@ export interface OccWorkerSnapshotClient {
   exportAuthoredModelDocument(
     documentId: AuthoredModelDocument["documentId"],
   ): Promise<AuthoredModelDocument>;
+  releaseDocument(documentId: AuthoredModelDocument["documentId"]): Promise<void>;
   getDocumentSnapshot(
     request: GetDocumentSnapshotRequest,
     lodTierId?: OccTessellationTierId,
@@ -186,13 +197,19 @@ export interface OccWorkerSnapshotClient {
 export class OccWorkerClient implements OccWorkerSnapshotClient {
   private readonly worker: OccWorkerLike;
   private readonly assetResolver: GeometryAssetResolver | undefined;
+  private readonly requestTimeoutMs: number | null;
   private readonly pending = new Map<RequestId, PendingRequest>();
   private requestSequence = 0;
+  private terminalError: Error | null = null;
+  private disposed = false;
 
   constructor(options: OccWorkerClientOptions) {
     this.worker = options.worker;
     this.assetResolver = options.assetResolver;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? null;
     this.worker.addEventListener("message", this.handleMessage);
+    this.worker.addEventListener("error", this.handleTransportError);
+    this.worker.addEventListener("messageerror", this.handleTransportError);
   }
 
   warmup(assets?: OccWorkerAssetConfig) {
@@ -234,6 +251,10 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
       kind: "exportAuthoredModelDocument",
       documentId,
     });
+  }
+
+  releaseDocument(documentId: AuthoredModelDocument["documentId"]) {
+    return this.invokeVoid({ kind: "releaseDocument", documentId });
   }
 
   getDocumentSnapshot(
@@ -480,10 +501,13 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   }
 
   dispose() {
-    this.worker.removeEventListener("message", this.handleMessage);
-    for (const requestId of this.pending.keys()) {
-      this.rejectPending(requestId, new Error("OCC worker client disposed."));
+    if (this.disposed) {
+      return;
     }
+
+    this.disposed = true;
+    this.detachListeners();
+    this.rejectAllPending(new Error("OCC worker client disposed."));
     this.worker.terminate?.();
   }
 
@@ -492,16 +516,41 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   }
 
   private invoke<T>(operation: OccWorkerOperation): Promise<T> {
+    if (this.disposed) {
+      return Promise.reject(new Error("OCC worker client disposed."));
+    }
+    if (this.terminalError) {
+      return Promise.reject(this.terminalError);
+    }
+
     const requestId = this.createRequestId(operation.kind);
 
     return new Promise<T>((resolve, reject) => {
+      const timeout =
+        this.requestTimeoutMs === null
+          ? null
+          : setTimeout(() => {
+              this.rejectPending(
+                requestId,
+                new Error(
+                  `OCC worker request timed out after ${this.requestTimeoutMs}ms.`,
+                ),
+              );
+            }, this.requestTimeoutMs);
       this.pending.set(requestId, {
         operation: operation.kind,
         resolve: (value) =>
           resolve(this.normalizePayload(operation.kind, value) as T),
         reject,
+        timeout,
       });
-      this.worker.postMessage({ kind: "invoke", requestId, operation });
+      try {
+        this.worker.postMessage({ kind: "invoke", requestId, operation });
+      } catch (error) {
+        this.enterTerminalState(
+          new Error(`OCC worker postMessage failed: ${describeTransportError(error)}`),
+        );
+      }
     });
   }
 
@@ -522,10 +571,22 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   }
 
   private readonly handleMessage = (event: MessageEvent<OccWorkerResponse>) => {
+    if (this.disposed || this.terminalError) {
+      return;
+    }
+
     const message = event.data;
 
     if (message.kind === "resolveGeometryAsset") {
-      void this.answerGeometryAssetRequest(message.requestId, message.reference);
+      void this.answerGeometryAssetRequest(message.requestId, message.reference).catch(
+        (error: unknown) => {
+          this.enterTerminalState(
+            new Error(
+              `OCC worker geometry asset resolution failed: ${describeTransportError(error)}`,
+            ),
+          );
+        },
+      );
       return;
     }
 
@@ -536,6 +597,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     }
 
     this.pending.delete(message.requestId);
+    this.clearPendingTimeout(pending);
 
     if (message.kind === "failure") {
       pending.reject(new Error(message.error.message));
@@ -558,15 +620,57 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   ) {
     const resolved =
       (await this.assetResolver?.resolveGeometryAsset(reference)) ?? null;
-    this.worker.postMessage(
-      {
-        kind: "resolveGeometryAssetResult",
-        requestId,
-        assetId: reference.assetId,
-        asset: resolved,
-      },
-      resolved ? [resolved.bytes.buffer as ArrayBuffer] : [],
+    if (this.disposed || this.terminalError) {
+      return;
+    }
+
+    try {
+      this.worker.postMessage(
+        {
+          kind: "resolveGeometryAssetResult",
+          requestId,
+          assetId: reference.assetId,
+          asset: resolved,
+        },
+        resolved ? [resolved.bytes.buffer as ArrayBuffer] : [],
+      );
+    } catch (error) {
+      this.enterTerminalState(
+        new Error(`OCC worker postMessage failed: ${describeTransportError(error)}`),
+      );
+    }
+  }
+
+  private readonly handleTransportError = (event: Event) => {
+    this.enterTerminalState(
+      new Error(
+        event.type === "messageerror"
+          ? "OCC worker message deserialization failed."
+          : "OCC worker transport failed.",
+      ),
     );
+  };
+
+  private enterTerminalState(error: Error) {
+    if (this.disposed || this.terminalError) {
+      return;
+    }
+
+    this.terminalError = error;
+    this.detachListeners();
+    this.rejectAllPending(error);
+  }
+
+  private detachListeners() {
+    this.worker.removeEventListener("message", this.handleMessage);
+    this.worker.removeEventListener("error", this.handleTransportError);
+    this.worker.removeEventListener("messageerror", this.handleTransportError);
+  }
+
+  private rejectAllPending(error: Error) {
+    for (const requestId of [...this.pending.keys()]) {
+      this.rejectPending(requestId, error);
+    }
   }
 
   private rejectPending(requestId: RequestId, error: Error) {
@@ -576,11 +680,22 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     }
 
     this.pending.delete(requestId);
+    this.clearPendingTimeout(pending);
     pending.reject(error);
+  }
+
+  private clearPendingTimeout(pending: PendingRequest) {
+    if (pending.timeout !== null) {
+      clearTimeout(pending.timeout);
+    }
   }
 
   private createRequestId(prefix: string) {
     this.requestSequence += 1;
     return `request_occ_${prefix}_${this.requestSequence}` as RequestId;
   }
+}
+
+function describeTransportError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

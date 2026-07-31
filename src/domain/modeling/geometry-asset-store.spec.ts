@@ -3,6 +3,7 @@ import { test, expect } from "vitest";
 import {
   createIndexedDbGeometryAssetStore,
   createMemoryGeometryAssetStore,
+  hashGeometryAssetBytes,
 } from "@/domain/modeling/geometry-asset-store";
 import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
 
@@ -10,6 +11,12 @@ test("src/domain/modeling/geometry-asset-store.spec.ts", async () => {
   const asset = await createDeterministicGeometryAsset({
     byteLength: 96 * 1024,
   });
+  const padded = new Uint8Array(asset.bytes.byteLength + 2);
+  padded.set(asset.bytes, 1);
+  expect(await hashGeometryAssetBytes(padded.subarray(1, -1))).toBe(
+    await hashGeometryAssetBytes(asset.bytes),
+  );
+
   const store = createMemoryGeometryAssetStore();
   const firstPut = await store.put(asset);
   const secondPut = await store.put(asset);
