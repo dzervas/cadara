@@ -1,4 +1,4 @@
-import { appVersion, gitCommit } from "virtual:cadara-build-metadata";
+import { appVersion, gitCommit } from "@/build-info";
 
 import {
   formatBuildMetadata,

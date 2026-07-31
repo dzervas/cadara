@@ -99,15 +99,17 @@ test("second real Onshape bundle updates walls against the latest revision", asy
   page,
 }) => {
   // The 9841 bundle (~237 MB with full bake-boundary snapshots) rebuilds every
-  // distinct probe prefix in the kernel during review, and now promotes two more
-  // features (`Shell 1`, `Extrude 2`), so each rebuild carries more geometry
-  // (~7 min end to end). Budget beyond the file-wide 120 s default.
-  test.setTimeout(2_400_000);
+  // distinct probe prefix in the kernel during review. Whole-body shell history
+  // now carries substantially more exact topology through each replay, and the
+  // full-plan containment pass reaches the previously masked Sketch 2 / Extrude 3
+  // region failure. Under two-worker contention review can exceed 25 minutes;
+  // these are wait caps only and real failures still surface through the alert race.
+  test.setTimeout(3_600_000);
   test.skip(
     !existsSync(PART_STUDIO_BUNDLE_PATH),
     "Second real Onshape capture is not present locally.",
   );
-  await importBundle(page, PART_STUDIO_BUNDLE_PATH);
+  await importBundle(page, PART_STUDIO_BUNDLE_PATH, false, undefined, 3_000_000);
   await editVariable(page, "walls", "3");
 
   await expect(

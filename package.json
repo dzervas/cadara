@@ -11,8 +11,9 @@
   ],
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
-    "build": "tsc -b ./tsconfig.app.json && vite build",
-    "build:single": "tsc -b ./tsconfig.app.json && vite build --config vite.single.config.ts",
+    "typecheck": "bunx --package @typescript/native tsc -b ./tsconfig.app.json",
+    "build": "bun run typecheck && vite build",
+    "build:single": "bun run typecheck && vite build --config vite.single.config.ts",
     "lint": "eslint .",
     "preview": "vite preview",
     "bench:init": "bun ./scripts/init-time-benchmark.ts",
@@ -24,7 +25,12 @@
     "test:static": "vitest run test/static",
     "test": "bun run test:logic && bun run test:ui && bun run test:static",
     "test:e2e": "playwright test",
-    "test:all": "bun run lint && bun run build && bun run test && bun run test:e2e"
+    "test:e2e:diagnostic": "PLAYWRIGHT_DIAGNOSTICS=1 playwright test --workers=1",
+    "test:e2e:real-captures": "bun ./scripts/require-onshape-captures.ts && PLAYWRIGHT_REAL_CAPTURES=1 playwright test e2e/onshape-import-parametric.spec.ts e2e/onshape-variable-rebuild.spec.ts --workers=1",
+    "test:e2e:real-captures:diagnostic": "bun ./scripts/require-onshape-captures.ts && PLAYWRIGHT_REAL_CAPTURES=1 PLAYWRIGHT_DIAGNOSTICS=1 playwright test e2e/onshape-import-parametric.spec.ts e2e/onshape-variable-rebuild.spec.ts --workers=1",
+    "test:e2e:all": "bun run test:e2e && bun run test:e2e:real-captures",
+    "test:all": "bun run lint && bun run build && bun run test && bun run test:e2e",
+    "test:all:acceptance": "bun run lint && bun run build && bun run test && bun run test:e2e:all"
   },
   "dependencies": {
     "@automerge/automerge-repo": "^2.5.5",
@@ -60,6 +66,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.183.1",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.1.1",

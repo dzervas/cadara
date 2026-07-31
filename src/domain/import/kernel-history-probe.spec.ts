@@ -10,7 +10,10 @@ import {
   createOccNativeExactBrepPayloadFromShimPayload,
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
-import { createImportCapabilities } from "@/domain/import/orchestrator";
+import {
+  createImportCapabilities,
+  TopologyApplyRematchError,
+} from "@/domain/import/orchestrator";
 import type { BodyId, DocumentId, RevisionId } from "@/contracts/shared/ids";
 
 import type { ImportPreparedActions } from "@/contracts/import/actions";
@@ -162,6 +165,85 @@ test("kernel history probe materializes deferred sketch-region extrudes", async 
   ).toBeTruthy();
 });
 
+
+test("kernel history probe awaits async service disposal after a successful evaluation", async () => {
+  let beginDispose: (() => void) | undefined;
+  let releaseDispose: (() => void) | undefined;
+  const disposeStarted = new Promise<void>((resolve) => {
+    beginDispose = resolve;
+  });
+  const disposeFinished = new Promise<void>((resolve) => {
+    releaseDispose = resolve;
+  });
+  const probe = createKernelHistoryProbeSession({
+    createService() {
+      return {
+        dispose() {
+          beginDispose?.();
+          return disposeFinished;
+        },
+      } as never;
+    },
+  });
+
+  const evaluation = probe.evaluateHistoryProbe({ actions: {} });
+  await disposeStarted;
+  let settled = false;
+  void evaluation.then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  expect(settled).toBe(false);
+
+  releaseDispose?.();
+  await expect(evaluation).resolves.toEqual({ steps: [] });
+});
+
+test("kernel history probe awaits async service disposal after a failed evaluation", async () => {
+  let beginDispose: (() => void) | undefined;
+  let releaseDispose: (() => void) | undefined;
+  const disposeStarted = new Promise<void>((resolve) => {
+    beginDispose = resolve;
+  });
+  const disposeFinished = new Promise<void>((resolve) => {
+    releaseDispose = resolve;
+  });
+  const probe = createKernelHistoryProbeSession({
+    createService() {
+      return {
+        async getCurrentDocumentSnapshot() {
+          return makeSnapshot("rev_probe_dispose" as RevisionId, []);
+        },
+        async createFeature() {
+          throw new Error("probe action failed");
+        },
+        dispose() {
+          beginDispose?.();
+          return disposeFinished;
+        },
+      } as never;
+    },
+  });
+
+  const evaluation = probe.evaluateHistoryProbe({
+    actions: { createFeatures: [{ requestId: "request_dispose_failure" } as never] },
+  });
+  await disposeStarted;
+  let settled = false;
+  void evaluation.then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  expect(settled).toBe(false);
+
+  releaseDispose?.();
+  await expect(evaluation).resolves.toMatchObject({
+    steps: [{
+      status: "failed",
+      diagnostics: [{ message: "History probe failed at step 1: probe action failed" }],
+    }],
+  });
+});
 
 test("kernel history probe contains deferred materialization failures at their feature step", async () => {
   const documentId = "doc_workspace" as DocumentId;
@@ -362,6 +444,150 @@ test("kernel history probe returns completed prefix results and failing-step dia
 });
 
 
+test("kernel history probe samples every successful step by default and skips unsampled signature work", async () => {
+  const actions: ImportPreparedActions = {
+    createFeatures: [
+      { requestId: "one" } as never,
+      { requestId: "two" } as never,
+      { requestId: "three" } as never,
+    ],
+  };
+  const evaluate = async (requestedSignatureStepOrdinals?: readonly number[]) => {
+    let snapshotCalls = 0;
+    let exactPayloadCalls = 0;
+    const probe = createKernelHistoryProbeSession({
+      service: {
+        async getCurrentDocumentSnapshot() {
+          snapshotCalls += 1;
+          return makeSnapshot("rev_sampling" as RevisionId, [
+            { bodyId: "body_sampling" as BodyId },
+          ]);
+        },
+        async createFeature() {
+          return ok({}) as never;
+        },
+        async commitSketch() {
+          return ok({}) as never;
+        },
+        async addDocumentVariable() {
+          return ok({}) as never;
+        },
+        async buildNativeExactBrepPayload() {
+          exactPayloadCalls += 1;
+          return {
+            kind: "nativeTopologyPayload" as const,
+            payload: makeExactPayload("body_sampling" as BodyId),
+            diagnostics: [],
+          };
+        },
+      },
+    });
+    const result = await probe.evaluateHistoryProbe({
+      actions,
+      ...(requestedSignatureStepOrdinals === undefined
+        ? {}
+        : { requestedSignatureStepOrdinals }),
+    });
+    return { result, snapshotCalls, exactPayloadCalls };
+  };
+
+  const legacy = await evaluate();
+  const legacySignatureCounts = legacy.result.steps.map((step) =>
+    step.status === "rebuilt" ? step.signatures.length : 0,
+  );
+  expect(legacySignatureCounts.every((count) => count > 0)).toBe(true);
+  expect(legacy).toMatchObject({ snapshotCalls: 6, exactPayloadCalls: 3 });
+
+  const selected = await evaluate([1]);
+  expect(
+    selected.result.steps.map((step) =>
+      step.status === "rebuilt" ? step.signatures.length : 0,
+    ),
+  ).toEqual([0, legacySignatureCounts[1], 0]);
+  expect(selected).toMatchObject({ snapshotCalls: 4, exactPayloadCalls: 1 });
+
+  const empty = await evaluate([]);
+  expect(empty.result.steps).toEqual([
+    { status: "rebuilt", signatures: [] },
+    { status: "rebuilt", signatures: [] },
+    { status: "rebuilt", signatures: [] },
+  ]);
+  expect(empty).toMatchObject({ snapshotCalls: 3, exactPayloadCalls: 0 });
+});
+
+test("kernel history probe contains topology rematch failures only when requested", async () => {
+  const selector = {
+    kind: "topologyOf" as const,
+    expectedKind: "body" as const,
+    capturedSignature: {} as never,
+    tolerance: {} as never,
+    source: {
+      consumerFeatureId: "consumer-feature",
+      parameterId: "parts",
+      deterministicId: "selector-id",
+    },
+  };
+  const createProbe = () => {
+    let actionCalls = 0;
+    return createKernelHistoryProbeSession({
+      createService() {
+        return {
+          async getCurrentDocumentSnapshot() {
+            return makeSnapshot("rev_rematch" as RevisionId, [
+              { bodyId: "body_rematch" as BodyId },
+            ]);
+          },
+          async createFeature() {
+            actionCalls += 1;
+            if (actionCalls === 2) {
+              throw new TopologyApplyRematchError(selector, "live candidates: none");
+            }
+            return ok({}) as never;
+          },
+          async commitSketch() {
+            return ok({}) as never;
+          },
+          async addDocumentVariable() {
+            return ok({}) as never;
+          },
+          async buildNativeExactBrepPayload() {
+            return {
+              kind: "nativeTopologyPayload" as const,
+              payload: makeExactPayload("body_rematch" as BodyId),
+              diagnostics: [],
+            };
+          },
+        } as never;
+      },
+    });
+  };
+  const actions: ImportPreparedActions = {
+    createFeatures: [
+      { requestId: "first" } as never,
+      { requestId: "second" } as never,
+    ],
+  };
+
+  await expect(createProbe().evaluateHistoryProbe({ actions })).rejects.toThrow(
+    "Live topology rematch failed for consumer-feature:parts:selector-id.",
+  );
+
+  const contained = await createProbe().evaluateHistoryProbe({
+    actions,
+    containTopologyRematchFailures: true,
+  });
+  expect(contained.steps[0]?.status).toBe("rebuilt");
+  expect(contained.steps[1]).toEqual({
+    status: "failed",
+    diagnostics: [{
+      severity: "error",
+      code: "topology-apply-rematch-failed",
+      message:
+        "History probe topology rematch failed at step 2 for consumer-feature:parts:selector-id: live candidates: none",
+    }],
+  });
+});
+
 // Lane: logic (per docs/testing.md — non-UI behavior at an exported domain
 // boundary). Seam: the probe's acceptance rule must equal apply's. A kernel
 // result whose Result envelope is Ok but that carries an error diagnostic (or a
@@ -511,6 +737,23 @@ test("memoized history probe evaluates each distinct action payload exactly once
   // request and must not be answered from the prefix entry.
   await memoized.evaluateHistoryProbe({ actions: prefix, includeFinalTessellation: true });
   expect(evaluations).toBe(3);
+
+  // Signature selection and rematch containment both affect observable probe
+  // output, so neither request may reuse a legacy cache entry.
+  await memoized.evaluateHistoryProbe({
+    actions: prefix,
+    requestedSignatureStepOrdinals: [],
+  });
+  await memoized.evaluateHistoryProbe({
+    actions: prefix,
+    requestedSignatureStepOrdinals: [],
+  });
+  expect(evaluations).toBe(4);
+  await memoized.evaluateHistoryProbe({
+    actions: prefix,
+    containTopologyRematchFailures: true,
+  });
+  expect(evaluations).toBe(5);
 });
 
 // A failed probe is the input to review's containment pass, which exists to change

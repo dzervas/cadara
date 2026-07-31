@@ -25,8 +25,8 @@ Scope decisions (2026-07-18, user-confirmed):
 Process: same as the parity plan — no openspec. One work item = one commit by
 one agent; agents check items off here and append verification notes at the
 bottom. Test policy per `docs/testing.md` (logic lane `.spec.ts` +
-apply-pipeline coverage; real-capture baselines skip when the gitignored
-bundle is absent). After each item: `bun run test:all` relevant slices green.
+apply-pipeline coverage against the tracked curated captures in
+`test/fixtures/onshape-captures`). After each item: `bun run test:all` relevant slices green.
 
 ## Baseline (2026-07-18, commit 06270237)
 
@@ -607,15 +607,15 @@ baked PS1 features decompose into: 9 sketches-on-body-faces
 ## Phase X — Full-parametric local-capture closure (active)
 
 Phase W closed its original scoped work, but did not satisfy the stronger local
-acceptance goal: every supported feature in every root
-`*.onshape-capture.json` imports as live parametric history. Phase X supersedes
+acceptance goal: every supported feature in every tracked
+`test/fixtures/onshape-captures/*.onshape-capture.json` imports as live parametric history. Phase X supersedes
 mock-review tier counts as acceptance. The real browser/worker/OCC apply path is
 the gate; `scripts/onshape-plan-dump.ts --review` remains diagnostic only because
 it echoes captured signatures and does not rebuild OCC geometry.
 
 Scope and denominator:
 
-- Root bundles: `405fa226bb150016d09afc09`, `40a51fb8fa82fd4565151114`,
+- Tracked fixture bundles: `405fa226bb150016d09afc09`, `40a51fb8fa82fd4565151114`,
   `5151a4c877c9493b733ad52f`, `9841e486906fa2ce62d74d8e`, and
   `d3cd9b09c3c36af1dd2efae9`; every Part Studio in each bundle is included.
 - Onshape `bodyType=SURFACE` extrudes are the only accepted exclusions. The
@@ -675,14 +675,15 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
   Local plan dumps confirm 9841 and d3cd9 `Extrude 4` stay baked with the new
   reason while 5151 `Extrude 4` remains correctly parametric because it is a
   solid remove. Changed-file lint and the production build are green.
-- [ ] X.3 **Refresh local capture evidence.** Target-enrich all five root bundles
+- [ ] X.3 **Refresh local capture evidence.** Target-enrich all five source bundles
       with the current exact-profile evidence schema. Reuse immutable source,
       deterministic-ID, query-resolution, final-geometry, and existing boundary
       evidence when its document microversion and element match; request only
       missing opaque-profile states and proven bake-boundary geometry. Verify format
       v2, the current complete profile-evidence manifest, expected
-      `resolvedQueryReferences`, and boundary-only rollback coverage; do not commit
-      root capture files. No compatibility fallback for pre-X.4 evidence is permitted.
+      `resolvedQueryReferences`, and boundary-only rollback coverage; then refresh the
+      curated tracked fixtures without committing the raw source captures. No compatibility
+      fallback for pre-X.4 evidence is permitted.
 
 
       **Current evidence (target enrichment resumed).** Capture now uses cookie auth,
@@ -1025,10 +1026,10 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         Playwright gate.
   - [ ] X.9.4 **Complete the real-browser acceptance matrix.** Extend the shared
         Playwright Onshape harness, not ad hoc scripts, to cover every studio in all
-        five root bundles. Assert the exact non-surface feature timeline, zero
+        five tracked fixture bundles. Assert the exact non-surface feature timeline, zero
         baked/checkpoint actions, zero suppressed supported features, zero
         invalid-reference diagnostics, and at least one meaningful upstream
-        edit/rebuild per studio. Tests skip only when a gitignored bundle is absent.
+        edit/rebuild per studio.
 - [ ] X.10 **Final verification and cleanup.** Run `bun run test:all`, record exact
       final tier tables here, remove temporary capture/debug code and stale
       mock/browser baselines, and verify `jj status` contains only intentional
@@ -1136,8 +1137,8 @@ Session notes for the next orchestrator: subagent model routing —
 `dzerv-art/gpt-5.6-sol` had a multi-day quota cooldown (check before use),
 `openai-codex/gpt-5.6-sol` quota was reset 2026-07-18, Claude models work as
 fallback; always pass fully-qualified model names to workflow agents (fuzzy
-resolution picked a keyless openrouter provider once). Real bundles + the
-`.cadara` capture in repo root are gitignored local fixtures. jj commits with
+resolution picked a keyless openrouter provider once). Curated real bundles are tracked in
+`test/fixtures/onshape-captures`; raw recaptures and the root `.cadara` file remain ignored. jj commits with
 `--config signing.behavior=drop` while the 1Password SSH agent is down.
 
 ## Execution notes for the orchestrator
@@ -1151,8 +1152,8 @@ resolution picked a keyless openrouter provider once). Real bundles + the
 - Each agent gets: this file, the relevant translator file(s),
   `docs/architecture/onshape-topology-reference-resolution.md`, and must run
   `scripts/onshape-plan-dump.ts` before/after on the affected capture.
-- Never commit `*.onshape-capture.json` (gitignored) or print `.envrc`
-  contents. API creds come from the environment (`direnv` or
+- Never commit arbitrary raw `*.onshape-capture.json` files outside the curated
+  `test/fixtures/onshape-captures` exception or print `.envrc` contents. API creds come from the environment (`direnv` or
   `source .envrc`; the "command not found" noise from sourcing is expected).
 
 ## Reference: current translator behavior (2026-07-18)

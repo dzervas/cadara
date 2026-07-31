@@ -6,7 +6,8 @@ import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
 
-const BUNDLE_PATH = "405fa226bb150016d09afc09.onshape-capture.json";
+const BUNDLE_PATH =
+  "test/fixtures/onshape-captures/405fa226bb150016d09afc09.onshape-capture.json";
 const ELEMENT_ID = "6869c89206c7a4bb97bd9129";
 
 test.skipIf(!existsSync(BUNDLE_PATH))(

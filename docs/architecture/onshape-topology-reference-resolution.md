@@ -55,23 +55,19 @@ confirmed by exact ID equality in a rollback snapshot and can receive a
 bbox/sample derived from its facets. An edge query cannot be identified from a
 rollback tessellation alone.
 
-### The checked-in bundles are not the archived v2 smoke captures
+### The tracked fixtures include v2 history evidence
 
-Both repository-root fixtures are currently `formatVersion: 1`, have
-`rollbackSnapshots: null`, and contain final-state references only:
+The curated fixtures under `test/fixtures/onshape-captures` are `formatVersion: 2`
+and retain the rollback topology and history-point references consumed by the importer:
 
 | Bundle | Studio | Features | References | History-point records | Rollback snapshots |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `40a51fb8fa82fd4565151114.onshape-capture.json` | Mounts | 10 | 11 | 0 | `null` |
-| `9841e486906fa2ce62d74d8e.onshape-capture.json` | Part Studio 1 | 41 | 223 | 0 | `null` |
+| `40a51fb8fa82fd4565151114.onshape-capture.json` | Mounts | 10 | 7 | 3 | 8 |
+| `9841e486906fa2ce62d74d8e.onshape-capture.json` | Part Studio 1 | 41 | 482 | 259 | 28 |
 
-The v2 counts in
-`openspec/changes/archive/2026-07-14-add-onshape-capture-rollback-snapshots/design.md`
-refer to live re-captures that were not checked in. Successful mid-history
-resolution cannot be claimed against the current root files. They are useful
-regression fixtures for the honest legacy fallback, but implementation
-acceptance requires recapturing both documents with automatic v2 history and
-proven-boundary evidence.
+Unused raw API response metadata is omitted from these acceptance fixtures, while
+the feature history, consumed evidence, deterministic IDs, and exact tessellation
+coordinates remain available for mid-history resolution and real-kernel acceptance.
 
 ### Actual query shapes
 
@@ -449,10 +445,10 @@ consumer's baked checkpoint if matching changed between review and apply. If no
 post-feature snapshot exists, apply fails atomically rather than authoring a
 wrong ref.
 
-For the current v1 root bundles, per-feature geometry is unavailable. The only
-honest geometry fallback is the existing final studio bake, with
-`topology-history-evidence-missing` plus `topology-bake-snapshot-missing`; later
-features remain suppressed. This limitation must be visible in review.
+The tracked v2 fixtures retain proven per-feature rollback geometry. When a
+consumer cannot rematch topology, the importer can therefore use the captured
+post-feature checkpoint rather than silently fabricating a reference. Any missing
+boundary still degrades explicitly and remains visible in review.
 
 ## Verification strategy
 
@@ -509,14 +505,11 @@ prepare -> `applyImportPreparedActions` seam:
   error diagnostic;
 - apply rematch failure should take the same per-feature fallback.
 
-The two root bundles must also be exercised. Before re-capture, tests should
-assert their explicit legacy degradation and final-studio bake. They cannot be
-used to assert successful topology resolution in their current form. The
-acceptance fixture update is to re-capture both as v2 with snapshots and then
-assert, feature by feature, either a concrete durable ref or the exact supported-
-parameter/bake reason. A static MockKernel topology unrelated to the real bundle
-is not sufficient evidence; the successful real-bundle path must use a replay
-harness backed by the actual OCC rebuild or run in the browser OCC lane.
+The two primary tracked bundles must also be exercised feature by feature,
+asserting either a concrete durable ref or the exact supported-parameter/bake
+reason. A static MockKernel topology unrelated to the real bundle is not
+sufficient evidence; the successful real-bundle path must use a replay harness
+backed by the actual OCC rebuild or run in the browser OCC lane.
 
 Run `bun run test:all` after implementation.
 

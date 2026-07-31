@@ -3,7 +3,7 @@ import {
   shouldEnablePerformanceTelemetry,
   shouldEnableSentryErrorReporting,
 } from "@/contracts/errors/sentry-client";
-import { sentryDist, sentryRelease } from "virtual:cadara-build-metadata";
+import { sentryDist, sentryRelease } from "@/build-info";
 
 const sentryEnabled = shouldEnableSentryErrorReporting({
   isProduction: import.meta.env.PROD,

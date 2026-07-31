@@ -158,6 +158,16 @@ export interface HistoryProbeInput {
   consumerFeatureId?: string;
   /** Request final-state tessellation for ground-truth verification. */
   includeFinalTessellation?: boolean;
+  /**
+   * Zero-based successful action ordinals whose live topology signatures are
+   * needed. Omit to preserve legacy sampling at every successful step.
+   */
+  requestedSignatureStepOrdinals?: readonly number[];
+  /**
+   * Report apply-time topology rematch failures as their failed probe step
+   * instead of throwing them to the caller.
+   */
+  containTopologyRematchFailures?: boolean;
 }
 
 /**

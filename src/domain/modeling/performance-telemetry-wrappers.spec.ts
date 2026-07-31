@@ -17,6 +17,7 @@ import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 test("src/domain/modeling/performance-telemetry-wrappers.spec.ts preserves OCC worker results and rejections", async () => {
   const telemetry = createRecordingTelemetry();
   const failure = new Error("worker failed");
+  let releasedDocumentId: string | null = null;
   const client = createInstrumentedOccWorkerClient(
     {
       async getDocumentSnapshot() {
@@ -34,6 +35,9 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts preserves OCC w
       },
       async createFeature() {
         throw failure;
+      },
+      async releaseDocument(documentId: string) {
+        releasedDocumentId = documentId;
       },
     } as unknown as OccWorkerSnapshotClient,
     telemetry,
@@ -69,6 +73,9 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts preserves OCC w
     ),
     "The OCC wrapper should classify rejected operations as failures.",
   ).toBeTruthy();
+
+  await client?.releaseDocument("doc_released");
+  expect(releasedDocumentId).toBe("doc_released");
 });
 
 test("src/domain/modeling/performance-telemetry-wrappers.spec.ts records repository source and heads without changing results", async () => {

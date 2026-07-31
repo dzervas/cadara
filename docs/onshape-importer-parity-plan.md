@@ -2,8 +2,8 @@
 
 Goal: every Onshape feature type that Cadara can represent parametrically imports
 as a parametric feature; everything else (sheet metal, surfacing, etc.) bakes
-honestly with a specific reason code. Verified by importing the two real capture
-bundles (`*.onshape-capture.json` in repo root) and interactively editing the
+honestly with a specific reason code. Verified by importing the real capture
+bundles tracked in `test/fixtures/onshape-captures` and interactively editing the
 result (drag sketch geometry, edit dimensions/variables, rebuild) via Playwright.
 
 Process: no openspec. Each work item = one commit by one agent. Agents check off

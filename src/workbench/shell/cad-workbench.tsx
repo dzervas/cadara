@@ -1,7 +1,7 @@
 // SLOP: Retained shell orchestrator while document/object/debug actions and visible regions are split into named workbench modules.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader } from "@mantine/core";
-import { appVersion, gitCommit } from "virtual:cadara-build-metadata";
+import { appVersion, gitCommit } from "@/build-info";
 
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";

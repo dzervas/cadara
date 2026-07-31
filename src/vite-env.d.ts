@@ -28,12 +28,10 @@ interface Window {
   } | null>;
 }
 
-declare module "virtual:cadara-build-metadata" {
-  export const appVersion: string;
-  export const gitCommit: string;
-  export const sentryRelease: string | null;
-  export const sentryDist: string | null;
-}
+declare const __CADARA_APP_VERSION__: string;
+declare const __CADARA_GIT_COMMIT__: string;
+declare const __CADARA_SENTRY_RELEASE__: string | null;
+declare const __CADARA_SENTRY_DIST__: string | null;
 
 interface Window {
   __CADARA_SINGLE_ASSETS__?: {

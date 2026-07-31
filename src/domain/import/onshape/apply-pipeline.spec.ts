@@ -2025,11 +2025,11 @@ test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same pos
 
 const realBundleCases = [
   [
-    "40a51fb8fa82fd4565151114.onshape-capture.json",
+    "test/fixtures/onshape-captures/40a51fb8fa82fd4565151114.onshape-capture.json",
     { parametric: 7, baked: 3, geometryOnly: 0 },
   ],
   [
-    "9841e486906fa2ce62d74d8e.onshape-capture.json",
+    "test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json",
     { parametric: 6, baked: 35, geometryOnly: 0 },
   ],
 ] as const;

@@ -8,10 +8,15 @@ import tailwindcss from "@tailwindcss/vite";
 import UnpluginTypia from "@typia/unplugin/vite";
 import { defineConfig, type Plugin } from "vite";
 
-import { createBuildMetadataPlugin } from "./build-metadata";
+import {
+  createBuildMetadataDefines,
+  readBuildMetadata,
+} from "./build-metadata";
 import { toolIconAssetFileNames } from "./src/core/tools/tool-icons";
+import { createTypiaPluginOptions } from "./typia-plugin-options";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
+const buildMetadata = readBuildMetadata(rootDir);
 const singleHtmlFileName = "cadara-single.html";
 const wasmDataUrlPattern =
   /(['"`])data:application\/wasm;base64,[A-Za-z0-9+/=]+\1/;
@@ -156,15 +161,13 @@ function cadaraSingleHtmlPlugin(): Plugin {
 }
 
 export default defineConfig({
+  define: createBuildMetadataDefines(buildMetadata),
   publicDir: false,
   worker: {
-    plugins: () => [
-      UnpluginTypia({ tsconfig: path.resolve(rootDir, "tsconfig.app.json") }),
-    ],
+    plugins: () => [UnpluginTypia(createTypiaPluginOptions(rootDir))],
   },
   plugins: [
-    createBuildMetadataPlugin(rootDir),
-    UnpluginTypia({ tsconfig: path.resolve(rootDir, "tsconfig.app.json") }),
+    UnpluginTypia(createTypiaPluginOptions(rootDir)),
     react(),
     tailwindcss(),
     cadaraSingleHtmlPlugin(),
@@ -181,6 +184,7 @@ export default defineConfig({
     modulePreload: false,
     cssCodeSplit: false,
     assetsInlineLimit: Number.MAX_SAFE_INTEGER,
+    reportCompressedSize: false,
     chunkSizeWarningLimit: 60000,
     rolldownOptions: {
       output: {

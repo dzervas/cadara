@@ -305,7 +305,13 @@ export async function validateGeometryAssetBytes(
 export async function hashGeometryAssetBytes(
   bytes: Uint8Array,
 ): Promise<GeometryAssetHash> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer);
+  const digestInput =
+    bytes.buffer instanceof ArrayBuffer &&
+      bytes.byteOffset === 0 &&
+      bytes.byteLength === bytes.buffer.byteLength
+      ? bytes.buffer
+      : bytes.slice().buffer;
+  const digest = await crypto.subtle.digest("SHA-256", digestInput);
   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 

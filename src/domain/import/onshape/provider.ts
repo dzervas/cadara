@@ -164,6 +164,13 @@ export interface OnshapeImportSelections {
   demotedFeatureIds: string[];
 }
 
+interface ReviewedBundleContext {
+  bundle: OnshapeCaptureBundle;
+  studioReads: Map<string, ReturnType<typeof readPartStudio>>;
+}
+
+const reviewedBundles = new WeakMap<OnshapeImportReview, ReviewedBundleContext>();
+
 /**
  * Tolerance for every captured→live topology match in a review. A rebuilt live
  * body reproduces captured Onshape geometry to well under a micron but not to
@@ -1084,6 +1091,7 @@ async function activateProbeBackedPlanning(input: {
     probeResult = await input.capabilities.history.evaluateHistoryProbe({
       actions: candidate,
       includeFinalTessellation: true,
+      requestedSignatureStepOrdinals: [],
     });
     const failedOrdinal = probeResult.steps.findIndex((step) => step.status === "failed");
     if (failedOrdinal < 0 || attempt > maxDemotions) break;
@@ -1163,6 +1171,7 @@ async function activateProbeBackedPlanning(input: {
       });
       const buildProbe = await input.capabilities.history!.evaluateHistoryProbe({
         actions: buildActions,
+        requestedSignatureStepOrdinals: [],
       });
       const failedOrdinal = buildProbe.steps.findIndex(
         (step) => step.status === "failed",
@@ -1792,6 +1801,7 @@ async function reviewStudio(
   bundle: OnshapeCaptureBundle,
   elementId: string,
   rawCapabilities: ImportCapabilities,
+  read = readPartStudio(bundle, elementId),
 ): Promise<OnshapeStudioReview> {
   // Review probes the same prefixes repeatedly (once per topology consumer, once
   // per fixed-point iteration). Memoizing on the exact prepared-action payload
@@ -1803,7 +1813,6 @@ async function reviewStudio(
   const capabilities: ImportCapabilities = memoizedHistory
     ? { ...rawCapabilities, history: memoizedHistory }
     : rawCapabilities;
-  const read = readPartStudio(bundle, elementId);
   const planned = planStudioFidelity(read, {
     captureFormatVersion: bundle.formatVersion,
     historyProbeAvailable: capabilities.history != null,
@@ -3450,9 +3459,23 @@ export const onshapeImportProvider: ImportProvider<
     }
 
     const studioList = listPartStudios(bundle);
-    const studios = await Promise.all(
-      studioList.map((entry) => reviewStudio(bundle, entry.elementId, capabilities)),
+    const studioReads = new Map(
+      studioList.map((entry) => [
+        entry.elementId,
+        readPartStudio(bundle, entry.elementId),
+      ]),
     );
+    const studios: OnshapeStudioReview[] = [];
+    for (const entry of studioList) {
+      studios.push(
+        await reviewStudio(
+          bundle,
+          entry.elementId,
+          capabilities,
+          studioReads.get(entry.elementId),
+        ),
+      );
+    }
     const defaultStudio =
       studios.find((studio) => studio.hasBodies) ?? studios[0] ?? null;
 
@@ -3478,12 +3501,14 @@ export const onshapeImportProvider: ImportProvider<
       return [];
     });
 
+    const providerReview: OnshapeImportReview = {
+      valid: true,
+      studios,
+      defaultStudioId: defaultStudio?.elementId ?? null,
+    };
+    reviewedBundles.set(providerReview, { bundle, studioReads });
     return {
-      providerReview: {
-        valid: true,
-        studios,
-        defaultStudioId: defaultStudio?.elementId ?? null,
-      },
+      providerReview,
       proposedActionKinds: ["addDocumentVariable", "commitSketch", "createFeature"],
       diagnostics,
     };
@@ -3593,7 +3618,8 @@ export const onshapeImportProvider: ImportProvider<
   },
 
   async prepare({ source, review, selections, capabilities }) {
-    const bundle = decodeBundle(source);
+    const reviewedContext = reviewedBundles.get(review.providerReview);
+    const bundle = reviewedContext?.bundle ?? decodeBundle(source);
     if (!bundle) {
       return {
         diagnostics: [
@@ -3608,7 +3634,9 @@ export const onshapeImportProvider: ImportProvider<
 
     const elementId =
       selections.studioElementId ?? bundle.partStudios[0]?.elementId ?? "";
-    const read = readPartStudio(bundle, elementId);
+    const read =
+      reviewedContext?.studioReads.get(elementId) ??
+      readPartStudio(bundle, elementId);
     const reviewedStudio = review.providerReview.studios.find(
       (studio) => studio.elementId === elementId,
     );

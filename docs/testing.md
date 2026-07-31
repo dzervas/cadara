@@ -16,7 +16,12 @@ This repository does not treat all tests as the same kind of asset. Choose the t
 - `bun run test:ui` runs UI-local and browser-adjacent Bun specs.
 - `bun run test:static` runs repository policy guards under `test/static/`.
 - `bun run test` runs the umbrella non-Playwright suite: logic, UI, and static.
-- `bun run test:e2e` runs the Playwright browser lane.
+- `bun run test:e2e` runs the fast Playwright browser lane with four workers; real-capture acceptance specs are excluded.
+- `bun run test:e2e:diagnostic` reruns the fast lane serially with retained failure traces and video.
+- `bun run test:e2e:real-captures` explicitly runs the complete Onshape/OCC acceptance lane against the tracked fixtures in `test/fixtures/onshape-captures` with one worker.
+- `bun run test:e2e:real-captures:diagnostic` runs that acceptance lane with retained failure traces and video.
+- `bun run test:e2e:all` runs the fast and real-capture Playwright lanes sequentially.
+- `bun run test:all:acceptance` runs every validation lane, including real captures; `bun run test:all` keeps the normal feedback loop on the fast E2E lane.
 
 ## Test Lanes
 
@@ -53,6 +58,8 @@ These tests should prove rendering behavior, interaction wiring, and local prese
 Use Playwright in `e2e/` for cross-surface behavior that must run through the browser and workbench shell.
 
 Prefer the shared harnesses under `e2e/helpers/` instead of ad hoc page scripting when the harness already covers the needed flow.
+
+Real Onshape capture tests are an explicit acceptance sub-lane. The curated fixtures in `test/fixtures/onshape-captures` retain the feature history, evidence, IDs, and exact tessellation coordinates consumed by the importer while omitting unused raw API payloads. Their tracked presence must never activate them in `test:e2e`; use `test:e2e:real-captures`, which runs serially to avoid OCC worker starvation. Keep these tests fully asserted rather than replacing them with mock coverage. Arbitrary local `*.onshape-capture.json` files remain ignored.
 
 ### Static
 

@@ -59,11 +59,11 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
 
 const realBundleCases = [
   [
-    "40a51fb8fa82fd4565151114.onshape-capture.json",
+    "test/fixtures/onshape-captures/40a51fb8fa82fd4565151114.onshape-capture.json",
     { parametric: 8, baked: 2, geometryOnly: 0 },
   ],
   [
-    "9841e486906fa2ce62d74d8e.onshape-capture.json",
+    "test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json",
     // Extrude 1 authors a `startOffset` start plane Cadara cannot yet express,
     // so it bakes as `extrude-start-extent-unsupported` rather than promoting a
     // solid short by the offset. The `ENTITY` start bounds that name live body
@@ -393,11 +393,14 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts nonorthogonal sketchMat
   });
 });
 
-test.skipIf(!existsSync("40a51fb8fa82fd4565151114.onshape-capture.json"))(
+const MOUNTS_CAPTURE_FIXTURE =
+  "test/fixtures/onshape-captures/40a51fb8fa82fd4565151114.onshape-capture.json";
+
+test.skipIf(!existsSync(MOUNTS_CAPTURE_FIXTURE))(
   "src/domain/import/onshape/fidelity-planner.spec.ts real Mounts Sketch 2 uses captured frame projection",
   async () => {
     const parsed = validateOnshapeCaptureBundle(
-      JSON.parse(await readFile("40a51fb8fa82fd4565151114.onshape-capture.json", "utf8")),
+      JSON.parse(await readFile(MOUNTS_CAPTURE_FIXTURE, "utf8")),
     );
     if (!parsed.success) throw new Error("Real Mounts capture must validate.");
     const studio = parsed.data.partStudios[0]!;

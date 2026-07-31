@@ -1,22 +1,36 @@
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 
 import { expect, type Page } from "@playwright/test";
 
+const CAPTURE_FIXTURE_DIRECTORY = "test/fixtures/onshape-captures";
+
 export const MOUNTS_BUNDLE_PATH = resolve(
+  CAPTURE_FIXTURE_DIRECTORY,
   "40a51fb8fa82fd4565151114.onshape-capture.json",
 );
 export const PART_STUDIO_BUNDLE_PATH = resolve(
+  CAPTURE_FIXTURE_DIRECTORY,
   "9841e486906fa2ce62d74d8e.onshape-capture.json",
 );
 export const WAVE_T_BUNDLE_PATH = resolve(
+  CAPTURE_FIXTURE_DIRECTORY,
   "405fa226bb150016d09afc09.onshape-capture.json",
 );
 export const LAPTOP_STAND_BUNDLE_PATH = resolve(
+  CAPTURE_FIXTURE_DIRECTORY,
   "5151a4c877c9493b733ad52f.onshape-capture.json",
 );
 export const SECOND_PART_STUDIO_BUNDLE_PATH = resolve(
+  CAPTURE_FIXTURE_DIRECTORY,
   "d3cd9b09c3c36af1dd2efae9.onshape-capture.json",
 );
+
+type CaptureBundle = Record<string, unknown> & {
+  partStudios?: Array<{ name?: unknown }>;
+};
+
+const captureBundleReads = new Map<string, Promise<CaptureBundle>>();
 
 export async function importBundle(
   page: Page,
@@ -26,6 +40,11 @@ export async function importBundle(
   /** Raise only for captures whose live prefix genuinely builds more solids. */
   reviewBudgetMs = 1_500_000,
 ) {
+  if (process.env.PLAYWRIGHT_REAL_CAPTURES !== "1") {
+    throw new Error(
+      "Real capture imports require PLAYWRIGHT_REAL_CAPTURES=1.",
+    );
+  }
   await page.addInitScript(() =>
     Object.defineProperty(globalThis, "showOpenFilePicker", {
       value: undefined,
@@ -41,13 +60,16 @@ export async function importBundle(
   const fileChooserPromise = page.waitForEvent("filechooser");
   await page.locator('button[data-tool-id="import"]').click();
   const fileChooser = await fileChooserPromise;
-  await fileChooser.setFiles(bundlePath);
+  await fileChooser.setFiles(
+    studioName
+      ? await readSelectedStudioCapture(bundlePath, studioName)
+      : bundlePath,
+  );
 
   if (studioName) {
-    const studio = page.getByRole("combobox", { name: "Part Studio" });
-    await studio.click();
-    await page.getByRole("option", { name: new RegExp(`^${escapeRegExp(studioName)} \\(`) }).click();
-    await expect(studio).toHaveValue(new RegExp(`^${escapeRegExp(studioName)} \\(`));
+    await expect(page.getByRole("combobox", { name: "Part Studio" })).toHaveValue(
+      new RegExp(`^${escapeRegExp(studioName)} \\(`),
+    );
   }
 
   const commit = page.getByRole("button", { name: "Commit", exact: true });
@@ -59,14 +81,23 @@ export async function importBundle(
   // failure still resolves immediately through the alert branch below.
   const reviewBudget = reviewBudgetMs;
   try {
-    const outcome = await Promise.race([
-      commit.waitFor({ state: "visible", timeout: reviewBudget }).then(() => ({ kind: "review" as const })),
-      alert.waitFor({ state: "visible", timeout: reviewBudget }).then(async () => ({
-        kind: "error" as const,
-        message: await alert.innerText(),
-      })),
-    ]);
-    if (outcome.kind === "error") throw new Error(`Import review failed: ${outcome.message}`);
+    let outcome = "pending";
+    await expect
+      .poll(
+        async () => {
+          outcome = (await alert.isVisible())
+            ? `error:${await alert.innerText()}`
+            : (await commit.isVisible())
+              ? "review"
+              : "pending";
+          return outcome;
+        },
+        { timeout: reviewBudget },
+      )
+      .not.toBe("pending");
+    if (outcome.startsWith("error:")) {
+      throw new Error(`Import review failed: ${outcome.slice("error:".length)}`);
+    }
     await expect(commit).toBeEnabled({ timeout: reviewBudget });
   } catch (error) {
     const diagnostics = await page.evaluate(() => ({
@@ -159,6 +190,33 @@ export async function waitForMachineIdle(page: Page) {
     undefined,
     { timeout: 60_000 },
   );
+}
+
+async function readSelectedStudioCapture(
+  bundlePath: string,
+  studioName: string,
+) {
+  let pendingBundle = captureBundleReads.get(bundlePath);
+  if (!pendingBundle) {
+    pendingBundle = readFile(bundlePath, "utf8").then(
+      (contents) => JSON.parse(contents) as CaptureBundle,
+    );
+    captureBundleReads.set(bundlePath, pendingBundle);
+  }
+  const bundle = await pendingBundle;
+  const studios = (bundle.partStudios ?? []).filter(
+    (studio) => studio.name === studioName,
+  );
+  if (studios.length !== 1) {
+    throw new Error(
+      `Expected exactly one Part Studio named ${studioName}; found ${studios.length}.`,
+    );
+  }
+  return {
+    name: basename(bundlePath),
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ ...bundle, partStudios: studios })),
+  };
 }
 
 function escapeRegExp(value: string) {
