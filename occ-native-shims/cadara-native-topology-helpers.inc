@@ -717,6 +717,24 @@ namespace {
       << "\"}";
   }
 
+  int CadaraFindExactShapeIndex(
+    const TopTools_IndexedMapOfShape& shapeMap,
+    const TopoDS_Shape& shape
+  );
+
+  void CadaraAppendExactFaceSuccessor(
+    std::vector<int>& finalFaceIndexes,
+    const TopTools_IndexedMapOfShape& finalFaceMap,
+    const TopoDS_Shape& candidate
+  );
+
+  void CadaraAppendPreparedFaceSuccessors(
+    std::vector<int>& finalFaceIndexes,
+    const TopTools_ListOfShape& intermediateFaces,
+    const Handle(BRepTools_History)& prepareHistory,
+    const TopTools_IndexedMapOfShape& finalFaceMap
+  );
+
   int CadaraAppendHistorySuccessorsFromList(
     std::ostringstream& out,
     const TopTools_ListOfShape& source,
@@ -772,6 +790,7 @@ namespace {
     const std::string& bodyId,
     const std::string& previousTopologyToken,
     const std::string& topologyToken,
+    const Handle(BRepTools_History)& prepareHistory,
     bool& needsRecordComma
   ) {
     TopTools_IndexedMapOfShape previousShapeMap;
@@ -787,27 +806,53 @@ namespace {
       std::ostringstream successorsJson;
       bool needsSuccessorComma = false;
       std::vector<int> successorIndexes;
-
-      CadaraAppendHistorySuccessorsFromList(
-        successorsJson,
-        modified,
-        finalShapeMap,
-        shapeType,
-        bodyId,
-        topologyToken,
-        needsSuccessorComma,
-        successorIndexes
-      );
-      CadaraAppendHistorySuccessorsFromList(
-        successorsJson,
-        generated,
-        finalShapeMap,
-        shapeType,
-        bodyId,
-        topologyToken,
-        needsSuccessorComma,
-        successorIndexes
-      );
+      if (shapeType == TopAbs_FACE && !prepareHistory.IsNull()) {
+        CadaraAppendPreparedFaceSuccessors(
+          successorIndexes,
+          modified,
+          prepareHistory,
+          finalShapeMap
+        );
+        CadaraAppendPreparedFaceSuccessors(
+          successorIndexes,
+          generated,
+          prepareHistory,
+          finalShapeMap
+        );
+        for (const int successorIndex : successorIndexes) {
+          if (needsSuccessorComma) {
+            successorsJson << ",";
+          }
+          needsSuccessorComma = true;
+          CadaraAppendDurableTopologyTargetJson(
+            successorsJson,
+            shapeType,
+            bodyId,
+            finalShapeMap.FindKey(successorIndex)
+          );
+        }
+      } else {
+        CadaraAppendHistorySuccessorsFromList(
+          successorsJson,
+          modified,
+          finalShapeMap,
+          shapeType,
+          bodyId,
+          topologyToken,
+          needsSuccessorComma,
+          successorIndexes
+        );
+        CadaraAppendHistorySuccessorsFromList(
+          successorsJson,
+          generated,
+          finalShapeMap,
+          shapeType,
+          bodyId,
+          topologyToken,
+          needsSuccessorComma,
+          successorIndexes
+        );
+      }
 
       if (successorIndexes.empty() && !deleted) {
         const int preservedIndex = finalShapeMap.FindIndex(previousSubshape);
@@ -937,13 +982,14 @@ namespace {
     const std::string& previousTopologyToken,
     const std::string& topologyToken,
     const TopoDS_Shape& previousShape,
-    const TopoDS_Shape& finalShape
+    const TopoDS_Shape& finalShape,
+    const Handle(BRepTools_History)& prepareHistory = Handle(BRepTools_History)()
   ) {
     std::ostringstream records;
     bool needsRecordComma = false;
-    CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_FACE, bodyId, previousTopologyToken, topologyToken, needsRecordComma);
-    CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_EDGE, bodyId, previousTopologyToken, topologyToken, needsRecordComma);
-    CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_VERTEX, bodyId, previousTopologyToken, topologyToken, needsRecordComma);
+    CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_FACE, bodyId, previousTopologyToken, topologyToken, prepareHistory, needsRecordComma);
+    CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_EDGE, bodyId, previousTopologyToken, topologyToken, prepareHistory, needsRecordComma);
+    CadaraAppendHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_VERTEX, bodyId, previousTopologyToken, topologyToken, prepareHistory, needsRecordComma);
     CadaraAppendGeneratedHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_FACE, bodyId, needsRecordComma);
     CadaraAppendGeneratedHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_EDGE, bodyId, needsRecordComma);
     CadaraAppendGeneratedHistoryRecordsForKind(records, builder, previousShape, finalShape, TopAbs_VERTEX, bodyId, needsRecordComma);
@@ -1250,9 +1296,18 @@ namespace {
     const TopTools_IndexedMapOfShape& finalFaceMap
   ) {
     TopTools_ListOfShape remaining(intermediateFaces);
+    TopTools_IndexedMapOfShape visitedFaces;
     while (remaining.Size() > 0) {
       const TopoDS_Shape intermediateFace = remaining.First();
       remaining.RemoveFirst();
+      if (
+        intermediateFace.IsNull()
+        || intermediateFace.ShapeType() != TopAbs_FACE
+        || visitedFaces.FindIndex(intermediateFace) > 0
+      ) {
+        continue;
+      }
+      visitedFaces.Add(intermediateFace);
       CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, intermediateFace);
 
       if (prepareHistory.IsNull()) {
@@ -1261,13 +1316,13 @@ namespace {
 
       TopTools_ListOfShape modified(prepareHistory->Modified(intermediateFace));
       while (modified.Size() > 0) {
-        CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, modified.First());
+        remaining.Append(modified.First());
         modified.RemoveFirst();
       }
 
       TopTools_ListOfShape generated(prepareHistory->Generated(intermediateFace));
       while (generated.Size() > 0) {
-        CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, generated.First());
+        remaining.Append(generated.First());
         generated.RemoveFirst();
       }
     }
@@ -1695,6 +1750,7 @@ namespace {
     std::string& malformedAssociation
   ) {
     TopTools_ListOfShape remaining(intermediateFaces);
+    TopTools_IndexedMapOfShape visitedFaces;
     while (remaining.Size() > 0) {
       const TopoDS_Shape intermediateFace = remaining.First();
       remaining.RemoveFirst();
@@ -1702,10 +1758,13 @@ namespace {
         malformedAssociation = "null-builder-successor";
         return false;
       }
-      if (intermediateFace.ShapeType() != TopAbs_FACE) {
+      if (
+        intermediateFace.ShapeType() != TopAbs_FACE
+        || visitedFaces.FindIndex(intermediateFace) > 0
+      ) {
         continue;
       }
-
+      visitedFaces.Add(intermediateFace);
       CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, intermediateFace);
       if (prepareHistory.IsNull()) {
         continue;
@@ -1719,10 +1778,7 @@ namespace {
           malformedAssociation = "null-preparation-modified-successor";
           return false;
         }
-        if (preparedFace.ShapeType() != TopAbs_FACE) {
-          continue;
-        }
-        CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, preparedFace);
+        remaining.Append(preparedFace);
       }
 
       TopTools_ListOfShape generated(prepareHistory->Generated(intermediateFace));
@@ -1733,10 +1789,7 @@ namespace {
           malformedAssociation = "null-preparation-generated-successor";
           return false;
         }
-        if (preparedFace.ShapeType() != TopAbs_FACE) {
-          continue;
-        }
-        CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, preparedFace);
+        remaining.Append(preparedFace);
       }
     }
     return true;
@@ -1866,8 +1919,8 @@ namespace {
           malformedAssociation
         );
       }
-      if (finalFaceIndexes.size() == 1) {
-        leftSourceIdsByFinalFace[finalFaceIndexes.front()].push_back(source.first);
+      for (const int finalFaceIndex : finalFaceIndexes) {
+        leftSourceIdsByFinalFace[finalFaceIndex].push_back(source.first);
       }
     }
     for (const auto& source : rightFacesByNativeId) {
@@ -1890,8 +1943,8 @@ namespace {
           malformedAssociation
         );
       }
-      if (finalFaceIndexes.size() == 1) {
-        rightSourceIdsByFinalFace[finalFaceIndexes.front()].push_back(source.first);
+      for (const int finalFaceIndex : finalFaceIndexes) {
+        rightSourceIdsByFinalFace[finalFaceIndex].push_back(source.first);
       }
     }
 
@@ -2013,7 +2066,8 @@ namespace {
         previousTopologyToken,
         topologyToken,
         leftOperand,
-        prepared.shape
+        prepared.shape,
+        prepared.history
       ),
       true,
       "",

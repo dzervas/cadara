@@ -66,7 +66,6 @@ export async function importBundle(
       : bundlePath,
   );
 
-
   const commit = page.getByRole("button", { name: "Commit", exact: true });
   const alert = page.getByRole("alert").first();
   // The heaviest real captures run several real-kernel probes during review

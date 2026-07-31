@@ -3100,3 +3100,52 @@ The d3 E2E now pins **23 / 1 / 0**, the exact timeline, zero diagnostics, the
 Final `bun run test:all` validation is green: **719 logic**, **126 UI**, **27
 static**, and **56 fast Playwright** tests passed. Surface-extrude support remains
 landed and is not an exclusion.
+
+### Session note: the sheet-split wasm rebuild landed, and the 24/0 blocker moved into the boolean shim's history coverage
+
+The previous note's claim that the tool-history wasm rebuild "is unavailable in
+this environment" is superseded: the shim entry point
+(`BuildSheetSplitCommittedShapeTransactionWithToolHistory`) was rebuilt into
+`public/cadara-occ.wasm` and `OCC_ASSET_VERSION` now records the shipped asset
+hashes. Exercising that path end-to-end against the real d3cd9 capture exposed
+two provenance defects and one honest kernel boundary, worked in order:
+
+1. **Same-feature source-key convergence was mis-handled.** `Extrude 3`'s
+   symmetric halves both claim one fused lateral face
+   (`…symmetric-first-end…generated-side-face` and
+   `…symmetric-second-end…generated-side-face`), which first resolved
+   `occ-topology-provenance-ambiguous` and failed `Split 1` outright (17/24).
+   The provenance index now dedupes identical `(feature, sourceKey, target)`
+   claims and resolves supported same-feature multi-source convergence to a
+   deterministic sorted `composite:` canonical id; any unsupported participant
+   keeps the target fail-closed as missing. Cross-feature ambiguity is
+   unchanged. Pinned in `topology-stage.spec.ts` under both insertion orders.
+2. **Exclusive-witness translation failures must degrade, not abort.** With the
+   composite in place, one sheet-split output slot still has zero resolvable
+   witnesses, so `executeSplitFeature` now degrades exactly that structured
+   failure class down the existing ladder (tool-history → generic native → JS)
+   with a `occ-native-sheet-split-tool-history-degraded` warning diagnostic,
+   restoring the honest 23/1 instead of failing the studio to 17/24. Pinned
+   against the real custom build in `combine-split-delete.spec.ts`.
+3. **The remaining 24/0 boundary is native, not JS.** The unresolvable
+   witnesses are positional reminted faces (`t0019_15`, `t0019_25`/`t0016_16`,
+   `t0019_26` on `body_feature_extrude-1`): the native boolean's
+   `HistoryJson()` genuinely returns no record for one of them at `Mirror 1`'s
+   join (`t0018 → t0019`), and the roots were already positional at
+   `Extrude 3`'s join (`t0016`). No geometry or traversal match was fabricated.
+   Closing this requires extending the shim's committed-shape history coverage
+   (`CadaraPrepareCommittedShapeWithHistory` / boolean face records) followed by
+   another wasm rebuild.
+
+Cleanup in the same session: the `CADARA_TRACE_D3_SPLIT_PROVENANCE` debug
+scaffolding was removed from `combine-split-delete.ts`, `mirror-transform.ts`,
+and `provider.spec.ts`; the dead "older probe implementation" rematch-catch
+compat path (and its contract-violating pinned test) was removed from
+`topology-resolution-planner.ts`; mirror-add operand collection no longer
+swallows arbitrary exceptions — per-face skips are limited to structured
+`occ-topology-provenance-*` outcomes via `isOccTopologyProvenanceResolutionError`
+and genuine faults propagate.
+
+The d3 real-OCC review gate (`provider.spec.ts`) now pins 23 parametric with
+`Extrude 8` as the only bake and `Split 1` parametric through the degraded
+generic sheet split.

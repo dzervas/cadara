@@ -639,23 +639,34 @@ export function resolveTopologyReferences(
       };
     }
 
-    // A split can leave coincident faces on separate bodies. If rollback
-    // evidence proves which captured body owns this face, restrict the generic
-    // match to that same live body; otherwise retain the unrestricted exact
-    // zero/one/many result.
-    const bodyScope = source.signature.entityClass === "face"
-      ? scopeLiveSignaturesToCapturedBody({
-          snapshot: input.rollback.snapshotBeforeFeature(input.consumerFeatureId),
-          deterministicId: query.deterministicId,
-          liveSignatures: input.cadaraSignatures,
-          tolerance: input.tolerance,
-        })
-      : null;
-    const match = matchSignature(
+    // A split can leave coincident faces on separate bodies. Body scoping can
+    // only separate an otherwise-ambiguous exact match (a unique match needs no
+    // scope and a no-match cannot be rescued by a candidate subset), so the
+    // sibling-face vote is computed lazily: an eager vote per face reference is
+    // O(siblings x candidates) and made large captures (9841's 482 references)
+    // unreviewable.
+    let match = matchSignature(
       source.signature,
-      bodyScope?.signatures ?? input.cadaraSignatures,
+      input.cadaraSignatures,
       input.tolerance,
     );
+    let bodyScope: ReturnType<typeof scopeLiveSignaturesToCapturedBody> | null =
+      null;
+    if (match.kind === "ambiguous" && source.signature.entityClass === "face") {
+      bodyScope = scopeLiveSignaturesToCapturedBody({
+        snapshot: input.rollback.snapshotBeforeFeature(input.consumerFeatureId),
+        deterministicId: query.deterministicId,
+        liveSignatures: input.cadaraSignatures,
+        tolerance: input.tolerance,
+      });
+      if (bodyScope.liveBodyId !== null) {
+        match = matchSignature(
+          source.signature,
+          bodyScope.signatures,
+          input.tolerance,
+        );
+      }
+    }
     if (match.kind === "noMatch") {
       return {
         kind: "degraded",
@@ -687,9 +698,7 @@ export function resolveTopologyReferences(
           parameterId: query.parameterId,
           deterministicId: query.deterministicId,
         },
-        ...(bodyScope?.liveBodyId === null || bodyScope === null
-          ? {}
-          : { bodyScope: bodyScope.liveBodyId }),
+        ...(bodyScope?.liveBodyId ? { bodyScope: bodyScope.liveBodyId } : {}),
       },
     });
   }

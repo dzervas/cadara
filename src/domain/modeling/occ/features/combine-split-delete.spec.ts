@@ -883,6 +883,51 @@ test.skipIf(!CUSTOM_OCC_HAS_SHEET_SPLIT_TOOL_HISTORY)(
   },
 );
 
+
+test.skipIf(!CUSTOM_OCC_HAS_SHEET_SPLIT_TOOL_HISTORY)(
+  "executeSplitFeature degrades unavailable semantic tool history to generic native split bodies",
+  async () => {
+    const oc = await loadCustomOpenCascadeForTest();
+    const target = makeTrackedBox(
+      oc,
+      "body_sheet_split_degraded_target" as BodyId,
+      "feature_sheet_split_degraded_target" as FeatureId,
+      [0, 0, 0],
+    );
+    const tool = makeTrackedCrossingSheet(
+      oc,
+      "body_sheet_split_degraded_tool" as BodyId,
+      "feature_sheet_split_degraded_tool" as FeatureId,
+    );
+    const context = createSheetSplitAuthoringState(oc, target, tool);
+    context.topologyProvenanceIndex = {
+      resolveFace(targetFace) {
+        throw new OccTopologyProvenanceMissingError(
+          `face:${targetFace.bodyId}:${targetFace.faceId}`,
+        );
+      },
+    };
+
+    const result = executeSplitFeature(
+      context,
+      "feature_sheet_split_degraded" as FeatureId,
+      splitDefinition(target.bodyId, tool.bodyId),
+    );
+
+    expect(result.topologyStage).toBeUndefined();
+    expect(result.producedTargets).toEqual([
+      { kind: "body", bodyId: "body_feature_sheet_split_degraded_split_1" },
+      { kind: "body", bodyId: "body_feature_sheet_split_degraded_split_2" },
+    ]);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "occ-native-sheet-split-tool-history-degraded",
+        severity: "warning",
+      }),
+    );
+  },
+);
+
 test.skipIf(!CUSTOM_OCC_HAS_SHEET_SPLIT_TOOL_HISTORY)(
   "sheet split releases its native transaction when tool-history parsing fails",
   async () => {

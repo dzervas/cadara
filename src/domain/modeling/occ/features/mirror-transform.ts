@@ -59,20 +59,9 @@ import {
   createExactSuccessorTopologyStage,
   createUnsupportedProducerTopologyStage,
   formatMirrorOperandTopologySourceKey,
+  isOccTopologyProvenanceResolutionError,
   type OccFeatureTopologyStage,
 } from "@/domain/modeling/occ/topology-stage";
-
-const traceD3SplitProvenance =
-  typeof process !== "undefined" &&
-  process.env.CADARA_TRACE_D3_SPLIT_PROVENANCE === "1";
-
-function traceMirrorAddProvenance(
-  event: string,
-  detail: Record<string, unknown>,
-) {
-  if (!traceD3SplitProvenance) return;
-  console.info(`[d3-mirror-provenance] ${event} ${JSON.stringify(detail)}`);
-}
 
 export function resolvePlanarReferencePlane(
   context: OccFeatureExecutionContext,
@@ -473,15 +462,16 @@ function collectMirrorAddOperandProducerTargets(input: {
             input.context.modelingTolerance,
             0.5,
           );
-        if (typeof sourcePayloadJson !== "string") {
-          throw new Error("occ-native-mirror-operand-history-missing-source-alias-abi.");
-        }
+        // A missing source-alias ABI yields no operand claims; downstream
+        // consumers receive honest invalidations instead of fabricated ones.
+        if (typeof sourcePayloadJson !== "string") return null;
         return buildNativeTopologyIdAliasesForTrackedBody(
           input.context.oc,
           input.sourceBody,
           parseNativeShimPayloadJson(sourcePayloadJson),
         ).faceIdsByNativeId;
       })();
+    if (!sourceAliases) return new Map<string, DurableRef>();
     const canonicalBySourceNativeId = new Map<string, string>();
     const sourceNativeIdsByPublicId = new Map<string, string[]>();
     for (const [nativeFaceId, publicFaceId] of sourceAliases) {
@@ -499,9 +489,12 @@ function collectMirrorAddOperandProducerTargets(input: {
             faceId: publicFaceId,
           }),
         );
-      } catch {
-        // An unresolved source face cannot contribute a right/mixed producer,
-        // but it must not erase independently exact operand incidences.
+      } catch (error) {
+        // A face whose lineage does not resolve (missing, remintable root,
+        // ambiguous, cyclic, or future-stage) cannot contribute a right/mixed
+        // producer, but it must not erase independently exact operand
+        // incidences. Non-provenance errors are genuine faults and propagate.
+        if (!isOccTopologyProvenanceResolutionError(error)) throw error;
       }
     }
     if (
@@ -513,7 +506,6 @@ function collectMirrorAddOperandProducerTargets(input: {
       return new Map<string, DurableRef>();
     }
     const canonicalByTransformedNativeId = new Map<string, string>();
-    const transformedNativeIdsBySourceFaceId = new Map<string, string[]>();
     for (const sourceFaceId of input.sourceBody.topology.faceIds) {
       const sourceFace = input.sourceBody.facesById.get(sourceFaceId);
       const sourceNativeId = sourceNativeIdsByPublicId.get(sourceFaceId)?.[0];
@@ -522,10 +514,6 @@ function collectMirrorAddOperandProducerTargets(input: {
       try {
         const matches = [...transformedFacesByNativeId].filter(([, candidate]) =>
           candidate.IsSame(transformed),
-        );
-        transformedNativeIdsBySourceFaceId.set(
-          sourceFaceId,
-          matches.map(([nativeFaceId]) => nativeFaceId),
         );
         if (matches.length !== 1) continue;
         const [transformedNativeId] = matches[0]!;
@@ -537,48 +525,9 @@ function collectMirrorAddOperandProducerTargets(input: {
         deleteOccObject(transformed);
       }
     }
-    const transformMappingCounts = [0, 1, 2].map((cardinality) => ({
-      cardinality: cardinality === 2 ? "many" : cardinality === 1 ? "one" : "zero",
-      count: input.sourceBody.topology.faceIds.filter(
-        (faceId) =>
-          (transformedNativeIdsBySourceFaceId.get(faceId)?.length ?? 0) ===
-          cardinality ||
-          (cardinality === 2 &&
-            (transformedNativeIdsBySourceFaceId.get(faceId)?.length ?? 0) > 1),
-      ).length,
-    }));
-    const sourceAliasCounts = [0, 1, 2].map((cardinality) => ({
-      cardinality: cardinality === 2 ? "many" : cardinality === 1 ? "one" : "zero",
-      count: input.sourceBody.topology.faceIds.filter(
-        (faceId) =>
-          (sourceNativeIdsByPublicId.get(faceId)?.length ?? 0) === cardinality ||
-          (cardinality === 2 &&
-            (sourceNativeIdsByPublicId.get(faceId)?.length ?? 0) > 1),
-      ).length,
-    }));
-    traceMirrorAddProvenance("operand-inputs", {
-      featureId: input.ownerFeatureId,
-      sourceAliasCounts,
-      transformMappingCounts,
-      canonicalSourceNativeIds: canonicalBySourceNativeId.size,
-      canonicalTransformedNativeIds: canonicalByTransformedNativeId.size,
-    });
     const candidatesBySourceKey = new Map<string, DurableRef[]>();
-    const incidencePartitions = {
-      leftOnly: 0,
-      rightOnly: 0,
-      mixed: 0,
-      unattributed: 0,
-      droppedMissingCanonical: 0,
-      canonicalSourceSets: 0,
-    };
     for (const finalFace of input.history.finalFaces) {
-      const hasLeft = finalFace.leftSourceFaceNativeIds.length > 0;
       const hasRight = finalFace.rightSourceFaceNativeIds.length > 0;
-      if (hasLeft && hasRight) incidencePartitions.mixed += 1;
-      else if (hasLeft) incidencePartitions.leftOnly += 1;
-      else if (hasRight) incidencePartitions.rightOnly += 1;
-      else incidencePartitions.unattributed += 1;
       if (!hasRight) continue;
       const left = finalFace.leftSourceFaceNativeIds.map((id) =>
         canonicalBySourceNativeId.get(id),
@@ -587,12 +536,10 @@ function collectMirrorAddOperandProducerTargets(input: {
         canonicalByTransformedNativeId.get(id),
       );
       if (left.some((value) => !value) || right.some((value) => !value)) {
-        incidencePartitions.droppedMissingCanonical += 1;
         continue;
       }
       const sourceCanonicalProvenanceIds = [...new Set([...left, ...right])] as string[];
       if (sourceCanonicalProvenanceIds.length === 0) continue;
-      incidencePartitions.canonicalSourceSets += 1;
       const sourceKey = formatMirrorOperandTopologySourceKey({
         featureId: input.ownerFeatureId,
         bodyId: input.sourceBody.bodyId,
@@ -605,39 +552,16 @@ function collectMirrorAddOperandProducerTargets(input: {
       ]);
     }
     const claims = new Map<string, DurableRef>();
-    let reverseUniqueOne = 0;
-    let reverseUniqueMany = 0;
     for (const [sourceKey, candidates] of candidatesBySourceKey) {
       const uniqueTargets = new Map(
         candidates.map((target) => [getOccDurableRefKey(target), target]),
       );
+      // Zero, many, or missing exact relations never receive a fabricated claim.
       if (uniqueTargets.size === 1) {
-        reverseUniqueOne += 1;
         claims.set(sourceKey, uniqueTargets.values().next().value!);
-      } else {
-        reverseUniqueMany += 1;
       }
     }
-    traceMirrorAddProvenance("operand-incidence", {
-      featureId: input.ownerFeatureId,
-      finalFaces: input.history.finalFaces.length,
-      ...incidencePartitions,
-      sourceKeys: candidatesBySourceKey.size,
-      reverseUniqueOne,
-      reverseUniqueMany,
-      claims: [...claims].map(([sourceKey, target]) => ({
-        sourceKey,
-        target: getOccDurableRefKey(target),
-      })),
-    });
     return claims;
-  } catch (error) {
-    traceMirrorAddProvenance("operand-error", {
-      featureId: input.ownerFeatureId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    // Zero, many, or missing exact relations never receive a fabricated claim.
-    return new Map<string, DurableRef>();
   } finally {
     for (const face of transformedFacesByNativeId.values()) deleteOccObject(face);
     deleteOccObject(faceMap);
@@ -749,42 +673,6 @@ export function executeMirrorFeature(
               nativeGeneratedTargets,
             }),
             supplementalProducerTargetsBySourceKey,
-          });
-          const output = topologyStage.outputs.get(outputBody.bodyId)!;
-          const publishedByTarget = new Map(
-            [...output.sourceTargets].flatMap(([sourceKey, targets]) =>
-              targets.map((target) => [getOccDurableRefKey(target), sourceKey]),
-            ),
-          );
-          traceMirrorAddProvenance("stage", {
-            featureId: ownerFeatureId,
-            supplementalBefore: [...supplementalProducerTargetsBySourceKey].map(
-              ([sourceKey, target]) => ({
-                sourceKey,
-                target: getOccDurableRefKey(target),
-              }),
-            ),
-            supplementalPublished: [...supplementalProducerTargetsBySourceKey]
-              .filter(([sourceKey]) => output.sourceTargets.has(sourceKey))
-              .map(([sourceKey]) => sourceKey),
-            supplementalBlockedByTargetClaim: [
-              ...supplementalProducerTargetsBySourceKey,
-            ]
-              .filter(
-                ([sourceKey, target]) =>
-                  !output.sourceTargets.has(sourceKey) &&
-                  publishedByTarget.has(getOccDurableRefKey(target)),
-              )
-              .map(([sourceKey]) => sourceKey),
-            supplementalUnsupported: [...output.unsupportedSourceKeys].filter((key) =>
-              supplementalProducerTargetsBySourceKey.has(key),
-            ),
-            publishedSourceTargets: [...output.sourceTargets].map(
-              ([sourceKey, targets]) => ({
-                sourceKey,
-                targets: targets.map(getOccDurableRefKey),
-              }),
-            ),
           });
           return topologyStage;
         })(),

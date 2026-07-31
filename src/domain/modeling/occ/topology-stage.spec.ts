@@ -16,6 +16,7 @@ import {
   createOccFeatureTopologyLineageMap,
   createOccTopologyProvenanceIndex,
   formatExactSuccessorTopologySourceKey,
+  formatCompositeTopologyProvenanceId,
   formatGeneratedAdjacencyTopologySourceKey,
   formatGeneratedProducerTopologySourceKey,
   formatMirrorOperandTopologySourceKey,
@@ -340,7 +341,7 @@ test("topology provenance canonicalizes generated adjacency from transitive face
   );
 });
 
-test("topology provenance refuses ambiguity, missing lineage, future references, malformed keys, and cycles", () => {
+test("topology provenance resolves exact convergence and refuses missing lineage, future references, malformed keys, and cycles", () => {
   const firstFeature = "feature_refusal_first" as FeatureId;
   const secondFeature = "feature_refusal_second" as FeatureId;
   const target = face("face_refusal_target");
@@ -358,13 +359,17 @@ test("topology provenance refuses ambiguity, missing lineage, future references,
       },
     ],
   ]);
-  expect(() =>
+  expect(
     createOccTopologyProvenanceIndex({
       stages: new Map([[firstFeature, ambiguousStage]]),
       previousLineage: new Map(),
       historyOrder: history(firstFeature),
     }).resolveFace(target),
-  ).toThrow(/provenance-ambiguous/);
+  ).toBe(
+    formatCompositeTopologyProvenanceId({
+      sourceCanonicalProvenanceIds: ["root:first", "root:second"],
+    }),
+  );
 
   const missing = face("face_missing");
   const missingStage = stage(
@@ -487,4 +492,100 @@ test("topology provenance restores transitive canonical roots from serialized li
   });
 
   expect(index.resolveFace(target)).toBe(rootKey);
+});
+
+
+test("topology provenance dedupes a feature's duplicate output bookkeeping", () => {
+  const featureId = "feature_duplicate_output_bookkeeping" as FeatureId;
+  const target = face("face_duplicate_output_bookkeeping");
+  const sourceKey = "extrude:feature_duplicate_output_bookkeeping:profile:0:first-face";
+  const first = stage(featureId, target, sourceKey);
+  const firstOutput = first.outputs.get(bodyId)!;
+  const duplicateOutput = {
+    ...firstOutput,
+    outputSlot: target.bodyId,
+  };
+  first.outputs = new Map([
+    [target.bodyId, firstOutput],
+    ["body_duplicate_output_bookkeeping" as BodyId, duplicateOutput],
+  ]);
+
+  expect(
+    createOccTopologyProvenanceIndex({
+      stages: new Map([[featureId, first]]),
+      previousLineage: new Map(),
+      historyOrder: history(featureId),
+    }).resolveFace(target),
+  ).toBe(sourceKey);
+});
+
+
+test("topology provenance composes converging exact source claims independently of insertion order", () => {
+  const featureId = "feature_converging_output_bookkeeping" as FeatureId;
+  const target = face("face_converging_output_bookkeeping");
+  const expected = formatCompositeTopologyProvenanceId({
+    sourceCanonicalProvenanceIds: ["root:first", "root:second"],
+  });
+  const resolve = (sourceTargets: ReadonlyMap<string, readonly DurableRef[]>) => {
+    const output = stage(featureId, target, "root:placeholder").outputs.get(bodyId)!;
+    return createOccTopologyProvenanceIndex({
+      stages: new Map([
+        [
+          featureId,
+          {
+            featureId,
+            outputs: new Map([
+              [
+                bodyId,
+                {
+                  ...output,
+                  sourceTargets,
+                  unsupportedSourceKeys: new Set(),
+                },
+              ],
+            ]),
+          },
+        ],
+      ]),
+      previousLineage: new Map(),
+      historyOrder: history(featureId),
+    }).resolveFace(target);
+  };
+
+  expect(resolve(new Map([["root:first", [target]], ["root:second", [target]]]))).toBe(
+    expected,
+  );
+  expect(resolve(new Map([["root:second", [target]], ["root:first", [target]]]))).toBe(
+    expected,
+  );
+});
+
+test("topology provenance leaves mixed exact and unsupported convergence missing", () => {
+  const featureId = "feature_unsupported_output_convergence" as FeatureId;
+  const target = face("face_unsupported_output_convergence");
+  const output = stage(featureId, target, "root:exact").outputs.get(bodyId)!;
+  const convergingStage: OccFeatureTopologyStage = {
+    featureId,
+    outputs: new Map([
+      [
+        bodyId,
+        {
+          ...output,
+          sourceTargets: new Map([
+            ["root:exact", [target]],
+            ["root:unsupported", [target]],
+          ]),
+          unsupportedSourceKeys: new Set(["root:unsupported"]),
+        },
+      ],
+    ]),
+  };
+
+  expect(() =>
+    createOccTopologyProvenanceIndex({
+      stages: new Map([[featureId, convergingStage]]),
+      previousLineage: new Map(),
+      historyOrder: history(featureId),
+    }).resolveFace(target),
+  ).toThrow(/occ-topology-provenance-missing/);
 });
