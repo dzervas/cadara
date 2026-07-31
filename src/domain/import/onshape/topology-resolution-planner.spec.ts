@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
 
 import type { ImportPreparedActions } from "@/contracts/import/actions";
-import { TopologyApplyRematchError } from "@/domain/import/orchestrator";
 import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-resolution-planner";
 
 test("batches duplicate and zero consumer boundaries against one longest prefix", async () => {
@@ -100,56 +99,6 @@ test("preserves earlier sampled boundaries when the longest prefix fails later",
     { consumerFeatureId: "before", status: "rebuilt", signatures: [{ ordinal: 0 }] },
     { consumerFeatureId: "at-failure", status: "failed", diagnostics: [failure] },
     { consumerFeatureId: "after-failure", status: "failed", diagnostics: [failure] },
-  ]);
-});
-
-// A pre-consumer prefix is a reduced action list (bake checkpoints are
-// suppressed for sub-topology consumers), so an unrelated feature's apply-time
-// rematch failing inside it is a probe-session artifact. It must be reported as
-// a failed prefix for the probed consumer instead of propagating, which would
-// force-bake that unrelated feature for the whole studio.
-test("contains an unrelated feature's apply-time rematch failure as a failed prefix", async () => {
-  const actions: ImportPreparedActions = {
-    addDocumentVariables: [{ name: "a" }] as never,
-    orderedActions: [{ kind: "addDocumentVariable", index: 0 }],
-  };
-  const selector = {
-    kind: "topologyOf" as const,
-    expectedKind: "body" as const,
-    capturedSignature: {} as never,
-    tolerance: {} as never,
-    source: {
-      consumerFeatureId: "other-feature",
-      parameterId: "parts",
-      deterministicId: "JND",
-    },
-  };
-  const results = await probeTopologyConsumerPrefixes({
-    actions,
-    featureIdToOrderedPrefixPosition: new Map([["consumer-a", 1]]),
-    consumerFeatureIds: ["consumer-a"],
-    history: {
-      async evaluateHistoryProbe() {
-        throw new TopologyApplyRematchError(selector, "live prefix 0: empty");
-      },
-    },
-  });
-
-  expect(results).toEqual([
-    {
-      consumerFeatureId: "consumer-a",
-      orderedPosition: 1,
-      status: "failed",
-      signatures: [],
-      diagnostics: [
-        {
-          severity: "error",
-          code: "topology-apply-rematch-failed",
-          message:
-            "The pre-consumer prefix probe could not materialize other-feature:parts:JND: live prefix 0: empty",
-        },
-      ],
-    },
   ]);
 });
 

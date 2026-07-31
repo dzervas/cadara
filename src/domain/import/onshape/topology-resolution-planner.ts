@@ -8,7 +8,6 @@ import {
   getOrderedActionRefs,
   takePreparedActionPrefix,
 } from "@/domain/import/kernel-history-probe";
-import { isTopologyApplyRematchError } from "@/domain/import/orchestrator";
 
 export interface TopologyConsumerPrefixResult {
   consumerFeatureId: string;
@@ -19,37 +18,6 @@ export interface TopologyConsumerPrefixResult {
   diagnostics: readonly HistoryProbeStepDiagnostic[];
 }
 
-function failedTopologyPrefix(
-  consumerFeatureId: string,
-  orderedPosition: number,
-  error: {
-    selector: {
-      source: {
-        consumerFeatureId: string;
-        parameterId: string;
-        deterministicId: string;
-      };
-    };
-    detail: string | null;
-  },
-): TopologyConsumerPrefixResult {
-  return {
-    consumerFeatureId,
-    orderedPosition,
-    status: "failed",
-    signatures: [],
-    diagnostics: [{
-      severity: "error",
-      code: "topology-apply-rematch-failed",
-      message: [
-        `The pre-consumer prefix probe could not materialize ${error.selector.source.consumerFeatureId}:${error.selector.source.parameterId}:${error.selector.source.deterministicId}`,
-        error.detail,
-      ]
-        .filter((part): part is string => Boolean(part))
-        .join(": "),
-    }],
-  };
-}
 
 /**
  * Probe the growing parametric history immediately before each declared topology
@@ -85,35 +53,21 @@ export async function probeTopologyConsumerPrefixes(input: {
     const zeroConsumerFeatureId = consumers.find(
       ({ orderedPosition }) => orderedPosition === 0,
     )?.consumerFeatureId;
-    try {
-      const zeroProbe = await input.history.evaluateHistoryProbe({
-        actions: takePreparedActionPrefix(input.actions, 0),
-        consumerFeatureId: zeroConsumerFeatureId,
-        includeFinalTessellation: false,
-        requestedSignatureStepOrdinals: [],
-        containTopologyRematchFailures: true,
-      });
-      const boundary = zeroProbe.steps.at(-1);
-      zeroBoundary = boundary?.status === "failed"
-        ? { status: "failed", signatures: [], diagnostics: boundary.diagnostics }
-        : {
-            status: "rebuilt",
-            signatures: boundary?.signatures ?? [],
-            diagnostics: [],
-          };
-    } catch (error) {
-      if (!isTopologyApplyRematchError(error)) throw error;
-      const failed = failedTopologyPrefix(
-        zeroConsumerFeatureId ?? "",
-        0,
-        error,
-      );
-      zeroBoundary = {
-        status: failed.status,
-        signatures: failed.signatures,
-        diagnostics: failed.diagnostics,
-      };
-    }
+    const zeroProbe = await input.history.evaluateHistoryProbe({
+      actions: takePreparedActionPrefix(input.actions, 0),
+      consumerFeatureId: zeroConsumerFeatureId,
+      includeFinalTessellation: false,
+      requestedSignatureStepOrdinals: [],
+      containTopologyRematchFailures: true,
+    });
+    const boundary = zeroProbe.steps.at(-1);
+    zeroBoundary = boundary?.status === "failed"
+      ? { status: "failed", signatures: [], diagnostics: boundary.diagnostics }
+      : {
+          status: "rebuilt",
+          signatures: boundary?.signatures ?? [],
+          diagnostics: [],
+        };
   }
 
   if (longestPrefixPosition === 0) {
@@ -127,27 +81,15 @@ export async function probeTopologyConsumerPrefixes(input: {
   const longestConsumerFeatureId = consumers.find(
     ({ orderedPosition }) => orderedPosition === longestPrefixPosition,
   )?.consumerFeatureId;
-  let probe: Awaited<ReturnType<ImportHistoryProbeCapabilities["evaluateHistoryProbe"]>>;
-  try {
-    probe = await input.history.evaluateHistoryProbe({
-      actions: takePreparedActionPrefix(input.actions, longestPrefixPosition),
-      consumerFeatureId: longestConsumerFeatureId,
-      includeFinalTessellation: false,
-      requestedSignatureStepOrdinals: prefixPositions
-        .filter((position) => position > 0)
-        .map((position) => position - 1),
-      containTopologyRematchFailures: true,
-    });
-  } catch (error) {
-    if (!isTopologyApplyRematchError(error)) throw error;
-    // Retain the legacy diagnostic if an older probe implementation throws even
-    // when containment is requested. Current kernel probes return this as a step.
-    return consumers.map(({ consumerFeatureId, orderedPosition }) =>
-      orderedPosition === 0
-        ? { consumerFeatureId, orderedPosition, ...zeroBoundary }
-        : failedTopologyPrefix(consumerFeatureId, orderedPosition, error),
-    );
-  }
+  const probe = await input.history.evaluateHistoryProbe({
+    actions: takePreparedActionPrefix(input.actions, longestPrefixPosition),
+    consumerFeatureId: longestConsumerFeatureId,
+    includeFinalTessellation: false,
+    requestedSignatureStepOrdinals: prefixPositions
+      .filter((position) => position > 0)
+      .map((position) => position - 1),
+    containTopologyRematchFailures: true,
+  });
 
   return consumers.map(({ consumerFeatureId, orderedPosition }) => {
     if (orderedPosition === 0) {

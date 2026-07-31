@@ -46,6 +46,21 @@ export class OccTopologyProvenanceMissingError extends Error {
   }
 }
 
+/**
+ * True for the structured provenance-resolution outcomes the index throws
+ * (missing, remintable root, ambiguous, cyclic, future-stage, malformed key).
+ * Callers that skip an unresolvable source must still propagate genuine faults.
+ */
+export function isOccTopologyProvenanceResolutionError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof OccTopologyProvenanceMissingError ||
+    (error instanceof Error &&
+      error.message.startsWith("occ-topology-provenance-"))
+  );
+}
+
 export interface OccTopologyProvenanceIndex {
   /** Resolve a live face only through exact authored topology lineage. */
   resolveFace(
@@ -67,6 +82,7 @@ interface ProvenanceClaim {
   featureId: FeatureId;
   featureIndex: number;
   sourceKey: OccTopologySourceKey;
+  unsupported: boolean;
 }
 
 function persistedProvenanceOutputs(
@@ -344,9 +360,12 @@ export function createOccTopologyProvenanceIndex(input: {
       // Ignore it here; resolving one of its targets will fail closed as missing.
       return;
     }
+    const claimsByTargetForFeature = new Map<
+      string,
+      Map<OccTopologySourceKey, ProvenanceClaim>
+    >();
     for (const output of outputs) {
       for (const [sourceKey, targets] of output.sourceTargets) {
-        if (output.unsupportedSourceKeys.has(sourceKey)) continue;
         for (const target of targets) {
           if (
             (target.kind !== "face" &&
@@ -357,12 +376,28 @@ export function createOccTopologyProvenanceIndex(input: {
             continue;
           }
           const targetKey = getOccDurableRefKey(target);
-          claimsByTarget.set(targetKey, [
-            ...(claimsByTarget.get(targetKey) ?? []),
-            { featureId, featureIndex: index, sourceKey },
-          ]);
+          const claimsForTarget =
+            claimsByTargetForFeature.get(targetKey) ?? new Map();
+          const existing = claimsForTarget.get(sourceKey);
+          if (existing) {
+            existing.unsupported ||= output.unsupportedSourceKeys.has(sourceKey);
+            continue;
+          }
+          claimsForTarget.set(sourceKey, {
+            featureId,
+            featureIndex: index,
+            sourceKey,
+            unsupported: output.unsupportedSourceKeys.has(sourceKey),
+          });
+          claimsByTargetForFeature.set(targetKey, claimsForTarget);
         }
       }
+    }
+    for (const [targetKey, claimsForTarget] of claimsByTargetForFeature) {
+      claimsByTarget.set(targetKey, [
+        ...(claimsByTarget.get(targetKey) ?? []),
+        ...claimsForTarget.values(),
+      ]);
     }
   };
 
@@ -423,6 +458,12 @@ export function createOccTopologyProvenanceIndex(input: {
       const latest = candidates.filter(
         (claim) => claim.featureIndex === latestIndex,
       );
+      if (
+        latest.length > 1 &&
+        latest.every((claim) => claim.featureId === latest[0]!.featureId)
+      ) {
+        return resolveConvergingClaims(latest, targetKey);
+      }
       if (latest.length !== 1) {
         if (
           latest.length === 0 &&
@@ -447,6 +488,9 @@ export function createOccTopologyProvenanceIndex(input: {
           throw new OccTopologyProvenanceMissingError(targetKey);
         }
         throw new Error(`occ-topology-provenance-ambiguous: ${targetKey}.`);
+      }
+      if (latest[0]!.unsupported) {
+        throw new OccTopologyProvenanceMissingError(targetKey);
       }
       return resolveSourceKey(latest[0]!.sourceKey, latest[0]!);
     } finally {
@@ -529,6 +573,36 @@ export function createOccTopologyProvenanceIndex(input: {
     } finally {
       resolvingSourceKeys.delete(cycleKey);
     }
+  };
+
+
+  const resolveConvergingClaims = (
+    claims: readonly ProvenanceClaim[],
+    targetKey: string,
+  ): OccCanonicalTopologyProvenanceId => {
+    if (claims.some((claim) => claim.unsupported)) {
+      throw new OccTopologyProvenanceMissingError(targetKey);
+    }
+    const sourceCanonicalProvenanceIds: OccCanonicalTopologyProvenanceId[] = [];
+    for (const claim of claims) {
+      try {
+        sourceCanonicalProvenanceIds.push(
+          resolveSourceKey(claim.sourceKey, claim),
+        );
+      } catch (error) {
+        if (
+          error instanceof OccTopologyProvenanceMissingError ||
+          (error instanceof Error &&
+            error.message.startsWith("occ-topology-provenance-remintable-root:"))
+        ) {
+          throw new OccTopologyProvenanceMissingError(targetKey);
+        }
+        throw error;
+      }
+    }
+    return formatCompositeTopologyProvenanceId({
+      sourceCanonicalProvenanceIds,
+    });
   };
 
   const limit = beforeIndex ?? Number.POSITIVE_INFINITY;
@@ -711,6 +785,22 @@ export function formatGeneratedProducerTopologySourceKey(input: {
   role: string;
 }) {
   return `generated-from:${input.featureId}:${input.bodyId}:${input.sourceKind}:${input.sourcePublicId}:${input.role}`;
+}
+
+/** Canonical identity for an exact same-feature convergence of source claims. */
+export function formatCompositeTopologyProvenanceId(input: {
+  sourceCanonicalProvenanceIds: readonly OccCanonicalTopologyProvenanceId[];
+}) {
+  const sources = [...new Set(input.sourceCanonicalProvenanceIds)].sort();
+  if (
+    sources.length === 0 ||
+    sources.some(
+      (source) => source.length === 0 || canonicalOperandProvenanceIsRemintable(source),
+    )
+  ) {
+    throw new Error("occ-topology-provenance-malformed-composite-source.");
+  }
+  return `composite:${sources.map((source) => encodeURIComponent(source)).join("+")}`;
 }
 
 /**

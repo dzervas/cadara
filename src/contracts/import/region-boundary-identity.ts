@@ -143,15 +143,23 @@ export function deriveImportRegionBoundaryIdentity(
   return `import-region-boundary/v1:${representations.sort()[0]!}`;
 }
 
+/** All closed live regions carrying the expected importer provenance. */
+export function matchImportedRegionsByBoundaryIdentity(
+  regions: readonly RegionRecord[],
+  expected: ImportRegionBoundaryIdentity,
+): RegionRecord[] {
+  return regions.filter(
+    (region) =>
+      region.isClosed &&
+      deriveImportRegionBoundaryIdentity(region, regions) === expected,
+  );
+}
+
 /** Resolves only one closed live region with the expected importer provenance. */
 export function resolveImportedRegionByBoundaryIdentity(
   regions: readonly RegionRecord[],
   expected: ImportRegionBoundaryIdentity,
 ): RegionRecord | null {
-  const matches = regions.filter(
-    (region) =>
-      region.isClosed &&
-      deriveImportRegionBoundaryIdentity(region, regions) === expected,
-  );
+  const matches = matchImportedRegionsByBoundaryIdentity(regions, expected);
   return matches.length === 1 ? matches[0]! : null;
 }

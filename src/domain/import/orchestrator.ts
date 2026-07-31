@@ -38,7 +38,7 @@ import type {
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
 import type { BodyId, ConstructionId, FeatureId, SketchId } from "@/contracts/shared/ids";
-import { resolveImportedRegionByBoundaryIdentity } from "@/contracts/import/region-boundary-identity";
+import { matchImportedRegionsByBoundaryIdentity } from "@/contracts/import/region-boundary-identity";
 import type { RegionRecord, SketchRecord } from "@/contracts/sketch/schema";
 import {
   CONTRACT_VERSION,
@@ -667,17 +667,29 @@ export class ImportDeferredMaterializer {
           (candidate) => candidate.sketchId === output.sketchId,
         );
         const regions = sketch ? getSketchRegions(sketch) : [];
-        const region = value.selector.expectedBoundaryIdentity
-          ? resolveImportedRegionByBoundaryIdentity(
+        const identityMatches = value.selector.expectedBoundaryIdentity
+          ? matchImportedRegionsByBoundaryIdentity(
               regions,
               value.selector.expectedBoundaryIdentity,
             )
-          : sketch
+          : [];
+        if (identityMatches.length > 1) {
+          throw new Error(
+            `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; reference action ${value.actionIndex}, sketch ${output.sketchId}: boundary identity matched ${identityMatches.length} live regions ${JSON.stringify(identityMatches.map((candidate) => candidate.regionId))}.`,
+          );
+        }
+        // Zero identity matches fall back to the authored interior point: the
+        // live solve may split boundary entities differently than the capture
+        // without moving the region, and point containment is the sanctioned
+        // region selector. Only an identity tie is refused outright.
+        const region =
+          identityMatches[0] ??
+          (sketch
             ? selectInnermostContainingRegion(
                 toSelectionSketch(sketch),
                 value.selector.point,
               )
-            : null;
+            : null);
         if (!region) {
           const liveRegionIds = regions.map((candidate) => candidate.regionId);
           throw new Error(

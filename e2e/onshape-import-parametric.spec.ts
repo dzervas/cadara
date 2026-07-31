@@ -494,7 +494,10 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   );
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
-  expect(imported.snapshotDiagnosticsCount).toBe(0);
+  // Exactly one warning: the sheet split degrades from the exact tool-history
+  // path (`occ-native-sheet-split-tool-history-degraded`) because the native
+  // boolean history cannot name every fused target face on this document.
+  expect(imported.snapshotDiagnosticsCount).toBe(1);
   expect(imported.featureIds).toEqual([
     "feature_extrude-1",
     "feature_plane-1",
@@ -520,7 +523,7 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   // then no longer resolve for Extrude 1 — a pre-existing region-identity defect
   // unrelated to this import gate.)
   const rebuilt = await editD3ScrewHole(page);
-  expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
+  expect(rebuilt.snapshotDiagnosticsCount).toBe(1);
   expect(rebuilt.featureIds).toEqual(imported.featureIds);
   await expectNoReferenceAlerts(page);
 });

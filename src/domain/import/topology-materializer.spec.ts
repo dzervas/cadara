@@ -500,7 +500,9 @@ test("regionOf rematches importer boundary provenance on the committed sketch", 
   });
 });
 
-test("regionOf never falls back to an interior point when boundary provenance is missing", async () => {
+// Zero identity matches fall back to the authored interior point; when that
+// point contains no live region either, the resolution still fails loudly.
+test("regionOf rejects when neither boundary provenance nor the interior point resolves", async () => {
   const planned = region("region_planned");
   const live = region("region_live", "other-boundary");
   const instance = new ImportDeferredMaterializer({
