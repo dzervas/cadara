@@ -1495,7 +1495,14 @@ async function activateProbeBackedPlanning(input: {
                   ...plan,
                   tier: "baked" as const,
                   target: { kind: "suppressed" as const },
-                  reasonCodes: ["extrude-extent-topology-unresolved"],
+                  reasonCodes: [
+                    resolution.kind === "degraded"
+                      ? resolution.reason
+                      : "extrude-extent-topology-unresolved",
+                  ],
+                  ...(resolution.kind === "degraded"
+                    ? { reasonDetail: describeResolutionFailure(resolution, prefix.signatures) }
+                    : {}),
                   suppressed: true,
                 };
           }
@@ -2442,6 +2449,52 @@ async function buildPreparedActions(input: {
       : null;
   };
 
+  /**
+   * Split's whole-body participants can retain exact producer identity when a
+   * prior action owns precisely one captured body output. This is stricter than
+   * geometric rematching: multi-output and unattributable sources retain their
+   * topology selectors and therefore their existing honest fallback behavior.
+   */
+  const resolveAdvancedBodyParticipants = (
+    definition: ImportDeferredFeatureDefinition,
+  ): ImportDeferredFeatureDefinition => {
+    const parameters = definition.parameters as {
+      participants?: readonly { role: string; targets: readonly unknown[] }[];
+    };
+    if (definition.kind !== "split" || !parameters.participants) return definition;
+    const participants = parameters.participants.map((participant) => {
+      const bodyParticipant =
+        participant.role === "body" ||
+        participant.role === "targetBody" ||
+        participant.role === "toolBody";
+      if (!bodyParticipant) return participant;
+      return {
+        ...participant,
+        targets: participant.targets.map((target) => {
+          if (
+            !target ||
+            typeof target !== "object" ||
+            (target as { kind?: unknown }).kind !== "topologyOf" ||
+            (target as { expectedKind?: unknown }).expectedKind !== "body"
+          ) {
+            return target;
+          }
+          const selector = target as ImportDeferredTopologyRef;
+          const producer = bodyProducerByDeterministicId.get(
+            selector.source.deterministicId,
+          );
+          return producer?.bodyDeterministicIds.length === 1
+            ? { kind: "bodyOf" as const, actionIndex: producer.actionIndex }
+            : target;
+        }),
+      };
+    });
+    return {
+      ...definition,
+      parameters: { ...definition.parameters, participants },
+    } as ImportDeferredFeatureDefinition;
+  };
+
   const deferredBodyTopologyIds = (value: unknown): string[] => {
     if (!value || typeof value !== "object") return [];
     if (
@@ -2884,6 +2937,7 @@ async function buildPreparedActions(input: {
           selector: {
             kind: "interiorPoint",
             point: profile.interiorPoint,
+            expectedBoundaryIdentity: profile.boundaryIdentity,
             ...(profile.evidence ? { source: profile.evidence } : {}),
           },
         });
@@ -3012,7 +3066,11 @@ async function buildPreparedActions(input: {
         (profile): ImportDeferredProfileRef => ({
           kind: "regionOf",
           actionIndex: profileSketchOrderedIndex,
-          selector: { kind: "interiorPoint", point: profile.interiorPoint },
+          selector: {
+            kind: "interiorPoint",
+            point: profile.interiorPoint,
+            expectedBoundaryIdentity: profile.boundaryIdentity,
+          },
         }),
       );
       if (profiles.length === 0) continue;
@@ -3104,7 +3162,11 @@ async function buildPreparedActions(input: {
         (profile): ImportDeferredProfileRef => ({
           kind: "regionOf",
           actionIndex: profileSketchOrderedIndex,
-          selector: { kind: "interiorPoint", point: profile.interiorPoint },
+          selector: {
+            kind: "interiorPoint",
+            point: profile.interiorPoint,
+            expectedBoundaryIdentity: profile.boundaryIdentity,
+          },
         }),
       );
       if (profileTargets.length === 0) continue;
@@ -3170,7 +3232,11 @@ async function buildPreparedActions(input: {
         profileTargets.push({
           kind: "regionOf",
           actionIndex: sketchOrderedIndex,
-          selector: { kind: "interiorPoint", point: profile.profile.interiorPoint },
+          selector: {
+            kind: "interiorPoint",
+            point: profile.profile.interiorPoint,
+            expectedBoundaryIdentity: profile.profile.boundaryIdentity,
+          },
         });
       }
       if (missingSketchFeatureId) {
@@ -3278,7 +3344,7 @@ async function buildPreparedActions(input: {
         documentId: context.documentId,
         baseRevisionId: context.baseRevisionId,
         featureLabel: featurePlan.label,
-        definition: resolvedDefinition.definition,
+        definition: resolveAdvancedBodyParticipants(resolvedDefinition.definition),
       };
       await prepareTopologyFallback(featurePlan, request);
       createFeatures.push(request);

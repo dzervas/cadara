@@ -329,6 +329,7 @@ function validateImportDeferredValueInvariants(
     ) {
       const parameters = request.definition.parameters as {
         participants?: readonly {
+          role: string;
           targets: readonly unknown[];
         }[];
       };
@@ -337,13 +338,21 @@ function validateImportDeferredValueInvariants(
           const targetPath = `createFeatures.${ref.index}.definition.parameters.participants.${participantIndex}.targets.${targetIndex}`;
           if (isDeferredValue(target)) {
             blessed.add(target);
-            if (target.kind !== "regionOf" && target.kind !== "constructionOf") {
+            const bodyParticipant =
+              participant.role === "body" ||
+              participant.role === "targetBody" ||
+              participant.role === "toolBody";
+            if (
+              target.kind !== "regionOf" &&
+              target.kind !== "constructionOf" &&
+              !(target.kind === "bodyOf" && bodyParticipant)
+            ) {
               issues.push({
                 path: targetPath,
-                expected: "regionOf or constructionOf deferred reference",
+                expected: "regionOf, constructionOf, or bodyOf at a body participant",
                 value: target.kind,
                 message:
-                  "Only regionOf and constructionOf deferred references are allowed as direct advanced participant targets.",
+                  "Only regionOf and constructionOf deferred references, plus bodyOf at body participants, are allowed as direct advanced participant targets.",
               });
             } else {
               issues.push(

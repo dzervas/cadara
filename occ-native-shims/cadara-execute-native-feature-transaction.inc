@@ -36,7 +36,8 @@ public:
         topologyToken,
         linearDeflection,
         angularDeflection,
-        left
+        left,
+        right
       );
     }
 
@@ -49,7 +50,8 @@ public:
         topologyToken,
         linearDeflection,
         angularDeflection,
-        left
+        left,
+        right
       );
     }
 
@@ -62,7 +64,8 @@ public:
         topologyToken,
         linearDeflection,
         angularDeflection,
-        left
+        left,
+        right
       );
     }
 
@@ -127,7 +130,8 @@ public:
         topologyToken,
         linearDeflection,
         angularDeflection,
-        left
+        left,
+        right
       );
     }
 
@@ -141,7 +145,8 @@ public:
         topologyToken,
         linearDeflection,
         angularDeflection,
-        left
+        left,
+        right
       );
     }
 
@@ -155,7 +160,8 @@ public:
         topologyToken,
         linearDeflection,
         angularDeflection,
-        left
+        left,
+        right
       );
     }
 
@@ -176,7 +182,118 @@ public:
         "operation",
         operation
       )
-    ), CadaraBuildUnsupportedHistoryJson(operation, bodyId), false);
+    ), CadaraBuildUnsupportedHistoryJson(operation, bodyId), false, "",
+      CadaraBuildUnsupportedBooleanOperandHistoryJson(
+        operation,
+        bodyId,
+        previousTopologyToken,
+        topologyToken,
+        "occ-native-boolean-operand-history-unsupported-operation",
+        "Native Boolean operand history is unavailable for an unsupported operation.",
+        operation
+      )
+    );
+  }
+
+  // This opt-in entrypoint keeps the generic split history contract unchanged
+  // while exposing only the exact tool-face provenance a sheet split creates.
+  static CadaraNativeFeatureTransactionResult BuildSheetSplitCommittedShapeTransactionWithToolHistory(
+    const TopoDS_Shape& target,
+    const TopoDS_Shape& tool,
+    const std::string& targetBodyId,
+    const std::string& toolBodyId,
+    const std::string& previousTopologyToken,
+    const std::string& topologyToken,
+    const double linearDeflection,
+    const double angularDeflection
+  ) {
+    if (tool.ShapeType() != TopAbs_SHELL && tool.ShapeType() != TopAbs_FACE) {
+      const TopoDS_Shape emptyShape;
+      return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
+        emptyShape,
+        targetBodyId,
+        topologyToken,
+        linearDeflection,
+        angularDeflection,
+        true,
+        CadaraDiagnosticJson(
+          "occ-native-sheet-split-history-invalid-tool",
+          "error",
+          "Native OCC sheet-split history requires a shell or face tool.",
+          targetBodyId,
+          "featureTransaction",
+          "toolBodyId",
+          toolBodyId
+        )
+      ), CadaraBuildUnsupportedHistoryJson("split", targetBodyId), false);
+    }
+
+    TopTools_ListOfShape splitArguments;
+    TopTools_ListOfShape splitTools;
+    splitArguments.Append(target);
+    splitTools.Append(tool);
+
+    BRepAlgoAPI_Splitter splitBuilder;
+    splitBuilder.SetArguments(splitArguments);
+    splitBuilder.SetTools(splitTools);
+    splitBuilder.SetToFillHistory(true);
+
+    Message_ProgressRange splitProgress;
+    splitBuilder.Build(splitProgress);
+
+    if (!splitBuilder.IsDone()) {
+      const TopoDS_Shape emptyShape;
+      return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
+        emptyShape,
+        targetBodyId,
+        topologyToken,
+        linearDeflection,
+        angularDeflection,
+        true,
+        CadaraDiagnosticJson(
+          "occ-native-feature-transaction-failed",
+          "error",
+          "Native OCC sheet-tool split feature transaction failed to build.",
+          targetBodyId,
+          "featureTransaction",
+          "operation",
+          "split"
+        )
+      ), CadaraBuildUnsupportedHistoryJson("split", targetBodyId), false);
+    }
+
+    splitBuilder.SimplifyResult(true, true, 1.0e-7);
+    const CadaraPreparedCommittedShape prepared = CadaraPrepareCommittedShapeWithHistory(
+      splitBuilder.Shape(),
+      linearDeflection,
+      angularDeflection
+    );
+    const std::string splitToolHistoryJson = CadaraBuildSheetSplitToolHistoryJson(
+      splitBuilder,
+      target,
+      tool,
+      prepared,
+      targetBodyId,
+      toolBodyId,
+      previousTopologyToken,
+      topologyToken
+    );
+
+    return CadaraNativeFeatureTransactionResult(
+      prepared.shape,
+      CadaraBuildTopologyJson(prepared.shape, targetBodyId, topologyToken, linearDeflection, angularDeflection, true),
+      CadaraBuildSplitFeatureHistoryJson(
+        splitBuilder,
+        splitBuilder,
+        targetBodyId,
+        previousTopologyToken,
+        topologyToken,
+        target,
+        prepared.shape
+      ),
+      true,
+      splitToolHistoryJson
+    );
   }
 
   static CadaraNativeFeatureTransactionResult BuildSplitCommittedShapeTransactionWithHistory(

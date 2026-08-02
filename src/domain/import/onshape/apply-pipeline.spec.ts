@@ -1101,7 +1101,11 @@ test("Onshape X.4 region selections apply through real OCC with exact live solid
       profiles: [{
         kind: "regionOf",
         actionIndex: 0,
-        selector: { kind: "interiorPoint", point: [25, 5] },
+        selector: {
+          kind: "interiorPoint",
+          point: [25, 5],
+          expectedBoundaryIdentity: expect.stringMatching(/^import-region-boundary\/v1:/),
+        },
       }],
     },
   });
@@ -1128,6 +1132,7 @@ test("Onshape X.4 region selections apply through real OCC with exact live solid
     expect(profile.actionIndex).toBe(0);
     expect(profile.selector.kind).toBe("interiorPoint");
     if (profile.selector.kind !== "interiorPoint") throw new Error("Expected an annulus interior-point selector.");
+    expect(profile.selector.expectedBoundaryIdentity).toMatch(/^import-region-boundary\/v1:/);
     const [x, y] = profile.selector.point;
     const radialDistance = Math.min(...[
       [0, 0], [0, 96.5], [0, 193], [102, 0], [102, 96.5], [102, 193],
@@ -2139,8 +2144,6 @@ test.each([
   if (fixtureKind === "boolean" || fixtureKind === "split") {
     const preparedConsumer = actions.createFeatures?.find((request) => request.definition.kind === expectedKind);
     expect(preparedConsumer?.definition.kind).toBe(expectedKind);
-    expect(preparedConsumer?.topologyFallback?.definition.kind).toBe("bakedBody");
-    expect(JSON.stringify(preparedConsumer)).toContain("topologyOf");
     if (
       preparedConsumer?.definition.kind !== "combine" &&
       preparedConsumer?.definition.kind !== "split"
@@ -2152,9 +2155,19 @@ test.each([
         (participant) => participant.role,
       ),
     ).toEqual(["targetBody", "toolBody"]);
-    expect(
-      preparedConsumer.topologyFallback?.definition.parameters.replacement,
-    ).toMatchObject({ kind: "replaceBodyOutputs", actionIndexes: [1, 3] });
+    if (fixtureKind === "split") {
+      expect(preparedConsumer.topologyFallback).toBeUndefined();
+      expect(preparedConsumer.definition.parameters.participants).toMatchObject([
+        { targets: [{ kind: "bodyOf", actionIndex: 1 }] },
+        { targets: [{ kind: "bodyOf", actionIndex: 3 }] },
+      ]);
+    } else {
+      expect(preparedConsumer.topologyFallback?.definition.kind).toBe("bakedBody");
+      expect(JSON.stringify(preparedConsumer)).toContain("topologyOf");
+      expect(
+        preparedConsumer.topologyFallback?.definition.parameters.replacement,
+      ).toMatchObject({ kind: "replaceBodyOutputs", actionIndexes: [1, 3] });
+    }
     return;
   }
   const requests = recordSuccessfulCreateFeatureInputs(service);
@@ -2173,6 +2186,127 @@ test.each([
   if (consumer?.definition.kind === "deleteSolid" || consumer?.definition.kind === "transform") {
     expect(consumer.definition.parameters.participants[0]?.targets[0]?.kind).toBe("body");
   }
+});
+
+// Lane: logic (per docs/testing.md — provider producer-ledger to prepared
+// advanced-participant seam). The synthetic sheet tool must retain the exact
+// single-output producer identity, rather than rematching either whole body.
+test("a split with a single-output solid and sheet producer prepares bodyOf participants without a fallback", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, snapshot, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        const count = input.actions.orderedActions?.length ?? 0;
+        return {
+          steps: Array.from({ length: count }, (_, index) => ({
+            status: "rebuilt" as const,
+            signatures: [
+              ...(index >= 1 ? [{
+                entityClass: "body" as const,
+                geometryType: "solid",
+                boundingBox: { low: [-4, -3, 12] as [number, number, number], high: [4, 3, 12] as [number, number, number] },
+                centroid: [0, 0, 12] as [number, number, number],
+                reference: { kind: "body" as const, bodyId: "probe_body_1" as never },
+              }] : []),
+              ...(index >= 3 ? [{
+                entityClass: "body" as const,
+                geometryType: "solid",
+                boundingBox: { low: [-2, -3, 12] as [number, number, number], high: [6, 3, 12] as [number, number, number] },
+                centroid: [2, 0, 12] as [number, number, number],
+                reference: { kind: "body" as const, bodyId: "probe_body_2" as never },
+              }] : []),
+            ],
+          })),
+        };
+      },
+    },
+  });
+  const source = sourceFromBundle(
+    makeWaveBBodyCaptureBundle("split", { surfaceTool: true, keepTools: false }),
+  );
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  expect(review.providerReview.studios[0]?.featurePlans.at(-1)).toMatchObject({
+    tier: "parametric",
+    reasonCodes: [],
+  });
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  const split = actions.createFeatures?.find((request) => request.definition.kind === "split");
+  expect(split?.definition).toMatchObject({
+    kind: "split",
+    parameters: {
+      participants: [
+        { role: "targetBody", targets: [{ kind: "bodyOf", actionIndex: 1 }] },
+        { role: "toolBody", targets: [{ kind: "bodyOf", actionIndex: 3 }] },
+      ],
+      options: { keepTools: { source: "literal", value: false } },
+    },
+  });
+  expect(split?.topologyFallback).toBeUndefined();
+  expect(validateImportPreparedActions(actions).success).toBe(true);
+});
+
+// Lane: logic (per docs/testing.md — provider producer-ledger to fallback
+// preparation seam). A multi-output producer is not uniquely attributable, so
+// its selector remains topologyOf and retains the checkpoint fallback.
+test("a split retains topology fallback for a multi-output target producer", async () => {
+  const { service } = createTestModelingService();
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const capabilities = createImportCapabilities(service, snapshot, {
+    history: {
+      async evaluateHistoryProbe(input) {
+        const count = input.actions.orderedActions?.length ?? 0;
+        return {
+          steps: Array.from({ length: count }, (_, index) => ({
+            status: "rebuilt" as const,
+            signatures: [
+              ...(index >= 1 ? [{
+                entityClass: "body" as const,
+                geometryType: "solid",
+                boundingBox: { low: [-4, -3, 12] as [number, number, number], high: [4, 3, 12] as [number, number, number] },
+                centroid: [0, 0, 12] as [number, number, number],
+                reference: { kind: "body" as const, bodyId: "probe_body_1" as never },
+              }] : []),
+              ...(index >= 3 ? [{
+                entityClass: "body" as const,
+                geometryType: "solid",
+                boundingBox: { low: [-2, -3, 12] as [number, number, number], high: [6, 3, 12] as [number, number, number] },
+                centroid: [2, 0, 12] as [number, number, number],
+                reference: { kind: "body" as const, bodyId: "probe_body_2" as never },
+              }] : []),
+            ],
+          })),
+        };
+      },
+    },
+  });
+  const source = sourceFromBundle(
+    makeWaveBBodyCaptureBundle("split", { multiOutputTarget: true }),
+  );
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  const split = actions.createFeatures?.find((request) => request.definition.kind === "split");
+  expect(split?.definition).toMatchObject({
+    kind: "split",
+    parameters: {
+      participants: [
+        { role: "targetBody", targets: [{ kind: "topologyOf" }] },
+        { role: "toolBody", targets: [{ kind: "bodyOf", actionIndex: 3 }] },
+      ],
+    },
+  });
+  expect(split?.topologyFallback?.definition.kind).toBe("bakedBody");
 });
 
 test("a body consumer over a baked producer reports topology-upstream-baked, not a matching failure", async () => {
@@ -4059,4 +4193,163 @@ test("a prepared Onshape surface extrude rebuilds into a sheet body in real OCC"
 
   const applied = await service.getCurrentDocumentSnapshot();
   expect(applied.document.bodies.map((body) => body.bodyKind)).toEqual(["sheet"]);
+});
+
+// Lane: logic (per docs/testing.md — importer prepared action application
+// through the real OCC adapter). Seam: single-output bodyOf participants
+// materialize to durable solid and sheet body refs before a keepTools=false
+// split, so no topology rematch or baked checkpoint is needed.
+test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", async () => {
+  const oc = await loadRealOccForImportTest();
+  const { service } = createRealOccModelingService(oc);
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const solidSketch = translateSketch({
+    featureId: "split_solid_sketch",
+    label: "Split solid profile",
+    planeKey: "xy",
+    entities: [{
+      entityId: "split_circle",
+      entityType: "circle",
+      center: [0, 0],
+      radius: 4,
+    }],
+  });
+  const sheetSketch = translateSketch({
+    featureId: "split_sheet_sketch",
+    label: "Split sheet profile",
+    planeKey: "xy",
+    entities: [{
+      entityId: "split_line",
+      entityType: "lineSegment",
+      start: [0, -5],
+      end: [0, 5],
+    }],
+  });
+  const commit = (
+    label: string,
+    translation: ReturnType<typeof translateSketch>,
+    requestId: string,
+  ) => ({
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_workspace" as DocumentId,
+    baseRevisionId: snapshot.document.revisionId,
+    solverCorrelation: {
+      requestId,
+      projectionRequestId: `${requestId}_project`,
+      validationRequestId: `${requestId}_validate`,
+      solveRequestId: `${requestId}_solve`,
+      regionRequestId: `${requestId}_regions`,
+    },
+    sketchId: null,
+    sketchLabel: label,
+    plane: translation.plane,
+    definition: translation.definition,
+  });
+  const blindExtent = {
+    mode: "oneSide" as const,
+    end: {
+      kind: "blind" as const,
+      direction: "positive" as const,
+      distance: createLiteralAuthoredValue(10),
+    },
+  };
+  const actions: ImportPreparedActions = {
+    commitSketches: [
+      commit("Split solid profile", solidSketch, "request_split_solid"),
+      commit("Split sheet profile", sheetSketch, "request_split_sheet"),
+    ],
+    createFeatures: [
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: snapshot.document.revisionId,
+        featureLabel: "Split solid",
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: "feature-type/extrude/v1alpha2",
+          parameters: {
+            resultBodyType: "solid",
+            profiles: [{
+              kind: "regionOf",
+              actionIndex: 0,
+              selector: { kind: "interiorPoint", point: [0, 0] },
+            }],
+            startExtent: { kind: "profilePlane" },
+            extent: blindExtent,
+            operation: createLiteralAuthoredValue("newBody"),
+            booleanScope: { kind: "standalone" },
+          },
+        },
+      },
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: snapshot.document.revisionId,
+        featureLabel: "Split sheet tool",
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: "feature-type/extrude/v1alpha2",
+          parameters: {
+            resultBodyType: "surface",
+            profiles: [{
+              kind: "sketchEntity",
+              sketchId: { kind: "sketchIdOf", actionIndex: 2 },
+              entityId: "sketch_entity_split_sheet_sketch_split_line",
+            }],
+            startExtent: { kind: "profilePlane" },
+            extent: blindExtent,
+          },
+        },
+      },
+      {
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace" as DocumentId,
+        baseRevisionId: snapshot.document.revisionId,
+        featureLabel: "Split with sheet",
+        definition: {
+          kind: "split",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            participants: [
+              { role: "targetBody", targets: [{ kind: "bodyOf", actionIndex: 1 }] },
+              { role: "toolBody", targets: [{ kind: "bodyOf", actionIndex: 3 }] },
+            ],
+            options: { keepTools: false },
+          },
+        },
+      },
+    ],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+      { kind: "commitSketch", index: 1 },
+      { kind: "createFeature", index: 1 },
+      { kind: "createFeature", index: 2 },
+    ],
+  };
+  const validation = validateImportPreparedActions(actions);
+  expect(validation.success, JSON.stringify(validation.issues)).toBe(true);
+
+  const created = recordCreateFeatureInputs(service);
+  const result = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: snapshot.document.revisionId,
+    actions,
+  });
+  expect(result.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+  expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
+    "topology-apply-rematch-failed",
+  );
+  expect(created.at(-1)?.definition).toMatchObject({
+    kind: "split",
+    parameters: {
+      participants: [
+        { role: "targetBody", targets: [{ kind: "body" }] },
+        { role: "toolBody", targets: [{ kind: "body" }] },
+      ],
+    },
+  });
+
+  const applied = await service.getCurrentDocumentSnapshot();
+  expect(applied.document.bodies.map((body) => body.bodyKind)).toEqual(["solid", "solid"]);
 });

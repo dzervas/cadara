@@ -3046,12 +3046,14 @@ lineage defect. The honest browser tier is **16 / 25 / 0** (previously
 #### d3cd9: one coincident split face is exactly body-scoped
 
 The rollback snapshot records which captured split body owns each support face.
-Review now resolves that captured body only when its other captured faces each
-have a unique live match and every match votes for the same live body. More than
-one admissible candidate is always ambiguous—body attribution disables the
-ordinary score-margin winner—so this cannot become nearest-geometry matching.
-The proven live `BodyId` is carried on the deferred selector and applied as the
-same hard scope during commit; an empty scoped set stays no-match.
+Available sibling faces with an exact unique live match vote for that match's
+live body; scoping occurs only when at least one such vote exists and all unique
+votes agree on one live body. Non-matching or non-unique siblings do not
+fabricate a vote. More than one admissible candidate is always ambiguous—body
+attribution disables the ordinary score-margin winner—so this cannot become
+nearest-geometry matching. The proven live `BodyId` is carried on the deferred
+selector and applied as the same hard scope during commit; an empty scoped set
+stays no-match.
 
 That promotes `Sketch 7`, moving d3cd9 from **18 / 6 / 0** to **19 / 5 / 0**.
 `Extrude 5` and `Extrude 6` now reach their own next blocker: their deferred
@@ -3071,3 +3073,30 @@ Validation: focused modeling/import/contracts tests, lint, build, 9841 `walls`
 rebuild, and d3cd9 `screwHole` rebuild passed on clean port 3123. The final
 acceptance components are green: 705 logic, 126 UI, 27 static, 56 fast Playwright,
 and 14 serial real-capture Playwright tests.
+
+### Latest verification: d3cd9 region identity and native sheet-split boundary
+
+The real browser gate moved d3cd9 from **19 / 5 / 0** to **23 / 1 / 0**
+(parametric / baked / geometryOnly). `Extrude 5`, `Extrude 6`, `Sketch 8`, and
+`Extrude 7` promoted through a transient importer-only, orientation-stable exact
+region-boundary identity. Persisted `RegionId` semantics were restored and remain
+unchanged.
+
+`Extrude 8` now resolves its topology face/body slots and grouped `(25/2) mm`
+depth. It remains the sole bake: `Split 1`'s native sheet-split transaction
+publishes no exact tool-face `Modified` successor/producer stage, so the
+correctly matched JZa face is invalidated during replay with
+`occ-topology-unsupported-history`.
+
+The attempted JavaScript `Generated(toolFace)` bypass was removed. The native
+path is retained; no geometry or topology match was fabricated. The correct
+**24 / 0 / 0** follow-up requires a native split-history payload carrying tool
+face `Modified` history to the exact final face and stable output slot, followed
+by a WASM rebuild. That rebuild is unavailable in this environment because no
+working container/emcc toolchain is available.
+
+The d3 E2E now pins **23 / 1 / 0**, the exact timeline, zero diagnostics, the
+`screwHole` rebuild, and no alerts; its single test passed in **33m22.693s**.
+Final `bun run test:all` validation is green: **719 logic**, **126 UI**, **27
+static**, and **56 fast Playwright** tests passed. Surface-extrude support remains
+landed and is not an exclusion.

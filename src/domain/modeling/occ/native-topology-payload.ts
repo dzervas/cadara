@@ -101,6 +101,16 @@ export interface OpenCascadeNativeTopologyKernelHost {
       linearDeflection: number,
       angularDeflection: number,
     ) => OpenCascadeNativeFeatureTransactionResult;
+    BuildSheetSplitCommittedShapeTransactionWithToolHistory?: (
+      target: unknown,
+      tool: unknown,
+      targetBodyId: string,
+      toolBodyId: string,
+      previousTopologyToken: string,
+      topologyToken: string,
+      linearDeflection: number,
+      angularDeflection: number,
+    ) => OpenCascadeNativeFeatureTransactionResult;
     BuildFilletCommittedShapeTransactionWithHistory?: (
       shape: unknown,
       edgeIdsCsv: string,
@@ -162,7 +172,12 @@ export interface OpenCascadeNativeFeatureTransactionResult {
   Shape: () => unknown;
   PayloadJson: () => string;
   HistoryJson: () => string;
+  /** Present only on the additive sheet-split tool-history transaction ABI. */
+  SplitToolHistoryJson?: () => string;
+  /** Present only on the additive Boolean operand-history transaction ABI. */
+  BooleanOperandHistoryJson?: () => string;
   IsDone: () => boolean;
+  delete: () => void;
 }
 
 export type OccNativeTopologyKind =
@@ -319,6 +334,70 @@ export type OccNativeFeatureTransactionHistoryReason =
   | "generated"
   | "missing";
 
+export const OCC_NATIVE_SHEET_SPLIT_TOOL_HISTORY_SCHEMA_VERSION =
+  "occ-native-sheet-split-tool-history-payload/v1alpha1";
+
+export interface OccNativeSheetSplitToolHistoryOutput {
+  outputSlotKey: OccNativeNonEmptyString;
+  sourceTargetFaceNativeIds: readonly OccNativeNonEmptyString[];
+  finalFaceNativeIds: readonly OccNativeNonEmptyString[];
+}
+
+export interface OccNativeSheetSplitToolFaceRelation {
+  sourceToolFace: {
+    bodyId: BodyId;
+    nativeFaceId: OccNativeNonEmptyString;
+  };
+  cardinality: "zero" | "one" | "many";
+  finalFaces: readonly {
+    nativeFaceId: OccNativeNonEmptyString;
+    outputSlotKeys: readonly OccNativeNonEmptyString[];
+  }[];
+}
+
+/**
+ * Exact output-slot and tool-face provenance emitted only by
+ * `BuildSheetSplitCommittedShapeTransactionWithToolHistory`.
+ *
+ * This deliberately does not infer solid membership from geometry: every
+ * final-face id declares every native output slot that contains it. A physical
+ * split-interface face may therefore belong to more than one output slot.
+ */
+export interface OccNativeSheetSplitToolHistoryPayload {
+  schemaVersion: typeof OCC_NATIVE_SHEET_SPLIT_TOOL_HISTORY_SCHEMA_VERSION;
+  source: "occt7-shim";
+  status: "available" | "unsupported";
+  targetBodyId: BodyId;
+  toolBodyId: BodyId;
+  previousTopologyToken: OccNativeNonEmptyString;
+  topologyToken: OccNativeNonEmptyString;
+  outputs: readonly OccNativeSheetSplitToolHistoryOutput[];
+  toolFaceRelations: readonly OccNativeSheetSplitToolFaceRelation[];
+  diagnostics: readonly OccNativeTopologyDiagnostic[];
+}
+
+export const OCC_NATIVE_BOOLEAN_OPERAND_HISTORY_SCHEMA_VERSION =
+  "occ-native-boolean-operand-history-payload/v1alpha1";
+
+export interface OccNativeBooleanOperandHistoryFinalFace {
+  nativeFaceId: OccNativeNonEmptyString;
+  leftSourceFaceNativeIds: readonly OccNativeNonEmptyString[];
+  rightSourceFaceNativeIds: readonly OccNativeNonEmptyString[];
+}
+
+/** Exact Boolean operand incidence; native ids are transaction-local only. */
+export interface OccNativeBooleanOperandHistoryPayload {
+  schemaVersion: typeof OCC_NATIVE_BOOLEAN_OPERAND_HISTORY_SCHEMA_VERSION;
+  source: "occt7-shim";
+  status: "available" | "unsupported";
+  operation: "join" | "cut" | "intersect";
+  bodyId: BodyId;
+  previousTopologyToken: OccNativeNonEmptyString;
+  topologyToken: OccNativeNonEmptyString;
+  finalFaces: readonly OccNativeBooleanOperandHistoryFinalFace[];
+  diagnostics: readonly OccNativeTopologyDiagnostic[];
+}
+
 export interface OccNativeFeatureTransactionHistoryRecord {
   target: DurableRef;
   reason: OccNativeFeatureTransactionHistoryReason;
@@ -455,6 +534,10 @@ const nativeShimPayloadValidator =
   typia.createValidateEquals<OccNativeShimPayloadRaw>();
 const nativeFeatureTransactionHistoryPayloadValidator =
   typia.createValidateEquals<OccNativeFeatureTransactionHistoryPayloadRaw>();
+const nativeSheetSplitToolHistoryPayloadValidator =
+  typia.createValidateEquals<OccNativeSheetSplitToolHistoryPayload>();
+const nativeBooleanOperandHistoryPayloadValidator =
+  typia.createValidateEquals<OccNativeBooleanOperandHistoryPayload>();
 
 const emptyBuffer = new ArrayBuffer(0);
 
@@ -975,6 +1058,182 @@ export function parseNativeShimPayloadJson(json: string): OccNativeShimPayload {
   return payload;
 }
 
+function assertUniqueNativeIds(
+  values: readonly string[],
+  path: string,
+) {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) {
+      throw invariantFailure(path, `contains duplicate native id ${value}.`);
+    }
+    seen.add(value);
+  }
+}
+
+function assertNativeSheetSplitToolHistoryInvariants(
+  payload: OccNativeSheetSplitToolHistoryPayload,
+) {
+  const outputsBySlot = new Map<string, OccNativeSheetSplitToolHistoryOutput>();
+  const outputSlotsByFinalFaceId = new Map<string, Set<string>>();
+
+  for (const output of payload.outputs) {
+    if (outputsBySlot.has(output.outputSlotKey)) {
+      throw invariantFailure(
+        "outputs",
+        `contains duplicate output slot ${output.outputSlotKey}.`,
+      );
+    }
+    if (
+      output.sourceTargetFaceNativeIds.length === 0 ||
+      output.finalFaceNativeIds.length === 0
+    ) {
+      throw invariantFailure(
+        `outputs.${output.outputSlotKey}`,
+        "must declare non-empty exact target and final face memberships.",
+      );
+    }
+    assertUniqueNativeIds(
+      output.sourceTargetFaceNativeIds,
+      `outputs.${output.outputSlotKey}.sourceTargetFaceNativeIds`,
+    );
+    assertUniqueNativeIds(
+      output.finalFaceNativeIds,
+      `outputs.${output.outputSlotKey}.finalFaceNativeIds`,
+    );
+    outputsBySlot.set(output.outputSlotKey, output);
+
+    for (const finalFaceId of output.finalFaceNativeIds) {
+      const outputSlots = outputSlotsByFinalFaceId.get(finalFaceId) ?? new Set();
+      outputSlots.add(output.outputSlotKey);
+      outputSlotsByFinalFaceId.set(finalFaceId, outputSlots);
+    }
+  }
+
+  if (payload.status === "available" && outputsBySlot.size === 0) {
+    throw invariantFailure("outputs", "must not be empty when history is available.");
+  }
+
+  const seenToolFaces = new Set<string>();
+  const claimedFinalFaces = new Set<string>();
+  for (const [relationIndex, relation] of payload.toolFaceRelations.entries()) {
+    const path = `toolFaceRelations.${relationIndex}`;
+    if (relation.sourceToolFace.bodyId !== payload.toolBodyId) {
+      throw invariantFailure(
+        `${path}.sourceToolFace.bodyId`,
+        `must equal toolBodyId ${payload.toolBodyId}.`,
+      );
+    }
+    if (seenToolFaces.has(relation.sourceToolFace.nativeFaceId)) {
+      throw invariantFailure(
+        "toolFaceRelations",
+        `contains duplicate tool face ${relation.sourceToolFace.nativeFaceId}.`,
+      );
+    }
+    seenToolFaces.add(relation.sourceToolFace.nativeFaceId);
+
+    const expectedCount =
+      relation.cardinality === "zero"
+        ? 0
+        : relation.cardinality === "one"
+          ? 1
+          : 2;
+    if (
+      (relation.cardinality === "many" && relation.finalFaces.length < expectedCount) ||
+      (relation.cardinality !== "many" &&
+        relation.finalFaces.length !== expectedCount)
+    ) {
+      throw invariantFailure(
+        `${path}.cardinality`,
+        `is inconsistent with ${relation.finalFaces.length} final faces.`,
+      );
+    }
+
+    for (const [faceIndex, finalFace] of relation.finalFaces.entries()) {
+      const facePath = `${path}.finalFaces.${faceIndex}`;
+      assertUniqueNativeIds(finalFace.outputSlotKeys, `${facePath}.outputSlotKeys`);
+      const declaredOutputSlots = outputSlotsByFinalFaceId.get(
+        finalFace.nativeFaceId,
+      );
+      if (!declaredOutputSlots) {
+        throw invariantFailure(
+          `${facePath}.nativeFaceId`,
+          "is not declared by any exact output slot.",
+        );
+      }
+      if (
+        finalFace.outputSlotKeys.length !== declaredOutputSlots.size ||
+        !finalFace.outputSlotKeys.every((slot) => declaredOutputSlots.has(slot))
+      ) {
+        throw invariantFailure(
+          `${facePath}.outputSlotKeys`,
+          "must contain exactly the declared output-slot membership for its final face.",
+        );
+      }
+      if (claimedFinalFaces.has(finalFace.nativeFaceId)) {
+        throw invariantFailure(
+          "toolFaceRelations",
+          `contains colliding tool-face claims for final face ${finalFace.nativeFaceId}.`,
+        );
+      }
+      claimedFinalFaces.add(finalFace.nativeFaceId);
+    }
+  }
+}
+
+function assertNativeBooleanOperandHistoryInvariants(
+  payload: OccNativeBooleanOperandHistoryPayload,
+) {
+  const finalFaceIds = new Set<string>();
+  for (const [index, finalFace] of payload.finalFaces.entries()) {
+    const path = `finalFaces.${index}`;
+    if (finalFaceIds.has(finalFace.nativeFaceId)) {
+      throw invariantFailure(
+        "finalFaces",
+        `contains duplicate final face ${finalFace.nativeFaceId}.`,
+      );
+    }
+    finalFaceIds.add(finalFace.nativeFaceId);
+    assertUniqueNativeIds(
+      finalFace.leftSourceFaceNativeIds,
+      `${path}.leftSourceFaceNativeIds`,
+    );
+    assertUniqueNativeIds(
+      finalFace.rightSourceFaceNativeIds,
+      `${path}.rightSourceFaceNativeIds`,
+    );
+  }
+  if (payload.status === "available" && payload.finalFaces.length === 0) {
+    throw invariantFailure(
+      "finalFaces",
+      "must not be empty when Boolean operand history is available.",
+    );
+  }
+  if (payload.status === "unsupported" && payload.finalFaces.length !== 0) {
+    throw invariantFailure(
+      "finalFaces",
+      "must be empty when Boolean operand history is unsupported.",
+    );
+  }
+}
+
+/** Parse the optional additive Boolean operand-history ABI strictly. */
+export function parseNativeBooleanOperandHistoryJson(
+  json: string,
+): OccNativeBooleanOperandHistoryPayload {
+  const parsed = JSON.parse(json) as unknown;
+  const result = nativeBooleanOperandHistoryPayloadValidator(parsed);
+  if (!result.success) {
+    throw new Error(
+      result.errors[0]?.description ??
+        result.errors[0]?.expected ??
+        "Native Boolean operand history payload is invalid.",
+    );
+  }
+  assertNativeBooleanOperandHistoryInvariants(result.data);
+  return result.data;
+}
+
 export function parseNativeFeatureTransactionHistoryJson(
   json: string,
 ): OccNativeFeatureTransactionHistoryPayload {
@@ -994,6 +1253,23 @@ export function parseNativeFeatureTransactionHistoryJson(
     diagnostics: result.data.diagnostics ?? [],
   };
   return payload;
+}
+
+export function parseNativeSheetSplitToolHistoryJson(
+  json: string,
+): OccNativeSheetSplitToolHistoryPayload {
+  const parsed = JSON.parse(json) as unknown;
+  const result = nativeSheetSplitToolHistoryPayloadValidator(parsed);
+  if (!result.success) {
+    throw new Error(
+      result.errors[0]?.description ??
+        result.errors[0]?.expected ??
+        "Native sheet-split tool history payload is invalid.",
+    );
+  }
+
+  assertNativeSheetSplitToolHistoryInvariants(result.data);
+  return result.data;
 }
 
 export function createOccNativeReferenceInvalidationsFromHistoryPayload(

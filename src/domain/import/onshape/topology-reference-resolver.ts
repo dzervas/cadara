@@ -639,7 +639,23 @@ export function resolveTopologyReferences(
       };
     }
 
-    const match = matchSignature(source.signature, input.cadaraSignatures, input.tolerance);
+    // A split can leave coincident faces on separate bodies. If rollback
+    // evidence proves which captured body owns this face, restrict the generic
+    // match to that same live body; otherwise retain the unrestricted exact
+    // zero/one/many result.
+    const bodyScope = source.signature.entityClass === "face"
+      ? scopeLiveSignaturesToCapturedBody({
+          snapshot: input.rollback.snapshotBeforeFeature(input.consumerFeatureId),
+          deterministicId: query.deterministicId,
+          liveSignatures: input.cadaraSignatures,
+          tolerance: input.tolerance,
+        })
+      : null;
+    const match = matchSignature(
+      source.signature,
+      bodyScope?.signatures ?? input.cadaraSignatures,
+      input.tolerance,
+    );
     if (match.kind === "noMatch") {
       return {
         kind: "degraded",
@@ -671,6 +687,9 @@ export function resolveTopologyReferences(
           parameterId: query.parameterId,
           deterministicId: query.deterministicId,
         },
+        ...(bodyScope?.liveBodyId === null || bodyScope === null
+          ? {}
+          : { bodyScope: bodyScope.liveBodyId }),
       },
     });
   }

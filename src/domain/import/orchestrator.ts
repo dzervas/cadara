@@ -38,6 +38,7 @@ import type {
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
 import type { BodyId, ConstructionId, FeatureId, SketchId } from "@/contracts/shared/ids";
+import { resolveImportedRegionByBoundaryIdentity } from "@/contracts/import/region-boundary-identity";
 import type { RegionRecord, SketchRecord } from "@/contracts/sketch/schema";
 import {
   CONTRACT_VERSION,
@@ -665,15 +666,22 @@ export class ImportDeferredMaterializer {
         const sketch = snapshot.document.sketches.find(
           (candidate) => candidate.sketchId === output.sketchId,
         );
-        const region = sketch
-          ? selectInnermostContainingRegion(
-              toSelectionSketch(sketch),
-              value.selector.point,
+        const regions = sketch ? getSketchRegions(sketch) : [];
+        const region = value.selector.expectedBoundaryIdentity
+          ? resolveImportedRegionByBoundaryIdentity(
+              regions,
+              value.selector.expectedBoundaryIdentity,
             )
-          : null;
+          : sketch
+            ? selectInnermostContainingRegion(
+                toSelectionSketch(sketch),
+                value.selector.point,
+              )
+            : null;
         if (!region) {
+          const liveRegionIds = regions.map((candidate) => candidate.regionId);
           throw new Error(
-            `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; reference action ${value.actionIndex}, sketch ${output.sketchId}, selector ${JSON.stringify(value.selector)}.`,
+            `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; reference action ${value.actionIndex}, sketch ${output.sketchId}, selector ${JSON.stringify(value.selector)}, live regions ${JSON.stringify(liveRegionIds)}.`,
           );
         }
         return {
@@ -934,7 +942,7 @@ export class ImportDeferredMaterializer {
               | ImportDeferredTopologyRef
               | ImportDeferredSketchEntityRef
               | ImportDeferredSketchPointRef
-              | Extract<ImportDeferredValue, { kind: "regionOf" | "constructionOf" }>
+              | Extract<ImportDeferredValue, { kind: "regionOf" | "bodyOf" | "constructionOf" }>
             )[];
           }[];
         }
@@ -958,7 +966,10 @@ export class ImportDeferredMaterializer {
                 };
               }
               if (isDeferredValue(target)) {
-                return this.resolveDeferredValue(target, consumer);
+                const resolved = await this.resolveDeferredValue(target, consumer);
+                return target.kind === "bodyOf"
+                  ? { kind: "body" as const, bodyId: resolved as BodyId }
+                  : resolved;
               }
               return target;
             }),

@@ -7,6 +7,7 @@ import {
   applyBooleanPolicy,
   resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
+  runSheetSplit,
 } from "@/domain/modeling/occ/features/boolean-operations";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 import { toGpPnt } from "@/domain/modeling/occ/planes";
@@ -77,6 +78,80 @@ function makeBoxShape(
 
   return box.Shape();
 }
+
+function createFailingSheetSplitOc(phase: "build" | "simplify" | "undone") {
+  const deleted: string[] = [];
+
+  class ShapeList {
+    Append_1() {}
+
+    delete() {
+      deleted.push("list");
+    }
+  }
+
+  class Splitter {
+    SetArguments() {}
+
+    SetTools() {}
+
+    SetToFillHistory() {}
+
+    Build() {
+      if (phase === "build") {
+        throw new Error("sheet split build failure");
+      }
+    }
+
+    IsDone() {
+      return phase !== "undone";
+    }
+
+    SimplifyResult() {
+      if (phase === "simplify") {
+        throw new Error("sheet split simplify failure");
+      }
+    }
+
+    delete() {
+      deleted.push("builder");
+    }
+  }
+
+  class ProgressRange {
+    delete() {
+      deleted.push("progress");
+    }
+  }
+
+  return {
+    oc: {
+      TopTools_ListOfShape_1: ShapeList,
+      BRepAlgoAPI_Splitter_1: Splitter,
+      Message_ProgressRange_1: ProgressRange,
+    } as unknown as OpenCascadeInstance,
+    deleted,
+  };
+}
+
+test.each([
+  ["build", "sheet split build failure"],
+  ["simplify", "sheet split simplify failure"],
+  ["undone", "OCC sheet-tool split failed to build."],
+] as const)(
+  "runSheetSplit disposes its fallback resources when %s does not return",
+  (phase, errorMessage) => {
+    const { oc, deleted } = createFailingSheetSplitOc(phase);
+
+    expect(() => runSheetSplit(oc, {} as never, {} as never)).toThrow(
+      errorMessage,
+    );
+    expect(
+      deleted,
+      "A failed sheet split must release its builder exactly once and clean up the progress range and both native lists.",
+    ).toEqual(["builder", "progress", "list", "list"]);
+  },
+);
 
 function topologyTargets(body: OccTrackedBody): DurableRef[] {
   return [

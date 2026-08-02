@@ -93,6 +93,45 @@ function formatNumber(value: number): string {
 }
 
 /**
+ * Lower a postfix unit on a parenthesized expression to multiplication by its
+ * document-unit conversion factor. Scanning from the right handles nested
+ * groups without needing to parse Onshape's unit-bearing grammar.
+ */
+function normalizeGroupedPostfixUnits(text: string): {
+  text: string;
+  hasUnknownUnit: boolean;
+} {
+  let normalized = text;
+
+  while (true) {
+    const groups: number[] = [];
+    let match: { start: number; end: number; close: number; unit: string } | null = null;
+    for (let index = 0; index < normalized.length; index += 1) {
+      if (normalized[index] === "(") {
+        groups.push(index);
+      } else if (normalized[index] === ")") {
+        const start = groups.pop();
+        if (start === undefined) continue;
+        const unitMatch = /^\s*([A-Za-z]+)\b/.exec(normalized.slice(index + 1));
+        if (unitMatch) {
+          match = {
+            start,
+            close: index,
+            end: index + 1 + unitMatch[0].length,
+            unit: unitMatch[1]!,
+          };
+        }
+      }
+    }
+
+    if (!match) return { text: normalized, hasUnknownUnit: false };
+    const factor = normalizeUnitLiteral(1, match.unit);
+    if (factor === null) return { text: normalized, hasUnknownUnit: true };
+    normalized = `${normalized.slice(0, match.start)}${normalized.slice(match.start, match.close + 1)} * ${formatNumber(factor)}${normalized.slice(match.end)}`;
+  }
+}
+
+/**
  * Recover a document-unit literal from the expression string. Parses the first
  * numeric magnitude present and converts by its trailing unit when present.
  * Returns null when no numeric literal is present.
@@ -161,9 +200,12 @@ export function translateOnshapeExpression(
     return { valueText: text, translated: true };
   }
 
-  // Normalize every `<number> <unit>` literal to document units. Unknown units
-  // make the expression untranslatable.
-  let unitFailure = false;
+  // Normalize postfix units on parenthesized expressions and every `<number>
+  // <unit>` literal to document units. Unknown units make the expression
+  // untranslatable.
+  const groupedUnits = normalizeGroupedPostfixUnits(text);
+  text = groupedUnits.text;
+  let unitFailure = groupedUnits.hasUnknownUnit;
   text = text.replace(UNIT_LITERAL, (match, magnitudeText: string, unit: string) => {
     const normalized = normalizeUnitLiteral(Number.parseFloat(magnitudeText), unit);
     if (normalized === null) {

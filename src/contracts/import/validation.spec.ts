@@ -194,7 +194,11 @@ test("src/contracts/import/validation.spec.ts", async () => {
           {
             kind: "regionOf" as const,
             actionIndex: profileActionIndex,
-            selector: { kind: "interiorPoint" as const, point: [0.5, 0.5] as const },
+            selector: {
+              kind: "interiorPoint" as const,
+              point: [0.5, 0.5] as const,
+              expectedBoundaryIdentity: "import-region-boundary/v1:source-stablehash" as const,
+            },
           },
         ],
         startExtent: { kind: "profilePlane" as const },
@@ -269,6 +273,23 @@ test("src/contracts/import/validation.spec.ts", async () => {
     deferredRegionResult.success,
     "Prepared action validation should accept blessed deferred region references to earlier sketch commits.",
   ).toBeTruthy();
+
+  const malformedBoundaryIdentity = structuredClone(extrudeRequest(0)) as unknown as {
+    definition: { parameters: { profiles: Array<{ selector: { expectedBoundaryIdentity: string } }> } };
+  };
+  malformedBoundaryIdentity.definition.parameters.profiles[0]!.selector.expectedBoundaryIdentity =
+    "face_not-an-import-boundary";
+  expect(
+    validateImportPreparedActions({
+      commitSketches: [sketchRequest()],
+      createFeatures: [malformedBoundaryIdentity as never],
+      orderedActions: [
+        { kind: "commitSketch", index: 0 },
+        { kind: "createFeature", index: 0 },
+      ],
+    }).success,
+    "Prepared action validation should reject a non-import boundary identity.",
+  ).toBeFalsy();
 
   expect(
     validateImportPreparedActions({
@@ -686,6 +707,62 @@ test("validates deferred revolve boolean scope and advanced construction partici
   expect(result.success, JSON.stringify(result.issues)).toBe(true);
 });
 
+
+test("validates bodyOf only at advanced body participants", () => {
+  const producer = {
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Producer",
+    definition: {
+      kind: "plane" as const,
+      featureTypeVersion: "feature-type/plane/v1alpha1" as const,
+      parameters: {
+        mode: "explicitFrame" as const,
+        frame: {
+          origin: [0, 0, 0] as const,
+          xAxis: [1, 0, 0] as const,
+          yAxis: [0, 1, 0] as const,
+          normal: [0, 0, 1] as const,
+          linearUnit: "documentLength" as const,
+          handedness: "rightHanded" as const,
+        },
+      },
+    },
+  };
+  const split = (role: "targetBody" | "toolBody" | "plane") => ({
+    contractVersion: "modeling-contract/v1alpha1" as const,
+    documentId: "doc_workspace",
+    baseRevisionId: "rev_1",
+    featureLabel: "Split",
+    definition: {
+      kind: "split" as const,
+      featureTypeVersion: "advanced-solid-feature/v0" as const,
+      parameters: {
+        participants: [{ role, targets: [{ kind: "bodyOf" as const, actionIndex: 0 }] }],
+      },
+    },
+  });
+  const orderedActions = [
+    { kind: "createFeature" as const, index: 0 },
+    { kind: "createFeature" as const, index: 1 },
+  ];
+
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [producer, split("targetBody")],
+      orderedActions,
+    }).success,
+    "A bodyOf reference at a targetBody participant should be a valid deferred body reference.",
+  ).toBe(true);
+  expect(
+    validateImportPreparedActions({
+      createFeatures: [producer, split("plane")],
+      orderedActions,
+    }).success,
+    "A bodyOf reference must not be allowed at a non-body advanced participant.",
+  ).toBe(false);
+});
 
 test("validates deferred advanced sketch-point participant sketch producers", () => {
   const sketchRequest = {

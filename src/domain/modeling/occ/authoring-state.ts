@@ -40,6 +40,7 @@ import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   createFeatureTopologyStage,
+  createOccTopologyProvenanceIndex,
   getPreviousFeatureTopologyLineage,
   getPreviousFeatureTopologyStage,
   type OccFeatureTopologyLineageMap,
@@ -278,6 +279,15 @@ export function createOccAuthoringState(
     })),
   ];
   const cursor = input.cursor ?? createTailCursor(features, sketches);
+  const featureTopologyStages = new Map(input.featureTopologyStages ?? []);
+  const previousFeatureTopologyLineage = new Map(
+    input.previousFeatureTopologyLineage ?? [],
+  );
+  const topologyProvenanceIndex = createOccTopologyProvenanceIndex({
+    stages: featureTopologyStages,
+    previousLineage: previousFeatureTopologyLineage,
+    historyOrder,
+  });
   const referenceState = createOccReferenceState({
     documentId,
     revisionId,
@@ -311,6 +321,7 @@ export function createOccAuthoringState(
     resolvedGeometryAssets,
     bakedShapeCache,
     previousTopologyStage: null,
+    topologyProvenanceIndex,
     authoredFeatures: features,
     embeddedBinaryAssets,
     historyOrder,
@@ -319,13 +330,11 @@ export function createOccAuthoringState(
     entities: [],
     renderRecords: [],
     referenceState,
-    featureTopologyStages: new Map(input.featureTopologyStages ?? []),
+    featureTopologyStages,
     previousFeatureTopologyStages: new Map(
       input.previousFeatureTopologyStages ?? [],
     ),
-    previousFeatureTopologyLineage: new Map(
-      input.previousFeatureTopologyLineage ?? [],
-    ),
+    previousFeatureTopologyLineage,
   };
 }
 
@@ -488,6 +497,16 @@ function applyFeatureResult(
   });
   const featureTopologyStages = new Map(state.featureTopologyStages);
   featureTopologyStages.set(feature.featureId, reconciled.topologyStage);
+  const historyOrder = state.historyOrder.some(
+    (entry) => entry.kind === "feature" && entry.featureId === feature.featureId,
+  )
+    ? state.historyOrder
+    : [...state.historyOrder, { kind: "feature" as const, featureId: feature.featureId }];
+  const topologyProvenanceIndex = createOccTopologyProvenanceIndex({
+    stages: featureTopologyStages,
+    previousLineage: state.previousFeatureTopologyLineage,
+    historyOrder,
+  });
 
   return {
     ...state,
@@ -503,6 +522,8 @@ function applyFeatureResult(
     renderRecords: [...state.renderRecords, ...result.renderRecords],
     referenceState,
     previousTopologyStage: null,
+    topologyProvenanceIndex,
+    historyOrder,
     featureTopologyStages,
   };
 }
@@ -528,12 +549,23 @@ export function applyOccFeatureToAuthoringState(
     state.previousFeatureTopologyStages,
     feature.featureId,
   );
+  const historyOrder = state.historyOrder.some(
+    (entry) => entry.kind === "feature" && entry.featureId === feature.featureId,
+  )
+    ? state.historyOrder
+    : [...state.historyOrder, { kind: "feature" as const, featureId: feature.featureId }];
+  const topologyProvenanceIndex = createOccTopologyProvenanceIndex({
+    stages: state.featureTopologyStages,
+    previousLineage: state.previousFeatureTopologyLineage,
+    historyOrder,
+    beforeFeatureId: feature.featureId,
+  });
 
   return applyFeatureResult(
     state,
     feature,
     executeOccFeature(
-      { ...state, previousTopologyStage },
+      { ...state, previousTopologyStage, topologyProvenanceIndex },
       feature.featureId,
       resolvedDefinition.definition,
     ),
@@ -562,6 +594,7 @@ export function rebuildOccAuthoringState(
     previousReferenceState: state.referenceState,
     previousFeatureTopologyStages: state.featureTopologyStages,
     previousFeatureTopologyLineage: state.previousFeatureTopologyLineage,
+    historyOrder: state.historyOrder,
     resolvedGeometryAssets: state.resolvedGeometryAssets,
     bakedShapeCache: state.bakedShapeCache,
   });

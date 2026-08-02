@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
+import * as math from "mathjs";
 import { expect, test } from "vitest";
 
 import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
@@ -471,6 +472,31 @@ test("halves the authored depth of a symmetric extrude", () => {
     mode: "symmetric",
     end: { distance: { source: "expression", valueText: "((walls) / 2)" } },
   });
+});
+
+test("plans a grouped blind depth without an unresolved unit symbol", () => {
+  const input = surfaceInput("wave-x-9841");
+  parameter(input.feature, "depth")!.expression = "(25/2) mm";
+
+  const result = planExtrudeFeature(input);
+  expect(result.tier).toBe("parametric");
+  if (result.tier !== "parametric") return;
+  expect(result.plannedExtrude.extent).toMatchObject({
+    mode: "oneSide",
+    end: {
+      kind: "blind",
+      distance: { source: "expression", valueText: "(25/2) * 1" },
+    },
+  });
+
+  const extent = result.plannedExtrude.extent;
+  if (
+    extent.mode !== "oneSide" ||
+    extent.end.kind !== "blind" ||
+    extent.end.distance.source !== "expression"
+  ) return;
+  expect(extent.end.distance.valueText).not.toMatch(/\bmm\b/);
+  expect(math.evaluate(extent.end.distance.valueText)).toBe(12.5);
 });
 
 test("keeps an UP_TO_SURFACE surface extrude on the topology-slot path", () => {

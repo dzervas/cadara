@@ -458,3 +458,88 @@ test("scopes a coincident captured face only through unambiguous sibling-face ow
   expect(undiscriminated.liveBodyId).toBeNull();
   expect(undiscriminated.signatures).toHaveLength(4);
 });
+
+test("resolves a coincident face only with exact captured-owner proof and carries that body scope", () => {
+  const rollback = createRollbackTopologyTimeline({
+    featureIds: ["split", "consumer"],
+    snapshots: [{
+      featureId: "split",
+      tessellationTolerance: 0.0001,
+      tessellatedFaces: {
+        bodies: [{
+          id: "captured-piece",
+          faces: [
+            {
+              id: "captured-target",
+              facets: [{ vertices: [
+                { x: 0, y: 0, z: 0 },
+                { x: 0.01, y: 0, z: 0 },
+                { x: 0, y: 0.01, z: 0 },
+              ] }],
+            },
+            {
+              id: "captured-sibling",
+              facets: [{ vertices: [
+                { x: 0.02, y: 0, z: 0 },
+                { x: 0.03, y: 0, z: 0 },
+                { x: 0.02, y: 0.01, z: 0 },
+              ] }],
+            },
+          ],
+        }],
+      },
+    }],
+  });
+  const face = (faceId: string, bodyId: string, lowX: number, highX: number): HistoryProbeTopologySignature => ({
+    entityClass: "face",
+    geometryType: "unknown",
+    boundingBox: { low: [lowX, 0, 0], high: [highX, 10, 0] },
+    reference: { kind: "face", bodyId: bodyId as never, faceId: faceId as never },
+  });
+  const targetOnA = face("target-a", "live-a", 0, 10);
+  const targetOnB = face("target-b", "live-b", 0, 10);
+  const siblingOnA = face("sibling-a", "live-a", 20, 30);
+  const faceQuery: OnshapeTopologyQueryRef = {
+    ...edgeQuery("captured-target"),
+    slotKey: "startEntity",
+    parameterId: "startOffsetEntity",
+    expectedKinds: ["face"],
+  };
+  const capturedTarget: OnshapeResolvedReference = {
+    deterministicId: "captured-target",
+    evaluatedAt: "historyPoint",
+    consumingFeatureId: "consumer",
+    signature: {
+      entityClass: "face",
+      geometryType: "unknown",
+      boundingBox: { low: [0, 0, 0], high: [0.01, 0.01, 0] },
+    },
+  };
+  const resolve = (cadaraSignatures: readonly HistoryProbeTopologySignature[]) =>
+    resolveTopologyReferences(input({
+      queries: [faceQuery],
+      capturedReferences: [capturedTarget],
+      rollback,
+      cadaraSignatures,
+    }));
+
+  expect(resolve([targetOnA, targetOnB, siblingOnA])).toMatchObject({
+    kind: "resolved",
+    bindings: [{
+      reviewReference: targetOnA.reference,
+      deferred: { expectedKind: "face", bodyScope: "live-a" },
+    }],
+  });
+
+  // No sibling vote and conflicting sibling votes both leave the coincident
+  // target ambiguous rather than selecting a body speculatively.
+  for (const liveSignatures of [
+    [targetOnA, targetOnB],
+    [targetOnA, targetOnB, siblingOnA, face("sibling-b", "live-b", 20, 30)],
+  ]) {
+    expect(resolve(liveSignatures)).toMatchObject({
+      kind: "degraded",
+      reason: "topology-reference-ambiguous",
+    });
+  }
+});

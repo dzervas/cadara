@@ -9,7 +9,9 @@ import {
   createOccNativeExactBrepPayloadFromShimPayload,
   createOccNativeReferenceInvalidationsFromHistoryPayload,
   createOccNativeTopologyPayloadFromShimPayloads,
+  parseNativeBooleanOperandHistoryJson,
   parseNativeFeatureTransactionHistoryJson,
+  parseNativeSheetSplitToolHistoryJson,
   parseNativeShimPayloadJson,
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
@@ -32,6 +34,12 @@ type NativeDisposableForTest = { delete?: () => void };
 
 type NativeOpenCascadeForTest = OpenCascadeNativeTopologyKernelHost & {
   BRepPrimAPI_MakeBox_2: new (
+    dx: number,
+    dy: number,
+    dz: number,
+  ) => NativeBoxBuilderForTest;
+  BRepPrimAPI_MakeBox_3: new (
+    origin: NativeDisposableForTest,
     dx: number,
     dy: number,
     dz: number,
@@ -69,6 +77,11 @@ type NativeOpenCascadeForTest = OpenCascadeNativeTopologyKernelHost & {
     SetTranslation_1(vector: NativeDisposableForTest): void;
   };
   gp_Vec_4: new (
+    x: number,
+    y: number,
+    z: number,
+  ) => NativeDisposableForTest;
+  gp_Pnt_3: new (
     x: number,
     y: number,
     z: number,
@@ -141,6 +154,205 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     }
 
     expect(rejected, message).toBeTruthy();
+  }
+
+  function testNativeBooleanOperandHistoryRejectsMalformedIncidence() {
+    const payload = {
+      schemaVersion: "occ-native-boolean-operand-history-payload/v1alpha1",
+      source: "occt7-shim",
+      status: "available",
+      operation: "join",
+      bodyId: "body_boolean_history",
+      previousTopologyToken: "t0001",
+      topologyToken: "t0002",
+      finalFaces: [
+        {
+          nativeFaceId: "face_final",
+          leftSourceFaceNativeIds: ["face_left"],
+          rightSourceFaceNativeIds: ["face_right"],
+        },
+      ],
+      diagnostics: [],
+    };
+    expect(
+      parseNativeBooleanOperandHistoryJson(JSON.stringify(payload)).finalFaces[0]
+        ?.nativeFaceId,
+      "A complete Boolean operand incidence payload should parse.",
+    ).toBe("face_final");
+    for (const invalid of [
+      { ...payload, finalFaces: [...payload.finalFaces, payload.finalFaces[0]] },
+      {
+        ...payload,
+        finalFaces: [
+          { ...payload.finalFaces[0], leftSourceFaceNativeIds: ["face_left", "face_left"] },
+        ],
+      },
+      { ...payload, status: "unsupported", finalFaces: payload.finalFaces },
+      { ...payload, status: "available", finalFaces: [] },
+      { ...payload, operation: "unsupported-operation" },
+    ]) {
+      expect(
+        () => parseNativeBooleanOperandHistoryJson(JSON.stringify(invalid)),
+        "Malformed or unsupported Boolean operand incidence must fail closed.",
+      ).toThrow();
+    }
+  }
+
+  function testNativeSheetSplitToolHistoryRejectsMalformedMembership() {
+    const payload = {
+      schemaVersion: "occ-native-sheet-split-tool-history-payload/v1alpha1",
+      source: "occt7-shim",
+      status: "available",
+      targetBodyId: "body_sheet_target",
+      toolBodyId: "body_sheet_tool",
+      previousTopologyToken: "t0001",
+      topologyToken: "t0002",
+      outputs: [
+        {
+          outputSlotKey: "sheet-slot-a",
+          sourceTargetFaceNativeIds: ["face_target_a"],
+          finalFaceNativeIds: ["face_final_a"],
+        },
+      ],
+      toolFaceRelations: [
+        {
+          sourceToolFace: {
+            bodyId: "body_sheet_tool",
+            nativeFaceId: "face_tool_a",
+          },
+          cardinality: "one",
+          finalFaces: [
+            {
+              nativeFaceId: "face_final_a",
+              outputSlotKeys: ["sheet-slot-a"],
+            },
+          ],
+        },
+      ],
+      diagnostics: [],
+    };
+
+    expect(
+      parseNativeSheetSplitToolHistoryJson(JSON.stringify(payload)).outputs[0]
+        ?.outputSlotKey,
+      "A complete exact output-slot payload should parse.",
+    ).toBe("sheet-slot-a");
+
+    const sharedInterfacePayload = {
+      ...payload,
+      outputs: [
+        {
+          ...payload.outputs[0],
+          outputSlotKey: "sheet-slot-a",
+          finalFaceNativeIds: ["face_final_shared"],
+        },
+        {
+          ...payload.outputs[0],
+          outputSlotKey: "sheet-slot-b",
+          sourceTargetFaceNativeIds: ["face_target_b"],
+          finalFaceNativeIds: ["face_final_shared"],
+        },
+      ],
+      toolFaceRelations: [
+        {
+          ...payload.toolFaceRelations[0],
+          finalFaces: [
+            {
+              nativeFaceId: "face_final_shared",
+              outputSlotKeys: ["sheet-slot-a", "sheet-slot-b"],
+            },
+          ],
+        },
+      ],
+    };
+    expect(
+      parseNativeSheetSplitToolHistoryJson(JSON.stringify(sharedInterfacePayload))
+        .toolFaceRelations[0]?.finalFaces[0]?.outputSlotKeys,
+      "A shared physical interface face should retain every exact output membership.",
+    ).toEqual(["sheet-slot-a", "sheet-slot-b"]);
+
+    const invalidPayloads = [
+      {
+        ...payload,
+        outputs: [
+          ...payload.outputs,
+          {
+            ...payload.outputs[0],
+            outputSlotKey: "sheet-slot-b",
+          },
+        ],
+      },
+      {
+        ...payload,
+        toolFaceRelations: [
+          {
+            ...payload.toolFaceRelations[0],
+            sourceToolFace: {
+              ...payload.toolFaceRelations[0]!.sourceToolFace,
+              bodyId: "body_wrong_tool",
+            },
+          },
+        ],
+      },
+      {
+        ...payload,
+        toolFaceRelations: [
+          {
+            ...payload.toolFaceRelations[0],
+            cardinality: "many",
+          },
+        ],
+      },
+      {
+        ...payload,
+        toolFaceRelations: [
+          {
+            ...payload.toolFaceRelations[0],
+            finalFaces: [
+              {
+                nativeFaceId: "face_final_a",
+                outputSlotKeys: ["sheet-slot-a", "sheet-slot-b"],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...sharedInterfacePayload,
+        toolFaceRelations: [
+          {
+            ...sharedInterfacePayload.toolFaceRelations[0]!,
+            finalFaces: [
+              {
+                nativeFaceId: "face_final_shared",
+                outputSlotKeys: ["sheet-slot-a"],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        ...sharedInterfacePayload,
+        toolFaceRelations: [
+          {
+            ...sharedInterfacePayload.toolFaceRelations[0]!,
+            finalFaces: [
+              {
+                nativeFaceId: "face_final_shared",
+                outputSlotKeys: ["sheet-slot-a", "sheet-slot-b", "sheet-slot-c"],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    for (const invalid of invalidPayloads) {
+      expect(
+        () => parseNativeSheetSplitToolHistoryJson(JSON.stringify(invalid)),
+        "Malformed sheet-split tool history must fail closed instead of widening an output association.",
+      ).toThrow();
+    }
   }
 
   function testNativeShimPayloadRejectsMalformedPrimitiveInvariants() {
@@ -945,6 +1157,64 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     rightBuilder.delete?.();
   }
 
+  async function testNativeBooleanOperandHistoryForPartiallyOverlappingBoxesWhenAvailable() {
+    const oc = await loadNativeOpenCascadeForTest();
+    const leftBuilder = new oc.BRepPrimAPI_MakeBox_2(2, 2, 2);
+    const rightOrigin = new oc.gp_Pnt_3(1, 1, 0);
+    const rightBuilder = new oc.BRepPrimAPI_MakeBox_3(rightOrigin, 2, 2, 2);
+    const result =
+      oc.CadaraExecuteNativeFeatureTransaction
+        .BuildBooleanCommittedShapeTransactionWithHistory?.(
+          leftBuilder.Shape(),
+          rightBuilder.Shape(),
+          "join",
+          "body_native_boolean_operand_probe",
+          "t0001",
+          "t0002",
+          0.1,
+          0.5,
+        );
+    if (!result || typeof result.BooleanOperandHistoryJson !== "function") {
+      rightOrigin.delete?.();
+      leftBuilder.delete?.();
+      rightBuilder.delete?.();
+      throw new Error(
+        "Rebuilt native Boolean transaction must expose BooleanOperandHistoryJson().",
+      );
+    }
+    try {
+      const payloadJson = result.BooleanOperandHistoryJson();
+      expect(
+        payloadJson.trim().length,
+        "Rebuilt Boolean operand history ABI must emit a payload.",
+      ).toBeGreaterThan(0);
+      const payload = parseNativeBooleanOperandHistoryJson(payloadJson);
+      expect(
+        payload.status,
+        "Overlapping-box Boolean operand incidence must be available after the rebuilt face filter.",
+      ).toBe("available");
+      expect(
+        payload.finalFaces.length,
+        "Available Boolean operand incidence must contain final-face records.",
+      ).toBeGreaterThan(0);
+      expect(
+        payload.finalFaces.every(
+          (finalFace) =>
+            new Set(finalFace.leftSourceFaceNativeIds).size ===
+              finalFace.leftSourceFaceNativeIds.length &&
+            new Set(finalFace.rightSourceFaceNativeIds).size ===
+              finalFace.rightSourceFaceNativeIds.length,
+        ),
+        "Native Boolean operand incidence must contain unique exact source ids per side.",
+      ).toBe(true);
+    } finally {
+      result.delete();
+      rightOrigin.delete?.();
+      leftBuilder.delete?.();
+      rightBuilder.delete?.();
+    }
+  }
+
   async function testNativeMeshPayloadPreservesFaceOrientation() {
     const oc = await loadNativeOpenCascadeForTest();
     const boxBuilder = new oc.BRepPrimAPI_MakeBox_2(1, 2, 3);
@@ -1003,6 +1273,8 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     boxBuilder.delete?.();
   }
 
+  testNativeSheetSplitToolHistoryRejectsMalformedMembership();
+  testNativeBooleanOperandHistoryRejectsMalformedIncidence();
   testNativeShimPayloadRejectsMalformedPrimitiveInvariants();
   await testNativeShimReturnsFlatTopologyAndMeshPayloads();
   await testNativeShimReturnsStructuredDiagnosticsForInvalidCommittedShapes();
@@ -1012,6 +1284,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
   await testNativeFeatureTransactionPreparesCommittedShapePayload();
   await testNativeBooleanTransactionBuildsCommittedPayload();
   await testNativeBooleanTransactionReturnsCommittedShapeResult();
+  await testNativeBooleanOperandHistoryForPartiallyOverlappingBoxesWhenAvailable();
   await testNativeMeshPayloadPreservesFaceOrientation();
 });
 
