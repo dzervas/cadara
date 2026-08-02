@@ -1667,7 +1667,115 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
   await testProjectedBoundaryInvalidationReportsStructuredCode();
   await testUnauthoredProjectedBoundaryInvalidatesEvenWithProjectionData();
   await testApproximationProvenanceIsExplicit();
+  async function testMultiPieceSourceCurveKeysEachSplitSegmentDistinctly() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createSketchPlane();
+    const sketchId = "sketch_multi_piece_band" as SketchId;
+    const sqrt3 = Math.sqrt(3);
+    const center = pointId("band_center");
+    const topLeft = pointId("band_top_left");
+    const topRight = pointId("band_top_right");
+    const bottomLeft = pointId("band_bottom_left");
+    const bottomRight = pointId("band_bottom_right");
+    const circle = entityId("band_circle");
+    const chordTop = entityId("band_chord_top");
+    const chordBottom = entityId("band_chord_bottom");
+    const definition = createSketchDefinition(sketchId, [
+      { id: center, position: [0, 0] },
+      { id: topLeft, position: [-sqrt3, 1] },
+      { id: topRight, position: [sqrt3, 1] },
+      { id: bottomLeft, position: [-sqrt3, -1] },
+      { id: bottomRight, position: [sqrt3, -1] },
+    ], [{
+      kind: "circle", entityId: circle, label: "band circle",
+      target: { kind: "sketchEntity", sketchId, entityId: circle }, isConstruction: false,
+      centerPointId: center, radius: 2,
+    }, {
+      kind: "lineSegment", entityId: chordTop, label: "band chord top",
+      target: { kind: "sketchEntity", sketchId, entityId: chordTop }, isConstruction: false,
+      startPointId: topLeft, endPointId: topRight,
+    }, {
+      kind: "lineSegment", entityId: chordBottom, label: "band chord bottom",
+      target: { kind: "sketchEntity", sketchId, entityId: chordBottom }, isConstruction: false,
+      startPointId: bottomLeft, endPointId: bottomRight,
+    }]);
+    const sketch = createSketchRecord(sketchId, definition, [{
+      kind: "circle", entityId: circle, centerPosition: [0, 0], solvedRadius: 2,
+    }, {
+      kind: "lineSegment", entityId: chordTop, startPosition: [-sqrt3, 1], endPosition: [sqrt3, 1],
+    }, {
+      kind: "lineSegment", entityId: chordBottom, startPosition: [-sqrt3, -1], endPosition: [sqrt3, -1],
+    }]);
+    const arcSegment = (
+      startPosition: [number, number],
+      endPosition: [number, number],
+      sourceSegmentOrdinal?: number,
+    ): RegionBoundarySegmentRecord => ({
+      source: { kind: "entity", entityId: circle }, startPointId: null, endPointId: null,
+      startPosition, endPosition,
+      ...(sourceSegmentOrdinal === undefined ? {} : { sourceSegmentOrdinal }),
+    });
+    const chordSegment = (
+      entity: SketchEntityId,
+      startPointId: SketchPointId,
+      endPointId: SketchPointId,
+    ): RegionBoundarySegmentRecord => ({
+      source: { kind: "entity", entityId: entity }, startPointId, endPointId,
+    });
+    const bandLoops = (withOrdinals: boolean): RegionRecord["loops"] => [{
+      loopId: loopId("band"), role: "outer", orientation: "counterClockwise",
+      segments: [
+        arcSegment([sqrt3, -1], [sqrt3, 1], withOrdinals ? 0 : undefined),
+        chordSegment(chordTop, topRight, topLeft),
+        arcSegment([-sqrt3, 1], [-sqrt3, -1], withOrdinals ? 1 : undefined),
+        chordSegment(chordBottom, bottomLeft, bottomRight),
+      ],
+      boundaryPointIds: [topLeft, topRight, bottomLeft, bottomRight],
+      isClosed: true,
+    }];
+
+    const band = createRegion(sketchId, "band", bandLoops(true));
+    const profile = buildRegionProfileFace(oc, { plane, sketch }, band);
+    assertClose(
+      await faceArea(profile.face),
+      (4 * Math.PI) / 3 + 2 * sqrt3,
+      1e-5,
+      "The band between two chords must build from both split pieces of one circle.",
+    );
+    expect(
+      [...profile.provenance.edges.keys()].sort(),
+      "Each split piece of the circle must carry its own ordinal-keyed provenance edge.",
+    ).toEqual([chordBottom, chordTop, `${circle}#0`, `${circle}#1`].sort());
+    expect(
+      profile.provenance.unsupportedSources,
+      "Ordinal-keyed split pieces are exact, never unsupported.",
+    ).toEqual([]);
+
+    const bandWithoutOrdinals = createRegion(
+      sketchId,
+      "band_no_ordinals",
+      bandLoops(false),
+    );
+    const degraded = buildRegionProfileFace(
+      oc,
+      { plane, sketch },
+      bandWithoutOrdinals,
+    );
+    expect(
+      [...degraded.provenance.edges.keys()].sort(),
+      "A multi-piece source without ordinals must not claim any of its edges.",
+    ).toEqual([chordBottom, chordTop].sort());
+    expect(
+      degraded.provenance.unsupportedSources,
+      "Each unnameable split piece fails closed as an unsupported source.",
+    ).toEqual([
+      { sourceKey: circle, reason: "ambiguous-split-segment" },
+      { sourceKey: circle, reason: "ambiguous-split-segment" },
+    ]);
+  }
+
   await testSplitCircleChordCellsBuildAsBoundedArcs();
+  await testMultiPieceSourceCurveKeysEachSplitSegmentDistinctly();
   await testRejectsMultipleOuterLoops();
   await testMixedTrimmedAndAuthoredLoopSharesCornerVertices();
 

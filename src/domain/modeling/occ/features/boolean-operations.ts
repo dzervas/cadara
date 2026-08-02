@@ -777,16 +777,10 @@ function collectNativeHistoryResolution(input: {
   }
 
   const previousClaims = new Map<string, OccNativeSuccessorClaim[]>();
-  const successorClaims = new Map<string, OccNativeSuccessorClaim[]>();
   for (const claim of claims) {
     const previousKey = getOccDurableRefKey(claim.previous);
-    const successorKey = getOccDurableRefKey(claim.successor);
     previousClaims.set(previousKey, [
       ...(previousClaims.get(previousKey) ?? []),
-      claim,
-    ]);
-    successorClaims.set(successorKey, [
-      ...(successorClaims.get(successorKey) ?? []),
       claim,
     ]);
   }
@@ -796,9 +790,7 @@ function collectNativeHistoryResolution(input: {
     const successorKey = getOccDurableRefKey(claim.successor);
     const duplicatePrevious =
       (previousClaims.get(previousKey)?.length ?? 0) > 1;
-    const duplicateSuccessor =
-      (successorClaims.get(successorKey)?.length ?? 0) > 1;
-    if (duplicatePrevious || duplicateSuccessor) {
+    if (duplicatePrevious) {
       invalidations.set(previousKey, {
         target: claim.previous,
         reason: OCC_REFERENCE_INVALIDATION_REASONS.topologyAmbiguous,
@@ -807,6 +799,8 @@ function collectNativeHistoryResolution(input: {
       preservedTargetsBySuccessorKey.delete(successorKey);
       continue;
     }
+    // A Boolean can fuse exact prior entities into one exact result entity.
+    // Keep both source→target claims for the topology stage to compose.
 
     successorTargetsByPreviousKey.set(previousKey, claim.successor);
   }

@@ -76,43 +76,58 @@ function persistedOutput(
   };
 }
 
-test("exact successor stages leave zero and many target matches unsupported", () => {
-  const featureId = "feature_exact_successor_honesty" as FeatureId;
+test("exact successor stages publish fused source claims for provenance composition", () => {
+  const rootFirstFeatureId = "feature_exact_successor_root_first" as FeatureId;
+  const rootSecondFeatureId = "feature_exact_successor_root_second" as FeatureId;
+  const featureId = "feature_exact_successor_convergence" as FeatureId;
   const sourceBody = {
     bodyId,
     topologyToken: "t0001",
-    topology: {
-      faceIds: ["face_source_a", "face_source_b"],
-      edgeIds: [],
-      vertexIds: [],
-    },
+    topology: { faceIds: ["face_source_a", "face_source_b"], edgeIds: [], vertexIds: [] },
   } as unknown as OccTrackedBody;
   const outputBody = {
     bodyId,
     topologyToken: "t0002",
     topology: { faceIds: ["face_output"], edgeIds: [], vertexIds: [] },
   } as unknown as OccTrackedBody;
+  const sourceA = face("face_source_a");
+  const sourceB = face("face_source_b");
   const outputFace = face("face_output");
-  const many = createExactSuccessorTopologyStage({
+  const manyStage = createExactSuccessorTopologyStage({
     featureId,
     sourceBody,
     outputBody,
     successorsBySourceKey: new Map([
-      [getOccDurableRefKey(face("face_source_a")), outputFace],
-      [getOccDurableRefKey(face("face_source_b")), outputFace],
+      [getOccDurableRefKey(sourceA), outputFace],
+      [getOccDurableRefKey(sourceB), outputFace],
     ]),
   }).outputs.get(bodyId)!;
-  const zero = createExactSuccessorTopologyStage({
+  const zeroStage = createExactSuccessorTopologyStage({
     featureId,
     sourceBody,
     outputBody,
     successorsBySourceKey: new Map(),
   }).outputs.get(bodyId)!;
 
-  expect(many.sourceTargets.size).toBe(0);
-  expect(many.unsupportedSourceKeys.size).toBe(2);
-  expect(zero.sourceTargets.size).toBe(0);
-  expect(zero.unsupportedSourceKeys.size).toBe(2);
+  expect(manyStage.sourceTargets.size).toBe(2);
+  expect(manyStage.unsupportedSourceKeys).toEqual(new Set());
+  expect(zeroStage.sourceTargets.size).toBe(0);
+  expect(zeroStage.unsupportedSourceKeys.size).toBe(2);
+  expect(
+    createOccTopologyProvenanceIndex({
+      stages: new Map([
+        [rootFirstFeatureId, stage(rootFirstFeatureId, sourceA, "root:first")],
+        [rootSecondFeatureId, stage(rootSecondFeatureId, sourceB, "root:second")],
+        [featureId, { featureId, outputs: new Map([[bodyId, manyStage]]) }],
+      ]),
+      previousLineage: new Map(),
+      historyOrder: history(rootFirstFeatureId, rootSecondFeatureId, featureId),
+    }).resolveFace(outputFace),
+  ).toBe(
+    formatCompositeTopologyProvenanceId({
+      sourceCanonicalProvenanceIds: ["root:first", "root:second"],
+    }),
+  );
 });
 
 
@@ -140,7 +155,7 @@ test("topology provenance follows same-ID exact predecessors through decreasing 
   ).toBe(rootSourceKey);
 });
 
-test("supplemental Mirror operand claims never override target-side topology", () => {
+test("supplemental Mirror operand claims converge with target-side topology", () => {
   const featureId = "feature_mirror_operand_preservation" as FeatureId;
   const sourceBody = {
     bodyId,
@@ -168,9 +183,10 @@ test("supplemental Mirror operand claims never override target-side topology", (
     ]),
     supplementalProducerTargetsBySourceKey: new Map([[mirrorKey, output]]),
   }).outputs.get(bodyId)!;
-  expect(outputStage.sourceTargets.has(mirrorKey)).toBe(false);
-  expect(outputStage.unsupportedSourceKeys.has(mirrorKey)).toBe(true);
-  expect(outputStage.sourceTargets.size).toBe(1);
+
+  expect(outputStage.sourceTargets.has(mirrorKey)).toBe(true);
+  expect(outputStage.unsupportedSourceKeys.has(mirrorKey)).toBe(false);
+  expect(outputStage.sourceTargets.size).toBe(2);
 });
 
 test("Mirror operand provenance survives serialization and rejects remintable keys", () => {
