@@ -28,15 +28,20 @@ import {
   type OccReferenceInvalidationRecord,
 } from "@/domain/modeling/occ/topology";
 import {
-  SKETCH_SCHEMA_VERSION,
-  SOLVED_SKETCH_SCHEMA_VERSION,
-  type SketchRecord,
-} from "@/contracts/sketch/schema";
+  createOccFeatureTopologyLineageMap,
+  createOccTopologyProvenanceIndex,
+  serializeOccFeatureTopologyLineage,
+} from "@/domain/modeling/occ/topology-stage";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
   createStandardPlaneDefinition,
 } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  SKETCH_SCHEMA_VERSION,
+  SOLVED_SKETCH_SCHEMA_VERSION,
+  type SketchRecord,
+} from "@/contracts/sketch/schema";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,
@@ -59,8 +64,14 @@ function makeTrackedBox(
   oc: OpenCascadeInstance,
   bodyId: BodyId,
   ownerFeatureId: FeatureId,
+  dimensions: readonly [number, number, number] = [4, 4, 4],
 ) {
-  const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, [0, 0, 0]), 4, 4, 4);
+  const box = new oc.BRepPrimAPI_MakeBox_3(
+    toGpPnt(oc, [0, 0, 0]),
+    dimensions[0],
+    dimensions[1],
+    dimensions[2],
+  );
   box.Build(new oc.Message_ProgressRange_1());
   expect(box.IsDone(), `Expected ${bodyId} box to build.`).toBeTruthy();
 
@@ -221,7 +232,10 @@ test("executeTransformFeature uses native transaction history for replacement to
     "Native transform should preserve previous face ids with unique successors.",
   ).toBeTruthy();
   const output = result.topologyStage?.outputs.get(body.bodyId);
-  expect(output, "Native transform should publish a topology stage.").toBeTruthy();
+  expect(
+    output,
+    "Native transform should publish a topology stage.",
+  ).toBeTruthy();
   const sourceKeyPrefix = `exact-successor:feature_native_transform_history:${body.bodyId}:`;
   const expectedSourceCount =
     body.topology.faceIds.length +
@@ -249,7 +263,11 @@ test("executeTransformFeature uses native transaction history for replacement to
           getOccDurableRefKey({ kind: "edge", bodyId: body.bodyId, edgeId }),
         ),
         ...replacement!.topology.vertexIds.map((vertexId) =>
-          getOccDurableRefKey({ kind: "vertex", bodyId: body.bodyId, vertexId }),
+          getOccDurableRefKey({
+            kind: "vertex",
+            bodyId: body.bodyId,
+            vertexId,
+          }),
         ),
       ].includes(key),
     ),
@@ -289,7 +307,10 @@ test("executeTransformFeature fallback publishes honest unsupported topology sta
             {
               role: "transformReference",
               targets: [
-                { kind: "construction", constructionId: "construction_plane-xy" },
+                {
+                  kind: "construction",
+                  constructionId: "construction_plane-xy",
+                },
               ],
             },
           ],
@@ -527,7 +548,9 @@ test("executeShellFeature creates an inside closed hollow without changing the o
     replacement,
     "Closed hollow must replace exactly the scoped source body in place.",
   ).toBeTruthy();
-  expect(result.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+  expect(result.producedTargets).toEqual([
+    { kind: "body", bodyId: body.bodyId },
+  ]);
   expect(getShapeBounds(oc, replacement!.shape)).toEqual(sourceBounds);
   expect(
     replacement!.topology.faceIds.length,
@@ -585,8 +608,13 @@ test("executeShellFeature offsets all shell faces as an in-place body replacemen
     (candidate) => candidate.bodyId === body.bodyId,
   );
   expect(inward.bodies.length).toBe(1);
-  expect(inwardBody, "Offset-all shell should retain the source body id.").toBeTruthy();
-  expect(inward.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+  expect(
+    inwardBody,
+    "Offset-all shell should retain the source body id.",
+  ).toBeTruthy();
+  expect(inward.producedTargets).toEqual([
+    { kind: "body", bodyId: body.bodyId },
+  ]);
   // The offset builder answers `Modified` for every face of the source box, so
   // the stage carries one exact successor per source subtopology (6 faces,
   // 12 edges, 8 vertices) instead of leaving the whole body unclaimed.
@@ -671,10 +699,15 @@ test("executeMirrorFeature joins the exact PART+ADD source/target body and prese
         operationIntent: createLiteralAuthoredValue("add"),
         participants: [
           { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
-          { role: "targetBody", targets: [{ kind: "body", bodyId: body.bodyId }] },
+          {
+            role: "targetBody",
+            targets: [{ kind: "body", bodyId: body.bodyId }],
+          },
           {
             role: "plane",
-            targets: [{ kind: "construction", constructionId: "construction_plane-yz" }],
+            targets: [
+              { kind: "construction", constructionId: "construction_plane-yz" },
+            ],
           },
         ],
         options: { copy: true },
@@ -682,8 +715,12 @@ test("executeMirrorFeature joins the exact PART+ADD source/target body and prese
     } satisfies AdvancedSolidFeatureDefinition & { kind: "mirror" },
   );
 
-  expect(result.bodies.map((candidate) => candidate.bodyId)).toEqual([body.bodyId]);
-  expect(result.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+  expect(result.bodies.map((candidate) => candidate.bodyId)).toEqual([
+    body.bodyId,
+  ]);
+  expect(result.producedTargets).toEqual([
+    { kind: "body", bodyId: body.bodyId },
+  ]);
   expect(getShapeBounds(oc, result.bodies[0]!.shape)).toMatchObject({
     minX: -4,
     maxX: 4,
@@ -692,6 +729,240 @@ test("executeMirrorFeature joins the exact PART+ADD source/target body and prese
     minZ: 0,
     maxZ: 4,
   });
+});
+
+test("Mirror PART+ADD publishes only exact target-side topology lineage", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_mirror_add_lineage" as BodyId,
+    "feature_mirror_add_lineage_seed" as FeatureId,
+  );
+  const result = executeMirrorFeature(
+    createOccAuthoringState(oc, { bodies: [body] }),
+    "feature_mirror_add_lineage" as FeatureId,
+    {
+      kind: "mirror",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        operationIntent: createLiteralAuthoredValue("add"),
+        participants: [
+          { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+          {
+            role: "targetBody",
+            targets: [{ kind: "body", bodyId: body.bodyId }],
+          },
+          {
+            role: "plane",
+            targets: [
+              { kind: "construction", constructionId: "construction_plane-yz" },
+            ],
+          },
+        ],
+        options: { copy: true },
+      },
+    } satisfies AdvancedSolidFeatureDefinition & { kind: "mirror" },
+  );
+  const output = result.topologyStage?.outputs.get(body.bodyId);
+
+  expect(
+    output,
+    "Mirror ADD must publish the retained target body topology stage.",
+  ).toBeTruthy();
+  expect(
+    output!.sourceTargets.size,
+    "Mirror ADD must retain at least one exact target-side claim.",
+  ).toBeGreaterThan(0);
+  expect(
+    [...output!.sourceTargets].every(
+      ([sourceKey, targets]) =>
+        (sourceKey.startsWith(
+          `exact-successor:feature_mirror_add_lineage:${body.bodyId}:`,
+        ) ||
+          sourceKey.startsWith(
+            `generated-from:feature_mirror_add_lineage:${body.bodyId}:`,
+          )) &&
+        targets.length === 1 &&
+        targets[0]?.bodyId === body.bodyId,
+    ),
+    "Mirror ADD must never assign lineage to transformed/right-operand topology.",
+  ).toBe(true);
+});
+
+test("Mirror PART+ADD publishes transformed-operand provenance when the rebuilt Boolean ABI is available", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_mirror_operand_history" as BodyId,
+    "feature_mirror_operand_seed" as FeatureId,
+  );
+  const nativeHost = oc as unknown as OpenCascadeNativeTopologyKernelHost;
+  const nativeBuilder =
+    nativeHost.CadaraExecuteNativeFeatureTransaction
+      ?.BuildBooleanCommittedShapeTransactionWithHistory;
+  if (!nativeBuilder) return;
+  const probe = nativeBuilder(
+    body.shape,
+    body.shape,
+    "join",
+    body.bodyId,
+    body.topologyToken,
+    "t0002",
+    0.1,
+    0.5,
+  );
+  const hasOperandHistory = typeof probe.BooleanOperandHistoryJson === "function";
+  probe.delete();
+  if (!hasOperandHistory) return;
+
+  const mirrorFeatureId = "feature_mirror_operand_history" as FeatureId;
+  const context = createOccAuthoringState(oc, { bodies: [body] });
+  const seedFeatureId = "feature_mirror_operand_seed" as FeatureId;
+  const seedStage = {
+    featureId: seedFeatureId,
+    outputs: new Map([
+      [
+        body.bodyId,
+        {
+          outputSlot: body.bodyId,
+          body,
+          sourceTargets: new Map(
+            body.topology.faceIds.map((faceId) => [
+              `extrude:${seedFeatureId}:profile:${faceId}:side`,
+              [{ kind: "face" as const, bodyId: body.bodyId, faceId }],
+            ]),
+          ),
+          unsupportedSourceKeys: new Set<string>(),
+        },
+      ],
+    ]),
+  };
+  context.topologyProvenanceIndex = createOccTopologyProvenanceIndex({
+    stages: new Map([[seedFeatureId, seedStage]]),
+    previousLineage: createOccFeatureTopologyLineageMap([]),
+    historyOrder: [
+      { kind: "feature", featureId: seedFeatureId },
+      { kind: "feature", featureId: mirrorFeatureId },
+    ],
+    beforeFeatureId: mirrorFeatureId,
+  });
+  const result = executeMirrorFeature(context, mirrorFeatureId, {
+    kind: "mirror",
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      operationIntent: createLiteralAuthoredValue("add"),
+      participants: [
+        { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+        { role: "targetBody", targets: [{ kind: "body", bodyId: body.bodyId }] },
+        {
+          role: "plane",
+          targets: [{ kind: "construction", constructionId: "construction_plane-yz" }],
+        },
+      ],
+      options: { copy: true },
+    },
+  } satisfies AdvancedSolidFeatureDefinition & { kind: "mirror" });
+  const output = result.topologyStage?.outputs.get(body.bodyId);
+  const operandClaims = [...(output?.sourceTargets ?? new Map())].filter(([key]) =>
+    key.startsWith(`mirror-operand:${mirrorFeatureId}:${body.bodyId}:`),
+  );
+  expect(
+    operandClaims.length,
+    "Rebuilt Boolean operand incidence should preserve at least one exact transformed Mirror face.",
+  ).toBeGreaterThan(0);
+  expect(
+    operandClaims.every(([, targets]) => targets.length === 1),
+    "Mirror operand provenance must remain reverse-unique and body-scoped.",
+  ).toBe(true);
+});
+
+test("Mirror PART+ADD serializes target lineage and rebuilds exact target claims after a width edit", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const featureId = "feature_mirror_add_width_rebuild" as FeatureId;
+  const bodyId = "body_mirror_add_width_rebuild" as BodyId;
+  const definition = {
+    kind: "mirror",
+    featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      operationIntent: createLiteralAuthoredValue("add"),
+      participants: [
+        { role: "body", targets: [{ kind: "body", bodyId }] },
+        { role: "targetBody", targets: [{ kind: "body", bodyId }] },
+        {
+          role: "plane",
+          targets: [
+            { kind: "construction", constructionId: "construction_plane-yz" },
+          ],
+        },
+      ],
+      options: { copy: true },
+    },
+  } satisfies AdvancedSolidFeatureDefinition & { kind: "mirror" };
+  const firstSource = makeTrackedBox(
+    oc,
+    bodyId,
+    "feature_mirror_add_width_seed" as FeatureId,
+    [4, 4, 4],
+  );
+  const first = executeMirrorFeature(
+    createOccAuthoringState(oc, { bodies: [firstSource] }),
+    featureId,
+    definition,
+  );
+  const firstOutput = first.topologyStage?.outputs.get(bodyId);
+  expect(
+    firstOutput,
+    "Mirror ADD must produce a serializable target stage.",
+  ).toBeTruthy();
+  if (!firstOutput || !first.topologyStage) {
+    throw new Error("Expected Mirror ADD topology stage.");
+  }
+  const [claimedSourceKey, claimedTargets] = [...firstOutput.sourceTargets][0]!;
+  const persisted = serializeOccFeatureTopologyLineage(
+    new Map([[featureId, first.topologyStage!]]),
+    new Map(),
+    new Set([featureId]),
+  );
+  const restored = createOccFeatureTopologyLineageMap(persisted).get(featureId);
+
+  expect(restored?.outputs[0]?.sourceTargets).toContainEqual({
+    sourceKey: claimedSourceKey,
+    targets: claimedTargets,
+  });
+
+  const rebuiltSource = makeTrackedBox(
+    oc,
+    bodyId,
+    "feature_mirror_add_width_seed" as FeatureId,
+    [6, 4, 4],
+  );
+  const rebuilt = executeMirrorFeature(
+    createOccAuthoringState(oc, { bodies: [rebuiltSource] }),
+    featureId,
+    definition,
+  );
+  const rebuiltOutput = rebuilt.topologyStage?.outputs.get(bodyId);
+  expect(
+    rebuiltOutput,
+    "Mirror ADD must produce a rebuilt target stage.",
+  ).toBeTruthy();
+  if (!rebuiltOutput) {
+    throw new Error("Expected rebuilt Mirror ADD topology stage.");
+  }
+
+  expect(rebuiltSource.topology.faceIds).not.toEqual(
+    firstSource.topology.faceIds,
+  );
+  expect(
+    rebuiltOutput.sourceTargets.size,
+    "A width rebuild must retain non-empty exact target-side Mirror lineage.",
+  ).toBeGreaterThan(0);
+  expect(
+    [...rebuiltOutput.sourceTargets.values()].every(
+      (targets) => targets.length === 1 && targets[0]?.bodyId === bodyId,
+    ),
+    "Rebuilt Mirror ADD claims must remain body-scoped and one-to-one.",
+  ).toBe(true);
 });
 
 test("executeMirrorFeature uses native transform transaction for copied topology", async () => {

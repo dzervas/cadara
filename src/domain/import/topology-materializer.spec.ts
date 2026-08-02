@@ -4,7 +4,9 @@ import type {
   ImportCreateFeatureRequest,
   ImportDeferredTopologyRef,
 } from "@/contracts/import/actions";
+import { deriveImportRegionBoundaryIdentity } from "@/contracts/import/region-boundary-identity";
 import type { BodyId, RevisionId, SketchId } from "@/contracts/shared/ids";
+import type { RegionRecord } from "@/contracts/sketch/schema";
 import { ImportDeferredMaterializer } from "@/domain/import/orchestrator";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
 import {
@@ -12,6 +14,27 @@ import {
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
 import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
+
+function region(regionId: string, entityId = "boundary"): RegionRecord {
+  return {
+    regionId: regionId as RegionRecord["regionId"],
+    isClosed: true,
+    loops: [{
+      loopId: `loop_${regionId}` as RegionRecord["loops"][number]["loopId"],
+      role: "outer",
+      orientation: "counterClockwise",
+      isClosed: true,
+      boundaryPointIds: [],
+      segments: [{
+        source: { kind: "entity", entityId },
+        sourceSegmentOrdinal: 0,
+        traversalDirection: "forward",
+        startPointId: null,
+        endPointId: null,
+      }],
+    }],
+  } as RegionRecord;
+}
 
 function payload(bodyId: BodyId) {
   return createOccNativeExactBrepPayloadFromShimPayload({
@@ -436,6 +459,84 @@ test("apply ambiguity swaps in the pre-registered baked fallback", async () => {
 });
 
 
+test("regionOf rematches importer boundary provenance on the committed sketch", async () => {
+  const planned = region("region_planned");
+  const live = region("region_live");
+  const instance = new ImportDeferredMaterializer({
+    outputRecords: new Map(),
+    modelingService: {
+      async getCurrentDocumentSnapshot() {
+        return {
+          document: {
+            revisionId: "rev_live",
+            sketches: [{ sketchId: "sketch_live", regions: [live] }],
+          },
+        } as never;
+      },
+      async buildNativeExactBrepPayload() {
+        throw new Error("not used");
+      },
+    },
+  });
+  instance.recordSketchOutput(0, "sketch_live" as SketchId);
+
+  await expect(
+    instance.resolveDeferredValue(
+      {
+        kind: "regionOf",
+        actionIndex: 0,
+        selector: {
+          kind: "interiorPoint",
+          point: [999, 999],
+          expectedBoundaryIdentity: deriveImportRegionBoundaryIdentity(planned, [planned]),
+        },
+      },
+      { kind: "createFeature", index: 1 },
+    ),
+  ).resolves.toEqual({
+    kind: "region",
+    sketchId: "sketch_live",
+    regionId: "region_live",
+  });
+});
+
+test("regionOf never falls back to an interior point when boundary provenance is missing", async () => {
+  const planned = region("region_planned");
+  const live = region("region_live", "other-boundary");
+  const instance = new ImportDeferredMaterializer({
+    outputRecords: new Map(),
+    modelingService: {
+      async getCurrentDocumentSnapshot() {
+        return {
+          document: {
+            revisionId: "rev_live",
+            sketches: [{ sketchId: "sketch_live", regions: [live] }],
+          },
+        } as never;
+      },
+      async buildNativeExactBrepPayload() {
+        throw new Error("not used");
+      },
+    },
+  });
+  instance.recordSketchOutput(0, "sketch_live" as SketchId);
+
+  await expect(
+    instance.resolveDeferredValue(
+      {
+        kind: "regionOf",
+        actionIndex: 0,
+        selector: {
+          kind: "interiorPoint",
+          point: [0, 0],
+          expectedBoundaryIdentity: deriveImportRegionBoundaryIdentity(planned, [planned]),
+        },
+      },
+      { kind: "createFeature", index: 1 },
+    ),
+  ).rejects.toThrow("live regions");
+});
+
 test("bodyOf requires exactly one producer body output", async () => {
   const instance = new ImportDeferredMaterializer({
     outputRecords: new Map([
@@ -457,6 +558,27 @@ test("bodyOf requires exactly one producer body output", async () => {
       { kind: "createFeature", index: 1 },
     ),
   ).rejects.toThrow("produced 2 body ids, expected exactly one");
+});
+
+test("bodyOf rejects a producer with no body output", async () => {
+  const instance = new ImportDeferredMaterializer({
+    outputRecords: new Map([["ordered:0", { bodyIds: [] }]]),
+    modelingService: {
+      async getCurrentDocumentSnapshot() {
+        throw new Error("not used");
+      },
+      async buildNativeExactBrepPayload() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  await expect(
+    instance.resolveDeferredValue(
+      { kind: "bodyOf", actionIndex: 0 },
+      { kind: "createFeature", index: 1 },
+    ),
+  ).rejects.toThrow("produced 0 body ids, expected exactly one");
 });
 
 test("materializes topologyOf body selectors in extrude and revolve boolean scopes", async () => {
@@ -567,6 +689,48 @@ test("materializes deferred revolve body scope and advanced construction partici
   });
 });
 
+
+test("materializes advanced bodyOf participants as durable body targets", async () => {
+  const instance = new ImportDeferredMaterializer({
+    outputRecords: new Map([
+      ["ordered:0", { bodyIds: ["body_target" as BodyId] }],
+      ["ordered:1", { bodyIds: ["body_tool" as BodyId] }],
+    ]),
+    modelingService: {
+      async getCurrentDocumentSnapshot() {
+        throw new Error("not used");
+      },
+      async buildNativeExactBrepPayload() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  const request = await instance.materializeFeatureRequest({
+    ...basis,
+    definition: {
+      kind: "split",
+      featureTypeVersion: "advanced-solid-feature/v0",
+      parameters: {
+        participants: [
+          { role: "targetBody", targets: [{ kind: "bodyOf", actionIndex: 0 }] },
+          { role: "toolBody", targets: [{ kind: "bodyOf", actionIndex: 1 }] },
+        ],
+        options: { keepTools: false },
+      },
+    },
+  } as ImportCreateFeatureRequest, { kind: "createFeature", index: 2 });
+
+  expect(request.definition).toMatchObject({
+    kind: "split",
+    parameters: {
+      participants: [
+        { role: "targetBody", targets: [{ kind: "body", bodyId: "body_target" }] },
+        { role: "toolBody", targets: [{ kind: "body", bodyId: "body_tool" }] },
+      ],
+    },
+  });
+});
 
 test("honors an exact body scope during apply-time topology rematching", async () => {
   const scopedBodyId = "body_scoped" as BodyId;

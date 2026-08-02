@@ -36,6 +36,8 @@ import { createGeometryAssetRecordFromReference } from "@/contracts/modeling/geo
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
@@ -103,6 +105,42 @@ function createRevisionAgnosticRealSolver(): SketchSolverAdapter {
       };
     },
   });
+}
+
+type CustomOpenCascadeMainJSForImportTest = new (
+  module: Record<string, unknown>,
+) => Promise<OpenCascadeInstance>;
+
+let realOccImportTestRuntime: Promise<OpenCascadeInstance> | null = null;
+
+function loadRealOccForImportTest() {
+  realOccImportTestRuntime ??= (async () => {
+    const module = (await import("../../../../public/cadara-occ.js")) as {
+      default: CustomOpenCascadeMainJSForImportTest;
+    };
+    const wasmBinary = new Uint8Array(
+      await readFile(new URL("../../../../public/cadara-occ.wasm", import.meta.url)),
+    );
+    return new module.default({ wasmBinary });
+  })();
+  return realOccImportTestRuntime;
+}
+
+function createRealOccModelingService(oc: OpenCascadeInstance) {
+  const createSolver = (revisionId: RevisionId | null) =>
+    new SketchConstraintSolverAdapter({
+      documentId: "doc_workspace" as DocumentId,
+      revisionId,
+    });
+  const service = createModelingService(
+    new OpenCascadeKernelAdapter({
+      solverAdapter: createSolver(null),
+      solverAdapterFactory: createSolver,
+      getOpenCascadeInstance: async () => oc,
+    }),
+    { currentDocumentId: "doc_workspace" },
+  );
+  return service;
 }
 
 function capabilitiesWithRealKernelProbe(): ImportCapabilities {
@@ -917,6 +955,8 @@ function capabilitiesWithProbe(
 function makeUpToVertexExtrudeBundle(
   includeVertexHistoryBinding: boolean,
   includeUnboundBooleanScope = false,
+  includeStartFace = false,
+  includeBooleanScopeHistoryBinding = false,
 ): OnshapeCaptureBundleV2 {
   const bundle = structuredClone(makeFaceSketchBundle()) as unknown as OnshapeCaptureBundleV2;
   bundle.formatVersion = 2;
@@ -936,6 +976,16 @@ function makeUpToVertexExtrudeBundle(
         parameterId: "endBoundEntityVertex",
         queries: [{ queryString: "query = qVertexTarget();", deterministicIds: ["vertex_target"] }],
       },
+      ...(includeStartFace
+        ? [
+            { parameterId: "startOffset", value: true },
+            { parameterId: "startOffsetBound", value: "ENTITY" },
+            {
+              parameterId: "startOffsetEntity",
+              queries: [{ queryString: "query = qStartFace();", deterministicIds: ["start_face_target"] }],
+            },
+          ]
+        : []),
       { parameterId: "operationType", value: includeUnboundBooleanScope ? "REMOVE" : "NEW" },
       ...(includeUnboundBooleanScope
         ? [{
@@ -975,6 +1025,33 @@ function makeUpToVertexExtrudeBundle(
         geometryType: "point",
         centroid: [0, 0, 0.003],
         boundingBox: { low: [0, 0, 0.003], high: [0, 0, 0.003] },
+      },
+    });
+  }
+  if (includeStartFace) {
+    studio.resolvedReferences.push({
+      deterministicId: "start_face_target",
+      evaluatedAt: "historyPoint",
+      consumingFeatureId: "E_VERTEX",
+      signature: {
+        entityClass: "face",
+        geometryType: "plane",
+        definingData: { origin: [0, 0, 0.003], normal: [0, 0, 1] },
+        centroid: [0.0005, 0.001, 0.003],
+        boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
+      },
+    });
+  }
+  if (includeBooleanScopeHistoryBinding) {
+    studio.resolvedReferences.push({
+      deterministicId: "body_target",
+      evaluatedAt: "historyPoint",
+      consumingFeatureId: "E_VERTEX",
+      signature: {
+        entityClass: "body",
+        geometryType: "solid",
+        centroid: [0.005, 0.005, 0.005],
+        boundingBox: { low: [0, 0, 0], high: [0.01, 0.01, 0.01] },
       },
     });
   }
@@ -1115,6 +1192,61 @@ test("src/domain/import/onshape/provider.spec.ts resolves extent and scope atomi
   expect(actions.createFeatures?.some((action) => action.featureLabel === "Up to vertex"))
     .toBe(false);
   expect(JSON.stringify(actions)).not.toContain("firstEndVertex");
+});
+
+// Lane: logic (per docs/testing.md — exported importer review/prepare seam).
+// Seam: entityOffset start-face and explicit REMOVE scope selectors bind together
+// before prepare emits the extrude action.
+test("src/domain/import/onshape/provider.spec.ts prepares entityOffset start face and explicit REMOVE scope atomically", async () => {
+  const source = sourceFromBundle(makeUpToVertexExtrudeBundle(true, true, true, true));
+  const probeCapabilities = capabilitiesWithProbe([
+    vertexProbeSignature(),
+    probeSignature("start-face"),
+    bodyProbeSignature("scope-body", [0, 0, 0], [10, 10, 10]),
+  ]);
+  const review = await onshapeImportProvider.review({ source, capabilities: probeCapabilities });
+  const plan = review.providerReview.studios[0]?.featurePlans.find(
+    (feature) => feature.onshapeFeatureId === "E_VERTEX",
+  );
+  expect(plan).toMatchObject({
+    tier: "parametric",
+    plannedExtrude: {
+      startExtent: {
+        kind: "entityOffset",
+        target: { kind: "topologyOf", expectedKind: "face" },
+      },
+      boolean: {
+        kind: "topologyTargets",
+        targets: [{ kind: "topologyOf", expectedKind: "body" }],
+      },
+    },
+  });
+
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: probeCapabilities,
+  });
+  const extrude = actions.createFeatures?.find(
+    (action) => action.featureLabel === "Up to vertex",
+  );
+  expect(extrude).toMatchObject({
+    definition: {
+      kind: "extrude",
+      parameters: {
+        startExtent: {
+          kind: "entityOffset",
+          target: { kind: "topologyOf", expectedKind: "face" },
+        },
+        operation: { source: "literal", value: "cut" },
+        booleanScope: {
+          kind: "targetBody",
+          bodyId: { kind: "topologyOf", expectedKind: "body" },
+        },
+      },
+    },
+  });
 });
 
 test("src/domain/import/onshape/provider.spec.ts surfaces human-readable review copy for an unresolved extrude extent", async () => {
@@ -1379,6 +1511,113 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
     ).toBe(false);
   }
 });
+
+// Lane: logic (per docs/testing.md — real provider review → prepared-action
+// seam). This pins the exact producer identities used by d3cd9's native sheet
+// split before the browser applies the prepared payload.
+const D3_CAPTURE_FIXTURE =
+  "test/fixtures/onshape-captures/d3cd9b09c3c36af1dd2efae9.onshape-capture.json";
+
+test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
+  "d3cd9 prepares the Mirror 1, surface Extrude 4, and Split 1 producer chain without a fallback",
+  async () => {
+    const bundle = JSON.parse(await readFile(D3_CAPTURE_FIXTURE, "utf8"));
+    const oc = await loadRealOccForImportTest();
+    const service = createRealOccModelingService(oc);
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const realProbeCapabilities = createImportCapabilities(service, snapshot, {
+      history: createKernelHistoryProbeSession({
+        createService: () => createRealOccModelingService(oc),
+      }),
+    });
+    const source = sourceFromBundle(bundle);
+    const review = await onshapeImportProvider.review({
+      source,
+      capabilities: realProbeCapabilities,
+    });
+    if (process.env.CADARA_TRACE_D3_SPLIT_PROVENANCE === "1") {
+      console.info(
+        "[d3-provider-plans]",
+        JSON.stringify(
+          review.providerReview.studios.flatMap((studio) =>
+            studio.featurePlans.map((plan) => ({
+              label: plan.label,
+              tier: plan.tier,
+              reasonCodes: plan.reasonCodes,
+            })),
+          ),
+        ),
+      );
+    }
+    const splitStudio = review.providerReview.studios.find((studio) =>
+      studio.featurePlans.some((plan) => plan.label === "Split 1"),
+    );
+    expect(splitStudio, "Expected d3cd9's studio review.").toBeDefined();
+    expect(
+      splitStudio?.featurePlans.filter((plan) => plan.tier === "parametric"),
+      "The real OCC review must retain every d3cd9 feature parametrically before preparation.",
+    ).toHaveLength(24);
+    expect(
+      splitStudio?.featurePlans.filter((plan) => plan.tier === "baked"),
+      "The real OCC review must not bake d3cd9 features.",
+    ).toHaveLength(0);
+    expect(
+      splitStudio?.featurePlans.find((plan) => plan.label === "Split 1"),
+      "Split 1 must remain parametric through exclusive-witness slot derivation.",
+    ).toMatchObject({ tier: "parametric", reasonCodes: [] });
+    const actions = await onshapeImportProvider.prepare({
+      source,
+      review,
+      selections: onshapeImportProvider.createDefaultSelections(review),
+      capabilities: realProbeCapabilities,
+    });
+    const featuresByLabel = new Map(
+      (actions.createFeatures ?? []).map((feature) => [feature.featureLabel, feature]),
+    );
+    const actionIndexFor = (featureLabel: string) => {
+      const feature = featuresByLabel.get(featureLabel);
+      expect(feature, `Expected prepared feature ${featureLabel}.`).toBeDefined();
+      if (!feature) throw new Error(`Expected prepared feature ${featureLabel}.`);
+      const actionIndex = actions.orderedActions?.findIndex(
+        (action) =>
+          action.kind === "createFeature" && actions.createFeatures?.[action.index] === feature,
+      );
+      expect(actionIndex, `Expected ordered action for ${featureLabel}.`).toBeGreaterThanOrEqual(0);
+      if (actionIndex === undefined || actionIndex < 0) {
+        throw new Error(`Expected ordered action for ${featureLabel}.`);
+      }
+      return { feature, actionIndex };
+    };
+
+    const mirror = actionIndexFor("Mirror 1");
+    const surfaceExtrude = actionIndexFor("Extrude 4");
+    const split = actionIndexFor("Split 1");
+    expect([
+      [mirror.feature.featureLabel, mirror.feature.definition.kind],
+      [surfaceExtrude.feature.featureLabel, surfaceExtrude.feature.definition.kind],
+      [split.feature.featureLabel, split.feature.definition.kind],
+    ]).toEqual([
+      ["Mirror 1", "mirror"],
+      ["Extrude 4", "extrude"],
+      ["Split 1", "split"],
+    ]);
+    expect(mirror.actionIndex).toBeLessThan(surfaceExtrude.actionIndex);
+    expect(surfaceExtrude.actionIndex).toBeLessThan(split.actionIndex);
+    if (split.feature.definition.kind !== "split") {
+      throw new Error("Expected prepared Split 1 action.");
+    }
+    expect(split.feature.definition.parameters.participants).toMatchObject([
+      { role: "targetBody", targets: [{ kind: "bodyOf", actionIndex: mirror.actionIndex }] },
+      {
+        role: "toolBody",
+        targets: [{ kind: "bodyOf", actionIndex: surfaceExtrude.actionIndex }],
+      },
+    ]);
+    expect(split.feature.topologyFallback).toBeUndefined();
+    expect(validateImportPreparedActions(actions).success).toBe(true);
+  },
+  3_600_000,
+);
 
 test("src/domain/import/onshape/provider.spec.ts unique face sketches follow the durable naming capability gate", async () => {
   const bundle = structuredClone(

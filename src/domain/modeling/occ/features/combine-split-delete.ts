@@ -1,12 +1,16 @@
 import type { FeatureBooleanOperation } from "@/contracts/modeling/schema";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
-import type { BodyId, FeatureId } from "@/contracts/shared/ids";
+import type { BodyId, FaceId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
 import {
   advanceTopologyToken,
+  buildNativeTopologyIdAliasesForTrackedBody,
+  extractSolidShapes,
+  trackNewSolidBody,
   type OccReferenceInvalidationRecord,
+  type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
 import {
   requireBody,
@@ -28,7 +32,32 @@ import {
   collectNativeFeatureHistoryInvalidations,
   validateNativeFeatureTransaction,
 } from "@/domain/modeling/occ/features/boolean-operations";
-import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
+import {
+  parseNativeSheetSplitToolHistoryJson,
+  parseNativeShimPayloadJson,
+  type OccNativeSheetSplitToolHistoryPayload,
+  type OccNativeShimPayload,
+  type OpenCascadeNativeTopologyKernelHost,
+} from "@/domain/modeling/occ/native-topology-payload";
+import {
+  formatGeneratedProducerTopologySourceKey,
+  OccTopologyProvenanceMissingError,
+  type OccCanonicalTopologyProvenanceId,
+  type OccFeatureTopologyStage,
+  type OccTopologyStageOutput,
+} from "@/domain/modeling/occ/topology-stage";
+
+const traceD3SplitProvenance =
+  typeof process !== "undefined" &&
+  process.env.CADARA_TRACE_D3_SPLIT_PROVENANCE === "1";
+
+function traceSheetSplitProvenance(
+  event: string,
+  detail: Record<string, unknown>,
+) {
+  if (!traceD3SplitProvenance) return;
+  console.info(`[d3-split-provenance] ${event} ${JSON.stringify(detail)}`);
+}
 
 function getCombineBodyTargets(
   definition: AdvancedSolidFeatureDefinition & { kind: "combine" },
@@ -91,22 +120,27 @@ function resolveNativeCombineReplacement(input: {
     return null;
   }
 
-  return resolveNativeFeatureTransactionReplacement(
-    input.context,
-    targetBody,
-    nativeBuilder(
-      targetBody.shape,
-      toolBody.shape,
-      input.operation,
-      targetBody.bodyId,
-      targetBody.topologyToken,
-      advanceTopologyToken(targetBody.topologyToken),
-      input.context.modelingTolerance,
-      0.5,
-    ),
-    `combine-${input.operation}`,
-    input.ownerFeatureId,
+  const transaction = nativeBuilder(
+    targetBody.shape,
+    toolBody.shape,
+    input.operation,
+    targetBody.bodyId,
+    targetBody.topologyToken,
+    advanceTopologyToken(targetBody.topologyToken),
+    input.context.modelingTolerance,
+    0.5,
   );
+  try {
+    return resolveNativeFeatureTransactionReplacement(
+      input.context,
+      targetBody,
+      transaction,
+      `combine-${input.operation}`,
+      input.ownerFeatureId,
+    );
+  } finally {
+    transaction.delete();
+}
 }
 
 export function executeCombineFeature(
@@ -357,6 +391,591 @@ function getSplitToolBody(
   return toolBodies[0];
 }
 
+type SheetSplitSemanticHistory = {
+  outputs: readonly {
+    nativeOutputSlotKey: string;
+    outputSlotKey: string;
+    sourceTargetProvenanceIds: readonly OccCanonicalTopologyProvenanceId[];
+    finalFaceNativeIds: readonly string[];
+  }[];
+  toolFaceRelations: readonly {
+    sourceToolFaceProvenanceId: OccCanonicalTopologyProvenanceId;
+    cardinality: "zero" | "one" | "many";
+    finalFaces: readonly {
+      nativeFaceId: string;
+      outputSlotKeys: readonly string[];
+    }[];
+  }[];
+};
+
+type SheetSplitTrackedOutput = {
+  outputSlotKey: string;
+  body: OccTrackedBody;
+  finalFacesByNativeId: ReadonlyMap<string, FaceId>;
+};
+
+function sheetSplitOutputBodyId(
+  ownerFeatureId: FeatureId,
+  outputSlotKey: string,
+): BodyId {
+  return `body_${ownerFeatureId}_sheet_split_${encodeURIComponent(outputSlotKey)}` as BodyId;
+}
+
+function translateExactNativeFaceId(input: {
+  aliases: ReadonlyMap<FaceId, FaceId>;
+  nativeFaceId: string;
+  bodyId: BodyId;
+  role: "target output membership" | "tool producer";
+}) {
+  const matches = [...input.aliases].filter(
+    ([nativeFaceId]) => nativeFaceId === input.nativeFaceId,
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `occ-native-sheet-split-history-${input.role.replaceAll(" ", "-")}-alias-${matches.length === 0 ? "missing" : "ambiguous"}: native face ${input.nativeFaceId} on body ${input.bodyId} must resolve through exactly one tracked public FaceId.`,
+    );
+  }
+
+  const publicFaceId = matches[0]![1];
+  const nativeAliasesForPublicFace = [...input.aliases].filter(
+    ([, candidate]) => candidate === publicFaceId,
+  );
+  if (nativeAliasesForPublicFace.length !== 1) {
+    throw new Error(
+      `occ-native-sheet-split-history-${input.role.replaceAll(" ", "-")}-alias-ambiguous: public face ${publicFaceId} on body ${input.bodyId} has ${nativeAliasesForPublicFace.length} native aliases.`,
+    );
+  }
+
+  return publicFaceId;
+}
+
+function formatSheetSplitSemanticOutputSlot(input: {
+  targetBodyId: BodyId;
+  sourceTargetProvenanceIds: readonly OccCanonicalTopologyProvenanceId[];
+}) {
+  return `sheet-split-output:target:${input.targetBodyId}:target-face-provenance:${input.sourceTargetProvenanceIds.map(encodeURIComponent).join(",")}`;
+}
+
+/**
+ * Native output membership is exact. Only a source target face that belongs to
+ * one output can distinguish that output's semantic slot; shared faces cannot.
+ */
+function getExclusiveSheetSplitWitnessNativeFaceIds(
+  history: OccNativeSheetSplitToolHistoryPayload,
+) {
+  const outputSlotsBySourceFace = new Map<string, Set<string>>();
+  for (const output of history.outputs) {
+    for (const nativeFaceId of output.sourceTargetFaceNativeIds) {
+      const outputSlots = outputSlotsBySourceFace.get(nativeFaceId) ?? new Set<string>();
+      outputSlots.add(output.outputSlotKey);
+      outputSlotsBySourceFace.set(nativeFaceId, outputSlots);
+    }
+  }
+
+  return new Map(
+    history.outputs.map((output) => [
+      output.outputSlotKey,
+      output.sourceTargetFaceNativeIds.filter(
+        (nativeFaceId) => outputSlotsBySourceFace.get(nativeFaceId)?.size === 1,
+      ),
+    ]),
+  );
+}
+
+function resolveExclusiveSheetSplitWitnessProvenance(input: {
+  topologyProvenanceIndex: OccFeatureExecutionContext["topologyProvenanceIndex"];
+  targetBodyId: BodyId;
+  faceId: FaceId;
+}) {
+  try {
+    const provenanceId = input.topologyProvenanceIndex.resolveFace({
+      kind: "face",
+      bodyId: input.targetBodyId,
+      faceId: input.faceId,
+    });
+    traceSheetSplitProvenance("canonical-witness", {
+      targetBodyId: input.targetBodyId,
+      faceId: input.faceId,
+      provenanceId,
+    });
+    return provenanceId;
+  } catch (error) {
+    // A genuinely unclaimed source face provides no durable witness. Every
+    // malformed, ambiguous, cyclic, or future-stage resolution remains fatal.
+    if (error instanceof OccTopologyProvenanceMissingError) {
+      traceSheetSplitProvenance("canonical-witness-missing", {
+        targetBodyId: input.targetBodyId,
+        faceId: input.faceId,
+        error: error.message,
+      });
+      return null;
+    }
+    traceSheetSplitProvenance("canonical-witness-error", {
+      targetBodyId: input.targetBodyId,
+      faceId: input.faceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+}
+}
+
+export function translateSheetSplitToolHistoryToSemanticIds(input: {
+  history: OccNativeSheetSplitToolHistoryPayload;
+  targetFaceIdsByNativeId: ReadonlyMap<FaceId, FaceId>;
+  toolFaceIdsByNativeId: ReadonlyMap<FaceId, FaceId>;
+  topologyProvenanceIndex: OccFeatureExecutionContext["topologyProvenanceIndex"];
+}): SheetSplitSemanticHistory {
+  const semanticOutputSlotByNativeSlot = new Map<string, string>();
+  const semanticSlotOwners = new Map<string, string>();
+  const exclusiveWitnessNativeFaceIdsByOutput =
+    getExclusiveSheetSplitWitnessNativeFaceIds(input.history);
+  traceSheetSplitProvenance("native-output-witnesses", {
+    targetBodyId: input.history.targetBodyId,
+    outputs: input.history.outputs.map((output) => ({
+      outputSlotKey: output.outputSlotKey,
+      sourceTargetFaceNativeIds: output.sourceTargetFaceNativeIds,
+      exclusiveWitnessNativeFaceIds:
+        exclusiveWitnessNativeFaceIdsByOutput.get(output.outputSlotKey) ?? [],
+    })),
+  });
+  const outputs = input.history.outputs.map((output) => {
+    const exclusiveWitnessNativeFaceIds =
+      exclusiveWitnessNativeFaceIdsByOutput.get(output.outputSlotKey);
+    if (!exclusiveWitnessNativeFaceIds) {
+      throw new Error(
+        `occ-native-sheet-split-history-exclusive-witnesses-missing: output slot ${output.outputSlotKey} has no exact membership incidence.`,
+      );
+    }
+    const sourceTargetFaceIds = exclusiveWitnessNativeFaceIds.map((nativeFaceId) =>
+      translateExactNativeFaceId({
+        aliases: input.targetFaceIdsByNativeId,
+        nativeFaceId,
+        bodyId: input.history.targetBodyId,
+        role: "target output membership",
+      }),
+    );
+    if (new Set(sourceTargetFaceIds).size !== sourceTargetFaceIds.length) {
+      throw new Error(
+        `occ-native-sheet-split-history-exclusive-witness-alias-ambiguous: output slot ${output.outputSlotKey} resolves multiple exact source target faces to one public FaceId.`,
+      );
+    }
+    const sourceTargetProvenanceIds = sourceTargetFaceIds
+      .map((faceId) =>
+        resolveExclusiveSheetSplitWitnessProvenance({
+          topologyProvenanceIndex: input.topologyProvenanceIndex,
+          targetBodyId: input.history.targetBodyId,
+          faceId,
+        }),
+      )
+      .filter(
+        (provenanceId): provenanceId is OccCanonicalTopologyProvenanceId =>
+          provenanceId !== null,
+      )
+      .sort();
+    traceSheetSplitProvenance("resolved-output-witnesses", {
+      nativeOutputSlotKey: output.outputSlotKey,
+      sourceTargetFaceIds,
+      sourceTargetProvenanceIds,
+    });
+    if (sourceTargetProvenanceIds.length === 0) {
+      throw new Error(
+        `occ-native-sheet-split-history-exclusive-witnesses-missing: output slot ${output.outputSlotKey} has no resolved canonical target-face witnesses.`,
+      );
+    }
+    if (
+      new Set(sourceTargetProvenanceIds).size !==
+      sourceTargetProvenanceIds.length
+    ) {
+      throw new Error(
+        `occ-native-sheet-split-history-exclusive-witness-provenance-ambiguous: output slot ${output.outputSlotKey} resolves distinct exact source target faces to one canonical provenance id.`,
+      );
+    }
+
+    const outputSlotKey = formatSheetSplitSemanticOutputSlot({
+      targetBodyId: input.history.targetBodyId,
+      sourceTargetProvenanceIds,
+    });
+    const previousOwner = semanticSlotOwners.get(outputSlotKey);
+    if (previousOwner !== undefined) {
+      throw new Error(
+        `occ-native-sheet-split-history-semantic-output-slot-collision: native output slots ${previousOwner} and ${output.outputSlotKey} resolve to ${outputSlotKey}.`,
+      );
+    }
+    semanticSlotOwners.set(outputSlotKey, output.outputSlotKey);
+    semanticOutputSlotByNativeSlot.set(output.outputSlotKey, outputSlotKey);
+
+    return {
+      nativeOutputSlotKey: output.outputSlotKey,
+      outputSlotKey,
+      sourceTargetProvenanceIds,
+      finalFaceNativeIds: output.finalFaceNativeIds,
+    };
+  });
+
+  const sourceToolFaceIds = new Set<FaceId>();
+  const sourceToolFaceProvenanceIds =
+    new Set<OccCanonicalTopologyProvenanceId>();
+  const toolFaceRelations = input.history.toolFaceRelations.map((relation) => {
+    const sourceToolFaceId = translateExactNativeFaceId({
+      aliases: input.toolFaceIdsByNativeId,
+      nativeFaceId: relation.sourceToolFace.nativeFaceId,
+      bodyId: input.history.toolBodyId,
+      role: "tool producer",
+    });
+    if (sourceToolFaceIds.has(sourceToolFaceId)) {
+      throw new Error(
+        `occ-native-sheet-split-history-tool-producer-alias-ambiguous: multiple native tool faces resolve to public face ${sourceToolFaceId}.`,
+      );
+    }
+    sourceToolFaceIds.add(sourceToolFaceId);
+    const sourceToolFaceProvenanceId =
+      input.topologyProvenanceIndex.resolveFace({
+        kind: "face",
+        bodyId: input.history.toolBodyId,
+        faceId: sourceToolFaceId,
+      });
+    if (sourceToolFaceProvenanceIds.has(sourceToolFaceProvenanceId)) {
+      throw new Error(
+        `occ-native-sheet-split-history-tool-producer-provenance-ambiguous: multiple tool faces resolve to canonical provenance ${sourceToolFaceProvenanceId}.`,
+      );
+    }
+    sourceToolFaceProvenanceIds.add(sourceToolFaceProvenanceId);
+
+    return {
+      sourceToolFaceProvenanceId,
+      cardinality: relation.cardinality,
+      finalFaces: relation.finalFaces.map((finalFace) => ({
+        nativeFaceId: finalFace.nativeFaceId,
+        outputSlotKeys: finalFace.outputSlotKeys.map((nativeOutputSlotKey) => {
+          const outputSlotKey = semanticOutputSlotByNativeSlot.get(
+            nativeOutputSlotKey,
+          );
+          if (!outputSlotKey) {
+            throw new Error(
+              `occ-native-sheet-split-history-output-slot-membership-missing: final face ${finalFace.nativeFaceId} names unknown native output slot ${nativeOutputSlotKey}.`,
+            );
+          }
+          return outputSlotKey;
+        }),
+      })),
+    };
+  });
+
+  return { outputs, toolFaceRelations };
+}
+
+function buildSheetSplitSourceFaceAliases(input: {
+  context: OccFeatureExecutionContext;
+  body: OccTrackedBody;
+}) {
+  const existingAliases = input.body.nativeTopologyIdAliases?.faceIdsByNativeId;
+  if (existingAliases) {
+    return existingAliases;
+  }
+
+  const nativeHost = input.context
+    .oc as unknown as OpenCascadeNativeTopologyKernelHost;
+  const payloadJson = nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson?.(
+    input.body.shape,
+    input.body.bodyId,
+    input.body.topologyToken,
+    input.context.modelingTolerance,
+    0.5,
+  );
+  if (typeof payloadJson !== "string") {
+    throw new Error(
+      `occ-native-sheet-split-history-missing-source-alias-abi: CadaraBuildNativeTopologyPayload.BuildJson is required to translate source body ${input.body.bodyId} into durable public FaceIds.`,
+    );
+  }
+
+  return buildNativeTopologyIdAliasesForTrackedBody(
+    input.context.oc,
+    input.body,
+    parseNativeShimPayloadJson(payloadJson),
+  ).faceIdsByNativeId;
+}
+
+function getNativeResultFacesById(input: {
+  context: OccFeatureExecutionContext;
+  shape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>;
+  nativePayload: OccNativeShimPayload;
+  targetBodyId: BodyId;
+}) {
+  const faceMap = new input.context.oc.TopTools_IndexedMapOfShape_1();
+  input.context.oc.TopExp.MapShapes_1(
+    input.shape,
+    input.context.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+    faceMap,
+  );
+  try {
+    const faceRecords = input.nativePayload.topology.filter(
+      (record) => record.kind === "face" && record.bodyId === input.targetBodyId,
+    );
+    if (faceRecords.length !== faceMap.Size()) {
+      throw new Error(
+        "occ-native-sheet-split-history-missing-output-shape-membership: transaction PayloadJson must expose every final face of the committed transaction Shape.",
+      );
+    }
+
+    const facesByNativeId = new Map<
+      string,
+      InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Face"]>
+    >();
+    try {
+      for (const record of faceRecords) {
+        if (record.index < 1 || record.index > faceMap.Size()) {
+          throw new Error(
+            `occ-native-sheet-split-history-missing-output-shape-membership: PayloadJson face ${record.id} has no matching transaction Shape face.`,
+          );
+        }
+        if (facesByNativeId.has(record.id)) {
+          throw new Error(
+            `occ-native-sheet-split-history-missing-output-shape-membership: PayloadJson duplicates final face ${record.id}.`,
+          );
+        }
+        facesByNativeId.set(
+          record.id,
+          input.context.oc.TopoDS.Face_1(faceMap.FindKey(record.index)),
+        );
+      }
+      return facesByNativeId;
+    } catch (error) {
+      for (const face of facesByNativeId.values()) {
+        face.delete();
+      }
+      throw error;
+    }
+  } finally {
+    faceMap.delete();
+  }
+}
+
+function disposeNativeResultFaces(
+  facesByNativeId: ReadonlyMap<
+    string,
+    InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Face"]>
+  >,
+) {
+  for (const face of facesByNativeId.values()) {
+    face.delete();
+  }
+}
+
+function getNativeFaceIdsInShape(input: {
+  context: OccFeatureExecutionContext;
+  shape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>;
+  facesByNativeId: ReadonlyMap<
+    string,
+    InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Face"]>
+  >;
+}) {
+  const faceMap = new input.context.oc.TopTools_IndexedMapOfShape_1();
+  input.context.oc.TopExp.MapShapes_1(
+    input.shape,
+    input.context.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+    faceMap,
+  );
+  try {
+    const nativeIds = new Set<string>();
+    for (let index = 1; index <= faceMap.Size(); index += 1) {
+      const face = input.context.oc.TopoDS.Face_1(faceMap.FindKey(index));
+      try {
+        for (const [nativeFaceId, finalFace] of input.facesByNativeId) {
+          if (face.IsSame(finalFace)) {
+            nativeIds.add(nativeFaceId);
+            break;
+          }
+        }
+      } finally {
+        face.delete();
+      }
+    }
+    if (nativeIds.size !== faceMap.Size()) {
+      throw new Error(
+        "occ-native-sheet-split-history-missing-output-shape-membership: transaction PayloadJson does not provide exact native face membership for every split output solid.",
+      );
+    }
+    return nativeIds;
+  } finally {
+    faceMap.delete();
+  }
+}
+
+function sameStringSet(left: ReadonlySet<string>, right: readonly string[]) {
+  return left.size === right.length && right.every((value) => left.has(value));
+}
+
+function resolveSheetSplitOutputShapes(input: {
+  context: OccFeatureExecutionContext;
+  shape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>;
+  nativePayload: OccNativeShimPayload;
+  history: OccNativeSheetSplitToolHistoryPayload;
+}) {
+  const facesByNativeId = getNativeResultFacesById({
+    context: input.context,
+    shape: input.shape,
+    nativePayload: input.nativePayload,
+    targetBodyId: input.history.targetBodyId,
+  });
+  try {
+    const solids = extractSolidShapes(input.context.oc, input.shape);
+    if (solids.length !== input.history.outputs.length) {
+      throw new Error(
+        "occ-native-sheet-split-history-missing-output-shape-membership: tool-history output slots do not cover exactly the committed split solids.",
+      );
+    }
+
+    const shapeByOutputSlot = new Map<
+      string,
+      InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>
+    >();
+    const assignedSolids = new Set<number>();
+    for (const output of input.history.outputs) {
+      const matches = solids
+        .map((solid, index) => ({
+          index,
+          solid,
+          nativeFaceIds: getNativeFaceIdsInShape({
+            context: input.context,
+            shape: solid,
+            facesByNativeId,
+          }),
+        }))
+        .filter((candidate) =>
+          sameStringSet(candidate.nativeFaceIds, output.finalFaceNativeIds),
+        );
+      if (matches.length !== 1 || assignedSolids.has(matches[0]?.index ?? -1)) {
+        throw new Error(
+          `occ-native-sheet-split-history-missing-output-shape-membership: output slot ${output.outputSlotKey} cannot be associated with exactly one committed split solid.`,
+        );
+      }
+      assignedSolids.add(matches[0]!.index);
+      shapeByOutputSlot.set(output.outputSlotKey, matches[0]!.solid);
+    }
+
+    return { facesByNativeId, shapeByOutputSlot };
+  } catch (error) {
+    disposeNativeResultFaces(facesByNativeId);
+    throw error;
+  }
+}
+
+function trackSheetSplitOutputs(input: {
+  context: OccFeatureExecutionContext;
+  ownerFeatureId: FeatureId;
+  history: SheetSplitSemanticHistory;
+  facesByNativeId: ReadonlyMap<
+    string,
+    InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Face"]>
+  >;
+  shapeByOutputSlot: ReadonlyMap<
+    string,
+    InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>
+  >;
+}) {
+  const outputs: SheetSplitTrackedOutput[] = [];
+  for (const output of input.history.outputs) {
+    const shape = input.shapeByOutputSlot.get(output.nativeOutputSlotKey);
+    if (!shape) {
+      throw new Error(
+        `occ-native-sheet-split-history-missing-output-shape-membership: no committed solid exists for semantic output slot ${output.outputSlotKey}.`,
+      );
+    }
+    const body = trackNewSolidBody(input.context.oc, {
+      bodyId: sheetSplitOutputBodyId(input.ownerFeatureId, output.outputSlotKey),
+      label: `${input.ownerFeatureId}_split`,
+      ownerFeatureId: input.ownerFeatureId,
+      shape,
+    });
+    const finalFacesByNativeId = new Map<string, FaceId>();
+    for (const nativeFaceId of output.finalFaceNativeIds) {
+      const finalFace = input.facesByNativeId.get(nativeFaceId);
+      const publicMatches = [...body.facesById].filter(([, face]) =>
+        face.IsSame(finalFace!),
+      );
+      if (publicMatches.length !== 1) {
+        throw new Error(
+          `occ-native-sheet-split-history-missing-output-shape-membership: final face ${nativeFaceId} has no exact public face on output slot ${output.outputSlotKey}.`,
+        );
+      }
+      finalFacesByNativeId.set(nativeFaceId, publicMatches[0]![0]);
+    }
+    outputs.push({
+      outputSlotKey: output.outputSlotKey,
+      body,
+      finalFacesByNativeId,
+    });
+  }
+  return outputs;
+}
+
+/** Build only exact one-to-one tool-face producer claims; zero/many stay unsupported. */
+export function createSheetSplitToolHistoryTopologyStage(input: {
+  ownerFeatureId: FeatureId;
+  toolBodyId: BodyId;
+  history: SheetSplitSemanticHistory;
+  outputs: readonly SheetSplitTrackedOutput[];
+}): OccFeatureTopologyStage {
+  const stageOutputs = new Map(
+    input.outputs.map(
+      (output) =>
+        [
+          output.body.bodyId,
+          {
+            outputSlot: output.body.bodyId,
+            body: output.body,
+            sourceTargets: new Map<string, DurableRef[]>(),
+            unsupportedSourceKeys: new Set<string>(),
+          } satisfies OccTopologyStageOutput,
+        ] as const,
+    ),
+  );
+
+  for (const relation of input.history.toolFaceRelations) {
+    for (const output of input.outputs) {
+      const sourceKey = formatGeneratedProducerTopologySourceKey({
+        featureId: input.ownerFeatureId,
+        bodyId: input.toolBodyId,
+        sourceKind: "face",
+        sourcePublicId: encodeURIComponent(
+          relation.sourceToolFaceProvenanceId,
+        ) as FaceId,
+        role: `sheet-split-interface-face:output-slot:${encodeURIComponent(output.outputSlotKey)}`,
+      });
+      const finalFaces = relation.finalFaces.filter((finalFace) =>
+        finalFace.outputSlotKeys.includes(output.outputSlotKey),
+      );
+      const stageOutput = stageOutputs.get(output.body.bodyId);
+      if (!stageOutput) {
+        throw new Error(
+          `occ-native-sheet-split-history-missing-output-shape-membership: no topology stage exists for output slot ${output.outputSlotKey}.`,
+        );
+      }
+      if (finalFaces.length !== 1) {
+        stageOutput.unsupportedSourceKeys.add(sourceKey);
+        continue;
+      }
+
+      const publicFaceId = output.finalFacesByNativeId.get(
+        finalFaces[0]!.nativeFaceId,
+      );
+      if (!publicFaceId) {
+        throw new Error(
+          `occ-native-sheet-split-history-missing-output-shape-membership: exact tool-face relation ${relation.sourceToolFaceProvenanceId} cannot resolve its declared output face on slot ${output.outputSlotKey}.`,
+        );
+      }
+      stageOutput.sourceTargets.set(sourceKey, [
+        { kind: "face", bodyId: output.body.bodyId, faceId: publicFaceId },
+      ]);
+    }
+  }
+
+  return {
+    featureId: input.ownerFeatureId,
+    outputs: new Map(stageOutputs),
+  };
+}
+
 export function executeSplitFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -386,6 +1005,136 @@ export function executeSplitFeature(
   const nativeBuilder =
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildSplitCommittedShapeTransactionWithHistory;
+  const nativeSheetSplitBuilder =
+    toolBody.bodyKind === "sheet"
+      ? nativeHost.CadaraExecuteNativeFeatureTransaction
+          ?.BuildSheetSplitCommittedShapeTransactionWithToolHistory
+      : undefined;
+
+  if (nativeSheetSplitBuilder) {
+    const nextTopologyToken = advanceTopologyToken(targetBody.topologyToken);
+    const transaction = nativeSheetSplitBuilder(
+      targetBody.shape,
+      toolBody.shape,
+      targetBody.bodyId,
+      toolBody.bodyId,
+      targetBody.topologyToken,
+      nextTopologyToken,
+      context.modelingTolerance,
+      0.5,
+    );
+    let transactionShape: InstanceType<
+      OccFeatureExecutionContext["oc"]["TopoDS_Shape"]
+    > | null = null;
+    try {
+      const { payload: nativePayload, history: nativeHistory } =
+        validateNativeFeatureTransaction(transaction, "sheet split");
+      const splitToolHistoryJson = transaction.SplitToolHistoryJson?.();
+      if (typeof splitToolHistoryJson !== "string") {
+        throw new Error(
+          "occ-native-sheet-split-history-missing-abi: BuildSheetSplitCommittedShapeTransactionWithToolHistory requires CadaraNativeFeatureTransactionResult.SplitToolHistoryJson().",
+        );
+      }
+      const splitToolHistory = parseNativeSheetSplitToolHistoryJson(
+        splitToolHistoryJson,
+      );
+      if (
+        splitToolHistory.targetBodyId !== targetBody.bodyId ||
+        splitToolHistory.toolBodyId !== toolBody.bodyId ||
+        splitToolHistory.previousTopologyToken !== targetBody.topologyToken ||
+        splitToolHistory.topologyToken !== nextTopologyToken
+      ) {
+        throw new Error(
+          "occ-native-sheet-split-history-body-mismatch: sheet-split tool history does not describe the committed target/tool bodies and topology tokens.",
+        );
+      }
+
+      const semanticHistory =
+        splitToolHistory.status === "available"
+          ? translateSheetSplitToolHistoryToSemanticIds({
+              history: splitToolHistory,
+              targetFaceIdsByNativeId: buildSheetSplitSourceFaceAliases({
+                context,
+                body: targetBody,
+              }),
+              toolFaceIdsByNativeId: buildSheetSplitSourceFaceAliases({
+                context,
+                body: toolBody,
+              }),
+              topologyProvenanceIndex: context.topologyProvenanceIndex,
+            })
+          : null;
+      transactionShape = transaction.Shape() as InstanceType<
+        OccFeatureExecutionContext["oc"]["TopoDS_Shape"]
+      >;
+      const trackedOutputs = semanticHistory
+        ? (() => {
+            const resolved = resolveSheetSplitOutputShapes({
+              context,
+              shape: transactionShape,
+              nativePayload,
+              history: splitToolHistory,
+            });
+            try {
+              return trackSheetSplitOutputs({
+                context,
+                ownerFeatureId,
+                history: semanticHistory,
+                ...resolved,
+              });
+            } finally {
+              disposeNativeResultFaces(resolved.facesByNativeId);
+            }
+          })()
+        : null;
+      const splitBodies = trackedOutputs?.map((output) => output.body) ??
+        trackBodiesFromShape(
+          context,
+          ownerFeatureId,
+          "Split result",
+          transactionShape,
+          "split",
+        );
+      const nextBodies = context.bodies
+        .filter(
+          (body) =>
+            body.bodyId !== targetBody.bodyId &&
+            (keepTool || body.bodyId !== toolBody.bodyId),
+        )
+        .concat(splitBodies);
+      const historyInvalidations = createDeletedBodyInvalidations(targetBody);
+      mergeHistoryInvalidations(
+        historyInvalidations,
+        collectNativeFeatureHistoryInvalidations(targetBody, nativeHistory),
+      );
+
+      return {
+        bodies: nextBodies,
+        constructions: [...context.constructions],
+        constructionPlanes: new Map(context.constructionPlanes),
+        producedTargets: splitBodies.map((body) => ({
+          kind: "body" as const,
+          bodyId: body.bodyId,
+        })),
+        entities: [],
+        renderRecords: [],
+        historyInvalidations,
+        ...(trackedOutputs
+          ? {
+              topologyStage: createSheetSplitToolHistoryTopologyStage({
+                ownerFeatureId,
+                toolBodyId: toolBody.bodyId,
+                history: semanticHistory!,
+                outputs: trackedOutputs,
+              }),
+            }
+          : {}),
+      };
+    } finally {
+      transactionShape?.delete();
+      transaction.delete();
+    }
+  }
 
   if (nativeBuilder) {
     const transaction = nativeBuilder(
@@ -443,40 +1192,44 @@ export function executeSplitFeature(
       targetBody.shape,
       toolBody.shape,
     );
-    const splitBodies = trackBodiesFromShape(
-      context,
-      ownerFeatureId,
-      "Split result",
-      splitResult.shape,
-      "split",
-    );
-    const nextBodies = context.bodies
-      .filter(
-        (body) =>
-          body.bodyId !== targetBody.bodyId &&
-          (keepTool || body.bodyId !== toolBody.bodyId),
-      )
-      .concat(splitBodies);
-    const historyInvalidations = createDeletedBodyInvalidations(targetBody);
+    try {
+      const splitBodies = trackBodiesFromShape(
+        context,
+        ownerFeatureId,
+        "Split result",
+        splitResult.shape,
+        "split",
+      );
+      const nextBodies = context.bodies
+        .filter(
+          (body) =>
+            body.bodyId !== targetBody.bodyId &&
+            (keepTool || body.bodyId !== toolBody.bodyId),
+        )
+        .concat(splitBodies);
+      const historyInvalidations = createDeletedBodyInvalidations(targetBody);
 
-    for (const [key, value] of markSplitAmbiguousInvalidations(
-      collectTopologyHistoryInvalidations(targetBody, splitResult.builder),
-    )) {
-      historyInvalidations.set(key, value);
+      for (const [key, value] of markSplitAmbiguousInvalidations(
+        collectTopologyHistoryInvalidations(targetBody, splitResult.builder),
+      )) {
+        historyInvalidations.set(key, value);
+      }
+
+      return {
+        bodies: nextBodies,
+        constructions: [...context.constructions],
+        constructionPlanes: new Map(context.constructionPlanes),
+        producedTargets: splitBodies.map((body) => ({
+          kind: "body" as const,
+          bodyId: body.bodyId,
+        })),
+        entities: [],
+        renderRecords: [],
+        historyInvalidations,
+      };
+    } finally {
+      splitResult.dispose();
     }
-
-    return {
-      bodies: nextBodies,
-      constructions: [...context.constructions],
-      constructionPlanes: new Map(context.constructionPlanes),
-      producedTargets: splitBodies.map((body) => ({
-        kind: "body" as const,
-        bodyId: body.bodyId,
-      })),
-      entities: [],
-      renderRecords: [],
-      historyInvalidations,
-    };
   }
 
   const cutResult = runBoolean(

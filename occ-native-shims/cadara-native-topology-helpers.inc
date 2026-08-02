@@ -581,6 +581,39 @@ namespace {
     return preparedShape;
   }
 
+  struct CadaraPreparedCommittedShape {
+    TopoDS_Shape shape;
+    Handle(BRepTools_History) history;
+  };
+
+  CadaraPreparedCommittedShape CadaraPrepareCommittedShapeWithHistory(
+    const TopoDS_Shape& shape,
+    const double linearTolerance,
+    const double angularTolerance
+  ) {
+    if (shape.IsNull()) {
+      return {shape, Handle(BRepTools_History)()};
+    }
+
+    ShapeUpgrade_UnifySameDomain unifier(shape, true, true, true);
+    unifier.SetLinearTolerance(linearTolerance);
+    unifier.SetAngularTolerance(angularTolerance);
+    unifier.Build();
+
+    TopoDS_Shape preparedShape = unifier.Shape();
+    BRep_Builder builder;
+    TopTools_IndexedMapOfShape edgeMap;
+    TopExp::MapShapes(preparedShape, TopAbs_EDGE, edgeMap);
+
+    for (int edgeIndex = 1; edgeIndex <= edgeMap.Size(); edgeIndex += 1) {
+      TopoDS_Edge edge = TopoDS::Edge(edgeMap.FindKey(edgeIndex));
+      builder.SameParameter(edge, true);
+      builder.SameRange(edge, true);
+    }
+
+    return {preparedShape, unifier.History()};
+  }
+
   std::string CadaraBuildTopologyJson(
     const TopoDS_Shape& shape,
     const std::string& bodyId,
@@ -1179,6 +1212,734 @@ namespace {
     return out.str();
   }
 
+  int CadaraFindExactShapeIndex(
+    const TopTools_IndexedMapOfShape& shapeMap,
+    const TopoDS_Shape& shape
+  ) {
+    for (int index = 1; index <= shapeMap.Size(); index += 1) {
+      if (shapeMap.FindKey(index).IsSame(shape)) {
+        return index;
+      }
+    }
+    return 0;
+  }
+
+  void CadaraAppendExactFaceSuccessor(
+    std::vector<int>& finalFaceIndexes,
+    const TopTools_IndexedMapOfShape& finalFaceMap,
+    const TopoDS_Shape& candidate
+  ) {
+    if (candidate.IsNull() || candidate.ShapeType() != TopAbs_FACE) {
+      return;
+    }
+
+    const int finalFaceIndex = CadaraFindExactShapeIndex(finalFaceMap, candidate);
+    if (
+      finalFaceIndex > 0
+      && std::find(finalFaceIndexes.begin(), finalFaceIndexes.end(), finalFaceIndex)
+        == finalFaceIndexes.end()
+    ) {
+      finalFaceIndexes.push_back(finalFaceIndex);
+    }
+  }
+
+  void CadaraAppendPreparedFaceSuccessors(
+    std::vector<int>& finalFaceIndexes,
+    const TopTools_ListOfShape& intermediateFaces,
+    const Handle(BRepTools_History)& prepareHistory,
+    const TopTools_IndexedMapOfShape& finalFaceMap
+  ) {
+    TopTools_ListOfShape remaining(intermediateFaces);
+    while (remaining.Size() > 0) {
+      const TopoDS_Shape intermediateFace = remaining.First();
+      remaining.RemoveFirst();
+      CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, intermediateFace);
+
+      if (prepareHistory.IsNull()) {
+        continue;
+      }
+
+      TopTools_ListOfShape modified(prepareHistory->Modified(intermediateFace));
+      while (modified.Size() > 0) {
+        CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, modified.First());
+        modified.RemoveFirst();
+      }
+
+      TopTools_ListOfShape generated(prepareHistory->Generated(intermediateFace));
+      while (generated.Size() > 0) {
+        CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, generated.First());
+        generated.RemoveFirst();
+      }
+    }
+  }
+
+  template <typename Builder>
+  std::vector<int> CadaraCollectPreparedFaceSuccessors(
+    Builder& builder,
+    const TopoDS_Face& sourceFace,
+    const Handle(BRepTools_History)& prepareHistory,
+    const TopTools_IndexedMapOfShape& finalFaceMap,
+    const bool includeGenerated
+  ) {
+    std::vector<int> finalFaceIndexes;
+    TopTools_ListOfShape modified(builder.Modified(sourceFace));
+    CadaraAppendPreparedFaceSuccessors(
+      finalFaceIndexes,
+      modified,
+      prepareHistory,
+      finalFaceMap
+    );
+
+    if (includeGenerated) {
+      TopTools_ListOfShape generated(builder.Generated(sourceFace));
+      CadaraAppendPreparedFaceSuccessors(
+        finalFaceIndexes,
+        generated,
+        prepareHistory,
+        finalFaceMap
+      );
+    }
+
+    if (finalFaceIndexes.empty() && !builder.IsDeleted(sourceFace)) {
+      CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, sourceFace);
+    }
+
+    std::sort(finalFaceIndexes.begin(), finalFaceIndexes.end());
+    return finalFaceIndexes;
+  }
+
+  bool CadaraCollectUniqueFaceIds(
+    const TopoDS_Shape& shape,
+    const std::string& bodyId,
+    std::map<std::string, TopoDS_Face>& facesByNativeId,
+    std::string& collisionId
+  ) {
+    TopTools_IndexedMapOfShape faceMap;
+    TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
+
+    for (int index = 1; index <= faceMap.Size(); index += 1) {
+      const TopoDS_Face face = TopoDS::Face(faceMap.FindKey(index));
+      const std::string nativeId = CadaraTopologyIdForShape(TopAbs_FACE, bodyId, face);
+      if (facesByNativeId.find(nativeId) != facesByNativeId.end()) {
+        collisionId = nativeId;
+        return false;
+      }
+      facesByNativeId[nativeId] = face;
+    }
+
+    return true;
+  }
+
+  std::vector<int> CadaraSortFinalFaceIndexesByNativeId(
+    const std::vector<int>& finalFaceIndexes,
+    const std::vector<std::string>& finalFaceNativeIds
+  ) {
+    std::vector<int> sortedIndexes(finalFaceIndexes);
+    std::sort(
+      sortedIndexes.begin(),
+      sortedIndexes.end(),
+      [&finalFaceNativeIds](const int left, const int right) {
+        return finalFaceNativeIds[left] < finalFaceNativeIds[right];
+      }
+    );
+    return sortedIndexes;
+  }
+
+  std::string CadaraBuildUnsupportedSheetSplitToolHistoryJson(
+    const std::string& targetBodyId,
+    const std::string& toolBodyId,
+    const std::string& previousTopologyToken,
+    const std::string& topologyToken,
+    const std::string& code,
+    const std::string& message,
+    const std::string& detailValue
+  ) {
+    std::ostringstream out;
+    out
+      << "{\"schemaVersion\":\"occ-native-sheet-split-tool-history-payload/v1alpha1\""
+      << ",\"source\":\"occt7-shim\""
+      << ",\"status\":\"unsupported\""
+      << ",\"targetBodyId\":\"" << CadaraEscapeJson(targetBodyId) << "\""
+      << ",\"toolBodyId\":\"" << CadaraEscapeJson(toolBodyId) << "\""
+      << ",\"previousTopologyToken\":\"" << CadaraEscapeJson(previousTopologyToken) << "\""
+      << ",\"topologyToken\":\"" << CadaraEscapeJson(topologyToken) << "\""
+      << ",\"outputs\":[]"
+      << ",\"toolFaceRelations\":[]"
+      << ",\"diagnostics\":["
+      << CadaraDiagnosticJson(
+        code,
+        "warning",
+        message,
+        targetBodyId,
+        "sheetSplitToolHistory",
+        "detail",
+        detailValue
+      )
+      << "]}";
+    return out.str();
+  }
+
+  struct CadaraSheetSplitOutputRecord {
+    std::string slotKey;
+    std::vector<int> finalFaceIndexes;
+    std::vector<std::string> sourceTargetFaceNativeIds;
+  };
+
+  template <typename Builder>
+  std::string CadaraBuildSheetSplitToolHistoryJson(
+    Builder& builder,
+    const TopoDS_Shape& target,
+    const TopoDS_Shape& tool,
+    const CadaraPreparedCommittedShape& prepared,
+    const std::string& targetBodyId,
+    const std::string& toolBodyId,
+    const std::string& previousTopologyToken,
+    const std::string& topologyToken
+  ) {
+    TopTools_IndexedMapOfShape finalFaceMap;
+    TopExp::MapShapes(prepared.shape, TopAbs_FACE, finalFaceMap);
+
+    std::map<std::string, TopoDS_Face> targetFacesByNativeId;
+    std::map<std::string, TopoDS_Face> toolFacesByNativeId;
+    std::string collisionId;
+    if (!CadaraCollectUniqueFaceIds(target, targetBodyId, targetFacesByNativeId, collisionId)) {
+      return CadaraBuildUnsupportedSheetSplitToolHistoryJson(
+        targetBodyId,
+        toolBodyId,
+        previousTopologyToken,
+        topologyToken,
+        "occ-native-sheet-split-history-source-id-collision",
+        "Native sheet-split history refused ambiguous target-face native identity.",
+        collisionId
+      );
+    }
+    if (!CadaraCollectUniqueFaceIds(tool, toolBodyId, toolFacesByNativeId, collisionId)) {
+      return CadaraBuildUnsupportedSheetSplitToolHistoryJson(
+        targetBodyId,
+        toolBodyId,
+        previousTopologyToken,
+        topologyToken,
+        "occ-native-sheet-split-history-source-id-collision",
+        "Native sheet-split history refused ambiguous tool-face native identity.",
+        collisionId
+      );
+    }
+
+    std::vector<std::string> finalFaceNativeIds(finalFaceMap.Size() + 1);
+    std::set<std::string> seenFinalFaceNativeIds;
+    for (int index = 1; index <= finalFaceMap.Size(); index += 1) {
+      const std::string nativeId = CadaraTopologyIdForShape(
+        TopAbs_FACE,
+        targetBodyId,
+        finalFaceMap.FindKey(index)
+      );
+      if (!seenFinalFaceNativeIds.insert(nativeId).second) {
+        return CadaraBuildUnsupportedSheetSplitToolHistoryJson(
+          targetBodyId,
+          toolBodyId,
+          previousTopologyToken,
+          topologyToken,
+          "occ-native-sheet-split-history-final-id-collision",
+          "Native sheet-split history refused ambiguous final-face native identity.",
+          nativeId
+        );
+      }
+      finalFaceNativeIds[index] = nativeId;
+    }
+
+    std::map<std::string, std::vector<int>> targetFaceSuccessors;
+    for (const auto& entry : targetFacesByNativeId) {
+      targetFaceSuccessors[entry.first] = CadaraCollectPreparedFaceSuccessors(
+        builder,
+        entry.second,
+        prepared.history,
+        finalFaceMap,
+        true
+      );
+    }
+
+    TopTools_IndexedMapOfShape solidMap;
+    TopExp::MapShapes(prepared.shape, TopAbs_SOLID, solidMap);
+    if (solidMap.Size() == 0) {
+      return CadaraBuildUnsupportedSheetSplitToolHistoryJson(
+        targetBodyId,
+        toolBodyId,
+        previousTopologyToken,
+        topologyToken,
+        "occ-native-sheet-split-history-no-output-solids",
+        "Native sheet-split history requires at least one final solid output.",
+        "solid-output"
+      );
+    }
+    std::map<std::string, CadaraSheetSplitOutputRecord> outputsBySlotKey;
+    for (int solidIndex = 1; solidIndex <= solidMap.Size(); solidIndex += 1) {
+      const TopoDS_Solid solid = TopoDS::Solid(solidMap.FindKey(solidIndex));
+      TopTools_IndexedMapOfShape solidFaceMap;
+      TopExp::MapShapes(solid, TopAbs_FACE, solidFaceMap);
+
+      std::vector<int> finalFaceIndexes;
+      for (int faceIndex = 1; faceIndex <= finalFaceMap.Size(); faceIndex += 1) {
+        if (CadaraFindExactShapeIndex(solidFaceMap, finalFaceMap.FindKey(faceIndex)) > 0) {
+          finalFaceIndexes.push_back(faceIndex);
+        }
+      }
+
+      std::vector<std::string> sourceTargetFaceNativeIds;
+      for (const auto& entry : targetFaceSuccessors) {
+        const bool belongsToSolid = std::any_of(
+          entry.second.begin(),
+          entry.second.end(),
+          [&solidFaceMap, &finalFaceMap](const int finalFaceIndex) {
+            return CadaraFindExactShapeIndex(
+              solidFaceMap,
+              finalFaceMap.FindKey(finalFaceIndex)
+            ) > 0;
+          }
+        );
+        if (belongsToSolid) {
+          sourceTargetFaceNativeIds.push_back(entry.first);
+        }
+      }
+
+      if (sourceTargetFaceNativeIds.empty()) {
+        return CadaraBuildUnsupportedSheetSplitToolHistoryJson(
+          targetBodyId,
+          toolBodyId,
+          previousTopologyToken,
+          topologyToken,
+          "occ-native-sheet-split-history-output-membership-missing",
+          "Native sheet-split history could not derive an exact input-history membership for an output solid.",
+          "target-face-membership"
+        );
+      }
+
+      // This key is the sorted set of exact target-face history memberships;
+      // it has no output bounds, volume, traversal index, or proximity input.
+      const std::string slotKey = "sheet-split-output:target:"
+        + targetBodyId
+        + ":target-face-membership:"
+        + [&sourceTargetFaceNativeIds]() {
+            std::ostringstream key;
+            for (std::size_t index = 0; index < sourceTargetFaceNativeIds.size(); index += 1) {
+              if (index > 0) {
+                key << ",";
+              }
+              key << sourceTargetFaceNativeIds[index];
+            }
+            return key.str();
+          }();
+      if (outputsBySlotKey.find(slotKey) != outputsBySlotKey.end()) {
+        return CadaraBuildUnsupportedSheetSplitToolHistoryJson(
+          targetBodyId,
+          toolBodyId,
+          previousTopologyToken,
+          topologyToken,
+          "occ-native-sheet-split-history-output-slot-collision",
+          "Native sheet-split history refused colliding semantic output slots.",
+          slotKey
+        );
+      }
+      outputsBySlotKey[slotKey] = {
+        slotKey,
+        finalFaceIndexes,
+        sourceTargetFaceNativeIds
+      };
+    }
+
+    std::map<int, std::vector<std::string>> outputSlotKeysByFinalFaceIndex;
+    for (const auto& output : outputsBySlotKey) {
+      for (const int finalFaceIndex : output.second.finalFaceIndexes) {
+        outputSlotKeysByFinalFaceIndex[finalFaceIndex].push_back(output.first);
+      }
+    }
+
+    std::ostringstream out;
+    out
+      << "{\"schemaVersion\":\"occ-native-sheet-split-tool-history-payload/v1alpha1\""
+      << ",\"source\":\"occt7-shim\""
+      << ",\"status\":\"available\""
+      << ",\"targetBodyId\":\"" << CadaraEscapeJson(targetBodyId) << "\""
+      << ",\"toolBodyId\":\"" << CadaraEscapeJson(toolBodyId) << "\""
+      << ",\"previousTopologyToken\":\"" << CadaraEscapeJson(previousTopologyToken) << "\""
+      << ",\"topologyToken\":\"" << CadaraEscapeJson(topologyToken) << "\""
+      << ",\"outputs\":[";
+
+    bool needsOutputComma = false;
+    for (const auto& output : outputsBySlotKey) {
+      if (needsOutputComma) {
+        out << ",";
+      }
+      needsOutputComma = true;
+      out << "{\"outputSlotKey\":\"" << CadaraEscapeJson(output.second.slotKey) << "\""
+        << ",\"sourceTargetFaceNativeIds\":[";
+      for (std::size_t index = 0; index < output.second.sourceTargetFaceNativeIds.size(); index += 1) {
+        if (index > 0) {
+          out << ",";
+        }
+        out << "\"" << CadaraEscapeJson(output.second.sourceTargetFaceNativeIds[index]) << "\"";
+      }
+      out << "],\"finalFaceNativeIds\":[";
+      const std::vector<int> sortedFinalFaceIndexes = CadaraSortFinalFaceIndexesByNativeId(
+        output.second.finalFaceIndexes,
+        finalFaceNativeIds
+      );
+      for (std::size_t index = 0; index < sortedFinalFaceIndexes.size(); index += 1) {
+        if (index > 0) {
+          out << ",";
+        }
+        out << "\"" << CadaraEscapeJson(
+          finalFaceNativeIds[sortedFinalFaceIndexes[index]]
+        ) << "\"";
+      }
+      out << "]}";
+    }
+
+    out << "],\"toolFaceRelations\":[";
+    bool needsRelationComma = false;
+    for (const auto& toolFace : toolFacesByNativeId) {
+      const std::vector<int> finalFaceIndexes = CadaraSortFinalFaceIndexesByNativeId(
+        CadaraCollectPreparedFaceSuccessors(
+          builder,
+          toolFace.second,
+          prepared.history,
+          finalFaceMap,
+          false
+        ),
+        finalFaceNativeIds
+      );
+      if (needsRelationComma) {
+        out << ",";
+      }
+      needsRelationComma = true;
+      out << "{\"sourceToolFace\":{\"bodyId\":\""
+        << CadaraEscapeJson(toolBodyId)
+        << "\",\"nativeFaceId\":\""
+        << CadaraEscapeJson(toolFace.first)
+        << "\"},\"cardinality\":\""
+        << (finalFaceIndexes.empty() ? "zero" : finalFaceIndexes.size() == 1 ? "one" : "many")
+        << "\",\"finalFaces\":[";
+      for (std::size_t index = 0; index < finalFaceIndexes.size(); index += 1) {
+        if (index > 0) {
+          out << ",";
+        }
+        const int finalFaceIndex = finalFaceIndexes[index];
+        const auto membership = outputSlotKeysByFinalFaceIndex.find(finalFaceIndex);
+        if (membership == outputSlotKeysByFinalFaceIndex.end() || membership->second.empty()) {
+          return CadaraBuildUnsupportedSheetSplitToolHistoryJson(
+            targetBodyId,
+            toolBodyId,
+            previousTopologyToken,
+            topologyToken,
+            "occ-native-sheet-split-history-final-membership-missing",
+            "Native sheet-split history found a tool-face successor outside every final output solid.",
+            finalFaceNativeIds[finalFaceIndex]
+          );
+        }
+        out << "{\"nativeFaceId\":\""
+          << CadaraEscapeJson(finalFaceNativeIds[finalFaceIndex])
+          << "\",\"outputSlotKeys\":[";
+        for (std::size_t slotIndex = 0; slotIndex < membership->second.size(); slotIndex += 1) {
+          if (slotIndex > 0) {
+            out << ",";
+          }
+          out << "\"" << CadaraEscapeJson(membership->second[slotIndex]) << "\"";
+        }
+        out << "]}";
+      }
+      out << "]}";
+    }
+
+    out << "],\"diagnostics\":[]}";
+    return out.str();
+  }
+
+
+  std::string CadaraBuildUnsupportedBooleanOperandHistoryJson(
+    const std::string& operation,
+    const std::string& bodyId,
+    const std::string& previousTopologyToken,
+    const std::string& topologyToken,
+    const std::string& code,
+    const std::string& message,
+    const std::string& detailValue
+  ) {
+    std::ostringstream out;
+    out
+      << "{\"schemaVersion\":\"occ-native-boolean-operand-history-payload/v1alpha1\""
+      << ",\"source\":\"occt7-shim\""
+      << ",\"status\":\"unsupported\""
+      << ",\"operation\":\"" << CadaraEscapeJson(operation) << "\""
+      << ",\"bodyId\":\"" << CadaraEscapeJson(bodyId) << "\""
+      << ",\"previousTopologyToken\":\"" << CadaraEscapeJson(previousTopologyToken) << "\""
+      << ",\"topologyToken\":\"" << CadaraEscapeJson(topologyToken) << "\""
+      << ",\"finalFaces\":[]"
+      << ",\"diagnostics\":["
+      << CadaraDiagnosticJson(
+        code,
+        "warning",
+        message,
+        bodyId,
+        "booleanOperandHistory",
+        "detail",
+        detailValue
+      )
+      << "]}";
+    return out.str();
+  }
+
+  bool CadaraAppendPreparedBooleanOperandFaceSuccessors(
+    std::vector<int>& finalFaceIndexes,
+    const TopTools_ListOfShape& intermediateFaces,
+    const Handle(BRepTools_History)& prepareHistory,
+    const TopTools_IndexedMapOfShape& finalFaceMap,
+    std::string& malformedAssociation
+  ) {
+    TopTools_ListOfShape remaining(intermediateFaces);
+    while (remaining.Size() > 0) {
+      const TopoDS_Shape intermediateFace = remaining.First();
+      remaining.RemoveFirst();
+      if (intermediateFace.IsNull()) {
+        malformedAssociation = "null-builder-successor";
+        return false;
+      }
+      if (intermediateFace.ShapeType() != TopAbs_FACE) {
+        continue;
+      }
+
+      CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, intermediateFace);
+      if (prepareHistory.IsNull()) {
+        continue;
+      }
+
+      TopTools_ListOfShape modified(prepareHistory->Modified(intermediateFace));
+      while (modified.Size() > 0) {
+        const TopoDS_Shape preparedFace = modified.First();
+        modified.RemoveFirst();
+        if (preparedFace.IsNull()) {
+          malformedAssociation = "null-preparation-modified-successor";
+          return false;
+        }
+        if (preparedFace.ShapeType() != TopAbs_FACE) {
+          continue;
+        }
+        CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, preparedFace);
+      }
+
+      TopTools_ListOfShape generated(prepareHistory->Generated(intermediateFace));
+      while (generated.Size() > 0) {
+        const TopoDS_Shape preparedFace = generated.First();
+        generated.RemoveFirst();
+        if (preparedFace.IsNull()) {
+          malformedAssociation = "null-preparation-generated-successor";
+          return false;
+        }
+        if (preparedFace.ShapeType() != TopAbs_FACE) {
+          continue;
+        }
+        CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, preparedFace);
+      }
+    }
+    return true;
+  }
+
+  template <typename Builder>
+  bool CadaraCollectPreparedBooleanOperandFaceSuccessors(
+    Builder& builder,
+    const TopoDS_Face& sourceFace,
+    const Handle(BRepTools_History)& prepareHistory,
+    const TopTools_IndexedMapOfShape& finalFaceMap,
+    std::vector<int>& finalFaceIndexes,
+    std::string& malformedAssociation
+  ) {
+    finalFaceIndexes.clear();
+    TopTools_ListOfShape modified(builder.Modified(sourceFace));
+    if (!CadaraAppendPreparedBooleanOperandFaceSuccessors(
+      finalFaceIndexes,
+      modified,
+      prepareHistory,
+      finalFaceMap,
+      malformedAssociation
+    )) {
+      return false;
+    }
+
+    TopTools_ListOfShape generated(builder.Generated(sourceFace));
+    if (!CadaraAppendPreparedBooleanOperandFaceSuccessors(
+      finalFaceIndexes,
+      generated,
+      prepareHistory,
+      finalFaceMap,
+      malformedAssociation
+    )) {
+      return false;
+    }
+
+    if (finalFaceIndexes.empty() && !builder.IsDeleted(sourceFace)) {
+      CadaraAppendExactFaceSuccessor(finalFaceIndexes, finalFaceMap, sourceFace);
+    }
+
+    std::sort(finalFaceIndexes.begin(), finalFaceIndexes.end());
+    return true;
+  }
+
+  template <typename Builder>
+  std::string CadaraBuildBooleanOperandHistoryJson(
+    Builder& builder,
+    const std::string& operation,
+    const std::string& bodyId,
+    const std::string& previousTopologyToken,
+    const std::string& topologyToken,
+    const TopoDS_Shape& left,
+    const TopoDS_Shape& right,
+    const CadaraPreparedCommittedShape& prepared
+  ) {
+    std::map<std::string, TopoDS_Face> leftFacesByNativeId;
+    std::map<std::string, TopoDS_Face> rightFacesByNativeId;
+    std::string collisionId;
+    if (!CadaraCollectUniqueFaceIds(left, bodyId, leftFacesByNativeId, collisionId)) {
+      return CadaraBuildUnsupportedBooleanOperandHistoryJson(
+        operation,
+        bodyId,
+        previousTopologyToken,
+        topologyToken,
+        "occ-native-boolean-operand-history-source-id-collision",
+        "Native Boolean operand history refused ambiguous left source-face native identity.",
+        collisionId
+      );
+    }
+    if (!CadaraCollectUniqueFaceIds(right, bodyId, rightFacesByNativeId, collisionId)) {
+      return CadaraBuildUnsupportedBooleanOperandHistoryJson(
+        operation,
+        bodyId,
+        previousTopologyToken,
+        topologyToken,
+        "occ-native-boolean-operand-history-source-id-collision",
+        "Native Boolean operand history refused ambiguous right source-face native identity.",
+        collisionId
+      );
+    }
+
+    TopTools_IndexedMapOfShape finalFaceMap;
+    TopExp::MapShapes(prepared.shape, TopAbs_FACE, finalFaceMap);
+    std::vector<std::string> finalFaceNativeIds(finalFaceMap.Size() + 1);
+    std::set<std::string> seenFinalFaceNativeIds;
+    for (int index = 1; index <= finalFaceMap.Size(); index += 1) {
+      const std::string nativeId = CadaraTopologyIdForShape(
+        TopAbs_FACE,
+        bodyId,
+        finalFaceMap.FindKey(index)
+      );
+      if (!seenFinalFaceNativeIds.insert(nativeId).second) {
+        return CadaraBuildUnsupportedBooleanOperandHistoryJson(
+          operation,
+          bodyId,
+          previousTopologyToken,
+          topologyToken,
+          "occ-native-boolean-operand-history-final-id-collision",
+          "Native Boolean operand history refused ambiguous final-face native identity.",
+          nativeId
+        );
+      }
+      finalFaceNativeIds[index] = nativeId;
+    }
+
+    std::vector<std::vector<std::string>> leftSourceIdsByFinalFace(finalFaceMap.Size() + 1);
+    std::vector<std::vector<std::string>> rightSourceIdsByFinalFace(finalFaceMap.Size() + 1);
+    std::string malformedAssociation;
+    for (const auto& source : leftFacesByNativeId) {
+      std::vector<int> finalFaceIndexes;
+      if (!CadaraCollectPreparedBooleanOperandFaceSuccessors(
+        builder,
+        source.second,
+        prepared.history,
+        finalFaceMap,
+        finalFaceIndexes,
+        malformedAssociation
+      )) {
+        return CadaraBuildUnsupportedBooleanOperandHistoryJson(
+          operation,
+          bodyId,
+          previousTopologyToken,
+          topologyToken,
+          "occ-native-boolean-operand-history-malformed-association",
+          "Native Boolean operand history received a malformed left-face association.",
+          malformedAssociation
+        );
+      }
+      if (finalFaceIndexes.size() == 1) {
+        leftSourceIdsByFinalFace[finalFaceIndexes.front()].push_back(source.first);
+      }
+    }
+    for (const auto& source : rightFacesByNativeId) {
+      std::vector<int> finalFaceIndexes;
+      if (!CadaraCollectPreparedBooleanOperandFaceSuccessors(
+        builder,
+        source.second,
+        prepared.history,
+        finalFaceMap,
+        finalFaceIndexes,
+        malformedAssociation
+      )) {
+        return CadaraBuildUnsupportedBooleanOperandHistoryJson(
+          operation,
+          bodyId,
+          previousTopologyToken,
+          topologyToken,
+          "occ-native-boolean-operand-history-malformed-association",
+          "Native Boolean operand history received a malformed right-face association.",
+          malformedAssociation
+        );
+      }
+      if (finalFaceIndexes.size() == 1) {
+        rightSourceIdsByFinalFace[finalFaceIndexes.front()].push_back(source.first);
+      }
+    }
+
+    std::ostringstream out;
+    out
+      << "{\"schemaVersion\":\"occ-native-boolean-operand-history-payload/v1alpha1\""
+      << ",\"source\":\"occt7-shim\""
+      << ",\"status\":\"available\""
+      << ",\"operation\":\"" << CadaraEscapeJson(operation) << "\""
+      << ",\"bodyId\":\"" << CadaraEscapeJson(bodyId) << "\""
+      << ",\"previousTopologyToken\":\"" << CadaraEscapeJson(previousTopologyToken) << "\""
+      << ",\"topologyToken\":\"" << CadaraEscapeJson(topologyToken) << "\""
+      << ",\"finalFaces\":[";
+    bool needsFaceComma = false;
+    std::vector<int> allFinalFaceIndexes;
+    for (int index = 1; index <= finalFaceMap.Size(); index += 1) {
+      allFinalFaceIndexes.push_back(index);
+    }
+    const std::vector<int> sortedFinalFaceIndexes = CadaraSortFinalFaceIndexesByNativeId(
+      allFinalFaceIndexes,
+      finalFaceNativeIds
+    );
+    for (const int finalFaceIndex : sortedFinalFaceIndexes) {
+      if (needsFaceComma) {
+        out << ",";
+      }
+      needsFaceComma = true;
+      out << "{\"nativeFaceId\":\"" << CadaraEscapeJson(finalFaceNativeIds[finalFaceIndex])
+        << "\",\"leftSourceFaceNativeIds\":[";
+      for (std::size_t index = 0; index < leftSourceIdsByFinalFace[finalFaceIndex].size(); index += 1) {
+        if (index > 0) {
+          out << ",";
+        }
+        out << "\"" << CadaraEscapeJson(leftSourceIdsByFinalFace[finalFaceIndex][index]) << "\"";
+      }
+      out << "],\"rightSourceFaceNativeIds\":[";
+      for (std::size_t index = 0; index < rightSourceIdsByFinalFace[finalFaceIndex].size(); index += 1) {
+        if (index > 0) {
+          out << ",";
+        }
+        out << "\"" << CadaraEscapeJson(rightSourceIdsByFinalFace[finalFaceIndex][index]) << "\"";
+      }
+      out << "]}";
+    }
+    out << "],\"diagnostics\":[]}";
+    return out.str();
+  }
+
   template <typename Builder>
   CadaraNativeFeatureTransactionResult CadaraBuildBooleanTransactionResult(
     Builder& builder,
@@ -1188,7 +1949,8 @@ namespace {
     const std::string& topologyToken,
     const double linearDeflection,
     const double angularDeflection,
-    const TopoDS_Shape& previousShape
+    const TopoDS_Shape& leftOperand,
+    const TopoDS_Shape& rightOperand
   ) {
     builder.SetToFillHistory(true);
     Message_ProgressRange progress;
@@ -1212,20 +1974,50 @@ namespace {
           "operation",
           operation
         )
-      ), CadaraBuildUnsupportedHistoryJson(operation, bodyId), false);
+      ), CadaraBuildUnsupportedHistoryJson(operation, bodyId), false, "",
+        CadaraBuildUnsupportedBooleanOperandHistoryJson(
+          operation,
+          bodyId,
+          previousTopologyToken,
+          topologyToken,
+          "occ-native-boolean-operand-history-transaction-failed",
+          "Native Boolean operand history is unavailable because the feature transaction failed to build.",
+          "transaction-failed"
+        )
+      );
     }
 
     builder.SimplifyResult(true, true, 1.0e-7);
-    const TopoDS_Shape preparedShape = CadaraPrepareCommittedShape(
+    const CadaraPreparedCommittedShape prepared = CadaraPrepareCommittedShapeWithHistory(
       builder.Shape(),
       linearDeflection,
       angularDeflection
     );
+    const std::string booleanOperandHistoryJson = CadaraBuildBooleanOperandHistoryJson(
+      builder,
+      operation,
+      bodyId,
+      previousTopologyToken,
+      topologyToken,
+      leftOperand,
+      rightOperand,
+      prepared
+    );
     return CadaraNativeFeatureTransactionResult(
-      preparedShape,
-      CadaraBuildTopologyJson(preparedShape, bodyId, topologyToken, linearDeflection, angularDeflection, true),
-      CadaraBuildFeatureHistoryJson(builder, operation, bodyId, previousTopologyToken, topologyToken, previousShape, preparedShape),
-      true
+      prepared.shape,
+      CadaraBuildTopologyJson(prepared.shape, bodyId, topologyToken, linearDeflection, angularDeflection, true),
+      CadaraBuildFeatureHistoryJson(
+        builder,
+        operation,
+        bodyId,
+        previousTopologyToken,
+        topologyToken,
+        leftOperand,
+        prepared.shape
+      ),
+      true,
+      "",
+      booleanOperandHistoryJson
     );
   }
 
@@ -1285,7 +2077,8 @@ namespace {
     const std::string& topologyToken,
     const double linearDeflection,
     const double angularDeflection,
-    const TopoDS_Shape& previousShape
+    const TopoDS_Shape& leftOperand,
+    const TopoDS_Shape& rightOperand
   ) {
     return CadaraBuildBooleanTransactionResult(
       builder,
@@ -1295,7 +2088,8 @@ namespace {
       topologyToken,
       linearDeflection,
       angularDeflection,
-      previousShape
+      leftOperand,
+      rightOperand
     ).PayloadJson();
-  }
+}
 }

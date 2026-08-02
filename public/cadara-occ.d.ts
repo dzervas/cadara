@@ -3557,6 +3557,8 @@ export declare class CadaraNativeFeatureTransactionResult {
   Shape(): TopoDS_Shape;
   PayloadJson(): string;
   HistoryJson(): string;
+  SplitToolHistoryJson(): string;
+  BooleanOperandHistoryJson(): string;
   IsDone(): Standard_Boolean;
   delete(): void;
 }
@@ -3566,7 +3568,7 @@ export declare class CadaraNativeFeatureTransactionResult {
   }
 
   export declare class CadaraNativeFeatureTransactionResult_2 extends CadaraNativeFeatureTransactionResult {
-    constructor(committedShape: TopoDS_Shape, committedPayloadJson: string, committedHistoryJson: string, transactionDone: Standard_Boolean);
+    constructor(committedShape: TopoDS_Shape, committedPayloadJson: string, committedHistoryJson: string, transactionDone: Standard_Boolean, committedSplitToolHistoryJson: string, committedBooleanOperandHistoryJson: string);
   }
 
 export declare class CadaraNativeTopologyProbe {
@@ -3591,6 +3593,7 @@ export declare class CadaraExecuteNativeFeatureTransaction {
   static BuildBooleanCommittedShapePayload(left: TopoDS_Shape, right: TopoDS_Shape, operation: string, bodyId: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): string;
   static BuildBooleanCommittedShapeTransaction(left: TopoDS_Shape, right: TopoDS_Shape, operation: string, bodyId: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
   static BuildBooleanCommittedShapeTransactionWithHistory(left: TopoDS_Shape, right: TopoDS_Shape, operation: string, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
+  static BuildSheetSplitCommittedShapeTransactionWithToolHistory(target: TopoDS_Shape, tool: TopoDS_Shape, targetBodyId: string, toolBodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
   static BuildSplitCommittedShapeTransactionWithHistory(target: TopoDS_Shape, tool: TopoDS_Shape, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
   static BuildFilletCommittedShapeTransactionWithHistory(shape: TopoDS_Shape, edgeIdsCsv: string, radius: Standard_Real, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
   static BuildChamferCommittedShapeTransactionWithHistory(shape: TopoDS_Shape, edgeIdsCsv: string, distance: Standard_Real, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;

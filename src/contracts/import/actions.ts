@@ -17,6 +17,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
 import type { FeatureReplayFeatureParameters } from "@/contracts/modeling/feature-replay";
+import type { ImportRegionBoundaryIdentity } from "@/contracts/import/region-boundary-identity";
 import type { BodyId, FeatureId, SketchId, SketchPointId } from "@/contracts/shared/ids";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
 import type {
@@ -53,6 +54,8 @@ export type ImportDeferredValue =
       selector: {
         kind: "interiorPoint";
         point: SketchPoint2D;
+        /** Import-only boundary provenance rematched against the committed sketch. */
+        expectedBoundaryIdentity?: ImportRegionBoundaryIdentity;
         /** Optional exact Onshape selected-face provenance retained for import diagnostics. */
         source?: {
           consumerFeatureId: string;
@@ -115,7 +118,7 @@ export type ImportDeferredDurableRef =
   | ImportDeferredTopologyRef
   | ImportDeferredSketchEntityRef
   | ImportDeferredSketchPointRef
-  | Extract<ImportDeferredValue, { kind: "regionOf" | "constructionOf" }>;
+  | Extract<ImportDeferredValue, { kind: "regionOf" | "bodyOf" | "constructionOf" }>;
 
 export interface ImportDeferredFilletFeatureParameters
   extends Omit<FilletFeatureParameters, "edgeTargets"> {
@@ -392,7 +395,10 @@ export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
     "createFeatures[].definition.parameters.profiles[]",
     "createFeatures[].definition.parameters.participants[].targets[]",
   ],
-  bodyOf: ["createFeatures[].definition.parameters.booleanScope.bodyId"],
+  bodyOf: [
+    "createFeatures[].definition.parameters.booleanScope.bodyId",
+    "createFeatures[].definition.parameters.participants[].targets[]",
+  ],
   sketchIdOf: [
     "createFeatures[].definition.parameters.axis.sketchId",
     "createFeatures[].definition.parameters.profiles[].sketchId",

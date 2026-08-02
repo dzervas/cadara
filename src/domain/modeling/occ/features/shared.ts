@@ -26,7 +26,10 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import type { OccFeatureTopologyStage } from "@/domain/modeling/occ/topology-stage";
+import type {
+  OccFeatureTopologyStage,
+  OccTopologyProvenanceIndex,
+} from "@/domain/modeling/occ/topology-stage";
 import {
   extractSheetShapes,
   extractSolidShapes,
@@ -66,6 +69,8 @@ export interface OccFeatureExecutionContext {
   bakedShapeCache: Map<GeometryAssetId, OccMaterializedBakedShape[]>;
   referenceState?: OccReferenceState;
   previousTopologyStage: OccFeatureTopologyStage | null;
+  /** Transient exact lineage resolver for live topology consumed by this feature. */
+  topologyProvenanceIndex: OccTopologyProvenanceIndex;
   /** Earlier authored feature definitions available to exact operation replay. */
   authoredFeatures?: readonly {
     featureId: FeatureId;

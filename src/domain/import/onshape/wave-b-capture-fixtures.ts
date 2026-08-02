@@ -62,9 +62,33 @@ function extrude(id: string, sketchId: string, endBound = "BLIND") {
   };
 }
 
+function surfaceExtrude(id: string, sketchId: string) {
+  return {
+    featureType: "extrude",
+    featureId: id,
+    name: id,
+    parameters: [
+      { parameterId: "bodyType", value: "SURFACE" },
+      { parameterId: "operationType", value: "NEW" },
+      { parameterId: "surfaceOperationType", value: "NEW" },
+      { parameterId: "surfaceEntities", queries: [{
+        queryString: `query = qCreatedBy(id + "${sketchId}", EntityType.EDGE);`,
+        deterministicIds: [`${sketchId}_edge`],
+      }] },
+      { parameterId: "endBound", value: "BLIND" },
+      { parameterId: "depth", expression: "10 mm", value: 0.01 },
+    ],
+  };
+}
+
 export function makeWaveBBodyCaptureBundle(
   kind: ConsumerKind,
-  options: { bakedProducer?: boolean } = {},
+  options: {
+    bakedProducer?: boolean;
+    surfaceTool?: boolean;
+    keepTools?: boolean;
+    multiOutputTarget?: boolean;
+  } = {},
 ) {
   const needsTwo = kind === "boolean" || kind === "split";
   // An unsupported end bound keeps E1 honestly baked so its body only ever
@@ -73,7 +97,12 @@ export function makeWaveBBodyCaptureBundle(
     sketch("S1"),
     extrude("E1", "S1", options.bakedProducer ? "UP_TO_SURFACE" : "BLIND"),
   ];
-  if (needsTwo) features.push(sketch("S2"), extrude("E2", "S2"));
+  if (needsTwo) {
+    features.push(
+      sketch("S2"),
+      options.surfaceTool ? surfaceExtrude("E2", "S2") : extrude("E2", "S2"),
+    );
+  }
   const consumer = kind === "boolean"
     ? { featureType: "booleanBodies", featureId: "C", name: "Boolean", parameters: [
         { parameterId: "operationType", value: "SUBTRACTION" },
@@ -92,7 +121,7 @@ export function makeWaveBBodyCaptureBundle(
       : kind === "split"
         ? { featureType: "splitPart", featureId: "C", name: "Split", parameters: [
             { parameterId: "splitType", value: "PART" }, query("targets", ["SRC1"]), query("tool", ["SRC2"]),
-            { parameterId: "keepBothSides", value: true }, { parameterId: "keepTools", value: true },
+            { parameterId: "keepBothSides", value: true }, { parameterId: "keepTools", value: options.keepTools ?? true },
           ] }
         : { featureType: "deleteBodies", featureId: "C", name: "Delete", parameters: [
             query("entities", ["SRC1"]), query("nonCompositeEntities", ["SRC1"]),
@@ -101,10 +130,16 @@ export function makeWaveBBodyCaptureBundle(
 
   const body1 = { id: "SRC1", low: [-0.004, -0.003, 0.012] as [number, number, number], high: [0.004, 0.003, 0.012] as [number, number, number] };
   const body2 = { id: "SRC2", low: [-0.002, -0.003, 0.012] as [number, number, number], high: [0.006, 0.003, 0.012] as [number, number, number] };
+  const extraTargetBody = {
+    id: "SRC1_EXTRA",
+    low: [-0.004, 0.006, 0.012] as [number, number, number],
+    high: [0.004, 0.008, 0.012] as [number, number, number],
+  };
+  const targetOutputs = options.multiOutputTarget ? [body1, extraTargetBody] : [body1];
   const snapshots = [
-    { featureId: "E1", tessellationTolerance: 0.0001, tessellatedFaces: tessellation([body1]) },
-    ...(needsTwo ? [{ featureId: "E2", tessellationTolerance: 0.0001, tessellatedFaces: tessellation([body1, body2]) }] : []),
-    { featureId: "C", tessellationTolerance: 0.0001, tessellatedFaces: tessellation(kind === "delete" ? [] : [body1, ...(needsTwo ? [body2] : [])]) },
+    { featureId: "E1", tessellationTolerance: 0.0001, tessellatedFaces: tessellation(targetOutputs) },
+    ...(needsTwo ? [{ featureId: "E2", tessellationTolerance: 0.0001, tessellatedFaces: tessellation([...targetOutputs, body2]) }] : []),
+    { featureId: "C", tessellationTolerance: 0.0001, tessellatedFaces: tessellation(kind === "delete" ? [] : [...targetOutputs, ...(needsTwo ? [body2] : [])]) },
   ];
 
   return {
@@ -120,27 +155,57 @@ export function makeWaveBBodyCaptureBundle(
       features: { features },
       sketches: { sketches: [
         { featureId: "S1", entities: [{ sketchEntityId: "circle1", sketchEntityType: "skCircle", geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: 0.004 }, isConstruction: false }] },
-        ...(needsTwo ? [{ featureId: "S2", entities: [{ sketchEntityId: "circle2", sketchEntityType: "skCircle", geometry: { center3d: { x: 0.002, y: 0, z: 0 }, radius: 0.004 }, isConstruction: false }] }] : []),
+        ...(needsTwo ? [{
+          featureId: "S2",
+          entities: options.surfaceTool
+            ? [{
+                sketchEntityId: "line2",
+                sketchEntityType: "skLineSegment",
+                startPosition3d: { x: 0, y: -0.005, z: 0 },
+                endPosition3d: { x: 0, y: 0.005, z: 0 },
+                isConstruction: false,
+              }]
+            : [{
+                sketchEntityId: "circle2",
+                sketchEntityType: "skCircle",
+                geometry: { center3d: { x: 0.002, y: 0, z: 0 }, radius: 0.004 },
+                isConstruction: false,
+              }],
+        }] : []),
       ] },
       parts: null, featureSpecs: { present: false, reason: "not required by synthetic fixture" },
       resolvedReferences: [{ deterministicId: "Top", evaluatedAt: "finalState", signature: { entityClass: "face", geometryType: "plane", definingData: { normal: [0, 0, 1] }, isDefaultPlane: true } }],
-      profileEvidence: ["E1", ...(needsTwo ? ["E2"] : [])].map((featureId, index) => ({
-        consumingFeatureId: featureId,
-        parameterId: "entities" as const,
-        queryIndex: 0,
-        resultIndex: 0,
-        deterministicId: `wave-b-profile:${featureId}`,
-        evaluatedAt: "historyPoint" as const,
-        kind: "sketchRegion" as const,
-        sourceSketchFeatureId: index === 0 ? "S1" : "S2",
-        interiorPoint3d: index === 0 ? [0, 0, 0] as [number, number, number] : [0.002, 0, 0] as [number, number, number],
-      })),
+      profileEvidence: ["E1", ...(needsTwo ? ["E2"] : [])].flatMap((featureId, index) =>
+        featureId === "E2" && options.surfaceTool
+          ? []
+          : [{
+              consumingFeatureId: featureId,
+              parameterId: "entities" as const,
+              queryIndex: 0,
+              resultIndex: 0,
+              deterministicId: `wave-b-profile:${featureId}`,
+              evaluatedAt: "historyPoint" as const,
+              kind: "sketchRegion" as const,
+              sourceSketchFeatureId: index === 0 ? "S1" : "S2",
+              interiorPoint3d: index === 0
+                ? [0, 0, 0] as [number, number, number]
+                : [0.002, 0, 0] as [number, number, number],
+            }],
+      ),
       profileEvidenceSchemaVersion: 3,
-      profileEvidenceManifest: ["E1", ...(needsTwo ? ["E2"] : [])].map((featureId, index) => ({
-        consumingFeatureId: featureId, parameterId: "entities" as const, queryIndex: 0,
-        sourceQueryString: `query = qSketchRegion(id + "${index === 0 ? "S1" : "S2"}", true);`,
-        kind: "faceResults" as const, emittedRecordCount: 1, completed: true as const,
-      })),
+      profileEvidenceManifest: ["E1", ...(needsTwo ? ["E2"] : [])].flatMap((featureId, index) =>
+        featureId === "E2" && options.surfaceTool
+          ? []
+          : [{
+              consumingFeatureId: featureId,
+              parameterId: "entities" as const,
+              queryIndex: 0,
+              sourceQueryString: `query = qSketchRegion(id + "${index === 0 ? "S1" : "S2"}", true);`,
+              kind: "faceResults" as const,
+              emittedRecordCount: 1,
+              completed: true as const,
+            }],
+      ),
       groundTruth: { hasBodies: false }, rollbackSnapshots: snapshots,
     }],
   };

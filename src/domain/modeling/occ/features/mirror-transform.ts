@@ -26,7 +26,11 @@ import type {
   OccReferenceInvalidationRecord,
   OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
-import { advanceTopologyToken } from "@/domain/modeling/occ/topology";
+import {
+  advanceTopologyToken,
+  buildNativeTopologyIdAliasesForTrackedBody,
+  getOccDurableRefKey,
+} from "@/domain/modeling/occ/topology";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
 import {
   requireBody,
@@ -44,16 +48,31 @@ import {
   requireUniqueTargetBodies,
   trackBodiesFromShape,
   validateNativeFeatureTransaction,
+  type OccResolvedNativeBooleanOperandHistory,
 } from "@/domain/modeling/occ/features/boolean-operations";
-import type {
-  OpenCascadeNativeFeatureTransactionResult,
-  OpenCascadeNativeTopologyKernelHost,
+import {
+  parseNativeShimPayloadJson,
+  type OpenCascadeNativeFeatureTransactionResult,
+  type OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
 import {
   createExactSuccessorTopologyStage,
   createUnsupportedProducerTopologyStage,
+  formatMirrorOperandTopologySourceKey,
   type OccFeatureTopologyStage,
 } from "@/domain/modeling/occ/topology-stage";
+
+const traceD3SplitProvenance =
+  typeof process !== "undefined" &&
+  process.env.CADARA_TRACE_D3_SPLIT_PROVENANCE === "1";
+
+function traceMirrorAddProvenance(
+  event: string,
+  detail: Record<string, unknown>,
+) {
+  if (!traceD3SplitProvenance) return;
+  console.info(`[d3-mirror-provenance] ${event} ${JSON.stringify(detail)}`);
+}
 
 export function resolvePlanarReferencePlane(
   context: OccFeatureExecutionContext,
@@ -110,7 +129,12 @@ export function resolveLinearDirectionReference(
   supportSuffix: string,
 ): Vec3 {
   if (target.kind === "construction" || target.kind === "face") {
-    return resolvePlanarReferenceNormal(context, ownerFeatureId, target, supportSuffix);
+    return resolvePlanarReferenceNormal(
+      context,
+      ownerFeatureId,
+      target,
+      supportSuffix,
+    );
   }
 
   if (target.kind === "edge") {
@@ -126,7 +150,11 @@ export function resolveLinearDirectionReference(
   }
 
   if (target.kind === "sketchEntity") {
-    const axis = buildAxisFromSketchLine(context, target.sketchId, target.entityId);
+    const axis = buildAxisFromSketchLine(
+      context,
+      target.sketchId,
+      target.entityId,
+    );
     try {
       return normalize(toVec3FromGpPoint(axis.Direction()));
     } finally {
@@ -271,9 +299,10 @@ function getMirrorCopyOption(
 function getMirrorOperation(
   definition: AdvancedSolidFeatureDefinition & { kind: "mirror" },
 ) {
-  const operationIntent = definition.parameters.operationIntent === undefined
-    ? undefined
-    : getAuthoredLiteralValue(definition.parameters.operationIntent);
+  const operationIntent =
+    definition.parameters.operationIntent === undefined
+      ? undefined
+      : getAuthoredLiteralValue(definition.parameters.operationIntent);
   if (operationIntent === undefined) return "newBody" as const;
   if (operationIntent === "add") return "add" as const;
   throw new Error(
@@ -284,13 +313,335 @@ function getMirrorOperation(
 function getMirrorAddTarget(
   definition: AdvancedSolidFeatureDefinition & { kind: "mirror" },
 ) {
-  const targets = getAdvancedParticipant(definition, "targetBody")?.targets ?? [];
+  const targets =
+    getAdvancedParticipant(definition, "targetBody")?.targets ?? [];
   if (targets.length !== 1 || targets[0]?.kind !== "body") {
     throw new Error(
       "advanced-feature-unsupported-kernel-case: OCC mirror add requires exactly one body target.",
     );
   }
   return targets[0];
+}
+
+type MirrorAddSubtopologyRef = Extract<
+  DurableRef,
+  { kind: "face" | "edge" | "vertex" }
+>;
+
+function mirrorAddSourceTargets(
+  body: OccTrackedBody,
+): MirrorAddSubtopologyRef[] {
+  return [
+    ...body.topology.faceIds.map(
+      (faceId): MirrorAddSubtopologyRef => ({
+        kind: "face",
+        bodyId: body.bodyId,
+        faceId,
+      }),
+    ),
+    ...body.topology.edgeIds.map(
+      (edgeId): MirrorAddSubtopologyRef => ({
+        kind: "edge",
+        bodyId: body.bodyId,
+        edgeId,
+      }),
+    ),
+    ...body.topology.vertexIds.map(
+      (vertexId): MirrorAddSubtopologyRef => ({
+        kind: "vertex",
+        bodyId: body.bodyId,
+        vertexId,
+      }),
+    ),
+  ];
+}
+
+function isLiveMirrorAddTarget(
+  body: OccTrackedBody,
+  source: MirrorAddSubtopologyRef,
+  target: DurableRef,
+): target is MirrorAddSubtopologyRef {
+  if (target.kind !== source.kind || target.bodyId !== body.bodyId) {
+    return false;
+  }
+  if (target.kind === "face") return body.facesById.has(target.faceId);
+  if (target.kind === "edge") return body.edgesById.has(target.edgeId);
+  return body.verticesById.has(target.vertexId);
+}
+
+function collectMirrorAddSuccessors(input: {
+  ownerFeatureId: FeatureId;
+  sourceBody: OccTrackedBody;
+  outputBody: OccTrackedBody;
+  nativeSuccessors: ReadonlyMap<string, DurableRef>;
+  featureSourceTargets: ReadonlyMap<string, readonly DurableRef[]> | undefined;
+}) {
+  const successors = new Map(input.nativeSuccessors);
+  for (const source of mirrorAddSourceTargets(input.sourceBody)) {
+    const sourceKey = getOccDurableRefKey(source);
+    if (successors.has(sourceKey)) continue;
+    const targets =
+      input.featureSourceTargets?.get(
+        `boolean:${input.ownerFeatureId}:input:${sourceKey}`,
+      ) ?? [];
+    const exactTargets = targets.filter((target) =>
+      isLiveMirrorAddTarget(input.outputBody, source, target),
+    );
+    if (exactTargets.length === 1) {
+      successors.set(sourceKey, exactTargets[0]!);
+    }
+  }
+  return successors;
+}
+
+function collectMirrorAddGeneratedTargets(input: {
+  outputBody: OccTrackedBody;
+  nativeGeneratedTargets: ReadonlyMap<string, DurableRef>;
+}) {
+  const generated = new Map<string, DurableRef>();
+  for (const [sourceKey, target] of input.nativeGeneratedTargets) {
+    if (
+      (target.kind === "face" ||
+        target.kind === "edge" ||
+        target.kind === "vertex") &&
+      isLiveMirrorAddTarget(input.outputBody, target, target)
+    ) {
+      generated.set(sourceKey, target);
+    }
+  }
+  return generated;
+}
+
+function collectMirrorAddOperandProducerTargets(input: {
+  context: OccFeatureExecutionContext;
+  ownerFeatureId: FeatureId;
+  sourceBody: OccTrackedBody;
+  transform: InstanceType<OccFeatureExecutionContext["oc"]["BRepBuilderAPI_Transform_2"]>;
+  transformedShape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>;
+  history: OccResolvedNativeBooleanOperandHistory | undefined;
+}) {
+  if (!input.history || input.history.operation !== "join") {
+    return new Map<string, DurableRef>();
+  }
+  const nativeHost = input.context.oc as unknown as OpenCascadeNativeTopologyKernelHost;
+  const payloadJson = nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson?.(
+    input.transformedShape,
+    input.sourceBody.bodyId,
+    input.sourceBody.topologyToken,
+    input.context.modelingTolerance,
+    0.5,
+  );
+  if (typeof payloadJson !== "string") return new Map<string, DurableRef>();
+
+  const payload = parseNativeShimPayloadJson(payloadJson);
+  const records = payload.topology.filter(
+    (record) => record.kind === "face" && record.bodyId === input.sourceBody.bodyId,
+  );
+  const faceMap = new input.context.oc.TopTools_IndexedMapOfShape_1();
+  input.context.oc.TopExp.MapShapes_1(
+    input.transformedShape,
+    input.context.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+    faceMap,
+  );
+  const transformedFacesByNativeId = new Map<
+    string,
+    InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Face"]>
+  >();
+  try {
+    if (records.length !== faceMap.Size()) return new Map<string, DurableRef>();
+    for (const record of records) {
+      if (
+        record.index < 1 ||
+        record.index > faceMap.Size() ||
+        transformedFacesByNativeId.has(record.id)
+      ) {
+        return new Map<string, DurableRef>();
+      }
+      transformedFacesByNativeId.set(
+        record.id,
+        input.context.oc.TopoDS.Face_1(faceMap.FindKey(record.index)),
+      );
+    }
+    const sourceAliases =
+      input.sourceBody.nativeTopologyIdAliases?.faceIdsByNativeId ??
+      (() => {
+        const sourcePayloadJson =
+          nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson?.(
+            input.sourceBody.shape,
+            input.sourceBody.bodyId,
+            input.sourceBody.topologyToken,
+            input.context.modelingTolerance,
+            0.5,
+          );
+        if (typeof sourcePayloadJson !== "string") {
+          throw new Error("occ-native-mirror-operand-history-missing-source-alias-abi.");
+        }
+        return buildNativeTopologyIdAliasesForTrackedBody(
+          input.context.oc,
+          input.sourceBody,
+          parseNativeShimPayloadJson(sourcePayloadJson),
+        ).faceIdsByNativeId;
+      })();
+    const canonicalBySourceNativeId = new Map<string, string>();
+    const sourceNativeIdsByPublicId = new Map<string, string[]>();
+    for (const [nativeFaceId, publicFaceId] of sourceAliases) {
+      if (!input.sourceBody.facesById.has(publicFaceId)) continue;
+      sourceNativeIdsByPublicId.set(publicFaceId, [
+        ...(sourceNativeIdsByPublicId.get(publicFaceId) ?? []),
+        nativeFaceId,
+      ]);
+      try {
+        canonicalBySourceNativeId.set(
+          nativeFaceId,
+          input.context.topologyProvenanceIndex.resolveFace({
+            kind: "face",
+            bodyId: input.sourceBody.bodyId,
+            faceId: publicFaceId,
+          }),
+        );
+      } catch {
+        // An unresolved source face cannot contribute a right/mixed producer,
+        // but it must not erase independently exact operand incidences.
+      }
+    }
+    if (
+      input.sourceBody.topology.faceIds.length === 0 ||
+      input.sourceBody.topology.faceIds.some(
+        (faceId) => (sourceNativeIdsByPublicId.get(faceId)?.length ?? 0) !== 1,
+      )
+    ) {
+      return new Map<string, DurableRef>();
+    }
+    const canonicalByTransformedNativeId = new Map<string, string>();
+    const transformedNativeIdsBySourceFaceId = new Map<string, string[]>();
+    for (const sourceFaceId of input.sourceBody.topology.faceIds) {
+      const sourceFace = input.sourceBody.facesById.get(sourceFaceId);
+      const sourceNativeId = sourceNativeIdsByPublicId.get(sourceFaceId)?.[0];
+      if (!sourceFace || !sourceNativeId) return new Map<string, DurableRef>();
+      const transformed = input.transform.ModifiedShape(sourceFace);
+      try {
+        const matches = [...transformedFacesByNativeId].filter(([, candidate]) =>
+          candidate.IsSame(transformed),
+        );
+        transformedNativeIdsBySourceFaceId.set(
+          sourceFaceId,
+          matches.map(([nativeFaceId]) => nativeFaceId),
+        );
+        if (matches.length !== 1) continue;
+        const [transformedNativeId] = matches[0]!;
+        const canonical = canonicalBySourceNativeId.get(sourceNativeId);
+        if (!canonical) continue;
+        if (canonicalByTransformedNativeId.has(transformedNativeId)) continue;
+        canonicalByTransformedNativeId.set(transformedNativeId, canonical);
+      } finally {
+        deleteOccObject(transformed);
+      }
+    }
+    const transformMappingCounts = [0, 1, 2].map((cardinality) => ({
+      cardinality: cardinality === 2 ? "many" : cardinality === 1 ? "one" : "zero",
+      count: input.sourceBody.topology.faceIds.filter(
+        (faceId) =>
+          (transformedNativeIdsBySourceFaceId.get(faceId)?.length ?? 0) ===
+          cardinality ||
+          (cardinality === 2 &&
+            (transformedNativeIdsBySourceFaceId.get(faceId)?.length ?? 0) > 1),
+      ).length,
+    }));
+    const sourceAliasCounts = [0, 1, 2].map((cardinality) => ({
+      cardinality: cardinality === 2 ? "many" : cardinality === 1 ? "one" : "zero",
+      count: input.sourceBody.topology.faceIds.filter(
+        (faceId) =>
+          (sourceNativeIdsByPublicId.get(faceId)?.length ?? 0) === cardinality ||
+          (cardinality === 2 &&
+            (sourceNativeIdsByPublicId.get(faceId)?.length ?? 0) > 1),
+      ).length,
+    }));
+    traceMirrorAddProvenance("operand-inputs", {
+      featureId: input.ownerFeatureId,
+      sourceAliasCounts,
+      transformMappingCounts,
+      canonicalSourceNativeIds: canonicalBySourceNativeId.size,
+      canonicalTransformedNativeIds: canonicalByTransformedNativeId.size,
+    });
+    const candidatesBySourceKey = new Map<string, DurableRef[]>();
+    const incidencePartitions = {
+      leftOnly: 0,
+      rightOnly: 0,
+      mixed: 0,
+      unattributed: 0,
+      droppedMissingCanonical: 0,
+      canonicalSourceSets: 0,
+    };
+    for (const finalFace of input.history.finalFaces) {
+      const hasLeft = finalFace.leftSourceFaceNativeIds.length > 0;
+      const hasRight = finalFace.rightSourceFaceNativeIds.length > 0;
+      if (hasLeft && hasRight) incidencePartitions.mixed += 1;
+      else if (hasLeft) incidencePartitions.leftOnly += 1;
+      else if (hasRight) incidencePartitions.rightOnly += 1;
+      else incidencePartitions.unattributed += 1;
+      if (!hasRight) continue;
+      const left = finalFace.leftSourceFaceNativeIds.map((id) =>
+        canonicalBySourceNativeId.get(id),
+      );
+      const right = finalFace.rightSourceFaceNativeIds.map((id) =>
+        canonicalByTransformedNativeId.get(id),
+      );
+      if (left.some((value) => !value) || right.some((value) => !value)) {
+        incidencePartitions.droppedMissingCanonical += 1;
+        continue;
+      }
+      const sourceCanonicalProvenanceIds = [...new Set([...left, ...right])] as string[];
+      if (sourceCanonicalProvenanceIds.length === 0) continue;
+      incidencePartitions.canonicalSourceSets += 1;
+      const sourceKey = formatMirrorOperandTopologySourceKey({
+        featureId: input.ownerFeatureId,
+        bodyId: input.sourceBody.bodyId,
+        role: left.length > 0 ? "mixed" : "right",
+        sourceCanonicalProvenanceIds,
+      });
+      candidatesBySourceKey.set(sourceKey, [
+        ...(candidatesBySourceKey.get(sourceKey) ?? []),
+        finalFace.finalFace,
+      ]);
+    }
+    const claims = new Map<string, DurableRef>();
+    let reverseUniqueOne = 0;
+    let reverseUniqueMany = 0;
+    for (const [sourceKey, candidates] of candidatesBySourceKey) {
+      const uniqueTargets = new Map(
+        candidates.map((target) => [getOccDurableRefKey(target), target]),
+      );
+      if (uniqueTargets.size === 1) {
+        reverseUniqueOne += 1;
+        claims.set(sourceKey, uniqueTargets.values().next().value!);
+      } else {
+        reverseUniqueMany += 1;
+      }
+    }
+    traceMirrorAddProvenance("operand-incidence", {
+      featureId: input.ownerFeatureId,
+      finalFaces: input.history.finalFaces.length,
+      ...incidencePartitions,
+      sourceKeys: candidatesBySourceKey.size,
+      reverseUniqueOne,
+      reverseUniqueMany,
+      claims: [...claims].map(([sourceKey, target]) => ({
+        sourceKey,
+        target: getOccDurableRefKey(target),
+      })),
+    });
+    return claims;
+  } catch (error) {
+    traceMirrorAddProvenance("operand-error", {
+      featureId: input.ownerFeatureId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    // Zero, many, or missing exact relations never receive a fabricated claim.
+    return new Map<string, DurableRef>();
+  } finally {
+    for (const face of transformedFacesByNativeId.values()) deleteOccObject(face);
+    deleteOccObject(faceMap);
+  }
 }
 
 export function executeMirrorFeature(
@@ -325,6 +676,9 @@ export function executeMirrorFeature(
       true,
     );
     const progress = new context.oc.Message_ProgressRange_1();
+    let transformedShape:
+      | InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>
+      | undefined;
     try {
       transform.Build(progress);
       if (!transform.IsDone()) {
@@ -332,13 +686,35 @@ export function executeMirrorFeature(
           "advanced-feature-unsupported-kernel-case: OCC mirror add transform build failed.",
         );
       }
+      transformedShape = transform.Shape();
       const joined = applyBooleanPolicy(
         context,
         ownerFeatureId,
         "join",
         { kind: "targetBody", bodyId: target.bodyId },
-        transform.Shape(),
+        transformedShape,
       );
+      const outputBodies = joined.bodies.filter(
+        (body) => body.bodyId === sourceBody.bodyId,
+      );
+      if (outputBodies.length !== 1) {
+        throw new Error(
+          "advanced-feature-unsupported-kernel-case: OCC mirror add did not retain exactly one target body output.",
+        );
+      }
+      const outputBody = outputBodies[0]!;
+      const nativeSuccessors =
+        ("successorTargetsByPreviousKey" in joined
+          ? joined.successorTargetsByPreviousKey
+          : undefined) ?? new Map<string, DurableRef>();
+      const nativeGeneratedTargets =
+        ("generatedTargetsBySourceKey" in joined
+          ? joined.generatedTargetsBySourceKey
+          : undefined) ?? new Map<string, DurableRef>();
+      const booleanOperandHistory =
+        ("booleanOperandHistory" in joined
+          ? joined.booleanOperandHistory
+          : undefined) as OccResolvedNativeBooleanOperandHistory | undefined;
       return {
         bodies: joined.bodies,
         constructions: [...context.constructions],
@@ -347,12 +723,78 @@ export function executeMirrorFeature(
         entities: [],
         renderRecords: [],
         historyInvalidations: joined.historyInvalidations,
+        topologyStage: (() => {
+          const supplementalProducerTargetsBySourceKey =
+            collectMirrorAddOperandProducerTargets({
+              context,
+              ownerFeatureId,
+              sourceBody,
+              transform,
+              transformedShape,
+              history: booleanOperandHistory,
+            });
+          const topologyStage = createExactSuccessorTopologyStage({
+            featureId: ownerFeatureId,
+            sourceBody,
+            outputBody,
+            successorsBySourceKey: collectMirrorAddSuccessors({
+              ownerFeatureId,
+              sourceBody,
+              outputBody,
+              nativeSuccessors,
+              featureSourceTargets: joined.featureSourceTargets,
+            }),
+            generatedTargetsBySourceKey: collectMirrorAddGeneratedTargets({
+              outputBody,
+              nativeGeneratedTargets,
+            }),
+            supplementalProducerTargetsBySourceKey,
+          });
+          const output = topologyStage.outputs.get(outputBody.bodyId)!;
+          const publishedByTarget = new Map(
+            [...output.sourceTargets].flatMap(([sourceKey, targets]) =>
+              targets.map((target) => [getOccDurableRefKey(target), sourceKey]),
+            ),
+          );
+          traceMirrorAddProvenance("stage", {
+            featureId: ownerFeatureId,
+            supplementalBefore: [...supplementalProducerTargetsBySourceKey].map(
+              ([sourceKey, target]) => ({
+                sourceKey,
+                target: getOccDurableRefKey(target),
+              }),
+            ),
+            supplementalPublished: [...supplementalProducerTargetsBySourceKey]
+              .filter(([sourceKey]) => output.sourceTargets.has(sourceKey))
+              .map(([sourceKey]) => sourceKey),
+            supplementalBlockedByTargetClaim: [
+              ...supplementalProducerTargetsBySourceKey,
+            ]
+              .filter(
+                ([sourceKey, target]) =>
+                  !output.sourceTargets.has(sourceKey) &&
+                  publishedByTarget.has(getOccDurableRefKey(target)),
+              )
+              .map(([sourceKey]) => sourceKey),
+            supplementalUnsupported: [...output.unsupportedSourceKeys].filter((key) =>
+              supplementalProducerTargetsBySourceKey.has(key),
+            ),
+            publishedSourceTargets: [...output.sourceTargets].map(
+              ([sourceKey, targets]) => ({
+                sourceKey,
+                targets: targets.map(getOccDurableRefKey),
+              }),
+            ),
+          });
+          return topologyStage;
+        })(),
       };
     } finally {
+      deleteOccObject(transformedShape);
       deleteOccObject(progress);
       deleteOccObject(transform);
       deleteOccObject(mirror);
-    }
+  }
   }
 
   const mirroredBodies: OccTrackedBody[] = [];
@@ -509,7 +951,10 @@ function getTransformVector(
   const vector = definition.parameters.options?.vector;
   return Array.isArray(vector) &&
     vector.length === 3 &&
-    vector.every((component) => typeof component === "number" && Number.isFinite(component)) &&
+    vector.every(
+      (component) =>
+        typeof component === "number" && Number.isFinite(component),
+    ) &&
     vector.some((component) => component !== 0)
     ? [vector[0] as number, vector[1] as number, vector[2] as number]
     : null;
@@ -551,7 +996,11 @@ function getTransformAngleRadians(
       ? raw
       : getAuthoredLiteralValue(raw as MaybeAuthoredValue<unknown>);
 
-  if (typeof degrees !== "number" || !Number.isFinite(degrees) || degrees === 0) {
+  if (
+    typeof degrees !== "number" ||
+    !Number.isFinite(degrees) ||
+    degrees === 0
+  ) {
     throw new Error(
       "advanced-feature-unsupported-kernel-case: OCC transform rotation requires a non-zero angle in degrees.",
     );
@@ -661,39 +1110,39 @@ export function executeTransformFeature(
     const replacementResult =
       nativeReplacementResult ??
       (() => {
-          const builder = new context.oc.BRepBuilderAPI_Transform_2(
-            body.shape,
-            transform,
-            true,
-          );
-          builder.Build(new context.oc.Message_ProgressRange_1());
+        const builder = new context.oc.BRepBuilderAPI_Transform_2(
+          body.shape,
+          transform,
+          true,
+        );
+        builder.Build(new context.oc.Message_ProgressRange_1());
 
-          if (!builder.IsDone()) {
-            throw new Error(
-              "advanced-feature-unsupported-kernel-case: OCC transform build failed.",
-            );
-          }
+        if (!builder.IsDone()) {
+          throw new Error(
+            "advanced-feature-unsupported-kernel-case: OCC transform build failed.",
+          );
+        }
 
-          const fallbackResult = resolveReplacementBodies(
-            context,
-            body.bodyId,
-            builder.Shape(),
-            ownerFeatureId,
-            {
-              allowEmpty: false,
-              historySource: builder,
-            },
-          );
-          topologyStages.push(
-            createUnsupportedProducerTopologyStage({
-              featureId: ownerFeatureId,
-              bodies: fallbackResult.replacements,
-              producedTargets: fallbackResult.replacements.map((replacement) => ({
-                kind: "body" as const,
-                bodyId: replacement.bodyId,
-              })),
-            }),
-          );
+        const fallbackResult = resolveReplacementBodies(
+          context,
+          body.bodyId,
+          builder.Shape(),
+          ownerFeatureId,
+          {
+            allowEmpty: false,
+            historySource: builder,
+          },
+        );
+        topologyStages.push(
+          createUnsupportedProducerTopologyStage({
+            featureId: ownerFeatureId,
+            bodies: fallbackResult.replacements,
+            producedTargets: fallbackResult.replacements.map((replacement) => ({
+              kind: "body" as const,
+              bodyId: replacement.bodyId,
+            })),
+          }),
+        );
         return fallbackResult;
       })();
     const index = nextBodies.findIndex((entry) => entry.bodyId === body.bodyId);

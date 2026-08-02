@@ -87,7 +87,12 @@ test("profile resolver expands a readable exact region set into closed sketch se
 
   expect(result).toMatchObject({
     tier: "resolved",
-    profiles: [{ kind: "sketchRegion", sketchFeatureId: "S_SET", interiorPoint: [0, 0] }],
+    profiles: [{
+      kind: "sketchRegion",
+      sketchFeatureId: "S_SET",
+      boundaryIdentity: expect.stringMatching(/^import-region-boundary\/v1:/),
+      interiorPoint: [0, 0],
+    }],
   });
 });
 
@@ -149,13 +154,20 @@ test("profile resolver derives exact selectors for a sparse layout of thin annul
   expect(result.tier === "resolved" && result.profiles).toHaveLength(6);
   expect(result.tier === "resolved" && result.profiles.every((profile) => {
     if (profile.kind !== "sketchRegion") return false;
-    return centers.some((center) =>
+    return profile.boundaryIdentity.startsWith("import-region-boundary/v1:") && centers.some((center) =>
       Math.abs(Math.hypot(
         profile.interiorPoint[0] - center[0] * 1_000,
         profile.interiorPoint[1] - center[1] * 1_000,
       ) - 3.25) < 1e-9,
     );
   })).toBeTruthy();
+  expect(
+    result.tier === "resolved"
+      ? new Set(result.profiles.map((profile) =>
+          profile.kind === "sketchRegion" ? profile.boundaryIdentity : "planar-face"
+        )).size
+      : 0,
+  ).toBe(6);
 });
 
 test("profile resolver fails closed for false qSketchRegion with inner loops", () => {
@@ -202,6 +214,7 @@ test("profile resolver selects only the captured subset, never all closed region
     profiles: [{
       kind: "sketchRegion",
       sketchFeatureId: "S_LEFT",
+      boundaryIdentity: expect.stringMatching(/^import-region-boundary\/v1:/),
       interiorPoint: [-4, 0],
       evidence: { queryIndex: 0, resultIndex: 0, deterministicId: "face-S_LEFT" },
     }],

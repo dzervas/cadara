@@ -1,4 +1,8 @@
 import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
+import {
+  deriveImportRegionBoundaryIdentity,
+  type ImportRegionBoundaryIdentity,
+} from "@/contracts/import/region-boundary-identity";
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
 import type { DocumentId, RevisionId, SketchEntityId, SketchId } from "@/contracts/shared/ids";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
@@ -35,7 +39,9 @@ export type DeferredSketchProfile = {
   kind: "sketchRegion";
   /** Sketch feature owning the exact captured qSketchRegion result. */
   sketchFeatureId: string;
-  /** Sketch-plane interior point that selects exactly one region at apply time. */
+  /** Import-only boundary provenance derived while verifying the captured selection. */
+  boundaryIdentity: ImportRegionBoundaryIdentity;
+  /** Sketch-plane witness retained for diagnostics and legacy compatibility. */
   interiorPoint: SketchPoint2D;
   evidence?: ExactProfileEvidenceIdentity;
 };
@@ -263,9 +269,10 @@ function resolveLegacyNonExtrudeProfiles(
     ),
     definition: translation.definition,
   };
-  const profiles = [...legacyInteriorPoint(selectionSketch)].map(({ interiorPoint }) => ({
+  const profiles = [...legacyInteriorPoint(selectionSketch)].map(({ region, interiorPoint }) => ({
     kind: "sketchRegion" as const,
     sketchFeatureId,
+    boundaryIdentity: deriveImportRegionBoundaryIdentity(region, regions),
     interiorPoint,
   }));
   return profiles.length > 0
@@ -453,9 +460,10 @@ function resolveSketchRegionSet(input: {
     });
     return null;
   }
-  return selectors.map(({ interiorPoint }) => ({
+  return selectors.map(({ region, interiorPoint }) => ({
     kind: "sketchRegion",
     sketchFeatureId,
+    boundaryIdentity: deriveImportRegionBoundaryIdentity(region, regions),
     interiorPoint: interiorPoint!,
   }));
 }
@@ -518,6 +526,7 @@ function resolveSketchProfile(input: {
   return {
     kind: "sketchRegion",
     sketchFeatureId,
+    boundaryIdentity: deriveImportRegionBoundaryIdentity(selected, regions),
     interiorPoint,
     evidence: {
       consumerFeatureId: input.evidence.consumingFeatureId,

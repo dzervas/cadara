@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <map>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
 #include <BRepGProp.hxx>
+#include <BRepTools_History.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_BezierSurface.hxx>

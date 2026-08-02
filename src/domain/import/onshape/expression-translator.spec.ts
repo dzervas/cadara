@@ -51,3 +51,16 @@ test("src/domain/import/onshape/expression-translator.spec.ts", () => {
     "A non-value expression with no recoverable numeric literal should substitute 0 with an explicit diagnostic.",
   ).toBeTruthy();
 });
+
+test("normalizes postfix units on grouped expressions", () => {
+  for (const [expression, valueText] of [
+    ["(25/2) mm", "(25/2) * 1"],
+    ["(25/2) in", "(25/2) * 25.4"],
+    ["((#width + 5) / 2) cm", "((width + 5) / 2) * 10"],
+  ]) {
+    expect(translateOnshapeExpression({ expression })).toEqual({
+      valueText,
+      translated: true,
+    });
+  }
+});

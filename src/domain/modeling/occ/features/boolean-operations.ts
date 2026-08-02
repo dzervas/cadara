@@ -28,8 +28,10 @@ import {
   type OccReferenceInvalidationRecord,
 } from "@/domain/modeling/occ/topology";
 import {
+  parseNativeBooleanOperandHistoryJson,
   parseNativeFeatureTransactionHistoryJson,
   parseNativeShimPayloadJson,
+  type OccNativeBooleanOperandHistoryPayload,
   type OccNativeFeatureTransactionHistoryPayload,
   type OccNativeFeatureTransactionHistoryRecord,
   type OccNativeShimPayload,
@@ -56,10 +58,7 @@ interface ApplyBooleanPolicyOptions {
   sourceShapes?: OccFeatureSourceShapeMap;
 }
 
-function listHistoryShapes(
-  oc: OpenCascadeInstance,
-  list: { Size(): number },
-) {
+function listHistoryShapes(oc: OpenCascadeInstance, list: { Size(): number }) {
   const shapes: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[] = [];
   const typedList = list as InstanceType<
     OpenCascadeInstance["TopTools_ListOfShape"]
@@ -102,7 +101,8 @@ export function projectFeatureSourceShapes(
     let candidates = [...initialShapes];
 
     for (const historySource of historySources) {
-      const successors: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[] = [];
+      const successors: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[] =
+        [];
 
       for (const candidate of candidates) {
         if (isOccTopologyHistoryDeleted(historySource, candidate)) {
@@ -191,7 +191,10 @@ function mapFeatureSourceTargets(
 }
 
 function mergeFeatureSourceTargets(
-  ...sources: readonly (ReadonlyMap<string, readonly DurableRef[]> | undefined)[]
+  ...sources: readonly (
+    | ReadonlyMap<string, readonly DurableRef[]>
+    | undefined
+  )[]
 ) {
   const merged = new Map<string, DurableRef[]>();
   for (const source of sources) {
@@ -348,28 +351,55 @@ export function runSheetSplit(
   target: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
   tool: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
 ) {
-  const argumentShapes = new oc.TopTools_ListOfShape_1();
-  const toolShapes = new oc.TopTools_ListOfShape_1();
-  argumentShapes.Append_1(target);
-  toolShapes.Append_1(tool);
+  let argumentShapes:
+    | InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>
+    | undefined;
+  let toolShapes:
+    | InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>
+    | undefined;
+  let builder:
+    | InstanceType<OpenCascadeInstance["BRepAlgoAPI_Splitter"]>
+    | undefined;
+  let progress:
+    | InstanceType<OpenCascadeInstance["Message_ProgressRange"]>
+    | undefined;
+  let returned = false;
 
-  const builder = new oc.BRepAlgoAPI_Splitter_1();
-  builder.SetArguments(argumentShapes);
-  builder.SetTools(toolShapes);
-  builder.SetToFillHistory(true);
-  builder.Build(new oc.Message_ProgressRange_1());
+  try {
+    argumentShapes = new oc.TopTools_ListOfShape_1();
+    toolShapes = new oc.TopTools_ListOfShape_1();
+    builder = new oc.BRepAlgoAPI_Splitter_1();
+    progress = new oc.Message_ProgressRange_1();
+    argumentShapes.Append_1(target);
+    toolShapes.Append_1(tool);
+    builder.SetArguments(argumentShapes);
+    builder.SetTools(toolShapes);
+    builder.SetToFillHistory(true);
+    builder.Build(progress);
 
-  if (!builder.IsDone()) {
-    throw new Error("OCC sheet-tool split failed to build.");
+    if (!builder.IsDone()) {
+      throw new Error("OCC sheet-tool split failed to build.");
+    }
+
+    builder.SimplifyResult(true, true, 1e-7);
+    const completedBuilder = builder;
+    const shape = completedBuilder.Shape();
+    returned = true;
+
+    return {
+      shape,
+      builder: completedBuilder,
+      historySources: [completedBuilder] satisfies OccTopologyHistorySource[],
+      dispose: () => completedBuilder.delete(),
+    };
+  } finally {
+    if (!returned) {
+      builder?.delete();
+    }
+    progress?.delete();
+    toolShapes?.delete();
+    argumentShapes?.delete();
   }
-
-  builder.SimplifyResult(true, true, 1e-7);
-
-  return {
-    shape: builder.Shape(),
-    builder,
-    historySources: [builder] satisfies OccTopologyHistorySource[],
-  };
 }
 
 function appendOwnerFeature(
@@ -532,14 +562,19 @@ function resolveExistingNativeAliasTarget(
 
 function isCurrentTopologyTarget(current: OccTrackedBody, target: DurableRef) {
   if (target.kind === "face") {
-    return target.bodyId === current.bodyId && current.facesById.has(target.faceId);
+    return (
+      target.bodyId === current.bodyId && current.facesById.has(target.faceId)
+    );
   }
   if (target.kind === "edge") {
-    return target.bodyId === current.bodyId && current.edgesById.has(target.edgeId);
+    return (
+      target.bodyId === current.bodyId && current.edgesById.has(target.edgeId)
+    );
   }
   if (target.kind === "vertex") {
     return (
-      target.bodyId === current.bodyId && current.verticesById.has(target.vertexId)
+      target.bodyId === current.bodyId &&
+      current.verticesById.has(target.vertexId)
     );
   }
   return false;
@@ -559,6 +594,62 @@ type OccNativeGeneratedClaim = {
   source: OccNativeSubtopologyRef;
   generated: OccNativeSubtopologyRef;
 };
+
+export interface OccResolvedNativeBooleanOperandHistory {
+  operation: OccNativeBooleanOperandHistoryPayload["operation"];
+  finalFaces: readonly {
+    finalFace: Extract<DurableRef, { kind: "face" }>;
+    leftSourceFaceNativeIds: readonly string[];
+    rightSourceFaceNativeIds: readonly string[];
+  }[];
+}
+
+function resolveNativeBooleanOperandHistory(input: {
+  history: OccNativeBooleanOperandHistoryPayload | undefined;
+  current: OccTrackedBody;
+  replacement: OccTrackedBody;
+  operation: string;
+}) {
+  const history = input.history;
+  if (!history || history.status === "unsupported") {
+    return undefined;
+  }
+  const expectedOperation = input.operation.replace(/^combine-/, "");
+  if (
+    history.operation !== expectedOperation ||
+    history.bodyId !== input.current.bodyId ||
+    history.previousTopologyToken !== input.current.topologyToken ||
+    history.topologyToken !== input.replacement.topologyToken
+  ) {
+    throw new Error(
+      "occ-native-boolean-operand-history-inconsistent-transaction: operand history does not describe the committed Boolean replacement.",
+    );
+  }
+  const aliases = input.replacement.nativeTopologyIdAliases?.faceIdsByNativeId;
+  if (!aliases) {
+    throw new Error(
+      "occ-native-boolean-operand-history-missing-final-face-aliases: committed Boolean replacement has no exact native-to-public face aliases.",
+    );
+  }
+  const finalFaces = history.finalFaces.map((finalFace) => {
+    const faceId = aliases.get(finalFace.nativeFaceId as FaceId);
+    if (!faceId || !input.replacement.facesById.has(faceId)) {
+      throw new Error(
+        `occ-native-boolean-operand-history-missing-final-face: ${finalFace.nativeFaceId}.`,
+      );
+    }
+    return {
+      finalFace: {
+        kind: "face" as const,
+        bodyId: input.replacement.bodyId,
+        faceId,
+      },
+      leftSourceFaceNativeIds: [...finalFace.leftSourceFaceNativeIds],
+      rightSourceFaceNativeIds: [...finalFace.rightSourceFaceNativeIds],
+    };
+  });
+  return { operation: history.operation, finalFaces } satisfies OccResolvedNativeBooleanOperandHistory;
+}
 
 function isNativeSubtopologyRef(
   target: DurableRef,
@@ -634,7 +725,10 @@ function collectNativeHistoryResolution(input: {
     const target =
       currentTargetAliases.get(getOccDurableRefKey(record.target)) ??
       record.target;
-    const exactTarget = resolveExistingNativeAliasTarget(input.current, record.target);
+    const exactTarget = resolveExistingNativeAliasTarget(
+      input.current,
+      record.target,
+    );
 
     if (
       record.reason === "unique-successor" &&
@@ -642,7 +736,10 @@ function collectNativeHistoryResolution(input: {
       sameTopologyTargetKind(target, record.successors[0]!)
     ) {
       const successor = record.successors[0]!;
-      preservedTargetsBySuccessorKey.set(getOccDurableRefKey(successor), target);
+      preservedTargetsBySuccessorKey.set(
+        getOccDurableRefKey(successor),
+        target,
+      );
       if (
         sameTopologyTargetKind(exactTarget, successor) &&
         isCurrentTopologyTarget(input.current, exactTarget)
@@ -684,7 +781,10 @@ function collectNativeHistoryResolution(input: {
   for (const claim of claims) {
     const previousKey = getOccDurableRefKey(claim.previous);
     const successorKey = getOccDurableRefKey(claim.successor);
-    previousClaims.set(previousKey, [...(previousClaims.get(previousKey) ?? []), claim]);
+    previousClaims.set(previousKey, [
+      ...(previousClaims.get(previousKey) ?? []),
+      claim,
+    ]);
     successorClaims.set(successorKey, [
       ...(successorClaims.get(successorKey) ?? []),
       claim,
@@ -694,8 +794,10 @@ function collectNativeHistoryResolution(input: {
   for (const claim of claims) {
     const previousKey = getOccDurableRefKey(claim.previous);
     const successorKey = getOccDurableRefKey(claim.successor);
-    const duplicatePrevious = (previousClaims.get(previousKey)?.length ?? 0) > 1;
-    const duplicateSuccessor = (successorClaims.get(successorKey)?.length ?? 0) > 1;
+    const duplicatePrevious =
+      (previousClaims.get(previousKey)?.length ?? 0) > 1;
+    const duplicateSuccessor =
+      (successorClaims.get(successorKey)?.length ?? 0) > 1;
     if (duplicatePrevious || duplicateSuccessor) {
       invalidations.set(previousKey, {
         target: claim.previous,
@@ -890,8 +992,7 @@ function reconcileNativeHistoryReplacement(
     preservedTargetsBySuccessorKey,
     ownerFeatureId,
     previousContributingFeatureIdsById: current.faceContributingFeatureIdsById,
-    freshContributingFeatureIdsById:
-      replacement.faceContributingFeatureIdsById,
+    freshContributingFeatureIdsById: replacement.faceContributingFeatureIdsById,
   });
   const facesById = new Map<
     FaceId,
@@ -912,8 +1013,7 @@ function reconcileNativeHistoryReplacement(
     preservedTargetsBySuccessorKey,
     ownerFeatureId,
     previousContributingFeatureIdsById: current.edgeContributingFeatureIdsById,
-    freshContributingFeatureIdsById:
-      replacement.edgeContributingFeatureIdsById,
+    freshContributingFeatureIdsById: replacement.edgeContributingFeatureIdsById,
   });
   const edgesById = new Map<
     EdgeId,
@@ -957,21 +1057,30 @@ function reconcileNativeHistoryReplacement(
     if (successor.kind === "face") {
       const faceId = faceIdsByNativeId.get(successor.faceId);
       if (faceId) {
-        successorTargetsByPreviousKey.set(previousKey, { ...successor, faceId });
+        successorTargetsByPreviousKey.set(previousKey, {
+          ...successor,
+          faceId,
+        });
       }
       continue;
     }
     if (successor.kind === "edge") {
       const edgeId = edgeIdsByNativeId.get(successor.edgeId);
       if (edgeId) {
-        successorTargetsByPreviousKey.set(previousKey, { ...successor, edgeId });
+        successorTargetsByPreviousKey.set(previousKey, {
+          ...successor,
+          edgeId,
+        });
       }
       continue;
     }
     if (successor.kind === "vertex") {
       const vertexId = vertexIdsByNativeId.get(successor.vertexId);
       if (vertexId) {
-        successorTargetsByPreviousKey.set(previousKey, { ...successor, vertexId });
+        successorTargetsByPreviousKey.set(previousKey, {
+          ...successor,
+          vertexId,
+        });
       }
     }
   }
@@ -1067,10 +1176,8 @@ export function resolveNativeFeatureTransactionReplacement(
   operation: string,
   ownerFeatureId: FeatureId,
 ) {
-  const { payload, history } = validateNativeFeatureTransaction(
-    transaction,
-    operation,
-  );
+  const { payload, history, booleanOperandHistory } =
+    validateNativeFeatureTransaction(transaction, operation);
   assertValidFeatureResultShape(
     context,
     transaction.Shape() as InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
@@ -1115,6 +1222,12 @@ export function resolveNativeFeatureTransactionReplacement(
     historyInvalidations: reconciled.historyInvalidations,
     successorTargetsByPreviousKey: reconciled.successorTargetsByPreviousKey,
     generatedTargetsBySourceKey: reconciled.generatedTargetsBySourceKey,
+    booleanOperandHistory: resolveNativeBooleanOperandHistory({
+      history: booleanOperandHistory,
+      current,
+      replacement: reconciled.body,
+      operation,
+    }),
   };
 }
 
@@ -1143,16 +1256,22 @@ export function validateNativeFeatureTransaction(
   const historyError = history.diagnostics.find(
     (diagnostic) => diagnostic.severity === "error",
   );
-
   if (historyError) {
     throw new Error(
       `Native OCC ${operation} rejected topology history: ${historyError.message}`,
     );
   }
+  const booleanOperandHistoryJson = transaction.BooleanOperandHistoryJson?.();
+  const booleanOperandHistory =
+    typeof booleanOperandHistoryJson === "string" &&
+    booleanOperandHistoryJson.trim().length > 0
+      ? parseNativeBooleanOperandHistoryJson(booleanOperandHistoryJson)
+      : undefined;
 
   return {
     payload,
     history,
+    booleanOperandHistory,
   };
 }
 
@@ -1185,13 +1304,17 @@ function resolveNativeBooleanReplacement(
     0.5,
   );
 
-  return resolveNativeFeatureTransactionReplacement(
-    context,
-    current,
-    transaction,
-    operation,
-    ownerFeatureId,
-  );
+  try {
+    return resolveNativeFeatureTransactionReplacement(
+      context,
+      current,
+      transaction,
+      operation,
+      ownerFeatureId,
+    );
+  } finally {
+    transaction.delete();
+}
 }
 
 function createHistoryTargetForShape(target: DurableRef, ownerBodyId: BodyId) {
@@ -1395,7 +1518,8 @@ export function resolveReplacementBodies(
     // The source body is gone, so its own reference and every face/edge/vertex
     // on it are deleted outright; anything the history only marked as modified
     // is downgraded to ambiguous because no single piece inherits it.
-    historyInvalidations = markSplitAmbiguousInvalidations(historyInvalidations);
+    historyInvalidations =
+      markSplitAmbiguousInvalidations(historyInvalidations);
     mergeHistoryInvalidations(
       historyInvalidations,
       createDeletedBodyInvalidations(current),
@@ -1556,7 +1680,11 @@ export function applyBooleanPolicy(
 
   if (!policy) {
     const bodyId = targetBodyIds[0]!;
-    const targetBody = requireSolidBody(context, bodyId, `boolean ${operation}`);
+    const targetBody = requireSolidBody(
+      context,
+      bodyId,
+      `boolean ${operation}`,
+    );
     let projectedSourceShapes = options.sourceShapes;
     let replacementResult = options.sourceShapes
       ? null
@@ -1582,19 +1710,22 @@ export function applyBooleanPolicy(
             result.historySources,
           )
         : undefined;
-      replacementResult = resolveReplacementBodies(
-        context,
-        bodyId,
-        result.shape,
-        ownerFeatureId,
-        {
-          allowEmpty: true,
-          historySources: result.historySources,
-          // A single-target boolean is the disconnecting-cut route: a cut that
-          // severs its target replaces it with one body per resulting piece.
-          onSever: "freshIdentities",
-        },
-      );
+      replacementResult = {
+        ...resolveReplacementBodies(
+          context,
+          bodyId,
+          result.shape,
+          ownerFeatureId,
+          {
+            allowEmpty: true,
+            historySources: result.historySources,
+            // A single-target boolean is the disconnecting-cut route: a cut that
+            // severs its target replaces it with one body per resulting piece.
+            onSever: "freshIdentities",
+          },
+        ),
+        booleanOperandHistory: undefined,
+      };
     }
 
     const index = nextBodies.findIndex((entry) => entry.bodyId === bodyId);
@@ -1606,6 +1737,18 @@ export function applyBooleanPolicy(
       bodies: nextBodies,
       producedTargets,
       historyInvalidations: replacementResult.historyInvalidations,
+      successorTargetsByPreviousKey:
+        "successorTargetsByPreviousKey" in replacementResult
+          ? replacementResult.successorTargetsByPreviousKey
+          : new Map<string, DurableRef>(),
+      generatedTargetsBySourceKey:
+        "generatedTargetsBySourceKey" in replacementResult
+          ? replacementResult.generatedTargetsBySourceKey
+          : new Map<string, DurableRef>(),
+      booleanOperandHistory:
+        "booleanOperandHistory" in replacementResult
+          ? replacementResult.booleanOperandHistory
+          : undefined,
       featureSourceTargets: mergeFeatureSourceTargets(
         mapFeatureSourceTargets(
           replacementResult.replacements,
@@ -1729,16 +1872,19 @@ export function applyBooleanPolicy(
         }
       }
 
-      replacementResult = resolveReplacementBodies(
-        context,
-        firstBodyId!,
-        currentResult.shape,
-        ownerFeatureId,
-        {
-          allowEmpty: true,
-          historySources: firstBodyHistorySources,
-        },
-      );
+      replacementResult = {
+        ...resolveReplacementBodies(
+          context,
+          firstBodyId!,
+          currentResult.shape,
+          ownerFeatureId,
+          {
+            allowEmpty: true,
+            historySources: firstBodyHistorySources,
+          },
+        ),
+        booleanOperandHistory: undefined,
+      };
     }
 
     const firstIndex = nextBodies.findIndex(
@@ -1827,16 +1973,19 @@ export function applyBooleanPolicy(
             result.historySources,
           )
         : undefined;
-      replacementResult = resolveReplacementBodies(
-        context,
-        bodyId,
-        result.shape,
-        ownerFeatureId,
-        {
-          allowEmpty: true,
-          historySources: result.historySources,
-        },
-      );
+      replacementResult = {
+        ...resolveReplacementBodies(
+          context,
+          bodyId,
+          result.shape,
+          ownerFeatureId,
+          {
+            allowEmpty: true,
+            historySources: result.historySources,
+          },
+        ),
+        booleanOperandHistory: undefined,
+      };
     }
 
     if (targetSourceShapes) {

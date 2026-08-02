@@ -465,14 +465,11 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
   expect(rebuilt.featureIds).toEqual(LAPTOP_STAND_FEATURE_IDS);
 });
 
-// d3cd9 commits in the real kernel. Its reviewed tiers equal what apply actually
-// creates: every consumer whose profile sketch stayed baked is baked
-// (`downstream-of-baked`) instead of being silently dropped at prepare.
-//
-// Extrude 2, Extrude 3, and Mirror 1 became parametric once one extrude stopped
-// emitting one solid per profile lobe (`fuseExtrudedShapes`): their boolean
-// scopes now resolve against the single body Onshape reports instead of against
-// a spuriously severed one.
+// d3cd9 commits through the native surface split. Exact body-scoped profile
+// identity promotes Extrudes 5/6, Sketch 8, and Extrude 7, leaving one honest
+// native-WASM history boundary: the sheet splitter does not publish the exact
+// modified tool-face lineage that Extrude 8 needs during replay. It therefore
+// remains a single intrinsic checkpoint rather than a claimed 24/0 import.
 test("Second Part Studio commits its honest real-kernel tier split", async ({
   page,
 }) => {
@@ -480,29 +477,21 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
     !existsSync(SECOND_PART_STUDIO_BUNDLE_PATH),
     "Real Onshape second Part Studio capture is not present locally.",
   );
-  test.setTimeout(1_800_000);
+  test.setTimeout(3_600_000);
   const { reviewText } = await importBundle(page, SECOND_PART_STUDIO_BUNDLE_PATH, true);
-  // `Extrude 4` authors `bodyType: SURFACE`, `operationType: NEW`, `depth = 50 mm`,
-  // `symmetric = true`; it now imports as a parametric surface extrude whose sheet
-  // spans the captured z ∈ [-25 mm, +25 mm]. `Split 1` uses exactly that sheet as
-  // its split tool. Body-scoped support-face matching then disambiguates the two
-  // coincident cut faces and promotes Sketch 7: 18 / 6 became 19 / 5.
-  expect(reviewText).toContain("19 parametric, 5 baked, 0 geometry-only features.");
-  expect(reviewText).toMatch(/Sketch 7\s+parametric/);
-  for (const [label, reason] of [
-    ["Extrude 5", "the modeling kernel could not build this feature against the live prefix"],
-    ["Extrude 6", "the modeling kernel could not build this feature against the live prefix"],
-    ["Sketch 8", "topology reference could not be rematched while applying"],
-    ["Extrude 7", "depends on previously baked geometry"],
-    // d3cd9's Extrude 8 authors an `ENTITY` start plane over live body topology.
-    // The start extent now binds to a durable entity, so its honest reason is the
-    // unresolved start-entity slot behind its baked producer.
-    ["Extrude 8", "could not be resolved as a durable reference"],
-  ] as const) {
-    expect(reviewText, `${label} must state its honest bake reason.`).toMatch(
-      new RegExp(`${label}\\s+baked \\(suppressed\\) — [^\\n]*${escapeRegExp(reason)}`),
+  expect(reviewText).toContain("23 parametric, 1 baked, 0 geometry-only features.");
+  for (const label of ["Extrude 5", "Extrude 6", "Sketch 8", "Extrude 7"]) {
+    expect(reviewText, `${label} must be parametric.`).toMatch(
+      new RegExp(`${label}\\s+parametric`),
     );
   }
+  const bakedRows = [...reviewText.matchAll(/^(.+)\n\nbaked \(suppressed\) —/gm)].map(
+    ([, label]) => label,
+  );
+  expect(bakedRows).toEqual(["Extrude 8"]);
+  expect(reviewText, "Extrude 8 must retain its native kernel-history failure.").toMatch(
+    /Extrude 8\s+baked \(suppressed\) — the modeling kernel could not build this feature against the live prefix \[kernel-history-probe-step-failed: History probe failed at step 26: occ-invalid-reference: face reference was invalidated with reason occ-topology-unsupported-history\.\]/,
+  );
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect(imported.snapshotDiagnosticsCount).toBe(0);
@@ -515,25 +504,62 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
     "feature_extrude-2",
     "feature_extrude-3",
     "feature_mirror-1",
-    // The surface extrude and sheet split commit, and body scoping commits Sketch
-    // 7 on exactly one split piece before the remaining cut cascade is baked.
     "feature_extrude-4",
     "feature_split-1",
-    "feature_bakedBody-1",
     "feature_extrude-5",
+    "feature_extrude-6",
+    "feature_extrude-7",
+    "feature_bakedBody-1",
+    "feature_extrude-8",
   ]);
   await expectNoWorkbenchAlerts(page);
 
   // The bundle carries real document variables; a `screwHole` edit proves the
-  // committed parametric prefix still rebuilds against the baked checkpoint.
+  // committed parametric prefix still rebuilds across Extrude 8's checkpoint.
   // (`walls` is a separate lever: it reshapes Sketch 1, whose region durable ids
   // then no longer resolve for Extrude 1 — a pre-existing region-identity defect
   // unrelated to this import gate.)
-  const rebuilt = await editVariable(page, "screwHole", "6");
+  const rebuilt = await editD3ScrewHole(page);
   expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
   expect(rebuilt.featureIds).toEqual(imported.featureIds);
   await expectNoReferenceAlerts(page);
 });
+
+async function editD3ScrewHole(page: Page) {
+  const beforeRevision = await currentRevision(page);
+  await page.locator("[data-workbench-variables-fab]").click();
+  const panel = page.locator("[data-workbench-variables-panel]");
+  const editButton = panel.getByRole("button", { name: "Edit variable screwHole" });
+  const variableId = await editButton.locator("..").getAttribute("data-variable-row");
+  expect(variableId).not.toBeNull();
+  await editButton.click();
+  await page.keyboard.press("F2");
+
+  const valueInput = panel.getByLabel(`Variable value ${variableId}`);
+  await valueInput.evaluate((input) => {
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    if (!setValue) throw new Error("HTML input value setter is unavailable.");
+    setValue.call(input, "6");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await valueInput.press("Enter");
+
+  // The live d3 prefix rebuild is substantially longer than the shared 60 s
+  // helper cap. This remains local to its real-kernel acceptance seam.
+  await waitForRevisionChange(page, beforeRevision, 600_000);
+  await page.waitForFunction(
+    () => window.__cadaraDebug?.getState().machineState === "idle",
+    undefined,
+    { timeout: 600_000 },
+  );
+  await expect(panel.locator(`[data-variable-expression="${variableId}"]`)).toHaveText("6", {
+    timeout: 600_000,
+  });
+  return page.evaluate(() => window.__cadaraDebug!.getState());
+}
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
