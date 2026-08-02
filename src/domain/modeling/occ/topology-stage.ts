@@ -869,8 +869,8 @@ export interface OccGeneratedAdjacencyEntry {
 /**
  * Build stage lineage from a feature's own exact kernel history successors.
  *
- * Applies to any feature that replaces one body and reports, per prior
- * subtopology, at most one successor claimed exactly once (rigid transforms,
+ * Applies to any feature that replaces one body and reports, for each prior
+ * subtopology, at most one exact successor (rigid transforms, Boolean fuses,
  * and local operations like fillet/chamfer whose `BRepFilletAPI` history maps
  * untouched faces/edges/vertices one-to-one). Anything the kernel left
  * ambiguous, deleted, or unclaimed becomes an unsupported source key, so a
@@ -893,7 +893,7 @@ export function createExactSuccessorTopologyStage(input: {
   outputBody: OccTrackedBody;
   successorsBySourceKey: ReadonlyMap<string, DurableRef>;
   generatedTargetsBySourceKey?: ReadonlyMap<OccTopologySourceKey, DurableRef>;
-  /** Exact supplemental claims never override target-side history. */
+  /** Exact supplemental claims never override generated target-side history. */
   supplementalProducerTargetsBySourceKey?: ReadonlyMap<
     OccTopologySourceKey,
     DurableRef
@@ -902,7 +902,13 @@ export function createExactSuccessorTopologyStage(input: {
 }): OccFeatureTopologyStage {
   const sourceTargets = new Map<OccTopologySourceKey, DurableRef[]>();
   const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
-  const claimedTargetKeys = new Map<string, OccTopologySourceKey>();
+  const claimedTargetKeys = new Map<string, Set<OccTopologySourceKey>>();
+  const generatedTargetKeys = new Set<string>();
+  const addClaimedTargetKey = (targetKey: string, sourceKey: OccTopologySourceKey) => {
+    const sourceKeys = claimedTargetKeys.get(targetKey) ?? new Set<OccTopologySourceKey>();
+    sourceKeys.add(sourceKey);
+    claimedTargetKeys.set(targetKey, sourceKeys);
+  };
 
   for (const source of getExactSuccessorSourceTargets(input.sourceBody)) {
     const sourceKey = formatExactSuccessorTopologySourceKey({
@@ -927,14 +933,13 @@ export function createExactSuccessorTopologyStage(input: {
     }
 
     const targetKey = getOccDurableRefKey(successor);
-    if (claimedTargetKeys.has(targetKey)) {
+    if (generatedTargetKeys.has(targetKey)) {
       unsupportedSourceKeys.add(sourceKey);
-      unsupportedSourceKeys.add(claimedTargetKeys.get(targetKey)!);
-      sourceTargets.delete(claimedTargetKeys.get(targetKey)!);
       continue;
     }
-
-    claimedTargetKeys.set(targetKey, sourceKey);
+    // Exact Boolean history can converge two prior entities on one fused result
+    // entity. Publish both claims; the provenance index owns their composite id.
+    addClaimedTargetKey(targetKey, sourceKey);
     sourceTargets.set(sourceKey, [successor]);
   }
 
@@ -950,15 +955,18 @@ export function createExactSuccessorTopologyStage(input: {
     const targetKey = getOccDurableRefKey(target);
     const claimedBy = claimedTargetKeys.get(targetKey);
     if (claimedBy) {
-      // A result entity cannot both survive a prior entity and be newly
-      // generated, and two producer claims on one entity are ambiguous.
+      // A result entity cannot both survive a prior entity and be newly generated.
       unsupportedSourceKeys.add(sourceKey);
-      unsupportedSourceKeys.add(claimedBy);
-      sourceTargets.delete(claimedBy);
+      for (const existingSourceKey of claimedBy) {
+        unsupportedSourceKeys.add(existingSourceKey);
+        sourceTargets.delete(existingSourceKey);
+      }
+      claimedTargetKeys.delete(targetKey);
       continue;
     }
 
-    claimedTargetKeys.set(targetKey, sourceKey);
+    addClaimedTargetKey(targetKey, sourceKey);
+    generatedTargetKeys.add(targetKey);
     sourceTargets.set(sourceKey, [target]);
   }
 
@@ -971,17 +979,16 @@ export function createExactSuccessorTopologyStage(input: {
       continue;
     }
     const targetKey = getOccDurableRefKey(target);
-    if (claimedTargetKeys.has(targetKey)) {
-      // The target-side successor/generated claim is authoritative.
+    if (generatedTargetKeys.has(targetKey)) {
       unsupportedSourceKeys.add(sourceKey);
       continue;
     }
-    claimedTargetKeys.set(targetKey, sourceKey);
+    addClaimedTargetKey(targetKey, sourceKey);
     sourceTargets.set(sourceKey, [target]);
   }
 
   // Adjacency claims run last: they can only name an entity once every face
-  // bounding it already carries a claim, and they must never override one.
+  // bounding it already carries exactly one claim, and they never override one.
   const adjacencyTargetsBySourceKey = new Map<OccTopologySourceKey, DurableRef>();
   const droppedAdjacencySourceKeys = new Set<OccTopologySourceKey>();
   for (const entry of input.generatedAdjacency ?? []) {
@@ -999,20 +1006,20 @@ export function createExactSuccessorTopologyStage(input: {
 
     const adjacentSourceKeys: OccTopologySourceKey[] = [];
     for (const faceId of new Set(entry.adjacentFaceIds)) {
-      const claim = claimedTargetKeys.get(
+      const claims = claimedTargetKeys.get(
         getOccDurableRefKey({
           kind: "face",
           bodyId: input.outputBody.bodyId,
           faceId,
         }),
       );
-      if (claim === undefined) {
-        // An unnamed bounding face makes the signature unreproducible, so the
-        // entity stays honestly unclaimed.
+      if (!claims || claims.size !== 1) {
+        // An unnamed or convergent bounding face has no singular reproducible
+        // adjacency signature, so the entity stays honestly unclaimed.
         adjacentSourceKeys.length = 0;
         break;
       }
-      adjacentSourceKeys.push(claim);
+      adjacentSourceKeys.push(claims.values().next().value!);
     }
     if (adjacentSourceKeys.length === 0) {
       continue;
@@ -1037,7 +1044,7 @@ export function createExactSuccessorTopologyStage(input: {
   }
 
   for (const [sourceKey, target] of adjacencyTargetsBySourceKey) {
-    claimedTargetKeys.set(getOccDurableRefKey(target), sourceKey);
+    addClaimedTargetKey(getOccDurableRefKey(target), sourceKey);
     sourceTargets.set(sourceKey, [target]);
   }
 

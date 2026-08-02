@@ -42,14 +42,23 @@ export type ProjectedSketchProfileVertexKey =
   `${ProjectedSketchProfileEdgeKey}:${"start" | "end"}`;
 export type SketchProfileEdgeSourceKey =
   | SketchEntityId
-  | ProjectedSketchProfileEdgeKey;
+  | ProjectedSketchProfileEdgeKey
+  | SplitSketchProfileEdgeKey;
+/**
+ * Distinct key for ONE split piece of a source curve that contributes several
+ * boundary segments to the same profile. The ordinal is the region
+ * extraction's persisted `sourceSegmentOrdinal` (split-piece position in
+ * source-curve parameter order), never a geometric match, so the key is exact
+ * and reproducible. Sources contributing a single segment keep their bare key.
+ */
+export type SplitSketchProfileEdgeKey = `${string}#${number}`;
 export type SketchProfileVertexSourceKey =
   | SketchPointId
   | ProjectedSketchProfileVertexKey;
 
 export interface UnsupportedSketchProfileSource {
   sourceKey: SketchProfileEdgeSourceKey;
-  reason: "approximated";
+  reason: "approximated" | "ambiguous-split-segment";
 }
 
 export interface SketchProfileProvenance {
@@ -1078,6 +1087,48 @@ function buildProjectedBoundaryEdge(
   }
 }
 
+type RegionBoundarySegment = RegionRecord["loops"][number]["segments"][number];
+
+function getRegionSegmentBaseEdgeKey(
+  segment: RegionBoundarySegment,
+): SketchProfileEdgeSourceKey {
+  return segment.source.kind === "projectedGeometry"
+    ? getProjectedSegmentId(segment.source)
+    : segment.source.entityId;
+}
+
+/**
+ * Resolve the provenance key for one boundary segment's profile edge.
+ *
+ * A source curve crossed several times by a region boundary contributes
+ * SEVERAL wire edges. Keying them all by the bare source id silently
+ * overwrites every edge but the last, so the earlier edges' swept faces reach
+ * later features with no lineage at all. Each split piece therefore keys on
+ * its persisted `sourceSegmentOrdinal`; a multi-piece source without ordinals
+ * cannot be named exactly and fails closed as an unsupported source.
+ */
+function createRegionSegmentEdgeKeyResolver(
+  loops: readonly RegionRecord["loops"][number][],
+) {
+  const segmentCounts = new Map<SketchProfileEdgeSourceKey, number>();
+  for (const loop of loops) {
+    for (const segment of loop.segments) {
+      const baseKey = getRegionSegmentBaseEdgeKey(segment);
+      segmentCounts.set(baseKey, (segmentCounts.get(baseKey) ?? 0) + 1);
+    }
+  }
+  return (segment: RegionBoundarySegment): SketchProfileEdgeSourceKey | null => {
+    const baseKey = getRegionSegmentBaseEdgeKey(segment);
+    if ((segmentCounts.get(baseKey) ?? 0) <= 1) {
+      return baseKey;
+    }
+    if (segment.sourceSegmentOrdinal === undefined) {
+      return null;
+    }
+    return `${baseKey}#${segment.sourceSegmentOrdinal}`;
+  };
+}
+
 function buildLoopWire(
   oc: OpenCascadeInstance,
   plane: SketchPlaneDefinition,
@@ -1085,6 +1136,9 @@ function buildLoopWire(
   loop: RegionRecord["loops"][number],
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
   provenance: MutableSketchProfileProvenance,
+  resolveSegmentEdgeKey: (
+    segment: RegionBoundarySegment,
+  ) => SketchProfileEdgeSourceKey | null,
 ) {
   const loopGeometry: BoundarySegmentGeometry[] = [];
   // `owned` vertices are loop-local and released with the loop; the rest are
@@ -1124,6 +1178,21 @@ function buildLoopWire(
     return vertex;
   };
   const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1();
+  const registerSegmentEdge = (
+    segment: RegionBoundarySegment,
+    edge: InstanceType<OpenCascadeInstance["TopoDS_Edge"]>,
+  ) => {
+    const edgeKey = resolveSegmentEdgeKey(segment);
+    if (edgeKey === null) {
+      provenance.unsupportedSources.push({
+        sourceKey: getRegionSegmentBaseEdgeKey(segment),
+        reason: "ambiguous-split-segment",
+      });
+      deleteOccObject(edge);
+      return;
+    }
+    provenance.edges.set(edgeKey, edge);
+  };
 
   try {
     for (const segment of loop.segments) {
@@ -1155,7 +1224,7 @@ function buildLoopWire(
           resolveProfileVertex,
         );
         wireBuilder.Add_1(edge);
-        provenance.edges.set(getProjectedSegmentId(segment.source), edge);
+        registerSegmentEdge(segment, edge);
       } else {
         const geometry = getSolvedEntityGeometry(
           sketch,
@@ -1182,7 +1251,7 @@ function buildLoopWire(
                 resolveProfileVertex(segmentGeometry.end),
               );
               wireBuilder.Add_1(edge);
-              provenance.edges.set(geometry.entityId, edge);
+              registerSegmentEdge(segment, edge);
               break;
             }
             const entity = getSketchEntityDefinition(sketch, geometry.entityId);
@@ -1210,7 +1279,7 @@ function buildLoopWire(
               deleteOccObject(baseEdge);
             }
             wireBuilder.Add_1(edge);
-            provenance.edges.set(entity.entityId, edge);
+            registerSegmentEdge(segment, edge);
             break;
           }
           case "circle": {
@@ -1232,7 +1301,7 @@ function buildLoopWire(
                 resolveProfileVertex(segmentGeometry.end),
               );
               wireBuilder.Add_1(edge);
-              provenance.edges.set(geometry.entityId, edge);
+              registerSegmentEdge(segment, edge);
               break;
             }
             const baseEdge = buildCircleEdge(oc, plane, geometry);
@@ -1242,7 +1311,7 @@ function buildLoopWire(
               deleteOccObject(baseEdge);
             }
             wireBuilder.Add_1(edge);
-            provenance.edges.set(geometry.entityId, edge);
+            registerSegmentEdge(segment, edge);
             break;
           }
           case "arc": {
@@ -1266,7 +1335,7 @@ function buildLoopWire(
                 resolveProfileVertex(segmentGeometry.end),
               );
               wireBuilder.Add_1(edge);
-              provenance.edges.set(geometry.entityId, edge);
+              registerSegmentEdge(segment, edge);
               break;
             }
             const entity = getSketchEntityDefinition(sketch, geometry.entityId);
@@ -1300,7 +1369,7 @@ function buildLoopWire(
               deleteOccObject(baseEdge);
             }
             wireBuilder.Add_1(edge);
-            provenance.edges.set(entity.entityId, edge);
+            registerSegmentEdge(segment, edge);
             break;
           }
           case "ellipse":
@@ -1390,6 +1459,9 @@ export function buildRegionProfileFace(
     vertices: new Map(),
     unsupportedSources: [],
   };
+  const resolveSegmentEdgeKey = createRegionSegmentEdgeKeyResolver(
+    region.loops.filter((loop) => loop.role === "outer" || loop.role === "inner"),
+  );
   let succeeded = false;
   let outerWire: ReturnType<typeof buildLoopWire> | null = null;
   let faceBuilder: {
@@ -1407,6 +1479,7 @@ export function buildRegionProfileFace(
       outerLoop,
       projectedReferences,
       provenance,
+      resolveSegmentEdgeKey,
     );
     faceBuilder = new oc.BRepBuilderAPI_MakeFace_15(outerWire, true);
 
@@ -1421,6 +1494,7 @@ export function buildRegionProfileFace(
         innerLoop,
         projectedReferences,
         provenance,
+        resolveSegmentEdgeKey,
       );
       try {
         faceBuilder.Add(innerWire);
@@ -1523,6 +1597,7 @@ export function buildRegionProfileWire(
         snapshotSketch.sketch.projectedReferences ??
         [],
       provenance,
+      createRegionSegmentEdgeKeyResolver([outerLoop]),
     );
     return { wire, plane, normal: plane.frame.normal, provenance };
   } catch (error) {

@@ -528,6 +528,7 @@ test("translateSheetSplitToolHistoryToSemanticIds derives slots from exact exclu
     resolveFace(target) {
       if (target.faceId === "face_public_a") return "canonical-witness-a";
       if (target.faceId === "face_public_b") return "canonical-witness-b";
+      if (target.faceId === "face_public_shared") return "canonical-witness-shared";
       if (target.faceId === "face_public_mirror") {
         throw new OccTopologyProvenanceMissingError("face:body_sheet_split_target:face_public_mirror");
       }
@@ -576,6 +577,21 @@ test("translateSheetSplitToolHistoryToSemanticIds derives slots from exact exclu
     "Shared source faces do not discriminate semantic split output slots.",
   ).not.toContain("face_native_shared");
 
+  // A slot with no exclusive member keeps its exact identity in the full
+  // membership set; identical sets across slots stay a fail-closed collision.
+  const fallback = translate(
+    makeHistory([
+      {
+        outputSlotKey: "native-slot-a",
+        sourceTargetFaceNativeIds: ["face_native_a", "face_native_shared"],
+      },
+      { outputSlotKey: "native-slot-b", sourceTargetFaceNativeIds: ["face_native_shared"] },
+    ]),
+  );
+  expect(
+    fallback.outputs.map((output) => output.sourceTargetProvenanceIds),
+    "A slot whose members are all shared derives its identity from the full membership set.",
+  ).toEqual([["canonical-witness-a"], ["canonical-witness-shared"]]);
   expect(() =>
     translate(
       makeHistory([
@@ -583,7 +599,7 @@ test("translateSheetSplitToolHistoryToSemanticIds derives slots from exact exclu
         { outputSlotKey: "native-slot-b", sourceTargetFaceNativeIds: ["face_native_shared"] },
       ]),
     ),
-  ).toThrow(/exclusive-witnesses-missing/);
+  ).toThrow(/semantic-output-slot-collision/);
   expect(() =>
     translate(
       makeHistory([

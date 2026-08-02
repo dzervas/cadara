@@ -445,8 +445,12 @@ function formatSheetSplitSemanticOutputSlot(input: {
 }
 
 /**
- * Native output membership is exact. Only a source target face that belongs to
- * one output can distinguish that output's semantic slot; shared faces cannot.
+ * Native output membership is exact. A source target face that belongs to one
+ * output distinguishes that output's semantic slot on its own; a slot whose
+ * every member face is shared (the tool split all of them across outputs)
+ * still has an exact identity in its FULL membership set, which must differ
+ * from every other slot's set or the semantic-slot collision check rejects
+ * the history outright.
  */
 function getExclusiveSheetSplitWitnessNativeFaceIds(
   history: OccNativeSheetSplitToolHistoryPayload,
@@ -522,7 +526,13 @@ export function translateSheetSplitToolHistoryToSemanticIds(input: {
         `occ-native-sheet-split-history-exclusive-witnesses-missing: output slot ${output.outputSlotKey} has no exact membership incidence.`,
       );
     }
-    const sourceTargetFaceIds = exclusiveWitnessNativeFaceIds.map((nativeFaceId) =>
+    // A slot with no exclusive member falls back to its full exact membership
+    // set; distinctness across slots is enforced by the collision check below.
+    const witnessNativeFaceIds =
+      exclusiveWitnessNativeFaceIds.length > 0
+        ? exclusiveWitnessNativeFaceIds
+        : output.sourceTargetFaceNativeIds;
+    const sourceTargetFaceIds = witnessNativeFaceIds.map((nativeFaceId) =>
       translateExactNativeFaceId({
         aliases: input.targetFaceIdsByNativeId,
         nativeFaceId,

@@ -1541,23 +1541,17 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
     expect(splitStudio, "Expected d3cd9's studio review.").toBeDefined();
     expect(
       splitStudio?.featurePlans.filter((plan) => plan.tier === "parametric"),
-      "The real OCC review must retain 23 of 24 d3cd9 features parametrically before preparation.",
-    ).toHaveLength(23);
-    // Extrude 8 is the one honest bake: the native boolean history omits exact
-    // records for some fused faces of body_feature_extrude-1 (rooted at
-    // Extrude 3's join), so the sheet split degrades to the generic native
-    // path without exact tool-face history and Extrude 8's face reference
-    // cannot replay. Closing it requires shim-level history coverage in
-    // CadaraPrepareCommittedShapeWithHistory plus a wasm rebuild.
+      "The real OCC review must retain all 24 d3cd9 features parametrically before preparation.",
+    ).toHaveLength(24);
     expect(
       splitStudio?.featurePlans
         .filter((plan) => plan.tier === "baked")
         .map((plan) => plan.label),
-      "Extrude 8 must remain the only baked d3cd9 feature.",
-    ).toEqual(["Extrude 8"]);
+      "No d3cd9 feature may bake: split-piece profile lineage and full-membership sheet-split slots replay Extrude 8 parametrically.",
+    ).toEqual([]);
     expect(
       splitStudio?.featurePlans.find((plan) => plan.label === "Split 1"),
-      "Split 1 must remain parametric through the degraded generic sheet split.",
+      "Split 1 must stay parametric on the native sheet-split tool-history path.",
     ).toMatchObject({ tier: "parametric", reasonCodes: [] });
     const actions = await onshapeImportProvider.prepare({
       source,

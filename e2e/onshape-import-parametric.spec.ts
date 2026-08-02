@@ -466,10 +466,10 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
 });
 
 // d3cd9 commits through the native surface split. Exact body-scoped profile
-// identity promotes Extrudes 5/6, Sketch 8, and Extrude 7, leaving one honest
-// native-WASM history boundary: the sheet splitter does not publish the exact
-// modified tool-face lineage that Extrude 8 needs during replay. It therefore
-// remains a single intrinsic checkpoint rather than a claimed 24/0 import.
+// identity promotes Extrudes 5/6, Sketch 8, and Extrude 7, and split-piece
+// profile lineage (`sourceSegmentOrdinal` provenance keys) plus
+// full-membership sheet-split slot identity let Extrude 8's face reference
+// replay too, so the whole document imports parametrically.
 test("Second Part Studio commits its honest real-kernel tier split", async ({
   page,
 }) => {
@@ -479,8 +479,8 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   );
   test.setTimeout(3_600_000);
   const { reviewText } = await importBundle(page, SECOND_PART_STUDIO_BUNDLE_PATH, true);
-  expect(reviewText).toContain("23 parametric, 1 baked, 0 geometry-only features.");
-  for (const label of ["Extrude 5", "Extrude 6", "Sketch 8", "Extrude 7"]) {
+  expect(reviewText).toContain("24 parametric, 0 baked, 0 geometry-only features.");
+  for (const label of ["Extrude 5", "Extrude 6", "Sketch 8", "Extrude 7", "Extrude 8"]) {
     expect(reviewText, `${label} must be parametric.`).toMatch(
       new RegExp(`${label}\\s+parametric`),
     );
@@ -488,16 +488,12 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   const bakedRows = [...reviewText.matchAll(/^(.+)\n\nbaked \(suppressed\) —/gm)].map(
     ([, label]) => label,
   );
-  expect(bakedRows).toEqual(["Extrude 8"]);
-  expect(reviewText, "Extrude 8 must retain its native kernel-history failure.").toMatch(
-    /Extrude 8\s+baked \(suppressed\) — the modeling kernel could not build this feature against the live prefix \[kernel-history-probe-step-failed: History probe failed at step 26: occ-invalid-reference: face reference was invalidated with reason occ-topology-unsupported-history\.\]/,
-  );
+  expect(bakedRows).toEqual([]);
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
-  // Exactly one warning: the sheet split degrades from the exact tool-history
-  // path (`occ-native-sheet-split-tool-history-degraded`) because the native
-  // boolean history cannot name every fused target face on this document.
-  expect(imported.snapshotDiagnosticsCount).toBe(1);
+  // No warnings: the sheet split commits on the exact tool-history path, so no
+  // `occ-native-sheet-split-tool-history-degraded` diagnostic survives.
+  expect(imported.snapshotDiagnosticsCount).toBe(0);
   expect(imported.featureIds).toEqual([
     "feature_extrude-1",
     "feature_plane-1",
@@ -512,18 +508,18 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
     "feature_extrude-5",
     "feature_extrude-6",
     "feature_extrude-7",
-    "feature_bakedBody-1",
     "feature_extrude-8",
+    "feature_extrude-9",
   ]);
   await expectNoWorkbenchAlerts(page);
 
   // The bundle carries real document variables; a `screwHole` edit proves the
-  // committed parametric prefix still rebuilds across Extrude 8's checkpoint.
+  // committed parametric document still rebuilds end to end.
   // (`walls` is a separate lever: it reshapes Sketch 1, whose region durable ids
   // then no longer resolve for Extrude 1 — a pre-existing region-identity defect
   // unrelated to this import gate.)
   const rebuilt = await editD3ScrewHole(page);
-  expect(rebuilt.snapshotDiagnosticsCount).toBe(1);
+  expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
   expect(rebuilt.featureIds).toEqual(imported.featureIds);
   await expectNoReferenceAlerts(page);
 });

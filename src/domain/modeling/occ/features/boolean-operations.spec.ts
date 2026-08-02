@@ -628,6 +628,79 @@ test("applyBooleanPolicy uses native boolean transactions for per-target multi-b
   ).toBeFalsy();
 });
 
+test("native Boolean history retains exact fused-face successor claims", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const body = makeTrackedBox(
+    oc,
+    "body_native_boolean_fused_history" as BodyId,
+    "feature_native_boolean_fused_history" as FeatureId,
+    [1, 1, 1],
+  );
+  const context = createOccAuthoringState(oc, { bodies: [body] });
+  const [firstSourceFaceId, secondSourceFaceId] = body.topology.faceIds;
+  const finalNativeFaceId = `face_${body.bodyId}_native_payload_1`;
+  const transaction = {
+    IsDone: () => true,
+    Shape: () => body.shape,
+    PayloadJson: () => JSON.stringify({
+      schemaVersion: "occ-native-topology-payload/v1alpha1",
+      source: "occt7-shim",
+      topology: [
+        ...body.topology.faceIds.map((_, index) => ({
+          id: `face_${body.bodyId}_native_payload_${index + 1}`,
+          kind: "face",
+          bodyId: body.bodyId,
+          index: index + 1,
+        })),
+        ...body.topology.edgeIds.map((_, index) => ({
+          id: `edge_${body.bodyId}_native_payload_${index + 1}`,
+          kind: "edge",
+          bodyId: body.bodyId,
+          index: index + 1,
+        })),
+        ...body.topology.vertexIds.map((_, index) => ({
+          id: `vertex_${body.bodyId}_native_payload_${index + 1}`,
+          kind: "vertex",
+          bodyId: body.bodyId,
+          index: index + 1,
+        })),
+      ],
+      edgeVertices: [],
+      diagnostics: [],
+    }),
+    HistoryJson: () => JSON.stringify({
+      schemaVersion: "occ-native-history-payload/v1alpha1",
+      source: "occt7-shim",
+      status: "available",
+      records: [firstSourceFaceId, secondSourceFaceId].map((faceId) => ({
+        target: { kind: "face", bodyId: body.bodyId, faceId },
+        reason: "unique-successor",
+        successors: [
+          { kind: "face", bodyId: body.bodyId, faceId: finalNativeFaceId },
+        ],
+      })),
+      diagnostics: [],
+    }),
+  };
+
+  const result = resolveNativeFeatureTransactionReplacement(
+    context,
+    body,
+    transaction,
+    "native-boolean-fused-history",
+    "feature_native_boolean_fused_history_replace" as FeatureId,
+  );
+  const successors = result?.successorTargetsByPreviousKey;
+
+  expect(result?.historyInvalidations.size).toBe(0);
+  expect(successors?.size).toBe(2);
+  expect(new Set([firstSourceFaceId, secondSourceFaceId].map((faceId) =>
+    getOccDurableRefKey(successors!.get(
+      getOccDurableRefKey({ kind: "face", bodyId: body.bodyId, faceId }),
+    )!),
+  )).size).toBe(1);
+});
+
 test("resolveNativeFeatureTransactionReplacement claims producer identity from native generated history records", async () => {
   const oc = await getDefaultOpenCascadeInstance();
   const body = makeTrackedBox(
