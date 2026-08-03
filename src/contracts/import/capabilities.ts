@@ -177,6 +177,8 @@ export interface HistoryProbeInput {
  */
 export interface ImportHistoryProbeCapabilities {
   evaluateHistoryProbe(input: HistoryProbeInput): Promise<HistoryProbeResult>;
+  /** Release any isolated kernel session retained for exact-prefix continuation. */
+  dispose?(): void | Promise<void>;
 }
 
 export interface ImportCapabilities {

@@ -1859,28 +1859,32 @@ async function reviewStudio(
   const forcedBakeFeatureIds = new Set<string>();
   const forcedBakeReasonDetails = new Map<string, string>();
   let activation: Awaited<ReturnType<typeof activateProbeBackedPlanning>>;
-  for (;;) {
-    try {
-      activation = await activateProbeBackedPlanning({
-        read,
-        plan: capturedFramePlan,
-        capabilities,
-        forcedBakeFeatureIds,
-        forcedBakeReasonDetails,
-        forgetFailedProbes: memoizedHistory?.forgetFailedEvaluations,
-      });
-      break;
-    } catch (error) {
-      if (!isTopologyApplyRematchError(error)) throw error;
-      const offendingFeatureId = error.selector.source.consumerFeatureId;
-      // No progress means the demotion did not prevent the throw; surface it
-      // loudly rather than looping. Genuine non-topology errors already rethrew.
-      if (forcedBakeFeatureIds.has(offendingFeatureId)) throw error;
-      forcedBakeFeatureIds.add(offendingFeatureId);
-      if (error.detail) {
-        forcedBakeReasonDetails.set(offendingFeatureId, error.detail);
+  try {
+    for (;;) {
+      try {
+        activation = await activateProbeBackedPlanning({
+          read,
+          plan: capturedFramePlan,
+          capabilities,
+          forcedBakeFeatureIds,
+          forcedBakeReasonDetails,
+          forgetFailedProbes: memoizedHistory?.forgetFailedEvaluations,
+        });
+        break;
+      } catch (error) {
+        if (!isTopologyApplyRematchError(error)) throw error;
+        const offendingFeatureId = error.selector.source.consumerFeatureId;
+        // No progress means the demotion did not prevent the throw; surface it
+        // loudly rather than looping. Genuine non-topology errors already rethrew.
+        if (forcedBakeFeatureIds.has(offendingFeatureId)) throw error;
+        forcedBakeFeatureIds.add(offendingFeatureId);
+        if (error.detail) {
+          forcedBakeReasonDetails.set(offendingFeatureId, error.detail);
+        }
       }
     }
+  } finally {
+    await memoizedHistory?.dispose?.();
   }
   const { plan, probeResult } = activation;
   const sketchRelationshipSummaries = plan.featurePlans

@@ -5,6 +5,7 @@ import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.p
 import {
   createKernelHistoryProbeSession,
   createMemoizedHistoryProbe,
+  takePreparedActionPrefix,
 } from "@/domain/import/kernel-history-probe";
 import {
   createOccNativeExactBrepPayloadFromShimPayload,
@@ -166,7 +167,7 @@ test("kernel history probe materializes deferred sketch-region extrudes", async 
 });
 
 
-test("kernel history probe awaits async service disposal after a successful evaluation", async () => {
+test("kernel history probe awaits async disposal of a retained successful session", async () => {
   let beginDispose: (() => void) | undefined;
   let releaseDispose: (() => void) | undefined;
   const disposeStarted = new Promise<void>((resolve) => {
@@ -186,17 +187,99 @@ test("kernel history probe awaits async service disposal after a successful eval
     },
   });
 
-  const evaluation = probe.evaluateHistoryProbe({ actions: {} });
+  await expect(probe.evaluateHistoryProbe({ actions: {} })).resolves.toEqual({ steps: [] });
+  const disposal = probe.dispose!();
   await disposeStarted;
   let settled = false;
-  void evaluation.then(() => {
+  void disposal.then(() => {
     settled = true;
   });
   await Promise.resolve();
   expect(settled).toBe(false);
 
   releaseDispose?.();
-  await expect(evaluation).resolves.toEqual({ steps: [] });
+  await disposal;
+});
+
+// Lane: logic. Seam: exact prepared-action prefix evaluations reuse one
+// isolated kernel session, while a changed prefix disposes it and starts fresh.
+test("kernel history probe continues exact prefix extensions and restarts on divergence", async () => {
+  const documentId = "doc_workspace" as DocumentId;
+  const fullActions = sketchExtrudeCandidate(documentId);
+  const firstPrefix = takePreparedActionPrefix(fullActions, 1);
+  let serviceCount = 0;
+  let sketchCalls = 0;
+  let featureCalls = 0;
+  let disposeCalls = 0;
+  let snapshotCalls = 0;
+  const probe = createKernelHistoryProbeSession({
+    createService() {
+      serviceCount += 1;
+      const service = createModelingService(
+        new MockKernelAdapter({ solverAdapter: createRevisionAgnosticRealSolver() }),
+        { currentDocumentId: documentId },
+      );
+      return {
+        ...service,
+        getCurrentDocumentSnapshot() {
+          snapshotCalls += 1;
+          return service.getCurrentDocumentSnapshot();
+        },
+        commitSketch(input) {
+          sketchCalls += 1;
+          return service.commitSketch(input);
+        },
+        createFeature(input) {
+          featureCalls += 1;
+          return service.createFeature(input);
+        },
+        async buildNativeExactBrepPayload(_input) {
+          return {
+            kind: "nativeTopologyPayload" as const,
+            payload: makeExactPayload("body_signature_fixture_box" as BodyId),
+            diagnostics: [],
+          };
+        },
+        dispose() {
+          disposeCalls += 1;
+          service.dispose();
+        },
+      };
+    },
+  });
+
+  await probe.evaluateHistoryProbe({
+    actions: firstPrefix,
+    requestedSignatureStepOrdinals: [0],
+  });
+  await probe.evaluateHistoryProbe({
+    actions: fullActions,
+    requestedSignatureStepOrdinals: [0, 1],
+  });
+  expect({ serviceCount, sketchCalls, featureCalls, snapshotCalls, disposeCalls }).toEqual({
+    serviceCount: 1,
+    sketchCalls: 1,
+    featureCalls: 1,
+    snapshotCalls: 4,
+    disposeCalls: 0,
+  });
+
+  const divergent = structuredClone(fullActions);
+  divergent.createFeatures![0]!.featureLabel = "Changed probe extrude";
+  await probe.evaluateHistoryProbe({
+    actions: divergent,
+    requestedSignatureStepOrdinals: [0, 1],
+  });
+  expect({ serviceCount, sketchCalls, featureCalls, snapshotCalls, disposeCalls }).toEqual({
+    serviceCount: 2,
+    sketchCalls: 2,
+    featureCalls: 2,
+    snapshotCalls: 8,
+    disposeCalls: 1,
+  });
+
+  await probe.dispose?.();
+  expect(disposeCalls).toBe(2);
 });
 
 test("kernel history probe awaits async service disposal after a failed evaluation", async () => {
@@ -496,7 +579,7 @@ test("kernel history probe samples every successful step by default and skips un
     step.status === "rebuilt" ? step.signatures.length : 0,
   );
   expect(legacySignatureCounts.every((count) => count > 0)).toBe(true);
-  expect(legacy).toMatchObject({ snapshotCalls: 6, exactPayloadCalls: 3 });
+  expect(legacy).toMatchObject({ snapshotCalls: 4, exactPayloadCalls: 3 });
 
   const selected = await evaluate([1]);
   expect(
@@ -504,7 +587,7 @@ test("kernel history probe samples every successful step by default and skips un
       step.status === "rebuilt" ? step.signatures.length : 0,
     ),
   ).toEqual([0, legacySignatureCounts[1], 0]);
-  expect(selected).toMatchObject({ snapshotCalls: 4, exactPayloadCalls: 1 });
+  expect(selected).toMatchObject({ snapshotCalls: 2, exactPayloadCalls: 1 });
 
   const empty = await evaluate([]);
   expect(empty.result.steps).toEqual([
@@ -512,7 +595,7 @@ test("kernel history probe samples every successful step by default and skips un
     { status: "rebuilt", signatures: [] },
     { status: "rebuilt", signatures: [] },
   ]);
-  expect(empty).toMatchObject({ snapshotCalls: 3, exactPayloadCalls: 0 });
+  expect(empty).toMatchObject({ snapshotCalls: 1, exactPayloadCalls: 0 });
 });
 
 test("kernel history probe contains topology rematch failures only when requested", async () => {
@@ -789,8 +872,13 @@ test("memoized history probe retains a failed evaluation until containment forge
   await memoized.evaluateHistoryProbe({ actions });
   expect(evaluations).toBe(1);
 
-  // The contained plan is a different payload, so it is evaluated on its own.
-  await memoized.evaluateHistoryProbe({ actions: { ...actions, commitSketches: [] } });
+  // A changed action prefix is evaluated on its own.
+  await memoized.evaluateHistoryProbe({
+    actions: {
+      addDocumentVariables: [{ name: "b" }] as never,
+      orderedActions: [{ kind: "addDocumentVariable", index: 0 }],
+    },
+  });
   expect(evaluations).toBe(2);
 
   // Containment ran: the prefix it contained must be able to reach the kernel
@@ -798,4 +886,61 @@ test("memoized history probe retains a failed evaluation until containment forge
   memoized.forgetFailedEvaluations();
   await memoized.evaluateHistoryProbe({ actions });
   expect(evaluations).toBe(3);
+});
+
+// Lane: logic. Seam: an exact failed action prefix answers longer downstream
+// probes until containment invalidates that evidence.
+test("memoized history probe reuses an exact failed prefix for longer action sequences", async () => {
+  let evaluations = 0;
+  const memoized = createMemoizedHistoryProbe({
+    async evaluateHistoryProbe() {
+      evaluations += 1;
+      return {
+        steps: [
+          { status: "rebuilt" as const, signatures: [] },
+          {
+            status: "failed" as const,
+            diagnostics: [{
+              severity: "error" as const,
+              code: "kernel-history-probe-step-failed",
+              message: "The second action fails.",
+            }],
+          },
+        ],
+      };
+    },
+  });
+  const failedActions: ImportPreparedActions = {
+    addDocumentVariables: [{ name: "a" }, { name: "b" }] as never,
+    orderedActions: [
+      { kind: "addDocumentVariable", index: 0 },
+      { kind: "addDocumentVariable", index: 1 },
+    ],
+  };
+  const longerActions: ImportPreparedActions = {
+    addDocumentVariables: [{ name: "a" }, { name: "b" }, { name: "c" }] as never,
+    orderedActions: [
+      { kind: "addDocumentVariable", index: 0 },
+      { kind: "addDocumentVariable", index: 1 },
+      { kind: "addDocumentVariable", index: 2 },
+    ],
+  };
+
+  const failed = await memoized.evaluateHistoryProbe({
+    actions: failedActions,
+    requestedSignatureStepOrdinals: [1],
+  });
+  const reused = await memoized.evaluateHistoryProbe({
+    actions: longerActions,
+    requestedSignatureStepOrdinals: [2],
+  });
+  expect(reused).toEqual(failed);
+  expect(evaluations).toBe(1);
+
+  memoized.forgetFailedEvaluations();
+  await memoized.evaluateHistoryProbe({
+    actions: longerActions,
+    requestedSignatureStepOrdinals: [2],
+  });
+  expect(evaluations).toBe(2);
 });
