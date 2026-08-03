@@ -4353,3 +4353,113 @@ test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", a
   const applied = await service.getCurrentDocumentSnapshot();
   expect(applied.document.bodies.map((body) => body.bodyKind)).toEqual(["solid", "solid"]);
 });
+
+// Lane: logic (per docs/testing.md — importer review/prepare/apply
+// orchestration through the real OCC adapter, no UI). Seam: the complete
+// prepared d3cd9 action sequence applies through applyImportPreparedActions —
+// the same entry the workbench commitPartImport uses — committing every
+// feature with zero error and zero committed-snapshot diagnostics. This is the
+// headless equivalent of the browser full-apply gate; the review-only probe
+// replay alone cannot prove split output body ids stay stable at apply.
+const D3_CAPTURE_FIXTURE =
+  "test/fixtures/onshape-captures/d3cd9b09c3c36af1dd2efae9.onshape-capture.json";
+
+test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
+  "d3cd9 applies the complete prepared action sequence through real OCC with zero diagnostics",
+  async () => {
+    const bundle = JSON.parse(await readFile(D3_CAPTURE_FIXTURE, "utf8"));
+    const oc = await loadRealOccForImportTest();
+    // Mirror the browser probe host: each evaluation receives an isolated
+    // probe document instead of sharing the live workspace document.
+    let probeOrdinal = 0;
+    const createProbeService = () => {
+      probeOrdinal += 1;
+      const documentId = `doc_occ_history_probe_${probeOrdinal}` as DocumentId;
+      const createSolver = (revisionId: RevisionId | null) =>
+        new SketchConstraintSolverAdapter({ documentId, revisionId });
+      return createModelingService(
+        new OpenCascadeKernelAdapter({
+          solverAdapter: createSolver(null),
+          solverAdapterFactory: createSolver,
+          getOpenCascadeInstance: async () => oc,
+          documentId,
+        }),
+        { currentDocumentId: documentId, sketchSolver: createSolver(null) },
+      );
+    };
+    const { adapter, service } = createRealOccModelingService(oc);
+    const before = await service.getCurrentDocumentSnapshot();
+    const reviewCapabilities = createImportCapabilities(service, before, {
+      history: createKernelHistoryProbeSession({
+        createService: createProbeService,
+      }),
+    });
+    const source = sourceFromBundle(bundle);
+    const review = await onshapeImportProvider.review({
+      source,
+      capabilities: reviewCapabilities,
+    });
+    const splitStudio = review.providerReview.studios.find((studio) =>
+      studio.featurePlans.some((plan) => plan.label === "Split 1"),
+    );
+    expect(
+      splitStudio?.featurePlans.filter((plan) => plan.tier === "parametric"),
+      "The real OCC review must retain all 24 d3cd9 features parametrically before apply.",
+    ).toHaveLength(24);
+
+    // The workbench prepares at commit time with a fresh probe capability, not
+    // the review-time one; mirror that so prepare re-probes in new sessions.
+    const prepareCapabilities = createImportCapabilities(service, before, {
+      history: createKernelHistoryProbeSession({
+        createService: createProbeService,
+      }),
+    });
+    const actions = await prepareImportActions({
+      provider: onshapeImportProvider,
+      source,
+      review,
+      selections: onshapeImportProvider.createDefaultSelections(review),
+      capabilities: prepareCapabilities,
+    });
+    expect(validateImportPreparedActions(actions).success).toBe(true);
+
+    const result = await applyImportPreparedActions({
+      modelingService: service,
+      baseRevisionId: before.document.revisionId,
+      actions,
+    });
+    expect(
+      result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+      "Every prepared d3cd9 action must commit without an error diagnostic.",
+    ).toEqual([]);
+    expect(result.rolledBack).toBe(false);
+    expect(
+      result.appliedOperationCount,
+      "Every ordered d3cd9 action must apply.",
+    ).toBe(actions.orderedActions?.length ?? 0);
+    const after = await service.getCurrentDocumentSnapshot();
+
+    expect(
+      after.document.diagnostics,
+      "The committed d3cd9 document must carry zero snapshot diagnostics.",
+    ).toEqual([]);
+
+    // A committed import must survive a full-document replay with identical
+    // ids: export the authored document and restore it, forcing the kernel to
+    // rebuild the identical feature history from scratch (the browser reload
+    // and variable-edit rebuild path).
+    const authored = await adapter.exportAuthoredModelDocument(
+      "doc_workspace" as DocumentId,
+    );
+    await adapter.restoreAuthoredModelDocument(authored);
+    const rebuilt = await service.getCurrentDocumentSnapshot();
+    expect(
+      rebuilt.document.diagnostics,
+      "An identical full-history replay must rebuild with zero snapshot diagnostics.",
+    ).toEqual([]);
+    expect(rebuilt.document.bodies.map((body) => body.bodyId).sort()).toEqual(
+      after.document.bodies.map((body) => body.bodyId).sort(),
+    );
+  },
+  3_600_000,
+);

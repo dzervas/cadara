@@ -40,9 +40,11 @@ export type ProjectedSketchProfileEdgeKey =
   `projected:${ReferenceId}/${string}`;
 export type ProjectedSketchProfileVertexKey =
   `${ProjectedSketchProfileEdgeKey}:${"start" | "end"}`;
-export type SketchProfileEdgeSourceKey =
+export type SketchProfileBaseEdgeSourceKey =
   | SketchEntityId
-  | ProjectedSketchProfileEdgeKey
+  | ProjectedSketchProfileEdgeKey;
+export type SketchProfileEdgeSourceKey =
+  | SketchProfileBaseEdgeSourceKey
   | SplitSketchProfileEdgeKey;
 /**
  * Distinct key for ONE split piece of a source curve that contributes several
@@ -51,7 +53,7 @@ export type SketchProfileEdgeSourceKey =
  * source-curve parameter order), never a geometric match, so the key is exact
  * and reproducible. Sources contributing a single segment keep their bare key.
  */
-export type SplitSketchProfileEdgeKey = `${string}#${number}`;
+export type SplitSketchProfileEdgeKey = `${SketchProfileBaseEdgeSourceKey}#${number}`;
 export type SketchProfileVertexSourceKey =
   | SketchPointId
   | ProjectedSketchProfileVertexKey;
@@ -1091,7 +1093,7 @@ type RegionBoundarySegment = RegionRecord["loops"][number]["segments"][number];
 
 function getRegionSegmentBaseEdgeKey(
   segment: RegionBoundarySegment,
-): SketchProfileEdgeSourceKey {
+): SketchProfileBaseEdgeSourceKey {
   return segment.source.kind === "projectedGeometry"
     ? getProjectedSegmentId(segment.source)
     : segment.source.entityId;
@@ -1125,7 +1127,7 @@ function createRegionSegmentEdgeKeyResolver(
     if (segment.sourceSegmentOrdinal === undefined) {
       return null;
     }
-    return `${baseKey}#${segment.sourceSegmentOrdinal}`;
+    return `${baseKey}#${segment.sourceSegmentOrdinal}` as SplitSketchProfileEdgeKey;
   };
 }
 
