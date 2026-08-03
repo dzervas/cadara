@@ -8,7 +8,7 @@ import type {
   ImportPreparedActionRef,
   ImportPreparedActions,
 } from "@/contracts/import/actions";
-import type { BodyId, RevisionId } from "@/contracts/shared/ids";
+import type { BodyId, DocumentId, RevisionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
@@ -34,7 +34,11 @@ type DisposableKernelHistoryProbeService = KernelHistoryProbeService & {
 export interface KernelHistoryProbeSessionOptions {
   /** Must be an isolated modeling service/session owned by the probe caller. */
   service?: DisposableKernelHistoryProbeService;
-  /** Creates a fresh isolated session for each probe evaluation. */
+  /**
+   * Creates an isolated session. The session is retained only while later
+   * evaluations are exact action-prefix extensions; divergence disposes it and
+   * starts fresh.
+   */
   createService?: () => DisposableKernelHistoryProbeService;
 }
 
@@ -47,31 +51,36 @@ export interface MemoizedHistoryProbe extends ImportHistoryProbeCapabilities {
 }
 
 /**
- * Memoize probe evaluations on the exact prepared-action payload they run.
+ * Memoize exact evaluations and proven failed action prefixes.
  *
- * Each evaluation rebuilds the whole prefix in a fresh isolated session, so it
- * is a pure function of that payload: the same actions always produce the same
- * steps and signatures. Review probes the same prefix many times — once per
- * topology consumer and once per fixed-point iteration — and the largest
- * captures cannot afford those redundant kernel rebuilds. The cache is keyed on
- * the payload itself (never on a consumer id or plan revision), so a changed
- * plan always misses it.
- *
- * A failed or throwing evaluation is retained too, but only until the plan it was
- * probed against changes. It is the input to review's containment pass, which
- * exists to change the conditions the probe failed under; until that pass runs,
- * re-evaluating the identical payload can only reproduce the identical failure at
- * full kernel cost. 9841 probes one unbuildable prefix from every downstream
- * consumer inside a single pass, and paying for each of those rebuilds put its
- * review past its wait cap.
+ * Successful results stay keyed on the complete request because requested
+ * signatures and tessellation are observable. A failed step is stronger: any
+ * longer evaluation with the identical action sequence through that step must
+ * fail there before its suffix can run. Reusing that result avoids rebuilding
+ * an expensive known-bad prefix for every downstream consumer. Signature
+ * samples before the failure are reused only when the retained evaluation
+ * actually sampled the newly requested ordinals. Containment explicitly drops
+ * all retained failures after it changes the plan.
  */
 export function createMemoizedHistoryProbe(
   history: ImportHistoryProbeCapabilities,
 ): MemoizedHistoryProbe {
   const cache = new Map<string, Promise<HistoryProbeResult>>();
   const failedKeys = new Set<string>();
+  const failedPrefixes: {
+    actionKeys: readonly string[];
+    result: HistoryProbeResult;
+    sampledOrdinals: ReadonlySet<number> | null;
+    containTopologyRematchFailures: boolean;
+  }[] = [];
+
   return {
     evaluateHistoryProbe(input) {
+      const actionKeys = getOrderedActionKeys(input.actions);
+      const retainedFailure = failedPrefixes.find((failure) =>
+        canReuseFailedPrefix(failure, input, actionKeys));
+      if (retainedFailure) return Promise.resolve(retainedFailure.result);
+
       const key = JSON.stringify({
         actions: input.actions,
         includeFinalTessellation: input.includeFinalTessellation ?? false,
@@ -82,7 +91,19 @@ export function createMemoizedHistoryProbe(
       if (cached) return cached;
       const pending = history.evaluateHistoryProbe(input).then(
         (result) => {
-          if (result.steps.some((step) => step.status === "failed")) failedKeys.add(key);
+          const failedOrdinal = result.steps.findIndex((step) => step.status === "failed");
+          if (failedOrdinal >= 0) {
+            failedKeys.add(key);
+            failedPrefixes.push({
+              actionKeys: actionKeys.slice(0, failedOrdinal + 1),
+              result,
+              sampledOrdinals:
+                input.requestedSignatureStepOrdinals === undefined
+                  ? null
+                  : new Set(input.requestedSignatureStepOrdinals),
+        containTopologyRematchFailures: input.containTopologyRematchFailures ?? false,
+            });
+          }
           return result;
         },
         (error: unknown) => {
@@ -96,80 +117,234 @@ export function createMemoizedHistoryProbe(
     forgetFailedEvaluations() {
       for (const key of failedKeys) cache.delete(key);
       failedKeys.clear();
+      failedPrefixes.length = 0;
+    },
+    async dispose() {
+      cache.clear();
+      failedKeys.clear();
+      failedPrefixes.length = 0;
+      await history.dispose?.();
     },
   };
 }
+
+function canReuseFailedPrefix(
+  failure: {
+    actionKeys: readonly string[];
+    result: HistoryProbeResult;
+    sampledOrdinals: ReadonlySet<number> | null;
+    containTopologyRematchFailures: boolean;
+  },
+  input: HistoryProbeInput,
+  actionKeys: readonly string[],
+) {
+  if (
+    failure.containTopologyRematchFailures !==
+      (input.containTopologyRematchFailures ?? false) ||
+    failure.actionKeys.length > actionKeys.length ||
+    !failure.actionKeys.every((key, ordinal) => key === actionKeys[ordinal])
+  ) {
+    return false;
+  }
+
+  const failedOrdinal = failure.result.steps.findIndex(
+    (step) => step.status === "failed",
+  );
+  if (input.requestedSignatureStepOrdinals === undefined) {
+    return failure.sampledOrdinals === null;
+  }
+  return input.requestedSignatureStepOrdinals.every(
+    (ordinal) =>
+      ordinal >= failedOrdinal ||
+      failure.sampledOrdinals === null ||
+      failure.sampledOrdinals.has(ordinal),
+  );
+}
+
+type RebuiltHistoryProbeStep = Extract<
+  HistoryProbeResult["steps"][number],
+  { status: "rebuilt" }
+>;
+
+type KernelHistoryProbeExecution = {
+  service: DisposableKernelHistoryProbeService;
+  actionKeys: string[];
+  materializer: ImportDeferredMaterializer;
+  signaturesByOrdinal: Map<number, RebuiltHistoryProbeStep["signatures"]>;
+  basis: { documentId: DocumentId; baseRevisionId: RevisionId } | null;
+};
 
 export function createKernelHistoryProbeSession(
   options: KernelHistoryProbeSessionOptions,
 ): ImportHistoryProbeCapabilities {
-  return {
-    async evaluateHistoryProbe(input) {
-      const service = options.createService?.() ?? options.service;
-      if (!service) {
-        return {
-          steps: [
-            {
-              status: "failed",
-              diagnostics: [
-                {
-                  severity: "error",
-                  code: "kernel-history-probe-missing-session",
-                  message: "Kernel history probe requires an isolated modeling session.",
-                },
-              ],
-            },
-          ],
-        };
-      }
+  // A fixed service preserves the legacy one-evaluation contract. Prefix
+  // continuation requires a factory so a divergent action sequence can be
+  // restarted in a genuinely fresh isolated document.
+  if (!options.createService) {
+    return {
+      async evaluateHistoryProbe(input) {
+        const service = options.service;
+        if (!service) return missingProbeSessionResult();
+        try {
+          const execution = createProbeExecution(service);
+          return (await evaluateHistoryProbeInKernelSession(input, execution)).result;
+        } finally {
+          await service.dispose?.();
+        }
+      },
+    };
+  }
 
-      try {
-        return await evaluateHistoryProbeInKernelSession(input, service);
-      } finally {
-        await service.dispose?.();
-      }
+  let execution: KernelHistoryProbeExecution | null = null;
+  let serialized = Promise.resolve();
+
+  const disposeExecution = async () => {
+    const current = execution;
+    execution = null;
+    await current?.service.dispose?.();
+  };
+
+  const evaluate = async (input: HistoryProbeInput) => {
+    const actionKeys = getOrderedActionKeys(input.actions);
+    if (!execution || !canContinueProbeExecution(execution, input, actionKeys)) {
+      await disposeExecution();
+      execution = createProbeExecution(options.createService!());
+    }
+
+    try {
+      const evaluated = await evaluateHistoryProbeInKernelSession(input, execution);
+      if (!evaluated.reusable) await disposeExecution();
+      return evaluated.result;
+    } catch (error) {
+      await disposeExecution();
+      throw error;
+    }
+  };
+
+  return {
+    evaluateHistoryProbe(input) {
+      const pending = serialized.then(
+        () => evaluate(input),
+        () => evaluate(input),
+      );
+      serialized = pending.then(
+        () => undefined,
+        () => undefined,
+      );
+      return pending;
+    },
+    async dispose() {
+      await serialized;
+      await disposeExecution();
     },
   };
 }
 
+function missingProbeSessionResult(): HistoryProbeResult {
+  return {
+    steps: [
+      {
+        status: "failed",
+        diagnostics: [
+          {
+            severity: "error",
+            code: "kernel-history-probe-missing-session",
+            message: "Kernel history probe requires an isolated modeling session.",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function createProbeExecution(
+  service: DisposableKernelHistoryProbeService,
+): KernelHistoryProbeExecution {
+  return {
+    service,
+    actionKeys: [],
+    materializer: new ImportDeferredMaterializer({
+      modelingService: service,
+      outputRecords: new Map<string, ImportActionOutputRecord>(),
+    }),
+    signaturesByOrdinal: new Map(),
+    basis: null,
+  };
+}
+
+function canContinueProbeExecution(
+  execution: KernelHistoryProbeExecution,
+  input: HistoryProbeInput,
+  actionKeys: readonly string[],
+) {
+  if (execution.actionKeys.length > actionKeys.length) return false;
+  if (!execution.actionKeys.every((key, index) => key === actionKeys[index])) {
+    return false;
+  }
+
+  const requested = input.requestedSignatureStepOrdinals;
+  if (requested === undefined) {
+    return execution.actionKeys.every((_, index) =>
+      execution.signaturesByOrdinal.has(index));
+  }
+  return requested.every(
+    (ordinal) =>
+      ordinal >= execution.actionKeys.length ||
+      execution.signaturesByOrdinal.has(ordinal),
+  );
+}
+
 async function evaluateHistoryProbeInKernelSession(
   input: HistoryProbeInput,
-  service: KernelHistoryProbeService,
-): Promise<HistoryProbeResult> {
+  execution: KernelHistoryProbeExecution,
+): Promise<{ result: HistoryProbeResult; reusable: boolean }> {
   const actionRefs = getOrderedActionRefs(input.actions);
+  const actionKeys = getOrderedActionKeys(input.actions);
   const requestedSignatureStepOrdinals = input.requestedSignatureStepOrdinals === undefined
     ? null
     : new Set(input.requestedSignatureStepOrdinals);
-  const steps: HistoryProbeResult["steps"] = [];
-  const materializer = new ImportDeferredMaterializer({
-    modelingService: service,
-    outputRecords: new Map<string, ImportActionOutputRecord>(),
-  });
+  const steps: HistoryProbeResult["steps"] = execution.actionKeys.map((_, ordinal) => ({
+    status: "rebuilt",
+    signatures:
+      requestedSignatureStepOrdinals === null ||
+      requestedSignatureStepOrdinals.has(ordinal)
+        ? execution.signaturesByOrdinal.get(ordinal) ?? []
+        : [],
+  }));
 
-  for (const [orderedPosition, actionRef] of actionRefs.entries()) {
+  if (execution.actionKeys.length < actionRefs.length && execution.basis === null) {
+    const snapshot = await execution.service.getCurrentDocumentSnapshot();
+    execution.basis = {
+      documentId: snapshot.document.documentId,
+      baseRevisionId: snapshot.document.revisionId as RevisionId,
+    };
+  }
+
+  for (
+    let orderedPosition = execution.actionKeys.length;
+    orderedPosition < actionRefs.length;
+    orderedPosition += 1
+  ) {
+    const actionRef = actionRefs[orderedPosition]!;
     let applyResult: Awaited<ReturnType<typeof applyProbeAction>>;
     try {
       applyResult = await applyProbeAction(
-        service,
+        execution.service,
         input.actions,
         actionRef,
         orderedPosition,
-        materializer,
+        execution.materializer,
+        execution.basis!,
       );
     } catch (error) {
-      // A rematch error carries structured selector evidence used by the
-      // consumer-prefix containment pass. Prefix probes can opt into receiving
-      // it at the exact action boundary; legacy callers keep the thrown error.
       if (isTopologyApplyRematchError(error)) {
         if (!input.containTopologyRematchFailures) throw error;
         steps.push({
           status: "failed",
           diagnostics: [topologyApplyRematchDiagnostic(error, orderedPosition)],
         });
-        return { steps };
+        return { result: { steps }, reusable: false };
       }
-      // Other action/materialization failures are feature-local probe results,
-      // not studio-fatal exceptions. Preserve the raw error text verbatim.
       applyResult = {
         ok: false,
         message: error instanceof Error ? error.message : String(error),
@@ -186,9 +361,15 @@ async function evaluateHistoryProbeInKernelSession(
           },
         ],
       });
-      return { steps };
+      return { result: { steps }, reusable: false };
     }
 
+    execution.basis = {
+      ...execution.basis!,
+      baseRevisionId: applyResult.revisionId,
+    };
+
+    execution.actionKeys.push(actionKeys[orderedPosition]!);
     if (
       requestedSignatureStepOrdinals !== null &&
       !requestedSignatureStepOrdinals.has(orderedPosition)
@@ -197,40 +378,60 @@ async function evaluateHistoryProbeInKernelSession(
       continue;
     }
 
-    const snapshot = await service.getCurrentDocumentSnapshot();
-    const signatureResult = await deriveLiveBodySignatures({ snapshot, service });
+    const snapshot = await execution.service.getCurrentDocumentSnapshot();
+    const signatureResult = await deriveLiveBodySignatures({
+      snapshot,
+      service: execution.service,
+    });
     if (signatureResult.status === "unavailable") {
       steps.push({ status: "failed", diagnostics: signatureResult.diagnostics });
-      return { steps };
+      return { result: { steps }, reusable: false };
     }
     const diagnostics: HistoryProbeStepDiagnostic[] = signatureResult.diagnostics;
-
-    steps.push(
-      diagnostics.some((diagnostic) => diagnostic.severity === "error")
-        ? { status: "failed", diagnostics }
-        : { status: "rebuilt", signatures: signatureResult.signatures },
-    );
-
-    if (steps[steps.length - 1]?.status === "failed") {
-      return { steps };
+    if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+      steps.push({ status: "failed", diagnostics });
+      return { result: { steps }, reusable: false };
     }
+    execution.signaturesByOrdinal.set(orderedPosition, signatureResult.signatures);
+    execution.materializer.primeLiveSignatures(
+      snapshot.document.revisionId,
+      signatureResult,
+    );
+    steps.push({ status: "rebuilt", signatures: signatureResult.signatures });
   }
 
   if (!input.includeFinalTessellation) {
-    return { steps };
+    return { result: { steps }, reusable: true };
   }
 
-  const finalSnapshot = await service.getCurrentDocumentSnapshot();
+  const finalSnapshot = await execution.service.getCurrentDocumentSnapshot();
   return {
-    steps,
-    finalTessellation: {
-      points: finalSnapshot.document.render.records.flatMap((record) =>
-        record.geometry.kind === "mesh"
-          ? record.geometry.vertexPositions.flatMap((point) => [...point])
-          : [],
-      ),
+    result: {
+      steps,
+      finalTessellation: {
+        points: finalSnapshot.document.render.records.flatMap((record) =>
+          record.geometry.kind === "mesh"
+            ? record.geometry.vertexPositions.flatMap((point) => [...point])
+            : [],
+        ),
+      },
     },
+    reusable: true,
   };
+}
+
+function getOrderedActionKeys(actions: ImportPreparedActions) {
+  return getOrderedActionRefs(actions).map((actionRef) =>
+    JSON.stringify({
+      kind: actionRef.kind,
+      request:
+        actionRef.kind === "addDocumentVariable"
+          ? actions.addDocumentVariables?.[actionRef.index]
+          : actionRef.kind === "commitSketch"
+            ? actions.commitSketches?.[actionRef.index]
+            : actions.createFeatures?.[actionRef.index],
+    }),
+  );
 }
 
 export function getOrderedActionRefs(actions: ImportPreparedActions): ImportPreparedActionRef[] {
@@ -291,12 +492,11 @@ async function applyProbeAction(
   actionRef: ImportPreparedActionRef,
   orderedPosition: number,
   materializer: ImportDeferredMaterializer,
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  const snapshot = await service.getCurrentDocumentSnapshot();
-  const basis = {
-    documentId: snapshot.document.documentId,
-    baseRevisionId: snapshot.document.revisionId as RevisionId,
-  };
+  basis: { documentId: DocumentId; baseRevisionId: RevisionId },
+): Promise<
+  | { ok: true; revisionId: RevisionId }
+  | { ok: false; message: string }
+> {
 
   switch (actionRef.kind) {
     case "addDocumentVariable": {
@@ -305,7 +505,9 @@ async function applyProbeAction(
         return missingAction(actionRef);
       }
       const result = await service.addDocumentVariable({ ...request, ...basis });
-      return result.isOk() ? { ok: true } : { ok: false, message: result.error.message };
+      if (result.isErr()) return { ok: false, message: result.error.message };
+      materializer.invalidateLiveSignatures();
+      return { ok: true, revisionId: result.value.revisionId };
     }
     case "commitSketch": {
       const request = actions.commitSketches?.[actionRef.index];
@@ -318,8 +520,9 @@ async function applyProbeAction(
       );
       const result = await service.commitSketch({ ...materialized, ...basis });
       if (result.isOk()) {
+        materializer.invalidateLiveSignatures();
         materializer.recordSketchOutput(orderedPosition, result.value.sketchId);
-        return { ok: true };
+        return { ok: true, revisionId: result.value.revisionId };
       }
       return { ok: false, message: result.error.message };
     }
@@ -345,6 +548,7 @@ async function applyProbeAction(
         if (rejection) return { ok: false, message: rejection };
       }
       if (result.isOk()) {
+        materializer.invalidateLiveSignatures();
         materializer.recordFeatureOutput(orderedPosition, result.value.featureId);
         materializer.recordBodyOutput(
           orderedPosition,
@@ -359,7 +563,7 @@ async function applyProbeAction(
         if (constructionIds.length > 0) {
           materializer.recordConstructionOutput(orderedPosition, constructionIds);
         }
-        return { ok: true };
+        return { ok: true, revisionId: result.value.revisionId };
       }
       return { ok: false, message: result.error.message };
     }
