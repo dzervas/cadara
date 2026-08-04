@@ -15,6 +15,8 @@ export type OccTopologyOutputSlot = OccTrackedBody["bodyId"];
 export interface OccTopologyStageOutput {
   outputSlot: OccTopologyOutputSlot;
   body: OccTrackedBody;
+  /** Exact evaluated source witnesses that identify this output slot across rebuilds. */
+  outputWitnesses?: readonly string[];
   sourceTargets: ReadonlyMap<OccTopologySourceKey, readonly DurableRef[]>;
   unsupportedSourceKeys: ReadonlySet<OccTopologySourceKey>;
 }
@@ -137,32 +139,49 @@ function splitAdjacentSourceKeys(value: string): string[] {
 }
 
 function parseGeneratedAdjacencySourceKey(sourceKey: string) {
+  return parseGeneratedNestedSourceKey(sourceKey, "adjacent", undefined);
+}
+
+function parseGeneratedCompleteBoundarySourceKey(sourceKey: string) {
+  return parseGeneratedNestedSourceKey(
+    sourceKey,
+    "complete-boundary",
+    "generated-face-from-complete-boundary",
+  );
+}
+
+function parseGeneratedNestedSourceKey(
+  sourceKey: string,
+  relation: "adjacent" | "complete-boundary",
+  requiredRole: string | undefined,
+) {
   const prefix = "generated-from:";
   if (!sourceKey.startsWith(prefix)) return null;
   const featureEnd = sourceKey.indexOf(":", prefix.length);
   const bodyEnd = sourceKey.indexOf(":", featureEnd + 1);
-  const adjacencyStart = bodyEnd + 1;
+  const relationStart = bodyEnd + 1;
+  const relationPrefix = `${relation}(`;
   if (
     featureEnd < 0 ||
     bodyEnd < 0 ||
-    !sourceKey.startsWith("adjacent(", adjacencyStart)
+    !sourceKey.startsWith(relationPrefix, relationStart)
   ) {
     return null;
   }
 
   let depth = 0;
-  let adjacencyEnd = -1;
-  for (let index = adjacencyStart + "adjacent".length; index < sourceKey.length; index += 1) {
+  let relationEnd = -1;
+  for (let index = relationStart + relation.length; index < sourceKey.length; index += 1) {
     if (sourceKey[index] === "(") depth += 1;
     if (sourceKey[index] === ")") {
       depth -= 1;
       if (depth === 0) {
-        adjacencyEnd = index;
+        relationEnd = index;
         break;
       }
     }
   }
-  if (adjacencyEnd < 0 || sourceKey[adjacencyEnd + 1] !== ":") {
+  if (relationEnd < 0 || sourceKey[relationEnd + 1] !== ":") {
     throw new Error(
       `occ-topology-provenance-malformed-source-key: ${sourceKey}.`,
     );
@@ -170,12 +189,18 @@ function parseGeneratedAdjacencySourceKey(sourceKey: string) {
 
   const featureId = sourceKey.slice(prefix.length, featureEnd) as FeatureId;
   const bodyId = sourceKey.slice(featureEnd + 1, bodyEnd) as BodyId;
-  const adjacent = sourceKey.slice(
-    adjacencyStart + "adjacent(".length,
-    adjacencyEnd,
+  const sources = sourceKey.slice(
+    relationStart + relationPrefix.length,
+    relationEnd,
   );
-  const role = sourceKey.slice(adjacencyEnd + 2);
-  if (!featureId || !bodyId || !adjacent || !role) {
+  const role = sourceKey.slice(relationEnd + 2);
+  if (
+    !featureId ||
+    !bodyId ||
+    !sources ||
+    !role ||
+    (requiredRole !== undefined && role !== requiredRole)
+  ) {
     throw new Error(
       `occ-topology-provenance-malformed-source-key: ${sourceKey}.`,
     );
@@ -183,7 +208,7 @@ function parseGeneratedAdjacencySourceKey(sourceKey: string) {
   return {
     featureId,
     bodyId,
-    adjacentSourceKeys: splitAdjacentSourceKeys(adjacent),
+    sourceKeys: splitAdjacentSourceKeys(sources),
     role,
   };
 }
@@ -248,6 +273,12 @@ function parseRelationshipSourceKey(sourceKey: string):
       role: string;
     }
   | {
+      kind: "generatedCompleteBoundary";
+      featureId: FeatureId;
+      bodyId: BodyId;
+      boundaryEdgeSourceKeys: readonly string[];
+    }
+  | {
       kind: "mirrorOperand";
       featureId: FeatureId;
       bodyId: BodyId;
@@ -255,16 +286,16 @@ function parseRelationshipSourceKey(sourceKey: string):
       sourceCanonicalProvenanceIds: readonly string[];
     }
   | { kind: "root" } {
-  const exact = /^exact-successor:([^:]+):([^:]+):(face|edge|vertex):([^:]+)$/.exec(
+  const exact = /^(exact-successor|exact-identity):([^:]+):([^:]+):(face|edge|vertex):([^:]+)$/.exec(
     sourceKey,
   );
   if (exact) {
     const source = parseSubtopologyRefKey(
-      `${exact[3]}:${exact[2]}:${exact[4]}`,
+      `${exact[4]}:${exact[3]}:${exact[5]}`,
     )!;
-    return { kind: "exact", featureId: exact[1] as FeatureId, source };
+    return { kind: "exact", featureId: exact[2] as FeatureId, source };
   }
-  if (sourceKey.startsWith("exact-successor:")) {
+  if (sourceKey.startsWith("exact-successor:") || sourceKey.startsWith("exact-identity:")) {
     throw new Error(`occ-topology-provenance-malformed-source-key: ${sourceKey}.`);
   }
 
@@ -289,9 +320,24 @@ function parseRelationshipSourceKey(sourceKey: string):
     throw new Error(`occ-topology-provenance-malformed-source-key: ${sourceKey}.`);
   }
 
+  const completeBoundary = parseGeneratedCompleteBoundarySourceKey(sourceKey);
+  if (completeBoundary) {
+    return {
+      kind: "generatedCompleteBoundary",
+      featureId: completeBoundary.featureId,
+      bodyId: completeBoundary.bodyId,
+      boundaryEdgeSourceKeys: completeBoundary.sourceKeys,
+    };
+  }
   const adjacency = parseGeneratedAdjacencySourceKey(sourceKey);
   if (adjacency) {
-    return { kind: "generatedAdjacency", ...adjacency };
+    return {
+      kind: "generatedAdjacency",
+      featureId: adjacency.featureId,
+      bodyId: adjacency.bodyId,
+      adjacentSourceKeys: adjacency.sourceKeys,
+      role: adjacency.role,
+    };
   }
   const generated = /^generated-from:([^:]+):([^:]+):(face|edge|vertex):([^:]+):(.+)$/.exec(
     sourceKey,
@@ -551,6 +597,16 @@ export function createOccTopologyProvenanceIndex(input: {
           sourceCanonicalProvenanceIds: parsed.sourceCanonicalProvenanceIds,
         });
       }
+      if (parsed.kind === "generatedCompleteBoundary") {
+        const boundaryEdgeSourceKeys = parsed.boundaryEdgeSourceKeys.map(
+          (boundaryKey) => resolveSourceKey(boundaryKey, owningClaim),
+        );
+        return formatGeneratedFaceCompleteBoundaryTopologySourceKey({
+          featureId: parsed.featureId,
+          bodyId: parsed.bodyId,
+          boundaryEdgeSourceKeys,
+        });
+      }
       if (parsed.kind === "generatedAdjacency") {
         const adjacentSourceKeys = parsed.adjacentSourceKeys.map(
           (adjacentKey) => resolveSourceKey(adjacentKey, owningClaim),
@@ -660,6 +716,9 @@ export function serializeOccFeatureTopologyLineage(
           edgeIds: [...output.body.topology.edgeIds],
           vertexIds: [...output.body.topology.vertexIds],
         },
+        ...(output.outputWitnesses
+          ? { outputWitnesses: [...output.outputWitnesses] }
+          : {}),
         sourceTargets: [...output.sourceTargets].map(([sourceKey, targets]) => ({
           sourceKey,
           targets: targets.filter((target) =>
@@ -768,6 +827,16 @@ export function formatExactSuccessorTopologySourceKey(input: {
   return `exact-successor:${input.featureId}:${input.bodyId}:${input.kind}:${input.sourcePublicId}`;
 }
 
+/** Exact unchanged identity; unlike `exact-successor`, this is not a Modified hop. */
+export function formatExactIdentityTopologySourceKey(input: {
+  featureId: FeatureId;
+  bodyId: BodyId;
+  kind: "face" | "edge" | "vertex";
+  sourcePublicId: FaceId | EdgeId | VertexId;
+}) {
+  return `exact-identity:${input.featureId}:${input.bodyId}:${input.kind}:${input.sourcePublicId}`;
+}
+
 /**
  * Producer-identity key for a subtopology a local operation CREATED.
  *
@@ -855,6 +924,30 @@ export function formatGeneratedAdjacencyTopologySourceKey(input: {
   return `generated-from:${input.featureId}:${input.bodyId}:adjacent(${adjacency}):${input.role}`;
 }
 
+
+/**
+ * Producer identity for a generated face whose COMPLETE exact OCC boundary has
+ * one prior direct lineage claim per edge. The identity deliberately contains
+ * neither native/public topology IDs nor wire traversal order.
+ */
+export function formatGeneratedFaceCompleteBoundaryTopologySourceKey(input: {
+  featureId: FeatureId;
+  bodyId: BodyId;
+  boundaryEdgeSourceKeys: readonly OccTopologySourceKey[];
+}) {
+  const boundary = [...new Set(input.boundaryEdgeSourceKeys)].sort();
+  if (boundary.length === 0 || boundary.some((sourceKey) => sourceKey.length === 0)) {
+    throw new Error("occ-topology-provenance-malformed-complete-boundary-source.");
+  }
+  return `generated-from:${input.featureId}:${input.bodyId}:complete-boundary(${boundary.join("+")}):generated-face-from-complete-boundary`;
+}
+
+export interface OccGeneratedFaceCompleteBoundaryEntry {
+  target: Extract<DurableRef, { kind: "face" }>;
+  /** Complete, exact OCC face→edge incidence, deduplicated by native identity. */
+  boundaryEdgeIds: readonly EdgeId[];
+}
+
 /**
  * One created subtopology plus the faces of the SAME output body that bound it.
  *
@@ -892,6 +985,8 @@ export function createExactSuccessorTopologyStage(input: {
   sourceBody: OccTrackedBody;
   outputBody: OccTrackedBody;
   successorsBySourceKey: ReadonlyMap<string, DurableRef>;
+  /** Source references carried by exact identity, rather than Modified, history. */
+  identitySuccessorSourceKeys?: ReadonlySet<string>;
   generatedTargetsBySourceKey?: ReadonlyMap<OccTopologySourceKey, DurableRef>;
   /** Exact supplemental claims never override generated target-side history. */
   supplementalProducerTargetsBySourceKey?: ReadonlyMap<
@@ -899,6 +994,7 @@ export function createExactSuccessorTopologyStage(input: {
     DurableRef
   >;
   generatedAdjacency?: readonly OccGeneratedAdjacencyEntry[];
+  generatedFaceCompleteBoundaries?: readonly OccGeneratedFaceCompleteBoundaryEntry[];
 }): OccFeatureTopologyStage {
   const sourceTargets = new Map<OccTopologySourceKey, DurableRef[]>();
   const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
@@ -911,12 +1007,20 @@ export function createExactSuccessorTopologyStage(input: {
   };
 
   for (const source of getExactSuccessorSourceTargets(input.sourceBody)) {
-    const sourceKey = formatExactSuccessorTopologySourceKey({
-      featureId: input.featureId,
-      bodyId: input.sourceBody.bodyId,
-      kind: source.kind,
-      sourcePublicId: exactSuccessorSourceId(source),
-    });
+    const sourceReferenceKey = getOccDurableRefKey(source);
+    const sourceKey = input.identitySuccessorSourceKeys?.has(sourceReferenceKey)
+      ? formatExactIdentityTopologySourceKey({
+          featureId: input.featureId,
+          bodyId: input.sourceBody.bodyId,
+          kind: source.kind,
+          sourcePublicId: exactSuccessorSourceId(source),
+        })
+      : formatExactSuccessorTopologySourceKey({
+          featureId: input.featureId,
+          bodyId: input.sourceBody.bodyId,
+          kind: source.kind,
+          sourcePublicId: exactSuccessorSourceId(source),
+        });
     const successor = getExactSuccessor(
       input.sourceBody,
       source,
@@ -970,6 +1074,10 @@ export function createExactSuccessorTopologyStage(input: {
     sourceTargets.set(sourceKey, [target]);
   }
 
+  // Supplemental producer paths (such as closed-hollow offset→cut) are exact
+  // but distinct from outer/direct history. Publish them before derived
+  // boundary/adjacency naming so their inner faces can participate, without
+  // displacing direct claims.
   for (const [sourceKey, target] of input.supplementalProducerTargetsBySourceKey ?? []) {
     if (
       !isOutputSubtopologyTarget(target, input.outputBody.bodyId) ||
@@ -987,8 +1095,77 @@ export function createExactSuccessorTopologyStage(input: {
     sourceTargets.set(sourceKey, [target]);
   }
 
-  // Adjacency claims run last: they can only name an entity once every face
-  // bounding it already carries exactly one claim, and they never override one.
+
+  // A face without direct history can still be named exactly from its complete
+  // OCC boundary, but only from the direct successor/generated claims already
+  // established above. This intentionally excludes adjacency-derived claims:
+  // accepting one could make an edge depend on the very unclaimed face it is
+  // meant to name.
+  const completeBoundaryTargetsBySourceKey = new Map<
+    OccTopologySourceKey,
+    Extract<DurableRef, { kind: "face" }>
+  >();
+  const droppedCompleteBoundarySourceKeys = new Set<OccTopologySourceKey>();
+  for (const entry of input.generatedFaceCompleteBoundaries ?? []) {
+    if (
+      entry.target.bodyId !== input.outputBody.bodyId ||
+      entry.boundaryEdgeIds.length === 0
+    ) {
+      continue;
+    }
+    const targetKey = getOccDurableRefKey(entry.target);
+    if (claimedTargetKeys.has(targetKey)) {
+      // Direct history always wins.
+      continue;
+    }
+
+    const boundaryEdgeSourceKeys: OccTopologySourceKey[] = [];
+    for (const edgeId of new Set(entry.boundaryEdgeIds)) {
+      const claims = claimedTargetKeys.get(
+        getOccDurableRefKey({
+          kind: "edge",
+          bodyId: input.outputBody.bodyId,
+          edgeId,
+        }),
+      );
+      if (!claims || claims.size !== 1) {
+        boundaryEdgeSourceKeys.length = 0;
+        break;
+      }
+      boundaryEdgeSourceKeys.push(claims.values().next().value!);
+    }
+    if (boundaryEdgeSourceKeys.length === 0) {
+      continue;
+    }
+
+    const sourceKey = formatGeneratedFaceCompleteBoundaryTopologySourceKey({
+      featureId: input.featureId,
+      bodyId: input.sourceBody.bodyId,
+      boundaryEdgeSourceKeys,
+    });
+    if (
+      sourceTargets.has(sourceKey) ||
+      completeBoundaryTargetsBySourceKey.has(sourceKey)
+    ) {
+      // A complete-boundary key is only publishable for exactly one face.
+      completeBoundaryTargetsBySourceKey.delete(sourceKey);
+      droppedCompleteBoundarySourceKeys.add(sourceKey);
+      continue;
+    }
+    if (droppedCompleteBoundarySourceKeys.has(sourceKey)) {
+      continue;
+    }
+    completeBoundaryTargetsBySourceKey.set(sourceKey, entry.target);
+  }
+  for (const [sourceKey, target] of completeBoundaryTargetsBySourceKey) {
+    addClaimedTargetKey(getOccDurableRefKey(target), sourceKey);
+    sourceTargets.set(sourceKey, [target]);
+  }
+
+
+  // Adjacency claims run after direct, supplemental, and complete-boundary face
+  // claims: they can only name an entity once every face bounding it already
+  // carries exactly one claim, and they never override one.
   const adjacencyTargetsBySourceKey = new Map<OccTopologySourceKey, DurableRef>();
   const droppedAdjacencySourceKeys = new Set<OccTopologySourceKey>();
   for (const entry of input.generatedAdjacency ?? []) {

@@ -1,3 +1,5 @@
+import { readCompressedQueryLiteralFields } from "@/domain/import/onshape/compressed-query-decoder";
+
 /**
  * Exact reader for Onshape `qCompressed` sketch-entity vertex queries.
  *
@@ -17,33 +19,6 @@ export interface OnshapeSketchEntityVertexQuery {
   role: "start" | "end" | "center" | "point";
 }
 
-const COMPRESSED_ASSIGNMENT =
-  /^\s*query\s*=\s*qCompressed\(\s*[\d.]+\s*,\s*"([^"]*)"\s*,\s*id\s*\)\s*;?\s*$/;
-
-const STRING_FIELD = /S((?:[0-9a-f]+)(?:\.[0-9a-f]+)*)\$/g;
-
-/** Decode the payload's ordered string fields exactly as encoded. */
-function readStringFields(payload: string): string[][] {
-  const fields: string[][] = [];
-  STRING_FIELD.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = STRING_FIELD.exec(payload)) !== null) {
-    const lengths = match[1]!.split(".").map((entry) => Number.parseInt(entry, 16));
-    if (lengths.some((length) => !Number.isInteger(length) || length < 0)) return [];
-    const start = match.index + match[0].length;
-    const total = lengths.reduce((sum, length) => sum + length, 0);
-    if (start + total > payload.length) return [];
-    const parts: string[] = [];
-    let offset = start;
-    for (const length of lengths) {
-      parts.push(payload.slice(offset, offset + length));
-      offset += length;
-    }
-    fields.push(parts);
-    STRING_FIELD.lastIndex = start + total;
-  }
-  return fields;
-}
 
 const ROLE_BY_SUFFIX: Record<string, OnshapeSketchEntityVertexQuery["role"]> = {
   start: "start",
@@ -55,11 +30,8 @@ const ROLE_BY_SUFFIX: Record<string, OnshapeSketchEntityVertexQuery["role"]> = {
 function readSketchEntityQueryValues(
   queryString: string | null | undefined,
 ): Map<string, string[]> | null {
-  if (typeof queryString !== "string") return null;
-  const payload = COMPRESSED_ASSIGNMENT.exec(queryString)?.[1];
-  if (payload === undefined) return null;
-
-  const fields = readStringFields(payload);
+  const fields = readCompressedQueryLiteralFields(queryString);
+  if (!fields) return null;
   const values = new Map<string, string[]>();
   for (let index = 0; index + 1 < fields.length; index += 2) {
     const key = fields[index]!;

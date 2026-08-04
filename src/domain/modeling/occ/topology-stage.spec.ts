@@ -4,7 +4,7 @@ import type {
   AuthoredFeatureTopologyLineage,
   AuthoredTopologyLineageOutput,
 } from "@/contracts/modeling/authored-document";
-import type { BodyId, FaceId, FeatureId } from "@/contracts/shared/ids";
+import type { BodyId, EdgeId, FaceId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-history";
 import {
@@ -18,10 +18,12 @@ import {
   formatExactSuccessorTopologySourceKey,
   formatCompositeTopologyProvenanceId,
   formatGeneratedAdjacencyTopologySourceKey,
+  formatGeneratedFaceCompleteBoundaryTopologySourceKey,
   formatGeneratedProducerTopologySourceKey,
   formatMirrorOperandTopologySourceKey,
   type OccFeatureTopologyStage,
 } from "@/domain/modeling/occ/topology-stage";
+import { classifySemanticStageTopology } from "@/domain/modeling/occ/topology-naming";
 
 const bodyId = "body_provenance" as BodyId;
 
@@ -604,4 +606,154 @@ test("topology provenance leaves mixed exact and unsupported convergence missing
       historyOrder: history(featureId),
     }).resolveFace(target),
   ).toThrow(/occ-topology-provenance-missing/);
+});
+
+
+test("complete exact face boundaries claim only one fully covered generated face", () => {
+  const featureId = "feature_complete_boundary" as FeatureId;
+  const sourceBody = {
+    bodyId,
+    topologyToken: "t0001",
+    topology: { faceIds: [], edgeIds: ["edge_profile_a", "edge_profile_b"], vertexIds: [] },
+  } as unknown as OccTrackedBody;
+  const outputBody = {
+    bodyId,
+    topologyToken: "t0002",
+    topology: { faceIds: ["face_generated"], edgeIds: ["edge_result_a", "edge_result_b"], vertexIds: [] },
+  } as unknown as OccTrackedBody;
+  const outputFace = face("face_generated");
+  const successors = new Map<string, DurableRef>([
+    [
+      getOccDurableRefKey({ kind: "edge", bodyId, edgeId: "edge_profile_a" as EdgeId }),
+      { kind: "edge", bodyId, edgeId: "edge_result_a" as EdgeId },
+    ],
+    [
+      getOccDurableRefKey({ kind: "edge", bodyId, edgeId: "edge_profile_b" as EdgeId }),
+      { kind: "edge", bodyId, edgeId: "edge_result_b" as EdgeId },
+    ],
+  ]);
+  const output = createExactSuccessorTopologyStage({
+    featureId,
+    sourceBody,
+    outputBody,
+    successorsBySourceKey: successors,
+    generatedFaceCompleteBoundaries: [
+      {
+        target: outputFace,
+        // Repeated native incidence from another wire does not alter the key.
+        boundaryEdgeIds: ["edge_result_b", "edge_result_a", "edge_result_a"] as EdgeId[],
+      },
+    ],
+  }).outputs.get(bodyId)!;
+  const sourceKey = formatGeneratedFaceCompleteBoundaryTopologySourceKey({
+    featureId,
+    bodyId,
+    boundaryEdgeSourceKeys: [
+      formatExactSuccessorTopologySourceKey({
+        featureId,
+        bodyId,
+        kind: "edge",
+        sourcePublicId: "edge_profile_a" as EdgeId,
+      }),
+      formatExactSuccessorTopologySourceKey({
+        featureId,
+        bodyId,
+        kind: "edge",
+        sourcePublicId: "edge_profile_b" as EdgeId,
+      }),
+    ],
+  });
+
+  expect(output.sourceTargets.get(sourceKey)).toEqual([outputFace]);
+});
+
+test("complete exact face boundaries refuse missing edges and duplicate face keys", () => {
+  const featureId = "feature_complete_boundary_refusal" as FeatureId;
+  const sourceBody = {
+    bodyId,
+    topologyToken: "t0001",
+    topology: { faceIds: [], edgeIds: ["edge_profile"], vertexIds: [] },
+  } as unknown as OccTrackedBody;
+  const outputBody = {
+    bodyId,
+    topologyToken: "t0002",
+    topology: {
+      faceIds: ["face_missing", "face_first", "face_second"],
+      edgeIds: ["edge_result"],
+      vertexIds: [],
+    },
+  } as unknown as OccTrackedBody;
+  const output = createExactSuccessorTopologyStage({
+    featureId,
+    sourceBody,
+    outputBody,
+    successorsBySourceKey: new Map([
+      [
+        getOccDurableRefKey({ kind: "edge", bodyId, edgeId: "edge_profile" as EdgeId }),
+        { kind: "edge", bodyId, edgeId: "edge_result" as EdgeId },
+      ],
+    ]),
+    generatedFaceCompleteBoundaries: [
+      {
+        target: face("face_missing"),
+        boundaryEdgeIds: ["edge_result", "edge_absent"] as EdgeId[],
+      },
+      { target: face("face_first"), boundaryEdgeIds: ["edge_result"] as EdgeId[] },
+      { target: face("face_second"), boundaryEdgeIds: ["edge_result"] as EdgeId[] },
+    ],
+  }).outputs.get(bodyId)!;
+
+  expect(
+    [...output.sourceTargets.values()].flat().filter((target) => target.kind === "face"),
+  ).toEqual([]);
+});
+
+test("complete exact boundary identity preserves a generated multi-profile face public ID across rebuild", () => {
+  const featureId = "feature_multi_profile_complete_boundary" as FeatureId;
+  const sourceBody = {
+    bodyId,
+    topologyToken: "t0001",
+    topology: { faceIds: [], edgeIds: ["edge_profile_a", "edge_profile_b"], vertexIds: [] },
+  } as unknown as OccTrackedBody;
+  const build = (faceId: FaceId, edgeIds: readonly EdgeId[], topologyToken: string) => {
+    const outputBody = {
+      bodyId,
+      topologyToken,
+      topology: { faceIds: [faceId], edgeIds, vertexIds: [] },
+    } as unknown as OccTrackedBody;
+    return createExactSuccessorTopologyStage({
+      featureId,
+      sourceBody,
+      outputBody,
+      successorsBySourceKey: new Map([
+        [
+          getOccDurableRefKey({ kind: "edge", bodyId, edgeId: "edge_profile_a" as EdgeId }),
+          { kind: "edge", bodyId, edgeId: edgeIds[0]! },
+        ],
+        [
+          getOccDurableRefKey({ kind: "edge", bodyId, edgeId: "edge_profile_b" as EdgeId }),
+          { kind: "edge", bodyId, edgeId: edgeIds[1]! },
+        ],
+      ]),
+      generatedFaceCompleteBoundaries: [
+        { target: face(faceId), boundaryEdgeIds: edgeIds },
+      ],
+    }).outputs.get(bodyId)!;
+  };
+  const previous = build(
+    "face_multi_profile_before" as FaceId,
+    ["edge_before_a", "edge_before_b"] as EdgeId[],
+    "t0002",
+  );
+  const current = build(
+    "face_multi_profile_after" as FaceId,
+    ["edge_after_a", "edge_after_b"] as EdgeId[],
+    "t0003",
+  );
+
+  expect(
+    classifySemanticStageTopology({ previous, current }).preservedTargetsByCurrentKey.get(
+      `face:${bodyId}:face_multi_profile_after`,
+    ),
+  ).toEqual(face("face_multi_profile_before"));
 });

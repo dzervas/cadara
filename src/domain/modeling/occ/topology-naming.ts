@@ -30,6 +30,8 @@ export interface OccTopologyHistorySource {
   Generated(shape: OccShape): { Size(): number };
   IsDeleted?(shape: OccShape): boolean;
   IsRemoved?(shape: OccShape): boolean;
+  /** Exact result membership for this history hop, when the producer exposes it. */
+  resultShape?: OccShape;
 }
 
 export const OCC_TOPOLOGY_NAMING_STRATEGY =
@@ -696,6 +698,26 @@ export function isOccTopologyHistoryDeleted(
   );
 }
 
+function isExactSubshapeOfResult(
+  oc: OpenCascadeInstance,
+  result: OccShape,
+  candidate: OccShape,
+) {
+  const subshapes = new oc.TopTools_IndexedMapOfShape_1();
+  try {
+    oc.TopExp.MapShapes_1(result, candidate.ShapeType() as never, subshapes);
+    for (let index = 1; index <= subshapes.Size(); index += 1) {
+      if (subshapes.FindKey(index).IsSame(candidate)) {
+        return true;
+      }
+    }
+    return false;
+  } finally {
+    subshapes.delete();
+  }
+}
+
+
 function resolveFinalSuccessors(
   oc: OpenCascadeInstance,
   previousShape: OccShape,
@@ -706,6 +728,7 @@ function resolveFinalSuccessors(
 ) {
   let candidates = [previousShape];
   let deleted = false;
+  let ambiguous = false;
 
   for (const historySource of historySources) {
     const nextCandidates: OccShape[] = [];
@@ -716,26 +739,39 @@ function resolveFinalSuccessors(
         continue;
       }
 
-      const modified = listShapes(oc, historySource.Modified(candidate));
-      const generated = listShapes(oc, historySource.Generated(candidate));
-      const evolved = uniqueShapes([...modified, ...generated]);
-
-      if (evolved.length > 0) {
-        nextCandidates.push(...evolved);
-      } else {
-        nextCandidates.push(candidate);
+      const modified = uniqueShapes(
+        listShapes(oc, historySource.Modified(candidate)),
+      );
+      if (modified.length > 1) {
+        ambiguous = true;
+        continue;
       }
+      if (modified.length === 1) {
+        nextCandidates.push(modified[0]!);
+        continue;
+      }
+
+      // A history source that omits Modified proves retention only when its
+      // own result still contains the exact native subshape. This is a
+      // TopoDS_Shape.IsSame check, never a geometric match.
+      if (
+        historySource.resultShape &&
+        !isExactSubshapeOfResult(oc, historySource.resultShape, candidate)
+      ) {
+        continue;
+      }
+      nextCandidates.push(candidate);
     }
 
+    if (ambiguous) {
+      return { finalIndexes: [], deleted, ambiguous };
+    }
     candidates = uniqueShapes(nextCandidates);
   }
 
   const finalIndexes = mapFinalIndexes(finalShapeMap, candidates);
 
-  return {
-    finalIndexes,
-    deleted,
-  };
+  return { finalIndexes, deleted, ambiguous };
 }
 
 function buildShapeMap(
@@ -896,7 +932,7 @@ function reconcileKind<
       input.historySources,
     );
     const selectorFinalIndexes =
-      inheritedResolution.finalIndexes.length === 1
+      inheritedResolution.finalIndexes.length === 1 || inheritedResolution.ambiguous
         ? []
         : resolveSelectorFinalSuccessors(
             oc,
@@ -908,7 +944,7 @@ function reconcileKind<
       inheritedResolution.finalIndexes.length === 1
         ? inheritedResolution
         : selectorFinalIndexes.length > 0
-          ? { finalIndexes: selectorFinalIndexes, deleted: false }
+          ? { finalIndexes: selectorFinalIndexes, deleted: false, ambiguous: false }
           : inheritedResolution;
 
     if (resolution.finalIndexes.length === 1) {
@@ -947,7 +983,7 @@ function reconcileKind<
     registerInvalidation(
       input.invalidations,
       target,
-      resolution.finalIndexes.length > 1
+      resolution.ambiguous || resolution.finalIndexes.length > 1
         ? TOPOLOGY_AMBIGUOUS_REASON
         : resolution.deleted
           ? TOPOLOGY_DELETED_REASON
@@ -1087,21 +1123,27 @@ function deriveGeneratedKindContributorIds<
     const key = topologyRefKey(
       targetFor(input.kind as never, input.bodyId, previousId as never),
     );
-    const selectorFinalIndexes = resolveSelectorFinalSuccessors(
+    const inheritedResolution = resolveFinalSuccessors(
       oc,
-      input.previousSelectorLabelsByKey.get(key),
-      input.validLabels,
+      previousShape,
       input.finalShapeMap,
+      input.historySources,
     );
-    const preservedResolution =
-      selectorFinalIndexes.length > 0
-        ? { finalIndexes: selectorFinalIndexes, deleted: false }
-        : resolveFinalSuccessors(
+    const selectorFinalIndexes =
+      inheritedResolution.finalIndexes.length === 1 || inheritedResolution.ambiguous
+        ? []
+        : resolveSelectorFinalSuccessors(
             oc,
-            previousShape,
+            input.previousSelectorLabelsByKey.get(key),
+            input.validLabels,
             input.finalShapeMap,
-            input.historySources,
           );
+    const preservedResolution =
+      inheritedResolution.finalIndexes.length === 1
+        ? inheritedResolution
+        : selectorFinalIndexes.length > 0
+          ? { finalIndexes: selectorFinalIndexes, deleted: false, ambiguous: false }
+          : inheritedResolution;
 
     if (preservedResolution.finalIndexes.length === 1) {
       const [index] = preservedResolution.finalIndexes;
@@ -1111,13 +1153,6 @@ function deriveGeneratedKindContributorIds<
       ]);
     }
 
-    const inheritedResolution = resolveFinalSuccessors(
-      oc,
-      previousShape,
-      input.finalShapeMap,
-      input.historySources,
-    );
-
     for (const index of inheritedResolution.finalIndexes) {
       inheritedContributorIdsByIndex.set(
         index,
@@ -1126,6 +1161,7 @@ function deriveGeneratedKindContributorIds<
         ]),
       );
     }
+
   }
 
   for (const [index, ids] of claimsByIndex) {

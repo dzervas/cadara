@@ -1,6 +1,11 @@
-import type { HistoryProbeTopologySignature } from "@/contracts/import/capabilities";
+import type {
+  HistoryProbeExactTopologyEvidence,
+  HistoryProbeFaceIncidence,
+  HistoryProbeTopologySignature,
+} from "@/contracts/import/capabilities";
+import type { AuthoredFeatureTopologyLineage } from "@/contracts/modeling/authored-document";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
-import type { BodyId } from "@/contracts/shared/ids";
+import type { BodyId, FaceId } from "@/contracts/shared/ids";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
 
@@ -16,6 +21,7 @@ export type LiveBodySignatureResult =
       signatures: HistoryProbeTopologySignature[];
       /** Same exact evidence indexed while each body payload is derived. */
       signaturesByBody?: ReadonlyMap<BodyId, readonly HistoryProbeTopologySignature[]>;
+      exactTopologyEvidence: HistoryProbeExactTopologyEvidence;
       diagnostics: LiveBodySignatureDiagnostic[];
     }
   | {
@@ -61,6 +67,49 @@ function deriveBodyMeshSignature(
   };
 }
 
+function deriveFaceIncidence(
+  payload: import("@/domain/modeling/occ/native-topology-payload").OccNativeExactBrepPayload,
+): HistoryProbeFaceIncidence[] {
+  const body = payload.brep.bodies[0];
+  if (!body) return [];
+  const topology = body.topology;
+  const faceEdges = topology.faces.map((face) =>
+    new Set(
+      face.loopIndices.flatMap((loopIndex) =>
+        (topology.loops[loopIndex]?.coedgeIndices ?? []).flatMap((coedgeIndex) => {
+          const edgeIndex = topology.coedges[coedgeIndex]?.edgeIndex;
+          return edgeIndex === undefined ? [] : [edgeIndex];
+        }),
+      ),
+    ),
+  );
+  const facesByEdge = new Map<number, number[]>();
+  for (const [faceIndex, edges] of faceEdges.entries()) {
+    for (const edgeIndex of edges) {
+      const faces = facesByEdge.get(edgeIndex) ?? [];
+      faces.push(faceIndex);
+      facesByEdge.set(edgeIndex, faces);
+    }
+  }
+  return topology.faces.map((face, faceIndex) => {
+    const adjacent = new Set<number>();
+    for (const edgeIndex of faceEdges[faceIndex] ?? []) {
+      for (const candidate of facesByEdge.get(edgeIndex) ?? []) {
+        if (candidate !== faceIndex) adjacent.add(candidate);
+      }
+    }
+    return {
+      bodyId: body.bodyKey as BodyId,
+      faceId: face.faceKey as FaceId,
+      adjacentFaceIds: [...adjacent]
+        .map((index) => topology.faces[index]?.faceKey as FaceId | undefined)
+        .filter((faceId): faceId is FaceId => faceId !== undefined)
+        .sort(),
+      planar: face.surface.kind === "plane",
+    };
+  });
+}
+
 /** Derive live native topology, with body-only mesh evidence limited to body identity. */
 export async function deriveLiveBodySignatures(input: {
   snapshot: WorkspaceSnapshot;
@@ -69,6 +118,8 @@ export async function deriveLiveBodySignatures(input: {
   const signatures: HistoryProbeTopologySignature[] = [];
   const diagnostics: LiveBodySignatureDiagnostic[] = [];
   const signaturesByBody = new Map<BodyId, readonly HistoryProbeTopologySignature[]>();
+  const lineageByFeatureId = new Map<string, AuthoredFeatureTopologyLineage>();
+  const faceIncidence: HistoryProbeFaceIncidence[] = [];
 
   for (const body of input.snapshot.document.bodies) {
     const bodyId = body.bodyId as BodyId;
@@ -139,6 +190,16 @@ export async function deriveLiveBodySignatures(input: {
       };
     }
 
+    for (const lineage of result.payload.topologyLineage ?? []) {
+      const existing = lineageByFeatureId.get(lineage.featureId);
+      lineageByFeatureId.set(
+        lineage.featureId,
+        existing
+          ? { ...existing, outputs: [...existing.outputs, ...lineage.outputs] }
+          : lineage,
+      );
+    }
+    faceIncidence.push(...deriveFaceIncidence(result.payload));
     signatures.push(...derived.signatures);
     signaturesByBody.set(bodyId, derived.signatures);
     diagnostics.push(
@@ -150,5 +211,15 @@ export async function deriveLiveBodySignatures(input: {
     );
   }
 
-  return { status: "available", signatures, signaturesByBody, diagnostics };
+  return {
+    status: "available",
+    signatures,
+    signaturesByBody,
+    exactTopologyEvidence: {
+      topologyLineage: [...lineageByFeatureId.values()],
+      faceIncidence,
+      actionOutputs: [],
+    },
+    diagnostics,
+  };
 }

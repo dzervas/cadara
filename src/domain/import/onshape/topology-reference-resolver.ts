@@ -4,7 +4,7 @@ import type {
   OnshapeResolvedQueryReference,
   OnshapeResolvedReference,
 } from "@/contracts/import/onshape-capture-bundle";
-import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
+import type { ImportDeferredTopologyRef, ImportDeferredTopologySelector } from "@/contracts/import/actions";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { BodyId } from "@/contracts/shared/ids";
 import type { RollbackTopologySnapshot, RollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
@@ -25,6 +25,10 @@ import type {
   TopologyQueryReadDiagnostic,
   TopologyQuerySlot,
 } from "@/domain/import/onshape/topology-query-reader";
+import {
+  resolveHistoricalTopology,
+  type HistoricalTopologySignatureStep,
+} from "@/domain/import/historical-topology-selector";
 
 export type TopologyResolutionReason =
   | "topology-query-unreadable"
@@ -39,11 +43,15 @@ export type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
 
 export interface TopologyResolutionBinding {
   query: OnshapeTopologyQueryRef;
-  reviewReference: DurableRef;
-  deferred: ImportDeferredTopologyRef;
+  reviewReference?: DurableRef;
+  /** Whole-body review can retain a source producer without topology rematching. */
+  deferred:
+    | ImportDeferredTopologySelector
+    | Extract<import("@/contracts/import/actions").ImportDeferredValue, { kind: "bodyOf" }>
+    | import("@/domain/import/onshape/exact-body-producer-resolver").DeferredBodyOfSourceFeature;
   score: number;
   evidence: readonly string[];
-  sourceEvidence: "historyPoint" | "queryHistoryPoint" | "rollback" | "corroboratedFinalState" | "uniquePrefixBody";
+  sourceEvidence: "historyPoint" | "queryHistoryPoint" | "rollback" | "corroboratedFinalState" | "uniquePrefixBody" | "historicalPrefixLineage" | "exactRollbackBodyProducer";
 }
 
 export interface TopologyResolutionFailureDetail {
@@ -78,6 +86,10 @@ export interface ResolveTopologyReferencesInput {
    * transformed again.
    */
   captureFrameToWorld?: RigidTransform;
+  /** Earlier body-changing action signatures, requested only after a current no-match. */
+  historicalSignatureSteps?: readonly HistoricalTopologySignatureStep[];
+  /** Apply already disproved the current geometric selector; require historical identity. */
+  requireHistoricalLineage?: boolean;
 }
 
 type SourceEvidence = {
@@ -520,7 +532,7 @@ export function resolveImplicitUnionTarget(input: ResolveTopologyReferencesInput
 
   const tools = new Set(
     toolResolution.bindings.map((binding) =>
-      binding.reviewReference.kind === "body" ? binding.reviewReference.bodyId : null,
+      binding.reviewReference?.kind === "body" ? binding.reviewReference.bodyId : null,
     ),
   );
   if (tools.has(null)) {
@@ -667,11 +679,41 @@ export function resolveTopologyReferences(
         );
       }
     }
-    if (match.kind === "noMatch") {
+    if (match.kind === "noMatch" || input.requireHistoricalLineage) {
+      const historical = input.historicalSignatureSteps
+        ? resolveHistoricalTopology({
+            expectedKind: expectedKindFor(source.signature),
+            capturedSignature: source.signature,
+            historicalSteps: input.historicalSignatureSteps,
+            consumerSignatures: input.cadaraSignatures,
+            source: {
+              consumerFeatureId: input.consumerFeatureId,
+              parameterId: query.parameterId,
+              deterministicId: query.deterministicId,
+            },
+          })
+        : null;
+      if (historical?.kind === "unique") {
+        bindings.push({
+          query,
+          reviewReference: historical.reference,
+          deferred: historical.selector,
+          score: 0,
+          evidence: ["unique-historical-witness", "exact-occ-public-id-lineage"],
+          sourceEvidence: "historicalPrefixLineage",
+        });
+        continue;
+      }
       return {
         kind: "degraded",
-        reason: "topology-reference-no-match",
-        details: [{ query, message: `No Cadara topology matches ${query.deterministicId}.`, rejected: match.rejected }],
+        reason: historical?.kind === "ambiguous" || historical?.kind === "conflict"
+          ? "topology-reference-ambiguous"
+          : "topology-reference-no-match",
+        details: [{
+          query,
+          message: historical?.detail ?? `No Cadara topology matches ${query.deterministicId}.`,
+          ...(match.kind === "noMatch" ? { rejected: match.rejected } : {}),
+        }],
       };
     }
     if (match.kind === "ambiguous") {

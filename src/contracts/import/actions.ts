@@ -69,6 +69,13 @@ export type ImportDeferredValue =
   | ({ kind: "constructionOf" } & ImportDeferredActionOutputRef)
   | ({ kind: "featureOf" } & ImportDeferredActionOutputRef);
 
+/** Diagnostic origin shared by live and historical topology selectors. */
+export interface ImportTopologySelectorSource {
+  consumerFeatureId: string;
+  parameterId: string;
+  deterministicId: string;
+}
+
 /** Selector rematched against live topology immediately before its consumer applies. */
 export interface ImportDeferredTopologyRef {
   kind: "topologyOf";
@@ -80,11 +87,7 @@ export interface ImportDeferredTopologyRef {
     relative: number;
     ambiguityMargin: number;
   };
-  source: {
-    consumerFeatureId: string;
-    parameterId: string;
-    deterministicId: string;
-  };
+  source: ImportTopologySelectorSource;
   /**
    * Live body the rematch must stay inside.
    *
@@ -97,6 +100,35 @@ export interface ImportDeferredTopologyRef {
    */
   bodyScope?: BodyId;
 }
+
+/**
+ * Action-relative OCC lineage selector. It carries no review/sandbox topology
+ * id: apply binds the producer-authorized witness at its exact action, then
+ * follows only modifications discovered from action-local OCC evidence.
+ */
+export interface ImportDeferredHistoricalTopologyRef {
+  kind: "historicalTopologyOf";
+  expectedKind: "body" | "face" | "edge" | "vertex";
+  capturedSignature: OnshapeGeometricSignature;
+  witnessActionIndex: number;
+  /** Exact modifying actions discovered from the historical OCC evidence. */
+  successorActionIndexes: readonly number[];
+  source: ImportTopologySelectorSource;
+}
+
+export interface ImportDeferredSplitInterfaceFaceRef {
+  kind: "splitInterfaceFaceOf";
+  toolExtrudeActionIndex: number;
+  splitActionIndex: number;
+  profileSketchActionIndex: number;
+  profileEntityId: "c.0" | "c.1";
+  endRole: "one-side-end";
+  source: ImportTopologySelectorSource;
+}
+
+export type ImportDeferredTopologySelector =
+  | ImportDeferredTopologyRef
+  | ImportDeferredHistoricalTopologyRef;
 
 export type ImportDeferredSketchEntityRef = Omit<
   Extract<DurableRef, { kind: "sketchEntity" }>,
@@ -115,7 +147,7 @@ export type ImportDeferredSketchPointRef = Omit<
 
 export type ImportDeferredDurableRef =
   | DurableRef
-  | ImportDeferredTopologyRef
+  | ImportDeferredTopologySelector
   | ImportDeferredSketchEntityRef
   | ImportDeferredSketchPointRef
   | Extract<ImportDeferredValue, { kind: "regionOf" | "bodyOf" | "constructionOf" }>;
@@ -124,16 +156,16 @@ export interface ImportDeferredFilletFeatureParameters
   extends Omit<FilletFeatureParameters, "edgeTargets"> {
   edgeTargets: readonly (
     | FilletFeatureParameters["edgeTargets"][number]
-    | ImportDeferredTopologyRef
+    | ImportDeferredTopologySelector
   )[];
 }
 
 export interface ImportDeferredShellFeatureParameters
   extends Omit<ShellFeatureParameters, "bodyTarget" | "faceTargets"> {
-  bodyTarget: ShellFeatureParameters["bodyTarget"] | ImportDeferredTopologyRef;
+  bodyTarget: ShellFeatureParameters["bodyTarget"] | ImportDeferredTopologySelector;
   faceTargets: readonly (
     | ShellFeatureParameters["faceTargets"][number]
-    | ImportDeferredTopologyRef
+    | ImportDeferredTopologySelector
   )[];
 }
 
@@ -158,7 +190,7 @@ export type ImportDeferredPlaneFeatureParameters =
       reference: {
         target:
           | Extract<PlaneFeatureParameters, { mode: "coplanar" }>["reference"]["target"]
-          | ImportDeferredTopologyRef;
+          | ImportDeferredTopologySelector;
       };
     };
 
@@ -166,7 +198,7 @@ export type ImportDeferredProfileRef =
   | ExtrudeProfileRef
   | Extract<ImportDeferredValue, { kind: "regionOf" }>
   /** A captured planar profile face rematched against live topology at apply. */
-  | ImportDeferredTopologyRef;
+  | ImportDeferredTopologySelector;
 
 /**
  * Profile seeds accepted by a surface extrude. An open sketch curve defers only
@@ -184,15 +216,16 @@ export type ImportDeferredFeatureBooleanScope =
       bodyId:
         | BodyId
         | Extract<ImportDeferredValue, { kind: "bodyOf" }>
-        | ImportDeferredTopologyRef;
+        | ImportDeferredTopologySelector;
     }
   | {
       kind: "targetBodies";
-      bodyIds: readonly (BodyId | ImportDeferredTopologyRef)[];
+      bodyIds: readonly (BodyId | ImportDeferredTopologySelector)[];
     };
 
-type ImportDeferredTopologyRefOf<Kind extends ImportDeferredTopologyRef["expectedKind"]> =
-  Omit<ImportDeferredTopologyRef, "expectedKind"> & { expectedKind: Kind };
+type ImportDeferredTopologyRefOf<Kind extends ImportDeferredTopologySelector["expectedKind"]> =
+  | (Omit<ImportDeferredTopologyRef, "expectedKind"> & { expectedKind: Kind })
+  | (Omit<ImportDeferredHistoricalTopologyRef, "expectedKind"> & { expectedKind: Kind });
 
 export type ImportDeferredExtrudeEndCondition =
   | Exclude<
@@ -377,7 +410,8 @@ export interface ImportCreateFeatureRequest
  */
 export type ImportDeferredSketchPlaneSupportRef =
   | SketchPlaneSupportRef
-  | ImportDeferredTopologyRef
+  | ImportDeferredTopologySelector
+  | ImportDeferredSplitInterfaceFaceRef
   | Extract<ImportDeferredValue, { kind: "constructionOf" }>;
 
 export interface ImportDeferredSketchPlaneDefinition

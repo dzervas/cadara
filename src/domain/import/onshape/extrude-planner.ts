@@ -9,7 +9,7 @@ import type {
   ImportDeferredExtrudeExtent,
   ImportDeferredExtrudeStartExtent,
   ImportDeferredSketchPointRef,
-  ImportDeferredTopologyRef,
+  ImportDeferredTopologySelector,
 } from "@/contracts/import/actions";
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
 import type { AuthoredValue } from "@/contracts/modeling/authored-values";
@@ -61,7 +61,7 @@ export interface PlannedSketchPointExtentTarget {
 type PlannedExtrudeTarget =
   | PlannedTopologyTarget
   | PlannedSketchPointExtentTarget
-  | ImportDeferredTopologyRef
+  | ImportDeferredTopologySelector
   | ImportDeferredSketchPointRef;
 
 type PlannedExtrudeEndCondition =
@@ -118,7 +118,7 @@ export type PlannedExtrudeBoolean =
   | {
       kind: "topologyTargets";
       slotKey: string;
-      targets: readonly ImportDeferredTopologyRef[];
+      targets: readonly ImportDeferredTopologySelector[];
     };
 
 interface PlannedExtrudeShared {
@@ -778,8 +778,9 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
 function bindingFor(
   slotKey: string,
   bindings: readonly TopologyResolutionBinding[],
-): ImportDeferredTopologyRef | null {
-  return bindings.find((binding) => binding.query.slotKey === slotKey)?.deferred ?? null;
+): ImportDeferredTopologySelector | null {
+  const deferred = bindings.find((binding) => binding.query.slotKey === slotKey)?.deferred;
+  return deferred?.kind === "bodyOf" || deferred?.kind === "bodyOfSourceFeature" ? null : deferred ?? null;
 }
 
 function resolveEnd(
@@ -831,9 +832,13 @@ export function resolvePlannedExtrudeTopology(
   let boolean = planned.boolean;
   if (boolean.kind === "topologyTargets") {
     const slotKey = boolean.slotKey;
-    const targets = bindings
-      .filter((binding) => binding.query.slotKey === slotKey)
-      .map((binding) => binding.deferred);
+    const targets = bindings.flatMap((binding) =>
+      binding.query.slotKey === slotKey &&
+      binding.deferred.kind !== "bodyOf" &&
+      binding.deferred.kind !== "bodyOfSourceFeature"
+        ? [binding.deferred]
+        : [],
+    );
     if (targets.length === 0) return null;
     boolean = { ...boolean, targets };
   }

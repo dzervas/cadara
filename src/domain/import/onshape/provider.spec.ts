@@ -19,7 +19,14 @@ import {
   assembleFixtureCaptureBundle,
   FIXTURE_PART_STUDIO_ID,
 } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
-import { onshapeImportProvider } from "@/domain/import/onshape/provider";
+import {
+  onshapeImportProvider,
+  cascadeUnavailableActionConsumers,
+  rebaseExactBodyOwnerForPreparedActions,
+  rebaseHistoricalTopologySelectorForPreparedActions,
+} from "@/domain/import/onshape/provider";
+import type { HistoricalTopologyPlanSelector } from "@/domain/import/historical-topology-selector";
+import type { FeaturePlan } from "@/domain/import/onshape/fidelity-planner";
 import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-capture-fixtures";
 import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
 import {
@@ -47,8 +54,209 @@ import {
   createOccNativeExactBrepPayloadFromShimPayload,
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
-
 import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
+
+// Lane: logic. Seam: preparation replaces exploratory review action positions
+// with the final emitted source-feature actions before the import contract leaves
+// the provider; checkpoints may shift every later position.
+test("preparation rebases historical selector source features after checkpoint reordering", () => {
+  const selector: HistoricalTopologyPlanSelector = {
+    kind: "historicalTopologyOf",
+    expectedKind: "face",
+    capturedSignature: {
+      entityClass: "face",
+      geometryType: "plane",
+      definingData: { origin: [0, 0, 0], normal: [0, 0, 1] },
+      boundingBox: { low: [0, 0, 0], high: [1, 1, 0] },
+    },
+    // Exploratory review had extra checkpoints before both actions.
+    witnessActionIndex: 7,
+    successorActionIndexes: [13],
+    witnessSourceFeatureId: "Extrude3",
+    successorSourceFeatureIds: ["Shell1"],
+    source: {
+      consumerFeatureId: "Cutter",
+      parameterId: "sketchPlane",
+      deterministicId: "JQi",
+    },
+  };
+  const finalActionLabels = ["walls", "checkpoint", "Extrude 3", "Sketch 2", "Shell 1", "Cutter"];
+  const rebased = rebaseHistoricalTopologySelectorForPreparedActions({
+    selector,
+    actionIndexesBySourceFeatureId: new Map([
+      ["Extrude3", [2]],
+      ["Shell1", [4]],
+    ]),
+    orderedActions: [
+      { kind: "addDocumentVariable", index: 0 },
+      { kind: "createFeature", index: 0 },
+      { kind: "createFeature", index: 1 },
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 2 },
+      { kind: "commitSketch", index: 1 },
+    ],
+    consumerActionIndex: 5,
+  });
+
+  expect(rebased.witnessActionIndex).toBe(2);
+  expect(rebased.successorActionIndexes).toEqual([4]);
+  expect(finalActionLabels[rebased.witnessActionIndex]).toBe("Extrude 3");
+  expect(finalActionLabels[rebased.successorActionIndexes[0]!]).toBe("Shell 1");
+  expect(rebased).not.toHaveProperty("witnessSourceFeatureId");
+  expect(rebased).not.toHaveProperty("successorSourceFeatureIds");
+});
+
+test("preparation fails when a historical selector source feature was not emitted", () => {
+  const selector = {
+    kind: "historicalTopologyOf",
+    expectedKind: "face",
+    capturedSignature: {
+      entityClass: "face",
+      geometryType: "plane",
+      definingData: { origin: [0, 0, 0], normal: [0, 0, 1] },
+      boundingBox: { low: [0, 0, 0], high: [1, 1, 0] },
+    },
+    witnessActionIndex: 7,
+    successorActionIndexes: [],
+    witnessSourceFeatureId: "missing-witness",
+    successorSourceFeatureIds: [],
+    source: { consumerFeatureId: "Cutter", parameterId: "sketchPlane", deterministicId: "JQi" },
+  } satisfies HistoricalTopologyPlanSelector;
+
+  expect(() => rebaseHistoricalTopologySelectorForPreparedActions({
+    selector,
+    actionIndexesBySourceFeatureId: new Map(),
+    orderedActions: [{ kind: "commitSketch", index: 0 }],
+    consumerActionIndex: 1,
+  })).toThrow("missing-witness for Cutter:sketchPlane:JQi must map to exactly one emitted action");
+});
+
+test("preparation rebases review-only Split owners after parametric producers emit", () => {
+  const orderedActions = [
+    { kind: "commitSketch" as const, index: 0 },
+    { kind: "createFeature" as const, index: 0 },
+    { kind: "commitSketch" as const, index: 1 },
+    { kind: "createFeature" as const, index: 1 },
+    { kind: "createFeature" as const, index: 2 },
+  ];
+  const rebase = (producerSourceFeatureId: string, deterministicId: string) =>
+    rebaseExactBodyOwnerForPreparedActions({
+      target: { kind: "bodyOfSourceFeature", producerSourceFeatureId, deterministicId },
+      actionIndexesBySourceFeatureId: new Map([
+        ["Extrude3", [1]],
+        ["Extrude4", [3]],
+      ]),
+      exactBodyProducerActionIndexes: new Map([
+        ["Extrude3", 1],
+        ["Extrude4", 3],
+      ]),
+      orderedActions,
+      consumerActionIndex: 4,
+    });
+
+  expect(rebase("Extrude3", "JND")).toEqual({ kind: "bodyOf", actionIndex: 1 });
+  expect(rebase("Extrude4", "JaD")).toEqual({ kind: "bodyOf", actionIndex: 3 });
+});
+
+test("preparation fails when an exact Split owner was not emitted", () => {
+  expect(() => rebaseExactBodyOwnerForPreparedActions({
+    target: { kind: "bodyOfSourceFeature", producerSourceFeatureId: "Extrude4", deterministicId: "JaD" },
+    actionIndexesBySourceFeatureId: new Map(),
+    exactBodyProducerActionIndexes: new Map(),
+    orderedActions: [{ kind: "createFeature", index: 0 }],
+    consumerActionIndex: 1,
+  })).toThrow("Extrude4 must map to exactly one emitted action");
+});
+
+// Lane: logic. Seam: fixed-point review invalidates consumers whose exact
+// source-action dependencies disappear after containment demotes a producer.
+test("producer demotion cascades through exact body, historical, and replay consumers", () => {
+  const featurePlan = (
+    onshapeFeatureId: string,
+    overrides: Partial<FeaturePlan> = {},
+  ): FeaturePlan => ({
+    onshapeFeatureId,
+    featureType: "fixture",
+    label: onshapeFeatureId,
+    tier: "parametric",
+    target: { kind: "feature" },
+    reasonCodes: [],
+    suppressed: false,
+    inputDependencies: [],
+    inputFeatureIds: [],
+    ...overrides,
+  });
+  const plans = [
+    featurePlan("producer", {
+      tier: "baked",
+      target: { kind: "suppressed" },
+      reasonCodes: ["feature-kernel-build-failed"],
+      suppressed: true,
+    }),
+    featurePlan("split", {
+      plannedAdvancedSolid: {
+        kind: "split",
+        parameters: {
+          participants: [{
+            role: "targetBody",
+            targets: [{
+              kind: "bodyOfSourceFeature",
+              producerSourceFeatureId: "producer",
+              deterministicId: "body_target",
+            }],
+          }],
+        },
+      } as never,
+    }),
+    featurePlan("historical-sketch", {
+      featureType: "newSketch",
+      target: {
+        kind: "sketch",
+        planeKey: "xy",
+        probedFaceSelector: {
+          kind: "historicalTopologyOf",
+          expectedKind: "face",
+          capturedSignature: { entityClass: "face", geometryType: "plane" },
+          witnessActionIndex: 1,
+          successorActionIndexes: [],
+          witnessSourceFeatureId: "producer",
+          successorSourceFeatureIds: [],
+          source: {
+            consumerFeatureId: "historical-sketch",
+            parameterId: "sketchPlane",
+            deterministicId: "face_target",
+          },
+        },
+      } as never,
+    }),
+    featurePlan("replay", {
+      plannedFeatureReplay: {
+        kind: "linear",
+        sourceFeatureIds: ["split"],
+        direction: { kind: "construction", constructionId: "construction_x_axis" as never },
+        instanceCount: 2,
+        spacing: 10,
+        oppositeDirection: false,
+      },
+    }),
+    featurePlan("independent"),
+  ];
+
+  const cascaded = cascadeUnavailableActionConsumers(plans);
+  const tierOf = (featureId: string) =>
+    cascaded.find((plan) => plan.onshapeFeatureId === featureId);
+
+  expect(tierOf("producer")?.reasonCodes).toEqual(["feature-kernel-build-failed"]);
+  for (const featureId of ["split", "historical-sketch", "replay"]) {
+    expect(tierOf(featureId)).toMatchObject({
+      tier: "baked",
+      target: { kind: "suppressed" },
+      reasonCodes: ["downstream-of-baked"],
+      suppressed: true,
+    });
+  }
+  expect(tierOf("independent")?.tier).toBe("parametric");
+});
 function sourceFromBundle(bundle: unknown): ResolvedImportSource {
   const bytes = new TextEncoder().encode(JSON.stringify(bundle));
   return {
@@ -67,8 +275,13 @@ const capabilities: ImportCapabilities = {
     baseRevisionId: "rev_1",
   },
   modeling: {
-    async bakeGeometry() {
-      throw new Error("not used");
+    async bakeGeometry(input) {
+      return {
+        assetId: "asset_test_bake" as never,
+        format: input.format,
+        hash: "sha256:test-bake" as never,
+        byteLength: input.bytes.byteLength,
+      };
     },
     async reconstructMeshToBrep() {
       throw new Error("not used");
@@ -382,6 +595,7 @@ function makeFaceSketchExtrudeBundle(): OnshapeCaptureBundleV2 {
   });
   return bundle;
 }
+
 
 function makeDurableSubtopologyBundle(): OnshapeCaptureBundleV2 {
   const bundle = makeSegmentedCheckpointBundle();
@@ -952,6 +1166,85 @@ function capabilitiesWithProbe(
   };
 }
 
+function topologyActionOrdinal(input: {
+  actions: {
+    orderedActions?: readonly { kind: string; index: number }[];
+    createFeatures?: readonly { definition: unknown }[];
+    commitSketches?: readonly { definition: unknown }[];
+  };
+}, featureId: string, selectorKind: "topologyOf" | "historicalTopologyOf"): number {
+  const hasSelector = (value: unknown): boolean => {
+    if (!value || typeof value !== "object") return false;
+    if (
+      (value as { kind?: unknown }).kind === selectorKind &&
+      (value as { source?: { consumerFeatureId?: unknown } }).source?.consumerFeatureId === featureId
+    ) return true;
+    return Array.isArray(value)
+      ? value.some(hasSelector)
+      : Object.values(value).some(hasSelector);
+  };
+  return input.actions.orderedActions?.findIndex((action) => {
+    const request = action.kind === "createFeature"
+      ? input.actions.createFeatures?.[action.index]
+      : action.kind === "commitSketch"
+        ? input.actions.commitSketches?.[action.index]
+        : undefined;
+    return request ? hasSelector(request.definition) : false;
+  }) ?? -1;
+}
+
+function capabilitiesWithContainmentFailure(input: {
+  featureId: string;
+  signatures: readonly HistoryProbeTopologySignature[];
+  failHistoricalRetry?: boolean;
+  diagnosticCode?: "topology-apply-rematch-failed" | "feature-kernel-build-failed";
+}) {
+  const base = capabilitiesWithProbe(input.signatures);
+  const history = base.history!;
+  let directContainmentFailures = 0;
+  let historicalContainmentFailures = 0;
+  return {
+    capabilities: {
+      ...base,
+      history: {
+        async evaluateHistoryProbe(probeInput: Parameters<typeof history.evaluateHistoryProbe>[0]) {
+          const isContainment =
+            probeInput.consumerFeatureId === undefined &&
+            probeInput.includeFinalTessellation !== true;
+          const directOrdinal = topologyActionOrdinal(probeInput, input.featureId, "topologyOf");
+          const historicalOrdinal = topologyActionOrdinal(
+            probeInput,
+            input.featureId,
+            "historicalTopologyOf",
+          );
+          const failedOrdinal = isContainment && directOrdinal >= 0
+            ? (directContainmentFailures += 1, directOrdinal)
+            : isContainment && input.failHistoricalRetry && historicalOrdinal >= 0
+              ? (historicalContainmentFailures += 1, historicalOrdinal)
+              : -1;
+          if (failedOrdinal < 0) return history.evaluateHistoryProbe(probeInput);
+          const count = probeInput.actions.orderedActions?.length ?? 0;
+          return {
+            steps: Array.from({ length: count }, (_, ordinal) =>
+              ordinal === failedOrdinal
+                ? {
+                    status: "failed" as const,
+                    diagnostics: [{
+                      severity: "error" as const,
+                      code: input.diagnosticCode ?? "topology-apply-rematch-failed",
+                      message: "structured containment failure",
+                    }],
+                  }
+                : { status: "rebuilt" as const, signatures: [...input.signatures] },
+            ),
+          };
+        },
+      },
+    } satisfies ImportCapabilities,
+    containmentFailures: () => ({ directContainmentFailures, historicalContainmentFailures }),
+  };
+}
+
 function makeUpToVertexExtrudeBundle(
   includeVertexHistoryBinding: boolean,
   includeUnboundBooleanScope = false,
@@ -1353,11 +1646,10 @@ test("src/domain/import/onshape/provider.spec.ts promotes a synthetic closed hol
 
 // Lane: logic (per docs/testing.md — exercises the exported importer
 // review/apply seam, not presentation behavior).
-// Seam: when a probe rejects a feature's topology reference at apply time
-// (TopologyApplyRematchError), review must degrade only that feature to
-// baked/suppressed with `topology-apply-rematch-failed`, cascade its dependents,
-// keep independent features parametric, and never let the throw escape review.
-test("src/domain/import/onshape/provider.spec.ts contains an apply-time topology rematch failure at the offending feature", async () => {
+// Seam: a live topologyOf apply no-match triggers one stricter historical-prefix
+// retry. A unique historical witness with the same current OCC key promotes the
+// feature and its dependent without weakening geometric rematching.
+test("src/domain/import/onshape/provider.spec.ts retries an apply-time topology no-match through historical lineage", async () => {
   const rematchSelector: ImportDeferredTopologyRef = {
     kind: "topologyOf",
     expectedKind: "face",
@@ -1410,26 +1702,154 @@ test("src/domain/import/onshape/provider.spec.ts contains an apply-time topology
   const byId = (id: string) => plans.find((plan) => plan.onshapeFeatureId === id);
 
   expect(byId("S_FACE"), JSON.stringify(plans)).toMatchObject({
-    tier: "baked",
-    suppressed: true,
+    tier: "parametric",
+    suppressed: false,
+    target: {
+      probedFaceSelector: {
+        kind: "historicalTopologyOf",
+        expectedKind: "face",
+        source: { consumerFeatureId: "S_FACE", deterministicId: "face_ref" },
+      },
+    },
   });
-  expect(byId("S_FACE")?.reasonCodes).toContain("topology-apply-rematch-failed");
-  // X.9.3: the contained bake must keep the failure's zero/one/many detail, or the
-  // next root cause behind an apply-time rematch has to be guessed.
-  expect(
-    byId("S_FACE")?.reasonDetail,
-    "A contained apply-rematch bake must preserve the live-match detail verbatim.",
-  ).toBe(
-    "wants face for face_ref; live match noMatch || rejected nothing || live prefix 0: empty",
-  );
-
-  // The dependent extrude on S_FACE's region cascades to baked rather than
-  // referencing a suppressed sketch.
-  expect(byId("E_FACE")?.tier).toBe("baked");
+  expect(JSON.stringify((byId("S_FACE")?.target as { probedFaceSelector?: unknown })
+    ?.probedFaceSelector)).not.toContain("body_probe");
+  expect(byId("E_FACE")?.tier).toBe("parametric");
 
   // Independent upstream geometry stays parametric: one rejected feature does
   // not bake the rest of the studio.
   expect(byId("E_BASE")?.tier).toBe("parametric");
+});
+
+// Lane: logic (per docs/testing.md — exported importer review seam).
+// Seam: a full-plan structured topology rematch refusal gets exactly one
+// historical retry before containment, so a successful historical selector is
+// never placed in the per-activation containment-rejection set.
+test("src/domain/import/onshape/provider.spec.ts retries a direct containment rematch through historical lineage", async () => {
+  const probe = capabilitiesWithContainmentFailure({
+    featureId: "E_VERTEX",
+    signatures: [vertexProbeSignature()],
+  });
+  const review = await onshapeImportProvider.review({
+    source: sourceFromBundle(makeUpToVertexExtrudeBundle(true)),
+    capabilities: probe.capabilities,
+  });
+  const plans = review.providerReview.studios[0]!.featurePlans;
+  const vertexExtrude = plans.find((plan) => plan.onshapeFeatureId === "E_VERTEX");
+
+  expect(probe.containmentFailures()).toEqual({
+    directContainmentFailures: 1,
+    historicalContainmentFailures: 0,
+  });
+  expect(vertexExtrude, JSON.stringify(plans)).toMatchObject({
+    tier: "parametric",
+    suppressed: false,
+    plannedExtrude: {
+      extent: { mode: "oneSide", end: { target: { kind: "historicalTopologyOf" } } },
+    },
+  });
+});
+
+// Lane: logic (per docs/testing.md — exported importer review seam).
+// Seam: a historical selector that survives its exact prefix is not rejected by
+// a whole-plan containment replay; checkpoints are replacement geometry, not
+// historical lineage evidence.
+test("src/domain/import/onshape/provider.spec.ts preserves historical lineage when containment replays a checkpoint", async () => {
+  const probe = capabilitiesWithContainmentFailure({
+    featureId: "E_VERTEX",
+    signatures: [vertexProbeSignature()],
+  });
+  const history = probe.capabilities.history!;
+  const review = await onshapeImportProvider.review({
+    source: sourceFromBundle(makeUpToVertexExtrudeBundle(true)),
+    capabilities: {
+      ...probe.capabilities,
+      history: {
+        async evaluateHistoryProbe(input) {
+          const historicalOrdinal = topologyActionOrdinal(input, "E_VERTEX", "historicalTopologyOf");
+          if (
+            input.consumerFeatureId === undefined &&
+            input.includeFinalTessellation !== true &&
+            historicalOrdinal >= 0
+          ) {
+            throw new TopologyApplyRematchError({
+              kind: "historicalTopologyOf",
+              expectedKind: "vertex",
+              capturedSignature: vertexProbeSignature(),
+              tolerance: { linear: 0.01, angularRadians: 0.01, relative: 0.01, ambiguityMargin: 0.5 },
+              source: { consumerFeatureId: "E_VERTEX", parameterId: "endBoundEntityVertex", deterministicId: "vertex_target" },
+            });
+          }
+          return history.evaluateHistoryProbe(input);
+        },
+      },
+    },
+  });
+
+  const vertexExtrude = review.providerReview.studios[0]!.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "E_VERTEX",
+  );
+  expect(vertexExtrude).toMatchObject({
+    tier: "parametric",
+    suppressed: false,
+    plannedExtrude: { extent: { mode: "oneSide", end: { target: { kind: "historicalTopologyOf" } } } },
+  });
+});
+
+// Lane: logic (per docs/testing.md — exported importer review seam).
+// Seam: if the historical selector also fails in the apply-equivalent plan, the
+// feature fails closed to baked rather than retrying or preserving a live selector.
+test("src/domain/import/onshape/provider.spec.ts contains a second historical rematch failure", async () => {
+  const probe = capabilitiesWithContainmentFailure({
+    featureId: "E_VERTEX",
+    signatures: [vertexProbeSignature()],
+    failHistoricalRetry: true,
+  });
+  const review = await onshapeImportProvider.review({
+    source: sourceFromBundle(makeUpToVertexExtrudeBundle(true)),
+    capabilities: probe.capabilities,
+  });
+  const plans = review.providerReview.studios[0]!.featurePlans;
+  const vertexExtrude = plans.find((plan) => plan.onshapeFeatureId === "E_VERTEX");
+
+  expect(probe.containmentFailures()).toEqual({
+    directContainmentFailures: 1,
+    historicalContainmentFailures: 2,
+  });
+  expect(vertexExtrude).toMatchObject({
+    tier: "baked",
+    target: { kind: "suppressed" },
+    suppressed: true,
+    reasonCodes: ["feature-kernel-build-failed"],
+  });
+});
+
+// Lane: logic (per docs/testing.md — exported importer review seam).
+// Seam: containment only requests historical lineage for the exact structured
+// rematch code; ordinary kernel build failures retain normal feature demotion.
+test("src/domain/import/onshape/provider.spec.ts contains a non-topology kernel failure without historical retry", async () => {
+  const probe = capabilitiesWithContainmentFailure({
+    featureId: "E_VERTEX",
+    signatures: [vertexProbeSignature()],
+    diagnosticCode: "feature-kernel-build-failed",
+  });
+  const review = await onshapeImportProvider.review({
+    source: sourceFromBundle(makeUpToVertexExtrudeBundle(true)),
+    capabilities: probe.capabilities,
+  });
+  const plans = review.providerReview.studios[0]!.featurePlans;
+  const vertexExtrude = plans.find((plan) => plan.onshapeFeatureId === "E_VERTEX");
+
+  expect(probe.containmentFailures()).toEqual({
+    directContainmentFailures: 2,
+    historicalContainmentFailures: 0,
+  });
+  expect(vertexExtrude).toMatchObject({
+    tier: "baked",
+    target: { kind: "suppressed" },
+    suppressed: true,
+    reasonCodes: ["feature-kernel-build-failed"],
+  });
 });
 
 test("src/domain/import/onshape/provider.spec.ts registration and acceptance", async () => {
@@ -1511,6 +1931,7 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
     ).toBe(false);
   }
 });
+
 
 // Lane: logic (per docs/testing.md — real provider review → prepared-action
 // seam). This pins the exact producer identities used by d3cd9's native sheet

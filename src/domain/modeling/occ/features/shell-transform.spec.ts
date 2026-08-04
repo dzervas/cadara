@@ -7,12 +7,17 @@ import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/adva
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   BodyId,
+  FaceId,
   FeatureId,
   SketchEntityId,
   SketchId,
 } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
-import { executeShellFeature } from "@/domain/modeling/occ/features/shell";
+import {
+  createClosedHollowInnerOffsetFaceClaims,
+  executeShellFeature,
+} from "@/domain/modeling/occ/features/shell";
 import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import {
   executeMirrorFeature,
@@ -26,7 +31,9 @@ import {
   getOccDurableRefKey,
   trackNewSolidBody,
   type OccReferenceInvalidationRecord,
+  type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
+import { classifySemanticStageTopology } from "@/domain/modeling/occ/topology-naming";
 import {
   createOccFeatureTopologyLineageMap,
   createOccTopologyProvenanceIndex,
@@ -576,6 +583,88 @@ test("executeShellFeature creates an inside closed hollow without changing the o
       },
     ),
   ).toThrow();
+});
+
+// Lane: logic (per docs/testing.md — exported closed-hollow execution and its
+// exact stage claims are deterministic domain behavior). Seam: the composed
+// offset→cut relation retains a cavity-face identity across a thickness rebuild.
+test("closedHollow preserves an inner face public id through its composed offset-to-cut claim", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const body = makeTrackedBox(
+    oc,
+    "body_closed_hollow_composite" as BodyId,
+    "feature_closed_hollow_composite_seed" as FeatureId,
+  );
+  const execute = (thickness: number) =>
+    executeShellFeature(
+      createOccAuthoringState(oc, { bodies: [body] }),
+      "feature_closed_hollow_composite" as FeatureId,
+      {
+        mode: "closedHollow",
+        bodyTarget: { kind: "body", bodyId: body.bodyId },
+        faceTargets: [],
+        thickness,
+        direction: "inside",
+        operation: "newBody",
+        booleanScope: { kind: "standalone" },
+      },
+    );
+  const first = execute(0.2);
+  const rebuilt = execute(0.3);
+  const firstStage = first.topologyStage?.outputs.get(body.bodyId);
+  const rebuiltStage = rebuilt.topologyStage?.outputs.get(body.bodyId);
+  expect(firstStage).toBeTruthy();
+  expect(rebuiltStage).toBeTruthy();
+  const innerClaim = [...firstStage!.sourceTargets].find(([sourceKey]) =>
+    sourceKey.endsWith(":shell-inner-offset-face-of"),
+  );
+  expect(innerClaim, "The cavity face must have an exact composed producer claim.").toBeTruthy();
+  const rebuiltTarget = rebuiltStage!.sourceTargets.get(innerClaim![0])?.[0];
+  expect(rebuiltTarget).toBeTruthy();
+  expect(
+    classifySemanticStageTopology({ previous: firstStage!, current: rebuiltStage! })
+      .preservedTargetsByCurrentKey.get(getOccDurableRefKey(rebuiltTarget!)),
+  ).toEqual(innerClaim![1]![0]);
+});
+
+test("closedHollow inner offset claims fail closed for missing, many, and inverse-many relations", () => {
+  const sourceFace = "face_closed_hollow_source" as FaceId;
+  const secondSourceFace = "face_closed_hollow_second_source" as FaceId;
+  const outputFace = "face_closed_hollow_output" as FaceId;
+  const secondOutputFace = "face_closed_hollow_second_output" as FaceId;
+  const sourceBody = {
+    bodyId: "body_closed_hollow_claim_source" as BodyId,
+    facesById: new Map([[sourceFace, {}], [secondSourceFace, {}]]),
+  } as unknown as OccTrackedBody;
+  const outputBody = {
+    bodyId: "body_closed_hollow_claim_output" as BodyId,
+  } as unknown as OccTrackedBody;
+  const output = (faceId: FaceId) => ({
+    kind: "face" as const,
+    bodyId: outputBody.bodyId,
+    faceId,
+  });
+  const claims = (
+    targetsBySourceFaceId: ReadonlyMap<FaceId, readonly DurableRef[]>,
+  ) =>
+    createClosedHollowInnerOffsetFaceClaims({
+      featureId: "feature_closed_hollow_claim" as FeatureId,
+      sourceBody,
+      outputBody,
+      targetsBySourceFaceId,
+    });
+  expect(claims(new Map([[sourceFace, []]])).size).toBe(0);
+  expect(
+    claims(new Map([[sourceFace, [output(outputFace), output(secondOutputFace)]]])).size,
+  ).toBe(0);
+  expect(
+    claims(
+      new Map([
+        [sourceFace, [output(outputFace)]],
+        [secondSourceFace, [output(outputFace)]],
+      ]),
+    ).size,
+  ).toBe(0);
 });
 
 // Lane: logic (per docs/testing.md — exported OCC feature execution is a

@@ -13,6 +13,7 @@ import {
   parseNativeFeatureTransactionHistoryJson,
   parseNativeSheetSplitToolHistoryJson,
   parseNativeShimPayloadJson,
+  type OpenCascadeNativeFeatureTransactionResult,
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
@@ -86,6 +87,59 @@ type NativeOpenCascadeForTest = OpenCascadeNativeTopologyKernelHost & {
     y: number,
     z: number,
   ) => NativeDisposableForTest;
+};
+
+type NativeBooleanProbeShape = NativeShapeForTest & {
+  IsSame(other: NativeBooleanProbeShape): boolean;
+};
+
+type NativeBooleanProbeList = {
+  Append_1(shape: NativeBooleanProbeShape): void;
+  Size(): number;
+  delete(): void;
+};
+
+type NativeBooleanProbeBuilder = {
+  SetArguments(shapes: NativeBooleanProbeList): void;
+  SetTools(shapes: NativeBooleanProbeList): void;
+  SetToFillHistory(enabled: boolean): void;
+  Build(progress: NativeDisposableForTest): void;
+  Modified(shape: NativeBooleanProbeShape): NativeBooleanProbeList;
+  Shape(): NativeBooleanProbeShape;
+  delete(): void;
+};
+
+type NativeBooleanHistoryProbe = NativeOpenCascadeForTest & {
+  BRepAlgoAPI_Fuse_1: new () => NativeBooleanProbeBuilder;
+  Message_ProgressRange_1: new () => NativeDisposableForTest;
+  ShapeUpgrade_UnifySameDomain_2: new (
+    shape: NativeBooleanProbeShape,
+    unifyEdges: boolean,
+    unifyFaces: boolean,
+    concatBSplines: boolean,
+  ) => NativeDisposableForTest & {
+    AllowInternalEdges(enabled: boolean): void;
+    SetSafeInputMode(enabled: boolean): void;
+    SetLinearTolerance(tolerance: number): void;
+    SetAngularTolerance(tolerance: number): void;
+    Build(): void;
+    Shape(): NativeBooleanProbeShape;
+  };
+  TopAbs_ShapeEnum: { TopAbs_FACE: unknown };
+  TopExp: {
+    MapShapes_1(
+      shape: NativeBooleanProbeShape,
+      shapeType: unknown,
+      map: { Size(): number; FindKey(index: number): NativeBooleanProbeShape },
+    ): void;
+  };
+  TopTools_IndexedMapOfShape_1: new () => {
+    Size(): number;
+    FindKey(index: number): NativeBooleanProbeShape;
+    delete(): void;
+  };
+  TopTools_ListOfShape_1: new () => NativeBooleanProbeList;
+  TopoDS: { Face_1(shape: NativeBooleanProbeShape): NativeBooleanProbeShape };
 };
 
 type NativeOpenCascadeMainJSForTest = new (
@@ -1157,6 +1211,93 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     rightBuilder.delete?.();
   }
 
+  async function testNativeBooleanTransactionRetainsExactG22Predecessor() {
+    const oc = await loadNativeOpenCascadeForTest() as NativeBooleanHistoryProbe;
+    const origin = new oc.gp_Pnt_3(0, 0, 0);
+    const toolOrigin = new oc.gp_Pnt_3(2, 0, 0);
+    const leftBuilder = new oc.BRepPrimAPI_MakeBox_3(origin, 2, 2, 2);
+    const rightBuilder = new oc.BRepPrimAPI_MakeBox_3(toolOrigin, 2, 2, 2);
+    const argumentsList = new oc.TopTools_ListOfShape_1();
+    const toolsList = new oc.TopTools_ListOfShape_1();
+    const progress = new oc.Message_ProgressRange_1();
+    const rawBuilder = new oc.BRepAlgoAPI_Fuse_1();
+    let unifier: (NativeDisposableForTest & { Shape(): NativeBooleanProbeShape }) | undefined;
+    let transaction: OpenCascadeNativeFeatureTransactionResult | undefined;
+    try {
+      const left = leftBuilder.Shape() as NativeBooleanProbeShape;
+      const right = rightBuilder.Shape() as NativeBooleanProbeShape;
+      const facesOf = (shape: NativeBooleanProbeShape) => {
+        const faces = new oc.TopTools_IndexedMapOfShape_1();
+        try {
+          oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, faces);
+          return Array.from({ length: faces.Size() }, (_, index) =>
+            oc.TopoDS.Face_1(faces.FindKey(index + 1)),
+          );
+        } finally {
+          faces.delete();
+        }
+      };
+
+      argumentsList.Append_1(left);
+      toolsList.Append_1(right);
+      rawBuilder.SetArguments(argumentsList);
+      rawBuilder.SetTools(toolsList);
+      rawBuilder.SetToFillHistory(true);
+      rawBuilder.Build(progress);
+      const rawShape = rawBuilder.Shape();
+      unifier = new oc.ShapeUpgrade_UnifySameDomain_2(rawShape, true, true, true);
+      unifier.AllowInternalEdges(false);
+      unifier.SetSafeInputMode(true);
+      unifier.SetLinearTolerance(0.001);
+      unifier.SetAngularTolerance(0.001);
+      unifier.Build();
+      const predecessor = facesOf(left).find((face) => {
+        const modified = rawBuilder.Modified(face);
+        try {
+          return modified.Size() === 0
+            && facesOf(rawShape).filter((candidate) => candidate.IsSame(face)).length === 1
+            && facesOf(unifier!.Shape()).filter((candidate) => candidate.IsSame(face)).length === 0;
+        } finally {
+          modified.delete();
+        }
+      });
+      expect(
+        predecessor,
+        "The g22 native probe must reproduce a raw unique IsSame face that the unifier loses without Modified history.",
+      ).toBeTruthy();
+      if (!predecessor) throw new Error("Expected a g22 exact-identity predecessor.");
+
+      transaction = oc.CadaraExecuteNativeFeatureTransaction
+        .BuildBooleanCommittedShapeTransactionWithHistory?.(
+          left,
+          right,
+          "join",
+          "body_native_g22_exact_history",
+          "t0001",
+          "t0002",
+          0.1,
+          0.5,
+        );
+      expect(transaction, "Custom OCC must expose native Boolean transactions.").toBeTruthy();
+      const committed = transaction!.Shape() as NativeBooleanProbeShape;
+      expect(
+        facesOf(committed).filter((candidate) => candidate.IsSame(predecessor)).length,
+        "The native committed Boolean transaction must retain the g22 predecessor by exact TopoDS::IsSame identity.",
+      ).toBe(1);
+    } finally {
+      transaction?.delete();
+      unifier?.delete?.();
+      rawBuilder.delete();
+      progress.delete?.();
+      argumentsList.delete();
+      toolsList.delete();
+      leftBuilder.delete?.();
+      rightBuilder.delete?.();
+      origin.delete?.();
+      toolOrigin.delete?.();
+    }
+  }
+
   async function testNativeBooleanOperandHistoryForPartiallyOverlappingBoxesWhenAvailable() {
     const oc = await loadNativeOpenCascadeForTest();
     const leftBuilder = new oc.BRepPrimAPI_MakeBox_2(2, 2, 2);
@@ -1285,6 +1426,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
   await testNativeBooleanTransactionBuildsCommittedPayload();
   await testNativeBooleanTransactionReturnsCommittedShapeResult();
   await testNativeBooleanOperandHistoryForPartiallyOverlappingBoxesWhenAvailable();
+  await testNativeBooleanTransactionRetainsExactG22Predecessor();
   await testNativeMeshPayloadPreservesFaceOrientation();
 });
 

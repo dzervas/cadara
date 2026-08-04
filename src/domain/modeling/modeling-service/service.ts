@@ -1219,6 +1219,7 @@ export function createModelingService(
     sketchSolver,
     dispose() {
       unsubscribeDocumentRepository?.();
+      adapter.dispose?.();
     },
     subscribeToDocumentChanges(listener) {
       documentChangeListeners.add(listener);

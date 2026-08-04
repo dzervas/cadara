@@ -565,7 +565,15 @@ export function applyOccFeatureToAuthoringState(
     state,
     feature,
     executeOccFeature(
-      { ...state, previousTopologyStage, topologyProvenanceIndex },
+      {
+        ...state,
+        previousTopologyStage,
+        previousTopologyLineage: getPreviousFeatureTopologyLineage(
+          state.previousFeatureTopologyLineage,
+          feature.featureId,
+        ),
+        topologyProvenanceIndex,
+      },
       feature.featureId,
       resolvedDefinition.definition,
     ),

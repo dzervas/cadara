@@ -15,6 +15,7 @@ import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import {
   ImportDeferredMaterializer,
   isTopologyApplyRematchError,
+  TopologyApplyRematchError,
   type ImportActionOutputRecord,
 } from "@/domain/import/orchestrator";
 
@@ -77,8 +78,9 @@ export function createMemoizedHistoryProbe(
   return {
     evaluateHistoryProbe(input) {
       const actionKeys = getOrderedActionKeys(input.actions);
-      const retainedFailure = failedPrefixes.find((failure) =>
-        canReuseFailedPrefix(failure, input, actionKeys));
+      const retainedFailure = input.requireFreshExecution
+        ? undefined
+        : failedPrefixes.find((failure) => canReuseFailedPrefix(failure, input, actionKeys));
       if (retainedFailure) return Promise.resolve(retainedFailure.result);
 
       const key = JSON.stringify({
@@ -86,8 +88,9 @@ export function createMemoizedHistoryProbe(
         includeFinalTessellation: input.includeFinalTessellation ?? false,
         requestedSignatureStepOrdinals: input.requestedSignatureStepOrdinals ?? null,
         containTopologyRematchFailures: input.containTopologyRematchFailures ?? false,
+        requireFreshExecution: input.requireFreshExecution ?? false,
       });
-      const cached = cache.get(key);
+      const cached = input.requireFreshExecution ? undefined : cache.get(key);
       if (cached) return cached;
       const pending = history.evaluateHistoryProbe(input).then(
         (result) => {
@@ -111,7 +114,7 @@ export function createMemoizedHistoryProbe(
           throw error;
         },
       );
-      cache.set(key, pending);
+      if (!input.requireFreshExecution) cache.set(key, pending);
       return pending;
     },
     forgetFailedEvaluations() {
@@ -171,8 +174,25 @@ type KernelHistoryProbeExecution = {
   actionKeys: string[];
   materializer: ImportDeferredMaterializer;
   signaturesByOrdinal: Map<number, RebuiltHistoryProbeStep["signatures"]>;
+  evidenceByOrdinal: Map<number, NonNullable<RebuiltHistoryProbeStep["exactTopologyEvidence"]>>;
+  outputRecords: Map<string, ImportActionOutputRecord>;
   basis: { documentId: DocumentId; baseRevisionId: RevisionId } | null;
 };
+
+function historicalWitnessActionIndexes(actions: ImportPreparedActions): ReadonlySet<number> {
+  const indexes = new Set<number>();
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    if ((value as { kind?: unknown }).kind === "historicalTopologyOf") {
+      const index = (value as { witnessActionIndex?: unknown }).witnessActionIndex;
+      if (typeof index === "number" && Number.isInteger(index)) indexes.add(index);
+      return;
+    }
+    for (const entry of Array.isArray(value) ? value : Object.values(value)) visit(entry);
+  };
+  visit(actions);
+  return indexes;
+}
 
 export function createKernelHistoryProbeSession(
   options: KernelHistoryProbeSessionOptions,
@@ -206,9 +226,29 @@ export function createKernelHistoryProbeSession(
 
   const evaluate = async (input: HistoryProbeInput) => {
     const actionKeys = getOrderedActionKeys(input.actions);
-    if (!execution || !canContinueProbeExecution(execution, input, actionKeys)) {
+    const historicalWitnesses = historicalWitnessActionIndexes(input.actions);
+    if (input.requireFreshExecution && execution) {
+      await disposeExecution();
+    }
+    if (!execution || !canContinueProbeExecution(execution, input, actionKeys, historicalWitnesses)) {
       await disposeExecution();
       execution = createProbeExecution(options.createService!());
+    }
+    execution.materializer.registerHistoricalSelectors(input.actions);
+    for (const ordinal of historicalWitnesses) {
+      if (ordinal >= execution.actionKeys.length) continue;
+      const signatures = execution.signaturesByOrdinal.get(ordinal);
+      if (!signatures) continue;
+      await execution.materializer.bindHistoricalSelectorsAtAction(ordinal, {
+        status: "available",
+        signatures,
+        exactTopologyEvidence: execution.evidenceByOrdinal.get(ordinal) ?? {
+          topologyLineage: [],
+          faceIncidence: [],
+          actionOutputs: [],
+        },
+        diagnostics: [],
+      });
     }
 
     try {
@@ -260,14 +300,17 @@ function missingProbeSessionResult(): HistoryProbeResult {
 function createProbeExecution(
   service: DisposableKernelHistoryProbeService,
 ): KernelHistoryProbeExecution {
+  const outputRecords = new Map<string, ImportActionOutputRecord>();
   return {
     service,
     actionKeys: [],
     materializer: new ImportDeferredMaterializer({
       modelingService: service,
-      outputRecords: new Map<string, ImportActionOutputRecord>(),
+      outputRecords,
     }),
     signaturesByOrdinal: new Map(),
+    evidenceByOrdinal: new Map(),
+    outputRecords,
     basis: null,
   };
 }
@@ -276,11 +319,15 @@ function canContinueProbeExecution(
   execution: KernelHistoryProbeExecution,
   input: HistoryProbeInput,
   actionKeys: readonly string[],
+  historicalWitnesses: ReadonlySet<number>,
 ) {
   if (execution.actionKeys.length > actionKeys.length) return false;
   if (!execution.actionKeys.every((key, index) => key === actionKeys[index])) {
     return false;
   }
+  if ([...historicalWitnesses].some(
+    (ordinal) => ordinal < execution.actionKeys.length && !execution.signaturesByOrdinal.has(ordinal),
+  )) return false;
 
   const requested = input.requestedSignatureStepOrdinals;
   if (requested === undefined) {
@@ -293,16 +340,17 @@ function canContinueProbeExecution(
       execution.signaturesByOrdinal.has(ordinal),
   );
 }
-
 async function evaluateHistoryProbeInKernelSession(
   input: HistoryProbeInput,
   execution: KernelHistoryProbeExecution,
 ): Promise<{ result: HistoryProbeResult; reusable: boolean }> {
+  execution.materializer.registerHistoricalSelectors(input.actions);
   const actionRefs = getOrderedActionRefs(input.actions);
   const actionKeys = getOrderedActionKeys(input.actions);
   const requestedSignatureStepOrdinals = input.requestedSignatureStepOrdinals === undefined
     ? null
     : new Set(input.requestedSignatureStepOrdinals);
+  const historicalWitnesses = execution.materializer.historicalWitnessActionIndexes();
   const steps: HistoryProbeResult["steps"] = execution.actionKeys.map((_, ordinal) => ({
     status: "rebuilt",
     signatures:
@@ -310,6 +358,9 @@ async function evaluateHistoryProbeInKernelSession(
       requestedSignatureStepOrdinals.has(ordinal)
         ? execution.signaturesByOrdinal.get(ordinal) ?? []
         : [],
+    ...(execution.evidenceByOrdinal.has(ordinal)
+      ? { exactTopologyEvidence: execution.evidenceByOrdinal.get(ordinal)! }
+      : {}),
   }));
 
   if (execution.actionKeys.length < actionRefs.length && execution.basis === null) {
@@ -370,13 +421,10 @@ async function evaluateHistoryProbeInKernelSession(
     };
 
     execution.actionKeys.push(actionKeys[orderedPosition]!);
-    if (
-      requestedSignatureStepOrdinals !== null &&
-      !requestedSignatureStepOrdinals.has(orderedPosition)
-    ) {
-      steps.push({ status: "rebuilt", signatures: [] });
-      continue;
-    }
+    const historicalWitness = historicalWitnesses.has(orderedPosition);
+    // Exact action evidence is needed independently of geometric signatures:
+    // a later consumer may need this action's Modified hop even when it did not
+    // request a geometric checkpoint at the same ordinal.
 
     const snapshot = await execution.service.getCurrentDocumentSnapshot();
     const signatureResult = await deriveLiveBodySignatures({
@@ -392,12 +440,57 @@ async function evaluateHistoryProbeInKernelSession(
       steps.push({ status: "failed", diagnostics });
       return { result: { steps }, reusable: false };
     }
+    const actionOutputs = [...execution.outputRecords].flatMap(([key, output]) => {
+      const match = /^ordered:(\d+)$/.exec(key);
+      if (!match) return [];
+      return [{ actionIndex: Number(match[1]), ...output }];
+    });
+    const previouslyPublishedFeatureIds = new Set(
+      [...execution.evidenceByOrdinal.values()].flatMap((evidence) =>
+        evidence.topologyLineage.map((lineage) => lineage.featureId),
+      ),
+    );
+    for (const lineage of signatureResult.exactTopologyEvidence.topologyLineage) {
+      if (!previouslyPublishedFeatureIds.has(lineage.featureId)) {
+        actionOutputs.push({ actionIndex: orderedPosition, featureId: lineage.featureId });
+      }
+    }
+    const hasExactEvidence =
+      signatureResult.exactTopologyEvidence.topologyLineage.length > 0 ||
+      signatureResult.exactTopologyEvidence.faceIncidence.length > 0;
+    const exactTopologyEvidence = {
+      ...signatureResult.exactTopologyEvidence,
+      actionOutputs: [...new Map(
+        actionOutputs.map((output) => [
+          `${output.actionIndex}:${output.featureId ?? ""}:${output.sketchId ?? ""}`,
+          output,
+        ]),
+      ).values()],
+    };
     execution.signaturesByOrdinal.set(orderedPosition, signatureResult.signatures);
+    if (hasExactEvidence) {
+      execution.evidenceByOrdinal.set(orderedPosition, exactTopologyEvidence);
+    }
     execution.materializer.primeLiveSignatures(
       snapshot.document.revisionId,
       signatureResult,
     );
-    steps.push({ status: "rebuilt", signatures: signatureResult.signatures });
+    if (historicalWitness) {
+      await execution.materializer.bindHistoricalSelectorsAtAction(
+        orderedPosition,
+        signatureResult,
+      );
+    }
+    await execution.materializer.advanceHistoricalSelectorsAtAction(orderedPosition);
+    steps.push({
+      status: "rebuilt",
+      signatures:
+        requestedSignatureStepOrdinals === null ||
+        requestedSignatureStepOrdinals.has(orderedPosition)
+          ? signatureResult.signatures
+          : [],
+      ...(hasExactEvidence ? { exactTopologyEvidence } : {}),
+    });
   }
 
   if (!input.includeFinalTessellation) {
@@ -545,17 +638,30 @@ async function applyProbeAction(
       // feature's conservative stage history surface only this way.
       if (result.isOk()) {
         const rejection = describeRejectedFeatureResult(result.value);
-        if (rejection) return { ok: false, message: rejection };
+        if (rejection) {
+          const invalidatedReference = result.value.diagnostics?.find(
+            (diagnostic) =>
+              diagnostic.code === "occ-invalid-reference" && diagnostic.target !== null,
+          )?.target;
+          const selector = materializer.directSelectorForInvalidatedReference(
+            invalidatedReference,
+          );
+          if (selector) {
+            throw new TopologyApplyRematchError(
+              selector,
+              `the exact public-id binding ${describeRefusedTarget(invalidatedReference)} was invalidated during the rebuild`,
+            );
+          }
+          return { ok: false, message: rejection };
+        }
       }
       if (result.isOk()) {
         materializer.invalidateLiveSignatures();
         materializer.recordFeatureOutput(orderedPosition, result.value.featureId);
-        materializer.recordBodyOutput(
-          orderedPosition,
-          (result.value.changedTargets ?? []).flatMap((target) =>
-            target.kind === "body" ? [target.bodyId] : [],
-          ),
+        const changedBodyIds = (result.value.changedTargets ?? []).flatMap((target) =>
+          target.kind === "body" ? [target.bodyId] : [],
         );
+        materializer.recordBodyOutput(orderedPosition, changedBodyIds);
         const constructionIds = (result.value.changedTargets ?? []).flatMap(
           (target) =>
             target.kind === "construction" ? [target.constructionId] : [],
@@ -622,23 +728,15 @@ function describeRefusedTarget(target: DurableRef | null | undefined) {
     : ` [refused target ${target.kind} ${suffix}]`;
 }
 function topologyApplyRematchDiagnostic(
-  error: {
-    selector: {
-      source: {
-        consumerFeatureId: string;
-        parameterId: string;
-        deterministicId: string;
-      };
-    };
-    detail: string | null;
-  },
+  error: import("@/domain/import/orchestrator").TopologyApplyRematchError,
   orderedPosition: number,
 ): HistoryProbeStepDiagnostic {
+  const target = `${error.selector.source.consumerFeatureId}:${error.selector.source.parameterId}:${error.selector.source.deterministicId}`;
   return {
     severity: "error",
     code: "topology-apply-rematch-failed",
     message: [
-      `History probe topology rematch failed at step ${orderedPosition + 1} for ${error.selector.source.consumerFeatureId}:${error.selector.source.parameterId}:${error.selector.source.deterministicId}`,
+      `History probe topology rematch failed at step ${orderedPosition + 1} for ${target}`,
       error.detail,
     ]
       .filter((part): part is string => Boolean(part))

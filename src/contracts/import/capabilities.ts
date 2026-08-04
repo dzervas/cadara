@@ -6,9 +6,10 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 import type { GeometryAssetId } from "@/contracts/shared/ids";
 import type { ContractVersion } from "@/contracts/shared/versioning";
-import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
+import type { BodyId, DocumentId, FaceId, FeatureId, RevisionId, SketchId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { ImportPreparedActions } from "@/contracts/import/actions";
+import type { AuthoredFeatureTopologyLineage } from "@/contracts/modeling/authored-document";
 
 /**
  * TODO: replace `unknown` with a shared neutral vector primitive union once
@@ -112,6 +113,27 @@ export interface HistoryProbeTopologySignature {
   reference: DurableRef;
 }
 
+export interface HistoryProbeFaceIncidence {
+  bodyId: BodyId;
+  faceId: FaceId;
+  adjacentFaceIds: readonly FaceId[];
+  planar: boolean;
+}
+
+export interface HistoryProbeActionOutput {
+  actionIndex: number;
+  featureId?: FeatureId;
+  sketchId?: SketchId;
+  bodyIds?: readonly BodyId[];
+}
+
+/** Exact OCC source claims and BRep face incidence sampled at one immutable step. */
+export interface HistoryProbeExactTopologyEvidence {
+  topologyLineage: readonly AuthoredFeatureTopologyLineage[];
+  faceIncidence: readonly HistoryProbeFaceIncidence[];
+  actionOutputs: readonly HistoryProbeActionOutput[];
+}
+
 export interface HistoryProbeStepDiagnostic {
   severity: "info" | "warning" | "error";
   message: string;
@@ -126,6 +148,7 @@ export type HistoryProbeStepResult =
   | {
       status: "rebuilt";
       signatures: HistoryProbeTopologySignature[];
+      exactTopologyEvidence?: HistoryProbeExactTopologyEvidence;
     }
   | {
       status: "failed";
@@ -163,6 +186,8 @@ export interface HistoryProbeInput {
    * needed. Omit to preserve legacy sampling at every successful step.
    */
   requestedSignatureStepOrdinals?: readonly number[];
+  /** Rebuild this request in a fresh isolated service instead of extending a prior probe. */
+  requireFreshExecution?: boolean;
   /**
    * Report apply-time topology rematch failures as their failed probe step
    * instead of throwing them to the caller.

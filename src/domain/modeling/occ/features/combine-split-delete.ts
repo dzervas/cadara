@@ -387,6 +387,7 @@ type SheetSplitSemanticHistory = {
     finalFaceNativeIds: readonly string[];
   }[];
   toolFaceRelations: readonly {
+    sourceToolFaceId: FaceId;
     sourceToolFaceProvenanceId: OccCanonicalTopologyProvenanceId;
     cardinality: "zero" | "one" | "many";
     finalFaces: readonly {
@@ -398,6 +399,7 @@ type SheetSplitSemanticHistory = {
 
 type SheetSplitTrackedOutput = {
   outputSlotKey: string;
+  outputWitnesses: readonly OccCanonicalTopologyProvenanceId[];
   body: OccTrackedBody;
   finalFacesByNativeId: ReadonlyMap<string, FaceId>;
 };
@@ -407,6 +409,77 @@ function sheetSplitOutputBodyId(
   outputSlotKey: string,
 ): BodyId {
   return `body_${ownerFeatureId}_sheet_split_${encodeURIComponent(outputSlotKey)}` as BodyId;
+}
+
+function hasExactWitnessSet(witnesses: readonly string[]) {
+  return (
+    witnesses.length > 0 &&
+    new Set(witnesses).size === witnesses.length &&
+    witnesses.every((witness) => witness.trim().length > 0)
+  );
+}
+
+/** Reuse evaluated output slots only through mutually unique exact witnesses. */
+export function reassociateExactOutputSlots(input: {
+  previous: readonly { outputSlot: BodyId; outputWitnesses?: readonly string[] }[];
+  current: readonly { key: string; outputWitnesses: readonly string[] }[];
+}): ReadonlyMap<string, BodyId> {
+  const previousWitnessKeyBySlot = new Map<BodyId, string>();
+  const conflictingPreviousSlots = new Set<BodyId>();
+  for (const output of input.previous) {
+    if (!output.outputWitnesses || !hasExactWitnessSet(output.outputWitnesses)) continue;
+    const witnessKey = JSON.stringify([...output.outputWitnesses].sort());
+    const existingKey = previousWitnessKeyBySlot.get(output.outputSlot);
+    if (existingKey !== undefined && existingKey !== witnessKey) {
+      conflictingPreviousSlots.add(output.outputSlot);
+      continue;
+    }
+    previousWitnessKeyBySlot.set(output.outputSlot, witnessKey);
+  }
+
+  const previousByWitness = new Map<string, BodyId[]>();
+  for (const [outputSlot, witnessKey] of previousWitnessKeyBySlot) {
+    if (conflictingPreviousSlots.has(outputSlot)) continue;
+    for (const witness of JSON.parse(witnessKey) as string[]) {
+      previousByWitness.set(witness, [
+        ...(previousByWitness.get(witness) ?? []),
+        outputSlot,
+      ]);
+    }
+  }
+  const currentByWitness = new Map<string, string[]>();
+  for (const output of input.current) {
+    if (!hasExactWitnessSet(output.outputWitnesses)) continue;
+    for (const witness of output.outputWitnesses) {
+      currentByWitness.set(witness, [
+        ...(currentByWitness.get(witness) ?? []),
+        output.key,
+      ]);
+    }
+  }
+  const candidatesByCurrent = new Map<string, Set<BodyId>>();
+  const candidatesByPrevious = new Map<BodyId, Set<string>>();
+  for (const [witness, current] of currentByWitness) {
+    const previous = previousByWitness.get(witness) ?? [];
+    if (current.length !== 1 || previous.length !== 1) continue;
+    const currentKey = current[0]!;
+    const previousSlot = previous[0]!;
+    const currentCandidates = candidatesByCurrent.get(currentKey) ?? new Set<BodyId>();
+    currentCandidates.add(previousSlot);
+    candidatesByCurrent.set(currentKey, currentCandidates);
+    const previousCandidates = candidatesByPrevious.get(previousSlot) ?? new Set<string>();
+    previousCandidates.add(currentKey);
+    candidatesByPrevious.set(previousSlot, previousCandidates);
+  }
+  const reassociated = new Map<string, BodyId>();
+  for (const [current, candidates] of candidatesByCurrent) {
+    if (candidates.size !== 1) continue;
+    const previous = candidates.values().next().value!;
+    if (candidatesByPrevious.get(previous)?.size === 1) {
+      reassociated.set(current, previous);
+    }
+  }
+  return reassociated;
 }
 
 function translateExactNativeFaceId(input: {
@@ -623,6 +696,7 @@ export function translateSheetSplitToolHistoryToSemanticIds(input: {
     sourceToolFaceProvenanceIds.add(sourceToolFaceProvenanceId);
 
     return {
+      sourceToolFaceId,
       sourceToolFaceProvenanceId,
       cardinality: relation.cardinality,
       finalFaces: relation.finalFaces.map((finalFace) => ({
@@ -855,6 +929,17 @@ function trackSheetSplitOutputs(input: {
   >;
 }) {
   const outputs: SheetSplitTrackedOutput[] = [];
+  const previousOutputs = [
+    ...(input.context.previousTopologyStage?.outputs.values() ?? []),
+    ...(input.context.previousTopologyLineage?.outputs ?? []),
+  ];
+  const reassociatedBodyIds = reassociateExactOutputSlots({
+    previous: previousOutputs,
+    current: input.history.outputs.map((output) => ({
+      key: output.outputSlotKey,
+      outputWitnesses: output.sourceTargetProvenanceIds,
+    })),
+  });
   for (const output of input.history.outputs) {
     const shape = input.shapeByOutputSlot.get(output.nativeOutputSlotKey);
     if (!shape) {
@@ -863,7 +948,9 @@ function trackSheetSplitOutputs(input: {
       );
     }
     const body = trackNewSolidBody(input.context.oc, {
-      bodyId: sheetSplitOutputBodyId(input.ownerFeatureId, output.outputSlotKey),
+      bodyId:
+        reassociatedBodyIds.get(output.outputSlotKey) ??
+        sheetSplitOutputBodyId(input.ownerFeatureId, output.outputSlotKey),
       label: `${input.ownerFeatureId}_split`,
       ownerFeatureId: input.ownerFeatureId,
       shape,
@@ -883,6 +970,7 @@ function trackSheetSplitOutputs(input: {
     }
     outputs.push({
       outputSlotKey: output.outputSlotKey,
+      outputWitnesses: output.sourceTargetProvenanceIds,
       body,
       finalFacesByNativeId,
     });
@@ -905,6 +993,7 @@ export function createSheetSplitToolHistoryTopologyStage(input: {
           {
             outputSlot: output.body.bodyId,
             body: output.body,
+            outputWitnesses: output.outputWitnesses,
             sourceTargets: new Map<string, DurableRef[]>(),
             unsupportedSourceKeys: new Set<string>(),
           } satisfies OccTopologyStageOutput,
@@ -949,6 +1038,27 @@ export function createSheetSplitToolHistoryTopologyStage(input: {
         { kind: "face", bodyId: output.body.bodyId, faceId: publicFaceId },
       ]);
     }
+  }
+
+  for (const relation of input.history.toolFaceRelations) {
+    const outputSlots = relation.finalFaces.flatMap((face) => face.outputSlotKeys);
+    if (relation.cardinality !== "one" || relation.finalFaces.length !== 1 || outputSlots.length !== 1) {
+      continue;
+    }
+    const output = input.outputs.find(
+      (candidate) => candidate.outputSlotKey === outputSlots[0],
+    );
+    const publicFaceId = output?.finalFacesByNativeId.get(relation.finalFaces[0]!.nativeFaceId);
+    if (!output || !publicFaceId) {
+      throw new Error(
+        `occ-native-sheet-split-history-missing-output-shape-membership: exact tool-face relation ${relation.sourceToolFaceProvenanceId} cannot resolve its sole final face.`,
+      );
+    }
+    const stageOutput = stageOutputs.get(output.body.bodyId)!;
+    const aliasKey = `sheet-split-tool-successor:${input.ownerFeatureId}:${input.toolBodyId}:face:${relation.sourceToolFaceId}`;
+    stageOutput.sourceTargets.set(aliasKey, [
+      { kind: "face", bodyId: output.body.bodyId, faceId: publicFaceId },
+    ]);
   }
 
   return {

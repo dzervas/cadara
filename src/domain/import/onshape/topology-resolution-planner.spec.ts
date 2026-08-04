@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import type { ImportPreparedActions } from "@/contracts/import/actions";
+import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
 import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-resolution-planner";
 
 test("batches duplicate and zero consumer boundaries against one longest prefix", async () => {
@@ -119,4 +120,45 @@ test("propagates a non-rematch probe failure from a consumer prefix", async () =
       },
     }),
   ).rejects.toThrow("kernel session lost");
+});
+
+// Lane: logic. Seam: prefix planning forwards fresh-service isolation independently
+// from whether historical signature steps are requested.
+test("forwards requireFreshExecution independently of historical sampling", async () => {
+  const forwarded: Array<{ fresh: boolean | undefined; requested: number[] | null | undefined }> = [];
+  const actions: ImportPreparedActions = {
+    addDocumentVariables: [{ name: "a" }] as never,
+    orderedActions: [{ kind: "addDocumentVariable", index: 0 }],
+  };
+  const history = {
+    async evaluateHistoryProbe(input: Parameters<NonNullable<ImportHistoryProbeCapabilities["evaluateHistoryProbe"]>>[0]) {
+      forwarded.push({
+        fresh: input.requireFreshExecution,
+        requested: input.requestedSignatureStepOrdinals,
+      });
+      return { steps: [{ status: "rebuilt" as const, signatures: [] }] };
+    },
+  };
+
+  await probeTopologyConsumerPrefixes({
+    actions,
+    featureIdToOrderedPrefixPosition: new Map([["consumer", 1]]),
+    consumerFeatureIds: ["consumer"],
+    history,
+    includeHistoricalSignatures: false,
+    requireFreshExecution: true,
+  });
+  await probeTopologyConsumerPrefixes({
+    actions,
+    featureIdToOrderedPrefixPosition: new Map([["consumer", 1]]),
+    consumerFeatureIds: ["consumer"],
+    history,
+    includeHistoricalSignatures: true,
+    requireFreshExecution: false,
+  });
+
+  expect(forwarded).toEqual([
+    { fresh: true, requested: [0] },
+    { fresh: false, requested: [0, 0] },
+  ]);
 });

@@ -90,6 +90,8 @@ export interface GeometryAssetResolver {
  * inferring omitted semantics from UI conventions.
  */
 export interface ModelingKernelAdapter {
+  /** Releases kernel-owned runtime state when the modeling service is disposed. */
+  dispose?(): void;
   /** Updates the requested viewport snapshot tessellation tier when supported. */
   setSnapshotLodTier?(tierId: "startup" | "normal" | "fine"): boolean;
   /** Rehydrates kernel runtime state from a repository-authored document when supported. */

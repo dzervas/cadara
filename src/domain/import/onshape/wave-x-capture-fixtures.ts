@@ -676,3 +676,301 @@ export function makeWaveXChamferAndImplicitUnionCaptureBundle(): OnshapeCaptureB
     }],
   };
 }
+
+/**
+ * Minimal proprietary-free stand-in for `9841e486906fa2ce62d74d8e`'s `Extrude 3`,
+ * the smallest shape that reproduces its baked gap without paying for the real
+ * capture's multi-minute review.
+ *
+ * The real feature is an `ADD` solid extrude whose profile sits on the outer
+ * face of a shelled body while its START bound is the shell's inner cavity
+ * face, so the added boss begins exactly on that cavity face and runs BLIND
+ * into the cavity. Onshape's rollback tessellation pins the result: in the
+ * boss's lateral window the surfaces go from `d = 0, 2.5` to `d = 0, 2.5, 5.5`,
+ * the body count stays 1, and the face count grows by 4 per boss. If the
+ * rebuilt boss does not actually contact the wall, the join severs the target
+ * into fresh bodies and every downstream public face id is reminted, which is
+ * what bakes 9841's `Cutter` -> `Extrude 4` -> `Split 1` chain.
+ *
+ * This fixture keeps that exact arrangement (shell, sketch-on-outer-face,
+ * ENTITY start bound on the cavity face, BLIND depth into the cavity) and
+ * nothing else: one 20 mm cylinder, 2.5 mm walls, one 5 mm boss.
+ */
+export function makeWaveXStartOffsetBossCaptureBundle(): OnshapeCaptureBundleV2 {
+  const baseExtrudeId = "E_BOSS_BASE";
+  const shellId = "SHELL_BOSS_BASE";
+  const bossSketchId = "S_BOSS";
+  const bossExtrudeId = "E_BOSS";
+  const bodyId = "BOSS_BASE_BODY";
+  const outerTopFaceId = "BOSS_OUTER_TOP";
+  const cavityTopFaceId = "BOSS_CAVITY_TOP";
+  // Cylinder r = 20 mm, height 20 mm, shelled inward by 2.5 mm.
+  const outerRadius = 0.02;
+  const height = 0.02;
+  const wall = 0.0025;
+  const cavityTop = height - wall;
+  const diskBody = (id: string) => ({
+    id,
+    faces: [{
+      id: `${id}_face`,
+      facets: [
+        {
+          vertices: [
+            { x: -outerRadius, y: -outerRadius, z: 0 },
+            { x: outerRadius, y: -outerRadius, z: 0 },
+            { x: outerRadius, y: outerRadius, z: height },
+          ],
+        },
+        {
+          vertices: [
+            { x: -outerRadius, y: -outerRadius, z: 0 },
+            { x: outerRadius, y: outerRadius, z: height },
+            { x: -outerRadius, y: outerRadius, z: height },
+          ],
+        },
+      ],
+    }],
+  });
+  const planarFaceSignature = (radius: number, z: number) => ({
+    entityClass: "face" as const,
+    geometryType: "plane" as const,
+    definingData: {
+      origin: [0, 0, z] as [number, number, number],
+      normal: [0, 0, 1] as [number, number, number],
+    },
+    boundingBox: {
+      low: [-radius, -radius, z] as [number, number, number],
+      high: [radius, radius, z] as [number, number, number],
+    },
+    centroid: [0, 0, z] as [number, number, number],
+  });
+  return {
+    formatVersion: 2,
+    provenance: {
+      capturedAt: "2026-08-06T00:00:00.000Z",
+      cliVersion: "test",
+      apiVersion: "v10",
+      baseUrl: "https://cad.onshape.com/api/v10",
+      documentId: "b".repeat(24),
+      wvm: "w",
+      wvmId: "w".repeat(24),
+      microversion: "m".repeat(24),
+    },
+    document: {},
+    elements: {},
+    diagnostics: [],
+    partStudios: [{
+      elementId: "wave-x-start-offset-boss",
+      name: "Start offset boss",
+      features: {
+        features: [
+          sketch("S_BOSS_BASE", "Base profile"),
+          extrude({
+            featureId: baseExtrudeId,
+            name: "Extrude 1",
+            sketchId: "S_BOSS_BASE",
+            bodyType: "SOLID",
+            operationType: "NEW",
+          }),
+          {
+            featureType: "shell",
+            featureId: shellId,
+            name: "Shell 1",
+            parameters: [
+              { parameterId: "isHollow", value: true },
+              { parameterId: "entities", queries: [] },
+              {
+                parameterId: "parts",
+                queries: [{
+                  queryString: `query = qCreatedBy(id + "${baseExtrudeId}", EntityType.BODY);`,
+                  deterministicIds: [bodyId],
+                }],
+              },
+              { parameterId: "thickness", expression: "2.5 mm", value: wall },
+              { parameterId: "oppositeDirection", value: false },
+            ],
+          },
+          {
+            featureType: "newSketch",
+            featureId: bossSketchId,
+            name: "Sketch 2",
+            parameters: [{
+              parameterId: "sketchPlane",
+              queries: [{
+                queryString: `query = qCreatedBy(id + "${shellId}", EntityType.FACE);`,
+                deterministicIds: [outerTopFaceId],
+              }],
+            }],
+          },
+          {
+            featureType: "extrude",
+            featureId: bossExtrudeId,
+            name: "Extrude 3",
+            parameters: [
+              { parameterId: "bodyType", value: "SOLID" },
+              { parameterId: "operationType", value: "ADD" },
+              {
+                parameterId: "entities",
+                queries: [{
+                  queryString: `query = qSketchRegion(id + "${bossSketchId}", true);`,
+                  deterministicIds: ["BOSS_REGION"],
+                }],
+              },
+              { parameterId: "endBound", value: "BLIND" },
+              { parameterId: "depth", expression: "3 mm", value: 0.003 },
+              { parameterId: "oppositeDirection", value: true },
+              { parameterId: "startOffset", value: true },
+              { parameterId: "startOffsetBound", value: "ENTITY" },
+              { parameterId: "startOffsetOppositeDirection", value: false },
+              {
+                parameterId: "startOffsetEntity",
+                queries: [{
+                  queryString: `query = qCreatedBy(id + "${shellId}", EntityType.FACE);`,
+                  deterministicIds: [cavityTopFaceId],
+                }],
+              },
+              { parameterId: "defaultScope", value: false },
+              {
+                parameterId: "booleanScope",
+                queries: [{
+                  queryString: `query = qCreatedBy(id + "${baseExtrudeId}", EntityType.BODY);`,
+                  deterministicIds: [bodyId],
+                }],
+              },
+            ],
+          },
+        ],
+      },
+      sketches: {
+        sketches: [
+          {
+            featureId: "S_BOSS_BASE",
+            sketchSolveStatus: "WELL_DEFINED",
+            sketchMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            entities: [{
+              sketchEntityId: "S_BOSS_BASE_circle",
+              sketchEntityType: "skCircle",
+              geometry: { center3d: { x: 0, y: 0, z: 0 }, radius: outerRadius },
+              isConstruction: false,
+            }],
+          },
+          {
+            featureId: bossSketchId,
+            sketchSolveStatus: "WELL_DEFINED",
+            sketchMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, height, 0, 0, 0, 1],
+            entities: [{
+              sketchEntityId: "S_BOSS_circle",
+              sketchEntityType: "skCircle",
+              geometry: { center3d: { x: 0, y: 0, z: height }, radius: 0.005 },
+              isConstruction: false,
+            }],
+          },
+        ],
+      },
+      parts: null,
+      featureSpecs: { present: false, reason: "synthetic start-offset boss fixture" },
+      resolvedReferences: [
+        {
+          deterministicId: "Top",
+          evaluatedAt: "finalState",
+          signature: {
+            entityClass: "face",
+            geometryType: "plane",
+            definingData: { normal: [0, 0, 1] },
+            isDefaultPlane: true,
+          },
+        },
+        {
+          deterministicId: outerTopFaceId,
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: bossSketchId,
+          signature: planarFaceSignature(outerRadius, height),
+        },
+        {
+          deterministicId: cavityTopFaceId,
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: bossExtrudeId,
+          signature: planarFaceSignature(outerRadius - wall, cavityTop),
+        },
+        {
+          deterministicId: bodyId,
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: bossExtrudeId,
+          signature: {
+            entityClass: "body",
+            geometryType: "solid",
+            boundingBox: {
+              low: [-outerRadius, -outerRadius, 0],
+              high: [outerRadius, outerRadius, height],
+            },
+            centroid: [0, 0, height / 2],
+          },
+        },
+      ],
+      resolvedQueryReferences: [],
+      profileEvidence: [
+        {
+          consumingFeatureId: baseExtrudeId,
+          parameterId: "entities",
+          queryIndex: 0,
+          resultIndex: 0,
+          deterministicId: "boss-base-profile",
+          evaluatedAt: "historyPoint",
+          kind: "sketchRegion",
+          sourceSketchFeatureId: "S_BOSS_BASE",
+          interiorPoint3d: [0, 0, 0],
+        },
+        {
+          consumingFeatureId: bossExtrudeId,
+          parameterId: "entities",
+          queryIndex: 0,
+          resultIndex: 0,
+          deterministicId: "BOSS_REGION",
+          evaluatedAt: "historyPoint",
+          kind: "sketchRegion",
+          sourceSketchFeatureId: bossSketchId,
+          interiorPoint3d: [0, 0, height],
+        },
+      ],
+      profileEvidenceSchemaVersion: 3,
+      profileEvidenceManifest: [
+        {
+          consumingFeatureId: baseExtrudeId,
+          parameterId: "entities",
+          queryIndex: 0,
+          sourceQueryString: 'query = qSketchRegion(id + "S_BOSS_BASE", true);',
+          kind: "faceResults",
+          emittedRecordCount: 1,
+          completed: true,
+        },
+        {
+          consumingFeatureId: bossExtrudeId,
+          parameterId: "entities",
+          queryIndex: 0,
+          sourceQueryString: `query = qSketchRegion(id + "${bossSketchId}", true);`,
+          kind: "faceResults",
+          emittedRecordCount: 1,
+          completed: true,
+        },
+      ],
+      groundTruth: { hasBodies: false },
+      rollbackSnapshots: [
+        {
+          featureId: baseExtrudeId,
+          tessellationTolerance: 0.0001,
+          tessellatedFaces: { bodies: [diskBody(bodyId)] },
+        },
+        {
+          featureId: shellId,
+          tessellationTolerance: 0.0001,
+          tessellatedFaces: { bodies: [diskBody(bodyId)] },
+        },
+        {
+          featureId: bossExtrudeId,
+          tessellationTolerance: 0.0001,
+          tessellatedFaces: { bodies: [diskBody(bodyId)] },
+        },
+      ],
+    }],
+  };
+}

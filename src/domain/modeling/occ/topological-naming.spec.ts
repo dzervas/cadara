@@ -56,6 +56,7 @@ import {
   createOccFeatureTopologyLineageMap,
   serializeOccFeatureTopologyLineage,
 } from "@/domain/modeling/occ/topology-stage";
+import { formatExtrudeProfileCapSourceKey } from "@/domain/modeling/occ/features/extrude";
 
 function pointId(name: string) {
   return `sketch_point_${name}` as SketchPointId;
@@ -1733,6 +1734,17 @@ test("durable naming qualification pins exact semantic zero, one, and many succe
     .outputs.get(bodyId)!;
   const originalTarget = originalOutput.sourceTargets.get(sourceKey!)?.[0];
   expect(originalTarget?.kind).toBe("edge");
+  const capSourceKey = formatExtrudeProfileCapSourceKey({
+    ownerFeatureId: baseFeatureId,
+    regionId: original.region.regionId,
+    endRole: "one-side-end",
+    cap: "last",
+  });
+  const originalCapTarget = originalOutput.sourceTargets.get(capSourceKey)?.[0];
+  expect(
+    originalCapTarget?.kind,
+    "The profile cap must be claimed from the persisted authored RegionId.",
+  ).toBe("face");
 
   const dimensionRebuilt = rebuildOccAuthoringState(
     { ...authored, sketches: [dimensionEdited.sketch] },
@@ -1750,6 +1762,18 @@ test("durable naming qualification pins exact semantic zero, one, and many succe
     dimensionTargets?.[0],
     "A proved one-to-one semantic successor should retain the old public topology ID.",
   ).toEqual(originalTarget);
+  const dimensionCapTargets = dimensionRebuilt.featureTopologyStages
+    .get(baseFeatureId)!
+    .outputs.get(bodyId)!
+    .sourceTargets.get(capSourceKey);
+  expect(
+    dimensionCapTargets?.length,
+    "A geometry-changing dimension rebuild must retain one RegionId-owned cap claim.",
+  ).toBe(1);
+  expect(
+    dimensionCapTargets?.[0],
+    "A geometry-changing dimension rebuild must retain the cap's public face from its RegionId claim.",
+  ).toEqual(originalCapTarget);
 
   const topologyRebuilt = rebuildOccAuthoringState(
     { ...authored, sketches: [topologyEdited.sketch] },

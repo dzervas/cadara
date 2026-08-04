@@ -84,7 +84,27 @@ function materializer(bodyIds: BodyId[] = ["body_live" as BodyId]) {
         return {
           document: {
             revisionId: "rev_live",
-            bodies: bodyIds.map((bodyId) => ({ bodyId })),
+            bodies: bodyIds.map((bodyId) => ({
+              bodyId,
+              topology: {
+                faceIds: derived.signatures.flatMap((entry) =>
+                  entry.reference.kind === "face" ? [entry.reference.faceId] : [],
+                ),
+                edgeIds: derived.signatures.flatMap((entry) =>
+                  entry.reference.kind === "edge" ? [entry.reference.edgeId] : [],
+                ),
+                vertexIds: derived.signatures.flatMap((entry) =>
+                  entry.reference.kind === "vertex" ? [entry.reference.vertexId] : [],
+                ),
+              },
+            })),
+            sketches: [{
+              sketchId: "sketch_live",
+              sketch: { definition: { entities: [
+                { label: "a", entityId: "a-live" },
+                { label: "b", entityId: "b-live" },
+              ] } },
+            }],
           },
         } as never;
       },
@@ -869,4 +889,40 @@ test("honors an exact body scope during apply-time topology rematching", async (
       bodyScope: "body_absent" as BodyId,
     }),
   ).rejects.toThrow("Live topology rematch failed");
+});
+
+// Lane: logic. Seam: apply binds an ID-free historical selector inside its own
+// session, so review/sandbox IDs cannot leak into the materialized DurableRef.
+test("binds historicalTopologyOf with apply-session IDs and follows exact current lineage", async () => {
+  const witness = derived.signatures.find((entry) => entry.entityClass === "face")!;
+  const historicalSelector = {
+    kind: "historicalTopologyOf" as const,
+    expectedKind: "face" as const,
+    capturedSignature: {
+      entityClass: witness.entityClass,
+      geometryType: witness.geometryType,
+      definingData: witness.definingData,
+      centroid: witness.centroid,
+      boundingBox: witness.boundingBox,
+    },
+    witnessActionIndex: 2,
+    successorActionIndexes: [],
+    source: {
+      consumerFeatureId: "consumer",
+      parameterId: "sketchPlane",
+      deterministicId: "captured-without-sandbox-id",
+    },
+  };
+  const instance = materializer(["body_apply_session" as BodyId]);
+  instance.registerHistoricalSelectors({
+    commitSketches: [{ plane: { support: historicalSelector } } as never],
+  });
+
+  await instance.bindHistoricalSelectorsAtAction(2);
+  await expect(instance.resolveDeferredTopologyRef(historicalSelector)).resolves.toMatchObject({
+    kind: "face",
+    bodyId: "body_apply_session",
+  });
+  expect(JSON.stringify(historicalSelector)).not.toContain("body_apply_session");
+  expect(JSON.stringify(historicalSelector)).not.toContain("body_sandbox_session");
 });
