@@ -266,15 +266,24 @@ export function createBooleanBuilder(
   left: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
   right: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
 ) {
-  const progress = new oc.Message_ProgressRange_1();
+  const argumentsList = new oc.TopTools_ListOfShape_1();
+  const toolsList = new oc.TopTools_ListOfShape_1();
+  const builder =
+    operation === "join"
+      ? new oc.BRepAlgoAPI_Fuse_1()
+      : operation === "cut"
+        ? new oc.BRepAlgoAPI_Cut_1()
+        : new oc.BRepAlgoAPI_Common_1();
 
-  switch (operation) {
-    case "join":
-      return new oc.BRepAlgoAPI_Fuse_3(left, right, progress);
-    case "cut":
-      return new oc.BRepAlgoAPI_Cut_3(left, right, progress);
-    case "intersect":
-      return new oc.BRepAlgoAPI_Common_3(left, right, progress);
+  try {
+    argumentsList.Append_1(left);
+    toolsList.Append_1(right);
+    builder.SetArguments(argumentsList);
+    builder.SetTools(toolsList);
+    return builder;
+  } finally {
+    toolsList.delete();
+    argumentsList.delete();
   }
 }
 
@@ -1704,20 +1713,21 @@ export function applyBooleanPolicy(
             result.historySources,
           )
         : undefined;
+      const resolvedReplacement = resolveReplacementBodies(
+        context,
+        bodyId,
+        result.shape,
+        ownerFeatureId,
+        {
+          allowEmpty: true,
+          historySources: result.historySources,
+          // A single-target boolean is the disconnecting-cut route: a cut that
+          // severs its target replaces it with one body per resulting piece.
+          onSever: "freshIdentities",
+        },
+      );
       replacementResult = {
-        ...resolveReplacementBodies(
-          context,
-          bodyId,
-          result.shape,
-          ownerFeatureId,
-          {
-            allowEmpty: true,
-            historySources: result.historySources,
-            // A single-target boolean is the disconnecting-cut route: a cut that
-            // severs its target replaces it with one body per resulting piece.
-            onSever: "freshIdentities",
-          },
-        ),
+        ...resolvedReplacement,
         booleanOperandHistory: undefined,
       };
     }
