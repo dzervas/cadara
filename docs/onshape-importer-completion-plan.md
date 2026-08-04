@@ -977,7 +977,7 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         artifact. 5151 `Boolean 1` remains open (see the tier table below); the
         9841 residuals are blocked behind the `UP_TO_VERTEX` gap recorded in
         X.9.1.
-  - [ ] X.9.3 **Make probe and large-bundle failures observable and stable.** Preserve
+  - [x] X.9.3 **Make probe and large-bundle failures observable and stable.** Preserve
         the first failed kernel-probe diagnostic instead of collapsing every failed
         prefix to `topology-history-evidence-missing`. The shared Playwright import
         helper must distinguish a visible review error from a timeout and reliably
@@ -1016,9 +1016,36 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
         browser now also surfaces `Extrude 4 boolean target is incorrect` as the
         single named cause behind eight further 5151 bakes.
 
-        Still open under this item: the shared Playwright helper's
-        review-error-versus-timeout distinction and the `9841` load/commit
-        reliability work were not part of this pass.
+        **Large-capture reliability and performance (done).** The 9841 timeout was not
+        boolean geometry: its final fuse/simplify/refine completed in roughly 300 ms.
+        Profiling isolated the dominant cost in topology reconciliation: every preserved
+        edge re-ran contextual `TNaming_Selector.Select_1` against an expanding naming
+        context, with individual calls growing from about 2 seconds to 52 seconds. New
+        selectors still use contextual selection; established exact selector labels are
+        now reselected directly with OCC's exact `Select_2` path after their old→new
+        naming modification. The chained fillet/chamfer old-edge gate proves that durable
+        selector behavior survives the change.
+
+        Probe execution now also retains exact-prefix sessions, memoizes proven failed
+        prefixes, caches revision/body-scoped exact signatures, primes materializers from
+        sampled signatures, and appends tail sketches/features without replaying built
+        state. OCC booleans build once rather than once in their constructor and again via
+        `Build()`. An isolated former eval-28 reproducer now rebuilds all 19 actions and
+        emits 636 exact signatures in 129.6 seconds instead of timing out in edge naming.
+        All temporary phase tracing was removed.
+
+        The authoritative real-browser 9841 gate now completes review, commit, and the
+        `walls` rebuild in **4.8 minutes** (previously beyond the 60-minute watchdog), with
+        the honest checkpoint plan unchanged at **16 parametric / 25 baked / 0
+        geometry-only** and zero committed snapshot diagnostics. Logic-lane tail-append
+        A composition-correct headless run using one shared checkpoint asset store and
+        resolver confirms the same **16 / 25 / 0** plan in 426.6 seconds.
+        seams prove that a new tail sketch preserves built feature state without replay
+        and that a new tail feature executes exactly once.
+        The d3cd9 no-regression gates remain **24 / 0 / 0**: its real-OCC provider
+        review completes in 17.4 seconds and its browser review plus `columnDepth`
+        rebuild in 1.5 minutes. Three focused Mounts rebuild/reload/edit browser gates
+        pass serially in 1.0 minute.
 
         Pinned by a logic-lane spec at the provider/probe seam
         (`apply-pipeline.spec.ts`, "preserves the kernel's first specific
@@ -3149,3 +3176,53 @@ and genuine faults propagate.
 The d3 real-OCC review gate (`provider.spec.ts`) now pins 23 parametric with
 `Extrude 8` as the only bake and `Split 1` parametric through the degraded
 generic sheet split.
+
+### Session note: d3cd9 reaches 24/0 end to end; the residual gap is edit-stable naming, not import
+
+The boolean/unify shim history rebuild landed (every exact source face from
+both operands is reported through composed Modified/Generated relations, with
+`ShapeUpgrade_UnifySameDomain` preparation history composed in), which moved
+the blocker chain twice more before closing:
+
+1. **Split-piece sketch provenance was silently overwritten.** `buildLoopWire`
+   keyed profile edges by bare entity id, so a source curve contributing
+   several trimmed segments to one region wire kept only the last edge's
+   lineage; the earlier pieces' prism side faces reached `Mirror 1`/`Split 1`
+   with no claims at all. Multi-piece sources now key each edge on the
+   persisted `sourceSegmentOrdinal` (`entity#N`) and fail closed as
+   `ambiguous-split-segment` without ordinals. Pinned in
+   `sketch-profile.spec.ts` against the real wasm.
+2. **Sheet-split slots with no exclusive witness derive identity from their
+   full exact membership set** (identical sets across slots still collide
+   fail-closed), which let `Split 1` commit on the exact tool-history path and
+   `Extrude 8` replay parametrically: the review gate pins **24 parametric /
+   0 baked / 0 geometry-only**, the sole-degrade warning is gone, and the
+   browser commit gate matches.
+3. **The full prepared sequence now has a headless apply gate**
+   (`apply-pipeline.spec.ts`, "d3cd9 applies the complete prepared action
+   sequence…"): review → prepare → apply all 28 ordered actions through
+   `applyImportPreparedActions`, zero error diagnostics, zero committed
+   snapshot diagnostics, then export→restore proves an identical full-history
+   replay rebuilds the same body set. Browser- and headless-prepared actions
+   were byte-compared and are identical (only source-binding file metadata
+   differs).
+
+#### Known-open: sheet-split output identity is not edit-stable
+
+A *shape-changing* variable edit after commit (`screwHole` 5→6, which reshapes
+Sketches 2-5 and therefore the boolean history fused into the split target)
+legitimately changes which member-face provenance each split output carries.
+Because the semantic slot key — and thus the output `BodyId` — is derived from
+those membership sets, the rebuild remints different split body ids and
+`Extrude 5`'s persisted boolean target reports
+`occ-missing-reference: Extrude 5 boolean target is incorrect.` (plus four
+dependency cascades). This reproduces headless via
+`updateDocumentVariable` after the apply gate; it is the same defect class as
+5151's `walls` region-identity gap: durable identity derived from evaluated
+content is deterministic across identical replays but not stable across
+parameter edits. Closing it requires an edit-stable identity design for
+evaluated-content-dependent outputs (e.g., persisted-slot re-association
+through exact witness lineage with fail-closed ambiguity), deliberately NOT a
+geometric or majority match. Until then the d3 e2e rebuild lever is
+`columnDepth` — the one captured variable no sketch consumes — which still
+forces the full live-kernel replay without tripping the naming gap.

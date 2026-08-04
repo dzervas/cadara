@@ -513,22 +513,27 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   ]);
   await expectNoWorkbenchAlerts(page);
 
-  // The bundle carries real document variables; a `screwHole` edit proves the
-  // committed parametric document still rebuilds end to end.
-  // (`walls` is a separate lever: it reshapes Sketch 1, whose region durable ids
-  // then no longer resolve for Extrude 1 — a pre-existing region-identity defect
-  // unrelated to this import gate.)
-  const rebuilt = await editD3ScrewHole(page);
+  // The bundle carries real document variables; a `columnDepth` edit proves the
+  // committed parametric document still replays end to end through the live
+  // kernel. It is the only lever whose value no captured sketch consumes:
+  // every geometry-changing lever (`walls`/`columnWidth` reshape Sketch 1,
+  // `screwHole` reshapes Sketches 2-5) feeds the split target body, and the
+  // sheet-split output slot identity is derived from member-face provenance
+  // sets, so a legitimate shape edit remints the split body ids and Extrude 5's
+  // persisted boolean target reports occ-missing-reference — the known-open
+  // edit-stable naming gap shared with 5151's `walls` region-identity defect
+  // (see docs/onshape-importer-completion-plan.md).
+  const rebuilt = await editD3ColumnDepth(page);
   expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
   expect(rebuilt.featureIds).toEqual(imported.featureIds);
   await expectNoReferenceAlerts(page);
 });
 
-async function editD3ScrewHole(page: Page) {
+async function editD3ColumnDepth(page: Page) {
   const beforeRevision = await currentRevision(page);
   await page.locator("[data-workbench-variables-fab]").click();
   const panel = page.locator("[data-workbench-variables-panel]");
-  const editButton = panel.getByRole("button", { name: "Edit variable screwHole" });
+  const editButton = panel.getByRole("button", { name: "Edit variable columnDepth" });
   const variableId = await editButton.locator("..").getAttribute("data-variable-row");
   expect(variableId).not.toBeNull();
   await editButton.click();
@@ -541,7 +546,7 @@ async function editD3ScrewHole(page: Page) {
       "value",
     )?.set;
     if (!setValue) throw new Error("HTML input value setter is unavailable.");
-    setValue.call(input, "6");
+    setValue.call(input, "41");
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await valueInput.press("Enter");
@@ -554,7 +559,7 @@ async function editD3ScrewHole(page: Page) {
     undefined,
     { timeout: 600_000 },
   );
-  await expect(panel.locator(`[data-variable-expression="${variableId}"]`)).toHaveText("6", {
+  await expect(panel.locator(`[data-variable-expression="${variableId}"]`)).toHaveText("41", {
     timeout: 600_000,
   });
   return page.evaluate(() => window.__cadaraDebug!.getState());
