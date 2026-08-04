@@ -231,7 +231,7 @@ export type PlannedTarget =
        * it as the commit's plane support so the orchestrator rematches the
        * probed face against live topology at apply time.
        */
-      probedFaceSelector?: import("@/contracts/import/actions").ImportDeferredTopologyRef;
+      probedFaceSelector?: import("@/contracts/import/actions").ImportDeferredTopologySelector;
     }
   | {
       kind: "plane";

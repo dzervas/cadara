@@ -264,6 +264,7 @@ test("createSheetSplitToolHistoryTopologyStage scopes exact tool faces to each o
     ],
     toolFaceRelations: [
       {
+        sourceToolFaceId: "face_sheet_split_tool" as FaceId,
         sourceToolFaceProvenanceId: "tool-provenance-a",
         cardinality,
         finalFaces,
@@ -299,6 +300,24 @@ test("createSheetSplitToolHistoryTopologyStage scopes exact tool faces to each o
       kind: "face",
       bodyId: bodyB.bodyId,
       faceId: "face_sheet_split_output_b_shared",
+    },
+  ]);
+  const singleton = createSheetSplitToolHistoryTopologyStage({
+    ownerFeatureId: "feature_sheet_split" as FeatureId,
+    toolBodyId: "body_sheet_split_tool" as BodyId,
+    history: makeHistory("one", [{
+      nativeFaceId: "face_final_a_only",
+      outputSlotKeys: [outputA.outputSlotKey],
+    }]),
+    outputs,
+  });
+  expect(singleton.outputs.get(bodyA.bodyId)?.sourceTargets.get(
+    "sheet-split-tool-successor:feature_sheet_split:body_sheet_split_tool:face:face_sheet_split_tool",
+  )).toEqual([
+    {
+      kind: "face",
+      bodyId: bodyA.bodyId,
+      faceId: "face_sheet_split_output_a_only",
     },
   ]);
 
@@ -425,9 +444,7 @@ test("translateSheetSplitToolHistoryToSemanticIds rejects incomplete aliases and
   expect(semantic.toolFaceRelations[0]?.sourceToolFaceProvenanceId).toBe(
     "extrude:feature_tool:profile:0:generated-side-face",
   );
-  expect(JSON.stringify(semantic)).not.toMatch(
-    /face_target_public|face_tool_public|face_target_native|face_tool_native/,
-  );
+  expect(semantic.toolFaceRelations[0]?.sourceToolFaceId).toBe("face_tool_public");
   expect(() =>
     translateSheetSplitToolHistoryToSemanticIds({
       history,

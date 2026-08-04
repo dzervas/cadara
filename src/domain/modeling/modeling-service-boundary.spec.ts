@@ -102,3 +102,21 @@ test("src/domain/modeling/modeling-service-boundary.spec.ts", async () => {
     "Variable response errors should include actionable schema issue paths.",
   ).toBeTruthy();
 });
+
+// Lane: logic. Seam: the modeling service lifecycle delegates disposal to its
+// kernel adapter so isolated history-probe services release native runtime state.
+test("modeling service disposal releases its kernel adapter", () => {
+  let disposeCalls = 0;
+  class DisposableAdapter extends MockKernelAdapter {
+    dispose() {
+      disposeCalls += 1;
+    }
+  }
+  const service = createModelingService(new DisposableAdapter(), {
+    currentDocumentId: "doc_workspace",
+  });
+
+  service.dispose();
+
+  expect(disposeCalls).toBe(1);
+});

@@ -1134,22 +1134,23 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     );
 
     expect(
-      multiKeys.some((key) => key.includes("profile:0:end:first-end")),
-      "Two-side provenance should include the first end role and first profile slot.",
+      multiKeys.some((key) =>
+        key.includes(`profile-region:${primary.region.regionId}:end:first-end`),
+      ),
+      "Two-side provenance should include the first end role and its RegionId producer.",
     ).toBe(true);
     expect(
-      multiKeys.some((key) => key.includes("profile:1:end:second-end")),
-      "Multi-profile provenance should disambiguate the second profile and second end.",
+      multiKeys.some((key) =>
+        key.includes(`profile-region:${secondary.region.regionId}:end:second-end`),
+      ),
+      "Multi-profile provenance should disambiguate the second RegionId producer and end.",
     ).toBe(true);
-    // One extrude is one operation: the per-end prisms are fused, so the shared
-    // profile plane at the two-sided seam becomes interior and disappears, along
-    // with its bounding edges and vertices. Each of the 4 profile/end pairs
-    // therefore publishes 17 live roles (26 minus the seam's 1 cap face, 4
-    // first-edges, and 4 first-vertices) instead of a spurious internal face.
+    // Shared faces retain one exact composite claim rather than several partial
+    // prism-role claims. The remaining individual roles stay directly named.
     expect(
       new Set(multiKeys).size,
-      "Each profile/end pair should retain its 17 roles that survive the two-sided seam fuse.",
-    ).toBe(68);
+      "Each profile/end pair should retain direct roles while shared faces use exact composite provenance.",
+    ).toBe(60);
     expect(
       multiKeys.some((key) => key.includes(":profile:first-face")),
       "The fused two-sided seam face must not be published as a live prism role.",
@@ -1244,7 +1245,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     expect(
       [...joinedOutput.sourceTargets.keys()].some(
         (key) =>
-          key.endsWith(":profile:last-face") &&
+          key.endsWith(":cap:last:face") &&
           joinedOutput.sourceTargets.get(key)?.length === 1,
       ),
       "Boolean history should project the prism end-cap role onto the joined result.",
@@ -1321,6 +1322,111 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       removedResolution?.invalidation?.reason,
       "A disappeared multi-result output slot must invalidate its prior topology as unsupported history.",
     ).toBe(OCC_REFERENCE_INVALIDATION_REASONS.topologyUnsupportedHistory);
+  }
+
+
+  async function testMultiProfileFusePublishesStableCompositeFaceProvenance() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plane = createStandardPlaneDefinition("xy");
+    const first = createRectangleSketch(
+      "sketch_fused_face_first" as SketchId,
+      plane,
+      { width: 4, height: 4 },
+    );
+    const second = createRectangleSketch(
+      "sketch_fused_face_second" as SketchId,
+      plane,
+      { origin: [2, 1], width: 4, height: 2 },
+    );
+    const featureId = "feature_fused_face_provenance" as FeatureId;
+    const feature = {
+      featureId,
+      suppressed: false,
+      definition: {
+        kind: "extrude" as const,
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "solid" as const,
+          profiles: [
+            {
+              kind: "region" as const,
+              sketchId: first.sketch.sketchId,
+              regionId: first.region.regionId,
+            },
+            {
+              kind: "region" as const,
+              sketchId: second.sketch.sketchId,
+              regionId: second.region.regionId,
+            },
+          ],
+          startExtent: { kind: "profilePlane" as const },
+          extent: {
+            mode: "oneSide" as const,
+            end: { kind: "blind" as const, direction: "positive" as const, distance: 3 },
+          },
+          operation: "newBody" as const,
+          booleanScope: { kind: "standalone" as const },
+        },
+      },
+    };
+    const initial = rebuildOccAuthoringState(
+      createOccAuthoringState(oc, { sketches: [first.sketch, second.sketch] }),
+      [feature],
+    );
+    const initialOutput = initial.featureTopologyStages
+      .get(featureId)!
+      .outputs.values()
+      .next().value!;
+    const composite = [...initialOutput.sourceTargets].find(
+      ([sourceKey, targets]) =>
+        sourceKey.startsWith("extrude-composite:") &&
+        targets.length === 1 &&
+        targets[0]?.kind === "face",
+    );
+    expect(
+      [...initialOutput.sourceTargets.keys()].some((sourceKey) =>
+        /:profile:[0-9]+:/.test(sourceKey),
+      ),
+      "Composite provenance must not encode a profile ordinal.",
+    ).toBe(false);
+    expect(
+      composite,
+      "An overlapping multi-profile fuse must name its otherwise unclaimed fusion face from its exact complete source set.",
+    ).toBeTruthy();
+    if (!composite) throw new Error("Expected exact composite fusion-face provenance.");
+    const [compositeSourceKey, [initialTarget]] = composite;
+    if (initialTarget?.kind !== "face") {
+      throw new Error("Expected composite provenance to name one fusion face.");
+    }
+    expect(
+      [...initialOutput.sourceTargets].filter(
+        ([sourceKey, targets]) =>
+          sourceKey !== compositeSourceKey &&
+          targets.some(
+            (target) =>
+              target.kind === "face" &&
+              getOccDurableRefKey(target) === getOccDurableRefKey(initialTarget),
+          ),
+      ),
+      "The fusion face must have one complete composite claim, not partial cap or side claims.",
+    ).toEqual([]);
+
+    const widenedFirst = createRectangleSketch(first.sketch.sketchId, plane, {
+      width: 5,
+      height: 4,
+    });
+    const rebuilt = rebuildOccAuthoringState(
+      { ...initial, sketches: [widenedFirst.sketch, second.sketch] },
+      [feature],
+    );
+    const rebuiltOutput = rebuilt.featureTopologyStages
+      .get(featureId)!
+      .outputs.values()
+      .next().value!;
+    expect(
+      rebuiltOutput.sourceTargets.get(compositeSourceKey),
+      "A geometry-changing rebuild must reproduce the fusion face's exact composite source key.",
+    ).toEqual([initialTarget]);
   }
 
   async function testExtrudeUpToNextSkipsCoplanarStartFace() {
@@ -4815,6 +4921,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testExtrudeFeatureCreatesStandaloneBodyFromRegion();
   await testSurfaceExtrudeRevolveAndThickenUseSheetBodies();
   await testExtrudePublishesSemanticPrismHistoryProvenance();
+  await testMultiProfileFusePublishesStableCompositeFaceProvenance();
   await testExtrudeUpToNextSkipsCoplanarStartFace();
   await testExtrudeStartExtentBoundToDurableEntity();
   await testExtrudeBlindStartOffsetIsSignedAlongExtrudeDirection();

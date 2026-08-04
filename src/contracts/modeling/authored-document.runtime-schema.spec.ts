@@ -50,6 +50,7 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
             edgeIds: ["edge_body_feature_extrude-1_preserved"],
             vertexIds: ["vertex_body_feature_extrude-1_preserved"],
           },
+          outputWitnesses: ["split-face:a", "split-face:b"],
           sourceTargets: [
             {
               sourceKey: "feature:feature_extrude-1:profile:0:generated-side-face",
@@ -71,6 +72,27 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
   expect(parsedLineage.ok && parsedLineage.document.topologyLineage).toEqual(
     authoredDocument.topologyLineage,
   );
+  expect(
+    parsedLineage.ok && parsedLineage.document.topologyLineage?.[0]?.outputs[0]?.outputWitnesses,
+  ).toEqual(["split-face:a", "split-face:b"]);
+
+  const duplicateOutputWitnesses = structuredClone(authoredDocument);
+  const duplicatedOutput = structuredClone(
+    duplicateOutputWitnesses.topologyLineage![0]!.outputs[0]!,
+  );
+  duplicatedOutput.outputSlot = "body_other" as never;
+  duplicateOutputWitnesses.topologyLineage![0]!.outputs.push(duplicatedOutput);
+  expect(
+    parseAuthoredModelDocument(duplicateOutputWitnesses).ok,
+    "Two persisted outputs with the same witness set must be rejected.",
+  ).toBe(false);
+
+  const blankOutputWitness = structuredClone(authoredDocument);
+  blankOutputWitness.topologyLineage![0]!.outputs[0]!.outputWitnesses = ["   "];
+  expect(
+    parseAuthoredModelDocument(blankOutputWitness).ok,
+    "Whitespace-only output witnesses must be rejected.",
+  ).toBe(false);
 
   const malformedLineage = structuredClone(authoredDocument);
   malformedLineage.topologyLineage![0]!.outputs[0]!.sourceTargets[0]!.targets[0]!.bodyId =

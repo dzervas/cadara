@@ -167,11 +167,12 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
     });
 
     await adapter.preloadRuntime();
-    await adapter.restoreAuthoredModelDocument({
+    const validDocument: AuthoredModelDocument = {
       contractVersion: "modeling-contract/v1alpha1",
       schemaVersion: "authored-model-document/v1alpha1",
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+      name: "Untitled",
       settings: {
         linearUnit: "millimeter",
         modelingTolerance: 0.001,
@@ -184,9 +185,21 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
       historyOrder: [],
       cursor: { kind: "empty" },
       bodyLabels: [],
-      assets: { records: [] },
+      assets: { schemaVersion: "geometry-asset-manifest/v1alpha1", records: [] },
       embeddedBinaryAssets: [],
-    });
+    };
+    const invalidDocument = structuredClone(validDocument);
+    invalidDocument.topologyLineage = [{
+      featureId: "feature_missing" as never,
+      outputs: [],
+    }];
+    await expect(
+      adapter.restoreAuthoredModelDocument(invalidDocument),
+      "The public adapter restore boundary must validate authored invariants before worker delegation.",
+    ).rejects.toThrow("Authored topology lineage");
+    expect(restoreCalls).toBe(0);
+
+    await adapter.restoreAuthoredModelDocument(validDocument);
     await adapter.getDocumentSnapshot({
       contractVersion: "modeling-contract/v1alpha1",
       documentId: OCC_KERNEL_DOCUMENT_ID,

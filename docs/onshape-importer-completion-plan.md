@@ -3226,3 +3226,46 @@ through exact witness lineage with fail-closed ambiguity), deliberately NOT a
 geometric or majority match. Until then the d3 e2e rebuild lever is
 `columnDepth` — the one captured variable no sketch consumes — which still
 forces the full live-kernel replay without tripping the naming gap.
+
+#### Known-open: 9841 `Extrude 3` bosses do not contact the shelled wall
+
+`Cutter` (and the `Extrude 4` / `Split 1` cascade behind it) bakes with
+`bound historical lineage face:body_feature_extrude-1:face_body_feature_extrude-1_g22a075177283902d
+occurs 0 times at the consumer`. The lineage machinery is not at fault: `g22`
+is present and exactly claimed at ordered action 9 (`Chamfer 2`), and is gone
+by action 13 (`Extrude 3`), because `Extrude 3` itself rebuilds wrongly.
+
+Measured against the capture's own rollback tessellation, in the lateral
+window `x ∈ [-41, -34] mm`, projected on the extrude direction
+`d = (0, 0.8660254037844385, -0.5000000000000004)` from `Sketch 2`'s plane:
+
+- before `Extrude 3` (snapshot `FNDWeJ0ochiid2V_1`): surfaces at `d = 0, 2.5`
+  (outer wall face and shell cavity face; wall thickness 2.5 mm),
+- after `Extrude 3` (snapshot `F1e8jznllKu2VbY_1`): surfaces at
+  `d = 0, 2.5, 5.5`, one body `JND`, face count 51 → 131 (+80 = 20 tools × 4).
+
+Our rebuild places the same material span (`d ∈ [2.4997, 5.4997]`), so the
+authored direction and extent are already correct — `oppositeDirection=true`
+maps to `-sketchNormal`, and Sketch 2's captured `sketchMatrix` normal
+`(0, -0.8660254, 0.5)` matches the probed support-face normal. Flipping the
+direction is NOT the fix: it yields one body but 158 faces against the
+ground-truth 131, i.e. bosses driven through the wall.
+
+The actual defect is contact: the 20 boss solids never merge with the target,
+so `applyBooleanPolicy` severs into 21 bodies and every downstream public face
+id (including `g22`) is reminted. Per-tool OCC `intersect` is empty and `join`
+returns 2 solids for every tool. The kernel is behaving correctly — with the
+custom build, `join` returns 1 solid for full and partial coincident-face
+contact and for overlap, and 2 solids only for a 0.3 µm gap — so the boss base
+annulus is not landing on the live cavity face.
+
+Next step is to discriminate the two remaining causes without guessing:
+translate one boss by `-0.0005 / -0.01 / -1 mm` along `d` and re-run
+`join`/`intersect`. Contact appearing at a sub-micron shift means a placement
+gap in `resolveStartExtentOffset` (`entityRange.max - profileSpan.max`);
+contact only appearing at a large shift means the boss footprint is not over
+the live cavity-face region, which points at `Sketch 2`'s region set (the
+capture's sketch-region query lists 40 deterministic ids while preparation
+emits 20 annular `regionOf` profiles). Note `applyBooleanPolicy`'s
+`onSever: "freshIdentities"` is what converts this geometric miss into the
+lineage failure, so it must stay fail-closed rather than be relaxed.

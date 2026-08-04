@@ -145,7 +145,7 @@ function mergeFeatureSourceShapes(
   }
 }
 
-function mapFeatureSourceTargets(
+export function mapFeatureSourceTargets(
   bodies: readonly OccTrackedBody[],
   sourceShapes: OccFeatureSourceShapeMap | undefined,
 ) {
@@ -333,19 +333,277 @@ export function runBoolean(
     throw new Error(`OCC boolean ${operation} failed to build.`);
   }
 
-  builder.SimplifyResult(true, true, 1e-7);
+  // `SimplifyResult` mutates the Boolean result without keeping composable
+  // history. Same-domain unification is optional: it must not replace an OCC
+  // Boolean result when its own exact history hop is incomplete.
+  const rawShape = builder.Shape();
+  const refined = refineBooleanResultShape(oc, rawShape);
+  const rawHistorySource = {
+    Modified: (subshape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      builder.Modified(subshape),
+    Generated: (subshape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      builder.Generated(subshape),
+    IsDeleted: (subshape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      builder.IsDeleted(subshape),
+    resultShape: rawShape,
+  } satisfies OccTopologyHistorySource;
+  const unifyHistorySource = {
+    Modified: (subshape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      refined.historySource.Modified(subshape),
+    Generated: (subshape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      refined.historySource.Generated(subshape),
+    resultShape: refined.shape,
+  } satisfies OccTopologyHistorySource;
+  const selected = selectBooleanResultWithCompleteHistory({
+    oc,
+    operands: [left, right],
+    rawShape,
+    rawHistorySource,
+    unifiedShape: refined.shape,
+    unifyHistorySource,
+  });
 
-  const refined = refineBooleanResultShape(oc, builder.Shape());
+  if (!selected.usesUnifiedResult) {
+    refined.historySource.delete();
+    // `Shape()` may alias the raw result when Unify makes no topological change.
+    if (!refined.shape.IsSame(rawShape)) refined.shape.delete();
+  }
 
   return {
-    shape: refined.shape,
+    shape: selected.shape,
     builder,
-    historySources: [
-      builder,
-      refined.historySource,
-    ] satisfies OccTopologyHistorySource[],
+    historySources: selected.historySources,
   };
 }
+
+type OccSubshapeKind = "face" | "edge" | "vertex";
+type OccShape = InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+
+function shapeTypeFor(oc: OpenCascadeInstance, kind: OccSubshapeKind) {
+  return kind === "face"
+    ? oc.TopAbs_ShapeEnum.TopAbs_FACE
+    : kind === "edge"
+      ? oc.TopAbs_ShapeEnum.TopAbs_EDGE
+      : oc.TopAbs_ShapeEnum.TopAbs_VERTEX;
+}
+
+function countSubshapeMatches(
+  oc: OpenCascadeInstance,
+  result: OccShape,
+  kind: OccSubshapeKind,
+  source: OccShape,
+) {
+  const subshapes = new oc.TopTools_IndexedMapOfShape_1();
+  oc.TopExp.MapShapes_1(result, shapeTypeFor(oc, kind) as never, subshapes);
+  try {
+    let matches = 0;
+    for (let index = 1; index <= subshapes.Size(); index += 1) {
+      if (subshapes.FindKey(index).IsSame(source)) matches += 1;
+    }
+    return matches;
+  } finally {
+    subshapes.delete();
+  }
+}
+
+function uniqueModifiedSuccessor(
+  oc: OpenCascadeInstance,
+  history: OccTopologyHistorySource,
+  source: OccShape,
+) {
+  const unique: OccShape[] = [];
+  for (const candidate of listHistoryShapes(oc, history.Modified(source))) {
+    appendUniqueShape(unique, candidate);
+  }
+  return unique;
+}
+
+function exactStageSuccessor(input: {
+  oc: OpenCascadeInstance;
+  kind: OccSubshapeKind;
+  source: OccShape;
+  history: OccTopologyHistorySource;
+  allowDeleted: boolean;
+}) {
+  const modified = uniqueModifiedSuccessor(
+    input.oc,
+    input.history,
+    input.source,
+  );
+  if (modified.length === 1) {
+    return countSubshapeMatches(
+      input.oc,
+      input.history.resultShape!,
+      input.kind,
+      modified[0]!,
+    ) === 1
+      ? { kind: "successor" as const, shape: modified[0]! }
+      : { kind: "incomplete" as const };
+  }
+  if (modified.length > 1) return { kind: "incomplete" as const };
+
+  const exactMatches = countSubshapeMatches(
+    input.oc,
+    input.history.resultShape!,
+    input.kind,
+    input.source,
+  );
+  if (exactMatches === 1) {
+    return { kind: "successor" as const, shape: input.source };
+  }
+  if (
+    input.allowDeleted &&
+    isOccTopologyHistoryDeleted(input.history, input.source)
+  ) {
+    return { kind: "deleted" as const };
+  }
+  return { kind: "incomplete" as const };
+}
+
+function everyOperandSubshape(
+  oc: OpenCascadeInstance,
+  operands: readonly OccShape[],
+  visitor: (kind: OccSubshapeKind, shape: OccShape) => boolean,
+) {
+  for (const operand of operands) {
+    for (const kind of ["face", "edge", "vertex"] as const) {
+      const subshapes = new oc.TopTools_IndexedMapOfShape_1();
+      oc.TopExp.MapShapes_1(operand, shapeTypeFor(oc, kind) as never, subshapes);
+      try {
+        for (let index = 1; index <= subshapes.Size(); index += 1) {
+          if (!visitor(kind, subshapes.FindKey(index))) return false;
+        }
+      } finally {
+        subshapes.delete();
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Retain same-domain unification only if every Boolean input subshape has an
+ * exact raw Boolean hop and, when it survives that hop, an exact unifier hop.
+ * `Modified` is authoritative; zero Modified falls back only to unique exact
+ * `IsSame` membership. This never uses geometric matching or invents lineage.
+ */
+export function selectBooleanResultWithCompleteHistory<
+  TRawHistory extends OccTopologyHistorySource,
+  TUnifyHistory extends OccTopologyHistorySource,
+>(input: {
+  oc: OpenCascadeInstance;
+  operands: readonly OccShape[];
+  rawShape: OccShape;
+  rawHistorySource: TRawHistory;
+  unifiedShape: OccShape;
+  unifyHistorySource: TUnifyHistory;
+}) {
+  const complete = everyOperandSubshape(
+    input.oc,
+    input.operands,
+    (kind, source) => {
+      const raw = exactStageSuccessor({
+        oc: input.oc,
+        kind,
+        source,
+        history: input.rawHistorySource,
+        allowDeleted: true,
+      });
+      if (raw.kind === "deleted") return true;
+      if (raw.kind !== "successor") return false;
+      return exactStageSuccessor({
+        oc: input.oc,
+        kind,
+        source: raw.shape,
+        history: input.unifyHistorySource,
+        allowDeleted: false,
+      }).kind === "successor";
+    },
+  );
+
+  return complete
+    ? {
+        shape: input.unifiedShape,
+        historySources: [input.rawHistorySource, input.unifyHistorySource],
+        usesUnifiedResult: true,
+      }
+    : {
+        shape: input.rawShape,
+        historySources: [input.rawHistorySource],
+        usesUnifiedResult: false,
+      };
+}
+
+function collectExactTargetSuccessors(input: {
+  oc: OpenCascadeInstance;
+  sourceBody: OccTrackedBody;
+  replacements: readonly OccTrackedBody[];
+  historySources: readonly OccTopologyHistorySource[];
+}) {
+  const successors = new Map<string, DurableRef>();
+  const finalTargetForShape = (kind: OccSubshapeKind, shape: OccShape) => {
+    const matches = input.replacements.flatMap((body) => {
+      const entries = kind === "face"
+        ? body.facesById
+        : kind === "edge"
+          ? body.edgesById
+          : body.verticesById;
+      return [...entries].flatMap(([id, candidate]) =>
+        candidate.IsSame(shape)
+          ? [
+              kind === "face"
+                ? ({ kind, bodyId: body.bodyId, faceId: id } as DurableRef)
+                : kind === "edge"
+                  ? ({ kind, bodyId: body.bodyId, edgeId: id } as DurableRef)
+                  : ({ kind, bodyId: body.bodyId, vertexId: id } as DurableRef),
+            ]
+          : [],
+      );
+    });
+    return matches.length === 1 ? matches[0]! : null;
+  };
+
+  const sources: Array<[DurableRef, OccSubshapeKind, OccShape]> = [
+    ...[...input.sourceBody.facesById].map(([faceId, shape]) => [
+      { kind: "face", bodyId: input.sourceBody.bodyId, faceId } as DurableRef,
+      "face" as const,
+      shape as OccShape,
+    ] as [DurableRef, OccSubshapeKind, OccShape]),
+    ...[...input.sourceBody.edgesById].map(([edgeId, shape]) => [
+      { kind: "edge", bodyId: input.sourceBody.bodyId, edgeId } as DurableRef,
+      "edge" as const,
+      shape as OccShape,
+    ] as [DurableRef, OccSubshapeKind, OccShape]),
+    ...[...input.sourceBody.verticesById].map(([vertexId, shape]) => [
+      { kind: "vertex", bodyId: input.sourceBody.bodyId, vertexId } as DurableRef,
+      "vertex" as const,
+      shape as OccShape,
+    ] as [DurableRef, OccSubshapeKind, OccShape]),
+  ];
+  for (const [source, kind, initial] of sources) {
+    let candidate = initial;
+    let complete = true;
+    for (const history of input.historySources) {
+      const successor = exactStageSuccessor({
+        oc: input.oc,
+        kind,
+        source: candidate,
+        history,
+        allowDeleted: false,
+      });
+      if (successor.kind !== "successor") {
+        complete = false;
+        break;
+      }
+      candidate = successor.shape;
+    }
+    if (!complete) continue;
+    const target = finalTargetForShape(kind, candidate);
+    if (target) successors.set(getOccDurableRefKey(source), target);
+  }
+  return successors;
+}
+
 
 /**
  * Split a solid by a sheet tool.
@@ -1728,6 +1986,12 @@ export function applyBooleanPolicy(
       );
       replacementResult = {
         ...resolvedReplacement,
+        successorTargetsByPreviousKey: collectExactTargetSuccessors({
+          oc: context.oc,
+          sourceBody: targetBody,
+          replacements: resolvedReplacement.replacements,
+          historySources: result.historySources,
+        }),
         booleanOperandHistory: undefined,
       };
     }

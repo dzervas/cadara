@@ -972,12 +972,15 @@ export function buildResolvedBodyConsumerDefinition(
   planned: PlannedBodyTopologyConsumer,
   bindings: readonly import("@/domain/import/onshape/topology-reference-resolver").TopologyResolutionBinding[],
 ): ImportDeferredFeatureDefinition {
+  // Review-only exact body ownership carries a source feature id until provider
+  // preparation emits the authoritative ordered action. It is rebased before this
+  // definition reaches the import contract.
   const targetsByRole = new Map<string, import("@/contracts/import/actions").ImportDeferredDurableRef[]>();
   for (const binding of bindings) {
     const role = planned.slots.find((entry) => entry.key === binding.query.slotKey)?.role;
     if (!role) continue;
     const targets = targetsByRole.get(role) ?? [];
-    targets.push(binding.deferred);
+    targets.push(binding.deferred as import("@/contracts/import/actions").ImportDeferredDurableRef);
     targetsByRole.set(role, targets);
   }
   if (planned.featureKind === "fillet") {

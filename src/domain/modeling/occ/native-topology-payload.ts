@@ -16,6 +16,7 @@ import type {
   VertexId,
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
+import type { AuthoredFeatureTopologyLineage } from "@/contracts/modeling/authored-document";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 
 export const OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION =
@@ -435,6 +436,8 @@ export interface OccNativeExactBrepPayload {
   revisionId: RevisionId;
   target: DurableRef;
   brep: CadaraBrepGeometryAssetData;
+  /** Exact current OCC stage source claims; transient review/apply evidence only. */
+  topologyLineage?: readonly AuthoredFeatureTopologyLineage[];
   tables: OccNativeExactBrepTableLayout;
   buffers: readonly OccNativeTransferableBuffer[];
   diagnostics: readonly OccNativeTopologyDiagnostic[];

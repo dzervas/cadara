@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { test, expect } from "vitest";
 import { ResultAsync, createAppError } from "@/contracts/errors";
 
@@ -38,6 +38,7 @@ import {
   makeWaveXClosedHollowShellCaptureBundle,
   makeWaveXRegionSelectionCaptureBundle,
   makeWaveXSurfaceExtrudeCaptureBundle,
+  makeWaveXStartOffsetBossCaptureBundle,
 } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import {
   applyImportPreparedActions,
@@ -65,7 +66,13 @@ import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
-import type { BodyId, DocumentId, FaceId, RevisionId, SketchPointId } from "@/contracts/shared/ids";
+import type {
+  BodyId,
+  DocumentId,
+  FaceId,
+  RevisionId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
 import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
 import {
   createOccNativeExactBrepPayloadFromShimPayload,
@@ -179,7 +186,9 @@ function loadRealOccForImportTest() {
       default: CustomOpenCascadeMainJSForImportTest;
     };
     const wasmBinary = new Uint8Array(
-      await readFile(new URL("../../../../public/cadara-occ.wasm", import.meta.url)),
+      await readFile(
+        new URL("../../../../public/cadara-occ.wasm", import.meta.url),
+      ),
     );
     return new module.default({ wasmBinary });
   })();
@@ -205,7 +214,8 @@ function createRealOccModelingService(oc: OpenCascadeInstance) {
 }
 
 function signatureRadius(signature: HistoryProbeTopologySignature) {
-  const radius = (signature.definingData as { radius?: unknown } | undefined)?.radius;
+  const radius = (signature.definingData as { radius?: unknown } | undefined)
+    ?.radius;
   return typeof radius === "number" ? radius : null;
 }
 
@@ -219,13 +229,15 @@ function makeRealOccHoleReviewBundle() {
   for (const studio of bundle.partStudios) {
     for (const snapshot of studio.rollbackSnapshots ?? []) {
       for (const body of snapshot.tessellatedFaces.bodies) {
-        body.faces = [{
+        body.faces = [
+          {
           id: `${body.id}_face`,
           facets: [
             { vertices: [low, { x: high.x, y: low.y, z: low.z }, high] },
             { vertices: [low, high, { x: low.x, y: high.y, z: high.z }] },
           ],
-        }];
+          },
+        ];
       }
     }
   }
@@ -326,9 +338,13 @@ async function translatedFixtureSketchAction() {
       entityId: curve.entityId,
       entityType: curve.entityType,
       isConstruction: curve.isConstruction,
-      start: curve.start3d ? projectPointToPlane(curve.start3d, "xy") : undefined,
+      start: curve.start3d
+        ? projectPointToPlane(curve.start3d, "xy")
+        : undefined,
       end: curve.end3d ? projectPointToPlane(curve.end3d, "xy") : undefined,
-      center: curve.center3d ? projectPointToPlane(curve.center3d, "xy") : undefined,
+      center: curve.center3d
+        ? projectPointToPlane(curve.center3d, "xy")
+        : undefined,
       radius: curve.radius === undefined ? undefined : curve.radius * 1000,
     }));
     const translation = translateSketch({
@@ -393,14 +409,54 @@ function nestedCircleSketchAction() {
     label: "Nested rectangles",
     planeKey: "xy",
     entities: [
-      { entityId: "outer_bottom", entityType: "lineSegment", start: [-10, -10], end: [10, -10] },
-      { entityId: "outer_right", entityType: "lineSegment", start: [10, -10], end: [10, 10] },
-      { entityId: "outer_top", entityType: "lineSegment", start: [10, 10], end: [-10, 10] },
-      { entityId: "outer_left", entityType: "lineSegment", start: [-10, 10], end: [-10, -10] },
-      { entityId: "inner_bottom", entityType: "lineSegment", start: [-4, -4], end: [4, -4] },
-      { entityId: "inner_right", entityType: "lineSegment", start: [4, -4], end: [4, 4] },
-      { entityId: "inner_top", entityType: "lineSegment", start: [4, 4], end: [-4, 4] },
-      { entityId: "inner_left", entityType: "lineSegment", start: [-4, 4], end: [-4, -4] },
+      {
+        entityId: "outer_bottom",
+        entityType: "lineSegment",
+        start: [-10, -10],
+        end: [10, -10],
+      },
+      {
+        entityId: "outer_right",
+        entityType: "lineSegment",
+        start: [10, -10],
+        end: [10, 10],
+      },
+      {
+        entityId: "outer_top",
+        entityType: "lineSegment",
+        start: [10, 10],
+        end: [-10, 10],
+      },
+      {
+        entityId: "outer_left",
+        entityType: "lineSegment",
+        start: [-10, 10],
+        end: [-10, -10],
+      },
+      {
+        entityId: "inner_bottom",
+        entityType: "lineSegment",
+        start: [-4, -4],
+        end: [4, -4],
+      },
+      {
+        entityId: "inner_right",
+        entityType: "lineSegment",
+        start: [4, -4],
+        end: [4, 4],
+      },
+      {
+        entityId: "inner_top",
+        entityType: "lineSegment",
+        start: [4, 4],
+        end: [-4, 4],
+      },
+      {
+        entityId: "inner_left",
+        entityType: "lineSegment",
+        start: [-4, 4],
+        end: [-4, -4],
+      },
     ],
   });
   return {
@@ -501,8 +557,7 @@ function recordSuccessfulCreateFeatureInputs(service: ModelingService) {
         changedTargets: [],
         diagnostics: [],
       }),
-      (error) =>
-        createAppError({ code: "unknown", message: String(error) }),
+      (error) => createAppError({ code: "unknown", message: String(error) }),
     );
   }) as ModelingService["createFeature"];
   return requests;
@@ -659,8 +714,8 @@ test("generic deferred sketch-point participants apply authored hole features th
     forwarded.definition.kind === "hole" &&
       forwarded.definition.parameters.participants[0]?.targets[0]?.kind ===
         "sketchPoint" &&
-      typeof forwarded.definition.parameters.participants[0].targets[0].sketchId ===
-        "string",
+      typeof forwarded.definition.parameters.participants[0].targets[0]
+        .sketchId === "string",
     "Deferred sketchIdOf should materialize to a live sketchPoint participant.",
   ).toBeTruthy();
   expect(
@@ -672,7 +727,9 @@ test("generic deferred sketch-point participants apply authored hole features th
     "The authored hole action should create a feature.",
   ).toBe(1);
   expect(
-    after.snapshot.document.bodies.some((body) => body.bodyId === "body_part-1"),
+    after.snapshot.document.bodies.some(
+      (body) => body.bodyId === "body_part-1",
+    ),
     "Mock hole application should keep the scoped base body live.",
   ).toBeTruthy();
 });
@@ -690,14 +747,23 @@ test("Onshape hole fixture translates through provider and applies with material
         return {
           steps: Array.from({ length: count }, (_, index) => ({
             status: "rebuilt" as const,
-            signatures: index >= 1
-              ? [{
+            signatures:
+              index >= 1
+                ? [
+                    {
                   entityClass: "body" as const,
                   geometryType: "solid",
-                  boundingBox: { low: [-4, -3, 12] as [number, number, number], high: [4, 3, 12] as [number, number, number] },
+                      boundingBox: {
+                        low: [-4, -3, 12] as [number, number, number],
+                        high: [4, 3, 12] as [number, number, number],
+                      },
                   centroid: [0, 0, 12] as [number, number, number],
-                  reference: { kind: "body" as const, bodyId: "probe_hole_body" as never },
-                }]
+                      reference: {
+                        kind: "body" as const,
+                        bodyId: "probe_hole_body" as never,
+                      },
+                    },
+                  ]
               : [],
           })),
         };
@@ -706,8 +772,15 @@ test("Onshape hole fixture translates through provider and applies with material
   });
   const source = sourceFromBundle(makeWaveBHoleCaptureBundle());
   const review = await onshapeImportProvider.review({ source, capabilities });
-  const plans = review.providerReview.studios.flatMap((studio) => studio.featurePlans);
-  expect(plans.filter((plan) => plan.featureType === "hole").map((plan) => plan.reasonCodes), JSON.stringify(plans)).toEqual([[], [], []]);
+  const plans = review.providerReview.studios.flatMap(
+    (studio) => studio.featurePlans,
+  );
+  expect(
+    plans
+      .filter((plan) => plan.featureType === "hole")
+      .map((plan) => plan.reasonCodes),
+    JSON.stringify(plans),
+  ).toEqual([[], [], []]);
 
   const actions = await prepareImportActions({
     provider: onshapeImportProvider,
@@ -716,10 +789,22 @@ test("Onshape hole fixture translates through provider and applies with material
     selections: onshapeImportProvider.createDefaultSelections(review),
     capabilities,
   });
-  const preparedHole = actions.createFeatures?.find((request) => request.definition.kind === "hole");
-  expect(preparedHole?.definition.parameters.participants).toEqual(expect.arrayContaining([
-    expect.objectContaining({ role: "location", targets: [expect.objectContaining({ kind: "sketchPoint", sketchId: expect.objectContaining({ kind: "sketchIdOf" }) })] }),
-  ]));
+  const preparedHole = actions.createFeatures?.find(
+    (request) => request.definition.kind === "hole",
+  );
+  expect(preparedHole?.definition.parameters.participants).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        role: "location",
+        targets: [
+          expect.objectContaining({
+            kind: "sketchPoint",
+            sketchId: expect.objectContaining({ kind: "sketchIdOf" }),
+          }),
+        ],
+      }),
+    ]),
+  );
 
   const requests = recordCreateFeatureInputs(service);
   const result = await applyImportPreparedActions({
@@ -727,17 +812,30 @@ test("Onshape hole fixture translates through provider and applies with material
     baseRevisionId: before.snapshot.document.revisionId,
     actions,
   });
-  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
-  const forwardedHoles = requests.filter((request) => request.definition.kind === "hole");
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify(result.diagnostics),
+  ).toBe(true);
+  const forwardedHoles = requests.filter(
+    (request) => request.definition.kind === "hole",
+  );
   expect(forwardedHoles).toHaveLength(1);
   expect(JSON.stringify(forwardedHoles)).not.toContain("sketchIdOf");
-  expect(forwardedHoles.every((request) =>
+  expect(
+    forwardedHoles.every(
+      (request) =>
     request.definition.kind === "hole" &&
-    request.definition.parameters.participants.some((participant) =>
+        request.definition.parameters.participants.some(
+          (participant) =>
       participant.role === "location" &&
-      participant.targets.every((target) => target.kind === "sketchPoint" && typeof target.sketchId === "string"),
+            participant.targets.every(
+              (target) =>
+                target.kind === "sketchPoint" &&
+                typeof target.sketchId === "string",
+            ),
     ),
-  )).toBe(true);
+    ),
+  ).toBe(true);
   const after = await adapter.getDocumentSnapshot({
     contractVersion: CONTRACT_VERSION,
     documentId: "doc_workspace",
@@ -759,9 +857,10 @@ test("Onshape hole fixture applies through the real OCC import service with mate
       }),
     });
     const review = await onshapeImportProvider.review({ source, capabilities });
-    const plans = review.providerReview.studios
-      .find((studio) => studio.elementId === elementId)
-      ?.featurePlans ?? [];
+    const plans =
+      review.providerReview.studios.find(
+        (studio) => studio.elementId === elementId,
+      )?.featurePlans ?? [];
     const holePlan = plans.find((plan) => plan.featureType === "hole");
     expect(holePlan, JSON.stringify(plans)).toMatchObject({
       tier: "parametric",
@@ -775,7 +874,8 @@ test("Onshape hole fixture applies through the real OCC import service with mate
       selections: { studioElementId: elementId, demotedFeatureIds: [] },
       capabilities,
     });
-    const preparedHoles = actions.createFeatures?.filter(
+    const preparedHoles =
+      actions.createFeatures?.filter(
       (request) => request.definition.kind === "hole",
     ) ?? [];
     expect(preparedHoles, JSON.stringify(actions)).toHaveLength(1);
@@ -793,7 +893,9 @@ test("Onshape hole fixture applies through the real OCC import service with mate
     ).toBe(true);
     expect(result.rolledBack).toBe(false);
 
-    const forwardedHole = forwarded.find((request) => request.definition.kind === "hole");
+    const forwardedHole = forwarded.find(
+      (request) => request.definition.kind === "hole",
+    );
     expect(forwardedHole, JSON.stringify(forwarded)).toBeDefined();
     const forwardedHoleJson = JSON.stringify(forwardedHole);
     expect(forwardedHoleJson).not.toContain("sketchIdOf");
@@ -801,7 +903,8 @@ test("Onshape hole fixture applies through the real OCC import service with mate
     expect(forwardedHoleJson).not.toContain("bodyOf");
     expect(
       forwardedHole?.definition.kind === "hole" &&
-        forwardedHole.definition.parameters.participants.some((participant) =>
+        forwardedHole.definition.parameters.participants.some(
+          (participant) =>
           participant.role === "location" &&
           participant.targets.every(
             (target) =>
@@ -814,12 +917,24 @@ test("Onshape hole fixture applies through the real OCC import service with mate
     ).toBe(true);
 
     const after = await service.getCurrentDocumentSnapshot();
-    expect(after.document.bodies.length, "Hole application should retain the scoped body.").toBe(1);
-    const signatureResult = await deriveLiveBodySignatures({ snapshot: after, service });
-    expect(signatureResult.status, JSON.stringify(signatureResult.diagnostics)).toBe("available");
-    if (signatureResult.status !== "available") throw new Error("Expected live OCC topology signatures.");
     expect(
-      signatureResult.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+      after.document.bodies.length,
+      "Hole application should retain the scoped body.",
+    ).toBe(1);
+    const signatureResult = await deriveLiveBodySignatures({
+      snapshot: after,
+      service,
+    });
+    expect(
+      signatureResult.status,
+      JSON.stringify(signatureResult.diagnostics),
+    ).toBe("available");
+    if (signatureResult.status !== "available")
+      throw new Error("Expected live OCC topology signatures.");
+    expect(
+      signatureResult.diagnostics.every(
+        (diagnostic) => diagnostic.severity !== "error",
+      ),
       JSON.stringify(signatureResult.diagnostics),
     ).toBe(true);
     return { result, signatures: signatureResult.signatures };
@@ -827,7 +942,11 @@ test("Onshape hole fixture applies through the real OCC import service with mate
 
   const simple = await prepareAndApplyHoleStudio("wave-b-hole-simple");
   const simpleCylinderRadii = simple.signatures
-    .filter((signature) => signature.entityClass === "face" && signature.geometryType === "cylinder")
+    .filter(
+      (signature) =>
+        signature.entityClass === "face" &&
+        signature.geometryType === "cylinder",
+    )
     .map(signatureRadius)
     .filter((radius): radius is number => radius !== null);
   expect(
@@ -835,15 +954,17 @@ test("Onshape hole fixture applies through the real OCC import service with mate
     JSON.stringify(simple.signatures),
   ).toBe(true);
 
-  const countersink = await prepareAndApplyHoleStudio("wave-b-hole-countersink");
+  const countersink = await prepareAndApplyHoleStudio(
+    "wave-b-hole-countersink",
+  );
   expect(
     countersink.signatures.some(
-      (signature) => signature.entityClass === "face" && signature.geometryType === "cone",
+      (signature) =>
+        signature.entityClass === "face" && signature.geometryType === "cone",
     ),
     JSON.stringify(countersink.signatures),
   ).toBe(true);
 });
-
 
 // Lane: logic (per docs/testing.md — this crosses the importer/provider/apply
 // seam through the real OCC adapter, without UI or browser behavior).
@@ -860,7 +981,8 @@ test("Onshape closed hollow shell fixture applies and rebuilds through real OCC"
         return {
           steps: (input.actions.orderedActions ?? []).map(() => ({
             status: "rebuilt" as const,
-            signatures: [{
+            signatures: [
+              {
               entityClass: "body" as const,
               geometryType: "solid",
               boundingBox: {
@@ -872,7 +994,8 @@ test("Onshape closed hollow shell fixture applies and rebuilds through real OCC"
                 kind: "body" as const,
                 bodyId: "probe_closed_hollow" as BodyId,
               },
-            }],
+              },
+            ],
           })),
         };
       },
@@ -933,8 +1056,14 @@ test("Onshape closed hollow shell fixture applies and rebuilds through real OCC"
     kind: "shell",
     parameters: { mode: "closedHollow", direction: "inside" },
   });
-  if (!baseFeature || !shellFeature || shellFeature.definition.kind !== "shell") {
-    throw new Error("Expected imported base extrude and closed hollow shell features.");
+  if (
+    !baseFeature ||
+    !shellFeature ||
+    shellFeature.definition.kind !== "shell"
+  ) {
+    throw new Error(
+      "Expected imported base extrude and closed hollow shell features.",
+    );
   }
 
   const baseCursor = await service.setFeatureCursor({
@@ -944,7 +1073,10 @@ test("Onshape closed hollow shell fixture applies and rebuilds through real OCC"
   if (baseCursor.isErr()) throw baseCursor.error;
   const beforeShell = await service.getCurrentDocumentSnapshot();
   const sourceBody = beforeShell.document.bodies[0];
-  expect(sourceBody, "Base extrude should produce one scoped solid body.").toBeDefined();
+  expect(
+    sourceBody,
+    "Base extrude should produce one scoped solid body.",
+  ).toBeDefined();
   const sourceSignatures = await deriveLiveBodySignatures({
     snapshot: beforeShell,
     service,
@@ -994,8 +1126,12 @@ test("Onshape closed hollow shell fixture applies and rebuilds through real OCC"
     throw new Error("Expected live source and closed-hollow body bounds.");
   }
   for (const [sourceValue, hollowedValue] of [
-    ...sourceBounds.low.map((value, index) => [value, hollowedBounds.low[index]!] as const),
-    ...sourceBounds.high.map((value, index) => [value, hollowedBounds.high[index]!] as const),
+    ...sourceBounds.low.map(
+      (value, index) => [value, hollowedBounds.low[index]!] as const,
+    ),
+    ...sourceBounds.high.map(
+      (value, index) => [value, hollowedBounds.high[index]!] as const,
+    ),
   ]) {
     expect(
       Math.abs(sourceValue - hollowedValue),
@@ -1024,6 +1160,70 @@ test("Onshape closed hollow shell fixture applies and rebuilds through real OCC"
   );
 });
 
+// Lane: logic (per docs/testing.md — importer review/prepare/apply through the
+// real OCC adapter, no UI). Seam: an ADD extrude whose START bound is a shelled
+// body's cavity face must land ON that face and join into one body.
+//
+// Fast stand-in for `9841e486906fa2ce62d74d8e`'s `Extrude 3`. Onshape's rollback
+// pins the truth: the boss spans the 3 mm immediately inside the cavity face and
+// the target stays ONE body. When the rebuilt boss misses the wall the join
+// severs the target into fresh `_split_` bodies, every public face id on it is
+// reminted, and that is exactly what bakes 9841's Cutter/Extrude 4/Split 1 chain.
+// See docs/onshape-importer-completion-plan.md, "9841 Extrude 3 bosses do not
+// contact the shelled wall".
+test("an ENTITY start-offset boss joins its shelled target as one body", async () => {
+  const oc = await loadRealOccForImportTest();
+  const { service } = createRealOccModelingService(oc);
+  const before = await service.getCurrentDocumentSnapshot();
+  const source = sourceFromBundle(makeWaveXStartOffsetBossCaptureBundle());
+  const capabilities = createImportCapabilities(service, before, {
+    history: createKernelHistoryProbeSession({
+      createService: () => createRealOccModelingService(oc).service,
+    }),
+  });
+  const review = await onshapeImportProvider.review({ source, capabilities });
+  const plans = review.providerReview.studios[0]?.featurePlans ?? [];
+  expect(
+    plans.map((plan) => ({ label: plan.label, tier: plan.tier })),
+    `Every feature in the boss fixture must review parametrically: ${JSON.stringify(plans)}`,
+  ).toEqual(plans.map((plan) => ({ label: plan.label, tier: "parametric" })));
+
+  const actions = await prepareImportActions({
+    provider: onshapeImportProvider,
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities,
+  });
+  const boss = actions.createFeatures?.find(
+    (request) => request.featureLabel === "Extrude 3",
+  );
+  expect(boss?.definition, JSON.stringify(boss)).toMatchObject({
+    kind: "extrude",
+    parameters: {
+      startExtent: { kind: "entityOffset" },
+      extent: { end: { kind: "blind", direction: "negative" } },
+      operation: { source: "literal", value: "join" },
+    },
+  });
+
+  const applied = await applyImportPreparedActions({
+    modelingService: service,
+    baseRevisionId: before.document.revisionId,
+    actions,
+  });
+  expect(
+    applied.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    "The boss sequence must commit through the real OCC apply seam.",
+  ).toEqual([]);
+  expect(applied.rolledBack).toBe(false);
+
+  const imported = await service.getCurrentDocumentSnapshot();
+  expect(
+    imported.document.bodies.map((body) => body.bodyId),
+    "The boss starts on the cavity face, so the join must keep exactly one body; severed `_split_` bodies mean the boss never contacted the wall and every public face id on the target was reminted.",
+  ).toHaveLength(1);
+});
 // Lane: logic (per docs/testing.md — provider review/prepare/apply crosses the
 // non-UI importer boundary into the real OCC adapter).
 // Seam: X.4 synthetic schema-v3 profile evidence becomes concrete OCC region
@@ -1059,7 +1259,8 @@ test("Onshape X.4 region selections apply through real OCC with exact live solid
       selections: { studioElementId: elementId, demotedFeatureIds: [] },
       capabilities,
     });
-    const preparedExtrudes = actions.createFeatures?.filter(
+    const preparedExtrudes =
+      actions.createFeatures?.filter(
       (request) => request.definition.kind === "extrude",
     ) ?? [];
     expect(preparedExtrudes, JSON.stringify(actions)).toHaveLength(1);
@@ -1071,7 +1272,9 @@ test("Onshape X.4 region selections apply through real OCC with exact live solid
       actions,
     });
     expect(
-      applied.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+      applied.diagnostics.every(
+        (diagnostic) => diagnostic.severity !== "error",
+      ),
       JSON.stringify({ diagnostics: applied.diagnostics, forwarded }),
     ).toBe(true);
     expect(applied.rolledBack).toBe(false);
@@ -1082,8 +1285,14 @@ test("Onshape X.4 region selections apply through real OCC with exact live solid
     expect(forwardedExtrudes).toHaveLength(1);
     expect(JSON.stringify(forwardedExtrudes)).not.toContain("regionOf");
     const snapshot = await service.getCurrentDocumentSnapshot();
-    const signatureResult = await deriveLiveBodySignatures({ snapshot, service });
-    expect(signatureResult.status, JSON.stringify(signatureResult.diagnostics)).toBe("available");
+    const signatureResult = await deriveLiveBodySignatures({
+      snapshot,
+      service,
+    });
+    expect(
+      signatureResult.status,
+      JSON.stringify(signatureResult.diagnostics),
+    ).toBe("available");
     if (signatureResult.status !== "available") {
       throw new Error("Expected live OCC topology signatures.");
     }
@@ -1098,22 +1307,27 @@ test("Onshape X.4 region selections apply through real OCC with exact live solid
     kind: "extrude",
     parameters: {
       resultBodyType: "solid",
-      profiles: [{
+      profiles: [
+        {
         kind: "regionOf",
         actionIndex: 0,
         selector: {
           kind: "interiorPoint",
           point: [25, 5],
-          expectedBoundaryIdentity: expect.stringMatching(/^import-region-boundary\/v1:/),
+            expectedBoundaryIdentity: expect.stringMatching(
+              /^import-region-boundary\/v1:/,
+            ),
         },
-      }],
+        },
+      ],
     },
   });
   expect(rightCell.snapshot.document.bodies).toHaveLength(1);
   const rightBounds = rightCell.signatures.find(
     (signature) => signature.entityClass === "body" && signature.boundingBox,
   )?.boundingBox;
-  if (!rightBounds) throw new Error("Expected a live OCC bound for the selected right cell.");
+  if (!rightBounds)
+    throw new Error("Expected a live OCC bound for the selected right cell.");
   expect(rightBounds.low).toEqual([20, 0, 0]);
   expect(rightBounds.high).toEqual([30, 10, 10]);
 
@@ -1128,38 +1342,73 @@ test("Onshape X.4 region selections apply through real OCC with exact live solid
   expect(annulusSelectors).toHaveLength(6);
   for (const profile of annulusSelectors) {
     expect(profile.kind).toBe("regionOf");
-    if (profile.kind !== "regionOf") throw new Error("Expected a deferred annulus region selector.");
+    if (profile.kind !== "regionOf")
+      throw new Error("Expected a deferred annulus region selector.");
     expect(profile.actionIndex).toBe(0);
     expect(profile.selector.kind).toBe("interiorPoint");
-    if (profile.selector.kind !== "interiorPoint") throw new Error("Expected an annulus interior-point selector.");
-    expect(profile.selector.expectedBoundaryIdentity).toMatch(/^import-region-boundary\/v1:/);
+    if (profile.selector.kind !== "interiorPoint")
+      throw new Error("Expected an annulus interior-point selector.");
+    expect(profile.selector.expectedBoundaryIdentity).toMatch(
+      /^import-region-boundary\/v1:/,
+    );
     const [x, y] = profile.selector.point;
-    const radialDistance = Math.min(...[
-      [0, 0], [0, 96.5], [0, 193], [102, 0], [102, 96.5], [102, 193],
-    ].map(([centerX, centerY]) => Math.hypot(x - centerX, y - centerY)));
+    const radialDistance = Math.min(
+      ...[
+        [0, 0],
+        [0, 96.5],
+        [0, 193],
+        [102, 0],
+        [102, 96.5],
+        [102, 193],
+      ].map(([centerX, centerY]) => Math.hypot(x - centerX, y - centerY)),
+    );
     expect(radialDistance).toBeCloseTo(3.25, 6);
   }
 
   expect(annuli.snapshot.document.bodies).toHaveLength(6);
   const annulusBodyBounds = annuli.signatures
-    .filter((signature) => signature.entityClass === "body" && signature.boundingBox)
+    .filter(
+      (signature) => signature.entityClass === "body" && signature.boundingBox,
+    )
     .map((signature) => signature.boundingBox!);
   expect(annulusBodyBounds).toHaveLength(6);
-  const annulusCenters = annulusBodyBounds.map((bounds) => [
+  const annulusCenters = annulusBodyBounds.map(
+    (bounds) =>
+      [
     (bounds.low[0] + bounds.high[0]) / 2,
     (bounds.low[1] + bounds.high[1]) / 2,
-  ] as const);
-  for (const [x, y] of [[0, 0], [0, 96.5], [0, 193], [102, 0], [102, 96.5], [102, 193]]) {
-    expect(annulusCenters.some(([centerX, centerY]) =>
+      ] as const,
+  );
+  for (const [x, y] of [
+    [0, 0],
+    [0, 96.5],
+    [0, 193],
+    [102, 0],
+    [102, 96.5],
+    [102, 193],
+  ]) {
+    expect(
+      annulusCenters.some(
+        ([centerX, centerY]) =>
       Math.abs(centerX - x) < 0.01 && Math.abs(centerY - y) < 0.01,
-    ), JSON.stringify(annulusBodyBounds)).toBe(true);
+      ),
+      JSON.stringify(annulusBodyBounds),
+    ).toBe(true);
   }
   const annulusCylinderRadii = annuli.signatures
-    .filter((signature) => signature.entityClass === "face" && signature.geometryType === "cylinder")
+    .filter(
+      (signature) =>
+        signature.entityClass === "face" &&
+        signature.geometryType === "cylinder",
+    )
     .map(signatureRadius)
     .filter((radius): radius is number => radius !== null);
-  expect(annulusCylinderRadii.filter((radius) => Math.abs(radius - 2.75) < 0.01)).toHaveLength(6);
-  expect(annulusCylinderRadii.filter((radius) => Math.abs(radius - 3.75) < 0.01)).toHaveLength(6);
+  expect(
+    annulusCylinderRadii.filter((radius) => Math.abs(radius - 2.75) < 0.01),
+  ).toHaveLength(6);
+  expect(
+    annulusCylinderRadii.filter((radius) => Math.abs(radius - 3.75) < 0.01),
+  ).toHaveLength(6);
 }, 90_000);
 
 test("Onshape pattern fixture applies through provider and mock kernel without unresolved refs", async () => {
@@ -1172,10 +1421,39 @@ test("Onshape pattern fixture applies through provider and mock kernel without u
     history: {
       async evaluateHistoryProbe(input) {
         const signatures = [
-          { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [0, 0, 0] as [number, number, number], high: [2, 2, 2] as [number, number, number] }, centroid: [1, 1, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_linear" as never } },
-          { entityClass: "body" as const, geometryType: "solid", boundingBox: { low: [10, -1, 0] as [number, number, number], high: [12, 1, 2] as [number, number, number] }, centroid: [11, 0, 1] as [number, number, number], reference: { kind: "body" as const, bodyId: "probe_circular" as never } },
+          {
+            entityClass: "body" as const,
+            geometryType: "solid",
+            boundingBox: {
+              low: [0, 0, 0] as [number, number, number],
+              high: [2, 2, 2] as [number, number, number],
+            },
+            centroid: [1, 1, 1] as [number, number, number],
+            reference: {
+              kind: "body" as const,
+              bodyId: "probe_linear" as never,
+            },
+          },
+          {
+            entityClass: "body" as const,
+            geometryType: "solid",
+            boundingBox: {
+              low: [10, -1, 0] as [number, number, number],
+              high: [12, 1, 2] as [number, number, number],
+            },
+            centroid: [11, 0, 1] as [number, number, number],
+            reference: {
+              kind: "body" as const,
+              bodyId: "probe_circular" as never,
+            },
+          },
         ];
-        return { steps: (input.actions.orderedActions ?? []).map(() => ({ status: "rebuilt" as const, signatures })) };
+        return {
+          steps: (input.actions.orderedActions ?? []).map(() => ({
+            status: "rebuilt" as const,
+            signatures,
+          })),
+        };
       },
     },
   });
@@ -1185,16 +1463,27 @@ test("Onshape pattern fixture applies through provider and mock kernel without u
     provider: onshapeImportProvider,
     source,
     review,
-    selections: { studioElementId: "wave-w-pattern-linear", demotedFeatureIds: [] },
+    selections: {
+      studioElementId: "wave-w-pattern-linear",
+      demotedFeatureIds: [],
+    },
     capabilities,
   });
-  const preparedPattern = actions.createFeatures?.find((request) => request.definition.kind === "linearPattern");
+  const preparedPattern = actions.createFeatures?.find(
+    (request) => request.definition.kind === "linearPattern",
+  );
   expect(JSON.stringify(preparedPattern)).toContain("topologyOf");
   expect(JSON.stringify(preparedPattern)).toContain("sketchIdOf");
   if (preparedPattern?.definition.kind === "linearPattern") {
-    preparedPattern.definition.parameters.participants = preparedPattern.definition.parameters.participants.map((participant) =>
+    preparedPattern.definition.parameters.participants =
+      preparedPattern.definition.parameters.participants.map((participant) =>
       participant.role === "body"
-        ? { ...participant, targets: [{ kind: "body" as const, bodyId: "body_part-1" as BodyId }] }
+          ? {
+              ...participant,
+              targets: [
+                { kind: "body" as const, bodyId: "body_part-1" as BodyId },
+              ],
+            }
         : participant,
     );
     preparedPattern.topologyFallback = undefined;
@@ -1206,8 +1495,13 @@ test("Onshape pattern fixture applies through provider and mock kernel without u
     baseRevisionId: before.snapshot.document.revisionId,
     actions,
   });
-  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
-  const forwardedPattern = forwarded.find((request) => request.definition.kind === "linearPattern");
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify(result.diagnostics),
+  ).toBe(true);
+  const forwardedPattern = forwarded.find(
+    (request) => request.definition.kind === "linearPattern",
+  );
   expect(forwardedPattern, JSON.stringify(forwarded)).toBeDefined();
   const forwardedJson = JSON.stringify(forwardedPattern);
   expect(forwardedJson).not.toContain("topologyOf");
@@ -1221,7 +1515,8 @@ test("applyImportPreparedActions retains exact source and target roles for a PAR
   const snapshot = await service.getCurrentDocumentSnapshot();
   const forwarded = recordCreateFeatureInputs(service);
   const actions: ImportPreparedActions = {
-    createFeatures: [{
+    createFeatures: [
+      {
       contractVersion: CONTRACT_VERSION,
       documentId: "doc_workspace" as DocumentId,
       baseRevisionId: "rev_ignored" as RevisionId,
@@ -1232,14 +1527,29 @@ test("applyImportPreparedActions retains exact source and target roles for a PAR
         parameters: {
           operationIntent: createLiteralAuthoredValue("add"),
           participants: [
-            { role: "body", targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }] },
-            { role: "targetBody", targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }] },
-            { role: "plane", targets: [{ kind: "construction", constructionId: "construction_plane-yz" as never }] },
+              {
+                role: "body",
+                targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }],
+              },
+              {
+                role: "targetBody",
+                targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }],
+              },
+              {
+                role: "plane",
+                targets: [
+                  {
+                    kind: "construction",
+                    constructionId: "construction_plane-yz" as never,
+                  },
+                ],
+              },
           ],
           options: { copy: createLiteralAuthoredValue(true) },
         },
       },
-    }],
+      },
+    ],
     orderedActions: [{ kind: "createFeature", index: 0 }],
   };
 
@@ -1249,14 +1559,20 @@ test("applyImportPreparedActions retains exact source and target roles for a PAR
     actions,
   });
 
-  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify(result.diagnostics),
+  ).toBe(true);
   expect(forwarded[0]?.definition).toMatchObject({
     kind: "mirror",
     parameters: {
       operationIntent: { source: "literal", value: "add" },
       participants: expect.arrayContaining([
         { role: "body", targets: [{ kind: "body", bodyId: "body_part-1" }] },
-        { role: "targetBody", targets: [{ kind: "body", bodyId: "body_part-1" }] },
+        {
+          role: "targetBody",
+          targets: [{ kind: "body", bodyId: "body_part-1" }],
+        },
       ]),
     },
   });
@@ -1276,7 +1592,10 @@ test("Onshape circular pattern fixture applies through the real OCC import servi
   const circularPlan = review.providerReview.studios
     .find((studio) => studio.elementId === "wave-w-pattern-circular")
     ?.featurePlans.find((plan) => plan.featureType === "circularPattern");
-  expect(circularPlan, JSON.stringify(review.providerReview.studios)).toMatchObject({
+  expect(
+    circularPlan,
+    JSON.stringify(review.providerReview.studios),
+  ).toMatchObject({
     tier: "parametric",
     reasonCodes: [],
   });
@@ -1284,7 +1603,10 @@ test("Onshape circular pattern fixture applies through the real OCC import servi
     provider: onshapeImportProvider,
     source,
     review,
-    selections: { studioElementId: "wave-w-pattern-circular", demotedFeatureIds: [] },
+    selections: {
+      studioElementId: "wave-w-pattern-circular",
+      demotedFeatureIds: [],
+    },
     capabilities,
   });
   const forwarded = recordCreateFeatureInputs(service);
@@ -1293,8 +1615,13 @@ test("Onshape circular pattern fixture applies through the real OCC import servi
     baseRevisionId: before.document.revisionId,
     actions,
   });
-  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
-  const forwardedPattern = forwarded.find((request) => request.definition.kind === "circularPattern");
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify(result.diagnostics),
+  ).toBe(true);
+  const forwardedPattern = forwarded.find(
+    (request) => request.definition.kind === "circularPattern",
+  );
   expect(forwardedPattern, JSON.stringify(forwarded)).toBeDefined();
   const forwardedJson = JSON.stringify(forwardedPattern);
   expect(forwardedJson).not.toContain("topologyOf");
@@ -1302,20 +1629,41 @@ test("Onshape circular pattern fixture applies through the real OCC import servi
 
   const after = await service.getCurrentDocumentSnapshot();
   expect(after.document.bodies.length).toBe(4);
-  const signatureResult = await deriveLiveBodySignatures({ snapshot: after, service });
-  expect(signatureResult.status, JSON.stringify(signatureResult.diagnostics)).toBe("available");
-  if (signatureResult.status !== "available") throw new Error("Expected live OCC topology signatures.");
+  const signatureResult = await deriveLiveBodySignatures({
+    snapshot: after,
+    service,
+  });
+  expect(
+    signatureResult.status,
+    JSON.stringify(signatureResult.diagnostics),
+  ).toBe("available");
+  if (signatureResult.status !== "available")
+    throw new Error("Expected live OCC topology signatures.");
   const bodyBoxes = signatureResult.signatures
-    .filter((signature) => signature.entityClass === "body" && signature.boundingBox)
+    .filter(
+      (signature) => signature.entityClass === "body" && signature.boundingBox,
+    )
     .map((signature) => signature.boundingBox!);
-  const centers = bodyBoxes.map((box) => [
-    (box.low[0] + box.high[0]) / 2,
-    (box.low[1] + box.high[1]) / 2,
-  ] as const);
-  expect(centers.some(([x, y]) => x > 9 && Math.abs(y) < 2), JSON.stringify(bodyBoxes)).toBe(true);
-  expect(centers.some(([x, y]) => y > 9 && Math.abs(x) < 2), JSON.stringify(bodyBoxes)).toBe(true);
-  expect(centers.some(([x, y]) => x < -9 && Math.abs(y) < 2), JSON.stringify(bodyBoxes)).toBe(true);
-  expect(centers.some(([x, y]) => y < -9 && Math.abs(x) < 2), JSON.stringify(bodyBoxes)).toBe(true);
+  const centers = bodyBoxes.map(
+    (box) =>
+      [(box.low[0] + box.high[0]) / 2, (box.low[1] + box.high[1]) / 2] as const,
+  );
+  expect(
+    centers.some(([x, y]) => x > 9 && Math.abs(y) < 2),
+    JSON.stringify(bodyBoxes),
+  ).toBe(true);
+  expect(
+    centers.some(([x, y]) => y > 9 && Math.abs(x) < 2),
+    JSON.stringify(bodyBoxes),
+  ).toBe(true);
+  expect(
+    centers.some(([x, y]) => x < -9 && Math.abs(y) < 2),
+    JSON.stringify(bodyBoxes),
+  ).toBe(true);
+  expect(
+    centers.some(([x, y]) => y < -9 && Math.abs(x) < 2),
+    JSON.stringify(bodyBoxes),
+  ).toBe(true);
 });
 
 test("Onshape FEATURE patterns replay source deltas through nested mirror instances in real OCC", async () => {
@@ -1332,7 +1680,12 @@ test("Onshape FEATURE patterns replay source deltas through nested mirror instan
   const studio = review.providerReview.studios.find(
     (candidate) => candidate.elementId === "wave-x-feature-patterns",
   );
-  expect(studio?.featurePlans.filter((plan) => plan.featureType === "linearPattern" || plan.featureType === "mirror")).toEqual([
+  expect(
+    studio?.featurePlans.filter(
+      (plan) =>
+        plan.featureType === "linearPattern" || plan.featureType === "mirror",
+    ),
+  ).toEqual([
     expect.objectContaining({
       onshapeFeatureId: "FNmvaMWuCDIXPZo_2",
       tier: "parametric",
@@ -1368,7 +1721,10 @@ test("Onshape FEATURE patterns replay source deltas through nested mirror instan
     provider: onshapeImportProvider,
     source,
     review,
-    selections: { studioElementId: "wave-x-feature-patterns", demotedFeatureIds: [] },
+    selections: {
+      studioElementId: "wave-x-feature-patterns",
+      demotedFeatureIds: [],
+    },
     capabilities,
   });
   const forwarded = recordCreateFeatureInputs(service);
@@ -1377,7 +1733,10 @@ test("Onshape FEATURE patterns replay source deltas through nested mirror instan
     baseRevisionId: before.document.revisionId,
     actions,
   });
-  expect(applied.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(applied.diagnostics)).toBe(true);
+  expect(
+    applied.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify(applied.diagnostics),
+  ).toBe(true);
   const forwardedReplays = forwarded.filter(
     (request) => request.definition.kind === "featureReplay",
   );
@@ -1402,15 +1761,20 @@ test("Onshape FEATURE patterns replay source deltas through nested mirror instan
     sourceRemove?.definition.kind !== "extrude" ||
     mirror?.definition.kind !== "featureReplay"
   ) {
-    throw new Error("Expected imported FEATURE replay seed operations and mirror.");
+    throw new Error(
+      "Expected imported FEATURE replay seed operations and mirror.",
+    );
   }
 
   const countTopFacesAt = async (height: number) => {
     const snapshot = await service.getCurrentDocumentSnapshot();
     const signatures = await deriveLiveBodySignatures({ snapshot, service });
-    expect(signatures.status, JSON.stringify(signatures.diagnostics)).toBe("available");
+    expect(signatures.status, JSON.stringify(signatures.diagnostics)).toBe(
+      "available",
+    );
     if (signatures.status !== "available") return 0;
-    return signatures.signatures.filter((signature) =>
+    return signatures.signatures.filter(
+      (signature) =>
       signature.entityClass === "face" &&
       signature.geometryType === "plane" &&
       signature.boundingBox &&
@@ -1487,7 +1851,8 @@ test("Onshape FEATURE patterns replay source deltas through nested mirror instan
   if (stale.isErr()) throw stale.error;
   expect(stale.value.rebuildResult.kind).toBe("failed");
   expect(
-    stale.value.diagnostics.some((diagnostic) =>
+    stale.value.diagnostics.some(
+      (diagnostic) =>
       diagnostic.code === "occ-missing-reference" &&
       diagnostic.target?.kind === "feature" &&
       diagnostic.target.featureId === "feature_stale_source",
@@ -1525,8 +1890,8 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
         const labels = (input.actions.createFeatures ?? []).map(
           (request) => request.featureLabel,
         );
-        const afterSecondCheckpoint = labels.some((label) =>
-          label === "Boolean after first checkpoint",
+        const afterSecondCheckpoint = labels.some(
+          (label) => label === "Boolean after first checkpoint",
         );
         return {
           steps: (input.actions.orderedActions ?? []).map(() => ({
@@ -1584,7 +1949,9 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
   );
   expect(checkpointRequests).toHaveLength(2);
   expect(
-    actions.orderedActions?.filter((action) => action.kind === "addDocumentVariable"),
+    actions.orderedActions?.filter(
+      (action) => action.kind === "addDocumentVariable",
+    ),
   ).toHaveLength(3);
   const booleanRequest = actions.createFeatures?.find(
     (request) => request.definition.kind === "combine",
@@ -1602,7 +1969,8 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
     high: [number, number, number];
   };
   const { service: backingService } = createTestModelingService();
-  const backingInitialSnapshot = await backingService.getCurrentDocumentSnapshot();
+  const backingInitialSnapshot =
+    await backingService.getCurrentDocumentSnapshot();
   let revision = 0;
   let currentRevisionId = backingInitialSnapshot.document.revisionId;
   let liveBodies: LiveBody[] = [];
@@ -1654,7 +2022,9 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
       return workspaceSnapshot();
     },
     async buildNativeExactBrepPayload() {
-      throw new Error("Body-only checkpoint meshes must not request native topology.");
+      throw new Error(
+        "Body-only checkpoint meshes must not request native topology.",
+      );
     },
     addDocumentVariable(request: { name: string }) {
       appliedVariables.push(request.name);
@@ -1682,15 +2052,18 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
         ];
       } else if (request.definition.kind === "combine") {
         expect(JSON.stringify(request)).not.toContain("topologyOf");
-        expect(request.definition.parameters.participants.map(
+        expect(
+          request.definition.parameters.participants.map(
           (participant) => participant.role,
-        )).toEqual(["targetBody", "toolBody"]);
+          ),
+        ).toEqual(["targetBody", "toolBody"]);
         liveBodies = [
           { id: "live-boolean-A", low: [0, 0, 0], high: [45, 45, 45] },
           { id: "live-boolean-B", low: [30, 0, 0], high: [41, 11, 11] },
         ];
       } else if (request.definition.kind === "bakedBody") {
-        const toFeatureId = request.definition.parameters.provenance.featureSpan?.toFeatureId;
+        const toFeatureId =
+          request.definition.parameters.provenance.featureSpan?.toFeatureId;
         if (toFeatureId === "ROTATE_ONE") {
           expect(request.definition.parameters.replacement).toEqual({
             kind: "replaceBodies",
@@ -1698,7 +2071,11 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
           });
           liveBodies = [
             { id: "live-checkpoint-one-A", low: [0, 0, 0], high: [12, 12, 12] },
-            { id: "live-checkpoint-one-B", low: [30, 0, 0], high: [40, 10, 10] },
+            {
+              id: "live-checkpoint-one-B",
+              low: [30, 0, 0],
+              high: [40, 10, 10],
+            },
           ];
         } else if (toFeatureId === "ROTATE_TWO") {
           expect(request.definition.parameters.replacement).toEqual({
@@ -1746,8 +2123,12 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
   expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
     "topology-apply-rematch-failed",
   );
-  expect(created.filter((request) => request.definition.kind === "bakedBody")).toHaveLength(3);
-  expect(created.some((request) => request.definition.kind === "transform")).toBe(false);
+  expect(
+    created.filter((request) => request.definition.kind === "bakedBody"),
+  ).toHaveLength(3);
+  expect(
+    created.some((request) => request.definition.kind === "transform"),
+  ).toBe(false);
   expect(appliedVariables).toEqual([
     "betweenCheckpoints",
     "afterCheckpoints",
@@ -1819,9 +2200,12 @@ test("legacy v1 preparation and apply remain equivalent with or without history 
     createFeatures: actions.createFeatures,
     orderedActions: actions.orderedActions,
   });
-  expect(actionShape(withHistory.actions)).toEqual(actionShape(withoutHistory.actions));
+  expect(actionShape(withHistory.actions)).toEqual(
+    actionShape(withoutHistory.actions),
+  );
   const bakedIndexes = (withoutHistory.actions.createFeatures ?? []).flatMap(
-    (request, index) => request.definition.kind === "bakedBody" ? [index] : [],
+    (request, index) =>
+      request.definition.kind === "bakedBody" ? [index] : [],
   );
   expect(bakedIndexes).toHaveLength(1);
   expect(withoutHistory.actions.orderedActions?.at(-1)).toEqual({
@@ -1848,7 +2232,11 @@ test("import apply preserves an authored chamfer expression for later variable e
   const service = {
     createFeature(request: CreateFeatureRequest) {
       created.push(request);
-      expect(validateFeatureDefinitionAuthoredValueInvariants(request.definition).map((issue) => issue.message)).toEqual([]);
+      expect(
+        validateFeatureDefinitionAuthoredValueInvariants(
+          request.definition,
+        ).map((issue) => issue.message),
+      ).toEqual([]);
       return ResultAsync.fromPromise(
         Promise.resolve({
           contractVersion: CONTRACT_VERSION,
@@ -1868,17 +2256,22 @@ test("import apply preserves an authored chamfer expression for later variable e
     modelingService: service,
     baseRevisionId: "rev_chamfer" as RevisionId,
     actions: {
-      createFeatures: [{
+      createFeatures: [
+        {
         documentId: "doc_workspace" as DocumentId,
         baseRevisionId: "rev_chamfer" as RevisionId,
         definition: {
           kind: "chamfer",
           featureTypeVersion: "advanced-solid-feature/v0",
           parameters: {
-            participants: [{
+              participants: [
+                {
               role: "edge",
-              targets: [{ kind: "edge", bodyId: "body_1", edgeId: "edge_1" }],
-            }],
+                  targets: [
+                    { kind: "edge", bodyId: "body_1", edgeId: "edge_1" },
+                  ],
+                },
+              ],
             options: {
               widthForm: "twoOffsets",
               distance1: { source: "expression", valueText: "Wall*(4/5)" },
@@ -1886,7 +2279,8 @@ test("import apply preserves an authored chamfer expression for later variable e
             },
           },
         },
-      }],
+        },
+      ],
     },
   });
 
@@ -1924,8 +2318,14 @@ test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same pos
           featureId: "feature_checkpoint" as const,
           revisionState: { kind: "accepted" as const },
           rebuildResult: "rebuilt" as const,
-          changedTargets: created.length === 1
-            ? [{ kind: "body" as const, bodyId: "body_checkpoint_live" as const }]
+          changedTargets:
+            created.length === 1
+              ? [
+                  {
+                    kind: "body" as const,
+                    bodyId: "body_checkpoint_live" as const,
+                  },
+                ]
             : [],
           diagnostics: [],
         }),
@@ -1939,18 +2339,24 @@ test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same pos
       featureId: "F_CHAMFER",
       tessellationTolerance: 0.001,
       tessellatedFaces: {
-        bodies: [{
+        bodies: [
+          {
           id: "checkpoint-body",
-          faces: [{
-            facets: [{
+            faces: [
+              {
+                facets: [
+                  {
               vertices: [
                 { x: 0, y: 0, z: 0 },
                 { x: 0.001, y: 0, z: 0 },
                 { x: 0, y: 0.001, z: 0 },
               ],
-            }],
-          }],
-        }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
       },
     },
     capabilities,
@@ -1965,19 +2371,25 @@ test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same pos
     modelingService: service,
     baseRevisionId: "rev_v2" as RevisionId,
     actions: {
-      createFeatures: [{
+      createFeatures: [
+        {
         ...checkpoint.request,
         featureLabel: "Deferred combine",
         definition: {
           kind: "combine",
           featureTypeVersion: "advanced-solid-feature/v0",
           parameters: {
-            participants: [{
+              participants: [
+                {
               role: "targetBody",
-              targets: [{
+                  targets: [
+                    {
                 kind: "topologyOf",
                 expectedKind: "body",
-                capturedSignature: { entityClass: "body", geometryType: "unknown" },
+                      capturedSignature: {
+                        entityClass: "body",
+                        geometryType: "unknown",
+                      },
                 tolerance: {
                   linear: 0.001,
                   angularRadians: 0.001,
@@ -1989,12 +2401,15 @@ test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same pos
                   parameterId: "targets",
                   deterministicId: "J_BODY",
                 },
-              }],
-            }],
+                    },
+                  ],
+                },
+              ],
           },
         },
         topologyFallback: checkpoint.request,
-      }, {
+        },
+        {
         ...checkpoint.request,
         featureLabel: "Downstream checkpoint",
         definition: {
@@ -2004,7 +2419,8 @@ test("compact v2 checkpoint replaces an apply-ambiguous consumer at the same pos
             replacement: { kind: "replaceBodyOutputs", actionIndexes: [0] },
           },
         },
-      }],
+        },
+      ],
       orderedActions: [
         { kind: "createFeature", index: 0 },
         { kind: "createFeature", index: 1 },
@@ -2050,26 +2466,47 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
   for (const [fileName, expectedCounts] of realBundleCases) {
     const bundle = JSON.parse(await readFile(fileName, "utf8"));
     expect(bundle.formatVersion).toBe(2);
-    const legacySnapshotless = bundle.partStudios[0]?.rollbackSnapshots === null;
+      const legacySnapshotless =
+        bundle.partStudios[0]?.rollbackSnapshots === null;
     const { service } = createTestModelingService();
     const snapshot = await service.getCurrentDocumentSnapshot();
     const capabilities = createImportCapabilities(service, snapshot);
     const source = sourceFromBundle(bundle);
-    const review = await onshapeImportProvider.review({ source, capabilities });
-    expect(review.providerReview.studios[0]?.tierCounts).toEqual(expectedCounts);
-    const consumers = review.providerReview.studios[0]?.featurePlans.filter((plan) =>
-      ["booleanBodies", "deleteBodies", "transform", "splitPart", "split"].includes(plan.featureType),
+      const review = await onshapeImportProvider.review({
+        source,
+        capabilities,
+      });
+      expect(review.providerReview.studios[0]?.tierCounts).toEqual(
+        expectedCounts,
+      );
+      const consumers =
+        review.providerReview.studios[0]?.featurePlans.filter((plan) =>
+          [
+            "booleanBodies",
+            "deleteBodies",
+            "transform",
+            "splitPart",
+            "split",
+          ].includes(plan.featureType),
     ) ?? [];
     expect(consumers.length).toBeGreaterThan(0);
     for (const consumer of consumers) {
       expect(consumer.tier).toBe("baked");
       if (consumer.featureType === "transform") {
-        expect(consumer.reasonCodes.some((reason) =>
-          reason === "needs-history-probe" || reason === "transform-rotation-axis-unresolved"
-        )).toBe(true);
+          expect(
+            consumer.reasonCodes.some(
+              (reason) =>
+                reason === "needs-history-probe" ||
+                reason === "transform-rotation-axis-unresolved",
+            ),
+          ).toBe(true);
       } else if (legacySnapshotless) {
-        expect(consumer.reasonCodes).toContain("topology-history-evidence-missing");
-        expect(consumer.reasonCodes).toContain("topology-bake-snapshot-missing");
+          expect(consumer.reasonCodes).toContain(
+            "topology-history-evidence-missing",
+          );
+          expect(consumer.reasonCodes).toContain(
+            "topology-bake-snapshot-missing",
+          );
       } else {
         expect(consumer.reasonCodes).toContain("needs-history-probe");
       }
@@ -2090,17 +2527,22 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
       capabilities,
     });
     expect(
-      actions.createFeatures?.some((request) => request.definition.kind === "bakedBody"),
+        actions.createFeatures?.some(
+          (request) => request.definition.kind === "bakedBody",
+        ),
     ).toBe(true);
   }
-});
+  },
+);
 
 test.each([
   ["boolean", "combine"],
   ["transform", "transform"],
   ["split", "split"],
   ["delete", "deleteSolid"],
-] as const)("applies synthetic v2 extrude topology path for %s with only live durable refs", async (fixtureKind, expectedKind) => {
+] as const)(
+  "applies synthetic v2 extrude topology path for %s with only live durable refs",
+  async (fixtureKind, expectedKind) => {
   const { service } = createTestModelingService();
   const snapshot = await service.getCurrentDocumentSnapshot();
   const capabilities = createImportCapabilities(service, snapshot, {
@@ -2111,20 +2553,40 @@ test.each([
           steps: Array.from({ length: count }, (_, index) => ({
             status: "rebuilt" as const,
             signatures: [
-              ...(index >= 1 ? [{
+                ...(index >= 1
+                  ? [
+                      {
                 entityClass: "body" as const,
                 geometryType: "solid",
-                boundingBox: { low: [-4, -3, 12] as [number, number, number], high: [4, 3, 12] as [number, number, number] },
+                        boundingBox: {
+                          low: [-4, -3, 12] as [number, number, number],
+                          high: [4, 3, 12] as [number, number, number],
+                        },
                 centroid: [0, 0, 12] as [number, number, number],
-                reference: { kind: "body" as const, bodyId: "probe_body_1" as never },
-              }] : []),
-              ...(index >= 3 ? [{
+                        reference: {
+                          kind: "body" as const,
+                          bodyId: "probe_body_1" as never,
+                        },
+                      },
+                    ]
+                  : []),
+                ...(index >= 3
+                  ? [
+                      {
                 entityClass: "body" as const,
                 geometryType: "solid",
-                boundingBox: { low: [-2, -3, 12] as [number, number, number], high: [6, 3, 12] as [number, number, number] },
+                        boundingBox: {
+                          low: [-2, -3, 12] as [number, number, number],
+                          high: [6, 3, 12] as [number, number, number],
+                        },
                 centroid: [2, 0, 12] as [number, number, number],
-                reference: { kind: "body" as const, bodyId: "probe_body_2" as never },
-              }] : []),
+                        reference: {
+                          kind: "body" as const,
+                          bodyId: "probe_body_2" as never,
+                        },
+                      },
+                    ]
+                  : []),
             ],
           })),
         };
@@ -2134,7 +2596,10 @@ test.each([
   const source = sourceFromBundle(makeWaveBBodyCaptureBundle(fixtureKind));
   const review = await onshapeImportProvider.review({ source, capabilities });
   const studio = review.providerReview.studios[0];
-  expect(studio?.featurePlans.at(-1), JSON.stringify(studio?.featurePlans)).toMatchObject({ tier: "parametric", reasonCodes: [] });
+    expect(
+      studio?.featurePlans.at(-1),
+      JSON.stringify(studio?.featurePlans),
+    ).toMatchObject({ tier: "parametric", reasonCodes: [] });
   const actions = await onshapeImportProvider.prepare({
     source,
     review,
@@ -2142,7 +2607,9 @@ test.each([
     capabilities,
   });
   if (fixtureKind === "boolean" || fixtureKind === "split") {
-    const preparedConsumer = actions.createFeatures?.find((request) => request.definition.kind === expectedKind);
+      const preparedConsumer = actions.createFeatures?.find(
+        (request) => request.definition.kind === expectedKind,
+      );
     expect(preparedConsumer?.definition.kind).toBe(expectedKind);
     if (
       preparedConsumer?.definition.kind !== "combine" &&
@@ -2157,12 +2624,16 @@ test.each([
     ).toEqual(["targetBody", "toolBody"]);
     if (fixtureKind === "split") {
       expect(preparedConsumer.topologyFallback).toBeUndefined();
-      expect(preparedConsumer.definition.parameters.participants).toMatchObject([
+        expect(
+          preparedConsumer.definition.parameters.participants,
+        ).toMatchObject([
         { targets: [{ kind: "bodyOf", actionIndex: 1 }] },
         { targets: [{ kind: "bodyOf", actionIndex: 3 }] },
       ]);
     } else {
-      expect(preparedConsumer.topologyFallback?.definition.kind).toBe("bakedBody");
+        expect(preparedConsumer.topologyFallback?.definition.kind).toBe(
+          "bakedBody",
+        );
       expect(JSON.stringify(preparedConsumer)).toContain("topologyOf");
       expect(
         preparedConsumer.topologyFallback?.definition.parameters.replacement,
@@ -2176,17 +2647,35 @@ test.each([
     baseRevisionId: snapshot.document.revisionId,
     actions,
   });
-  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
-  const consumer = requests.find((request) => request.definition.kind === expectedKind);
+    expect(
+      result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+      JSON.stringify(result.diagnostics),
+    ).toBe(true);
+    const consumer = requests.find(
+      (request) => request.definition.kind === expectedKind,
+    );
   expect(consumer?.definition.kind).toBe(expectedKind);
   expect(JSON.stringify(consumer)).not.toContain("topologyOf");
-  if (consumer?.definition.kind === "combine" || consumer?.definition.kind === "split") {
-    expect(consumer.definition.parameters.participants.map((participant) => participant.role)).toEqual(["targetBody", "toolBody"]);
+    if (
+      consumer?.definition.kind === "combine" ||
+      consumer?.definition.kind === "split"
+    ) {
+      expect(
+        consumer.definition.parameters.participants.map(
+          (participant) => participant.role,
+        ),
+      ).toEqual(["targetBody", "toolBody"]);
   }
-  if (consumer?.definition.kind === "deleteSolid" || consumer?.definition.kind === "transform") {
-    expect(consumer.definition.parameters.participants[0]?.targets[0]?.kind).toBe("body");
+    if (
+      consumer?.definition.kind === "deleteSolid" ||
+      consumer?.definition.kind === "transform"
+    ) {
+      expect(
+        consumer.definition.parameters.participants[0]?.targets[0]?.kind,
+      ).toBe("body");
   }
-});
+  },
+);
 
 // Lane: logic (per docs/testing.md — provider producer-ledger to prepared
 // advanced-participant seam). The synthetic sheet tool must retain the exact
@@ -2202,20 +2691,40 @@ test("a split with a single-output solid and sheet producer prepares bodyOf part
           steps: Array.from({ length: count }, (_, index) => ({
             status: "rebuilt" as const,
             signatures: [
-              ...(index >= 1 ? [{
+              ...(index >= 1
+                ? [
+                    {
                 entityClass: "body" as const,
                 geometryType: "solid",
-                boundingBox: { low: [-4, -3, 12] as [number, number, number], high: [4, 3, 12] as [number, number, number] },
+                      boundingBox: {
+                        low: [-4, -3, 12] as [number, number, number],
+                        high: [4, 3, 12] as [number, number, number],
+                      },
                 centroid: [0, 0, 12] as [number, number, number],
-                reference: { kind: "body" as const, bodyId: "probe_body_1" as never },
-              }] : []),
-              ...(index >= 3 ? [{
+                      reference: {
+                        kind: "body" as const,
+                        bodyId: "probe_body_1" as never,
+                      },
+                    },
+                  ]
+                : []),
+              ...(index >= 3
+                ? [
+                    {
                 entityClass: "body" as const,
                 geometryType: "solid",
-                boundingBox: { low: [-2, -3, 12] as [number, number, number], high: [6, 3, 12] as [number, number, number] },
+                      boundingBox: {
+                        low: [-2, -3, 12] as [number, number, number],
+                        high: [6, 3, 12] as [number, number, number],
+                      },
                 centroid: [2, 0, 12] as [number, number, number],
-                reference: { kind: "body" as const, bodyId: "probe_body_2" as never },
-              }] : []),
+                      reference: {
+                        kind: "body" as const,
+                        bodyId: "probe_body_2" as never,
+                      },
+                    },
+                  ]
+                : []),
             ],
           })),
         };
@@ -2223,7 +2732,10 @@ test("a split with a single-output solid and sheet producer prepares bodyOf part
     },
   });
   const source = sourceFromBundle(
-    makeWaveBBodyCaptureBundle("split", { surfaceTool: true, keepTools: false }),
+    makeWaveBBodyCaptureBundle("split", {
+      surfaceTool: true,
+      keepTools: false,
+    }),
   );
   const review = await onshapeImportProvider.review({ source, capabilities });
   expect(review.providerReview.studios[0]?.featurePlans.at(-1)).toMatchObject({
@@ -2237,7 +2749,9 @@ test("a split with a single-output solid and sheet producer prepares bodyOf part
     selections: onshapeImportProvider.createDefaultSelections(review),
     capabilities,
   });
-  const split = actions.createFeatures?.find((request) => request.definition.kind === "split");
+  const split = actions.createFeatures?.find(
+    (request) => request.definition.kind === "split",
+  );
   expect(split?.definition).toMatchObject({
     kind: "split",
     parameters: {
@@ -2266,20 +2780,40 @@ test("a split retains topology fallback for a multi-output target producer", asy
           steps: Array.from({ length: count }, (_, index) => ({
             status: "rebuilt" as const,
             signatures: [
-              ...(index >= 1 ? [{
+              ...(index >= 1
+                ? [
+                    {
                 entityClass: "body" as const,
                 geometryType: "solid",
-                boundingBox: { low: [-4, -3, 12] as [number, number, number], high: [4, 3, 12] as [number, number, number] },
+                      boundingBox: {
+                        low: [-4, -3, 12] as [number, number, number],
+                        high: [4, 3, 12] as [number, number, number],
+                      },
                 centroid: [0, 0, 12] as [number, number, number],
-                reference: { kind: "body" as const, bodyId: "probe_body_1" as never },
-              }] : []),
-              ...(index >= 3 ? [{
+                      reference: {
+                        kind: "body" as const,
+                        bodyId: "probe_body_1" as never,
+                      },
+                    },
+                  ]
+                : []),
+              ...(index >= 3
+                ? [
+                    {
                 entityClass: "body" as const,
                 geometryType: "solid",
-                boundingBox: { low: [-2, -3, 12] as [number, number, number], high: [6, 3, 12] as [number, number, number] },
+                      boundingBox: {
+                        low: [-2, -3, 12] as [number, number, number],
+                        high: [6, 3, 12] as [number, number, number],
+                      },
                 centroid: [2, 0, 12] as [number, number, number],
-                reference: { kind: "body" as const, bodyId: "probe_body_2" as never },
-              }] : []),
+                      reference: {
+                        kind: "body" as const,
+                        bodyId: "probe_body_2" as never,
+                      },
+                    },
+                  ]
+                : []),
             ],
           })),
         };
@@ -2296,7 +2830,9 @@ test("a split retains topology fallback for a multi-output target producer", asy
     selections: onshapeImportProvider.createDefaultSelections(review),
     capabilities,
   });
-  const split = actions.createFeatures?.find((request) => request.definition.kind === "split");
+  const split = actions.createFeatures?.find(
+    (request) => request.definition.kind === "split",
+  );
   expect(split?.definition).toMatchObject({
     kind: "split",
     parameters: {
@@ -2325,11 +2861,17 @@ test("a body consumer over a baked producer reports topology-upstream-baked, not
       },
     },
   });
-  const source = sourceFromBundle(makeWaveBBodyCaptureBundle("delete", { bakedProducer: true }));
+  const source = sourceFromBundle(
+    makeWaveBBodyCaptureBundle("delete", { bakedProducer: true }),
+  );
   const review = await onshapeImportProvider.review({ source, capabilities });
   const studio = review.providerReview.studios[0];
-  const producer = studio?.featurePlans.find((plan) => plan.onshapeFeatureId === "E1");
-  const consumer = studio?.featurePlans.find((plan) => plan.onshapeFeatureId === "C");
+  const producer = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "E1",
+  );
+  const consumer = studio?.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === "C",
+  );
   expect(producer?.tier).toBe("baked");
   expect(consumer, JSON.stringify(studio?.featurePlans)).toMatchObject({
     tier: "baked",
@@ -2381,16 +2923,21 @@ test("a failed prefix probe preserves the kernel's first specific diagnostic (X.
           // The FIRST failure names the real root cause; later failures are
           // generic. Collapsing to the last one would hide the actual defect.
           return {
-            steps: [{
+            steps: [
+              {
               status: "failed" as const,
-              diagnostics: [{
+                diagnostics: [
+                  {
                 severity: "error" as const,
                 code: "kernel-history-probe-step-failed",
-                message: prefixProbeOrdinal === 1
+                    message:
+                      prefixProbeOrdinal === 1
                   ? "Offset distance collapses the circle radius."
                   : "A later generic prefix failure.",
-              }],
-            }],
+                  },
+                ],
+              },
+            ],
           };
         }
         return {
@@ -2418,7 +2965,6 @@ test("a failed prefix probe preserves the kernel's first specific diagnostic (X.
   expect(prefixProbeOrdinal).toBeGreaterThan(0);
 });
 
-
 test("apply pipeline materializes the provider-produced parametric revolve profile and local axis", async () => {
   const { service } = createTestModelingService();
   const snapshot = await service.getCurrentDocumentSnapshot();
@@ -2443,10 +2989,14 @@ test("apply pipeline materializes the provider-produced parametric revolve profi
     result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
     JSON.stringify({ diagnostics: result.diagnostics, requests }),
   ).toBe(true);
-  const revolve = requests.find((request) => request.definition.kind === "revolve");
+  const revolve = requests.find(
+    (request) => request.definition.kind === "revolve",
+  );
   expect(revolve?.definition.kind).toBe("revolve");
   if (revolve?.definition.kind !== "revolve") {
-    throw new Error("Expected the apply pipeline to receive a revolve request.");
+    throw new Error(
+      "Expected the apply pipeline to receive a revolve request.",
+    );
   }
   expect(revolve.definition.parameters.profiles[0]?.kind).toBe("region");
   expect(revolve.definition.parameters.axis.kind).toBe("sketchEntity");
@@ -2468,9 +3018,9 @@ test("applyImportPreparedActions keeps a faithful constrained fixture position-s
     actions: { commitSketches: [action] },
   });
   const committedId = result.createdEntityIds.sketchIds[0];
-  const committed = (await service.getCurrentDocumentSnapshot()).document.sketches.find(
-    (sketch) => sketch.sketchId === committedId,
-  );
+  const committed = (
+    await service.getCurrentDocumentSnapshot()
+  ).document.sketches.find((sketch) => sketch.sketchId === committedId);
   const solvedById = new Map(
     committed?.sketch.solvedSnapshot.solvedPoints.map((point) => [
       point.pointId,
@@ -2497,9 +3047,9 @@ test("applyImportPreparedActions commits seeded geometry after isolating a broke
     reason: "solve-consistency",
   });
   expect(verified.definition.dimensions).toEqual([]);
-  expect(verified.definition.constraints.map((constraint) => constraint.kind)).toEqual([
-    "horizontal",
-  ]);
+  expect(
+    verified.definition.constraints.map((constraint) => constraint.kind),
+  ).toEqual(["horizontal"]);
 
   const result = await applyImportPreparedActions({
     modelingService: service,
@@ -2507,9 +3057,9 @@ test("applyImportPreparedActions commits seeded geometry after isolating a broke
     actions: { commitSketches: [action] },
   });
   const committedId = result.createdEntityIds.sketchIds[0];
-  const committed = (await service.getCurrentDocumentSnapshot()).document.sketches.find(
-    (sketch) => sketch.sketchId === committedId,
-  );
+  const committed = (
+    await service.getCurrentDocumentSnapshot()
+  ).document.sketches.find((sketch) => sketch.sketchId === committedId);
   const solvedById = new Map(
     committed?.sketch.solvedSnapshot.solvedPoints.map((point) => [
       point.pointId,
@@ -2525,11 +3075,14 @@ test("applyImportPreparedActions commits seeded geometry after isolating a broke
 
 test("applyImportPreparedActions resolves a fixture sketch region into a concrete extrude profile", async () => {
   const { adapter, service } = createTestModelingService();
-  const snapshot = (await adapter.getDocumentSnapshot({
+  const snapshot = (
+    await adapter.getDocumentSnapshot({
     contractVersion: CONTRACT_VERSION,
     documentId: "doc_workspace",
-  })).snapshot;
-  const { action: sketchAction, selectorPoint } = await translatedFixtureSketchAction();
+    })
+  ).snapshot;
+  const { action: sketchAction, selectorPoint } =
+    await translatedFixtureSketchAction();
   const createFeatureRequests = recordCreateFeatureInputs(service);
   const actions: ImportPreparedActions = {
     commitSketches: [sketchAction],
@@ -2538,7 +3091,11 @@ test("applyImportPreparedActions resolves a fixture sketch region into a concret
         featureLabel: "Fixture region extrude",
         profileActionIndex: 0,
         selectorPoint,
-      }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      }) as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
     ],
     orderedActions: [
       { kind: "commitSketch", index: 0 },
@@ -2559,7 +3116,8 @@ test("applyImportPreparedActions resolves a fixture sketch region into a concret
   expect(result.createdEntityIds.featureIds.length).toBe(1);
   expect(
     createFeatureRequests[0]?.definition.kind === "extrude" &&
-      createFeatureRequests[0].definition.parameters.profiles[0]?.kind === "region",
+      createFeatureRequests[0].definition.parameters.profiles[0]?.kind ===
+        "region",
     "The deferred regionOf profile should be materialized to a concrete region profile before createFeature.",
   ).toBeTruthy();
 });
@@ -2607,7 +3165,8 @@ test("applyImportPreparedActions materializes a deferred sketchEntity rotation a
   } as unknown as ModelingService;
   const actions: ImportPreparedActions = {
     commitSketches: [sketchAction],
-    createFeatures: [{
+    createFeatures: [
+      {
       contractVersion: CONTRACT_VERSION,
       documentId: "doc_workspace",
       baseRevisionId: "rev_ignored" as RevisionId,
@@ -2618,19 +3177,25 @@ test("applyImportPreparedActions materializes a deferred sketchEntity rotation a
         parameters: {
           options: { transformType: "rotation", angle: 90 },
           participants: [
-            { role: "body", targets: [{ kind: "body", bodyId: "body_live" as never }] },
+              {
+                role: "body",
+                targets: [{ kind: "body", bodyId: "body_live" as never }],
+              },
             {
               role: "axis",
-              targets: [{
+                targets: [
+                  {
                 kind: "sketchEntity",
                 sketchId: { kind: "sketchIdOf", actionIndex: 0 },
                 entityId: "line" as never,
-              }],
+                  },
+                ],
             },
           ],
         },
       },
-    }],
+      },
+    ],
     orderedActions: [
       { kind: "commitSketch", index: 0 },
       { kind: "createFeature", index: 0 },
@@ -2643,13 +3208,25 @@ test("applyImportPreparedActions materializes a deferred sketchEntity rotation a
     actions,
   });
 
-  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"), JSON.stringify(result.diagnostics)).toBe(true);
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+    JSON.stringify(result.diagnostics),
+  ).toBe(true);
   expect(created[0]?.definition).toMatchObject({
     kind: "transform",
     parameters: {
       participants: [
         { role: "body" },
-        { role: "axis", targets: [{ kind: "sketchEntity", sketchId: "sketch_live_axis", entityId: "line" }] },
+        {
+          role: "axis",
+          targets: [
+            {
+              kind: "sketchEntity",
+              sketchId: "sketch_live_axis",
+              entityId: "line",
+            },
+          ],
+        },
       ],
     },
   });
@@ -2657,12 +3234,16 @@ test("applyImportPreparedActions materializes a deferred sketchEntity rotation a
 
 test("applyImportPreparedActions resolves bodyOf scope for a sketch-extrude-cut chain", async () => {
   const { adapter, service } = createTestModelingService();
-  const snapshot = (await adapter.getDocumentSnapshot({
+  const snapshot = (
+    await adapter.getDocumentSnapshot({
     contractVersion: CONTRACT_VERSION,
     documentId: "doc_workspace",
-  })).snapshot;
-  const { action: sketchAction, selectorPoint } = await translatedFixtureSketchAction();
-  const createFeatureRequests = recordCreateFeatureInputsWithCreatedBody(service);
+    })
+  ).snapshot;
+  const { action: sketchAction, selectorPoint } =
+    await translatedFixtureSketchAction();
+  const createFeatureRequests =
+    recordCreateFeatureInputsWithCreatedBody(service);
   const actions: ImportPreparedActions = {
     commitSketches: [sketchAction],
     createFeatures: [
@@ -2670,13 +3251,21 @@ test("applyImportPreparedActions resolves bodyOf scope for a sketch-extrude-cut 
         featureLabel: "Fixture base extrude",
         profileActionIndex: 0,
         selectorPoint,
-      }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      }) as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
       extrudeRequest({
         featureLabel: "Fixture cut extrude",
         profileActionIndex: 0,
         bodyActionIndex: 1,
         selectorPoint,
-      }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      }) as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
     ],
     orderedActions: [
       { kind: "commitSketch", index: 0 },
@@ -2694,18 +3283,21 @@ test("applyImportPreparedActions resolves bodyOf scope for a sketch-extrude-cut 
   expect(result.createdEntityIds.featureIds.length).toBe(2);
   expect(
     createFeatureRequests[1]?.definition.kind === "extrude" &&
-      createFeatureRequests[1].definition.parameters.booleanScope.kind === "targetBody" &&
-      typeof createFeatureRequests[1].definition.parameters.booleanScope.bodyId === "string",
+      createFeatureRequests[1].definition.parameters.booleanScope.kind ===
+        "targetBody" &&
+      typeof createFeatureRequests[1].definition.parameters.booleanScope
+        .bodyId === "string",
     "The deferred bodyOf scope should be materialized to the first extrude's created body id before the cut applies.",
   ).toBeTruthy();
 });
-
 
 test("generic prepared pattern actions materialize constructionOf and sketchEntity refs", async () => {
   const adapter = new MockKernelAdapter({
     solverAdapter: createRevisionAgnosticRealSolver(),
   });
-  const service = createModelingService(adapter, { currentDocumentId: "doc_workspace" });
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+  });
   const snapshot = await service.getCurrentDocumentSnapshot();
   const createFeatureRequests = recordCreateFeatureInputs(service);
   const axisSketchAction = {
@@ -2737,19 +3329,30 @@ test("generic prepared pattern actions materialize constructionOf and sketchEnti
       schemaVersion: "sketch-definition/v1alpha1" as const,
       referenceIds: [],
       references: [],
-      pointIds: ["sketch_point_import_axis_start", "sketch_point_import_axis_end"],
+      pointIds: [
+        "sketch_point_import_axis_start",
+        "sketch_point_import_axis_end",
+      ],
       points: [
         {
           pointId: "sketch_point_import_axis_start" as never,
           label: "Axis start",
-          target: { kind: "sketchPoint" as const, sketchId: "sketch_import_axis" as never, pointId: "sketch_point_import_axis_start" as never },
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId: "sketch_import_axis" as never,
+            pointId: "sketch_point_import_axis_start" as never,
+          },
           position: [0, 0] as const,
           isConstruction: true,
         },
         {
           pointId: "sketch_point_import_axis_end" as never,
           label: "Axis end",
-          target: { kind: "sketchPoint" as const, sketchId: "sketch_import_axis" as never, pointId: "sketch_point_import_axis_end" as never },
+          target: {
+            kind: "sketchPoint" as const,
+            sketchId: "sketch_import_axis" as never,
+            pointId: "sketch_point_import_axis_end" as never,
+          },
           position: [10, 0] as const,
           isConstruction: true,
         },
@@ -2760,7 +3363,11 @@ test("generic prepared pattern actions materialize constructionOf and sketchEnti
           kind: "lineSegment" as const,
           entityId: "sketch_entity_import_axis_line" as never,
           label: "Pattern axis",
-          target: { kind: "sketchEntity" as const, sketchId: "sketch_import_axis" as never, entityId: "sketch_entity_import_axis_line" as never },
+          target: {
+            kind: "sketchEntity" as const,
+            sketchId: "sketch_import_axis" as never,
+            entityId: "sketch_entity_import_axis_line" as never,
+          },
           isConstruction: true,
           startPointId: "sketch_point_import_axis_start" as never,
           endPointId: "sketch_point_import_axis_end" as never,
@@ -2779,7 +3386,11 @@ test("generic prepared pattern actions materialize constructionOf and sketchEnti
   const actions: ImportPreparedActions = {
     commitSketches: [axisSketchAction],
     createFeatures: [
-      explicitFramePlaneAction() as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      explicitFramePlaneAction() as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
       {
         contractVersion: CONTRACT_VERSION,
         documentId: "doc_workspace" as DocumentId,
@@ -2790,7 +3401,10 @@ test("generic prepared pattern actions materialize constructionOf and sketchEnti
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
             participants: [
-              { role: "body", targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }] },
+              {
+                role: "body",
+                targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }],
+              },
               {
                 role: "axis",
                 targets: [
@@ -2811,7 +3425,11 @@ test("generic prepared pattern actions materialize constructionOf and sketchEnti
           },
         },
       },
-      downstreamPlane as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      downstreamPlane as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
     ],
     orderedActions: [
       { kind: "createFeature", index: 0 },
@@ -2829,29 +3447,39 @@ test("generic prepared pattern actions materialize constructionOf and sketchEnti
   const after = await service.getCurrentDocumentSnapshot();
   const patternRequest = createFeatureRequests[1];
 
-  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error")).toBeTruthy();
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+  ).toBeTruthy();
   expect(result.createdEntityIds.featureIds.length).toBe(3);
   expect(
     after.document.sketches.some(
-      (sketch) => sketch.label === "Imported pattern axis sketch" && sketch.plane.support.kind === "construction",
+      (sketch) =>
+        sketch.label === "Imported pattern axis sketch" &&
+        sketch.plane.support.kind === "construction",
     ),
     "Deferred constructionOf should materialize as the committed sketch plane support.",
   ).toBeTruthy();
   expect(
     patternRequest?.definition.kind === "circularPattern" &&
-      patternRequest.definition.parameters.participants[1]?.targets[0]?.kind === "sketchEntity" &&
-      typeof patternRequest.definition.parameters.participants[1].targets[0].sketchId === "string",
+      patternRequest.definition.parameters.participants[1]?.targets[0]?.kind ===
+        "sketchEntity" &&
+      typeof patternRequest.definition.parameters.participants[1].targets[0]
+        .sketchId === "string",
     "Deferred sketchIdOf should materialize inside advanced sketchEntity participants before pattern create.",
   ).toBeTruthy();
   expect(
-    after.document.features.some((feature) => feature.label === "Downstream neutral plane"),
+    after.document.features.some(
+      (feature) => feature.label === "Downstream neutral plane",
+    ),
     "A downstream neutral action should continue after the materialized pattern.",
   ).toBeTruthy();
 });
 
 test("generic prepared pattern bodyOf outputs reject multi-body consumers", async () => {
   const adapter = new MockKernelAdapter();
-  const service = createModelingService(adapter, { currentDocumentId: "doc_workspace" });
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+  });
   const snapshot = await service.getCurrentDocumentSnapshot();
   const profile = snapshot.document.sketches[0]?.sketch.regions[0]?.target;
   if (!profile) throw new Error("Mock snapshot must expose a seed region.");
@@ -2867,10 +3495,26 @@ test("generic prepared pattern bodyOf outputs reject multi-body consumers", asyn
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
             participants: [
-              { role: "body", targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }] },
-              { role: "direction", targets: [{ kind: "construction", constructionId: "construction_plane-yz" as never }] },
+              {
+                role: "body",
+                targets: [{ kind: "body", bodyId: "body_part-1" as BodyId }],
+              },
+              {
+                role: "direction",
+                targets: [
+                  {
+                    kind: "construction",
+                    constructionId: "construction_plane-yz" as never,
+                  },
+                ],
+              },
             ],
-            options: { instanceCount: createLiteralAuthoredValue(3), spacing: createLiteralAuthoredValue(10), centered: createLiteralAuthoredValue(false), oppositeDirection: createLiteralAuthoredValue(false) },
+            options: {
+              instanceCount: createLiteralAuthoredValue(3),
+              spacing: createLiteralAuthoredValue(10),
+              centered: createLiteralAuthoredValue(false),
+              oppositeDirection: createLiteralAuthoredValue(false),
+            },
           },
         },
       },
@@ -2886,9 +3530,15 @@ test("generic prepared pattern bodyOf outputs reject multi-body consumers", asyn
             resultBodyType: "solid",
             profiles: [profile],
             startExtent: { kind: "profilePlane" },
-            extent: { mode: "oneSide", end: { kind: "blind", direction: "positive", distance: 1 } },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 1 },
+            },
             operation: "cut",
-            booleanScope: { kind: "targetBody", bodyId: { kind: "bodyOf", actionIndex: 0 } },
+            booleanScope: {
+              kind: "targetBody",
+              bodyId: { kind: "bodyOf", actionIndex: 0 },
+            },
           },
         },
       } as never,
@@ -2909,7 +3559,9 @@ test("generic prepared pattern bodyOf outputs reject multi-body consumers", asyn
     result.diagnostics.some(
       (diagnostic) =>
         diagnostic.severity === "error" &&
-        diagnostic.message.includes("produced 2 body ids, expected exactly one"),
+        diagnostic.message.includes(
+          "produced 2 body ids, expected exactly one",
+        ),
     ),
     "A bodyOf consumer should reject multi-output pattern producers through the existing apply policy.",
   ).toBeTruthy();
@@ -2917,7 +3569,9 @@ test("generic prepared pattern bodyOf outputs reject multi-body consumers", asyn
 
 test("generic prepared topologyOf participants can seed authored body patterns", async () => {
   const adapter = new MockKernelAdapter();
-  const service = createModelingService(adapter, { currentDocumentId: "doc_workspace" });
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+  });
   const snapshot = await service.getCurrentDocumentSnapshot();
   const actions: ImportPreparedActions = {
     createFeatures: [
@@ -2942,9 +3596,17 @@ test("generic prepared topologyOf participants can seed authored body patterns",
                       geometryType: "solid",
                       boundingBox: { low: [-4, -3, 12], high: [4, 3, 12] },
                       centroid: [0, 0, 12],
-                      reference: { kind: "body", bodyId: "body_part-1" as BodyId },
+                      reference: {
+                        kind: "body",
+                        bodyId: "body_part-1" as BodyId,
+                      },
                     },
-                    tolerance: { linear: 1e-6, angularRadians: 1e-6, relative: 1e-6, ambiguityMargin: 1e-6 },
+                    tolerance: {
+                      linear: 1e-6,
+                      angularRadians: 1e-6,
+                      relative: 1e-6,
+                      ambiguityMargin: 1e-6,
+                    },
                     source: {
                       consumerFeatureId: "pattern_topology_seed",
                       parameterId: "body",
@@ -2953,9 +3615,22 @@ test("generic prepared topologyOf participants can seed authored body patterns",
                   },
                 ],
               },
-              { role: "direction", targets: [{ kind: "construction", constructionId: "construction_plane-yz" as never }] },
+              {
+                role: "direction",
+                targets: [
+                  {
+                    kind: "construction",
+                    constructionId: "construction_plane-yz" as never,
+                  },
+                ],
+              },
             ],
-            options: { instanceCount: createLiteralAuthoredValue(2), spacing: createLiteralAuthoredValue(10), centered: createLiteralAuthoredValue(false), oppositeDirection: createLiteralAuthoredValue(false) },
+            options: {
+              instanceCount: createLiteralAuthoredValue(2),
+              spacing: createLiteralAuthoredValue(10),
+              centered: createLiteralAuthoredValue(false),
+              oppositeDirection: createLiteralAuthoredValue(false),
+            },
           },
         },
       },
@@ -2969,7 +3644,9 @@ test("generic prepared topologyOf participants can seed authored body patterns",
     actions,
   });
 
-  expect(result.diagnostics.every((diagnostic) => diagnostic.severity !== "error")).toBeTruthy();
+  expect(
+    result.diagnostics.every((diagnostic) => diagnostic.severity !== "error"),
+  ).toBeTruthy();
   expect(result.createdEntityIds.featureIds.length).toBe(1);
 });
 
@@ -2981,7 +3658,9 @@ test("applyImportPreparedActions forwards whole-solid shell offsets to mock crea
     modelingService: service,
     baseRevisionId: snapshot.document.revisionId,
     actions: {
-      createFeatures: [shellOffsetAllFacesRequest("body_apply_shell" as BodyId)],
+      createFeatures: [
+        shellOffsetAllFacesRequest("body_apply_shell" as BodyId),
+      ],
       orderedActions: [{ kind: "createFeature", index: 0 }],
     },
   });
@@ -3005,18 +3684,34 @@ test("applyImportPreparedActions materializes a baked checkpoint that supersedes
     solverAdapter: createRevisionAgnosticRealSolver(),
     assetResolver: resolver,
   });
-  const service = createModelingService(adapter, { currentDocumentId: "doc_workspace" });
-  const snapshot = (await service.getCurrentDocumentSnapshot());
-  const { action: sketchAction, selectorPoint } = await translatedFixtureSketchAction();
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+  });
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const { action: sketchAction, selectorPoint } =
+    await translatedFixtureSketchAction();
   const requests = recordCreateFeatureInputsWithCreatedBody(service);
-  const bytes = new TextEncoder().encode(JSON.stringify({
+  const bytes = new TextEncoder().encode(
+    JSON.stringify({
     kind: "bakedMeshGeometry",
     schemaVersion: "baked-mesh-geometry/v1alpha1",
-    vertices: [[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 10]],
-    indices: [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]],
-  }));
-  const reference = await createImportCapabilities(service, snapshot, { assetStore })
-    .modeling.bakeGeometry({ bytes, format: "baked-mesh" });
+      vertices: [
+        [0, 0, 0],
+        [10, 0, 0],
+        [0, 10, 0],
+        [0, 0, 10],
+      ],
+      indices: [
+        [0, 2, 1],
+        [0, 1, 3],
+        [1, 2, 3],
+        [2, 0, 3],
+      ],
+    }),
+  );
+  const reference = await createImportCapabilities(service, snapshot, {
+    assetStore,
+  }).modeling.bakeGeometry({ bytes, format: "baked-mesh" });
   const actions: ImportPreparedActions = {
     commitSketches: [sketchAction],
     createFeatures: [
@@ -3024,7 +3719,11 @@ test("applyImportPreparedActions materializes a baked checkpoint that supersedes
         featureLabel: "Parametric source body",
         profileActionIndex: 0,
         selectorPoint,
-      }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      }) as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
       {
         contractVersion: CONTRACT_VERSION,
         documentId: "doc_workspace" as DocumentId,
@@ -3036,7 +3735,10 @@ test("applyImportPreparedActions materializes a baked checkpoint that supersedes
           parameters: {
             ...reference,
             label: "Final studio checkpoint",
-            provenance: { source: "onshape", reason: "onshape-studio-bake-required" },
+            provenance: {
+              source: "onshape",
+              reason: "onshape-studio-bake-required",
+            },
             replacement: { kind: "replaceBodyOutputs", actionIndexes: [1] },
           },
         },
@@ -3057,14 +3759,20 @@ test("applyImportPreparedActions materializes a baked checkpoint that supersedes
   const finalSnapshot = await service.getCurrentDocumentSnapshot();
   expect(result.rolledBack).toBe(false);
   expect(finalSnapshot.document.bodies).toHaveLength(2);
-  expect(finalSnapshot.document.bodies.filter((body) =>
-    body.label === "Final studio checkpoint",
-  )).toHaveLength(1);
+  expect(
+    finalSnapshot.document.bodies.filter(
+      (body) => body.label === "Final studio checkpoint",
+    ),
+  ).toHaveLength(1);
   expect(finalSnapshot.document.features).toHaveLength(
     snapshot.document.features.length + 2,
   );
-  expect(finalSnapshot.document.features.at(-2)?.producedTargets).toHaveLength(1);
-  expect(finalSnapshot.document.features.at(-1)?.producedTargets).toHaveLength(1);
+  expect(finalSnapshot.document.features.at(-2)?.producedTargets).toHaveLength(
+    1,
+  );
+  expect(finalSnapshot.document.features.at(-1)?.producedTargets).toHaveLength(
+    1,
+  );
   expect(
     requests[1]?.definition.kind === "bakedBody" &&
       requests[1].definition.parameters.replacement,
@@ -3073,10 +3781,12 @@ test("applyImportPreparedActions materializes a baked checkpoint that supersedes
 
 test("applyImportPreparedActions rolls back when a deferred region selector cannot resolve", async () => {
   const { adapter, service } = createTestModelingService();
-  const snapshot = (await adapter.getDocumentSnapshot({
+  const snapshot = (
+    await adapter.getDocumentSnapshot({
     contractVersion: CONTRACT_VERSION,
     documentId: "doc_workspace",
-  })).snapshot;
+    })
+  ).snapshot;
   const { action: sketchAction } = await translatedFixtureSketchAction();
   let rolledBackCount = 0;
   const actions: ImportPreparedActions = {
@@ -3086,7 +3796,11 @@ test("applyImportPreparedActions rolls back when a deferred region selector cann
         featureLabel: "Unresolvable region extrude",
         profileActionIndex: 0,
         selectorPoint: [1_000_000, 1_000_000],
-      }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      }) as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
     ],
     orderedActions: [
       { kind: "commitSketch", index: 0 },
@@ -3116,13 +3830,14 @@ test("applyImportPreparedActions rolls back when a deferred region selector cann
   ).toBeTruthy();
 });
 
-
 test("applyImportPreparedActions preserves the apply failure when rollback also fails", async () => {
   const { adapter, service } = createTestModelingService();
-  const snapshot = (await adapter.getDocumentSnapshot({
+  const snapshot = (
+    await adapter.getDocumentSnapshot({
     contractVersion: CONTRACT_VERSION,
     documentId: "doc_workspace",
-  })).snapshot;
+    })
+  ).snapshot;
   const { action: sketchAction } = await translatedFixtureSketchAction();
 
   const result = await applyImportPreparedActions({
@@ -3135,7 +3850,9 @@ test("applyImportPreparedActions preserves the apply failure when rollback also 
           featureLabel: "Unresolvable region extrude",
           profileActionIndex: 0,
           selectorPoint: [1_000_000, 1_000_000],
-        }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined
+        }) as ImportPreparedActions["createFeatures"] extends
+          | (infer Entry)[]
+          | undefined
           ? Entry
           : never,
       ],
@@ -3171,10 +3888,12 @@ test("applyImportPreparedActions preserves the apply failure when rollback also 
 
 test("applyImportPreparedActions uses innermost containment for nested region selectors", async () => {
   const { adapter, service } = createTestModelingService();
-  const snapshot = (await adapter.getDocumentSnapshot({
+  const snapshot = (
+    await adapter.getDocumentSnapshot({
     contractVersion: CONTRACT_VERSION,
     documentId: "doc_workspace",
-  })).snapshot;
+    })
+  ).snapshot;
   const createFeatureRequests = recordSuccessfulCreateFeatureInputs(service);
   const actions: ImportPreparedActions = {
     commitSketches: [nestedCircleSketchAction()],
@@ -3183,7 +3902,11 @@ test("applyImportPreparedActions uses innermost containment for nested region se
         featureLabel: "Nested inner extrude",
         profileActionIndex: 0,
         selectorPoint: [0, 0],
-      }) as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined ? Entry : never,
+      }) as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
+        ? Entry
+        : never,
     ],
     orderedActions: [
       { kind: "commitSketch", index: 0 },
@@ -3196,17 +3919,33 @@ test("applyImportPreparedActions uses innermost containment for nested region se
     const snapshotWithSketch = await getSnapshot();
     const sketch = snapshotWithSketch.document.sketches.find(
       (entry) => entry.sketchId === "sketch_2",
-    ) as ((typeof snapshotWithSketch.document.sketches)[number] & {
-      sketch?: { regions?: unknown[]; definition?: typeof actions.commitSketches extends (infer Entry)[] ? Entry extends { definition: infer Definition } ? Definition : never : never };
+    ) as
+      | ((typeof snapshotWithSketch.document.sketches)[number] & {
+          sketch?: {
       regions?: unknown[];
-      definition?: typeof actions.commitSketches extends (infer Entry)[] ? Entry extends { definition: infer Definition } ? Definition : never : never;
-    }) | undefined;
+            definition?: typeof actions.commitSketches extends (infer Entry)[]
+              ? Entry extends { definition: infer Definition }
+                ? Definition
+                : never
+              : never;
+          };
+          regions?: unknown[];
+          definition?: typeof actions.commitSketches extends (infer Entry)[]
+            ? Entry extends { definition: infer Definition }
+              ? Definition
+              : never
+            : never;
+        })
+      | undefined;
     if (sketch) {
       const definition = (sketch.sketch?.definition ?? sketch.definition)!;
       const line = (label: string) =>
         definition.entities.find(
           (entity) => entity.kind === "lineSegment" && entity.label === label,
-        ) as Extract<(typeof definition.entities)[number], { kind: "lineSegment" }>;
+        ) as Extract<
+          (typeof definition.entities)[number],
+          { kind: "lineSegment" }
+        >;
       const makeRegion = (regionId: string, labels: string[]) => ({
         regionId,
         label: regionId,
@@ -3229,8 +3968,18 @@ test("applyImportPreparedActions uses innermost containment for nested region se
         isClosed: true,
       });
       const regions = [
-        makeRegion("region_outer", ["outer_bottom", "outer_right", "outer_top", "outer_left"]),
-        makeRegion("region_inner", ["inner_bottom", "inner_right", "inner_top", "inner_left"]),
+        makeRegion("region_outer", [
+          "outer_bottom",
+          "outer_right",
+          "outer_top",
+          "outer_left",
+        ]),
+        makeRegion("region_inner", [
+          "inner_bottom",
+          "inner_right",
+          "inner_top",
+          "inner_left",
+        ]),
       ];
       if (sketch.sketch) {
         sketch.sketch.regions = regions;
@@ -3251,18 +4000,22 @@ test("applyImportPreparedActions uses innermost containment for nested region se
   expect(result.createdEntityIds.featureIds.length).toBe(1);
   expect(
     createFeatureRequests[0]?.definition.kind === "extrude" &&
-      createFeatureRequests[0].definition.parameters.profiles[0]?.kind === "region" &&
-      createFeatureRequests[0].definition.parameters.profiles[0].regionId === innerRegion?.regionId,
+      createFeatureRequests[0].definition.parameters.profiles[0]?.kind ===
+        "region" &&
+      createFeatureRequests[0].definition.parameters.profiles[0].regionId ===
+        innerRegion?.regionId,
     "A selector inside nested regions should resolve to the innermost containing region.",
   ).toBeTruthy();
 });
 
 test("applyImportPreparedActions keeps the no-deferred-reference path unchanged", async () => {
   const { adapter, service } = createTestModelingService();
-  const snapshot = (await adapter.getDocumentSnapshot({
+  const snapshot = (
+    await adapter.getDocumentSnapshot({
     contractVersion: CONTRACT_VERSION,
     documentId: "doc_workspace",
-  })).snapshot;
+    })
+  ).snapshot;
   const result = await applyImportPreparedActions({
     modelingService: service,
     baseRevisionId: snapshot.document.revisionId,
@@ -3348,7 +4101,9 @@ test("applyImportPreparedActions applies a baked body through the shared composi
             replacement: { kind: "replaceBodyOutputs", actionIndexes: [] },
           },
         },
-      } as ImportPreparedActions["createFeatures"] extends (infer Entry)[] | undefined
+      } as ImportPreparedActions["createFeatures"] extends
+        | (infer Entry)[]
+        | undefined
         ? Entry
         : never,
     ],
@@ -3556,12 +4311,17 @@ function makePromotedFaceSketchBundle(): OnshapeCaptureBundleV2 {
     document: {},
     elements: {},
     diagnostics: [],
-    partStudios: [{
+    partStudios: [
+      {
       elementId: "e1",
       name: "Probe",
       features: {
         features: [
-          { featureType: "newSketch", featureId: "S_BASE", name: "Base sketch" },
+            {
+              featureType: "newSketch",
+              featureId: "S_BASE",
+              name: "Base sketch",
+            },
           {
             featureType: "extrude",
             featureId: "E_BASE",
@@ -3569,7 +4329,12 @@ function makePromotedFaceSketchBundle(): OnshapeCaptureBundleV2 {
             parameters: [
               {
                 parameterId: "entities",
-                queries: [{ queryString: 'query = qSketchRegion(id + "S_BASE", true);' }],
+                  queries: [
+                    {
+                      queryString:
+                        'query = qSketchRegion(id + "S_BASE", true);',
+                    },
+                  ],
               },
               { parameterId: "endBound", value: "BLIND" },
               { parameterId: "depth", expression: "3 mm", value: 0.003 },
@@ -3581,7 +4346,10 @@ function makePromotedFaceSketchBundle(): OnshapeCaptureBundleV2 {
             featureId: "S_FACE",
             name: "Face sketch",
             parameters: [
-              { parameterId: "sketchPlane", queries: [{ deterministicIds: ["face_ref"] }] },
+                {
+                  parameterId: "sketchPlane",
+                  queries: [{ deterministicIds: ["face_ref"] }],
+                },
             ],
           },
         ],
@@ -3590,27 +4358,38 @@ function makePromotedFaceSketchBundle(): OnshapeCaptureBundleV2 {
         sketches: [
           {
             featureId: "S_BASE",
-            entities: [{
+              entities: [
+                {
               sketchEntityId: "cb",
               sketchEntityType: "skCircle",
-              geometry: { center3d: { x: 0.0005, y: 0.001, z: 0 }, radius: 0.0004 },
+                  geometry: {
+                    center3d: { x: 0.0005, y: 0.001, z: 0 },
+                    radius: 0.0004,
+                  },
               isConstruction: false,
-            }],
+                },
+              ],
           },
           {
             featureId: "S_FACE",
-            entities: [{
+              entities: [
+                {
               sketchEntityId: "c1",
               sketchEntityType: "skCircle",
-              geometry: { center3d: { x: 0.0005, y: 0.001, z: 0.003 }, radius: 0.0001 },
+                  geometry: {
+                    center3d: { x: 0.0005, y: 0.001, z: 0.003 },
+                    radius: 0.0001,
+                  },
               isConstruction: false,
-            }],
+                },
+              ],
           },
         ],
       },
       parts: null,
       featureSpecs: { present: false, reason: "n/a" },
-      resolvedReferences: [{
+        resolvedReferences: [
+          {
         deterministicId: "face_ref",
         evaluatedAt: "historyPoint",
         consumingFeatureId: "S_FACE",
@@ -3621,7 +4400,8 @@ function makePromotedFaceSketchBundle(): OnshapeCaptureBundleV2 {
           centroid: [0.0005, 0.001, 0.003],
           boundingBox: { low: [0, 0, 0.003], high: [0.001, 0.002, 0.003] },
         },
-      }],
+          },
+        ],
       groundTruth: {
         hasBodies: true,
         tessellationTolerance: 0.001,
@@ -3629,7 +4409,8 @@ function makePromotedFaceSketchBundle(): OnshapeCaptureBundleV2 {
         step: "",
       },
       rollbackSnapshots: null,
-    }],
+      },
+    ],
   } as unknown as OnshapeCaptureBundleV2;
 }
 
@@ -3637,10 +4418,18 @@ function probeFaceSignature(id: string): HistoryProbeTopologySignature {
   return {
     entityClass: "face",
     geometryType: "plane",
-    definingData: { origin: [0, 0, 3], normal: [0, 0, 1], xDirection: [1, 0, 0] },
+    definingData: {
+      origin: [0, 0, 3],
+      normal: [0, 0, 1],
+      xDirection: [1, 0, 0],
+    },
     centroid: [0.5, 1, 3],
     boundingBox: { low: [0, 0, 3], high: [1, 2, 3] },
-    reference: { kind: "face", bodyId: "body_probe" as BodyId, faceId: id as FaceId },
+    reference: {
+      kind: "face",
+      bodyId: "body_probe" as BodyId,
+      faceId: id as FaceId,
+    },
   };
 }
 
@@ -3654,15 +4443,25 @@ function probeCapabilities(
       baseRevisionId: "rev_1" as RevisionId,
     },
     modeling: {
-      async bakeGeometry() { throw new Error("not used"); },
-      async reconstructMeshToBrep() { throw new Error("not used"); },
+      async bakeGeometry() {
+        throw new Error("not used");
+      },
+      async reconstructMeshToBrep() {
+        throw new Error("not used");
+      },
     },
     sketch: {
-      async convertVectorToSketch() { throw new Error("not used"); },
+      async convertVectorToSketch() {
+        throw new Error("not used");
+      },
     },
     assets: {
-      async registerGeometryAsset() { throw new Error("not used"); },
-      async storeEmbeddedBinary() { throw new Error("not used"); },
+      async registerGeometryAsset() {
+        throw new Error("not used");
+      },
+      async storeEmbeddedBinary() {
+        throw new Error("not used");
+      },
     },
     history: {
       async evaluateHistoryProbe(input) {
@@ -3679,7 +4478,9 @@ function probeCapabilities(
 
 test("a provider-promoted sketch-on-face applies with its topologyOf plane support rematched to a live face", async () => {
   const source = sourceFromBundle(makePromotedFaceSketchBundle());
-  const reviewCapabilities = probeCapabilities([probeFaceSignature("face_match")]);
+  const reviewCapabilities = probeCapabilities([
+    probeFaceSignature("face_match"),
+  ]);
   const review = await onshapeImportProvider.review({
     source,
     capabilities: reviewCapabilities,
@@ -3687,8 +4488,13 @@ test("a provider-promoted sketch-on-face applies with its topologyOf plane suppo
   const faceSketchPlan = review.providerReview.studios[0]?.featurePlans.find(
     (plan) => plan.onshapeFeatureId === "S_FACE",
   );
-  expect(faceSketchPlan, JSON.stringify(review.providerReview.studios[0]?.featurePlans))
-    .toMatchObject({ tier: "parametric", reasonCodes: ["sketch-on-probed-face"] });
+  expect(
+    faceSketchPlan,
+    JSON.stringify(review.providerReview.studios[0]?.featurePlans),
+  ).toMatchObject({
+    tier: "parametric",
+    reasonCodes: ["sketch-on-probed-face"],
+  });
 
   const actions = await onshapeImportProvider.prepare({
     source,
@@ -3705,7 +4511,8 @@ test("a provider-promoted sketch-on-face applies with its topologyOf plane suppo
     promotedSketch,
     "The promoted face sketch must carry a deferred topologyOf face support.",
   ).toBeDefined();
-  if (!promotedSketch) throw new Error("Expected a promoted face sketch commit.");
+  if (!promotedSketch)
+    throw new Error("Expected a promoted face sketch commit.");
 
   // Live document with a single non-mesh body whose native BREP resolves the box
   // fixture; its top face (centroid [0.5, 1, 3]) matches the captured signature.
@@ -3716,7 +4523,9 @@ test("a provider-promoted sketch-on-face applies with its topologyOf plane suppo
       target: { kind: "body", bodyId: "body_box" as BodyId },
       bodyId: "body_box" as BodyId,
       bodyLabel: "Box",
-      nativePayload: parseNativeShimPayloadJson(JSON.stringify(boxFixture.exactBrep)),
+      nativePayload: parseNativeShimPayloadJson(
+        JSON.stringify(boxFixture.exactBrep),
+      ),
     });
   const snapshot = {
     document: {
@@ -3784,7 +4593,8 @@ test("applyImportPreparedActions rolls back prior operations when a modeling mut
     createFeature() {
       callCount += 1;
       return ResultAsync.fromPromise(
-        Promise.resolve(callCount === 1
+        Promise.resolve(
+          callCount === 1
           ? {
               revisionId: "rev_rejected_1" as RevisionId,
               featureId: "feature_first" as never,
@@ -3802,14 +4612,17 @@ test("applyImportPreparedActions rolls back prior operations when a modeling mut
               },
               rebuildResult: { kind: "skipped" as const },
               changedTargets: [],
-              diagnostics: [{
+                diagnostics: [
+                  {
                 code: "advanced-feature-unsupported-kernel-case",
                 severity: "error" as const,
                 message: "Rejected imported feature.",
                 target: null,
                 detail: null,
-              }],
-            }),
+                  },
+                ],
+              },
+        ),
         (error) => createAppError({ code: "unknown", message: String(error) }),
       );
     },
@@ -3843,13 +4656,15 @@ test("applyImportPreparedActions rolls back prior operations when a modeling mut
     rolledBack: true,
     rollbackAttempted: true,
   });
-  expect(result.diagnostics).toEqual(expect.arrayContaining([
+  expect(result.diagnostics).toEqual(
+    expect.arrayContaining([
     expect.objectContaining({
       code: "advanced-feature-unsupported-kernel-case",
       message: "Rejected imported feature.",
     }),
     expect.objectContaining({ code: "import-apply-failed" }),
-  ]));
+    ]),
+  );
 });
 
 test("an up-to-vertex extent terminating at a sketch point builds exactly in real OCC", async () => {
@@ -3865,10 +4680,20 @@ test("an up-to-vertex extent terminating at a sketch point builds exactly in rea
     label: "Profile",
     planeKey: "xy",
     entities: [
-      { entityId: "b", entityType: "lineSegment", start: [-5, -5], end: [5, -5] },
+      {
+        entityId: "b",
+        entityType: "lineSegment",
+        start: [-5, -5],
+        end: [5, -5],
+      },
       { entityId: "r", entityType: "lineSegment", start: [5, -5], end: [5, 5] },
       { entityId: "t", entityType: "lineSegment", start: [5, 5], end: [-5, 5] },
-      { entityId: "l", entityType: "lineSegment", start: [-5, 5], end: [-5, -5] },
+      {
+        entityId: "l",
+        entityType: "lineSegment",
+        start: [-5, 5],
+        end: [-5, -5],
+      },
     ],
   });
   const TERMINATION_HEIGHT = 7;
@@ -3916,7 +4741,11 @@ test("an up-to-vertex extent terminating at a sketch point builds exactly in rea
   const actions: ImportPreparedActions = {
     commitSketches: [
       commitSketch("up_to_vertex_profile", "Profile", profileTranslation),
-      commitSketch("up_to_vertex_terminator", "Terminator", terminatorTranslation),
+      commitSketch(
+        "up_to_vertex_terminator",
+        "Terminator",
+        terminatorTranslation,
+      ),
     ],
     createFeatures: [
       {
@@ -3977,14 +4806,20 @@ test("an up-to-vertex extent terminating at a sketch point builds exactly in rea
   const applied = await service.getCurrentDocumentSnapshot();
   expect(applied.document.bodies.length).toBe(1);
 
-  const signatures = await deriveLiveBodySignatures({ snapshot: applied, service });
+  const signatures = await deriveLiveBodySignatures({
+    snapshot: applied,
+    service,
+  });
   if (signatures.status !== "available") {
-    throw new Error("Expected live OCC body signatures for the applied extrude.");
+    throw new Error(
+      "Expected live OCC body signatures for the applied extrude.",
+    );
   }
   const bounds = signatures.signatures.find(
     (signature) => signature.entityClass === "body" && signature.boundingBox,
   )?.boundingBox;
-  if (!bounds) throw new Error("Expected a live OCC bound for the applied extrude.");
+  if (!bounds)
+    throw new Error("Expected a live OCC bound for the applied extrude.");
 
   // The terminator point's exact Z is the extrude's exact height; nothing here
   // is a tolerance-relaxed approximation.
@@ -4014,8 +4849,18 @@ test("a sketch-point start offset moves the extrude's start plane in real OCC", 
     entities: [
       { entityId: "b", entityType: "lineSegment", start: [-5, 0], end: [5, 0] },
       { entityId: "r", entityType: "lineSegment", start: [5, 0], end: [5, 10] },
-      { entityId: "t", entityType: "lineSegment", start: [5, 10], end: [-5, 10] },
-      { entityId: "l", entityType: "lineSegment", start: [-5, 10], end: [-5, 0] },
+      {
+        entityId: "t",
+        entityType: "lineSegment",
+        start: [5, 10],
+        end: [-5, 10],
+      },
+      {
+        entityId: "l",
+        entityType: "lineSegment",
+        start: [-5, 10],
+        end: [-5, 0],
+      },
     ],
   });
   const boundsTranslation = translateSketch({
@@ -4129,14 +4974,20 @@ test("a sketch-point start offset moves the extrude's start plane in real OCC", 
   expect(result.rolledBack).toBe(false);
 
   const applied = await service.getCurrentDocumentSnapshot();
-  const signatures = await deriveLiveBodySignatures({ snapshot: applied, service });
+  const signatures = await deriveLiveBodySignatures({
+    snapshot: applied,
+    service,
+  });
   if (signatures.status !== "available") {
-    throw new Error("Expected live OCC body signatures for the applied extrude.");
+    throw new Error(
+      "Expected live OCC body signatures for the applied extrude.",
+    );
   }
   const bounds = signatures.signatures.find(
     (signature) => signature.entityClass === "body" && signature.boundingBox,
   )?.boundingBox;
-  if (!bounds) throw new Error("Expected a live OCC bound for the applied extrude.");
+  if (!bounds)
+    throw new Error("Expected a live OCC bound for the applied extrude.");
 
   // BOTH ends are authored points. Before the start-extent contract existed the
   // prism began at the profile plane (x = 0) and this high bound was 0.
@@ -4164,7 +5015,8 @@ test("a prepared Onshape surface extrude rebuilds into a sheet body in real OCC"
   });
   // Apply only the surface extrude and its profile sketch: the fixture's trailing
   // solid cut exists to prove the sheet is not solid body lineage and bakes.
-  const surfaceIndex = actions.createFeatures?.findIndex(
+  const surfaceIndex =
+    actions.createFeatures?.findIndex(
     (request) =>
       request.definition.kind === "extrude" &&
       request.definition.parameters.resultBodyType === "surface",
@@ -4192,7 +5044,9 @@ test("a prepared Onshape surface extrude rebuilds into a sheet body in real OCC"
   expect(result.rolledBack).toBe(false);
 
   const applied = await service.getCurrentDocumentSnapshot();
-  expect(applied.document.bodies.map((body) => body.bodyKind)).toEqual(["sheet"]);
+  expect(applied.document.bodies.map((body) => body.bodyKind)).toEqual([
+    "sheet",
+  ]);
 });
 
 // Lane: logic (per docs/testing.md — importer prepared action application
@@ -4207,23 +5061,27 @@ test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", a
     featureId: "split_solid_sketch",
     label: "Split solid profile",
     planeKey: "xy",
-    entities: [{
+    entities: [
+      {
       entityId: "split_circle",
       entityType: "circle",
       center: [0, 0],
       radius: 4,
-    }],
+      },
+    ],
   });
   const sheetSketch = translateSketch({
     featureId: "split_sheet_sketch",
     label: "Split sheet profile",
     planeKey: "xy",
-    entities: [{
+    entities: [
+      {
       entityId: "split_line",
       entityType: "lineSegment",
       start: [0, -5],
       end: [0, 5],
-    }],
+      },
+    ],
   });
   const commit = (
     label: string,
@@ -4269,11 +5127,13 @@ test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", a
           featureTypeVersion: "feature-type/extrude/v1alpha2",
           parameters: {
             resultBodyType: "solid",
-            profiles: [{
+            profiles: [
+              {
               kind: "regionOf",
               actionIndex: 0,
               selector: { kind: "interiorPoint", point: [0, 0] },
-            }],
+              },
+            ],
             startExtent: { kind: "profilePlane" },
             extent: blindExtent,
             operation: createLiteralAuthoredValue("newBody"),
@@ -4291,11 +5151,13 @@ test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", a
           featureTypeVersion: "feature-type/extrude/v1alpha2",
           parameters: {
             resultBodyType: "surface",
-            profiles: [{
+            profiles: [
+              {
               kind: "sketchEntity",
               sketchId: { kind: "sketchIdOf", actionIndex: 2 },
               entityId: "sketch_entity_split_sheet_sketch_split_line",
-            }],
+              },
+            ],
             startExtent: { kind: "profilePlane" },
             extent: blindExtent,
           },
@@ -4311,8 +5173,14 @@ test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", a
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
             participants: [
-              { role: "targetBody", targets: [{ kind: "bodyOf", actionIndex: 1 }] },
-              { role: "toolBody", targets: [{ kind: "bodyOf", actionIndex: 3 }] },
+              {
+                role: "targetBody",
+                targets: [{ kind: "bodyOf", actionIndex: 1 }],
+              },
+              {
+                role: "toolBody",
+                targets: [{ kind: "bodyOf", actionIndex: 3 }],
+              },
             ],
             options: { keepTools: false },
           },
@@ -4336,7 +5204,9 @@ test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", a
     baseRevisionId: snapshot.document.revisionId,
     actions,
   });
-  expect(result.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+  expect(
+    result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+  ).toEqual([]);
   expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
     "topology-apply-rematch-failed",
   );
@@ -4351,8 +5221,530 @@ test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", a
   });
 
   const applied = await service.getCurrentDocumentSnapshot();
-  expect(applied.document.bodies.map((body) => body.bodyKind)).toEqual(["solid", "solid"]);
+  expect(applied.document.bodies.map((body) => body.bodyKind)).toEqual([
+    "solid",
+    "solid",
+  ]);
 });
+
+// Lane: logic (per docs/testing.md — importer review/prepare/apply
+// orchestration through the real OCC adapter, no UI). Seam: the complete
+// Laptop Stand prepared sequence survives an authored-variable rebuild while
+// retaining Extrude 5's selected Sketch 4 RegionId.
+const LAPTOP_STAND_CAPTURE_FIXTURE =
+  "test/fixtures/onshape-captures/5151a4c877c9493b733ad52f.onshape-capture.json";
+
+test.skipIf(!existsSync(LAPTOP_STAND_CAPTURE_FIXTURE))(
+  "Laptop Stand preserves Sketch 4's Extrude 5 region through Wall 3→4 in real OCC",
+  async () => {
+    const bundle = JSON.parse(
+      await readFile(LAPTOP_STAND_CAPTURE_FIXTURE, "utf8"),
+    );
+    const oc = await loadRealOccForImportTest();
+    const { assetStore, resolver } = createGeometryAssetComposition(
+      createMemoryGeometryAssetStore(),
+    );
+    let probeOrdinal = 0;
+    const createProbeService = () => {
+      probeOrdinal += 1;
+      const documentId = `doc_occ_history_probe_${probeOrdinal}` as DocumentId;
+      const createSolver = (revisionId: RevisionId | null) =>
+        new SketchConstraintSolverAdapter({ documentId, revisionId });
+      return createModelingService(
+        new OpenCascadeKernelAdapter({
+          solverAdapter: createSolver(null),
+          solverAdapterFactory: createSolver,
+          getOpenCascadeInstance: async () => oc,
+          documentId,
+          assetResolver: resolver,
+        }),
+        { currentDocumentId: documentId, sketchSolver: createSolver(null) },
+      );
+    };
+    const createWorkspaceSolver = (revisionId: RevisionId | null) =>
+      new SketchConstraintSolverAdapter({
+        documentId: "doc_workspace" as DocumentId,
+        revisionId,
+      });
+    const service = createModelingService(
+      new OpenCascadeKernelAdapter({
+        solverAdapter: createWorkspaceSolver(null),
+        solverAdapterFactory: createWorkspaceSolver,
+        getOpenCascadeInstance: async () => oc,
+        assetResolver: resolver,
+      }),
+      {
+        currentDocumentId: "doc_workspace",
+        sketchSolver: createWorkspaceSolver(null),
+      },
+    );
+    const before = await service.getCurrentDocumentSnapshot();
+    const source = sourceFromBundle(bundle);
+    const review = await onshapeImportProvider.review({
+      source,
+      capabilities: createImportCapabilities(service, before, {
+        assetStore,
+        history: createKernelHistoryProbeSession({
+          createService: createProbeService,
+        }),
+      }),
+    });
+    const studio = review.providerReview.studios.find((candidate) =>
+      candidate.featurePlans.some((plan) => plan.label === "Sketch 4"),
+    );
+    expect(
+      studio?.featurePlans.find((plan) => plan.label === "Sketch 4")?.tier,
+    ).toBe("parametric");
+    expect(
+      studio?.featurePlans.find((plan) => plan.label === "Extrude 5")?.tier,
+    ).toBe("parametric");
+
+    const actions = await prepareImportActions({
+      provider: onshapeImportProvider,
+      source,
+      review,
+      selections: onshapeImportProvider.createDefaultSelections(review),
+      capabilities: createImportCapabilities(service, before, {
+        assetStore,
+        history: createKernelHistoryProbeSession({
+          createService: createProbeService,
+        }),
+      }),
+    });
+    expect(validateImportPreparedActions(actions).success).toBe(true);
+    const applied = await applyImportPreparedActions({
+      modelingService: service,
+      baseRevisionId: before.document.revisionId,
+      actions,
+    });
+    expect(
+      applied.diagnostics.filter(
+        (diagnostic) => diagnostic.severity === "error",
+      ),
+    ).toEqual([]);
+    expect(applied.rolledBack).toBe(false);
+    expect(applied.appliedOperationCount).toBe(
+      actions.orderedActions?.length ?? 0,
+    );
+
+    const afterApply = await service.getCurrentDocumentSnapshot();
+    expect(afterApply.document.diagnostics).toEqual([]);
+    const sketch4 = afterApply.document.sketches.find(
+      (sketch) => sketch.label === "Sketch 4",
+    );
+    const extrude5 = afterApply.document.features.find(
+      (feature) => feature.label === "Extrude 5",
+    );
+    expect(sketch4, "Laptop Stand must commit Sketch 4.").toBeTruthy();
+    expect(extrude5, "Laptop Stand must commit Extrude 5.").toBeTruthy();
+    if (!sketch4 || !extrude5 || extrude5.definition.kind !== "extrude") {
+      throw new Error(
+        "Expected committed Laptop Stand Sketch 4 and Extrude 5.",
+      );
+    }
+    const selectedProfile = extrude5.definition.parameters.profiles.find(
+      (profile) => profile.kind === "region",
+    );
+    expect(
+      selectedProfile,
+      "Extrude 5 must select a committed Sketch 4 region.",
+    ).toBeTruthy();
+    if (!selectedProfile || selectedProfile.kind !== "region") {
+      throw new Error("Expected Extrude 5's selected region profile.");
+    }
+    const selectedRegionId = selectedProfile.regionId;
+    expect(
+      sketch4.sketch.regions.some(
+        (region) => region.regionId === selectedRegionId,
+      ),
+    ).toBe(true);
+
+    const wall = afterApply.document.variables.find(
+      (variable) => variable.name === "Wall",
+    );
+    expect(wall, "Laptop Stand must import the Wall variable.").toBeTruthy();
+    if (!wall) throw new Error("Expected Laptop Stand Wall variable.");
+    const edited = await service.updateDocumentVariable({
+      baseRevisionId: afterApply.document.revisionId,
+      variableId: wall.variableId,
+      name: wall.name,
+      valueText: "4",
+    });
+    if (edited.isErr()) throw edited.error;
+    expect(edited.value.revisionState.kind).toBe("accepted");
+
+    const afterWallEdit = await service.getCurrentDocumentSnapshot();
+    expect(afterWallEdit.document.diagnostics).toEqual([]);
+    const rebuiltSketch4 = afterWallEdit.document.sketches.find(
+      (sketch) => sketch.label === "Sketch 4",
+    );
+    const rebuiltExtrude5 = afterWallEdit.document.features.find(
+      (feature) => feature.label === "Extrude 5",
+    );
+    expect(rebuiltSketch4, "Wall 3→4 must rebuild Sketch 4.").toBeTruthy();
+    expect(rebuiltExtrude5, "Wall 3→4 must rebuild Extrude 5.").toBeTruthy();
+    if (
+      !rebuiltSketch4 ||
+      !rebuiltExtrude5 ||
+      rebuiltExtrude5.definition.kind !== "extrude"
+    ) {
+      throw new Error("Expected rebuilt Laptop Stand Sketch 4 and Extrude 5.");
+    }
+    const liveRegion = rebuiltSketch4.sketch.regions.find(
+      (region) => region.regionId === selectedRegionId,
+    );
+    expect(
+      liveRegion,
+      "Extrude 5's selected Sketch 4 RegionId must remain live.",
+    ).toBeTruthy();
+    expect(liveRegion?.target.regionId).toBe(selectedRegionId);
+    expect(
+      liveRegion?.loops.every(
+        (loop, ordinal) =>
+          loop.loopId === `region_loop_${selectedRegionId}_${ordinal}`,
+      ),
+      "Every RegionId-owned loop id must follow the restored RegionId.",
+    ).toBe(true);
+    expect(
+      rebuiltExtrude5.definition.parameters.profiles.some(
+        (profile) =>
+          profile.kind === "region" && profile.regionId === selectedRegionId,
+      ),
+      "Extrude 5 must rebuild against the still-live selected RegionId.",
+    ).toBe(true);
+  },
+  3_600_000,
+);
+
+// Lane: logic (per docs/testing.md — importer review/prepare/apply through the
+// real OCC adapter, without browser behavior). Seam: 9841's review decision and
+// commit use the same geometry asset composition in the workspace and every
+// isolated probe session, so a promoted timeline cannot pass review on assets
+// unavailable to its real apply.
+const PART_STUDIO_9841_CAPTURE_FIXTURE =
+  "test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json";
+
+test.skipIf(!existsSync(PART_STUDIO_9841_CAPTURE_FIXTURE))(
+  "9841 applies its reviewed prepared action sequence through real OCC",
+  async () => {
+    const bundle = JSON.parse(
+      await readFile(PART_STUDIO_9841_CAPTURE_FIXTURE, "utf8"),
+    );
+    const oc = await loadRealOccForImportTest();
+    const { assetStore, resolver } = createGeometryAssetComposition(
+      createMemoryGeometryAssetStore(),
+    );
+    let probeOrdinal = 0;
+    const createProbeService = () => {
+      probeOrdinal += 1;
+      const documentId = `doc_9841_history_probe_${probeOrdinal}` as DocumentId;
+      const createSolver = (revisionId: RevisionId | null) =>
+        new SketchConstraintSolverAdapter({ documentId, revisionId });
+      return createModelingService(
+        new OpenCascadeKernelAdapter({
+          solverAdapter: createSolver(null),
+          solverAdapterFactory: createSolver,
+          getOpenCascadeInstance: async () => oc,
+          documentId,
+          assetResolver: resolver,
+        }),
+        { currentDocumentId: documentId, sketchSolver: createSolver(null) },
+      );
+    };
+    const workspaceDocumentId = "doc_9841_workspace" as DocumentId;
+    const createWorkspaceSolver = (revisionId: RevisionId | null) =>
+      new SketchConstraintSolverAdapter({
+        documentId: workspaceDocumentId,
+        revisionId,
+      });
+    const adapter = new OpenCascadeKernelAdapter({
+      solverAdapter: createWorkspaceSolver(null),
+      solverAdapterFactory: createWorkspaceSolver,
+      getOpenCascadeInstance: async () => oc,
+      documentId: workspaceDocumentId,
+      assetResolver: resolver,
+    });
+    const service = createModelingService(adapter, {
+      currentDocumentId: workspaceDocumentId,
+      sketchSolver: createWorkspaceSolver(null),
+    });
+    const before = await service.getCurrentDocumentSnapshot();
+    const source = sourceFromBundle(bundle);
+    const reviewCachePath = "/tmp/cadara-9841-review.json";
+    const review = existsSync(reviewCachePath)
+      ? (JSON.parse(await readFile(reviewCachePath, "utf8")) as Awaited<
+          ReturnType<typeof onshapeImportProvider.review>
+        >)
+      : await onshapeImportProvider.review({
+          source,
+          capabilities: createImportCapabilities(service, before, {
+            assetStore,
+            history: createKernelHistoryProbeSession({
+              createService: createProbeService,
+            }),
+          }),
+        });
+    if (!existsSync(reviewCachePath)) await writeFile(reviewCachePath, JSON.stringify(review));
+    const reviewedPlans = review.providerReview.studios.flatMap(
+      (studio) => studio.featurePlans,
+    );
+    const extrude1Plan = reviewedPlans.find((plan) => plan.label === "Extrude 1");
+    expect(
+      extrude1Plan?.tier,
+      `Extrude 1 must be parametric: ${JSON.stringify(extrude1Plan)}`,
+    ).toBe("parametric");
+    expect(reviewedPlans.find((plan) => plan.label === "Sketch 2")?.tier).toBe(
+      "parametric",
+    );
+    const extrude3Plan = reviewedPlans.find((plan) => plan.label === "Extrude 3");
+    expect(
+      extrude3Plan?.tier,
+      `Extrude 3 must be parametric: ${JSON.stringify(extrude3Plan)}`,
+    ).toBe("parametric");
+    const cutterPlan = reviewedPlans.find((plan) => plan.label === "Cutter");
+    expect(cutterPlan?.tier, `Cutter must be parametric: ${JSON.stringify(cutterPlan)}`).toBe(
+      "parametric",
+    );
+    const extrude4Plan = reviewedPlans.find((plan) => plan.label === "Extrude 4");
+    expect(
+      extrude4Plan?.tier,
+      `Extrude 4 must be parametric: ${JSON.stringify(extrude4Plan)}`,
+    ).toBe("parametric");
+    expect(
+      reviewedPlans
+        .filter((plan) => ["Split 1", "Sketch 3", "Sketch 4"].includes(plan.label))
+        .map((plan) => ({ label: plan.label, tier: plan.tier })),
+    ).toEqual([
+      { label: "Split 1", tier: "parametric" },
+      { label: "Sketch 3", tier: "parametric" },
+      { label: "Sketch 4", tier: "parametric" },
+    ]);
+
+    const actions = await prepareImportActions({
+      provider: onshapeImportProvider,
+      source,
+      review,
+      selections: onshapeImportProvider.createDefaultSelections(review),
+      capabilities: createImportCapabilities(service, before, {
+        assetStore,
+        history: createKernelHistoryProbeSession({
+          createService: createProbeService,
+        }),
+      }),
+    });
+    expect(validateImportPreparedActions(actions).success).toBe(true);
+    const orderedLabels = actions.orderedActions?.map((action) =>
+      action.kind === "createFeature"
+        ? actions.createFeatures?.[action.index]?.featureLabel
+        : action.kind === "commitSketch"
+          ? actions.commitSketches?.[action.index]?.sketchLabel
+          : actions.addDocumentVariables?.[action.index]?.name,
+    );
+    expect(orderedLabels?.slice(9, 15)).toEqual([
+      "Chamfer 2",
+      "Shell 1",
+      "Extrude 2",
+      "Sketch 2",
+      "Extrude 3",
+      "Cutter",
+    ]);
+    const cutterPlane = actions.commitSketches?.find(
+      (request) => request.sketchLabel === "Cutter",
+    )?.plane.support;
+    expect(cutterPlane, "Cutter must retain an action-relative g22 selector.").toMatchObject({
+      kind: "historicalTopologyOf",
+      witnessActionIndex: 9,
+    });
+    if (cutterPlane?.kind !== "historicalTopologyOf") {
+      throw new Error("Expected Cutter's historical topology selector.");
+    }
+    expect(
+      cutterPlane.successorActionIndexes,
+      "Cutter may hop through action 13's unique Modified successor, or retain g22 exactly through action 13 without a successor hop.",
+    ).toSatisfy(
+      (indexes) =>
+        indexes.length === 0 ||
+        (indexes.length === 1 && indexes[0] === 13),
+    );
+    const applied = await applyImportPreparedActions({
+      modelingService: service,
+      baseRevisionId: before.document.revisionId,
+      actions,
+    });
+    expect(
+      applied.diagnostics.filter(
+        (diagnostic) => diagnostic.severity === "error",
+      ),
+      "Every reviewed 9841 action must commit through the real OCC apply seam.",
+    ).toEqual([]);
+    expect(applied.rolledBack).toBe(false);
+    expect(applied.appliedOperationCount).toBe(
+      actions.orderedActions?.length ?? 0,
+    );
+
+    const committed = await service.getCurrentDocumentSnapshot();
+    const walls = committed.document.variables.find(
+      (variable) => variable.name === "walls",
+    );
+    expect(walls, "9841 must import the walls variable.").toBeTruthy();
+    if (!walls) throw new Error("Expected 9841 walls variable.");
+    expect(
+      actions.commitSketches?.some(
+        (request) => request.sketchLabel === "Sketch 2",
+      ),
+      "9841 must commit the promoted Sketch 2 branch.",
+    ).toBe(true);
+    expect(
+      actions.createFeatures?.some(
+        (request) => request.featureLabel === "Extrude 3",
+      ),
+      "9841 must commit source Extrude 3 parametrically.",
+    ).toBe(true);
+    expect(
+      actions.commitSketches?.some((request) => request.sketchLabel === "Cutter"),
+      "9841 must commit Cutter on the exact Extrude 3 modified-face successor.",
+    ).toBe(true);
+    for (const label of ["Extrude 4"]) {
+      expect(
+        actions.createFeatures?.some((request) => request.featureLabel === label),
+        `9841 must prepare ${label} parametrically.`,
+      ).toBe(true);
+    }
+    const split = actions.createFeatures?.find((request) => request.featureLabel === "Split 1");
+    expect(split?.definition.kind, "9841 must prepare Split 1 parametrically.").toBe("split");
+    if (split?.definition.kind !== "split") throw new Error("Expected prepared Split 1.");
+    expect(split.topologyFallback).toBeUndefined();
+    expect(split.definition.parameters.participants).toMatchObject([
+      { role: "targetBody", targets: [{ kind: "bodyOf" }] },
+      { role: "toolBody", targets: [{ kind: "bodyOf" }] },
+    ]);
+    for (const label of ["Sketch 3", "Sketch 4"]) {
+      expect(
+        actions.commitSketches?.some((request) => request.sketchLabel === label),
+        `9841 must prepare ${label} parametrically.`,
+      ).toBe(true);
+    }
+    const committedFeatureIds = committed.document.features.map(
+      (feature) => feature.featureId,
+    );
+    const committedSketchPlanes = committed.document.sketches.map(
+      ({ sketchId, plane }) => ({
+        sketchId,
+        plane,
+      }),
+    );
+    const sketch2 = committed.document.sketches.find((sketch) => sketch.label === "Sketch 2");
+    const shell1 = committed.document.features.find((feature) => feature.label === "Shell 1");
+    if (!sketch2 || sketch2.plane.support.kind !== "face" || !shell1) {
+      throw new Error("Expected committed Sketch 2 face support and Shell 1.");
+    }
+    const committedAuthored = await adapter.exportAuthoredModelDocument(workspaceDocumentId);
+    const shellLineage = committedAuthored.topologyLineage?.find(
+      (lineage) => lineage.featureId === shell1.featureId,
+    );
+    const sketch2SupportClaims = shellLineage?.outputs.flatMap((output) =>
+      output.sourceTargets.filter((entry) =>
+        entry.targets.some(
+          (target) =>
+            target.kind === "face" &&
+            target.bodyId === sketch2.plane.support.bodyId &&
+            target.faceId === sketch2.plane.support.faceId,
+        ),
+      ),
+    );
+    expect(
+      sketch2SupportClaims?.some((entry) => entry.sourceKey.includes("exact-successor")),
+      "Closed-hollow Shell 1 must publish Sketch 2's face as an exact successor.",
+    ).toBe(true);
+    expect(
+      sketch2SupportClaims?.some((entry) => entry.sourceKey.startsWith("generated-from:")),
+      "Closed-hollow Shell 1 must not classify Sketch 2's outer face as generated.",
+    ).toBe(false);
+    const sourceFeatureIds = ["Extrude 1", "Chamfer 1", "Chamfer 2", "Shell 1"].map(
+      (label) => {
+        const feature = committed.document.features.find(
+          (candidate) => candidate.label === label,
+        );
+        if (!feature) throw new Error(`Expected committed ${label}.`);
+        return { label, featureId: feature.featureId };
+      },
+    );
+    const getSketch2SupportClaimsBySourceFeature = (
+      authored: typeof committedAuthored,
+    ) =>
+      sourceFeatureIds.map(({ label, featureId }) => ({
+        label,
+        sourceKeys: (authored.topologyLineage ?? [])
+          .find((lineage) => lineage.featureId === featureId)
+          ?.outputs.flatMap((output) =>
+            output.sourceTargets
+              .filter((entry) =>
+                entry.targets.some(
+                  (target) =>
+                    target.kind === "face" &&
+                    target.bodyId === sketch2.plane.support.bodyId &&
+                    target.faceId === sketch2.plane.support.faceId,
+                ),
+              )
+              .map((entry) => entry.sourceKey),
+          )
+          .sort() ?? [],
+      }));
+    const committedSketch2SupportClaimsBySourceFeature =
+      getSketch2SupportClaimsBySourceFeature(committedAuthored);
+    expect(
+      committedSketch2SupportClaimsBySourceFeature.every(
+        ({ sourceKeys }) => sourceKeys.length > 0,
+      ),
+      "Every source feature before Sketch 2 must claim its selected face exactly.",
+    ).toBe(true);
+    const edited = await service.updateDocumentVariable({
+      baseRevisionId: committed.document.revisionId,
+      variableId: walls.variableId,
+      name: walls.name,
+      valueText: "3",
+    });
+    if (edited.isErr()) throw edited.error;
+    expect(edited.value.revisionState.kind).toBe("accepted");
+    const afterEdit = await service.getCurrentDocumentSnapshot();
+    const afterEditAuthored = await adapter.exportAuthoredModelDocument(
+      workspaceDocumentId,
+    );
+    expect(
+      getSketch2SupportClaimsBySourceFeature(afterEditAuthored),
+      "Walls 2→3 must retain Sketch 2's public face from the same exact source claim at Extrude 1, Chamfer 1, Chamfer 2, and Shell 1.",
+    ).toEqual(committedSketch2SupportClaimsBySourceFeature);
+    expect(
+      afterEdit.document.diagnostics,
+      "9841 walls 2→3 must rebuild with zero snapshot diagnostics.",
+    ).toEqual([]);
+    expect(
+      afterEdit.document.features.map((feature) => feature.featureId),
+    ).toEqual(committedFeatureIds);
+    expect(
+      afterEdit.document.sketches.map(({ sketchId, plane }) => ({
+        sketchId,
+        plane,
+      })),
+    ).toEqual(committedSketchPlanes);
+    await adapter.restoreAuthoredModelDocument(afterEditAuthored);
+    const restored = await service.getCurrentDocumentSnapshot();
+    expect(
+      restored.document.diagnostics,
+      "9841 export→restore after walls 2→3 must rebuild with zero snapshot diagnostics.",
+    ).toEqual([]);
+    expect(
+      restored.document.features.map((feature) => feature.featureId),
+    ).toEqual(committedFeatureIds);
+    expect(
+      restored.document.sketches.map(({ sketchId, plane }) => ({
+        sketchId,
+        plane,
+      })),
+    ).toEqual(committedSketchPlanes);
+  },
+  3_600_000,
+);
 
 // Lane: logic (per docs/testing.md — importer review/prepare/apply
 // orchestration through the real OCC adapter, no UI). Seam: the complete
@@ -4429,7 +5821,9 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
       actions,
     });
     expect(
-      result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+      result.diagnostics.filter(
+        (diagnostic) => diagnostic.severity === "error",
+      ),
       "Every prepared d3cd9 action must commit without an error diagnostic.",
     ).toEqual([]);
     expect(result.rolledBack).toBe(false);
@@ -4443,6 +5837,75 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
       after.document.diagnostics,
       "The committed d3cd9 document must carry zero snapshot diagnostics.",
     ).toEqual([]);
+    const featureIds = after.document.features.map(
+      (feature) => feature.featureId,
+    );
+    const sketchIds = after.document.sketches.map((sketch) => sketch.sketchId);
+    const producedTargets = after.document.features.map((feature) => ({
+      featureId: feature.featureId,
+      producedTargets: feature.producedTargets,
+    }));
+    const bodyIds = after.document.bodies.map((body) => body.bodyId).sort();
+
+    const splitFeature = after.document.features.find(
+      (feature) => feature.label === "Split 1",
+    );
+    const splitBodyIds =
+      splitFeature?.producedTargets
+        .filter(
+          (target): target is Extract<typeof target, { kind: "body" }> =>
+            target.kind === "body",
+        )
+        .map((target) => target.bodyId)
+        .sort() ?? [];
+    expect(
+      splitBodyIds,
+      "Split 1 must publish its native sheet-split output BodyIds.",
+    ).not.toEqual([]);
+    const screwHole = after.document.variables.find(
+      (variable) => variable.name === "screwHole",
+    );
+    expect(
+      screwHole,
+      "The d3cd9 fixture must import the screwHole variable.",
+    ).toBeTruthy();
+    if (!screwHole) throw new Error("Expected d3cd9 screwHole variable.");
+    const edited = await service.updateDocumentVariable({
+      baseRevisionId: after.document.revisionId,
+      variableId: screwHole.variableId,
+      name: screwHole.name,
+      valueText: "6",
+    });
+    if (edited.isErr()) throw edited.error;
+    expect(edited.value.revisionState.kind).toBe("accepted");
+    const afterScrewHoleEdit = await service.getCurrentDocumentSnapshot();
+    expect(
+      afterScrewHoleEdit.document.diagnostics,
+      "The shape-changing screwHole 5→6 edit must rebuild with zero diagnostics.",
+    ).toEqual([]);
+    expect(
+      splitBodyIds.every((bodyId) =>
+        afterScrewHoleEdit.document.bodies.some(
+          (body) => body.bodyId === bodyId,
+        ),
+      ),
+      "The native sheet-split outputs must retain their persisted BodyIds after screwHole 5→6.",
+    ).toBe(true);
+    expect(
+      afterScrewHoleEdit.document.features.map((feature) => feature.featureId),
+    ).toEqual(featureIds);
+    expect(
+      afterScrewHoleEdit.document.sketches.map((sketch) => sketch.sketchId),
+    ).toEqual(sketchIds);
+    expect(
+      afterScrewHoleEdit.document.features.map((feature) => ({
+        featureId: feature.featureId,
+        producedTargets: feature.producedTargets,
+      })),
+    ).toEqual(producedTargets);
+    expect(afterScrewHoleEdit.document.bodies.map((body) => body.bodyId).sort()).toEqual(
+      bodyIds,
+    );
 
     // A committed import must survive a full-document replay with identical
     // ids: export the authored document and restore it, forcing the kernel to
@@ -4457,9 +5920,24 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
       rebuilt.document.diagnostics,
       "An identical full-history replay must rebuild with zero snapshot diagnostics.",
     ).toEqual([]);
-    expect(rebuilt.document.bodies.map((body) => body.bodyId).sort()).toEqual(
-      after.document.bodies.map((body) => body.bodyId).sort(),
+    expect(
+      rebuilt.document.features.map((feature) => feature.featureId),
+    ).toEqual(featureIds);
+    expect(rebuilt.document.sketches.map((sketch) => sketch.sketchId)).toEqual(
+      sketchIds,
     );
+    expect(
+      rebuilt.document.features.map((feature) => ({
+        featureId: feature.featureId,
+        producedTargets: feature.producedTargets,
+      })),
+    ).toEqual(producedTargets);
+    expect(rebuilt.document.bodies.map((body) => body.bodyId).sort()).toEqual(bodyIds);
+    expect(
+      rebuilt.document.variables.find(
+        (variable) => variable.name === "screwHole",
+      )?.valueText,
+    ).toBe("6");
   },
   3_600_000,
 );

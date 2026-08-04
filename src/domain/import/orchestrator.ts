@@ -10,7 +10,10 @@ import type {
   ImportDeferredFeatureBooleanScope,
   ImportDeferredSketchEntityRef,
   ImportDeferredSketchPointRef,
+  ImportDeferredHistoricalTopologyRef,
+  ImportDeferredSplitInterfaceFaceRef,
   ImportDeferredTopologyRef,
+  ImportDeferredTopologySelector,
   ImportDeferredValue,
   ImportPreparedActions,
   ImportPreparedActionRef,
@@ -53,6 +56,11 @@ import {
 import { validateGeometryAssetRecord } from "@/contracts/modeling/geometry-assets.runtime-schema";
 import { registerEmbeddedBinaryAsset } from "@/domain/modeling/embedded-binary-asset-registry";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
+import {
+  durableTopologyReferenceKey,
+  followExactTopologySuccessor,
+  LIVE_TOPOLOGY_MATCH_TOLERANCE,
+} from "@/domain/import/historical-topology-selector";
 import {
   selectInnermostContainingRegion,
   type RegionSelectionSketch,
@@ -322,11 +330,22 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
   );
 }
 
-function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologyRef {
+function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologySelector {
   return Boolean(
     value &&
       typeof value === "object" &&
-      (value as { kind?: unknown }).kind === "topologyOf",
+      ((value as { kind?: unknown }).kind === "topologyOf" ||
+        (value as { kind?: unknown }).kind === "historicalTopologyOf"),
+  );
+}
+
+function isDeferredHistoricalTopologyRef(
+  value: unknown,
+): value is ImportDeferredHistoricalTopologyRef {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { kind?: unknown }).kind === "historicalTopologyOf",
   );
 }
 
@@ -345,17 +364,17 @@ function isDeferredSketchTargetRef(
 }
 
 export class TopologyApplyRematchError extends Error {
-  readonly selector: ImportDeferredTopologyRef;
-  /**
-   * Zero/one/many detail for the live match that failed, preserved verbatim so a
-   * contained bake names the real mismatch instead of only its reason code.
-   * Purely diagnostic; it never participates in matching.
-   */
+  readonly selector: ImportDeferredTopologySelector;
   readonly detail: string | null;
 
-  constructor(selector: ImportDeferredTopologyRef, detail: string | null = null) {
+  constructor(
+    selector: ImportDeferredTopologySelector,
+    detail: string | null = null,
+  ) {
     super(
-      `Live topology rematch failed for ${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}.`,
+      selector.kind === "topologyOf"
+        ? `Live topology rematch failed for ${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}.`
+        : `Historical topology lineage rematch failed for ${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}.`,
     );
     this.name = "TopologyApplyRematchError";
     this.selector = selector;
@@ -515,6 +534,20 @@ export class ImportDeferredMaterializer {
       Awaited<ReturnType<typeof deriveLiveBodySignatures>>
     >;
   } | null = null;
+  private readonly historicalSelectors = new Map<string, {
+    selector: ImportDeferredHistoricalTopologyRef;
+    boundReference: DurableRef | null;
+  }>();
+  /** Exact direct-selector bindings observed in this apply session. */
+  private readonly directSelectorsByResolvedReferenceKey = new Map<
+    string,
+    ImportDeferredTopologyRef | null
+  >();
+  private readonly splitInterfaceSelectors = new Map<string, {
+    selector: ImportDeferredSplitInterfaceFaceRef;
+    toolFace: Extract<DurableRef, { kind: "face" }> | null;
+    outputFace: Extract<DurableRef, { kind: "face" }> | null;
+  }>();
 
   constructor(input: {
     modelingService: Pick<
@@ -581,9 +614,236 @@ export class ImportDeferredMaterializer {
     return source;
   }
 
+  registerHistoricalSelectors(actions: ImportPreparedActions) {
+    const visit = (value: unknown) => {
+      if (!value || typeof value !== "object") return;
+      if (isDeferredHistoricalTopologyRef(value)) {
+        const key = this.historicalSelectorKey(value);
+        const existing = this.historicalSelectors.get(key);
+        if (existing && JSON.stringify(existing.selector) !== JSON.stringify(value)) {
+          throw new TopologyApplyRematchError(value, "conflicting historical selector declarations");
+        }
+        if (!existing) {
+          this.historicalSelectors.set(key, { selector: value, boundReference: null });
+        }
+        return;
+      }
+      for (const entry of Array.isArray(value) ? value : Object.values(value)) visit(entry);
+    };
+    visit(actions);
+  }
+
+  private splitInterfaceSelectorKey(selector: ImportDeferredSplitInterfaceFaceRef) {
+    return `${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}`;
+  }
+
+  registerSplitInterfaceSelectors(actions: ImportPreparedActions) {
+    const visit = (value: unknown) => {
+      if (!value || typeof value !== "object") return;
+      if ((value as { kind?: unknown }).kind === "splitInterfaceFaceOf") {
+        const selector = value as ImportDeferredSplitInterfaceFaceRef;
+        const key = this.splitInterfaceSelectorKey(selector);
+        const existing = this.splitInterfaceSelectors.get(key);
+        if (existing && JSON.stringify(existing.selector) !== JSON.stringify(selector)) {
+          throw new Error("Conflicting split-interface selector declarations.");
+        }
+        if (!existing) this.splitInterfaceSelectors.set(key, { selector, toolFace: null, outputFace: null });
+        return;
+      }
+      for (const entry of Array.isArray(value) ? value : Object.values(value)) visit(entry);
+    };
+    visit(actions);
+  }
+
+  async bindSplitInterfaceToolFacesAtAction(orderedActionIndex: number) {
+    const registrations = [...this.splitInterfaceSelectors.values()].filter(
+      ({ selector }) => selector.toolExtrudeActionIndex === orderedActionIndex,
+    );
+    for (const registration of registrations) {
+      const selector = registration.selector;
+      const output = this.input.outputRecords.get(orderedOutputKey(orderedActionIndex));
+      const sketch = this.input.outputRecords.get(orderedOutputKey(selector.profileSketchActionIndex));
+      if (!output?.featureId || output.bodyIds?.length !== 1 || !sketch?.sketchId) {
+        throw new Error("Split-interface tool action must produce exactly one body and follow a committed profile sketch.");
+      }
+      const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+      const exact = await this.input.modelingService.buildNativeExactBrepPayload({
+        baseRevisionId: snapshot.document.revisionId,
+        target: { kind: "body", bodyId: output.bodyIds[0]! },
+      });
+      const sourceKey = `extrude:${output.featureId}:profile-sketch:${sketch.sketchId}:end:${selector.endRole}:sketch-entity:${sketch.sketchId}:${selector.profileEntityId}:generated-side-face`;
+      const targets = exact.kind === "nativeTopologyPayload"
+        ? (exact.payload.topologyLineage ?? []).filter((lineage) => lineage.featureId === output.featureId)
+          .flatMap((lineage) => lineage.outputs)
+          .flatMap((entry) => entry.sourceTargets)
+          .filter((entry) => entry.sourceKey === sourceKey)
+          .flatMap((entry) => entry.targets)
+          .filter((target): target is Extract<DurableRef, { kind: "face" }> =>
+            target.kind === "face" && target.bodyId === output.bodyIds![0],
+          )
+        : [];
+      if (targets.length !== 1) {
+        throw new Error(`Split-interface source ${sourceKey} resolved ${targets.length} tool faces, expected exactly one.`);
+      }
+      registration.toolFace = targets[0]!;
+    }
+  }
+
+  async bindSplitInterfaceOutputFacesAtAction(orderedActionIndex: number) {
+    const registrations = [...this.splitInterfaceSelectors.values()].filter(
+      ({ selector }) => selector.splitActionIndex === orderedActionIndex,
+    );
+    for (const registration of registrations) {
+      const output = this.input.outputRecords.get(orderedOutputKey(orderedActionIndex));
+      if (!output?.featureId || !registration.toolFace || !output.bodyIds?.length) {
+        throw new Error("Split-interface selector has no exact tool face or split outputs.");
+      }
+      const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+      const exact = await this.input.modelingService.buildNativeExactBrepPayload({
+        baseRevisionId: snapshot.document.revisionId,
+        target: { kind: "body", bodyId: output.bodyIds[0]! },
+      });
+      const sourceKey = `sheet-split-tool-successor:${output.featureId}:${registration.toolFace.bodyId}:face:${registration.toolFace.faceId}`;
+      const targets = exact.kind === "nativeTopologyPayload"
+        ? (exact.payload.topologyLineage ?? []).filter((lineage) => lineage.featureId === output.featureId)
+          .flatMap((lineage) => lineage.outputs)
+          .flatMap((entry) => entry.sourceTargets)
+          .filter((entry) => entry.sourceKey === sourceKey)
+          .flatMap((entry) => entry.targets)
+          .filter((target): target is Extract<DurableRef, { kind: "face" }> => target.kind === "face")
+        : [];
+      if (targets.length !== 1) {
+        throw new Error(`Split-interface alias ${sourceKey} resolved ${targets.length} output faces, expected exactly one.`);
+      }
+      registration.outputFace = targets[0]!;
+    }
+  }
+
+  async resolveDeferredSplitInterfaceFace(
+    selector: ImportDeferredSplitInterfaceFaceRef,
+  ): Promise<Extract<DurableRef, { kind: "face" }>> {
+    const registration = this.splitInterfaceSelectors.get(this.splitInterfaceSelectorKey(selector));
+    const reference = registration?.outputFace;
+    if (!reference) throw new Error("Split-interface face was not bound in this apply session.");
+    const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+    const body = snapshot.document.bodies.find((candidate) => candidate.bodyId === reference.bodyId);
+    if (!body?.topology.faceIds.includes(reference.faceId)) {
+      throw new Error(`Split-interface output face ${reference.bodyId}:${reference.faceId} occurs 0 times at the sketch consumer.`);
+    }
+    return reference;
+  }
+
+  historicalWitnessActionIndexes(): ReadonlySet<number> {
+    return new Set(
+      [...this.historicalSelectors.values()].map(({ selector }) => selector.witnessActionIndex),
+    );
+  }
+
+  async bindHistoricalSelectorsAtAction(
+    orderedActionIndex: number,
+    retainedResult?: Awaited<ReturnType<typeof deriveLiveBodySignatures>>,
+  ) {
+    const registrations = [...this.historicalSelectors.values()].filter(
+      ({ selector }) => selector.witnessActionIndex === orderedActionIndex,
+    );
+    if (registrations.length === 0) return;
+    let result = retainedResult;
+    if (!result) {
+      const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+      result = await deriveLiveBodySignatures({ snapshot, service: this.input.modelingService });
+      this.primeLiveSignatures(snapshot.document.revisionId, result);
+    }
+    if (result.status !== "available") {
+      throw new TopologyApplyRematchError(
+        registrations[0]!.selector,
+        `historical witness signatures unavailable: ${result.diagnostics
+          .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+          .join(" | ")}`,
+      );
+    }
+    for (const registration of registrations) {
+      const selector = registration.selector;
+      const candidates = result.signatures.filter(
+        (signature) =>
+          signature.entityClass === selector.expectedKind &&
+          signature.reference.kind === selector.expectedKind,
+      );
+      const match = matchSignature(
+        selector.capturedSignature,
+        candidates,
+        LIVE_TOPOLOGY_MATCH_TOLERANCE,
+      );
+      if (match.kind !== "unique" || match.reference.kind !== selector.expectedKind) {
+        throw new TopologyApplyRematchError(
+          selector,
+          `historical witness action ${orderedActionIndex} matched ${match.kind}`,
+        );
+      }
+      const key = durableTopologyReferenceKey(match.reference);
+      if (
+        registration.boundReference &&
+        durableTopologyReferenceKey(registration.boundReference) !== key
+      ) {
+        throw new TopologyApplyRematchError(
+          selector,
+          `historical witness binding conflict (${durableTopologyReferenceKey(registration.boundReference)} versus ${key})`,
+        );
+      }
+      registration.boundReference = match.reference;
+    }
+  }
+
+  /** Advance selected historical references through one exact action-local lineage stage. */
+  async advanceHistoricalSelectorsAtAction(orderedActionIndex: number) {
+    const registrations = [...this.historicalSelectors.values()].filter(({ selector }) =>
+      (selector.successorActionIndexes ?? []).includes(orderedActionIndex),
+    );
+    if (registrations.length === 0) return;
+    const output = this.input.outputRecords.get(orderedOutputKey(orderedActionIndex));
+    const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+    const signatureResult = await deriveLiveBodySignatures({
+      snapshot,
+      service: this.input.modelingService,
+    });
+    if (signatureResult.status === "unavailable") {
+      throw new TopologyApplyRematchError(
+        registrations[0]!.selector,
+        "exact successor lineage payload is unavailable",
+      );
+    }
+    const evidence = {
+      ...signatureResult.exactTopologyEvidence,
+      actionOutputs: output ? [{ actionIndex: orderedActionIndex, ...output }] : [],
+    };
+    for (const registration of registrations) {
+      if (!registration.boundReference) {
+        throw new TopologyApplyRematchError(
+          registration.selector,
+          `historical witness was not bound before successor action ${orderedActionIndex}`,
+        );
+      }
+      const successor = followExactTopologySuccessor({
+        actionIndex: orderedActionIndex,
+        evidence,
+        reference: registration.boundReference,
+      });
+      if (successor.kind !== "unique") {
+        throw new TopologyApplyRematchError(registration.selector, successor.detail);
+      }
+      registration.boundReference = successor.reference;
+    }
+  }
+
+  private historicalSelectorKey(selector: ImportDeferredHistoricalTopologyRef) {
+    return `${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}`;
+  }
+
   async resolveDeferredTopologyRef(
-    selector: ImportDeferredTopologyRef,
+    selector: ImportDeferredTopologySelector,
   ): Promise<DurableRef> {
+    if (selector.kind === "historicalTopologyOf") {
+      return this.resolveDeferredHistoricalTopologyRef(selector);
+    }
     let cache = this.liveSignatureCache;
     let signatureResult = cache?.byBodyScope.get(selector.bodyScope);
     const allBodyResult = cache?.byBodyScope.get(undefined);
@@ -606,26 +866,22 @@ export class ImportDeferredMaterializer {
     if (!signatureResult) {
       const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
       if (cache?.revisionId !== snapshot.document.revisionId) {
-        cache = {
-          revisionId: snapshot.document.revisionId,
-          byBodyScope: new Map(),
-        };
+        cache = { revisionId: snapshot.document.revisionId, byBodyScope: new Map() };
         this.liveSignatureCache = cache;
       }
       signatureResult = cache.byBodyScope.get(selector.bodyScope);
       if (!signatureResult) {
-        const scopedSnapshot =
-          selector.bodyScope === undefined
-            ? snapshot
-            : {
-                ...snapshot,
-                document: {
-                  ...snapshot.document,
-                  bodies: snapshot.document.bodies.filter(
-                    (body) => body.bodyId === selector.bodyScope,
-                  ),
-                },
-              };
+        const scopedSnapshot = selector.bodyScope === undefined
+          ? snapshot
+          : {
+              ...snapshot,
+              document: {
+                ...snapshot.document,
+                bodies: snapshot.document.bodies.filter(
+                  (body) => body.bodyId === selector.bodyScope,
+                ),
+              },
+            };
         signatureResult = await deriveLiveBodySignatures({
           snapshot: scopedSnapshot,
           service: this.input.modelingService,
@@ -635,8 +891,6 @@ export class ImportDeferredMaterializer {
     }
     const allSignatures: HistoryProbeTopologySignature[] =
       signatureResult.status === "available" ? signatureResult.signatures : [];
-    // Body scope and expected kind are exact hard gates. Apply them before the
-    // geometric matcher rather than scoring candidates it must reject.
     const signatures = allSignatures.filter(
       (signature) =>
         signature.entityClass === selector.expectedKind &&
@@ -645,20 +899,13 @@ export class ImportDeferredMaterializer {
           ("bodyId" in signature.reference &&
             signature.reference.bodyId === selector.bodyScope)),
     );
-    const match = matchSignature(
-      selector.capturedSignature,
-      signatures,
-      selector.tolerance,
-    );
+    const match = matchSignature(selector.capturedSignature, signatures, selector.tolerance);
     if (match.kind !== "unique" || match.reference.kind !== selector.expectedKind) {
-      // An unavailable signature derivation is not a no-match: its own
-      // diagnostics are the real cause and must not be dropped on the floor.
-      const unavailable =
-        signatureResult.status === "available"
-          ? null
-          : `live signatures unavailable: ${signatureResult.diagnostics
-              .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
-              .join(" | ")}`;
+      const unavailable = signatureResult.status === "available"
+        ? null
+        : `live signatures unavailable: ${signatureResult.diagnostics
+            .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+            .join(" | ")}`;
       throw new TopologyApplyRematchError(
         selector,
         [describeApplyRematchFailure(selector, match, signatures), unavailable]
@@ -666,10 +913,71 @@ export class ImportDeferredMaterializer {
           .join(" || "),
       );
     }
+    this.rememberDirectSelectorResolution(selector, match.reference);
     return match.reference;
   }
 
-  async resolveDeferredBodyId(selector: ImportDeferredTopologyRef): Promise<BodyId> {
+  /**
+   * A rebuild diagnostic names the rejected durable public id. Only a unique
+   * selector that materialized to that exact id is eligible for a historical
+   * retry; conflicting bindings fail closed.
+   */
+  directSelectorForInvalidatedReference(
+    reference: DurableRef | null | undefined,
+  ): ImportDeferredTopologyRef | null {
+    return reference
+      ? this.directSelectorsByResolvedReferenceKey.get(
+          durableTopologyReferenceKey(reference),
+        ) ?? null
+      : null;
+  }
+
+  private rememberDirectSelectorResolution(
+    selector: ImportDeferredTopologyRef,
+    reference: DurableRef,
+  ) {
+    const key = durableTopologyReferenceKey(reference);
+    const existing = this.directSelectorsByResolvedReferenceKey.get(key);
+    this.directSelectorsByResolvedReferenceKey.set(
+      key,
+      existing === undefined || JSON.stringify(existing) === JSON.stringify(selector)
+        ? selector
+        : null,
+    );
+  }
+
+  private async resolveDeferredHistoricalTopologyRef(
+    selector: ImportDeferredHistoricalTopologyRef,
+  ): Promise<DurableRef> {
+    const registration = this.historicalSelectors.get(this.historicalSelectorKey(selector));
+    if (!registration?.boundReference) {
+      throw new TopologyApplyRematchError(selector, "historical witness was not bound in this session");
+    }
+    const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+    const reference = registration.boundReference;
+    if (!("bodyId" in reference)) {
+      throw new TopologyApplyRematchError(selector, "historical topology reference has no body lineage");
+    }
+    const body = snapshot.document.bodies.find((candidate) => candidate.bodyId === reference.bodyId);
+    const live = reference.kind === "body"
+      ? body !== undefined
+      : reference.kind === "face"
+        ? body?.topology.faceIds.includes(reference.faceId) ?? false
+        : reference.kind === "edge"
+          ? body?.topology.edgeIds.includes(reference.edgeId) ?? false
+          : reference.kind === "vertex"
+            ? body?.topology.vertexIds.includes(reference.vertexId) ?? false
+            : false;
+    if (!live) {
+      throw new TopologyApplyRematchError(
+        selector,
+        `bound historical lineage ${durableTopologyReferenceKey(reference)} occurs 0 times at the consumer`,
+      );
+    }
+    return reference;
+  }
+
+  async resolveDeferredBodyId(selector: ImportDeferredTopologySelector): Promise<BodyId> {
     const reference = await this.resolveDeferredTopologyRef(selector);
     if (reference.kind !== "body") {
       throw new TopologyApplyRematchError(
@@ -894,6 +1202,7 @@ export class ImportDeferredMaterializer {
       if (!(error instanceof TopologyApplyRematchError) || !request.topologyFallback) {
         throw error;
       }
+      if (error.selector.kind !== "topologyOf") throw error;
       this.topologyFallbackSource = error.selector.source;
       return this.materializeFeatureRequestUnchecked(
         request.topologyFallback,
@@ -1024,7 +1333,7 @@ export class ImportDeferredMaterializer {
             role: string;
             targets: readonly (
               | DurableRef
-              | ImportDeferredTopologyRef
+              | ImportDeferredTopologySelector
               | ImportDeferredSketchEntityRef
               | ImportDeferredSketchPointRef
               | Extract<ImportDeferredValue, { kind: "regionOf" | "bodyOf" | "constructionOf" }>
@@ -1181,6 +1490,13 @@ export class ImportDeferredMaterializer {
     consumer: ImportPreparedActionRef,
   ): Promise<CommitSketchRequest> {
     const support = request.plane.support;
+    if (support.kind === "splitInterfaceFaceOf") {
+      const resolvedSupport = await this.resolveDeferredSplitInterfaceFace(support);
+      return {
+        ...request,
+        plane: { ...request.plane, support: resolvedSupport },
+      } as CommitSketchRequest;
+    }
     if (isDeferredTopologyRef(support)) {
       const resolvedSupport = await this.resolveDeferredTopologyRef(support);
       return {
@@ -1395,6 +1711,8 @@ export async function applyImportPreparedActions(input: {
       ),
     ];
   }
+  materializer.registerHistoricalSelectors(input.actions);
+  materializer.registerSplitInterfaceSelectors(input.actions);
 
   let failure: unknown = null;
   for (
@@ -1406,6 +1724,9 @@ export async function applyImportPreparedActions(input: {
     currentOrderedPosition = orderedPosition;
     try {
       await applyByKind(ref);
+      await materializer.bindSplitInterfaceToolFacesAtAction(orderedPosition);
+      await materializer.bindSplitInterfaceOutputFacesAtAction(orderedPosition);
+      await materializer.bindHistoricalSelectorsAtAction(orderedPosition);
     } catch (error) {
       failure = error;
       break;

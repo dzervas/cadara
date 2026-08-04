@@ -54,7 +54,12 @@ import type {
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
 import { type AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import {
+  createAuthoredSketchRegionSlots,
+  reassociateAuthoredSketchRegionSlots,
+} from "@/contracts/sketch/authored-region-slots";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
@@ -96,7 +101,10 @@ import {
   type OccAuthoringState,
 } from "@/domain/modeling/occ/authoring-state";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
-import { releaseReplacedOccBakedShapeCache } from "@/domain/modeling/occ/memory";
+import {
+  releaseOccAuthoringStateObjects,
+  releaseReplacedOccBakedShapeCache,
+} from "@/domain/modeling/occ/memory";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import {
   getOpenCascadeInstance,
@@ -256,6 +264,17 @@ function createRevisionId(sequence: number) {
   return `rev_${String(sequence).padStart(4, "0")}` as RevisionId;
 }
 
+function serializeCurrentOccTopologyLineage(state: OccAuthoringState) {
+  return serializeOccFeatureTopologyLineage(
+    mergeOccFeatureTopologyStageMaps(
+      state.previousFeatureTopologyStages,
+      state.featureTopologyStages,
+    ),
+    state.previousFeatureTopologyLineage,
+    new Set(state.features.map((feature) => feature.featureId)),
+  );
+}
+
 function createAuthoredModelDocumentFromAuthoringState(
   state: OccAuthoringState,
 ): AuthoredModelDocument {
@@ -276,6 +295,7 @@ function createAuthoredModelDocumentFromAuthoringState(
       label: sketch.label,
       plane: structuredClone(sketch.plane),
       definition: structuredClone(sketch.sketch.definition),
+      regionSlots: createAuthoredSketchRegionSlots(sketch.sketch.regions),
     })),
     features: state.features.map((feature) => ({
       featureId: feature.featureId,
@@ -292,14 +312,7 @@ function createAuthoredModelDocumentFromAuthoringState(
     })),
     assets: structuredClone(state.assets),
     embeddedBinaryAssets: [...structuredClone(state.embeddedBinaryAssets)],
-    topologyLineage: serializeOccFeatureTopologyLineage(
-      mergeOccFeatureTopologyStageMaps(
-        state.previousFeatureTopologyStages,
-        state.featureTopologyStages,
-      ),
-      state.previousFeatureTopologyLineage,
-      new Set(state.features.map((feature) => feature.featureId)),
-    ),
+    topologyLineage: serializeCurrentOccTopologyLineage(state),
   };
 }
 
@@ -1568,6 +1581,13 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
       const targets: NonNullable<ModelingDiagnostic["target"]>[] = [
         ...definition.parameters.profiles,
       ];
+      // The start entity is a durable topology dependency just like an UP_TO
+      // terminator. Omitting it hid its exact invalidated face from the rebuild
+      // diagnostic, preventing importer containment from retrying the owning
+      // selector through its public-id lineage.
+      if (definition.parameters.startExtent.kind === "entityOffset") {
+        targets.push(definition.parameters.startExtent.target);
+      }
       const extent = getExtrudeFeatureExtent(definition.parameters);
       const ends =
         extent.mode === "twoSide"
@@ -1764,6 +1784,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.assetResolver = options.assetResolver;
     this.documentId = options.documentId ?? OCC_KERNEL_DOCUMENT_ID;
     this.tolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES;
+  }
+
+  dispose(): void {
+    const runtimeState = this.runtimeState;
+    this.runtimeState = null;
+    this.initializationPromise = null;
+    this.workerRestoredDocument = null;
+    this.nativeTopologyBodyPayloadCache.clear();
+    if (runtimeState) {
+      releaseOccAuthoringStateObjects(runtimeState.authoringState);
+    }
   }
 
   preloadRuntime(): Promise<void> {
@@ -1970,11 +2001,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       document.revisionId,
       definition,
-      normalizeDerivedRegionsForSketchId(
-        regions.regions,
-        sketchId,
-        document.revisionId,
-      ),
+      reassociateAuthoredSketchRegionSlots({
+        slots: sketch.regionSlots,
+        regions: normalizeDerivedRegionsForSketchId(
+          regions.regions,
+          sketchId,
+          document.revisionId,
+        ),
+      }),
       solved.solvedSnapshot,
       projection.projectedReferences,
     );
@@ -1985,16 +2019,21 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
   ): Promise<void> {
+    const parsed = parseAuthoredModelDocument(structuredClone(document));
+    if (!parsed.ok) {
+      throw new Error(parsed.diagnostic.message);
+    }
+    const validatedDocument = parsed.document;
     this.assetResolver = assetResolver ?? this.assetResolver;
-    const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver);
-    const assets = createGeometryAssetBlobInputs(document, assetBlobs);
+    const assetBlobs = await resolveGeometryAssetBlobs(validatedDocument, assetResolver);
+    const assets = createGeometryAssetBlobInputs(validatedDocument, assetBlobs);
 
     if (this.workerSnapshotClient) {
       this.workerRestoredDocument = null;
       this.runtimeState = null;
       this.initializationPromise = null;
       await this.workerSnapshotClient.restoreAuthoredModelDocument(
-        document,
+        validatedDocument,
         diagnostics,
         assets,
       );
@@ -2004,7 +2043,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.workerRestoredDocument = null;
 
     await this.restoreAuthoredModelDocumentOnMainThread(
-      document,
+      validatedDocument,
       diagnostics,
       assetResolver ?? createInMemoryGeometryAssetResolver(assets),
     );
@@ -2015,15 +2054,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
   ): Promise<void> {
+    const parsed = parseAuthoredModelDocument(structuredClone(document));
+    if (!parsed.ok) {
+      throw new Error(parsed.diagnostic.message);
+    }
+    const validatedDocument = parsed.document;
     this.assetResolver = assetResolver ?? this.assetResolver;
     if (this.workerSnapshotClient) {
       const assetBlobs = await resolveGeometryAssetBlobs(
-        document,
+        validatedDocument,
         assetResolver,
       );
-      const assets = createGeometryAssetBlobInputs(document, assetBlobs);
+      const assets = createGeometryAssetBlobInputs(validatedDocument, assetBlobs);
       await this.workerSnapshotClient.validateAuthoredModelDocument(
-        document,
+        validatedDocument,
         diagnostics,
         assets,
       );
@@ -2035,7 +2079,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     await this.restoreAuthoredModelDocumentOnMainThread(
-      document,
+      validatedDocument,
       diagnostics,
       assetResolver,
     );
@@ -3429,13 +3473,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           aliases,
         )
       : parsedNativePayload;
-    const payload = createOccNativeExactBrepPayloadFromShimPayload({
-      revisionId: state.revisionId,
-      target,
-      bodyId: bodyOrResult.bodyId,
-      bodyLabel: bodyOrResult.label,
-      nativePayload,
-    });
+    const payload = {
+      ...createOccNativeExactBrepPayloadFromShimPayload({
+        revisionId: state.revisionId,
+        target,
+        bodyId: bodyOrResult.bodyId,
+        bodyLabel: bodyOrResult.label,
+        nativePayload,
+      }),
+      topologyLineage: serializeCurrentOccTopologyLineage(state),
+    };
 
     return {
       kind: "nativeTopologyPayload",

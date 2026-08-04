@@ -41,6 +41,7 @@ import {
   formatGeneratedProducerTopologySourceKey,
   type OccFeatureTopologyStage,
   type OccGeneratedAdjacencyEntry,
+  type OccGeneratedFaceCompleteBoundaryEntry,
 } from "@/domain/modeling/occ/topology-stage";
 
 type OccSubtopologyShape = { IsSame(other: never): boolean };
@@ -115,6 +116,71 @@ function collectExactIdentitySuccessors(
     sourceBody.verticesById,
     replacement.verticesById,
     (bodyId, vertexId) => ({ kind: "vertex", bodyId, vertexId }),
+  );
+
+  return successors;
+}
+
+/**
+ * Exact successors reported directly by the builder's `Modified` relation.
+ * This deliberately excludes `Generated`: a modified source entity can retain
+ * its identity, whereas a generated result cannot be its successor.
+ */
+function collectExactModifiedSuccessors(input: {
+  oc: OccFeatureExecutionContext["oc"];
+  sourceBody: OccTrackedBody;
+  replacement: OccTrackedBody;
+  builder: { Modified(source: never): never };
+}) {
+  const successors = new Map<string, DurableRef>();
+  const claimKind = <Id extends FaceId | EdgeId | VertexId>(
+    previousShapesById: ReadonlyMap<Id, OccSubtopologyShape>,
+    currentShapesById: ReadonlyMap<Id, OccSubtopologyShape>,
+    toRef: (bodyId: BodyId, id: Id) => DurableRef,
+  ) => {
+    for (const [previousId, previousShape] of previousShapesById) {
+      const matches = listOccShapes(
+        input.oc,
+        input.builder.Modified(previousShape as never),
+      ).flatMap((modified) =>
+        [...currentShapesById].filter(([, currentShape]) =>
+          currentShape.IsSame(modified as never),
+        ),
+      );
+      if (matches.length !== 1) continue;
+      successors.set(
+        getOccDurableRefKey(toRef(input.sourceBody.bodyId, previousId)),
+        toRef(input.replacement.bodyId, matches[0]![0]),
+      );
+    }
+  };
+
+  claimKind(
+    input.sourceBody.facesById,
+    input.replacement.facesById,
+    (bodyId, faceId) => ({
+      kind: "face",
+      bodyId,
+      faceId,
+    }),
+  );
+  claimKind(
+    input.sourceBody.edgesById,
+    input.replacement.edgesById,
+    (bodyId, edgeId) => ({
+      kind: "edge",
+      bodyId,
+      edgeId,
+    }),
+  );
+  claimKind(
+    input.sourceBody.verticesById,
+    input.replacement.verticesById,
+    (bodyId, vertexId) => ({
+      kind: "vertex",
+      bodyId,
+      vertexId,
+    }),
   );
 
   return successors;
@@ -252,7 +318,8 @@ function collectGeneratedAdjacency(input: {
     currentShapesById: ReadonlyMap<Id, OccSubtopologyShape>,
     toRef: (id: Id) => DurableRef,
   ) => {
-    const ancestors = new input.oc.TopTools_IndexedDataMapOfShapeListOfShape_1();
+    const ancestors =
+      new input.oc.TopTools_IndexedDataMapOfShapeListOfShape_1();
     input.oc.TopExp.MapShapesAndAncestors(
       input.replacement.shape,
       (kind === "edge"
@@ -316,6 +383,52 @@ function collectGeneratedAdjacency(input: {
   ];
 }
 
+
+/**
+ * Complete face→edge incidence for local-operation output faces. `TopExp_Explorer`
+ * traverses every wire; IsSame resolves its exact native edge identity back to
+ * the tracked edge id and removes repeated seam/wire occurrences.
+ */
+function collectGeneratedFaceCompleteBoundaries(input: {
+  oc: OccFeatureExecutionContext["oc"];
+  replacement: OccTrackedBody;
+}): OccGeneratedFaceCompleteBoundaryEntry[] {
+  const entries: OccGeneratedFaceCompleteBoundaryEntry[] = [];
+  for (const [faceId, face] of input.replacement.facesById) {
+    const explorer = new input.oc.TopExp_Explorer_2(
+      face,
+      input.oc.TopAbs_ShapeEnum.TopAbs_EDGE as never,
+      input.oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+    );
+    const boundaryEdgeIds = new Set<EdgeId>();
+    let complete = true;
+    try {
+      while (explorer.More()) {
+        const edge = explorer.Current() as unknown as OccSubtopologyShape;
+        const matches = [...input.replacement.edgesById].filter(([, candidate]) =>
+          (candidate as OccSubtopologyShape).IsSame(edge as never),
+        );
+        if (matches.length !== 1) {
+          complete = false;
+          break;
+        }
+        boundaryEdgeIds.add(matches[0]![0]);
+        explorer.Next();
+      }
+    } finally {
+      explorer.delete();
+    }
+    if (!complete || boundaryEdgeIds.size === 0) {
+      continue;
+    }
+    entries.push({
+      target: { kind: "face", bodyId: input.replacement.bodyId, faceId },
+      boundaryEdgeIds: [...boundaryEdgeIds],
+    });
+  }
+  return entries;
+}
+
 /**
  * Record stage lineage for one local operation (fillet/chamfer) on one body.
  *
@@ -341,6 +454,12 @@ export function collectLocalOperationTopologyStages(input: {
   };
   hasNativeHistory: boolean;
   generatedHistorySource: { Generated(source: never): never } | null;
+  exactSuccessorHistorySource?: { Modified(source: never): never } | null;
+  includeGeneratedTopology?: boolean;
+  supplementalProducerTargetsByOutputBodyId?: ReadonlyMap<
+    BodyId,
+    ReadonlyMap<string, DurableRef>
+  >;
 }) {
   // Exact history comes from either the native transaction's successor claims
   // or a live JS builder. With neither there is no exact claim to make, so the
@@ -362,14 +481,26 @@ export function collectLocalOperationTopologyStages(input: {
   }
 
   for (const replacement of input.replacementResult.replacements) {
-    const successorsBySourceKey = new Map(
-      collectExactIdentitySuccessors(input.sourceBody, replacement),
-    );
+    const identitySuccessors = collectExactIdentitySuccessors(input.sourceBody, replacement);
+    const successorsBySourceKey = new Map(identitySuccessors);
+    const identitySuccessorSourceKeys = new Set(identitySuccessors.keys());
+    for (const [key, successor] of input.exactSuccessorHistorySource
+      ? collectExactModifiedSuccessors({
+          oc: input.oc,
+          sourceBody: input.sourceBody,
+          replacement,
+          builder: input.exactSuccessorHistorySource,
+        })
+      : []) {
+      successorsBySourceKey.set(key, successor);
+      identitySuccessorSourceKeys.delete(key);
+    }
     // The kernel's own claims win where it made one; identity only fills the
     // gaps its over-eager `IsDeleted` left behind.
     for (const [key, successor] of input.replacementResult
       .successorTargetsByPreviousKey ?? []) {
       successorsBySourceKey.set(key, successor);
+      identitySuccessorSourceKeys.delete(key);
     }
     for (const key of successorsBySourceKey.keys()) {
       input.historyInvalidations.delete(key);
@@ -380,10 +511,16 @@ export function collectLocalOperationTopologyStages(input: {
         sourceBody: input.sourceBody,
         outputBody: replacement,
         successorsBySourceKey,
+        identitySuccessorSourceKeys,
         // The JS builder is live, so it answers `Generated` for the build that
         // actually ran; on the native path the shim's own generated records
-        // carry the same producer identity.
-        generatedTargetsBySourceKey: input.generatedHistorySource
+        // carry the same producer identity. Some operations deliberately carry
+        // successor-only history because their builder's Generated relation is
+        // not provenance for the result's newly created topology.
+        generatedTargetsBySourceKey:
+          input.includeGeneratedTopology === false
+            ? undefined
+            : input.generatedHistorySource
           ? collectGeneratedProducerTargets({
               oc: input.oc,
               ownerFeatureId: input.ownerFeatureId,
@@ -394,11 +531,20 @@ export function collectLocalOperationTopologyStages(input: {
           : input.replacementResult.generatedTargetsBySourceKey,
         // Neither builder history names the boundary of the surface it created,
         // so those entities are identified by the faces they bound.
-        generatedAdjacency: collectGeneratedAdjacency({
+        generatedAdjacency:
+          input.includeGeneratedTopology === false
+            ? undefined
+            : collectGeneratedAdjacency({
           oc: input.oc,
           sourceBody: input.sourceBody,
           replacement,
         }),
+        generatedFaceCompleteBoundaries: collectGeneratedFaceCompleteBoundaries({
+          oc: input.oc,
+          replacement,
+        }),
+        supplementalProducerTargetsBySourceKey:
+          input.supplementalProducerTargetsByOutputBodyId?.get(replacement.bodyId),
       }),
     );
   }
@@ -406,7 +552,11 @@ export function collectLocalOperationTopologyStages(input: {
 
 function serializeNativeEdgeTargets(
   body: OccTrackedBody,
-  targets: readonly { kind?: "edge"; bodyId: BodyId; edgeId: `edge_${string}` }[],
+  targets: readonly {
+    kind?: "edge";
+    bodyId: BodyId;
+    edgeId: `edge_${string}`;
+  }[],
 ) {
   return targets
     .map((target) =>
@@ -777,7 +927,12 @@ function addChamferWidth(
         "advanced-feature-unsupported-kernel-case: OCC chamfer binding does not expose distance+angle execution.",
       );
     }
-    chamfer.AddDA(width.distance, (width.angleDegrees * Math.PI) / 180, edge, face);
+    chamfer.AddDA(
+      width.distance,
+      (width.angleDegrees * Math.PI) / 180,
+      edge,
+      face,
+    );
     return;
   }
 

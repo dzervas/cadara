@@ -310,6 +310,11 @@ function entityId(featureId: string, raw: string): SketchEntityId {
   return `sketch_entity_${sanitizeId(featureId)}_${sanitizeId(raw)}` as SketchEntityId;
 }
 
+/** Stable authored entity id used by imported Onshape sketches. */
+export function importedOnshapeSketchEntityId(featureId: string, raw: string): SketchEntityId {
+  return entityId(featureId, raw);
+}
+
 function constraintId(featureId: string, raw: string): ConstraintId {
   return `constraint_${sanitizeId(featureId)}_${sanitizeId(raw)}` as ConstraintId;
 }

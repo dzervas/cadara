@@ -69,6 +69,8 @@ export interface OccFeatureExecutionContext {
   bakedShapeCache: Map<GeometryAssetId, OccMaterializedBakedShape[]>;
   referenceState?: OccReferenceState;
   previousTopologyStage: OccFeatureTopologyStage | null;
+  /** Persisted exact output slots from the last evaluation of this feature. */
+  previousTopologyLineage?: import("@/contracts/modeling/authored-document").AuthoredFeatureTopologyLineage | null;
   /** Transient exact lineage resolver for live topology consumed by this feature. */
   topologyProvenanceIndex: OccTopologyProvenanceIndex;
   /** Earlier authored feature definitions available to exact operation replay. */

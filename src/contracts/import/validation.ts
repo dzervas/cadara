@@ -1,7 +1,9 @@
 import typia from "typia";
 
 import type {
-  ImportDeferredTopologyRef,
+  ImportDeferredHistoricalTopologyRef,
+  ImportDeferredTopologySelector,
+  ImportDeferredSplitInterfaceFaceRef,
   ImportDeferredFeatureBooleanScope,
   ImportDeferredValue,
   ImportPreparedActions,
@@ -52,12 +54,25 @@ function isDeferredValue(value: unknown): value is ImportDeferredValue {
   );
 }
 
-function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologyRef {
+function isDeferredTopologyRef(value: unknown): value is ImportDeferredTopologySelector {
   return Boolean(
-    value &&
-      typeof value === "object" &&
-      (value as { kind?: unknown }).kind === "topologyOf",
+    value && typeof value === "object" &&
+      ((value as { kind?: unknown }).kind === "topologyOf" ||
+        (value as { kind?: unknown }).kind === "historicalTopologyOf"),
   );
+}
+
+function isDeferredHistoricalTopologyRef(
+  value: ImportDeferredTopologySelector,
+): value is ImportDeferredHistoricalTopologyRef {
+  return value.kind === "historicalTopologyOf";
+}
+
+function isDeferredSplitInterfaceFaceRef(
+  value: unknown,
+): value is ImportDeferredSplitInterfaceFaceRef {
+  return Boolean(value && typeof value === "object" &&
+    (value as { kind?: unknown }).kind === "splitInterfaceFaceOf");
 }
 
 function collectTopologySlots(
@@ -623,6 +638,30 @@ function validateImportDeferredValueInvariants(
       return;
     }
     const path = `commitSketches.${ref.index}.plane.support`;
+    if (isDeferredSplitInterfaceFaceRef(support)) {
+      const indexes = [
+        support.profileSketchActionIndex,
+        support.toolExtrudeActionIndex,
+        support.splitActionIndex,
+      ];
+      const kinds = ["commitSketch", "createFeature", "createFeature"] as const;
+      const validChain = indexes.every(
+        (actionIndex, index) => Number.isInteger(actionIndex) && actionIndex >= 0 &&
+          actionIndex < orderedPosition &&
+          getActionAtOrderedPosition(actions, actionIndex)?.kind === kinds[index],
+      ) && support.profileSketchActionIndex < support.toolExtrudeActionIndex &&
+        support.toolExtrudeActionIndex < support.splitActionIndex &&
+        support.endRole === "one-side-end";
+      if (!validChain) {
+        issues.push({
+          path,
+          expected: "profile sketch → sole-body tool extrude → split earlier action chain",
+          value: support,
+          message: "A split-interface sketch support must name its exact earlier profile, tool, and split actions.",
+        });
+      }
+      return;
+    }
     // A `topologyOf` support rematches a probed face against live topology, so
     // it must resolve a face produced by an earlier imported feature action.
     if (isDeferredTopologyRef(support)) {
@@ -634,18 +673,41 @@ function validateImportDeferredValueInvariants(
           message: "Sketch-plane topologyOf supports must resolve a face.",
         });
       }
-      const hasEarlierProducer =
-        actions.orderedActions
-          ?.slice(0, orderedPosition)
-          .some((entry) => entry.kind === "createFeature") ?? false;
+      const hasEarlierProducer = isDeferredHistoricalTopologyRef(support)
+        ? Number.isInteger(support.witnessActionIndex) &&
+          support.witnessActionIndex < orderedPosition &&
+          getActionAtOrderedPosition(actions, support.witnessActionIndex)?.kind === "createFeature"
+        : actions.orderedActions
+            ?.slice(0, orderedPosition)
+            .some((entry) => entry.kind === "createFeature") ?? false;
       if (!hasEarlierProducer) {
         issues.push({
           path,
           expected: "an earlier createFeature producer action",
           value: orderedPosition,
           message:
-            "A topologyOf sketch-plane support must follow the feature action that produces its face.",
+            "A deferred topology sketch-plane support must follow the feature action that produces its face.",
         });
+      }
+      if (isDeferredHistoricalTopologyRef(support)) {
+        const indexes = support.successorActionIndexes;
+        const validChain = Array.isArray(indexes) &&
+          indexes.every(
+            (index, position) =>
+              Number.isInteger(index) &&
+              index > support.witnessActionIndex &&
+              index < orderedPosition &&
+              getActionAtOrderedPosition(actions, index)?.kind === "createFeature" &&
+              (position === 0 || index > indexes[position - 1]!),
+          );
+        if (!validChain) {
+          issues.push({
+            path: `${path}.successorActionIndexes`,
+            expected: "strictly ordered earlier createFeature action indexes",
+            value: indexes,
+            message: "Historical topology successors must be exact earlier feature actions in ascending order.",
+          });
+        }
       }
       return;
     }

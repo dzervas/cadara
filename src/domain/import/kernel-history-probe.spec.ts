@@ -11,6 +11,7 @@ import {
   createOccNativeExactBrepPayloadFromShimPayload,
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
 import {
   createImportCapabilities,
   TopologyApplyRematchError,
@@ -29,7 +30,26 @@ function makeSnapshot(revisionId: RevisionId, bodies: readonly { bodyId: BodyId 
     document: {
       documentId: "doc_probe" as DocumentId,
       revisionId,
-      bodies: bodies.map((body) => ({ bodyId: body.bodyId })),
+      bodies: bodies.map((body) => {
+        const derived = deriveKernelTopologySignaturesFromExactBrepPayload(
+          makeExactPayload(body.bodyId),
+        );
+        const signatures = derived.status === "available" ? derived.signatures : [];
+        return {
+          bodyId: body.bodyId,
+          topology: {
+            faceIds: signatures.flatMap((entry) =>
+              entry.reference.kind === "face" ? [entry.reference.faceId] : [],
+            ),
+            edgeIds: signatures.flatMap((entry) =>
+              entry.reference.kind === "edge" ? [entry.reference.edgeId] : [],
+            ),
+            vertexIds: signatures.flatMap((entry) =>
+              entry.reference.kind === "vertex" ? [entry.reference.vertexId] : [],
+            ),
+          },
+        };
+      }),
     },
   } as never;
 }
@@ -264,11 +284,10 @@ test("kernel history probe continues exact prefix extensions and restarts on div
     disposeCalls: 0,
   });
 
-  const divergent = structuredClone(fullActions);
-  divergent.createFeatures![0]!.featureLabel = "Changed probe extrude";
   await probe.evaluateHistoryProbe({
-    actions: divergent,
+    actions: fullActions,
     requestedSignatureStepOrdinals: [0, 1],
+    requireFreshExecution: true,
   });
   expect({ serviceCount, sketchCalls, featureCalls, snapshotCalls, disposeCalls }).toEqual({
     serviceCount: 2,
@@ -278,8 +297,103 @@ test("kernel history probe continues exact prefix extensions and restarts on div
     disposeCalls: 1,
   });
 
+  const divergent = structuredClone(fullActions);
+  divergent.createFeatures![0]!.featureLabel = "Changed probe extrude";
+  await probe.evaluateHistoryProbe({
+    actions: divergent,
+    requestedSignatureStepOrdinals: [0, 1],
+  });
+  expect({ serviceCount, sketchCalls, featureCalls, snapshotCalls, disposeCalls }).toEqual({
+    serviceCount: 3,
+    sketchCalls: 3,
+    featureCalls: 3,
+    snapshotCalls: 12,
+    disposeCalls: 2,
+  });
+
   await probe.dispose?.();
-  expect(disposeCalls).toBe(2);
+  expect(disposeCalls).toBe(3);
+});
+
+// Lane: logic. Seam: extending a retained prefix can bind a historical selector
+// from exact signatures sampled internally even when they were omitted from output.
+test("kernel history probe reuses an internally sampled historical witness", async () => {
+  const bodyId = "body_apply_probe" as BodyId;
+  const payload = makeExactPayload(bodyId);
+  const derived = deriveKernelTopologySignaturesFromExactBrepPayload(payload);
+  if (derived.status !== "available") throw new Error("Expected exact witness signatures.");
+  const witness = derived.signatures.find((signature) => signature.entityClass === "face")!;
+  const selector = {
+    kind: "historicalTopologyOf" as const,
+    expectedKind: "face" as const,
+    capturedSignature: {
+      entityClass: witness.entityClass,
+      geometryType: witness.geometryType,
+      definingData: witness.definingData,
+      centroid: witness.centroid,
+      boundingBox: witness.boundingBox,
+    },
+    witnessActionIndex: 0,
+    source: {
+      consumerFeatureId: "consumer",
+      parameterId: "reference",
+      deterministicId: "historical-face",
+    },
+  };
+  const first: ImportPreparedActions = {
+    createFeatures: [{ requestId: "witness" } as never],
+    orderedActions: [{ kind: "createFeature", index: 0 }],
+  };
+  const extended: ImportPreparedActions = {
+    createFeatures: [
+      first.createFeatures![0]!,
+      {
+        definition: {
+          kind: "plane",
+          parameters: { mode: "coplanar", reference: { target: selector } },
+        },
+      } as never,
+    ],
+    orderedActions: [
+      { kind: "createFeature", index: 0 },
+      { kind: "createFeature", index: 1 },
+    ],
+  };
+  let serviceCount = 0;
+  let actionCalls = 0;
+  const probe = createKernelHistoryProbeSession({
+    createService() {
+      serviceCount += 1;
+      return {
+        async getCurrentDocumentSnapshot() {
+          return makeSnapshot(`rev_historical_${actionCalls}` as RevisionId, [{ bodyId }]);
+        },
+        async createFeature() {
+          actionCalls += 1;
+          return ok({
+            revisionId: `rev_historical_${actionCalls}` as RevisionId,
+            featureId: `feature_${actionCalls}`,
+            changedTargets: [{ kind: "body", bodyId }],
+            diagnostics: [],
+            revisionState: { kind: "accepted" },
+          }) as never;
+        },
+        async commitSketch() { return ok({}) as never; },
+        async addDocumentVariable() { return ok({}) as never; },
+        async buildNativeExactBrepPayload() {
+          return { kind: "nativeTopologyPayload", payload, diagnostics: [] } as const;
+        },
+      } as never;
+    },
+  });
+
+  await probe.evaluateHistoryProbe({ actions: first, requestedSignatureStepOrdinals: [] });
+  const result = await probe.evaluateHistoryProbe({ actions: extended, requestedSignatureStepOrdinals: [] });
+
+  expect(serviceCount).toBe(1);
+  expect(actionCalls).toBe(2);
+  expect(result.steps.every((step) => step.status === "rebuilt")).toBe(true);
+  expect(JSON.stringify(selector)).not.toContain(bodyId);
 });
 
 test("kernel history probe awaits async service disposal after a failed evaluation", async () => {
@@ -527,7 +641,7 @@ test("kernel history probe returns completed prefix results and failing-step dia
 });
 
 
-test("kernel history probe samples every successful step by default and skips unsampled signature work", async () => {
+test("kernel history probe samples exact evidence at every step while filtering signature output", async () => {
   const actions: ImportPreparedActions = {
     createFeatures: [
       { requestId: "one" } as never,
@@ -587,15 +701,21 @@ test("kernel history probe samples every successful step by default and skips un
       step.status === "rebuilt" ? step.signatures.length : 0,
     ),
   ).toEqual([0, legacySignatureCounts[1], 0]);
-  expect(selected).toMatchObject({ snapshotCalls: 2, exactPayloadCalls: 1 });
+  expect(selected).toMatchObject({ snapshotCalls: 4, exactPayloadCalls: 3 });
 
   const empty = await evaluate([]);
-  expect(empty.result.steps).toEqual([
-    { status: "rebuilt", signatures: [] },
-    { status: "rebuilt", signatures: [] },
-    { status: "rebuilt", signatures: [] },
+  expect(
+    empty.result.steps.map((step) => ({
+      status: step.status,
+      signatures: step.status === "rebuilt" ? step.signatures : [],
+      hasExactEvidence: step.status === "rebuilt" && Boolean(step.exactTopologyEvidence),
+    })),
+  ).toEqual([
+    { status: "rebuilt", signatures: [], hasExactEvidence: true },
+    { status: "rebuilt", signatures: [], hasExactEvidence: true },
+    { status: "rebuilt", signatures: [], hasExactEvidence: true },
   ]);
-  expect(empty).toMatchObject({ snapshotCalls: 1, exactPayloadCalls: 0 });
+  expect(empty).toMatchObject({ snapshotCalls: 4, exactPayloadCalls: 3 });
 });
 
 test("kernel history probe contains topology rematch failures only when requested", async () => {

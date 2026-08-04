@@ -8,7 +8,7 @@ import {
   getExtrudeExtentEnds,
   getExtrudeFeatureExtent,
 } from "@/contracts/modeling/feature-extents";
-import type { BodyId, FeatureId } from "@/contracts/shared/ids";
+import type { BodyId, EdgeId, FeatureId, RegionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { mapSketchPointToWorld, type Vec3 } from "@/domain/modeling/occ/math";
 import {
@@ -43,15 +43,18 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import {
   applyBooleanPolicy,
+  mapFeatureSourceTargets,
   projectFeatureSourceShapes,
   runBoolean,
   trackSurfaceFeatureResult,
   type OccFeatureSourceShapeMap,
 } from "@/domain/modeling/occ/features/boolean-operations";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
-import type {
-  OccTopologySourceKey,
-  OccTopologyStageOutput,
+import {
+  formatExactSuccessorTopologySourceKey,
+  formatGeneratedFaceCompleteBoundaryTopologySourceKey,
+  type OccTopologySourceKey,
+  type OccTopologyStageOutput,
 } from "@/domain/modeling/occ/topology-stage";
 
 interface BuiltExtrudeShape {
@@ -60,7 +63,203 @@ interface BuiltExtrudeShape {
     OccTopologySourceKey,
     InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
   >;
+  /**
+   * Faces created by a multi-profile fuse, keyed only after every exact OCC
+   * Modified/Generated relation has contributed its authored source key.
+   */
+  compositeSourceShapes: Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >;
+  /** Complete semantic source sets carried through whole-operand OCC history. */
+  compositeOperands: CompositeOperand[];
   unsupportedSourceKeys: Set<OccTopologySourceKey>;
+}
+
+export function formatExtrudeProfileCapSourceKey(input: {
+  ownerFeatureId: FeatureId;
+  regionId: RegionId;
+  endRole: string;
+  cap: "first" | "last";
+}) {
+  return `extrude:${input.ownerFeatureId}:profile-region:${input.regionId}:end:${input.endRole}:cap:${input.cap}:face`;
+}
+
+/**
+ * Canonical identity for one fused face's complete, exact OCC ancestry. The
+ * caller establishes the set from kernel history before canonicalizing it;
+ * this helper never derives identity from shape order or geometry.
+ */
+export function formatExtrudeCompositeSourceKey(
+  sourceKeys: readonly OccTopologySourceKey[],
+) {
+  const sources = [...new Set(sourceKeys)].sort();
+  if (sources.length < 2 || sources.some((sourceKey) => sourceKey.length === 0)) {
+    throw new Error("occ-extrude-composite-provenance-requires-multiple-sources");
+  }
+  return `extrude-composite:${sources.map(encodeURIComponent).join("+")}`;
+}
+
+
+/**
+ * Exact fallback for an output face the prism/fuse history leaves unclaimed.
+ * The key comes from every distinct edge in every output wire, resolved only
+ * through the direct source claims already published for those edges.
+ */
+function addCompleteBoundaryFaceClaims(input: {
+  oc: OpenCascadeInstance;
+  ownerFeatureId: FeatureId;
+  body: import("@/domain/modeling/occ/topology").OccTrackedBody;
+  sourceTargets: Map<OccTopologySourceKey, DurableRef[]>;
+}) {
+  const claimsByEdgeTargetKey = new Map<string, Set<OccTopologySourceKey>>();
+  const claimedFaceTargetKeys = new Set<string>();
+  for (const [sourceKey, targets] of input.sourceTargets) {
+    for (const target of targets) {
+      if (
+        (target.kind !== "face" && target.kind !== "edge") ||
+        target.bodyId !== input.body.bodyId
+      ) {
+        continue;
+      }
+      if (target.kind === "face") {
+        claimedFaceTargetKeys.add(getOccDurableRefKey(target));
+      }
+      if (target.kind !== "edge") continue;
+      const targetKey = getOccDurableRefKey(target);
+      const claims = claimsByEdgeTargetKey.get(targetKey) ?? new Set<OccTopologySourceKey>();
+      claims.add(sourceKey);
+      claimsByEdgeTargetKey.set(targetKey, claims);
+    }
+  }
+
+  const candidatesBySourceKey = new Map<
+    OccTopologySourceKey,
+    Extract<DurableRef, { kind: "face" }>
+  >();
+  const droppedSourceKeys = new Set<OccTopologySourceKey>();
+  for (const [faceId, face] of input.body.facesById) {
+    const target: Extract<DurableRef, { kind: "face" }> = {
+      kind: "face",
+      bodyId: input.body.bodyId,
+      faceId,
+    };
+    if (claimedFaceTargetKeys.has(getOccDurableRefKey(target))) {
+      continue;
+    }
+
+    const explorer = new input.oc.TopExp_Explorer_2(
+      face,
+      input.oc.TopAbs_ShapeEnum.TopAbs_EDGE as never,
+      input.oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+    );
+    const boundaryEdgeSourceKeys: OccTopologySourceKey[] = [];
+    const seenEdgeIds = new Set<EdgeId>();
+    let complete = true;
+    try {
+      while (explorer.More()) {
+        const boundaryEdge = explorer.Current();
+        const matchingEdgeIds = [...input.body.edgesById]
+          .filter(([, edge]) => edge.IsSame(boundaryEdge as never))
+          .map(([edgeId]) => edgeId);
+        if (matchingEdgeIds.length !== 1) {
+          complete = false;
+          break;
+        }
+        const edgeId = matchingEdgeIds[0]!;
+        if (!seenEdgeIds.has(edgeId)) {
+          seenEdgeIds.add(edgeId);
+          const claims = claimsByEdgeTargetKey.get(
+            getOccDurableRefKey({ kind: "edge", bodyId: input.body.bodyId, edgeId }),
+          );
+          if (!claims || claims.size !== 1) {
+            complete = false;
+            break;
+          }
+          boundaryEdgeSourceKeys.push(claims.values().next().value!);
+        }
+        explorer.Next();
+      }
+    } finally {
+      explorer.delete();
+    }
+    if (!complete || boundaryEdgeSourceKeys.length === 0) {
+      continue;
+    }
+
+    const sourceKey = formatGeneratedFaceCompleteBoundaryTopologySourceKey({
+      featureId: input.ownerFeatureId,
+      bodyId: input.body.bodyId,
+      boundaryEdgeSourceKeys,
+    });
+    if (
+      input.sourceTargets.has(sourceKey) ||
+      candidatesBySourceKey.has(sourceKey)
+    ) {
+      candidatesBySourceKey.delete(sourceKey);
+      droppedSourceKeys.add(sourceKey);
+      continue;
+    }
+    if (!droppedSourceKeys.has(sourceKey)) {
+      candidatesBySourceKey.set(sourceKey, target);
+    }
+  }
+
+  for (const [sourceKey, target] of candidatesBySourceKey) {
+    input.sourceTargets.set(sourceKey, [target]);
+  }
+}
+
+
+type CompositeOperand = {
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+  sourceKeys: ReadonlySet<OccTopologySourceKey>;
+};
+
+function semanticCompositeSourceKeys(sourceShapes: OccFeatureSourceShapeMap) {
+  const sourceKeys = [...sourceShapes.keys()];
+  // Split-piece position is not semantic identity. If any profile source needs
+  // it, this producer is deliberately unavailable rather than partially named.
+  return sourceKeys.some((sourceKey) => /#[0-9]+(?:[:]|$)/.test(sourceKey))
+    ? new Set<OccTopologySourceKey>()
+    : new Set(sourceKeys);
+}
+
+function projectCompositeOperands(
+  oc: OpenCascadeInstance,
+  operands: readonly CompositeOperand[],
+  historySources: readonly {
+    Modified(
+      shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+    ): InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>;
+    Generated(
+      shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+    ): InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>;
+  }[],
+) {
+  let projected = operands.map((operand) => ({
+    shape: operand.shape,
+    sourceKeys: new Set(operand.sourceKeys),
+  }));
+  for (const historySource of historySources) {
+    const evolved: typeof projected = [];
+    for (const operand of projected) {
+      const successors = [
+        ...listOccShapes(oc, historySource.Modified(operand.shape)),
+        ...listOccShapes(oc, historySource.Generated(operand.shape)),
+      ];
+      for (const shape of successors.length > 0 ? successors : [operand.shape]) {
+        const existing = evolved.find((candidate) => candidate.shape.IsSame(shape));
+        if (existing) {
+          for (const sourceKey of operand.sourceKeys) existing.sourceKeys.add(sourceKey);
+        } else {
+          evolved.push({ shape, sourceKeys: new Set(operand.sourceKeys) });
+        }
+      }
+    }
+    projected = evolved;
+  }
+  return projected;
 }
 
 function appendUniqueShape(
@@ -118,6 +317,32 @@ export function listOccShapes(
   return shapes;
 }
 
+
+function registerSourceShapeFaces(
+  oc: OpenCascadeInstance,
+  sourceShapes: Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >,
+  sourceKey: OccTopologySourceKey,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  registerSourceShape(sourceShapes, sourceKey, shape);
+  const faces = new oc.TopTools_IndexedMapOfShape_1();
+  try {
+    oc.TopExp.MapShapes_1(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+      faces,
+    );
+    for (let index = 1; index <= faces.Size(); index += 1) {
+      registerSourceShape(sourceShapes, sourceKey, faces.FindKey(index));
+    }
+  } finally {
+    faces.delete();
+  }
+}
+
 function projectSourceShapesThroughHistory(
   oc: OpenCascadeInstance,
   sourceShapes: OccFeatureSourceShapeMap,
@@ -153,6 +378,57 @@ function projectSourceShapesThroughHistory(
   }
 
   return projected;
+}
+
+/**
+ * Invert exact source→shape projections after the complete Boolean history
+ * chain. A composite is emitted only for a source set that reaches one shape;
+ * collisions are discarded by the caller once the shapes are resolved to final
+ * public face targets.
+ */
+function collectCompositeSourceShapes(
+  sourceShapes: OccFeatureSourceShapeMap,
+  operands: readonly CompositeOperand[],
+) {
+  const entries: Array<{
+    shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+    sourceKeys: Set<OccTopologySourceKey>;
+  }> = [];
+
+  for (const [sourceKey, shapes] of sourceShapes) {
+    for (const shape of shapes) {
+      const entry = entries.find((candidate) => candidate.shape.IsSame(shape));
+      if (entry) {
+        entry.sourceKeys.add(sourceKey);
+      } else {
+        entries.push({ shape, sourceKeys: new Set([sourceKey]) });
+      }
+    }
+  }
+
+  for (const operand of operands) {
+    if (operand.sourceKeys.size === 0) continue;
+    const entry = entries.find((candidate) => candidate.shape.IsSame(operand.shape));
+    if (entry) {
+      for (const sourceKey of operand.sourceKeys) entry.sourceKeys.add(sourceKey);
+    } else {
+      entries.push({ shape: operand.shape, sourceKeys: new Set(operand.sourceKeys) });
+    }
+  }
+
+  const composites = new Map<
+    OccTopologySourceKey,
+    InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
+  >();
+  for (const entry of entries) {
+    if (entry.sourceKeys.size < 2) continue;
+    registerSourceShape(
+      composites,
+      formatExtrudeCompositeSourceKey([...entry.sourceKeys]),
+      entry.shape,
+    );
+  }
+  return composites;
 }
 
 function getShapeProjectionRange(
@@ -478,7 +754,6 @@ function registerSurfaceExtrudeProvenance(
   context: OccFeatureExecutionContext,
   input: {
     ownerFeatureId: FeatureId;
-    profileSlot: number;
     endRole: string;
     prism: InstanceType<OpenCascadeInstance["BRepPrimAPI_MakePrism_1"]>;
     profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
@@ -492,7 +767,10 @@ function registerSurfaceExtrudeProvenance(
     InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
   >();
   const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
-  const slotPrefix = `extrude:${input.ownerFeatureId}:profile:${input.profileSlot}:end:${input.endRole}`;
+  const profileSource = input.sketchId
+    ? `profile-sketch:${input.sketchId}`
+    : `profile-face:${input.faceProfileKey ?? "unsupported"}`;
+  const slotPrefix = `extrude:${input.ownerFeatureId}:${profileSource}:end:${input.endRole}`;
 
   for (const edge of listShapeEdges(context.oc, input.profileShape)) {
     registerSourceShape(
@@ -546,7 +824,6 @@ function buildExtrudeProfileShapes(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
   profile: ExtrudeFeatureParameters["profiles"][number],
-  profileSlot: number,
   extent: ReturnType<typeof getExtrudeFeatureExtent>,
   startExtent: ExtrudeStartExtent,
 ) {
@@ -556,6 +833,7 @@ function buildExtrudeProfileShapes(
     | ReturnType<typeof buildRegionProfileFace>["provenance"]
     | null = null;
   let sketchId: string | null = null;
+  let profileRegionId: RegionId | null = null;
 
   if (profile.kind === "sketchEntity") {
     throw new Error(
@@ -578,6 +856,7 @@ function buildExtrudeProfileShapes(
     );
     sketchProvenance = profileFace.provenance;
     sketchId = profile.sketchId;
+    profileRegionId = profile.regionId;
   } else {
     const body = requireBody(context, profile.bodyId);
     const face = requireFace(context, body, profile.faceId);
@@ -612,10 +891,10 @@ function buildExtrudeProfileShapes(
       baseNormal,
       end,
       startExtent,
-      profileSlot,
       endRole: role,
       sketchId,
       sketchProvenance,
+      profileRegionId,
       faceProfileKey:
         profile.kind === "face" ? getOccDurableRefKey(profile) : null,
     }),
@@ -759,6 +1038,10 @@ function applyExtrudeDraft(
   return {
     shape,
     sourceShapes,
+    compositeSourceShapes: new Map(),
+    // Draft's whole-solid history is unavailable in this binding. Its direct
+    // subshape history remains tracked above; do not fabricate a composite.
+    compositeOperands: [],
     unsupportedSourceKeys,
   };
 }
@@ -866,12 +1149,12 @@ function buildExtrudeEndShape(
     baseNormal: Vec3;
     end: ExtrudeEndCondition;
     startExtent: ExtrudeStartExtent;
-    profileSlot: number;
     endRole: string;
     sketchId: string | null;
     sketchProvenance:
       | ReturnType<typeof buildRegionProfileFace>["provenance"]
       | null;
+    profileRegionId: RegionId | null;
     faceProfileKey: string | null;
   },
 ): BuiltExtrudeShape {
@@ -939,18 +1222,38 @@ function buildExtrudeEndShape(
     InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
   >();
   const unsupportedSourceKeys = new Set<OccTopologySourceKey>();
-  const slotPrefix = `extrude:${input.ownerFeatureId}:profile:${input.profileSlot}:end:${input.endRole}`;
+  const profileSource = input.profileRegionId
+    ? `profile-region:${input.profileRegionId}`
+    : input.sketchId
+      ? `profile-sketch:${input.sketchId}`
+      : `profile-face:${input.faceProfileKey ?? "unsupported"}`;
+  const slotPrefix = `extrude:${input.ownerFeatureId}:${profileSource}:end:${input.endRole}`;
 
-  registerSourceShape(
-    sourceShapes,
-    `${slotPrefix}:profile:first-face`,
-    prism.FirstShape_1(),
-  );
-  registerSourceShape(
-    sourceShapes,
-    `${slotPrefix}:profile:last-face`,
-    prism.LastShape_1(),
-  );
+  if (input.profileRegionId) {
+    registerSourceShapeFaces(
+      context.oc,
+      sourceShapes,
+      formatExtrudeProfileCapSourceKey({
+        ownerFeatureId: input.ownerFeatureId,
+        regionId: input.profileRegionId,
+        endRole: input.endRole,
+        cap: "first",
+      }),
+      prism.FirstShape_1(),
+    );
+    registerSourceShapeFaces(
+      context.oc,
+      sourceShapes,
+      formatExtrudeProfileCapSourceKey({
+        ownerFeatureId: input.ownerFeatureId,
+        regionId: input.profileRegionId,
+        endRole: input.endRole,
+        cap: "last",
+      }),
+      prism.LastShape_1(),
+    );
+  }
+
 
   if (input.sketchId && sketchProvenance) {
     for (const [sourceKey, edge] of sketchProvenance.edges) {
@@ -1009,6 +1312,13 @@ function buildExtrudeEndShape(
       {
         shape: prism.Shape(),
         sourceShapes,
+        compositeSourceShapes: new Map(),
+        compositeOperands: [
+          {
+            shape: prism.Shape(),
+            sourceKeys: semanticCompositeSourceKeys(sourceShapes),
+          },
+        ],
         unsupportedSourceKeys,
       },
       extrusionDirection,
@@ -1088,7 +1398,6 @@ function buildSurfaceExtrudePrism(
   try {
     const provenance = registerSurfaceExtrudeProvenance(context, {
       ownerFeatureId,
-      profileSlot: 0,
       endRole,
       prism,
       profileShape,
@@ -1096,7 +1405,12 @@ function buildSurfaceExtrudePrism(
       sketchProvenance,
       faceProfileKey: profile.faceProfileKey,
     });
-    return { shape: prism.Shape(), ...provenance };
+    return {
+      shape: prism.Shape(),
+      ...provenance,
+      compositeSourceShapes: new Map(),
+      compositeOperands: [],
+    };
   } finally {
     deleteOccObject(prism);
   }
@@ -1241,12 +1555,11 @@ export function buildExtrudeFeatureShape(
     profileKeys.add(key);
   }
 
-  const extrudedShapes = parameters.profiles.flatMap((profile, profileSlot) =>
+  const extrudedShapes = parameters.profiles.flatMap((profile) =>
     buildExtrudeProfileShapes(
       context,
       ownerFeatureId,
       profile,
-      profileSlot,
       extent,
       parameters.startExtent,
     ),
@@ -1273,7 +1586,8 @@ export function buildExtrudeFeatureShape(
  *
  * Stage lineage is preserved by projecting every prism source shape (FirstShape
  * / LastShape / Generated) through the fuse history, so profile faces, side
- * faces, and sketch-entity edges stay resolvable on the fused result.
+ * faces, and sketch-entity edges stay resolvable on the fused result. Source
+ * keys identify their RegionId or exact sketch producer, never profile order.
  */
 function fuseExtrudedShapes(
   context: OccFeatureExecutionContext,
@@ -1285,6 +1599,8 @@ function fuseExtrudedShapes(
     OccTopologySourceKey,
     InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]
   >();
+  let compositeSourceShapes = new Map(first.compositeSourceShapes);
+  let compositeOperands = first.compositeOperands;
   for (const [sourceKey, shapes] of first.sourceShapes) {
     registerSourceShapes(sourceShapes, sourceKey, shapes);
   }
@@ -1300,13 +1616,32 @@ function fuseExtrudedShapes(
       sourceShapes,
       result.historySources,
     );
+    // Every seed is a real prism FirstShape/LastShape or prism Generated
+    // subshape. Projecting all of them through every Fuse and same-domain
+    // history source yields the exact complete input set for a newly fused
+    // face; no geometric comparison participates.
+    compositeOperands = projectCompositeOperands(
+      context.oc,
+      [...compositeOperands, ...next.compositeOperands],
+      result.historySources,
+    );
+    compositeSourceShapes = collectCompositeSourceShapes(
+      sourceShapes,
+      compositeOperands,
+    );
     for (const sourceKey of next.unsupportedSourceKeys) {
       unsupportedSourceKeys.add(sourceKey);
     }
     shape = result.shape;
   }
 
-  return { shape, sourceShapes, unsupportedSourceKeys };
+  return {
+    shape,
+    sourceShapes,
+    compositeSourceShapes,
+    compositeOperands,
+    unsupportedSourceKeys,
+  };
 }
 
 export function executeExtrudeFeature(
@@ -1338,6 +1673,48 @@ export function executeExtrudeFeature(
             { sourceShapes: featureShape.sourceShapes },
           );
         });
+  const compositeFaceTargetsBySourceKey = new Map<
+    OccTopologySourceKey,
+    Extract<DurableRef, { kind: "face" }>[]
+  >();
+  if (featureShape.compositeSourceShapes.size > 0) {
+    const compositeTargets =
+      mapFeatureSourceTargets(result.bodies, featureShape.compositeSourceShapes) ??
+      new Map<OccTopologySourceKey, DurableRef[]>();
+    for (const [sourceKey, targets] of compositeTargets) {
+      const faces = targets.filter(
+        (target): target is Extract<DurableRef, { kind: "face" }> =>
+          target.kind === "face",
+      );
+      // An ancestry set may name only one final entity. Several final faces
+      // with the same set are genuinely many and remain unclaimed.
+      if (faces.length === 1) {
+        compositeFaceTargetsBySourceKey.set(sourceKey, faces);
+      }
+    }
+  }
+  const compositeSourceKeysByFaceTargetKey = new Map<
+    string,
+    OccTopologySourceKey[]
+  >();
+  for (const [sourceKey, [target]] of compositeFaceTargetsBySourceKey) {
+    const targetKey = getOccDurableRefKey(target!);
+    compositeSourceKeysByFaceTargetKey.set(targetKey, [
+      ...(compositeSourceKeysByFaceTargetKey.get(targetKey) ?? []),
+      sourceKey,
+    ]);
+  }
+  const compositeSourceKeyByFaceTargetKey = new Map<string, OccTopologySourceKey>();
+  for (const [targetKey, sourceKeys] of compositeSourceKeysByFaceTargetKey) {
+    if (sourceKeys.length === 1) {
+      compositeSourceKeyByFaceTargetKey.set(targetKey, sourceKeys[0]!);
+    } else {
+      for (const sourceKey of sourceKeys) {
+        compositeFaceTargetsBySourceKey.delete(sourceKey);
+      }
+    }
+  }
+
   const producedBodyIds = new Set(
     result.producedTargets
       .filter(
@@ -1356,12 +1733,57 @@ export function executeExtrudeFeature(
     const sourceTargets = new Map<OccTopologySourceKey, DurableRef[]>();
     for (const [sourceKey, targets] of result.featureSourceTargets ?? []) {
       const matching = targets.filter(
-        (target) => "bodyId" in target && target.bodyId === body.bodyId,
+        (target) =>
+          "bodyId" in target &&
+          target.bodyId === body.bodyId &&
+          !(
+            target.kind === "face" &&
+            compositeSourceKeyByFaceTargetKey.has(getOccDurableRefKey(target))
+          ),
       );
       if (matching.length > 0) {
         sourceTargets.set(sourceKey, matching);
       }
     }
+
+    const exactSuccessors: ReadonlyMap<string, DurableRef> =
+      "successorTargetsByPreviousKey" in result
+        ? result.successorTargetsByPreviousKey as ReadonlyMap<string, DurableRef>
+        : new Map<string, DurableRef>();
+    for (const [previousKey, successor] of exactSuccessors) {
+      if (
+        (successor.kind !== "face" && successor.kind !== "edge" && successor.kind !== "vertex") ||
+        successor.bodyId !== body.bodyId
+      ) continue;
+      const previous = /^((?:face|edge|vertex)):([^:]+):([^:]+)$/.exec(previousKey);
+      if (!previous || previous[1] !== successor.kind) continue;
+      sourceTargets.set(
+        formatExactSuccessorTopologySourceKey({
+          featureId: ownerFeatureId,
+          bodyId: previous[2] as BodyId,
+          kind: successor.kind,
+          sourcePublicId: previous[3] as never,
+        }),
+        [successor],
+      );
+    }
+
+    for (const [sourceKey, targets] of compositeFaceTargetsBySourceKey) {
+      const matching = targets.filter((target) => target.bodyId === body.bodyId);
+      if (
+        matching.length === 1 &&
+        compositeSourceKeyByFaceTargetKey.get(getOccDurableRefKey(matching[0]!)) ===
+          sourceKey
+      ) {
+        sourceTargets.set(sourceKey, matching);
+      }
+    }
+    addCompleteBoundaryFaceClaims({
+      oc: context.oc,
+      ownerFeatureId,
+      body,
+      sourceTargets,
+    });
 
     outputs.set(body.bodyId, {
       outputSlot: body.bodyId,

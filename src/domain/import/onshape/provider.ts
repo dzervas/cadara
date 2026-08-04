@@ -53,7 +53,7 @@ import type {
   SketchPlaneDefinition,
   SketchPlaneFrame,
 } from "@/contracts/shared/sketch-plane";
-import type { ConstructionId, RequestId } from "@/contracts/shared/ids";
+import type { BodyId, ConstructionId, FaceId, RequestId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type {
   FeatureEditorFormSchema,
@@ -104,6 +104,7 @@ import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-
 import { createMemoizedHistoryProbe } from "@/domain/import/kernel-history-probe";
 import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
 import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
+import { readSplitInterfaceFaceQuery } from "@/domain/import/onshape/split-interface-face-query-reader";
 import {
   isUniquePrefixBodyQuery,
   resolveImplicitUnionTarget,
@@ -118,7 +119,15 @@ import {
   computeParametricTransformReframe,
 } from "@/domain/import/onshape/capture-frame";
 import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
-import { DEFAULT_MATCH_TOLERANCE } from "@/domain/import/onshape/signature-matcher";
+import {
+  resolveExactBodyProducerBindings,
+  type DeferredBodyOfSourceFeature,
+} from "@/domain/import/onshape/exact-body-producer-resolver";
+import {
+  LIVE_TOPOLOGY_MATCH_TOLERANCE,
+  resolveHistoricalTopology,
+  type HistoricalTopologyPlanSelector,
+} from "@/domain/import/historical-topology-selector";
 import { buildResolvedBodyConsumerDefinition } from "@/domain/import/onshape/wave-b-body-feature-translators";
 import { prepareRollbackCheckpointBake } from "@/domain/import/onshape/rollback-bake";
 import {
@@ -132,6 +141,38 @@ import {
 import { isTopologyApplyRematchError } from "@/domain/import/orchestrator";
 
 const ACCEPTED_EXTENSION = ".onshape-capture.json";
+
+type ContainmentResult =
+  | { kind: "contained" }
+  | { kind: "historical-retry-requested"; featureId: string };
+
+type ProbeBackedPlanningActivation =
+  | { kind: "activated"; plan: OnshapeStudioPlan; probeResult: HistoryProbeResult | null }
+  | { kind: "historical-retry-requested"; featureId: string };
+
+function usesDirectTopologyOf(actions: ImportPreparedActions, featureId: string): boolean {
+  const visited = new Set<object>();
+  const visit = (value: unknown): boolean => {
+    if (!value || typeof value !== "object") return false;
+    if (visited.has(value)) return false;
+    visited.add(value);
+    if (
+      (value as { kind?: unknown }).kind === "topologyOf" &&
+      (value as { source?: { consumerFeatureId?: unknown } }).source?.consumerFeatureId === featureId
+    ) {
+      return true;
+    }
+    return Array.isArray(value)
+      ? value.some(visit)
+      : Object.values(value).some(visit);
+  };
+  return visit(actions);
+}
+
+function hasTopologyApplyRematchFailure(step: HistoryProbeResult["steps"][number] | undefined) {
+  return step?.status === "failed" &&
+    step.diagnostics.some((diagnostic) => diagnostic.code === "topology-apply-rematch-failed");
+}
 
 export interface OnshapeStudioReview {
   elementId: string;
@@ -171,17 +212,6 @@ interface ReviewedBundleContext {
 
 const reviewedBundles = new WeakMap<OnshapeImportReview, ReviewedBundleContext>();
 
-/**
- * Tolerance for every captured→live topology match in a review. A rebuilt live
- * body reproduces captured Onshape geometry to well under a micron but not to
- * the bit, so the same tolerance must be used everywhere the two are compared —
- * and, critically, review must not match more strictly than the apply-time
- * selector it emits, or it rejects faces apply would accept.
- */
-const LIVE_TOPOLOGY_MATCH_TOLERANCE = {
-  ...DEFAULT_MATCH_TOLERANCE,
-  linear: Math.max(DEFAULT_MATCH_TOLERANCE.linear, 0.01),
-};
 
 function decodeBundle(source: ResolvedImportSource): OnshapeCaptureBundle | null {
   let parsed: unknown;
@@ -349,25 +379,34 @@ function extractPlaneConsumerReference(
 function queryStringsForFeature(feature: ReturnType<typeof readPartStudio>["features"][number]) {
   const values: string[] = [];
   for (const parameter of feature.parameters ?? []) {
-    if (typeof parameter !== "object" || parameter === null) {
-      continue;
-    }
+    if (typeof parameter !== "object" || parameter === null) continue;
     const queries = (parameter as { queries?: unknown }).queries;
-    if (!Array.isArray(queries)) {
-      continue;
-    }
+    if (!Array.isArray(queries)) continue;
     for (const query of queries) {
-      if (typeof query !== "object" || query === null) {
-        continue;
-      }
+      if (typeof query !== "object" || query === null) continue;
       const queryString = (query as { queryString?: unknown }).queryString;
-      if (typeof queryString === "string") {
-        values.push(queryString);
-      }
+      if (typeof queryString === "string") values.push(queryString);
     }
   }
   return values;
 }
+
+function readExactSplitInterfaceFaceQuery(
+  feature: ReturnType<typeof readPartStudio>["features"][number],
+) {
+  const parameters = feature.parameters as Array<{
+    parameterId?: unknown;
+    queries?: unknown;
+  }> | undefined;
+  const parameter = parameters?.find(
+    (candidate) => candidate.parameterId === "sketchPlane",
+  );
+  const queries = parameter?.queries;
+  if (!Array.isArray(queries) || queries.length !== 1) return null;
+  const queryString = (queries[0] as { queryString?: unknown })?.queryString;
+  return typeof queryString === "string" ? readSplitInterfaceFaceQuery(queryString) : null;
+}
+
 
 function readEvaluatedDepthMm(
   feature: ReturnType<typeof readPartStudio>["features"][number] | undefined,
@@ -626,7 +665,7 @@ function replanDependentFeatures(input: {
     bodyProducingFeatureIds: [] as string[],
   };
 
-  return input.read.features.map((feature) => {
+  const replanned = input.read.features.map((feature) => {
     const currentPlan = plansByFeatureId.get(feature.featureId);
     if (!currentPlan) {
       throw new Error(`Missing plan for source feature ${feature.featureId}.`);
@@ -667,9 +706,9 @@ function replanDependentFeatures(input: {
             })))) ||
       (currentPlan.reasonCodes.includes("downstream-of-baked") && replaySourcesAreLive);
     if (replan) {
-      const replanned = translator.plan(context);
-      plansByFeatureId.set(feature.featureId, replanned);
-      return replanned;
+      const next = translator.plan(context);
+      plansByFeatureId.set(feature.featureId, next);
+      return next;
     }
 
     // Preserve the reviewed plan, but replay preceding translator state so a
@@ -677,6 +716,7 @@ function replanDependentFeatures(input: {
     if (feature.featureType !== "newSketch") translator.plan(context);
     return currentPlan;
   });
+  return cascadeUnavailableActionConsumers(replanned);
 }
 
 function activateCapturedFrameTranslation(input: {
@@ -865,16 +905,49 @@ function bakeUnresolvedExtrudeTopology(featurePlans: FeaturePlan[]): FeaturePlan
   );
 }
 
+/** Collect review-only references that require one emitted source-feature action. */
+function collectRequiredSourceActionIds(value: unknown, target: Set<string>): void {
+  if (!value || typeof value !== "object") return;
+  const record = value as {
+    kind?: unknown;
+    producerSourceFeatureId?: unknown;
+    witnessSourceFeatureId?: unknown;
+    successorSourceFeatureIds?: unknown;
+  };
+  if (record.kind === "bodyOfSourceFeature") {
+    if (typeof record.producerSourceFeatureId === "string") {
+      target.add(record.producerSourceFeatureId);
+    }
+    return;
+  }
+  if (record.kind === "historicalTopologyOf") {
+    if (typeof record.witnessSourceFeatureId === "string") {
+      target.add(record.witnessSourceFeatureId);
+    }
+    if (Array.isArray(record.successorSourceFeatureIds)) {
+      for (const featureId of record.successorSourceFeatureIds) {
+        if (typeof featureId === "string") target.add(featureId);
+      }
+    }
+    return;
+  }
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    collectRequiredSourceActionIds(child, target);
+  }
+}
+
 /**
- * Fail closed at the feature level for sketch lineage: review can promote a
- * consumer whose profile sketch stayed baked. `buildPreparedActions` would then
- * silently drop that consumer with a warning, so review would claim a
- * parametric feature the commit never contains. Cascade to a fixed point so the
- * reviewed tier counts equal what apply actually creates.
+ * Fail closed when a reviewed parametric consumer depends on an action that a
+ * later containment pass demoted. This is deliberately action-specific: normal
+ * body dependencies may be satisfied by checkpoints, while exact Split owners,
+ * historical topology chains, feature replay, and sketch ids cannot.
  */
-function bakeConsumersOfBakedSketches(featurePlans: FeaturePlan[]): FeaturePlan[] {
+export function cascadeUnavailableActionConsumers(featurePlans: FeaturePlan[]): FeaturePlan[] {
   let current = featurePlans;
   for (;;) {
+    const emittedSourceFeatureIds = new Set(
+      current.flatMap((plan) => plan.tier === "parametric" ? [plan.onshapeFeatureId] : []),
+    );
     const reachableSketchFeatureIds = new Set(
       current.flatMap((plan) =>
         plan.tier === "parametric" && plan.target.kind === "sketch"
@@ -883,13 +956,19 @@ function bakeConsumersOfBakedSketches(featurePlans: FeaturePlan[]): FeaturePlan[
       ),
     );
     const knownFeatureIds = new Set(current.map((plan) => plan.onshapeFeatureId));
-    const next = current.map((plan) =>
-      plan.tier === "parametric" &&
-      unreachableFeatureDependencies(plan.inputDependencies, {
+    const next = current.map((plan) => {
+      if (plan.tier !== "parametric") return plan;
+      const requiredSourceFeatureIds = new Set(plan.plannedFeatureReplay?.sourceFeatureIds ?? []);
+      collectRequiredSourceActionIds(plan, requiredSourceFeatureIds);
+      const missingSourceAction = [...requiredSourceFeatureIds].some(
+        (featureId) => !emittedSourceFeatureIds.has(featureId),
+      );
+      const missingSketch = unreachableFeatureDependencies(plan.inputDependencies, {
         reachableSketchFeatureIds,
         reachableBodyFeatureIds: new Set(knownFeatureIds),
         knownFeatureIds,
-      }).some((dependency) => dependency.kind === "sketch")
+      }).some((dependency) => dependency.kind === "sketch");
+      return missingSourceAction || missingSketch
         ? {
             ...plan,
             tier: "baked" as const,
@@ -899,8 +978,8 @@ function bakeConsumersOfBakedSketches(featurePlans: FeaturePlan[]): FeaturePlan[
             ],
             suppressed: true,
           }
-        : plan,
-    );
+        : plan;
+    });
     if (next.every((plan, index) => plan === current[index])) return next;
     current = next;
   }
@@ -1031,18 +1110,28 @@ async function activateProbeBackedPlanning(input: {
   forcedBakeFeatureIds?: ReadonlySet<string>;
   /** Verbatim zero/one/many detail per forced bake, when the failure carried one. */
   forcedBakeReasonDetails?: ReadonlyMap<string, string>;
+  /** Features whose live topologyOf apply failed and must retry via historical lineage. */
+  historicalRetryFeatureIds?: ReadonlySet<string>;
+  /**
+   * The outer retry loop resumes from this exact fixed-point plan after a probe
+   * throws. It must not restart from captured-frame planning and discard an
+   * upstream extrude's already-resolved topology selectors.
+   */
+  workingPlanRef?: { current: OnshapeStudioPlan };
   /**
    * Drop probe failures the memo retained. Called once per containment pass: the
    * pass exists to change the conditions a probe failed under, so the contained
    * plan must be allowed to reach the kernel again.
    */
   forgetFailedProbes?: () => void;
-}) {
+}): Promise<ProbeBackedPlanningActivation> {
   if (!input.capabilities.history) {
-    return { plan: input.plan, probeResult: null };
+    return { kind: "activated", plan: input.plan, probeResult: null };
   }
 
   const forcedBakeFeatureIds = input.forcedBakeFeatureIds ?? new Set<string>();
+  const historicalRetryFeatureIds = input.historicalRetryFeatureIds ?? new Set<string>();
+  const containmentRejectedFeatureIds = new Set<string>();
   let workingPlan: OnshapeStudioPlan =
     forcedBakeFeatureIds.size === 0
       ? input.plan
@@ -1068,6 +1157,10 @@ async function activateProbeBackedPlanning(input: {
           input.read.studio.groundTruth.hasBodies,
           input.read,
         );
+  const rememberWorkingPlan = () => {
+    if (input.workingPlanRef) input.workingPlanRef.current = workingPlan;
+  };
+  rememberWorkingPlan();
   let probeResult: HistoryProbeResult;
   const maxDemotions = input.plan.featurePlans.filter(isCapturedFrameTranslation).length;
   for (let attempt = 0; ; attempt += 1) {
@@ -1083,8 +1176,10 @@ async function activateProbeBackedPlanning(input: {
       plan: verificationPlan,
       capabilities: input.capabilities,
       materializeBake: false,
+      deferUnresolvedExactBodyOwners: true,
       orderedPositionToFeatureId,
     });
+    rememberWorkingPlan();
     // This full-plan probe is retained only for verification and attribution of a
     // failed provisional action. Topology consumers are resolved below from exact
     // pre-consumer prefixes.
@@ -1135,10 +1230,10 @@ async function activateProbeBackedPlanning(input: {
       requiresStudioBake: plan.requiresStudioBake,
     });
 
-  // Containment pass: prove the current plan actually BUILDS in the live kernel,
-  // using the same ordered action sequence apply will run (checkpoints included).
-  // A feature the kernel rejects is demoted to baked with a specific reason and
-  // its dependents are re-planned, so one unbuildable feature never aborts the
+  // Containment pass: prove the parametric timeline first, then validate the
+  // checkpoint-bearing action sequence only after consumer promotion has
+  // re-planned the genuinely baked segments. A feature the kernel rejects is
+  // demoted to baked with a specific reason and its dependents are re-planned,
   // studio.
   //
   // Attribution is exact: `orderedPositionToFeatureId` is recorded by
@@ -1152,27 +1247,59 @@ async function activateProbeBackedPlanning(input: {
   // prefix. Containing the refusal first makes the probe present the same body
   // state apply does.
   //
-  // The pass is memoized on the plan fingerprint it already proved buildable, so
-  // re-running it inside the fixed-point loop costs nothing when the plan has not
-  // changed. Each attempt rebuilds the whole studio in the kernel, and the
-  // largest captures cannot afford a redundant one per iteration.
-  let containedPlanFingerprint: string | null = null;
-  const containUnbuildableFeatures = async () => {
-    if (containedPlanFingerprint === planFingerprint(workingPlan)) return;
+  // The no-checkpoint pass establishes whether a parametric timeline itself
+  // builds. Only after topology consumers have been resolved against that
+  // timeline may checkpoint materialization validate genuinely baked runs.
+  // Keep distinct proofs: a checkpoint replaces topology and is never lineage
+  // evidence for a consumer.
+  const containedPlanFingerprints = new Set<string>();
+  const containUnbuildableFeatures = async (options: {
+    materializeBake: boolean;
+  }): Promise<ContainmentResult> => {
+    const containmentFingerprint = `${options.materializeBake ? "checkpoints" : "parametric"}:${planFingerprint(workingPlan)}`;
+    if (containedPlanFingerprints.has(containmentFingerprint)) {
+      return { kind: "contained" };
+    }
     for (let attempt = 0; attempt < workingPlan.featurePlans.length; attempt += 1) {
       const orderedPositionToFeatureId = new Map<number, string>();
       const buildActions = await buildPreparedActions({
         read: input.read,
         plan: workingPlan,
         capabilities: input.capabilities,
-        materializeBake: false,
-        emitBakeCheckpoints: true,
+        // A checkpoint is replacement geometry, not topology evidence. The
+        // parametric containment pass must therefore see the same lineage the
+        // exploratory prefix used; checkpoint validation happens separately,
+        // after promotion has re-planned the remaining baked runs.
+        materializeBake: options.materializeBake,
+        // Full containment validates only planner-owned baked segments.
+        // Per-feature fallback checkpoints are apply recovery, never topology
+        // evidence and therefore must not alter a consumer's proof.
+        materializeTopologyFallback: false,
+        emitBakeCheckpoints: options.materializeBake,
+        // A Split whose source producer is absent from this transient prefix is
+        // deferred, never applied or demoted from this probe artifact.
+        deferUnresolvedExactBodyOwners: true,
         orderedPositionToFeatureId,
       });
-      const buildProbe = await input.capabilities.history!.evaluateHistoryProbe({
-        actions: buildActions,
-        requestedSignatureStepOrdinals: [],
-      });
+      rememberWorkingPlan();
+      let buildProbe: HistoryProbeResult;
+      try {
+        buildProbe = await input.capabilities.history!.evaluateHistoryProbe({
+          actions: buildActions,
+          requestedSignatureStepOrdinals: [],
+        });
+      } catch (error) {
+        // Historical selectors are proved by their pre-consumer prefix. A
+        // whole-plan containment replay cannot use a checkpoint-replaced body
+        // to disprove that exact lineage.
+        if (
+          isTopologyApplyRematchError(error) &&
+          error.selector.kind === "historicalTopologyOf"
+        ) {
+          break;
+        }
+        throw error;
+      }
       const failedOrdinal = buildProbe.steps.findIndex(
         (step) => step.status === "failed",
       );
@@ -1188,8 +1315,22 @@ async function activateProbeBackedPlanning(input: {
       // Nothing parametric to demote means the failure is not contained by this
       // pass; leave the plan as is so the real error surfaces at apply instead of
       // silently mutating an unrelated feature.
-      if (!failedPlan) break;
+      if (!failedPlan || !failedFeatureId) break;
       const failedStep = buildProbe.steps[failedOrdinal];
+      // A direct live selector can fail only when the whole apply-equivalent plan
+      // is assembled. Give it exactly one ID-free historical-lineage retry before
+      // recording the refusal as containment; the outer review loop resets probe
+      // memoization and restarts activation with that feature marked.
+      if (
+        hasTopologyApplyRematchFailure(failedStep) &&
+        !historicalRetryFeatureIds.has(failedFeatureId) &&
+        usesDirectTopologyOf(buildActions, failedFeatureId)
+      ) {
+        return { kind: "historical-retry-requested", featureId: failedFeatureId };
+      }
+      // A failed full-plan probe is an apply-equivalent refusal. Do not let a
+      // later fixed-point pass re-promote the same selector after containment.
+      containmentRejectedFeatureIds.add(failedFeatureId);
       // Keep the kernel's own first message: `feature-kernel-build-failed` alone
       // says nothing about which invariant the live prefix rejected.
       const failureDetail =
@@ -1202,7 +1343,7 @@ async function activateProbeBackedPlanning(input: {
         workingPlan,
         replanDependentFeatures({
           read: input.read,
-          featurePlans: bakeConsumersOfBakedSketches(
+          featurePlans: cascadeUnavailableActionConsumers(
             workingPlan.featurePlans.map((plan) =>
               plan.onshapeFeatureId === failedFeatureId
                 ? {
@@ -1223,11 +1364,12 @@ async function activateProbeBackedPlanning(input: {
         input.read,
       );
     }
-    containedPlanFingerprint = planFingerprint(workingPlan);
+    containedPlanFingerprints.add(containmentFingerprint);
     // The pass ran against a changed plan, so every probe failure it took as
     // input has had its conditions revisited. Release those retained failures;
     // the passes that follow probe the contained plan for real.
     input.forgetFailedProbes?.();
+    return { kind: "contained" };
   };
 
   const maxPromotionIterations = Math.max(1, workingPlan.featurePlans.length);
@@ -1239,7 +1381,10 @@ async function activateProbeBackedPlanning(input: {
     for (const candidate of [...workingPlan.featurePlans]) {
       // A feature the live kernel already rejected at apply stays baked; never
       // re-promote it, or the same rematch throw would abort the studio again.
-      if (forcedBakeFeatureIds.has(candidate.onshapeFeatureId)) continue;
+      if (
+        forcedBakeFeatureIds.has(candidate.onshapeFeatureId) ||
+        containmentRejectedFeatureIds.has(candidate.onshapeFeatureId)
+      ) continue;
       const slots =
         candidate.plannedBodyTopologyConsumer?.slots ??
         candidate.plannedExtrude?.topologySlots ??
@@ -1247,13 +1392,16 @@ async function activateProbeBackedPlanning(input: {
       // `topologySlots` deliberately retains declarations after resolution, so
       // candidate lifecycle must inspect live extent/boolean placeholders rather
       // than slot count. An unresolved extrude is eligible from either tier;
-      // only a settled parametric candidate is skipped.
+      // only a settled parametric candidate is skipped, except when a retry must
+      // replace its direct selector with historical lineage.
       const unresolvedExtrudeTopology = candidate.plannedExtrude
         ? hasUnresolvedExtrudeTopology(candidate.plannedExtrude)
         : false;
       if (
         slots.length === 0 ||
-        (candidate.tier === "parametric" && !unresolvedExtrudeTopology)
+        (candidate.tier === "parametric" &&
+          !unresolvedExtrudeTopology &&
+          !historicalRetryFeatureIds.has(candidate.onshapeFeatureId))
       ) {
         continue;
       }
@@ -1344,14 +1492,9 @@ async function activateProbeBackedPlanning(input: {
           input.read,
         );
       };
-      // Bake checkpoints (bodyOnlyMesh) expose only body identity, so they can
-      // only serve whole-body consumers. A face/edge consumer needs sub-topology
-      // (a specific face or edge) of its owning body; a tessellation-backed
-      // checkpoint body cannot expose that, and apply rebuilds the consumer on
-      // exactly that checkpoint body (not on the pre-checkpoint parametric
-      // bodies). So the probe prefix emits checkpoints only for whole-body
-      // consumers, and those are the only consumers over a baked body that can
-      // be recovered.
+      // Checkpoints replace a body with baked geometry, so they are never
+      // topology evidence for any consumer — including whole-body consumers.
+      // Historical lineage is collected only from the parametric prefix.
       const uniquePrefixBodyEligible = isUniquePrefixBodyQuery(feature, slots);
       const consumesOnlyBodies =
         uniquePrefixBodyEligible ||
@@ -1360,22 +1503,22 @@ async function activateProbeBackedPlanning(input: {
             (query) =>
               query.expectedKinds.length === 1 && query.expectedKinds[0] === "body",
           ));
-      if (
-        consumesBakedUpstreamBody &&
-        prefixPlan.bakeStrategy.kind !== "segments"
-      ) {
-        degradeConsumer("topology-upstream-baked");
-        continue;
-      }
       const featureIdToOrderedPrefixPosition = new Map<string, number>();
+      const featureIdToOrderedActionIndex = new Map<string, number>();
+      const featureIdToBodyProducerActionIndex = new Map<string, number>();
+      const orderedPositionToFeatureId = new Map<number, string>();
       const prefixActions = await buildPreparedActions({
         read: input.read,
         plan: prefixPlan,
         capabilities: input.capabilities,
         materializeBake: false,
-        emitBakeCheckpoints: consumesOnlyBodies,
         featureIdToOrderedPrefixPosition,
+        orderedPositionToFeatureId,
+        featureIdToOrderedActionIndex,
+        featureIdToBodyProducerActionIndex,
+        deferUnresolvedExactBodyOwners: true,
       });
+      rememberWorkingPlan();
       const [prefix] = await probeTopologyConsumerPrefixes({
         actions: prefixActions,
         featureIdToOrderedPrefixPosition,
@@ -1405,16 +1548,11 @@ async function activateProbeBackedPlanning(input: {
         resolvedReferences: input.read.studio.resolvedReferences,
       });
       if (captureFrameToWorld && !consumesOnlyBodies) {
-        // A non-identity capture→world transform means a baked (checkpoint)
-        // feature sits between this face/edge consumer and its captured
-        // evidence. The probe prefix (checkpoints suppressed for face/edge
-        // consumers) matches the still-parametric pre-checkpoint body, but apply
-        // rebuilds the consumer on the tessellation-backed checkpoint body,
-        // which exposes only body identity — never the specific face/edge. So
-        // reframing lets review match a body that apply never presents,
-        // over-promoting the consumer. Stay honestly baked: recovering it needs
-        // the owning feature to be parametric (e.g. Mounts Chamfer 1 is gated on
-        // W.3 Transform rotation), not a reframe against the wrong prefix.
+        // A non-identity capture→world transform means a baked feature sits
+        // between this face/edge consumer and its captured evidence. The
+        // parametric probe prefix cannot make that baked feature evidence; the
+        // owning feature itself must be parametric before its face/edge can be
+        // promoted.
         degradeConsumer("topology-upstream-baked");
         continue;
       }
@@ -1455,16 +1593,110 @@ async function activateProbeBackedPlanning(input: {
               slots,
             })
           : null;
-      const resolution =
-        implicitUnionResolution ??
-        resolveUniquePrefixBody({
-          consumerFeatureId: candidate.onshapeFeatureId,
-          feature,
-          slots,
-          cadaraSignatures: prefix.signatures,
-          tolerance: topologyTolerance,
-        }) ??
-        resolveTopologyReferences(topologyResolutionInput);
+      const exactBodyQueries = queryRead.refs.filter(
+        (query) => query.expectedKinds.length === 1 && query.expectedKinds[0] === "body",
+      );
+      const exactBodyProducerActionIndexes = new Map(featureIdToOrderedActionIndex);
+      for (const [featureId, actionIndex] of featureIdToBodyProducerActionIndex) {
+        exactBodyProducerActionIndexes.set(featureId, actionIndex);
+      }
+      const exactReviewBindings =
+        candidate.plannedBodyTopologyConsumer?.featureKind === "split" &&
+        exactBodyQueries.length > 0
+          ? resolveExactBodyProducerBindings({
+              featureIds: input.read.features.map((entry) => entry.featureId),
+              consumerFeatureId: candidate.onshapeFeatureId,
+              queries: exactBodyQueries,
+              rollback: topologyTimeline,
+              isParametric: (featureId) => plansById.get(featureId)?.tier === "parametric",
+              reviewMode: true,
+            })
+          : null;
+      // Keep the established prefix-index path only when rollback review cannot
+      // prove an exact owner (for example, sparse synthetic rollback captures).
+      const exactBodyBindings = exactReviewBindings ??
+        (candidate.plannedBodyTopologyConsumer?.featureKind === "split" &&
+        queryRead.diagnostics.length === 0 &&
+        exactBodyQueries.length > 0
+          ? resolveExactBodyProducerBindings({
+              featureIds: input.read.features.map((entry) => entry.featureId),
+              consumerFeatureId: candidate.onshapeFeatureId,
+              queries: exactBodyQueries,
+              rollback: topologyTimeline,
+              isParametric: (featureId) => plansById.get(featureId)?.tier === "parametric",
+              featureIdToOrderedActionIndex: exactBodyProducerActionIndexes,
+            })
+          : null);
+      let resolution: TopologyResolutionResult;
+      if (exactBodyBindings) {
+        const remainingQueries = queryRead.refs.filter(
+          (query) => !exactBodyQueries.includes(query),
+        );
+        const remainingResolution = remainingQueries.length === 0
+          ? { kind: "resolved" as const, bindings: [] }
+          : resolveTopologyReferences({ ...topologyResolutionInput, queries: remainingQueries });
+        resolution = remainingResolution.kind === "degraded"
+          ? remainingResolution
+          : {
+              kind: "resolved",
+              bindings: [
+                ...exactBodyBindings.map((binding) => ({
+                  ...binding,
+                  score: 0,
+                  evidence: ["exact-rollback-body-producer"],
+                  sourceEvidence: "exactRollbackBodyProducer" as const,
+                })),
+                ...remainingResolution.bindings,
+              ],
+            };
+      } else {
+        resolution = implicitUnionResolution ??
+          resolveUniquePrefixBody({
+            consumerFeatureId: candidate.onshapeFeatureId,
+            feature,
+            slots,
+            cadaraSignatures: prefix.signatures,
+            tolerance: topologyTolerance,
+          }) ??
+          resolveTopologyReferences(topologyResolutionInput);
+      }
+      if (
+        !exactBodyBindings &&
+        consumesBakedUpstreamBody &&
+        prefixPlan.bakeStrategy.kind !== "segments"
+      ) {
+        degradeConsumer("topology-upstream-baked");
+        continue;
+      }
+      const requiresHistoricalLineage = historicalRetryFeatureIds.has(
+        candidate.onshapeFeatureId,
+      );
+      if (
+        !exactBodyBindings &&
+        (requiresHistoricalLineage ||
+          (resolution.kind === "degraded" &&
+            resolution.reason === "topology-reference-no-match"))
+      ) {
+        const [historicalPrefix] = await probeTopologyConsumerPrefixes({
+          actions: prefixActions,
+          featureIdToOrderedPrefixPosition,
+          consumerFeatureIds: [candidate.onshapeFeatureId],
+          history: input.capabilities.history,
+          includeHistoricalSignatures: true,
+          requireFreshExecution: requiresHistoricalLineage,
+        });
+        if (historicalPrefix?.status === "rebuilt") {
+          resolution = resolveTopologyReferences({
+            ...topologyResolutionInput,
+            cadaraSignatures: historicalPrefix.signatures,
+            historicalSignatureSteps: withHistoricalSourceFeatureIds(
+              historicalPrefix.historicalSignatureSteps,
+              featureIdToOrderedActionIndex,
+            ),
+            requireHistoricalLineage: requiresHistoricalLineage,
+          });
+        }
+      }
       workingPlan = recomputePlanWithFeaturePlans(
         workingPlan,
         workingPlan.featurePlans.map((plan) => {
@@ -1551,7 +1783,7 @@ async function activateProbeBackedPlanning(input: {
       )
       .map((featurePlan) => featurePlan.onshapeFeatureId);
     const sketchConsumerIds = new Set(consumerIds);
-    const probeSketchPrefixes = async () => {
+    const probeSketchPrefixes = async (historicalConsumerIds: readonly string[] = []) => {
       const provisionalSketchPlan = workingPlan.bakeStrategy.kind === "segments"
         ? recomputePlanWithFeaturePlans(
             workingPlan,
@@ -1572,28 +1804,48 @@ async function activateProbeBackedPlanning(input: {
         : workingPlan;
       const sketchPrefixPlan: OnshapeStudioPlan = {
         ...workingPlan,
-        featurePlans: bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
+        featurePlans: historicalConsumerIds.length > 0
+          ? workingPlan.featurePlans
+          : bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
         bakeStrategy: provisionalSketchPlan.bakeStrategy,
         requiresStudioBake: provisionalSketchPlan.requiresStudioBake,
         bakeDiagnostics: provisionalSketchPlan.bakeDiagnostics,
       };
       const featureIdToOrderedPrefixPosition = new Map<string, number>();
+      const featureIdToOrderedActionIndex = new Map<string, number>();
+      const orderedPositionToFeatureId = new Map<number, string>();
       const prefixActions = await buildPreparedActions({
         read: input.read,
         plan: sketchPrefixPlan,
         capabilities: input.capabilities,
         materializeBake: false,
         featureIdToOrderedPrefixPosition,
+        featureIdToOrderedActionIndex,
+        orderedPositionToFeatureId,
+        deferUnresolvedExactBodyOwners: true,
       });
-      return probeTopologyConsumerPrefixes({
-        actions: prefixActions,
-        featureIdToOrderedPrefixPosition,
-        consumerFeatureIds: consumerIds,
-        history: input.capabilities.history!,
-      });
+      rememberWorkingPlan();
+      return {
+        results: await probeTopologyConsumerPrefixes({
+          actions: prefixActions,
+          featureIdToOrderedPrefixPosition,
+          consumerFeatureIds: historicalConsumerIds.length > 0 ? historicalConsumerIds : consumerIds,
+          history: input.capabilities.history!,
+          includeHistoricalSignatures: historicalConsumerIds.length > 0,
+          requireFreshExecution: historicalConsumerIds.length > 0,
+        }),
+        featureIdToOrderedActionIndex,
     };
+      };
 
-    let prefixResults = await probeSketchPrefixes();
+    let probedSketchPrefixes = await probeSketchPrefixes();
+    let prefixResults = probedSketchPrefixes.results;
+    const featureIdToOrderedActionIndexBySketchConsumerId = new Map(
+      prefixResults.map((result) => [
+        result.consumerFeatureId,
+        probedSketchPrefixes.featureIdToOrderedActionIndex,
+      ] as const),
+    );
     // A face-backed sketch can only be lifted onto a live face that apply will
     // actually present. When a sketch prefix does not rebuild, the prefix still
     // contains a feature the live kernel refuses, so the probe exposes no live
@@ -1602,12 +1854,70 @@ async function activateProbeBackedPlanning(input: {
     // This is deliberately lazy: containment rebuilds the whole studio in the
     // kernel, which the largest captures cannot afford on every iteration.
     if (prefixResults.some((result) => result.status === "failed")) {
-      await containUnbuildableFeatures();
-      prefixResults = await probeSketchPrefixes();
+      const containment = await containUnbuildableFeatures({ materializeBake: false });
+      if (containment.kind === "historical-retry-requested") return containment;
+      probedSketchPrefixes = await probeSketchPrefixes();
+      prefixResults = probedSketchPrefixes.results;
+      for (const result of prefixResults) {
+        featureIdToOrderedActionIndexBySketchConsumerId.set(
+          result.consumerFeatureId,
+          probedSketchPrefixes.featureIdToOrderedActionIndex,
+        );
     }
-    const prefixByConsumerFeatureId = new Map(
+      }
+    let prefixByConsumerFeatureId = new Map(
       prefixResults.map((result) => [result.consumerFeatureId, result]),
     );
+    const historicalSketchConsumerIds = workingPlan.featurePlans.flatMap((featurePlan) => {
+      if (!sketchConsumerIds.has(featurePlan.onshapeFeatureId)) return [];
+      const prefixResult = prefixByConsumerFeatureId.get(featurePlan.onshapeFeatureId);
+      const feature = featuresById.get(featurePlan.onshapeFeatureId);
+      if (!feature || prefixResult?.status !== "rebuilt") return [];
+      const deterministicId = extractSketchPlaneDeterministicId(feature);
+      const records = deterministicId ? references.get(deterministicId) ?? [] : [];
+      const reference =
+        records.find(
+          (record) =>
+            record.evaluatedAt === "historyPoint" &&
+            record.consumingFeatureId === feature.featureId &&
+            "signature" in record,
+        ) ??
+        records.find((record) => record.evaluatedAt === "historyPoint" && "signature" in record) ??
+        records.find((record) => record.evaluatedAt === "finalState" && "signature" in record);
+      const capturedSignature =
+        reference && "signature" in reference
+          ? normalizeOnshapeTopologySignature(reference.signature)
+          : inferredSweptFaceSignature({ feature, read: input.read, plan: workingPlan });
+      if (!capturedSignature) return [];
+      const bodyScope = scopeLiveSignaturesToCapturedBody({
+        snapshot: topologyTimeline.snapshotBeforeFeature(featurePlan.onshapeFeatureId),
+        deterministicId,
+        liveSignatures: prefixResult.signatures,
+        tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+      });
+      return historicalRetryFeatureIds.has(featurePlan.onshapeFeatureId) ||
+        matchSignature(
+          capturedSignature,
+          bodyScope.signatures,
+          LIVE_TOPOLOGY_MATCH_TOLERANCE,
+        ).kind === "noMatch"
+        ? [featurePlan.onshapeFeatureId]
+        : [];
+    });
+    if (historicalSketchConsumerIds.length > 0) {
+      const historicalProbedSketchPrefixes = await probeSketchPrefixes(historicalSketchConsumerIds);
+      const historicalResults = historicalProbedSketchPrefixes.results;
+      prefixByConsumerFeatureId = new Map([
+        ...prefixByConsumerFeatureId,
+        ...historicalResults.map((result) => [result.consumerFeatureId, result] as const),
+      ]);
+      for (const result of historicalResults) {
+        featureIdToOrderedActionIndexBySketchConsumerId.set(
+          result.consumerFeatureId,
+          historicalProbedSketchPrefixes.featureIdToOrderedActionIndex,
+        );
+    }
+      }
     const nextPlans: FeaturePlan[] = workingPlan.featurePlans.map((featurePlan) => {
       if (forcedBakeFeatureIds.has(featurePlan.onshapeFeatureId)) return featurePlan;
       if (
@@ -1655,6 +1965,45 @@ async function activateProbeBackedPlanning(input: {
       const finalStateReference = records.find(
         (record) => record.evaluatedAt === "finalState" && "signature" in record,
       );
+      const splitInterfaceQuery = feature
+        ? readExactSplitInterfaceFaceQuery(feature)
+        : null;
+      const splitInterfaceReference = historyReference ?? finalStateReference;
+      const splitInterfaceSignature = splitInterfaceReference && "signature" in splitInterfaceReference
+        ? splitInterfaceReference.signature
+        : null;
+      const splitInterfaceFrame = splitInterfaceSignature
+        ? frameFromCapturedSignature(splitInterfaceSignature)
+        : null;
+      if (splitInterfaceQuery && splitInterfaceFrame && splitInterfaceSignature) {
+        const placeholderSelector: ImportDeferredTopologyRef = {
+          kind: "topologyOf",
+          expectedKind: "face",
+          capturedSignature: normalizeOnshapeTopologySignature(splitInterfaceSignature),
+          tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+          source: {
+            consumerFeatureId: featurePlan.onshapeFeatureId,
+            parameterId: "sketchPlane",
+            deterministicId: `split-interface:${splitInterfaceQuery.profileEntityId}`,
+          },
+        };
+        return {
+          ...featurePlan,
+          tier: "parametric" as const,
+          target: {
+            kind: "sketch" as const,
+            planeKey: "xy" as const,
+            plane: {
+              support: { kind: "face", bodyId: "body_pending" as BodyId, faceId: "face_pending" as FaceId },
+              frame: splitInterfaceFrame,
+              key: null,
+            },
+            probedFaceSelector: placeholderSelector,
+          },
+          reasonCodes: ["sketch-on-probed-face" as const],
+          suppressed: false,
+        };
+      }
       if (!historyReference && finalStateReference) {
         return {
           ...featurePlan,
@@ -1699,15 +2048,8 @@ async function activateProbeBackedPlanning(input: {
             : "The sketch feature declares no resolvable sketch-plane query id.",
         );
       }
-      // A split leaves both pieces carrying the same coincident face, so the
-      // plane can only be named per body. Scope the live candidates to the one
-      // live body the captured face's own captured body resolves to; when that
-      // correspondence is not exact, nothing is scoped and the outcome stays
-      // honestly zero/one/many.
       const bodyScope = scopeLiveSignaturesToCapturedBody({
-        snapshot: topologyTimeline.snapshotBeforeFeature(
-          featurePlan.onshapeFeatureId,
-        ),
+        snapshot: topologyTimeline.snapshotBeforeFeature(featurePlan.onshapeFeatureId),
         deterministicId,
         liveSignatures: probeSignatures,
         tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
@@ -1719,13 +2061,61 @@ async function activateProbeBackedPlanning(input: {
         bodyScope.signatures,
         LIVE_TOPOLOGY_MATCH_TOLERANCE,
       );
-      if (match.kind !== "unique") {
+      const requiresHistoricalLineage = historicalRetryFeatureIds.has(featurePlan.onshapeFeatureId);
+      if (match.kind !== "unique" || requiresHistoricalLineage) {
+        const historical = match.kind === "noMatch" || requiresHistoricalLineage
+          ? resolveHistoricalTopology({
+              expectedKind: "face",
+              capturedSignature,
+              historicalSteps: withHistoricalSourceFeatureIds(
+                prefixResult.historicalSignatureSteps,
+                featureIdToOrderedActionIndexBySketchConsumerId.get(
+                  featurePlan.onshapeFeatureId,
+                ) ?? new Map(),
+              ),
+              consumerSignatures: probeSignatures,
+              source: {
+                consumerFeatureId: featurePlan.onshapeFeatureId,
+                parameterId: "sketchPlane",
+                deterministicId: deterministicId ?? "historical-sketch-plane",
+              },
+            })
+          : null;
+        if (historical?.kind === "unique") {
+          const historicalSignature = probeSignatures.find(
+            (signature) => referenceKey(signature.reference) === referenceKey(historical.reference),
+          );
+          const historicalPlane = historicalSignature
+            ? planeFromProbeSignature(historicalSignature)
+            : null;
+          if (historicalPlane) {
+            return {
+              ...featurePlan,
+              tier: "parametric" as const,
+              target: {
+                kind: "sketch" as const,
+                planeKey: "xy" as const,
+                plane: historicalPlane,
+                probedFaceSelector: historical.selector,
+              },
+              reasonCodes: ["sketch-on-probed-face" as const],
+              suppressed: false,
+            };
+          }
+        }
+        const currentDetail = match.kind === "unique"
+          ? `Current geometric match ${durableRefLabel(match.reference)} was rejected after its apply-time rematch failure.`
+          : describeSketchPlaneMatchFailure(
+              match,
+              capturedSignature,
+              bodyScope.signatures,
+            );
         return bakeSketchWithDetail(
-          `${describeSketchPlaneMatchFailure(
-            match,
-            capturedSignature,
-            bodyScope.signatures,
-          )} || ${bodyScope.detail}`,
+          `${currentDetail} || ${bodyScope.detail}${
+            historical && historical.kind !== "unique"
+              ? ` || ${historical.detail}`
+              : ""
+          }`,
         );
       }
       const matchedReference = match.reference;
@@ -1787,7 +2177,7 @@ async function activateProbeBackedPlanning(input: {
   // parametric with a live extent/scope `topologySlot`, degrade only that
   // feature (and cascade its dependents) rather than letting a whole-studio
   // prepare throw. `resolvedExtrudeExtent` remains a hard invariant behind this.
-  const swept = bakeConsumersOfBakedSketches(
+  const swept = cascadeUnavailableActionConsumers(
     bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
   );
   if (swept.some((plan, index) => plan !== workingPlan.featurePlans[index])) {
@@ -1799,9 +2189,82 @@ async function activateProbeBackedPlanning(input: {
     );
   }
 
-  await containUnbuildableFeatures();
+  // Exact Split ownership is source-feature-relative during review. Once every
+  // producer and split-interface dependent is parametric, its provisional probe
+  // annotations are no longer a fidelity limitation; retain a clean promoted plan.
+  const exactSplitProducerFeatureIds = new Set<string>();
+  const collectExactSplitProducers = (value: unknown, target: Set<string>): void => {
+    if (!value || typeof value !== "object") return;
+    if ((value as { kind?: unknown }).kind === "bodyOfSourceFeature") {
+      const featureId = (value as { producerSourceFeatureId?: unknown }).producerSourceFeatureId;
+      if (typeof featureId === "string") target.add(featureId);
+      return;
+    }
+    for (const child of Array.isArray(value) ? value : Object.values(value)) {
+      collectExactSplitProducers(child, target);
+    }
+  };
+  const exactSplitFeatureIds = new Set<string>();
+  for (const featurePlan of workingPlan.featurePlans) {
+    if (featurePlan.plannedAdvancedSolid?.kind !== "split") continue;
+    const producerIds = new Set<string>();
+    collectExactSplitProducers(featurePlan.plannedAdvancedSolid, producerIds);
+    if (producerIds.size === 0) continue;
+    exactSplitFeatureIds.add(featurePlan.onshapeFeatureId);
+    for (const producerId of producerIds) exactSplitProducerFeatureIds.add(producerId);
+  }
+  if (exactSplitFeatureIds.size > 0) {
+    const exactSplitLineageIds = new Set(exactSplitProducerFeatureIds);
+    const pendingFeatureIds = [...exactSplitProducerFeatureIds];
+    while (pendingFeatureIds.length > 0) {
+      const featureId = pendingFeatureIds.pop()!;
+      const featurePlan = workingPlan.featurePlans.find((plan) => plan.onshapeFeatureId === featureId);
+      for (const inputFeatureId of featurePlan?.inputFeatureIds ?? []) {
+        if (!exactSplitLineageIds.has(inputFeatureId)) {
+          exactSplitLineageIds.add(inputFeatureId);
+          pendingFeatureIds.push(inputFeatureId);
+        }
+      }
+    }
+    for (const featurePlan of workingPlan.featurePlans) {
+      const feature = featuresById.get(featurePlan.onshapeFeatureId);
+      const splitInterface = feature ? readExactSplitInterfaceFaceQuery(feature) : null;
+      if (splitInterface && exactSplitFeatureIds.has(splitInterface.splitFeatureId)) {
+        exactSplitLineageIds.add(featurePlan.onshapeFeatureId);
+      }
+    }
+    const cleanedPlans = workingPlan.featurePlans.map((featurePlan) =>
+      featurePlan.tier === "parametric" && exactSplitLineageIds.has(featurePlan.onshapeFeatureId)
+        ? { ...featurePlan, reasonCodes: [], reasonDetail: undefined }
+        : featurePlan,
+    );
+    if (cleanedPlans.some((plan, index) => plan !== workingPlan.featurePlans[index])) {
+      workingPlan = recomputePlanWithFeaturePlans(
+        workingPlan,
+        cleanedPlans,
+        input.read.studio.groundTruth.hasBodies,
+        input.read,
+      );
+    }
+  }
 
-  return { plan: workingPlan, probeResult };
+  // A checkpoint cannot validate a live topology consumer: it replaces the
+  // topology that consumer proved. Prefix probes are the only valid evidence
+  // for such a consumer. Once no repairable consumer remains, contain the
+  // no-checkpoint parametric sequence and then the remaining baked segments.
+  const hasRepairableTopologyConsumer = workingPlan.featurePlans.some(
+    (featurePlan) =>
+      featurePlan.tier === "parametric" &&
+      featurePlan.target.kind === "sketch" &&
+      featurePlan.target.probedFaceSelector !== undefined,
+  );
+  if (!hasRepairableTopologyConsumer) {
+    const parametricContainment = await containUnbuildableFeatures({ materializeBake: false });
+    if (parametricContainment.kind === "historical-retry-requested") return parametricContainment;
+    const containment = await containUnbuildableFeatures({ materializeBake: true });
+    if (containment.kind === "historical-retry-requested") return containment;
+  }
+  return { kind: "activated", plan: workingPlan, probeResult };
 }
 
 async function reviewStudio(
@@ -1858,30 +2321,67 @@ async function reviewStudio(
   // one rejected feature from aborting the whole studio import.
   const forcedBakeFeatureIds = new Set<string>();
   const forcedBakeReasonDetails = new Map<string, string>();
-  let activation: Awaited<ReturnType<typeof activateProbeBackedPlanning>>;
+  const historicalRetryFeatureIds = new Set<string>();
+  let retryPlan: OnshapeStudioPlan = capturedFramePlan;
+  const workingPlanRef = { current: retryPlan };
+  let activation: Extract<ProbeBackedPlanningActivation, { kind: "activated" }>;
   try {
     for (;;) {
       try {
-        activation = await activateProbeBackedPlanning({
+        const result = await activateProbeBackedPlanning({
           read,
-          plan: capturedFramePlan,
+          plan: retryPlan,
           capabilities,
           forcedBakeFeatureIds,
           forcedBakeReasonDetails,
+          historicalRetryFeatureIds,
+          workingPlanRef,
           forgetFailedProbes: memoizedHistory?.forgetFailedEvaluations,
         });
+        if (result.kind === "historical-retry-requested") {
+          historicalRetryFeatureIds.add(result.featureId);
+          // Historical resolution deliberately replans the selector from source
+          // evidence; a retained direct selector must not be re-used here.
+          retryPlan = capturedFramePlan;
+          memoizedHistory?.forgetFailedEvaluations();
+          continue;
+        }
+        const previousTiers = new Map(
+          retryPlan.featurePlans.map((featurePlan) => [
+            featurePlan.onshapeFeatureId,
+            featurePlan.tier,
+          ]),
+        );
+        if (result.plan.featurePlans.some(
+          (featurePlan) => previousTiers.get(featurePlan.onshapeFeatureId) !== featurePlan.tier,
+        )) {
+          retryPlan = result.plan;
+          memoizedHistory?.forgetFailedEvaluations();
+          continue;
+        }
+        activation = result;
         break;
       } catch (error) {
         if (!isTopologyApplyRematchError(error)) throw error;
+        retryPlan = workingPlanRef.current;
         const offendingFeatureId = error.selector.source.consumerFeatureId;
-        // No progress means the demotion did not prevent the throw; surface it
-        // loudly rather than looping. Genuine non-topology errors already rethrew.
+        if (
+          error.selector.kind === "topologyOf" &&
+          !historicalRetryFeatureIds.has(offendingFeatureId)
+        ) {
+          historicalRetryFeatureIds.add(offendingFeatureId);
+          retryPlan = capturedFramePlan;
+          memoizedHistory?.forgetFailedEvaluations();
+          continue;
+        }
+        // Historical zero/many/conflict (or a second live failure) has now failed
+        // closed. Contain that one feature rather than weakening the selector.
         if (forcedBakeFeatureIds.has(offendingFeatureId)) throw error;
         forcedBakeFeatureIds.add(offendingFeatureId);
         if (error.detail) {
           forcedBakeReasonDetails.set(offendingFeatureId, error.detail);
-        }
       }
+    }
     }
   } finally {
     await memoizedHistory?.dispose?.();
@@ -2249,6 +2749,184 @@ type OnshapeStudioPlan = Pick<
   | "requiresStudioBake"
 >;
 
+function isHistoricalTopologyPlanSelector(
+  selector: unknown,
+): selector is HistoricalTopologyPlanSelector {
+  return Boolean(
+    selector &&
+      typeof selector === "object" &&
+      (selector as { kind?: unknown }).kind === "historicalTopologyOf" &&
+      typeof (selector as { witnessSourceFeatureId?: unknown }).witnessSourceFeatureId === "string" &&
+      Array.isArray((selector as { successorSourceFeatureIds?: unknown }).successorSourceFeatureIds),
+  );
+}
+
+/** Replace exploratory review indexes with this prepared sequence's source actions. */
+export function rebaseHistoricalTopologySelectorForPreparedActions(input: {
+  selector: HistoricalTopologyPlanSelector;
+  actionIndexesBySourceFeatureId: ReadonlyMap<string, readonly number[]>;
+  orderedActions: readonly ImportPreparedActionRef[];
+  consumerActionIndex: number;
+}): import("@/contracts/import/actions").ImportDeferredHistoricalTopologyRef {
+  const rebase = (sourceFeatureId: string, role: string): number => {
+    const actionIndexes = input.actionIndexesBySourceFeatureId.get(sourceFeatureId) ?? [];
+    if (actionIndexes.length !== 1) {
+      throw new Error(
+        `Historical topology ${role} source feature ${sourceFeatureId} for ${input.selector.source.consumerFeatureId}:${input.selector.source.parameterId}:${input.selector.source.deterministicId} must map to exactly one emitted action (found ${actionIndexes.length}).`,
+      );
+    }
+    const actionIndex = actionIndexes[0]!;
+    if (actionIndex >= input.consumerActionIndex || !input.orderedActions[actionIndex]) {
+      throw new Error(
+        `Historical topology ${role} source feature ${sourceFeatureId} must map to one prior emitted action.`,
+      );
+    }
+    return actionIndex;
+  };
+  const witnessActionIndex = rebase(input.selector.witnessSourceFeatureId, "witness");
+  const successorActionIndexes = input.selector.successorSourceFeatureIds.map(
+    (sourceFeatureId) => rebase(sourceFeatureId, "successor"),
+  );
+  if (successorActionIndexes.some((index, position) =>
+    index <= (position === 0 ? witnessActionIndex : successorActionIndexes[position - 1]!),
+  )) {
+    throw new Error("Historical topology source-feature successors are not in prepared action order.");
+  }
+  const selector = Object.fromEntries(
+    Object.entries(input.selector).filter(
+      ([key]) => key !== "witnessSourceFeatureId" && key !== "successorSourceFeatureIds",
+    ),
+  ) as unknown as import("@/contracts/import/actions").ImportDeferredHistoricalTopologyRef;
+  return { ...selector, witnessActionIndex, successorActionIndexes };
+}
+
+/** Rebase review-only exact body ownership after all source actions are emitted. */
+export function rebaseExactBodyOwnerForPreparedActions(input: {
+  target: DeferredBodyOfSourceFeature;
+  actionIndexesBySourceFeatureId: ReadonlyMap<string, readonly number[]>;
+  exactBodyProducerActionIndexes: ReadonlyMap<string, number>;
+  orderedActions: readonly ImportPreparedActionRef[];
+  consumerActionIndex: number;
+}): Extract<import("@/contracts/import/actions").ImportDeferredValue, { kind: "bodyOf" }> {
+  const actionIndexes = input.actionIndexesBySourceFeatureId.get(
+    input.target.producerSourceFeatureId,
+  ) ?? [];
+  if (actionIndexes.length !== 1) {
+    throw new Error(
+      `Exact body owner ${input.target.producerSourceFeatureId} must map to exactly one emitted action (found ${actionIndexes.length}).`,
+    );
+  }
+  const actionIndex = actionIndexes[0]!;
+  if (
+    actionIndex >= input.consumerActionIndex ||
+    !input.orderedActions[actionIndex] ||
+    input.exactBodyProducerActionIndexes.get(input.target.producerSourceFeatureId) !== actionIndex
+  ) {
+    throw new Error(
+      `Exact body owner ${input.target.producerSourceFeatureId} must map to one prior action with exactly one rollback body output (${input.target.deterministicId}).`,
+    );
+  }
+  return { kind: "bodyOf", actionIndex };
+}
+
+function rebaseExactBodyOwnersInPreparedValue(input: {
+  value: unknown;
+  actionIndexesBySourceFeatureId: ReadonlyMap<string, readonly number[]>;
+  exactBodyProducerActionIndexes: ReadonlyMap<string, number>;
+  orderedActions: readonly ImportPreparedActionRef[];
+  consumerActionIndex: number;
+}): unknown {
+  if (
+    input.value &&
+    typeof input.value === "object" &&
+    (input.value as { kind?: unknown }).kind === "bodyOfSourceFeature"
+  ) {
+    const target = input.value as DeferredBodyOfSourceFeature;
+    if (
+      typeof target.producerSourceFeatureId !== "string" ||
+      typeof target.deterministicId !== "string"
+    ) {
+      throw new Error("Exact body owner is missing review source-feature identity.");
+    }
+    return rebaseExactBodyOwnerForPreparedActions({
+      target,
+      actionIndexesBySourceFeatureId: input.actionIndexesBySourceFeatureId,
+      exactBodyProducerActionIndexes: input.exactBodyProducerActionIndexes,
+      orderedActions: input.orderedActions,
+      consumerActionIndex: input.consumerActionIndex,
+    });
+  }
+  if (Array.isArray(input.value)) {
+    return input.value.map((value) => rebaseExactBodyOwnersInPreparedValue({ ...input, value }));
+  }
+  if (
+    !input.value ||
+    typeof input.value !== "object" ||
+    Object.getPrototypeOf(input.value) !== Object.prototype
+  ) {
+    return input.value;
+  }
+  return Object.fromEntries(
+    Object.entries(input.value).map(([key, value]) => [
+      key,
+      rebaseExactBodyOwnersInPreparedValue({ ...input, value }),
+    ]),
+  );
+}
+
+function rebaseHistoricalSelectorsInPreparedValue(input: {
+  value: unknown;
+  actionIndexesBySourceFeatureId: ReadonlyMap<string, readonly number[]>;
+  orderedActions: readonly ImportPreparedActionRef[];
+  consumerActionIndex: number;
+}): unknown {
+  if (isHistoricalTopologyPlanSelector(input.value)) {
+    return rebaseHistoricalTopologySelectorForPreparedActions({
+      selector: input.value,
+      actionIndexesBySourceFeatureId: input.actionIndexesBySourceFeatureId,
+      orderedActions: input.orderedActions,
+      consumerActionIndex: input.consumerActionIndex,
+    });
+  }
+  if (
+    input.value &&
+    typeof input.value === "object" &&
+    (input.value as { kind?: unknown }).kind === "historicalTopologyOf"
+  ) {
+    throw new Error("Historical topology selector is missing review source-feature identities.");
+  }
+  if (Array.isArray(input.value)) {
+    return input.value.map((value) => rebaseHistoricalSelectorsInPreparedValue({ ...input, value }));
+  }
+  if (
+    !input.value ||
+    typeof input.value !== "object" ||
+    Object.getPrototypeOf(input.value) !== Object.prototype
+  ) {
+    return input.value;
+  }
+  return Object.fromEntries(
+    Object.entries(input.value).map(([key, value]) => [
+      key,
+      rebaseHistoricalSelectorsInPreparedValue({ ...input, value }),
+    ]),
+  );
+}
+
+function withHistoricalSourceFeatureIds(
+  steps: readonly import("@/domain/import/historical-topology-selector").HistoricalTopologySignatureStep[],
+  featureIdToOrderedActionIndex: ReadonlyMap<string, number>,
+) {
+  const featureIdByActionIndex = new Map<number, string>();
+  for (const [featureId, actionIndex] of featureIdToOrderedActionIndex) {
+    featureIdByActionIndex.set(actionIndex, featureId);
+  }
+  return steps.map((step) => ({
+    ...step,
+    sourceFeatureId: featureIdByActionIndex.get(step.orderedActionIndex),
+  }));
+}
+
 export function resolvePlannedDeferredParticipants(
   definition: ImportDeferredFeatureDefinition,
   orderedIndexByFeatureId: ReadonlyMap<string, number>,
@@ -2333,6 +3011,11 @@ async function buildPreparedActions(input: {
   includeBinding?: boolean;
   materializeBake?: boolean;
   /**
+   * Attach per-feature topology fallback checkpoints. These are apply recovery,
+   * not evidence for containment or historical lineage.
+   */
+  materializeTopologyFallback?: boolean;
+  /**
    * Emit planner-selected bake checkpoints (segment checkpoint bodies) into the
    * prepared prefix without materializing the monolithic whole-studio bake.
    * Probe prefixes set this so whole-body consumers (Split/Boolean/Delete/
@@ -2348,6 +3031,12 @@ async function buildPreparedActions(input: {
   orderedPositionToFeatureId?: Map<number, string>;
   /** Ordered prefix length immediately before each source feature. */
   featureIdToOrderedPrefixPosition?: Map<string, number>;
+  /** Exact action ownership for deferred whole-body producer references. */
+  featureIdToOrderedActionIndex?: Map<string, number>;
+  /** Unique emitted action whose rollback delta owns one body transition. */
+  featureIdToBodyProducerActionIndex?: Map<string, number>;
+  /** Exploratory review may omit an exact-owner consumer until its source action exists. */
+  deferUnresolvedExactBodyOwners?: boolean;
 }): Promise<ImportPreparedActions> {
   const demoted = new Set(input.demotedFeatureIds ?? []);
   const featuresById = new Map(input.read.features.map((f) => [f.featureId, f]));
@@ -2365,6 +3054,12 @@ async function buildPreparedActions(input: {
   // references can address producing actions by ordered-sequence position
   // (the index the orchestrator records outputs under).
   const orderedIndexByFeatureId = new Map<string, number>();
+  const actionIndexesBySourceFeatureId = new Map<string, number[]>();
+  const recordSourceAction = (featureId: string, actionIndex: number) => {
+    const actionIndexes = actionIndexesBySourceFeatureId.get(featureId) ?? [];
+    actionIndexes.push(actionIndex);
+    actionIndexesBySourceFeatureId.set(featureId, actionIndexes);
+  };
   const segmentByBoundaryFeatureId = new Map(
     input.plan.bakeStrategy.kind === "segments"
       ? input.plan.bakeStrategy.segments.map((segment) => [
@@ -2373,6 +3068,38 @@ async function buildPreparedActions(input: {
         ] as const)
       : [],
   );
+
+  // A checkpoint replaces live topology. If a promoted sketch immediately
+  // following a baked segment has topology support, emit the replacement only
+  // after that sketch commits; support is derived solely from the parametric
+  // predecessor, never from checkpoint geometry.
+  const deferredCheckpointBoundaryIds = new Set<string>();
+  const checkpointBoundaryIdsBeforeFeature = new Map<string, string[]>();
+  const trailingCheckpointBoundaryIds: string[] = [];
+  if (input.plan.bakeStrategy.kind === "segments") {
+    for (const segment of input.plan.bakeStrategy.segments) {
+      const boundaryIndex = input.plan.featurePlans.findIndex(
+        (featurePlan) => featurePlan.onshapeFeatureId === segment.boundaryFeatureId,
+      );
+      const consumerIndex = input.plan.featurePlans.findIndex(
+        (featurePlan, index) =>
+          index > boundaryIndex &&
+          featurePlan.tier === "parametric" &&
+          featurePlan.target.kind === "sketch" &&
+          featurePlan.target.probedFaceSelector !== undefined,
+      );
+      if (boundaryIndex < 0 || consumerIndex < 0) continue;
+      deferredCheckpointBoundaryIds.add(segment.boundaryFeatureId);
+      const nextFeatureId = input.plan.featurePlans[consumerIndex + 1]?.onshapeFeatureId;
+      if (nextFeatureId) {
+        const boundaries = checkpointBoundaryIdsBeforeFeature.get(nextFeatureId) ?? [];
+        boundaries.push(segment.boundaryFeatureId);
+        checkpointBoundaryIdsBeforeFeature.set(nextFeatureId, boundaries);
+      } else {
+        trailingCheckpointBoundaryIds.push(segment.boundaryFeatureId);
+      }
+    }
+  }
   const rollbackTimeline = input.read.studio.rollbackSnapshots
     ? createRollbackTopologyTimeline({
         featureIds: input.read.features.map((feature) => feature.featureId),
@@ -2385,6 +3112,8 @@ async function buildPreparedActions(input: {
     bindings: ReadonlyMap<string, ImportDeferredTopologyRef>;
   };
   const bodyProducerByDeterministicId = new Map<string, PreparedBodyProducer>();
+  const exactProducerActionIndexByFeatureId = new Map<string, number>();
+  const exactProducerActionCountByFeatureId = new Map<string, number>();
   const firstRollbackFeatureId = input.read.studio.rollbackSnapshots?.[0]?.featureId;
 
   const recordBodyTransition = (
@@ -2392,26 +3121,36 @@ async function buildPreparedActions(input: {
     actionIndex: number,
     bindings: ReadonlyMap<string, ImportDeferredTopologyRef> = new Map(),
   ) => {
+    const actionCount = (exactProducerActionCountByFeatureId.get(featureId) ?? 0) + 1;
+    exactProducerActionCountByFeatureId.set(featureId, actionCount);
     const delta = rollbackTimeline?.bodyDeltaBetweenFeatures(featureId, featureId);
     const firstSnapshot = featureId === firstRollbackFeatureId
       ? rollbackTimeline?.snapshotAfterFeature(featureId)
       : null;
-    if (!delta && !firstSnapshot) return;
+    if (!delta && !firstSnapshot) {
+      exactProducerActionIndexByFeatureId.delete(featureId);
+      return;
+    }
     const introducedBodyDeterministicIds = delta
       ? delta.introducedBodyDeterministicIds
       : firstSnapshot!.bodies.map((body) => body.id);
     const changedBodyDeterministicIds = delta?.changedBodyDeterministicIds ?? [];
     const removedBodyDeterministicIds = delta?.removedBodyDeterministicIds ?? [];
+    const bodyDeterministicIds = [
+      ...introducedBodyDeterministicIds,
+      ...changedBodyDeterministicIds,
+    ];
+    if (actionCount === 1 && bodyDeterministicIds.length === 1) {
+      exactProducerActionIndexByFeatureId.set(featureId, actionIndex);
+    } else {
+      exactProducerActionIndexByFeatureId.delete(featureId);
+    }
     for (const bodyId of [
       ...changedBodyDeterministicIds,
       ...removedBodyDeterministicIds,
     ]) {
       bodyProducerByDeterministicId.delete(bodyId);
     }
-    const bodyDeterministicIds = [
-      ...introducedBodyDeterministicIds,
-      ...changedBodyDeterministicIds,
-    ];
     const producer = { actionIndex, bodyDeterministicIds, bindings };
     for (const bodyId of bodyDeterministicIds) {
       bodyProducerByDeterministicId.set(bodyId, producer);
@@ -2453,19 +3192,30 @@ async function buildPreparedActions(input: {
       : null;
   };
 
-  /**
-   * Split's whole-body participants can retain exact producer identity when a
-   * prior action owns precisely one captured body output. This is stricter than
-   * geometric rematching: multi-output and unattributable sources retain their
-   * topology selectors and therefore their existing honest fallback behavior.
-   */
   const resolveAdvancedBodyParticipants = (
     definition: ImportDeferredFeatureDefinition,
-  ): ImportDeferredFeatureDefinition => {
-    const parameters = definition.parameters as {
+    consumerFeatureId: string,
+  ): ImportDeferredFeatureDefinition | null => {
+    let rebasedDefinition: ImportDeferredFeatureDefinition;
+    try {
+      rebasedDefinition = rebaseExactBodyOwnersInPreparedValue({
+        value: definition,
+        actionIndexesBySourceFeatureId,
+        exactBodyProducerActionIndexes: exactProducerActionIndexByFeatureId,
+        orderedActions,
+        consumerActionIndex: orderedActions.length,
+      }) as ImportDeferredFeatureDefinition;
+    } catch (error) {
+      if (input.deferUnresolvedExactBodyOwners) return null;
+      throw error;
+    }
+    const parameters = rebasedDefinition.parameters as {
       participants?: readonly { role: string; targets: readonly unknown[] }[];
     };
-    if (definition.kind !== "split" || !parameters.participants) return definition;
+    if (!rollbackTimeline || rebasedDefinition.kind !== "split" || !parameters.participants) {
+      return rebasedDefinition;
+    }
+    const featureIds = input.read.features.map((feature) => feature.featureId);
     const participants = parameters.participants.map((participant) => {
       const bodyParticipant =
         participant.role === "body" ||
@@ -2480,22 +3230,32 @@ async function buildPreparedActions(input: {
             typeof target !== "object" ||
             (target as { kind?: unknown }).kind !== "topologyOf" ||
             (target as { expectedKind?: unknown }).expectedKind !== "body"
-          ) {
-            return target;
-          }
+          ) return target;
           const selector = target as ImportDeferredTopologyRef;
-          const producer = bodyProducerByDeterministicId.get(
-            selector.source.deterministicId,
-          );
-          return producer?.bodyDeterministicIds.length === 1
-            ? { kind: "bodyOf" as const, actionIndex: producer.actionIndex }
-            : target;
+          const binding = resolveExactBodyProducerBindings({
+            featureIds,
+            consumerFeatureId,
+            queries: [{
+              consumerFeatureId,
+              slotKey: selector.source.parameterId,
+              parameterId: selector.source.parameterId,
+              queryIndex: 0,
+              deterministicId: selector.source.deterministicId,
+              queryString: null,
+              expectedKinds: ["body"],
+            }],
+            rollback: rollbackTimeline,
+            isParametric: (featureId) =>
+              input.plan.featurePlans.find((plan) => plan.onshapeFeatureId === featureId)?.tier === "parametric",
+            featureIdToOrderedActionIndex: exactProducerActionIndexByFeatureId,
+          })?.[0];
+          return binding?.deferred.kind === "bodyOf" ? binding.deferred : target;
         }),
       };
     });
     return {
-      ...definition,
-      parameters: { ...definition.parameters, participants },
+      ...rebasedDefinition,
+      parameters: { ...rebasedDefinition.parameters, participants },
     } as ImportDeferredFeatureDefinition;
   };
 
@@ -2516,10 +3276,7 @@ async function buildPreparedActions(input: {
     featurePlan: FeaturePlan,
     request: ImportCreateFeatureRequest,
   ) => {
-    if (
-      !input.materializeBake ||
-      !rollbackTimeline
-    ) return;
+    if (!input.materializeTopologyFallback || !rollbackTimeline) return;
     const selectedBodyIds = deferredBodyTopologyIds(request.definition);
     if (selectedBodyIds.length === 0) return;
     const delta = rollbackTimeline.bodyDeltaBetweenFeatures(
@@ -2631,6 +3388,7 @@ async function buildPreparedActions(input: {
       });
       const checkpointOrderedIndex = orderedActions.length - 1;
       orderedIndexByFeatureId.set(boundaryFeatureId, checkpointOrderedIndex);
+      recordSourceAction(boundaryFeatureId, checkpointOrderedIndex);
       const checkpointBindings = new Map(
         segment.bodyBindings.map((binding) => [
           binding.deterministicId,
@@ -2674,6 +3432,11 @@ async function buildPreparedActions(input: {
   };
 
   for (const featurePlan of input.plan.featurePlans) {
+    for (const boundaryFeatureId of checkpointBoundaryIdsBeforeFeature.get(
+      featurePlan.onshapeFeatureId,
+    ) ?? []) {
+      await emitSegmentCheckpoint(boundaryFeatureId);
+    }
     input.featureIdToOrderedPrefixPosition?.set(
       featurePlan.onshapeFeatureId,
       orderedActions.length,
@@ -2693,7 +3456,9 @@ async function buildPreparedActions(input: {
           code: "onshape-feature-degraded",
         });
       }
-      await emitSegmentCheckpoint(featurePlan.onshapeFeatureId);
+      if (!deferredCheckpointBoundaryIds.has(featurePlan.onshapeFeatureId)) {
+        await emitSegmentCheckpoint(featurePlan.onshapeFeatureId);
+      }
       continue;
     }
 
@@ -2739,6 +3504,7 @@ async function buildPreparedActions(input: {
         orderedActions.length - 1,
         featurePlan.onshapeFeatureId,
       );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
       continue;
     }
 
@@ -2765,6 +3531,7 @@ async function buildPreparedActions(input: {
         featurePlan.onshapeFeatureId,
         orderedActions.length - 1,
       );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
       input.orderedPositionToFeatureId?.set(
         orderedActions.length - 1,
         featurePlan.onshapeFeatureId,
@@ -2854,6 +3621,7 @@ async function buildPreparedActions(input: {
           planeOrderedIndex,
           featurePlan.onshapeFeatureId,
         );
+        recordSourceAction(featurePlan.onshapeFeatureId, planeOrderedIndex);
         planeSupport = {
           kind: "constructionOf",
           actionIndex: planeOrderedIndex,
@@ -2875,10 +3643,60 @@ async function buildPreparedActions(input: {
           actionIndex: planeOrderedIndex,
         };
       } else if (featurePlan.target.probedFaceSelector) {
-        // Promoted sketch-on-face: emit the probed face as a deferred
-        // topologyOf support so the orchestrator rematches it against live
-        // topology at apply time (orchestrator.ts materializeCommitSketchRequest).
-        planeSupport = featurePlan.target.probedFaceSelector;
+        if (isHistoricalTopologyPlanSelector(featurePlan.target.probedFaceSelector)) {
+          const witnessActions = actionIndexesBySourceFeatureId.get(
+            featurePlan.target.probedFaceSelector.witnessSourceFeatureId,
+          ) ?? [];
+          if (witnessActions.length !== 1) {
+            diagnostics.push({
+              severity: "warning",
+              code: "onshape-sketch-missing-historical-witness",
+              message: `Sketch "${featurePlan.label}" referenced historical witness ${featurePlan.target.probedFaceSelector.witnessSourceFeatureId}, which was not emitted exactly once; the sketch was skipped.`,
+            });
+            if (input.deferUnresolvedExactBodyOwners) continue;
+          }
+        }
+        const splitInterfaceQuery = readExactSplitInterfaceFaceQuery(
+          featuresById.get(featurePlan.onshapeFeatureId)!,
+        );
+        const profileSketchActionIndex = splitInterfaceQuery
+          ? orderedIndexByFeatureId.get(splitInterfaceQuery.profileSketchFeatureId)
+          : undefined;
+        const toolExtrudeActionIndex = splitInterfaceQuery
+          ? orderedIndexByFeatureId.get(splitInterfaceQuery.toolExtrudeFeatureId)
+          : undefined;
+        const splitActionIndex = splitInterfaceQuery
+          ? orderedIndexByFeatureId.get(splitInterfaceQuery.splitFeatureId)
+          : undefined;
+        if (
+          splitInterfaceQuery &&
+          (profileSketchActionIndex === undefined ||
+            toolExtrudeActionIndex === undefined ||
+            splitActionIndex === undefined)
+        ) {
+          // The exact split-interface selector is meaningful only with its full
+          // producer chain. A transient review prefix must not substitute the
+          // generic face selector and then demote this sketch on that artifact.
+          if (input.deferUnresolvedExactBodyOwners) continue;
+          throw new Error(
+            `Split-interface sketch ${featurePlan.label} is missing an emitted profile, tool, or Split action.`,
+          );
+        }
+        planeSupport = splitInterfaceQuery
+          ? {
+              kind: "splitInterfaceFaceOf",
+              profileSketchActionIndex: profileSketchActionIndex!,
+              toolExtrudeActionIndex: toolExtrudeActionIndex!,
+              splitActionIndex: splitActionIndex!,
+              profileEntityId: splitInterfaceQuery.profileEntityId,
+              endRole: splitInterfaceQuery.endRole,
+              source: {
+                consumerFeatureId: featurePlan.onshapeFeatureId,
+                parameterId: "sketchPlane",
+                deterministicId: `split-interface:${splitInterfaceQuery.profileEntityId}`,
+              },
+            }
+          : featurePlan.target.probedFaceSelector;
       }
       commitSketches.push({
         contractVersion: context.contractVersion,
@@ -2904,6 +3722,7 @@ async function buildPreparedActions(input: {
         featurePlan.onshapeFeatureId,
         orderedActions.length - 1,
       );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
       input.orderedPositionToFeatureId?.set(
         orderedActions.length - 1,
         featurePlan.onshapeFeatureId,
@@ -3042,6 +3861,7 @@ async function buildPreparedActions(input: {
         featurePlan.onshapeFeatureId,
         orderedActions.length - 1,
       );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
       input.orderedPositionToFeatureId?.set(
         orderedActions.length - 1,
         featurePlan.onshapeFeatureId,
@@ -3135,6 +3955,7 @@ async function buildPreparedActions(input: {
         featurePlan.onshapeFeatureId,
         orderedActions.length - 1,
       );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
       input.orderedPositionToFeatureId?.set(
         orderedActions.length - 1,
         featurePlan.onshapeFeatureId,
@@ -3217,6 +4038,7 @@ async function buildPreparedActions(input: {
         featurePlan.onshapeFeatureId,
         orderedActions.length - 1,
       );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
       input.orderedPositionToFeatureId?.set(
         orderedActions.length - 1,
         featurePlan.onshapeFeatureId,
@@ -3326,6 +4148,7 @@ async function buildPreparedActions(input: {
       createFeatures.push(request);
       orderedActions.push({ kind: "createFeature", index: createFeatures.length - 1 });
       orderedIndexByFeatureId.set(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
       input.orderedPositionToFeatureId?.set(orderedActions.length - 1, featurePlan.onshapeFeatureId);
       recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
     }
@@ -3343,17 +4166,23 @@ async function buildPreparedActions(input: {
         });
         continue;
       }
+      const advancedDefinition = resolveAdvancedBodyParticipants(
+        resolvedDefinition.definition,
+        featurePlan.onshapeFeatureId,
+      );
+      if (!advancedDefinition) continue;
       const request: ImportCreateFeatureRequest = {
         contractVersion: context.contractVersion,
         documentId: context.documentId,
         baseRevisionId: context.baseRevisionId,
         featureLabel: featurePlan.label,
-        definition: resolveAdvancedBodyParticipants(resolvedDefinition.definition),
+        definition: advancedDefinition,
       };
       await prepareTopologyFallback(featurePlan, request);
       createFeatures.push(request);
       orderedActions.push({ kind: "createFeature", index: createFeatures.length - 1 });
       orderedIndexByFeatureId.set(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
       input.orderedPositionToFeatureId?.set(orderedActions.length - 1, featurePlan.onshapeFeatureId);
       recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
     }
@@ -3439,6 +4268,10 @@ async function buildPreparedActions(input: {
     }
   }
 
+  for (const boundaryFeatureId of trailingCheckpointBoundaryIds) {
+    await emitSegmentCheckpoint(boundaryFeatureId);
+  }
+
   if (input.plan.bakeStrategy.kind === "segments") {
     for (const segment of input.plan.bakeStrategy.segments) {
       diagnostics.push({
@@ -3473,6 +4306,18 @@ async function buildPreparedActions(input: {
     message: `Fidelity: ${input.plan.tierCounts.parametric} parametric, ${input.plan.tierCounts.baked} baked, ${input.plan.tierCounts.geometryOnly} geometry-only; bake strategy: ${strategySummary}.`,
     code: "onshape-fidelity-summary",
   });
+  if (input.featureIdToOrderedActionIndex) {
+    for (const [featureId, actionIndexes] of actionIndexesBySourceFeatureId) {
+      if (actionIndexes.length === 1) {
+        input.featureIdToOrderedActionIndex.set(featureId, actionIndexes[0]!);
+      }
+    }
+  }
+  if (input.featureIdToBodyProducerActionIndex) {
+    for (const [featureId, actionIndex] of exactProducerActionIndexByFeatureId) {
+      input.featureIdToBodyProducerActionIndex.set(featureId, actionIndex);
+    }
+  }
 
   const actions: ImportPreparedActions = {
     addDocumentVariables,
@@ -3481,6 +4326,40 @@ async function buildPreparedActions(input: {
     orderedActions,
     diagnostics,
   };
+
+  const rebasePreparedValue = (value: unknown, consumerActionIndex: number) => {
+    try {
+      return rebaseHistoricalSelectorsInPreparedValue({
+        value,
+        actionIndexesBySourceFeatureId,
+        orderedActions,
+        consumerActionIndex,
+      });
+    } catch (error) {
+      const buildDiagnostics = diagnostics
+        .filter((diagnostic) => diagnostic.severity !== "info")
+        .map((diagnostic) => `${diagnostic.code ?? "diagnostic"}: ${diagnostic.message}`)
+        .join("; ");
+      throw new Error(
+        `${describeUnknownError(error, "Historical topology rebase failed")}${buildDiagnostics ? ` Build diagnostics: ${buildDiagnostics}` : ""}`,
+        { cause: error },
+      );
+    }
+  };
+
+  for (const [consumerActionIndex, action] of orderedActions.entries()) {
+    if (action.kind === "commitSketch") {
+      commitSketches[action.index] = rebasePreparedValue(
+        commitSketches[action.index],
+        consumerActionIndex,
+      ) as ImportCommitSketchRequest;
+    } else if (action.kind === "createFeature") {
+      createFeatures[action.index] = rebasePreparedValue(
+        createFeatures[action.index],
+        consumerActionIndex,
+      ) as ImportCreateFeatureRequest;
+    }
+  }
 
   if (input.includeBinding && input.source) {
     actions.binding = {
@@ -3710,7 +4589,7 @@ export const onshapeImportProvider: ImportProvider<
     const reviewedStudio = review.providerReview.studios.find(
       (studio) => studio.elementId === elementId,
     );
-    const plan = reviewedStudio
+    const reviewedPlan: OnshapeStudioPlan = reviewedStudio
       ? {
           featurePlans: reviewedStudio.featurePlans,
           tierCounts: reviewedStudio.tierCounts,
@@ -3729,6 +4608,26 @@ export const onshapeImportProvider: ImportProvider<
             featurePlans: bakeUnresolvedExtrudeTopology(fallback.featurePlans),
           };
         })();
+    const selectedDemotions = new Set(selections.demotedFeatureIds);
+    const plan = selectedDemotions.size === 0
+      ? reviewedPlan
+      : recomputePlanWithFeaturePlans(
+          reviewedPlan,
+          cascadeUnavailableActionConsumers(
+            reviewedPlan.featurePlans.map((featurePlan) =>
+              selectedDemotions.has(featurePlan.onshapeFeatureId)
+                ? {
+                    ...featurePlan,
+                    tier: "baked" as const,
+                    target: { kind: "suppressed" as const },
+                    suppressed: true,
+                  }
+                : featurePlan,
+            ),
+          ),
+          read.studio.groundTruth.hasBodies,
+          read,
+        );
     return await buildPreparedActions({
       source,
       read,
@@ -3737,6 +4636,7 @@ export const onshapeImportProvider: ImportProvider<
       demotedFeatureIds: selections.demotedFeatureIds,
       includeBinding: true,
       materializeBake: true,
+      materializeTopologyFallback: true,
     });
   },
 };

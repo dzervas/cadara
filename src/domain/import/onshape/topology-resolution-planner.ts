@@ -1,6 +1,7 @@
 import type {
   HistoryProbeStepDiagnostic,
   HistoryProbeTopologySignature,
+  HistoryProbeExactTopologyEvidence,
   ImportHistoryProbeCapabilities,
 } from "@/contracts/import/capabilities";
 import type { ImportPreparedActions } from "@/contracts/import/actions";
@@ -13,23 +14,27 @@ export interface TopologyConsumerPrefixResult {
   consumerFeatureId: string;
   orderedPosition: number;
   signatures: readonly HistoryProbeTopologySignature[];
+  exactTopologyEvidence?: HistoryProbeExactTopologyEvidence;
+  historicalSignatureSteps: readonly {
+    orderedActionIndex: number;
+    signatures: readonly HistoryProbeTopologySignature[];
+  }[];
   status: "rebuilt" | "failed";
   /** Structured kernel diagnostics from the failed step, preserved verbatim. */
   diagnostics: readonly HistoryProbeStepDiagnostic[];
 }
 
 
-/**
- * Probe the growing parametric history immediately before each declared topology
- * consumer. Final tessellation is deliberately not requested here; it belongs to
- * whole-plan verification only.
- */
 export async function probeTopologyConsumerPrefixes(input: {
   actions: ImportPreparedActions;
   /** Prefix length immediately before each Onshape feature is planned. */
   featureIdToOrderedPrefixPosition: ReadonlyMap<string, number>;
   consumerFeatureIds: readonly string[];
   history: ImportHistoryProbeCapabilities;
+  /** Request every ordered prefix step for exact public-id continuity and lineage. */
+  includeHistoricalSignatures?: boolean;
+  /** Require the complete-history request to run in a fresh isolated service. */
+  requireFreshExecution?: boolean;
 }): Promise<readonly TopologyConsumerPrefixResult[]> {
   const actionCount = getOrderedActionRefs(input.actions).length;
   const consumers = input.consumerFeatureIds.flatMap((consumerFeatureId) => {
@@ -44,10 +49,13 @@ export async function probeTopologyConsumerPrefixes(input: {
   const prefixPositions = [...new Set(consumers.map(({ orderedPosition }) => orderedPosition))]
     .sort((left, right) => left - right);
   const longestPrefixPosition = Math.max(0, ...prefixPositions);
+  const historicalOrdinals = input.includeHistoricalSignatures
+    ? Array.from({ length: longestPrefixPosition }, (_, ordinal) => ordinal)
+    : [];
   let zeroBoundary: Pick<
     TopologyConsumerPrefixResult,
-    "status" | "signatures" | "diagnostics"
-  > = { status: "rebuilt", signatures: [], diagnostics: [] };
+    "status" | "signatures" | "historicalSignatureSteps" | "diagnostics"
+  > = { status: "rebuilt", signatures: [], historicalSignatureSteps: [], diagnostics: [] };
 
   if (prefixPositions.includes(0)) {
     const zeroConsumerFeatureId = consumers.find(
@@ -62,11 +70,15 @@ export async function probeTopologyConsumerPrefixes(input: {
     });
     const boundary = zeroProbe.steps.at(-1);
     zeroBoundary = boundary?.status === "failed"
-      ? { status: "failed", signatures: [], diagnostics: boundary.diagnostics }
+      ? { status: "failed", signatures: [], historicalSignatureSteps: [], diagnostics: boundary.diagnostics }
       : {
           status: "rebuilt",
           signatures: boundary?.signatures ?? [],
+          ...(boundary?.exactTopologyEvidence
+            ? { exactTopologyEvidence: boundary.exactTopologyEvidence }
+            : {}),
           diagnostics: [],
+          historicalSignatureSteps: [],
         };
   }
 
@@ -87,7 +99,9 @@ export async function probeTopologyConsumerPrefixes(input: {
     includeFinalTessellation: false,
     requestedSignatureStepOrdinals: prefixPositions
       .filter((position) => position > 0)
-      .map((position) => position - 1),
+      .map((position) => position - 1)
+      .concat(historicalOrdinals),
+    requireFreshExecution: input.requireFreshExecution,
     containTopologyRematchFailures: true,
   });
 
@@ -101,7 +115,24 @@ export async function probeTopologyConsumerPrefixes(input: {
         consumerFeatureId,
         orderedPosition,
         status: "rebuilt" as const,
+        historicalSignatureSteps: historicalOrdinals
+          .filter((ordinal) => ordinal < orderedPosition)
+          .flatMap((ordinal) => {
+            const step = probe.steps[ordinal];
+            return step?.status === "rebuilt"
+              ? [{
+                  orderedActionIndex: ordinal,
+                  signatures: step.signatures,
+                  ...(step.exactTopologyEvidence
+                    ? { exactTopologyEvidence: step.exactTopologyEvidence }
+                    : {}),
+                }]
+              : [];
+          }),
         signatures: boundary.signatures,
+        ...(boundary.exactTopologyEvidence
+          ? { exactTopologyEvidence: boundary.exactTopologyEvidence }
+          : {}),
         diagnostics: [],
       };
     }
@@ -113,6 +144,7 @@ export async function probeTopologyConsumerPrefixes(input: {
       orderedPosition,
       status: "failed" as const,
       signatures: [],
+      historicalSignatureSteps: [],
       diagnostics: failedBoundary?.status === "failed" ? failedBoundary.diagnostics : [],
     };
   });

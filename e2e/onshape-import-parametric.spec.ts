@@ -221,14 +221,10 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // Such a failure is now contained at the prefix-probe boundary, so `Shell 1`
   // is decided by the whole-plan probes that build the sequence apply runs.
   //
-  // Four face-backed sketches are parametric now. Review used to match their
-  // captured sketch-plane face with the 1e-4 mm default tolerance while the
-  // apply-time selector it emits carries the 0.01 mm live-topology tolerance, so
-  // review rejected live faces apply would have accepted over ~4e-4 mm of
-  // rebuild precision. Both ends now use the same tolerance, and each promoted
-  // sketch is committed onto its live face through a durable `topologyOf`
-  // support ref.
-  expect(reviewText).toContain("16 parametric, 25 baked, 0 geometry-only features.");
+  // The full real-OCC apply-equivalent containment pass rejects the downstream
+  // stale face lineage before review. Those features remain baked rather than
+  // advertising a timeline the commit seam cannot author.
+  expect(reviewText).toContain("15 parametric, 26 baked, 0 geometry-only features.");
   // The two BLIND start offsets (`Extrude 10` / `Extrude 11`) are no longer
   // blocked by the start plane itself: the capture pins that displacement
   // exactly. They now wait on their own `UP_TO_SURFACE` / `UP_TO_BODY`
@@ -245,35 +241,20 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   expect(reviewText).toMatch(/Chamfer 2\s+parametric/);
   expect(reviewText).toMatch(/Shell 1\s+parametric/);
   expect(reviewText).toMatch(/Extrude 2\s+parametric/);
-  expect(reviewText).toMatch(/Cutter\s+baked \(suppressed\) — topology reference could not be rematched while applying/);
-  expect(reviewText).toMatch(/Sketch 7\s+parametric/);
-  expect(reviewText).toMatch(/Sketch 9\s+parametric/);
-  expect(reviewText).toMatch(/Sketch 10\s+parametric/);
-  // Whole-body shell history now preserves every surviving outer-face identity,
-  // so Extrude 4's UP_TO_SURFACE target itself is no longer invalidated. The
-  // newly reachable full-plan probe instead exposes the earlier honest wall:
-  // Sketch 2 / Extrude 3 cannot build their live region, which inserts a mesh
-  // checkpoint before Cutter. Cutter cannot recover a face from that body-only
-  // checkpoint, so Extrude 4 stays downstream-of-baked and Split 1 cannot see
-  // its sheet tool. This is not a surface-extrude or split-kernel refusal.
-  expect(reviewText).toContain(
-    "Extrude 4\n\nbaked (suppressed) — depends on previously baked geometry",
-  );
-  expect(reviewText).toMatch(/Split 1\s+baked \(suppressed\) — topology reference did not match/);
+  // Split 1 remains downstream of the contained surface-extrude branch.
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect.soft(imported.snapshotDiagnosticsCount).toBe(0);
   expect.soft(imported.featureIds).toEqual([
     "feature_plane-1",
-    // Every promoted feature reaches the committed timeline: the extrude built
-    // between its authored start plane and its sketch-point terminator, the
-    // chamfer that consumes the resulting 120 mm edge, and the chamfer that
-    // consumes the first chamfer's own generated boundary edges.
+    // The commit seam authorizes the contained parametric prefix through Extrude 3;
+    // its downstream surface/split branch remains baked.
     "feature_extrude-1",
     "feature_chamfer-1",
     "feature_chamfer-2",
     "feature_shell-1",
     "feature_extrude-2",
+    "feature_extrude-3",
     "feature_bakedBody-1",
   ]);
   expect.soft(imported.selectableTargets).toEqual(

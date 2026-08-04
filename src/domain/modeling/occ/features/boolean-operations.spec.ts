@@ -1,13 +1,16 @@
 import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
-import type { BodyId, FeatureId } from "@/contracts/shared/ids";
+import type { BodyId, FaceId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import {
   applyBooleanPolicy,
+  createBooleanBuilder,
+  refineBooleanResultShape,
   resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
   runSheetSplit,
+  selectBooleanResultWithCompleteHistory,
 } from "@/domain/modeling/occ/features/boolean-operations";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 import { toGpPnt } from "@/domain/modeling/occ/planes";
@@ -830,4 +833,199 @@ test("resolveNativeFeatureTransactionReplacement claims producer identity from n
     ambiguousRecord?.historyInvalidations.size,
     "Native generated records carry producer identity only and must not invalidate the prior entity they are attributed to.",
   ).toBe(0);
+});
+
+// Lane: logic (per docs/testing.md). Seam: the real OCC Boolean/unifier boundary
+// retains the raw result when unification loses exact identity, and the public
+// face id then survives replacement naming without a geometric rematch.
+test("falls back to the raw Fuse result when unification loses a retained face", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const body = makeTrackedBox(
+    oc,
+    "body_unifier_identity_loss" as BodyId,
+    "feature_unifier_identity_seed" as FeatureId,
+    [2, 2, 2],
+  );
+  const makeTool = (
+    origin: readonly [number, number, number],
+    dimensions: readonly [number, number, number],
+  ) => {
+    const tool = new oc.BRepPrimAPI_MakeBox_3(
+      toGpPnt(oc, origin),
+      dimensions[0],
+      dimensions[1],
+      dimensions[2],
+    );
+    tool.Build(new oc.Message_ProgressRange_1());
+    expect(tool.IsDone()).toBe(true);
+    return tool.Shape();
+  };
+  const faceType = oc.TopAbs_ShapeEnum.TopAbs_FACE as never;
+  const facesOf = (shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) => {
+    const faces = new oc.TopTools_IndexedMapOfShape_1();
+    try {
+      oc.TopExp.MapShapes_1(shape, faceType, faces);
+      return Array.from({ length: faces.Size() }, (_, index) =>
+        oc.TopoDS.Face_1(faces.FindKey(index + 1)),
+      );
+    } finally {
+      faces.delete();
+    }
+  };
+  const candidates = [
+    { origin: [2, 0, 0], dimensions: [2, 2, 2] },
+    { origin: [2, 0, 0], dimensions: [2, 2, 1] },
+    { origin: [2, 0, 1], dimensions: [2, 2, 1] },
+    { origin: [0, 2, 0], dimensions: [2, 2, 2] },
+    { origin: [0, 0, 2], dimensions: [2, 2, 2] },
+    { origin: [1, 0, 0], dimensions: [2, 2, 2] },
+    { origin: [0, 1, 0], dimensions: [2, 2, 2] },
+    { origin: [1, 1, 0], dimensions: [2, 2, 2] },
+    { origin: [0.5, 0.5, 0], dimensions: [2, 2, 2] },
+  ] as const;
+  let fixture:
+    | {
+        faceId: FaceId;
+        face: InstanceType<OpenCascadeInstance["TopoDS_Face"]>;
+        raw: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+        unified: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+        builder: ReturnType<typeof createBooleanBuilder>;
+      }
+    | undefined;
+  for (const candidate of candidates) {
+    const tool = makeTool(candidate.origin, candidate.dimensions);
+    const builder = createBooleanBuilder(oc, "join", body.shape, tool);
+    builder.SetToFillHistory(true);
+    builder.Build(new oc.Message_ProgressRange_1());
+    const raw = builder.Shape();
+    const refined = refineBooleanResultShape(oc, raw);
+    const retained = [...body.facesById].find(([, face]) => {
+      const modified = builder.Modified(face);
+      try {
+        return (
+          modified.Size() === 0 &&
+          facesOf(raw).filter((entry) => entry.IsSame(face)).length === 1 &&
+          facesOf(refined.shape).filter((entry) => entry.IsSame(face)).length === 0
+        );
+      } finally {
+        modified.delete();
+      }
+    });
+    if (retained) {
+      fixture = {
+        faceId: retained[0],
+        face: retained[1],
+        raw,
+        unified: refined.shape,
+        builder,
+      };
+      break;
+    }
+  }
+
+  expect(
+    fixture,
+    "The real Fuse fixture must reproduce raw IsSame=1 and unified IsSame=0.",
+  ).toBeTruthy();
+  if (!fixture) throw new Error("Expected an OCC unifier identity-loss fixture.");
+
+  const list = (...shapes: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]) => {
+    const result = new oc.TopTools_ListOfShape_1();
+    for (const shape of shapes) result.Append_1(shape);
+    return result;
+  };
+  const rawHistorySource = {
+    Modified: (shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      fixture.builder.Modified(shape),
+    Generated: () => list(),
+    IsDeleted: (shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      fixture.builder.IsDeleted(shape),
+    resultShape: fixture.raw,
+  };
+  // This is g22's real history contract: the real Unify shape no longer
+  // contains the retained raw face and exposes no Modified successor for it.
+  const missingUnifierHistory = {
+    Modified: () => list(),
+    Generated: () => list(),
+    resultShape: fixture.unified,
+  };
+  const selected = selectBooleanResultWithCompleteHistory({
+    oc,
+    operands: [fixture.face],
+    rawShape: fixture.raw,
+    rawHistorySource,
+    unifiedShape: fixture.unified,
+    unifyHistorySource: missingUnifierHistory,
+  });
+  expect(selected.usesUnifiedResult).toBe(false);
+  expect(
+    facesOf(selected.shape).filter((candidate) => candidate.IsSame(fixture.face)),
+    "The policy must select the raw Boolean shape rather than the identity-losing unified shape.",
+  ).toHaveLength(1);
+
+  const replacement = resolveReplacementBodies(
+    createOccAuthoringState(oc, { bodies: [body] }),
+    body.bodyId,
+    selected.shape,
+    "feature_unifier_identity_replace" as FeatureId,
+    { allowEmpty: false, historySources: selected.historySources },
+  ).replacements[0];
+  expect(
+    replacement?.facesById.get(fixture.faceId)?.IsSame(fixture.face),
+    "resolveReplacementBodies must retain the raw exact IsSame public face id.",
+  ).toBe(true);
+});
+
+test("Modified history takes precedence and ambiguous Modified history fails closed", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const body = makeTrackedBox(
+    oc,
+    "body_modified_precedence" as BodyId,
+    "feature_modified_precedence_seed" as FeatureId,
+    [2, 2, 2],
+  );
+  const [source, , firstModified, secondModified] = [...body.facesById.values()];
+  if (!source || !firstModified || !secondModified) {
+    throw new Error("Expected three box faces for exact-history policy coverage.");
+  }
+  const list = (...shapes: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[]) => {
+    const result = new oc.TopTools_ListOfShape_1();
+    for (const shape of shapes) result.Append_1(shape);
+    return result;
+  };
+  const unchangedUnifier = {
+    Modified: () => list(),
+    Generated: () => list(),
+    resultShape: body.shape,
+  };
+  const uniqueModified = {
+    Modified: (shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      shape.IsSame(source) ? list(firstModified) : list(),
+    Generated: () => list(),
+    resultShape: body.shape,
+  };
+  const manyModified = {
+    Modified: (shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      shape.IsSame(source) ? list(firstModified, secondModified) : list(),
+    Generated: () => list(),
+    resultShape: body.shape,
+  };
+  const select = (rawHistorySource: typeof uniqueModified) =>
+    selectBooleanResultWithCompleteHistory({
+      oc,
+      operands: [body.shape],
+      rawShape: body.shape,
+      rawHistorySource,
+      unifiedShape: body.shape,
+      unifyHistorySource: unchangedUnifier,
+    });
+
+  expect(
+    select(uniqueModified).usesUnifiedResult,
+    "A unique Modified successor must take precedence even when the source is still IsSame in the result.",
+  ).toBe(true);
+  expect(
+    select(manyModified).usesUnifiedResult,
+    "Many Modified successors are ambiguous and must fail closed instead of falling through to IsSame.",
+  ).toBe(false);
 });

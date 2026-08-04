@@ -21,6 +21,7 @@ import type { GeometryAssetManifest } from "@/contracts/modeling/geometry-assets
 import { createEmptyGeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
 import { normalizeFeatureDefinitionAuthoredValues } from "@/contracts/modeling/feature-authored-values";
+import { createAuthoredSketchRegionSlots } from "@/contracts/sketch/authored-region-slots";
 import {
   AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION,
   CONTRACT_VERSION,
@@ -33,6 +34,8 @@ export interface AuthoredSketchRecord {
   label: string;
   plane: SketchSnapshotRecord["plane"];
   definition: SketchSnapshotRecord["sketch"]["definition"];
+  /** Derived-region identities persisted only through exact boundary witnesses. */
+  regionSlots?: import("@/contracts/sketch/authored-region-slots").AuthoredSketchRegionSlot[];
 }
 
 export interface AuthoredFeatureRecord {
@@ -64,6 +67,8 @@ export interface AuthoredTopologyLineageOutput {
     edgeIds: EdgeId[];
     vertexIds: VertexId[];
   };
+  /** Exact evaluated source witnesses that identify this output slot across rebuilds. */
+  outputWitnesses?: string[];
   sourceTargets: Array<{
     sourceKey: string;
     targets: AuthoredTopologyLineageTarget[];
@@ -121,6 +126,7 @@ export function createAuthoredModelDocumentFromSnapshot(
       label: sketch.label,
       plane: structuredClone(sketch.plane),
       definition: structuredClone(sketch.sketch.definition),
+      regionSlots: createAuthoredSketchRegionSlots(sketch.sketch.regions),
     })),
     features: snapshot.document.features.map((feature) => ({
       featureId: feature.featureId,

@@ -1,7 +1,11 @@
 import type { ShellFeatureParameters } from "@/contracts/modeling/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
-import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
-import type { BodyId, FeatureId } from "@/contracts/shared/ids";
+import {
+  getShapeVertexPoints,
+  listOccShapes,
+} from "@/domain/modeling/occ/features/extrude";
+import type { BodyId, FaceId, FeatureId } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
 import type { OccReferenceInvalidationRecord } from "@/domain/modeling/occ/topology";
 import {
   advanceTopologyToken,
@@ -18,13 +22,17 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import {
   applyBooleanPolicy,
+  mapFeatureSourceTargets,
   resolveReplacementBodies,
   validateNativeFeatureTransaction,
 } from "@/domain/modeling/occ/features/boolean-operations";
 import { collectLocalOperationTopologyStages } from "@/domain/modeling/occ/features/fillet-chamfer";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 import type { OccTopologyHistorySource } from "@/domain/modeling/occ/topology-naming";
-import type { OccFeatureTopologyStage } from "@/domain/modeling/occ/topology-stage";
+import {
+  formatGeneratedProducerTopologySourceKey,
+  type OccFeatureTopologyStage,
+} from "@/domain/modeling/occ/topology-stage";
 
 function serializeNativeFaceTargets(
   body: ReturnType<typeof requireBody>,
@@ -55,7 +63,9 @@ function getShellSignedThickness(parameters: ShellFeatureParameters) {
     throw new Error("Shell thickness must be positive.");
   }
 
-  return parameters.direction === "outside" ? resolvedThickness : -resolvedThickness;
+  return parameters.direction === "outside"
+    ? resolvedThickness
+    : -resolvedThickness;
 }
 
 function assertValidSingleSolidShellShape(
@@ -113,7 +123,11 @@ function getShapeBounds(
         );
         if (triangulationHandle.IsNull()) continue;
         const triangulation = triangulationHandle.get();
-        for (let nodeIndex = 1; nodeIndex <= triangulation.NbNodes(); nodeIndex += 1) {
+        for (
+          let nodeIndex = 1;
+          nodeIndex <= triangulation.NbNodes();
+          nodeIndex += 1
+        ) {
           const point = triangulation
             .Node(nodeIndex)
             .Transformed(location.Transformation());
@@ -129,7 +143,9 @@ function getShapeBounds(
   }
 
   if (points.length === 0) {
-    throw new Error("OCC closedHollow could not verify the source outer envelope.");
+    throw new Error(
+      "OCC closedHollow could not verify the source outer envelope.",
+    );
   }
 
   return [
@@ -201,15 +217,195 @@ function assertClosedHollowSemantics(
   return solid;
 }
 
+type OccShape = InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>;
+type ClosedHollowOffsetRelationRole = "modified" | "generated";
+
+interface ClosedHollowOffsetCandidate {
+  shape: OccShape;
+  roles: Set<ClosedHollowOffsetRelationRole>;
+}
+
+function appendExactOffsetCandidate(
+  candidates: ClosedHollowOffsetCandidate[],
+  shape: OccShape,
+  role: ClosedHollowOffsetRelationRole,
+) {
+  const existing = candidates.find((candidate) => candidate.shape.IsSame(shape));
+  if (existing) {
+    existing.roles.add(role);
+    return;
+  }
+  candidates.push({ shape, roles: new Set([role]) });
+}
+
+function appendUniqueExactShape(shapes: OccShape[], shape: OccShape) {
+  if (!shapes.some((candidate) => candidate.IsSame(shape))) {
+    shapes.push(shape);
+  }
+}
+
+/**
+ * Compose the only exact history path for an inside closed hollow:
+ * source face → offset face → cut-result inner face. The relation roles are
+ * retained while both builders are alive; only a one-to-one source/result path
+ * survives to public topology mapping.
+ */
+function collectClosedHollowInnerOffsetFaceShapes(input: {
+  context: OccFeatureExecutionContext;
+  sourceBody: ReturnType<typeof requireSolidBody>;
+  cavityOffset: {
+    Modified(source: never): InstanceType<
+      OccFeatureExecutionContext["oc"]["TopTools_ListOfShape"]
+    >;
+    Generated(source: never): InstanceType<
+      OccFeatureExecutionContext["oc"]["TopTools_ListOfShape"]
+    >;
+  };
+  cut: {
+    Modified(source: never): InstanceType<
+      OccFeatureExecutionContext["oc"]["TopTools_ListOfShape"]
+    >;
+    Generated(source: never): InstanceType<
+      OccFeatureExecutionContext["oc"]["TopTools_ListOfShape"]
+    >;
+  };
+  finalShell: OccShape;
+}) {
+  const finalFaces = new input.context.oc.TopTools_IndexedMapOfShape_1();
+  const sourceCandidates = new Map<FaceId, OccShape[]>();
+  try {
+    input.context.oc.TopExp.MapShapes_1(
+      input.finalShell,
+      input.context.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+      finalFaces,
+    );
+    const finalFaceShapes = Array.from({ length: finalFaces.Size() }, (_, index) =>
+      input.context.oc.TopoDS.Face_1(finalFaces.FindKey(index + 1)),
+    );
+
+    for (const [sourceFaceId, sourceFace] of input.sourceBody.facesById) {
+      const offsetCandidates: ClosedHollowOffsetCandidate[] = [];
+      for (const shape of listOccShapes(
+        input.context.oc,
+        input.cavityOffset.Modified(sourceFace as never),
+      )) {
+        appendExactOffsetCandidate(offsetCandidates, shape, "modified");
+      }
+      for (const shape of listOccShapes(
+        input.context.oc,
+        input.cavityOffset.Generated(sourceFace as never),
+      )) {
+        appendExactOffsetCandidate(offsetCandidates, shape, "generated");
+      }
+
+      const resultCandidates: OccShape[] = [];
+      for (const offsetCandidate of offsetCandidates) {
+        const cutCandidates = [
+          ...listOccShapes(
+            input.context.oc,
+            input.cut.Modified(offsetCandidate.shape as never),
+          ),
+          ...listOccShapes(
+            input.context.oc,
+            input.cut.Generated(offsetCandidate.shape as never),
+          ),
+          // Some OCC cuts retain the offset face unchanged and report no
+          // Modified/Generated entry. Exact final-shell membership is history
+          // only when it is the same native shape.
+          ...finalFaceShapes.filter((face) => face.IsSame(offsetCandidate.shape)),
+        ];
+        for (const cutCandidate of cutCandidates) {
+          for (const finalFace of finalFaceShapes) {
+            if (finalFace.IsSame(cutCandidate)) {
+              appendUniqueExactShape(resultCandidates, finalFace);
+            }
+          }
+        }
+      }
+      sourceCandidates.set(sourceFaceId, resultCandidates);
+    }
+  } finally {
+    finalFaces.delete();
+  }
+
+  const uniqueRelations = new Map<FaceId, OccShape[]>();
+  for (const [sourceFaceId, resultCandidates] of sourceCandidates) {
+    if (resultCandidates.length !== 1) continue;
+    const [result] = resultCandidates;
+    const inverseCount = [...sourceCandidates.values()].filter((candidates) =>
+      candidates.some((candidate) => candidate.IsSame(result!)),
+    ).length;
+    if (inverseCount === 1) {
+      uniqueRelations.set(sourceFaceId, [result!]);
+    }
+  }
+  return uniqueRelations;
+}
+
+/**
+ * Convert pre-deletion exact composed history into stable public claims only
+ * after replacement topology has been tracked. Missing, many, and conflicting
+ * source/result relations deliberately remain unnamed.
+ */
+export function createClosedHollowInnerOffsetFaceClaims(input: {
+  featureId: FeatureId;
+  sourceBody: ReturnType<typeof requireSolidBody>;
+  outputBody: ReturnType<typeof requireSolidBody>;
+  targetsBySourceFaceId: ReadonlyMap<FaceId, readonly DurableRef[]>;
+}) {
+  const targetsBySourceFaceId = new Map<
+    FaceId,
+    Extract<DurableRef, { kind: "face" }>
+  >();
+  const sourceFaceIdsByTargetKey = new Map<string, FaceId[]>();
+  for (const [sourceFaceId, targets] of input.targetsBySourceFaceId) {
+    if (!input.sourceBody.facesById.has(sourceFaceId)) continue;
+    const faces = targets.filter(
+      (target): target is Extract<DurableRef, { kind: "face" }> =>
+        target.kind === "face" && target.bodyId === input.outputBody.bodyId,
+    );
+    if (faces.length !== 1) continue;
+    const target = faces[0]!;
+    targetsBySourceFaceId.set(sourceFaceId, target);
+    const targetKey = `${target.bodyId}:${target.faceId}`;
+    sourceFaceIdsByTargetKey.set(targetKey, [
+      ...(sourceFaceIdsByTargetKey.get(targetKey) ?? []),
+      sourceFaceId,
+    ]);
+  }
+
+  const claims = new Map<string, DurableRef>();
+  for (const [sourceFaceId, target] of targetsBySourceFaceId) {
+    if (sourceFaceIdsByTargetKey.get(`${target.bodyId}:${target.faceId}`)?.length !== 1) {
+      continue;
+    }
+    claims.set(
+      formatGeneratedProducerTopologySourceKey({
+        featureId: input.featureId,
+        bodyId: input.sourceBody.bodyId,
+        sourceKind: "face",
+        sourcePublicId: sourceFaceId,
+        role: "shell-inner-offset-face-of",
+      }),
+      target,
+    );
+  }
+  return claims;
+}
+
 function buildOffsetAllFacesShellShape(
   context: OccFeatureExecutionContext,
   parameters: ShellFeatureParameters,
 ) {
   if (!isOffsetAllFacesShell(parameters)) {
-    throw new Error("Shell offsetAllFaces builder received open-face parameters.");
+    throw new Error(
+      "Shell offsetAllFaces builder received open-face parameters.",
+    );
   }
   if (parameters.faceTargets.length !== 0) {
-    throw new Error("Shell offsetAllFaces mode cannot include removable faces.");
+    throw new Error(
+      "Shell offsetAllFaces mode cannot include removable faces.",
+    );
   }
 
   const sourceBody = requireSolidBody(
@@ -241,6 +437,7 @@ function buildOffsetAllFacesShellShape(
     // which is the only exact identity this mode has; the builder therefore
     // outlives the call so the caller can reconcile instead of re-minting ids.
     builder: shell,
+    topologyHistory: "includeGenerated" as const,
     shape: assertValidSingleSolidShellShape(
       context,
       shell.Shape(),
@@ -254,7 +451,9 @@ function buildClosedHollowShellShape(
   parameters: ShellFeatureParameters,
 ) {
   if (!isClosedHollowShell(parameters)) {
-    throw new Error("Closed-hollow shell builder received non-closed-hollow parameters.");
+    throw new Error(
+      "Closed-hollow shell builder received non-closed-hollow parameters.",
+    );
   }
   if (parameters.faceTargets.length !== 0) {
     throw new Error("Shell closedHollow mode cannot include removable faces.");
@@ -318,11 +517,23 @@ function buildClosedHollowShellShape(
             return {
               sourceBody,
               builder: cut,
+              // A cut can prove each surviving outer source face exactly, but
+              // cannot attribute an inner cavity face to it without composing
+              // offset history with the cut. Publish successors only.
+              topologyHistory: "exactSuccessorsOnly" as const,
               shape: assertClosedHollowSemantics(
                 context,
                 sourceBody.shape,
                 cutShape,
               ),
+              innerOffsetFaceShapesBySourceFaceId:
+                collectClosedHollowInnerOffsetFaceShapes({
+                  context,
+                  sourceBody,
+                  cavityOffset,
+                  cut,
+                  finalShell: cutShape,
+                }),
             };
           } finally {
             cutShape.delete();
@@ -352,7 +563,9 @@ function buildShellFeatureShape(
   parameters: ShellFeatureParameters,
 ) {
   if (isOffsetAllFacesShell(parameters) || isClosedHollowShell(parameters)) {
-    throw new Error("Open-face shell builder received non-open-face parameters.");
+    throw new Error(
+      "Open-face shell builder received non-open-face parameters.",
+    );
   }
   const resolvedThickness = getAuthoredLiteralValue(parameters.thickness);
   if (resolvedThickness === null || resolvedThickness <= 0) {
@@ -381,9 +594,7 @@ function buildShellFeatureShape(
   }
 
   const signedThickness =
-    parameters.direction === "outside"
-      ? resolvedThickness
-      : -resolvedThickness;
+    parameters.direction === "outside" ? resolvedThickness : -resolvedThickness;
   const shell = new context.oc.BRepOffsetAPI_MakeThickSolid();
   shell.MakeThickSolidByJoin(
     sourceBody.shape,
@@ -415,7 +626,9 @@ function buildNativeShellFeatureShape(
   parameters: ShellFeatureParameters,
 ) {
   if (isOffsetAllFacesShell(parameters) || isClosedHollowShell(parameters)) {
-    throw new Error("Native open-face shell builder received non-open-face parameters.");
+    throw new Error(
+      "Native open-face shell builder received non-open-face parameters.",
+    );
   }
   const resolvedThickness = getAuthoredLiteralValue(parameters.thickness);
   if (resolvedThickness === null || resolvedThickness <= 0) {
@@ -451,9 +664,7 @@ function buildNativeShellFeatureShape(
   }
 
   const signedThickness =
-    parameters.direction === "outside"
-      ? resolvedThickness
-      : -resolvedThickness;
+    parameters.direction === "outside" ? resolvedThickness : -resolvedThickness;
   const transaction = builder(
     sourceBody.shape,
     serializeNativeFaceTargets(sourceBody, parameters.faceTargets),
@@ -493,7 +704,9 @@ function executeWholeBodyShellFeature(
   shellResult: {
     sourceBody: ReturnType<typeof requireSolidBody>;
     builder: OccTopologyHistorySource;
+    topologyHistory: "includeGenerated" | "exactSuccessorsOnly";
     shape: InstanceType<OccFeatureExecutionContext["oc"]["TopoDS_Shape"]>;
+    innerOffsetFaceShapesBySourceFaceId?: ReadonlyMap<FaceId, readonly OccShape[]>;
   },
 ): OccFeatureExecutionResult {
   const replacementResult = resolveReplacementBodies(
@@ -516,6 +729,32 @@ function executeWholeBodyShellFeature(
     replacementResult.historyInvalidations,
   );
   const topologyStages: OccFeatureTopologyStage[] = [];
+  const supplementalProducerTargetsByOutputBodyId = new Map(
+    replacementResult.replacements.map((replacement) => {
+      const targetsBySourceFaceId = mapFeatureSourceTargets(
+        [replacement],
+        new Map(
+          [...(shellResult.innerOffsetFaceShapesBySourceFaceId ?? [])].map(
+            ([sourceFaceId, shapes]) => [sourceFaceId, shapes],
+          ),
+        ),
+      );
+      return [
+        replacement.bodyId,
+        createClosedHollowInnerOffsetFaceClaims({
+          featureId: ownerFeatureId,
+          sourceBody: shellResult.sourceBody,
+          outputBody: replacement,
+          targetsBySourceFaceId: new Map(
+            [...(targetsBySourceFaceId ?? new Map())].map(([sourceFaceId, targets]) => [
+              sourceFaceId as FaceId,
+              targets,
+            ]),
+          ),
+        }),
+      ] as const;
+    }),
+  );
   collectLocalOperationTopologyStages({
     oc: context.oc,
     topologyStages,
@@ -527,6 +766,13 @@ function executeWholeBodyShellFeature(
     generatedHistorySource: shellResult.builder as unknown as {
       Generated(source: never): never;
     },
+    exactSuccessorHistorySource:
+      shellResult.topologyHistory === "exactSuccessorsOnly"
+        ? (shellResult.builder as unknown as { Modified(source: never): never })
+        : null,
+    includeGeneratedTopology:
+      shellResult.topologyHistory === "includeGenerated",
+    supplementalProducerTargetsByOutputBodyId,
   });
 
   return {
