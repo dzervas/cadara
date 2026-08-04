@@ -508,6 +508,13 @@ export class ImportDeferredMaterializer {
     outputRecords: Map<string, ImportActionOutputRecord>;
   };
   private topologyFallbackSource: ImportDeferredTopologyRef["source"] | null = null;
+  private liveSignatureCache: {
+    revisionId: WorkspaceSnapshot["document"]["revisionId"];
+    byBodyScope: Map<
+      BodyId | undefined,
+      Awaited<ReturnType<typeof deriveLiveBodySignatures>>
+    >;
+  } | null = null;
 
   constructor(input: {
     modelingService: Pick<
@@ -517,6 +524,28 @@ export class ImportDeferredMaterializer {
     outputRecords: Map<string, ImportActionOutputRecord>;
   }) {
     this.input = input;
+  }
+
+  /** Retain exact signatures already sampled for the current immutable revision. */
+  primeLiveSignatures(
+    revisionId: WorkspaceSnapshot["document"]["revisionId"],
+    result: Awaited<ReturnType<typeof deriveLiveBodySignatures>>,
+  ) {
+    const byBodyScope = new Map<
+      BodyId | undefined,
+      Awaited<ReturnType<typeof deriveLiveBodySignatures>>
+    >([[undefined, result]]);
+    if (result.status === "available") {
+      for (const [bodyId, signatures] of result.signaturesByBody ?? []) {
+        byBodyScope.set(bodyId, { ...result, signatures: [...signatures] });
+      }
+    }
+    this.liveSignatureCache = { revisionId, byBodyScope };
+  }
+
+  /** Must be called after every accepted modeling mutation. */
+  invalidateLiveSignatures() {
+    this.liveSignatureCache = null;
   }
 
   recordSketchOutput(orderedPosition: number, sketchId: SketchId) {
@@ -555,23 +584,67 @@ export class ImportDeferredMaterializer {
   async resolveDeferredTopologyRef(
     selector: ImportDeferredTopologyRef,
   ): Promise<DurableRef> {
-    const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
-    const signatureResult = await deriveLiveBodySignatures({
-      snapshot,
-      service: this.input.modelingService,
-    });
+    let cache = this.liveSignatureCache;
+    let signatureResult = cache?.byBodyScope.get(selector.bodyScope);
+    const allBodyResult = cache?.byBodyScope.get(undefined);
+    if (
+      !signatureResult &&
+      selector.bodyScope !== undefined &&
+      allBodyResult?.status === "available"
+    ) {
+      signatureResult = {
+        ...allBodyResult,
+        signatures: allBodyResult.signatures.filter(
+          (signature) =>
+            "bodyId" in signature.reference &&
+            signature.reference.bodyId === selector.bodyScope,
+        ),
+      };
+      cache?.byBodyScope.set(selector.bodyScope, signatureResult);
+    }
+
+    if (!signatureResult) {
+      const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+      if (cache?.revisionId !== snapshot.document.revisionId) {
+        cache = {
+          revisionId: snapshot.document.revisionId,
+          byBodyScope: new Map(),
+        };
+        this.liveSignatureCache = cache;
+      }
+      signatureResult = cache.byBodyScope.get(selector.bodyScope);
+      if (!signatureResult) {
+        const scopedSnapshot =
+          selector.bodyScope === undefined
+            ? snapshot
+            : {
+                ...snapshot,
+                document: {
+                  ...snapshot.document,
+                  bodies: snapshot.document.bodies.filter(
+                    (body) => body.bodyId === selector.bodyScope,
+                  ),
+                },
+              };
+        signatureResult = await deriveLiveBodySignatures({
+          snapshot: scopedSnapshot,
+          service: this.input.modelingService,
+        });
+        cache.byBodyScope.set(selector.bodyScope, signatureResult);
+      }
+    }
     const allSignatures: HistoryProbeTopologySignature[] =
       signatureResult.status === "available" ? signatureResult.signatures : [];
-    // A body scope is exact evidence review derived from the capture, so honour
-    // it verbatim: an empty scoped set is a no-match, never a silent widening.
-    const signatures =
-      selector.bodyScope === undefined
-        ? allSignatures
-        : allSignatures.filter(
-            (signature) =>
-              "bodyId" in signature.reference &&
-              signature.reference.bodyId === selector.bodyScope,
-          );
+    // Body scope and expected kind are exact hard gates. Apply them before the
+    // geometric matcher rather than scoring candidates it must reject.
+    const signatures = allSignatures.filter(
+      (signature) =>
+        signature.entityClass === selector.expectedKind &&
+        signature.reference.kind === selector.expectedKind &&
+        (selector.bodyScope === undefined ||
+          ("bodyId" in signature.reference &&
+            signature.reference.bodyId === selector.bodyScope)),
+    );
     const match = matchSignature(
       selector.capturedSignature,
       signatures,
@@ -1175,6 +1248,7 @@ export async function applyImportPreparedActions(input: {
     if (accepted.isErr()) throw accepted.error;
 
     revisionId = accepted.value.revisionId;
+    materializer.invalidateLiveSignatures();
     createdEntityIds.variableIds.push(accepted.value.variableId);
     appliedOperationCount += 1;
     const errorDiagnostic = accepted.value.diagnostics.find(
@@ -1211,6 +1285,7 @@ export async function applyImportPreparedActions(input: {
     if (accepted.isErr()) throw accepted.error;
 
     revisionId = accepted.value.revisionId;
+    materializer.invalidateLiveSignatures();
     createdEntityIds.featureIds.push(accepted.value.featureId);
     if (currentOrderedPosition >= 0) {
       materializer.recordFeatureOutput(
@@ -1257,6 +1332,7 @@ export async function applyImportPreparedActions(input: {
     if (accepted.isErr()) throw accepted.error;
 
     revisionId = accepted.value.revisionId;
+    materializer.invalidateLiveSignatures();
     createdEntityIds.sketchIds.push(accepted.value.sketchId);
     if (currentOrderedPosition >= 0) {
       materializer.recordSketchOutput(

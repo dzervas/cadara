@@ -14,6 +14,8 @@ export type LiveBodySignatureResult =
   | {
       status: "available";
       signatures: HistoryProbeTopologySignature[];
+      /** Same exact evidence indexed while each body payload is derived. */
+      signaturesByBody?: ReadonlyMap<BodyId, readonly HistoryProbeTopologySignature[]>;
       diagnostics: LiveBodySignatureDiagnostic[];
     }
   | {
@@ -66,12 +68,14 @@ export async function deriveLiveBodySignatures(input: {
 }): Promise<LiveBodySignatureResult> {
   const signatures: HistoryProbeTopologySignature[] = [];
   const diagnostics: LiveBodySignatureDiagnostic[] = [];
+  const signaturesByBody = new Map<BodyId, readonly HistoryProbeTopologySignature[]>();
 
   for (const body of input.snapshot.document.bodies) {
+    const bodyId = body.bodyId as BodyId;
     if (body.topologyPresentation === "bodyOnlyMesh") {
       const signature = deriveBodyMeshSignature(
         input.snapshot,
-        body.bodyId as BodyId,
+        bodyId,
       );
       if (!signature) {
         return {
@@ -84,20 +88,22 @@ export async function deriveLiveBodySignatures(input: {
         };
       }
       signatures.push(signature);
+      signaturesByBody.set(bodyId, [signature]);
       continue;
     }
 
     const result = await input.service.buildNativeExactBrepPayload({
       baseRevisionId: input.snapshot.document.revisionId,
-      target: { kind: "body", bodyId: body.bodyId as BodyId },
+      target: { kind: "body", bodyId },
     });
     if (result.kind !== "nativeTopologyPayload") {
       const signature = deriveBodyMeshSignature(
         input.snapshot,
-        body.bodyId as BodyId,
+        bodyId,
       );
       if (signature) {
         signatures.push(signature);
+        signaturesByBody.set(bodyId, [signature]);
         continue;
       }
       return {
@@ -116,10 +122,11 @@ export async function deriveLiveBodySignatures(input: {
     if (derived.status === "unavailable") {
       const signature = deriveBodyMeshSignature(
         input.snapshot,
-        body.bodyId as BodyId,
+        bodyId,
       );
       if (signature) {
         signatures.push(signature);
+        signaturesByBody.set(bodyId, [signature]);
         continue;
       }
       return {
@@ -133,6 +140,7 @@ export async function deriveLiveBodySignatures(input: {
     }
 
     signatures.push(...derived.signatures);
+    signaturesByBody.set(bodyId, derived.signatures);
     diagnostics.push(
       ...derived.diagnostics.map((diagnostic) => ({
         severity: diagnostic.severity,
@@ -142,5 +150,5 @@ export async function deriveLiveBodySignatures(input: {
     );
   }
 
-  return { status: "available", signatures, diagnostics };
+  return { status: "available", signatures, signaturesByBody, diagnostics };
 }
