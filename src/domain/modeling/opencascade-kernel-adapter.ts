@@ -1248,6 +1248,27 @@ function deleteDocumentHistoryOrderEntry(
   );
 }
 
+function insertDocumentHistoryOrderEntryIntoOrder(
+  historyOrder: readonly DocumentHistoryOrderEntry[],
+  cursor: OccAuthoringState["cursor"],
+  entry: DocumentHistoryOrderEntry,
+) {
+  const entryKey = getDocumentHistoryOrderEntryKey(entry);
+  const order = historyOrder.filter(
+    (item) => getDocumentHistoryOrderEntryKey(item) !== entryKey,
+  );
+  if (cursor.kind === "empty") {
+    order.unshift(entry);
+    return order;
+  }
+  const cursorKey = getDocumentHistoryOrderEntryKey(cursor);
+  const cursorIndex = order.findIndex(
+    (item) => getDocumentHistoryOrderEntryKey(item) === cursorKey,
+  );
+  order.splice(cursorIndex < 0 ? order.length : cursorIndex + 1, 0, entry);
+  return order;
+}
+
 function documentHistoryOrderContainsCursor(
   historyOrder: readonly DocumentHistoryOrderEntry[],
   cursor: OccAuthoringState["cursor"],
@@ -1274,6 +1295,14 @@ function createTailCursorFromHistoryOrder(
   return tail.kind === "sketch"
     ? { kind: "sketch", sketchId: tail.sketchId }
     : { kind: "feature", featureId: tail.featureId };
+}
+
+function isCursorAtDocumentHistoryTail(state: OccAuthoringState) {
+  const tail = state.historyOrder.at(-1);
+  if (!tail) return state.cursor.kind === "empty";
+  if (state.cursor.kind === "empty") return false;
+  return getDocumentHistoryOrderEntryKey(tail) ===
+    getDocumentHistoryOrderEntryKey(state.cursor);
 }
 
 function repairCursorAfterHistoryDeletion(
@@ -3515,20 +3544,32 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       createDefaultSolverCorrelation(sketchId, request.baseRevisionId);
     const solverAdapter = this.getSolverAdapter(request.baseRevisionId);
 
-    const projection = await this.projectSketchExternalReferences({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: correlation.projectionRequestId,
-      documentId: this.documentId,
-      revisionId: request.baseRevisionId,
-      sketchId,
-      plane: request.plane.frame,
-      tolerances: this.tolerances,
-      references: normalizedDefinition.references.map((reference) => ({
-        referenceId: reference.referenceId,
-        reference,
-      })),
-    });
+    const projection =
+      normalizedDefinition.references.length === 0
+        ? {
+            contractVersion: CONTRACT_VERSION,
+            solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+            requestId: correlation.projectionRequestId,
+            documentId: this.documentId,
+            revisionId: request.baseRevisionId,
+            sketchId,
+            projectedReferences: [],
+            diagnostics: [],
+          }
+        : await this.projectSketchExternalReferences({
+            contractVersion: CONTRACT_VERSION,
+            solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+            requestId: correlation.projectionRequestId,
+            documentId: this.documentId,
+            revisionId: request.baseRevisionId,
+            sketchId,
+            plane: request.plane.frame,
+            tolerances: this.tolerances,
+            references: normalizedDefinition.references.map((reference) => ({
+              referenceId: reference.referenceId,
+              reference,
+            })),
+          });
     const validation = await solverAdapter.validateSketch({
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
@@ -3625,22 +3666,36 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         )
       : [...runtimeState.authoringState.sketches, snapshotRecord];
     const nextHistoryOrder = isNewSketch
-      ? insertDocumentHistoryOrderEntryAfterCursor(
-          buildOccWorkspaceSnapshot(runtimeState.authoringState).presentation
-            .documentHistory,
+      ? insertDocumentHistoryOrderEntryIntoOrder(
+          runtimeState.authoringState.historyOrder,
           runtimeState.authoringState.cursor,
           { kind: "sketch", sketchId },
         )
       : runtimeState.authoringState.historyOrder;
 
-    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
-      revisionId: nextRevisionId,
-      sketches: nextSketches,
-      historyOrder: nextHistoryOrder,
-      cursor: isNewSketch
-        ? { kind: "sketch", sketchId }
-        : runtimeState.authoringState.cursor,
-    });
+    const nextCursor = isNewSketch
+      ? ({ kind: "sketch", sketchId } as const)
+      : runtimeState.authoringState.cursor;
+    const nextAuthoringState =
+      isNewSketch && isCursorAtDocumentHistoryTail(runtimeState.authoringState)
+        ? {
+            ok: true as const,
+            state: {
+              ...runtimeState.authoringState,
+              revisionId: nextRevisionId,
+              sketches: nextSketches,
+              historyOrder: nextHistoryOrder,
+              cursor: nextCursor,
+            },
+            partial: false,
+            diagnostics: [],
+          }
+        : this.tryBuildNextAuthoringState(runtimeState, {
+            revisionId: nextRevisionId,
+            sketches: nextSketches,
+            historyOrder: nextHistoryOrder,
+            cursor: nextCursor,
+          });
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
@@ -3714,17 +3769,49 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       nextFeatures.map((entry) => entry.definition),
     );
 
-    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
-      revisionId: nextRevisionId,
-      features: nextFeatures,
-      historyOrder: insertDocumentHistoryOrderEntryAfterCursor(
-        buildOccWorkspaceSnapshot(runtimeState.authoringState).presentation
-          .documentHistory,
-        runtimeState.authoringState.cursor,
-        { kind: "feature", featureId },
-      ),
-      cursor: { kind: "feature", featureId },
-    });
+    const nextHistoryOrder = insertDocumentHistoryOrderEntryIntoOrder(
+      runtimeState.authoringState.historyOrder,
+      runtimeState.authoringState.cursor,
+      { kind: "feature", featureId },
+    );
+    const nextCursor = { kind: "feature", featureId } as const;
+    let nextAuthoringState: RebuildAttempt;
+    if (
+      insertionIndex === runtimeState.authoringState.features.length &&
+      isCursorAtDocumentHistoryTail(runtimeState.authoringState)
+    ) {
+      try {
+        const appended = applyOccFeatureToAuthoringState(
+          {
+            ...runtimeState.authoringState,
+            revisionId: nextRevisionId,
+            historyOrder: nextHistoryOrder,
+            cursor: nextCursor,
+          },
+          feature,
+        );
+        nextAuthoringState = {
+          ok: true,
+          state: { ...appended, cursor: nextCursor },
+          partial: false,
+          diagnostics: [],
+        };
+      } catch {
+        nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+          revisionId: nextRevisionId,
+          features: nextFeatures,
+          historyOrder: nextHistoryOrder,
+          cursor: nextCursor,
+        });
+      }
+    } else {
+      nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
+        revisionId: nextRevisionId,
+        features: nextFeatures,
+        historyOrder: nextHistoryOrder,
+        cursor: nextCursor,
+      });
+    }
     const nonRepairableDiagnostics = getNonRepairableFeatureDiagnostics(
       nextAuthoringState.diagnostics,
       new Set([featureId]),
