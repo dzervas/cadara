@@ -398,13 +398,12 @@ function readNamedShape(oc: OpenCascadeInstance, namedShape: OccNamedShape) {
   return uniqueShapes(shapes);
 }
 
-function createSelectorLabel(
+function selectIntoSelectorLabel(
   oc: OpenCascadeInstance,
-  parent: OccLabel,
+  label: OccLabel,
   selection: OccShape,
   context: OccShape,
 ) {
-  const label = parent.NewChild();
   const selector = new oc.TNaming_Selector(label);
 
   try {
@@ -435,6 +434,34 @@ function createSelectorLabel(
   } finally {
     selector.delete();
   }
+}
+
+function directlyReselectSelectorLabel(
+  oc: OpenCascadeInstance,
+  label: OccLabel,
+  selection: OccShape,
+) {
+  const selector = new oc.TNaming_Selector(label);
+  try {
+    selector.Select_2(selection, false, true);
+    return label;
+  } finally {
+    selector.delete();
+  }
+}
+
+function createSelectorLabel(
+  oc: OpenCascadeInstance,
+  parent: OccLabel,
+  selection: OccShape,
+  context: OccShape,
+) {
+  return selectIntoSelectorLabel(
+    oc,
+    parent.NewChild(),
+    selection,
+    context,
+  );
 }
 
 function modifyLabel(
@@ -862,21 +889,27 @@ function reconcileKind<
       previousId as never,
     );
     const key = topologyRefKey(target);
-    const selectorFinalIndexes = resolveSelectorFinalSuccessors(
+    const inheritedResolution = resolveFinalSuccessors(
       oc,
-      input.previousSelectorLabelsByKey.get(key),
-      input.validLabels,
+      previousShape,
       input.finalShapeMap,
+      input.historySources,
     );
-    const resolution =
-      selectorFinalIndexes.length > 0
-        ? { finalIndexes: selectorFinalIndexes, deleted: false }
-        : resolveFinalSuccessors(
+    const selectorFinalIndexes =
+      inheritedResolution.finalIndexes.length === 1
+        ? []
+        : resolveSelectorFinalSuccessors(
             oc,
-            previousShape,
+            input.previousSelectorLabelsByKey.get(key),
+            input.validLabels,
             input.finalShapeMap,
-            input.historySources,
           );
+    const resolution =
+      inheritedResolution.finalIndexes.length === 1
+        ? inheritedResolution
+        : selectorFinalIndexes.length > 0
+          ? { finalIndexes: selectorFinalIndexes, deleted: false }
+          : inheritedResolution;
 
     if (resolution.finalIndexes.length === 1) {
       const [index] = resolution.finalIndexes;
@@ -887,12 +920,6 @@ function reconcileKind<
       preservedIndexById.set(previousId, index!);
     }
 
-    const inheritedResolution = resolveFinalSuccessors(
-      oc,
-      previousShape,
-      input.finalShapeMap,
-      input.historySources,
-    );
 
     for (const index of inheritedResolution.finalIndexes) {
       if (preservedIndexById.get(previousId) === index) {
@@ -960,9 +987,12 @@ function reconcileKind<
     if (label) {
       modifyLabel(oc, label, previousShape, shape);
       input.nextLabelsByKey.set(key, label);
+      const selectorLabel = input.previousSelectorLabelsByKey.get(key);
       input.nextSelectorLabelsByKey.set(
         key,
-        createSelectorLabel(oc, input.bodyLabel, shape, input.contextShape),
+        selectorLabel
+          ? directlyReselectSelectorLabel(oc, selectorLabel, shape)
+          : createSelectorLabel(oc, input.bodyLabel, shape, input.contextShape),
       );
     }
 
