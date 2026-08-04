@@ -168,6 +168,123 @@ async function materialize(definition: unknown) {
   );
 }
 
+// Lane: logic. Seam: multiple topologyOf selectors materialized at one live
+// revision share one exact-BRep signature derivation; a revision change misses.
+test("caches exact live topology signatures per modeling revision", async () => {
+  let revisionId = "rev_live" as RevisionId;
+  let exactPayloadCalls = 0;
+  const instance = new ImportDeferredMaterializer({
+    outputRecords: new Map(),
+    modelingService: {
+      async getCurrentDocumentSnapshot() {
+        return {
+          document: {
+            revisionId,
+            bodies: [{ bodyId: "body_live" as BodyId }],
+          },
+        } as never;
+      },
+      async buildNativeExactBrepPayload(input) {
+        exactPayloadCalls += 1;
+        return {
+          kind: "nativeTopologyPayload" as const,
+          payload: payload(input.target.bodyId),
+          diagnostics: [],
+        };
+      },
+    },
+  });
+
+  await expect(instance.resolveDeferredTopologyRef(selector("face"))).resolves.toMatchObject({
+    kind: "face",
+  });
+  await expect(instance.resolveDeferredTopologyRef(selector("edge"))).resolves.toMatchObject({
+    kind: "edge",
+  });
+  expect(exactPayloadCalls).toBe(1);
+
+  revisionId = "rev_next" as RevisionId;
+  instance.invalidateLiveSignatures();
+  await instance.resolveDeferredTopologyRef(selector("body"));
+  expect(exactPayloadCalls).toBe(2);
+});
+
+// Lane: logic. Seam: an exact body scope limits native signature extraction to
+// that body rather than deriving and subsequently discarding sibling bodies.
+test("derives live topology only for an exact selector body scope", async () => {
+  const exactPayloadBodies: BodyId[] = [];
+  const instance = new ImportDeferredMaterializer({
+    outputRecords: new Map(),
+    modelingService: {
+      async getCurrentDocumentSnapshot() {
+        return {
+          document: {
+            revisionId: "rev_scoped",
+            bodies: [
+              { bodyId: "body_target" as BodyId },
+              { bodyId: "body_unrelated" as BodyId },
+            ],
+          },
+        } as never;
+      },
+      async buildNativeExactBrepPayload(input) {
+        exactPayloadBodies.push(input.target.bodyId);
+        return {
+          kind: "nativeTopologyPayload" as const,
+          payload: payload(input.target.bodyId),
+          diagnostics: [],
+        };
+      },
+    },
+  });
+  const face = {
+    ...selector("face"),
+    bodyScope: "body_target" as BodyId,
+  };
+  const edge = {
+    ...selector("edge"),
+    bodyScope: "body_target" as BodyId,
+  };
+
+  await expect(instance.resolveDeferredTopologyRef(face)).resolves.toMatchObject({
+    kind: "face",
+    bodyId: "body_target",
+  });
+  await instance.resolveDeferredTopologyRef(edge);
+  expect(exactPayloadBodies).toEqual(["body_target"]);
+});
+
+// Lane: logic. Seam: probe-sampled exact signatures seed the deferred
+// materializer at the same immutable revision without another snapshot.
+test("resolves from primed exact signatures without resnapshotting", async () => {
+  let snapshotCalls = 0;
+  const instance = new ImportDeferredMaterializer({
+    outputRecords: new Map(),
+    modelingService: {
+      async getCurrentDocumentSnapshot() {
+        snapshotCalls += 1;
+        throw new Error("primed signatures must avoid a redundant snapshot");
+      },
+      async buildNativeExactBrepPayload() {
+        throw new Error("primed signatures must avoid redundant native extraction");
+      },
+    },
+  });
+  instance.primeLiveSignatures("rev_live" as RevisionId, {
+    status: "available",
+    signatures: derived.signatures,
+    diagnostics: [],
+  });
+
+  await expect(
+    instance.resolveDeferredTopologyRef({
+      ...selector("face"),
+      bodyScope: "body_live" as BodyId,
+    }),
+  ).resolves.toMatchObject({ kind: "face", bodyId: "body_live" });
+  expect(snapshotCalls).toBe(0);
+});
+
 test("materializes topologyOf only in every blessed feature and sketch position", async () => {
   const requests = [
     await materialize({
