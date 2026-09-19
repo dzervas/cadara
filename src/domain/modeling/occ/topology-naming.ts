@@ -725,6 +725,7 @@ function resolveFinalSuccessors(
     OpenCascadeInstance["TopTools_IndexedMapOfShape"]
   >,
   historySources: readonly OccTopologyHistorySource[],
+  includeGenerated = false,
 ) {
   let candidates = [previousShape];
   let deleted = false;
@@ -734,6 +735,9 @@ function resolveFinalSuccessors(
     const nextCandidates: OccShape[] = [];
 
     for (const candidate of candidates) {
+      if (includeGenerated) {
+        nextCandidates.push(...listShapes(oc, historySource.Generated(candidate)));
+      }
       if (isOccTopologyHistoryDeleted(historySource, candidate)) {
         deleted = true;
         continue;
@@ -742,6 +746,10 @@ function resolveFinalSuccessors(
       const modified = uniqueShapes(
         listShapes(oc, historySource.Modified(candidate)),
       );
+      if (includeGenerated && modified.length > 0) {
+        nextCandidates.push(...modified);
+        continue;
+      }
       if (modified.length > 1) {
         ambiguous = true;
         continue;
@@ -1153,7 +1161,16 @@ function deriveGeneratedKindContributorIds<
       ]);
     }
 
-    for (const index of inheritedResolution.finalIndexes) {
+    // Contributor ancestry includes generated descendants; durable identity
+    // above still requires a unique Modified or retained exact successor.
+    const contributorResolution = resolveFinalSuccessors(
+      oc,
+      previousShape,
+      input.finalShapeMap,
+      input.historySources,
+      true,
+    );
+    for (const index of contributorResolution.finalIndexes) {
       inheritedContributorIdsByIndex.set(
         index,
         mergeContributorIds(inheritedContributorIdsByIndex.get(index) ?? [], [

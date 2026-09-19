@@ -23,6 +23,7 @@ function extrude(input: {
   sketchId: string;
   bodyType: "SOLID" | "SURFACE";
   operationType: "NEW" | "REMOVE";
+  depthMm?: number;
 }) {
   return {
     featureType: "extrude",
@@ -36,7 +37,11 @@ function extrude(input: {
         queries: [{ queryString: `query = qSketchRegion(id + "${input.sketchId}", true);` }],
       },
       { parameterId: "endBound", value: "BLIND" },
-      { parameterId: "depth", expression: "10 mm", value: 0.01 },
+      {
+        parameterId: "depth",
+        expression: `${input.depthMm ?? 10} mm`,
+        value: (input.depthMm ?? 10) / 1000,
+      },
     ],
   };
 }
@@ -769,6 +774,7 @@ export function makeWaveXStartOffsetBossCaptureBundle(): OnshapeCaptureBundleV2 
             featureId: baseExtrudeId,
             name: "Extrude 1",
             sketchId: "S_BOSS_BASE",
+            depthMm: height * 1000,
             bodyType: "SOLID",
             operationType: "NEW",
           }),

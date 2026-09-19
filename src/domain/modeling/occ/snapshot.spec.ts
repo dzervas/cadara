@@ -898,6 +898,15 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
       preservedBackFace.contributingFeatureIds.join("|"),
       "Preserved back faces should keep only the original extrude contributor ancestry.",
     ).toBe(extrudeFeatureId);
+    for (const [axis, value] of [
+      ["x", 1], ["x", 9], ["y", 1], ["y", 7], ["z", 1],
+    ] as const) {
+      const innerFaceId = findPlanarFaceByAxis(oc, shelledBody, axis, value);
+      expect(
+        findFaceEntity(snapshot, innerFaceId)?.contributingFeatureIds,
+        "Every generated inner shell face must inherit the extrude before the shell contributor.",
+      ).toEqual([extrudeFeatureId, shellFeatureId]);
+    }
     expect(
       innerBackFace.contributingFeatureIds.join("|"),
       "Inner shell faces should expose authored-order extrude and shell contributor ancestry.",

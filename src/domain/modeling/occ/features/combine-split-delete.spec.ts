@@ -226,6 +226,8 @@ test("createSheetSplitToolHistoryTopologyStage scopes exact tool faces to each o
   const outputA = {
     outputSlotKey:
       "sheet-split-output:target:body_sheet_split_target:target-face-provenance:target-provenance-a",
+    producerSlotKey:
+      "sheet-split-output:target:body_sheet_split_target:target-face-provenance:target-provenance-a",
     body: bodyA,
     finalFacesByNativeId: new Map([
       ["face_final_shared", "face_sheet_split_output_a_shared" as const],
@@ -234,6 +236,8 @@ test("createSheetSplitToolHistoryTopologyStage scopes exact tool faces to each o
   };
   const outputB = {
     outputSlotKey:
+      "sheet-split-output:target:body_sheet_split_target:target-face-provenance:target-provenance-b",
+    producerSlotKey:
       "sheet-split-output:target:body_sheet_split_target:target-face-provenance:target-provenance-b",
     body: bodyB,
     finalFacesByNativeId: new Map([
@@ -302,6 +306,21 @@ test("createSheetSplitToolHistoryTopologyStage scopes exact tool faces to each o
       faceId: "face_sheet_split_output_b_shared",
     },
   ]);
+  const changedSlotKey = `${outputA.outputSlotKey},additional-exact-witness`;
+  const reassociated = createSheetSplitToolHistoryTopologyStage({
+    ownerFeatureId: "feature_sheet_split" as FeatureId,
+    toolBodyId: "body_sheet_split_tool" as BodyId,
+    history: makeHistory("one", [{
+      nativeFaceId: "face_final_a_only",
+      outputSlotKeys: [changedSlotKey],
+    }]),
+    outputs: [{ ...outputA, outputSlotKey: changedSlotKey }],
+  });
+  expect(
+    reassociated.outputs.get(bodyA.bodyId)?.sourceTargets.get(sourceKeyA),
+    "An exactly reassociated output must retain its original tool-face producer key when its witness set changes.",
+  ).toEqual([{ kind: "face", bodyId: bodyA.bodyId, faceId: "face_sheet_split_output_a_only" }]);
+
   const singleton = createSheetSplitToolHistoryTopologyStage({
     ownerFeatureId: "feature_sheet_split" as FeatureId,
     toolBodyId: "body_sheet_split_tool" as BodyId,

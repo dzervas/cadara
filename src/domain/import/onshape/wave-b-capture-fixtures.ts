@@ -72,7 +72,7 @@ function surfaceExtrude(id: string, sketchId: string) {
       { parameterId: "operationType", value: "NEW" },
       { parameterId: "surfaceOperationType", value: "NEW" },
       { parameterId: "surfaceEntities", queries: [{
-        queryString: `query = qCreatedBy(id + "${sketchId}", EntityType.EDGE);`,
+        queryString: `query = qConstructionFilter(qBodyType(qCreatedBy(id + "${sketchId}", EntityType.EDGE), BodyType.WIRE), ConstructionObject.NO);`,
         deterministicIds: [`${sketchId}_edge`],
       }] },
       { parameterId: "endBound", value: "BLIND" },

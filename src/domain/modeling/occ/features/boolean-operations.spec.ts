@@ -9,6 +9,7 @@ import {
   refineBooleanResultShape,
   resolveNativeFeatureTransactionReplacement,
   resolveReplacementBodies,
+  runBoolean,
   runSheetSplit,
   selectBooleanResultWithCompleteHistory,
 } from "@/domain/modeling/occ/features/boolean-operations";
@@ -974,6 +975,37 @@ test("falls back to the raw Fuse result when unification loses a retained face",
     replacement?.facesById.get(fixture.faceId)?.IsSame(fixture.face),
     "resolveReplacementBodies must retain the raw exact IsSame public face id.",
   ).toBe(true);
+});
+
+test.each(["adjacent", "overlapping"])("unification retains exact seam history for %s boxes", async (placement) => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const left = makeBoxShape(oc, [2, 2, 2]);
+  const rightBuilder = new oc.BRepPrimAPI_MakeBox_3(
+    toGpPnt(oc, [0, 0, placement === "adjacent" ? 2 : 0]),
+    2,
+    2,
+    placement === "adjacent" ? 2 : 4,
+  );
+  const result = runBoolean(oc, "join", left, rightBuilder.Shape());
+  const faces = new oc.TopTools_IndexedMapOfShape_1();
+  try {
+    oc.TopExp.MapShapes_1(
+      result.shape,
+      oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+      faces,
+    );
+    expect(
+      faces.Size(),
+      "Coplanar side faces must be unified after removing the shared seam.",
+    ).toBe(6);
+    expect(
+      result.historySources,
+      "Both Boolean and unifier history must remain available.",
+    ).toHaveLength(2);
+  } finally {
+    faces.delete();
+    rightBuilder.delete();
+  }
 });
 
 test("Modified history takes precedence and ambiguous Modified history fails closed", async () => {
