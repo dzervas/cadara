@@ -399,6 +399,7 @@ type SheetSplitSemanticHistory = {
 
 type SheetSplitTrackedOutput = {
   outputSlotKey: string;
+  producerSlotKey: string;
   outputWitnesses: readonly OccCanonicalTopologyProvenanceId[];
   body: OccTrackedBody;
   finalFacesByNativeId: ReadonlyMap<string, FaceId>;
@@ -970,6 +971,11 @@ function trackSheetSplitOutputs(input: {
     }
     outputs.push({
       outputSlotKey: output.outputSlotKey,
+      // Exact witness reassociation preserves the original output identity even
+      // when the current witness set (and its derived slot key) has changed.
+      producerSlotKey: decodeURIComponent(
+        body.bodyId.slice(`body_${input.ownerFeatureId}_sheet_split_`.length),
+      ),
       outputWitnesses: output.sourceTargetProvenanceIds,
       body,
       finalFacesByNativeId,
@@ -1010,7 +1016,7 @@ export function createSheetSplitToolHistoryTopologyStage(input: {
         sourcePublicId: encodeURIComponent(
           relation.sourceToolFaceProvenanceId,
         ) as FaceId,
-        role: `sheet-split-interface-face:output-slot:${encodeURIComponent(output.outputSlotKey)}`,
+        role: `sheet-split-interface-face:output-slot:${encodeURIComponent(output.producerSlotKey)}`,
       });
       const finalFaces = relation.finalFaces.filter((finalFace) =>
         finalFace.outputSlotKeys.includes(output.outputSlotKey),

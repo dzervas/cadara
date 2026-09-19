@@ -352,6 +352,8 @@ export function runBoolean(
       refined.historySource.Modified(subshape),
     Generated: (subshape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
       refined.historySource.Generated(subshape),
+    IsRemoved: (subshape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>) =>
+      refined.historySource.IsRemoved(subshape),
     resultShape: refined.shape,
   } satisfies OccTopologyHistorySource;
   const selected = selectBooleanResultWithCompleteHistory({
@@ -484,6 +486,8 @@ function everyOperandSubshape(
 /**
  * Retain same-domain unification only if every Boolean input subshape has an
  * exact raw Boolean hop and, when it survives that hop, an exact unifier hop.
+ * Raw splits must converge to one final successor; explicit removals are valid
+ * history, including seam edges removed by same-domain unification.
  * `Modified` is authoritative; zero Modified falls back only to unique exact
  * `IsSame` membership. This never uses geometric matching or invents lineage.
  */
@@ -510,14 +514,31 @@ export function selectBooleanResultWithCompleteHistory<
         allowDeleted: true,
       });
       if (raw.kind === "deleted") return true;
-      if (raw.kind !== "successor") return false;
-      return exactStageSuccessor({
-        oc: input.oc,
-        kind,
-        source: raw.shape,
-        history: input.unifyHistorySource,
-        allowDeleted: false,
-      }).kind === "successor";
+      const rawSuccessors = raw.kind === "successor"
+        ? [raw.shape]
+        : uniqueModifiedSuccessor(input.oc, input.rawHistorySource, source);
+      if (rawSuccessors.length === 0) return false;
+
+      const finalSuccessors: OccShape[] = [];
+      for (const successor of rawSuccessors) {
+        if (countSubshapeMatches(input.oc, input.rawShape, kind, successor) !== 1) {
+          return false;
+        }
+        const unified = exactStageSuccessor({
+          oc: input.oc,
+          kind,
+          source: successor,
+          history: input.unifyHistorySource,
+          allowDeleted: true,
+        });
+        if (unified.kind === "incomplete") return false;
+        if (unified.kind === "successor") {
+          appendUniqueShape(finalSuccessors, unified.shape);
+        }
+      }
+      // Raw splits are unambiguous only if every exact branch is removed or
+      // converges to the same final shape. Never choose one of many survivors.
+      return finalSuccessors.length <= 1;
     },
   );
 

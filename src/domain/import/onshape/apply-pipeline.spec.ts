@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { test, expect } from "vitest";
 import { ResultAsync, createAppError } from "@/contracts/errors";
 
@@ -2738,7 +2738,10 @@ test("a split with a single-output solid and sheet producer prepares bodyOf part
     }),
   );
   const review = await onshapeImportProvider.review({ source, capabilities });
-  expect(review.providerReview.studios[0]?.featurePlans.at(-1)).toMatchObject({
+  expect(
+    review.providerReview.studios[0]?.featurePlans.at(-1),
+    JSON.stringify(review.providerReview.studios[0]?.featurePlans),
+  ).toMatchObject({
     tier: "parametric",
     reasonCodes: [],
   });
@@ -5470,21 +5473,15 @@ test.skipIf(!existsSync(PART_STUDIO_9841_CAPTURE_FIXTURE))(
     });
     const before = await service.getCurrentDocumentSnapshot();
     const source = sourceFromBundle(bundle);
-    const reviewCachePath = "/tmp/cadara-9841-review.json";
-    const review = existsSync(reviewCachePath)
-      ? (JSON.parse(await readFile(reviewCachePath, "utf8")) as Awaited<
-          ReturnType<typeof onshapeImportProvider.review>
-        >)
-      : await onshapeImportProvider.review({
-          source,
-          capabilities: createImportCapabilities(service, before, {
-            assetStore,
-            history: createKernelHistoryProbeSession({
-              createService: createProbeService,
-            }),
-          }),
-        });
-    if (!existsSync(reviewCachePath)) await writeFile(reviewCachePath, JSON.stringify(review));
+    const review = await onshapeImportProvider.review({
+      source,
+      capabilities: createImportCapabilities(service, before, {
+        assetStore,
+        history: createKernelHistoryProbeSession({
+          createService: createProbeService,
+        }),
+      }),
+    });
     const reviewedPlans = review.providerReview.studios.flatMap(
       (studio) => studio.featurePlans,
     );
