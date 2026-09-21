@@ -969,6 +969,33 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     );
   }
 
+  async function testEditedParallelLineDistanceConverges() {
+    const points = [
+      makePoint("sketch_point_a", "A", -4.5, 50),
+      makePoint("sketch_point_b", "B", -4.5, -50),
+      makePoint("sketch_point_c", "C", 4.5, 50),
+      makePoint("sketch_point_d", "D", 4.5, -50),
+    ];
+    const entities = [
+      makeLine("sketch_entity_left", "Left", points[0]!.pointId, points[1]!.pointId),
+      makeLine("sketch_entity_right", "Right", points[2]!.pointId, points[3]!.pointId),
+    ];
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1", referenceIds: [], references: [],
+      points, pointIds: points.map((point) => point.pointId),
+      entities, entityIds: entities.map((entity) => entity.entityId),
+      constraintIds: [], constraints: [], dimensionIds: ["dimension_gap"],
+      dimensions: [{ dimensionId: "dimension_gap", kind: "lineDistance", label: "Gap",
+        lines: [{ kind: "localEntity", entityId: entities[0]!.entityId },
+          { kind: "localEntity", entityId: entities[1]!.entityId }], value: 12 }],
+      styleIds: [], styles: [], svgRenderingEnabled: true,
+    };
+    const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: "failOnConflict" });
+    expect(solved.status.solveState, "An edited distance must not stall when initially parallel lines rotate during iteration.").toBe("solved");
+    assertClose(solved.solvedSnapshot.dimensionStatuses[0]!.solvedValue!, 12, 1e-4,
+      "The edited line gap must reach its authored distance.");
+  }
+
   async function testExpandedDimensionStatuses() {
     const definition: SketchDefinition = {
       schemaVersion: "sketch-definition/v1alpha1",
@@ -3412,6 +3439,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     await testEuclideanDistance();
     await testHorizontalDistance();
     await testVerticalDistance();
+    await testEditedParallelLineDistanceConverges();
     await testExpandedDimensionStatuses();
     await testAxisQualifiedDistance();
     await testObtuseLineAngleDimension();
@@ -3447,8 +3475,5 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     await testCompiledInteractiveDragTranslatesRigidRectangle();
   }
 
-  run().catch((error: unknown) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+  await run();
 });

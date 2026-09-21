@@ -2681,55 +2681,42 @@ function buildSystem(
         continue;
       }
 
-      scalarConstraints.push(
-        createNumericalScalarConstraint({
-          id: dimension.dimensionId,
-          targetKind: "dimension",
-          parameterCount,
-          affectedVariableIndices: [
-            ...lineDimOperandIdx(dimension.lines[0]),
-            ...lineDimOperandIdx(dimension.lines[1]),
-          ],
-          evaluateResidual(values) {
-            const first = resolveLineDimensionOperand(
-              values,
-              dimension.lines[0],
-              lineEntityMap,
-              pointRecords,
-              options.projectedReferences ?? [],
-            );
-            const second = resolveLineDimensionOperand(
-              values,
-              dimension.lines[1],
-              lineEntityMap,
-              pointRecords,
-              options.projectedReferences ?? [],
-            );
-            if (!first || !second) {
-              return dimension.value;
-            }
-
-            const parallelResidual = lineParallelResidual(
-              first.start,
-              first.end,
-              second.start,
-              second.end,
-            );
-            if (
-              !Number.isFinite(parallelResidual) ||
-              Math.abs(parallelResidual) > 1e-4
-            ) {
-              return Math.max(1, Math.abs(parallelResidual)) + dimension.value;
-            }
-
-            return (
-              Math.abs(
-                pointLineSignedDistance(second.start, first.start, first.end),
-              ) - dimension.value
-            );
-          },
-        }),
-      );
+      // Keep the distance and its parallel-line prerequisite smooth during
+      // iteration. A thresholded penalty traps valid edits at the boundary as
+      // unconstrained trial steps temporarily rotate the initially parallel lines.
+      for (const component of ["parallel", "distance"] as const) {
+        scalarConstraints.push(
+          createNumericalScalarConstraint({
+            id: dimension.dimensionId,
+            targetKind: "dimension",
+            parameterCount,
+            affectedVariableIndices: [
+              ...lineDimOperandIdx(dimension.lines[0]),
+              ...lineDimOperandIdx(dimension.lines[1]),
+            ],
+            evaluateResidual(values) {
+              const first = resolveLineDimensionOperand(
+                values,
+                dimension.lines[0],
+                lineEntityMap,
+                pointRecords,
+                options.projectedReferences ?? [],
+              );
+              const second = resolveLineDimensionOperand(
+                values,
+                dimension.lines[1],
+                lineEntityMap,
+                pointRecords,
+                options.projectedReferences ?? [],
+              );
+              if (!first || !second) return dimension.value;
+              return component === "parallel"
+                ? lineParallelResidual(first.start, first.end, second.start, second.end)
+                : Math.abs(pointLineSignedDistance(second.start, first.start, first.end)) - dimension.value;
+            },
+          }),
+        );
+      }
       continue;
     }
 
