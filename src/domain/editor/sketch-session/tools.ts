@@ -2129,7 +2129,9 @@ export function acceptSketchDraw(
     point: endPoint,
   });
 
-  if (result.state.validationMessage) {
+  const completedInvalidSpline =
+    session.activeTool === "spline" && result.state.status === "idle";
+  if (result.state.validationMessage && !completedInvalidSpline) {
     return {
       ...session,
       toolStagedEntities: [],
@@ -2238,14 +2240,13 @@ export function acceptSketchDraw(
           sweepDirection,
           session.constructionModifierActive,
         ),
-      createSplineEntity: (label, entityId, fitPointIds, degree) =>
+      createSplineEntity: (label, entityId, pointIds) =>
         createSplineEntityDefinition(
           sketchId,
           entityId,
           label,
-          fitPointIds,
+          pointIds,
           session.constructionModifierActive,
-          degree,
         ),
       createEllipseEntity: (
         label,

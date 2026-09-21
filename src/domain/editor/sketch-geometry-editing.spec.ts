@@ -166,10 +166,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         entityId: entityId as `sketch_entity_${string}`,
       } as const,
       isConstruction: false,
-      fitPointIds: fitPointIds.map(
-        (pointId) => pointId as `sketch_point_${string}`,
-      ),
-      degree: 2 as const,
+      pointOccurrenceIds: fitPointIds.map((_, index) => `occ-${index}`),
+      pointOccurrences: fitPointIds.map((pointId, index) => ({
+        occurrenceId: `occ-${index}`,
+        pointId: pointId as `sketch_point_${string}`,
+        tangent: { kind: "automatic" as const },
+      })),
+      closure: "open" as const,
+      interpolationPolicy: "centripetal-mean-arm-v1" as const,
     };
   }
 
@@ -1189,7 +1193,10 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         "Drag-frame updates should keep the previous constrained square profile visible.",
       ).toBe(1);
       if (index === 0) {
-        expect(session, "A motionless frame must not mutate or rederive the draft.").toBe(previous);
+        expect(
+          session,
+          "A motionless frame must not mutate or rederive the draft.",
+        ).toBe(previous);
       } else {
         expect(
           session.liveRegionState?.freshness,
@@ -1537,8 +1544,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     expect(
       deleted.definition.entities.every((entity) =>
         entity.kind === "spline"
-          ? entity.fitPointIds.every((pointId) =>
-              remainingPointIds.has(pointId),
+          ? entity.pointOccurrences.every((occurrence) =>
+              remainingPointIds.has(occurrence.pointId),
             )
           : entity.kind === "circle"
             ? remainingPointIds.has(entity.centerPointId)
@@ -2033,14 +2040,16 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
 
     expect(
       splineSession.validationMessage,
-      "Spline trim should not leave validation feedback.",
-    ).toBe(null);
+      "Spline trimming requires exact neutral-span trimming and is not available yet.",
+    ).toBe(
+      "Spline trimming requires exact neutral-span trimming and is not available yet.",
+    );
     expect(
       splineSession.definition.entities.filter(
         (entity) => entity.kind === "spline",
       ).length,
-      "Trimming a spline should split the remaining geometry into two spline entities.",
-    ).toBe(2);
+      "Unavailable exact spline trimming must preserve the authored spline.",
+    ).toBe(1);
   }
 
   function testOffsetAddsLineCopyAndRejectsInvalidDistance() {
@@ -2506,13 +2515,15 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
           {
             geometryId: "projected_geometry_spline",
             kind: "spline",
-            fitPoints: [
-              [0, 0],
-              [1, 2],
-              [2, 0],
-            ],
-            degree: 2,
-            isClosed: false,
+            representation: {
+              kind: "sourceSamples",
+              points: [
+                [0, 0],
+                [1, 2],
+                [2, 0],
+              ],
+              isClosed: false,
+            },
           },
         ],
         diagnostics: [],

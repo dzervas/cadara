@@ -190,6 +190,27 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
       });
     }
 
+    if (entity.kind === "spline") {
+      const occurrenceIds = entity.pointOccurrences.map(
+        (occurrence) => occurrence.occurrenceId,
+      );
+      if (
+        entity.pointOccurrenceIds.length !== occurrenceIds.length ||
+        new Set(entity.pointOccurrenceIds).size !==
+          entity.pointOccurrenceIds.length ||
+        entity.pointOccurrenceIds.some((id) => !occurrenceIds.includes(id)) ||
+        new Set(occurrenceIds).size !== occurrenceIds.length
+      ) {
+        issues.push({
+          path: `entities.${index}.pointOccurrenceIds`,
+          expected: "a unique order bijective with pointOccurrences",
+          value: entity.pointOccurrenceIds,
+          message:
+            "Spline occurrence order must be bijective with stable occurrence records.",
+        });
+      }
+    }
+
     if (entity.kind === "profileText") {
       if (entity.text.trim().length === 0) {
         issues.push({
@@ -240,6 +261,19 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
   const entityIds = new Set(
     definition.entities.map((entity) => entity.entityId),
   );
+  definition.entities.forEach((entity, entityIndex) => {
+    if (entity.kind !== "spline") return;
+    entity.pointOccurrences.forEach((occurrence, occurrenceIndex) => {
+      if (!pointIds.has(occurrence.pointId)) {
+        issues.push({
+          path: `entities.${entityIndex}.pointOccurrences.${occurrenceIndex}.pointId`,
+          expected: "an existing canonical sketch point",
+          value: occurrence.pointId,
+          message: "Spline occurrences must reference canonical sketch points.",
+        });
+      }
+    });
+  });
   const imageOwnedPointIds = new Set<string>();
   const imageOwnedEntityIds = new Set<string>();
   definition.referenceImages?.forEach((record, index) => {

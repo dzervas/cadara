@@ -1,5 +1,6 @@
 import { test, expect } from "vitest";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type { SketchDerivedValidity } from "@/contracts/sketch/schema";
 import {
   CONTRACT_VERSION,
   RENDER_EXPORT_SCHEMA_VERSION,
@@ -178,6 +179,193 @@ test("model edge projection classifies supported projected geometry generically"
   ).toBe("counterClockwise");
 });
 
+function projectAuthoredSpline(derivedValidity: SketchDerivedValidity) {
+  const snapshot = createSnapshotWithEdge([], false);
+  snapshot.document.cursor = { kind: "sketch", sketchId: "sketch_source" };
+  snapshot.presentation.documentHistory = [
+    {
+      id: "history_sketch_source",
+      label: "Source sketch",
+      description: "Source sketch",
+      kind: "sketch",
+      target: { kind: "sketch", sketchId: "sketch_source" },
+      sketchId: "sketch_source",
+      featureId: null,
+    },
+  ];
+  snapshot.document.sketches.push({
+    documentId: "doc_projection",
+    revisionId: "rev_projection",
+    sketchId: "sketch_source",
+    label: "Source sketch",
+    plane: {
+      support: {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      frame: {
+        origin: [0, 0, 0],
+        xAxis: [0, -1, 0],
+        yAxis: [-1, 0, 0],
+        normal: [0, 0, -1],
+        linearUnit: "documentLength",
+        handedness: "rightHanded",
+      },
+    },
+    sketch: {
+      documentId: "doc_projection",
+      revisionId: "rev_projection",
+      sketchId: "sketch_source",
+      label: "Source sketch",
+      planeSupport: {
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      },
+      definition: {
+        schemaVersion: "sketch-definition/v1alpha1",
+        referenceIds: [],
+        references: [],
+        pointIds: ["sketch_point_start", "sketch_point_end"],
+        points: [
+          {
+            pointId: "sketch_point_start",
+            label: "Start",
+            target: {
+              kind: "sketchPoint",
+              sketchId: "sketch_source",
+              pointId: "sketch_point_start",
+            },
+            position: [0, 0],
+            isConstruction: false,
+          },
+          {
+            pointId: "sketch_point_end",
+            label: "End",
+            target: {
+              kind: "sketchPoint",
+              sketchId: "sketch_source",
+              pointId: "sketch_point_end",
+            },
+            position: [20, 20],
+            isConstruction: false,
+          },
+        ],
+        entityIds: ["sketch_entity_spline"],
+        entities: [
+          {
+            kind: "spline",
+            entityId: "sketch_entity_spline",
+            label: "Spline",
+            target: {
+              kind: "sketchEntity",
+              sketchId: "sketch_source",
+              entityId: "sketch_entity_spline",
+            },
+            isConstruction: false,
+            pointOccurrenceIds: ["occ-start", "occ-end"],
+            pointOccurrences: [
+              {
+                occurrenceId: "occ-start",
+                pointId: "sketch_point_start",
+                tangent: { kind: "authored", vector: [1, 0] },
+              },
+              {
+                occurrenceId: "occ-end",
+                pointId: "sketch_point_end",
+                tangent: { kind: "authored", vector: [1, 0] },
+              },
+            ],
+            closure: "open",
+            interpolationPolicy: "centripetal-mean-arm-v1",
+          },
+        ],
+        constraintIds: [],
+        constraints: [],
+        dimensionIds: [],
+        dimensions: [],
+      },
+      solvedSnapshot: {
+        status: { solveState: "solved", degreesOfFreedom: 4 },
+        solvedPoints: [
+          { pointId: "sketch_point_start", solvedPosition: [0, 0] },
+          { pointId: "sketch_point_end", solvedPosition: [2, 0] },
+        ],
+        diagnostics: [],
+      },
+      derivedValidity,
+      regions: [],
+    },
+  } as unknown as WorkspaceSnapshot["document"]["sketches"][number]);
+
+  return projectSketchExternalReferencesFromSnapshot(snapshot, {
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: "request_project_spline",
+    documentId: "doc_projection",
+    revisionId: "rev_projection",
+    sketchId: "sketch_projection",
+    plane: {
+      origin: [0, 0, 0],
+      xAxis: [1, 0, 0],
+      yAxis: [0, 1, 0],
+      normal: [0, 0, 1],
+      linearUnit: "documentLength",
+      handedness: "rightHanded",
+    },
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    references: [
+      {
+        referenceId: "ref_projected_spline",
+        reference: {
+          referenceId: "ref_projected_spline",
+          kind: "sketchReference",
+          label: "Projected spline",
+          source: {
+            kind: "sketchEntity",
+            sketchId: "sketch_source",
+            entityId: "sketch_entity_spline",
+          },
+        },
+      },
+    ],
+  });
+}
+
+test("authored spline projection transforms source-owner spans into an opposite-normal destination frame", () => {
+  const projected = projectAuthoredSpline({ state: "current", diagnostics: [] })
+    .projectedReferences[0];
+  const geometry = projected?.geometry[0];
+  expect(projected?.status).toBe("projected");
+  expect(
+    geometry?.kind === "spline" &&
+      geometry.representation.kind === "neutralCubicSpans"
+      ? geometry.representation.spans[0]?.poles
+      : null,
+    "Projection must transform source-reconstructed poles, including authored tangent vectors, without reconstructing in the destination metric.",
+  ).toEqual([
+    [0, 0],
+    [0, -1],
+    [0, -1],
+    [0, -2],
+  ]);
+});
+
+test("sketch projection explicitly rejects invalid and stale source derived output", () => {
+  for (const state of ["invalid", "stale"] as const) {
+    const projected = projectAuthoredSpline({ state, diagnostics: [] })
+      .projectedReferences[0];
+    expect(projected?.status).toBe("unsupportedSource");
+    expect(projected?.geometry).toEqual([]);
+    expect(projected?.diagnostics[0]?.code).toBe(
+      "projection-source-derived-output-not-current",
+    );
+  }
+});
+
 test("model edge projection handles closed edge sampling variants without misclassifying unsupported curves", () => {
   const repeatedEndpointCircle = projectEdge(
     [
@@ -233,7 +421,9 @@ test("model edge projection handles closed edge sampling variants without miscla
     "Freeform model edges should project as splines.",
   ).toBe("spline");
   expect(
-    splineGeometry.isClosed,
-    "Projected freeform curves should preserve closed sampling.",
+    splineGeometry?.kind === "spline" &&
+      splineGeometry.representation.kind === "sourceSamples" &&
+      splineGeometry.representation.isClosed,
+    "Projected freeform curves should preserve explicit source sampling without becoming ordinary splines.",
   ).toBeTruthy();
 });

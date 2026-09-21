@@ -23,6 +23,11 @@ import type {
   SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import {
+  reconstructSplineAggregate,
+  type SplineSpan,
+  type SplineVector,
+} from "@/contracts/sketch/spline-geometry";
 import type { SketchSolveDiagnostic } from "@/contracts/sketch";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { isDocumentHistoryTargetAppliedForCursor } from "@/domain/modeling/document-history";
@@ -123,6 +128,59 @@ function projectWorldPoint(
 ): SketchPoint2D {
   const relative = subtract(point, plane.origin);
   return [dot(relative, plane.xAxis), dot(relative, plane.yAxis)];
+}
+
+function projectSketchVector(
+  source: SketchPlaneFrame,
+  destination: SketchPlaneFrame,
+  vector: SplineVector,
+): SplineVector {
+  const world = add(
+    scale(source.xAxis, vector[0]),
+    scale(source.yAxis, vector[1]),
+  );
+  return [dot(world, destination.xAxis), dot(world, destination.yAxis)];
+}
+
+function projectSplineSpan(
+  span: SplineSpan,
+  source: SketchPlaneFrame,
+  destination: SketchPlaneFrame,
+): SplineSpan {
+  const projectPole = (pole: SplineVector) =>
+    projectWorldPoint(destination, mapSketchPointToWorld(source, pole));
+  const projectDifferential = (pole: SplineVector) =>
+    projectSketchVector(source, destination, pole);
+  return {
+    ...span,
+    poles: [
+      projectPole(span.poles[0]),
+      projectPole(span.poles[1]),
+      projectPole(span.poles[2]),
+      projectPole(span.poles[3]),
+    ],
+    differential: {
+      interval: span.differential.interval,
+      poles: [
+        projectDifferential(span.differential.poles[0]),
+        projectDifferential(span.differential.poles[1]),
+        projectDifferential(span.differential.poles[2]),
+        projectDifferential(span.differential.poles[3]),
+      ],
+    },
+  };
+}
+
+function sourceSketchDerivedOutputFailure(
+  referenceId: ReferenceId,
+  state: "invalid" | "stale",
+): ProjectedSketchReferenceRecord {
+  return failedReference(
+    referenceId,
+    "unsupportedSource",
+    "projection-source-derived-output-not-current",
+    `Sketch reference ${referenceId} cannot project ${state} source-derived output.`,
+  );
 }
 
 function canUseExistingGeometry(
@@ -273,10 +331,6 @@ function signedPolylineArea(points: readonly SketchPoint2D[]) {
   return area / 2;
 }
 
-function splineDegreeForPointCount(pointCount: number): 2 | 3 {
-  return pointCount >= 4 ? 3 : 2;
-}
-
 function geometryFromWorldPolyline(input: {
   referenceId: ReferenceId;
   suffix: string;
@@ -338,9 +392,11 @@ function geometryFromWorldPolyline(input: {
             input.suffix,
           ),
           kind: "spline",
-          fitPoints: candidate,
-          degree: splineDegreeForPointCount(candidate.length),
-          isClosed,
+          representation: {
+            kind: "sourceSamples",
+            points: candidate,
+            isClosed,
+          },
         }
       : null;
   }
@@ -591,6 +647,13 @@ function projectSketchPoint(
     );
   }
 
+  if (sketch.sketch.derivedValidity.state !== "current") {
+    return sourceSketchDerivedOutputFailure(
+      reference.referenceId,
+      sketch.sketch.derivedValidity.state,
+    );
+  }
+
   const solvedPoint = sketch.sketch.solvedSnapshot.solvedPoints.find(
     (entry) => entry.pointId === source.pointId,
   );
@@ -726,11 +789,12 @@ function projectSketchEntityGeometry(input: {
         : null;
     }
     case "spline": {
-      const fitPoints = entity.fitPointIds.flatMap((pointId) => {
-        const point = worldPoint(pointId);
-        return point ? [projectWorldPoint(input.plane, point)] : [];
-      });
-      return fitPoints.length === entity.fitPointIds.length
+      const positions = Object.fromEntries(pointById) as Record<
+        SketchPointId,
+        SketchPoint2D
+      >;
+      const reconstruction = reconstructSplineAggregate(entity, positions);
+      return reconstruction.validity === "valid"
         ? [
             {
               geometryId: createProjectedGeometryId(
@@ -738,9 +802,12 @@ function projectSketchEntityGeometry(input: {
                 entity.entityId,
               ),
               kind: "spline" as const,
-              fitPoints,
-              degree: entity.degree,
-              isClosed: false,
+              representation: {
+                kind: "neutralCubicSpans" as const,
+                spans: reconstruction.spans.map((span) =>
+                  projectSplineSpan(span, sketch.plane.frame, input.plane),
+                ),
+              },
             },
           ]
         : null;
@@ -782,6 +849,13 @@ function projectSketchEntity(
       "missingSource",
       "missing-sketch-entity-source",
       `Sketch entity ${reference.referenceId} does not resolve in the requested revision.`,
+    );
+  }
+
+  if (sketch.sketch.derivedValidity.state !== "current") {
+    return sourceSketchDerivedOutputFailure(
+      reference.referenceId,
+      sketch.sketch.derivedValidity.state,
     );
   }
 
@@ -857,6 +931,13 @@ function projectWholeSketch(
       "missingSource",
       "missing-sketch-source",
       `Sketch ${reference.referenceId} does not resolve in the requested revision.`,
+    );
+  }
+
+  if (sketch.sketch.derivedValidity.state !== "current") {
+    return sourceSketchDerivedOutputFailure(
+      reference.referenceId,
+      sketch.sketch.derivedValidity.state,
     );
   }
 

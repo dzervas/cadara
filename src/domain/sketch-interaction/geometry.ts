@@ -1,6 +1,8 @@
-import type {
-  ProjectedSketchReferenceGeometry,
-  ProjectedSketchReferenceRecord,
+import {
+  projectedSplineDisplayPoints,
+  projectedSplineIsClosed,
+  type ProjectedSketchReferenceGeometry,
+  type ProjectedSketchReferenceRecord,
 } from "@/contracts/solver/schema";
 import type {
   SketchDefinition,
@@ -8,6 +10,11 @@ import type {
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
 import type { SketchId, SketchPointId } from "@/contracts/shared/ids";
+import {
+  orderedSplinePointIds,
+  reconstructSplineAggregate,
+  sampleSplineGeometry,
+} from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   getSketchSessionDisplayDefinition,
@@ -64,16 +71,6 @@ export type SketchInteractionGeometry =
       sweepDirection: "clockwise" | "counterClockwise";
     }
   | {
-      kind: "spline";
-      source: SketchInteractionGeometrySource;
-      id: string;
-      label: string;
-      target: PrimitiveRef;
-      points: readonly SketchPoint2D[];
-      degree: 2 | 3;
-      isClosed: boolean;
-    }
-  | {
       kind: "sampledCurve";
       source: SketchInteractionGeometrySource;
       id: string;
@@ -123,11 +120,6 @@ export function flattenSketchInteractionCurve(
         geometry.start,
         geometry.end,
         geometry.sweepDirection,
-      );
-    case "spline":
-      return closeSampledPoints(
-        sampleSplinePoints(geometry.points, geometry.degree),
-        geometry.isClosed,
       );
     case "sampledCurve":
       return closeSampledPoints(geometry.points, geometry.isClosed);
@@ -279,17 +271,25 @@ function createLocalEntityInteractionGeometry(
         : null;
     }
     case "spline": {
-      const points = collectDefiningPoints(entity.fitPointIds, point);
-      return points
+      const pointIds = orderedSplinePointIds(entity);
+      const points = collectDefiningPoints(pointIds, point);
+      if (!points) return null;
+      const positions = Object.fromEntries(
+        pointIds.map((pointId, index) => [pointId, points[index]!]),
+      ) as Record<SketchPointId, SketchPoint2D>;
+      const sampled = sampleSplineGeometry(
+        reconstructSplineAggregate(entity, positions),
+        SPLINE_SEGMENTS_PER_SPAN,
+      );
+      return sampled.length
         ? {
-            kind: "spline",
+            kind: "sampledCurve",
             source: "local",
             id: `sketch-entity:${entity.entityId}`,
             label: entity.label,
             target: entity.target,
-            points,
-            degree: entity.degree,
-            isClosed: false,
+            points: sampled,
+            isClosed: entity.closure !== "open",
           }
         : null;
     }
@@ -451,16 +451,16 @@ function createProjectedGeometry(
         end: geometry.endPosition,
         sweepDirection: geometry.sweepDirection,
       };
-    case "spline":
-      return geometry.fitPoints.length >= 2
-        ? {
-            ...base,
-            kind: "spline",
-            points: geometry.fitPoints,
-            degree: geometry.degree,
-            isClosed: geometry.isClosed,
-          }
-        : null;
+    case "spline": {
+      const points = projectedSplineDisplayPoints(geometry);
+      if (points.length < 2) return null;
+      return {
+        ...base,
+        kind: "sampledCurve",
+        points,
+        isClosed: projectedSplineIsClosed(geometry),
+      };
+    }
   }
 }
 
@@ -511,63 +511,6 @@ function sampleArcPoints(
     return [
       center[0] + Math.cos(angle) * radius,
       center[1] + Math.sin(angle) * radius,
-    ] satisfies SketchPoint2D;
-  });
-}
-
-function sampleSplinePoints(
-  points: readonly SketchPoint2D[],
-  degree: 2 | 3,
-): readonly SketchPoint2D[] {
-  if (points.length < 3) {
-    return points;
-  }
-
-  if (points.length <= degree + 1) {
-    return sampleBezierPoints(points, degree);
-  }
-
-  const sampled: SketchPoint2D[] = [];
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const p0 = points[Math.max(0, index - 1)]!;
-    const p1 = points[index]!;
-    const p2 = points[index + 1]!;
-    const p3 = points[Math.min(points.length - 1, index + 2)]!;
-    const segment = sampleCatmullRomSegment(
-      p0,
-      p1,
-      p2,
-      p3,
-      SPLINE_SEGMENTS_PER_SPAN,
-    );
-    sampled.push(...(index === 0 ? segment : segment.slice(1)));
-  }
-
-  return sampled;
-}
-
-function sampleCatmullRomSegment(
-  p0: SketchPoint2D,
-  p1: SketchPoint2D,
-  p2: SketchPoint2D,
-  p3: SketchPoint2D,
-  segments: number,
-): readonly SketchPoint2D[] {
-  return Array.from({ length: segments + 1 }, (_, index) => {
-    const t = index / segments;
-    const t2 = t * t;
-    const t3 = t2 * t;
-    return [
-      0.5 *
-        (2 * p1[0] +
-          (-p0[0] + p2[0]) * t +
-          (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
-          (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
-      0.5 *
-        (2 * p1[1] +
-          (-p0[1] + p2[1]) * t +
-          (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
-          (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
     ] satisfies SketchPoint2D;
   });
 }

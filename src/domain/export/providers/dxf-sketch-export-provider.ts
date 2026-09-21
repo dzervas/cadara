@@ -132,7 +132,11 @@ function entityToDxf(entity: SketchVectorEntity): string[] {
       ];
     }
     case "spline":
-      return polylineEntity(entity.points);
+      return polylineEntity(
+        entity.spans.flatMap((span, index) =>
+          sampleCubic(span).slice(index === 0 ? 0 : 1),
+        ),
+      );
     case "bezierCurve":
       return polylineEntity(
         entity.degree === 3 && entity.controlPoints.length >= 4

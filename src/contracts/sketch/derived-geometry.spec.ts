@@ -245,6 +245,181 @@ test("evaluateSketchDerivations applies linear, circular, and transform relation
   ).toBe(0);
 });
 
+test("evaluateSketchDerivations preserves complete spline aggregates and linearly transforms authored tangents", () => {
+  const seed = {
+    ...makeSpline("seed_spline", ["seed_a", "seed_b", "seed_a"]),
+    pointOccurrenceIds: ["seed-occ-a", "seed-occ-b", "seed-occ-alias"],
+    pointOccurrences: [
+      {
+        occurrenceId: "seed-occ-a",
+        pointId: "seed_a",
+        tangent: { kind: "authored" as const, vector: [1, 2] as const },
+      },
+      {
+        occurrenceId: "seed-occ-b",
+        pointId: "seed_b",
+        tangent: { kind: "authored" as const, vector: [0, 0] as const },
+      },
+      {
+        occurrenceId: "seed-occ-alias",
+        pointId: "seed_a",
+        tangent: { kind: "automatic" as const },
+      },
+    ],
+    closure: "smooth" as const,
+  } as Extract<SketchEntityDefinition, { kind: "spline" }>;
+  const mirrored = {
+    ...makeSpline("mirrored_spline", ["mirror_a", "mirror_b", "mirror_a"]),
+    pointOccurrenceIds: ["mirror-occ-a", "mirror-occ-b", "mirror-occ-alias"],
+    pointOccurrences: [
+      {
+        occurrenceId: "mirror-occ-a",
+        pointId: "mirror_a",
+        tangent: { kind: "automatic" as const },
+      },
+      {
+        occurrenceId: "mirror-occ-b",
+        pointId: "mirror_b",
+        tangent: { kind: "automatic" as const },
+      },
+      {
+        occurrenceId: "mirror-occ-alias",
+        pointId: "mirror_a",
+        tangent: { kind: "automatic" as const },
+      },
+    ],
+  } as Extract<SketchEntityDefinition, { kind: "spline" }>;
+  const transformed = {
+    ...makeSpline("transformed_spline", [
+      "transform_a",
+      "transform_b",
+      "transform_a",
+    ]),
+    pointOccurrenceIds: [
+      "transform-occ-a",
+      "transform-occ-b",
+      "transform-occ-alias",
+    ],
+    pointOccurrences: [
+      {
+        occurrenceId: "transform-occ-a",
+        pointId: "transform_a",
+        tangent: { kind: "automatic" as const },
+      },
+      {
+        occurrenceId: "transform-occ-b",
+        pointId: "transform_b",
+        tangent: { kind: "automatic" as const },
+      },
+      {
+        occurrenceId: "transform-occ-alias",
+        pointId: "transform_a",
+        tangent: { kind: "automatic" as const },
+      },
+    ],
+  } as Extract<SketchEntityDefinition, { kind: "spline" }>;
+  const definition = makeSketchDefinition({
+    points: [
+      makePoint("axis_start", [0, -2]),
+      makePoint("axis_end", [0, 2]),
+      makePoint("seed_a", [1, 0]),
+      makePoint("seed_b", [2, 1]),
+      makePoint("mirror_a", [0, 0]),
+      makePoint("mirror_b", [0, 0]),
+      makePoint("transform_a", [0, 0]),
+      makePoint("transform_b", [0, 0]),
+    ],
+    entities: [
+      makeLine("axis", "axis_start", "axis_end"),
+      seed,
+      mirrored,
+      transformed,
+    ],
+    derivedRelationships: [
+      makeRelationship({
+        kind: "mirror",
+        derivationId: "mirror_spline_relationship",
+        label: "Mirror spline",
+        seedEntityIds: ["seed_spline"],
+        mirrorReference: { kind: "lineEntity", entityId: "axis" },
+        outputs: [
+          {
+            seedEntityId: "seed_spline",
+            outputEntityId: "mirrored_spline",
+            instanceIndex: 1,
+            seedPointIds: ["seed_a", "seed_b", "seed_a"],
+            outputPointIds: ["mirror_a", "mirror_b", "mirror_a"],
+          },
+        ],
+      }),
+      makeRelationship({
+        kind: "transform",
+        derivationId: "transform_spline_relationship",
+        label: "Transform spline",
+        seedEntityIds: ["seed_spline"],
+        origin: [0, 0],
+        translation: [9, 7],
+        rotationRadians: Math.PI / 2,
+        scale: 2,
+        outputs: [
+          {
+            seedEntityId: "seed_spline",
+            outputEntityId: "transformed_spline",
+            instanceIndex: 1,
+            seedPointIds: ["seed_a", "seed_b", "seed_a"],
+            outputPointIds: ["transform_a", "transform_b", "transform_a"],
+          },
+        ],
+      }),
+    ],
+  });
+
+  const first = evaluateSketchDerivations(definition);
+  const second = evaluateSketchDerivations({
+    ...definition,
+    points: [...definition.points],
+  });
+  const mirrorResult = entity(first.definition, "mirrored_spline") as Extract<
+    SketchEntityDefinition,
+    { kind: "spline" }
+  >;
+  const transformResult = entity(
+    first.definition,
+    "transformed_spline",
+  ) as Extract<SketchEntityDefinition, { kind: "spline" }>;
+  const repeatedMirror = entity(
+    second.definition,
+    "mirrored_spline",
+  ) as Extract<SketchEntityDefinition, { kind: "spline" }>;
+
+  expect(mirrorResult.pointOccurrenceIds).toEqual([
+    "mirror-occ-a",
+    "mirror-occ-b",
+    "mirror-occ-alias",
+  ]);
+  expect(repeatedMirror.pointOccurrenceIds).toEqual(
+    mirrorResult.pointOccurrenceIds,
+  );
+  expect(
+    mirrorResult.pointOccurrences.map((occurrence) => occurrence.pointId),
+  ).toEqual(["mirror_a", "mirror_b", "mirror_a"]);
+  expect(mirrorResult.closure).toBe("smooth");
+  expect(
+    mirrorResult.pointOccurrences.map((occurrence) => occurrence.tangent),
+  ).toEqual([
+    { kind: "authored", vector: [-1, 2] },
+    { kind: "authored", vector: [0, 0] },
+    { kind: "automatic" },
+  ]);
+  expect(
+    transformResult.pointOccurrences.map((occurrence) => occurrence.tangent),
+  ).toEqual([
+    { kind: "authored", vector: [-4, 2.0000000000000004] },
+    { kind: "authored", vector: [0, 0] },
+    { kind: "automatic" },
+  ]);
+});
+
 test("evaluateSketchDerivations emits diagnostics for missing seed, missing output, and missing mirror axis seams", () => {
   const definition = makeSketchDefinition({
     points: [
@@ -577,8 +752,20 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
         makePoint("out_end", [9, 9]),
       ],
       entities: [
-        makeArc("seed_arc", "arc_center", "arc_start", "arc_end", "counterClockwise"),
-        makeArc("out_arc", "out_center", "out_start", "out_end", "counterClockwise"),
+        makeArc(
+          "seed_arc",
+          "arc_center",
+          "arc_start",
+          "arc_end",
+          "counterClockwise",
+        ),
+        makeArc(
+          "out_arc",
+          "out_center",
+          "out_start",
+          "out_end",
+          "counterClockwise",
+        ),
       ],
       derivedRelationships: [
         makeRelationship({
@@ -790,13 +977,14 @@ function makeSpline(
       entityId: entityId as SketchEntityDefinition["entityId"],
     },
     isConstruction: false,
-    fitPointIds: fitPointIds as SketchEntityDefinition extends {
-      kind: "spline";
-      fitPointIds: infer T;
-    }
-      ? T
-      : never,
-    degree: 3,
+    pointOccurrenceIds: fitPointIds.map((_, index) => `occ-${index}`),
+    pointOccurrences: fitPointIds.map((pointId, index) => ({
+      occurrenceId: `occ-${index}`,
+      pointId: pointId as SketchPointDefinition["pointId"],
+      tangent: { kind: "automatic" },
+    })),
+    closure: "open",
+    interpolationPolicy: "centripetal-mean-arm-v1",
   };
 }
 

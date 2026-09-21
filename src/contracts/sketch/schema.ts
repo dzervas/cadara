@@ -25,6 +25,12 @@ import type {
 } from "@/contracts/shared/references";
 import type { SketchPlaneSupportRef } from "@/contracts/shared/sketch-plane";
 import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
+import type {
+  SplineClosure,
+  SplineGeometry,
+  SplineInterpolationPolicy,
+  SplinePointOccurrence,
+} from "@/contracts/sketch/spline-geometry";
 
 /**
  * Declarative sketch-space point coordinates expressed in sketch plane units.
@@ -288,10 +294,14 @@ export type SketchEntityDefinition =
       target: SketchEntityRef;
       /** True when the curve is construction-only and should not generate derived regions. */
       isConstruction: boolean;
-      /** Fit/control points defining this first-version spline curve. */
-      fitPointIds: readonly SketchPointId[];
-      /** Polynomial degree for this explicit spline representation. */
-      degree: 2 | 3;
+      /** Canonical order of stable per-occurrence records. Point aliases remain explicit. */
+      pointOccurrenceIds: readonly string[];
+      /** Per-occurrence point reference and independently authored tangent intent. */
+      pointOccurrences: readonly SplinePointOccurrence<SketchPointId>[];
+      /** Positional and smooth closure are independent authored choices. */
+      closure: SplineClosure;
+      /** Versioned reconstruction policy; consumers must not guess another curve family. */
+      interpolationPolicy: SplineInterpolationPolicy;
       /** Optional local style authored directly in the sketch session. */
       style?: SketchStyleDefinition;
     }
@@ -1165,10 +1175,8 @@ export type SolvedSketchEntityGeometryRecord =
       entityId: SketchEntityId;
       /** Stable discriminant for solved spline geometry. */
       kind: "spline";
-      /** Solver-computed fit/control points in sketch-plane units. */
-      fitPoints: readonly SketchPoint2D[];
-      /** Polynomial degree reported for the solved spline representation. */
-      degree: 2 | 3;
+      /** Sole owner-produced neutral cubic reconstruction, including invalid diagnostics. */
+      reconstruction: SplineGeometry;
     }
   | {
       /** Authored entity identity whose solved geometry is being reported. */

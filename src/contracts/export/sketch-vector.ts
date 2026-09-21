@@ -4,6 +4,7 @@ import type {
   SketchStyleFill,
   SketchStyleStroke,
 } from "@/contracts/sketch/schema";
+import type { SplinePoles } from "@/contracts/sketch/spline-geometry";
 import type {
   DocumentId,
   RegionId,
@@ -53,8 +54,7 @@ export type SketchVectorEntity =
       kind: "spline";
       entityId: SketchEntityId;
       label: string;
-      points: readonly SketchPoint2D[];
-      degree: 2 | 3;
+      spans: readonly SplinePoles[];
       isConstruction: boolean;
       style: SketchVectorStyle | null;
     }

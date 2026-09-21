@@ -913,19 +913,16 @@ export const controlPointSplineSketchToolDefinition = createFixedPointTool(
           };
     },
     buildPreview(points) {
-      return points.length < 2
-        ? []
+      const controls = controlLines(points, "preview-control-spline");
+      return points.length < 4
+        ? controls
         : [
-            ...controlLines(points, "preview-control-spline"),
-            {
-              id: "preview-control-spline",
-              kind: "spline",
-              points,
-              entityId: null,
-              status: "preview",
-              label: "Control-point spline preview",
-              isConstruction: false,
-            },
+            ...controls,
+            ...pointPolylinePreview(
+              "preview-control-spline",
+              "Control-point spline preview",
+              sampleBezierPoints(points.slice(0, 4)),
+            ),
           ];
     },
     createCommitContribution({ sequence, points, factories }) {
@@ -946,7 +943,7 @@ export const controlPointSplineSketchToolDefinition = createFixedPointTool(
             ),
           ),
         entities: [
-          factories.createSplineEntity(
+          factories.createBezierCurveEntity(
             `Control spline ${sequence}`,
             entityId,
             pointIds,

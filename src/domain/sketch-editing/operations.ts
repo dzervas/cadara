@@ -8,6 +8,12 @@ import type {
 } from "@/contracts/sketch/schema";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import {
+  orderedSplineOccurrences,
+  orderedSplinePointIds,
+  reconstructSplineAggregate,
+  sampleSplineGeometry,
+} from "@/contracts/sketch/spline-geometry";
+import {
   computeOffsetChain,
   offsetLinePoints,
   offsetPolylinePoints,
@@ -15,7 +21,11 @@ import {
   scalePointFromCenter,
   type OffsetSeedCurve,
 } from "@/contracts/sketch/offset-geometry";
-import type { ProjectedSketchReferenceGeometry } from "@/contracts/solver/schema";
+import {
+  projectedSplineDisplayPoints,
+  projectedSplineIsClosed,
+  type ProjectedSketchReferenceGeometry,
+} from "@/contracts/solver/schema";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import type {
@@ -244,11 +254,13 @@ function getCurveDescriptor(
         : null;
     }
     case "spline": {
-      const points = entity.fitPointIds.flatMap((pointId) => {
-        const point = getPoint(definition, pointId);
-        return point ? [point.position] : [];
-      });
-      return points.length === entity.fitPointIds.length && points.length >= 3
+      const positions = Object.fromEntries(
+        definition.points.map((point) => [point.pointId, point.position]),
+      ) as Record<SketchPointId, SketchPoint>;
+      const points = sampleSplineGeometry(
+        reconstructSplineAggregate(entity, positions),
+      );
+      return points.length >= 2
         ? {
             kind: "spline",
             entity,
@@ -299,18 +311,20 @@ export function offsetCurveDescriptorFromProjectedGeometry(
         end: geometry.endPosition,
         sweepDirection: geometry.sweepDirection,
       };
-    case "spline":
-      return geometry.fitPoints.length >= 3
+    case "spline": {
+      const points = projectedSplineDisplayPoints(geometry);
+      return points.length >= 2
         ? {
             kind: "spline",
             isConstruction: false,
             style: undefined,
             points:
-              geometry.isClosed && geometry.fitPoints.length > 2
-                ? [...geometry.fitPoints, geometry.fitPoints[0]!]
-                : geometry.fitPoints,
+              projectedSplineIsClosed(geometry) && points.length > 2
+                ? [...points, points[0]!]
+                : points,
           }
         : null;
+    }
   }
 }
 
@@ -352,32 +366,19 @@ function pointOnCircle(
   ];
 }
 
-function sampleQuadraticSpline(
+function sampleSplineDisplayPolyline(
   points: readonly SketchPoint[],
   t: number,
 ): SketchPoint {
-  const [start, control, end] = points;
-  const oneMinusT = 1 - t;
+  const scaled = Math.max(0, Math.min(1, t)) * (points.length - 1);
+  const index = Math.min(Math.floor(scaled), points.length - 2);
+  const local = scaled - index;
+  const start = points[index]!;
+  const end = points[index + 1]!;
   return [
-    oneMinusT * oneMinusT * start![0] +
-      2 * oneMinusT * t * control![0] +
-      t * t * end![0],
-    oneMinusT * oneMinusT * start![1] +
-      2 * oneMinusT * t * control![1] +
-      t * t * end![1],
+    start[0] + (end[0] - start[0]) * local,
+    start[1] + (end[1] - start[1]) * local,
   ];
-}
-
-function splitQuadraticSpline(
-  points: readonly SketchPoint[],
-  from: number,
-  to: number,
-): readonly [SketchPoint, SketchPoint, SketchPoint] {
-  const start = sampleQuadraticSpline(points, from);
-  const end = sampleQuadraticSpline(points, to);
-  const middleT = from + (to - from) / 2;
-  const middle = sampleQuadraticSpline(points, middleT);
-  return [start, middle, end];
 }
 
 function sampleCurve(curve: CurveDescriptor): CurveSample[] {
@@ -419,7 +420,7 @@ function sampleCurve(curve: CurveDescriptor): CurveSample[] {
       return Array.from({ length: CURVE_SAMPLE_COUNT + 1 }, (_, index) => {
         const t = index / CURVE_SAMPLE_COUNT;
         return {
-          point: sampleQuadraticSpline(curve.points, t),
+          point: sampleSplineDisplayPolyline(curve.points, t),
           t,
         };
       });
@@ -771,61 +772,11 @@ export function trimLineSegmentAtIntersections(
     };
   }
 
-  const leftPoints = splitQuadraticSpline(targetCurve.points, 0, trimStart.t);
-  const rightPoints = splitQuadraticSpline(targetCurve.points, trimEnd.t, 1);
-  const leftPointIds = leftPoints.map((_, index) =>
-    input.nextPointId(`trim-spline-left-${index + 1}`),
-  );
-  const rightPointIds = rightPoints.map((_, index) =>
-    input.nextPointId(`trim-spline-right-${index + 1}`),
-  );
-  const leftPointDefinitions = leftPoints.map((point, index) =>
-    input.createPoint(
-      `${entity.label} trim left ${index + 1}`,
-      leftPointIds[index]!,
-      point,
-    ),
-  );
-  const rightPointDefinitions = rightPoints.map((point, index) =>
-    input.createPoint(
-      `${entity.label} trim right ${index + 1}`,
-      rightPointIds[index]!,
-      point,
-    ),
-  );
-  const splitEntityId = input.nextEntityId("trim-spline-split");
-  const updatedEntity = {
-    ...targetCurve.entity,
-    fitPointIds: leftPointIds,
-  };
-  const splitEntity = {
-    ...input.createSpline(
-      `${entity.label} trimmed`,
-      splitEntityId,
-      rightPointIds,
-    ),
-    isConstruction: entity.isConstruction,
-    style: entity.style,
-  };
-  const appended = withAppendedTrimPoints(input.definition, [
-    ...leftPointDefinitions,
-    ...rightPointDefinitions,
-  ]);
-
   return {
-    changed: true,
-    message: null,
-    definition: {
-      ...input.definition,
-      ...appended,
-      entityIds: [...input.definition.entityIds, splitEntityId],
-      entities: [
-        ...input.definition.entities.map((candidate) =>
-          candidate.entityId === entity.entityId ? updatedEntity : candidate,
-        ),
-        splitEntity,
-      ],
-    },
+    changed: false,
+    message:
+      "Spline trimming requires exact neutral-span trimming and is not available yet.",
+    definition: input.definition,
   };
 }
 
@@ -3035,7 +2986,7 @@ function getPointIdsForSupportedDerivedEntity(
     case "arc":
       return [entity.centerPointId, entity.startPointId, entity.endPointId];
     case "spline":
-      return entity.fitPointIds;
+      return orderedSplinePointIds(entity);
     case "ellipse":
     case "ellipticalArc":
     case "conic":
@@ -3105,14 +3056,33 @@ function createDerivedEntity(
   }
 
   if (entity.kind === "spline") {
+    const created = factories.createSplineEntity(
+      entity.label,
+      outputEntityId,
+      outputPointIds,
+    );
+    if (created.kind !== "spline") {
+      return null;
+    }
+    const sourceOccurrences = orderedSplineOccurrences(entity);
+    const outputOccurrences = orderedSplineOccurrences(created);
+    if (
+      !sourceOccurrences ||
+      !outputOccurrences ||
+      sourceOccurrences.length !== outputOccurrences.length
+    ) {
+      return null;
+    }
     return {
-      ...factories.createSplineEntity(
-        entity.label,
-        outputEntityId,
-        outputPointIds,
-      ),
+      ...created,
       isConstruction: entity.isConstruction,
       style: entity.style,
+      closure: entity.closure,
+      interpolationPolicy: entity.interpolationPolicy,
+      pointOccurrences: outputOccurrences.map((occurrence, index) => ({
+        ...occurrence,
+        tangent: sourceOccurrences[index]!.tangent,
+      })),
     };
   }
 
@@ -3212,11 +3182,12 @@ function createPreviewEntitiesFromContribution(
       }
 
       if (entity.kind === "spline") {
-        const points = entity.fitPointIds.flatMap((pointId) => {
+        const pointIds = orderedSplinePointIds(entity);
+        const points = pointIds.flatMap((pointId) => {
           const point = pointById.get(pointId);
           return point ? [point] : [];
         });
-        return points.length === entity.fitPointIds.length
+        return points.length === pointIds.length
           ? [
               makePreviewSpline(
                 `preview-${entity.entityId}`,

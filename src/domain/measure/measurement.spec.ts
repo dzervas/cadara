@@ -295,12 +295,26 @@ test("src/domain/measure/measurement.spec.ts", () => {
                 entityId: "spline_primary",
               },
               isConstruction: false,
-              fitPointIds: [
-                "point_spline_a",
-                "point_spline_b",
-                "point_spline_c",
+              pointOccurrenceIds: ["occ-a", "occ-b", "occ-c"],
+              pointOccurrences: [
+                {
+                  occurrenceId: "occ-a",
+                  pointId: "point_spline_a",
+                  tangent: { kind: "automatic" },
+                },
+                {
+                  occurrenceId: "occ-b",
+                  pointId: "point_spline_b",
+                  tangent: { kind: "automatic" },
+                },
+                {
+                  occurrenceId: "occ-c",
+                  pointId: "point_spline_c",
+                  tangent: { kind: "automatic" },
+                },
               ],
-              degree: 3,
+              closure: "open",
+              interpolationPolicy: "centripetal-mean-arm-v1",
             },
           ],
           constraintIds: [],
@@ -704,9 +718,9 @@ test("src/domain/measure/measurement.spec.ts", () => {
   });
   expect(
     splineMeasurement?.rows.some(
-      (row) => row.label === "Degree" && row.value === "3",
+      (row) => row.label === "Closed" && row.value === "No",
     ),
-    "Spline measurement should expose degree when available.",
+    "Spline measurement should expose authored closure.",
   ).toBeTruthy();
   expect(
     splineMeasurement?.rows.some(

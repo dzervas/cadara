@@ -34,6 +34,11 @@ import {
   type SolvedSketchSnapshot,
   SKETCH_SCHEMA_VERSION,
 } from "@/contracts/sketch/schema";
+import {
+  orderedSplinePointIds,
+  reconstructSplineAggregate,
+  sampleSplineGeometry,
+} from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 import {
@@ -509,7 +514,7 @@ export function getEntityPointIds(entity: SketchEntityDefinition) {
     case "point":
       return [entity.pointId];
     case "spline":
-      return entity.fitPointIds;
+      return orderedSplinePointIds(entity);
     case "ellipse":
       return [entity.centerPointId, entity.majorAxisPointId];
     case "ellipticalArc":
@@ -856,12 +861,15 @@ export function mapDefinitionEntityToDraftEntity(
   }
 
   if (entity.kind === "spline") {
-    const splinePoints = entity.fitPointIds.flatMap((pointId) => {
-      const point = pointById.get(pointId);
-      return point ? [point] : [];
-    });
+    const positions = Object.fromEntries(pointById) as Record<
+      SketchPointId,
+      SketchPoint
+    >;
+    const splinePoints = sampleSplineGeometry(
+      reconstructSplineAggregate(entity, positions),
+    );
 
-    if (splinePoints.length < 3) {
+    if (splinePoints.length < 2) {
       return [];
     }
 
@@ -1113,18 +1121,26 @@ export function createSplineEntityDefinition(
   sketchId: SketchId,
   entityId: SketchEntityId,
   label: string,
-  fitPointIds: readonly SketchPointId[],
+  pointIds: readonly SketchPointId[],
   isConstruction = false,
-  degree: 2 | 3 = 2,
 ): SketchEntityDefinition {
+  const pointOccurrences = pointIds.map((pointId) => ({
+    occurrenceId: `spline_occurrence_${crypto.randomUUID()}`,
+    pointId,
+    tangent: { kind: "automatic" } as const,
+  }));
   return {
     kind: "spline",
     entityId,
     label,
     target: createSketchEntityRef(sketchId, entityId),
     isConstruction,
-    fitPointIds,
-    degree,
+    pointOccurrenceIds: pointOccurrences.map(
+      (occurrence) => occurrence.occurrenceId,
+    ),
+    pointOccurrences,
+    closure: "open",
+    interpolationPolicy: "centripetal-mean-arm-v1",
   };
 }
 
@@ -1497,17 +1513,9 @@ export function createSessionCommitFactories(
     createSplineEntity: (
       label: string,
       entityId: SketchEntityId,
-      fitPointIds: readonly SketchPointId[],
-      degree?: 2 | 3,
+      pointIds: readonly SketchPointId[],
     ) =>
-      createSplineEntityDefinition(
-        sketchId,
-        entityId,
-        label,
-        fitPointIds,
-        false,
-        degree,
-      ),
+      createSplineEntityDefinition(sketchId, entityId, label, pointIds, false),
     createEllipseEntity: (
       label: string,
       entityId: SketchEntityId,

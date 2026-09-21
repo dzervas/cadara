@@ -148,8 +148,7 @@ export interface SketchToolCommitFactories {
   createSplineEntity(
     label: string,
     entityId: SketchEntityId,
-    fitPointIds: readonly SketchPointId[],
-    degree?: 2 | 3,
+    pointIds: readonly SketchPointId[],
   ): SketchEntityDefinition;
   createEllipseEntity(
     label: string,

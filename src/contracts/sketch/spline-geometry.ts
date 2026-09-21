@@ -11,11 +11,65 @@ export type SplinePoles = readonly [
 export type SplineTangent =
   | { readonly kind: "automatic" }
   | { readonly kind: "authored"; readonly vector: SplineVector };
+export type SplineClosure = "open" | "positional" | "smooth";
+export type SplineInterpolationPolicy = "centripetal-mean-arm-v1";
+export interface SplinePointOccurrence<TPointId extends string = string> {
+  /** Stable identity for this ordered use, distinct from its canonical point identity. */
+  readonly occurrenceId: string;
+  readonly pointId: TPointId;
+  readonly tangent: SplineTangent;
+}
+export interface AuthoredSplineAggregate<TPointId extends string = string> {
+  readonly entityId: string;
+  readonly pointOccurrenceIds: readonly string[];
+  readonly pointOccurrences: readonly SplinePointOccurrence<TPointId>[];
+  readonly closure: SplineClosure;
+  readonly interpolationPolicy: SplineInterpolationPolicy;
+}
+export function orderedSplineOccurrences<TPointId extends string>(
+  aggregate: Pick<
+    AuthoredSplineAggregate<TPointId>,
+    "pointOccurrenceIds" | "pointOccurrences"
+  >,
+): readonly SplinePointOccurrence<TPointId>[] | null {
+  const byId = new Map(
+    aggregate.pointOccurrences.map((occurrence) => [
+      occurrence.occurrenceId,
+      occurrence,
+    ]),
+  );
+  if (
+    byId.size !== aggregate.pointOccurrences.length ||
+    aggregate.pointOccurrenceIds.length !== aggregate.pointOccurrences.length ||
+    new Set(aggregate.pointOccurrenceIds).size !==
+      aggregate.pointOccurrenceIds.length
+  )
+    return null;
+  const ordered = aggregate.pointOccurrenceIds.map((id) => byId.get(id));
+  return ordered.every(
+    (occurrence): occurrence is SplinePointOccurrence<TPointId> => !!occurrence,
+  )
+    ? ordered
+    : null;
+}
+
+export function orderedSplinePointIds<TPointId extends string>(
+  aggregate: Pick<
+    AuthoredSplineAggregate<TPointId>,
+    "pointOccurrenceIds" | "pointOccurrences"
+  >,
+): readonly TPointId[] {
+  return (
+    orderedSplineOccurrences(aggregate)?.map(({ pointId }) => pointId) ?? []
+  );
+}
+
 export interface ResolvedSplineInput {
   readonly id: string;
-  readonly policy: "centripetal-mean-arm-v1";
-  readonly closure: "open" | "positional" | "smooth";
+  readonly policy: SplineInterpolationPolicy;
+  readonly closure: SplineClosure;
   readonly points: readonly {
+    readonly occurrenceId: string;
     readonly id: string;
     readonly position: SplineVector;
     readonly tangent: SplineTangent;
@@ -33,6 +87,8 @@ export interface SplineSpan {
     readonly spanIndex: number;
     readonly startPointId: string;
     readonly endPointId: string;
+    readonly startOccurrenceId: string;
+    readonly endOccurrenceId: string;
   };
   readonly orientation: "forward";
   /** t = interval[0] + u * (interval[1] - interval[0]). */
@@ -51,7 +107,9 @@ export interface SplineDiagnostic {
     | "non-finite"
     | "inconsistent-point"
     | "coincident-points"
-    | "positional-gap";
+    | "positional-gap"
+    | "invalid-occurrence-order"
+    | "missing-point";
   readonly pointIndex?: number;
   readonly spanIndex?: number;
 }
@@ -83,6 +141,49 @@ const scale = (a: SplineVector, b: number): SplineVector => [
   a[1] * b,
 ];
 const finite = (v: SplineVector) => v.every(Number.isFinite);
+
+/** Resolve the complete authored aggregate exactly once before reconstruction. */
+export function reconstructSplineAggregate<TPointId extends string>(
+  aggregate: AuthoredSplineAggregate<TPointId>,
+  positions: Readonly<Record<TPointId, SplineVector>>,
+  variation: SplineVariation = {},
+): SplineGeometry {
+  const ordered = orderedSplineOccurrences(aggregate);
+  if (!ordered) {
+    return {
+      validity: "invalid",
+      diagnostics: [{ code: "invalid-occurrence-order" }],
+      spans: [],
+    };
+  }
+  const points: Array<ResolvedSplineInput["points"][number]> = [];
+  for (let index = 0; index < ordered.length; index++) {
+    const occurrence = ordered[index]!;
+    const position = positions[occurrence.pointId];
+    if (!position) {
+      return {
+        validity: "invalid",
+        diagnostics: [{ code: "missing-point", pointIndex: index }],
+        spans: [],
+      };
+    }
+    points.push({
+      occurrenceId: occurrence.occurrenceId,
+      id: occurrence.pointId,
+      position,
+      tangent: occurrence.tangent,
+    });
+  }
+  return reconstructSpline(
+    {
+      id: aggregate.entityId,
+      policy: aggregate.interpolationPolicy,
+      closure: aggregate.closure,
+      points,
+    },
+    variation,
+  );
+}
 
 /** Positive intervals only; exact coincident points are retained and diagnosed.
  * 'valid' means reconstruction is defined, NOT regularity or profile validity.
@@ -232,6 +333,8 @@ export function reconstructSpline(
         spanIndex: i,
         startPointId: points[i].id,
         endPointId: points[j].id,
+        startOccurrenceId: points[i].occurrenceId,
+        endOccurrenceId: points[j].occurrenceId,
       },
       orientation: "forward",
       validity: "valid",
@@ -260,6 +363,32 @@ export function reconstructSpline(
         handles,
         handleDifferentials,
       };
+}
+
+export function sampleSplineSpans(
+  spans: readonly SplineSpan[],
+  samplesPerSpan = 16,
+): readonly SplineVector[] {
+  if (!Number.isInteger(samplesPerSpan) || samplesPerSpan < 1) return [];
+  return spans.flatMap((span, spanIndex) =>
+    Array.from(
+      { length: samplesPerSpan + (spanIndex === 0 ? 1 : 0) },
+      (_, index) =>
+        evaluateSplineSpan(span, {
+          kind: "local",
+          value: (index + (spanIndex === 0 ? 0 : 1)) / samplesPerSpan,
+        }).position,
+    ),
+  );
+}
+
+export function sampleSplineGeometry(
+  geometry: SplineGeometry,
+  samplesPerSpan = 16,
+): readonly SplineVector[] {
+  return geometry.validity === "valid"
+    ? sampleSplineSpans(geometry.spans, samplesPerSpan)
+    : [];
 }
 
 export interface SplineEvaluation {

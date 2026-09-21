@@ -6,10 +6,13 @@ import type {
   SketchToolRuntimeState,
 } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
-import { createIdleState, distanceBetween } from "@/core/sketch-tools/shared";
+import { createIdleState } from "@/core/sketch-tools/shared";
+import {
+  reconstructSplineAggregate,
+  sampleSplineGeometry,
+} from "@/contracts/sketch/spline-geometry";
 
 const MIN_SPLINE_POINTS = 3;
-const EPSILON = 0.0001;
 
 function getPlacedPoints(
   state: SketchToolRuntimeState,
@@ -17,11 +20,43 @@ function getPlacedPoints(
   return state.placedPoints ?? [];
 }
 
-function hasDuplicateAdjacentPoint(points: readonly SketchPoint[]) {
-  return points.some(
-    (point, index) =>
-      index > 0 && distanceBetween(points[index - 1]!, point) <= EPSILON,
+function reconstructPreviewSpline(points: readonly SketchPoint[]) {
+  const pointOccurrences = points.map((_, index) => ({
+    occurrenceId: `preview-spline-occurrence-${index}`,
+    pointId: `preview-spline-point-${index}`,
+    tangent: { kind: "automatic" as const },
+  }));
+  return reconstructSplineAggregate(
+    {
+      entityId: "preview-spline",
+      pointOccurrenceIds: pointOccurrences.map(
+        (occurrence) => occurrence.occurrenceId,
+      ),
+      pointOccurrences,
+      closure: "open",
+      interpolationPolicy: "centripetal-mean-arm-v1",
+    },
+    Object.fromEntries(
+      points.map((point, index) => [`preview-spline-point-${index}`, point]),
+    ),
   );
+}
+
+function getSplineGeometryValidationMessage(
+  points: readonly SketchPoint[],
+): string | null {
+  if (points.length < 2) {
+    return null;
+  }
+
+  const reconstruction = reconstructPreviewSpline(points);
+  if (reconstruction.validity === "valid") {
+    return null;
+  }
+
+  return reconstruction.diagnostics[0]?.code === "coincident-points"
+    ? "Spline has consecutive coincident fit points."
+    : "Spline geometry is invalid.";
 }
 
 function buildSplinePreview(
@@ -31,31 +66,33 @@ function buildSplinePreview(
     return [];
   }
 
-  return [
-    {
-      id: "preview-spline",
-      kind: "spline",
-      points,
-      entityId: null,
-      status: "preview",
-      label: "Spline preview",
-      isConstruction: false,
-    },
-  ];
+  const sampled = sampleSplineGeometry(reconstructPreviewSpline(points));
+
+  return sampled.length < 2
+    ? []
+    : [
+        {
+          id: "preview-spline",
+          kind: "spline",
+          points: sampled,
+          entityId: null,
+          status: "preview",
+          label: "Spline preview",
+          isConstruction: false,
+        },
+      ];
 }
 
 function validateSpline(points: readonly SketchPoint[]) {
+  const geometryMessage = getSplineGeometryValidationMessage(points);
+  if (geometryMessage) {
+    return { valid: false, message: geometryMessage };
+  }
+
   if (points.length < MIN_SPLINE_POINTS) {
     return {
       valid: false,
       message: `Spline requires ${MIN_SPLINE_POINTS} points.`,
-    };
-  }
-
-  if (hasDuplicateAdjacentPoint(points)) {
-    return {
-      valid: false,
-      message: "Spline points must be distinct.",
     };
   }
 
@@ -82,8 +119,7 @@ function buildSplinePresentation(
         },
       ]
     : [];
-  const ready =
-    previewPoints.length >= MIN_SPLINE_POINTS && validation.length === 0;
+  const ready = previewPoints.length >= MIN_SPLINE_POINTS;
 
   return {
     prompts: [
@@ -163,14 +199,15 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
     };
   },
   pointerMove({ state, point }) {
-    const nextState = {
-      ...state,
-      livePoint: point,
-    };
     const previewPoints =
       point && state.status === "drawing"
         ? [...getPlacedPoints(state), point]
         : getPlacedPoints(state);
+    const nextState = {
+      ...state,
+      livePoint: point,
+      validationMessage: getSplineGeometryValidationMessage(previewPoints),
+    };
 
     return {
       state: nextState,
@@ -188,17 +225,13 @@ export const splineSketchToolDefinition: SketchToolDefinition<"spline"> = {
     }
 
     const nextPoints = [...getPlacedPoints(state), point];
-    const validation = validateSpline(nextPoints);
-    const complete = nextPoints.length >= MIN_SPLINE_POINTS && validation.valid;
+    const complete = nextPoints.length >= MIN_SPLINE_POINTS;
     const nextState = {
       status: complete ? "idle" : "drawing",
       pointerDownPoint: nextPoints[0] ?? point,
-      livePoint: point,
+      livePoint: null,
       placedPoints: nextPoints,
-      validationMessage:
-        complete || nextPoints.length < MIN_SPLINE_POINTS
-          ? null
-          : validation.message,
+      validationMessage: getSplineGeometryValidationMessage(nextPoints),
     } satisfies SketchToolRuntimeState;
 
     return {
