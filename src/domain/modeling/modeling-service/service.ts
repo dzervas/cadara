@@ -259,6 +259,7 @@ export function createModelingService(
     return {
       ...snapshot,
       provenance: {
+        actorId: metadata.actorId,
         repositoryHeads: [...metadata.heads],
         repositorySource: metadata.source,
       },
@@ -1429,14 +1430,7 @@ export function createModelingService(
             response,
             mapCommitSketchResponse(response, currentDocumentId),
             input,
-            () =>
-              createCommitSketchHistoryEntry(request, response.sketchId, {
-                includeAuthoringOperations: !(
-                  documentRepository &&
-                  documentRepositoryPersistence === "background" &&
-                  canPersistAuthoredDocument
-                ),
-              }),
+            () => createCommitSketchHistoryEntry(request, response.sketchId),
           );
         },
       });

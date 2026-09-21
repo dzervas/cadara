@@ -163,7 +163,7 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
     "Sketch image import should not route through sketch point/entity/constraint materialization.",
   ).toBeTruthy();
 
-  const importedOperation = committedInput.definition.authoringOperations?.find(
+  const importedOperation = committedInput.definition.referenceImages?.find(
     (operation) => operation.kind === "referenceImage",
   );
   expect(
@@ -175,14 +175,8 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
       operationId: importedOperation?.operationId,
       label: "reference.png",
       kind: "referenceImage",
-      targets: {
-        created: [
-          {
-            kind: "operation",
-            operationId: importedOperation?.operationId,
-          },
-        ],
-      },
+      ownedPointIds: [],
+      ownedEntityIds: [],
       ownedState: {
         kind: "referenceImage",
         image: expectedPayload,
@@ -200,7 +194,8 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
       operationId: importedOperation?.operationId,
       label: importedOperation?.label,
       kind: importedOperation?.kind,
-      targets: importedOperation?.targets,
+      ownedPointIds: importedOperation?.ownedPointIds,
+      ownedEntityIds: importedOperation?.ownedEntityIds,
       ownedState: importedOperation?.ownedState && {
         kind: importedOperation.ownedState.kind,
         image: importedOperation.ownedState.image,
@@ -219,7 +214,7 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts", async () => {
     result.snapshot.document.sketches.some(
       (sketch) =>
         sketch.sketchId === result.sketchId &&
-        sketch.sketch.definition.authoringOperations?.some(
+        sketch.sketch.definition.referenceImages?.some(
           (operation) =>
             operation.kind === "referenceImage" &&
             operation.ownedState?.kind === "referenceImage" &&
@@ -270,7 +265,7 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports into a new draft
     result.snapshot.document.sketches.some(
       (sketch) =>
         sketch.sketchId === result.sketchId &&
-        sketch.sketch.definition.authoringOperations?.some(
+        sketch.sketch.definition.referenceImages?.some(
           (operation) => operation.kind === "referenceImage",
         ),
     ),
@@ -332,7 +327,7 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft
     "Reference-image-only sketches should persist without requiring solved sketch geometry.",
   ).toBe("notEvaluated");
   expect(
-    committedSketch.sketch.definition.authoringOperations?.some(
+    committedSketch.sketch.definition.referenceImages?.some(
       (operation) => operation.kind === "referenceImage",
     ),
     "OpenCascade snapshot should preserve the reference-image authoring operation.",
@@ -350,7 +345,7 @@ test("src/app/cad-workbench-sketch-image-import.spec.ts imports image-only draft
     (sketch) => sketch.sketchId === result.sketchId,
   );
   expect(
-    restoredSketch?.sketch.definition.authoringOperations?.some(
+    restoredSketch?.sketch.definition.referenceImages?.some(
       (operation) => operation.kind === "referenceImage",
     ),
     "OpenCascade authored-document restore should preserve reference-image-only sketches.",

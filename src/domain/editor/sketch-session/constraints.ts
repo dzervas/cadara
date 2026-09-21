@@ -36,14 +36,12 @@ import type {
 } from "./types";
 import {
   SKETCH_DIRECT_EDIT_TOLERANCES,
-  applySketchHistoryContribution,
-  createAuthoringOperationFromContribution,
+  applySketchContribution,
   createConstraintId,
   createDimensionId,
   createSketchDimensionRef,
   deriveSolvedRegionsForSession,
   resolveSketchDefinitionForSolve,
-  filterSketchDefinitionThroughCursor,
   getSessionSketchId,
   getTargetKey,
   normalizeConstraintValue,
@@ -113,7 +111,10 @@ export function buildConstraintToolPresentation(
       ? {
           id: `${authoring.toolId}-value-input`,
           label: valueSpec.label,
-          value: authoring.pendingValue === null ? null : getAuthoredFormText(authoring.pendingValue),
+          value:
+            authoring.pendingValue === null
+              ? null
+              : getAuthoredFormText(authoring.pendingValue),
           unit: valueSpec.unit,
           min: valueSpec.min,
           confirmLabel: "Commit",
@@ -586,23 +587,19 @@ export function patchSketchDimensionAnnotationPlacement(
   );
   const nextFullDefinition = updateDimensionAnnotationPlacementInDefinition(
     session,
-    session.fullDefinition,
+    session.definition,
     target,
     point,
   );
 
-  if (nextFullDefinition === session.fullDefinition) {
+  if (nextFullDefinition === session.definition) {
     return session;
   }
 
-  const nextDefinition = filterSketchDefinitionThroughCursor(
-    nextFullDefinition,
-    session.historyCursor,
-  );
+  const nextDefinition = nextFullDefinition;
 
   return {
     ...session,
-    fullDefinition: nextFullDefinition,
     definition: nextDefinition,
     toolPresentation: null,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
@@ -678,34 +675,13 @@ export function commitSketchConstraintAuthoring(
     };
   }
 
-  const history = applySketchHistoryContribution(session, {
+  const history = applySketchContribution(session, {
     points: [],
     entities: [],
     ...contribution,
-    authoringOperation: createAuthoringOperationFromContribution(
-      {
-        points: [],
-        entities: [],
-        ...contribution,
-      },
-      {
-        sequence: session.sequence + 1,
-        kind:
-          (contribution.dimensions?.length ?? 0) > 0
-            ? "dimension"
-            : "constraint",
-        label: `${definition.metadata.name} ${session.sequence + 1}`,
-        suffix: authoring.toolId,
-      },
-    ),
   });
   const solvedDefinition = solveCommittedConstraintDefinition(
     history.definition,
-    session.projectedReferences,
-    session.documentVariables,
-  );
-  const solvedFullDefinition = solveCommittedConstraintDefinition(
-    history.fullDefinition,
     session.projectedReferences,
     session.documentVariables,
   );
@@ -714,9 +690,6 @@ export function commitSketchConstraintAuthoring(
     ...session,
     toolStagedEntities: [],
     definition: solvedDefinition.definition,
-    fullDefinition: solvedFullDefinition.definition,
-    historyCursor: history.historyCursor,
-    historyOperations: history.historyOperations,
     sequence: session.sequence + 1,
     status: "idle",
     constraintAuthoring: null,

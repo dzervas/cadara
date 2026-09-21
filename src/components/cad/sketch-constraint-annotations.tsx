@@ -40,6 +40,7 @@ interface SketchConstraintAnnotationsProps {
     handle: SketchDimensionAnnotationDragHandle,
     clientX: number,
     clientY: number,
+    phase: "start" | "move" | "end" | "cancel",
   ) => void;
 }
 
@@ -171,6 +172,8 @@ export function SketchConstraintAnnotations({
                 event,
                 dragStateRef,
                 suppressClickHandleIdRef,
+                onDimensionDrag,
+                "end",
               )
             }
             onPointerCancel={(event) =>
@@ -178,6 +181,8 @@ export function SketchConstraintAnnotations({
                 event,
                 dragStateRef,
                 suppressClickHandleIdRef,
+                onDimensionDrag,
+                "cancel",
               )
             }
             onClick={(event) => {
@@ -267,6 +272,7 @@ function handleDimensionPointerMove(
     handle: SketchDimensionAnnotationDragHandle,
     clientX: number,
     clientY: number,
+    phase: "start" | "move" | "end" | "cancel",
   ) => void,
 ) {
   if (annotation.status !== "dimension" || !annotation.dragHandle) {
@@ -296,11 +302,17 @@ function handleDimensionPointerMove(
   if (!dragState.dragging) {
     dragState.dragging = true;
     onSelect(dragState.target);
+    onDimensionDrag?.(
+      dragState.handle,
+      dragState.startX,
+      dragState.startY,
+      "start",
+    );
   }
 
   event.preventDefault();
   event.stopPropagation();
-  onDimensionDrag?.(dragState.handle, event.clientX, event.clientY);
+  onDimensionDrag?.(dragState.handle, event.clientX, event.clientY, "move");
 }
 
 function handleDimensionPointerEnd(
@@ -314,6 +326,15 @@ function handleDimensionPointerEnd(
     target: SketchConstraintRef | SketchDimensionRef;
   } | null>,
   suppressClickHandleIdRef: MutableRefObject<string | null>,
+  onDimensionDrag:
+    | ((
+        handle: SketchDimensionAnnotationDragHandle,
+        clientX: number,
+        clientY: number,
+        phase: "start" | "move" | "end" | "cancel",
+      ) => void)
+    | undefined,
+  phase: "end" | "cancel",
 ) {
   const dragState = dragStateRef.current;
   if (!dragState || dragState.pointerId !== event.pointerId) {
@@ -324,6 +345,7 @@ function handleDimensionPointerEnd(
     event.preventDefault();
     event.stopPropagation();
     suppressClickHandleIdRef.current = dragState.handle.id;
+    onDimensionDrag?.(dragState.handle, event.clientX, event.clientY, phase);
   }
 
   if (event.currentTarget.hasPointerCapture(event.pointerId)) {

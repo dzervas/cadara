@@ -16,7 +16,6 @@ import type {
   SketchEntityId,
   SketchId,
   SketchPointId,
-  SketchStyleId,
 } from "@/contracts/shared/ids";
 import type {
   SketchConstraintRef,
@@ -28,17 +27,10 @@ import type {
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
 import {
-  type ConstraintDefinition,
-  type DimensionDefinition,
   type RegionRecord,
-  type SketchAuthoringOperation,
-  type SketchAuthoringOperationGraphSnapshot,
-  type SketchAuthoringOperationKind,
-  type SketchAuthoringOperationMemberRef,
   type SketchDefinition,
   type SketchEntityDefinition,
   type SketchPointDefinition,
-  type SketchStyleRecord,
   type SolvedSketchSnapshot,
   SKETCH_SCHEMA_VERSION,
 } from "@/contracts/sketch/schema";
@@ -69,18 +61,8 @@ import type {
   SketchToolId,
 } from "@/core/sketch-tools/definition";
 import { sampleArcPoints } from "@/core/sketch-tools/geometry";
-import type {
-  SketchAuthoringToolId,
-  SketchHistoryCursor,
-  SketchHistoryOperation,
-  SketchSessionState,
-} from "./types";
-import {
-  buildCommitRequest,
-  createTailSketchHistoryCursor,
-  getSketchHistoryCursorIndex,
-  getSketchHistoryItems,
-} from "./history";
+import type { SketchAuthoringToolId, SketchSessionState } from "./types";
+import { buildCommitRequest } from "./history";
 
 export const SKETCH_DIRECT_EDIT_TOLERANCES = {
   coincidence: 1e-6,
@@ -115,35 +97,35 @@ export const liveRegionSolvedSnapshotByRegions = new WeakMap<
 >();
 
 export function createPointId(sequence: number, suffix: string): SketchPointId {
-  return `sketch_point_${sequence}_${suffix}` as SketchPointId;
+  return `sketch_point_${sequence}_${suffix}_${crypto.randomUUID()}` as SketchPointId;
 }
 
 export function createEntityId(
   sequence: number,
   suffix: string,
 ): SketchEntityId {
-  return `sketch_entity_${sequence}_${suffix}` as SketchEntityId;
+  return `sketch_entity_${sequence}_${suffix}_${crypto.randomUUID()}` as SketchEntityId;
 }
 
 export function createConstraintId(
   sequence: number,
   suffix: string,
 ): ConstraintId {
-  return `constraint_${sequence}_${suffix}` as ConstraintId;
+  return `constraint_${sequence}_${suffix}_${crypto.randomUUID()}` as ConstraintId;
 }
 
 export function createDimensionId(
   sequence: number,
   suffix: string,
 ): DimensionId {
-  return `dimension_${sequence}_${suffix}` as DimensionId;
+  return `dimension_${sequence}_${suffix}_${crypto.randomUUID()}` as DimensionId;
 }
 
 export function createAuthoringOperationId(
   sequence: number,
   suffix: string,
 ): SketchAuthoringOperationId {
-  return `sketch_operation_${sequence}_${suffix}` as SketchAuthoringOperationId;
+  return `sketch_operation_${sequence}_${suffix}_${crypto.randomUUID()}` as SketchAuthoringOperationId;
 }
 
 export function createSketchEntityRef(
@@ -216,7 +198,6 @@ export function createEmptyDefinition(): SketchDefinition {
     dimensions: [],
     svgRenderingEnabled: false,
     derivedRelationships: [],
-    authoringOperations: [],
   };
 }
 
@@ -248,7 +229,7 @@ export function getReferenceImageOperationOverrides(
 }
 
 export function collectVisibleReferenceImageAnchorPointIds(
-  definition: Pick<SketchDefinition, "authoringOperations">,
+  definition: Pick<SketchDefinition, "referenceImages">,
   overrides?: ReadonlyMap<
     SketchAuthoringOperationId,
     ReferenceImageOperationStateOverride
@@ -273,7 +254,7 @@ export function collectVisibleReferenceImageAnchorPointIds(
 }
 
 export function collectVisibleReferenceImageAnchorLabels(
-  definition: Pick<SketchDefinition, "authoringOperations">,
+  definition: Pick<SketchDefinition, "referenceImages">,
   overrides?: ReadonlyMap<
     SketchAuthoringOperationId,
     ReferenceImageOperationStateOverride
@@ -318,9 +299,6 @@ export function cloneDefinition(
     svgRenderingEnabled: definition.svgRenderingEnabled ?? false,
     derivedRelationships: definition.derivedRelationships
       ? [...definition.derivedRelationships]
-      : undefined,
-    authoringOperations: definition.authoringOperations
-      ? [...definition.authoringOperations]
       : undefined,
   };
 }
@@ -483,150 +461,6 @@ export function getHistorySequence(id: string) {
   return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
 }
 
-export function getContributionSequence(patch: SketchToolCommitContribution) {
-  const ids = [
-    ...patch.points.map((point) => point.pointId),
-    ...patch.entities.map((entity) => entity.entityId),
-    ...(patch.constraints ?? []).map((constraint) => constraint.constraintId),
-    ...(patch.dimensions ?? []).map((dimension) => dimension.dimensionId),
-    ...(patch.derivedRelationships ?? []).map(
-      (relationship) => relationship.derivationId,
-    ),
-  ];
-  const sequences = ids
-    .map((id) => getHistorySequence(id))
-    .filter((sequence) => sequence !== Number.MAX_SAFE_INTEGER);
-
-  return sequences[0] ?? 0;
-}
-
-export function getAuthoringMemberRefsFromGraph(
-  graph: SketchAuthoringOperationGraphSnapshot,
-): SketchAuthoringOperationMemberRef[] {
-  return [
-    ...(graph.points ?? []).map((point) => ({
-      kind: "point" as const,
-      pointId: point.pointId,
-    })),
-    ...(graph.entities ?? []).map((entity) => ({
-      kind: "entity" as const,
-      entityId: entity.entityId,
-    })),
-    ...(graph.constraints ?? []).map((constraint) => ({
-      kind: "constraint" as const,
-      constraintId: constraint.constraintId,
-    })),
-    ...(graph.dimensions ?? []).map((dimension) => ({
-      kind: "dimension" as const,
-      dimensionId: dimension.dimensionId,
-    })),
-    ...(graph.styles ?? []).map((style) => ({
-      kind: "style" as const,
-      styleId: style.styleId,
-    })),
-    ...(graph.derivedRelationships ?? []).map((relationship) => ({
-      kind: "derivation" as const,
-      derivationId: relationship.derivationId,
-    })),
-  ];
-}
-
-export function createAuthoringOperationFromContribution(
-  patch: SketchToolCommitContribution,
-  input?: {
-    sequence?: number;
-    kind?: Exclude<SketchAuthoringOperationKind, "referenceImage" | "edit">;
-    label?: string;
-    suffix?: string;
-  },
-): SketchAuthoringOperation {
-  const sequence = input?.sequence ?? getContributionSequence(patch);
-  const createdGraph: SketchAuthoringOperationGraphSnapshot = {
-    points: patch.points,
-    entities: patch.entities,
-    constraints: patch.constraints ?? [],
-    dimensions: patch.dimensions ?? [],
-    derivedRelationships: patch.derivedRelationships ?? [],
-  };
-  const label =
-    input?.label ??
-    patch.entities[0]?.label ??
-    patch.constraints?.[0]?.label ??
-    patch.dimensions?.[0]?.label ??
-    patch.derivedRelationships?.[0]?.label ??
-    `Sketch operation ${sequence}`;
-
-  return {
-    operationId: createAuthoringOperationId(
-      sequence,
-      input?.suffix ?? "operation",
-    ),
-    label,
-    kind: input?.kind ?? "operation",
-    targets: {
-      created: getAuthoringMemberRefsFromGraph(createdGraph),
-    },
-    createdGraph,
-  };
-}
-
-export function createDeleteAuthoringOperation(input: {
-  sequence: number;
-  removedGraph: SketchAuthoringOperationGraphSnapshot;
-}): SketchAuthoringOperation {
-  return {
-    operationId: createAuthoringOperationId(input.sequence, "delete"),
-    label: `Delete ${input.sequence}`,
-    kind: "delete",
-    targets: {
-      removed: getAuthoringMemberRefsFromGraph(input.removedGraph),
-    },
-    removedGraph: input.removedGraph,
-  };
-}
-
-export function createLegacyAuthoringOperation(
-  definition: SketchDefinition,
-): SketchAuthoringOperation | null {
-  const graph: SketchAuthoringOperationGraphSnapshot = {
-    points: definition.points,
-    entities: definition.entities,
-    constraints: definition.constraints,
-    dimensions: definition.dimensions,
-    styles: definition.styles ?? [],
-    derivedRelationships: definition.derivedRelationships ?? [],
-  };
-  const targets = getAuthoringMemberRefsFromGraph(graph);
-  if (targets.length === 0) {
-    return null;
-  }
-
-  return {
-    operationId: createAuthoringOperationId(
-      Math.max(0, getNextDefinitionSequence(definition)),
-      "legacy",
-    ),
-    label: "Legacy sketch graph",
-    kind: "operation",
-    targets: {
-      created: targets,
-    },
-    createdGraph: graph,
-  };
-}
-
-export function getAppendBaseAuthoringOperations(
-  definition: SketchDefinition,
-): SketchAuthoringOperation[] {
-  const operations = definition.authoringOperations ?? [];
-  if (operations.length > 0) {
-    return [...operations];
-  }
-
-  const legacyOperation = createLegacyAuthoringOperation(definition);
-  return legacyOperation ? [legacyOperation] : [];
-}
-
 export function getDefinitionSketchId(definition: SketchDefinition) {
   return (
     definition.entities[0]?.target.sketchId ??
@@ -665,226 +499,6 @@ export function getEntityPointIds(entity: SketchEntityDefinition) {
   }
 }
 
-export function sketchHistoryCursorsEqual(
-  left: SketchHistoryCursor,
-  right: SketchHistoryCursor,
-) {
-  if (left.kind === "empty" || right.kind === "empty") {
-    return left.kind === right.kind;
-  }
-
-  return left.itemId === right.itemId;
-}
-
-export function getSketchHistoryOperationForCursor(
-  session: SketchSessionState,
-  cursor: SketchHistoryCursor,
-) {
-  return cursor.kind === "item"
-    ? (session.historyOperations.find(
-        (entry) => entry.itemId === cursor.itemId,
-      ) ?? null)
-    : null;
-}
-
-export function replayAuthoringOperationsThroughCursor(
-  definition: SketchDefinition,
-  cursor: SketchHistoryCursor,
-): SketchDefinition {
-  const operations = definition.authoringOperations ?? [];
-  const items = getSketchHistoryItems(definition);
-  const cursorIndex = getSketchHistoryCursorIndex(items, cursor);
-  const visibleOperations =
-    cursor.kind === "empty"
-      ? []
-      : cursorIndex < 0
-        ? operations
-        : operations.slice(0, cursorIndex + 1);
-
-  const pointById = new Map<SketchPointId, SketchPointDefinition>();
-  const entityById = new Map<SketchEntityId, SketchEntityDefinition>();
-  const constraintById = new Map<ConstraintId, ConstraintDefinition>();
-  const dimensionById = new Map<DimensionId, DimensionDefinition>();
-  const styleById = new Map<SketchStyleId, SketchStyleRecord>();
-  const derivationById = new Map<
-    string,
-    NonNullable<SketchDefinition["derivedRelationships"]>[number]
-  >();
-  const livePointById = new Map(
-    definition.points.map((point) => [point.pointId, point]),
-  );
-  const liveEntityById = new Map(
-    definition.entities.map((entity) => [entity.entityId, entity]),
-  );
-  const liveConstraintById = new Map(
-    definition.constraints.map((constraint) => [
-      constraint.constraintId,
-      constraint,
-    ]),
-  );
-  const liveDimensionById = new Map(
-    definition.dimensions.map((dimension) => [
-      dimension.dimensionId,
-      dimension,
-    ]),
-  );
-  const liveStyleById = new Map(
-    (definition.styles ?? []).map((style) => [style.styleId, style]),
-  );
-  const liveDerivationById = new Map(
-    (definition.derivedRelationships ?? []).map((relationship) => [
-      relationship.derivationId,
-      relationship,
-    ]),
-  );
-
-  const addGraph = (graph?: SketchAuthoringOperationGraphSnapshot) => {
-    for (const point of graph?.points ?? []) {
-      pointById.set(point.pointId, livePointById.get(point.pointId) ?? point);
-    }
-    for (const entity of graph?.entities ?? []) {
-      entityById.set(
-        entity.entityId,
-        liveEntityById.get(entity.entityId) ?? entity,
-      );
-    }
-    for (const constraint of graph?.constraints ?? []) {
-      constraintById.set(
-        constraint.constraintId,
-        liveConstraintById.get(constraint.constraintId) ?? constraint,
-      );
-    }
-    for (const dimension of graph?.dimensions ?? []) {
-      dimensionById.set(
-        dimension.dimensionId,
-        liveDimensionById.get(dimension.dimensionId) ?? dimension,
-      );
-    }
-    for (const style of graph?.styles ?? []) {
-      styleById.set(style.styleId, liveStyleById.get(style.styleId) ?? style);
-    }
-    for (const relationship of graph?.derivedRelationships ?? []) {
-      derivationById.set(
-        relationship.derivationId,
-        liveDerivationById.get(relationship.derivationId) ?? relationship,
-      );
-    }
-  };
-  const removeGraph = (graph?: SketchAuthoringOperationGraphSnapshot) => {
-    for (const point of graph?.points ?? []) {
-      pointById.delete(point.pointId);
-    }
-    for (const entity of graph?.entities ?? []) {
-      entityById.delete(entity.entityId);
-    }
-    for (const constraint of graph?.constraints ?? []) {
-      constraintById.delete(constraint.constraintId);
-    }
-    for (const dimension of graph?.dimensions ?? []) {
-      dimensionById.delete(dimension.dimensionId);
-    }
-    for (const style of graph?.styles ?? []) {
-      styleById.delete(style.styleId);
-    }
-    for (const relationship of graph?.derivedRelationships ?? []) {
-      derivationById.delete(relationship.derivationId);
-    }
-  };
-
-  for (const operation of visibleOperations) {
-    addGraph(operation.createdGraph);
-    removeGraph(operation.removedGraph);
-  }
-
-  const points = [...pointById.values()];
-  const entities = [...entityById.values()];
-  const constraints = [...constraintById.values()];
-  const dimensions = [...dimensionById.values()];
-  const styles = [...styleById.values()];
-  const derivedRelationships = [...derivationById.values()];
-
-  return {
-    ...definition,
-    pointIds: points.map((point) => point.pointId),
-    points,
-    entityIds: entities.map((entity) => entity.entityId),
-    entities,
-    constraintIds: constraints.map((constraint) => constraint.constraintId),
-    constraints,
-    dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
-    dimensions,
-    styleIds: styles.map((style) => style.styleId),
-    styles,
-    derivedRelationships,
-    authoringOperations: visibleOperations,
-  };
-}
-
-export function filterSketchDefinitionThroughCursor(
-  definition: SketchDefinition,
-  cursor: SketchHistoryCursor,
-): SketchDefinition {
-  if ((definition.authoringOperations ?? []).length > 0) {
-    return replayAuthoringOperationsThroughCursor(definition, cursor);
-  }
-
-  const items = getSketchHistoryItems(definition);
-  const cursorIndex = getSketchHistoryCursorIndex(items, cursor);
-  const visibleItemIds = new Set(
-    cursor.kind === "empty"
-      ? []
-      : items.slice(0, cursorIndex + 1).map((item) => item.id),
-  );
-  const entities = definition.entities.filter((entity) =>
-    visibleItemIds.has(entity.entityId),
-  );
-  const visiblePointIds = new Set(
-    entities.flatMap((entity) => getEntityPointIds(entity)),
-  );
-  const points = definition.points.filter((point) =>
-    visiblePointIds.has(point.pointId),
-  );
-  const constraints = definition.constraints.filter((constraint) =>
-    visibleItemIds.has(constraint.constraintId),
-  );
-  const dimensions = definition.dimensions.filter((dimension) =>
-    visibleItemIds.has(dimension.dimensionId),
-  );
-  const derivedRelationships = (definition.derivedRelationships ?? []).filter(
-    (relationship) => {
-      const outputEntityIds = new Set(
-        relationship.outputs.map((output) => output.outputEntityId),
-      );
-      const seedEntityIds = new Set(relationship.seedEntityIds);
-      const mirrorAxisId =
-        relationship.kind === "mirror"
-          ? relationship.mirrorReference.entityId
-          : null;
-
-      return (
-        [...outputEntityIds].every((entityId) =>
-          visibleItemIds.has(entityId),
-        ) &&
-        [...seedEntityIds].every((entityId) => visibleItemIds.has(entityId)) &&
-        (mirrorAxisId === null || visibleItemIds.has(mirrorAxisId))
-      );
-    },
-  );
-
-  return {
-    ...definition,
-    pointIds: points.map((point) => point.pointId),
-    points,
-    entityIds: entities.map((entity) => entity.entityId),
-    entities,
-    constraintIds: constraints.map((constraint) => constraint.constraintId),
-    constraints,
-    dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
-    dimensions,
-    derivedRelationships,
-  };
-}
-
 export function getNextDefinitionSequence(definition: SketchDefinition) {
   const ids = [
     ...definition.referenceIds,
@@ -892,9 +506,6 @@ export function getNextDefinitionSequence(definition: SketchDefinition) {
     ...definition.entityIds,
     ...definition.constraintIds,
     ...definition.dimensionIds,
-    ...(definition.authoringOperations ?? []).map(
-      (operation) => operation.operationId,
-    ),
   ];
 
   let highestSequence = 0;
@@ -1610,6 +1221,7 @@ export function appendDefinition(
   patch: SketchToolCommitContribution,
 ): SketchDefinition {
   return {
+    ...definition,
     schemaVersion: definition.schemaVersion,
     referenceIds: [...definition.referenceIds],
     references: [...definition.references],
@@ -1640,75 +1252,28 @@ export function appendDefinition(
       ...(definition.derivedRelationships ?? []),
       ...(patch.derivedRelationships ?? []),
     ],
-    authoringOperations: [
-      ...getAppendBaseAuthoringOperations(definition),
-      patch.authoringOperation ??
-        createAuthoringOperationFromContribution(patch),
-    ],
   };
 }
 
-export function truncateDefinitionAfterCursor(
-  definition: SketchDefinition,
-  cursor: SketchHistoryCursor,
-) {
-  return filterSketchDefinitionThroughCursor(definition, cursor);
-}
-
-export function applySketchHistoryContribution(
+export function applySketchContribution(
   session: SketchSessionState,
   patch: SketchToolCommitContribution,
 ) {
-  const operation = getSketchHistoryOperationForCursor(
-    session,
-    session.historyCursor,
-  );
-  const truncatedDefinition = operation
-    ? cloneDefinition(operation.afterDefinition)
-    : truncateDefinitionAfterCursor(
-        session.fullDefinition,
-        session.historyCursor,
-      );
-  const fullDefinition = appendDefinition(truncatedDefinition, patch);
-  const historyCursor = createTailSketchHistoryCursor(fullDefinition);
-  const definition = filterSketchDefinitionThroughCursor(
-    fullDefinition,
-    historyCursor,
-  );
-
-  return {
-    fullDefinition,
-    historyCursor,
-    definition,
-    historyOperations: session.historyOperations.filter(
-      (entry) =>
-        !sketchHistoryCursorsEqual(entry.beforeCursor, session.historyCursor),
-    ),
-  };
+  return { definition: appendDefinition(session.definition, patch) };
 }
 
 export function rebuildSessionForDefinition(
   session: SketchSessionState,
-  input: {
-    definition: SketchDefinition;
-    fullDefinition: SketchDefinition;
-    historyCursor: SketchHistoryCursor;
-    historyOperations: SketchHistoryOperation[];
-  },
+  input: { definition: SketchDefinition },
 ): SketchSessionState {
   const definition = cloneDefinition(input.definition);
-  const fullDefinition = cloneDefinition(input.fullDefinition);
-  const projectedReferences = mergeDerivedProjectedReferences(
-    definition,
-    session.projectedReferences,
-  );
   return {
     ...session,
-    historyCursor: input.historyCursor,
     definition,
-    fullDefinition,
-    historyOperations: [...input.historyOperations],
-    projectedReferences,
+    projectedReferences: mergeDerivedProjectedReferences(
+      definition,
+      session.projectedReferences,
+    ),
     toolStagedEntities: [],
     activeAnnotationEdit: null,
     selectedAnnotation: null,

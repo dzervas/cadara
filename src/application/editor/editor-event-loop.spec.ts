@@ -6,6 +6,11 @@ import type {
   EditorEvent,
   EditorState,
 } from "@/domain/editor/state-machine";
+import { defaultEditorExtensionDependencies } from "@/core/editor/state-machine";
+import { createSketchSpecialModeHandleRef } from "@/core/sketch-special-modes/presentation";
+import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
+import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
+import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";
@@ -306,6 +311,210 @@ test("src/application/editor/editor-event-loop.spec.ts stop() discards queued an
     "Stopping the loop should ignore in-flight effect completions.",
   ).toBe(null);
 });
+
+test("EditorEventLoop keeps special-mode drag previews out of history until release", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const sketch = snapshot.document.sketches[0]!;
+  snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+  const operation = createReferenceImageOperation({
+    sequence: 1,
+    sketchId: sketch.sketchId,
+    payload: {
+      mediaType: "image/png",
+      pixelWidth: 4,
+      pixelHeight: 2,
+      base64Data: "cG5n",
+    },
+  });
+  sketch.sketch.definition.referenceImages = [operation];
+
+  const mode = {
+    id: "test-authored-drag",
+    label: "Test authored drag",
+    enter: () => ({ state: null }),
+    handleDragStart: ({ handle }) => ({ activeDragHandle: handle }),
+    handleDragMove: ({ sketchSession, point }) => ({
+      session: moveFirstPoint(sketchSession, point),
+    }),
+    handleDragEnd: ({ sketchSession, point }) => ({
+      session: moveFirstPoint(sketchSession, point),
+      activeDragHandle: null,
+    }),
+    cancel: () => ({ exit: true }),
+  } satisfies SketchSpecialModeDefinition<null>;
+  const dependencies = {
+    ...defaultEditorExtensionDependencies,
+    sketchSpecialModes: createSketchSpecialModeRegistry([mode]),
+  };
+  let committedPoint: readonly [number, number] | null = null;
+  const loop = createEditorEventLoop(
+    {
+      ...createRuntime(snapshot),
+      async commitSketch(input) {
+        committedPoint = input.session.definition.points[0]!.position;
+        return null;
+      },
+    },
+    createTestErrorReporter(),
+    undefined,
+    dependencies,
+  );
+
+  loop.start();
+  await waitForState(loop, (state) => state.document.revisionId !== null);
+  loop.dispatch({
+    type: "authoring.reopenRequested",
+    target: { kind: "sketch", sketchId: sketch.sketchId },
+    toolId: "sketch",
+  });
+  const opened = await waitForState(
+    loop,
+    (state) => state.kind === "editingSketch",
+  );
+  if (opened.kind !== "editingSketch")
+    throw new Error("Expected sketch edit state.");
+  const originalPoint = opened.session.definition.points[0]!.position;
+  const handle = createSketchSpecialModeHandleRef(
+    operation.operationId,
+    "test-handle",
+  );
+
+  const enterMode = () =>
+    loop.dispatch({
+      type: "sketch.specialModeEntered",
+      modeId: mode.id,
+      operationId: operation.operationId,
+    });
+  const startAndMove = (point: readonly [number, number, number]) => {
+    loop.dispatch({ type: "sketch.specialModeDragStarted", handle, point });
+    loop.dispatch({ type: "sketch.specialModeDragMoved", handle, point });
+  };
+  const currentSketch = () => {
+    const state = loop.getState();
+    if (state.kind !== "editingSketch")
+      throw new Error("Expected sketch edit state.");
+    return state;
+  };
+
+  const dimension = currentSketch().session.definition.dimensions[0]!;
+  const originalPlacement = dimension.annotationPlacement;
+  const annotationPatch = (
+    gesturePhase: "start" | "move" | "end" | "cancel",
+    point: readonly [number, number],
+  ) =>
+    loop.dispatch({
+      type: "sketch.toolPatched",
+      patch: {
+        intent: "setDimensionAnnotationPlacement",
+        dimensionId: dimension.dimensionId,
+        point,
+        gesturePhase,
+        clientPoint: point,
+      },
+    });
+  annotationPatch("start", [20, 10]);
+  annotationPatch("move", [30, 15]);
+  expect(currentSketch().session.actionAvailability?.canUndo).toBe(false);
+  annotationPatch("end", [30, 15]);
+  expect(currentSketch().session.actionAvailability?.canUndo).toBe(true);
+  loop.dispatch({ type: "history.undoRequested" });
+  expect(
+    currentSketch().session.definition.dimensions[0]!.annotationPlacement,
+  ).toEqual(originalPlacement);
+  annotationPatch("start", [40, 20]);
+  annotationPatch("move", [50, 25]);
+  annotationPatch("cancel", [50, 25]);
+  expect(
+    currentSketch().session.definition.dimensions[0]!.annotationPlacement,
+  ).toEqual(originalPlacement);
+  expect(currentSketch().session.actionAvailability).toEqual({
+    canUndo: false,
+    canRedo: true,
+  });
+  annotationPatch("start", [60, 30]);
+  annotationPatch("end", [60, 30]);
+  expect(
+    currentSketch().session.definition.dimensions[0]!.annotationPlacement,
+  ).toEqual(originalPlacement);
+  expect(currentSketch().session.actionAvailability).toEqual({
+    canUndo: false,
+    canRedo: true,
+  });
+
+  enterMode();
+  startAndMove([20, 10, 0]);
+  expect(currentSketch().session.definition.points[0]!.position).not.toEqual(
+    originalPoint,
+  );
+  expect(currentSketch().session.actionAvailability?.canUndo).toBe(false);
+  loop.dispatch({
+    type: "command.cancelled",
+    commandSessionId: currentSketch().command.commandSessionId,
+  });
+  expect(currentSketch().session.definition.points[0]!.position).toEqual(
+    originalPoint,
+  );
+  expect(currentSketch().session.actionAvailability?.canUndo).toBe(false);
+
+  enterMode();
+  startAndMove([30, 15, 0]);
+  loop.dispatch({ type: "tool.activated", toolId: "line" });
+  expect(currentSketch().session.definition.points[0]!.position).toEqual(
+    originalPoint,
+  );
+  expect(currentSketch().session.actionAvailability?.canUndo).toBe(false);
+  loop.dispatch({
+    type: "command.cancelled",
+    commandSessionId: currentSketch().command.commandSessionId,
+  });
+
+  enterMode();
+  startAndMove([40, 20, 0]);
+  loop.dispatch({
+    type: "sketch.specialModeDragEnded",
+    handle,
+    point: [40, 20, 0],
+  });
+  const releasedPoint = currentSketch().session.definition.points[0]!.position;
+  expect(releasedPoint).not.toEqual(originalPoint);
+  expect(currentSketch().session.actionAvailability?.canUndo).toBe(true);
+  loop.dispatch({ type: "history.undoRequested" });
+  expect(currentSketch().session.definition.points[0]!.position).toEqual(
+    originalPoint,
+  );
+  expect(currentSketch().session.actionAvailability).toEqual({
+    canUndo: false,
+    canRedo: true,
+  });
+  loop.dispatch({ type: "history.redoRequested" });
+  expect(currentSketch().session.definition.points[0]!.position).toEqual(
+    releasedPoint,
+  );
+
+  loop.dispatch({ type: "history.undoRequested" });
+  enterMode();
+  startAndMove([50, 25, 0]);
+  loop.dispatch({ type: "tool.activated", toolId: "finishSketch" });
+  await waitForCondition(() => committedPoint !== null);
+  expect(committedPoint).toEqual(originalPoint);
+  loop.stop();
+});
+
+function moveFirstPoint(
+  session: Extract<EditorState, { kind: "editingSketch" }>["session"],
+  point: readonly [number, number, number],
+) {
+  return {
+    ...session,
+    definition: {
+      ...session.definition,
+      points: session.definition.points.map((entry, index) =>
+        index === 0 ? { ...entry, position: [point[0], point[1]] } : entry,
+      ),
+    },
+  };
+}
 
 test("src/application/editor/editor-event-loop.spec.ts restart() resumes draining after stop during an in-flight effect", async () => {
   const snapshot = await createSeedDocumentSnapshot();

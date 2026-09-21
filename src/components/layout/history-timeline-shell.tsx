@@ -11,10 +11,7 @@ import {
   writeHistoryTimelineCollapsedPreference,
 } from "@/components/layout/history-timeline-shell-state";
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
-import {
-  type SketchHistoryCursor,
-  type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+import { type SketchSessionState } from "@/domain/editor/sketch-session";
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
@@ -37,7 +34,6 @@ interface HistoryTimelineShellProps {
     beforeItem: DocumentHistoryOrderEntry | null,
   ) => void;
   documentHistoryReorderDisabled?: boolean;
-  onSketchCursorRequested?: (cursor: SketchHistoryCursor) => void;
   onDeleteDocumentItem: (item: DocumentHistoryItemRecord) => void;
   onExportDocumentItem: (
     item: Extract<DocumentHistoryItemRecord, { kind: "sketch" }>,
@@ -62,7 +58,6 @@ export function HistoryTimelineShell({
   documentCursorDisabled = false,
   onDocumentHistoryReorder,
   documentHistoryReorderDisabled = false,
-  onSketchCursorRequested,
   onDeleteDocumentItem,
   onExportDocumentItem,
   onRenameDocumentItem,
@@ -176,7 +171,6 @@ export function HistoryTimelineShell({
               session={sketchSession}
               visibleSelection={visibleSelection}
               onSelectTarget={onSelectTarget}
-              onCursorRequested={onSketchCursorRequested}
             />
           </div>
         ) : null}

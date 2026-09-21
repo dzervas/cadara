@@ -5,7 +5,6 @@ import {
   IndexedDbAutomergeDocumentRepository,
   MemoryDocumentRepositoryUrlStore,
 } from "@/infrastructure/persistence/indexeddb-automerge-document-repository";
-import { createMemoryLocalDurableHistoryStore } from "./local-durable-history-store";
 import { createMemoryGeometryAssetStore } from "./geometry-asset-store";
 import { createDeterministicGeometryAsset } from "./geometry-asset-test-helpers";
 import {
@@ -14,9 +13,7 @@ import {
   type CollaborativeDocument,
 } from "./collaborative-document";
 import type { DocumentRepository } from "./document-repository";
-import { parseDocumentLocalDurableHistoryState } from "@/contracts/modeling/durable-history.runtime-schema";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
-import { persistSketchDraftSession } from "@/domain/editor/sketch-session/persistence";
 import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
 
 function persistent(
@@ -27,7 +24,6 @@ function persistent(
     repo,
     urlStore,
     assetStore: createMemoryGeometryAssetStore(),
-    localDurableHistoryStore: createMemoryLocalDurableHistoryStore(),
   });
 }
 for (const [name, make] of [
@@ -89,46 +85,6 @@ for (const [name, make] of [
     expect(
       await repository.getDurableHistoryAvailability(seed.documentId),
     ).toEqual({ canUndo: false, canRedo: false });
-  });
-  test(`${name}: not-yet-replaced private draft seam remains independent of document compensation`, async () => {
-    const seed = await createSeedAuthoredModelDocument(),
-      repository = make();
-    await repository.load({ documentId: seed.documentId, seedDocument: seed });
-    const session = createNewSketchSession(createStandardPlaneDefinition("xy"));
-    const initial = persistSketchDraftSession(session);
-    const next = persistSketchDraftSession({
-      ...session,
-      sketchLabel: "Private edit",
-      sequence: session.sequence + 1,
-    });
-    await repository.saveSketchDraftHistory(
-      seed.documentId,
-      "draft:xy",
-      initial,
-    );
-    expect(
-      await repository.saveSketchDraftHistory(
-        seed.documentId,
-        "draft:xy",
-        next,
-      ),
-    ).toEqual({ canUndo: true, canRedo: false });
-    expect(
-      (await repository.undoSketchDraftHistory(seed.documentId, "draft:xy"))
-        .session,
-    ).toEqual(initial);
-    expect(
-      (await repository.redoSketchDraftHistory(seed.documentId, "draft:xy"))
-        .session,
-    ).toEqual(next);
-    expect(
-      await repository.getDurableHistoryAvailability(seed.documentId),
-    ).toEqual({ canUndo: false, canRedo: false });
-    await repository.clearSketchDraftHistory(seed.documentId, "draft:xy");
-    expect(
-      (await repository.getSketchDraftHistory(seed.documentId, "draft:xy"))
-        .session,
-    ).toBeNull();
   });
   test(`${name}: deletion compensation carries non-history sketch provenance`, async () => {
     const seed = await createSeedAuthoredModelDocument(),
@@ -477,7 +433,6 @@ for (const replacement of ["peer", "initialize", "reset"] as const) {
     const repository = new IndexedDbAutomergeDocumentRepository({
       repo,
       urlStore: urls,
-      localDurableHistoryStore: createMemoryLocalDurableHistoryStore(),
       assetStore: {
         put: (input) => inner.put(input),
         get: (input) => inner.get(input),
@@ -579,13 +534,6 @@ test("replaced document and snapshot history storage is explicitly rejected", as
   expect(!replaced.ok && replaced.status.diagnostic.message).toContain(
     "Unsupported collaborative document",
   );
-  expect(
-    parseDocumentLocalDurableHistoryState({
-      undoStack: [seed],
-      redoStack: [],
-      draftSessions: {},
-    }).ok,
-  ).toBe(false);
 });
 
 import * as Automerge from "@automerge/automerge";

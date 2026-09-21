@@ -479,97 +479,40 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
       "Persisted commitSketch entity targets must be normalized to the committed sketch id.",
     ).toBeTruthy();
   }
-
   function testCanCompactCommitSketchAuthoringOperations() {
-    const committedSketchId = "sketch_committed";
-    const draftDefinition = createDraftSketchDefinition("sketch_draft");
-    const definitionWithOperations: CommitSketchRequest["definition"] = {
-      ...draftDefinition,
-      authoringOperations: [
-        {
-          operationId: "sketch_operation_1_line",
-          label: "Line 1",
-          kind: "line",
-          targets: {
-            created: [
-              { kind: "point", pointId: draftDefinition.pointIds[0]! },
-              { kind: "point", pointId: draftDefinition.pointIds[1]! },
-              { kind: "entity", entityId: draftDefinition.entityIds[0]! },
-            ],
-          },
-          createdGraph: {
-            points: draftDefinition.points.slice(0, 2),
-            entities: draftDefinition.entities.slice(0, 1),
-          },
-        },
-      ],
-    };
-
-    const fullEntry = createCommitSketchHistoryEntry(
-      {
-        ...commitSketchRequest,
-        sketchId: null,
-        definition: definitionWithOperations,
-      },
-      committedSketchId,
+    const definition = createDraftSketchDefinition("sketch_draft");
+    const entry = createCommitSketchHistoryEntry(
+      { ...commitSketchRequest, sketchId: null, definition },
+      "sketch_committed",
     );
-    const compactEntry = createCommitSketchHistoryEntry(
-      {
-        ...commitSketchRequest,
-        sketchId: null,
-        definition: definitionWithOperations,
-      },
-      committedSketchId,
-      { includeAuthoringOperations: false },
-    );
-
+    expect(entry.kind).toBe("commitSketch");
+    expect(entry.payload.definition).not.toHaveProperty("authoringOperations");
     expect(
-      fullEntry.kind === "commitSketch" &&
-        fullEntry.payload.definition.authoringOperations?.length === 1,
-      "Full commit history should preserve authoring operations by default.",
-    ).toBeTruthy();
+      entry.payload.definition.points.every(
+        (point) => point.target.sketchId === "sketch_committed",
+      ),
+    ).toBe(true);
     expect(
-      compactEntry.kind,
-      "Compact commit history should preserve the commitSketch entry kind.",
-    ).toBe("commitSketch");
-    expect(
-      compactEntry.payload.definition.authoringOperations,
-      "Compact commit history should omit sketch-local authoring operations.",
-    ).toBe(undefined);
-    expect(
-      compactEntry.payload.definition.points.every(
-        (point) => point.target.sketchId === committedSketchId,
-      ) &&
-        compactEntry.payload.definition.entities.every(
-          (entity) => entity.target.sketchId === committedSketchId,
-        ),
-      "Compact commit history should still normalize the live sketch graph targets.",
-    ).toBeTruthy();
+      entry.payload.definition.entities.every(
+        (entity) => entity.target.sketchId === "sketch_committed",
+      ),
+    ).toBe(true);
   }
 
   function testCompactHistoryPreservesReferenceImageOperations() {
-    const committedSketchId = "sketch_committed";
-    const draftDefinition = createDraftSketchDefinition("sketch_draft");
-    const definitionWithReferenceImage: CommitSketchRequest["definition"] = {
-      ...draftDefinition,
-      authoringOperations: [
+    const definition: CommitSketchRequest["definition"] = {
+      ...createDraftSketchDefinition("sketch_draft"),
+      referenceImages: [
         {
-          operationId: "sketch_operation_1_reference-image",
-          label: "Reference image 1",
+          operationId: "sketch_operation_image",
+          label: "Reference",
           kind: "referenceImage",
-          targets: {
-            created: [
-              {
-                kind: "operation",
-                operationId: "sketch_operation_1_reference-image",
-              },
-            ],
-          },
+          ownedPointIds: [],
+          ownedEntityIds: [],
           ownedState: {
             kind: "referenceImage",
             image: {
               mediaType: "image/png",
-              fileName: "reference.png",
               pixelWidth: 640,
               pixelHeight: 480,
               base64Data: "cG5n",
@@ -582,47 +525,27 @@ test("src/contracts/modeling/operation-history.spec.ts", async () => {
             },
           },
         },
-        {
-          operationId: "sketch_operation_2_delete",
-          label: "Delete 2",
-          kind: "delete",
-          targets: {
-            removed: [
-              {
-                kind: "operation",
-                operationId: "sketch_operation_1_reference-image",
-              },
-            ],
-          },
-        },
       ],
     };
-
-    const compactEntry = createCommitSketchHistoryEntry(
+    const entry = createCommitSketchHistoryEntry(
+      { ...commitSketchRequest, sketchId: null, definition },
+      "sketch_committed",
+    );
+    expect(entry.payload.definition.referenceImages).toEqual(
+      definition.referenceImages,
+    );
+    const deleted = createCommitSketchHistoryEntry(
       {
         ...commitSketchRequest,
         sketchId: null,
-        definition: definitionWithReferenceImage,
+        definition: { ...definition, referenceImages: [] },
       },
-      committedSketchId,
-      { includeAuthoringOperations: false },
+      "sketch_committed",
     );
-
-    expect(
-      compactEntry.kind,
-      "Compact commit history should preserve reference-image commit entries.",
-    ).toBe("commitSketch");
-    expect(
-      compactEntry.payload.definition.authoringOperations?.length,
-      "Compact commit history should retain reference-image operations and their deletes.",
-    ).toBe(2);
-    expect(
-      compactEntry.payload.definition.authoringOperations?.[0]?.kind ===
-        "referenceImage" &&
-        compactEntry.payload.definition.authoringOperations?.[1]?.targets
-          .removed?.[0]?.kind === "operation",
-      "Compact commit history should preserve operation-owned image state and operation-target deletes.",
-    ).toBeTruthy();
+    expect(deleted.payload.definition.referenceImages).toEqual([]);
+    expect(deleted.payload.definition).not.toHaveProperty(
+      "authoringOperations",
+    );
   }
 
   function testAcceptsLegacyDraftCommitSketchTargets() {

@@ -514,20 +514,5 @@ function createDelayedUndoNotificationRepository(
     redoDurableHistory(documentId) {
       return repository.redoDurableHistory(documentId);
     },
-    getSketchDraftHistory(documentId, draftKey) {
-      return repository.getSketchDraftHistory(documentId, draftKey);
-    },
-    saveSketchDraftHistory(documentId, draftKey, session) {
-      return repository.saveSketchDraftHistory(documentId, draftKey, session);
-    },
-    undoSketchDraftHistory(documentId, draftKey) {
-      return repository.undoSketchDraftHistory(documentId, draftKey);
-    },
-    redoSketchDraftHistory(documentId, draftKey) {
-      return repository.redoSketchDraftHistory(documentId, draftKey);
-    },
-    clearSketchDraftHistory(documentId, draftKey) {
-      return repository.clearSketchDraftHistory(documentId, draftKey);
-    },
   };
 }

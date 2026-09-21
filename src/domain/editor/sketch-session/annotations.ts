@@ -26,7 +26,6 @@ import type {
   LocalCollinearTargetOperand,
   ProjectedSketchGeometryRef,
   RegionRecord,
-  SketchAuthoringOperationGraphSnapshot,
   SketchDefinition,
   SketchStyleDefinition,
   SketchStyleRecord,
@@ -54,10 +53,7 @@ import type {
 import {
   ANNOTATION_EDIT_SOLVE_BLOCKED_MESSAGE,
   SKETCH_DIRECT_EDIT_TOLERANCES,
-  createDeleteAuthoringOperation,
   deriveSolvedRegionsForSession,
-  filterSketchDefinitionThroughCursor,
-  getAppendBaseAuthoringOperations,
   resolveSketchDefinitionForSolve,
   getTargetKey,
   normalizeConstraintValue,
@@ -76,7 +72,6 @@ import {
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
 } from "./annotation-display";
-import { createTailSketchHistoryCursor } from "./history";
 
 export function beginSketchAnnotationEdit(
   session: SketchSessionState,
@@ -291,9 +286,7 @@ export function applyFillStylePatchToDefinition(
     : definition;
 }
 
-export function isFillStylePatch(
-  patch: SketchStylePatch,
-): patch is Extract<
+export function isFillStylePatch(patch: SketchStylePatch): patch is Extract<
   SketchStylePatch,
   {
     field: "fillMode" | "fillColor" | "gradientStartColor" | "gradientEndColor";
@@ -521,15 +514,17 @@ export function clearSketchAnnotationEdit(
 
 export function commitSketchAnnotationEditValue(
   session: SketchSessionState,
-  edit: SketchAnnotationEditState & { pendingValue: MaybeAuthoredValue<number> },
+  edit: SketchAnnotationEditState & {
+    pendingValue: MaybeAuthoredValue<number>;
+  },
 ): SketchSessionState {
   const updatedFullDefinition = updateAnnotationValueInDefinition(
-    session.fullDefinition,
+    session.definition,
     edit.target,
     edit.pendingValue,
   );
 
-  if (updatedFullDefinition === session.fullDefinition) {
+  if (updatedFullDefinition === session.definition) {
     return session;
   }
 
@@ -552,14 +547,10 @@ export function commitSketchAnnotationEditValue(
   }
 
   const nextFullDefinition = solved.definition;
-  const nextDefinition = filterSketchDefinitionThroughCursor(
-    nextFullDefinition,
-    session.historyCursor,
-  );
+  const nextDefinition = nextFullDefinition;
 
   return {
     ...session,
-    fullDefinition: nextFullDefinition,
     definition: nextDefinition,
     toolStagedEntities: [],
     status: "idle",
@@ -587,7 +578,12 @@ export function solveEditedAnnotationDefinition(
     variables: documentVariables,
   });
   if (!resolvedDefinition.ok) {
-    return { kind: "blocked" as const, message: resolvedDefinition.diagnostics[0]?.message ?? "Dimension value could not be resolved." };
+    return {
+      kind: "blocked" as const,
+      message:
+        resolvedDefinition.diagnostics[0]?.message ??
+        "Dimension value could not be resolved.",
+    };
   }
 
   const solved = solveSketchDefinitionCore({
@@ -628,112 +624,6 @@ export function solveEditedAnnotationDefinition(
   };
 }
 
-export function updateAuthoringOperationsForAnnotationEdit(
-  operations: SketchDefinition["authoringOperations"],
-  target: SketchConstraintRef | SketchDimensionRef,
-  graph: Pick<
-    SketchAuthoringOperationGraphSnapshot,
-    "constraints" | "dimensions" | "entities"
-  >,
-) {
-  if (!operations || operations.length === 0) {
-    return operations;
-  }
-
-  return operations.map((operation) => {
-    const createdGraph = operation.createdGraph;
-    if (!createdGraph) {
-      return operation;
-    }
-
-    if (target.kind === "constraint") {
-      const replacement = graph.constraints?.find(
-        (constraint) => constraint.constraintId === target.constraintId,
-      );
-      const constraints = replacement
-        ? createdGraph.constraints?.map((constraint) =>
-            constraint.constraintId === target.constraintId
-              ? replacement
-              : constraint,
-          )
-        : createdGraph.constraints;
-      const edited =
-        constraints?.some(
-          (constraint, index) =>
-            constraint !== createdGraph.constraints?.[index],
-        ) ?? false;
-
-      return edited
-        ? {
-            ...operation,
-            targets: {
-              ...operation.targets,
-              edited: [
-                ...(operation.targets.edited ?? []),
-                {
-                  kind: "constraint" as const,
-                  constraintId: target.constraintId,
-                },
-              ],
-            },
-            createdGraph: {
-              ...createdGraph,
-              constraints,
-            },
-          }
-        : operation;
-    }
-
-    const replacementDimension = graph.dimensions?.find(
-      (dimension) => dimension.dimensionId === target.dimensionId,
-    );
-    const dimensions = replacementDimension
-      ? createdGraph.dimensions?.map((dimension) =>
-          dimension.dimensionId === target.dimensionId
-            ? replacementDimension
-            : dimension,
-        )
-      : createdGraph.dimensions;
-    const editedDimension =
-      dimensions?.some(
-        (dimension, index) => dimension !== createdGraph.dimensions?.[index],
-      ) ?? false;
-    const editedEntityIds = new Set(
-      replacementDimension?.kind === "circleRadius"
-        ? [replacementDimension.entityId]
-        : [],
-    );
-    const entities =
-      editedEntityIds.size > 0
-        ? createdGraph.entities?.map((entity) =>
-            editedEntityIds.has(entity.entityId)
-              ? (graph.entities?.find(
-                  (candidate) => candidate.entityId === entity.entityId,
-                ) ?? entity)
-              : entity,
-          )
-        : createdGraph.entities;
-
-    return editedDimension
-      ? {
-          ...operation,
-          targets: {
-            ...operation.targets,
-            edited: [
-              ...(operation.targets.edited ?? []),
-              { kind: "dimension" as const, dimensionId: target.dimensionId },
-            ],
-          },
-          createdGraph: {
-            ...createdGraph,
-            dimensions,
-            entities,
-          },
-        }
-      : operation;
-  });
-}
-
 export function updateAnnotationValueInDefinition(
   definition: SketchDefinition,
   target: SketchConstraintRef | SketchDimensionRef,
@@ -766,11 +656,6 @@ export function updateAnnotationValueInDefinition(
       ? {
           ...definition,
           constraints,
-          authoringOperations: updateAuthoringOperationsForAnnotationEdit(
-            definition.authoringOperations,
-            target,
-            { constraints },
-          ),
         }
       : definition;
   }
@@ -803,7 +688,8 @@ export function updateAnnotationValueInDefinition(
         const literalValue = getAuthoredLiteralValue(value);
         return {
           ...dimension,
-          valueRadians: literalValue === null ? value : (literalValue * Math.PI) / 180,
+          valueRadians:
+            literalValue === null ? value : (literalValue * Math.PI) / 180,
         };
       }
       case "arcStartPointCoincident":
@@ -832,21 +718,6 @@ export function updateAnnotationValueInDefinition(
               )
             : definition.entities,
         dimensions,
-        authoringOperations: updateAuthoringOperationsForAnnotationEdit(
-          definition.authoringOperations,
-          target,
-          {
-            dimensions,
-            entities: editedCircleRadiusEntityId
-              ? definition.entities.map((entity) =>
-                  entity.entityId === editedCircleRadiusEntityId &&
-                  entity.kind === "circle"
-                    ? { ...entity, radius: getAuthoredLiteralValue(value)! }
-                    : entity,
-                )
-              : definition.entities,
-          },
-        ),
       }
     : definition;
 }
@@ -902,11 +773,6 @@ export function updateDimensionAnnotationPlacementInDefinition(
     ? {
         ...definition,
         dimensions,
-        authoringOperations: updateAuthoringOperationsForAnnotationEdit(
-          definition.authoringOperations,
-          target,
-          { dimensions },
-        ),
       }
     : definition;
 }
@@ -1056,7 +922,10 @@ export function buildAnnotationEditPresentation(
     floatingInput: {
       id: `annotation-edit-${getTargetKey(edit.target)}`,
       label,
-      value: edit.pendingValue === null ? null : getAuthoredFormText(edit.pendingValue),
+      value:
+        edit.pendingValue === null
+          ? null
+          : getAuthoredFormText(edit.pendingValue),
       unit: editable?.unit,
       min: editable?.min,
       confirmLabel: "Save",
@@ -1246,64 +1115,33 @@ export function deleteSelectedSketchAnnotation(
     return session;
   }
 
-  const deleteOperation = createDeleteAuthoringOperation({
-    sequence: session.sequence + 1,
-    removedGraph:
-      selectedAnnotation.kind === "constraint"
-        ? {
-            constraints: session.fullDefinition.constraints.filter(
-              (constraint) =>
-                constraint.constraintId === selectedAnnotation.constraintId,
-            ),
-          }
-        : {
-            dimensions: session.fullDefinition.dimensions.filter(
-              (dimension) =>
-                dimension.dimensionId === selectedAnnotation.dimensionId,
-            ),
-          },
-  });
   const nextFullDefinition =
     selectedAnnotation.kind === "constraint"
       ? {
-          ...session.fullDefinition,
-          constraintIds: session.fullDefinition.constraintIds.filter(
+          ...session.definition,
+          constraintIds: session.definition.constraintIds.filter(
             (constraintId) => constraintId !== selectedAnnotation.constraintId,
           ),
-          constraints: session.fullDefinition.constraints.filter(
+          constraints: session.definition.constraints.filter(
             (constraint) =>
               constraint.constraintId !== selectedAnnotation.constraintId,
           ),
-          authoringOperations: [
-            ...getAppendBaseAuthoringOperations(session.fullDefinition),
-            deleteOperation,
-          ],
         }
       : {
-          ...session.fullDefinition,
-          dimensionIds: session.fullDefinition.dimensionIds.filter(
+          ...session.definition,
+          dimensionIds: session.definition.dimensionIds.filter(
             (dimensionId) => dimensionId !== selectedAnnotation.dimensionId,
           ),
-          dimensions: session.fullDefinition.dimensions.filter(
+          dimensions: session.definition.dimensions.filter(
             (dimension) =>
               dimension.dimensionId !== selectedAnnotation.dimensionId,
           ),
-          authoringOperations: [
-            ...getAppendBaseAuthoringOperations(session.fullDefinition),
-            deleteOperation,
-          ],
         };
-  const historyCursor = createTailSketchHistoryCursor(nextFullDefinition);
-  const nextDefinition = filterSketchDefinitionThroughCursor(
-    nextFullDefinition,
-    historyCursor,
-  );
+  const nextDefinition = nextFullDefinition;
 
   return {
     ...session,
-    fullDefinition: nextFullDefinition,
     definition: nextDefinition,
-    historyCursor,
     sequence: session.sequence + 1,
     toolStagedEntities: [],
     activeAnnotationEdit: null,
@@ -3162,7 +3000,9 @@ function formatAuthoredDimensionNumber(
   }
 
   const literal = getAuthoredLiteralValue(value);
-  return literal === null ? getAuthoredFormText(value) : literal.toFixed(digits);
+  return literal === null
+    ? getAuthoredFormText(value)
+    : literal.toFixed(digits);
 }
 
 function formatAuthoredDimensionDegrees(

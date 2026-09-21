@@ -22,6 +22,7 @@ import {
   type EditorEventLoopTraceListener,
 } from "./editor-debug-trace";
 import { runEditorEffect } from "./effect-registry";
+import { SketchAuthoredActions } from "./sketch-authored-actions";
 
 export type EditorEventLoopListener = (state: EditorState) => void;
 
@@ -34,6 +35,13 @@ export class EditorEventLoop {
     runtime: EditorEffectRuntime,
   ) => Promise<EditorEvent>;
   private state: EditorState = initialEditorState;
+  private readonly sketchActions = new SketchAuthoredActions();
+
+  private transition(event: EditorEvent) {
+    return this.sketchActions.transition(this.state, event, (state) =>
+      transitionEditorState(state, event, this.dependencies),
+    );
+  }
   private readonly effectQueue: EditorEffect[] = [];
   private readonly listeners = new Set<EditorEventLoopListener>();
   private readonly traceListeners = new Set<EditorEventLoopTraceListener>();
@@ -62,7 +70,7 @@ export class EditorEventLoop {
       return;
     }
 
-    const result = transitionEditorState(this.state, event, this.dependencies);
+    const result = this.transition(event);
     this.applyTransitionResult(result);
     this.emitTrace(
       createEventDispatchedTraceEntry({
@@ -170,11 +178,7 @@ export class EditorEventLoop {
             break;
           }
 
-          const result = transitionEditorState(
-            this.state,
-            effectEvent,
-            this.dependencies,
-          );
+          const result = this.transition(effectEvent);
           this.applyTransitionResult(result);
           this.emitTrace(
             createEffectCompletedTraceEntry({
@@ -211,11 +215,7 @@ export class EditorEventLoop {
             appError,
             "Editor runtime invocation failed.",
           );
-          const result = transitionEditorState(
-            this.state,
-            failureEvent,
-            this.dependencies,
-          );
+          const result = this.transition(failureEvent);
           this.applyTransitionResult(result);
           this.emitTrace(
             createEffectFailedTraceEntry({

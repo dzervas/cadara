@@ -1,94 +1,38 @@
 import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
 import type { SketchAuthoringOperationId } from "@/contracts/shared/ids";
 import type {
-  SketchAuthoringOperation,
+  SketchReferenceImageRecord,
   SketchEntityDefinition,
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
-import {
-  collectActiveReferenceImageOperations,
-  createReferenceImageEditOperation,
-} from "@/domain/reference-image/operations";
+import { stripReferenceImageRuntimeState } from "@/domain/reference-image-calibration/state";
 import type { SketchSessionState } from "./types";
 import {
-  applySketchHistoryContribution,
-  getHistorySequence,
+  appendDefinition,
   mergeDerivedProjectedReferences,
-  rebuildSessionForDefinition,
+  rebuildSessionCommitRequest,
   withLiveSolvedRegions,
 } from "./internals";
 
 export function appendReferenceImageOperations(
   session: SketchSessionState,
-  operations: readonly SketchAuthoringOperation[],
+  records: readonly SketchReferenceImageRecord[],
 ): SketchSessionState {
-  if (operations.length === 0) {
-    return session;
-  }
-
-  const history = applySketchHistoryContribution(session, {
-    points: [...(operations[0]!.createdGraph?.points ?? [])],
-    entities: [...(operations[0]!.createdGraph?.entities ?? [])],
-    ...(operations[0]!.createdGraph?.constraints
-      ? { constraints: [...operations[0]!.createdGraph.constraints] }
-      : {}),
-    ...(operations[0]!.createdGraph?.dimensions
-      ? { dimensions: [...operations[0]!.createdGraph.dimensions] }
-      : {}),
-    ...(operations[0]!.createdGraph?.derivedRelationships
-      ? {
-          derivedRelationships: [
-            ...operations[0]!.createdGraph.derivedRelationships,
-          ],
-        }
-      : {}),
-    authoringOperation: operations[0]!,
-  });
-
-  let nextSession = rebuildSessionForDefinition(session, {
-    definition: history.definition,
-    fullDefinition: history.fullDefinition,
-    historyCursor: history.historyCursor,
-    historyOperations: history.historyOperations,
-  });
-
-  for (const operation of operations.slice(1)) {
-    const appended = applySketchHistoryContribution(nextSession, {
-      points: [...(operation.createdGraph?.points ?? [])],
-      entities: [...(operation.createdGraph?.entities ?? [])],
-      ...(operation.createdGraph?.constraints
-        ? { constraints: [...operation.createdGraph.constraints] }
-        : {}),
-      ...(operation.createdGraph?.dimensions
-        ? { dimensions: [...operation.createdGraph.dimensions] }
-        : {}),
-      ...(operation.createdGraph?.derivedRelationships
-        ? {
-            derivedRelationships: [
-              ...operation.createdGraph.derivedRelationships,
-            ],
-          }
-        : {}),
-      authoringOperation: operation,
-    });
-    nextSession = rebuildSessionForDefinition(nextSession, {
-      definition: appended.definition,
-      fullDefinition: appended.fullDefinition,
-      historyCursor: appended.historyCursor,
-      historyOperations: appended.historyOperations,
-    });
-  }
-
-  return {
-    ...nextSession,
-    sequence: Math.max(
-      session.sequence,
-      ...operations.map((operation) =>
-        getHistorySequence(operation.operationId),
-      ),
-    ),
+  if (records.length === 0) return session;
+  const definition = {
+    ...session.definition,
+    referenceImages: [
+      ...(session.definition.referenceImages ?? []),
+      ...records,
+    ],
   };
+  return withLiveSolvedRegions({
+    ...session,
+    definition,
+    sequence: session.sequence + 1,
+    commitRequest: rebuildSessionCommitRequest(session, definition),
+  });
 }
 
 export function updateReferenceImageOperationStates(input: {
@@ -101,31 +45,51 @@ export function updateReferenceImageOperationStates(input: {
     createdEntities?: readonly SketchEntityDefinition[];
   }>;
 }): SketchSessionState {
-  if (input.updates.length === 0) {
-    return input.session;
-  }
-
-  const activeOperationIds = new Set(
-    collectActiveReferenceImageOperations(input.session.definition).map(
-      ({ operation }) => operation.operationId,
+  const updates = input.updates.filter((update) =>
+    input.session.definition.referenceImages?.some(
+      (record) => record.operationId === update.operationId,
     ),
   );
-  const operations = input.updates.flatMap((update, index) =>
-    activeOperationIds.has(update.operationId)
-      ? [
-          createReferenceImageEditOperation({
-            sequence: input.session.sequence + index + 1,
-            operationId: update.operationId,
-            state: update.state,
-            label: update.label,
-            createdPoints: update.createdPoints,
-            createdEntities: update.createdEntities,
-          }),
-        ]
-      : [],
-  );
-
-  return appendReferenceImageOperations(input.session, operations);
+  if (updates.length === 0) return input.session;
+  let definition = input.session.definition;
+  for (const update of updates) {
+    definition = appendDefinition(definition, {
+      points: [...(update.createdPoints ?? [])],
+      entities: [...(update.createdEntities ?? [])],
+    });
+    definition = {
+      ...definition,
+      referenceImages: definition.referenceImages?.map((record) =>
+        record.operationId === update.operationId
+          ? {
+              ...record,
+              label: update.label ?? record.label,
+              ownedPointIds: [
+                ...new Set([
+                  ...record.ownedPointIds,
+                  ...(update.createdPoints ?? []).map((point) => point.pointId),
+                ]),
+              ],
+              ownedEntityIds: [
+                ...new Set([
+                  ...record.ownedEntityIds,
+                  ...(update.createdEntities ?? []).map(
+                    (entity) => entity.entityId,
+                  ),
+                ]),
+              ],
+              ownedState: stripReferenceImageRuntimeState(update.state),
+            }
+          : record,
+      ),
+    };
+  }
+  return withLiveSolvedRegions({
+    ...input.session,
+    definition,
+    sequence: input.session.sequence + 1,
+    commitRequest: rebuildSessionCommitRequest(input.session, definition),
+  });
 }
 
 export function updateSketchReferenceProjection(
@@ -153,14 +117,12 @@ export function updateSketchReferenceProjection(
     ],
   );
   const projectionDiagnostics = [...diagnostics, ...referenceDiagnostics];
-  const validationMessage =
-    projectionDiagnostics.find((diagnostic) => diagnostic.severity !== "info")
-      ?.message ?? null;
-
   return withLiveSolvedRegions({
     ...session,
     projectedReferences: mergedProjectedReferences,
     projectionDiagnostics,
-    validationMessage,
+    validationMessage:
+      projectionDiagnostics.find((diagnostic) => diagnostic.severity !== "info")
+        ?.message ?? null,
   });
 }

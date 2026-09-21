@@ -63,7 +63,7 @@ export function getSketchHistoryItemToolIcon(
   switch (item.kind) {
     case "operation": {
       const operation =
-        definition.authoringOperations?.find(
+        definition.referenceImages?.find(
           (entry) => entry.operationId === item.id,
         ) ?? null;
       return operation ? getSketchOperationToolIcon(operation.kind) : null;
@@ -88,49 +88,8 @@ export function getSketchHistoryItemToolIcon(
     }
   }
 }
-
-function getSketchOperationToolIcon(
-  kind: NonNullable<SketchDefinition["authoringOperations"]>[number]["kind"],
-): ToolIconId | null {
-  switch (kind) {
-    case "rectangle":
-    case "centerPointRectangle":
-    case "alignedRectangle":
-      return "rectangle";
-    case "line":
-    case "midpointLine":
-      return "line";
-    case "circle":
-    case "threePointCircle":
-    case "centerPointArc":
-    case "threePointArc":
-    case "tangentArc":
-      return "circle";
-    case "spline":
-    case "controlPointSpline":
-    case "ellipse":
-    case "ellipticalArc":
-    case "conic":
-    case "bezierCurve":
-    case "profileText":
-      return "spline";
-    case "constraint":
-      return "constraintCoincident";
-    case "dimension":
-      return "dimension";
-    case "referenceImage":
-      return "import";
-    case "delete":
-    case "edit":
-    case "derived":
-    case "point":
-    case "construction":
-    case "reference":
-    case "inscribedPolygon":
-    case "circumscribedPolygon":
-    case "operation":
-      return null;
-  }
+function getSketchOperationToolIcon(_kind: "referenceImage"): ToolIconId {
+  return "import";
 }
 
 function getSketchEntityToolIcon(

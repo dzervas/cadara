@@ -375,6 +375,5 @@ function makeCurveSession(sketchId: SketchId) {
     ...createNewSketchSession(createStandardPlaneDefinition("xy")),
     sketchId,
     definition,
-    fullDefinition: definition,
   };
 }

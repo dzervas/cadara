@@ -55,6 +55,8 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 
 export interface DocumentSnapshotProvenance {
+  /** Actual editing actor when the snapshot is repository-backed. */
+  actorId?: string;
   repositoryHeads: readonly string[];
   repositorySource:
     | "local"
@@ -110,7 +112,7 @@ export type {
   LoftPathOptions,
   LoftProfileConditionKind,
   LoftProfileConditionOptions,
-  } from "@/contracts/modeling/advanced-solid";
+} from "@/contracts/modeling/advanced-solid";
 export {
   CHAMFER_WIDTH_OPTION_DESCRIPTORS,
   CIRCULAR_PATTERN_OPTION_DESCRIPTORS,
@@ -542,7 +544,11 @@ export type RevolveSurfaceProfileRef =
 export type RevolveAxisRef =
   | { kind: "edge"; bodyId: BodyId; edgeId: EdgeId }
   | { kind: "construction"; constructionId: ConstructionId }
-  | { kind: "sketchEntity"; sketchId: SketchId; entityId: import("@/contracts/shared/ids").SketchEntityId };
+  | {
+      kind: "sketchEntity";
+      sketchId: SketchId;
+      entityId: import("@/contracts/shared/ids").SketchEntityId;
+    };
 
 /**
  * Placeholder revolve parameters.
@@ -1150,7 +1156,6 @@ export interface BodyTopologySnapshotRecord {
   /** Durable vertex identities owned by the body at this revision. */
   vertexIds: VertexId[];
 }
-
 
 /**
  * Presentation/topology availability for bodies whose authoritative geometry is

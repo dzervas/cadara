@@ -5,11 +5,8 @@ import {
   adoptCompatibleSketchEditToolTargets,
   beginSketchTool,
   focusSketchStyleTool,
-  getNextSketchHistoryCursor,
-  getPreviousSketchHistoryCursor,
   getSketchSessionPreviewLabel,
   isSketchSvgRenderingEnabled,
-  moveSketchHistoryCursor,
   toggleSketchSvgRendering,
 } from "@/domain/editor/sketch-session";
 import {
@@ -31,20 +28,17 @@ import type {
 import type { EditorExtensionDependencies } from "./dependencies";
 import {
   emitSketchCommit,
-  emitSketchReferenceProjection,
   emitSketchSpecialModeEffect,
   emitEditSessionCursorRestore,
 } from "./effect-emitters";
 import { toIdleState, withActivationSelection } from "./state-creators";
-import { getEditorHistoryAvailability } from "./selectors";
+
 import { isPassiveSketchTool, nextRequestId } from "./utility-helpers";
 import {
   handleSketchPointerMoved,
   handleSketchPointerReleased,
   handleSketchToolPatched,
   handleSketchActiveToolCleared,
-  handleSketchHistoryCursorRequested,
-  handleSketchHistoryOperationDeleteRequested,
   handleSketchAnnotationDeleteRequested,
   handleSketchAnnotationEditRequested,
   handleSketchConnectedSelectionRequested,
@@ -176,37 +170,6 @@ function handleEditingSketchToolActivation(
   return null;
 }
 
-function moveSketchHistory(
-  state: SketchEditorState,
-  direction: "undo" | "redo",
-): EditorTransitionResult {
-  const cursor =
-    direction === "undo"
-      ? getPreviousSketchHistoryCursor(state.session)
-      : getNextSketchHistoryCursor(state.session);
-
-  if (!cursor) {
-    return { state, effects: [] };
-  }
-
-  const session = moveSketchHistoryCursor(state.session, cursor);
-
-  return {
-    state: {
-      ...state,
-      selection: [],
-      hoverTarget: null,
-      session,
-      preview: {
-        kind: "sketch",
-        label: getSketchSessionPreviewLabel(session),
-        target: session.planeTarget,
-      },
-    },
-    effects: [],
-  };
-}
-
 export function reduceSketchWorkflow(
   state: SketchEditorState,
   event: SketchEvent,
@@ -220,32 +183,8 @@ export function reduceSketchWorkflow(
     case "tool.activated":
       return handleEditingSketchToolActivation(state, event);
     case "history.undoRequested":
-      return getEditorHistoryAvailability(state).canUndo
-        ? moveSketchHistory(state, "undo")
-        : { state, effects: [] };
     case "history.redoRequested":
-      return getEditorHistoryAvailability(state).canRedo
-        ? moveSketchHistory(state, "redo")
-        : { state, effects: [] };
-    case "sketch.draftHistoryRestored":
-      return emitSketchReferenceProjection(
-        {
-          ...state,
-          selection: [
-            {
-              kind: "sketch",
-              sketchId: event.session.sketchId ?? ("sketch_draft" as const),
-            },
-          ],
-          hoverTarget: null,
-          preview: {
-            kind: "sketch",
-            label: getSketchSessionPreviewLabel(event.session),
-            target: event.session.planeTarget,
-          },
-        },
-        event.session,
-      );
+      return { state, effects: [] };
     case "command.cancelled":
       if (state.command.commandSessionId !== event.commandSessionId) {
         return { state, effects: [] };
@@ -344,10 +283,6 @@ export function reduceSketchWorkflow(
       return handleSketchToolPatched(state, event);
     case "sketch.activeToolCleared":
       return handleSketchActiveToolCleared(state);
-    case "sketch.historyCursorRequested":
-      return handleSketchHistoryCursorRequested(state, event);
-    case "sketch.historyOperationDeleteRequested":
-      return handleSketchHistoryOperationDeleteRequested(state, event);
     case "sketch.annotationDeleteRequested":
       return handleSketchAnnotationDeleteRequested(state);
     case "sketch.annotationEditRequested":

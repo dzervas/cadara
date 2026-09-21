@@ -128,7 +128,7 @@ export interface BugReportEditorContext {
     dimensionCount: number;
     referenceCount: number;
     projectedReferenceCount: number;
-    historyCursor: string;
+    history: { canUndo: boolean; canRedo: boolean };
     constructionModifierActive: boolean;
     constructionTargetPicking: boolean;
     referenceTargetPicking: boolean;
@@ -1058,10 +1058,7 @@ function createEditorContext(
           dimensionCount: sketchSession.definition.dimensions.length,
           referenceCount: sketchSession.definition.references.length,
           projectedReferenceCount: sketchSession.projectedReferences.length,
-          historyCursor:
-            sketchSession.historyCursor.kind === "empty"
-              ? "empty"
-              : sketchSession.historyCursor.itemId,
+          history: sketchSession.actionAvailability ?? { canUndo: false, canRedo: false },
           constructionModifierActive: sketchSession.constructionModifierActive,
           constructionTargetPicking: sketchSession.constructionTargetPicking,
           referenceTargetPicking: sketchSession.referenceTargetPicking,

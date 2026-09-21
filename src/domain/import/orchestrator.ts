@@ -499,7 +499,6 @@ function getSketchDefinition(
       styles: [],
       svgRenderingEnabled: true,
       derivedRelationships: [],
-      authoringOperations: [],
     }
   );
 }

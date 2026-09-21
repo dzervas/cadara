@@ -26,8 +26,6 @@ export type {
   SketchDisplayDiagnosticStyle,
   SketchDisplayPaintStyle,
   SketchDisplayStrokeStyle,
-  SketchHistoryCursor,
-  SketchHistoryOperation,
   SketchHistoryItem,
 } from "./types";
 
@@ -84,7 +82,6 @@ export {
 export {
   beginSketchGeometryDrag,
   deleteSelectedSketchGeometry,
-  deleteSketchHistoryOperation,
   finishSketchGeometryDrag,
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
@@ -92,16 +89,9 @@ export {
   updateSketchGeometryDrag,
 } from "./editing";
 
-export {
-  buildCommitRequest,
-  createTailSketchHistoryCursor,
-  getSketchHistoryCursorForIndex,
-  getSketchHistoryCursorIndex,
-  getSketchHistoryItems,
-} from "./history";
+export { buildCommitRequest, getSketchHistoryItems } from "./history";
 
 export {
-  filterSketchDefinitionThroughCursor,
   getSketchSessionRegionDiagnostics,
   refreshLiveRegionsAfterDebounce,
   withLiveSolvedRegions,
@@ -116,9 +106,6 @@ export {
 export {
   getSelectedReferenceImageOperationIds,
   getSelectedSketchGeometryIds,
-  getOperationOwnedStateTargetIds,
-  pruneDirectOperationDependents,
-  repairSketchHistoryCursorAfterOperationRemoval,
 } from "./selection";
 
 export {
@@ -130,13 +117,10 @@ export {
   deriveSketchDisplayEntities,
   dimensionReferencesSketchGeometry,
   getConnectedSketchEntitySelectionTargets,
-  getNextSketchHistoryCursor,
-  getPreviousSketchHistoryCursor,
   isEditableSketchGeometrySelection,
   isSketchConstructionSelected,
   isSketchReferenceToolSelected,
   mapSketchPointToWorld,
-  moveSketchHistoryCursor,
 } from "./state";
 
 export {

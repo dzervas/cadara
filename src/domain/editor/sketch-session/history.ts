@@ -1,7 +1,7 @@
 import type { SketchId } from "@/contracts/shared/ids";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import type {
-  SketchAuthoringOperation,
+  SketchReferenceImageRecord,
   SketchDefinition,
 } from "@/contracts/sketch/schema";
 import type {
@@ -9,46 +9,9 @@ import type {
   SketchDimensionRef,
   SketchEntityRef,
   SketchOperationRef,
-  SketchPointRef,
 } from "@/contracts/shared/references";
-import type { PrimitiveRef } from "@/core/editor/schema";
-import type {
-  SketchHistoryCursor,
-  SketchHistoryItem,
-  SketchSessionState,
-} from "./types";
 
-function cloneDefinition(definition: SketchDefinition): SketchDefinition {
-  return {
-    ...definition,
-    schemaVersion: definition.schemaVersion,
-    referenceIds: [...definition.referenceIds],
-    references: [...definition.references],
-    pointIds: [...definition.pointIds],
-    points: [...definition.points],
-    entityIds: [...definition.entityIds],
-    entities: [...definition.entities],
-    constraintIds: [...definition.constraintIds],
-    constraints: [...definition.constraints],
-    dimensionIds: [...definition.dimensionIds],
-    dimensions: [...definition.dimensions],
-    styleIds: definition.styleIds ? [...definition.styleIds] : undefined,
-    styles: definition.styles ? [...definition.styles] : undefined,
-    svgRenderingEnabled: definition.svgRenderingEnabled ?? false,
-    derivedRelationships: definition.derivedRelationships
-      ? [...definition.derivedRelationships]
-      : undefined,
-    authoringOperations: definition.authoringOperations
-      ? [...definition.authoringOperations]
-      : undefined,
-  };
-}
-
-function getHistorySequence(id: string) {
-  const match = id.match(/_(\d+)_/);
-  const parsed = match ? Number.parseInt(match[1], 10) : Number.NaN;
-  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
-}
+import type { SketchHistoryItem, SketchSessionState } from "./types";
 
 function getDefinitionSketchId(definition: SketchDefinition) {
   return (
@@ -81,73 +44,23 @@ function createSketchEntityRef(
 
 function createSketchOperationRef(
   sketchId: SketchId,
-  operationId: SketchAuthoringOperation["operationId"],
+  operationId: SketchReferenceImageRecord["operationId"],
 ): SketchOperationRef {
   return { kind: "sketchOperation", sketchId, operationId };
-}
-
-function createSketchPointRef(
-  sketchId: SketchId,
-  pointId: SketchDefinition["pointIds"][number],
-): SketchPointRef {
-  return { kind: "sketchPoint", sketchId, pointId };
-}
-
-function getAuthoringOperationHistoryTarget(
-  sketchId: SketchId,
-  operation: SketchAuthoringOperation,
-): PrimitiveRef | null {
-  if (operation.kind === "referenceImage") {
-    return createSketchOperationRef(sketchId, operation.operationId);
-  }
-
-  const target = [
-    ...(operation.targets.created ?? []),
-    ...(operation.targets.edited ?? []),
-    ...(operation.targets.removed ?? []),
-  ].find(
-    (entry) =>
-      entry.kind === "operation" ||
-      entry.kind === "entity" ||
-      entry.kind === "point" ||
-      entry.kind === "constraint" ||
-      entry.kind === "dimension",
-  );
-
-  if (!target) {
-    return null;
-  }
-
-  switch (target.kind) {
-    case "operation":
-      return createSketchOperationRef(sketchId, target.operationId);
-    case "point":
-      return createSketchPointRef(sketchId, target.pointId);
-    case "entity":
-      return createSketchEntityRef(sketchId, target.entityId);
-    case "constraint":
-      return createSketchConstraintRef(sketchId, target.constraintId);
-    case "dimension":
-      return createSketchDimensionRef(sketchId, target.dimensionId);
-  }
 }
 
 export function getSketchHistoryItems(
   definition: SketchDefinition,
 ): SketchHistoryItem[] {
   const sketchId = getDefinitionSketchId(definition);
-  const operations = definition.authoringOperations ?? [];
-  if (operations.length > 0) {
-    return operations.map((operation) => ({
+  return [
+    ...(definition.referenceImages ?? []).map((operation) => ({
       kind: "operation" as const,
       id: operation.operationId,
       label: operation.label,
       operation,
-      target: getAuthoringOperationHistoryTarget(sketchId, operation),
-    }));
-  }
-
-  return [
+      target: createSketchOperationRef(sketchId, operation.operationId),
+    })),
     ...definition.entities.map((entity) => ({
       kind: "entity" as const,
       id: entity.entityId,
@@ -166,39 +79,7 @@ export function getSketchHistoryItems(
       label: dimension.label,
       target: createSketchDimensionRef(sketchId, dimension.dimensionId),
     })),
-  ].sort((left, right) => {
-    const sequenceDelta =
-      getHistorySequence(left.id) - getHistorySequence(right.id);
-    return sequenceDelta === 0
-      ? left.id.localeCompare(right.id)
-      : sequenceDelta;
-  });
-}
-
-export function createTailSketchHistoryCursor(
-  definition: SketchDefinition,
-): SketchHistoryCursor {
-  const tail = getSketchHistoryItems(definition).at(-1);
-  return tail ? { kind: "item", itemId: tail.id } : { kind: "empty" };
-}
-
-export function getSketchHistoryCursorIndex(
-  items: readonly SketchHistoryItem[],
-  cursor: SketchHistoryCursor,
-) {
-  if (cursor.kind === "empty") {
-    return -1;
-  }
-
-  return items.findIndex((item) => item.id === cursor.itemId);
-}
-
-export function getSketchHistoryCursorForIndex(
-  items: readonly SketchHistoryItem[],
-  index: number,
-): SketchHistoryCursor {
-  const item = items[index];
-  return item ? { kind: "item", itemId: item.id } : { kind: "empty" };
+  ];
 }
 
 export function buildCommitRequest(input: {
@@ -212,6 +93,6 @@ export function buildCommitRequest(input: {
     sketchId: input.sketchId,
     sketchLabel: input.sketchLabel,
     plane: input.plane,
-    definition: cloneDefinition(input.definition),
+    definition: structuredClone(input.definition),
   };
 }

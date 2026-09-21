@@ -8,10 +8,7 @@ import type {
   GeometryAssetHash,
   GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
-import type {
-  DurableHistoryAvailability,
-  PersistedSketchDraftSession,
-} from "@/contracts/modeling/durable-history";
+import type { DurableHistoryAvailability } from "@/contracts/modeling/durable-history";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type { DocumentId } from "@/contracts/shared/ids";
 import type { LocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
@@ -121,36 +118,6 @@ export interface DocumentRepository {
   redoDurableHistory(
     documentId: DocumentId,
   ): Promise<DocumentRepositoryMutationResult | null>;
-  getSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-  ): Promise<{
-    session: PersistedSketchDraftSession | null;
-    availability: DurableHistoryAvailability;
-  }>;
-  saveSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-    session: PersistedSketchDraftSession,
-  ): Promise<DurableHistoryAvailability>;
-  undoSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-  ): Promise<{
-    session: PersistedSketchDraftSession | null;
-    availability: DurableHistoryAvailability;
-  }>;
-  redoSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-  ): Promise<{
-    session: PersistedSketchDraftSession | null;
-    availability: DurableHistoryAvailability;
-  }>;
-  clearSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-  ): Promise<void>;
 }
 
 export interface GeometryAssetDocumentRepository extends DocumentRepository {

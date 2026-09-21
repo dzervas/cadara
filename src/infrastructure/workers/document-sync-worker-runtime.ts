@@ -494,68 +494,6 @@ export function createDocumentSyncWorkerMessageHandler(
           });
           return;
         }
-        case "getSketchDraftHistory": {
-          const result = await options.repository.getSketchDraftHistory(
-            request.documentId,
-            request.draftKey,
-          );
-          postMessage({
-            kind: "sketchDraftHistory",
-            requestId: request.requestId,
-            session: result.session,
-            availability: result.availability,
-          });
-          return;
-        }
-        case "saveSketchDraftHistory": {
-          postMessage({
-            kind: "sketchDraftHistorySaved",
-            requestId: request.requestId,
-            availability: await options.repository.saveSketchDraftHistory(
-              request.documentId,
-              request.draftKey,
-              request.session,
-            ),
-          });
-          return;
-        }
-        case "undoSketchDraftHistory": {
-          const result = await options.repository.undoSketchDraftHistory(
-            request.documentId,
-            request.draftKey,
-          );
-          postMessage({
-            kind: "sketchDraftHistory",
-            requestId: request.requestId,
-            session: result.session,
-            availability: result.availability,
-          });
-          return;
-        }
-        case "redoSketchDraftHistory": {
-          const result = await options.repository.redoSketchDraftHistory(
-            request.documentId,
-            request.draftKey,
-          );
-          postMessage({
-            kind: "sketchDraftHistory",
-            requestId: request.requestId,
-            session: result.session,
-            availability: result.availability,
-          });
-          return;
-        }
-        case "clearSketchDraftHistory": {
-          await options.repository.clearSketchDraftHistory(
-            request.documentId,
-            request.draftKey,
-          );
-          postMessage({
-            kind: "sketchDraftHistoryCleared",
-            requestId: request.requestId,
-          });
-          return;
-        }
       }
     } catch (error: unknown) {
       postMessage(createDocumentSyncWorkerFailure(request.requestId, error));

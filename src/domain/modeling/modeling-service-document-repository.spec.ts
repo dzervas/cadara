@@ -990,23 +990,6 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         },
         definition: {
           ...sourceSketch.sketch.definition,
-          authoringOperations: [
-            {
-              operationId: "sketch_operation_compact_background",
-              label: "Compacted metadata",
-              kind: "operation",
-              targets: {
-                created: [
-                  { kind: "point", pointId: firstPointId },
-                  { kind: "entity", entityId: firstEntityId },
-                ],
-              },
-              createdGraph: {
-                points: sourceSketch.sketch.definition.points.slice(0, 1),
-                entities: sourceSketch.sketch.definition.entities.slice(0, 1),
-              },
-            },
-          ],
         },
       }),
     );
@@ -1021,11 +1004,12 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         pendingHistory.payload?.entries[0]?.kind === "commitSketch",
       "Background sketch commits should persist a fallback entry.",
     ).toBeTruthy();
+    expect(pendingHistory.payload.entries[0].payload.definition.points).toEqual(
+      sourceSketch.sketch.definition.points,
+    );
     expect(
-      pendingHistory.payload.entries[0].payload.definition.authoringOperations
-        ?.length ?? 0,
-      "Background sketch commit fallback should omit bulky sketch-local authoring operations.",
-    ).toBe(0);
+      pendingHistory.payload.entries[0].payload.definition,
+    ).not.toHaveProperty("referenceImages");
     releaseMutate?.();
   }
 
@@ -1067,48 +1051,13 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
           constraints: [],
           dimensionIds: [],
           dimensions: [],
-          authoringOperations: [
+          referenceImages: [
             {
               operationId: "sketch_operation_1_reference-image",
-              label: "reference.png",
-              kind: "referenceImage",
-              targets: {
-                created: [
-                  {
-                    kind: "operation",
-                    operationId: "sketch_operation_1_reference-image",
-                  },
-                ],
-              },
-              ownedState: {
-                kind: "referenceImage",
-                image: {
-                  mediaType: "image/png",
-                  fileName: "reference.png",
-                  pixelWidth: 640,
-                  pixelHeight: 480,
-                  base64Data: "cG5n",
-                },
-                placement: {
-                  center: [0, 0],
-                  width: 200,
-                  height: 150,
-                  rotationRadians: 0,
-                },
-              },
-            },
-            {
-              operationId: "sketch_operation_2_edit-reference-image",
               label: "reference-updated.png",
-              kind: "edit",
-              targets: {
-                edited: [
-                  {
-                    kind: "operation",
-                    operationId: "sketch_operation_1_reference-image",
-                  },
-                ],
-              },
+              kind: "referenceImage" as const,
+              ownedPointIds: [],
+              ownedEntityIds: [],
               ownedState: {
                 kind: "referenceImage",
                 image: {
@@ -1136,51 +1085,20 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       "Reference-image sketch commits should be accepted.",
     ).toBe("accepted");
     const persisted = documentRepository.savedDocuments.at(-1);
+    expect(
+      persisted,
+      JSON.stringify(documentRepository.getRestoreStatus("doc_workspace")),
+    ).toBeDefined();
     const persistedSketch = persisted?.sketches.find(
       (sketch) => sketch.sketchId === "sketch_reference_image",
     );
     const expectedReferenceImageOperations = [
       {
         operationId: "sketch_operation_1_reference-image",
-        label: "reference.png",
-        kind: "referenceImage",
-        targets: {
-          created: [
-            {
-              kind: "operation",
-              operationId: "sketch_operation_1_reference-image",
-            },
-          ],
-        },
-        ownedState: {
-          kind: "referenceImage",
-          image: {
-            mediaType: "image/png",
-            fileName: "reference.png",
-            pixelWidth: 640,
-            pixelHeight: 480,
-            base64Data: "cG5n",
-          },
-          placement: {
-            center: [0, 0],
-            width: 200,
-            height: 150,
-            rotationRadians: 0,
-          },
-        },
-      },
-      {
-        operationId: "sketch_operation_2_edit-reference-image",
         label: "reference-updated.png",
-        kind: "edit",
-        targets: {
-          edited: [
-            {
-              kind: "operation",
-              operationId: "sketch_operation_1_reference-image",
-            },
-          ],
-        },
+        kind: "referenceImage" as const,
+        ownedPointIds: [],
+        ownedEntityIds: [],
         ownedState: {
           kind: "referenceImage",
           image: {
@@ -1213,7 +1131,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       "Persisted reference-image sketches should not materialize sketch entities.",
     ).toBe(0);
     assertReferenceImageOperationPayloads(
-      persistedSketch.definition.authoringOperations,
+      persistedSketch.definition.referenceImages,
       expectedReferenceImageOperations,
       "Persisted authored documents should keep the full inline reference-image operation payloads, including edit rows.",
     );
@@ -1243,7 +1161,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       "Restored reference-image sketches should still avoid local entities.",
     ).toBe(0);
     assertReferenceImageOperationPayloads(
-      restoredSketch.sketch.definition.authoringOperations,
+      restoredSketch.sketch.definition.referenceImages,
       expectedReferenceImageOperations,
       "Repository restore should preserve the full inline reference-image operation payloads, including edit rows.",
     );

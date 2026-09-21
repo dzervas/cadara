@@ -121,31 +121,6 @@ export function createInstrumentedDocumentRepository<
         nullableMutationResultAttributes,
       );
     },
-    getSketchDraftHistory(documentId, draftKey) {
-      return measure("getSketchDraftHistory", documentId, () =>
-        repository.getSketchDraftHistory(documentId, draftKey),
-      );
-    },
-    saveSketchDraftHistory(documentId, draftKey, session) {
-      return measure("saveSketchDraftHistory", documentId, () =>
-        repository.saveSketchDraftHistory(documentId, draftKey, session),
-      );
-    },
-    undoSketchDraftHistory(documentId, draftKey) {
-      return measure("undoSketchDraftHistory", documentId, () =>
-        repository.undoSketchDraftHistory(documentId, draftKey),
-      );
-    },
-    redoSketchDraftHistory(documentId, draftKey) {
-      return measure("redoSketchDraftHistory", documentId, () =>
-        repository.redoSketchDraftHistory(documentId, draftKey),
-      );
-    },
-    clearSketchDraftHistory(documentId, draftKey) {
-      return measure("clearSketchDraftHistory", documentId, () =>
-        repository.clearSketchDraftHistory(documentId, draftKey),
-      );
-    },
   };
 
   if (isGeometryAssetDocumentRepository(repository)) {

@@ -225,37 +225,43 @@ function validateSketchDefinitionInvariants(definition: SketchDefinition) {
     }
   });
 
-  definition.authoringOperations?.forEach((operation, index) => {
-    const state = operation.ownedState;
-    if (state?.kind !== "referenceImage") {
-      return;
-    }
-
+  const pointIds = new Set(definition.points.map((point) => point.pointId));
+  const entityIds = new Set(
+    definition.entities.map((entity) => entity.entityId),
+  );
+  const imageOwnedPointIds = new Set<string>();
+  const imageOwnedEntityIds = new Set<string>();
+  definition.referenceImages?.forEach((record, index) => {
+    record.ownedPointIds.forEach((pointId, ownedIndex) => {
+      if (!pointIds.has(pointId) || imageOwnedPointIds.has(pointId)) {
+        issues.push({
+          path: `referenceImages.${index}.ownedPointIds.${ownedIndex}`,
+          expected: "an existing point owned by only this reference image",
+          value: pointId,
+          message:
+            "Reference-image point ownership must identify an existing, uniquely owned point.",
+        });
+      }
+      imageOwnedPointIds.add(pointId);
+    });
+    record.ownedEntityIds.forEach((entityId, ownedIndex) => {
+      if (!entityIds.has(entityId) || imageOwnedEntityIds.has(entityId)) {
+        issues.push({
+          path: `referenceImages.${index}.ownedEntityIds.${ownedIndex}`,
+          expected: "an existing entity owned by only this reference image",
+          value: entityId,
+          message:
+            "Reference-image entity ownership must identify an existing, uniquely owned entity.",
+        });
+      }
+      imageOwnedEntityIds.add(entityId);
+    });
     issues.push(
       ...prefixIssues(
-        `authoringOperations.${index}.ownedState`,
-        validateReferenceImageOperationStateInvariants(state),
+        `referenceImages.${index}.ownedState`,
+        validateReferenceImageOperationStateInvariants(record.ownedState),
       ),
     );
-
-    const hasOperationTarget =
-      operation.kind === "referenceImage" ||
-      (operation.kind === "edit" &&
-        operation.targets.edited?.some((t) => t.kind === "operation"));
-
-    if (!hasOperationTarget) {
-      issues.push({
-        path: `authoringOperations.${index}.ownedState`,
-        expected: "referenceImage or edit-with-operation-target",
-        value: operation.kind,
-        message:
-          operation.kind === "edit"
-            ? "Edit operations without operation targets should not have operation-owned reference-image state."
-            : "Non-reference operations should not have operation-owned reference-image state.",
-      });
-      return;
-    }
-
   });
 
   return issues;

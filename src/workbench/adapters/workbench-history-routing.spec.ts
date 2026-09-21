@@ -90,25 +90,17 @@ function makeSnapshot(input?: {
   } as never;
 }
 
-test("useWorkbenchHistory routes sketch undo and redo through the durable history service", async () => {
+test("useWorkbenchHistory routes sketch undo and redo to the editor action owner", async () => {
   const dispatched: unknown[] = [];
   currentDurableHistory = createDurableHistoryStub({
     async getAvailability() {
-      return { canUndo: true, canRedo: true };
+      throw new Error("Sketch history must not consult document history");
     },
     async undo() {
-      return {
-        context: "sketch",
-        session: { sketchId: "sketch_restored_undo" } as never,
-        availability: { canUndo: false, canRedo: true },
-      };
+      throw new Error("Sketch Undo must not reach document compensation");
     },
     async redo() {
-      return {
-        context: "sketch",
-        session: { sketchId: "sketch_restored_redo" } as never,
-        availability: { canUndo: true, canRedo: false },
-      };
+      throw new Error("Sketch Redo must not reach document compensation");
     },
   });
 
@@ -148,17 +140,11 @@ test("useWorkbenchHistory routes sketch undo and redo through the durable histor
 
   expect(
     JSON.stringify(dispatched),
-    "Sketch undo and redo should restore draft sessions through the durable history coordinator.",
+    "Sketch undo and redo should dispatch to the sole editor owner.",
   ).toBe(
     JSON.stringify([
-      {
-        type: "sketch.draftHistoryRestored",
-        session: { sketchId: "sketch_restored_undo" },
-      },
-      {
-        type: "sketch.draftHistoryRestored",
-        session: { sketchId: "sketch_restored_redo" },
-      },
+      { type: "history.undoRequested" },
+      { type: "history.redoRequested" },
     ]),
   );
 });
@@ -227,20 +213,25 @@ test("useWorkbenchHistory routes document undo and redo through the durable hist
 
   expect(JSON.stringify(dispatched)).toBe(
     JSON.stringify([
-      { type: "document.replaced", snapshot: undoSnapshot },
-      { type: "document.replaced", snapshot: redoSnapshot },
+      {
+        type: "document.replaced",
+        snapshot: undoSnapshot,
+        preserveAuthoredHistory: true,
+      },
+      {
+        type: "document.replaced",
+        snapshot: redoSnapshot,
+        preserveAuthoredHistory: true,
+      },
     ]),
   );
   // "Document undo and redo should replace the active snapshot through the durable history coordinator.",
 });
 
-test("useWorkbenchHistory derives sketch toolbar availability from the durable history service", async () => {
+test("useWorkbenchHistory derives sketch toolbar availability from editor-owned availability", async () => {
   currentDurableHistory = createDurableHistoryStub({
     async getAvailability() {
-      return { canUndo: true, canRedo: false };
-    },
-    getSketchDraftKey() {
-      return "sketch:sketch_active";
+      throw new Error("Sketch availability must not query document history");
     },
   });
 
@@ -264,7 +255,7 @@ test("useWorkbenchHistory derives sketch toolbar availability from the durable h
         );
       },
       errorReporter: createTestErrorReporter(),
-      history: { canRedo: false, canUndo: false },
+      history: { canRedo: false, canUndo: true },
       setInvalidVariableValueMessages() {
         throw new Error(
           "Sketch availability should not touch variable validation messages.",
@@ -302,7 +293,7 @@ test("useWorkbenchHistory derives sketch toolbar availability from the durable h
         );
       },
       errorReporter: createTestErrorReporter(),
-      history: { canRedo: false, canUndo: false },
+      history: { canRedo: false, canUndo: true },
       setInvalidVariableValueMessages() {
         throw new Error(
           "Sketch availability should not touch variable validation messages.",
@@ -320,7 +311,6 @@ test("useWorkbenchHistory derives sketch toolbar availability from the durable h
 
   expect(controller.toolbarHistoryAvailability.canUndo).toBeTruthy();
   expect(controller.toolbarHistoryAvailability.canRedo).toBeFalsy();
-  // "Active sketch toolbar availability should come from the durable-history coordinator, not the legacy sketch cursor availability.",
 });
 
 test("useWorkbenchHistory updates variables through the document owner and reflects durable-history availability", async () => {
@@ -658,18 +648,6 @@ function createDurableHistoryStub(
     },
     async redo() {
       return null;
-    },
-    async restoreSketchDraft() {
-      return null;
-    },
-    async syncSketchDraft() {
-      return { canUndo: false, canRedo: false };
-    },
-    async clearSketchDraft() {
-      return undefined;
-    },
-    getSketchDraftKey() {
-      return "draft-key";
     },
     ...overrides,
   };

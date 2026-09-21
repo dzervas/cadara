@@ -109,25 +109,33 @@ test("active sketch curve picking selects semantic curves without pixel-perfect 
 
   await page.keyboard.press("Escape");
 
-  await workbench.clickViewportAt({ x: 370, y: 268 });
-  await expect
-    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
-    .toBe("sketch_draft.sketch_entity_1_line");
+  const semanticPickFixtures = [
+    { label: "Line 1", point: { x: 370, y: 268 } },
+    { label: "Circle 2", point: { x: 688, y: 260 } },
+    { label: "Spline 3", point: { x: 420, y: 440 } },
+    { label: "Line 4", point: { x: 570, y: 468 } },
+  ] as const;
+  const exactAuthoredTargets: string[] = [];
 
-  await workbench.clickViewportAt({ x: 688, y: 260 });
-  await expect
-    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
-    .toBe("sketch_draft.sketch_entity_2_circle");
+  for (const fixture of semanticPickFixtures) {
+    await page
+      .getByRole("treeitem", { name: `Select ${fixture.label}.` })
+      .getByRole("button")
+      .click();
+    const expectedTarget = await workbench.currentEditorSelection();
+    expect(expectedTarget).not.toBe("Nothing selected");
+    expect(exactAuthoredTargets).not.toContain(expectedTarget);
+    exactAuthoredTargets.push(expectedTarget);
 
-  await workbench.clickViewportAt({ x: 420, y: 440 });
-  await expect
-    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
-    .toBe("sketch_draft.sketch_entity_3_spline");
-
-  await workbench.clickViewportAt({ x: 570, y: 468 });
-  await expect
-    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
-    .toBe("sketch_draft.sketch_entity_4_line");
+    await page.evaluate(() => window.__cadaraDebug?.clearSelection());
+    await expect
+      .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+      .toBe("Nothing selected");
+    await workbench.clickViewportAt(fixture.point);
+    await expect
+      .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+      .toBe(expectedTarget);
+  }
 });
 
 test("repository-backed sketch commit stays responsive and survives immediate refresh without file system access", async ({
@@ -192,7 +200,6 @@ test("repository-backed sketch commit stays responsive and survives immediate re
         kind: string;
         payload?: {
           definition?: {
-            authoringOperations?: unknown[];
             entities?: unknown[];
           };
         };
@@ -203,14 +210,11 @@ test("repository-backed sketch commit stays responsive and survives immediate re
       .at(-1);
 
     return {
-      authoringOperationCount:
-        commitSketch?.payload?.definition?.authoringOperations?.length ?? 0,
       entityCount: commitSketch?.payload?.definition?.entities?.length ?? 0,
     };
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
 
   expect(persistedSketch?.entityCount).toBeGreaterThanOrEqual(1);
-  expect(persistedSketch?.authoringOperationCount).toBe(0);
 
   await page.evaluate(() => {
     window.__cadDelayDocumentSyncMutations = false;

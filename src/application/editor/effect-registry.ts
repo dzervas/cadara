@@ -562,12 +562,11 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       const commitDefinition = {
         ...evaluateSketchDerivations(
           resolveSketchDerivationDistances({
-            definition: input.session.fullDefinition,
+            definition: input.session.definition,
             variables: input.session.documentVariables,
           }),
         ).definition,
-        derivedRelationships:
-          input.session.fullDefinition.derivedRelationships,
+        derivedRelationships: input.session.definition.derivedRelationships,
       };
       const result = await modelingService.commitSketch({
         requestId: input.requestId,

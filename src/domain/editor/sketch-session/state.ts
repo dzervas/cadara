@@ -17,7 +17,6 @@ import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimen
 import type {
   ConstraintDefinition,
   DimensionDefinition,
-  SketchAuthoringOperation,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { type PrimitiveRef } from "@/core/editor/schema";
@@ -28,36 +27,16 @@ import {
 import { buildReferenceImageAnchorProjectedReferences } from "@/domain/reference-image-calibration/export/references";
 import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
 import { mapSketchPointToWorkspaceWorld } from "@/core/workspace/sketch-plane-mapping";
-import type {
-  SketchConstraintDisplayState,
-  SketchHistoryCursor,
-  SketchSessionState,
-} from "./types";
+import type { SketchConstraintDisplayState, SketchSessionState } from "./types";
 import {
   cloneDefinition,
   createEmptyDefinition,
-  createSketchConstraintRef,
-  createSketchDimensionRef,
-  createSketchEntityRef,
-  createSketchOperationRef,
-  createSketchPointRef,
-  filterSketchDefinitionThroughCursor,
   getEntityPointIds,
-  getHistorySequence,
   getNextDefinitionSequence,
   getSessionSketchId,
-  getSketchHistoryOperationForCursor,
   mapDefinitionEntityToDraftEntity,
-  rebuildSessionForDefinition,
-  sketchHistoryCursorsEqual,
 } from "./internals";
-import {
-  buildCommitRequest,
-  createTailSketchHistoryCursor,
-  getSketchHistoryCursorForIndex,
-  getSketchHistoryCursorIndex,
-  getSketchHistoryItems,
-} from "./history";
+import { buildCommitRequest } from "./history";
 import {
   getSelectedReferenceImageOperationIds,
   getSelectedSketchGeometryIds,
@@ -92,129 +71,18 @@ export function normalizeSketchConstraintDisplayState(
   return "underconstrained";
 }
 
-export function getAuthoringOperationHistoryTarget(
-  sketchId: SketchId,
-  operation: SketchAuthoringOperation,
-): PrimitiveRef | null {
-  if (operation.kind === "referenceImage") {
-    return createSketchOperationRef(sketchId, operation.operationId);
-  }
-
-  const target = [
-    ...(operation.targets.created ?? []),
-    ...(operation.targets.edited ?? []),
-    ...(operation.targets.removed ?? []),
-  ].find(
-    (entry) =>
-      entry.kind === "operation" ||
-      entry.kind === "entity" ||
-      entry.kind === "point" ||
-      entry.kind === "constraint" ||
-      entry.kind === "dimension",
-  );
-
-  if (!target) {
-    return null;
-  }
-
-  switch (target.kind) {
-    case "operation":
-      return createSketchOperationRef(sketchId, target.operationId);
-    case "point":
-      return createSketchPointRef(sketchId, target.pointId);
-    case "entity":
-      return createSketchEntityRef(sketchId, target.entityId);
-    case "constraint":
-      return createSketchConstraintRef(sketchId, target.constraintId);
-    case "dimension":
-      return createSketchDimensionRef(sketchId, target.dimensionId);
-  }
-}
-
-export function getPreviousSketchHistoryCursor(
-  session: SketchSessionState,
-): SketchHistoryCursor | null {
-  const operation = getSketchHistoryOperationForCursor(
-    session,
-    session.historyCursor,
-  );
-  if (operation) {
-    return operation.beforeCursor;
-  }
-
-  const items = getSketchHistoryItems(session.fullDefinition);
-  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor);
-
-  if (session.historyCursor.kind !== "empty" && cursorIndex < 0) {
-    return null;
-  }
-
-  if (cursorIndex <= -1) {
-    return null;
-  }
-
-  const currentSequence = getHistorySequence(items[cursorIndex]?.id ?? "");
-  let previousIndex = cursorIndex - 1;
-  while (
-    previousIndex >= 0 &&
-    getHistorySequence(items[previousIndex]?.id ?? "") === currentSequence
-  ) {
-    previousIndex -= 1;
-  }
-
-  return getSketchHistoryCursorForIndex(items, previousIndex);
-}
-
-export function getNextSketchHistoryCursor(
-  session: SketchSessionState,
-): SketchHistoryCursor | null {
-  const operation = session.historyOperations.find((entry) =>
-    sketchHistoryCursorsEqual(entry.beforeCursor, session.historyCursor),
-  );
-
-  if (operation) {
-    return { kind: "item", itemId: operation.itemId };
-  }
-
-  const items = getSketchHistoryItems(session.fullDefinition);
-  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor);
-
-  if (session.historyCursor.kind !== "empty" && cursorIndex < 0) {
-    return null;
-  }
-
-  const nextIndex = cursorIndex + 1;
-  if (nextIndex >= items.length) {
-    return null;
-  }
-
-  const nextSequence = getHistorySequence(items[nextIndex]?.id ?? "");
-  let sequenceTailIndex = nextIndex;
-  while (
-    sequenceTailIndex + 1 < items.length &&
-    getHistorySequence(items[sequenceTailIndex + 1]?.id ?? "") === nextSequence
-  ) {
-    sequenceTailIndex += 1;
-  }
-
-  return getSketchHistoryCursorForIndex(items, sequenceTailIndex);
-}
-
 export function createSketchSessionFromSnapshot(
   sketch: SketchSnapshotRecord,
 ): SketchSessionState {
   const sketchId = sketch.sketchId;
   const fullDefinition = cloneDefinition(sketch.sketch.definition);
-  const historyCursor = createTailSketchHistoryCursor(fullDefinition);
-  const definition = filterSketchDefinitionThroughCursor(
-    fullDefinition,
-    historyCursor,
-  );
+  const definition = fullDefinition;
   const planeKey = sketch.plane.key ?? null;
   const projectedReferences =
     buildReferenceImageAnchorProjectedReferences(definition);
 
   return {
+    actionContextId: sketchId,
     sketchId,
     sketchLabel: sketch.label,
     plane: sketch.plane,
@@ -222,9 +90,6 @@ export function createSketchSessionFromSnapshot(
     planeKey,
     toolStagedEntities: [],
     definition,
-    fullDefinition,
-    historyCursor,
-    historyOperations: [],
     activeTool: null,
     status: "idle",
     constructionTargetPicking: false,
@@ -267,6 +132,7 @@ export function createNewSketchSession(
   const definition = createEmptyDefinition();
 
   return {
+    actionContextId: `sketch_${crypto.randomUUID()}` as SketchId,
     sketchId: null,
     sketchLabel: "Sketch Draft",
     plane,
@@ -274,9 +140,6 @@ export function createNewSketchSession(
     planeKey,
     toolStagedEntities: [],
     definition,
-    fullDefinition: cloneDefinition(definition),
-    historyCursor: { kind: "empty" },
-    historyOperations: [],
     activeTool: null,
     status: "idle",
     constructionTargetPicking: false,
@@ -344,43 +207,6 @@ export function createNewSketchSessionFromSupport(
         };
 
   return createNewSketchSession(plane);
-}
-
-export function moveSketchHistoryCursor(
-  session: SketchSessionState,
-  cursor: SketchHistoryCursor,
-): SketchSessionState {
-  const operation = getSketchHistoryOperationForCursor(session, cursor);
-  if (operation) {
-    return rebuildSessionForDefinition(session, {
-      definition: operation.afterDefinition,
-      fullDefinition: operation.afterDefinition,
-      historyCursor: cursor,
-      historyOperations: session.historyOperations,
-    });
-  }
-
-  const redoSourceOperation = session.historyOperations.find((entry) =>
-    sketchHistoryCursorsEqual(entry.beforeCursor, cursor),
-  );
-  const fullDefinition =
-    redoSourceOperation?.beforeDefinition ?? session.fullDefinition;
-  const items = getSketchHistoryItems(fullDefinition);
-  const normalizedCursor =
-    cursor.kind === "empty" || items.some((item) => item.id === cursor.itemId)
-      ? cursor
-      : createTailSketchHistoryCursor(fullDefinition);
-  const definition = filterSketchDefinitionThroughCursor(
-    fullDefinition,
-    normalizedCursor,
-  );
-
-  return rebuildSessionForDefinition(session, {
-    definition,
-    fullDefinition,
-    historyCursor: normalizedCursor,
-    historyOperations: session.historyOperations,
-  });
 }
 
 export function isEditableSketchGeometrySelection(

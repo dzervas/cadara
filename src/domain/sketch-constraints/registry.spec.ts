@@ -124,7 +124,6 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     return {
       ...updateSketchReferenceProjection(session, [projectedReference], []),
       definition: definitionWithReference,
-      fullDefinition: definitionWithReference,
     };
   }
 
@@ -914,7 +913,6 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     degenerateSession = {
       ...degenerateSession,
       definition: degenerateDefinition,
-      fullDefinition: degenerateDefinition,
     };
     degenerateSession = beginSketchTool(degenerateSession, "point");
     degenerateSession = startSketchDraw(degenerateSession, [1, 1]);
@@ -1909,7 +1907,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     ).toBeTruthy();
     expect(
       session.commitRequest?.definition.dimensions[0]?.kind === "distance" &&
-        session.commitRequest.definition.dimensions[0].value.source === "literal" &&
+        session.commitRequest.definition.dimensions[0].value.source ===
+          "literal" &&
         session.commitRequest.definition.dimensions[0].value.value === 31,
       "Committing the reopened distance input should update the durable sketch mutation payload.",
     ).toBeTruthy();
@@ -1962,7 +1961,9 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       (entry) => entry.dimensionId === annotation.target.dimensionId,
     );
     expect(
-      dimension?.kind === "distance" && dimension.value.source === "literal" && dimension.value.value === 20,
+      dimension?.kind === "distance" &&
+        dimension.value.source === "literal" &&
+        dimension.value.value === 20,
       "Width edit should update the durable dimension.",
     ).toBeTruthy();
     expect(
@@ -1987,7 +1988,9 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       (entry) => entry.dimensionId === annotation.target.dimensionId,
     );
     expect(
-      payloadDimension?.kind === "distance" && payloadDimension.value.source === "literal" && payloadDimension.value.value === 20,
+      payloadDimension?.kind === "distance" &&
+        payloadDimension.value.source === "literal" &&
+        payloadDimension.value.value === 20,
       "Width edit should update the durable sketch mutation payload.",
     ).toBeTruthy();
   }
@@ -2022,7 +2025,9 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       (entry) => entry.dimensionId === annotation.target.dimensionId,
     );
     expect(
-      dimension?.kind === "circleRadius" && dimension.value.source === "literal" && dimension.value.value === 18,
+      dimension?.kind === "circleRadius" &&
+        dimension.value.source === "literal" &&
+        dimension.value.value === 18,
       "Radius edit should update the durable dimension.",
     ).toBeTruthy();
     const circle = session.definition.entities.find(
@@ -2103,8 +2108,11 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Committed dimension edit should persist the raw expression text.",
     ).toBeTruthy();
 
-    const resolvedAnnotation = getSketchAnnotationDescriptors(resolvedSession).find(
-      (entry) => entry.target.kind === "dimension" &&
+    const resolvedAnnotation = getSketchAnnotationDescriptors(
+      resolvedSession,
+    ).find(
+      (entry) =>
+        entry.target.kind === "dimension" &&
         entry.target.dimensionId === annotation.target.dimensionId,
     );
     expect(
@@ -2161,7 +2169,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     expect(
       diameter?.kind === "diameter" &&
         diameter.entityId === circleId &&
-        diameter.value.source === "literal" && diameter.value.value === 12 &&
+        diameter.value.source === "literal" &&
+        diameter.value.value === 12 &&
         diameter.annotationPlacement?.kind === "dimensionLine",
       "Diameter authoring should commit a durable diameter dimension with annotation placement.",
     ).toBeTruthy();
@@ -2224,7 +2233,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     expect(
       lineLength?.kind === "lineLength" &&
         lineLength.entityId === lengthLineId &&
-        lineLength.value.source === "literal" && lineLength.value.value === 8 &&
+        lineLength.value.source === "literal" &&
+        lineLength.value.value === 8 &&
         lineLength.annotationPlacement?.kind === "dimensionLine",
       "Single-line Dimension authoring should commit a durable line-length dimension tied to the selected edge.",
     ).toBeTruthy();
@@ -2256,7 +2266,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     expect(
       lineDistance?.kind === "lineDistance" &&
         lineDistance.lines.every((line) => line.kind === "localEntity") &&
-        lineDistance.value.source === "literal" && lineDistance.value.value === 6,
+        lineDistance.value.source === "literal" &&
+        lineDistance.value.value === 6,
       "Parallel line targets should commit a durable line-to-line distance dimension.",
     ).toBeTruthy();
 
@@ -2291,7 +2302,8 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       pointLineDistance?.kind === "linePointDistance" &&
         pointLineDistance.line.kind === "localEntity" &&
         pointLineDistance.point.kind === "localPoint" &&
-        pointLineDistance.value.source === "literal" && pointLineDistance.value.value === 4,
+        pointLineDistance.value.source === "literal" &&
+        pointLineDistance.value.value === 4,
       "Line and point targets should commit a durable line-to-point distance dimension in either selection order.",
     ).toBeTruthy();
 

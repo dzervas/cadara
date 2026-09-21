@@ -691,57 +691,8 @@ function normalizeSketchDefinitionForSketchId(
   definition: SketchDefinition,
   sketchId: SketchId,
 ): SketchDefinition {
-  const normalizeOperationGraph = (
-    graph:
-      | NonNullable<
-          NonNullable<
-            SketchDefinition["authoringOperations"]
-          >[number]["createdGraph"]
-        >
-      | undefined,
-  ) =>
-    graph
-      ? {
-          ...graph,
-          points: graph.points?.map((point) => ({
-            ...point,
-            target: {
-              ...point.target,
-              sketchId,
-            },
-          })),
-          entities: graph.entities?.map((entity) => ({
-            ...entity,
-            target: {
-              ...entity.target,
-              sketchId,
-            },
-          })),
-        }
-      : undefined;
-
-  const authoringOperations = definition.authoringOperations?.map(
-    (operation) => {
-      const { createdGraph, removedGraph, ...rest } = operation;
-      const normalizedCreatedGraph = normalizeOperationGraph(createdGraph);
-      const normalizedRemovedGraph = normalizeOperationGraph(removedGraph);
-
-      return {
-        ...rest,
-        ...(normalizedCreatedGraph
-          ? { createdGraph: normalizedCreatedGraph }
-          : {}),
-        ...(normalizedRemovedGraph
-          ? { removedGraph: normalizedRemovedGraph }
-          : {}),
-      };
-    },
-  );
-  const definitionWithoutOps = { ...definition };
-  delete definitionWithoutOps.authoringOperations;
-
   return {
-    ...definitionWithoutOps,
+    ...definition,
     points: definition.points.map((point) => ({
       ...point,
       target: {
@@ -756,7 +707,6 @@ function normalizeSketchDefinitionForSketchId(
         sketchId,
       },
     })),
-    ...(authoringOperations ? { authoringOperations } : {}),
   };
 }
 
@@ -835,11 +785,7 @@ function buildSketchChangedTargets(sketch: SketchSnapshotRecord) {
 }
 
 function hasReferenceImageOperationState(definition: SketchDefinition) {
-  return (definition.authoringOperations ?? []).some(
-    (operation) =>
-      operation.kind === "referenceImage" ||
-      operation.ownedState?.kind === "referenceImage",
-  );
+  return (definition.referenceImages?.length ?? 0) > 0;
 }
 
 function canPersistSketchSolveState(

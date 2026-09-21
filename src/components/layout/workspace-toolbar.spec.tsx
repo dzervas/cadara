@@ -291,10 +291,6 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   );
   const svgDisabledSession = {
     ...baseSvgDisabledSession,
-    fullDefinition: {
-      ...baseSvgDisabledSession.fullDefinition,
-      svgRenderingEnabled: false,
-    },
     definition: {
       ...baseSvgDisabledSession.definition,
       svgRenderingEnabled: false,

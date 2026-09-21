@@ -59,11 +59,6 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
         referenceIds: [referenceRecord.referenceId],
         references: [referenceRecord],
       },
-      fullDefinition: {
-        ...session.fullDefinition,
-        referenceIds: [referenceRecord.referenceId],
-        references: [referenceRecord],
-      },
       projectedReferences,
     };
   }
@@ -279,11 +274,6 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       ...session,
       definition: {
         ...session.definition,
-        referenceIds: ["ref_projected_edge"],
-        references: [referenceRecord],
-      },
-      fullDefinition: {
-        ...session.fullDefinition,
         referenceIds: ["ref_projected_edge"],
         references: [referenceRecord],
       },

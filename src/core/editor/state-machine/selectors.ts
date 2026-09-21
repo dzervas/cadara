@@ -1,7 +1,3 @@
-import {
-  getNextSketchHistoryCursor,
-  getPreviousSketchHistoryCursor,
-} from "@/domain/editor/sketch-session";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import {
   getNextDocumentHistoryCursor,
@@ -24,10 +20,9 @@ export function getEditorHistoryAvailability(
       return { canUndo: false, canRedo: false };
     }
 
-    return {
-      canUndo: getPreviousSketchHistoryCursor(state.session) !== null,
-      canRedo: getNextSketchHistoryCursor(state.session) !== null,
-    };
+    return (
+      state.session.actionAvailability ?? { canUndo: false, canRedo: false }
+    );
   }
 
   if (state.kind !== "idle") {

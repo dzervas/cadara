@@ -2838,9 +2838,7 @@ export function createSketchOffsetDerivationContribution(input: {
       role: string,
       position: SketchPoint,
     ): SketchPointId => {
-      const pointId = input.factories.createPointId(
-        `offset-${suffix}-${role}`,
-      );
+      const pointId = input.factories.createPointId(`offset-${suffix}-${role}`);
       points.push(
         input.factories.createPoint(
           `Offset ${input.sequence} ${seed.label} ${role}`,
@@ -2997,7 +2995,7 @@ export function createSketchOffsetDerivationContribution(input: {
   }
 
   const relationship: SketchDerivationDefinition = {
-    derivationId: `sketch_derivation_${input.sequence}_offset`,
+    derivationId: `sketch_derivation_${input.sequence}_offset_${crypto.randomUUID()}`,
     label: `offset ${input.sequence}`,
     kind: "offset",
     seedEntityIds: chain.order.map((entry) => entry.seedEntityId),
@@ -3308,7 +3306,7 @@ function createRelationship(
   mirrorAxisId: SketchEntityId | null,
 ): SketchDerivationDefinition | null {
   const derivationId =
-    `sketch_derivation_${input.sequence}_${input.operatorKind}` as const;
+    `sketch_derivation_${input.sequence}_${input.operatorKind}_${crypto.randomUUID()}` as const;
   const label = `${input.operatorKind} ${input.sequence}`;
 
   if (input.operatorKind === "mirror") {

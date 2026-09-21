@@ -160,7 +160,6 @@ test("collectSketchInteractionGeometry preserves local, projected, datum, and ad
     ...createNewSketchSession(createStandardPlaneDefinition("xy")),
     sketchId,
     definition,
-    fullDefinition: definition,
     projectedReferences: [projectedReference],
   };
 
@@ -266,7 +265,6 @@ test("flattenSketchInteractionCurve respects arc sweeps and closes closed curves
     ...createNewSketchSession(createStandardPlaneDefinition("xy")),
     sketchId,
     definition,
-    fullDefinition: definition,
   };
   const geometry = collectSketchInteractionGeometry(session);
   const arcGeometry = geometry.find((entry) => entry.target === arc.target);

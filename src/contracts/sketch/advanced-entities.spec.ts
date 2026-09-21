@@ -370,7 +370,6 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     ...createNewSketchSession(plane),
     sketchId,
     definition,
-    fullDefinition: definition,
   };
   const sessionRenderables = getSketchSessionDisplayRenderables(session);
   expect(
