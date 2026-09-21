@@ -16,7 +16,7 @@ test("opt-in local peer sync exposes peer-authored document changes after refres
   const secondTab = await context.newPage();
 
   await openSyncedWorkbench(firstTab, firstTabUrl);
-  await waitForRepositoryUrl(firstTab, `${channelName}-a`);
+  await waitForRepositoryUrl(firstTab, channelName);
   await openSyncedWorkbench(secondTab, secondTabUrl);
   await expect(firstTab.locator("[data-variable-row]")).toHaveCount(0);
   await expect(secondTab.locator("[data-variable-row]")).toHaveCount(0);
@@ -78,8 +78,9 @@ async function openSyncedWorkbench(page: Page, url: string) {
     .not.toBe("loading");
 }
 
-async function waitForRepositoryUrl(page: Page, databaseName: string) {
-  const storageKey = `cad.documentRepository.automergeUrls.v1:${databaseName}`;
+async function waitForRepositoryUrl(page: Page, channelName: string) {
+  const namespace = `cad-local-peer-channel:${encodeURIComponent(channelName)}`;
+  const storageKey = `cad.documentRepository.automergeUrls.v1:${namespace}`;
   await expect
     .poll(
       () =>
