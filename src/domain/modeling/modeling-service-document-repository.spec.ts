@@ -1256,6 +1256,8 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       release: () => void;
       complete: Promise<void>;
       resolveComplete: () => void;
+      expectedLabel: string | undefined;
+      candidateLabel: string | undefined;
     }> = [];
     const historyStore = createMemoryOperationHistoryStore(
       createEmptyOperationHistory("doc_workspace"),
@@ -1269,7 +1271,17 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       const complete = new Promise<void>((resolve) => {
         resolveComplete = resolve;
       });
-      mutateCalls.push({ release, complete, resolveComplete });
+      mutateCalls.push({
+        release,
+        complete,
+        resolveComplete,
+        expectedLabel: input.expected.bodyLabels.find(
+          (record) => record.bodyId === "body_part-1",
+        )?.label,
+        candidateLabel: input.document.bodyLabels.find(
+          (record) => record.bodyId === "body_part-1",
+        )?.label,
+      });
       await gate;
       const result = await mutate(input);
       resolveComplete();
@@ -1345,6 +1357,22 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       clearedHistory.ok && clearedHistory.payload === null,
       "Final background write should clear the fallback tail.",
     ).toBeTruthy();
+    expect(
+      mutateCalls[0]?.candidateLabel,
+      "Queued persistence must not coalesce the first completed intent into later editor state.",
+    ).toBe("First Background Body");
+    expect(
+      mutateCalls[1]?.expectedLabel,
+      "The second candidate must retain the actual first editor state as its base.",
+    ).toBe("First Background Body");
+    expect(mutateCalls[1]?.candidateLabel).toBe("Second Background Body");
+    const undone = await documentRepository.undoDurableHistory("doc_workspace");
+    expect(
+      undone?.ok &&
+        undone.document.bodyLabels.find(
+          (record) => record.bodyId === "body_part-1",
+        )?.label,
+    ).toBe("First Background Body");
   }
 
   async function testLocalRepositoryHeadAdvancesDoNotConflictWithCurrentRevisionMutation() {
@@ -1558,8 +1586,10 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         peerEventCount += 1;
       }
     });
-    const peerResult =
-      await documentRepository.receivePeerDocument(peerDocument);
+    const peerResult = await documentRepository.receivePeerDocument(
+      peerDocument,
+      createAuthoredModelDocumentFromSnapshot(snapshot),
+    );
     expect(
       peerResult.ok,
       "Test peer document should be accepted by the repository.",
@@ -1737,8 +1767,10 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         : label,
     );
 
-    const peerResult =
-      await documentRepository.receivePeerDocument(peerDocument);
+    const peerResult = await documentRepository.receivePeerDocument(
+      peerDocument,
+      createAuthoredModelDocumentFromSnapshot(snapshot),
+    );
     expect(
       peerResult.ok,
       "Late-subscriber peer document should be accepted by the repository.",
@@ -1800,8 +1832,10 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     );
     publishPeerDocument = async () => {
       publishPeerDocument = async () => {};
-      const peerResult =
-        await documentRepository.receivePeerDocument(peerDocument);
+      const peerResult = await documentRepository.receivePeerDocument(
+        peerDocument,
+        createAuthoredModelDocumentFromSnapshot(snapshot),
+      );
       expect(
         peerResult.ok,
         "In-flight peer document should be accepted by the repository.",

@@ -60,6 +60,17 @@ export class WorkerBackedDocumentRepository
     return this.normalizeResult(result);
   }
 
+  async initialize(
+    input: Parameters<DocumentRepository["initialize"]>[0],
+  ): Promise<DocumentRepositoryMutationResult> {
+    const result = await this.client.initialize(input);
+    if (!result.ok) {
+      this.statuses.set(input.documentId, result.status);
+      return result;
+    }
+    return this.normalizeResult(result);
+  }
+
   async mutate(
     input: Parameters<DocumentRepository["mutate"]>[0],
   ): Promise<DocumentRepositoryMutationResult> {
@@ -115,9 +126,16 @@ export class WorkerBackedDocumentRepository
     documentId: DocumentId,
   ): Promise<DocumentRepositoryRestoreStatus> {
     const status = await this.client.reset({ documentId });
-    this.urlStore?.delete(documentId);
     this.statuses.set(documentId, status);
-    this.metadata.set(documentId, { documentId, heads: [], source: "reset" });
+    if (status.kind === "reset") {
+      this.urlStore?.delete(documentId);
+      this.metadata.set(documentId, {
+        actorId: "",
+        documentId,
+        heads: [],
+        source: "reset",
+      });
+    }
     return status;
   }
 
@@ -128,6 +146,7 @@ export class WorkerBackedDocumentRepository
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata {
     return (
       this.metadata.get(documentId) ?? {
+        actorId: "",
         documentId,
         heads: [],
         source: "restore",

@@ -113,6 +113,7 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
     ).toBe("automerge:worker-url");
 
     const mutation = repository.mutate({
+      expected: seed,
       documentId: seed.documentId,
       document: seed,
     });
@@ -163,6 +164,7 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       },
     };
     const assetMutation = repository.mutate({
+      expected: seed,
       documentId: seed.documentId,
       document: documentWithAsset,
       assets: [asset],
@@ -466,6 +468,88 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
 
   await testLoadMutatePeerUpdateAndDiagnostics();
   await testDurableHistoryMethodsProxyThroughWorker();
+});
+
+test("worker-backed reset preserves URL and actor/heads on rejection, clearing only after success", async () => {
+  const seed = await createSeedAuthoredModelDocument();
+  const worker = new FakeDocumentSyncWorker();
+  const client = new DocumentSyncWorkerClient({ worker });
+  const urlStore = createMemoryUrlStore();
+  const url = "automerge:retained-reset-association" as Parameters<
+    DocumentRepositoryUrlStore["set"]
+  >[1];
+  const metadata = {
+    actorId: "actual-session-actor",
+    documentId: seed.documentId,
+    heads: ["applied-head"],
+    source: "restore" as const,
+    storageKey: url,
+  };
+  const repository = createWorkerBackedDocumentRepository({ client, urlStore });
+  try {
+    const load = repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    const loadRequest = worker.takePosted("load");
+    worker.emit({
+      kind: "loaded",
+      requestId: loadRequest.requestId,
+      result: {
+        ok: true,
+        document: seed,
+        status: { kind: "restored", documentId: seed.documentId },
+        metadata,
+      },
+    });
+    await flushAsync();
+    const normalize = worker.takePosted("normalize");
+    worker.emit({
+      kind: "normalized",
+      requestId: normalize.requestId,
+      result: { document: seed, metadata, diagnostics: [] },
+    });
+    expect((await load).ok).toBe(true);
+    expect(urlStore.get(seed.documentId)).toBe(url);
+    const failed = {
+      kind: "failed" as const,
+      documentId: seed.documentId,
+      diagnostic: {
+        reasonCode: "automerge-durability-failed",
+        message: "Applied changes still need persistence.",
+      },
+    };
+    const rejected = repository.reset(seed.documentId);
+    const rejectedRequest = worker.takePosted("reset");
+    expect(urlStore.get(seed.documentId)).toBe(url);
+    worker.emit({
+      kind: "reset",
+      requestId: rejectedRequest.requestId,
+      status: failed,
+    });
+    expect(await rejected).toEqual(failed);
+    expect(repository.getRestoreStatus(seed.documentId)).toEqual(failed);
+    expect(urlStore.get(seed.documentId)).toBe(url);
+    expect(repository.getMetadata(seed.documentId)).toEqual(metadata);
+    const successful = repository.reset(seed.documentId);
+    const successfulRequest = worker.takePosted("reset");
+    expect(urlStore.get(seed.documentId)).toBe(url);
+    worker.emit({
+      kind: "reset",
+      requestId: successfulRequest.requestId,
+      status: { kind: "reset", documentId: seed.documentId },
+    });
+    expect((await successful).kind).toBe("reset");
+    expect(urlStore.get(seed.documentId)).toBeNull();
+    expect(repository.getMetadata(seed.documentId)).toEqual({
+      actorId: "",
+      documentId: seed.documentId,
+      heads: [],
+      source: "reset",
+    });
+  } finally {
+    client.dispose();
+  }
 });
 
 function createMemoryUrlStore(): DocumentRepositoryUrlStore {

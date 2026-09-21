@@ -220,6 +220,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
 
     await handle({
       kind: "mutate",
+      expected: seed,
       requestId:
         "request_document_sync_mutate" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
@@ -268,6 +269,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
     };
     await handle({
       kind: "mutate",
+      expected: seed,
       requestId:
         "request_document_sync_asset_mutate" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
@@ -494,6 +496,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
 
     await handle({
       kind: "mutate",
+      expected: seed,
       requestId:
         "request_document_sync_file_mutate_1" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
@@ -506,6 +509,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_file_mutate_2" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
       document: withBodyLabel(seed, "Autosync Two"),
+      expected: withBodyLabel(seed, "Autosync One"),
     });
     await handle({
       kind: "mutate",
@@ -513,6 +517,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_file_mutate_3" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
       document: withBodyLabel(seed, "Autosync Three"),
+      expected: withBodyLabel(seed, "Autosync Two"),
     });
     writeGate.resolve();
     await flushAsync();
@@ -566,6 +571,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_file_mutate_denied" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
       document: withBodyLabel(seed, "Permission Denied"),
+      expected: withBodyLabel(seed, "Autosync Three"),
     });
     await flushAsync();
     expect(
@@ -596,6 +602,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         "request_document_sync_file_mutate_failed" as DocumentSyncWorkerRequest["requestId"],
       documentId: seed.documentId,
       document: withBodyLabel(seed, "Write Failed"),
+      expected: withBodyLabel(seed, "Permission Denied"),
     });
     await flushAsync();
     expect(
@@ -768,7 +775,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       "Matching linked-file loads should return the exact cached repository load result and preserve metadata, diagnostics, and asset availability.",
     ).toBeTruthy();
     expect(
-      repository.mutations.length,
+      repository.initializations.length,
       "Matching linked-file loads should not perform a no-op repository mutation.",
     ).toBe(0);
     expect(
@@ -817,7 +824,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
     );
     expect(
       loaded?.result === repository.lastLoadResult &&
-        repository.mutations.length === 0,
+        repository.initializations.length === 0,
       "Linked-file equality should compare parsed authored documents instead of raw serialized JSON.",
     ).toBeTruthy();
     expect(
@@ -864,7 +871,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
     );
     expect(
       loaded?.result === repository.lastLoadResult &&
-        repository.mutations.length === 0,
+        repository.initializations.length === 0,
       "Linked-file equality should normalize the disk document id to the active document id before comparing with cache.",
     ).toBeTruthy();
   }
@@ -906,7 +913,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       loaded?.result.ok === true &&
         loaded.result.document.bodyLabels[0]?.label ===
           "Changed Authoritative File" &&
-        repository.mutations.length === 1,
+        repository.initializations.length === 1,
       "Changed linked-file loads should refresh repository state from the authoritative file document.",
     ).toBeTruthy();
     expect(
@@ -947,7 +954,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       invalidLoaded?.result.ok === false &&
         invalidLoaded.result.status.diagnostic.reasonCode ===
           "invalid-authored-document" &&
-        invalidRepository.mutations.length === 0,
+        invalidRepository.initializations.length === 0,
       "Invalid linked files should fail explicitly without mutating or returning stale cached authored state.",
     ).toBeTruthy();
 
@@ -978,7 +985,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       unreadableLoaded?.result.ok === false &&
         unreadableLoaded.result.status.diagnostic.reasonCode ===
           "local-file-read-failed" &&
-        unreadableRepository.mutations.length === 0,
+        unreadableRepository.initializations.length === 0,
       "Unreadable linked files should fail explicitly without mutating or returning stale cached authored state.",
     ).toBeTruthy();
   }
@@ -1012,7 +1019,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         loaded.result.ok &&
         loaded.result.document.bodyLabels[0]?.label ===
           "Browser Only Cached State" &&
-        repository.mutations.length === 0 &&
+        repository.initializations.length === 0 &&
         !posted.some(
           (message) =>
             message.kind === "writeStatusChanged" &&
@@ -1056,7 +1063,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         loaded.result.status.diagnostic.reasonCode ===
           "repository-load-failed-for-test" &&
         fileRead === false &&
-        repository.mutations.length === 0,
+        repository.initializations.length === 0,
       "Repository load failures should return explicitly without reading linked files or falling back to stale cache.",
     ).toBeTruthy();
   }
@@ -1074,6 +1081,127 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
   await testBrowserOnlyLoadBypassesLinkedFileComparison();
   await testRepositoryLoadFailureDoesNotFallBackToLinkedCache();
   await testWorkerRuntimeStorageResetAndBindingFailures();
+});
+
+test("worker transport preserves candidate bases, conflict atomicity, actor identity and fresh initialization", async () => {
+  const seed = await createSeedAuthoredModelDocument();
+  const repository = createMemoryDocumentRepository();
+  const worker = new FakeDocumentSyncWorker();
+  const handler = createDocumentSyncWorkerMessageHandler(
+    { repository },
+    (message) => worker.emit(message),
+  );
+  worker.postMessage = (message) => {
+    void handler(structuredClone(message));
+  };
+  const client = new DocumentSyncWorkerClient({ worker });
+  try {
+    const initial = await client.initialize({
+      documentId: seed.documentId,
+      document: seed,
+    });
+    expect(initial.ok).toBe(true);
+    if (!initial.ok) throw new Error("initialize failed");
+    expect(initial.metadata.actorId).toBe(
+      repository.getMetadata(seed.documentId).actorId,
+    );
+    const local = { ...seed, name: "Local worker action" };
+    expect(
+      (
+        await client.mutate({
+          documentId: seed.documentId,
+          expected: seed,
+          document: local,
+          label: "Rename",
+        })
+      ).ok,
+    ).toBe(true);
+    const peer = {
+      ...seed,
+      bodyLabels: seed.bodyLabels.map((r) => ({ ...r, label: "Peer body" })),
+    };
+    expect((await repository.receivePeerDocument(peer, seed)).ok).toBe(true);
+    const undo = await client.undoDurableHistory({
+      documentId: seed.documentId,
+    });
+    expect(undo?.ok && undo.document.name).toBe(seed.name);
+    expect(undo?.ok && undo.document.bodyLabels).toEqual(peer.bodyLabels);
+    expect(
+      (await client.redoDurableHistory({ documentId: seed.documentId }))?.ok,
+    ).toBe(true);
+    const conflict = await client.mutate({
+      documentId: seed.documentId,
+      expected: seed,
+      document: { ...seed, name: "Stale", bodyLabels: [] },
+    });
+    expect(conflict.ok).toBe(false);
+    const current = await client.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect(current.ok && current.document.name).toBe(local.name);
+    expect(current.ok && current.document.bodyLabels).toEqual(peer.bodyLabels);
+    await client.initialize({ documentId: seed.documentId, document: seed });
+    expect(
+      await client.getDurableHistoryAvailability({
+        documentId: seed.documentId,
+      }),
+    ).toEqual({ canUndo: false, canRedo: false });
+  } finally {
+    client.dispose();
+  }
+});
+
+test("runtime reset preserves the reopen URL on rejection and deletes it only after repository success", async () => {
+  const seed = await createSeedAuthoredModelDocument();
+  const repository = createMemoryDocumentRepository();
+  await repository.load({ documentId: seed.documentId, seedDocument: seed });
+  const metadata = repository.getMetadata(seed.documentId);
+  const repositoryUrlStore = new MemoryDocumentRepositoryUrlStore();
+  const url = "automerge:retained-reset-association" as AutomergeUrl;
+  repositoryUrlStore.set(seed.documentId, url);
+  const messages: DocumentSyncWorkerResponse[] = [];
+  const handler = createDocumentSyncWorkerMessageHandler(
+    { repository, repositoryUrlStore },
+    (message) => messages.push(message),
+  );
+  const reset = repository.reset.bind(repository);
+  const failed = {
+    kind: "failed" as const,
+    documentId: seed.documentId,
+    diagnostic: {
+      reasonCode: "automerge-durability-failed",
+      message: "Applied changes still need persistence.",
+    },
+  };
+  repository.reset = async (documentId) => {
+    expect(repositoryUrlStore.get(documentId)).toBe(url);
+    return failed;
+  };
+  await handler({
+    kind: "reset",
+    requestId: "request_reset_rejected",
+    documentId: seed.documentId,
+  });
+  expect(messages.at(-1)).toMatchObject({ kind: "reset", status: failed });
+  expect(repositoryUrlStore.get(seed.documentId)).toBe(url);
+  expect(repositoryUrlStore.deleted).toEqual([]);
+  expect(repository.getMetadata(seed.documentId)).toEqual(metadata);
+  repository.reset = async (documentId) => {
+    expect(repositoryUrlStore.get(documentId)).toBe(url);
+    return reset(documentId);
+  };
+  await handler({
+    kind: "reset",
+    requestId: "request_reset_succeeded",
+    documentId: seed.documentId,
+  });
+  expect(messages.at(-1)).toMatchObject({
+    kind: "reset",
+    status: { kind: "reset", documentId: seed.documentId },
+  });
+  expect(repositoryUrlStore.get(seed.documentId)).toBeNull();
+  expect(repositoryUrlStore.deleted).toEqual([seed.documentId]);
 });
 
 class FakeDocumentSyncWorker implements DocumentSyncWorkerLike {
@@ -1192,7 +1320,7 @@ interface TrackingMemoryDocumentRepositoryLoadOverrides {
 class TrackingMemoryDocumentRepository extends MemoryDocumentRepository {
   lastLoadResult: DocumentRepositoryLoadResult | null = null;
   loadOverrides: TrackingMemoryDocumentRepositoryLoadOverrides = {};
-  readonly mutations: AuthoredModelDocument[] = [];
+  readonly initializations: AuthoredModelDocument[] = [];
   readonly notifications: DocumentRepositoryChangeEvent[] = [];
 
   constructor(
@@ -1229,9 +1357,11 @@ class TrackingMemoryDocumentRepository extends MemoryDocumentRepository {
     return result;
   }
 
-  async mutate(input: Parameters<MemoryDocumentRepository["mutate"]>[0]) {
-    this.mutations.push(structuredClone(input.document));
-    return super.mutate(input);
+  async initialize(
+    input: Parameters<MemoryDocumentRepository["initialize"]>[0],
+  ) {
+    this.initializations.push(structuredClone(input.document));
+    return super.initialize(input);
   }
 
   subscribe(

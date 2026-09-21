@@ -33,7 +33,7 @@ function createRepository() {
   const resets: DocumentId[] = [];
 
   const repository = {
-    async mutate(input) {
+    async initialize(input) {
       mutations.push({
         documentId: input.documentId,
         documentName: input.document.name,
@@ -43,6 +43,7 @@ function createRepository() {
         document: input.document,
         status: { kind: "restored" as const, documentId: input.documentId },
         metadata: {
+          actorId: "test-session",
           documentId: input.documentId,
           heads: [],
           source: "local" as const,

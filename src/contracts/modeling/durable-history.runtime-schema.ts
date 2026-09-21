@@ -9,12 +9,11 @@ import { validateContract } from "@/contracts/shared/validation";
 
 const persistedSketchDraftSessionValidator =
   typia.createValidateEquals<PersistedSketchDraftSession>();
+// Current private-draft format only; document snapshot Undo is unsupported.
 const documentLocalDurableHistoryStateValidator =
   typia.createValidateEquals<DocumentLocalDurableHistoryState>();
 
-export function validatePersistedSketchDraftSession(
-  value: unknown,
-) {
+export function validatePersistedSketchDraftSession(value: unknown) {
   return validateContract(persistedSketchDraftSessionValidator, value);
 }
 

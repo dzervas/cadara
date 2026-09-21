@@ -99,7 +99,7 @@ export async function openDocumentCopyAsTab(input: {
   }
 
   const documentId = input.createDocumentId();
-  const result = await input.repository.mutate({
+  const result = await input.repository.initialize({
     documentId,
     document: {
       ...parsed.document,
@@ -207,7 +207,7 @@ async function openLinkedDocumentHandleAsTab(input: {
   }
 
   const documentId = input.createDocumentId();
-  const mutateResult = await input.repository.mutate({
+  const mutateResult = await input.repository.initialize({
     documentId,
     document: {
       ...parsed.document,

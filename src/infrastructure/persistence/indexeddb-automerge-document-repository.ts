@@ -1,33 +1,27 @@
 import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
+import { getActorId } from "@automerge/automerge/slim";
 import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
 import { BroadcastChannelNetworkAdapter } from "@automerge/automerge-repo-network-broadcastchannel";
 import { IndexedDBStorageAdapter } from "@automerge/automerge-repo-storage-indexeddb";
-
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import type {
   AuthoredModelDocument,
   AuthoredModelDocumentDiagnostic,
 } from "@/contracts/modeling/authored-document";
-import { createDurableHistoryAvailability } from "@/contracts/modeling/durable-history.runtime-schema";
-import {
-  createEmptyDocumentLocalDurableHistoryState,
-  type DocumentLocalDurableHistoryState,
-  type DurableHistoryAvailability,
-  type PersistedSketchDraftSession,
-} from "@/contracts/modeling/durable-history";
 import type { DocumentId } from "@/contracts/shared/ids";
 import type {
-  GeometryAssetBlobInput,
   GeometryAssetHash,
   GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
 import {
-  createLocalStorageDocumentRepositoryUrlStore,
-  MemoryDocumentRepositoryUrlStore,
-  type DocumentRepositoryUrlStore,
-} from "@/infrastructure/persistence/document-repository-url-store";
+  createEmptyDocumentLocalDurableHistoryState,
+  type DocumentLocalDurableHistoryState,
+  type PersistedSketchDraftSession,
+} from "@/contracts/modeling/durable-history";
+import { createDurableHistoryAvailability } from "@/contracts/modeling/durable-history.runtime-schema";
 import type {
+  DocumentRepository,
   GeometryAssetDocumentRepository,
   DocumentRepositoryChangeEvent,
   DocumentRepositoryChangeSource,
@@ -39,7 +33,6 @@ import type {
 import {
   collectAssetAvailability,
   createIndexedDbGeometryAssetStore,
-  filterGeometryAssetInputsForManifest,
   storeGeometryAssetInputsForManifest,
   type GeometryAssetStore,
 } from "@/domain/modeling/geometry-asset-store";
@@ -47,20 +40,24 @@ import {
   createIndexedDbLocalDurableHistoryStore,
   type LocalDurableHistoryStore,
 } from "@/domain/modeling/local-durable-history-store";
+import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
+import {
+  applyCollaborativeWrites,
+  DocumentProvenanceConflict,
+  createCollaborativeDocument,
+  documentActionState,
+  materializeCollaborativeDocument,
+  updateDocumentProvenance,
+  type CollaborativeDocument,
+} from "@/domain/modeling/collaborative-document";
+import type { AuthoredActionResult } from "@/contracts/modeling/authored-actions";
+import {
+  createLocalStorageDocumentRepositoryUrlStore,
+  MemoryDocumentRepositoryUrlStore,
+  type DocumentRepositoryUrlStore,
+} from "./document-repository-url-store";
 
-interface AutomergeDocumentEnvelope {
-  authoredDocument: AuthoredModelDocument;
-}
-
-interface LocalPeerDocumentMessage {
-  type: "cad-authored-document-repository/document-updated";
-  senderId: string;
-  documentId: DocumentId;
-  document: AuthoredModelDocument;
-  assets?: GeometryAssetBlobInput[];
-}
-
-interface AutomergeHandleLike<T> {
+export interface AutomergeHandleLike<T> {
   readonly url: AutomergeUrl;
   readonly documentId: string;
   whenReady(): Promise<void>;
@@ -69,26 +66,20 @@ interface AutomergeHandleLike<T> {
   change(callback: (document: T) => void): void;
   on(event: "change", callback: () => void): void;
 }
-
-interface AutomergeRepositoryLike {
+export interface AutomergeRepositoryLike {
   create<T>(initialValue?: T): AutomergeHandleLike<T>;
   find<T>(id: AutomergeUrl): Promise<AutomergeHandleLike<T>>;
   delete(id: AutomergeUrl): void;
   flush?(documents?: string[]): Promise<void>;
 }
-
-let automergeWasmInitialization: Promise<void> | null = null;
-
-function ensureAutomergeWasmInitialized() {
-  automergeWasmInitialization ??= initializeBase64Wasm(
-    automergeWasmBase64,
-  ).catch((error: unknown) => {
-    automergeWasmInitialization = null;
+let wasm: Promise<void> | undefined;
+function prepare() {
+  wasm ??= initializeBase64Wasm(automergeWasmBase64).catch((error: unknown) => {
+    wasm = undefined;
     throw error;
   });
-  return automergeWasmInitialization;
+  return wasm;
 }
-
 export interface IndexedDbAutomergeDocumentRepositoryOptions {
   repo?: AutomergeRepositoryLike;
   urlStore?: DocumentRepositoryUrlStore;
@@ -97,230 +88,423 @@ export interface IndexedDbAutomergeDocumentRepositoryOptions {
   assetStore?: GeometryAssetStore;
   localDurableHistoryStore?: LocalDurableHistoryStore;
   historyScope?: string;
-  localPeerSync?:
-    | false
-    | {
-        channelName?: string;
-        peerWaitMs?: number;
-      };
+  localPeerSync?: false | { channelName?: string; peerWaitMs?: number };
 }
-
 export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocumentRepository {
   private repo: AutomergeRepositoryLike | null;
   private readonly urlStore: DocumentRepositoryUrlStore;
-  private readonly databaseName?: string;
-  private readonly storeName?: string;
-  private readonly localPeerSync: IndexedDbAutomergeDocumentRepositoryOptions["localPeerSync"];
   private readonly assetStore: GeometryAssetStore;
   private readonly localDurableHistoryStore: LocalDurableHistoryStore;
-  private readonly historyScope: string;
+  private readonly handles = new Map<
+    DocumentId,
+    AutomergeHandleLike<CollaborativeDocument>
+  >();
+  private readonly actions = new Map<DocumentId, AuthoredActionHistory>();
+  private readonly drafts = new Map<
+    DocumentId,
+    DocumentLocalDurableHistoryState
+  >();
   private readonly statuses = new Map<
     DocumentId,
     DocumentRepositoryRestoreStatus
   >();
   private readonly metadata = new Map<DocumentId, DocumentRepositoryMetadata>();
-  private readonly historyState = new Map<
+  private readonly durabilityFailures = new Map<
     DocumentId,
-    DocumentLocalDurableHistoryState
+    Extract<DocumentRepositoryRestoreStatus, { kind: "failed" }>
   >();
-  private readonly handles = new Map<
+  private readonly publicationVersions = new Map<DocumentId, number>();
+  private readonly publishedEvents = new Map<
     DocumentId,
-    AutomergeHandleLike<AutomergeDocumentEnvelope>
-  >();
-  private readonly localPeerDocuments = new Map<
-    DocumentId,
-    AuthoredModelDocument
-  >();
-  private readonly installedListeners = new Set<string>();
-  private readonly pendingLocalChanges = new Map<
-    DocumentId,
-    DocumentRepositoryChangeSource
-  >();
-  private readonly pendingSeedEchoes = new Map<
-    DocumentId,
-    AuthoredModelDocument
+    DocumentRepositoryChangeEvent
   >();
   private readonly listeners = new Map<
     DocumentId,
     Set<(event: DocumentRepositoryChangeEvent) => void>
   >();
-  private readonly localPeerId = `peer-${Math.random().toString(36).slice(2)}`;
-  private readonly localPeerDocumentChannel: BroadcastChannel | null;
-  private readonly prepareAutomerge: () => Promise<void>;
-
+  private readonly localChanges = new Set<DocumentId>();
+  private readonly queues = new Map<DocumentId, Promise<unknown>>();
+  private readonly options: IndexedDbAutomergeDocumentRepositoryOptions;
   constructor(options: IndexedDbAutomergeDocumentRepositoryOptions = {}) {
-    this.prepareAutomerge = options.repo
-      ? async () => {}
-      : ensureAutomergeWasmInitialized;
+    this.options = options;
     this.repo = options.repo ?? null;
     this.urlStore = options.urlStore ?? new MemoryDocumentRepositoryUrlStore();
-    this.databaseName = options.databaseName;
-    this.storeName = options.storeName;
     this.assetStore =
       options.assetStore ??
       createIndexedDbGeometryAssetStore({
         databaseName: `${options.databaseName ?? "cad-authored-documents"}-geometry-assets`,
       });
-    this.historyScope = options.historyScope ?? "default";
     this.localDurableHistoryStore =
       options.localDurableHistoryStore ??
       createIndexedDbLocalDurableHistoryStore({
         databaseName: `${options.databaseName ?? "cad-authored-documents"}-local-history`,
       });
-    this.localPeerSync = options.localPeerSync;
-    this.localPeerDocumentChannel = createLocalPeerDocumentChannel(
-      options.localPeerSync,
-    );
-    this.localPeerDocumentChannel?.addEventListener(
-      "message",
-      (event: MessageEvent<unknown>) => {
-        this.receiveLocalPeerDocumentMessage(event.data);
-      },
-    );
   }
-
-  async load(input: {
-    documentId: DocumentId;
-    seedDocument: AuthoredModelDocument;
-  }): Promise<DocumentRepositoryLoadResult> {
-    try {
-      const repo = await this.getRepo();
-      const url = this.urlStore.get(input.documentId);
-      if (!url) {
-        return await this.createSeedDocument(
+  private async getRepo() {
+    if (!this.repo) {
+      await prepare();
+      this.repo ??= new Repo({
+        storage: new IndexedDBStorageAdapter(
+          this.options.databaseName ?? "cad-authored-documents",
+          this.options.storeName ?? "documents",
+        ),
+        network:
+          this.options.localPeerSync && typeof BroadcastChannel !== "undefined"
+            ? [
+                new BroadcastChannelNetworkAdapter({
+                  channelName:
+                    this.options.localPeerSync.channelName ??
+                    "cad-authored-documents",
+                  peerWaitMs: this.options.localPeerSync.peerWaitMs ?? 100,
+                }),
+              ]
+            : [],
+      }) as AutomergeRepositoryLike;
+    }
+    return this.repo;
+  }
+  private enqueue<T>(
+    documentId: DocumentId,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.queues.get(documentId) ?? Promise.resolve();
+    // A rejected operation is returned to its caller; it must not poison subsequent transactions.
+    const next = previous.then(action, action);
+    this.queues.set(documentId, next);
+    return next;
+  }
+  load(
+    input: Parameters<DocumentRepository["load"]>[0],
+  ): Promise<DocumentRepositoryLoadResult> {
+    return this.enqueue(input.documentId, async () => {
+      try {
+        const repo = await this.getRepo();
+        const existing = this.handles.get(input.documentId);
+        const url = this.urlStore.get(input.documentId);
+        if (!existing && !url)
+          return this.seed(input.documentId, input.seedDocument);
+        const handle =
+          existing ?? (await repo.find<CollaborativeDocument>(url!));
+        await handle.whenReady();
+        const document = materializeCollaborativeDocument(handle.doc());
+        const parsed = parseAuthoredModelDocument(document);
+        if (!parsed.ok) return this.fail(input.documentId, parsed.diagnostic);
+        if (parsed.document.documentId !== input.documentId)
+          return this.fail(input.documentId, {
+            reasonCode: "identity-mismatch",
+            message: "Document identity does not match.",
+          });
+        this.install(input.documentId, handle);
+        await this.loadDrafts(input.documentId);
+        // Explicit load retries unresolved durability, never merely relabels live state as restored.
+        if (this.durabilityFailures.has(input.documentId)) {
+          await repo.flush?.([handle.documentId]);
+          this.durabilityFailures.delete(input.documentId);
+        }
+        return this.publish(input.documentId, handle, "restore");
+      } catch (error) {
+        if (this.durabilityFailures.has(input.documentId))
+          return this.durabilityFailed(input.documentId, error);
+        return this.failure(input.documentId, "automerge-load-failed", error);
+      }
+    });
+  }
+  initialize(
+    input: Parameters<DocumentRepository["initialize"]>[0],
+  ): Promise<DocumentRepositoryMutationResult> {
+    return this.enqueue(input.documentId, async () => {
+      const unresolved = this.durabilityFailures.get(input.documentId);
+      if (unresolved) return { ok: false, status: unresolved };
+      try {
+        const parsed = parseAuthoredModelDocument(
+          structuredClone(input.document),
+        );
+        if (!parsed.ok) return this.fail(input.documentId, parsed.diagnostic);
+        const stored = await storeGeometryAssetInputsForManifest(
+          this.assetStore,
+          parsed.document.assets.records,
+          input.assets ?? [],
+        );
+        if (!stored.ok)
+          return this.fail(input.documentId, {
+            reasonCode: stored.diagnostic.code,
+            message: stored.diagnostic.message,
+          });
+        return await this.seed(input.documentId, parsed.document);
+      } catch (error) {
+        return this.failure(
           input.documentId,
-          input.seedDocument,
+          "automerge-initialize-failed",
+          error,
         );
       }
-
-      const handle = await repo.find<AutomergeDocumentEnvelope>(url);
-      await handle.whenReady();
-      this.handles.set(input.documentId, handle);
-      this.installHandleListener(input.documentId, handle);
+    });
+  }
+  private async seed(
+    documentId: DocumentId,
+    document: AuthoredModelDocument,
+  ): Promise<DocumentRepositoryLoadResult> {
+    const parsed = parseAuthoredModelDocument(structuredClone(document));
+    if (!parsed.ok) return this.fail(documentId, parsed.diagnostic);
+    if (document.documentId !== documentId)
+      return this.fail(documentId, {
+        reasonCode: "identity-mismatch",
+        message: "Document identity does not match.",
+      });
+    const repo = await this.getRepo();
+    const handle = repo.create(createCollaborativeDocument(parsed.document));
+    await handle.whenReady();
+    await repo.flush?.([handle.documentId]);
+    this.install(documentId, handle);
+    this.urlStore.set(documentId, handle.url);
+    this.actions.set(documentId, new AuthoredActionHistory());
+    await this.saveDrafts(
+      documentId,
+      createEmptyDocumentLocalDurableHistoryState(),
+    );
+    return this.publish(documentId, handle, "seed");
+  }
+  mutate(
+    input: Parameters<DocumentRepository["mutate"]>[0],
+  ): Promise<DocumentRepositoryMutationResult> {
+    return this.enqueue(input.documentId, async () => {
+      const unresolved = this.durabilityFailures.get(input.documentId);
+      if (unresolved) return { ok: false, status: unresolved };
       const parsed = parseAuthoredModelDocument(
-        structuredClone(handle.doc().authoredDocument),
+        structuredClone(input.document),
       );
-      if (!parsed.ok) {
-        return this.fail(input.documentId, parsed.diagnostic);
-      }
-
-      const status = {
-        kind: "restored" as const,
-        documentId: input.documentId,
-      };
+      if (!parsed.ok) return this.fail(input.documentId, parsed.diagnostic);
+      const stored = await storeGeometryAssetInputsForManifest(
+        this.assetStore,
+        parsed.document.assets.records,
+        input.assets ?? [],
+      );
+      if (!stored.ok)
+        return this.fail(input.documentId, {
+          reasonCode: stored.diagnostic.code,
+          message: stored.diagnostic.message,
+        });
       const assets = await collectAssetAvailability(
         this.assetStore,
         parsed.document.assets.records,
       );
-      const metadata = this.createMetadata(
-        input.documentId,
-        handle,
-        "restore",
-        assets.availability,
-      );
-      this.statuses.set(input.documentId, status);
-      this.metadata.set(input.documentId, metadata);
-      await this.loadHistoryState(input.documentId);
-      return {
-        ok: true,
-        document: parsed.document,
-        diagnostics: assets.diagnostics,
-        assetAvailability: assets.availability,
-        status,
-        metadata,
+      if (assets.diagnostics.length)
+        return this.fail(input.documentId, {
+          reasonCode: assets.diagnostics[0]!.code,
+          message: assets.diagnostics[0]!.message,
+        });
+      return this.transact(input.documentId, "local", input);
+    });
+  }
+  private async transact(
+    documentId: DocumentId,
+    source: "local" | "undo" | "redo",
+    input?: Parameters<DocumentRepository["mutate"]>[0],
+  ): Promise<DocumentRepositoryMutationResult> {
+    const handle = this.handles.get(documentId);
+    if (!handle)
+      return this.fail(documentId, {
+        reasonCode: "document-not-initialized",
+        message: "Load or initialize the document before editing.",
+      });
+    const unresolved = this.durabilityFailures.get(documentId);
+    if (unresolved) return { ok: false, status: unresolved };
+    const staged = this.owner(documentId).fork();
+    let result: AuthoredActionResult = { status: "unchanged" };
+    try {
+      const identity = this.identity(documentId);
+      this.localChanges.add(documentId);
+      handle.change((storage) => {
+        const current = documentActionState(
+          materializeCollaborativeDocument(storage),
+        );
+        result = input
+          ? staged.commit(
+              identity,
+              current,
+              documentActionState(input.document),
+              input.label ?? "Edit document",
+              documentActionState(input.expected),
+            )
+          : staged[source === "undo" ? "undo" : "redo"](identity, current);
+        if (result.status === "blocked") return;
+        if (result.status === "applied")
+          applyCollaborativeWrites(storage, result.writes);
+        if (input)
+          updateDocumentProvenance(storage, input.document, input.expected);
+      });
+      // DocHandle.change emits synchronously. Only suppress that local echo;
+      // peer changes arriving while flush awaits must still reach subscribers.
+      this.localChanges.delete(documentId);
+      const checked = result as AuthoredActionResult;
+      if (checked.status === "blocked")
+        return this.fail(documentId, {
+          reasonCode: checked.reason,
+          message: `Document action blocked: ${checked.reason} (${checked.targets.map((p) => p.join(".")).join(", ")})`,
+        });
+      // change() has already applied and may have shared these writes. The ledger must
+      // match that live state, even if the subsequent durability barrier fails.
+      this.actions.set(documentId, staged);
+      const pending = {
+        kind: "failed" as const,
+        documentId,
+        diagnostic: {
+          reasonCode: "automerge-durability-pending",
+          message: "Document changes are applied; persistence is pending.",
+        },
       };
-    } catch (error: unknown) {
-      return this.fail(
-        input.documentId,
-        createFailureDiagnostic(
-          "automerge-load-failed",
-          error,
-          "Authored document could not be loaded.",
-        ),
+      this.durabilityFailures.set(documentId, pending);
+      this.statuses.set(documentId, pending);
+      await (await this.getRepo()).flush?.([handle.documentId]);
+      this.durabilityFailures.delete(documentId);
+      return await this.publish(documentId, handle, source);
+    } catch (error) {
+      if (this.durabilityFailures.has(documentId)) {
+        const failed = this.durabilityFailed(documentId, error);
+        await this.publish(documentId, handle, source);
+        return failed;
+      }
+      return this.failure(
+        documentId,
+        error instanceof DocumentProvenanceConflict
+          ? "provenance-conflict"
+          : "automerge-write-failed",
+        error,
       );
+    } finally {
+      this.localChanges.delete(documentId);
     }
   }
-
-  async mutate(input: {
-    documentId: DocumentId;
-    document: AuthoredModelDocument;
-    assets?: readonly GeometryAssetBlobInput[];
-  }): Promise<DocumentRepositoryMutationResult> {
-    const parsed = parseAuthoredModelDocument(structuredClone(input.document));
-    if (!parsed.ok) {
-      return this.fail(input.documentId, parsed.diagnostic);
+  private owner(documentId: DocumentId) {
+    let owner = this.actions.get(documentId);
+    if (!owner) {
+      owner = new AuthoredActionHistory();
+      this.actions.set(documentId, owner);
     }
-
-    const stored = await storeGeometryAssetInputsForManifest(
-      this.assetStore,
-      parsed.document.assets.records,
-      input.assets ?? [],
+    return owner;
+  }
+  private identity(documentId: DocumentId) {
+    const handle = this.handles.get(documentId);
+    if (!handle) throw new Error("Document actor unavailable before load");
+    return {
+      actorId: getActorId(handle.doc()),
+      documentId,
+      context: { kind: "document" as const },
+    };
+  }
+  async getDurableHistoryAvailability(documentId: DocumentId) {
+    if (!this.handles.has(documentId))
+      return { canUndo: false, canRedo: false };
+    const entries = this.owner(documentId).entries(this.identity(documentId));
+    return {
+      canUndo: entries.undo.length > 0,
+      canRedo: entries.redo.length > 0,
+    };
+  }
+  undoDurableHistory(
+    documentId: DocumentId,
+  ): Promise<DocumentRepositoryMutationResult | null> {
+    return this.enqueue(documentId, async () =>
+      (await this.getDurableHistoryAvailability(documentId)).canUndo
+        ? this.transact(documentId, "undo")
+        : null,
     );
-    if (!stored.ok) {
-      return this.fail(input.documentId, {
-        reasonCode: stored.diagnostic.code,
-        message: stored.diagnostic.message,
-      });
-    }
-
+  }
+  redoDurableHistory(
+    documentId: DocumentId,
+  ): Promise<DocumentRepositoryMutationResult | null> {
+    return this.enqueue(documentId, async () =>
+      (await this.getDurableHistoryAvailability(documentId)).canRedo
+        ? this.transact(documentId, "redo")
+        : null,
+    );
+  }
+  private install(
+    documentId: DocumentId,
+    handle: AutomergeHandleLike<CollaborativeDocument>,
+  ) {
+    if (this.handles.get(documentId) === handle) return;
+    this.handles.set(documentId, handle);
+    this.publicationVersions.set(
+      documentId,
+      (this.publicationVersions.get(documentId) ?? 0) + 1,
+    );
+    this.publishedEvents.delete(documentId);
+    handle.on("change", () => {
+      if (
+        this.handles.get(documentId) !== handle ||
+        this.localChanges.has(documentId)
+      )
+        return;
+      // Peer changes never clear or rewrite this actor's ledger.
+      void this.publish(documentId, handle, "peer");
+    });
+  }
+  private async publish(
+    documentId: DocumentId,
+    handle: AutomergeHandleLike<CollaborativeDocument>,
+    source: DocumentRepositoryChangeSource,
+  ): Promise<DocumentRepositoryLoadResult> {
+    const version = (this.publicationVersions.get(documentId) ?? 0) + 1;
+    this.publicationVersions.set(documentId, version);
+    const snapshot = handle.doc();
+    const heads = [...(handle.heads?.() ?? [])];
+    const actorId = getActorId(snapshot);
+    const parsed = parseAuthoredModelDocument(
+      materializeCollaborativeDocument(snapshot),
+    );
+    if (!parsed.ok) return this.fail(documentId, parsed.diagnostic);
     const assets = await collectAssetAvailability(
       this.assetStore,
       parsed.document.assets.records,
     );
-    if (assets.diagnostics.length > 0) {
-      const diagnostic = assets.diagnostics[0]!;
-      return this.fail(input.documentId, {
-        reasonCode: diagnostic.code,
-        message: diagnostic.message,
-      });
-    }
-
-    try {
-      const handle = await this.getHandle(input.documentId, parsed.document);
-      const previousDocument = structuredClone(handle.doc().authoredDocument);
-      this.pendingLocalChanges.set(input.documentId, "local");
-      handle.change((doc) => {
-        doc.authoredDocument = structuredClone(parsed.document);
-      });
-      await this.flush(handle);
-      await this.recordCommittedDocumentMutation(
-        input.documentId,
-        previousDocument,
-      );
-      const status = {
-        kind: "restored" as const,
-        documentId: input.documentId,
-      };
-      const metadata = this.createMetadata(
-        input.documentId,
-        handle,
-        "local",
-        assets.availability,
-      );
-      this.statuses.set(input.documentId, status);
-      this.metadata.set(input.documentId, metadata);
-      await this.broadcastLocalPeerDocument(input.documentId, parsed.document);
+    if (
+      this.handles.get(documentId) !== handle ||
+      this.publicationVersions.get(documentId) !== version
+    ) {
+      if (source !== "peer" && this.handles.get(documentId) === handle)
+        return this.publish(documentId, handle, source);
       return {
-        ok: true,
-        document: parsed.document,
-        diagnostics: [],
-        assetAvailability: assets.availability,
-        status,
-        metadata,
+        ok: false,
+        status: {
+          kind: "failed",
+          documentId,
+          diagnostic: {
+            reasonCode: "publication-superseded",
+            message:
+              "A newer document context or publication superseded this result.",
+          },
+        },
       };
-    } catch (error: unknown) {
-      this.pendingLocalChanges.delete(input.documentId);
-      return this.fail(
-        input.documentId,
-        createFailureDiagnostic(
-          "automerge-write-failed",
-          error,
-          "Authored document could not be written.",
-        ),
-      );
     }
+    const unresolved = this.durabilityFailures.get(documentId);
+    const status = unresolved ?? {
+      kind: source === "seed" ? ("seeded" as const) : ("restored" as const),
+      documentId,
+    };
+    const metadata: DocumentRepositoryMetadata = {
+      actorId,
+      documentId,
+      heads,
+      source,
+      storageKey: handle.url,
+      assetAvailability: assets.availability,
+    };
+    this.statuses.set(documentId, status);
+    this.metadata.set(documentId, metadata);
+    const result = {
+      ok: true as const,
+      document: parsed.document,
+      diagnostics: assets.diagnostics,
+      assetAvailability: assets.availability,
+      status,
+      metadata,
+    };
+    this.publishedEvents.set(documentId, structuredClone(result));
+    for (const listener of this.listeners.get(documentId) ?? [])
+      listener(structuredClone(result));
+    return unresolved ? { ok: false, status: unresolved } : result;
   }
-
   subscribe(
     documentId: DocumentId,
     listener: (event: DocumentRepositoryChangeEvent) => void,
@@ -328,766 +512,197 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     const listeners = this.listeners.get(documentId) ?? new Set();
     listeners.add(listener);
     this.listeners.set(documentId, listeners);
-    this.emitCurrentDocument(documentId, listener);
-
+    const published = this.publishedEvents.get(documentId);
+    if (published)
+      listener({
+        ...structuredClone(published),
+        status: this.durabilityFailures.get(documentId) ?? published.status,
+      });
     return () => {
       listeners.delete(listener);
     };
   }
-
-  async reset(
-    documentId: DocumentId,
-  ): Promise<DocumentRepositoryRestoreStatus> {
-    const url = this.urlStore.get(documentId);
-    if (url) {
-      const repo = await this.getRepo();
-      repo.delete(url);
-    }
-    this.handles.delete(documentId);
-    this.localPeerDocuments.delete(documentId);
-    this.historyState.delete(documentId);
-    this.urlStore.delete(documentId);
-    await this.localDurableHistoryStore.clear({
-      documentId,
-      scope: this.historyScope,
+  reset(documentId: DocumentId): Promise<DocumentRepositoryRestoreStatus> {
+    return this.enqueue(documentId, async () => {
+      const unresolved = this.durabilityFailures.get(documentId);
+      if (unresolved) return unresolved;
+      const url = this.urlStore.get(documentId);
+      if (url) (await this.getRepo()).delete(url);
+      this.handles.delete(documentId);
+      this.actions.delete(documentId);
+      this.drafts.delete(documentId);
+      this.urlStore.delete(documentId);
+      const cleared = await this.localDurableHistoryStore.clear({
+        documentId,
+        scope: this.options.historyScope ?? "default",
+      });
+      if (!cleared.ok && cleared.reason === "failed") throw cleared.error;
+      const status = { kind: "reset" as const, documentId };
+      this.statuses.set(documentId, status);
+      this.metadata.delete(documentId);
+      this.publishedEvents.delete(documentId);
+      this.publicationVersions.set(
+        documentId,
+        (this.publicationVersions.get(documentId) ?? 0) + 1,
+      );
+      return status;
     });
-    const status = { kind: "reset" as const, documentId };
-    this.statuses.set(documentId, status);
-    this.metadata.set(documentId, { documentId, heads: [], source: "reset" });
-    return status;
   }
-
   getRestoreStatus(documentId: DocumentId): DocumentRepositoryRestoreStatus {
     return this.statuses.get(documentId) ?? { kind: "pending", documentId };
   }
-
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata {
     return (
       this.metadata.get(documentId) ?? {
+        actorId: "",
         documentId,
         heads: [],
         source: "restore",
       }
     );
   }
-
-  async getDurableHistoryAvailability(
-    documentId: DocumentId,
-  ): Promise<DurableHistoryAvailability> {
-    const state = await this.loadHistoryState(documentId);
-    return createDurableHistoryAvailability({
-      canUndo: state.undoStack.length > 0,
-      canRedo: state.redoStack.length > 0,
-    });
-  }
-
-  async undoDurableHistory(
-    documentId: DocumentId,
-  ): Promise<DocumentRepositoryMutationResult | null> {
-    const state = await this.loadHistoryState(documentId);
-    const nextState = structuredClone(state);
-    const nextDocument = nextState.undoStack.pop();
-    const handle = this.handles.get(documentId);
-    if (!nextDocument || !handle) {
-      return null;
-    }
-
-    nextState.redoStack.push(structuredClone(handle.doc().authoredDocument));
-    return this.applyHistoryDocument(
-      documentId,
-      nextDocument,
-      "undo",
-      nextState,
-    );
-  }
-
-  async redoDurableHistory(
-    documentId: DocumentId,
-  ): Promise<DocumentRepositoryMutationResult | null> {
-    const state = await this.loadHistoryState(documentId);
-    const nextState = structuredClone(state);
-    const nextDocument = nextState.redoStack.pop();
-    const handle = this.handles.get(documentId);
-    if (!nextDocument || !handle) {
-      return null;
-    }
-
-    nextState.undoStack.push(structuredClone(handle.doc().authoredDocument));
-    return this.applyHistoryDocument(
-      documentId,
-      nextDocument,
-      "redo",
-      nextState,
-    );
-  }
-
-  async getSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    const entry =
-      (await this.loadHistoryState(documentId)).draftSessions[draftKey] ?? null;
-    return {
-      session: entry ? structuredClone(entry.current) : null,
-      availability: createDraftHistoryAvailability(entry),
-    };
-  }
-
-  async saveSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-    session: PersistedSketchDraftSession,
-  ): Promise<DurableHistoryAvailability> {
-    const state = await this.loadHistoryState(documentId);
-    const nextSession = structuredClone(session);
-    const current = state.draftSessions[draftKey];
-    if (!current) {
-      state.draftSessions[draftKey] = {
-        current: nextSession,
-        undoStack: [],
-        redoStack: [],
-      };
-      await this.persistHistoryState(documentId, state);
-      return createDraftHistoryAvailability(state.draftSessions[draftKey]);
-    }
-
-    if (draftSessionsEqual(current.current, nextSession)) {
-      return createDraftHistoryAvailability(current);
-    }
-
-    current.undoStack.push(current.current);
-    if (current.undoStack.length > MAX_DRAFT_UNDO_STACK_SIZE) {
-      current.undoStack.splice(
-        0,
-        current.undoStack.length - MAX_DRAFT_UNDO_STACK_SIZE,
-      );
-    }
-    current.redoStack = [];
-    current.current = nextSession;
-    await this.persistHistoryState(documentId, state);
-    return createDraftHistoryAvailability(current);
-  }
-
-  async undoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    const state = await this.loadHistoryState(documentId);
-    const entry = state.draftSessions[draftKey] ?? null;
-    if (!entry) {
-      return {
-        session: null,
-        availability: createDurableHistoryAvailability({
-          canUndo: false,
-          canRedo: false,
-        }),
-      };
-    }
-
-    const nextSession = entry.undoStack.pop();
-    if (!nextSession) {
-      return {
-        session: structuredClone(entry.current),
-        availability: createDraftHistoryAvailability(entry),
-      };
-    }
-
-    entry.redoStack.push(entry.current);
-    entry.current = nextSession;
-    await this.persistHistoryState(documentId, state);
-    return {
-      session: structuredClone(entry.current),
-      availability: createDraftHistoryAvailability(entry),
-    };
-  }
-
-  async redoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    const state = await this.loadHistoryState(documentId);
-    const entry = state.draftSessions[draftKey] ?? null;
-    if (!entry) {
-      return {
-        session: null,
-        availability: createDurableHistoryAvailability({
-          canUndo: false,
-          canRedo: false,
-        }),
-      };
-    }
-
-    const nextSession = entry.redoStack.pop();
-    if (!nextSession) {
-      return {
-        session: structuredClone(entry.current),
-        availability: createDraftHistoryAvailability(entry),
-      };
-    }
-
-    entry.undoStack.push(entry.current);
-    entry.current = nextSession;
-    await this.persistHistoryState(documentId, state);
-    return {
-      session: structuredClone(entry.current),
-      availability: createDraftHistoryAvailability(entry),
-    };
-  }
-
-  async clearSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-  ): Promise<void> {
-    const state = await this.loadHistoryState(documentId);
-    delete state.draftSessions[draftKey];
-    await this.persistHistoryState(documentId, state);
-  }
-
-  async getGeometryAssetBytes(hash: GeometryAssetHash) {
-    const asset = [
-      ...[...this.handles.values()].map(
-        (handle) => handle.doc().authoredDocument,
-      ),
-      ...this.localPeerDocuments.values(),
-    ]
-      .flatMap((document) => document.assets.records)
-      .find((record) => record.hash === hash);
-    return asset ? this.getGeometryAssetRecord(asset) : null;
-  }
-
-  async getGeometryAssetRecord(asset: GeometryAssetRecord) {
-    const result = await this.assetStore.get(asset);
-    return result.ok ? result.bytes : null;
-  }
-
-  private async createSeedDocument(
-    documentId: DocumentId,
-    seedDocument: AuthoredModelDocument,
-  ): Promise<DocumentRepositoryLoadResult> {
-    const repo = await this.getRepo();
-    const parsed = parseAuthoredModelDocument(structuredClone(seedDocument));
-    if (!parsed.ok) {
-      return this.fail(documentId, parsed.diagnostic);
-    }
-
-    const handle = repo.create<AutomergeDocumentEnvelope>({
-      authoredDocument: structuredClone(parsed.document),
-    });
-    await handle.whenReady();
-    this.handles.set(documentId, handle);
-    this.urlStore.set(documentId, handle.url);
-    await this.flush(handle);
-    const status = { kind: "seeded" as const, documentId };
-    const assets = await collectAssetAvailability(
-      this.assetStore,
-      parsed.document.assets.records,
-    );
-    const metadata = this.createMetadata(
-      documentId,
-      handle,
-      "seed",
-      assets.availability,
-    );
-    this.statuses.set(documentId, status);
-    this.metadata.set(documentId, metadata);
-    this.pendingSeedEchoes.set(documentId, structuredClone(parsed.document));
-    this.installHandleListener(documentId, handle);
-    await this.persistHistoryState(
-      documentId,
-      createEmptyDocumentLocalDurableHistoryState(),
-    );
-    this.notify(
-      documentId,
-      parsed.document,
-      status,
-      metadata,
-      assets.diagnostics,
-      assets.availability,
-    );
-    return {
-      ok: true,
-      document: parsed.document,
-      diagnostics: assets.diagnostics,
-      assetAvailability: assets.availability,
-      status,
-      metadata,
-    };
-  }
-
-  private async getHandle(
-    documentId: DocumentId,
-    seedDocument: AuthoredModelDocument,
-  ) {
-    const existing = this.handles.get(documentId);
-    if (existing) {
-      return existing;
-    }
-
-    const url = this.urlStore.get(documentId);
-    if (!url) {
-      const seeded = await this.createSeedDocument(documentId, seedDocument);
-      if (!seeded.ok) {
-        throw new Error(seeded.status.diagnostic.message);
-      }
-      return this.handles.get(documentId)!;
-    }
-
-    const repo = await this.getRepo();
-    const handle = await repo.find<AutomergeDocumentEnvelope>(url);
-    await handle.whenReady();
-    this.handles.set(documentId, handle);
-    this.installHandleListener(documentId, handle);
-    return handle;
-  }
-
-  private installHandleListener(
-    documentId: DocumentId,
-    handle: AutomergeHandleLike<AutomergeDocumentEnvelope>,
-  ) {
-    const listenerKey = `${documentId}:${handle.documentId}`;
-    if (this.installedListeners.has(listenerKey)) {
-      return;
-    }
-    this.installedListeners.add(listenerKey);
-
-    const callback = () => {
-      void this.handleAutomergeChange(documentId, handle);
-    };
-    handle.on("change", callback);
-  }
-
-  private async handleAutomergeChange(
-    documentId: DocumentId,
-    handle: AutomergeHandleLike<AutomergeDocumentEnvelope>,
-  ) {
-    const parsed = parseAuthoredModelDocument(
-      structuredClone(handle.doc().authoredDocument),
-    );
-    if (!parsed.ok) {
-      this.fail(documentId, parsed.diagnostic);
-      return;
-    }
-
-    const status = { kind: "restored" as const, documentId };
-    const source = this.pendingLocalChanges.get(documentId) ?? "peer";
-    this.pendingLocalChanges.delete(documentId);
-    const assets = await collectAssetAvailability(
-      this.assetStore,
-      parsed.document.assets.records,
-    );
-    const metadata = this.createMetadata(
-      documentId,
-      handle,
-      source,
-      assets.availability,
-    );
-    const previousMetadata = this.metadata.get(documentId);
-    if (
-      source === "peer" &&
-      previousMetadata &&
-      previousMetadata.source !== "peer" &&
-      sameStringSet(previousMetadata.heads, metadata.heads)
-    ) {
-      return;
-    }
-    if (
-      source === "peer" &&
-      previousMetadata?.source === "seed" &&
-      (sameStringSet(previousMetadata.heads, metadata.heads) ||
-        documentsEqual(this.pendingSeedEchoes.get(documentId), parsed.document))
-    ) {
-      return;
-    }
-    this.pendingSeedEchoes.delete(documentId);
-    if (source === "peer") {
-      const historyState = await this.loadHistoryState(documentId);
-      historyState.undoStack = [];
-      historyState.redoStack = [];
-      await this.persistHistoryState(documentId, historyState);
-    }
-    this.statuses.set(documentId, status);
-    this.metadata.set(documentId, metadata);
-    this.notify(
-      documentId,
-      parsed.document,
-      status,
-      metadata,
-      assets.diagnostics,
-      assets.availability,
-    );
-  }
-
-  private async flush(handle: AutomergeHandleLike<AutomergeDocumentEnvelope>) {
-    const repo = await this.getRepo();
-    await repo.flush?.([handle.documentId]);
-  }
-
-  private async getRepo() {
-    if (this.repo) {
-      return this.repo;
-    }
-
-    await this.prepareAutomerge();
-    this.repo = new Repo({
-      storage: new IndexedDBStorageAdapter(
-        this.databaseName ?? "cad-authored-documents",
-        this.storeName ?? "documents",
-      ),
-      network: createLocalPeerNetwork(this.localPeerSync),
-    }) as AutomergeRepositoryLike;
-    return this.repo;
-  }
-
   private fail(
     documentId: DocumentId,
     diagnostic: AuthoredModelDocumentDiagnostic,
   ): Extract<DocumentRepositoryLoadResult, { ok: false }> {
-    const status = { kind: "failed" as const, documentId, diagnostic };
+    const status = this.durabilityFailures.get(documentId) ?? {
+      kind: "failed" as const,
+      documentId,
+      diagnostic,
+    };
     this.statuses.set(documentId, status);
     return { ok: false, status };
   }
-
-  private async loadHistoryState(documentId: DocumentId) {
-    const existing = this.historyState.get(documentId);
-    if (existing) {
-      return existing;
-    }
-
-    const result = await this.localDurableHistoryStore.load({
+  private durabilityFailed(documentId: DocumentId, error: unknown) {
+    const status = {
+      kind: "failed" as const,
       documentId,
-      scope: this.historyScope,
+      diagnostic: {
+        reasonCode: "automerge-durability-failed",
+        message: `Document changes are applied but not durably saved. Load to retry persistence before further edits: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    };
+    this.durabilityFailures.set(documentId, status);
+    this.statuses.set(documentId, status);
+    return { ok: false as const, status };
+  }
+  private failure(documentId: DocumentId, reasonCode: string, error: unknown) {
+    return this.fail(documentId, {
+      reasonCode,
+      message: error instanceof Error ? error.message : String(error),
     });
-    if (!result.ok) {
-      const empty = createEmptyDocumentLocalDurableHistoryState();
-      this.historyState.set(documentId, empty);
-      return empty;
-    }
-
-    this.historyState.set(documentId, result.value);
-    return result.value;
+  }
+  async getGeometryAssetBytes(hash: GeometryAssetHash) {
+    const record = [...this.handles.values()]
+      .flatMap(
+        (handle) =>
+          materializeCollaborativeDocument(handle.doc()).assets.records,
+      )
+      .find((record) => record.hash === hash);
+    return record ? this.getGeometryAssetRecord(record) : null;
+  }
+  async getGeometryAssetRecord(record: GeometryAssetRecord) {
+    const result = await this.assetStore.get(record);
+    return result.ok ? result.bytes : null;
   }
 
-  private async persistHistoryState(
+  // NOT-YET-replaced private draft RPC seam. T03/T04 remove it with its editor callers.
+  private async loadDrafts(documentId: DocumentId) {
+    const existing = this.drafts.get(documentId);
+    if (existing) return existing;
+    const result = await this.localDurableHistoryStore.load({
+      documentId,
+      scope: this.options.historyScope ?? "default",
+    });
+    if (!result.ok && result.reason === "failed") throw result.error;
+    const state = result.ok
+      ? result.value
+      : createEmptyDocumentLocalDurableHistoryState();
+    this.drafts.set(documentId, state);
+    return state;
+  }
+  private async saveDrafts(
     documentId: DocumentId,
     state: DocumentLocalDurableHistoryState,
   ) {
-    this.historyState.set(documentId, structuredClone(state));
-    await this.localDurableHistoryStore.save({
+    const result = await this.localDurableHistoryStore.save({
       documentId,
-      scope: this.historyScope,
+      scope: this.options.historyScope ?? "default",
       state,
     });
+    if (!result.ok && result.reason === "failed") throw result.error;
+    this.drafts.set(documentId, structuredClone(state));
   }
-
-  private async recordCommittedDocumentMutation(
-    documentId: DocumentId,
-    previousDocument: AuthoredModelDocument,
-  ) {
-    const state = await this.loadHistoryState(documentId);
-    state.undoStack.push(structuredClone(previousDocument));
-    state.redoStack = [];
-    await this.persistHistoryState(documentId, state);
-  }
-
-  private async applyHistoryDocument(
-    documentId: DocumentId,
-    document: AuthoredModelDocument,
-    source: Extract<DocumentRepositoryMetadata["source"], "undo" | "redo">,
-    nextHistoryState: DocumentLocalDurableHistoryState,
-  ): Promise<DocumentRepositoryMutationResult> {
-    const handle = this.handles.get(documentId);
-    if (!handle) {
-      return this.fail(
-        documentId,
-        createFailureDiagnostic(
-          "automerge-history-handle-missing",
-          new Error("Document history handle is unavailable."),
-          "Document history handle is unavailable.",
-        ),
-      );
-    }
-
-    try {
-      this.pendingLocalChanges.set(documentId, source);
-      handle.change((doc) => {
-        doc.authoredDocument = structuredClone(document);
-      });
-      await this.flush(handle);
-      await this.persistHistoryState(documentId, nextHistoryState);
-      const assets = await collectAssetAvailability(
-        this.assetStore,
-        document.assets.records,
-      );
-      const status = { kind: "restored" as const, documentId };
-      const metadata = this.createMetadata(
-        documentId,
-        handle,
-        source,
-        assets.availability,
-      );
-      this.statuses.set(documentId, status);
-      this.metadata.set(documentId, metadata);
-      await this.broadcastLocalPeerDocument(documentId, document);
-      this.pendingLocalChanges.delete(documentId);
-      this.notify(
-        documentId,
-        document,
-        status,
-        metadata,
-        assets.diagnostics,
-        assets.availability,
-      );
-      return {
-        ok: true,
-        document: structuredClone(document),
-        diagnostics: assets.diagnostics,
-        assetAvailability: assets.availability,
-        status,
-        metadata,
-      };
-    } catch (error: unknown) {
-      this.pendingLocalChanges.delete(documentId);
-      return this.fail(
-        documentId,
-        createFailureDiagnostic(
-          "automerge-write-failed",
-          error,
-          "Authored document could not be written.",
-        ),
-      );
-    }
-  }
-
-  private createMetadata(
-    documentId: DocumentId,
-    handle: AutomergeHandleLike<AutomergeDocumentEnvelope>,
-    source: DocumentRepositoryChangeSource,
-    assetAvailability = [] as NonNullable<
-      DocumentRepositoryMetadata["assetAvailability"]
-    >,
-  ): DocumentRepositoryMetadata {
-    const heads = handle.heads?.() ?? [
-      `automerge:${handle.documentId}:${handle.doc().authoredDocument.revisionId}`,
-    ];
+  async getSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    const entry = (await this.loadDrafts(documentId)).draftSessions[draftKey];
     return {
-      documentId,
-      heads: [...heads].sort(),
-      source,
-      storageKey: handle.url,
-      assetAvailability,
+      session: entry ? structuredClone(entry.current) : null,
+      availability: draftAvailability(entry),
     };
   }
-
-  private notify(
+  async saveSketchDraftHistory(
     documentId: DocumentId,
-    document: AuthoredModelDocument,
-    status: DocumentRepositoryRestoreStatus,
-    metadata: DocumentRepositoryMetadata,
-    diagnostics: DocumentRepositoryChangeEvent["diagnostics"] = [],
-    assetAvailability: DocumentRepositoryChangeEvent["assetAvailability"] = [],
+    draftKey: string,
+    session: PersistedSketchDraftSession,
   ) {
-    for (const listener of this.listeners.get(documentId) ?? []) {
-      listener({
-        document: structuredClone(document),
-        diagnostics,
-        assetAvailability,
-        status,
-        metadata,
-      });
+    const state = structuredClone(await this.loadDrafts(documentId)),
+      entry = state.draftSessions[draftKey];
+    if (!entry)
+      state.draftSessions[draftKey] = {
+        current: structuredClone(session),
+        undoStack: [],
+        redoStack: [],
+      };
+    else if (!draftSessionsEqual(entry.current, session)) {
+      entry.undoStack.push(entry.current);
+      entry.undoStack = entry.undoStack.slice(-50);
+      entry.redoStack = [];
+      entry.current = structuredClone(session);
     }
+    await this.saveDrafts(documentId, state);
+    return draftAvailability(state.draftSessions[draftKey]);
   }
-
-  private emitCurrentDocument(
+  async undoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    return this.compensateDraft(documentId, draftKey, "undoStack");
+  }
+  async redoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    return this.compensateDraft(documentId, draftKey, "redoStack");
+  }
+  private async compensateDraft(
     documentId: DocumentId,
-    listener: (event: DocumentRepositoryChangeEvent) => void,
+    draftKey: string,
+    direction: "undoStack" | "redoStack",
   ) {
-    const localPeerDocument = this.localPeerDocuments.get(documentId);
-    const status = this.statuses.get(documentId);
-    const metadata = this.metadata.get(documentId);
-
-    if (localPeerDocument && status && metadata) {
-      listener({
-        document: structuredClone(localPeerDocument),
-        diagnostics: [],
-        assetAvailability: metadata.assetAvailability ?? [],
-        status,
-        metadata,
-      });
-      return;
+    const state = structuredClone(await this.loadDrafts(documentId)),
+      entry = state.draftSessions[draftKey];
+    const next = entry?.[direction].pop();
+    if (entry && next) {
+      entry[direction === "undoStack" ? "redoStack" : "undoStack"].push(
+        entry.current,
+      );
+      entry.current = next;
+      await this.saveDrafts(documentId, state);
     }
-
-    const handleDocument = this.handles.get(documentId)?.doc().authoredDocument;
-    if (handleDocument && status && metadata) {
-      listener({
-        document: structuredClone(handleDocument),
-        diagnostics: [],
-        assetAvailability: metadata.assetAvailability ?? [],
-        status,
-        metadata,
-      });
-    }
-  }
-
-  private async broadcastLocalPeerDocument(
-    documentId: DocumentId,
-    document: AuthoredModelDocument,
-  ) {
-    if (!this.localPeerDocumentChannel) {
-      return;
-    }
-
-    const assets: GeometryAssetBlobInput[] = [];
-    for (const asset of document.assets.records) {
-      const bytes = await this.getGeometryAssetRecord(asset);
-      if (bytes) {
-        assets.push({ asset, bytes });
-      }
-    }
-
-    this.localPeerDocumentChannel?.postMessage({
-      type: "cad-authored-document-repository/document-updated",
-      senderId: this.localPeerId,
-      documentId,
-      document: structuredClone(document),
-      assets,
-    } satisfies LocalPeerDocumentMessage);
-  }
-
-  private receiveLocalPeerDocumentMessage(data: unknown) {
-    if (
-      !isLocalPeerDocumentMessage(data) ||
-      data.senderId === this.localPeerId
-    ) {
-      return;
-    }
-
-    void this.handleLocalPeerDocumentMessage(data);
-  }
-
-  private async handleLocalPeerDocumentMessage(data: LocalPeerDocumentMessage) {
-    const parsed = parseAuthoredModelDocument(structuredClone(data.document));
-    if (!parsed.ok) {
-      this.fail(data.documentId, parsed.diagnostic);
-      return;
-    }
-
-    const peerAssets = filterGeometryAssetInputsForManifest(
-      parsed.document.assets.records,
-      (data.assets ?? []).filter(isLocalPeerAssetBlob),
-    );
-    await storeGeometryAssetInputsForManifest(
-      this.assetStore,
-      parsed.document.assets.records,
-      peerAssets,
-    );
-
-    this.localPeerDocuments.set(
-      data.documentId,
-      structuredClone(parsed.document),
-    );
-    const historyState = await this.loadHistoryState(data.documentId);
-    historyState.undoStack = [];
-    historyState.redoStack = [];
-    await this.persistHistoryState(data.documentId, historyState);
-    const assets = await collectAssetAvailability(
-      this.assetStore,
-      parsed.document.assets.records,
-    );
-    const status = { kind: "restored" as const, documentId: data.documentId };
-    const metadata: DocumentRepositoryMetadata = {
-      documentId: data.documentId,
-      heads: [`local-peer:${data.senderId}:${parsed.document.revisionId}`],
-      source: "peer",
-      assetAvailability: assets.availability,
+    return {
+      session: entry ? structuredClone(entry.current) : null,
+      availability: draftAvailability(entry),
     };
-    this.statuses.set(data.documentId, status);
-    this.metadata.set(data.documentId, metadata);
-    this.notify(
-      data.documentId,
-      parsed.document,
-      status,
-      metadata,
-      assets.diagnostics,
-      assets.availability,
-    );
+  }
+  async clearSketchDraftHistory(documentId: DocumentId, draftKey: string) {
+    const state = structuredClone(await this.loadDrafts(documentId));
+    delete state.draftSessions[draftKey];
+    await this.saveDrafts(documentId, state);
   }
 }
-
-function createFailureDiagnostic(
-  reasonCode: string,
-  error: unknown,
-  fallbackMessage: string,
-): AuthoredModelDocumentDiagnostic {
-  return {
-    reasonCode,
-    message: error instanceof Error ? error.message : fallbackMessage,
-  };
+function draftAvailability(entry?: {
+  undoStack: unknown[];
+  redoStack: unknown[];
+}) {
+  return createDurableHistoryAvailability({
+    canUndo: !!entry?.undoStack.length,
+    canRedo: !!entry?.redoStack.length,
+  });
 }
-
-export function createIndexedDbAutomergeDocumentRepository(
-  options?: IndexedDbAutomergeDocumentRepositoryOptions,
-) {
-  return new IndexedDbAutomergeDocumentRepository(options);
-}
-
-function createLocalPeerNetwork(
-  options: IndexedDbAutomergeDocumentRepositoryOptions["localPeerSync"],
-) {
-  if (!options || typeof BroadcastChannel === "undefined") {
-    return [];
-  }
-
-  return [
-    new BroadcastChannelNetworkAdapter({
-      channelName: options?.channelName ?? "cad-authored-documents",
-      peerWaitMs: options?.peerWaitMs ?? 100,
-    }),
-  ];
-}
-
-function createLocalPeerDocumentChannel(
-  options: IndexedDbAutomergeDocumentRepositoryOptions["localPeerSync"],
-) {
-  if (!options || typeof BroadcastChannel === "undefined") {
-    return null;
-  }
-
-  const channelName = options.channelName ?? "cad-authored-documents";
-  return new BroadcastChannel(`${channelName}:documents`);
-}
-
-function isLocalPeerDocumentMessage(
-  value: unknown,
-): value is LocalPeerDocumentMessage {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { type?: unknown }).type ===
-      "cad-authored-document-repository/document-updated" &&
-    typeof (value as { senderId?: unknown }).senderId === "string" &&
-    typeof (value as { documentId?: unknown }).documentId === "string" &&
-    typeof (value as { document?: unknown }).document === "object" &&
-    (value as { document?: unknown }).document !== null &&
-    ((value as { assets?: unknown }).assets === undefined ||
-      Array.isArray((value as { assets?: unknown }).assets))
-  );
-}
-
-function isLocalPeerAssetBlob(value: unknown): value is GeometryAssetBlobInput {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { asset?: { hash?: unknown } }).asset?.hash === "string" &&
-    (value as { bytes?: unknown }).bytes instanceof Uint8Array
-  );
-}
-
-function sameStringSet(left: readonly string[], right: readonly string[]) {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  const rightSet = new Set(right);
-  return left.every((value) => rightSet.has(value));
-}
-
-const MAX_DRAFT_UNDO_STACK_SIZE = 50;
-
-function documentsEqual(left: unknown, right: unknown) {
-  return left !== undefined && JSON.stringify(left) === JSON.stringify(right);
-}
-
 function draftSessionsEqual(
   left: PersistedSketchDraftSession,
   right: PersistedSketchDraftSession,
@@ -1101,22 +716,11 @@ function draftSessionsEqual(
       : true)
   );
 }
-
-function createDraftHistoryAvailability(
-  entry:
-    | {
-        undoStack: unknown[];
-        redoStack: unknown[];
-      }
-    | null
-    | undefined,
-): DurableHistoryAvailability {
-  return createDurableHistoryAvailability({
-    canUndo: (entry?.undoStack.length ?? 0) > 0,
-    canRedo: (entry?.redoStack.length ?? 0) > 0,
-  });
+export function createIndexedDbAutomergeDocumentRepository(
+  options?: IndexedDbAutomergeDocumentRepositoryOptions,
+) {
+  return new IndexedDbAutomergeDocumentRepository(options);
 }
-
 export {
   createLocalStorageDocumentRepositoryUrlStore,
   MemoryDocumentRepositoryUrlStore,

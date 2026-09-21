@@ -154,7 +154,6 @@ export function createModelingService(
     options.documentRepositoryPersistence ?? "blocking";
   let operationHistoryPayload: ModelingOperationHistoryPayload =
     createEmptyOperationHistory(currentDocumentId);
-  let operationHistoryGeneration = 0;
   let canPersistOperationHistory = true;
   let canPersistAuthoredDocument = true;
   let historyRestoreState: ModelingHistoryRestoreState = {
@@ -193,7 +192,6 @@ export function createModelingService(
 
   function resetOperationHistoryPayloadForCurrentRepository() {
     operationHistoryPayload = createEmptyOperationHistoryForCurrentRepository();
-    operationHistoryGeneration += 1;
   }
 
   function canReplayOperationHistoryOverRestoredRepository(
@@ -601,7 +599,7 @@ export function createModelingService(
     }
 
     if (documentRepository) {
-      const writeResult = await documentRepository.mutate({
+      const writeResult = await documentRepository.initialize({
         documentId: currentDocumentId,
         document: activeDocument,
         assets,
@@ -711,6 +709,7 @@ export function createModelingService(
       diagnostics: ModelingDiagnostic[];
     },
   >(
+    expected: AuthoredModelDocument,
     response: ModelingOperationResult,
     result: T,
     input: { baseRepositoryHeads?: readonly string[] },
@@ -732,15 +731,15 @@ export function createModelingService(
     if (createHistoryEntry) {
       appendOperationHistoryEntry(createHistoryEntry());
       if (documentRepositoryPersistence === "background") {
-        enqueueAcceptedAuthoredDocumentPersistence();
+        await enqueueAcceptedAuthoredDocumentPersistence(expected);
         return freshResult;
       }
     } else if (documentRepositoryPersistence === "background") {
-      enqueueAcceptedAuthoredDocumentPersistence();
+      await enqueueAcceptedAuthoredDocumentPersistence(expected);
       return freshResult;
     }
 
-    return persistAcceptedAuthoredDocument(freshResult);
+    return persistAcceptedAuthoredDocument(freshResult, expected);
   }
 
   function notifyModelingDocumentChange(event: DocumentRepositoryChangeEvent) {
@@ -793,7 +792,6 @@ export function createModelingService(
     loadResultPayload: ModelingOperationHistoryPayload,
   ) {
     operationHistoryPayload = structuredClone(loadResultPayload);
-    operationHistoryGeneration = loadResultPayload.entries.length;
     let replayCursor = await getAdapterReplayCursor(adapter, currentDocumentId);
 
     for (const [entryIndex, entry] of loadResultPayload.entries.entries()) {
@@ -921,6 +919,7 @@ export function createModelingService(
 
         const writeResult = await documentRepository!.mutate({
           documentId: currentDocumentId,
+          expected: loadResult.document,
           document: await exportAuthoredDocumentForRepository(),
         });
         if (!writeResult.ok) {
@@ -985,6 +984,7 @@ export function createModelingService(
 
       const writeResult = await documentRepository!.mutate({
         documentId: currentDocumentId,
+        expected: loadResult.document,
         document: await exportAuthoredDocumentForRepository(),
       });
       if (!writeResult.ok) {
@@ -1041,7 +1041,6 @@ export function createModelingService(
     void documentRepository?.reset(currentDocumentId);
     repositoryPersistencePromise = Promise.resolve();
     operationHistoryPayload = createEmptyOperationHistory(currentDocumentId);
-    operationHistoryGeneration += 1;
     canPersistOperationHistory = true;
     canPersistAuthoredDocument = true;
     historyRestoreState = {
@@ -1053,9 +1052,9 @@ export function createModelingService(
 
   function appendOperationHistoryEntry(
     entry: ModelingOperationHistoryEntry,
-  ): number | null {
+  ): void {
     if (!operationHistoryStore || !canPersistOperationHistory) {
-      return null;
+      return;
     }
 
     operationHistoryPayload = {
@@ -1065,8 +1064,7 @@ export function createModelingService(
 
     try {
       operationHistoryStore.save(operationHistoryPayload);
-      operationHistoryGeneration += 1;
-      return operationHistoryGeneration;
+      return;
     } catch (error: unknown) {
       canPersistOperationHistory = false;
       historyRestoreState = createRestoreFailure(
@@ -1077,13 +1075,12 @@ export function createModelingService(
         null,
         operationHistoryPayload.entries.length,
       );
-      return null;
     }
   }
 
   async function persistAcceptedAuthoredDocument<
     T extends { diagnostics: ModelingDiagnostic[] },
-  >(result: T): Promise<T> {
+  >(result: T, expected: AuthoredModelDocument): Promise<T> {
     if (!documentRepository) {
       return result;
     }
@@ -1103,6 +1100,7 @@ export function createModelingService(
 
     const writeResult = await documentRepository.mutate({
       documentId: currentDocumentId,
+      expected,
       document: await exportAuthoredDocumentForRepository(),
     });
 
@@ -1122,34 +1120,29 @@ export function createModelingService(
   }
 
   function reconcileOperationHistoryAfterRepositoryWrite(
-    input: {
-      persistedGeneration: number;
-      persistedEntryCount: number;
-    } | null,
+    persistedEntries: readonly ModelingOperationHistoryEntry[] | null,
   ) {
-    if (!operationHistoryStore || !input || input.persistedEntryCount === 0) {
+    if (!operationHistoryStore || !persistedEntries?.length) {
       return;
     }
 
-    if (input.persistedGeneration === operationHistoryGeneration) {
+    const remaining = operationHistoryPayload.entries.filter(
+      (entry) => !persistedEntries.includes(entry),
+    );
+    if (remaining.length === 0) {
       operationHistoryStore.clear();
       resetOperationHistoryPayloadForCurrentRepository();
       canPersistOperationHistory = true;
       return;
     }
 
-    if (operationHistoryPayload.entries.length < input.persistedEntryCount) {
-      return;
-    }
-
     operationHistoryPayload = {
       ...createEmptyOperationHistoryForCurrentRepository(),
-      entries: operationHistoryPayload.entries.slice(input.persistedEntryCount),
+      entries: remaining,
     };
 
     try {
       operationHistoryStore.save(operationHistoryPayload);
-      operationHistoryGeneration += 1;
       canPersistOperationHistory = true;
     } catch (error: unknown) {
       canPersistOperationHistory = false;
@@ -1164,27 +1157,27 @@ export function createModelingService(
     }
   }
 
-  function enqueueAcceptedAuthoredDocumentPersistence() {
+  async function enqueueAcceptedAuthoredDocumentPersistence(
+    expected: AuthoredModelDocument,
+  ) {
     if (!documentRepository || !canPersistAuthoredDocument) {
       return;
     }
 
+    const document = await exportAuthoredDocumentForRepository();
+    // Capture the existing replay tail associated with this exact candidate, not later queued work.
+    const persistedHistory = operationHistoryStore
+      ? [...operationHistoryPayload.entries]
+      : null;
     repositoryPersistencePromise = repositoryPersistencePromise
-      .catch(() => undefined)
       .then(async () => {
         if (!canPersistAuthoredDocument || !documentRepository) {
           return;
         }
-
-        const persistedHistory = operationHistoryStore
-          ? {
-              persistedGeneration: operationHistoryGeneration,
-              persistedEntryCount: operationHistoryPayload.entries.length,
-            }
-          : null;
         const writeResult = await documentRepository.mutate({
           documentId: currentDocumentId,
-          document: await exportAuthoredDocumentForRepository(),
+          expected,
+          document,
         });
 
         if (writeResult.ok) {
@@ -1429,8 +1422,10 @@ export function createModelingService(
           await restorePromise;
           await repositoryChangePromise;
           const request = normalizeCommitSketchInput(input, currentDocumentId);
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.commitSketch(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapCommitSketchResponse(response, currentDocumentId),
             input,
@@ -1468,8 +1463,10 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.addDocumentVariable(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapDocumentVariableResponse(response, currentDocumentId),
             input,
@@ -1497,8 +1494,10 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.updateDocumentVariable(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapDocumentVariableResponse(response, currentDocumentId),
             input,
@@ -1516,8 +1515,10 @@ export function createModelingService(
           await restorePromise;
           await repositoryChangePromise;
           const request = normalizeCreateFeatureInput(input, currentDocumentId);
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.createFeature(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapFeatureMutationResponse(response, currentDocumentId),
             input,
@@ -1538,8 +1539,10 @@ export function createModelingService(
           await restorePromise;
           await repositoryChangePromise;
           const request = normalizeUpdateFeatureInput(input, currentDocumentId);
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.updateFeature(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapFeatureMutationResponse(response, currentDocumentId),
             input,
@@ -1565,8 +1568,10 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.setFeatureSuppression(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapFeatureSuppressionResponse(response, currentDocumentId),
             input,
@@ -1587,8 +1592,10 @@ export function createModelingService(
           await restorePromise;
           await repositoryChangePromise;
           const request = normalizeDeleteFeatureInput(input, currentDocumentId);
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.deleteFeature(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapDeleteFeatureResponse(response, currentDocumentId),
             input,
@@ -1609,8 +1616,10 @@ export function createModelingService(
           await restorePromise;
           await repositoryChangePromise;
           const request = normalizeDeleteTargetInput(input, currentDocumentId);
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.deleteTarget(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapDeleteTargetResponse(response, currentDocumentId),
             input,
@@ -1631,8 +1640,10 @@ export function createModelingService(
           await restorePromise;
           await repositoryChangePromise;
           const request = normalizeRenameBodyInput(input, currentDocumentId);
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.renameBody(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapRenameBodyResponse(response, currentDocumentId),
             input,
@@ -1656,8 +1667,10 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.reorderFeature(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapReorderFeatureResponse(response, currentDocumentId),
             input,
@@ -1687,8 +1700,10 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.reorderDocumentHistory(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapReorderDocumentHistoryResponse(response, currentDocumentId),
             input,
@@ -1709,8 +1724,10 @@ export function createModelingService(
             input,
             currentDocumentId,
           );
+          const expected = await exportAuthoredDocumentForRepository();
           const response = await adapter.setFeatureCursor(request);
           return finalizeMutationResult(
+            expected,
             response,
             mapSetFeatureCursorResponse(response, currentDocumentId),
             input,

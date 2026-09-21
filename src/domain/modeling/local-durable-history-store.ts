@@ -44,7 +44,10 @@ export function createMemoryLocalDurableHistoryStore(
 ): LocalDurableHistoryStore {
   const states = new Map<string, DocumentLocalDurableHistoryState>();
   for (const [documentId, state] of initialState.entries()) {
-    states.set(documentId, structuredClone(state));
+    states.set(
+      createScopedStorageKey(documentId, "default"),
+      structuredClone(state),
+    );
   }
 
   return {
@@ -52,13 +55,15 @@ export function createMemoryLocalDurableHistoryStore(
       return true;
     },
     async load({ documentId, scope }) {
-      return {
-        ok: true,
-        value: structuredClone(
+      const parsed = parseDocumentLocalDurableHistoryState(
+        structuredClone(
           states.get(createScopedStorageKey(documentId, scope)) ??
             createEmptyDocumentLocalDurableHistoryState(),
         ),
-      };
+      );
+      return parsed.ok
+        ? { ok: true, value: parsed.state }
+        : { ok: false, reason: "failed", error: new Error(parsed.message) };
     },
     async save({ documentId, scope, state }) {
       const clone = structuredClone(state);
@@ -127,7 +132,9 @@ export function createIndexedDbLocalDurableHistoryStore(
       }
 
       const parsed = parseDocumentLocalDurableHistoryState(
-        result.value?.state ?? createEmptyDocumentLocalDurableHistoryState(),
+        result.value
+          ? result.value.state
+          : createEmptyDocumentLocalDurableHistoryState(),
       );
       if (!parsed.ok) {
         return {

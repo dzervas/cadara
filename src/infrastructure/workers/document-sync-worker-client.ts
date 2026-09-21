@@ -70,6 +70,17 @@ export class DocumentSyncWorkerClient {
       .result;
   }
 
+  async initialize(
+    input: Omit<
+      Extract<DocumentSyncWorkerRequest, { kind: "initialize" }>,
+      "kind" | "requestId"
+    >,
+  ) {
+    const message = await this.request("initialize", "mutated", input);
+    return (message as Extract<DocumentSyncWorkerResponse, { kind: "mutated" }>)
+      .result;
+  }
+
   async mutate(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "mutate" }>,
