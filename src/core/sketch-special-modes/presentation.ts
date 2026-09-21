@@ -181,7 +181,7 @@ export function enterSketchSpecialMode(input: {
   }
 
   const operationExists =
-    input.session.definition.authoringOperations?.some(
+    input.session.definition.referenceImages?.some(
       (operation) => operation.operationId === input.operationId,
     ) ?? false;
 

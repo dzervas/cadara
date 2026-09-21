@@ -310,7 +310,9 @@ export function normalizeExtrudeEnd(value: unknown): ExtrudeEndCondition {
  * exactly; a malformed payload throws rather than silently falling back to the
  * profile plane, which would build a solid short by the intended offset.
  */
-export function normalizeExtrudeStartExtent(value: unknown): ExtrudeStartExtent {
+export function normalizeExtrudeStartExtent(
+  value: unknown,
+): ExtrudeStartExtent {
   if (value === undefined || value === null) return { kind: "profilePlane" };
   if (!isRecord(value)) {
     throw new Error("Invalid extrude start extent payload.");
@@ -414,7 +416,10 @@ export function normalizeExtrudeFeatureParameters(
     );
   }
 
-  const resultBodyType = normalizeResultBodyType(value.resultBodyType, "Extrude");
+  const resultBodyType = normalizeResultBodyType(
+    value.resultBodyType,
+    "Extrude",
+  );
 
   if (resultBodyType === "surface") {
     return {
@@ -641,7 +646,10 @@ export function normalizeRevolveFeatureParameters(
     );
   }
 
-  const resultBodyType = normalizeResultBodyType(value.resultBodyType, "Revolve");
+  const resultBodyType = normalizeResultBodyType(
+    value.resultBodyType,
+    "Revolve",
+  );
   const startAngle = isAuthoredNumberLike(value.startAngle)
     ? toContractAuthoredValue(value.startAngle as MaybeAuthoredValue<number>, 0)
     : toContractAuthoredValue(0, 0);
@@ -783,7 +791,9 @@ export function normalizeShellFeatureParameters(
 
   if (value.mode === "closedHollow") {
     if (value.faceTargets.length !== 0) {
-      throw new Error("Shell closedHollow mode cannot include removable faces.");
+      throw new Error(
+        "Shell closedHollow mode cannot include removable faces.",
+      );
     }
     if (value.direction !== undefined && value.direction !== "inside") {
       throw new Error("Shell closedHollow mode requires an inside direction.");
@@ -869,7 +879,9 @@ export function normalizeAdvancedSolidFeatureParameters(
   };
 }
 
-function normalizeBakedBodyProvenance(value: unknown): BakedBodyFeatureProvenance {
+function normalizeBakedBodyProvenance(
+  value: unknown,
+): BakedBodyFeatureProvenance {
   if (!isRecord(value) || !isString(value.source)) {
     throw new Error("Invalid baked-body provenance payload.");
   }
@@ -906,10 +918,18 @@ function normalizeBakedBodyProvenance(value: unknown): BakedBodyFeatureProvenanc
 function normalizeFeatureReplayFeatureParameters(
   value: unknown,
 ): FeatureReplayFeatureParameters {
-  if (!isRecord(value) || !Array.isArray(value.sourceFeatureIds) || value.sourceFeatureIds.length === 0) {
-    throw new Error("Feature replay requires one or more ordered source feature ids.");
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.sourceFeatureIds) ||
+    value.sourceFeatureIds.length === 0
+  ) {
+    throw new Error(
+      "Feature replay requires one or more ordered source feature ids.",
+    );
   }
-  const sourceFeatureIds = value.sourceFeatureIds.map((featureId) => assertFeatureId(featureId));
+  const sourceFeatureIds = value.sourceFeatureIds.map((featureId) =>
+    assertFeatureId(featureId),
+  );
   if (new Set(sourceFeatureIds).size !== sourceFeatureIds.length) {
     throw new Error("Feature replay source feature ids must be unique.");
   }
@@ -919,7 +939,9 @@ function normalizeFeatureReplayFeatureParameters(
   if (value.transform.kind === "linear") {
     const direction = assertDurableRef(value.transform.direction);
     if (direction.kind !== "construction") {
-      throw new Error("Feature replay linear direction must be a construction plane.");
+      throw new Error(
+        "Feature replay linear direction must be a construction plane.",
+      );
     }
     if (
       !isAuthoredNumberLike(value.transform.instanceCount) ||
@@ -953,7 +975,9 @@ function normalizeFeatureReplayFeatureParameters(
   if (value.transform.kind === "mirror") {
     const plane = assertDurableRef(value.transform.plane);
     if (plane.kind !== "construction") {
-      throw new Error("Feature replay mirror plane must be a construction plane.");
+      throw new Error(
+        "Feature replay mirror plane must be a construction plane.",
+      );
     }
     return { sourceFeatureIds, transform: { kind: "mirror", plane } };
   }
@@ -1843,7 +1867,9 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
       entry.binding.semanticClass === "body" &&
       (entry.binding.topology !== null || target.kind !== "body")
     ) {
-      throw new Error("body bindings must target durable bodies without subtopology.");
+      throw new Error(
+        "body bindings must target durable bodies without subtopology.",
+      );
     }
 
     if (
@@ -2267,8 +2293,8 @@ export function normalizeSketchDefinition(value: unknown): SketchDefinition {
           normalizeSketchDerivationDefinition(relationship),
         )
       : [],
-    authoringOperations: Array.isArray(value.authoringOperations)
-      ? (value.authoringOperations as SketchDefinition["authoringOperations"])
+    referenceImages: Array.isArray(value.referenceImages)
+      ? (value.referenceImages as SketchDefinition["referenceImages"])
       : [],
   };
 }

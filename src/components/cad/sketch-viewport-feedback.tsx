@@ -1,4 +1,8 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import type {
   SketchToolOverlayDragHandle,
@@ -19,7 +23,8 @@ const VIEWPORT_FLOATING_INPUT_MARGIN_PX = 12;
 const VIEWPORT_FLOATING_INPUT_RIGHT_EDGE_PX =
   VIEWPORT_FLOATING_INPUT_WIDTH_PX + VIEWPORT_FLOATING_INPUT_MARGIN_PX;
 const VIEWPORT_FLOATING_INPUT_TOP_EDGE_PX =
-  VIEWPORT_FLOATING_INPUT_ESTIMATED_HEIGHT_PX + VIEWPORT_FLOATING_INPUT_MARGIN_PX;
+  VIEWPORT_FLOATING_INPUT_ESTIMATED_HEIGHT_PX +
+  VIEWPORT_FLOATING_INPUT_MARGIN_PX;
 
 interface SketchViewportFeedbackLayerProps {
   schema: SketchToolPresentationSchema | null;
@@ -30,7 +35,24 @@ interface SketchViewportFeedbackLayerProps {
     handle: SketchToolOverlayDragHandle,
     clientX: number,
     clientY: number,
+    phase: "start" | "move" | "end" | "cancel",
   ) => void;
+}
+
+interface SketchViewportDragCallbacks {
+  onDragStart(
+    handle: SketchToolOverlayDragHandle,
+    event: ReactPointerEvent<SVGElement>,
+  ): void;
+  onDragMove(
+    handle: SketchToolOverlayDragHandle,
+    event: ReactPointerEvent<SVGElement>,
+  ): void;
+  onDragEnd(
+    handle: SketchToolOverlayDragHandle,
+    event: ReactPointerEvent<SVGElement>,
+    phase: "end" | "cancel",
+  ): void;
 }
 
 export function SketchViewportFeedbackLayer({
@@ -40,30 +62,24 @@ export function SketchViewportFeedbackLayer({
   onDragHandle,
   documentVariableNames = [],
 }: SketchViewportFeedbackLayerProps) {
-  const dragCallbacks = {
-    onDragStart(
-      handle: SketchToolOverlayDragHandle,
-      event: ReactPointerEvent<SVGElement>,
-    ) {
+  const dragCallbacks: SketchViewportDragCallbacks = {
+    onDragStart(handle, event) {
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.dataset.sketchViewportDragging = "true";
       event.currentTarget.setPointerCapture(event.pointerId);
-      onDragHandle?.(handle, event.clientX, event.clientY);
+      onDragHandle?.(handle, event.clientX, event.clientY, "start");
     },
-    onDragMove(
-      handle: SketchToolOverlayDragHandle,
-      event: ReactPointerEvent<SVGElement>,
-    ) {
+    onDragMove(handle, event) {
       if (event.currentTarget.dataset.sketchViewportDragging !== "true") {
         return;
       }
 
       event.preventDefault();
       event.stopPropagation();
-      onDragHandle?.(handle, event.clientX, event.clientY);
+      onDragHandle?.(handle, event.clientX, event.clientY, "move");
     },
-    onDragEnd(event: ReactPointerEvent<SVGElement>) {
+    onDragEnd(handle, event, phase) {
       if (event.currentTarget.dataset.sketchViewportDragging !== "true") {
         return;
       }
@@ -74,6 +90,7 @@ export function SketchViewportFeedbackLayer({
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
+      onDragHandle?.(handle, event.clientX, event.clientY, phase);
     },
   };
 
@@ -236,17 +253,7 @@ function shouldRenderOverlayLabel(overlay: SketchToolOverlayDescriptor) {
 function renderOverlayGeometry(
   overlay: SketchToolOverlayDescriptor,
   projectionById: Map<string, SketchViewportFeedbackProjection>,
-  dragCallbacks: {
-    onDragStart(
-      handle: SketchToolOverlayDragHandle,
-      event: ReactPointerEvent<SVGElement>,
-    ): void;
-    onDragMove(
-      handle: SketchToolOverlayDragHandle,
-      event: ReactPointerEvent<SVGElement>,
-    ): void;
-    onDragEnd(event: ReactPointerEvent<SVGElement>): void;
-  },
+  dragCallbacks: SketchViewportDragCallbacks,
 ) {
   switch (overlay.kind) {
     case "dimensionLine":
@@ -381,17 +388,7 @@ function renderProjectedLine({
   stroke: string;
   strokeWidth: number;
   dragHandle?: SketchToolOverlayDragHandle;
-  dragCallbacks?: {
-    onDragStart(
-      handle: SketchToolOverlayDragHandle,
-      event: ReactPointerEvent<SVGElement>,
-    ): void;
-    onDragMove(
-      handle: SketchToolOverlayDragHandle,
-      event: ReactPointerEvent<SVGElement>,
-    ): void;
-    onDragEnd(event: ReactPointerEvent<SVGElement>): void;
-  };
+  dragCallbacks?: SketchViewportDragCallbacks;
 }) {
   if (!start || !end) {
     return null;
@@ -429,8 +426,12 @@ function renderProjectedLine({
         vectorEffect="non-scaling-stroke"
         onPointerDown={(event) => dragCallbacks.onDragStart(dragHandle, event)}
         onPointerMove={(event) => dragCallbacks.onDragMove(dragHandle, event)}
-        onPointerUp={dragCallbacks.onDragEnd}
-        onPointerCancel={dragCallbacks.onDragEnd}
+        onPointerUp={(event) =>
+          dragCallbacks.onDragEnd(dragHandle, event, "end")
+        }
+        onPointerCancel={(event) =>
+          dragCallbacks.onDragEnd(dragHandle, event, "cancel")
+        }
       />
     </g>
   );
@@ -439,17 +440,7 @@ function renderProjectedLine({
 function renderProjectedArc(
   overlay: Extract<SketchToolOverlayDescriptor, { kind: "angleArc" }>,
   projectionById: Map<string, SketchViewportFeedbackProjection>,
-  dragCallbacks: {
-    onDragStart(
-      handle: SketchToolOverlayDragHandle,
-      event: ReactPointerEvent<SVGElement>,
-    ): void;
-    onDragMove(
-      handle: SketchToolOverlayDragHandle,
-      event: ReactPointerEvent<SVGElement>,
-    ): void;
-    onDragEnd(event: ReactPointerEvent<SVGElement>): void;
-  },
+  dragCallbacks: SketchViewportDragCallbacks,
 ) {
   const { id } = overlay;
   const center = projectionById.get(
@@ -544,8 +535,12 @@ function renderProjectedArc(
         vectorEffect="non-scaling-stroke"
         onPointerDown={(event) => dragCallbacks.onDragStart(dragHandle, event)}
         onPointerMove={(event) => dragCallbacks.onDragMove(dragHandle, event)}
-        onPointerUp={dragCallbacks.onDragEnd}
-        onPointerCancel={dragCallbacks.onDragEnd}
+        onPointerUp={(event) =>
+          dragCallbacks.onDragEnd(dragHandle, event, "end")
+        }
+        onPointerCancel={(event) =>
+          dragCallbacks.onDragEnd(dragHandle, event, "cancel")
+        }
       />
     </g>
   );
@@ -681,4 +676,3 @@ function ViewportFloatingInput({
     </div>
   );
 }
-

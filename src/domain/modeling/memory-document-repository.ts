@@ -1,12 +1,7 @@
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import { createDurableHistoryAvailability } from "@/contracts/modeling/durable-history.runtime-schema";
-import {
-  createEmptyDocumentLocalDurableHistoryState,
-  type DocumentLocalDurableHistoryState,
-  type DurableHistoryAvailability,
-  type PersistedSketchDraftSession,
-} from "@/contracts/modeling/durable-history";
+
+import { type DurableHistoryAvailability } from "@/contracts/modeling/durable-history";
 import type { DocumentId } from "@/contracts/shared/ids";
 import type {
   GeometryAssetBlobInput,
@@ -58,10 +53,6 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
   }
   readonly savedDocuments: AuthoredModelDocument[] = [];
   private readonly documents = new Map<DocumentId, CollaborativeDocument>();
-  private readonly historyState = new Map<
-    DocumentId,
-    DocumentLocalDurableHistoryState
-  >();
   private readonly assetStore: GeometryAssetStore;
   private readonly statuses = new Map<
     DocumentId,
@@ -82,10 +73,6 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       this.documents.set(
         document.documentId,
         createCollaborativeDocument(document),
-      );
-      this.historyState.set(
-        document.documentId,
-        createEmptyDocumentLocalDurableHistoryState(),
       );
       this.statuses.set(document.documentId, {
         kind: "restored",
@@ -134,7 +121,6 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
         assetAvailability: assets.availability,
       };
       this.metadata.set(input.documentId, metadataWithAssets);
-      this.ensureHistoryState(input.documentId);
       return {
         ok: true,
         document: result.document,
@@ -161,7 +147,6 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       input.documentId,
       createCollaborativeDocument(result.document),
     );
-    this.ensureHistoryState(input.documentId);
     const status = { kind: "seeded" as const, documentId: input.documentId };
     const metadata = createMemoryMetadata(
       this.actorId,
@@ -435,7 +420,6 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     documentId: DocumentId,
   ): Promise<DocumentRepositoryRestoreStatus> {
     this.documents.delete(documentId);
-    this.historyState.delete(documentId);
     this.actions.delete(documentId);
     const status = { kind: "reset" as const, documentId };
     this.statuses.set(documentId, status);
@@ -469,10 +453,10 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     const state = this.actionOwner(documentId).entries(
       this.identity(documentId),
     );
-    return createDurableHistoryAvailability({
+    return {
       canUndo: state.undo.length > 0,
       canRedo: state.redo.length > 0,
-    });
+    };
   }
 
   async undoDurableHistory(
@@ -489,113 +473,6 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     return this.enqueue(documentId, async () =>
       this.compensate(documentId, "redo"),
     );
-  }
-
-  async getSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    const entry =
-      this.ensureHistoryState(documentId).draftSessions[draftKey] ?? null;
-    return {
-      session: entry ? structuredClone(entry.current) : null,
-      availability: createDraftHistoryAvailability(entry),
-    };
-  }
-
-  async saveSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-    session: PersistedSketchDraftSession,
-  ) {
-    const state = this.ensureHistoryState(documentId);
-    const current = state.draftSessions[draftKey];
-    const nextSession = structuredClone(session);
-    if (!current) {
-      state.draftSessions[draftKey] = {
-        current: nextSession,
-        undoStack: [],
-        redoStack: [],
-      };
-      return createDraftHistoryAvailability(state.draftSessions[draftKey]);
-    }
-
-    if (draftSessionsEqual(current.current, nextSession)) {
-      return createDraftHistoryAvailability(current);
-    }
-
-    current.undoStack.push(current.current);
-    if (current.undoStack.length > MAX_DRAFT_UNDO_STACK_SIZE) {
-      current.undoStack.splice(
-        0,
-        current.undoStack.length - MAX_DRAFT_UNDO_STACK_SIZE,
-      );
-    }
-    current.redoStack = [];
-    current.current = nextSession;
-    return createDraftHistoryAvailability(current);
-  }
-
-  async undoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    const entry =
-      this.ensureHistoryState(documentId).draftSessions[draftKey] ?? null;
-    if (!entry) {
-      return {
-        session: null,
-        availability: createDurableHistoryAvailability({
-          canUndo: false,
-          canRedo: false,
-        }),
-      };
-    }
-
-    const nextSession = entry.undoStack.pop();
-    if (!nextSession) {
-      return {
-        session: structuredClone(entry.current),
-        availability: createDraftHistoryAvailability(entry),
-      };
-    }
-
-    entry.redoStack.push(entry.current);
-    entry.current = nextSession;
-    return {
-      session: structuredClone(entry.current),
-      availability: createDraftHistoryAvailability(entry),
-    };
-  }
-
-  async redoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    const entry =
-      this.ensureHistoryState(documentId).draftSessions[draftKey] ?? null;
-    if (!entry) {
-      return {
-        session: null,
-        availability: createDurableHistoryAvailability({
-          canUndo: false,
-          canRedo: false,
-        }),
-      };
-    }
-
-    const nextSession = entry.redoStack.pop();
-    if (!nextSession) {
-      return {
-        session: structuredClone(entry.current),
-        availability: createDraftHistoryAvailability(entry),
-      };
-    }
-
-    entry.undoStack.push(entry.current);
-    entry.current = nextSession;
-    return {
-      session: structuredClone(entry.current),
-      availability: createDraftHistoryAvailability(entry),
-    };
-  }
-
-  async clearSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-  ): Promise<void> {
-    delete this.ensureHistoryState(documentId).draftSessions[draftKey];
   }
 
   async getGeometryAssetBytes(hash: GeometryAssetHash) {
@@ -626,17 +503,6 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     const status = { kind: "failed" as const, documentId, diagnostic };
     this.statuses.set(documentId, status);
     return { ok: false, status };
-  }
-
-  private ensureHistoryState(documentId: DocumentId) {
-    const existing = this.historyState.get(documentId);
-    if (existing) {
-      return existing;
-    }
-
-    const created = createEmptyDocumentLocalDurableHistoryState();
-    this.historyState.set(documentId, created);
-    return created;
   }
 
   private currentDocument(documentId: DocumentId) {
@@ -737,37 +603,6 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       });
     }
   }
-}
-
-function createDraftHistoryAvailability(
-  entry:
-    | {
-        undoStack: unknown[];
-        redoStack: unknown[];
-      }
-    | null
-    | undefined,
-): DurableHistoryAvailability {
-  return createDurableHistoryAvailability({
-    canUndo: (entry?.undoStack.length ?? 0) > 0,
-    canRedo: (entry?.redoStack.length ?? 0) > 0,
-  });
-}
-
-const MAX_DRAFT_UNDO_STACK_SIZE = 50;
-
-function draftSessionsEqual(
-  left: PersistedSketchDraftSession,
-  right: PersistedSketchDraftSession,
-) {
-  return (
-    left.sequence === right.sequence &&
-    left.sketchId === right.sketchId &&
-    left.historyCursor.kind === right.historyCursor.kind &&
-    (left.historyCursor.kind === "item" && right.historyCursor.kind === "item"
-      ? left.historyCursor.itemId === right.historyCursor.itemId
-      : true)
-  );
 }
 
 export function createMemoryDocumentRepository(

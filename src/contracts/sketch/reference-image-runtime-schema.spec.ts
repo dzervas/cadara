@@ -20,19 +20,13 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
     styles: [],
     svgRenderingEnabled: true,
     derivedRelationships: [],
-    authoringOperations: [
+    referenceImages: [
       {
         operationId: "sketch_operation_1_reference-image",
         label: "Reference",
-        kind: "referenceImage",
-        targets: {
-          created: [
-            {
-              kind: "operation",
-              operationId: "sketch_operation_1_reference-image",
-            },
-          ],
-        },
+        kind: "referenceImage" as const,
+        ownedPointIds: [],
+        ownedEntityIds: [],
         ownedState: {
           kind: "referenceImage",
           image: {
@@ -60,13 +54,13 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
 
   const missingPayload = validateSketchDefinition({
     ...baseDefinition,
-    authoringOperations: [
+    referenceImages: [
       {
-        ...baseDefinition.authoringOperations![0]!,
+        ...baseDefinition.referenceImages![0]!,
         ownedState: {
-          ...baseDefinition.authoringOperations![0]!.ownedState!,
+          ...baseDefinition.referenceImages![0]!.ownedState!,
           image: {
-            ...baseDefinition.authoringOperations![0]!.ownedState!.image,
+            ...baseDefinition.referenceImages![0]!.ownedState!.image,
             base64Data: "",
           },
         },
@@ -80,13 +74,13 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
 
   const zeroDimensions = validateSketchDefinition({
     ...baseDefinition,
-    authoringOperations: [
+    referenceImages: [
       {
-        ...baseDefinition.authoringOperations![0]!,
+        ...baseDefinition.referenceImages![0]!,
         ownedState: {
-          ...baseDefinition.authoringOperations![0]!.ownedState!,
+          ...baseDefinition.referenceImages![0]!.ownedState!,
           image: {
-            ...baseDefinition.authoringOperations![0]!.ownedState!.image,
+            ...baseDefinition.referenceImages![0]!.ownedState!.image,
             pixelWidth: 0,
           },
         },
@@ -100,13 +94,13 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
 
   const missingPlacement = validateSketchDefinition({
     ...baseDefinition,
-    authoringOperations: [
+    referenceImages: [
       {
-        ...baseDefinition.authoringOperations![0]!,
+        ...baseDefinition.referenceImages![0]!,
         ownedState: {
-          ...baseDefinition.authoringOperations![0]!.ownedState!,
+          ...baseDefinition.referenceImages![0]!.ownedState!,
           placement: {
-            ...baseDefinition.authoringOperations![0]!.ownedState!.placement,
+            ...baseDefinition.referenceImages![0]!.ownedState!.placement,
             width: 0,
           },
         },
@@ -120,11 +114,11 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
 
   const legacyAnchor = validateSketchDefinition({
     ...baseDefinition,
-    authoringOperations: [
+    referenceImages: [
       {
-        ...baseDefinition.authoringOperations![0]!,
+        ...baseDefinition.referenceImages![0]!,
         ownedState: {
-          ...baseDefinition.authoringOperations![0]!.ownedState!,
+          ...baseDefinition.referenceImages![0]!.ownedState!,
           calibration: {
             scaleMode: "lockedAspect",
             anchors: [
@@ -148,11 +142,11 @@ test("src/contracts/sketch/reference-image-runtime-schema.spec.ts", () => {
 
   const legacyConstraints = validateSketchDefinition({
     ...baseDefinition,
-    authoringOperations: [
+    referenceImages: [
       {
-        ...baseDefinition.authoringOperations![0]!,
+        ...baseDefinition.referenceImages![0]!,
         ownedState: {
-          ...baseDefinition.authoringOperations![0]!.ownedState!,
+          ...baseDefinition.referenceImages![0]!.ownedState!,
           calibration: {
             scaleMode: "lockedAspect",
             anchors: [

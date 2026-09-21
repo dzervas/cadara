@@ -10,7 +10,7 @@ import type {
 import type {
   RegionLoopRecord,
   RegionRecord,
-  SketchAuthoringOperation,
+  SketchReferenceImageRecord,
   SketchDefinition,
   SketchEntityDefinition,
   SketchStyleDefinition,
@@ -404,7 +404,6 @@ export function getStableSketchSessionDisplayKey(
     objectIdentity(session.projectedReferences),
     objectIdentity(session.projectionDiagnostics),
     objectIdentity(session.solvedRegions),
-    objectIdentity(session.historyCursor),
     session.liveRegionState?.freshness ?? "no-live-regions",
     session.liveRegionState?.pendingSinceSequence ?? "no-pending-regions",
     session.activeSpecialMode
@@ -796,8 +795,8 @@ export function createDisplayRenderableForEntity(
 
 export function createDisplayRenderableForReferenceImageOperation(
   session: SketchSessionState,
-  operation: SketchAuthoringOperation,
-  state: NonNullable<SketchAuthoringOperation["ownedState"]>,
+  operation: SketchReferenceImageRecord,
+  state: NonNullable<SketchReferenceImageRecord["ownedState"]>,
   index: number,
 ): SketchSessionDisplayRenderable {
   const corners = getReferenceImageCornerPoints(state).map((point) =>
@@ -861,9 +860,9 @@ export interface SketchEntityDisplayStyle {
 export function createSketchEntityStyleLookup(
   session: SketchSessionState,
 ): Map<SketchEntityId, SketchEntityDisplayStyle> {
-  const styleRecords = getPersistedSketchStyleRecords(session.fullDefinition);
+  const styleRecords = getPersistedSketchStyleRecords(session.definition);
   const entityStyleById = new Map<SketchEntityId, SketchEntityDisplayStyle>();
-  for (const entity of session.fullDefinition.entities) {
+  for (const entity of session.definition.entities) {
     const localStyle = parseSketchStyleDefinition(entity.style);
     const styleId = getEntityStyleId(entity);
     const persistedStyle = styleId ? styleRecords.get(styleId) : undefined;
@@ -883,7 +882,7 @@ export function createSketchPointStyleLookup(
 ): Map<SketchPointId, SketchEntityDisplayStyle> {
   const pointStyleById = new Map<SketchPointId, SketchEntityDisplayStyle>();
 
-  for (const point of session.fullDefinition.points) {
+  for (const point of session.definition.points) {
     const style = parseSketchStyleDefinition(point.style);
     if (!style) {
       continue;
@@ -903,7 +902,7 @@ export function createSketchRegionStyleLookup(
     SketchEntityDisplayStyle
   >();
 
-  for (const styleRecord of session.fullDefinition.styles ?? []) {
+  for (const styleRecord of session.definition.styles ?? []) {
     if (!styleRecord.target || styleRecord.target.kind !== "region") {
       continue;
     }

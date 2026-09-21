@@ -2157,7 +2157,7 @@ export function ThreeCadViewport({
         projections={sketchFeedbackProjections}
         documentVariableNames={model.documentVariableNames}
         onPatch={(patch) => sketchToolPatchRef.current(patch)}
-        onDragHandle={(handle, clientX, clientY) => {
+        onDragHandle={(handle, clientX, clientY, gesturePhase) => {
           const point = projectSketchClientPointRef.current(clientX, clientY);
           if (point) {
             sketchToolPatchRef.current({
@@ -2168,6 +2168,8 @@ export function ThreeCadViewport({
               handleKind: handle.kind,
               dimensionId: handle.dimensionId,
               point,
+              gesturePhase,
+              clientPoint: [clientX, clientY],
             });
           }
         }}
@@ -2217,12 +2219,14 @@ export function ThreeCadViewport({
         }}
         onSelect={(target) => selectRef.current(target)}
         onEdit={(target) => annotationEditRef.current(target)}
-        onDimensionDrag={(handle, clientX, clientY) => {
+        onDimensionDrag={(handle, clientX, clientY, gesturePhase) => {
           const point = projectSketchClientPointRef.current(clientX, clientY);
           if (point) {
-            sketchToolPatchRef.current(
-              createDimensionAnnotationPlacementPatch(handle, point),
-            );
+            sketchToolPatchRef.current({
+              ...createDimensionAnnotationPlacementPatch(handle, point),
+              gesturePhase,
+              clientPoint: [clientX, clientY],
+            });
           }
         }}
       />

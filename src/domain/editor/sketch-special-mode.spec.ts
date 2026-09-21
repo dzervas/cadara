@@ -1,3 +1,4 @@
+import { createReferenceImageFixture as createReferenceImageOperation } from "@/domain/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
 import {
@@ -7,7 +8,7 @@ import {
   type EditorEffectRuntime,
   type EditorState,
 } from "@/domain/editor/state-machine";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 import {
   appendReferenceImageOperations,

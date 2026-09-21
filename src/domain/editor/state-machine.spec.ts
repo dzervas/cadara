@@ -2097,7 +2097,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Transform activation should wait for an explicit transform reference before previewing.",
     ).toBe(0);
 
-
     const linearPatternActivation = transitionEditorState(
       {
         ...initialEditorState,
@@ -3182,9 +3181,9 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Sketch edit snapshot should remain at the document rollback cursor.",
     ).toBeTruthy();
     expect(
-      result.state.session.historyCursor.kind,
-      "Reopened sketch editing should preserve sketch-local history while the document is rolled back.",
-    ).not.toBe("empty");
+      result.state.session.definition.entities.length,
+      "Reopened sketch editing retains authored geometry while the part cursor is rolled back.",
+    ).toBeGreaterThan(0);
     expect(
       getSnapshotReadCount(),
       "Sketch reopen should reuse the rollback snapshot directly instead of forcing an extra document refresh cycle.",
@@ -4665,7 +4664,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       ...createNewSketchSession(createStandardPlaneDefinition("xy")),
       sketchId,
       definition,
-      fullDefinition: definition,
     };
     const localTarget = definition.entities[0]!.target;
     const projectedTarget: PrimitiveRef = {
@@ -4906,7 +4904,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     ).toBe(0);
   }
 
-  function testSketchHistoryDeleteStaysDistinctFromLiveSelectionDelete() {
+  function testSketchImageDeletionUsesCurrentAuthoredState() {
     const baseSession = appendReferenceImageOperations(
       createNewSketchSession(createStandardPlaneDefinition("xy")),
       [
@@ -4924,7 +4922,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       ],
     );
     const operationId =
-      baseSession.fullDefinition.authoringOperations?.[0]?.operationId;
+      baseSession.definition.referenceImages?.[0]?.operationId;
     expect(
       operationId,
       "History-delete fixture should create a committed reference-image operation.",
@@ -4967,24 +4965,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       pendingCommitRequestId: null,
     };
 
-    const deletedFromHistory = transitionEditorState(baseState, {
-      type: "sketch.historyOperationDeleteRequested",
-      operationId,
-    });
-    expect(
-      deletedFromHistory.state.kind,
-      "History-row deletion should keep the sketch editor active.",
-    ).toBe("editingSketch");
-    expect(
-      deletedFromHistory.state.session.fullDefinition.authoringOperations
-        ?.length,
-      "History-row deletion should remove the targeted authored operation instead of appending a delete row.",
-    ).toBe(0);
-    expect(
-      deletedFromHistory.state.selection.length,
-      "History-row deletion should clear live selection state after the rewrite.",
-    ).toBe(0);
-
     const liveDelete = transitionEditorState(baseState, {
       type: "sketch.annotationDeleteRequested",
     });
@@ -4993,13 +4973,9 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Live selection deletion should keep the sketch editor active.",
     ).toBe("editingSketch");
     expect(
-      liveDelete.state.session.fullDefinition.authoringOperations?.length,
-      "Live selection deletion of a reference image should append a durable delete operation.",
-    ).toBe(2);
-    expect(
-      liveDelete.state.session.fullDefinition.authoringOperations?.at(-1)?.kind,
-      "Live selection deletion should preserve the existing append-delete semantics for viewport-selected reference images.",
-    ).toBe("delete");
+      liveDelete.state.session.definition.referenceImages?.length,
+      "Live selection deletion removes the explicit authored image record.",
+    ).toBe(0);
   }
 
   function testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm() {
@@ -5101,7 +5077,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     ).toBe("editingSketch");
     expect(
       committed.state.session.definition.dimensions[0]?.kind === "distance" &&
-        committed.state.session.definition.dimensions[0].value.source === "literal" &&
+        committed.state.session.definition.dimensions[0].value.source ===
+          "literal" &&
         committed.state.session.definition.dimensions[0].value.value === 33,
       "Committed dimension edit should update the existing durable dimension record.",
     ).toBeTruthy();
@@ -5694,7 +5671,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   testConnectedSketchSelectionEventWorksAfterRectangleToolAcceptsShape();
   testConnectedSketchSelectionEventRejectsUnsupportedTargets();
   testCommittedAnnotationSelectionAndDeletionRoutesThroughSketchMutation();
-  testSketchHistoryDeleteStaysDistinctFromLiveSelectionDelete();
+  testSketchImageDeletionUsesCurrentAuthoredState();
   testCommittedDimensionAnnotationEditRequestOpensAndCommitsValueForm();
   testSketchStylePatchRoutesThroughSelectionAndUpdatesCommitRequest();
   testRejectedSketchCommitShowsValidationMessage();

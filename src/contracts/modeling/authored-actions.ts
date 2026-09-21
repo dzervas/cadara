@@ -17,7 +17,7 @@ export type AuthoredActionSketch = Omit<
   AuthoredSketchRecord,
   "regionSlots" | "definition"
 > & {
-  definition: Omit<AuthoredSketchRecord["definition"], "authoringOperations">;
+  definition: AuthoredSketchRecord["definition"];
 };
 export type AuthoredActionDocument = Omit<
   AuthoredModelDocument,

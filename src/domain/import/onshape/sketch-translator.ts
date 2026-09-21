@@ -1616,7 +1616,6 @@ export function translateSketch(
     styles: [],
     svgRenderingEnabled: true,
     derivedRelationships,
-    authoringOperations: [],
   });
 
   return {

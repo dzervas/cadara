@@ -22,6 +22,7 @@ const sketchCollections = {
   constraints: "constraintId",
   dimensions: "dimensionId",
   styles: "styleId",
+  referenceImages: "operationId",
   derivedRelationships: "derivationId",
 };
 const documentCollections = {
@@ -73,7 +74,6 @@ function collections(
 function sketch(data: Fields, encode: boolean) {
   delete data.regionSlots;
   const definition = data.definition as Fields;
-  delete definition.authoringOperations;
   collections(definition, sketchCollections, encode);
   for (const [records, ids] of Object.entries(canonicalIds)) {
     if (encode) delete definition[ids];

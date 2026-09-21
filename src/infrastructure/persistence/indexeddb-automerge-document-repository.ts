@@ -14,12 +14,7 @@ import type {
   GeometryAssetHash,
   GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
-import {
-  createEmptyDocumentLocalDurableHistoryState,
-  type DocumentLocalDurableHistoryState,
-  type PersistedSketchDraftSession,
-} from "@/contracts/modeling/durable-history";
-import { createDurableHistoryAvailability } from "@/contracts/modeling/durable-history.runtime-schema";
+
 import type {
   DocumentRepository,
   GeometryAssetDocumentRepository,
@@ -36,10 +31,7 @@ import {
   storeGeometryAssetInputsForManifest,
   type GeometryAssetStore,
 } from "@/domain/modeling/geometry-asset-store";
-import {
-  createIndexedDbLocalDurableHistoryStore,
-  type LocalDurableHistoryStore,
-} from "@/domain/modeling/local-durable-history-store";
+
 import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
 import {
   applyCollaborativeWrites,
@@ -86,24 +78,17 @@ export interface IndexedDbAutomergeDocumentRepositoryOptions {
   databaseName?: string;
   storeName?: string;
   assetStore?: GeometryAssetStore;
-  localDurableHistoryStore?: LocalDurableHistoryStore;
-  historyScope?: string;
   localPeerSync?: false | { channelName?: string; peerWaitMs?: number };
 }
 export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocumentRepository {
   private repo: AutomergeRepositoryLike | null;
   private readonly urlStore: DocumentRepositoryUrlStore;
   private readonly assetStore: GeometryAssetStore;
-  private readonly localDurableHistoryStore: LocalDurableHistoryStore;
   private readonly handles = new Map<
     DocumentId,
     AutomergeHandleLike<CollaborativeDocument>
   >();
   private readonly actions = new Map<DocumentId, AuthoredActionHistory>();
-  private readonly drafts = new Map<
-    DocumentId,
-    DocumentLocalDurableHistoryState
-  >();
   private readonly statuses = new Map<
     DocumentId,
     DocumentRepositoryRestoreStatus
@@ -133,11 +118,6 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       options.assetStore ??
       createIndexedDbGeometryAssetStore({
         databaseName: `${options.databaseName ?? "cad-authored-documents"}-geometry-assets`,
-      });
-    this.localDurableHistoryStore =
-      options.localDurableHistoryStore ??
-      createIndexedDbLocalDurableHistoryStore({
-        databaseName: `${options.databaseName ?? "cad-authored-documents"}-local-history`,
       });
   }
   private async getRepo() {
@@ -195,7 +175,6 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
             message: "Document identity does not match.",
           });
         this.install(input.documentId, handle);
-        await this.loadDrafts(input.documentId);
         // Explicit load retries unresolved durability, never merely relabels live state as restored.
         if (this.durabilityFailures.has(input.documentId)) {
           await repo.flush?.([handle.documentId]);
@@ -258,10 +237,6 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     this.install(documentId, handle);
     this.urlStore.set(documentId, handle.url);
     this.actions.set(documentId, new AuthoredActionHistory());
-    await this.saveDrafts(
-      documentId,
-      createEmptyDocumentLocalDurableHistoryState(),
-    );
     return this.publish(documentId, handle, "seed");
   }
   mutate(
@@ -530,13 +505,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       if (url) (await this.getRepo()).delete(url);
       this.handles.delete(documentId);
       this.actions.delete(documentId);
-      this.drafts.delete(documentId);
       this.urlStore.delete(documentId);
-      const cleared = await this.localDurableHistoryStore.clear({
-        documentId,
-        scope: this.options.historyScope ?? "default",
-      });
-      if (!cleared.ok && cleared.reason === "failed") throw cleared.error;
       const status = { kind: "reset" as const, documentId };
       this.statuses.set(documentId, status);
       this.metadata.delete(documentId);
@@ -605,117 +574,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     const result = await this.assetStore.get(record);
     return result.ok ? result.bytes : null;
   }
+}
 
-  // NOT-YET-replaced private draft RPC seam. T03/T04 remove it with its editor callers.
-  private async loadDrafts(documentId: DocumentId) {
-    const existing = this.drafts.get(documentId);
-    if (existing) return existing;
-    const result = await this.localDurableHistoryStore.load({
-      documentId,
-      scope: this.options.historyScope ?? "default",
-    });
-    if (!result.ok && result.reason === "failed") throw result.error;
-    const state = result.ok
-      ? result.value
-      : createEmptyDocumentLocalDurableHistoryState();
-    this.drafts.set(documentId, state);
-    return state;
-  }
-  private async saveDrafts(
-    documentId: DocumentId,
-    state: DocumentLocalDurableHistoryState,
-  ) {
-    const result = await this.localDurableHistoryStore.save({
-      documentId,
-      scope: this.options.historyScope ?? "default",
-      state,
-    });
-    if (!result.ok && result.reason === "failed") throw result.error;
-    this.drafts.set(documentId, structuredClone(state));
-  }
-  async getSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    const entry = (await this.loadDrafts(documentId)).draftSessions[draftKey];
-    return {
-      session: entry ? structuredClone(entry.current) : null,
-      availability: draftAvailability(entry),
-    };
-  }
-  async saveSketchDraftHistory(
-    documentId: DocumentId,
-    draftKey: string,
-    session: PersistedSketchDraftSession,
-  ) {
-    const state = structuredClone(await this.loadDrafts(documentId)),
-      entry = state.draftSessions[draftKey];
-    if (!entry)
-      state.draftSessions[draftKey] = {
-        current: structuredClone(session),
-        undoStack: [],
-        redoStack: [],
-      };
-    else if (!draftSessionsEqual(entry.current, session)) {
-      entry.undoStack.push(entry.current);
-      entry.undoStack = entry.undoStack.slice(-50);
-      entry.redoStack = [];
-      entry.current = structuredClone(session);
-    }
-    await this.saveDrafts(documentId, state);
-    return draftAvailability(state.draftSessions[draftKey]);
-  }
-  async undoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    return this.compensateDraft(documentId, draftKey, "undoStack");
-  }
-  async redoSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    return this.compensateDraft(documentId, draftKey, "redoStack");
-  }
-  private async compensateDraft(
-    documentId: DocumentId,
-    draftKey: string,
-    direction: "undoStack" | "redoStack",
-  ) {
-    const state = structuredClone(await this.loadDrafts(documentId)),
-      entry = state.draftSessions[draftKey];
-    const next = entry?.[direction].pop();
-    if (entry && next) {
-      entry[direction === "undoStack" ? "redoStack" : "undoStack"].push(
-        entry.current,
-      );
-      entry.current = next;
-      await this.saveDrafts(documentId, state);
-    }
-    return {
-      session: entry ? structuredClone(entry.current) : null,
-      availability: draftAvailability(entry),
-    };
-  }
-  async clearSketchDraftHistory(documentId: DocumentId, draftKey: string) {
-    const state = structuredClone(await this.loadDrafts(documentId));
-    delete state.draftSessions[draftKey];
-    await this.saveDrafts(documentId, state);
-  }
-}
-function draftAvailability(entry?: {
-  undoStack: unknown[];
-  redoStack: unknown[];
-}) {
-  return createDurableHistoryAvailability({
-    canUndo: !!entry?.undoStack.length,
-    canRedo: !!entry?.redoStack.length,
-  });
-}
-function draftSessionsEqual(
-  left: PersistedSketchDraftSession,
-  right: PersistedSketchDraftSession,
-) {
-  return (
-    left.sequence === right.sequence &&
-    left.sketchId === right.sketchId &&
-    left.historyCursor.kind === right.historyCursor.kind &&
-    (left.historyCursor.kind === "item" && right.historyCursor.kind === "item"
-      ? left.historyCursor.itemId === right.historyCursor.itemId
-      : true)
-  );
-}
 export function createIndexedDbAutomergeDocumentRepository(
   options?: IndexedDbAutomergeDocumentRepositoryOptions,
 ) {

@@ -925,7 +925,6 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onReopenTarget={() => undefined}
           onDocumentCursorRequested={() => undefined}
-          onSketchCursorRequested={() => undefined}
           onDeleteDocumentItem={() => undefined}
           onExportDocumentItem={() => undefined}
           onRenameDocumentItem={() => undefined}
@@ -940,9 +939,13 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
     "History shell should switch to sketch mode during sketch edit sessions.",
   ).toBeTruthy();
   expect(
-    sketchHistoryMarkup.includes('aria-label="Sketch history"'),
-    "Sketch edit sessions should render sketch-local history.",
+    sketchHistoryMarkup.includes('aria-label="Sketch contents"'),
+    "Sketch edit sessions should render current authored contents without a replay cursor.",
   ).toBeTruthy();
+  expect(
+    sketchHistoryMarkup.includes("Timeline cursor at Line"),
+    "Sketch contents must not expose an operation replay cursor.",
+  ).toBe(false);
   expect(
     sketchHistoryMarkup.includes("/icons/sketch-line-segment.svg"),
     "Sketch history entity entries should use shared drawing tool icons.",

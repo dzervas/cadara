@@ -884,7 +884,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       10.386898346172789, -3.3335358542735576,
     ] as const;
     const target = session.definition.points.find(
-      (point) => point.pointId === "sketch_point_5_line-end",
+      (point) =>
+        point.pointId === "sketch_point_5_line-end" ||
+        point.pointId.startsWith("sketch_point_5_line-end_"),
     )?.target;
     expect(target, "Expected logo-like free endpoint.").toBeTruthy();
 
@@ -1174,15 +1176,20 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     const startedAt = performance.now();
     for (let index = 0; index < frameCount; index += 1) {
       const t = index / (frameCount - 1);
+      const previous = session;
       session = updateSketchGeometryDrag(session, [1 + t * 3, t * 2]);
       expect(
         session.solvedRegions.length,
         "Drag-frame updates should keep the previous constrained square profile visible.",
       ).toBe(1);
-      expect(
-        session.liveRegionState?.freshness,
-        "Drag-frame updates should defer live region extraction.",
-      ).toBe("pendingRefresh");
+      if (index === 0) {
+        expect(session, "A motionless frame must not mutate or rederive the draft.").toBe(previous);
+      } else {
+        expect(
+          session.liveRegionState?.freshness,
+          "Moving drag frames should defer live region extraction.",
+        ).toBe("pendingRefresh");
+      }
     }
     const elapsed = performance.now() - startedAt;
     expect(
@@ -1201,7 +1208,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     session = acceptSketchDraw(session, [4, 3]);
 
     const target = session.definition.points.find(
-      (point) => point.pointId === "sketch_point_1_rect-bottom-left",
+      (point) =>
+        point.pointId === "sketch_point_1_rect-bottom-left" ||
+        point.pointId.startsWith("sketch_point_1_rect-bottom-left_"),
     )?.target;
     expect(target, "Expected rectangle bottom-left vertex.").toBeTruthy();
 
@@ -1212,22 +1221,38 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       session.definition.points.map((point) => [point.pointId, point.position]),
     );
     assertClosePoint(
-      points.get("sketch_point_1_rect-bottom-left"),
+      points.get(
+        session.definition.pointIds.find((id) =>
+          id.startsWith("sketch_point_1_rect-bottom-left_"),
+        )!,
+      ),
       [2, 2],
       "Dragging rectangle corner should translate bottom left.",
     );
     assertClosePoint(
-      points.get("sketch_point_1_rect-bottom-right"),
+      points.get(
+        session.definition.pointIds.find((id) =>
+          id.startsWith("sketch_point_1_rect-bottom-right_"),
+        )!,
+      ),
       [6, 2],
       "Dragging rectangle corner should translate bottom right.",
     );
     assertClosePoint(
-      points.get("sketch_point_1_rect-top-right"),
+      points.get(
+        session.definition.pointIds.find((id) =>
+          id.startsWith("sketch_point_1_rect-top-right_"),
+        )!,
+      ),
       [6, 5],
       "Dragging rectangle corner should translate top right.",
     );
     assertClosePoint(
-      points.get("sketch_point_1_rect-top-left"),
+      points.get(
+        session.definition.pointIds.find((id) =>
+          id.startsWith("sketch_point_1_rect-top-left_"),
+        )!,
+      ),
       [2, 5],
       "Dragging rectangle corner should translate top left.",
     );
@@ -1288,7 +1313,9 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
       session.definition.points.map((point) => [point.pointId, point.position]),
     );
     const target = session.definition.points.find(
-      (point) => point.pointId === "sketch_point_5_line-end",
+      (point) =>
+        point.pointId === "sketch_point_5_line-end" ||
+        point.pointId.startsWith("sketch_point_5_line-end_"),
     )?.target;
     expect(target, "Expected fixed logo-like endpoint.").toBeTruthy();
 

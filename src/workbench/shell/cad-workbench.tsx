@@ -103,7 +103,7 @@ import { useCadaraDebugPlatform } from "@/workbench/debug/use-cadara-debug-platf
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { useFeatureEditing } from "@/hooks/use-feature-editing";
-import { useDurableHistory } from "@/hooks/use-durable-history";
+
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
 import { useModelingService } from "@/hooks/use-modeling-service";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
@@ -171,7 +171,6 @@ export function CadWorkbench({
   onReorderDocumentTab,
   onSyncActiveDocumentTab,
 }: CadWorkbenchProps) {
-  const durableHistory = useDurableHistory();
   const modelingService = useModelingService();
   const { sketchSpecialModes } = useRuntimeExtensionRegistry();
   const documentOwner = useWorkbenchDocumentOwner();
@@ -198,21 +197,6 @@ export function CadWorkbench({
     getRuntimeTrace,
   } = useEditorState();
   const snapshot = machineState.snapshot;
-  const sketchDraftSyncRef = useRef<{
-    documentId: DocumentId | null;
-    draftKey: string | null;
-    sessionHash: string | null;
-    wasDragging: boolean;
-  }>({
-    documentId: null,
-    draftKey: null,
-    sessionHash: null,
-    wasDragging: false,
-  });
-  const previousSketchDraftRef = useRef<{
-    documentId: DocumentId;
-    draftKey: string;
-  } | null>(null);
   const initialOccRenderPending = isInitialOccRenderPending(machineState);
   const previewRenderables = machineState.previewRenderables;
   const [variablesPanelOpen, setVariablesPanelOpen] = useState(false);
@@ -640,104 +624,6 @@ export function CadWorkbench({
     },
   });
 
-  useEffect(() => {
-    if (!sketchSession || !snapshot) {
-      const previousDraft = previousSketchDraftRef.current;
-      previousSketchDraftRef.current = null;
-      sketchDraftSyncRef.current = {
-        documentId: null,
-        draftKey: null,
-        sessionHash: null,
-        wasDragging: false,
-      };
-      if (previousDraft) {
-        void durableHistory.clearSketchDraft(previousDraft);
-      }
-      return;
-    }
-
-    if (sketchSession.activeDrag) {
-      sketchDraftSyncRef.current.wasDragging = true;
-      return;
-    }
-
-    const dragJustEnded = sketchDraftSyncRef.current.wasDragging;
-    sketchDraftSyncRef.current.wasDragging = false;
-
-    const documentId = snapshot.document.documentId;
-    const draftKey = durableHistory.getSketchDraftKey(sketchSession);
-    const sessionHash = `${sketchSession.sketchId}:${sketchSession.sequence}:${sketchSession.historyCursor.kind === "item" ? sketchSession.historyCursor.itemId : "empty"}`;
-    const trackedSession = sketchDraftSyncRef.current;
-    previousSketchDraftRef.current = { documentId, draftKey };
-
-    let cancelled = false;
-    if (
-      trackedSession.documentId !== documentId ||
-      trackedSession.draftKey !== draftKey
-    ) {
-      void durableHistory
-        .restoreSketchDraft({
-          documentId,
-          session: sketchSession,
-        })
-        .then((restoredSession) => {
-          if (cancelled) {
-            return;
-          }
-
-          if (restoredSession) {
-            const restoredHash = `${restoredSession.sketchId}:${restoredSession.sequence}:${restoredSession.historyCursor.kind === "item" ? restoredSession.historyCursor.itemId : "empty"}`;
-            sketchDraftSyncRef.current = {
-              documentId,
-              draftKey,
-              sessionHash: restoredHash,
-              wasDragging: false,
-            };
-            if (restoredHash !== sessionHash) {
-              dispatch({
-                type: "sketch.draftHistoryRestored",
-                session: restoredSession,
-              });
-              return;
-            }
-          }
-
-          sketchDraftSyncRef.current = {
-            documentId,
-            draftKey,
-            sessionHash,
-            wasDragging: false,
-          };
-          void durableHistory.syncSketchDraft({
-            documentId,
-            session: sketchSession,
-          });
-        });
-
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (trackedSession.sessionHash === sessionHash && !dragJustEnded) {
-      return;
-    }
-
-    sketchDraftSyncRef.current = {
-      documentId,
-      draftKey,
-      sessionHash,
-      wasDragging: false,
-    };
-    void durableHistory.syncSketchDraft({
-      documentId,
-      session: sketchSession,
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [dispatch, durableHistory, sketchSession, snapshot]);
   const {
     handleNavigationReopen,
     handleSectionClear,
@@ -1557,9 +1443,6 @@ export function CadWorkbench({
                     isDocumentHistoryReorderRunning ||
                     isUndoRedoRunning ||
                     (!history.canUndo && !history.canRedo)
-                  }
-                  onSketchCursorRequested={(cursor) =>
-                    dispatch({ type: "sketch.historyCursorRequested", cursor })
                   }
                   onDeleteDocumentItem={handleDocumentHistoryDelete}
                   onExportDocumentItem={handleDocumentHistoryExport}

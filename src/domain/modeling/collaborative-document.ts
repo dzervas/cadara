@@ -11,7 +11,7 @@ import {
 
 type Fields = Record<string, AuthoredValue>;
 export interface CollaborativeDocument {
-  format: "cadara-stable-authored-v2";
+  format: "cadara-stable-authored-v3";
   authored: Fields;
   revisionId: AuthoredModelDocument["revisionId"];
   provenance: Record<string, Fields>;
@@ -65,13 +65,6 @@ function provenance(document: AuthoredModelDocument) {
               }
             : {}),
           // NOT-YET-replaced replay metadata. Its order remains meaningful until T03 removes the seam.
-          ...(sketch.definition.authoringOperations
-            ? {
-                authoringOperations: plain(
-                  sketch.definition.authoringOperations,
-                ) as unknown as AuthoredValue,
-              }
-            : {}),
         },
       ]),
     ) as Record<string, Fields>,
@@ -91,7 +84,7 @@ export function createCollaborativeDocument(
 ): CollaborativeDocument {
   const metadata = provenance(document);
   return {
-    format: "cadara-stable-authored-v2",
+    format: "cadara-stable-authored-v3",
     authored: encodeAuthoredActionState(documentActionState(document)),
     revisionId: document.revisionId,
     provenance: metadata.sketches,
@@ -101,7 +94,7 @@ export function createCollaborativeDocument(
 export function materializeCollaborativeDocument(
   storage: CollaborativeDocument,
 ): AuthoredModelDocument {
-  if (storage.format !== "cadara-stable-authored-v2" || !storage.authored)
+  if (storage.format !== "cadara-stable-authored-v3" || !storage.authored)
     throw new Error("Unsupported collaborative document storage format");
   const state = decodeAuthoredActionState(
     {
@@ -126,10 +119,6 @@ export function materializeCollaborativeDocument(
       sketch.regionSlots = Object.values(
         plain(metadata.regionSlots) as Fields,
       ) as unknown as NonNullable<typeof sketch.regionSlots>;
-    if (metadata?.authoringOperations)
-      sketch.definition.authoringOperations = plain(
-        metadata.authoringOperations,
-      ) as unknown as NonNullable<typeof sketch.definition.authoringOperations>;
   }
   return document;
 }

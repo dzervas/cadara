@@ -8,7 +8,7 @@ import type {
 } from "@/contracts/shared/ids";
 import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
-  SketchAuthoringOperation,
+  SketchReferenceImageRecord,
   SketchDefinition,
 } from "@/contracts/sketch/schema";
 import type {
@@ -153,6 +153,8 @@ export interface SketchEditToolState {
 }
 
 export interface SketchSessionState {
+  actionContextId: SketchId;
+  actionAvailability?: { canUndo: boolean; canRedo: boolean };
   sketchId: SketchId | null;
   sketchLabel: string;
   plane: SketchPlaneDefinition;
@@ -161,9 +163,6 @@ export interface SketchSessionState {
   toolStagedEntities: readonly import("@/core/sketch-tools/definition").SketchDraftEntity[];
   definition: SketchDefinition;
   documentVariables: readonly DocumentVariableRecord[];
-  fullDefinition: SketchDefinition;
-  historyCursor: SketchHistoryCursor;
-  historyOperations: SketchHistoryOperation[];
   activeTool: SketchAuthoringToolId | null;
   status: SketchSessionStatus;
   constructionTargetPicking: boolean;
@@ -280,23 +279,12 @@ export interface SketchDisplayStrokeStyle {
   gapSize?: number;
 }
 
-export type SketchHistoryCursor =
-  | { kind: "empty" }
-  | { kind: "item"; itemId: string };
-
-export interface SketchHistoryOperation {
-  itemId: string;
-  beforeCursor: SketchHistoryCursor;
-  beforeDefinition: SketchDefinition;
-  afterDefinition: SketchDefinition;
-}
-
 export type SketchHistoryItem =
   | {
       kind: "operation";
       id: SketchAuthoringOperationId;
       label: string;
-      operation: SketchAuthoringOperation;
+      operation: SketchReferenceImageRecord;
       target: PrimitiveRef | null;
     }
   | {

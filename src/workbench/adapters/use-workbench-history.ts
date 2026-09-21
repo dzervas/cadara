@@ -64,7 +64,7 @@ export function useWorkbenchHistory({
   deps,
   dispatch,
   errorReporter,
-  history: _history,
+  history,
   setInvalidVariableValueMessages,
   showWorkbenchError,
   sketchSession,
@@ -103,20 +103,24 @@ export function useWorkbenchHistory({
       return activeDocumentId;
     }
 
-    return `${activeDocumentId}:${durableHistory.getSketchDraftKey(sketchSession)}`;
-  }, [activeDocumentId, durableHistory, sketchSession]);
+    return `${activeDocumentId}:${sketchSession.actionContextId}`;
+  }, [activeDocumentId, sketchSession]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!activeDocumentId || !activeHistoryContextKey || isUndoRedoRunning) {
+    if (
+      sketchSession ||
+      !activeDocumentId ||
+      !activeHistoryContextKey ||
+      isUndoRedoRunning
+    ) {
       return;
     }
 
     void durableHistory
       .getAvailability({
         documentId: activeDocumentId,
-        sketchSession,
       })
       .then((availability) => {
         if (cancelled) {
@@ -128,11 +132,30 @@ export function useWorkbenchHistory({
           availability,
         });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setActiveHistoryAvailability({
             contextKey: activeHistoryContextKey,
             availability: EMPTY_HISTORY_AVAILABILITY,
+          });
+          const message =
+            error instanceof Error
+              ? error.message
+              : "History availability failed.";
+          handleWorkbenchFailure({
+            appError: createAppError({
+              code: "workbench/action-failed",
+              message,
+              cause: error,
+            }),
+            reporter: errorReporter,
+            metadata: {
+              source: "workbench.history.availability",
+              visibility: "user",
+            },
+            reportability: "reportable",
+            userMessage: message,
+            notify: showWorkbenchError,
           });
         }
       });
@@ -145,11 +168,14 @@ export function useWorkbenchHistory({
     activeDocumentId,
     activeRevisionId,
     durableHistory,
+    errorReporter,
+    showWorkbenchError,
     isUndoRedoRunning,
     sketchSession,
   ]);
 
   const toolbarHistoryAvailability = useMemo<EditorHistoryAvailability>(() => {
+    if (sketchSession) return history;
     if (!activeDocumentId || isUndoRedoRunning) {
       return EMPTY_HISTORY_AVAILABILITY;
     }
@@ -163,6 +189,8 @@ export function useWorkbenchHistory({
 
     return activeHistoryAvailability.availability;
   }, [
+    history,
+    sketchSession,
     activeDocumentId,
     activeHistoryAvailability,
     activeHistoryContextKey,
@@ -181,6 +209,10 @@ export function useWorkbenchHistory({
   );
 
   const requestUndo = useCallback(() => {
+    if (sketchSessionRef.current) {
+      dispatch({ type: "history.undoRequested" });
+      return;
+    }
     const currentSnapshot = snapshotRef.current;
     if (!currentSnapshot || isUndoRedoRunning) {
       return;
@@ -190,7 +222,6 @@ export function useWorkbenchHistory({
     void durableHistory
       .undo({
         documentId: currentSnapshot.document.documentId,
-        sketchSession: sketchSessionRef.current,
       })
       .then((result) => {
         if (!result) {
@@ -202,18 +233,13 @@ export function useWorkbenchHistory({
             contextKey: currentSnapshot.document.documentId,
             availability: result.availability,
           });
-          dispatch({ type: "document.replaced", snapshot: result.snapshot });
+          dispatch({
+            type: "document.replaced",
+            snapshot: result.snapshot,
+            preserveAuthoredHistory: true,
+          });
           return;
         }
-
-        setActiveHistoryAvailability({
-          contextKey: `${currentSnapshot.document.documentId}:${durableHistory.getSketchDraftKey(result.session)}`,
-          availability: result.availability,
-        });
-        dispatch({
-          type: "sketch.draftHistoryRestored",
-          session: result.session,
-        });
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Undo failed.";
@@ -257,6 +283,10 @@ export function useWorkbenchHistory({
   ]);
 
   const requestRedo = useCallback(() => {
+    if (sketchSessionRef.current) {
+      dispatch({ type: "history.redoRequested" });
+      return;
+    }
     const currentSnapshot = snapshotRef.current;
     if (!currentSnapshot || isUndoRedoRunning) {
       return;
@@ -266,7 +296,6 @@ export function useWorkbenchHistory({
     void durableHistory
       .redo({
         documentId: currentSnapshot.document.documentId,
-        sketchSession: sketchSessionRef.current,
       })
       .then((result) => {
         if (!result) {
@@ -278,18 +307,13 @@ export function useWorkbenchHistory({
             contextKey: currentSnapshot.document.documentId,
             availability: result.availability,
           });
-          dispatch({ type: "document.replaced", snapshot: result.snapshot });
+          dispatch({
+            type: "document.replaced",
+            snapshot: result.snapshot,
+            preserveAuthoredHistory: true,
+          });
           return;
         }
-
-        setActiveHistoryAvailability({
-          contextKey: `${currentSnapshot.document.documentId}:${durableHistory.getSketchDraftKey(result.session)}`,
-          availability: result.availability,
-        });
-        dispatch({
-          type: "sketch.draftHistoryRestored",
-          session: result.session,
-        });
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Redo failed.";

@@ -6,14 +6,12 @@ import {
   acceptSketchDraw,
   beginSketchTool,
   createNewSketchSessionFromSupport,
-  getSketchHistoryCursorForIndex,
-  getSketchHistoryItems,
-  moveSketchHistoryCursor,
+  deleteSelectedSketchGeometry,
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
 import { createModelingServiceEditorEffectRuntime } from "./effect-registry";
 
-test("src/application/editor/effect-registry.spec.ts commits the full sketch definition even when the visible history cursor is rolled back", async () => {
+test("commits the current authored sketch after deletion without resurrecting a history tail", async () => {
   function addLine(
     session: ReturnType<typeof createNewSketchSessionFromSupport>,
     start: readonly [number, number],
@@ -30,11 +28,9 @@ test("src/application/editor/effect-registry.spec.ts commits the full sketch def
   session = addLine(session, [0, 0], [1, 0]);
   session = addLine(session, [0, 1], [1, 1]);
 
-  const fullItems = getSketchHistoryItems(session.fullDefinition);
-  const rolledBackSession = moveSketchHistoryCursor(
-    session,
-    getSketchHistoryCursorForIndex(fullItems, 0),
-  );
+  const deletedSession = deleteSelectedSketchGeometry(session, [
+    session.definition.entities[0]!.target,
+  ]);
   let committedEntityCount = 0;
 
   const runtime = createModelingServiceEditorEffectRuntime({
@@ -72,11 +68,8 @@ test("src/application/editor/effect-registry.spec.ts commits the full sketch def
     },
   });
 
-  expect(
-    rolledBackSession.definition.entityIds.length === 1 &&
-      rolledBackSession.fullDefinition.entityIds.length === 2,
-    "The fixture should distinguish the visible rollback definition from the durable full sketch definition.",
-  ).toBeTruthy();
+  expect(session.definition.entities).toHaveLength(2);
+  expect(deletedSession.definition.entities).toHaveLength(1);
 
   const result = await runtime.commitSketch({
     requestId: "request_commit_full_sketch" as RequestId,
@@ -84,15 +77,15 @@ test("src/application/editor/effect-registry.spec.ts commits the full sketch def
     baseRepositoryHeads: [],
     documentId: "doc_fixture" as DocumentId,
     commandSessionId: "command_sketch_fixture",
-    session: rolledBackSession,
+    session: deletedSession,
   });
 
   expect(
     result?.accepted,
-    "Rolled-back sketch commit coverage should accept through the fake modeling service.",
+    "Current authored sketch should commit through the modeling service.",
   ).toBeTruthy();
   expect(
     committedEntityCount,
-    "Sketch commits must preserve full history tail geometry when the cursor is only rolled back for viewing.",
-  ).toBe(2);
+    "Deleted geometry must stay absent from the published candidate.",
+  ).toBe(1);
 });

@@ -140,7 +140,6 @@ test("src/contracts/import/validation.spec.ts", async () => {
     valueText: "10 mm",
   });
 
-
   const sketchRequest = () => ({
     contractVersion: "modeling-contract/v1alpha1" as const,
     documentId: "doc_workspace",
@@ -149,7 +148,10 @@ test("src/contracts/import/validation.spec.ts", async () => {
     sketchId: null,
     sketchLabel: "Imported sketch",
     plane: {
-      support: { kind: "construction" as const, constructionId: "construction_plane-xy" },
+      support: {
+        kind: "construction" as const,
+        constructionId: "construction_plane-xy",
+      },
       frame: {
         origin: [0, 0, 0] as const,
         xAxis: [1, 0, 0] as const,
@@ -176,11 +178,13 @@ test("src/contracts/import/validation.spec.ts", async () => {
       styles: [],
       svgRenderingEnabled: true,
       derivedRelationships: [],
-      authoringOperations: [],
     },
   });
 
-  const extrudeRequest = (profileActionIndex: number, bodyActionIndex?: number) => ({
+  const extrudeRequest = (
+    profileActionIndex: number,
+    bodyActionIndex?: number,
+  ) => ({
     contractVersion: "modeling-contract/v1alpha1" as const,
     documentId: "doc_workspace",
     baseRevisionId: "rev_1",
@@ -197,7 +201,8 @@ test("src/contracts/import/validation.spec.ts", async () => {
             selector: {
               kind: "interiorPoint" as const,
               point: [0.5, 0.5] as const,
-              expectedBoundaryIdentity: "import-region-boundary/v1:source-stablehash" as const,
+              expectedBoundaryIdentity:
+                "import-region-boundary/v1:source-stablehash" as const,
             },
           },
         ],
@@ -210,13 +215,22 @@ test("src/contracts/import/validation.spec.ts", async () => {
             distance: { source: "literal" as const, value: 10 },
           },
         },
-        operation: { source: "literal" as const, value: bodyActionIndex === undefined ? "newBody" as const : "cut" as const },
+        operation: {
+          source: "literal" as const,
+          value:
+            bodyActionIndex === undefined
+              ? ("newBody" as const)
+              : ("cut" as const),
+        },
         booleanScope:
           bodyActionIndex === undefined
             ? { kind: "standalone" as const }
             : {
                 kind: "targetBody" as const,
-                bodyId: { kind: "bodyOf" as const, actionIndex: bodyActionIndex },
+                bodyId: {
+                  kind: "bodyOf" as const,
+                  actionIndex: bodyActionIndex,
+                },
               },
       },
     },
@@ -260,7 +274,6 @@ test("src/contracts/import/validation.spec.ts", async () => {
     "Prepared action validation should reject an ordered sequence with an out-of-range index.",
   ).toBeFalsy();
 
-
   const deferredRegionResult = validateImportPreparedActions({
     commitSketches: [sketchRequest()],
     createFeatures: [extrudeRequest(0)],
@@ -274,8 +287,14 @@ test("src/contracts/import/validation.spec.ts", async () => {
     "Prepared action validation should accept blessed deferred region references to earlier sketch commits.",
   ).toBeTruthy();
 
-  const malformedBoundaryIdentity = structuredClone(extrudeRequest(0)) as unknown as {
-    definition: { parameters: { profiles: Array<{ selector: { expectedBoundaryIdentity: string } }> } };
+  const malformedBoundaryIdentity = structuredClone(
+    extrudeRequest(0),
+  ) as unknown as {
+    definition: {
+      parameters: {
+        profiles: Array<{ selector: { expectedBoundaryIdentity: string } }>;
+      };
+    };
   };
   malformedBoundaryIdentity.definition.parameters.profiles[0]!.selector.expectedBoundaryIdentity =
     "face_not-an-import-boundary";
@@ -433,7 +452,10 @@ test("src/contracts/import/validation.spec.ts", async () => {
                 end: {
                   kind: "upToFace" as const,
                   direction: "positive" as const,
-                  target: { ...deferredFaceTarget, expectedKind: "body" as const },
+                  target: {
+                    ...deferredFaceTarget,
+                    expectedKind: "body" as const,
+                  },
                 },
               },
             },
@@ -458,7 +480,10 @@ test("src/contracts/import/validation.spec.ts", async () => {
                 end: {
                   kind: "upToFace" as const,
                   direction: "positive" as const,
-                  target: { kind: "topologySlot" as const, slotKey: "firstEndFace" },
+                  target: {
+                    kind: "topologySlot" as const,
+                    slotKey: "firstEndFace",
+                  },
                 },
               },
             },
@@ -618,7 +643,6 @@ test("src/contracts/import/validation.spec.ts", async () => {
   ).toBeFalsy();
 });
 
-
 test("validates deferred revolve boolean scope and advanced construction participants", () => {
   const planeRequest = {
     contractVersion: "modeling-contract/v1alpha1" as const,
@@ -649,15 +673,29 @@ test("validates deferred revolve boolean scope and advanced construction partici
     sketchId: null,
     sketchLabel: "Sketch",
     plane: {
-      support: { kind: "construction" as const, constructionId: "construction_plane-xy" },
+      support: {
+        kind: "construction" as const,
+        constructionId: "construction_plane-xy",
+      },
       frame: planeRequest.definition.parameters.frame,
       key: "xy" as const,
     },
     definition: {
       schemaVersion: "sketch-definition/v1alpha1" as const,
-      referenceIds: [], references: [], pointIds: [], points: [], entityIds: [], entities: [],
-      constraintIds: [], constraints: [], dimensionIds: [], dimensions: [], styleIds: [], styles: [],
-      svgRenderingEnabled: true, derivedRelationships: [], authoringOperations: [],
+      referenceIds: [],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+      styleIds: [],
+      styles: [],
+      svgRenderingEnabled: true,
+      derivedRelationships: [],
     },
   };
   const revolve = {
@@ -670,12 +708,28 @@ test("validates deferred revolve boolean scope and advanced construction partici
       featureTypeVersion: "feature-type/revolve/v1alpha2" as const,
       parameters: {
         resultBodyType: "solid",
-        profiles: [{ kind: "regionOf" as const, actionIndex: 0, selector: { kind: "interiorPoint" as const, point: [0, 0] as const } }],
-        axis: { kind: "sketchEntity" as const, sketchId: { kind: "sketchIdOf" as const, actionIndex: 0 }, entityId: "sketch_entity_axis" },
+        profiles: [
+          {
+            kind: "regionOf" as const,
+            actionIndex: 0,
+            selector: {
+              kind: "interiorPoint" as const,
+              point: [0, 0] as const,
+            },
+          },
+        ],
+        axis: {
+          kind: "sketchEntity" as const,
+          sketchId: { kind: "sketchIdOf" as const, actionIndex: 0 },
+          entityId: "sketch_entity_axis",
+        },
         startAngle: { source: "literal" as const, value: 0 },
         extent: { mode: "oneSide" as const, end: { kind: "full" as const } },
         operation: { source: "literal" as const, value: "cut" as const },
-        booleanScope: { kind: "targetBody" as const, bodyId: { kind: "bodyOf" as const, actionIndex: 1 } },
+        booleanScope: {
+          kind: "targetBody" as const,
+          bodyId: { kind: "bodyOf" as const, actionIndex: 1 },
+        },
       },
     },
   };
@@ -688,7 +742,12 @@ test("validates deferred revolve boolean scope and advanced construction partici
       kind: "mirror" as const,
       featureTypeVersion: "advanced-solid-feature/v0" as const,
       parameters: {
-        participants: [{ role: "plane" as const, targets: [{ kind: "constructionOf" as const, actionIndex: 1 }] }],
+        participants: [
+          {
+            role: "plane" as const,
+            targets: [{ kind: "constructionOf" as const, actionIndex: 1 }],
+          },
+        ],
         options: { copy: true },
       },
     },
@@ -706,7 +765,6 @@ test("validates deferred revolve boolean scope and advanced construction partici
   });
   expect(result.success, JSON.stringify(result.issues)).toBe(true);
 });
-
 
 test("validates bodyOf only at advanced body participants", () => {
   const producer = {
@@ -739,7 +797,9 @@ test("validates bodyOf only at advanced body participants", () => {
       kind: "split" as const,
       featureTypeVersion: "advanced-solid-feature/v0" as const,
       parameters: {
-        participants: [{ role, targets: [{ kind: "bodyOf" as const, actionIndex: 0 }] }],
+        participants: [
+          { role, targets: [{ kind: "bodyOf" as const, actionIndex: 0 }] },
+        ],
       },
     },
   });
@@ -773,7 +833,10 @@ test("validates deferred advanced sketch-point participant sketch producers", ()
     sketchId: null,
     sketchLabel: "Hole sketch",
     plane: {
-      support: { kind: "construction" as const, constructionId: "construction_plane-xy" },
+      support: {
+        kind: "construction" as const,
+        constructionId: "construction_plane-xy",
+      },
       frame: {
         origin: [0, 0, 0] as const,
         xAxis: [1, 0, 0] as const,
@@ -800,7 +863,6 @@ test("validates deferred advanced sketch-point participant sketch producers", ()
       styles: [],
       svgRenderingEnabled: true,
       derivedRelationships: [],
-      authoringOperations: [],
     },
   };
   const planeRequest = {
@@ -837,7 +899,10 @@ test("validates deferred advanced sketch-point participant sketch producers", ()
               },
             ],
           },
-          { role: "body" as const, targets: [{ kind: "body" as const, bodyId: "body_target" }] },
+          {
+            role: "body" as const,
+            targets: [{ kind: "body" as const, bodyId: "body_target" }],
+          },
         ],
       },
     },
@@ -930,7 +995,10 @@ test("validates deferred open sketch-curve profiles on surface extrude actions",
     sketchId: null,
     sketchLabel: "Open chain",
     plane: {
-      support: { kind: "construction" as const, constructionId: "construction_plane-xy" },
+      support: {
+        kind: "construction" as const,
+        constructionId: "construction_plane-xy",
+      },
       frame: {
         origin: [0, 0, 0] as const,
         xAxis: [1, 0, 0] as const,
@@ -943,9 +1011,20 @@ test("validates deferred open sketch-curve profiles on surface extrude actions",
     },
     definition: {
       schemaVersion: "sketch-definition/v1alpha1" as const,
-      referenceIds: [], references: [], pointIds: [], points: [], entityIds: [], entities: [],
-      constraintIds: [], constraints: [], dimensionIds: [], dimensions: [], styleIds: [], styles: [],
-      svgRenderingEnabled: true, derivedRelationships: [], authoringOperations: [],
+      referenceIds: [],
+      references: [],
+      pointIds: [],
+      points: [],
+      entityIds: [],
+      entities: [],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+      styleIds: [],
+      styles: [],
+      svgRenderingEnabled: true,
+      derivedRelationships: [],
     },
   };
   const surfaceExtrude = (sketchId: unknown) => ({
@@ -958,7 +1037,13 @@ test("validates deferred open sketch-curve profiles on surface extrude actions",
       featureTypeVersion: "feature-type/extrude/v1alpha2" as const,
       parameters: {
         resultBodyType: "surface",
-        profiles: [{ kind: "sketchEntity" as const, sketchId, entityId: "sketch_entity_open" }],
+        profiles: [
+          {
+            kind: "sketchEntity" as const,
+            sketchId,
+            entityId: "sketch_entity_open",
+          },
+        ],
         startExtent: { kind: "profilePlane" as const },
         extent: {
           mode: "oneSide" as const,
@@ -999,17 +1084,20 @@ test("validates deferred open sketch-curve profiles on surface extrude actions",
 
   const withBooleanState = validateImportPreparedActions({
     commitSketches: [sketchRequest],
-    createFeatures: [{
-      ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }),
-      definition: {
-        ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }).definition,
-        parameters: {
-          ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }).definition.parameters,
-          operation: { source: "literal", value: "newBody" },
-          booleanScope: { kind: "standalone" },
+    createFeatures: [
+      {
+        ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }),
+        definition: {
+          ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }).definition,
+          parameters: {
+            ...surfaceExtrude({ kind: "sketchIdOf", actionIndex: 0 }).definition
+              .parameters,
+            operation: { source: "literal", value: "newBody" },
+            booleanScope: { kind: "standalone" },
+          },
         },
       },
-    }],
+    ],
     orderedActions,
   });
   expect(

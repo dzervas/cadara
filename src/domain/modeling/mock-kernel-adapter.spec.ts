@@ -848,61 +848,6 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
         constraints: [],
         dimensionIds: [],
         dimensions: [],
-        authoringOperations: [
-          {
-            operationId: "sketch_operation_1_line",
-            label: "Line 1",
-            kind: "line",
-            targets: {
-              created: [
-                { kind: "point", pointId: "sketch_point_1_a" },
-                { kind: "point", pointId: "sketch_point_1_b" },
-                { kind: "entity", entityId: "sketch_entity_1_line" },
-              ],
-            },
-            createdGraph: {
-              points: [
-                {
-                  pointId: "sketch_point_1_a",
-                  label: "A",
-                  target: {
-                    kind: "sketchPoint",
-                    sketchId: "sketch_draft",
-                    pointId: "sketch_point_1_a",
-                  },
-                  position: [0, 0],
-                  isConstruction: false,
-                },
-                {
-                  pointId: "sketch_point_1_b",
-                  label: "B",
-                  target: {
-                    kind: "sketchPoint",
-                    sketchId: "sketch_draft",
-                    pointId: "sketch_point_1_b",
-                  },
-                  position: [1, 0],
-                  isConstruction: false,
-                },
-              ],
-              entities: [
-                {
-                  kind: "lineSegment",
-                  entityId: "sketch_entity_1_line",
-                  label: "Line 1",
-                  target: {
-                    kind: "sketchEntity",
-                    sketchId: "sketch_draft",
-                    entityId: "sketch_entity_1_line",
-                  },
-                  isConstruction: false,
-                  startPointId: "sketch_point_1_a",
-                  endPointId: "sketch_point_1_b",
-                },
-              ],
-            },
-          },
-        ],
       },
     });
     const after = await adapter.getDocumentSnapshot({
@@ -913,10 +858,9 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       (sketch) => sketch.sketchId === committed.sketchId,
     );
 
-    expect(
-      committed.revisionState.kind,
-      "Sketch with authoring operation metadata should commit.",
-    ).toBe("accepted");
+    expect(committed.revisionState.kind, "Authored sketch should commit.").toBe(
+      "accepted",
+    );
     expect(
       reopenedSketch,
       "Committed sketch should be available for reopen.",
@@ -927,17 +871,12 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       ),
       "Committed mock sketch points should be normalized to the committed sketch id.",
     ).toBeTruthy();
+
     expect(
-      reopenedSketch.sketch.definition.authoringOperations?.[0]?.createdGraph?.points?.every(
-        (point) => point.target.sketchId === committed.sketchId,
-      ),
-      "Committed mock sketch operation point snapshots should be normalized to the committed sketch id.",
-    ).toBeTruthy();
-    expect(
-      reopenedSketch.sketch.definition.authoringOperations?.[0]?.createdGraph?.entities?.every(
+      reopenedSketch.sketch.definition.entities.every(
         (entity) => entity.target.sketchId === committed.sketchId,
       ),
-      "Committed mock sketch operation entity snapshots should be normalized to the committed sketch id.",
+      "Committed mock sketch authored entities should be normalized to the committed sketch id.",
     ).toBeTruthy();
   }
 
@@ -2675,7 +2614,9 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
           simpleDefinition.parameters.participants[0]!,
           {
             role: "body" as const,
-            targets: [{ kind: "body" as const, bodyId: "body_missing" as BodyId }],
+            targets: [
+              { kind: "body" as const, bodyId: "body_missing" as BodyId },
+            ],
           },
         ],
       },
@@ -2761,11 +2702,15 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       "Committed mock hole should be present in the next snapshot.",
     ).toBe("hole");
     expect(
-      after.snapshot.document.bodies.some((body) => body.bodyId === "body_part-1"),
+      after.snapshot.document.bodies.some(
+        (body) => body.bodyId === "body_part-1",
+      ),
       "Mock hole application should retain the first scoped body id.",
     ).toBeTruthy();
     expect(
-      after.snapshot.document.bodies.some((body) => body.bodyId === "body_part-2"),
+      after.snapshot.document.bodies.some(
+        (body) => body.bodyId === "body_part-2",
+      ),
       "Mock hole application should retain every scoped body id.",
     ).toBeTruthy();
     expect(
@@ -2786,11 +2731,12 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBe(countersink.revisionId);
   }
 
-
   function linearPatternDefinition(input: {
     bodyIds: readonly BodyId[];
     instanceCount: number;
-    direction?: { kind: "construction"; constructionId: ConstructionId } | { kind: "edge"; bodyId: BodyId; edgeId: string };
+    direction?:
+      | { kind: "construction"; constructionId: ConstructionId }
+      | { kind: "edge"; bodyId: BodyId; edgeId: string };
     centered?: boolean;
   }) {
     return {
@@ -2800,7 +2746,10 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
         participants: [
           {
             role: "body" as const,
-            targets: input.bodyIds.map((bodyId) => ({ kind: "body" as const, bodyId })),
+            targets: input.bodyIds.map((bodyId) => ({
+              kind: "body" as const,
+              bodyId,
+            })),
           },
           {
             role: "direction" as const,
@@ -2834,7 +2783,10 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
         participants: [
           {
             role: "body" as const,
-            targets: input.bodyIds.map((bodyId) => ({ kind: "body" as const, bodyId })),
+            targets: input.bodyIds.map((bodyId) => ({
+              kind: "body" as const,
+              bodyId,
+            })),
           },
           {
             role: "axis" as const,
@@ -2910,7 +2862,11 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       }),
     });
     expect(circular.revisionState.kind).toBe("accepted");
-    expect(circular.changedTargets.map((target) => target.kind === "body" && target.bodyId)).toEqual([
+    expect(
+      circular.changedTargets.map(
+        (target) => target.kind === "body" && target.bodyId,
+      ),
+    ).toEqual([
       "body_feature_circularPattern-1_circular_seed1_instance1",
       "body_feature_circularPattern-1_circular_seed1_instance2",
       "body_feature_circularPattern-1_circular_seed1_instance3",
@@ -2983,10 +2939,16 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
 
     expect(suppressed.revisionState.kind).toBe("accepted");
     expect(
-      afterSuppress.snapshot.document.bodies.some((body) => initialOutputIds.includes(body.bodyId)),
+      afterSuppress.snapshot.document.bodies.some((body) =>
+        initialOutputIds.includes(body.bodyId),
+      ),
       "Suppressing a pattern should remove only its generated body records.",
     ).toBeFalsy();
-    expect(afterSuppress.snapshot.document.bodies.some((body) => body.bodyId === "body_part-1")).toBeTruthy();
+    expect(
+      afterSuppress.snapshot.document.bodies.some(
+        (body) => body.bodyId === "body_part-1",
+      ),
+    ).toBeTruthy();
 
     const unsuppressed = await adapter.setFeatureSuppression({
       contractVersion: "modeling-contract/v1alpha1",
@@ -2996,7 +2958,9 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       suppressed: false,
     });
     expect(
-      unsuppressed.changedTargets.filter((target) => target.kind === "body").map((target) => target.bodyId),
+      unsuppressed.changedTargets
+        .filter((target) => target.kind === "body")
+        .map((target) => target.bodyId),
       "Unsuppress should recreate deterministic body ids for the same pattern definition.",
     ).toEqual(initialOutputIds);
 
@@ -3030,7 +2994,11 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toEqual(updatedOutputIds);
     expect(
       afterUpdate.snapshot.document.render.records.every(
-        (record) => record.ownerBodyId === null || afterUpdate.snapshot.document.bodies.some((body) => body.bodyId === record.ownerBodyId),
+        (record) =>
+          record.ownerBodyId === null ||
+          afterUpdate.snapshot.document.bodies.some(
+            (body) => body.bodyId === record.ownerBodyId,
+          ),
       ),
       "Pattern rebuild should not leave orphan render records for removed generated bodies.",
     ).toBeTruthy();
@@ -3532,7 +3500,6 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-
   async function testDocumentVariableUpdateRebuildsImportedExpressionSketch() {
     class VariableRebuildSolverAdapter extends MockSketchSolverAdapter {
       readonly solvedWidthValues: number[] = [];
@@ -3559,12 +3526,12 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
               ...response,
               solvedSnapshot: {
                 ...response.solvedSnapshot,
-                dimensionStatuses: response.solvedSnapshot.dimensionStatuses.map(
-                  (status) =>
+                dimensionStatuses:
+                  response.solvedSnapshot.dimensionStatuses.map((status) =>
                     status.dimensionId === "dimension_1_width"
                       ? { ...status, solvedValue }
                       : status,
-                ),
+                  ),
               },
             };
       }
@@ -3577,7 +3544,10 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     const sketch = imported.sketches.find(
       (entry) => entry.sketchId === "sketch_primary",
     );
-    expect(sketch, "Seed authored sketch should be available for import-style restore.").toBeTruthy();
+    expect(
+      sketch,
+      "Seed authored sketch should be available for import-style restore.",
+    ).toBeTruthy();
     if (!sketch) return;
 
     const widthDimension = sketch.definition.dimensions.find(
@@ -3607,9 +3577,10 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     const beforeSketch = before.snapshot.document.sketches.find(
       (entry) => entry.sketchId === "sketch_primary",
     );
-    const beforeWidthStatus = beforeSketch?.sketch.solvedSnapshot.dimensionStatuses.find(
-      (status) => status.dimensionId === "dimension_1_width",
-    );
+    const beforeWidthStatus =
+      beforeSketch?.sketch.solvedSnapshot.dimensionStatuses.find(
+        (status) => status.dimensionId === "dimension_1_width",
+      );
     expect(beforeWidthStatus?.solvedValue).toBe(8);
 
     const updated = await adapter.updateDocumentVariable({
@@ -3624,13 +3595,15 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     expect(updated.revisionState.kind).toBe("accepted");
     expect(
       updated.changedTargets.some(
-        (target) => target.kind === "sketch" && target.sketchId === "sketch_primary",
+        (target) =>
+          target.kind === "sketch" && target.sketchId === "sketch_primary",
       ),
       "Variable edits should invalidate the expression-backed imported sketch.",
     ).toBe(true);
     expect(
       updated.changedTargets.some(
-        (target) => target.kind === "feature" && target.featureId === "feature_extrude-1",
+        (target) =>
+          target.kind === "feature" && target.featureId === "feature_extrude-1",
       ),
       "Variable edits should invalidate dependent solid features that consume the rebuilt sketch.",
     ).toBe(true);
@@ -3642,9 +3615,10 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     const afterSketch = after.snapshot.document.sketches.find(
       (entry) => entry.sketchId === "sketch_primary",
     );
-    const afterWidthStatus = afterSketch?.sketch.solvedSnapshot.dimensionStatuses.find(
-      (status) => status.dimensionId === "dimension_1_width",
-    );
+    const afterWidthStatus =
+      afterSketch?.sketch.solvedSnapshot.dimensionStatuses.find(
+        (status) => status.dimensionId === "dimension_1_width",
+      );
     expect(
       solverAdapter.solvedWidthValues.at(-1),
       "Variable rebuild should send the recalculated numeric dimension to the solver boundary.",
@@ -3655,7 +3629,8 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       (dimension) => dimension.dimensionId === "dimension_1_width",
     );
     expect(
-      storedWidth?.kind === "distance" && isExpressionAuthoredValue(storedWidth.value),
+      storedWidth?.kind === "distance" &&
+        isExpressionAuthoredValue(storedWidth.value),
       "Rebuild should keep the imported authored expression instead of replacing it with a literal.",
     ).toBe(true);
   }

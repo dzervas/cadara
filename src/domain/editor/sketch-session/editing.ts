@@ -1,12 +1,10 @@
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
-  SketchAuthoringOperationId,
   SketchEntityId,
   SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
 import type {
-  SketchAuthoringOperation,
   SketchDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
@@ -20,10 +18,7 @@ import {
 } from "@/contracts/sketch/solver-core";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import { type PrimitiveRef, primitiveRefEquals } from "@/core/editor/schema";
-import {
-  collectActiveReferenceImageOperations,
-  createReferenceImageDeleteOperation,
-} from "@/domain/reference-image/operations";
+import { collectActiveReferenceImageOperations } from "@/domain/reference-image/operations";
 import { getSketchEditToolDefinition } from "@/core/sketch-edit-tools/registry";
 import {
   type OffsetCurveDescriptor,
@@ -43,22 +38,15 @@ import {
   offsetSeedCurveFromEntity,
   offsetSideForPoint,
 } from "@/contracts/sketch/offset-geometry";
-import type {
-  SketchEditToolState,
-  SketchHistoryCursor,
-  SketchHistoryItem,
-  SketchHistoryOperation,
-  SketchSessionState,
-} from "./types";
+import type { SketchEditToolState, SketchSessionState } from "./types";
 import {
   CONSTRAINED_DRAG_BLOCKED_MESSAGE,
   CONSTRAINED_DRAG_MOVE_FRACTION,
   CONSTRAINED_DRAG_REQUEST_EPSILON,
   SKETCH_DIRECT_EDIT_TOLERANCES,
-  applySketchHistoryContribution,
+  applySketchContribution,
   cloneDefinition,
   createArcEntityDefinition,
-  createDeleteAuthoringOperation,
   createEntityId,
   createLineEntityDefinition,
   createPointDefinition,
@@ -66,18 +54,12 @@ import {
   createSessionCommitFactories,
   createSplineEntityDefinition,
   deriveSolvedRegionsForSession,
-  filterSketchDefinitionThroughCursor,
-  getAppendBaseAuthoringOperations,
   getEntityPointIds,
   isDrawingSketchTool,
   rebuildSessionCommitRequest,
   rebuildSessionForDefinition,
-  sketchHistoryCursorsEqual,
 } from "./internals";
-import {
-  appendReferenceImageOperations,
-  updateReferenceImageOperationStates,
-} from "./references";
+import { updateReferenceImageOperationStates } from "./references";
 import {
   constraintReferencesSketchGeometry,
   dimensionReferencesSketchGeometry,
@@ -87,108 +69,11 @@ import {
   selectSketchEditTarget,
 } from "./tools";
 import { applyPointPositionsToDefinition } from "./definition-patches";
-import {
-  createTailSketchHistoryCursor,
-  getSketchHistoryItems,
-} from "./history";
+
 import {
   getSelectedReferenceImageOperationIds,
   getSelectedSketchGeometryIds,
 } from "./selection";
-
-export function getOperationOwnedStateTargetIds(
-  operation: SketchAuthoringOperation,
-) {
-  return [
-    ...(operation.targets.edited ?? []),
-    ...(operation.targets.removed ?? []),
-  ].flatMap((target) =>
-    target.kind === "operation" ? [target.operationId] : [],
-  );
-}
-
-export function pruneDirectOperationDependents(
-  operations: readonly SketchAuthoringOperation[],
-  removedOperationIds: ReadonlySet<SketchAuthoringOperationId>,
-) {
-  const pendingRemovedIds = new Set(removedOperationIds);
-  let remainingOperations = [...operations];
-  let pruned = true;
-
-  while (pruned) {
-    pruned = false;
-    remainingOperations = remainingOperations.filter((operation) => {
-      const operationTargetIds = getOperationOwnedStateTargetIds(operation);
-      if (
-        operationTargetIds.length === 0 ||
-        !operationTargetIds.every((targetOperationId) =>
-          pendingRemovedIds.has(targetOperationId),
-        )
-      ) {
-        return true;
-      }
-
-      pendingRemovedIds.add(operation.operationId);
-      pruned = true;
-      return false;
-    });
-  }
-
-  return remainingOperations;
-}
-
-export function repairSketchHistoryCursorAfterOperationRemoval(
-  previousItems: readonly SketchHistoryItem[],
-  previousCursor: SketchHistoryCursor,
-  remainingOperationIds: ReadonlySet<SketchAuthoringOperationId>,
-): SketchHistoryCursor {
-  if (previousCursor.kind === "empty") {
-    return previousCursor;
-  }
-
-  if (
-    remainingOperationIds.has(
-      previousCursor.itemId as SketchAuthoringOperationId,
-    )
-  ) {
-    return previousCursor;
-  }
-
-  const previousCursorIndex = previousItems.findIndex(
-    (item) => item.id === previousCursor.itemId,
-  );
-  for (let index = previousCursorIndex - 1; index >= 0; index -= 1) {
-    const item = previousItems[index];
-    if (
-      item &&
-      remainingOperationIds.has(item.id as SketchAuthoringOperationId)
-    ) {
-      return { kind: "item", itemId: item.id };
-    }
-  }
-
-  return { kind: "empty" };
-}
-
-export function createEmptyAuthoringReplayDefinition(
-  definition: SketchDefinition,
-): SketchDefinition {
-  return {
-    ...cloneDefinition(definition),
-    pointIds: [],
-    points: [],
-    entityIds: [],
-    entities: [],
-    constraintIds: [],
-    constraints: [],
-    dimensionIds: [],
-    dimensions: [],
-    styleIds: [],
-    styles: [],
-    derivedRelationships: [],
-    authoringOperations: [],
-  };
-}
 
 export function deleteSelectedSketchGeometry(
   session: SketchSessionState,
@@ -199,12 +84,54 @@ export function deleteSelectedSketchGeometry(
   let nextSession = session;
 
   if (selectedReferenceImageOperationIds.length > 0) {
-    nextSession = appendReferenceImageOperations(nextSession, [
-      createReferenceImageDeleteOperation({
-        sequence: nextSession.sequence + 1,
-        removedOperationIds: selectedReferenceImageOperationIds,
-      }),
-    ]);
+    const removedImages =
+      nextSession.definition.referenceImages?.filter((record) =>
+        selectedReferenceImageOperationIds.includes(record.operationId),
+      ) ?? [];
+    const ownedPointIds = new Set(
+      removedImages.flatMap((record) => record.ownedPointIds),
+    );
+    const ownedEntityIds = new Set(
+      removedImages.flatMap((record) => record.ownedEntityIds),
+    );
+    const points = nextSession.definition.points.filter(
+      (point) => !ownedPointIds.has(point.pointId),
+    );
+    const entities = nextSession.definition.entities.filter(
+      (entity) => !ownedEntityIds.has(entity.entityId),
+    );
+    const constraints = nextSession.definition.constraints.filter(
+      (constraint) =>
+        !constraintReferencesSketchGeometry(
+          constraint,
+          ownedPointIds,
+          ownedEntityIds,
+        ),
+    );
+    const dimensions = nextSession.definition.dimensions.filter(
+      (dimension) =>
+        !dimensionReferencesSketchGeometry(
+          dimension,
+          ownedPointIds,
+          ownedEntityIds,
+        ),
+    );
+    const definition = {
+      ...nextSession.definition,
+      pointIds: points.map((point) => point.pointId),
+      points,
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+      constraintIds: constraints.map((constraint) => constraint.constraintId),
+      constraints,
+      dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+      dimensions,
+      referenceImages: nextSession.definition.referenceImages?.filter(
+        (record) =>
+          !selectedReferenceImageOperationIds.includes(record.operationId),
+      ),
+    };
+    nextSession = rebuildSessionForDefinition(nextSession, { definition });
     nextSession = {
       ...nextSession,
       activeTool: null,
@@ -274,29 +201,6 @@ export function deleteSelectedSketchGeometry(
         deletedEntityIds,
       ),
   );
-  const remainingConstraintIds = new Set(
-    constraints.map((constraint) => constraint.constraintId),
-  );
-  const remainingDimensionIds = new Set(
-    dimensions.map((dimension) => dimension.dimensionId),
-  );
-  const deleteOperation = createDeleteAuthoringOperation({
-    sequence: nextSession.sequence + 1,
-    removedGraph: {
-      points: beforeDefinition.points.filter((point) =>
-        deletedPointIds.has(point.pointId),
-      ),
-      entities: beforeDefinition.entities.filter((entity) =>
-        deletedEntityIds.has(entity.entityId),
-      ),
-      constraints: beforeDefinition.constraints.filter(
-        (constraint) => !remainingConstraintIds.has(constraint.constraintId),
-      ),
-      dimensions: beforeDefinition.dimensions.filter(
-        (dimension) => !remainingDimensionIds.has(dimension.dimensionId),
-      ),
-    },
-  });
   const afterDefinition: SketchDefinition = {
     ...beforeDefinition,
     pointIds: points.map((point) => point.pointId),
@@ -307,32 +211,19 @@ export function deleteSelectedSketchGeometry(
     constraints,
     dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
     dimensions,
-    authoringOperations: [
-      ...getAppendBaseAuthoringOperations(beforeDefinition),
-      deleteOperation,
-    ],
-  };
-  const operation: SketchHistoryOperation = {
-    itemId: deleteOperation.operationId,
-    beforeCursor: nextSession.historyCursor,
-    beforeDefinition,
-    afterDefinition,
+    referenceImages: beforeDefinition.referenceImages?.map((record) => ({
+      ...record,
+      ownedPointIds: record.ownedPointIds.filter(
+        (pointId) => !deletedPointIds.has(pointId),
+      ),
+      ownedEntityIds: record.ownedEntityIds.filter(
+        (entityId) => !deletedEntityIds.has(entityId),
+      ),
+    })),
   };
 
   let rebuiltSession = rebuildSessionForDefinition(nextSession, {
     definition: afterDefinition,
-    fullDefinition: afterDefinition,
-    historyCursor: { kind: "item", itemId: operation.itemId },
-    historyOperations: [
-      ...nextSession.historyOperations.filter(
-        (entry) =>
-          !sketchHistoryCursorsEqual(
-            entry.beforeCursor,
-            nextSession.historyCursor,
-          ),
-      ),
-      operation,
-    ],
   });
 
   const referenceImageBindingUpdates = collectActiveReferenceImageOperations(
@@ -390,52 +281,6 @@ export function deleteSelectedSketchGeometry(
     drawStartSnap: null,
     sequence: rebuiltSession.sequence,
   };
-}
-
-export function deleteSketchHistoryOperation(
-  session: SketchSessionState,
-  operationId: SketchAuthoringOperationId,
-): SketchSessionState {
-  const operations = session.fullDefinition.authoringOperations ?? [];
-  if (!operations.some((operation) => operation.operationId === operationId)) {
-    return session;
-  }
-
-  const previousItems = getSketchHistoryItems(session.fullDefinition);
-  const survivingOperations = pruneDirectOperationDependents(
-    operations.filter((operation) => operation.operationId !== operationId),
-    new Set([operationId]),
-  );
-  const survivingOperationIds = new Set(
-    survivingOperations.map((operation) => operation.operationId),
-  );
-  const replayDefinition = {
-    ...cloneDefinition(session.fullDefinition),
-    authoringOperations: survivingOperations,
-  };
-  const fullDefinition =
-    survivingOperations.length > 0
-      ? filterSketchDefinitionThroughCursor(
-          replayDefinition,
-          createTailSketchHistoryCursor(replayDefinition),
-        )
-      : createEmptyAuthoringReplayDefinition(session.fullDefinition);
-  const historyCursor = repairSketchHistoryCursorAfterOperationRemoval(
-    previousItems,
-    session.historyCursor,
-    survivingOperationIds,
-  );
-  const definition = filterSketchDefinitionThroughCursor(
-    fullDefinition,
-    historyCursor,
-  );
-
-  return rebuildSessionForDefinition(session, {
-    definition,
-    fullDefinition,
-    historyCursor,
-    historyOperations: [],
-  });
 }
 
 export function getOffsetPreview(
@@ -681,12 +526,8 @@ export function applySketchEditOperationResult(
 ) {
   const nextSequence = session.sequence + 1;
   if (result.definition) {
-    const historyCursor = createTailSketchHistoryCursor(result.definition);
     return {
       definition: result.definition,
-      fullDefinition: cloneDefinition(result.definition),
-      historyCursor,
-      historyOperations: session.historyOperations,
       sequence: nextSequence,
       commitRequest: rebuildSessionCommitRequest(session, result.definition),
       solvedRegions: deriveSolvedRegionsForSession(session, result.definition),
@@ -694,15 +535,9 @@ export function applySketchEditOperationResult(
   }
 
   if (result.contribution) {
-    const history = applySketchHistoryContribution(
-      session,
-      result.contribution,
-    );
+    const history = applySketchContribution(session, result.contribution);
     return {
       definition: history.definition,
-      fullDefinition: history.fullDefinition,
-      historyCursor: history.historyCursor,
-      historyOperations: history.historyOperations,
       sequence: nextSequence,
       commitRequest: rebuildSessionCommitRequest(session, history.definition),
       solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
@@ -813,13 +648,9 @@ export function selectSketchEditToolTarget(
       };
     }
 
-    const historyCursor = createTailSketchHistoryCursor(result.definition);
-
     return {
       ...session,
       definition: result.definition,
-      fullDefinition: cloneDefinition(result.definition),
-      historyCursor,
       toolStagedEntities: [],
       sequence: nextSequence,
       validationMessage: null,
@@ -1018,7 +849,7 @@ export function patchSketchEditToolValue(
   }
 
   const nextSequence = session.sequence + 1;
-  const history = applySketchHistoryContribution(session, preview.contribution);
+  const history = applySketchContribution(session, preview.contribution);
   const nextEditTool = {
     ...activeEditTool,
     selectedTarget: null,
@@ -1030,9 +861,6 @@ export function patchSketchEditToolValue(
     activeEditTool: nextEditTool,
     toolStagedEntities: [],
     definition: history.definition,
-    fullDefinition: history.fullDefinition,
-    historyCursor: history.historyCursor,
-    historyOperations: history.historyOperations,
     sequence: nextSequence,
     commitRequest: rebuildSessionCommitRequest(session, history.definition),
     solvedRegions: deriveSolvedRegionsForSession(session, history.definition),
@@ -1216,6 +1044,14 @@ export function applySketchGeometryDrag(
   if (!drag) {
     return session;
   }
+  if (
+    point[0] === drag.startPoint[0] &&
+    point[1] === drag.startPoint[1] &&
+    drag.currentPoint[0] === drag.startPoint[0] &&
+    drag.currentPoint[1] === drag.startPoint[1]
+  ) {
+    return session;
+  }
 
   const edit = solveDraggedPointEdit(
     session.definition,
@@ -1241,15 +1077,10 @@ export function applySketchGeometryDrag(
   }
 
   const definition = edit.definition;
-  const fullDefinition = applyPointPositionsToDefinition(
-    session.fullDefinition,
-    definition.points,
-  );
 
   return {
     ...session,
     definition,
-    fullDefinition,
     toolStagedEntities: [],
     activeDrag: complete
       ? null

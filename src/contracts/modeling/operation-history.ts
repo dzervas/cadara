@@ -124,112 +124,26 @@ export function createEmptyOperationHistory(
     : payload;
 }
 
-interface CommitSketchHistoryEntryOptions {
-  includeAuthoringOperations?: boolean;
-}
-
 function normalizeCommitSketchDefinitionForSketchId(
   definition: CommitSketchRequest["definition"],
   sketchId: SketchId,
-  options: CommitSketchHistoryEntryOptions = {},
 ): CommitSketchRequest["definition"] {
-  const includeAuthoringOperations = options.includeAuthoringOperations ?? true;
-  const normalizeOperationGraph = (
-    graph:
-      | NonNullable<
-          NonNullable<
-            CommitSketchRequest["definition"]["authoringOperations"]
-          >[number]["createdGraph"]
-        >
-      | undefined,
-  ) =>
-    graph
-      ? {
-          ...graph,
-          points: graph.points?.map((point) => ({
-            ...point,
-            target: {
-              ...point.target,
-              sketchId,
-            },
-          })),
-          entities: graph.entities?.map((entity) => ({
-            ...entity,
-            target: {
-              ...entity.target,
-              sketchId,
-            },
-          })),
-        }
-      : undefined;
-  const normalizeAuthoringOperation = (
-    operation: NonNullable<
-      CommitSketchRequest["definition"]["authoringOperations"]
-    >[number],
-  ) => {
-    const { createdGraph, removedGraph, ...rest } = operation;
-    const normalizedCreatedGraph = normalizeOperationGraph(createdGraph);
-    const normalizedRemovedGraph = normalizeOperationGraph(removedGraph);
-
-    return {
-      ...rest,
-      ...(normalizedCreatedGraph
-        ? { createdGraph: normalizedCreatedGraph }
-        : {}),
-      ...(normalizedRemovedGraph
-        ? { removedGraph: normalizedRemovedGraph }
-        : {}),
-    };
-  };
-  const shouldPersistCompactAuthoringOperation = (
-    operation: NonNullable<
-      CommitSketchRequest["definition"]["authoringOperations"]
-    >[number],
-  ) =>
-    operation.kind === "referenceImage" ||
-    (operation.kind === "edit" &&
-      operation.ownedState?.kind === "referenceImage") ||
-    operation.targets.created?.some((target) => target.kind === "operation") ===
-      true ||
-    operation.targets.edited?.some((target) => target.kind === "operation") ===
-      true ||
-    operation.targets.removed?.some((target) => target.kind === "operation") ===
-      true;
-  const compactAuthoringOperations = definition.authoringOperations
-    ?.filter(shouldPersistCompactAuthoringOperation)
-    .map(normalizeAuthoringOperation);
-  const authoringOperations = includeAuthoringOperations
-    ? definition.authoringOperations?.map(normalizeAuthoringOperation)
-    : compactAuthoringOperations && compactAuthoringOperations.length > 0
-      ? compactAuthoringOperations
-      : undefined;
-  const definitionWithoutOps = { ...definition };
-  delete definitionWithoutOps.authoringOperations;
-
   return {
-    ...definitionWithoutOps,
+    ...definition,
     points: definition.points.map((point) => ({
       ...point,
-      target: {
-        ...point.target,
-        sketchId,
-      },
+      target: { ...point.target, sketchId },
     })),
     entities: definition.entities.map((entity) => ({
       ...entity,
-      target: {
-        ...entity.target,
-        sketchId,
-      },
+      target: { ...entity.target, sketchId },
     })),
-    ...(authoringOperations ? { authoringOperations } : {}),
   };
 }
 
 export function createCommitSketchHistoryEntry(
   payload: CommitSketchRequest,
   committedSketchId: SketchId,
-  options: CommitSketchHistoryEntryOptions = {},
 ): ModelingOperationHistoryEntry {
   return {
     kind: "commitSketch",
@@ -240,7 +154,6 @@ export function createCommitSketchHistoryEntry(
       definition: normalizeCommitSketchDefinitionForSketchId(
         payload.definition,
         committedSketchId,
-        options,
       ),
     },
   };

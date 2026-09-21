@@ -1,8 +1,5 @@
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import type {
-  DurableHistoryAvailability,
-  PersistedSketchDraftSession,
-} from "@/contracts/modeling/durable-history";
+import type { DurableHistoryAvailability } from "@/contracts/modeling/durable-history";
 import type {
   GeometryAssetBlobInput,
   GeometryAssetHash,
@@ -172,37 +169,6 @@ export type DocumentSyncWorkerRequest =
       kind: "redoDurableHistory";
       requestId: RequestId;
       documentId: DocumentId;
-    }
-  | {
-      kind: "getSketchDraftHistory";
-      requestId: RequestId;
-      documentId: DocumentId;
-      draftKey: string;
-    }
-  | {
-      kind: "saveSketchDraftHistory";
-      requestId: RequestId;
-      documentId: DocumentId;
-      draftKey: string;
-      session: PersistedSketchDraftSession;
-    }
-  | {
-      kind: "undoSketchDraftHistory";
-      requestId: RequestId;
-      documentId: DocumentId;
-      draftKey: string;
-    }
-  | {
-      kind: "redoSketchDraftHistory";
-      requestId: RequestId;
-      documentId: DocumentId;
-      draftKey: string;
-    }
-  | {
-      kind: "clearSketchDraftHistory";
-      requestId: RequestId;
-      documentId: DocumentId;
-      draftKey: string;
     };
 
 export type DocumentSyncWorkerResponse =
@@ -273,21 +239,6 @@ export type DocumentSyncWorkerResponse =
       kind: "durableHistoryMutated";
       requestId: RequestId;
       result: DocumentRepositoryMutationResult | null;
-    }
-  | {
-      kind: "sketchDraftHistory";
-      requestId: RequestId;
-      session: PersistedSketchDraftSession | null;
-      availability: DurableHistoryAvailability;
-    }
-  | {
-      kind: "sketchDraftHistorySaved";
-      requestId: RequestId;
-      availability: DurableHistoryAvailability;
-    }
-  | {
-      kind: "sketchDraftHistoryCleared";
-      requestId: RequestId;
     }
   | {
       kind: "documentChanged";

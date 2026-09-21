@@ -6,13 +6,11 @@ import {
   clearActiveSketchTool,
   deleteSelectedSketchAnnotation,
   deleteSelectedSketchGeometry,
-  deleteSketchHistoryOperation,
   deleteSketchReferenceTarget,
   finishSketchGeometryDrag,
   getConnectedSketchEntitySelectionTargets,
   getSketchSessionPreviewLabel,
   isEditableSketchGeometrySelection,
-  moveSketchHistoryCursor,
   patchSketchConstraintValue,
   patchSketchDimensionAnnotationPlacement,
   patchSketchDrawingToolValue,
@@ -247,64 +245,6 @@ export function handleSketchActiveToolCleared(
         toolId: "sketch",
         phase: "editing",
       },
-      preview: {
-        kind: "sketch",
-        label: getSketchSessionPreviewLabel(session),
-        target: session.planeTarget,
-      },
-    },
-    effects: [],
-  };
-}
-
-export function handleSketchHistoryCursorRequested(
-  state: EditorState,
-  event: Extract<EditorEvent, { type: "sketch.historyCursorRequested" }>,
-): EditorTransitionResult {
-  if (state.kind !== "editingSketch") {
-    return { state, effects: [] };
-  }
-
-  const session = moveSketchHistoryCursor(state.session, event.cursor);
-
-  return {
-    state: {
-      ...state,
-      selection: [],
-      hoverTarget: null,
-      session,
-      preview: {
-        kind: "sketch",
-        label: getSketchSessionPreviewLabel(session),
-        target: session.planeTarget,
-      },
-    },
-    effects: [],
-  };
-}
-
-export function handleSketchHistoryOperationDeleteRequested(
-  state: EditorState,
-  event: Extract<
-    EditorEvent,
-    { type: "sketch.historyOperationDeleteRequested" }
-  >,
-): EditorTransitionResult {
-  if (state.kind !== "editingSketch") {
-    return { state, effects: [] };
-  }
-
-  const session = deleteSketchHistoryOperation(
-    state.session,
-    event.operationId,
-  );
-
-  return {
-    state: {
-      ...state,
-      selection: [],
-      hoverTarget: null,
-      session,
       preview: {
         kind: "sketch",
         label: getSketchSessionPreviewLabel(session),

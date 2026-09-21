@@ -55,9 +55,8 @@ import type {
   SketchSessionState,
 } from "./types";
 import {
-  applySketchHistoryContribution,
+  applySketchContribution,
   createArcEntityDefinition,
-  createAuthoringOperationFromContribution,
   createBezierCurveEntityDefinition,
   createCircleEntityDefinition,
   createConicEntityDefinition,
@@ -73,7 +72,6 @@ import {
   createProfileTextEntityDefinition,
   createSplineEntityDefinition,
   deriveSolvedRegionsForSession,
-  filterSketchDefinitionThroughCursor,
   getSessionSketchId,
   getSketchSessionRegionDiagnostics,
   getTargetKey,
@@ -380,7 +378,10 @@ export function buildSketchEditToolPresentation(
         ? {
             id: "offset-distance-input",
             label: "Offset distance",
-            value: state.offsetDistance === null ? null : String(state.offsetDistance),
+            value:
+              state.offsetDistance === null
+                ? null
+                : String(state.offsetDistance),
             unit: "mm",
             min: 0,
             confirmLabel: "Create",
@@ -970,18 +971,15 @@ export function toggleSketchConstructionTarget(
   }
 
   const nextFullDefinition = toggleConstructionTargetInDefinition(
-    session.fullDefinition,
+    session.definition,
     target,
   );
 
-  if (nextFullDefinition === session.fullDefinition) {
+  if (nextFullDefinition === session.definition) {
     return session;
   }
 
-  const definition = filterSketchDefinitionThroughCursor(
-    nextFullDefinition,
-    session.historyCursor,
-  );
+  const definition = nextFullDefinition;
 
   return {
     ...session,
@@ -1000,7 +998,6 @@ export function toggleSketchConstructionTarget(
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
-    fullDefinition: nextFullDefinition,
     definition,
     toolStagedEntities: [],
     commitRequest: rebuildSessionCommitRequest(session, definition),
@@ -1013,7 +1010,7 @@ export function createReferenceId(
   sequence: number,
   target: PrimitiveRef,
 ): ReferenceId {
-  return `ref_${sequence}_${getTargetKey(target).replaceAll(/[^a-zA-Z0-9_-]/g, "-")}` as ReferenceId;
+  return `ref_${sequence}_${getTargetKey(target).replaceAll(/[^a-zA-Z0-9_-]/g, "-")}_${crypto.randomUUID()}` as ReferenceId;
 }
 
 export function sourceMatchesTarget(
@@ -1114,7 +1111,7 @@ export function selectSketchReferenceTarget(
   }
 
   if (
-    session.fullDefinition.references.some((reference) =>
+    session.definition.references.some((reference) =>
       sourceMatchesTarget(reference, target),
     )
   ) {
@@ -1137,10 +1134,6 @@ export function selectSketchReferenceTarget(
     };
   }
 
-  const fullDefinition = appendReferenceDefinition(
-    session.fullDefinition,
-    reference,
-  );
   const definition = appendReferenceDefinition(session.definition, reference);
 
   return {
@@ -1162,7 +1155,6 @@ export function selectSketchReferenceTarget(
     activeDrag: null,
     sequence: nextSequence,
     definition,
-    fullDefinition,
     commitRequest: rebuildSessionCommitRequest(session, definition),
     solvedRegions: deriveSolvedRegionsForSession(session, definition),
     validationMessage: null,
@@ -1191,9 +1183,9 @@ export function deleteSketchReferenceTarget(
       (reference) => reference.referenceId !== target.referenceId,
     ),
   });
-  const fullDefinition = removeFromDefinition(session.fullDefinition);
+  const fullDefinition = removeFromDefinition(session.definition);
 
-  if (fullDefinition === session.fullDefinition) {
+  if (fullDefinition === session.definition) {
     return session;
   }
 
@@ -1201,7 +1193,6 @@ export function deleteSketchReferenceTarget(
 
   return {
     ...session,
-    fullDefinition,
     definition,
     projectedReferences: session.projectedReferences.filter(
       (reference) => reference.referenceId !== target.referenceId,
@@ -2354,26 +2345,14 @@ export function acceptSketchDraw(
     sequence: nextSequence,
     createConstraintId: (suffix) => createConstraintId(nextSequence, suffix),
   });
-  const history = applySketchHistoryContribution(session, {
+  const history = applySketchContribution(session, {
     ...definitionPatch,
-    authoringOperation: createAuthoringOperationFromContribution(
-      definitionPatch,
-      {
-        sequence: nextSequence,
-        kind: session.activeTool,
-        label: `${toolDefinition.metadata.name} ${nextSequence}`,
-        suffix: session.activeTool,
-      },
-    ),
   });
 
   return {
     ...session,
     toolStagedEntities: [],
     definition: history.definition,
-    fullDefinition: history.fullDefinition,
-    historyCursor: history.historyCursor,
-    historyOperations: history.historyOperations,
     status: result.state.status,
     pointerDownPoint: result.state.pointerDownPoint,
     livePoint: result.state.livePoint,

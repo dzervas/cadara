@@ -1,3 +1,4 @@
+import { createReferenceImageFixture as createReferenceImageOperation } from "@/domain/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
@@ -8,7 +9,6 @@ import {
   createSketchSessionFromSnapshot,
   createNewSketchSession,
   deleteSelectedSketchGeometry,
-  deleteSketchHistoryOperation,
   getSketchSessionDisplayRenderables,
   startSketchDraw,
   updateReferenceImageOperationStates,
@@ -19,10 +19,6 @@ import {
   type ReferenceImageCalibrationModeState,
 } from "@/domain/reference-image-calibration/mode/shared";
 import { solveReferenceImageOperationState } from "@/domain/reference-image-calibration/state";
-import {
-  createReferenceImageEditOperation,
-  createReferenceImageOperation,
-} from "@/domain/reference-image/operations";
 
 function loadCapturedReferenceImageSketchFixture() {
   const sketch = {
@@ -114,137 +110,19 @@ function loadCapturedReferenceImageSketchFixture() {
       styles: [],
       svgRenderingEnabled: true,
       derivedRelationships: [],
-      authoringOperations: [
+      referenceImages: [
         {
           operationId: "sketch_operation_1_reference-image",
           label: "cadara-mock.png",
           kind: "referenceImage" as const,
-          targets: {
-            created: [
-              {
-                kind: "operation" as const,
-                operationId: "sketch_operation_1_reference-image",
-              },
-            ],
-          },
-          ownedState: {
-            kind: "referenceImage" as const,
-            image: {
-              mediaType: "image/png",
-              fileName: "cadara-mock.png",
-              pixelWidth: 1254,
-              pixelHeight: 1254,
-              base64Data: "fixture-image-data",
-            },
-            placement: {
-              center: [0, 0] as const,
-              width: 199.99999999999994,
-              height: 199.99999999999994,
-              rotationRadians: 0,
-            },
-            calibration: {
-              scaleMode: "lockedAspect" as const,
-              showExportedAnchorsInSketch: true,
-              anchors: [],
-            },
-          },
-        },
-        {
-          operationId: "sketch_operation_2_edit-reference-image",
-          label: "cadara-mock.png",
-          kind: "edit" as const,
-          targets: {
-            created: [
-              {
-                kind: "point" as const,
-                pointId:
-                  "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
-              },
-              {
-                kind: "point" as const,
-                pointId:
-                  "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
-              },
-              {
-                kind: "entity" as const,
-                entityId:
-                  "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1_point",
-              },
-              {
-                kind: "entity" as const,
-                entityId:
-                  "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2_point",
-              },
-            ],
-            edited: [
-              {
-                kind: "operation" as const,
-                operationId: "sketch_operation_1_reference-image",
-              },
-            ],
-          },
-          createdGraph: {
-            points: [
-              {
-                pointId:
-                  "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
-                label: "Anchor 1",
-                target: {
-                  kind: "sketchPoint" as const,
-                  sketchId: "sketch_primary",
-                  pointId:
-                    "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
-                },
-                position: [66.07556708127112, 23.759903721283415] as const,
-                isConstruction: true,
-              },
-              {
-                pointId:
-                  "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
-                label: "Anchor 2",
-                target: {
-                  kind: "sketchPoint" as const,
-                  sketchId: "sketch_primary",
-                  pointId:
-                    "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
-                },
-                position: [66.75807778062575, -22.650823834832128] as const,
-                isConstruction: true,
-              },
-            ],
-            entities: [
-              {
-                kind: "point" as const,
-                entityId:
-                  "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1_point",
-                label: "Anchor 1",
-                target: {
-                  kind: "sketchEntity" as const,
-                  sketchId: "sketch_primary",
-                  entityId:
-                    "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1_point",
-                },
-                isConstruction: true,
-                pointId:
-                  "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
-              },
-              {
-                kind: "point" as const,
-                entityId:
-                  "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2_point",
-                label: "Anchor 2",
-                target: {
-                  kind: "sketchEntity" as const,
-                  sketchId: "sketch_primary",
-                  entityId:
-                    "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2_point",
-                },
-                isConstruction: true,
-                pointId:
-                  "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
-              },
-            ],
-          },
+          ownedPointIds: [
+            "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1",
+            "sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2",
+          ],
+          ownedEntityIds: [
+            "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_1_point",
+            "sketch_entity_sketch_operation_1_reference_image_sketch_point_sketch_operation_1_reference_image_sketch_operation_1_reference_image_anchor_2_point",
+          ],
           ownedState: {
             kind: "referenceImage" as const,
             image: {
@@ -326,7 +204,7 @@ function loadCapturedReferenceImageSketchFixture() {
   };
 }
 
-test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image state operation-owned while rendering the latest payload", () => {
+test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image state authored while rendering the latest payload", () => {
   const plane = createStandardPlaneDefinition("xy");
   const session = appendReferenceImageOperations(
     createNewSketchSession(plane),
@@ -361,7 +239,7 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image
     "Reference-image imports should not materialize sketch points at import time.",
   ).toBe(0);
   expect(
-    session.definition.authoringOperations?.length,
+    session.definition.referenceImages?.length,
     "Reference-image imports should commit as authoring operations.",
   ).toBe(2);
 
@@ -392,15 +270,15 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image
   });
 
   const persistedCalibration =
-    updated.definition.authoringOperations?.at(-1)?.ownedState?.kind ===
+    updated.definition.referenceImages?.[0]?.ownedState?.kind ===
     "referenceImage"
-      ? updated.definition.authoringOperations.at(-1)?.ownedState.calibration
+      ? updated.definition.referenceImages[0]?.ownedState.calibration
       : undefined;
 
   expect(
-    updated.definition.authoringOperations?.at(-1)?.kind,
-    "Reference-image state updates should append edit authoring operations.",
-  ).toBe("edit");
+    updated.definition.referenceImages?.[0]?.kind,
+    "Reference-image edits update the explicit authored record.",
+  ).toBe("referenceImage");
   expect(
     updated.commitRequest?.definition.references.some(
       (reference) => reference.kind === "referenceImageAnchor",
@@ -425,29 +303,31 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps reference-image
     "Reference-image updates should replay the latest inline payload bytes for rendering.",
   ).toBe("dXBkYXRlZA==");
 
-  const explicitEdit = appendReferenceImageOperations(session, [
-    createReferenceImageEditOperation({
-      sequence: session.sequence + 1,
-      operationId: "sketch_operation_2_reference-image",
-      label: "reference-b-adjusted.jpg",
-      state: {
-        kind: "referenceImage",
-        image: {
-          mediaType: "image/jpeg",
-          fileName: "reference-b-adjusted.jpg",
-          pixelWidth: 200,
-          pixelHeight: 400,
-          base64Data: "YWRqdXN0ZWQ=",
-        },
-        placement: {
-          center: [-6, 8],
-          width: 100,
-          height: 200,
-          rotationRadians: 1.2,
+  const explicitEdit = updateReferenceImageOperationStates({
+    session,
+    updates: [
+      {
+        operationId: "sketch_operation_2_reference-image",
+        label: "reference-b-adjusted.jpg",
+        state: {
+          kind: "referenceImage",
+          image: {
+            mediaType: "image/jpeg",
+            fileName: "reference-b-adjusted.jpg",
+            pixelWidth: 200,
+            pixelHeight: 400,
+            base64Data: "YWRqdXN0ZWQ=",
+          },
+          placement: {
+            center: [-6, 8],
+            width: 100,
+            height: 200,
+            rotationRadians: 1.2,
+          },
         },
       },
-    }),
-  ]);
+    ],
+  });
   const adjustedRenderables = getSketchSessionDisplayRenderables(
     explicitEdit,
   ).filter((entry) => entry.target?.kind === "sketchOperation");
@@ -533,11 +413,12 @@ test("src/domain/editor/reference-image-operations.spec.ts removes anchor bindin
   ]);
 
   const latestOwnedState =
-    deleted.definition.authoringOperations?.at(-1)?.ownedState;
+    deleted.definition.referenceImages?.at(-1)?.ownedState;
   expect(
     latestOwnedState?.kind,
-    "Deleting a bound point should append a reference-image edit row after the delete.",
+    "Deleting a bound point should update the explicit reference-image record.",
   ).toBe("referenceImage");
+  expect(deleted.definition.referenceImages?.[0]?.ownedPointIds).toEqual([]);
   expect(
     latestOwnedState.calibration?.anchors.length,
     "Deleting a bound anchor point should detach the anchor binding from the reference-image operation.",
@@ -715,19 +596,13 @@ test("src/domain/editor/reference-image-operations.spec.ts lets bound anchor poi
     dimensions: [],
     svgRenderingEnabled: true,
     derivedRelationships: [],
-    authoringOperations: [
+    referenceImages: [
       {
         operationId: "sketch_operation_1_reference-image",
         label: "Reference image",
         kind: "referenceImage" as const,
-        targets: {
-          created: [
-            {
-              kind: "operation" as const,
-              operationId: "sketch_operation_1_reference-image",
-            },
-          ],
-        },
+        ownedPointIds: [],
+        ownedEntityIds: [],
         ownedState: {
           kind: "referenceImage" as const,
           image: {
@@ -792,9 +667,9 @@ test("src/domain/editor/reference-image-operations.spec.ts reuses bound anchor p
     loadCapturedReferenceImageSketchFixture(),
   );
   const anchorPointIds =
-    session.definition.authoringOperations?.[1]?.ownedState?.kind ===
+    session.definition.referenceImages?.[0]?.ownedState?.kind ===
     "referenceImage"
-      ? (session.definition.authoringOperations[1].ownedState.calibration?.anchors.map(
+      ? (session.definition.referenceImages[0].ownedState.calibration?.anchors.map(
           (anchor) => anchor.pointId,
         ) ?? [])
       : [];
@@ -861,39 +736,98 @@ test("src/domain/editor/reference-image-operations.spec.ts keeps captured debug-
   ).toBeTruthy();
 });
 
-test("src/domain/editor/reference-image-operations.spec.ts deletes one reference-image history row without appending a new delete operation or disturbing other images", () => {
+test("src/domain/editor/reference-image-operations.spec.ts deletes only image-owned anchor geometry and preserves bound geometry and other images", () => {
+  const ownedPoint = {
+    pointId: "sketch_point_image_anchor" as const,
+    label: "Image anchor",
+    target: {
+      kind: "sketchPoint" as const,
+      sketchId: "sketch_draft" as const,
+      pointId: "sketch_point_image_anchor" as const,
+    },
+    position: [12, 6] as const,
+    isConstruction: true,
+  };
+  const ownedEntity = {
+    kind: "point" as const,
+    entityId: "sketch_entity_image_anchor" as const,
+    label: "Image anchor",
+    target: {
+      kind: "sketchEntity" as const,
+      sketchId: "sketch_draft" as const,
+      entityId: "sketch_entity_image_anchor" as const,
+    },
+    isConstruction: true,
+    pointId: ownedPoint.pointId,
+  };
+  const boundPoint = {
+    pointId: "sketch_point_preexisting_bound" as const,
+    label: "Preexisting bound point",
+    target: {
+      kind: "sketchPoint" as const,
+      sketchId: "sketch_draft" as const,
+      pointId: "sketch_point_preexisting_bound" as const,
+    },
+    position: [3, 4] as const,
+    isConstruction: false,
+  };
+  const boundEntity = {
+    kind: "point" as const,
+    entityId: "sketch_entity_preexisting_bound" as const,
+    label: "Preexisting bound point",
+    target: {
+      kind: "sketchEntity" as const,
+      sketchId: "sketch_draft" as const,
+      entityId: "sketch_entity_preexisting_bound" as const,
+    },
+    isConstruction: false,
+    pointId: boundPoint.pointId,
+  };
+  const imported = appendReferenceImageOperations(
+    createNewSketchSession(createStandardPlaneDefinition("xy")),
+    [
+      createReferenceImageOperation({
+        sequence: 1,
+        sketchId: "sketch_draft",
+        payload: {
+          mediaType: "image/png",
+          fileName: "reference-a.png",
+          pixelWidth: 400,
+          pixelHeight: 200,
+          base64Data: "aW1hZ2UtYQ==",
+        },
+      }),
+      createReferenceImageOperation({
+        sequence: 2,
+        sketchId: "sketch_draft",
+        payload: {
+          mediaType: "image/png",
+          fileName: "reference-b.png",
+          pixelWidth: 200,
+          pixelHeight: 400,
+          base64Data: "aW1hZ2UtYg==",
+        },
+      }),
+    ],
+  );
+  const withBoundGeometry = {
+    ...imported,
+    definition: {
+      ...imported.definition,
+      pointIds: [...imported.definition.pointIds, boundPoint.pointId],
+      points: [...imported.definition.points, boundPoint],
+      entityIds: [...imported.definition.entityIds, boundEntity.entityId],
+      entities: [...imported.definition.entities, boundEntity],
+    },
+  };
   const session = updateReferenceImageOperationStates({
-    session: appendReferenceImageOperations(
-      createNewSketchSession(createStandardPlaneDefinition("xy")),
-      [
-        createReferenceImageOperation({
-          sequence: 1,
-          sketchId: "sketch_draft",
-          payload: {
-            mediaType: "image/png",
-            fileName: "reference-a.png",
-            pixelWidth: 400,
-            pixelHeight: 200,
-            base64Data: "aW1hZ2UtYQ==",
-          },
-        }),
-        createReferenceImageOperation({
-          sequence: 2,
-          sketchId: "sketch_draft",
-          payload: {
-            mediaType: "image/png",
-            fileName: "reference-b.png",
-            pixelWidth: 200,
-            pixelHeight: 400,
-            base64Data: "aW1hZ2UtYg==",
-          },
-        }),
-      ],
-    ),
+    session: withBoundGeometry,
     updates: [
       {
         operationId: "sketch_operation_1_reference-image",
         label: "reference-a-edited.png",
+        createdPoints: [ownedPoint],
+        createdEntities: [ownedEntity],
         state: {
           kind: "referenceImage",
           image: {
@@ -909,39 +843,65 @@ test("src/domain/editor/reference-image-operations.spec.ts deletes one reference
             height: 110,
             rotationRadians: 0.2,
           },
+          calibration: {
+            scaleMode: "lockedAspect",
+            showExportedAnchorsInSketch: true,
+            anchors: [
+              {
+                anchorId: "image-created-anchor",
+                label: "Image anchor",
+                uv: [0.25, 0.5],
+                pointId: ownedPoint.pointId,
+              },
+              {
+                anchorId: "preexisting-bound-anchor",
+                label: "Bound point",
+                uv: [0.75, 0.5],
+                pointId: boundPoint.pointId,
+              },
+            ],
+          },
         },
       },
     ],
   });
 
-  const deleted = deleteSketchHistoryOperation(
-    session,
-    "sketch_operation_1_reference-image",
-  );
+  expect(session.definition.referenceImages?.[0]?.ownedPointIds).toEqual([
+    ownedPoint.pointId,
+  ]);
+  expect(session.definition.referenceImages?.[0]?.ownedEntityIds).toEqual([
+    ownedEntity.entityId,
+  ]);
+
+  const deleted = deleteSelectedSketchGeometry(session, [
+    {
+      kind: "sketchOperation",
+      sketchId: "sketch_draft",
+      operationId: "sketch_operation_1_reference-image",
+    },
+  ]);
   const renderables = getSketchSessionDisplayRenderables(deleted).filter(
     (entry) => entry.target?.kind === "sketchOperation",
   );
 
   expect(
-    deleted.fullDefinition.authoringOperations?.every(
-      (operation) =>
-        operation.operationId !== "sketch_operation_1_reference-image" &&
-        operation.operationId !== "sketch_operation_3_edit-reference-image",
-    ),
-    "Deleting a reference-image history row should prune direct operation-owned follow-up rows for that image.",
-  ).toBeTruthy();
+    deleted.definition.referenceImages?.map((record) => record.operationId),
+    "Deleting one reference image should retain exactly the untargeted current record.",
+  ).toEqual(["sketch_operation_2_reference-image"]);
   expect(
-    deleted.fullDefinition.authoringOperations?.every(
-      (operation) => operation.kind !== "delete",
-    ),
-    "Deleting a reference-image history row should not append a new delete operation.",
-  ).toBeTruthy();
+    deleted.definition.referenceImages?.length,
+    "Deleting an image removes its current authored record.",
+  ).toBe(1);
+  expect(deleted.definition.pointIds).not.toContain(ownedPoint.pointId);
+  expect(deleted.definition.entityIds).not.toContain(ownedEntity.entityId);
+  expect(deleted.definition.points).toContainEqual(boundPoint);
+  expect(deleted.definition.entities).toContainEqual(boundEntity);
   expect(
     renderables.length,
-    "Deleting one reference-image history row should preserve other committed reference images.",
+    "Deleting one reference-image record should preserve other committed reference images.",
   ).toBe(1);
   expect(
     renderables[0]?.label,
-    "Deleting one reference-image history row should leave the untargeted image intact.",
+    "Deleting one reference-image record should leave the untargeted image intact.",
   ).toBe("reference-b.png");
 });

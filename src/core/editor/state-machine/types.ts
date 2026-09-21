@@ -15,10 +15,7 @@ import type {
   SelectionTargetCatalog,
 } from "@/core/editor/schema";
 import type { SectionViewSession, Vec3 } from "@/core/section-view/session";
-import type {
-  SketchSessionState,
-  SketchHistoryCursor,
-} from "@/domain/editor/sketch-session";
+import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import type { SketchPlaneEditSessionState } from "@/domain/editor/sketch-plane-editing";
 import type {
   DocumentFeatureCursor,
@@ -288,6 +285,8 @@ export interface DocumentSnapshotLoadedEvent {
 /** Replaces the active document basis through an explicit whole-document handoff. */
 export interface DocumentReplacedEvent {
   type: "document.replaced";
+  /** Compensation refresh retains private contexts; explicit file opening starts fresh. */
+  preserveAuthoredHistory?: boolean;
   /** Full typed snapshot payload that becomes the next authoritative document basis. */
   snapshot: WorkspaceSnapshot;
 }
@@ -444,11 +443,6 @@ export interface SketchActiveToolClearedEvent {
 }
 
 /** Moves the active sketch-local history cursor. */
-export interface SketchHistoryCursorRequestedEvent {
-  type: "sketch.historyCursorRequested";
-  /** Cursor position requested by the sketch-local history view. */
-  cursor: SketchHistoryCursor;
-}
 
 /** Moves the document-level authored history cursor through the editor runtime. */
 export interface DocumentHistoryCursorRequestedEvent {
@@ -468,17 +462,8 @@ export interface HistoryRedoRequestedEvent {
 }
 
 /** Replaces the active sketch draft with a repository-backed durable-history state. */
-export interface SketchDraftHistoryRestoredEvent {
-  type: "sketch.draftHistoryRestored";
-  session: SketchSessionState;
-}
 
 /** Deletes a targeted sketch-local authoring-operation row from history. */
-export interface SketchHistoryOperationDeleteRequestedEvent {
-  type: "sketch.historyOperationDeleteRequested";
-  /** Durable sketch-local operation identity targeted by the history-row menu. */
-  operationId: SketchAuthoringOperationId;
-}
 
 /** Deletes the currently selected committed sketch annotation, if any. */
 export interface SketchAnnotationDeleteRequestedEvent {
@@ -618,12 +603,9 @@ export type EditorEvent =
   | SketchGeometryDragEndedEvent
   | SketchToolPatchedEvent
   | SketchActiveToolClearedEvent
-  | SketchHistoryCursorRequestedEvent
   | DocumentHistoryCursorRequestedEvent
   | HistoryUndoRequestedEvent
   | HistoryRedoRequestedEvent
-  | SketchDraftHistoryRestoredEvent
-  | SketchHistoryOperationDeleteRequestedEvent
   | SketchAnnotationDeleteRequestedEvent
   | SketchAnnotationEditRequestedEvent
   | FormFeaturePatchedEvent

@@ -35,10 +35,7 @@ import {
   selectionFilterAllowsTarget,
 } from "@/core/editor/schema";
 import {
-  getSketchHistoryCursorForIndex,
-  getSketchHistoryCursorIndex,
   getSketchHistoryItems,
-  type SketchHistoryCursor,
   type SketchHistoryItem,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
@@ -90,7 +87,6 @@ interface SketchHistoryTimelineBarProps {
   session: SketchSessionState;
   visibleSelection: PrimitiveRef[];
   onSelectTarget: (target: PrimitiveRef) => void;
-  onCursorRequested?: (cursor: SketchHistoryCursor) => void;
 }
 
 interface HistoryTimelineVisualItem {
@@ -597,7 +593,7 @@ function HistoryTimelineSurface({
               )}
             </div>
 
-            {items.length > 0 ? (
+            {dataHistoryKind === "document" && items.length > 0 ? (
               <div
                 className="relative h-5 mb-2 select-none"
                 style={{
@@ -1058,14 +1054,13 @@ export function SketchHistoryTimelineBar({
   session,
   visibleSelection,
   onSelectTarget,
-  onCursorRequested,
 }: SketchHistoryTimelineBarProps) {
   const {
     state: { selection, selectionFilter, selectionCatalog },
     dispatch,
   } = useEditorState();
-  const items = getSketchHistoryItems(session.fullDefinition);
-  const cursorIndex = getSketchHistoryCursorIndex(items, session.historyCursor);
+  const items = getSketchHistoryItems(session.definition);
+  const cursorIndex = items.length - 1;
   const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const trackRef = useRef<HTMLDivElement | null>(null);
 
@@ -1090,7 +1085,7 @@ export function SketchHistoryTimelineBar({
         const isAtCursor = index === cursorIndex;
         const itemToolIcon = getSketchHistoryItemToolIcon(
           item,
-          session.fullDefinition,
+          session.definition,
         );
         const description =
           item.kind === "operation"
@@ -1115,15 +1110,6 @@ export function SketchHistoryTimelineBar({
             },
           },
           {
-            kind: "item",
-            id: "move-cursor-here",
-            label: "Move cursor here",
-            commandId: "context.rollCursorHere",
-            icon: <WorkbenchIcon name="history" className="h-3.5 w-3.5" />,
-            onSelect: () =>
-              onCursorRequested?.(getSketchHistoryCursorForIndex(items, index)),
-          },
-          {
             kind: "divider",
             id: "destructive-divider",
           },
@@ -1136,14 +1122,9 @@ export function SketchHistoryTimelineBar({
             disabled: item.target === null,
             danger: true,
             onSelect: () => {
-              if (item.kind !== "operation" || !item.target) {
-                return;
-              }
-
-              dispatch({
-                type: "sketch.historyOperationDeleteRequested",
-                operationId: item.operation.operationId,
-              });
+              if (!item.target) return;
+              onSelectTarget(item.target);
+              dispatch({ type: "sketch.annotationDeleteRequested" });
             },
           },
         ];
@@ -1157,8 +1138,8 @@ export function SketchHistoryTimelineBar({
             getSketchHistoryIcon(item.kind)
           ),
           menuItems,
-          ariaLabel: `Select ${item.label}. Double-click to move sketch history cursor.`,
-          title: `${description}${isAfterCursor ? ". After current cursor" : ""}. Double-click to move sketch history cursor.`,
+          ariaLabel: `Select ${item.label}. `,
+          title: `${description}${isAfterCursor ? ". After current cursor" : ""}. `,
           isSelected,
           isAllowed,
           isAfterCursor,
@@ -1171,35 +1152,30 @@ export function SketchHistoryTimelineBar({
 
             onSelectTarget(item.target);
           },
-          onDoubleClick: () =>
-            onCursorRequested?.(getSketchHistoryCursorForIndex(items, index)),
         };
       }),
     [
       cursorIndex,
       dispatch,
       items,
-      onCursorRequested,
       onSelectTarget,
       selection,
       selectionCatalog,
       selectionFilter,
-      session.fullDefinition,
+      session.definition,
       visibleSelection,
     ],
   );
 
   return (
     <HistoryTimelineSurface
-      ariaLabel="Sketch history"
+      ariaLabel="Sketch contents"
       dataHistoryKind="sketch"
-      emptyLabel="Empty sketch history"
+      emptyLabel="Empty sketch"
       items={visualItems}
       cursorIndex={cursorIndex}
-      cursorDisabled={!onCursorRequested}
-      onCursorRequested={(index) =>
-        onCursorRequested?.(getSketchHistoryCursorForIndex(items, index))
-      }
+      cursorDisabled
+      onCursorRequested={() => {}}
       getCursorAriaLabel={(index) => {
         if (items.length === 0) {
           return "Timeline cursor at empty sketch history";

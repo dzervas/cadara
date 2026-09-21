@@ -11,7 +11,6 @@ import {
 import type { SketchSessionState } from "./types";
 import {
   deriveSolvedRegionsForSession,
-  filterSketchDefinitionThroughCursor,
   getSessionSketchId,
   rebuildSessionCommitRequest,
 } from "./internals";
@@ -101,7 +100,7 @@ export function hasSketchStyleTarget(
 export function isSketchSvgRenderingEnabled(
   session: SketchSessionState,
 ): boolean {
-  return session.fullDefinition.svgRenderingEnabled ?? false;
+  return session.definition.svgRenderingEnabled ?? false;
 }
 
 export function toggleSketchSvgRendering(
@@ -109,17 +108,13 @@ export function toggleSketchSvgRendering(
 ): SketchSessionState {
   const enabled = !isSketchSvgRenderingEnabled(session);
   const nextFullDefinition: SketchDefinition = {
-    ...session.fullDefinition,
+    ...session.definition,
     svgRenderingEnabled: enabled,
   };
-  const nextDefinition = filterSketchDefinitionThroughCursor(
-    nextFullDefinition,
-    session.historyCursor,
-  );
+  const nextDefinition = nextFullDefinition;
 
   return {
     ...session,
-    fullDefinition: nextFullDefinition,
     definition: nextDefinition,
     activeStyleFocus: enabled ? session.activeStyleFocus : null,
     activeEditTarget: null,
@@ -169,7 +164,7 @@ export function getSketchStyleTargetDefinition(
   }
 
   if (target.kind === "region") {
-    const styleRecord = session.fullDefinition.styles?.find(
+    const styleRecord = session.definition.styles?.find(
       (record) =>
         record.target.kind === "region" &&
         record.target.regionId === target.regionId,
@@ -209,25 +204,21 @@ export function patchSketchStyleValue(
   }
 
   const nextFullDefinition = applyStylePatchToDefinition(
-    session.fullDefinition,
+    session.definition,
     session.solvedRegions,
     localTargets,
     parsedPatch,
     toolId,
   );
 
-  if (nextFullDefinition === session.fullDefinition) {
+  if (nextFullDefinition === session.definition) {
     return session;
   }
 
-  const nextDefinition = filterSketchDefinitionThroughCursor(
-    nextFullDefinition,
-    session.historyCursor,
-  );
+  const nextDefinition = nextFullDefinition;
 
   return {
     ...session,
-    fullDefinition: nextFullDefinition,
     definition: nextDefinition,
     commitRequest: rebuildSessionCommitRequest(session, nextDefinition),
     solvedRegions: deriveSolvedRegionsForSession(session, nextDefinition),

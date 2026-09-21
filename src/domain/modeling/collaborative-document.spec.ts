@@ -107,14 +107,15 @@ test("separated list deletions retain interior CRDT identities across a peer del
 test("stale-base provenance writes preserve peer lineage records and untouched sketch fields", async () => {
   const seed = await fixture();
   seed.sketches[0]!.regionSlots = [];
-  seed.sketches[0]!.definition.authoringOperations = [];
+  seed.sketches[0]!.definition.svgRenderingEnabled = false;
   const base = Automerge.from(createCollaborativeDocument(seed));
   const peer = structuredClone(seed);
   peer.topologyLineage = [{ featureId: "feature_peer", outputs: [] }];
-  peer.sketches[0]!.definition.authoringOperations = [
-    { kind: "edit", operationId: "operation_peer", label: "Peer", targets: {} },
-  ];
-  const current = Automerge.change(Automerge.clone(base), (storage) =>
+  peer.sketches[0]!.definition.svgRenderingEnabled = true;
+  const authoredPeer = change(Automerge.clone(base), seed, (d) => {
+    d.sketches[0]!.definition.svgRenderingEnabled = true;
+  });
+  const current = Automerge.change(authoredPeer, (storage) =>
     updateDocumentProvenance(storage, peer, seed),
   );
   const local = structuredClone(seed);
@@ -129,8 +130,8 @@ test("stale-base provenance writes preserve peer lineage records and untouched s
   expect(
     materialized.topologyLineage?.map((record) => record.featureId).sort(),
   ).toEqual(["feature_local", "feature_peer"]);
-  expect(materialized.sketches[0]!.definition.authoringOperations).toEqual(
-    peer.sketches[0]!.definition.authoringOperations,
+  expect(materialized.sketches[0]!.definition.svgRenderingEnabled).toEqual(
+    peer.sketches[0]!.definition.svgRenderingEnabled,
   );
   expect(materialized.sketches[0]!.regionSlots).toEqual(
     local.sketches[0]!.regionSlots,

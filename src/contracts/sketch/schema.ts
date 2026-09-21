@@ -64,94 +64,17 @@ export type SketchDerivedTransformKind =
   | "circularPattern"
   | "transform"
   | "offset";
-export type SketchAuthoringOperationKind =
-  | "referenceImage"
-  | "point"
-  | "line"
-  | "midpointLine"
-  | "rectangle"
-  | "centerPointRectangle"
-  | "alignedRectangle"
-  | "circle"
-  | "threePointCircle"
-  | "centerPointArc"
-  | "threePointArc"
-  | "tangentArc"
-  | "ellipse"
-  | "ellipticalArc"
-  | "conic"
-  | "bezierCurve"
-  | "inscribedPolygon"
-  | "circumscribedPolygon"
-  | "spline"
-  | "controlPointSpline"
-  | "profileText"
-  | "constraint"
-  | "dimension"
-  | "construction"
-  | "reference"
-  | "delete"
-  | "edit"
-  | "derived"
-  | "operation";
-
-export type SketchAuthoringOperationMemberRef =
-  | { kind: "point"; pointId: SketchPointId }
-  | { kind: "entity"; entityId: SketchEntityId }
-  | { kind: "operation"; operationId: SketchAuthoringOperationId }
-  | { kind: "constraint"; constraintId: ConstraintId }
-  | { kind: "dimension"; dimensionId: DimensionId }
-  | { kind: "style"; styleId: SketchStyleId }
-  | { kind: "derivation"; derivationId: string };
-
-export type SketchAuthoringOperationOwnedState = ReferenceImageOperationState;
-
-export interface SketchAuthoringOperationGraphSnapshot {
-  points?: readonly SketchPointDefinition[];
-  entities?: readonly SketchEntityDefinition[];
-  constraints?: readonly ConstraintDefinition[];
-  dimensions?: readonly DimensionDefinition[];
-  styles?: readonly SketchStyleRecord[];
-  derivedRelationships?: readonly SketchDerivationDefinition[];
-}
-
-export interface SketchAuthoringOperationTargets {
-  created?: readonly SketchAuthoringOperationMemberRef[];
-  removed?: readonly SketchAuthoringOperationMemberRef[];
-  edited?: readonly SketchAuthoringOperationMemberRef[];
-}
-
-interface SketchAuthoringOperationBase {
-  /** Durable sketch-local operation identity used by sketch history cursors. */
+/** Current authored image data, never an action/replay record. */
+export interface SketchReferenceImageRecord {
   operationId: SketchAuthoringOperationId;
-  /** Human-readable row label shown in sketch-local history. */
   label: string;
-  /** Typed references to graph members affected by this operation. */
-  targets: SketchAuthoringOperationTargets;
-  /** Metadata-only records needed to rebuild sketch-local cursor states. */
-  createdGraph?: SketchAuthoringOperationGraphSnapshot;
-  /** Metadata-only records removed by delete operations. */
-  removedGraph?: SketchAuthoringOperationGraphSnapshot;
+  kind: "referenceImage";
+  /** Point records created by this image's calibration, never bound preexisting points. */
+  ownedPointIds: SketchPointId[];
+  /** Entity records created by this image's calibration, never bound preexisting entities. */
+  ownedEntityIds: SketchEntityId[];
+  ownedState: ReferenceImageOperationState;
 }
-
-export type SketchAuthoringOperation =
-  | (SketchAuthoringOperationBase & {
-      /** User intent or fallback operation category. */
-      kind: "referenceImage";
-      /** Explicit operation-local state owned outside the flat sketch graph. */
-      ownedState: SketchAuthoringOperationOwnedState;
-    })
-  | (SketchAuthoringOperationBase & {
-      /** Edit rows may carry operation-owned state updates for existing targets. */
-      kind: "edit";
-      /** Optional replacement state for edited operation-owned records. */
-      ownedState?: SketchAuthoringOperationOwnedState;
-    })
-  | (SketchAuthoringOperationBase & {
-      /** User intent or fallback operation category. */
-      kind: Exclude<SketchAuthoringOperationKind, "referenceImage" | "edit">;
-      ownedState?: never;
-    });
 
 export interface SketchDerivedEntityOutput {
   /** Seed entity driving this derived output. */
@@ -545,19 +468,15 @@ export type DimensionAnnotationPlacement =
 export type SketchDimensionAuthoredValue = any;
 export type SketchDimensionNumericValue = number;
 
-type NumericDimensionWithValue<TKind extends DimensionDefinition["kind"]> = Omit<
-  Extract<DimensionDefinition, { kind: TKind }>,
-  "value"
-> & {
-  value: SketchDimensionNumericValue;
-};
+type NumericDimensionWithValue<TKind extends DimensionDefinition["kind"]> =
+  Omit<Extract<DimensionDefinition, { kind: TKind }>, "value"> & {
+    value: SketchDimensionNumericValue;
+  };
 
-type NumericDimensionWithRadians<TKind extends DimensionDefinition["kind"]> = Omit<
-  Extract<DimensionDefinition, { kind: TKind }>,
-  "valueRadians"
-> & {
-  valueRadians: SketchDimensionNumericValue;
-};
+type NumericDimensionWithRadians<TKind extends DimensionDefinition["kind"]> =
+  Omit<Extract<DimensionDefinition, { kind: TKind }>, "valueRadians"> & {
+    valueRadians: SketchDimensionNumericValue;
+  };
 
 export type NumericDimensionDefinition =
   | NumericDimensionWithValue<"distance">
@@ -1128,8 +1047,7 @@ export interface SketchDefinition {
   svgRenderingEnabled?: boolean;
   /** Durable sketch-local mirror, pattern, and transform relationships. */
   derivedRelationships?: SketchDerivationDefinition[];
-  /** Ordered durable metadata describing accepted sketch authoring intent. */
-  authoringOperations?: SketchAuthoringOperation[];
+  referenceImages?: SketchReferenceImageRecord[];
 }
 
 /**

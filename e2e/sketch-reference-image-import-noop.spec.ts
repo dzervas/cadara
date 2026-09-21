@@ -11,7 +11,7 @@ const REFERENCE_IMAGE_BYTES = Buffer.from(
   "base64",
 );
 
-test("importing a sketch reference image through the file chooser should add sketch history and change the viewport", async ({
+test("importing a sketch reference image should add current sketch content and change the viewport", async ({
   page,
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
@@ -31,8 +31,10 @@ test("importing a sketch reference image through the file chooser should add ske
     .click();
   await workbench.expectSketchSessionActive();
 
-  const sketchHistory = page.locator('[data-history-kind="sketch"]');
-  await expect(sketchHistory).toContainText("Empty sketch history");
+  const sketchContents = page.locator('[data-history-kind="sketch"]');
+  await expect(
+    sketchContents.getByText("Empty sketch", { exact: true }),
+  ).toBeVisible();
 
   await workbench.waitForAnimationFrames(4);
   const baselineFrame = await workbench.viewport().screenshot();
@@ -60,28 +62,15 @@ test("importing a sketch reference image through the file chooser should add ske
 
   const importedFrame = await workbench.viewport().screenshot();
   const viewportDelta = meanPixelDelta(settledBaselineFrame, importedFrame);
-  const historyItemCount = await sketchHistory
-    .getByRole("button", { name: /reference\.png/i })
-    .count();
-  const emptyHistoryVisible = await sketchHistory
-    .getByText("Empty sketch history")
-    .count();
-
-  const failures: string[] = [];
-
-  if (historyItemCount < 1 || emptyHistoryVisible > 0) {
-    failures.push(
-      `expected the imported image to add a sketch history row, but historyItemCount=${historyItemCount} and emptyHistoryVisible=${emptyHistoryVisible}`,
-    );
-  }
-
-  if (viewportDelta <= idleDelta + 5) {
-    failures.push(
-      `expected the imported image to visibly change the viewport, but idleDelta=${idleDelta.toFixed(2)} and viewportDelta=${viewportDelta.toFixed(2)}`,
-    );
-  }
-
-  if (failures.length > 0) {
-    throw new Error(failures.join("\n"));
-  }
+  const imageContent = sketchContents.getByRole("button", {
+    name: /reference\.png/i,
+  });
+  await expect(imageContent).toHaveCount(1);
+  await expect(
+    sketchContents.getByText("Empty sketch", { exact: true }),
+  ).toHaveCount(0);
+  expect(
+    viewportDelta,
+    `Expected the imported image to visibly change the viewport; idleDelta=${idleDelta.toFixed(2)}, viewportDelta=${viewportDelta.toFixed(2)}.`,
+  ).toBeGreaterThan(idleDelta + 5);
 });

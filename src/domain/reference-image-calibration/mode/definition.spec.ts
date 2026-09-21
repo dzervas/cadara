@@ -1,3 +1,4 @@
+import { createReferenceImageFixture as createReferenceImageOperation } from "@/domain/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
 import {
@@ -15,7 +16,6 @@ import {
   REFERENCE_IMAGE_CALIBRATION_MODE_ID,
   type ReferenceImageCalibrationModeState,
 } from "@/domain/reference-image-calibration/mode/shared";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 
 function createEditingSketchState(): SketchEditorState {
   const session = appendReferenceImageOperations(
@@ -62,7 +62,7 @@ function createEditingSketchState(): SketchEditorState {
 
 function getOperationTarget(state: SketchEditorState) {
   const operationId =
-    state.session.definition.authoringOperations?.[0]?.operationId;
+    state.session.definition.referenceImages?.[0]?.operationId;
   if (!operationId) {
     throw new Error("Expected reference-image operation fixture.");
   }
@@ -292,27 +292,6 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a s
           },
         ],
       },
-      fullDefinition: {
-        ...baseState.session.fullDefinition,
-        pointIds: [
-          ...baseState.session.fullDefinition.pointIds,
-          "sketch_point_anchor",
-        ],
-        points: [
-          ...baseState.session.fullDefinition.points,
-          {
-            pointId: "sketch_point_anchor",
-            label: "Existing anchor",
-            target: {
-              kind: "sketchPoint",
-              sketchId: "sketch_draft",
-              pointId: "sketch_point_anchor",
-            },
-            position: [30, 0],
-            isConstruction: true,
-          },
-        ],
-      },
     },
   };
 
@@ -384,27 +363,6 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode
         ],
         points: [
           ...baseState.session.definition.points,
-          {
-            pointId: "sketch_point_overlap",
-            label: "Overlap point",
-            target: {
-              kind: "sketchPoint",
-              sketchId: "sketch_draft",
-              pointId: "sketch_point_overlap",
-            },
-            position: [0, 0],
-            isConstruction: true,
-          },
-        ],
-      },
-      fullDefinition: {
-        ...baseState.session.fullDefinition,
-        pointIds: [
-          ...baseState.session.fullDefinition.pointIds,
-          "sketch_point_overlap",
-        ],
-        points: [
-          ...baseState.session.fullDefinition.points,
           {
             pointId: "sketch_point_overlap",
             label: "Overlap point",

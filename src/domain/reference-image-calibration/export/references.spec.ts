@@ -1,3 +1,4 @@
+import { createReferenceImageFixture as createReferenceImageOperation } from "@/domain/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
@@ -5,7 +6,6 @@ import {
   buildReferenceImageAnchorProjectedReferences,
   mergeReferenceImageAnchorReferences,
 } from "@/domain/reference-image-calibration/export/references";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 
 test("src/domain/reference-image-calibration/export/references.spec.ts does not synthesize exported anchor references into the sketch definition", () => {
   const operation = createReferenceImageOperation({
@@ -34,7 +34,7 @@ test("src/domain/reference-image-calibration/export/references.spec.ts does not 
     dimensions: [],
     svgRenderingEnabled: true,
     derivedRelationships: [],
-    authoringOperations: [operation],
+    referenceImages: [operation],
   };
 
   const merged = mergeReferenceImageAnchorReferences(
@@ -75,7 +75,7 @@ test("src/domain/reference-image-calibration/export/references.spec.ts does not 
     dimensions: [],
     svgRenderingEnabled: true,
     derivedRelationships: [],
-    authoringOperations: [operation],
+    referenceImages: [operation],
   } satisfies SketchDefinition);
 
   expect(
