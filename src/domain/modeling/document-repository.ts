@@ -28,6 +28,7 @@ export type DocumentRepositoryChangeSource =
   | "redo";
 
 export interface DocumentRepositoryMetadata {
+  actorId: string;
   documentId: DocumentId;
   heads: readonly string[];
   source: DocumentRepositoryChangeSource;
@@ -60,6 +61,10 @@ export type DocumentRepositoryLoadResult =
       status: Extract<DocumentRepositoryRestoreStatus, { kind: "failed" }>;
     };
 
+/** A durability failure reports an already-applied live change, not rollback.
+ * Its matching action ledger is retained; further writes fail closed until load retries persistence.
+ * The failed status distinguishes this from an atomic expected-state/provenance rejection.
+ */
 export type DocumentRepositoryMutationResult =
   | {
       ok: true;
@@ -83,13 +88,21 @@ export interface DocumentRepositoryChangeEvent {
 }
 
 export interface DocumentRepository {
+  /** Also explicitly retries unresolved durability in the current editing session. */
   load(input: {
     documentId: DocumentId;
     seedDocument: AuthoredModelDocument;
   }): Promise<DocumentRepositoryLoadResult>;
+  initialize(input: {
+    documentId: DocumentId;
+    document: AuthoredModelDocument;
+    assets?: readonly GeometryAssetBlobInput[];
+  }): Promise<DocumentRepositoryMutationResult>;
   mutate(input: {
     documentId: DocumentId;
     document: AuthoredModelDocument;
+    expected: AuthoredModelDocument;
+    label?: string;
     assets?: readonly GeometryAssetBlobInput[];
   }): Promise<DocumentRepositoryMutationResult>;
   subscribe(

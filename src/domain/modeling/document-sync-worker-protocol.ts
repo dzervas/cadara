@@ -98,6 +98,15 @@ export type DocumentSyncWorkerRequest =
       requestId: RequestId;
       documentId: DocumentId;
       document: AuthoredModelDocument;
+      expected: AuthoredModelDocument;
+      label?: string;
+      assets?: readonly GeometryAssetBlobInput[];
+    }
+  | {
+      kind: "initialize";
+      requestId: RequestId;
+      documentId: DocumentId;
+      document: AuthoredModelDocument;
       assets?: readonly GeometryAssetBlobInput[];
     }
   | {

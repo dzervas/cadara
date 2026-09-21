@@ -9,6 +9,11 @@ import type {
   AuthoredValue,
 } from "@/contracts/modeling/authored-actions";
 
+export {
+  encode as encodeAuthoredActionState,
+  decode as decodeAuthoredActionState,
+};
+
 type Fields = { [key: string]: AuthoredValue };
 const sketchCollections = {
   references: "referenceId",

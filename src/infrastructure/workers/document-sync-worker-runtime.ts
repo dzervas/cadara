@@ -289,7 +289,7 @@ export function createDocumentSyncWorkerMessageHandler(
           postMessage({
             kind: "loaded",
             requestId: request.requestId,
-            result: await options.repository.mutate({
+            result: await options.repository.initialize({
               documentId: request.documentId,
               document: boundFileDocument.document,
             }),
@@ -297,20 +297,32 @@ export function createDocumentSyncWorkerMessageHandler(
           return;
         }
         case "reset": {
-          options.repositoryUrlStore?.delete(request.documentId);
+          const status = await options.repository.reset(request.documentId);
+          if (status.kind === "reset")
+            options.repositoryUrlStore?.delete(request.documentId);
           postMessage({
             kind: "reset",
             requestId: request.requestId,
-            status: await options.repository.reset(request.documentId),
+            status,
           });
           return;
         }
+        case "initialize":
         case "mutate": {
-          const result = await options.repository.mutate({
-            documentId: request.documentId,
-            document: request.document,
-            assets: request.assets,
-          });
+          const result =
+            request.kind === "initialize"
+              ? await options.repository.initialize({
+                  documentId: request.documentId,
+                  document: request.document,
+                  assets: request.assets,
+                })
+              : await options.repository.mutate({
+                  documentId: request.documentId,
+                  document: request.document,
+                  expected: request.expected,
+                  label: request.label,
+                  assets: request.assets,
+                });
           if (result.ok) {
             const normalized = normalizeCollaborativeAuthoredModelDocument(
               result.document,

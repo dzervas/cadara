@@ -67,6 +67,14 @@ export function createInstrumentedDocumentRepository<
         loadResultAttributes,
       );
     },
+    initialize(input) {
+      return measure(
+        "initialize",
+        input.documentId,
+        () => repository.initialize(input),
+        mutationResultAttributes,
+      );
+    },
     mutate(input) {
       return measure(
         "mutate",

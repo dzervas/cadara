@@ -1,870 +1,654 @@
 import { test, expect } from "vitest";
-
-import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
-import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { createSeedAuthoredModelDocument } from "./modeling-test-fixtures";
+import { createMemoryDocumentRepository } from "./memory-document-repository";
 import {
-  createLocalStorageDocumentRepositoryUrlStore,
   IndexedDbAutomergeDocumentRepository,
-  type DocumentRepositoryUrlStore,
+  MemoryDocumentRepositoryUrlStore,
 } from "@/infrastructure/persistence/indexeddb-automerge-document-repository";
-import { createMemoryLocalDurableHistoryStore } from "@/domain/modeling/local-durable-history-store";
-import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
-import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
-import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { createMemoryLocalDurableHistoryStore } from "./local-durable-history-store";
+import { createMemoryGeometryAssetStore } from "./geometry-asset-store";
+import { createDeterministicGeometryAsset } from "./geometry-asset-test-helpers";
+import {
+  materializeCollaborativeDocument,
+  createCollaborativeDocument,
+  type CollaborativeDocument,
+} from "./collaborative-document";
+import type { DocumentRepository } from "./document-repository";
+import { parseDocumentLocalDurableHistoryState } from "@/contracts/modeling/durable-history.runtime-schema";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import { persistSketchDraftSession } from "@/domain/editor/sketch-session/persistence";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
 
-test("src/domain/modeling/document-repository.spec.ts", async () => {
-  async function createSeedDocument() {
-    const adapter = new MockKernelAdapter();
-    const snapshot = (
-      await adapter.getDocumentSnapshot({
-        contractVersion: CONTRACT_VERSION,
-        documentId: "doc_workspace",
-      })
-    ).snapshot;
-    return createAuthoredModelDocumentFromSnapshot(snapshot);
-  }
-
-  async function testMemoryRepositoryLoadsMutatesSubscribesAndResets() {
-    const seed = await createSeedDocument();
-    const repository = createMemoryDocumentRepository();
+function persistent(
+  repo = new RealAutomergeRepo(),
+  urlStore = new MemoryDocumentRepositoryUrlStore(),
+) {
+  return new IndexedDbAutomergeDocumentRepository({
+    repo,
+    urlStore,
+    assetStore: createMemoryGeometryAssetStore(),
+    localDurableHistoryStore: createMemoryLocalDurableHistoryStore(),
+  });
+}
+for (const [name, make] of [
+  ["memory", () => createMemoryDocumentRepository()],
+  ["Automerge", () => persistent()],
+] as const) {
+  test(`${name}: conditional writes, compensation, fresh initialization and actor identity`, async () => {
+    const seed = await createSeedAuthoredModelDocument();
+    const repository: DocumentRepository = make();
     const loaded = await repository.load({
       documentId: seed.documentId,
       seedDocument: seed,
     });
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) throw new Error("load failed");
+    expect(loaded.metadata.actorId).not.toBe("");
     expect(
-      loaded.ok,
-      "Memory repository should create a missing document from the seed document.",
-    ).toBeTruthy();
+      (
+        await repository.initialize({
+          documentId: "doc_wrong_context",
+          document: seed,
+        })
+      ).ok,
+    ).toBe(false);
     expect(
-      loaded.status.kind,
-      "Missing memory documents should report seeded status.",
-    ).toBe("seeded");
-
-    let observed: AuthoredModelDocument | null = null;
-    let observedHeads: readonly string[] = [];
-    const unsubscribe = repository.subscribe(seed.documentId, (event) => {
-      observed = event.document;
-      observedHeads = event.metadata.heads;
-    });
-    const mutated = await repository.mutate({
+      (
+        await repository.load({
+          documentId: "doc_wrong_context",
+          seedDocument: seed,
+        })
+      ).ok,
+    ).toBe(false);
+    const candidate = { ...seed, name: "Local name" };
+    const first = await repository.mutate({
       documentId: seed.documentId,
-      document: {
-        ...seed,
-        bodyLabels: seed.bodyLabels.map((label) =>
-          label.bodyId === "body_part-1"
-            ? { ...label, label: "Repository Body" }
-            : label,
-        ),
-      },
+      expected: seed,
+      document: candidate,
     });
-    expect(
-      mutated.ok,
-      "Memory repository should accept plain authored document mutations.",
-    ).toBeTruthy();
-    expect(
-      observed?.bodyLabels.some((label) => label.label === "Repository Body"),
-      "Subscribers should receive plain authored documents.",
-    ).toBeTruthy();
-    expect(
-      observedHeads[0],
-      "Memory repository changes should include head metadata.",
-    ).toBe(`memory:${mutated.document.revisionId}`);
-    unsubscribe();
-    observed = null;
-    await repository.mutate({ documentId: seed.documentId, document: seed });
-    expect(
-      observed,
-      "Unsubscribed memory repository listeners should not receive later changes.",
-    ).toBe(null);
-
-    const reset = await repository.reset(seed.documentId);
-    expect(reset.kind, "Repository reset should report reset status.").toBe(
-      "reset",
-    );
-    const reloaded = await repository.load({
+    expect(first.ok).toBe(true);
+    const conflict = await repository.mutate({
+      documentId: seed.documentId,
+      expected: seed,
+      document: { ...seed, name: "Stale name", bodyLabels: [] },
+    });
+    expect(conflict.ok).toBe(false);
+    const current = await repository.load({
       documentId: seed.documentId,
       seedDocument: seed,
     });
-    expect(
-      reloaded.ok && reloaded.status.kind === "seeded",
-      "Repository should recreate a seeded document after reset.",
-    ).toBeTruthy();
-  }
-
-  async function testRepositoryAssetMutationsAreAtomic() {
-    const seed = await createSeedDocument();
-    const asset = await createDeterministicGeometryAsset({
-      ownerFeatureIds: [seed.features[0]!.featureId],
-    });
-    const documentWithAsset: AuthoredModelDocument = {
-      ...seed,
-      assets: {
-        schemaVersion: "geometry-asset-manifest/v1alpha1",
-        records: [asset.asset],
-      },
-    };
-    const repository = createMemoryDocumentRepository();
-    await repository.load({ documentId: seed.documentId, seedDocument: seed });
-
-    const unrelatedAsset = await createDeterministicGeometryAsset({
-      assetId: "asset_unreferenced_geometry",
-      ownerFeatureIds: [seed.features[0]!.featureId],
-      seed: 23,
-    });
-    const invalidAssetBatch = await repository.mutate({
-      documentId: seed.documentId,
-      document: documentWithAsset,
-      assets: [asset, unrelatedAsset],
-    });
-    expect(
-      invalidAssetBatch.ok,
-      "Asset mutations with blobs outside the authored manifest should fail.",
-    ).toBeFalsy();
-
-    const embeddedAsset = await repository.mutate({
-      documentId: seed.documentId,
-      document: documentWithAsset,
-    });
-    expect(
-      embeddedAsset.ok,
-      "Asset-referencing mutations should commit when required bytes are embedded in JSON.",
-    ).toBeTruthy();
-
-    const storedAsset = await repository.mutate({
-      documentId: seed.documentId,
-      document: documentWithAsset,
-      assets: [asset],
-    });
-    expect(
-      storedAsset.ok,
-      "Asset-referencing mutations should commit after required blobs are stored.",
-    ).toBeTruthy();
-    expect(
-      storedAsset.ok &&
-        storedAsset.assetAvailability?.every((entry) => entry.available),
-      "Committed asset mutations should report asset availability metadata.",
-    ).toBeTruthy();
-    expect(
-      await repository.getGeometryAssetRecord(asset.asset),
-      "Repository asset resolver should return stored immutable blob bytes.",
-    ).not.toBe(null);
-  }
-
-  async function testPeerAssetTransferStoresBlobs() {
-    const seed = await createSeedDocument();
-    const asset = await createDeterministicGeometryAsset({
-      ownerFeatureIds: [seed.features[0]!.featureId],
-    });
-    const documentWithAsset: AuthoredModelDocument = {
-      ...seed,
-      assets: {
-        schemaVersion: "geometry-asset-manifest/v1alpha1",
-        records: [asset.asset],
-      },
-    };
-    const peer = new IndexedDbAutomergeDocumentRepository({
-      repo: createFakeAutomergeRepo(),
-      urlStore: createMemoryUrlStore(),
-      assetStore: createMemoryGeometryAssetStore(),
-      localPeerSync: false,
-    });
-    const observed: string[] = [];
-    peer.subscribe(seed.documentId, (event) => {
-      observed.push(
-        `${event.metadata.source}:${event.assetAvailability?.[0]?.available}`,
-      );
-    });
-
-    await (
-      peer as unknown as {
-        handleLocalPeerDocumentMessage(data: unknown): Promise<void>;
-      }
-    ).handleLocalPeerDocumentMessage({
-      type: "cad-authored-document-repository/document-updated",
-      senderId: "peer_source",
-      documentId: seed.documentId,
-      document: documentWithAsset,
-      assets: [asset],
-    });
-
-    expect(
-      observed.includes("peer:true"),
-      "Peer asset transfer should notify with available verified blob metadata.",
-    ).toBeTruthy();
-    expect(
-      await peer.getGeometryAssetRecord(asset.asset),
-      "Peer asset transfer should store received blob bytes.",
-    ).not.toBe(null);
-    expect(
-      await peer.getGeometryAssetBytes(asset.asset.hash),
-      "Peer asset transfer should make blobs resolvable by hash for restore paths.",
-    ).not.toBe(null);
-  }
-
-  async function testIndexedDbRepositoryUsesInternalHandleAndReportsFailures() {
-    const seed = await createSeedDocument();
-    const urlStore = createMemoryUrlStore();
-    const repo = createFakeAutomergeRepo();
-    const repository = new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-    });
-
-    const seedEvents: string[] = [];
-    repository.subscribe(seed.documentId, (event) => {
-      seedEvents.push(event.metadata.source);
-    });
-    const loaded = await repository.load({
-      documentId: seed.documentId,
-      seedDocument: seed,
-    });
-    expect(
-      loaded.ok && loaded.status.kind === "seeded",
-      "IndexedDB repository should seed missing Automerge documents.",
-    ).toBeTruthy();
-    expect(
-      loaded.ok && loaded.metadata.heads.length > 0,
-      "Seeded Automerge documents should expose causal heads.",
-    ).toBeTruthy();
-    expect(
-      seedEvents.every((source) => source !== "peer"),
-      "Seeded Automerge documents should not emit peer-originated changes.",
-    ).toBeTruthy();
-    expect(
-      repo.createdCount,
-      "IndexedDB repository should create an internal Automerge handle for missing documents.",
-    ).toBe(1);
-    expect(
-      urlStore.get(seed.documentId),
-      "IndexedDB repository should persist the app document to Automerge URL mapping.",
-    ).not.toBe(null);
-
-    const restored = await new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-    }).load({
-      documentId: seed.documentId,
-      seedDocument: {
-        ...seed,
-        bodyLabels: [],
-      },
-    });
-    expect(
-      restored.ok && restored.status.kind === "restored",
-      "A new repository instance should restore through the stored Automerge URL.",
-    ).toBeTruthy();
-    expect(
-      restored.ok && restored.metadata.source === "restore",
-      "Restored Automerge documents should identify restore as the change source.",
-    ).toBeTruthy();
-    expect(
-      restored.ok &&
-        restored.document.bodyLabels.length === seed.bodyLabels.length,
-      "Refresh restore should use the stored authored document.",
-    ).toBeTruthy();
-
-    const events: string[] = [];
-    const unsubscribe = repository.subscribe(seed.documentId, (event) => {
-      events.push(`${event.metadata.source}:${event.metadata.heads.join("|")}`);
-    });
-    repo.pushPeerChange(urlStore.get(seed.documentId)!, {
-      authoredDocument: {
-        ...seed,
-        bodyLabels: seed.bodyLabels.map((label) =>
-          label.bodyId === "body_part-1"
-            ? { ...label, label: "Peer Body" }
-            : label,
-        ),
-      },
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(
-      events.some((event) => event.startsWith("peer:")),
-      "Peer-originated handle changes should notify subscribers.",
-    ).toBeTruthy();
-    unsubscribe();
-    const eventCount = events.length;
-    repo.pushPeerChange(urlStore.get(seed.documentId)!, {
-      authoredDocument: seed,
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(
-      events.length,
-      "Unsubscribed Automerge repository listeners should not receive later peer changes.",
-    ).toBe(eventCount);
-
-    const unsupported = await repository.mutate({
-      documentId: seed.documentId,
-      document: {
-        ...seed,
-        schemaVersion:
-          "authored-model-document/v9" as AuthoredModelDocument["schemaVersion"],
-      },
-    });
-    expect(
-      unsupported.ok,
-      "Unsupported authored schemas should fail without replacing existing data.",
-    ).toBeFalsy();
-    expect(
-      unsupported.status.diagnostic.reasonCode,
-      "Unsupported schema failures should be explicit.",
-    ).toBe("unsupported-schema-version");
-
-    repo.failNextFind = true;
-    const findFailed = await new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-    }).load({
-      documentId: seed.documentId,
-      seedDocument: seed,
-    });
-    expect(findFailed.ok, "DocHandle load failures should be reported.").toBe(
-      false,
-    );
-    expect(
-      findFailed.status.diagnostic.reasonCode,
-      "DocHandle load failures should keep a repository diagnostic.",
-    ).toBe("automerge-load-failed");
-
-    repo.failNextChange = true;
-    const writeFailed = await repository.mutate({
-      documentId: seed.documentId,
-      document: seed,
-    });
-    expect(writeFailed.ok, "DocHandle write failures should be reported.").toBe(
-      false,
-    );
-    expect(
-      writeFailed.status.diagnostic.reasonCode,
-      "Write failures should keep a repository diagnostic.",
-    ).toBe("automerge-write-failed");
-
-    const reset = await repository.reset(seed.documentId);
-    expect(
-      reset.kind,
-      "IndexedDB repository reset should clear the mapped document.",
-    ).toBe("reset");
-    expect(
-      urlStore.get(seed.documentId),
-      "Reset should remove the stored Automerge URL mapping.",
-    ).toBe(null);
-  }
-
-  async function testDocumentRepositoriesPersistDurableUndoRedoLocally() {
-    const seed = await createSeedDocument();
-    const repository = createMemoryDocumentRepository();
-    await repository.load({ documentId: seed.documentId, seedDocument: seed });
-
-    const mutated = await repository.mutate({
-      documentId: seed.documentId,
-      document: {
-        ...seed,
-        bodyLabels: seed.bodyLabels.map((label) =>
-          label.bodyId === "body_part-1"
-            ? { ...label, label: "Durable Undo Body" }
-            : label,
-        ),
-      },
-    });
-    expect(
-      mutated.ok,
-      "Durable history fixtures require the initial repository mutation to succeed.",
-    ).toBeTruthy();
-
-    const afterMutation = await repository.getDurableHistoryAvailability(
-      seed.documentId,
-    );
-    expect(
-      afterMutation.canUndo && !afterMutation.canRedo,
-      "Accepted local mutations should create one durable undo step.",
-    ).toBeTruthy();
-
+    expect(current.ok && current.document.bodyLabels).toEqual(seed.bodyLabels);
     const undone = await repository.undoDurableHistory(seed.documentId);
-    expect(
-      undone?.ok &&
-        undone.document.bodyLabels.every(
-          (label) => label.label !== "Durable Undo Body",
-        ),
-      "Undo should restore the prior authored document snapshot through the repository seam.",
-    ).toBeTruthy();
-    const afterUndo = await repository.getDurableHistoryAvailability(
-      seed.documentId,
-    );
-    expect(
-      afterUndo.canUndo && afterUndo.canRedo,
-      "Undo should move durable history availability onto redo.",
-    ).toBeFalsy();
-
+    expect(undone?.ok && undone.document.name).toBe(seed.name);
     const redone = await repository.redoDurableHistory(seed.documentId);
-    expect(
-      redone?.ok &&
-        redone.document.bodyLabels.some(
-          (label) => label.label === "Durable Undo Body",
-        ),
-      "Redo should reapply the durable authored document snapshot through the repository seam.",
-    ).toBeTruthy();
-
-    await repository.receivePeerDocument({
-      ...seed,
-      revisionId: "rev_peer_override" as AuthoredModelDocument["revisionId"],
+    expect(redone?.ok && redone.document.name).toBe("Local name");
+    await repository.initialize({
+      documentId: seed.documentId,
+      document: candidate,
     });
-    const afterPeer = await repository.getDurableHistoryAvailability(
-      seed.documentId,
-    );
     expect(
-      afterPeer.canUndo && !afterPeer.canRedo,
-      "Peer-authored repository changes should not arrive as locally undoable durable history.",
-    ).toBeFalsy();
-  }
-
-  async function testIndexedDbRepositoryRestoresDurableHistoryAcrossRefresh() {
-    const seed = await createSeedDocument();
-    const urlStore = createMemoryUrlStore();
-    const repo = createFakeAutomergeRepo();
-    const localDurableHistoryStore = createMemoryLocalDurableHistoryStore();
-    const repository = new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-      localDurableHistoryStore,
-    });
-
+      await repository.getDurableHistoryAvailability(seed.documentId),
+    ).toEqual({ canUndo: false, canRedo: false });
+  });
+  test(`${name}: not-yet-replaced private draft seam remains independent of document compensation`, async () => {
+    const seed = await createSeedAuthoredModelDocument(),
+      repository = make();
     await repository.load({ documentId: seed.documentId, seedDocument: seed });
-    const mutated = await repository.mutate({
-      documentId: seed.documentId,
-      document: {
-        ...seed,
-        bodyLabels: seed.bodyLabels.map((label) =>
-          label.bodyId === "body_part-1"
-            ? { ...label, label: "Restored Durable Undo Body" }
-            : label,
-        ),
-      },
+    const session = createNewSketchSession(createStandardPlaneDefinition("xy"));
+    const initial = persistSketchDraftSession(session);
+    const next = persistSketchDraftSession({
+      ...session,
+      sketchLabel: "Private edit",
+      sequence: session.sequence + 1,
     });
-    expect(
-      mutated.ok,
-      "Refresh durable-history coverage needs an accepted repository mutation.",
-    ).toBeTruthy();
-
-    const refreshedRepository = new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-      localDurableHistoryStore,
-    });
-    await refreshedRepository.load({
-      documentId: seed.documentId,
-      seedDocument: seed,
-    });
-    const restoredAvailability =
-      await refreshedRepository.getDurableHistoryAvailability(seed.documentId);
-    expect(
-      restoredAvailability.canUndo && !restoredAvailability.canRedo,
-      "Refreshing the same local repository should restore durable undo availability from repository-local storage.",
-    ).toBeTruthy();
-  }
-
-  async function testIndexedDbRepositoryScopesDurableHistoryPerLocalSession() {
-    const seed = await createSeedDocument();
-    const urlStore = createMemoryUrlStore();
-    const repo = createFakeAutomergeRepo();
-    const localDurableHistoryStore = createMemoryLocalDurableHistoryStore();
-    const sessionA = new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-      localDurableHistoryStore,
-      historyScope: "session-a",
-    });
-    await sessionA.load({ documentId: seed.documentId, seedDocument: seed });
-    const mutated = await sessionA.mutate({
-      documentId: seed.documentId,
-      document: {
-        ...seed,
-        bodyLabels: seed.bodyLabels.map((label) =>
-          label.bodyId === "body_part-1"
-            ? { ...label, label: "Scoped Durable Undo Body" }
-            : label,
-        ),
-      },
-    });
-    expect(
-      mutated.ok,
-      "Session-scoped durable history coverage needs an accepted repository mutation.",
-    ).toBeTruthy();
-
-    const refreshedSessionA = new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-      localDurableHistoryStore,
-      historyScope: "session-a",
-    });
-    await refreshedSessionA.load({
-      documentId: seed.documentId,
-      seedDocument: seed,
-    });
-    const sessionAAvailability =
-      await refreshedSessionA.getDurableHistoryAvailability(seed.documentId);
-    expect(
-      sessionAAvailability.canUndo && !sessionAAvailability.canRedo,
-      "Refreshing the same local session should restore that session scoped durable undo state.",
-    ).toBeTruthy();
-
-    const sessionB = new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-      localDurableHistoryStore,
-      historyScope: "session-b",
-    });
-    await sessionB.load({ documentId: seed.documentId, seedDocument: seed });
-    const sessionBAvailability = await sessionB.getDurableHistoryAvailability(
-      seed.documentId,
-    );
-    expect(
-      sessionBAvailability.canUndo && !sessionBAvailability.canRedo,
-      "A different local session should not inherit another session durable undo ledger.",
-    ).toBeFalsy();
-
-    await sessionB.reset(seed.documentId);
-    const sessionAAfterReset =
-      await refreshedSessionA.getDurableHistoryAvailability(seed.documentId);
-    expect(
-      sessionAAfterReset.canUndo && !sessionAAfterReset.canRedo,
-      "Resetting a different local session should not clear the original session durable undo ledger.",
-    ).toBeTruthy();
-  }
-
-  async function testIndexedDbUndoFailureKeepsDurableHistoryAvailability() {
-    const seed = await createSeedDocument();
-    const urlStore = createMemoryUrlStore();
-    const repo = createFakeAutomergeRepo();
-    const localDurableHistoryStore = createMemoryLocalDurableHistoryStore();
-    const repository = new IndexedDbAutomergeDocumentRepository({
-      repo,
-      urlStore,
-      localDurableHistoryStore,
-      historyScope: "session-undo-failure",
-    });
-
-    await repository.load({ documentId: seed.documentId, seedDocument: seed });
-    const mutated = await repository.mutate({
-      documentId: seed.documentId,
-      document: {
-        ...seed,
-        bodyLabels: seed.bodyLabels.map((label) =>
-          label.bodyId === "body_part-1"
-            ? { ...label, label: "Undo Failure Body" }
-            : label,
-        ),
-      },
-    });
-    expect(
-      mutated.ok,
-      "Undo failure coverage needs an accepted repository mutation.",
-    ).toBeTruthy();
-
-    repo.failNextChange = true;
-    const failedUndo = await repository.undoDurableHistory(seed.documentId);
-    expect(
-      failedUndo?.ok,
-      "Undo should surface repository write failures.",
-    ).toBeFalsy();
-
-    const availability = await repository.getDurableHistoryAvailability(
-      seed.documentId,
-    );
-    expect(
-      availability.canUndo && !availability.canRedo,
-      "A failed durable undo should leave the undo and redo ledger unchanged.",
-    ).toBeTruthy();
-  }
-
-  async function testRepositoryPersistsLocalSketchDraftHistory() {
-    const seed = await createSeedDocument();
-    const repository = createMemoryDocumentRepository();
-    await repository.load({ documentId: seed.documentId, seedDocument: seed });
-
-    let sketchSession = createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-    );
-    const initialDraft = persistSketchDraftSession(sketchSession);
-    sketchSession = {
-      ...sketchSession,
-      sketchLabel: "Sketch Draft Updated",
-      sequence: sketchSession.sequence + 1,
-    };
-    const updatedDraft = persistSketchDraftSession(sketchSession);
-
-    const initialAvailability = await repository.saveSketchDraftHistory(
+    await repository.saveSketchDraftHistory(
       seed.documentId,
       "draft:xy",
-      initialDraft,
+      initial,
     );
     expect(
-      initialAvailability.canUndo && !initialAvailability.canRedo,
-      "Seeding a draft session should not create undo history before the draft changes.",
-    ).toBeFalsy();
-
-    const updatedAvailability = await repository.saveSketchDraftHistory(
-      seed.documentId,
-      "draft:xy",
-      updatedDraft,
-    );
+      await repository.saveSketchDraftHistory(
+        seed.documentId,
+        "draft:xy",
+        next,
+      ),
+    ).toEqual({ canUndo: true, canRedo: false });
     expect(
-      updatedAvailability.canUndo && !updatedAvailability.canRedo,
-      "Updating a draft session should create repository-backed draft undo availability.",
-    ).toBeTruthy();
-
-    const undone = await repository.undoSketchDraftHistory(
-      seed.documentId,
-      "draft:xy",
-    );
+      (await repository.undoSketchDraftHistory(seed.documentId, "draft:xy"))
+        .session,
+    ).toEqual(initial);
     expect(
-      undone.session?.sketchLabel,
-      "Draft undo should restore the prior persisted sketch draft session.",
-    ).toBe(initialDraft.sketchLabel);
+      (await repository.redoSketchDraftHistory(seed.documentId, "draft:xy"))
+        .session,
+    ).toEqual(next);
     expect(
-      undone.availability.canUndo && undone.availability.canRedo,
-      "Draft undo should move local draft availability onto redo.",
-    ).toBeFalsy();
-
-    const redone = await repository.redoSketchDraftHistory(
-      seed.documentId,
-      "draft:xy",
-    );
-    expect(
-      redone.session?.sketchLabel,
-      "Draft redo should reapply the newer persisted sketch draft session.",
-    ).toBe(updatedDraft.sketchLabel);
-
+      await repository.getDurableHistoryAvailability(seed.documentId),
+    ).toEqual({ canUndo: false, canRedo: false });
     await repository.clearSketchDraftHistory(seed.documentId, "draft:xy");
-    const cleared = await repository.getSketchDraftHistory(
-      seed.documentId,
-      "draft:xy",
+    expect(
+      (await repository.getSketchDraftHistory(seed.documentId, "draft:xy"))
+        .session,
+    ).toBeNull();
+  });
+  test(`${name}: deletion compensation carries non-history sketch provenance`, async () => {
+    const seed = await createSeedAuthoredModelDocument(),
+      repository = make();
+    const plane = createStandardPlaneDefinition("xy");
+    const sketch = {
+      sketchId: "sketch_provenance",
+      label: "Retained provenance",
+      plane,
+      definition: createNewSketchSession(plane).definition,
+      regionSlots: [],
+    };
+    const document = {
+      ...seed,
+      sketches: [...seed.sketches, sketch],
+      historyOrder: [
+        ...seed.historyOrder,
+        { kind: "sketch" as const, sketchId: sketch.sketchId },
+      ],
+    };
+    const initialized = await repository.initialize({
+      documentId: seed.documentId,
+      document,
+    });
+    expect(initialized, JSON.stringify(initialized)).toMatchObject({
+      ok: true,
+    });
+    expect(
+      (
+        await repository.mutate({
+          documentId: seed.documentId,
+          expected: document,
+          document: seed,
+        })
+      ).ok,
+    ).toBe(true);
+    const undo = await repository.undoDurableHistory(seed.documentId);
+    expect(
+      undo?.ok &&
+        undo.document.sketches.find((s) => s.sketchId === sketch.sketchId)
+          ?.regionSlots,
+    ).toEqual([]);
+  });
+  test(`${name}: asset errors do not create document actions`, async () => {
+    const seed = await createSeedAuthoredModelDocument(),
+      repository = make();
+    await repository.load({ documentId: seed.documentId, seedDocument: seed });
+    const asset = await createDeterministicGeometryAsset({
+      ownerFeatureIds: [seed.features[0]!.featureId],
+    });
+    const invalid = await repository.mutate({
+      documentId: seed.documentId,
+      expected: seed,
+      document: { ...seed, name: "Not saved" },
+      assets: [asset],
+    });
+    expect(invalid.ok).toBe(false);
+    expect(
+      await repository.getDurableHistoryAvailability(seed.documentId),
+    ).toEqual({ canUndo: false, canRedo: false });
+    const document = {
+      ...seed,
+      assets: { ...seed.assets, records: [asset.asset] },
+    };
+    const saved = await repository.mutate({
+      documentId: seed.documentId,
+      expected: seed,
+      document,
+      assets: [asset],
+    });
+    expect(saved.ok).toBe(true);
+    expect(await repository.getGeometryAssetRecord(asset.asset)).toEqual(
+      asset.bytes,
     );
-    expect(
-      cleared.session === null &&
-        !cleared.availability.canUndo &&
-        !cleared.availability.canRedo,
-      "Explicit draft clearing should remove repository-local sketch draft history.",
-    ).toBeTruthy();
-  }
+  });
+}
 
-  function testLocalStorageUrlStoreValidatesPersistedPayloads() {
-    const storage = createMemoryStorage();
-    const urlStore = createLocalStorageDocumentRepositoryUrlStore(storage);
-    const validUrl = "automerge:4NMNnkMhL8jXrdJ9jamS58PAVdXu" as Parameters<
-      DocumentRepositoryUrlStore["set"]
-    >[1];
-
-    urlStore.set("doc_workspace", validUrl);
-    expect(
-      urlStore.get("doc_workspace"),
-      "Valid Automerge URLs should round-trip through localStorage.",
-    ).toBe(validUrl);
-
-    storage.setItem(
-      "cad.documentRepository.automergeUrls.v1",
-      JSON.stringify({
-        doc_workspace: "https://not-automerge",
-      }),
-    );
-    expect(
-      urlStore.get("doc_workspace"),
-      "Malformed persisted URLs should be rejected by runtime validation.",
-    ).toBe(null);
-
-    storage.setItem(
-      "cad.documentRepository.automergeUrls.v1",
-      JSON.stringify({
-        doc_workspace: "automerge:invalidid",
-      }),
-    );
-    expect(
-      urlStore.get("doc_workspace"),
-      "Semantically invalid Automerge URLs should be rejected.",
-    ).toBe(null);
-
-    storage.setItem(
-      "cad.documentRepository.automergeUrls.v1",
-      JSON.stringify({
-        doc_workspace: 42,
-      }),
-    );
-    expect(
-      urlStore.get("doc_workspace"),
-      "Non-string persisted URLs should be rejected by runtime validation.",
-    ).toBe(null);
-
-    storage.setItem(
-      "cad.documentRepository.automergeUrls.v1",
-      JSON.stringify(null),
-    );
-    expect(
-      urlStore.get("doc_workspace"),
-      "Null persisted payloads should be rejected by runtime validation.",
-    ).toBe(null);
-
-    storage.setItem(
-      "cad.documentRepository.automergeUrls.v1",
-      JSON.stringify([validUrl]),
-    );
-    expect(
-      urlStore.get("doc_workspace"),
-      "Array persisted payloads should be rejected by runtime validation.",
-    ).toBe(null);
-  }
-
-  await testMemoryRepositoryLoadsMutatesSubscribesAndResets();
-  await testRepositoryAssetMutationsAreAtomic();
-  await testPeerAssetTransferStoresBlobs();
-  await testIndexedDbRepositoryUsesInternalHandleAndReportsFailures();
-  await testDocumentRepositoriesPersistDurableUndoRedoLocally();
-  await testIndexedDbRepositoryRestoresDurableHistoryAcrossRefresh();
-  await testIndexedDbRepositoryScopesDurableHistoryPerLocalSession();
-  await testIndexedDbUndoFailureKeepsDurableHistoryAvailability();
-  await testRepositoryPersistsLocalSketchDraftHistory();
-  testLocalStorageUrlStoreValidatesPersistedPayloads();
+test("real Automerge peer merge preserves unrelated fields and history, blocks atomic compensation conflicts", async () => {
+  const seed = await createSeedAuthoredModelDocument(),
+    repoA = new RealAutomergeRepo(),
+    urlsA = new MemoryDocumentRepositoryUrlStore();
+  const a = persistent(repoA, urlsA);
+  await a.load({ documentId: seed.documentId, seedDocument: seed });
+  const handleA = await repoA.find<CollaborativeDocument>(
+    urlsA.get(seed.documentId)!,
+  );
+  const handleB = handleA.fork(),
+    repoB = new RealAutomergeRepo(),
+    urlsB = new MemoryDocumentRepositoryUrlStore();
+  repoB.handles.set(handleB.url, handleB as never);
+  urlsB.set(seed.documentId, handleB.url);
+  const b = persistent(repoB, urlsB);
+  await b.load({ documentId: seed.documentId, seedDocument: seed });
+  expect(a.getMetadata(seed.documentId).actorId).not.toBe(
+    b.getMetadata(seed.documentId).actorId,
+  );
+  const local = {
+    ...seed,
+    name: "A",
+    bodyLabels: seed.bodyLabels.map((r) => ({ ...r, label: "A body" })),
+  };
+  expect(
+    (
+      await a.mutate({
+        documentId: seed.documentId,
+        expected: seed,
+        document: local,
+      })
+    ).ok,
+  ).toBe(true);
+  const peer = {
+    ...seed,
+    settings: {
+      ...seed.settings,
+      modelingTolerance: seed.settings.modelingTolerance * 2,
+    },
+  };
+  expect(
+    (
+      await b.mutate({
+        documentId: seed.documentId,
+        expected: seed,
+        document: peer,
+      })
+    ).ok,
+  ).toBe(true);
+  handleA.merge(handleB);
+  const undo = await a.undoDurableHistory(seed.documentId);
+  expect(undo?.ok && undo.document.name).toBe(seed.name);
+  expect(undo?.ok && undo.document.settings.modelingTolerance).toBe(
+    peer.settings.modelingTolerance,
+  );
+  expect((await a.redoDurableHistory(seed.documentId))?.ok).toBe(true);
+  handleB.merge(handleA);
+  const base = await b.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  if (!base.ok) throw new Error(JSON.stringify(base.status));
+  await b.mutate({
+    documentId: seed.documentId,
+    expected: base.document,
+    document: { ...base.document, name: "B conflict" },
+  });
+  handleA.merge(handleB);
+  const blocked = await a.undoDurableHistory(seed.documentId);
+  expect(blocked?.ok).toBe(false);
+  expect(await a.getDurableHistoryAvailability(seed.documentId)).toEqual({
+    canUndo: true,
+    canRedo: false,
+  });
+  const after = await a.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  expect(after.ok && after.document.name).toBe("B conflict");
+  expect(after.ok && after.document.bodyLabels).toEqual(local.bodyLabels);
 });
 
-function createMemoryStorage() {
-  const values = new Map<string, string>();
-  return {
-    getItem(key: string) {
-      return values.get(key) ?? null;
-    },
-    setItem(key: string, value: string) {
-      values.set(key, value);
-    },
-    removeItem(key: string) {
-      values.delete(key);
-    },
+test("Automerge peer changes during a pending local flush are not hidden from subscribers", async () => {
+  const seed = await createSeedAuthoredModelDocument(),
+    repo = new RealAutomergeRepo(),
+    urls = new MemoryDocumentRepositoryUrlStore(),
+    repository = persistent(repo, urls);
+  await repository.load({ documentId: seed.documentId, seedDocument: seed });
+  const handle = await repo.find<CollaborativeDocument>(
+    urls.get(seed.documentId)!,
+  );
+  const peer = handle.fork();
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const pending = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  repo.flush = async () => {
+    started();
+    await gate;
   };
+  const observed: string[] = [];
+  repository.subscribe(seed.documentId, (event) => {
+    if (event.metadata.source === "peer") observed.push(event.document.name);
+  });
+  const write = repository.mutate({
+    documentId: seed.documentId,
+    expected: seed,
+    document: {
+      ...seed,
+      bodyLabels: seed.bodyLabels.map((record) => ({
+        ...record,
+        label: "Local body",
+      })),
+    },
+  });
+  await pending;
+  peer.change((storage) => {
+    storage.authored.name = "Peer during flush";
+  });
+  handle.merge(peer);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(observed).toContain("Peer during flush");
+  release();
+  const result = await write;
+  expect(result.ok && result.document.name).toBe("Peer during flush");
+  expect(
+    (await repository.getDurableHistoryAvailability(seed.documentId)).canUndo,
+  ).toBe(true);
+});
+
+for (const direction of ["commit", "undo", "redo"] as const) {
+  test(`Automerge ${direction} flush failure retains the applied ledger, fails closed and explicitly retries durability`, async () => {
+    const seed = await createSeedAuthoredModelDocument(),
+      repo = new RealAutomergeRepo(),
+      urls = new MemoryDocumentRepositoryUrlStore(),
+      repository = persistent(repo, urls);
+    await repository.load({ documentId: seed.documentId, seedDocument: seed });
+    const local = { ...seed, name: "Applied local action" };
+    if (direction !== "commit")
+      await repository.mutate({
+        documentId: seed.documentId,
+        expected: seed,
+        document: local,
+      });
+    if (direction === "redo")
+      await repository.undoDurableHistory(seed.documentId);
+    const handle = await repo.find<CollaborativeDocument>(
+      urls.get(seed.documentId)!,
+    );
+    repo.failFlush = true;
+    const result =
+      direction === "commit"
+        ? await repository.mutate({
+            documentId: seed.documentId,
+            expected: seed,
+            document: local,
+          })
+        : direction === "undo"
+          ? await repository.undoDurableHistory(seed.documentId)
+          : await repository.redoDurableHistory(seed.documentId);
+    expect(result?.ok).toBe(false);
+    expect(repository.getRestoreStatus(seed.documentId)).toMatchObject({
+      kind: "failed",
+      diagnostic: { reasonCode: "automerge-durability-failed" },
+    });
+    const current = materializeCollaborativeDocument(handle.doc());
+    expect(current.name).toBe(direction === "undo" ? seed.name : local.name);
+    expect(
+      await repository.getDurableHistoryAvailability(seed.documentId),
+    ).toEqual({ canUndo: direction !== "undo", canRedo: direction === "undo" });
+    const heads = handle.heads();
+    expect(
+      (
+        await repository.mutate({
+          documentId: seed.documentId,
+          expected: current,
+          document: { ...current, name: "Must fail closed" },
+        })
+      ).ok,
+    ).toBe(false);
+    expect(handle.heads()).toEqual(heads);
+    expect(
+      (
+        await repository.load({
+          documentId: seed.documentId,
+          seedDocument: seed,
+        })
+      ).ok,
+    ).toBe(false);
+    expect(
+      (
+        await repository.initialize({
+          documentId: seed.documentId,
+          document: seed,
+        })
+      ).ok,
+    ).toBe(false);
+    expect((await repository.reset(seed.documentId)).kind).toBe("failed");
+    const peer = handle.fork();
+    peer.change((storage) => {
+      (
+        storage.authored.settings as { modelingTolerance: number }
+      ).modelingTolerance = seed.settings.modelingTolerance * 2;
+    });
+    handle.merge(peer);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(repository.getRestoreStatus(seed.documentId)).toMatchObject({
+      kind: "failed",
+      diagnostic: { reasonCode: "automerge-durability-failed" },
+    });
+    repo.failFlush = false;
+    const retried = await repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect(retried.ok && retried.document.name).toBe(current.name);
+    expect(repository.getRestoreStatus(seed.documentId).kind).toBe("restored");
+    const compensated =
+      direction === "undo"
+        ? await repository.redoDurableHistory(seed.documentId)
+        : await repository.undoDurableHistory(seed.documentId);
+    expect(compensated?.ok && compensated.document.name).toBe(
+      direction === "undo" ? local.name : seed.name,
+    );
+    expect(
+      compensated?.ok && compensated.document.settings.modelingTolerance,
+    ).toBe(seed.settings.modelingTolerance * 2);
+    const reopened = persistent(repo, urls);
+    expect(
+      (await reopened.load({ documentId: seed.documentId, seedDocument: seed }))
+        .ok,
+    ).toBe(true);
+    expect(
+      await reopened.getDurableHistoryAvailability(seed.documentId),
+    ).toEqual({ canUndo: false, canRedo: false });
+  });
 }
 
-function createMemoryUrlStore(): DocumentRepositoryUrlStore {
-  const urls = new Map<string, string>();
-  return {
-    get(documentId) {
-      return (urls.get(documentId) ?? null) as ReturnType<
-        DocumentRepositoryUrlStore["get"]
-      >;
-    },
-    set(documentId, url) {
-      urls.set(documentId, url);
-    },
-    delete(documentId) {
-      urls.delete(documentId);
-    },
-  };
+for (const replacement of ["peer", "initialize", "reset"] as const) {
+  test(`delayed peer publication cannot overtake ${replacement} or pair old data with new heads`, async () => {
+    const seed = await createSeedAuthoredModelDocument();
+    const asset = await createDeterministicGeometryAsset({
+      ownerFeatureIds: [seed.features[0]!.featureId],
+    });
+    seed.assets.records = [asset.asset];
+    const inner = createMemoryGeometryAssetStore();
+    let delay = false,
+      release!: () => void,
+      started!: () => void,
+      lookupCompleted!: () => void,
+      newerPublished!: () => void;
+    const completed = new Promise<void>((resolve) => {
+      lookupCompleted = resolve;
+    });
+    const newer = new Promise<void>((resolve) => {
+      newerPublished = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const repo = new RealAutomergeRepo(),
+      urls = new MemoryDocumentRepositoryUrlStore();
+    const repository = new IndexedDbAutomergeDocumentRepository({
+      repo,
+      urlStore: urls,
+      localDurableHistoryStore: createMemoryLocalDurableHistoryStore(),
+      assetStore: {
+        put: (input) => inner.put(input),
+        get: (input) => inner.get(input),
+        async has(input) {
+          const delayed = delay;
+          if (delayed) {
+            delay = false;
+            started();
+            await gate;
+          }
+          const result = await inner.has(input);
+          if (delayed) lookupCompleted();
+          return result;
+        },
+      },
+    });
+    await repository.load({ documentId: seed.documentId, seedDocument: seed });
+    const handle = await repo.find<CollaborativeDocument>(
+      urls.get(seed.documentId)!,
+    );
+    const peer = handle.fork();
+    const observed: Array<{ name: string; heads: readonly string[] }> = [];
+    repository.subscribe(seed.documentId, (event) => {
+      observed.push({ name: event.document.name, heads: event.metadata.heads });
+      if (event.document.name === "PEER-NEW") newerPublished();
+    });
+    observed.length = 0;
+    delay = true;
+    peer.change((storage) => {
+      storage.authored.name = "PEER-OLD";
+    });
+    handle.merge(peer);
+    await pending;
+    if (replacement === "peer") {
+      peer.change((storage) => {
+        storage.authored.name = "PEER-NEW";
+      });
+      handle.merge(peer);
+      await newer;
+      expect(observed).toEqual([{ name: "PEER-NEW", heads: handle.heads() }]);
+    } else if (replacement === "initialize") {
+      expect(
+        (
+          await repository.initialize({
+            documentId: seed.documentId,
+            document: { ...seed, name: "FRESH" },
+          })
+        ).ok,
+      ).toBe(true);
+      expect(observed.map((event) => event.name)).toEqual(["FRESH"]);
+    } else {
+      expect((await repository.reset(seed.documentId)).kind).toBe("reset");
+      expect(observed).toEqual([]);
+    }
+    const beforeRelease = structuredClone(observed);
+    const metadata = repository.getMetadata(seed.documentId);
+    release();
+    await completed;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(observed).toEqual(beforeRelease);
+    expect(repository.getMetadata(seed.documentId)).toEqual(metadata);
+    if (replacement === "reset")
+      expect(repository.getRestoreStatus(seed.documentId).kind).toBe("reset");
+    else {
+      let replay: { name: string; heads: readonly string[] } | undefined;
+      const unsubscribe = repository.subscribe(seed.documentId, (event) => {
+        replay = { name: event.document.name, heads: event.metadata.heads };
+      });
+      expect(replay).toEqual(observed.at(-1));
+      unsubscribe();
+    }
+  });
 }
 
-function createFakeAutomergeRepo() {
-  const handles = new Map<string, FakeAutomergeHandle<unknown>>();
-  let count = 0;
+test("replaced document and snapshot history storage is explicitly rejected", async () => {
+  const seed = await createSeedAuthoredModelDocument(),
+    repo = new RealAutomergeRepo(),
+    urls = new MemoryDocumentRepositoryUrlStore();
+  const old = repo.create({ authoredDocument: seed });
+  urls.set(seed.documentId, old.url);
+  const loaded = await persistent(repo, urls).load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  expect(loaded.ok).toBe(false);
+  expect(!loaded.ok && loaded.status.diagnostic.message).toContain(
+    "Unsupported collaborative document",
+  );
+  const oldStable = repo.create({
+    ...createCollaborativeDocument(seed),
+    format: "cadara-stable-authored-v1",
+  });
+  urls.set(seed.documentId, oldStable.url);
+  const replaced = await persistent(repo, urls).load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  expect(replaced.ok).toBe(false);
+  expect(!replaced.ok && replaced.status.diagnostic.message).toContain(
+    "Unsupported collaborative document",
+  );
+  expect(
+    parseDocumentLocalDurableHistoryState({
+      undoStack: [seed],
+      redoStack: [],
+      draftSessions: {},
+    }).ok,
+  ).toBe(false);
+});
 
-  return {
-    createdCount: 0,
-    failNextFind: false,
-    failNextChange: false,
-    create<T>(initialValue?: T) {
-      count += 1;
-      this.createdCount += 1;
-      const handle = new FakeAutomergeHandle(
-        `automerge:fake-${count}`,
-        initialValue,
-        () => this.failNextChange,
-      );
-      handles.set(handle.url, handle as FakeAutomergeHandle<unknown>);
-      return handle;
-    },
-    async find<T>(url: string) {
-      if (this.failNextFind) {
-        this.failNextFind = false;
-        throw new Error("DocHandle unavailable.");
-      }
+import * as Automerge from "@automerge/automerge";
+import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
+import type {
+  AutomergeRepositoryLike,
+  AutomergeHandleLike,
+} from "@/infrastructure/persistence/indexeddb-automerge-document-repository";
 
-      const handle = handles.get(url);
-      if (!handle) {
-        throw new Error("DocHandle missing.");
-      }
-
-      return handle as FakeAutomergeHandle<T>;
-    },
-    delete(url: string) {
-      handles.delete(url);
-    },
-    pushPeerChange<T>(url: string, value: T) {
-      const handle = handles.get(url) as FakeAutomergeHandle<T> | undefined;
-      if (!handle) {
-        throw new Error("DocHandle missing.");
-      }
-      handle.pushPeerChange(value);
-    },
-    async flush() {},
-  };
-}
-
-class FakeAutomergeHandle<T> {
-  readonly url: string;
-  readonly documentId: string;
-  private value: T;
-  private readonly listeners = new Set<() => void>();
-  private readonly shouldFailChange: () => boolean;
-  private headSequence = 0;
-
-  constructor(
-    url: string,
-    initialValue: T | undefined,
-    shouldFailChange: () => boolean,
-  ) {
-    this.url = url;
-    this.documentId = url.replace("automerge:", "");
-    this.value = initialValue ?? ({} as T);
-    this.shouldFailChange = shouldFailChange;
+export class RealAutomergeHandle<T> implements AutomergeHandleLike<T> {
+  readonly documentId = crypto.randomUUID();
+  readonly url = `automerge:${this.documentId}` as AutomergeUrl;
+  private listeners = new Set<() => void>();
+  private value: Automerge.Doc<T>;
+  constructor(value: Automerge.Doc<T>) {
+    this.value = value;
   }
-
   async whenReady() {}
-
   doc() {
     return this.value;
   }
-
   heads() {
-    return [`head_${this.headSequence}`];
+    return Automerge.getHeads(this.value);
   }
-
   change(callback: (document: T) => void) {
-    if (this.shouldFailChange()) {
-      throw new Error("DocHandle change failed.");
-    }
-
-    callback(this.value);
-    this.headSequence += 1;
-    for (const listener of this.listeners) {
-      listener();
-    }
+    this.value = Automerge.change(this.value, callback);
+    this.emit();
   }
-
-  pushPeerChange(value: T) {
-    this.value = value;
-    this.headSequence += 1;
-    for (const listener of this.listeners) {
-      listener();
-    }
-  }
-
   on(_event: "change", callback: () => void) {
     this.listeners.add(callback);
+  }
+  fork() {
+    return new RealAutomergeHandle(Automerge.clone(this.value));
+  }
+  merge(peer: RealAutomergeHandle<T>) {
+    this.value = Automerge.merge(this.value, peer.value);
+    this.emit();
+  }
+  private emit() {
+    for (const listener of this.listeners) listener();
+  }
+}
+export class RealAutomergeRepo implements AutomergeRepositoryLike {
+  handles = new Map<string, RealAutomergeHandle<unknown>>();
+  failFlush = false;
+  create<T>(initialValue?: T) {
+    const handle = new RealAutomergeHandle(
+      Automerge.from(
+        initialValue as Record<string, unknown>,
+      ) as Automerge.Doc<T>,
+    );
+    this.handles.set(handle.url, handle as RealAutomergeHandle<unknown>);
+    return handle;
+  }
+  async find<T>(url: AutomergeUrl) {
+    const handle = this.handles.get(url);
+    if (!handle) throw new Error("Document handle missing");
+    return handle as RealAutomergeHandle<T>;
+  }
+  delete(url: AutomergeUrl) {
+    this.handles.delete(url);
+  }
+  async flush() {
+    if (this.failFlush) throw new Error("Injected persistence failure");
   }
 }

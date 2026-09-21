@@ -28,9 +28,36 @@ import {
   type GeometryAssetStore,
 } from "@/domain/modeling/geometry-asset-store";
 
+import { AuthoredActionHistory } from "./authored-action-history";
+import {
+  createCollaborativeDocument,
+  materializeCollaborativeDocument,
+  applyCollaborativeWrites,
+  updateDocumentProvenance,
+  DocumentProvenanceConflict,
+  documentActionState,
+} from "./collaborative-document";
+import type { CollaborativeDocument } from "./collaborative-document";
+import type { AuthoredActionResult } from "@/contracts/modeling/authored-actions";
+
 export class MemoryDocumentRepository implements GeometryAssetDocumentRepository {
+  private readonly actorId = crypto.randomUUID();
+  private readonly actions = new Map<DocumentId, AuthoredActionHistory>();
+  private readonly queues = new Map<DocumentId, Promise<unknown>>();
+
+  private enqueue<T>(
+    documentId: DocumentId,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const next = (this.queues.get(documentId) ?? Promise.resolve()).then(
+      action,
+      action,
+    );
+    this.queues.set(documentId, next);
+    return next;
+  }
   readonly savedDocuments: AuthoredModelDocument[] = [];
-  private readonly documents = new Map<DocumentId, AuthoredModelDocument>();
+  private readonly documents = new Map<DocumentId, CollaborativeDocument>();
   private readonly historyState = new Map<
     DocumentId,
     DocumentLocalDurableHistoryState
@@ -52,7 +79,10 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
   ) {
     this.assetStore = assetStore;
     for (const document of initialDocuments) {
-      this.documents.set(document.documentId, structuredClone(document));
+      this.documents.set(
+        document.documentId,
+        createCollaborativeDocument(document),
+      );
       this.historyState.set(
         document.documentId,
         createEmptyDocumentLocalDurableHistoryState(),
@@ -63,7 +93,12 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       });
       this.metadata.set(
         document.documentId,
-        createMemoryMetadata(document.documentId, document, "restore"),
+        createMemoryMetadata(
+          this.actorId,
+          document.documentId,
+          document,
+          "restore",
+        ),
       );
     }
   }
@@ -72,7 +107,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     documentId: DocumentId;
     seedDocument: AuthoredModelDocument;
   }): Promise<DocumentRepositoryLoadResult> {
-    const existing = this.documents.get(input.documentId);
+    const existing = this.currentDocument(input.documentId);
     if (existing) {
       const result = parseAuthoredModelDocument(structuredClone(existing));
       if (!result.ok) {
@@ -84,6 +119,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
         documentId: input.documentId,
       };
       const metadata = createMemoryMetadata(
+        this.actorId,
         input.documentId,
         result.document,
         "restore",
@@ -109,6 +145,11 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       };
     }
 
+    if (input.seedDocument.documentId !== input.documentId)
+      return this.fail(input.documentId, {
+        reasonCode: "identity-mismatch",
+        message: "Document identity does not match.",
+      });
     const result = parseAuthoredModelDocument(
       structuredClone(input.seedDocument),
     );
@@ -116,10 +157,14 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       return this.fail(input.documentId, result.diagnostic);
     }
 
-    this.documents.set(input.documentId, structuredClone(result.document));
+    this.documents.set(
+      input.documentId,
+      createCollaborativeDocument(result.document),
+    );
     this.ensureHistoryState(input.documentId);
     const status = { kind: "seeded" as const, documentId: input.documentId };
     const metadata = createMemoryMetadata(
+      this.actorId,
       input.documentId,
       result.document,
       "seed",
@@ -152,9 +197,52 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     };
   }
 
-  async mutate(input: {
+  initialize(
+    input: Parameters<GeometryAssetDocumentRepository["initialize"]>[0],
+  ) {
+    return this.enqueue(input.documentId, () => this.initializeNow(input));
+  }
+
+  private async initializeNow(input: {
     documentId: DocumentId;
     document: AuthoredModelDocument;
+    assets?: readonly GeometryAssetBlobInput[];
+  }): Promise<DocumentRepositoryMutationResult> {
+    const parsed = parseAuthoredModelDocument(structuredClone(input.document));
+    if (!parsed.ok) return this.fail(input.documentId, parsed.diagnostic);
+    if (parsed.document.documentId !== input.documentId)
+      return this.fail(input.documentId, {
+        reasonCode: "identity-mismatch",
+        message: "Document identity does not match.",
+      });
+    const stored = await storeGeometryAssetInputsForManifest(
+      this.assetStore,
+      parsed.document.assets.records,
+      input.assets ?? [],
+    );
+    if (!stored.ok)
+      return this.fail(input.documentId, {
+        reasonCode: stored.diagnostic.code,
+        message: stored.diagnostic.message,
+      });
+    await this.resetNow(input.documentId);
+    const result = await this.load({
+      documentId: input.documentId,
+      seedDocument: parsed.document,
+    });
+    if (result.ok) this.savedDocuments.push(structuredClone(result.document));
+    return result;
+  }
+
+  mutate(input: Parameters<GeometryAssetDocumentRepository["mutate"]>[0]) {
+    return this.enqueue(input.documentId, () => this.mutateNow(input));
+  }
+
+  private async mutateNow(input: {
+    documentId: DocumentId;
+    document: AuthoredModelDocument;
+    expected: AuthoredModelDocument;
+    label?: string;
     assets?: readonly GeometryAssetBlobInput[];
   }): Promise<DocumentRepositoryMutationResult> {
     const result = parseAuthoredModelDocument(structuredClone(input.document));
@@ -186,15 +274,42 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       });
     }
 
-    const previousDocument = this.documents.get(input.documentId);
-    this.documents.set(input.documentId, structuredClone(result.document));
-    this.savedDocuments.push(structuredClone(result.document));
-    this.recordCommittedDocumentMutation(
-      input.documentId,
-      previousDocument ?? null,
+    const previousDocument = this.currentDocument(input.documentId);
+    if (!previousDocument)
+      return this.fail(input.documentId, {
+        reasonCode: "document-not-initialized",
+        message: "Initialize the document before editing.",
+      });
+    const staged = this.actionOwner(input.documentId).fork();
+    const action = staged.commit(
+      this.identity(input.documentId),
+      documentActionState(previousDocument),
+      documentActionState(result.document),
+      input.label ?? "Edit document",
+      documentActionState(input.expected),
     );
+    if (action.status === "blocked")
+      return this.blocked(input.documentId, action);
+    const storage = structuredClone(this.documents.get(input.documentId)!);
+    if (action.status === "applied")
+      applyCollaborativeWrites(storage, action.writes);
+    try {
+      updateDocumentProvenance(storage, result.document, input.expected);
+    } catch (error) {
+      if (error instanceof DocumentProvenanceConflict)
+        return this.fail(input.documentId, {
+          reasonCode: "provenance-conflict",
+          message: error.message,
+        });
+      throw error;
+    }
+    result.document = materializeCollaborativeDocument(storage);
+    this.documents.set(input.documentId, storage);
+    this.savedDocuments.push(structuredClone(result.document));
+    this.actions.set(input.documentId, staged);
     const status = { kind: "restored" as const, documentId: input.documentId };
     const metadata = createMemoryMetadata(
+      this.actorId,
       input.documentId,
       result.document,
       "local",
@@ -225,16 +340,43 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
 
   async receivePeerDocument(
     document: AuthoredModelDocument,
+    expected: AuthoredModelDocument,
   ): Promise<DocumentRepositoryMutationResult> {
     const result = parseAuthoredModelDocument(structuredClone(document));
     if (!result.ok) {
       return this.fail(document.documentId, result.diagnostic);
     }
 
-    this.documents.set(document.documentId, structuredClone(result.document));
-    const historyState = this.ensureHistoryState(document.documentId);
-    historyState.undoStack = [];
-    historyState.redoStack = [];
+    const current = this.currentDocument(document.documentId);
+    if (!current)
+      return this.fail(document.documentId, {
+        reasonCode: "document-not-initialized",
+        message: "Load the document before receiving edits.",
+      });
+    const action = new AuthoredActionHistory().commit(
+      { ...this.identity(document.documentId), actorId: "memory-peer" },
+      documentActionState(current),
+      documentActionState(document),
+      "Peer edit",
+      documentActionState(expected),
+    );
+    if (action.status === "blocked")
+      return this.blocked(document.documentId, action);
+    const storage = structuredClone(this.documents.get(document.documentId)!);
+    if (action.status === "applied")
+      applyCollaborativeWrites(storage, action.writes);
+    try {
+      updateDocumentProvenance(storage, document, expected);
+    } catch (error) {
+      if (error instanceof DocumentProvenanceConflict)
+        return this.fail(document.documentId, {
+          reasonCode: "provenance-conflict",
+          message: error.message,
+        });
+      throw error;
+    }
+    result.document = materializeCollaborativeDocument(storage);
+    this.documents.set(document.documentId, storage);
     const status = {
       kind: "restored" as const,
       documentId: document.documentId,
@@ -244,7 +386,12 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       result.document.assets.records,
     );
     const metadata = {
-      ...createMemoryMetadata(document.documentId, result.document, "peer"),
+      ...createMemoryMetadata(
+        this.actorId,
+        document.documentId,
+        result.document,
+        "peer",
+      ),
       assetAvailability: assets.availability,
     };
     this.statuses.set(document.documentId, status);
@@ -280,14 +427,24 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     };
   }
 
-  async reset(
+  reset(documentId: DocumentId): Promise<DocumentRepositoryRestoreStatus> {
+    return this.enqueue(documentId, () => this.resetNow(documentId));
+  }
+
+  private async resetNow(
     documentId: DocumentId,
   ): Promise<DocumentRepositoryRestoreStatus> {
     this.documents.delete(documentId);
     this.historyState.delete(documentId);
+    this.actions.delete(documentId);
     const status = { kind: "reset" as const, documentId };
     this.statuses.set(documentId, status);
-    this.metadata.set(documentId, { documentId, heads: [], source: "reset" });
+    this.metadata.set(documentId, {
+      actorId: this.actorId,
+      documentId,
+      heads: [],
+      source: "reset",
+    });
     return status;
   }
 
@@ -298,6 +455,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
   getMetadata(documentId: DocumentId): DocumentRepositoryMetadata {
     return (
       this.metadata.get(documentId) ?? {
+        actorId: this.actorId,
         documentId,
         heads: [],
         source: "restore",
@@ -308,50 +466,28 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
   async getDurableHistoryAvailability(
     documentId: DocumentId,
   ): Promise<DurableHistoryAvailability> {
-    const state = this.ensureHistoryState(documentId);
+    const state = this.actionOwner(documentId).entries(
+      this.identity(documentId),
+    );
     return createDurableHistoryAvailability({
-      canUndo: state.undoStack.length > 0,
-      canRedo: state.redoStack.length > 0,
+      canUndo: state.undo.length > 0,
+      canRedo: state.redo.length > 0,
     });
   }
 
   async undoDurableHistory(
     documentId: DocumentId,
   ): Promise<DocumentRepositoryMutationResult | null> {
-    const state = this.ensureHistoryState(documentId);
-    const nextState = structuredClone(state);
-    const nextDocument = nextState.undoStack.pop();
-    const currentDocument = this.documents.get(documentId);
-    if (!nextDocument || !currentDocument) {
-      return null;
-    }
-
-    nextState.redoStack.push(structuredClone(currentDocument));
-    return this.applyHistoryDocument(
-      documentId,
-      nextDocument,
-      "undo",
-      nextState,
+    return this.enqueue(documentId, async () =>
+      this.compensate(documentId, "undo"),
     );
   }
 
   async redoDurableHistory(
     documentId: DocumentId,
   ): Promise<DocumentRepositoryMutationResult | null> {
-    const state = this.ensureHistoryState(documentId);
-    const nextState = structuredClone(state);
-    const nextDocument = nextState.redoStack.pop();
-    const currentDocument = this.documents.get(documentId);
-    if (!nextDocument || !currentDocument) {
-      return null;
-    }
-
-    nextState.undoStack.push(structuredClone(currentDocument));
-    return this.applyHistoryDocument(
-      documentId,
-      nextDocument,
-      "redo",
-      nextState,
+    return this.enqueue(documentId, async () =>
+      this.compensate(documentId, "redo"),
     );
   }
 
@@ -464,7 +600,9 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
 
   async getGeometryAssetBytes(hash: GeometryAssetHash) {
     const asset = [...this.documents.values()]
-      .flatMap((document) => document.assets.records)
+      .flatMap(
+        (document) => materializeCollaborativeDocument(document).assets.records,
+      )
       .find((record) => record.hash === hash);
     if (!asset) {
       return null;
@@ -501,34 +639,64 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     return created;
   }
 
-  private recordCommittedDocumentMutation(
-    documentId: DocumentId,
-    previousDocument: AuthoredModelDocument | null,
-  ) {
-    if (!previousDocument) {
-      return;
+  private currentDocument(documentId: DocumentId) {
+    const stored = this.documents.get(documentId);
+    return stored ? materializeCollaborativeDocument(stored) : undefined;
+  }
+  private identity(documentId: DocumentId) {
+    return {
+      actorId: this.actorId,
+      documentId,
+      context: { kind: "document" as const },
+    };
+  }
+  private actionOwner(documentId: DocumentId) {
+    let owner = this.actions.get(documentId);
+    if (!owner) {
+      owner = new AuthoredActionHistory();
+      this.actions.set(documentId, owner);
     }
-
-    const state = this.ensureHistoryState(documentId);
-    state.undoStack.push(structuredClone(previousDocument));
-    state.redoStack = [];
+    return owner;
+  }
+  private blocked(
+    documentId: DocumentId,
+    result: Extract<AuthoredActionResult, { status: "blocked" }>,
+  ) {
+    return this.fail(documentId, {
+      reasonCode: result.reason,
+      message: `Document action blocked: ${result.reason} (${result.targets.map((p) => p.join(".")).join(", ")})`,
+    });
+  }
+  private compensate(documentId: DocumentId, direction: "undo" | "redo") {
+    const current = this.currentDocument(documentId);
+    if (!current) return null;
+    const staged = this.actionOwner(documentId).fork();
+    const action = staged[direction](
+      this.identity(documentId),
+      documentActionState(current),
+    );
+    if (action.status === "unchanged") return null;
+    if (action.status === "blocked") return this.blocked(documentId, action);
+    const storage = structuredClone(this.documents.get(documentId)!);
+    applyCollaborativeWrites(storage, action.writes);
+    const document = materializeCollaborativeDocument(storage);
+    this.documents.set(documentId, storage);
+    this.actions.set(documentId, staged);
+    return this.applyHistoryDocument(documentId, document, direction);
   }
 
   private async applyHistoryDocument(
     documentId: DocumentId,
     document: AuthoredModelDocument,
     source: Extract<DocumentRepositoryMetadata["source"], "undo" | "redo">,
-    nextHistoryState: DocumentLocalDurableHistoryState,
   ): Promise<DocumentRepositoryMutationResult> {
-    this.documents.set(documentId, structuredClone(document));
-    this.historyState.set(documentId, structuredClone(nextHistoryState));
     const status = { kind: "restored" as const, documentId };
     const assets = await collectAssetAvailability(
       this.assetStore,
       document.assets.records,
     );
     const metadata = {
-      ...createMemoryMetadata(documentId, document, source),
+      ...createMemoryMetadata(this.actorId, documentId, document, source),
       assetAvailability: assets.availability,
     };
     this.statuses.set(documentId, status);
@@ -610,12 +778,14 @@ export function createMemoryDocumentRepository(
 }
 
 function createMemoryMetadata(
+  actorId: string,
   documentId: DocumentId,
   document: AuthoredModelDocument,
   source: DocumentRepositoryMetadata["source"],
 ): DocumentRepositoryMetadata {
   return {
     documentId,
+    actorId,
     heads: [`memory:${document.revisionId}`],
     source,
   };

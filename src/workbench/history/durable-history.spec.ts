@@ -397,7 +397,6 @@ test("src/workbench/history/durable-history.spec.ts", async () => {
     ).toBeTruthy();
   }
 
-
   async function testUndoAllowsSlowKernelBackedRepositorySynchronization() {
     const { documentRepository, modelingService } =
       await createBackgroundDurableHistoryFixture(
@@ -475,6 +474,9 @@ function createDelayedUndoNotificationRepository(
   return {
     load(input) {
       return repository.load(input);
+    },
+    initialize(input) {
+      return repository.initialize(input);
     },
     mutate(input) {
       return repository.mutate(input);

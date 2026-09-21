@@ -1,4 +1,3 @@
-import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type {
   CommitSketchRequest,
   DocumentVariableRecord,
@@ -47,15 +46,13 @@ export interface DraftHistoryEntry<TSession> {
 }
 
 export interface DocumentLocalDurableHistoryState {
-  undoStack: AuthoredModelDocument[];
-  redoStack: AuthoredModelDocument[];
+  format: "private-sketch-drafts-v1";
   draftSessions: Record<string, DraftHistoryEntry<PersistedSketchDraftSession>>;
 }
 
 export function createEmptyDocumentLocalDurableHistoryState(): DocumentLocalDurableHistoryState {
   return {
-    undoStack: [],
-    redoStack: [],
+    format: "private-sketch-drafts-v1",
     draftSessions: {},
   };
 }
