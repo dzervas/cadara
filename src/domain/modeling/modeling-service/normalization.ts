@@ -2207,21 +2207,42 @@ export function normalizeProjectedSketchReferenceGeometry(
   }
 
   if (value.kind === "spline") {
+    const representation = value.representation;
+    if (!isRecord(representation)) {
+      throw new Error("Invalid projected spline payload.");
+    }
+    if (representation.kind === "sourceSamples") {
+      if (
+        !Array.isArray(representation.points) ||
+        typeof representation.isClosed !== "boolean"
+      ) {
+        throw new Error("Invalid projected spline payload.");
+      }
+      return {
+        geometryId,
+        kind: "spline",
+        representation: {
+          kind: "sourceSamples",
+          points: representation.points.map((point) =>
+            normalizePoint2D(point, "Invalid projected spline point payload."),
+          ),
+          isClosed: representation.isClosed,
+        },
+      };
+    }
     if (
-      !Array.isArray(value.fitPoints) ||
-      (value.degree !== 2 && value.degree !== 3) ||
-      typeof value.isClosed !== "boolean"
+      representation.kind !== "neutralCubicSpans" ||
+      !Array.isArray(representation.spans)
     ) {
       throw new Error("Invalid projected spline payload.");
     }
     return {
       geometryId,
       kind: "spline",
-      fitPoints: value.fitPoints.map((point) =>
-        normalizePoint2D(point, "Invalid projected spline point payload."),
-      ),
-      degree: value.degree,
-      isClosed: value.isClosed,
+      representation: structuredClone(representation) as Extract<
+        ProjectedSketchReferenceGeometry,
+        { kind: "spline" }
+      >["representation"],
     };
   }
 

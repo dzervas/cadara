@@ -7,15 +7,21 @@ import type {
   RenderPoint3D,
   RenderableEntityRecord,
 } from "@/contracts/render/schema";
-import type {
-  ProjectedSketchArcGeometry,
-  ProjectedSketchCircleGeometry,
+import {
+  projectedSplineDisplayPoints,
+  projectedSplineIsClosed,
+  type ProjectedSketchArcGeometry,
+  type ProjectedSketchCircleGeometry,
 } from "@/contracts/solver/schema";
 import type {
   RegionLoopRecord,
   RegionRecord,
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
+import {
+  reconstructSplineAggregate,
+  sampleSplineGeometry,
+} from "@/contracts/sketch/spline-geometry";
 import {
   getPrimitiveRefKey,
   getPrimitiveRefLabel,
@@ -680,16 +686,22 @@ function resolveSketchEntityTarget(
   }
 
   if (entity.kind === "spline") {
-    const fitPoints = entity.fitPointIds.flatMap((pointId) => {
-      const point = getSketchDefinitionPoint(sketch, pointId);
-      return point ? [point] : [];
-    });
+    const positions = Object.fromEntries(
+      sketch.sketch.definition.points.map((point) => [
+        point.pointId,
+        point.position,
+      ]),
+    );
+    const splineGeometry = reconstructSplineAggregate(entity, positions);
+    const fitPoints = sampleSplineGeometry(splineGeometry, SPLINE_SEGMENTS);
 
     if (fitPoints.length < 2) {
       return null;
     }
 
-    const sampledPoints = sampleSplinePoints(fitPoints, SPLINE_SEGMENTS);
+    const sampledPoints = fitPoints.map((point) =>
+      mapSketchPointToWorkspaceWorld(sketch.plane, point),
+    );
     return createCurveTarget({
       target,
       label: entity.label,
@@ -701,12 +713,15 @@ function resolveSketchEntityTarget(
           label: "Length",
           value: formatLength(polylineLength(sampledPoints, false)),
         },
-        { id: "closed", label: "Closed", value: "No" },
-        { id: "degree", label: "Degree", value: String(entity.degree) },
+        {
+          id: "closed",
+          label: "Closed",
+          value: entity.closure === "open" ? "No" : "Yes",
+        },
         {
           id: "fit-points",
           label: "Fit Points",
-          value: String(entity.fitPointIds.length),
+          value: String(entity.pointOccurrenceIds.length),
         },
       ],
     });
@@ -846,34 +861,32 @@ function resolveProjectedGeometryTarget(
   }
 
   if (geometry.kind === "spline") {
-    const sampledPoints = sampleSplinePoints(
-      geometry.fitPoints.map((point) =>
-        mapSketchPointToWorkspaceWorld(sketch.plane, point),
-      ),
-      SPLINE_SEGMENTS,
+    const points = projectedSplineDisplayPoints(geometry);
+    const isClosed = projectedSplineIsClosed(geometry);
+    const sampledPoints = points.map((point) =>
+      mapSketchPointToWorkspaceWorld(sketch.plane, point),
     );
     return createCurveTarget({
       target,
       label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline: sampledPoints,
-      isClosed: geometry.isClosed,
+      isClosed,
       rows: [
         {
           id: "length",
           label: "Length",
-          value: formatLength(polylineLength(sampledPoints, geometry.isClosed)),
+          value: formatLength(polylineLength(sampledPoints, isClosed)),
         },
         {
           id: "closed",
           label: "Closed",
-          value: geometry.isClosed ? "Yes" : "No",
+          value: isClosed ? "Yes" : "No",
         },
-        { id: "degree", label: "Degree", value: String(geometry.degree) },
         {
           id: "fit-points",
           label: "Fit Points",
-          value: String(geometry.fitPoints.length),
+          value: String(points.length),
         },
       ],
     });
@@ -1406,70 +1419,6 @@ function sampleProjectedArcPoints(
     geometry.endPosition,
     geometry.sweepDirection,
   );
-}
-
-function sampleSplinePoints(
-  points: readonly WorkspaceVec3[],
-  segmentCount: number,
-) {
-  if (points.length < 3) {
-    return [...points];
-  }
-
-  if (points.length === 3) {
-    return Array.from({ length: segmentCount + 1 }, (_, index) => {
-      const t = index / segmentCount;
-      const oneMinusT = 1 - t;
-      return [
-        oneMinusT * oneMinusT * points[0]![0] +
-          2 * oneMinusT * t * points[1]![0] +
-          t * t * points[2]![0],
-        oneMinusT * oneMinusT * points[0]![1] +
-          2 * oneMinusT * t * points[1]![1] +
-          t * t * points[2]![1],
-        oneMinusT * oneMinusT * points[0]![2] +
-          2 * oneMinusT * t * points[1]![2] +
-          t * t * points[2]![2],
-      ] as const;
-    });
-  }
-
-  const sampled: WorkspaceVec3[] = [];
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const previous = points[Math.max(0, index - 1)]!;
-    const current = points[index]!;
-    const next = points[index + 1]!;
-    const after = points[Math.min(points.length - 1, index + 2)]!;
-
-    for (let step = 0; step < segmentCount / (points.length - 1); step += 1) {
-      const t =
-        step / Math.max(1, Math.floor(segmentCount / (points.length - 1)));
-      sampled.push(catmullRomPoint(previous, current, next, after, t));
-    }
-  }
-  sampled.push(points[points.length - 1]!);
-  return sampled;
-}
-
-function catmullRomPoint(
-  previous: WorkspaceVec3,
-  current: WorkspaceVec3,
-  next: WorkspaceVec3,
-  after: WorkspaceVec3,
-  t: number,
-): WorkspaceVec3 {
-  const interpolate = (p0: number, p1: number, p2: number, p3: number) =>
-    0.5 *
-    (2 * p1 +
-      (-p0 + p2) * t +
-      (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t +
-      (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
-
-  return [
-    interpolate(previous[0], current[0], next[0], after[0]),
-    interpolate(previous[1], current[1], next[1], after[1]),
-    interpolate(previous[2], current[2], next[2], after[2]),
-  ];
 }
 
 function polylineWitnessFromPoints(

@@ -2,7 +2,11 @@ import type {
   SketchDefinition,
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import {
+  projectedSplineDisplayPoints,
+  projectedSplineIsClosed,
+  type ProjectedSketchReferenceRecord,
+} from "@/contracts/solver/schema";
 import type {
   ProjectedGeometryId,
   ReferenceId,
@@ -11,6 +15,10 @@ import type {
 } from "@/contracts/shared/ids";
 import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { distanceBetween, midpoint } from "@/domain/sketch/point-math";
+import {
+  reconstructSplineAggregate,
+  sampleSplineGeometry,
+} from "@/contracts/sketch/spline-geometry";
 
 const DEFAULT_SNAP_TOLERANCE = 0.18;
 const DEFAULT_SKETCH_DATUM_AXIS_EXTENT = 10;
@@ -236,11 +244,16 @@ export function collectSketchSnapGeometries(input: {
             : [];
         }
         case "spline": {
-          const fitPoints = entity.fitPointIds.flatMap((pointId) => {
-            const point = points.get(pointId);
-            return point ? [point.position] : [];
-          });
-          return fitPoints.length === entity.fitPointIds.length
+          const positions = Object.fromEntries(
+            [...points.entries()].map(([pointId, point]) => [
+              pointId,
+              point.position,
+            ]),
+          ) as Record<SketchPointId, SketchPoint2D>;
+          const fitPoints = sampleSplineGeometry(
+            reconstructSplineAggregate(entity, positions),
+          );
+          return fitPoints.length
             ? [
                 {
                   kind: "spline",
@@ -323,8 +336,8 @@ export function collectSketchSnapGeometries(input: {
               {
                 kind: "spline",
                 source,
-                fitPoints: geometry.fitPoints,
-                isClosed: geometry.isClosed,
+                fitPoints: projectedSplineDisplayPoints(geometry),
+                isClosed: projectedSplineIsClosed(geometry),
                 label,
               },
             ];
@@ -414,7 +427,7 @@ function getSketchDatumAxisExtent(
           ];
         }
         case "spline":
-          return geometry.fitPoints.flatMap((point) => [
+          return projectedSplineDisplayPoints(geometry).flatMap((point) => [
             Math.abs(point[0]),
             Math.abs(point[1]),
           ]);

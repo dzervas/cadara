@@ -327,7 +327,7 @@ describe("authored action boundary", () => {
       definition: { pointIds: expect.arrayContaining(["p", "peer"]) },
     });
   });
-  test("meaningful fit-point sequences are ordered atomic fields", () => {
+  test("spline occurrence order is atomic while tangent fields remain independent", () => {
     const history = new AuthoredActionHistory();
     const before = changed(point(point(seed(), "p"), "q"), (data) => {
       data.definition.entityIds = ["spline"];
@@ -342,19 +342,64 @@ describe("authored action boundary", () => {
             entityId: "spline",
           },
           isConstruction: false,
-          degree: 3,
-          fitPointIds: ["p", "q"],
+          pointOccurrenceIds: ["occ-p", "occ-q"],
+          pointOccurrences: [
+            {
+              occurrenceId: "occ-p",
+              pointId: "p",
+              tangent: { kind: "automatic" },
+            },
+            {
+              occurrenceId: "occ-q",
+              pointId: "q",
+              tangent: { kind: "authored", vector: [1, 0] },
+            },
+          ],
+          closure: "open",
+          interpolationPolicy: "centripetal-mean-arm-v1",
         },
       ];
     });
     const candidate = changed(before, (data) => {
       const entity = data.definition.entities[0];
-      if (entity.kind === "spline") entity.fitPointIds = ["q", "p"];
+      if (entity.kind === "spline")
+        entity.pointOccurrenceIds = ["occ-q", "occ-p"];
     });
     applied(history.commit(identity, before, candidate, "Reverse", before));
     expect(applied(history.undo(identity, candidate)).data).toMatchObject({
-      definition: { entities: [{ fitPointIds: ["p", "q"] }] },
+      definition: {
+        entities: [{ pointOccurrenceIds: ["occ-p", "occ-q"] }],
+      },
     });
+
+    const tangentEdit = changed(before, (data) => {
+      const entity = data.definition.entities[0];
+      if (entity.kind === "spline") {
+        const occurrence = entity.pointOccurrences[1]!;
+        occurrence.tangent = { kind: "authored", vector: [0, 2] };
+      }
+    });
+    const committed = history.commit(
+      identity,
+      before,
+      tangentEdit,
+      "Move tangent",
+      before,
+    );
+    expect(committed.status).toBe("applied");
+    if (committed.status === "applied") {
+      expect(committed.writes.map((write) => write.address)).toEqual([
+        [
+          "definition",
+          "entities",
+          "spline",
+          "pointOccurrences",
+          "occ-q",
+          "tangent",
+          "vector",
+        ],
+      ]);
+    }
   });
   test("250 compact entries, no-op retains Redo, real new action clears it", () => {
     const history = new AuthoredActionHistory();

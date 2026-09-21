@@ -1,5 +1,5 @@
 import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
-  import type {
+import type {
   ConstraintDefinition,
   DimensionDefinition,
   DimensionAnnotationPlacement,
@@ -8,7 +8,11 @@ import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
   SketchPoint2D,
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import {
+  projectedSplineDisplayPoints,
+  type ProjectedSketchReferenceRecord,
+} from "@/contracts/solver/schema";
+import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { ToolMetadataBase } from "@/core/tools/metadata";
 import type {
@@ -343,7 +347,8 @@ export function resolveCurveTarget(
       return null;
     }
 
-    const firstPoint = findPoint(definition, entity.fitPointIds[0]);
+    const pointIds = orderedSplinePointIds(entity);
+    const firstPoint = findPoint(definition, pointIds[0]);
 
     return {
       target,
@@ -351,7 +356,7 @@ export function resolveCurveTarget(
       kind: "spline",
       anchor: firstPoint?.position ?? [0, 0],
       entity,
-      entityPoints: entity.fitPointIds.flatMap((pointId) => {
+      entityPoints: pointIds.flatMap((pointId) => {
         const point = findPoint(definition, pointId);
         return point
           ? [{ pointId: point.pointId, position: point.position }]
@@ -458,7 +463,7 @@ function resolveProjectedGeometryTarget(
       target,
       label: `Projected ${geometry.geometryId}`,
       kind: "spline",
-      anchor: geometry.fitPoints[0] ?? [0, 0],
+      anchor: projectedSplineDisplayPoints(geometry)[0] ?? [0, 0],
       projected: { reference: target, geometry },
     };
   }

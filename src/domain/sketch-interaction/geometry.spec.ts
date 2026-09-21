@@ -184,11 +184,11 @@ test("collectSketchInteractionGeometry preserves local, projected, datum, and ad
   ).toBeTruthy();
   expect(
     byKind.has("spline"),
-    "Local and projected splines should be available as semantic splines.",
-  ).toBeTruthy();
+    "No interaction consumer should retain a private spline interpretation.",
+  ).toBeFalsy();
   expect(
     byKind.has("sampledCurve"),
-    "Advanced local curves should be available as sampled semantic curves.",
+    "Owner-produced spline display output and advanced curves should be sampled semantic curves.",
   ).toBeTruthy();
   expect(
     geometry.some((entry) => entry.target === points[0]!.target),
@@ -336,13 +336,15 @@ function makeProjectedReference(): ProjectedSketchReferenceRecord {
       {
         kind: "spline",
         geometryId: "projected_geometry_spline" as ProjectedGeometryId,
-        fitPoints: [
-          [0, 0],
-          [1, 1],
-          [2, 0],
-        ],
-        degree: 2,
-        isClosed: false,
+        representation: {
+          kind: "sourceSamples",
+          points: [
+            [0, 0],
+            [1, 1],
+            [2, 0],
+          ],
+          isClosed: false,
+        },
       },
     ],
     diagnostics: [],

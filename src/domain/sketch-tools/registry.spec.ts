@@ -6,6 +6,7 @@ import {
   beginSketchTool,
   createNewSketchSessionFromSupport,
   deriveSketchDisplayEntities,
+  getSketchSessionDerivedValidity,
   getSketchSessionDisplayRenderables,
   getSketchToolPresentation,
   patchSketchDrawingToolValue,
@@ -599,6 +600,146 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBe(0);
   }
 
+  function testSplineRetainsInvalidIntentWithoutTransientDuplicatePoints() {
+    const tool = getSketchToolDefinition("spline");
+    const activated = tool.activate();
+    const first = tool.pointerRelease({
+      state: activated.state,
+      point: [0, 0],
+    });
+    const normalSecond = tool.pointerRelease({
+      state: first.state,
+      point: [1, 0],
+    });
+
+    expect(
+      normalSecond.presentation.steps[0]?.label,
+      "A released partial spline should count authored occurrences without appending its consumed live point.",
+    ).toBe("2/3 points");
+    expect(
+      tool.getStagedEntities(normalSecond.state).length,
+      "A normal released partial spline should retain its preview instead of reconstructing a duplicate live occurrence.",
+    ).toBe(1);
+
+    const duplicateSecond = tool.pointerRelease({
+      state: first.state,
+      point: [0, 0],
+    });
+    expect(
+      duplicateSecond.state.validationMessage,
+      "A coincident second fit point should receive immediate owner-consistent feedback.",
+    ).toBe("Spline has consecutive coincident fit points.");
+
+    const completedInvalid = tool.pointerRelease({
+      state: duplicateSecond.state,
+      point: [2, 0],
+    });
+    expect(
+      completedInvalid.state.status,
+      "Three structurally supported fit points should complete even when owner reconstruction is invalid.",
+    ).toBe("idle");
+
+    const invalidSession = drawSketchTool("spline", [
+      [0, 0],
+      [0, 0],
+      [2, 0],
+    ]);
+    const invalidSpline = invalidSession.definition.entities[0];
+    expect(
+      invalidSpline?.kind === "spline" &&
+        invalidSession.definition.points.map(({ position }) => position),
+      "Committed invalid spline intent should retain both genuinely clicked coincident coordinates.",
+    ).toEqual([
+      [0, 0],
+      [0, 0],
+      [2, 0],
+    ]);
+    const invalidSolvedSpline = solveSketchDefinitionCore({
+      definition: invalidSession.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: "bestEffort",
+    }).solvedSnapshot.solvedEntities.find(
+      (entity) => entity.entityId === invalidSpline?.entityId,
+    );
+    expect(
+      invalidSolvedSpline?.kind === "spline" &&
+        invalidSolvedSpline.reconstruction.diagnostics,
+      "The reconstruction owner should diagnose the retained coincident occurrences.",
+    ).toEqual([{ code: "coincident-points", spanIndex: 0 }]);
+    expect(
+      getSketchSessionDerivedValidity(invalidSession).state,
+      "Completed invalid spline intent should become invalid derived state rather than a modal tool trap.",
+    ).toBe("invalid");
+
+    const nearDistinctSession = drawSketchTool("spline", [
+      [0, 0],
+      [1, 0],
+      [1.00005, 0],
+    ]);
+    expect(
+      nearDistinctSession.definition.points.map(({ position }) => position),
+      "Distinct fit points below the removed tool epsilon should remain authored owner input.",
+    ).toEqual([
+      [0, 0],
+      [1, 0],
+      [1.00005, 0],
+    ]);
+    const nearDistinctSolved = solveSketchDefinitionCore({
+      definition: nearDistinctSession.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: "bestEffort",
+    }).solvedSnapshot.solvedEntities.find((entity) => entity.kind === "spline");
+    expect(
+      nearDistinctSolved?.kind === "spline" &&
+        nearDistinctSolved.reconstruction.validity,
+      "Near-but-distinct fit points should remain valid owner reconstruction input.",
+    ).toBe("valid");
+
+    const distinctSecond = tool.pointerRelease({
+      state: first.state,
+      point: [1, 0],
+    });
+    const invalidLive = tool.pointerMove({
+      state: distinctSecond.state,
+      point: [1, 0],
+    });
+    expect(
+      invalidLive.state.validationMessage,
+      "An invalid live candidate should report feedback before release.",
+    ).toBe("Spline has consecutive coincident fit points.");
+    expect(
+      invalidLive.presentation.validation?.[0]?.message,
+      "A structurally complete invalid candidate should keep its owner diagnostic visible.",
+    ).toBe("Spline has consecutive coincident fit points.");
+    expect(
+      invalidLive.presentation.completionHints?.[0],
+      "Structural completion guidance should match the release that will commit invalid authored intent.",
+    ).toMatchObject({
+      text: "Click to accept the spline",
+      ready: true,
+    });
+    expect(
+      invalidLive.presentation.completionHints?.[0]?.text,
+      "A complete candidate should never request zero or a negative number of additional points.",
+    ).not.toMatch(/Place (?:0|-\d+) more/);
+    const validLive = tool.pointerMove({
+      state: invalidLive.state,
+      point: [1.00005, 0],
+    });
+    expect(
+      validLive.state.validationMessage,
+      "Live candidate validation should recompute instead of sticking to an earlier invalid position.",
+    ).toBeNull();
+  }
+
   function testAdvancedCurveConstructorsCommitDurableIntent() {
     const ellipse = drawSketchTool("ellipse", [
       [0, 0],
@@ -692,12 +833,12 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ]);
     expect(
       controlSpline.definition.entities[0]?.kind,
-      "Control-point spline should still commit durable spline geometry.",
-    ).toBe("spline");
+      "Control-point spline should use the faithful cubic Bezier representation.",
+    ).toBe("bezierCurve");
     expect(
-      controlSpline.definition.entities[0]?.kind === "spline" &&
+      controlSpline.definition.entities[0]?.kind === "bezierCurve" &&
         controlSpline.definition.entities[0].degree === 3,
-      "Control-point spline should stay distinct from fit-point spline degree.",
+      "Control-point spline should stay distinct from ordinary interpolation.",
     ).toBeTruthy();
 
     const fitSpline = drawSketchTool("spline", [
@@ -707,8 +848,10 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ]);
     expect(
       fitSpline.definition.entities[0]?.kind === "spline" &&
-        fitSpline.definition.entities[0].degree === 2,
-      "Fit-point spline behavior should remain unchanged.",
+        fitSpline.definition.entities[0].interpolationPolicy ===
+          "centripetal-mean-arm-v1" &&
+        fitSpline.definition.entities[0].pointOccurrences.length === 3,
+      "Fit-point spline should commit the complete ordinary-spline aggregate.",
     ).toBeTruthy();
   }
 
@@ -840,6 +983,57 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBe("Text content is required.");
   }
 
+  function testFullSplinePreviewsMatchCommittedGeometry() {
+    let ordinary = beginSketchTool(
+      createNewSketchSessionFromSupport({
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      }),
+      "spline",
+    );
+    ordinary = startSketchDraw(ordinary, [0, 0]);
+    ordinary = acceptSketchDraw(ordinary, [1, 2]);
+    const ordinaryPreviewSession = updateSketchPointer(ordinary, [2, 0]);
+    const ordinaryPreview = ordinaryPreviewSession.toolStagedEntities.find(
+      (entity) => entity.id === "preview-spline" && entity.kind === "spline",
+    );
+    const ordinaryCommitted = acceptSketchDraw(ordinaryPreviewSession, [2, 0]);
+    const ordinaryOutput = deriveSketchDisplayEntities(ordinaryCommitted).find(
+      (entity) => entity.label === "Spline 1" && entity.kind === "spline",
+    );
+    expect(ordinaryPreview?.points).toEqual(ordinaryOutput?.points);
+    expect(
+      ordinaryPreview?.points.length,
+      "A complete ordinary-spline preview should be owner-reconstructed curve geometry, not its three-point control polygon.",
+    ).toBeGreaterThan(3);
+
+    let control = beginSketchTool(
+      createNewSketchSessionFromSupport({
+        kind: "construction",
+        constructionId: "construction_plane-xy",
+      }),
+      "controlPointSpline",
+    );
+    control = startSketchDraw(control, [0, 0]);
+    control = acceptSketchDraw(control, [1, 2]);
+    control = acceptSketchDraw(control, [2, 2]);
+    const controlPreviewSession = updateSketchPointer(control, [3, 0]);
+    const controlPreview = controlPreviewSession.toolStagedEntities.find(
+      (entity) =>
+        entity.id === "preview-control-spline" && entity.kind === "polyline",
+    );
+    const controlCommitted = acceptSketchDraw(controlPreviewSession, [3, 0]);
+    const controlOutput = deriveSketchDisplayEntities(controlCommitted).find(
+      (entity) =>
+        entity.label === "Control spline 1" && entity.kind === "polyline",
+    );
+    expect(controlPreview?.points).toEqual(controlOutput?.points);
+    expect(
+      controlPreview?.points[32]?.[1],
+      "A complete four-control-point preview should show the cubic Bezier curve rather than the control polygon.",
+    ).toBeGreaterThan(1);
+  }
+
   function testGenericPresentationAccessFromSession() {
     const session = beginSketchTool(
       createNewSketchSessionFromSupport({
@@ -870,9 +1064,11 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
   testRectangleConstructorsCommitDurableIntent();
   testCircleArcAndPolygonConstructorsCommitDurableIntent();
   testSplineCollectsThreePointsAndCommitsDurableGeometry();
+  testSplineRetainsInvalidIntentWithoutTransientDuplicatePoints();
   testAdvancedCurveConstructorsCommitDurableIntent();
   testAdvancedToolValidationRejectsDegenerateInput();
   testProfileTextCommitsEditableTextAndDerivedProfile();
   testInvalidProfileTextDoesNotCommitPartialEntity();
+  testFullSplinePreviewsMatchCommittedGeometry();
   testGenericPresentationAccessFromSession();
 });

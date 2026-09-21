@@ -17,7 +17,11 @@ import type {
   SketchStyleRecord,
 } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import {
+  projectedSplineDisplayPoints,
+  projectedSplineIsClosed,
+  type ProjectedSketchReferenceRecord,
+} from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { solveReferenceImageOperationState } from "@/domain/reference-image-calibration/state";
 import {
@@ -66,23 +70,7 @@ import { isSketchSvgRenderingEnabled } from "./styles";
 export function sampleSplinePoints(
   points: readonly SketchPoint[],
 ): SketchPoint[] {
-  if (points.length < 3) {
-    return [...points];
-  }
-
-  const [start, control, end] = points;
-  return Array.from({ length: 25 }, (_, index) => {
-    const t = index / 24;
-    const oneMinusT = 1 - t;
-    return [
-      oneMinusT * oneMinusT * start![0] +
-        2 * oneMinusT * t * control![0] +
-        t * t * end![0],
-      oneMinusT * oneMinusT * start![1] +
-        2 * oneMinusT * t * control![1] +
-        t * t * end![1],
-    ] as const;
-  });
+  return [...points];
 }
 
 export function sketchSessionHasReferenceImage(
@@ -1429,10 +1417,10 @@ export function createDisplayRenderableForProjectedGeometry(
       target,
       geometry: {
         kind: "polyline",
-        points: geometry.fitPoints.map((point) =>
+        points: projectedSplineDisplayPoints(geometry).map((point) =>
           mapSketchPointToWorld(session.plane, point),
         ),
-        isClosed: geometry.isClosed,
+        isClosed: projectedSplineIsClosed(geometry),
       },
       linePattern: "dashed",
       role: "reference",

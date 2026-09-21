@@ -96,14 +96,13 @@ function entityPath(
     case "arc":
       return arcPath(entity, coordinates);
     case "spline":
-      if (entity.points.length < 2) {
-        return null;
-      }
+      if (entity.spans.length === 0) return null;
       return [
-        `M ${formatPoint(entity.points[0]!, coordinates)}`,
-        ...entity.points
-          .slice(1)
-          .map((point) => `L ${formatPoint(point, coordinates)}`),
+        `M ${formatPoint(entity.spans[0]![0], coordinates)}`,
+        ...entity.spans.map(
+          ([, first, second, end]) =>
+            `C ${formatPoint(first, coordinates)} ${formatPoint(second, coordinates)} ${formatPoint(end, coordinates)}`,
+        ),
       ].join(" ");
     case "bezierCurve":
       return bezierPath(entity.controlPoints, entity.degree, coordinates);
@@ -208,7 +207,7 @@ function entityBounds(entity: SketchVectorEntity): SketchPoint2D[] {
         [entity.center[0] + entity.radius, entity.center[1] + entity.radius],
       ];
     case "spline":
-      return [...entity.points];
+      return entity.spans.flatMap((span) => [...span]);
     case "bezierCurve":
       return [...entity.controlPoints];
     case "conic":

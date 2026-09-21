@@ -16,6 +16,7 @@ import {
   createSketchChamferMutation,
   createSketchExtendMutation,
   createSketchFilletMutation,
+  createSketchDerivedTransformContribution,
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
   createSketchSplitMutation,
@@ -101,8 +102,14 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
         entityId: entityId as SketchEntityId,
       },
       isConstruction: false,
-      fitPointIds: fitPointIds.map((pointId) => pointId as SketchPointId),
-      degree: 2 as const,
+      pointOccurrenceIds: fitPointIds.map((_, index) => `occ-${index}`),
+      pointOccurrences: fitPointIds.map((pointId, index) => ({
+        occurrenceId: `occ-${index}`,
+        pointId: pointId as SketchPointId,
+        tangent: { kind: "automatic" },
+      })),
+      closure: "open",
+      interpolationPolicy: "centripetal-mean-arm-v1",
     };
   }
 
@@ -200,7 +207,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
         endPointId,
         sweepDirection,
       }),
-      createSplineEntity: (label, entityId, fitPointIds) => ({
+      createSplineEntity: (label, entityId, pointIds) => ({
         kind: "spline",
         entityId,
         label,
@@ -210,8 +217,16 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
           entityId,
         },
         isConstruction: false,
-        fitPointIds,
-        degree: 2,
+        pointOccurrenceIds: pointIds.map(
+          (_, index) => `${entityId}-occ-${index}`,
+        ),
+        pointOccurrences: pointIds.map((pointId, index) => ({
+          occurrenceId: `${entityId}-occ-${index}`,
+          pointId,
+          tangent: { kind: "automatic" },
+        })),
+        closure: "open",
+        interpolationPolicy: "centripetal-mean-arm-v1",
       }),
     };
   }
@@ -615,22 +630,18 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       factories: createFactories(),
     });
     expect(splineOffset.valid, "Spline offset should be valid.").toBeTruthy();
-    const sqrt5 = Math.sqrt(5);
-    expectPointCloseTo(
-      splineOffset.contribution?.points[0]?.position,
-      [-2 / sqrt5, 1 / sqrt5],
-      "Spline offset first point",
-    );
-    expectPointCloseTo(
-      splineOffset.contribution?.points[1]?.position,
-      [1, 3],
-      "Spline offset middle point",
-    );
-    expectPointCloseTo(
-      splineOffset.contribution?.points[2]?.position,
-      [2 + 2 / sqrt5, 1 / sqrt5],
-      "Spline offset last point",
-    );
+    const offsetPoints = splineOffset.contribution?.points ?? [];
+    expect(
+      offsetPoints.length,
+      "Spline offset should consume the owner-sampled complete cubic spans.",
+    ).toBeGreaterThan(3);
+    expect(offsetPoints[0]!.position[0]).toBeLessThan(0);
+    expect(offsetPoints[0]!.position[1]).toBeGreaterThan(0);
+    expect(offsetPoints.at(-1)!.position[0]).toBeGreaterThan(2);
+    expect(offsetPoints.at(-1)!.position[1]).toBeGreaterThan(0);
+    expect(
+      Math.max(...offsetPoints.map((point) => point.position[1])),
+    ).toBeGreaterThan(2);
   }
 
   function testOffsetCharacterizationChains() {
@@ -715,7 +726,8 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
     expect(
       closedPositions?.some(
         (position) =>
-          Math.abs(position[0] - -1) < 1e-6 && Math.abs(position[1] - -1) < 1e-6,
+          Math.abs(position[0] - -1) < 1e-6 &&
+          Math.abs(position[1] - -1) < 1e-6,
       ),
       "Left offset of a counter-clockwise loop should expand outward.",
     ).toBeTruthy();
@@ -842,10 +854,7 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
 
     const disconnected = createSketchOffsetDerivationContribution({
       definition: chainDefinition,
-      entityIds: [
-        "sketch_entity_ab",
-        "sketch_entity_far",
-      ] as SketchEntityId[],
+      entityIds: ["sketch_entity_ab", "sketch_entity_far"] as SketchEntityId[],
       distance: 1,
       side: "left",
       sequence: 10,
@@ -913,15 +922,93 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
       ).toBe(2);
     }
     expect(
-      committed.contribution?.entities.filter(
-        (entity) => entity.kind === "arc",
-      ).length,
+      committed.contribution?.entities.filter((entity) => entity.kind === "arc")
+        .length,
       "The convex corner should stage a joint arc entity.",
     ).toBe(1);
     expect(
       committed.previewEntities.length > 0,
       "A valid offset derivation should stage preview geometry.",
     ).toBeTruthy();
+  }
+
+  function testDerivedSplineFactoryPreservesCompleteAggregate() {
+    const source = {
+      ...makeSpline("sketch_entity_spline", "Spline", [
+        "sketch_point_a",
+        "sketch_point_b",
+        "sketch_point_a",
+      ]),
+      pointOccurrenceIds: ["source-a", "source-b", "source-alias"],
+      pointOccurrences: [
+        {
+          occurrenceId: "source-a",
+          pointId: "sketch_point_a" as SketchPointId,
+          tangent: { kind: "authored" as const, vector: [1, 2] as const },
+        },
+        {
+          occurrenceId: "source-b",
+          pointId: "sketch_point_b" as SketchPointId,
+          tangent: { kind: "authored" as const, vector: [0, 0] as const },
+        },
+        {
+          occurrenceId: "source-alias",
+          pointId: "sketch_point_a" as SketchPointId,
+          tangent: { kind: "automatic" as const },
+        },
+      ],
+      closure: "positional" as const,
+    } as Extract<SketchEntityDefinition, { kind: "spline" }>;
+    const definition = makeDefinition(
+      [
+        makePoint("sketch_point_a", "A", [1, 0]),
+        makePoint("sketch_point_b", "B", [2, 1]),
+        makePoint("sketch_point_axis_start", "Axis start", [0, -2]),
+        makePoint("sketch_point_axis_end", "Axis end", [0, 2]),
+      ],
+      [
+        source,
+        makeLine(
+          "sketch_entity_axis",
+          "Axis",
+          "sketch_point_axis_start",
+          "sketch_point_axis_end",
+        ),
+      ],
+    );
+    const result = createSketchDerivedTransformContribution({
+      definition,
+      operatorKind: "mirror",
+      entityIds: [
+        "sketch_entity_spline",
+        "sketch_entity_axis",
+      ] as SketchEntityId[],
+      value: null,
+      sequence: 10,
+      factories: createFactories(),
+    });
+    const output = result.contribution?.entities.find(
+      (entity): entity is Extract<SketchEntityDefinition, { kind: "spline" }> =>
+        entity.kind === "spline",
+    );
+
+    expect(result.valid).toBeTruthy();
+    expect(output?.closure).toBe("positional");
+    expect(output?.pointOccurrenceIds).not.toEqual(source.pointOccurrenceIds);
+    expect(
+      output?.pointOccurrences.map((occurrence) => occurrence.pointId),
+    ).toEqual([
+      "sketch_point_10_mirror-sketch_point_a",
+      "sketch_point_10_mirror-sketch_point_b",
+      "sketch_point_10_mirror-sketch_point_a",
+    ]);
+    expect(
+      output?.pointOccurrences.map((occurrence) => occurrence.tangent),
+    ).toEqual([
+      { kind: "authored", vector: [-1, 2] },
+      { kind: "authored", vector: [0, 0] },
+      { kind: "automatic" },
+    ]);
   }
 
   testFilletAndChamferMutateAdjacentLines();
@@ -932,4 +1019,5 @@ test("src/domain/sketch-editing/operations.spec.ts", () => {
   testOffsetCharacterizationChains();
   testSlotOffsetCharacterization();
   testOffsetDerivationValidationAndCommitPreparation();
+  testDerivedSplineFactoryPreservesCompleteAggregate();
 });

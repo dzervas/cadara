@@ -7,6 +7,11 @@ import type {
   SketchSolveDiagnostic,
 } from "@/contracts/sketch/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
+import {
+  orderedSplineOccurrences,
+  orderedSplinePointIds,
+  type SplineVector,
+} from "@/contracts/sketch/spline-geometry";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import {
   OFFSET_DIAGNOSTIC_CODES,
@@ -21,6 +26,12 @@ interface SketchDerivationEvaluationResult {
 }
 
 type TransformPoint = (point: SketchPoint2D) => SketchPoint2D;
+type TransformVector = (vector: SplineVector) => SplineVector;
+
+interface RelationshipTransform {
+  point: TransformPoint;
+  vector: TransformVector;
+}
 
 const EPSILON = 1e-9;
 
@@ -46,7 +57,7 @@ function getEntityPointIds(
     case "arc":
       return [entity.centerPointId, entity.startPointId, entity.endPointId];
     case "spline":
-      return entity.fitPointIds;
+      return orderedSplinePointIds(entity);
     case "ellipse":
       return [entity.centerPointId, entity.majorAxisPointId];
     case "ellipticalArc":
@@ -114,7 +125,7 @@ function getMirrorTransform(
   entityById: Map<SketchEntityId, SketchEntityDefinition>,
   pointById: Map<SketchPointId, SketchPointDefinition>,
   diagnostics: SketchSolveDiagnostic[],
-): TransformPoint | null {
+): RelationshipTransform | null {
   const axis = entityById.get(relationship.mirrorReference.entityId);
   if (!axis || axis.kind !== "lineSegment") {
     diagnostics.push(
@@ -142,10 +153,35 @@ function getMirrorTransform(
     return null;
   }
 
-  return (point) => {
-    const reflected = reflectAcrossLine(point, start.position, end.position);
-    return reflected ?? point;
+  const dx = end.position[0] - start.position[0];
+  const dy = end.position[1] - start.position[1];
+  const lengthSquared = dx * dx + dy * dy;
+  return {
+    point: (point) => {
+      const reflected = reflectAcrossLine(point, start.position, end.position);
+      return reflected ?? point;
+    },
+    vector: (vector) => {
+      const projectionScale = (vector[0] * dx + vector[1] * dy) / lengthSquared;
+      return [
+        2 * projectionScale * dx - vector[0],
+        2 * projectionScale * dy - vector[1],
+      ];
+    },
   };
+}
+
+function rotateVector(
+  vector: SplineVector,
+  angle: number,
+  scale = 1,
+): SplineVector {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return [
+    scale * (vector[0] * cos - vector[1] * sin),
+    scale * (vector[0] * sin + vector[1] * cos),
+  ];
 }
 
 function getRelationshipTransform(
@@ -154,7 +190,7 @@ function getRelationshipTransform(
   pointById: Map<SketchPointId, SketchPointDefinition>,
   instanceIndex: number,
   diagnostics: SketchSolveDiagnostic[],
-): TransformPoint | null {
+): RelationshipTransform | null {
   switch (relationship.kind) {
     case "offset":
       // Offset relationships recompute per-segment geometry rather than a
@@ -168,29 +204,40 @@ function getRelationshipTransform(
         diagnostics,
       );
     case "linearPattern":
-      return (point) => [
-        point[0] + relationship.vector[0] * instanceIndex,
-        point[1] + relationship.vector[1] * instanceIndex,
-      ];
-    case "circularPattern":
-      return (point) =>
-        rotateAround(
-          point,
-          relationship.center,
-          relationship.angleRadians * instanceIndex,
-        );
+      return {
+        point: (point) => [
+          point[0] + relationship.vector[0] * instanceIndex,
+          point[1] + relationship.vector[1] * instanceIndex,
+        ],
+        vector: (vector) => vector,
+      };
+    case "circularPattern": {
+      const angle = relationship.angleRadians * instanceIndex;
+      return {
+        point: (point) => rotateAround(point, relationship.center, angle),
+        vector: (vector) => rotateVector(vector, angle),
+      };
+    }
     case "transform":
-      return (point) => {
-        const rotated = rotateAround(
-          point,
-          relationship.origin,
-          relationship.rotationRadians,
-          relationship.scale,
-        );
-        return [
-          rotated[0] + relationship.translation[0],
-          rotated[1] + relationship.translation[1],
-        ];
+      return {
+        point: (point) => {
+          const rotated = rotateAround(
+            point,
+            relationship.origin,
+            relationship.rotationRadians,
+            relationship.scale,
+          );
+          return [
+            rotated[0] + relationship.translation[0],
+            rotated[1] + relationship.translation[1],
+          ];
+        },
+        vector: (vector) =>
+          rotateVector(
+            vector,
+            relationship.rotationRadians,
+            relationship.scale,
+          ),
       };
   }
 }
@@ -199,6 +246,7 @@ function transformedEntity(
   relationship: SketchDerivationDefinition,
   seed: SketchEntityDefinition,
   output: SketchEntityDefinition,
+  transformVector: TransformVector,
 ): SketchEntityDefinition {
   if (seed.kind === "circle" && output.kind === "circle") {
     return {
@@ -220,6 +268,32 @@ function transformedEntity(
             : "clockwise"
           : seed.sweepDirection,
     };
+  }
+
+  if (seed.kind === "spline" && output.kind === "spline") {
+    const seedOccurrences = orderedSplineOccurrences(seed);
+    const outputOccurrences = orderedSplineOccurrences(output);
+    if (
+      seedOccurrences &&
+      outputOccurrences &&
+      seedOccurrences.length === outputOccurrences.length
+    ) {
+      return {
+        ...output,
+        closure: seed.closure,
+        interpolationPolicy: seed.interpolationPolicy,
+        pointOccurrences: outputOccurrences.map((occurrence, index) => {
+          const tangent = seedOccurrences[index]!.tangent;
+          return {
+            ...occurrence,
+            tangent:
+              tangent.kind === "authored"
+                ? { kind: "authored", vector: transformVector(tangent.vector) }
+                : tangent,
+          };
+        }),
+      };
+    }
   }
 
   return output;
@@ -359,7 +433,10 @@ function evaluateOffsetRelationship(
   const geometryJoints = new Map(
     result.joints.map(
       (joint) =>
-        [jointKey(joint.firstSeedEntityId, joint.secondSeedEntityId), joint] as const,
+        [
+          jointKey(joint.firstSeedEntityId, joint.secondSeedEntityId),
+          joint,
+        ] as const,
     ),
   );
 
@@ -546,10 +623,12 @@ export function evaluateSketchDerivations(
           continue;
         }
 
-        replacePoint(outputPointId, transform(seedPoint.position));
+        replacePoint(outputPointId, transform.point(seedPoint.position));
       }
 
-      replaceEntity(transformedEntity(relationship, seed, target));
+      replaceEntity(
+        transformedEntity(relationship, seed, target, transform.vector),
+      );
     }
   }
 

@@ -4,6 +4,7 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { projectedSplineDisplayPoints } from "@/contracts/solver/schema";
 import type { SketchToolAnchorDescriptor } from "@/core/sketch-tools/editor-schema";
 
 export function addAnchorOffset(
@@ -85,10 +86,9 @@ export function getSketchDatumGuideExtent(
           ];
         }
         case "spline":
-          return geometry.fitPoints.flatMap((point: SketchPoint) => [
-            Math.abs(point[0]),
-            Math.abs(point[1]),
-          ]);
+          return projectedSplineDisplayPoints(geometry).flatMap(
+            (point: SketchPoint) => [Math.abs(point[0]), Math.abs(point[1])],
+          );
       }
     }),
   );

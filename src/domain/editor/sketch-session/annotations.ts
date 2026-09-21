@@ -30,9 +30,13 @@ import type {
   SketchStyleDefinition,
   SketchStyleRecord,
 } from "@/contracts/sketch/schema";
+import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
-import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
+import {
+  projectedSplineDisplayPoints,
+  type ProjectedSketchReferenceRecord,
+} from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type {
   SketchStylePatch,
@@ -2699,7 +2703,7 @@ export function getProjectedGeometryAnchor(
     case "arc":
       return geometry.centerPosition;
     case "spline":
-      return geometry.fitPoints[0] ?? null;
+      return projectedSplineDisplayPoints(geometry)[0] ?? null;
   }
 }
 
@@ -2866,7 +2870,7 @@ export function getEntityAnchor(
     case "arc":
       return getPointPosition(definition, entity.centerPointId);
     case "spline":
-      return getAveragePointPosition(definition, entity.fitPointIds);
+      return getAveragePointPosition(definition, orderedSplinePointIds(entity));
     case "ellipse":
       return getPointPosition(definition, entity.centerPointId);
     case "ellipticalArc":
@@ -2905,7 +2909,7 @@ export function getEntityAnchorPointId(
     case "arc":
       return entity.centerPointId;
     case "spline":
-      return entity.fitPointIds[0] ?? null;
+      return orderedSplinePointIds(entity)[0] ?? null;
     case "ellipse":
     case "ellipticalArc":
       return entity.centerPointId;

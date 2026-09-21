@@ -5,6 +5,7 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import type { SketchPointId } from "@/contracts/shared/ids";
+import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 
 /**
  * Shared 2D offset mathematics for the sketch layer.
@@ -260,7 +261,7 @@ export function offsetSeedCurveFromEntity(
         : null;
     }
     case "spline": {
-      const points = entity.fitPointIds.map((pointId) =>
+      const points = orderedSplinePointIds(entity).map((pointId) =>
         getPointPosition(pointId),
       );
       return points.every((point): point is SketchPoint2D => point !== null) &&
@@ -293,7 +294,9 @@ function arcSweepAngle(
   const startAngle = angleOf(center, start);
   const endAngle = angleOf(center, end);
   const delta =
-    sweep === "counterClockwise" ? endAngle - startAngle : startAngle - endAngle;
+    sweep === "counterClockwise"
+      ? endAngle - startAngle
+      : startAngle - endAngle;
   return ((delta % fullTurn) + fullTurn) % fullTurn;
 }
 
@@ -814,9 +817,7 @@ function buildTraversal(
   }
 
   const [firstStartNode, firstEndNode] = endpointNodes[0]!;
-  const entries: TraversalEntry[] = [
-    { curveIndex: 0, reversed: false },
-  ];
+  const entries: TraversalEntry[] = [{ curveIndex: 0, reversed: false }];
   const used = new Set([0]);
   let cursor = firstEndNode;
 
@@ -1208,7 +1209,11 @@ function resolveJoint(
 
   const turn = cross(tangentA, tangentB);
   if (turn * distance > EPSILON) {
-    const intersection = trimIntersection(first, second, midpoint(endA, startB));
+    const intersection = trimIntersection(
+      first,
+      second,
+      midpoint(endA, startB),
+    );
     if (intersection) {
       setSegmentTraversalEnd(first, intersection);
       setSegmentTraversalStart(second, intersection);
@@ -1464,7 +1469,10 @@ export function offsetSideForPoint(input: {
 
       const t = Math.max(
         0,
-        Math.min(1, dot(subtract(input.point, start), direction) / lengthSquared),
+        Math.min(
+          1,
+          dot(subtract(input.point, start), direction) / lengthSquared,
+        ),
       );
       const closest = add(start, scale(direction, t));
       const separation = distanceBetween(input.point, closest);

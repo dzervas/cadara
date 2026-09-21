@@ -112,7 +112,7 @@ test("active sketch curve picking selects semantic curves without pixel-perfect 
   const semanticPickFixtures = [
     { label: "Line 1", point: { x: 370, y: 268 } },
     { label: "Circle 2", point: { x: 688, y: 260 } },
-    { label: "Spline 3", point: { x: 420, y: 440 } },
+    { label: "Spline 3", point: { x: 470, y: 400 } },
     { label: "Line 4", point: { x: 570, y: 468 } },
   ] as const;
   const exactAuthoredTargets: string[] = [];

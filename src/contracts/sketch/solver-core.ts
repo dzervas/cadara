@@ -17,6 +17,14 @@ import type {
 } from "@/contracts/sketch/schema";
 import { SOLVED_SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import {
+  orderedSplineOccurrences,
+  reconstructSplineAggregate,
+} from "@/contracts/sketch/spline-geometry";
+import {
+  projectedSplineDisplayPoints,
+  projectedSplineIsClosed,
+} from "@/contracts/solver/schema";
 import type {
   ProjectedSketchReferenceGeometry,
   ProjectedSketchReferenceRecord,
@@ -764,14 +772,13 @@ function pointSegmentDistance(
   );
 }
 
-function pointSplineDistance(
+function pointPolylineDistance(
   point: SketchPoint2D,
-  geometry: Extract<ProjectedSketchReferenceGeometry, { kind: "spline" }>,
+  points: readonly SketchPoint2D[],
+  isClosed: boolean,
 ) {
   const fitPoints =
-    geometry.isClosed && geometry.fitPoints.length > 2
-      ? [...geometry.fitPoints, geometry.fitPoints[0]!]
-      : geometry.fitPoints;
+    isClosed && points.length > 2 ? [...points, points[0]!] : points;
 
   if (fitPoints.length === 0) {
     return 0;
@@ -785,6 +792,17 @@ function pointSplineDistance(
     );
   }
   return Number.isFinite(best) ? best : length(subtract(point, fitPoints[0]!));
+}
+
+function pointSplineDistance(
+  point: SketchPoint2D,
+  geometry: Extract<ProjectedSketchReferenceGeometry, { kind: "spline" }>,
+) {
+  return pointPolylineDistance(
+    point,
+    projectedSplineDisplayPoints(geometry),
+    projectedSplineIsClosed(geometry),
+  );
 }
 
 function midpoint(start: SketchPoint2D, end: SketchPoint2D): SketchPoint2D {
@@ -1163,18 +1181,16 @@ function buildSystem(
     }
 
     if (entity.kind === "spline") {
-      const fitPoints = entity.fitPointIds.flatMap((pointId) => {
+      const occurrences = orderedSplineOccurrences(entity) ?? [];
+      const fitPoints = occurrences.flatMap(({ pointId }) => {
         const fitPoint = pointRecords.get(pointId);
         return fitPoint ? [getPoint(values, fitPoint)] : [];
       });
-      return pointSplineDistance(position, {
-        geometryId:
-          "projected_geometry_local_spline" as import("@/contracts/shared/ids").ProjectedGeometryId,
-        kind: "spline",
+      return pointPolylineDistance(
+        position,
         fitPoints,
-        degree: entity.degree,
-        isClosed: false,
-      });
+        entity.closure !== "open",
+      );
     }
 
     const circleLike = getLocalCircleLike(values, entity);
@@ -3239,20 +3255,17 @@ function validateDefinition(
     }
 
     if (entity.kind === "spline") {
-      const uniqueFitPointIds = new Set(entity.fitPointIds);
-      if (
-        entity.fitPointIds.length < 3 ||
-        uniqueFitPointIds.size !== entity.fitPointIds.length
-      ) {
+      const occurrences = orderedSplineOccurrences(entity);
+      if (!occurrences || occurrences.length < 2) {
         diagnostics.push(
           makeDiagnostic(
-            "invalid-spline-fit-points",
+            "invalid-spline-point-occurrences",
             "error",
-            `Spline ${entity.entityId} requires at least three distinct fit points.`,
+            `Spline ${entity.entityId} requires at least two ordered point occurrences.`,
             { kind: "entity", entityId: entity.entityId },
           ),
         );
-      } else if (entity.fitPointIds.some((pointId) => !pointMap.has(pointId))) {
+      } else if (occurrences.some(({ pointId }) => !pointMap.has(pointId))) {
         diagnostics.push(
           makeDiagnostic(
             "missing-spline-fit-point",
@@ -3261,6 +3274,26 @@ function validateDefinition(
             { kind: "entity", entityId: entity.entityId },
           ),
         );
+      } else {
+        const reconstruction = reconstructSplineAggregate(
+          entity,
+          Object.fromEntries(
+            [...pointMap.entries()].map(([pointId, point]) => [
+              pointId,
+              point.position,
+            ]),
+          ),
+        );
+        for (const diagnostic of reconstruction.diagnostics) {
+          diagnostics.push(
+            makeDiagnostic(
+              `invalid-spline-${diagnostic.code}`,
+              "error",
+              `Spline ${entity.entityId} reconstruction is invalid: ${diagnostic.code}.`,
+              { kind: "entity", entityId: entity.entityId },
+            ),
+          );
+        }
       }
     }
 
@@ -6168,21 +6201,17 @@ function buildSolvedEntities(
     }
 
     if (entity.kind === "spline") {
-      const fitPoints = entity.fitPointIds.flatMap((pointId) => {
-        const point = pointRecords.get(pointId);
-        return point ? [getPoint(values, point)] : [];
+      const positions = Object.fromEntries(
+        [...pointRecords.entries()].map(([pointId, point]) => [
+          pointId,
+          getPoint(values, point),
+        ]),
+      ) as Record<SketchPointId, SketchPoint2D>;
+      solved.push({
+        entityId: entity.entityId,
+        kind: "spline",
+        reconstruction: reconstructSplineAggregate(entity, positions),
       });
-      if (
-        fitPoints.length === entity.fitPointIds.length &&
-        fitPoints.length >= 3
-      ) {
-        solved.push({
-          entityId: entity.entityId,
-          kind: "spline",
-          fitPoints,
-          degree: entity.degree,
-        });
-      }
       continue;
     }
 
@@ -6797,7 +6826,9 @@ function getEntityPoints(
     case "arc":
       return [entity.centerPointId, entity.startPointId, entity.endPointId];
     case "spline":
-      return entity.fitPointIds;
+      return (
+        orderedSplineOccurrences(entity)?.map(({ pointId }) => pointId) ?? []
+      );
     case "ellipse":
       return [entity.centerPointId, entity.majorAxisPointId];
     case "ellipticalArc":

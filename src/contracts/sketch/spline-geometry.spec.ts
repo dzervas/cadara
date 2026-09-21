@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   evaluateSplineSpan,
   reconstructSpline,
+  reconstructSplineAggregate,
   type ResolvedSplineInput,
   type SplineVariation,
   type SplineVector as V,
@@ -34,6 +35,7 @@ function input(
     policy: "centripetal-mean-arm-v1",
     closure,
     points: points.map((position, i) => ({
+      occurrenceId: `occurrence-${i}`,
       id: `p${i}`,
       position,
       tangent: handles[i]
@@ -91,6 +93,49 @@ function perturb(
 }
 
 describe("neutral spline reconstruction owner", () => {
+  test("resolves stable ordered occurrences with independent alias tangents", () => {
+    const aggregate = {
+      entityId: "spline-alias",
+      pointOccurrenceIds: ["start", "middle", "end"],
+      pointOccurrences: [
+        {
+          occurrenceId: "middle",
+          pointId: "p1",
+          tangent: { kind: "automatic" as const },
+        },
+        {
+          occurrenceId: "end",
+          pointId: "p0",
+          tangent: { kind: "authored" as const, vector: [0, 0] as V },
+        },
+        {
+          occurrenceId: "start",
+          pointId: "p0",
+          tangent: { kind: "automatic" as const },
+        },
+      ],
+      closure: "positional" as const,
+      interpolationPolicy: "centripetal-mean-arm-v1" as const,
+    };
+    const result = reconstructSplineAggregate(aggregate, {
+      p0: [0, 0],
+      p1: [2, 1],
+    });
+    expect(result.validity).toBe("valid");
+    if (result.validity === "valid") {
+      expect(result.spans[0]!.source.startOccurrenceId).toBe("start");
+      expect(result.spans[1]!.source.endOccurrenceId).toBe("end");
+      expect(result.handles[2]).toEqual([0, 0]);
+      expect(result.handles[0]).not.toEqual([0, 0]);
+    }
+
+    expect(
+      reconstructSplineAggregate(
+        { ...aggregate, pointOccurrenceIds: ["start", "start", "end"] },
+        { p0: [0, 0], p1: [2, 1] },
+      ).validity,
+    ).toBe("invalid");
+  });
   test("automatic uneven, reflected endpoint and wrapped spans match recursive interpolation", () => {
     for (const closure of ["open", "smooth"] as const) {
       const result = build(input(uneven, closure));
@@ -109,6 +154,8 @@ describe("neutral spline reconstruction owner", () => {
           spanIndex: i,
           startPointId: `p${i}`,
           endPointId: `p${(i + 1) % n}`,
+          startOccurrenceId: `occurrence-${i}`,
+          endOccurrenceId: `occurrence-${(i + 1) % n}`,
         });
         expect(span.orientation).toBe("forward");
         expect(span.interval[0]).toBe(i ? result.spans[i - 1].interval[1] : 0);

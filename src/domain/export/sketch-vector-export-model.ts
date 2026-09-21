@@ -21,6 +21,7 @@ import type {
   SketchStyleStroke,
   SolvedSketchEntityGeometryRecord,
 } from "@/contracts/sketch/schema";
+import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import type {
   DocumentId,
   RevisionId,
@@ -204,12 +205,12 @@ function buildEntity(
     }
 
     if (solvedEntity.kind === "spline") {
+      if (solvedEntity.reconstruction.validity !== "valid") return null;
       return {
         kind: "spline",
         entityId: entity.entityId,
         label: entity.label,
-        points: solvedEntity.fitPoints,
-        degree: solvedEntity.degree,
+        spans: solvedEntity.reconstruction.spans.map((span) => span.poles),
         isConstruction: entity.isConstruction,
         style,
       };
@@ -321,10 +322,12 @@ function buildEntity(
         : null;
     }
     case "spline": {
-      const points = entity.fitPointIds
-        .map((pointId) => getPoint(pointMap, pointId, diagnostics, target))
-        .filter((point): point is SketchPoint2D => point !== undefined);
-      if (points.length < 2) {
+      const positions = Object.fromEntries(pointMap) as Record<
+        SketchPointId,
+        SketchPoint2D
+      >;
+      const reconstruction = reconstructSplineAggregate(entity, positions);
+      if (reconstruction.validity !== "valid") {
         diagnostics.push(
           createDiagnostic(
             "sketch-vector-unsupported-entity",
@@ -338,8 +341,7 @@ function buildEntity(
         kind: entity.kind,
         entityId: entity.entityId,
         label: entity.label,
-        points,
-        degree: entity.degree,
+        spans: reconstruction.spans.map((span) => span.poles),
         isConstruction: entity.isConstruction,
         style,
       };

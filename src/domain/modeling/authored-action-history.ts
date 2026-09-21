@@ -127,10 +127,34 @@ function collections(
     } else data[key] = Object.values(data[key] as Fields);
   }
 }
+function splineOccurrences(definition: Fields, encode: boolean) {
+  const entities = definition.entities as Fields[] | Record<string, Fields>;
+  const records = Array.isArray(entities) ? entities : Object.values(entities);
+  for (const entity of records) {
+    if (entity.kind !== "spline") continue;
+    const order = entity.pointOccurrenceIds as string[];
+    if (encode) {
+      const occurrences = entity.pointOccurrences as Fields[];
+      const entries = occurrences.map(
+        (occurrence) => [String(occurrence.occurrenceId), occurrence] as const,
+      );
+      if (new Set(entries.map(([id]) => id)).size !== entries.length)
+        throw new Error(
+          "Duplicate authored identity in spline pointOccurrences",
+        );
+      entity.pointOccurrences = Object.fromEntries(entries);
+    } else {
+      const occurrences = entity.pointOccurrences as Record<string, Fields>;
+      entity.pointOccurrences = order.map((id) => occurrences[id]);
+    }
+  }
+}
 function sketch(data: Fields, encode: boolean) {
   delete data.regionSlots;
   const definition = data.definition as Fields;
+  if (encode) splineOccurrences(definition, true);
   collections(definition, sketchCollections, encode);
+  if (!encode) splineOccurrences(definition, false);
   for (const [records, ids] of Object.entries(canonicalIds)) {
     if (encode) delete definition[ids];
     else if (definition[records] !== undefined)
@@ -141,7 +165,8 @@ function sketch(data: Fields, encode: boolean) {
   }
 }
 /** Only authored fields enter the ledger; canonical membership arrays materialize from stable records.
- * Feature/history order, spline fit/control points, operands and other meaningful sequences stay atomic.
+ * Feature/history order, spline occurrence order, control points, operands and other meaningful sequences stay atomic.
+ * Stable spline occurrence records are projected separately so independent tangent fields remain independent writes.
  */
 function encode(state: AuthoredActionState): Fields {
   const data = withoutUndefined(structuredClone(state.data)) as Fields;

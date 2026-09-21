@@ -29,6 +29,10 @@ import {
 import { validateSketchSolverEnvelope } from "@/contracts/solver/runtime-schema";
 import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
 import {
+  orderedSplineOccurrences,
+  reconstructSplineAggregate,
+} from "@/contracts/sketch/spline-geometry";
+import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
   updateCompiledSketchSolveSession,
@@ -181,8 +185,7 @@ function assertSupportedRequest(
   const parsed = validateSketchSolverEnvelope(request);
   if (!parsed.success) {
     throw new Error(
-      parsed.issues[0]?.message ??
-        "Invalid sketch solver request envelope.",
+      parsed.issues[0]?.message ?? "Invalid sketch solver request envelope.",
     );
   }
 
@@ -512,23 +515,21 @@ function validateDefinition(
           );
         }
         break;
-      case "spline":
-        if (
-          entity.fitPointIds.length < 3 ||
-          new Set(entity.fitPointIds).size !== entity.fitPointIds.length
-        ) {
+      case "spline": {
+        const occurrences = orderedSplineOccurrences(entity);
+        if (!occurrences || occurrences.length < 2) {
           diagnostics.push(
             makeDiagnostic(
-              "invalid-spline-fit-points",
+              "invalid-spline-point-occurrences",
               "error",
-              `Spline ${entity.entityId} requires at least three distinct fit points.`,
+              `Spline ${entity.entityId} requires at least two ordered point occurrences.`,
               { kind: "entity", entityId: entity.entityId },
             ),
           );
           break;
         }
 
-        if (entity.fitPointIds.some((pointId) => !points.has(pointId))) {
+        if (occurrences.some(({ pointId }) => !points.has(pointId))) {
           diagnostics.push(
             makeDiagnostic(
               "missing-spline-fit-point",
@@ -539,6 +540,7 @@ function validateDefinition(
           );
         }
         break;
+      }
     }
   }
 
@@ -997,20 +999,17 @@ function solvedGeometryForEntity(
         : null;
     }
     case "spline": {
-      const fitPoints = entity.fitPointIds.flatMap((pointId) => {
-        const point = points.get(pointId);
-        return point ? [point.position] : [];
-      });
-
-      return fitPoints.length === entity.fitPointIds.length &&
-        fitPoints.length >= 3
-        ? {
-            entityId: entity.entityId,
-            kind: "spline",
-            fitPoints,
-            degree: entity.degree,
-          }
-        : null;
+      const positions = Object.fromEntries(
+        [...points.entries()].map(([pointId, point]) => [
+          pointId,
+          point.position,
+        ]),
+      ) as Record<SketchPointId, SketchPoint2D>;
+      return {
+        entityId: entity.entityId,
+        kind: "spline",
+        reconstruction: reconstructSplineAggregate(entity, positions),
+      };
     }
     case "ellipse": {
       const center = points.get(entity.centerPointId);

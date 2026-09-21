@@ -18,6 +18,7 @@ import type {
   RenderableEntityRecord,
 } from "@/contracts/render/schema";
 import type { SolvedSketchEntityGeometryRecord } from "@/contracts/sketch/schema";
+import { sampleSplineGeometry } from "@/contracts/sketch/spline-geometry";
 import { describeFeatureTreeNode } from "@/domain/modeling/feature-description";
 import type {
   BodyId,
@@ -1109,12 +1110,19 @@ function buildFaceRenderRecord(
   };
 }
 
-function buildBodyOnlyMeshRenderRecord(body: OccTrackedBody): RenderableEntityRecord {
+function buildBodyOnlyMeshRenderRecord(
+  body: OccTrackedBody,
+): RenderableEntityRecord {
   const meshTriangles = body.meshExportFallback;
   if (!meshTriangles || meshTriangles.length === 0) {
-    throw new Error(`Body-only mesh ${body.bodyId} has no authoritative baked mesh fallback.`);
+    throw new Error(
+      `Body-only mesh ${body.bodyId} has no authoritative baked mesh fallback.`,
+    );
   }
-  const vertexIndexByPoint = new Map<(typeof meshTriangles)[number][number], number>();
+  const vertexIndexByPoint = new Map<
+    (typeof meshTriangles)[number][number],
+    number
+  >();
   const vertexPositions: RenderPoint3D[] = [];
   const triangleIndices: Array<readonly [number, number, number]> = [];
   const indexPoint = (point: (typeof meshTriangles)[number][number]) => {
@@ -1126,7 +1134,11 @@ function buildBodyOnlyMeshRenderRecord(body: OccTrackedBody): RenderableEntityRe
     return index;
   };
   for (const triangle of meshTriangles) {
-    triangleIndices.push([indexPoint(triangle[0]), indexPoint(triangle[1]), indexPoint(triangle[2])]);
+    triangleIndices.push([
+      indexPoint(triangle[0]),
+      indexPoint(triangle[1]),
+      indexPoint(triangle[2]),
+    ]);
   }
   const target = { kind: "body", bodyId: body.bodyId } as const;
   return {
@@ -1134,8 +1146,19 @@ function buildBodyOnlyMeshRenderRecord(body: OccTrackedBody): RenderableEntityRe
     label: body.label,
     ownerBodyId: body.bodyId,
     ownerFeatureId: body.ownerFeatureId,
-    binding: { pickId: createPickId(target), pickPriority: BODY_PICK_PRIORITY, target, topology: null, semanticClass: "body" },
-    geometry: { kind: "mesh", vertexPositions, vertexNormals: null, triangleIndices },
+    binding: {
+      pickId: createPickId(target),
+      pickPriority: BODY_PICK_PRIORITY,
+      target,
+      topology: null,
+      semanticClass: "body",
+    },
+    geometry: {
+      kind: "mesh",
+      vertexPositions,
+      vertexNormals: null,
+      triangleIndices,
+    },
   };
 }
 
@@ -2055,7 +2078,7 @@ function buildSketchCurveRenderRecords(
         );
         break;
       case "spline":
-        points2D = entity.fitPoints;
+        points2D = sampleSplineGeometry(entity.reconstruction);
         break;
       case "ellipse":
         points2D = sampleEllipsePoints(

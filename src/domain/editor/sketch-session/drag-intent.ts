@@ -1,5 +1,6 @@
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
+import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 
 /**
  * Deterministic per-handle drag intent contract (minimum-motion-sketch-drag, D5).
@@ -49,7 +50,7 @@ export function getSketchEntityDefiningPointIds(
     case "arc":
       return [entity.centerPointId, entity.startPointId, entity.endPointId];
     case "spline":
-      return entity.fitPointIds;
+      return orderedSplinePointIds(entity);
     case "ellipse":
       return [entity.centerPointId, entity.majorAxisPointId];
     case "ellipticalArc":

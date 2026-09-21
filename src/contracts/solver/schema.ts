@@ -1,3 +1,7 @@
+import {
+  sampleSplineSpans,
+  type SplineSpan,
+} from "@/contracts/sketch/spline-geometry";
 import type {
   DocumentId,
   ProjectedGeometryId,
@@ -182,18 +186,43 @@ export interface ProjectedSketchSplineGeometry {
   geometryId: ProjectedGeometryId;
   /** Geometry discriminant for a projected spline/freeform result. */
   kind: "spline";
-  /** Projected curve sample/control points in sketch-plane units. */
-  fitPoints: readonly SketchPoint2D[];
-  /** Polynomial degree when known; sampled freeform curves use a bounded degree. */
-  degree: 2 | 3;
-  /** True when the final point connects back to the first point. */
-  isClosed: boolean;
+  /** Faithful source form: external source data stays distinct from ordinary-spline reconstruction. */
+  representation:
+    | {
+        kind: "sourceSamples";
+        points: readonly SketchPoint2D[];
+        isClosed: boolean;
+      }
+    | {
+        kind: "neutralCubicSpans";
+        spans: readonly SplineSpan[];
+      };
 }
 
 /**
  * Union of all explicit 2D geometry that the solver may return for a projected
  * external sketch reference.
  */
+export function projectedSplineDisplayPoints(
+  geometry: ProjectedSketchSplineGeometry,
+): readonly SketchPoint2D[] {
+  return geometry.representation.kind === "sourceSamples"
+    ? geometry.representation.points
+    : sampleSplineSpans(geometry.representation.spans);
+}
+
+export function projectedSplineIsClosed(
+  geometry: ProjectedSketchSplineGeometry,
+): boolean {
+  if (geometry.representation.kind === "sourceSamples")
+    return geometry.representation.isClosed;
+  const spans = geometry.representation.spans;
+  if (spans.length === 0) return false;
+  const first = spans[0]!.poles[0];
+  const last = spans.at(-1)!.poles[3];
+  return first[0] === last[0] && first[1] === last[1];
+}
+
 export type ProjectedSketchReferenceGeometry =
   | ProjectedSketchPointGeometry
   | ProjectedSketchLineSegmentGeometry
