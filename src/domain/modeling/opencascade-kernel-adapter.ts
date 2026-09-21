@@ -91,9 +91,17 @@ import type { DurableRef } from "@/contracts/shared/references";
 import type {
   RegionRecord,
   SketchDefinition,
+  SketchDerivedValidity,
   SketchRecord,
   SketchSolveDiagnostic,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
+import { SOLVED_SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
+import {
+  deriveSketchValidity,
+  mergeSketchSolveDiagnostics,
+} from "@/contracts/sketch/derived-validity";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   applyOccFeatureToAuthoringState,
   createOccAuthoringState,
@@ -686,6 +694,57 @@ function mapSketchSolverDiagnostic(
   );
 }
 
+function mapModelingDiagnosticToSketchDiagnostic(
+  diagnostic: ModelingDiagnostic,
+): SketchSolveDiagnostic {
+  return {
+    code: diagnostic.code,
+    severity: diagnostic.severity,
+    message: diagnostic.message,
+    target:
+      diagnostic.target?.kind === "sketchEntity"
+        ? { kind: "entity", entityId: diagnostic.target.entityId }
+        : diagnostic.target?.kind === "sketchPoint"
+          ? { kind: "point", pointId: diagnostic.target.pointId }
+          : diagnostic.target?.kind === "region"
+            ? { kind: "region", regionId: diagnostic.target.regionId }
+            : null,
+  };
+}
+
+function createInvalidSolvedSketchSnapshot(
+  diagnostics: readonly SketchSolveDiagnostic[],
+): SolvedSketchSnapshot {
+  return {
+    schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
+    status: { solveState: "failed", constraintState: "inconsistent" },
+    solvedEntities: [],
+    solvedPoints: [],
+    constraintStatuses: [],
+    dimensionStatuses: [],
+    diagnostics: [...diagnostics],
+  };
+}
+
+function createDerivedValidity(input: {
+  solvedSnapshot: SolvedSketchSnapshot;
+  diagnostics: readonly SketchSolveDiagnostic[];
+  validationIsValid: boolean;
+}): SketchDerivedValidity {
+  const diagnostics = mergeSketchSolveDiagnostics(
+    input.diagnostics,
+    input.validationIsValid
+      ? []
+      : [{
+          code: "sketch-validation-failed",
+          severity: "error" as const,
+          message: "The authored sketch has invalid or unresolved requirements.",
+          target: null,
+        }],
+  );
+  return deriveSketchValidity({ solvedSnapshot: input.solvedSnapshot, diagnostics });
+}
+
 function normalizeSketchDefinitionForSketchId(
   definition: SketchDefinition,
   sketchId: SketchId,
@@ -736,6 +795,7 @@ function buildSketchSnapshotRecord(
   definition: SketchDefinition,
   regions: readonly RegionRecord[],
   solvedSnapshot: SketchRecord["solvedSnapshot"],
+  derivedValidity: SketchDerivedValidity,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ): SketchSnapshotRecord {
   const sketch: SketchRecord = {
@@ -749,6 +809,7 @@ function buildSketchSnapshotRecord(
     planeSupport: request.plane.support,
     definition,
     solvedSnapshot,
+    derivedValidity,
     projectedReferences: structuredClone([...projectedReferences]),
     regions: [...regions],
   };
@@ -781,29 +842,6 @@ function buildSketchChangedTargets(sketch: SketchSnapshotRecord) {
       pointId: point.pointId,
     })),
   ];
-}
-
-function hasReferenceImageOperationState(definition: SketchDefinition) {
-  return (definition.referenceImages?.length ?? 0) > 0;
-}
-
-function canPersistSketchSolveState(
-  definition: SketchDefinition,
-  solvedSnapshot: SketchRecord["solvedSnapshot"],
-) {
-  if (
-    solvedSnapshot.status.solveState === "solved" ||
-    solvedSnapshot.status.solveState === "partiallySolved"
-  ) {
-    return true;
-  }
-
-  return (
-    solvedSnapshot.status.solveState === "notEvaluated" &&
-    definition.points.length === 0 &&
-    definition.entities.length === 0 &&
-    hasReferenceImageOperationState(definition)
-  );
 }
 
 function createRestoreSolverCorrelation(
@@ -1632,11 +1670,27 @@ function collectInvalidConsumedTargetDiagnostics(
   const diagnostics: ModelingDiagnostic[] = [];
 
   for (const target of getFeatureConsumedTargets(feature.definition)) {
-    if (target.kind === "region") {
+    if (
+      target.kind === "region" ||
+      target.kind === "sketchEntity" ||
+      target.kind === "sketchPoint"
+    ) {
       const sketch = state.sketches.find(
         (entry) => entry.sketchId === target.sketchId,
       );
+      if (sketch && sketch.sketch.derivedValidity.state !== "current") {
+        diagnostics.push(
+          createFeatureFieldDiagnostic({
+            code: "occ-sketch-derived-output-not-current",
+            feature,
+            target,
+            detail: null,
+          }),
+        );
+        continue;
+      }
       if (
+        target.kind === "region" &&
         sketch &&
         resolveCompatibleRegion(sketch.sketch.regions, target.regionId)
       ) {
@@ -1841,10 +1895,31 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: document.variables,
     });
     if (!resolvedDefinition.ok) {
-      throw new Error(
-        `Authored sketch ${sketchId} dimensions could not be resolved: ${resolvedDefinition.diagnostics
-          .map((diagnostic) => diagnostic.message)
-          .join("; ")}`,
+      const diagnostics = resolvedDefinition.diagnostics.map(
+        mapModelingDiagnosticToSketchDiagnostic,
+      );
+      const solvedSnapshot = createInvalidSolvedSketchSnapshot(diagnostics);
+      return buildSketchSnapshotRecord(
+        {
+          contractVersion: CONTRACT_VERSION,
+          documentId: document.documentId,
+          baseRevisionId: document.revisionId,
+          solverCorrelation: createRestoreSolverCorrelation(
+            sketchId,
+            document.revisionId,
+          ),
+          sketchId,
+          sketchLabel: sketch.label,
+          plane: structuredClone(sketch.plane),
+          definition,
+        },
+        sketchId,
+        document.revisionId,
+        definition,
+        [],
+        solvedSnapshot,
+        deriveSketchValidity({ solvedSnapshot, diagnostics }),
+        [],
       );
     }
     const correlation = createRestoreSolverCorrelation(
@@ -1907,14 +1982,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       projectedReferences: projection.projectedReferences,
     });
 
-    if (
-      !validation.isValid ||
-      !canPersistSketchSolveState(definition, solved.solvedSnapshot)
-    ) {
-      throw new Error(
-        `Authored sketch ${sketchId} could not be restored from persisted authored inputs.`,
-      );
-    }
+    const derivedDiagnostics = mergeSketchSolveDiagnostics(
+      projection.diagnostics,
+      validation.diagnostics,
+      solved.diagnostics,
+      regions.diagnostics,
+    );
+    const derivedValidity = createDerivedValidity({
+      solvedSnapshot: solved.solvedSnapshot,
+      diagnostics: derivedDiagnostics,
+      validationIsValid: validation.isValid,
+    });
 
     return buildSketchSnapshotRecord(
       {
@@ -1930,15 +2008,21 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketchId,
       document.revisionId,
       definition,
-      reassociateAuthoredSketchRegionSlots({
-        slots: sketch.regionSlots,
-        regions: normalizeDerivedRegionsForSketchId(
-          regions.regions,
-          sketchId,
-          document.revisionId,
-        ),
-      }),
-      solved.solvedSnapshot,
+      derivedValidity.state === "current"
+        ? reassociateAuthoredSketchRegionSlots({
+            slots: sketch.regionSlots,
+            regions: normalizeDerivedRegionsForSketchId(
+              regions.regions,
+              sketchId,
+              document.revisionId,
+            ),
+          })
+        : [],
+      {
+        ...solved.solvedSnapshot,
+        diagnostics: derivedDiagnostics,
+      },
+      derivedValidity,
       projection.projectedReferences,
     );
   }
@@ -3511,147 +3595,145 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       };
     }
 
+    const structuralValidation = validateSketchDefinition(request.definition);
+    if (!structuralValidation.success) {
+      const diagnostics = structuralValidation.issues.map((issue) =>
+        createValidationDiagnostic(issue.message, {
+          kind: "sketch",
+          sketchId,
+        }),
+      );
+      const rejected = this.buildRejectedResult(
+        request.baseRevisionId,
+        diagnostics,
+        OCC_VALIDATION_ERROR_CODE,
+      );
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: this.documentId,
+        sketchId,
+        changedTargets: [],
+        ...rejected,
+      };
+    }
     const normalizedDefinition = normalizeSketchDefinitionForSketchId(
-      request.definition,
+      structuralValidation.data,
       sketchId,
     );
     const resolvedDefinition = resolveSketchDimensionValues({
       definition: normalizedDefinition,
       variables: runtimeState.authoringState.variables,
     });
-    if (!resolvedDefinition.ok) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        resolvedDefinition.diagnostics,
-        resolvedDefinition.diagnostics[0]?.code ?? "sketch-dimension-expression",
-      );
-
-      return {
-        contractVersion: CONTRACT_VERSION,
-        documentId: this.documentId,
-        sketchId,
-        changedTargets: [],
-        ...rejected,
-      };
-    }
-    const solverDefinition = resolvedDefinition.definition;
     const correlation =
       request.solverCorrelation ??
       createDefaultSolverCorrelation(sketchId, request.baseRevisionId);
     const solverAdapter = this.getSolverAdapter(request.baseRevisionId);
+    let projectedReferences: ProjectedSketchReferenceRecord[] = [];
+    let solvedSnapshot: SolvedSketchSnapshot;
+    let derivedRegions: RegionRecord[] = [];
+    let validationIsValid = false;
+    let sketchDiagnostics: SketchSolveDiagnostic[];
 
-    const projection =
-      normalizedDefinition.references.length === 0
-        ? {
-            contractVersion: CONTRACT_VERSION,
-            solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-            requestId: correlation.projectionRequestId,
-            documentId: this.documentId,
-            revisionId: request.baseRevisionId,
-            sketchId,
-            projectedReferences: [],
-            diagnostics: [],
-          }
-        : await this.projectSketchExternalReferences({
-            contractVersion: CONTRACT_VERSION,
-            solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-            requestId: correlation.projectionRequestId,
-            documentId: this.documentId,
-            revisionId: request.baseRevisionId,
-            sketchId,
-            plane: request.plane.frame,
-            tolerances: this.tolerances,
-            references: normalizedDefinition.references.map((reference) => ({
-              referenceId: reference.referenceId,
-              reference,
-            })),
-          });
-    const validation = await solverAdapter.validateSketch({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: correlation.validationRequestId,
-      documentId: this.documentId,
-      revisionId: request.baseRevisionId,
-      sketchId,
-      plane: request.plane.frame,
-      tolerances: this.tolerances,
-      definition: solverDefinition,
-      projectedReferences: projection.projectedReferences,
-    });
-    const solved = await solverAdapter.solveSketch({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: correlation.solveRequestId,
-      documentId: this.documentId,
-      revisionId: request.baseRevisionId,
-      sketchId,
-      plane: request.plane.frame,
-      tolerances: this.tolerances,
-      partialSolvePolicy: "bestEffort",
-      definition: solverDefinition,
-      projectedReferences: projection.projectedReferences,
-    });
-    const regions = await solverAdapter.deriveSketchRegions({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: correlation.regionRequestId,
-      documentId: this.documentId,
-      revisionId: request.baseRevisionId,
-      sketchId,
-      solvedSnapshot: solved.solvedSnapshot,
-      definition: solverDefinition,
-      projectedReferences: projection.projectedReferences,
-    });
-
-    const solverDiagnostics = [
-      ...projection.diagnostics.map((diagnostic) =>
-        mapSketchSolverDiagnostic(sketchId, diagnostic),
-      ),
-      ...validation.diagnostics.map((diagnostic) =>
-        mapSketchSolverDiagnostic(sketchId, diagnostic),
-      ),
-      ...solved.diagnostics.map((diagnostic) =>
-        mapSketchSolverDiagnostic(sketchId, diagnostic),
-      ),
-      ...regions.diagnostics.map((diagnostic) =>
-        mapSketchSolverDiagnostic(sketchId, diagnostic),
-      ),
-    ];
-
-    if (
-      !validation.isValid ||
-      !canPersistSketchSolveState(normalizedDefinition, solved.solvedSnapshot)
-    ) {
-      const rejected = this.buildRejectedResult(
-        request.baseRevisionId,
-        solverDiagnostics,
-        OCC_VALIDATION_ERROR_CODE,
+    if (!resolvedDefinition.ok) {
+      sketchDiagnostics = resolvedDefinition.diagnostics.map(
+        mapModelingDiagnosticToSketchDiagnostic,
       );
-
-      return {
+      solvedSnapshot = createInvalidSolvedSketchSnapshot(sketchDiagnostics);
+    } else {
+      const solverDefinition = resolvedDefinition.definition;
+      const projection =
+        normalizedDefinition.references.length === 0
+          ? { projectedReferences: [], diagnostics: [] }
+          : await this.projectSketchExternalReferences({
+              contractVersion: CONTRACT_VERSION,
+              solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+              requestId: correlation.projectionRequestId,
+              documentId: this.documentId,
+              revisionId: request.baseRevisionId,
+              sketchId,
+              plane: request.plane.frame,
+              tolerances: this.tolerances,
+              references: normalizedDefinition.references.map((reference) => ({
+                referenceId: reference.referenceId,
+                reference,
+              })),
+            });
+      projectedReferences = [...projection.projectedReferences];
+      const validation = await solverAdapter.validateSketch({
         contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: correlation.validationRequestId,
         documentId: this.documentId,
+        revisionId: request.baseRevisionId,
         sketchId,
-        changedTargets: [],
-        ...rejected,
-      };
+        plane: request.plane.frame,
+        tolerances: this.tolerances,
+        definition: solverDefinition,
+        projectedReferences,
+      });
+      const solved = await solverAdapter.solveSketch({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: correlation.solveRequestId,
+        documentId: this.documentId,
+        revisionId: request.baseRevisionId,
+        sketchId,
+        plane: request.plane.frame,
+        tolerances: this.tolerances,
+        partialSolvePolicy: "bestEffort",
+        definition: solverDefinition,
+        projectedReferences,
+      });
+      const regions = await solverAdapter.deriveSketchRegions({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: correlation.regionRequestId,
+        documentId: this.documentId,
+        revisionId: request.baseRevisionId,
+        sketchId,
+        solvedSnapshot: solved.solvedSnapshot,
+        definition: solverDefinition,
+        projectedReferences,
+      });
+      validationIsValid = validation.isValid;
+      solvedSnapshot = solved.solvedSnapshot;
+      derivedRegions = regions.regions;
+      sketchDiagnostics = mergeSketchSolveDiagnostics(
+        projection.diagnostics,
+        validation.diagnostics,
+        solved.diagnostics,
+        regions.diagnostics,
+      );
     }
 
+    const derivedValidity = createDerivedValidity({
+      solvedSnapshot,
+      diagnostics: sketchDiagnostics,
+      validationIsValid,
+    });
+    solvedSnapshot = { ...solvedSnapshot, diagnostics: derivedValidity.diagnostics };
+    const solverDiagnostics = derivedValidity.diagnostics.map((diagnostic) =>
+      mapSketchSolverDiagnostic(sketchId, diagnostic),
+    );
     const nextSequence = runtimeState.revisionSequence + 1;
     const nextRevisionId = createRevisionId(nextSequence);
-    const normalizedRegions = normalizeDerivedRegionsForSketchId(
-      regions.regions,
-      sketchId,
-      nextRevisionId,
-    );
+    const normalizedRegions =
+      derivedValidity.state === "current"
+        ? normalizeDerivedRegionsForSketchId(
+            derivedRegions,
+            sketchId,
+            nextRevisionId,
+          )
+        : [];
     const snapshotRecord = buildSketchSnapshotRecord(
       request,
       sketchId,
       nextRevisionId,
       normalizedDefinition,
       normalizedRegions,
-      solved.solvedSnapshot,
-      projection.projectedReferences,
+      solvedSnapshot,
+      derivedValidity,
+      projectedReferences,
     );
     const isNewSketch = !runtimeState.authoringState.sketches.some(
       (entry) => entry.sketchId === sketchId,

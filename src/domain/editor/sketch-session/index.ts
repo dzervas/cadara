@@ -92,6 +92,7 @@ export {
 export { buildCommitRequest, getSketchHistoryItems } from "./history";
 
 export {
+  getSketchSessionDerivedValidity,
   getSketchSessionRegionDiagnostics,
   refreshLiveRegionsAfterDebounce,
   withLiveSolvedRegions,

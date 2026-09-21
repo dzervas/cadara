@@ -129,4 +129,19 @@ test("src/contracts/modeling/runtime-schema.spec.ts", async () => {
     validateGetDocumentSnapshotResponse(invalidResponse).success,
     "Snapshot response validation should reject legacy raw authored values nested in feature definitions.",
   ).toBeFalsy();
+
+  const unknownSnapshotField = structuredClone(response) as unknown as {
+    snapshot: {
+      document: {
+        sketches: Array<{ sketch: { definition: Record<string, unknown> } }>;
+      };
+    };
+  };
+  unknownSnapshotField.snapshot.document.sketches[0]!.sketch.definition.createdGraph = {
+    pointIds: ["legacy_point"],
+  };
+  expect(
+    validateGetDocumentSnapshotResponse(unknownSnapshotField).success,
+    "Snapshot transport validation must reject unknown removed fields before normalization can strip them.",
+  ).toBe(false);
 });

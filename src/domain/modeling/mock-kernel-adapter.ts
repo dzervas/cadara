@@ -1,4 +1,14 @@
-import type { SketchDefinition, SketchRecord } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SketchRecord,
+  SketchSolveDiagnostic,
+  SolvedSketchSnapshot,
+} from "@/contracts/sketch/schema";
+import {
+  deriveSketchValidity,
+  mergeSketchSolveDiagnostics,
+} from "@/contracts/sketch/derived-validity";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import {
   SOLVER_SCHEMA_VERSION,
@@ -506,7 +516,7 @@ function getFeatureDefinitionLabel(definition: FeatureDefinition) {
   return definition.kind;
 }
 
-function getExtrudeEndTargets(
+function getExtrudeInputTargets(
   definition: Extract<FeatureDefinition, { kind: "extrude" }>,
 ) {
   const extent = getExtrudeFeatureExtent(definition.parameters);
@@ -514,7 +524,12 @@ function getExtrudeEndTargets(
     extent.mode === "twoSide"
       ? [extent.firstEnd, extent.secondEnd]
       : [extent.end];
-  return ends.flatMap((end) => ("target" in end ? [end.target] : []));
+  return [
+    ...("target" in definition.parameters.startExtent
+      ? [definition.parameters.startExtent.target]
+      : []),
+    ...ends.flatMap((end) => ("target" in end ? [end.target] : [])),
+  ];
 }
 
 function getRevolveEndTargets(
@@ -533,7 +548,7 @@ function getFeatureDefinitionChangedTargets(definition: FeatureDefinition) {
     case "extrude":
       return [
         ...definition.parameters.profiles,
-        ...getExtrudeEndTargets(definition),
+        ...getExtrudeInputTargets(definition),
       ];
     case "fillet":
       return [...definition.parameters.edgeTargets];
@@ -1192,6 +1207,26 @@ function hasSketchPointTarget(
   );
 }
 
+function findNonCurrentSketchFeatureInput(
+  definition: FeatureDefinition,
+  snapshot: WorkspaceSnapshot,
+) {
+  return getFeatureDefinitionChangedTargets(definition).find((target) => {
+    if (
+      target.kind !== "region" &&
+      target.kind !== "sketchEntity" &&
+      target.kind !== "sketchPoint"
+    ) {
+      return false;
+    }
+
+    const sketch = snapshot.document.sketches.find(
+      (entry) => entry.sketchId === target.sketchId,
+    );
+    return !sketch || sketch.sketch.derivedValidity.state !== "current";
+  });
+}
+
 const HOLE_ADVANCED_FEATURE_DESCRIPTOR = {
   featureKind: "hole",
   participants: [
@@ -1643,6 +1678,24 @@ function validateFeatureDefinitionAgainstSnapshot(
   definition: FeatureDefinition,
   snapshot: WorkspaceSnapshot,
 ) {
+  const nonCurrentSketchInput = findNonCurrentSketchFeatureInput(
+    definition,
+    snapshot,
+  );
+  if (nonCurrentSketchInput) {
+    return {
+      accepted: false as const,
+      reasonCode: `mock-invalid-${definition.kind}`,
+      diagnostics: [
+        createInvalidFeatureDiagnostic(
+          definition,
+          nonCurrentSketchInput,
+          "Features can consume sketch-derived inputs only when their owning sketch has current derived validity.",
+        ),
+      ],
+    };
+  }
+
   switch (definition.kind) {
     case "extrude": {
       const extent = getExtrudeFeatureExtent(definition.parameters);
@@ -3070,6 +3123,38 @@ function getCommitSolverCorrelation(
   return request.solverCorrelation;
 }
 
+function mapModelingDiagnosticToSketchDiagnostic(
+  diagnostic: ModelingDiagnostic,
+): SketchSolveDiagnostic {
+  return {
+    code: diagnostic.code,
+    severity: diagnostic.severity,
+    message: diagnostic.message,
+    target:
+      diagnostic.target?.kind === "sketchEntity"
+        ? { kind: "entity", entityId: diagnostic.target.entityId }
+        : diagnostic.target?.kind === "sketchPoint"
+          ? { kind: "point", pointId: diagnostic.target.pointId }
+          : diagnostic.target?.kind === "region"
+            ? { kind: "region", regionId: diagnostic.target.regionId }
+            : null,
+  };
+}
+
+function createInvalidSolvedSnapshot(
+  diagnostics: readonly SketchSolveDiagnostic[],
+): SolvedSketchSnapshot {
+  return {
+    schemaVersion: "solved-sketch/v1alpha1",
+    status: { solveState: "failed", constraintState: "inconsistent" },
+    solvedEntities: [],
+    solvedPoints: [],
+    constraintStatuses: [],
+    dimensionStatuses: [],
+    diagnostics: [...diagnostics],
+  };
+}
+
 function mapSketchSolverDiagnostic(
   sketchId: SketchId,
   diagnostic: {
@@ -3388,7 +3473,17 @@ async function buildSketchRecord(
     },
     definition: input.definition,
     solvedSnapshot: evaluation.solve.solvedSnapshot,
-    regions: evaluation.regions.regions,
+    derivedValidity: deriveSketchValidity({
+      solvedSnapshot: evaluation.solve.solvedSnapshot,
+      diagnostics: mergeSketchSolveDiagnostics(
+        evaluation.validation.diagnostics,
+        evaluation.solve.diagnostics,
+        evaluation.regions.diagnostics,
+      ),
+    }),
+    regions: evaluation.validation.isValid
+      ? evaluation.regions.regions
+      : [],
   };
 }
 
@@ -3420,7 +3515,27 @@ async function rebuildSketchesForDocumentVariables(input: {
     });
 
     if (!resolvedDefinition.ok) {
-      return { ok: false, diagnostics: resolvedDefinition.diagnostics };
+      const sketchDiagnostics = resolvedDefinition.diagnostics.map(
+        mapModelingDiagnosticToSketchDiagnostic,
+      );
+      const solvedSnapshot = createInvalidSolvedSnapshot(sketchDiagnostics);
+      diagnostics.push(...resolvedDefinition.diagnostics);
+      sketches.push({
+        ...sketch,
+        ownerRevisionId: input.nextRevisionId,
+        sketch: {
+          ...sketch.sketch,
+          ownerRevisionId: input.nextRevisionId,
+          definition,
+          solvedSnapshot,
+          derivedValidity: deriveSketchValidity({
+            solvedSnapshot,
+            diagnostics: sketchDiagnostics,
+          }),
+          regions: [],
+        },
+      });
+      continue;
     }
 
     const requestId = `request_variable_rebuild_${sketch.sketchId}` as RequestId;
@@ -3493,22 +3608,42 @@ async function rebuildSketchesForDocumentVariables(input: {
       ),
     ];
 
-    if (!validation.isValid || solved.status.solveState === "failed") {
-      return { ok: false, diagnostics: sketchDiagnostics };
-    }
-
     diagnostics.push(...sketchDiagnostics);
+    const derivedValidity = deriveSketchValidity({
+      solvedSnapshot: solved.solvedSnapshot,
+      diagnostics: mergeSketchSolveDiagnostics(
+        projection.diagnostics,
+        validation.diagnostics,
+        solved.diagnostics,
+        regions.diagnostics,
+        validation.isValid
+          ? []
+          : [{
+              code: "sketch-validation-failed",
+              severity: "error" as const,
+              message: "The authored sketch has invalid or unresolved requirements.",
+              target: null,
+            }],
+      ),
+    });
 
     const sketchRecord: SketchRecord = {
       ...sketch.sketch,
       ownerRevisionId: input.nextRevisionId,
       definition,
-      solvedSnapshot: solved.solvedSnapshot,
+      solvedSnapshot: {
+        ...solved.solvedSnapshot,
+        diagnostics: derivedValidity.diagnostics,
+      },
+      derivedValidity,
       projectedReferences: structuredClone(projection.projectedReferences),
-      regions: regions.regions.map((region) => ({
-        ...region,
-        ownerRevisionId: input.nextRevisionId,
-      })),
+      regions:
+        derivedValidity.state === "current"
+          ? regions.regions.map((region) => ({
+              ...region,
+              ownerRevisionId: input.nextRevisionId,
+            }))
+          : [],
     };
 
     sketches.push({
@@ -4897,22 +5032,34 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         definition: sketch.definition,
         variables: document.variables,
       });
-      if (!resolvedDefinition.ok) {
-        throw new Error(
-          `Mock restored sketch ${sketch.sketchId} dimensions could not be resolved: ${resolvedDefinition.diagnostics
-            .map((diagnostic) => diagnostic.message)
-            .join("; ")}`,
-        );
-      }
-
-      const evaluation = evaluateMockSketchDefinition({
-        documentId: document.documentId,
-        revisionId: document.revisionId,
-        sketchId: sketch.sketchId,
-        plane: sketch.plane.frame,
-        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-        definition: resolvedDefinition.definition,
-        requestId: `request_restore_${sketch.sketchId}_regions` as RequestId,
+      const evaluation = resolvedDefinition.ok
+        ? evaluateMockSketchDefinition({
+            documentId: document.documentId,
+            revisionId: document.revisionId,
+            sketchId: sketch.sketchId,
+            plane: sketch.plane.frame,
+            tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+            definition: resolvedDefinition.definition,
+            requestId: `request_restore_${sketch.sketchId}_regions` as RequestId,
+          })
+        : null;
+      const expressionDiagnostics = resolvedDefinition.ok
+        ? []
+        : resolvedDefinition.diagnostics.map(
+            mapModelingDiagnosticToSketchDiagnostic,
+          );
+      const solvedSnapshot = evaluation?.solve.solvedSnapshot ??
+        createInvalidSolvedSnapshot(expressionDiagnostics);
+      const derivedDiagnostics = evaluation
+        ? mergeSketchSolveDiagnostics(
+            evaluation.validation.diagnostics,
+            evaluation.solve.diagnostics,
+            evaluation.regions.diagnostics,
+          )
+        : expressionDiagnostics;
+      const derivedValidity = deriveSketchValidity({
+        solvedSnapshot,
+        diagnostics: derivedDiagnostics,
       });
       const sketchRecord: SketchRecord = {
         ownerDocumentId: document.documentId,
@@ -4924,12 +5071,21 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         label: sketch.label,
         planeSupport: sketch.plane.support,
         definition: structuredClone(sketch.definition),
-        solvedSnapshot: evaluation.solve.solvedSnapshot,
-        projectedReferences: structuredClone(evaluation.projectedReferences),
-        regions: evaluation.regions.regions.map((region) => ({
-          ...region,
-          ownerRevisionId: document.revisionId,
-        })),
+        solvedSnapshot: {
+          ...solvedSnapshot,
+          diagnostics: derivedValidity.diagnostics,
+        },
+        derivedValidity,
+        projectedReferences: structuredClone(
+          evaluation?.projectedReferences ?? [],
+        ),
+        regions:
+          derivedValidity.state === "current"
+            ? (evaluation?.regions.regions ?? []).map((region) => ({
+                ...region,
+                ownerRevisionId: document.revisionId,
+              }))
+            : [],
       };
 
       return {
@@ -5512,16 +5668,17 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       };
     }
 
-    const normalizedDefinition = normalizeSketchDefinitionForSketchId(
-      request.definition,
-      sketchId,
-    );
-    const resolvedDefinition = resolveSketchDimensionValues({
-      definition: normalizedDefinition,
-      variables: snapshot.document.variables,
-    });
-    if (!resolvedDefinition.ok) {
-      const diagnostics = resolvedDefinition.diagnostics;
+    const structuralValidation = validateSketchDefinition(request.definition);
+    if (!structuralValidation.success) {
+      const diagnostics: ModelingDiagnostic[] = structuralValidation.issues.map(
+        (issue) => ({
+          code: "mock-invalid-sketch-structure",
+          severity: "error",
+          message: issue.message,
+          target: createSketchTarget(sketchId),
+          detail: null,
+        }),
+      );
       return {
         contractVersion: CONTRACT_VERSION,
         documentId: request.documentId,
@@ -5530,7 +5687,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         revisionState: {
           kind: "rejected",
           baseRevisionId: request.baseRevisionId,
-          reasonCode: "mock-invalid-sketch",
+          reasonCode: "mock-invalid-sketch-structure",
         },
         rebuildResult: createRebuildResult({
           kind: "skipped",
@@ -5541,92 +5698,106 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         diagnostics,
       };
     }
-    const projection = await this.projectSketchExternalReferences({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: solverCorrelation.projectionRequestId,
-      documentId: request.documentId,
-      revisionId: request.baseRevisionId,
+    const normalizedDefinition = normalizeSketchDefinitionForSketchId(
+      structuralValidation.data,
       sketchId,
-      plane: referenceFrame,
-      tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-      references: normalizedDefinition.references.map((reference) => ({
-        referenceId: reference.referenceId,
-        reference,
-      })),
+    );
+    const resolvedDefinition = resolveSketchDimensionValues({
+      definition: normalizedDefinition,
+      variables: snapshot.document.variables,
     });
-    const validation = await this.solverAdapter.validateSketch({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: solverCorrelation.validationRequestId,
-      documentId: request.documentId,
-      revisionId: request.baseRevisionId,
-      sketchId,
-      plane: referenceFrame,
-      tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
-    });
-    const solved = await this.solverAdapter.solveSketch({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: solverCorrelation.solveRequestId,
-      documentId: request.documentId,
-      revisionId: request.baseRevisionId,
-      sketchId,
-      plane: referenceFrame,
-      tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-      partialSolvePolicy: "bestEffort",
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
-    });
-    const regions = await this.solverAdapter.deriveSketchRegions({
-      contractVersion: CONTRACT_VERSION,
-      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-      requestId: solverCorrelation.regionRequestId,
-      documentId: request.documentId,
-      revisionId: request.baseRevisionId,
-      sketchId,
-      solvedSnapshot: solved.solvedSnapshot,
-      definition: resolvedDefinition.definition,
-      projectedReferences: projection.projectedReferences,
-    });
+    let projectedReferences = [] as Awaited<
+      ReturnType<MockKernelAdapter["projectSketchExternalReferences"]>
+    >["projectedReferences"];
+    let solvedSnapshot: SolvedSketchSnapshot;
+    let derivedRegions = [] as Awaited<
+      ReturnType<SketchSolverAdapter["deriveSketchRegions"]>
+    >["regions"];
+    let sketchDiagnostics: SketchSolveDiagnostic[];
 
-    const commitDiagnostics = [
-      ...projection.diagnostics.map((diagnostic) =>
-        mapSketchSolverDiagnostic(sketchId, diagnostic),
-      ),
-      ...validation.diagnostics.map((diagnostic) =>
-        mapSketchSolverDiagnostic(sketchId, diagnostic),
-      ),
-      ...solved.diagnostics.map((diagnostic) =>
-        mapSketchSolverDiagnostic(sketchId, diagnostic),
-      ),
-      ...regions.diagnostics.map((diagnostic) =>
-        mapSketchSolverDiagnostic(sketchId, diagnostic),
-      ),
-    ];
-
-    if (!validation.isValid || solved.status.solveState === "failed") {
-      return {
+    if (!resolvedDefinition.ok) {
+      sketchDiagnostics = resolvedDefinition.diagnostics.map(
+        mapModelingDiagnosticToSketchDiagnostic,
+      );
+      solvedSnapshot = createInvalidSolvedSnapshot(sketchDiagnostics);
+    } else {
+      const projection = await this.projectSketchExternalReferences({
         contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: solverCorrelation.projectionRequestId,
         documentId: request.documentId,
-        revisionId: this.currentRevisionId,
+        revisionId: request.baseRevisionId,
         sketchId,
-        revisionState: {
-          kind: "rejected",
-          baseRevisionId: request.baseRevisionId,
-          reasonCode: "mock-invalid-sketch",
-        },
-        rebuildResult: createRebuildResult({
-          kind: "skipped",
-          reasonCode: "validationRejected",
-          diagnostics: commitDiagnostics,
-        }),
-        changedTargets: [],
-        diagnostics: commitDiagnostics,
-      };
+        plane: referenceFrame,
+        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+        references: normalizedDefinition.references.map((reference) => ({
+          referenceId: reference.referenceId,
+          reference,
+        })),
+      });
+      projectedReferences = projection.projectedReferences;
+      const validation = await this.solverAdapter.validateSketch({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: solverCorrelation.validationRequestId,
+        documentId: request.documentId,
+        revisionId: request.baseRevisionId,
+        sketchId,
+        plane: referenceFrame,
+        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+        definition: resolvedDefinition.definition,
+        projectedReferences,
+      });
+      const solved = await this.solverAdapter.solveSketch({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: solverCorrelation.solveRequestId,
+        documentId: request.documentId,
+        revisionId: request.baseRevisionId,
+        sketchId,
+        plane: referenceFrame,
+        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+        partialSolvePolicy: "bestEffort",
+        definition: resolvedDefinition.definition,
+        projectedReferences,
+      });
+      const regions = await this.solverAdapter.deriveSketchRegions({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: solverCorrelation.regionRequestId,
+        documentId: request.documentId,
+        revisionId: request.baseRevisionId,
+        sketchId,
+        solvedSnapshot: solved.solvedSnapshot,
+        definition: resolvedDefinition.definition,
+        projectedReferences,
+      });
+      solvedSnapshot = solved.solvedSnapshot;
+      derivedRegions = regions.regions;
+      sketchDiagnostics = mergeSketchSolveDiagnostics(
+        projection.diagnostics,
+        validation.diagnostics,
+        solved.diagnostics,
+        regions.diagnostics,
+        validation.isValid
+          ? []
+          : [{
+              code: "sketch-validation-failed",
+              severity: "error" as const,
+              message: "The authored sketch has invalid or unresolved requirements.",
+              target: null,
+            }],
+      );
     }
+
+    const derivedValidity = deriveSketchValidity({
+      solvedSnapshot,
+      diagnostics: sketchDiagnostics,
+    });
+    solvedSnapshot = { ...solvedSnapshot, diagnostics: derivedValidity.diagnostics };
+    const commitDiagnostics = derivedValidity.diagnostics.map((diagnostic) =>
+      mapSketchSolverDiagnostic(sketchId, diagnostic),
+    );
 
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
       const sketchRecord: SketchRecord = {
@@ -5639,17 +5810,21 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         label: request.sketchLabel,
         planeSupport: request.plane.support,
         definition: normalizedDefinition,
-        solvedSnapshot: solved.solvedSnapshot,
-        projectedReferences: structuredClone(projection.projectedReferences),
-        regions: regions.regions.map((region) => ({
-          ...region,
-          ownerRevisionId: nextRevisionId,
-        })),
+        solvedSnapshot,
+        derivedValidity,
+        projectedReferences: structuredClone(projectedReferences),
+        regions:
+          derivedValidity.state === "current"
+            ? derivedRegions.map((region) => ({
+                ...region,
+                ownerRevisionId: nextRevisionId,
+              }))
+            : [],
       };
 
       const changedTargets = [
         createSketchTarget(sketchId),
-        ...regions.regions.map((region) => ({ ...region.target, sketchId })),
+        ...sketchRecord.regions.map((region) => ({ ...region.target, sketchId })),
         ...normalizedDefinition.entities.map((entity) => ({
           ...entity.target,
           sketchId,

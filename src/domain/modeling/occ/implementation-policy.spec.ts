@@ -272,6 +272,7 @@ test("src/domain/modeling/occ/implementation-policy.spec.ts", async () => {
         dimensionStatuses: [],
         diagnostics: [],
       },
+      derivedValidity: { state: "current", diagnostics: [] },
       regions: [],
     };
   }

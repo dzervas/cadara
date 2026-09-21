@@ -72,8 +72,14 @@ export function isTargetHidden(
 export function composeViewportRenderables(
   input: ComposeViewportRenderablesInput,
 ): ComposedViewportRenderables {
+  const snapshotSketches = input.snapshotSketches ?? [];
   const sketchConstraintDisplayById =
-    createCommittedSketchConstraintDisplayLookup(input.snapshotSketches ?? []);
+    createCommittedSketchConstraintDisplayLookup(snapshotSketches);
+  const nonCurrentSketchIds = new Set(
+    snapshotSketches
+      .filter((sketch) => sketch.sketch.derivedValidity.state !== "current")
+      .map((sketch) => sketch.sketchId),
+  );
   const layeredRenderables = [
     ...input.snapshotRenderables.map((renderable) => ({
       origin: "document" as const,
@@ -87,10 +93,16 @@ export function composeViewportRenderables(
       origin: "preview" as const,
       renderable,
     })),
-  ].filter(
-    ({ renderable }) =>
-      !isTargetHidden(renderable.binding.target, input.hiddenTargetKeys),
-  );
+  ].filter(({ renderable }) => {
+    const target = renderable.binding.target;
+    return (
+      !isTargetHidden(target, input.hiddenTargetKeys) &&
+      !(
+        target.kind === "region" &&
+        nonCurrentSketchIds.has(target.sketchId)
+      )
+    );
+  });
 
   const mergedRenderables = mergeSketchRenderables(
     layeredRenderables,

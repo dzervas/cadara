@@ -181,6 +181,7 @@ test("src/domain/modeling/occ/topology.spec.ts", async () => {
         dimensionStatuses: [],
         diagnostics: [],
       },
+      derivedValidity: { state: "current", diagnostics: [] },
       regions: [region],
     };
 

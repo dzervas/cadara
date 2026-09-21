@@ -184,6 +184,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
               dimensionStatuses: [],
               diagnostics: [],
             },
+            derivedValidity: { state: "current", diagnostics: [] },
             regions: [],
           },
         },
@@ -236,6 +237,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
                 dimensionStatuses: [],
                 diagnostics: [],
               },
+              derivedValidity: { state: "current", diagnostics: [] },
               regions: [],
             },
           },
@@ -1444,6 +1446,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           dimensionStatuses: [],
           diagnostics: [],
         },
+        derivedValidity: { state: "current", diagnostics: [] },
         regions: [],
       },
     });
@@ -1523,6 +1526,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           dimensionStatuses: [],
           diagnostics: [],
         },
+        derivedValidity: { state: "current", diagnostics: [] },
         regions: [],
       },
     };

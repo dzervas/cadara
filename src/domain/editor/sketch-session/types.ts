@@ -44,6 +44,7 @@ import type { ActiveSketchSpecialModeSession } from "@/core/sketch-special-modes
 import type {
   DimensionAnnotationPlacement,
   RegionRecord,
+  SketchDerivedValidity,
 } from "@/contracts/sketch/schema";
 
 export type {
@@ -137,7 +138,7 @@ export interface SketchGeometryDragState {
 }
 
 export interface SketchLiveRegionState {
-  freshness: "current" | "pendingRefresh";
+  freshness: "current" | "stale";
   pendingSinceSequence: number | null;
   debounceMs: number;
 }
@@ -197,6 +198,7 @@ export interface SketchSessionState {
   drawStartSnap: SketchSnapCandidate | null;
   sequence: number;
   solvedRegions: RegionRecord[];
+  derivedValidity: SketchDerivedValidity;
   liveRegionState?: SketchLiveRegionState;
   projectedReferences: ProjectedSketchReferenceRecord[];
   projectionDiagnostics: ProjectedSketchReferenceRecord["diagnostics"];

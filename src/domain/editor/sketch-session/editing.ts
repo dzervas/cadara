@@ -1096,7 +1096,7 @@ export function applySketchGeometryDrag(
       ? deriveSolvedRegionsForSession(session, definition, edit.solvedSnapshot)
       : session.solvedRegions,
     liveRegionState: {
-      freshness: complete ? "current" : "pendingRefresh",
+      freshness: complete ? "current" : "stale",
       pendingSinceSequence: complete ? null : session.sequence,
       debounceMs: 100,
     },

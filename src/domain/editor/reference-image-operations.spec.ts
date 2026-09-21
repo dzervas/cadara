@@ -197,6 +197,7 @@ function loadCapturedReferenceImageSketchFixture() {
       planeSupport: sketch.planeTarget,
       definition: sketch.definition,
       solvedSnapshot: solved.solvedSnapshot,
+      derivedValidity: { state: "current", diagnostics: [] },
       regions: [],
     },
     solvedSketch: solved,

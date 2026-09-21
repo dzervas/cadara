@@ -131,4 +131,48 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
     rejectedLegacyLiteral.ok,
     "Persisted authored documents should reject legacy raw literals on feature authored-value fields.",
   ).toBeFalsy();
+
+  const legacyOperationGraph = structuredClone(authoredDocument) as unknown as {
+    sketches: Array<{ definition: Record<string, unknown> }>;
+  };
+  legacyOperationGraph.sketches[0]!.definition.createdGraph = {
+    pointIds: ["legacy_point"],
+  };
+  expect(
+    parseAuthoredModelDocument(legacyOperationGraph).ok,
+    "Strict file validation must reject removed operation-graph fields before normalization can strip them.",
+  ).toBe(false);
+
+  const unsupportedImagePayload = structuredClone(authoredDocument) as unknown as {
+    sketches: Array<{ definition: Record<string, unknown> }>;
+  };
+  unsupportedImagePayload.sketches[0]!.definition.authoredImageData = {
+    base64Data: "legacy",
+  };
+  expect(
+    parseAuthoredModelDocument(unsupportedImagePayload).ok,
+    "Strict file validation must reject unsupported legacy image fields before normalization.",
+  ).toBe(false);
+
+  const malformedSketch = structuredClone(authoredDocument);
+  const malformedDefinition = malformedSketch.sketches[0]!.definition;
+  const centerPointId = malformedDefinition.pointIds[0]!;
+  malformedDefinition.entityIds.push("sketch_entity_malformed_circle");
+  malformedDefinition.entities.push({
+    kind: "circle",
+    entityId: "sketch_entity_malformed_circle",
+    label: "Malformed circle",
+    target: {
+      kind: "sketchEntity",
+      sketchId: malformedSketch.sketches[0]!.sketchId,
+      entityId: "sketch_entity_malformed_circle",
+    },
+    isConstruction: false,
+    centerPointId,
+    radius: -1,
+  });
+  expect(
+    parseAuthoredModelDocument(malformedSketch).ok,
+    "Structurally malformed authored geometry must remain rejected.",
+  ).toBe(false);
 });

@@ -393,6 +393,7 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     planeSupport: plane.support,
     definition,
     solvedSnapshot: solved.solvedSnapshot,
+    derivedValidity: { state: "current", diagnostics: [] },
     regions: [],
   };
   const sketchSnapshot: SketchSnapshotRecord = {

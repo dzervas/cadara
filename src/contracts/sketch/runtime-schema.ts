@@ -80,6 +80,17 @@ export function validateSketchRecord(
       validateSolvedSketchSnapshotInvariants(result.data.solvedSnapshot),
     ),
   ];
+  if (
+    result.data.derivedValidity.state !== "current" &&
+    result.data.regions.length > 0
+  ) {
+    invariantIssues.push({
+      path: "regions",
+      expected: "no consumable regions for invalid or stale derivation",
+      value: result.data.regions,
+      message: "Invalid or stale sketch derivation cannot expose regions.",
+    });
+  }
   return invariantIssues.length === 0
     ? result
     : {

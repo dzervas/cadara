@@ -147,6 +147,7 @@ function createSketchRecord(
       dimensionStatuses: [],
       diagnostics: [],
     },
+    derivedValidity: { state: "current", diagnostics: [] },
     regions,
   };
 

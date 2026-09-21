@@ -181,6 +181,7 @@ function makeSketch(
       dimensionStatuses: [],
       diagnostics: [],
     },
+    derivedValidity: { state: "current", diagnostics: [] },
     regions: [],
   };
 

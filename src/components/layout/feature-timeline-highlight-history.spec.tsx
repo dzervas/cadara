@@ -95,6 +95,7 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
       label: sketchId,
       planeSupport: plane.support,
       definition,
+      derivedValidity: { state: "current", diagnostics: [] },
       solvedSnapshot: {
         schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
         status: {

@@ -78,8 +78,16 @@ export function createSketchSessionFromSnapshot(
   const fullDefinition = cloneDefinition(sketch.sketch.definition);
   const definition = fullDefinition;
   const planeKey = sketch.plane.key ?? null;
-  const projectedReferences =
-    buildReferenceImageAnchorProjectedReferences(definition);
+  const imageReferences = buildReferenceImageAnchorProjectedReferences(definition);
+  const imageReferenceIds = new Set(
+    imageReferences.map((reference) => reference.referenceId),
+  );
+  const projectedReferences = [
+    ...(sketch.sketch.projectedReferences ?? []).filter(
+      (reference) => !imageReferenceIds.has(reference.referenceId),
+    ),
+    ...imageReferences,
+  ];
 
   return {
     actionContextId: sketchId,
@@ -112,8 +120,11 @@ export function createSketchSessionFromSnapshot(
     drawStartSnap: null,
     sequence: getNextDefinitionSequence(sketch.sketch.definition),
     solvedRegions: [...sketch.sketch.regions],
+    derivedValidity: structuredClone(sketch.sketch.derivedValidity),
     projectedReferences,
-    projectionDiagnostics: [],
+    projectionDiagnostics: projectedReferences.flatMap(
+      (reference) => reference.diagnostics,
+    ),
     commitRequest: buildCommitRequest({
       sketchId,
       sketchLabel: sketch.label,
@@ -121,7 +132,13 @@ export function createSketchSessionFromSnapshot(
       definition,
     }),
     documentVariables: [],
-    validationMessage: null,
+    validationMessage:
+      sketch.sketch.derivedValidity.state === "current"
+        ? null
+        : (sketch.sketch.derivedValidity.diagnostics.find(
+            (diagnostic) => diagnostic.severity !== "info",
+          )?.message ??
+          "Sketch profiles are unavailable until the sketch is corrected."),
   };
 }
 
@@ -162,6 +179,7 @@ export function createNewSketchSession(
     drawStartSnap: null,
     sequence: 0,
     solvedRegions: [],
+    derivedValidity: { state: "current", diagnostics: [] },
     projectedReferences: [],
     projectionDiagnostics: [],
     commitRequest: null,

@@ -773,7 +773,9 @@ function buildSketchEntities(
     },
   ];
 
-  for (const region of sketch.sketch.regions) {
+  for (const region of sketch.sketch.derivedValidity.state === "current"
+    ? sketch.sketch.regions
+    : []) {
     records.push({
       ownerDocumentId: state.documentId,
       ownerRevisionId: state.revisionId,
@@ -1346,7 +1348,9 @@ function buildRegionRenderRecords(
   const tessellationTier = getOccTessellationTier(options.lodTierId);
 
   for (const sketch of sketches) {
-    for (const region of sketch.sketch.regions) {
+    for (const region of sketch.sketch.derivedValidity.state === "current"
+      ? sketch.sketch.regions
+      : []) {
       let profileFace: ReturnType<typeof buildRegionProfileFace> | null = null;
 
       try {

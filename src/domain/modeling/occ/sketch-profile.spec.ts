@@ -150,6 +150,7 @@ test("src/domain/modeling/occ/sketch-profile.spec.ts", async () => {
         dimensionStatuses: [],
         diagnostics: [],
       },
+      derivedValidity: { state: "current", diagnostics: [] },
       projectedReferences,
       regions: [],
     };

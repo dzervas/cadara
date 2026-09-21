@@ -326,6 +326,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
           dimensionStatuses: [],
           diagnostics: [],
         },
+        derivedValidity: { state: "current", diagnostics: [] },
         projectedReferences: [],
         regions: [],
       },
@@ -343,6 +344,40 @@ test("src/app/viewport-renderables.spec.ts", async () => {
         ?.isAffectedOverconstraint,
       "Committed sketch renderables should carry solved constraint display diagnostics from their sketch snapshot.",
     ).toBeTruthy();
+
+    const invalidSketch = structuredClone(sketchSnapshot);
+    invalidSketch.sketch.derivedValidity = {
+      state: "invalid",
+      diagnostics: [
+        {
+          code: "missing-geometry",
+          severity: "error",
+          message: "A referenced entity is missing.",
+          target: null,
+        },
+      ],
+    };
+    const invalidRegion = createCommittedRegion("sketch_a", "region_a");
+    const validRegion = createCommittedRegion("sketch_b", "region_b");
+    const gated = composeViewportRenderables({
+      snapshotRenderables: [invalidRegion, validRegion],
+      snapshotSketches: [invalidSketch],
+      previewRenderables: null,
+      sketchSession: null,
+      hiddenTargetKeys: {},
+    });
+    expect(
+      gated.documentRenderables.some(
+        ({ renderable }) => renderable.id === invalidRegion.id,
+      ),
+      "Invalid committed profiles must not remain selectable or renderable.",
+    ).toBe(false);
+    expect(
+      gated.documentRenderables.some(
+        ({ renderable }) => renderable.id === validRegion.id,
+      ),
+      "Profile gating must not hide regions owned by unrelated sketches.",
+    ).toBe(true);
   }
 
   {

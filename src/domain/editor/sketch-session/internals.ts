@@ -35,6 +35,7 @@ import {
   SKETCH_SCHEMA_VERSION,
 } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 import {
   resolveSketchDerivationDistances,
   resolveSketchDimensionValues,
@@ -94,6 +95,10 @@ export const liveRegionDiagnosticsByRegions = new WeakMap<
 export const liveRegionSolvedSnapshotByRegions = new WeakMap<
   RegionRecord[],
   SolvedSketchSnapshot
+>();
+export const liveRegionValidityByRegions = new WeakMap<
+  RegionRecord[],
+  SketchSessionState["derivedValidity"]
 >();
 
 export function createPointId(sequence: number, suffix: string): SketchPointId {
@@ -417,11 +422,18 @@ export function deriveSolvedRegionsForSession(
   });
   liveRegionDiagnosticsByRegions.set(derived.regions, derived.diagnostics);
   liveRegionSolvedSnapshotByRegions.set(derived.regions, usableSolvedSnapshot);
+  liveRegionValidityByRegions.set(
+    derived.regions,
+    deriveSketchValidity({
+      solvedSnapshot: usableSolvedSnapshot,
+      diagnostics: derived.diagnostics,
+    }),
+  );
   return derived.regions;
 }
 
 export function getSketchSessionRegionDiagnostics(session: SketchSessionState) {
-  return liveRegionDiagnosticsByRegions.get(session.solvedRegions) ?? [];
+  return getSketchSessionDerivedValidity(session).diagnostics;
 }
 
 export function getSketchSessionSolvedSnapshot(
@@ -430,12 +442,29 @@ export function getSketchSessionSolvedSnapshot(
   return liveRegionSolvedSnapshotByRegions.get(session.solvedRegions) ?? null;
 }
 
+export function getSketchSessionDerivedValidity(
+  session: SketchSessionState,
+): SketchSessionState["derivedValidity"] {
+  const validity =
+    liveRegionValidityByRegions.get(session.solvedRegions) ??
+    session.derivedValidity;
+  return session.liveRegionState?.freshness === "stale"
+    ? { state: "stale", diagnostics: validity.diagnostics }
+    : validity;
+}
+
 export function withLiveSolvedRegions(
   session: SketchSessionState,
 ): SketchSessionState {
+  const solvedRegions = deriveSolvedRegionsForSession(
+    session,
+    session.definition,
+  );
   return {
     ...session,
-    solvedRegions: deriveSolvedRegionsForSession(session, session.definition),
+    solvedRegions,
+    derivedValidity:
+      liveRegionValidityByRegions.get(solvedRegions) ?? session.derivedValidity,
     liveRegionState: {
       freshness: "current",
       pendingSinceSequence: null,
@@ -1267,6 +1296,9 @@ export function rebuildSessionForDefinition(
   input: { definition: SketchDefinition },
 ): SketchSessionState {
   const definition = cloneDefinition(input.definition);
+  const solvedRegions = deriveSolvedRegionsForSession(session, definition);
+  const derivedValidity =
+    liveRegionValidityByRegions.get(solvedRegions) ?? session.derivedValidity;
   return {
     ...session,
     definition,
@@ -1279,9 +1311,16 @@ export function rebuildSessionForDefinition(
     selectedAnnotation: null,
     activeEditTarget: null,
     activeDrag: null,
-    validationMessage: null,
+    validationMessage:
+      derivedValidity.state === "current"
+        ? null
+        : (derivedValidity.diagnostics.find(
+            (diagnostic) => diagnostic.severity !== "info",
+          )?.message ??
+          "Sketch profiles are unavailable until the sketch is corrected."),
     commitRequest: rebuildSessionCommitRequest(session, definition),
-    solvedRegions: deriveSolvedRegionsForSession(session, definition),
+    solvedRegions,
+    derivedValidity,
   };
 }
 
