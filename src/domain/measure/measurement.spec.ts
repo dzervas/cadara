@@ -317,6 +317,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
           dimensionStatuses: [],
           diagnostics: [],
         },
+        derivedValidity: { state: "current", diagnostics: [] },
         projectedReferences: [
           {
             referenceId: "reference_projected_circle",

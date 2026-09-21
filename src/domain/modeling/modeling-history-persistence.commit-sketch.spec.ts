@@ -404,6 +404,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
               dimensionStatuses: [],
               diagnostics: [],
             },
+            derivedValidity: { state: "current", diagnostics: [] },
             regions: [],
           },
         };
@@ -571,6 +572,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
             planeSupport: request.plane.support,
             definition: normalizedDefinition,
             solvedSnapshot,
+            derivedValidity: { state: "current", diagnostics: [] },
             regions,
           },
         };

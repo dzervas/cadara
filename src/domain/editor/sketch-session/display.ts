@@ -50,6 +50,7 @@ import {
   getReferenceImageOperationOverrides,
   getSketchSessionDisplayDefinition,
   getSketchSessionDisplayProjectedReferences,
+  getSketchSessionDerivedValidity,
   getSketchSessionSolvedSnapshot,
   mapDefinitionEntityToDraftEntity,
   resolveSketchDefinitionForSolve,
@@ -167,6 +168,7 @@ export function getStableSketchSessionDisplayRenderables(
       (point) => [point.pointId, point.solvedPosition] as const,
     ),
   );
+  const derivedValidity = getSketchSessionDerivedValidity(session);
   const regionRenderables = session.solvedRegions.flatMap((region, index) => {
     const renderable = createDisplayRenderableForRegion(
       session,
@@ -174,6 +176,7 @@ export function getStableSketchSessionDisplayRenderables(
       region,
       index,
       regionStyleLookup.get(region.regionId),
+      derivedValidity.state,
     );
     return renderable
       ? [withSketchConstraintDisplay(renderable, constraintDisplaySummary)]
@@ -494,6 +497,7 @@ export function createDisplayRenderableForRegion(
   region: RegionRecord,
   index: number,
   style: SketchEntityDisplayStyle | undefined,
+  validity: SketchSessionState["derivedValidity"]["state"] = "current",
 ): SketchSessionDisplayRenderable | null {
   const triangulated = triangulateSketchRegionLoops(definition, region);
   if (!triangulated) {
@@ -502,8 +506,8 @@ export function createDisplayRenderableForRegion(
 
   return {
     id: `renderable_sketch_region_${region.regionId}_${index}` as RenderableId,
-    label: region.label,
-    target: region.target,
+    label: validity === "stale" ? `${region.label} (stale)` : region.label,
+    target: validity === "current" ? region.target : null,
     geometry: {
       kind: "mesh",
       vertexPositions: triangulated.points.map((point) =>

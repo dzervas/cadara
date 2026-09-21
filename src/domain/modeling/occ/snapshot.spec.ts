@@ -114,6 +114,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         dimensionStatuses: [],
         diagnostics: [],
       },
+      derivedValidity: { state: "current", diagnostics: [] },
       regions,
     };
 

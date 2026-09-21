@@ -130,6 +130,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       planeSupport: plane.support,
       definition,
       solvedSnapshot: solved.solvedSnapshot,
+      derivedValidity: { state: "current", diagnostics: [] },
       regions: [],
     },
   } satisfies SketchSnapshotRecord);
@@ -247,6 +248,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       planeSupport: plane.support,
       definition: localDefinition,
       solvedSnapshot: localSolved.solvedSnapshot,
+      derivedValidity: { state: "current", diagnostics: [] },
       regions: [],
     },
   } satisfies SketchSnapshotRecord);
@@ -364,6 +366,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         planeSupport: plane.support,
         definition: regionDefinition,
         solvedSnapshot: regionSolved.solvedSnapshot,
+        derivedValidity: { state: "current", diagnostics: [] },
         regions: [
           {
             ownerDocumentId: "doc_workspace",
@@ -474,6 +477,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       planeSupport: plane.support,
       definition: disabledStrokeDefinition,
       solvedSnapshot: disabledStrokeSolved.solvedSnapshot,
+      derivedValidity: { state: "current", diagnostics: [] },
       regions: [],
     },
   } satisfies SketchSnapshotRecord);
@@ -530,6 +534,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       planeSupport: plane.support,
       definition: pointStyledDefinition,
       solvedSnapshot: pointStyledSolved.solvedSnapshot,
+      derivedValidity: { state: "current", diagnostics: [] },
       regions: [],
     },
   } satisfies SketchSnapshotRecord);

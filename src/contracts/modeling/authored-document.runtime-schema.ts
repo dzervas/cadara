@@ -11,6 +11,7 @@ import type {
 } from "@/contracts/modeling/authored-document";
 import { validateContract } from "@/contracts/shared/validation";
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
+import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 
 const authoredModelDocumentValidator =
   typia.createValidateEquals<AuthoredModelDocument>();
@@ -202,6 +203,15 @@ function validateAuthoredModelDocumentInvariants(
   );
   const seenHistoryTargets = new Set<string>();
   for (const sketch of document.sketches) {
+    const definitionValidation = validateSketchDefinition(sketch.definition);
+    if (!definitionValidation.success) {
+      return createDiagnostic(
+        "invalid-authored-document",
+        definitionValidation.issues[0]?.message ??
+          "Authored sketch definition is invalid.",
+      );
+    }
+
     const slotRegionIds = new Set<string>();
     const slotWitnesses = new Set<string>();
     for (const slot of sketch.regionSlots ?? []) {

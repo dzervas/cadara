@@ -112,6 +112,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         planeSupport: plane.support,
         definition,
         solvedSnapshot: solved.solvedSnapshot,
+        derivedValidity: { state: "current", diagnostics: [] },
         regions: [],
       },
     } satisfies SketchSnapshotRecord);
@@ -184,6 +185,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
         planeSupport: plane.support,
         definition: createDefinition(),
         solvedSnapshot: solved.solvedSnapshot,
+        derivedValidity: { state: "current", diagnostics: [] },
         regions: [],
       },
     } satisfies SketchSnapshotRecord);

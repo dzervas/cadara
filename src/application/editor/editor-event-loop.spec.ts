@@ -11,6 +11,14 @@ import { createSketchSpecialModeHandleRef } from "@/core/sketch-special-modes/pr
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import {
+  getSketchSessionDerivedValidity,
+  getSketchSessionPreviewLabel,
+  withLiveSolvedRegions,
+} from "@/domain/editor/sketch-session";
+import {
+  isSketchProfileOutputCurrent,
+} from "@/contracts/sketch/derived-validity";
 import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";
@@ -498,6 +506,154 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
   loop.dispatch({ type: "tool.activated", toolId: "finishSketch" });
   await waitForCondition(() => committedPoint !== null);
   expect(committedPoint).toEqual(originalPoint);
+  loop.stop();
+});
+
+test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and profile capability", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const sketch = snapshot.document.sketches[0]!;
+  snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+  const operation = createReferenceImageOperation({
+    sequence: 2,
+    sketchId: sketch.sketchId,
+    payload: {
+      mediaType: "image/png",
+      pixelWidth: 4,
+      pixelHeight: 2,
+      base64Data: "cG5n",
+    },
+  });
+  sketch.sketch.definition.referenceImages = [operation];
+
+  const conflictIds = [
+    "constraint_event_conflict_a",
+    "constraint_event_conflict_b",
+  ];
+  const mode = {
+    id: "test-invalid-action-history",
+    label: "Test invalid action history",
+    enter: () => ({ state: null }),
+    handleDragStart: ({ handle }) => ({ activeDragHandle: handle }),
+    handleDragEnd: ({ sketchSession }) => {
+      const definition = structuredClone(sketchSession.definition);
+      definition.constraintIds = definition.constraintIds.filter(
+        (id) => !conflictIds.includes(id),
+      );
+      definition.constraints = definition.constraints.filter(
+        (constraint) => !conflictIds.includes(constraint.constraintId),
+      );
+      if (!sketchSession.definition.constraintIds.includes(conflictIds[0]!)) {
+        const pointId = definition.points[0]!.pointId;
+        definition.constraintIds.push(...conflictIds);
+        definition.constraints.push(
+          {
+            constraintId: conflictIds[0]!,
+            kind: "fixPoint",
+            label: "Conflicting event-loop point A",
+            pointId,
+            position: [0, 0],
+          },
+          {
+            constraintId: conflictIds[1]!,
+            kind: "fixPoint",
+            label: "Conflicting event-loop point B",
+            pointId,
+            position: [100, 0],
+          },
+        );
+      }
+      return {
+        session: withLiveSolvedRegions({ ...sketchSession, definition }),
+        activeDragHandle: null,
+      };
+    },
+    cancel: () => ({ exit: true }),
+  } satisfies SketchSpecialModeDefinition<null>;
+  const loop = createEditorEventLoop(
+    createRuntime(snapshot),
+    createTestErrorReporter(),
+    undefined,
+    {
+      ...defaultEditorExtensionDependencies,
+      sketchSpecialModes: createSketchSpecialModeRegistry([mode]),
+    },
+  );
+  loop.start();
+  await waitForState(loop, (state) => state.document.revisionId !== null);
+  loop.dispatch({
+    type: "authoring.reopenRequested",
+    target: { kind: "sketch", sketchId: sketch.sketchId },
+    toolId: "sketch",
+  });
+  await waitForState(loop, (state) => state.kind === "editingSketch");
+  const handle = createSketchSpecialModeHandleRef(
+    operation.operationId,
+    "invalid-history-handle",
+  );
+  const currentSession = () => {
+    const state = loop.getState();
+    if (state.kind !== "editingSketch") throw new Error("Expected sketch state.");
+    return state.session;
+  };
+  const applyDefinitionAction = (x: number) => {
+    loop.dispatch({
+      type: "sketch.specialModeEntered",
+      modeId: mode.id,
+      operationId: operation.operationId,
+    });
+    loop.dispatch({
+      type: "sketch.specialModeDragStarted",
+      handle,
+      point: [x, 0, 0],
+    });
+    loop.dispatch({
+      type: "sketch.specialModeDragEnded",
+      handle,
+      point: [x, 0, 0],
+    });
+    loop.dispatch({
+      type: "command.cancelled",
+      commandSessionId: (
+        loop.getState() as Extract<EditorState, { kind: "editingSketch" }>
+      ).command.commandSessionId,
+    });
+  };
+
+  applyDefinitionAction(1);
+  const invalidValidity = getSketchSessionDerivedValidity(currentSession());
+  expect(invalidValidity.state).toBe("invalid");
+  expect(
+    invalidValidity.diagnostics.some(
+      (diagnostic) => diagnostic.code === "solver-residual-too-large",
+    ),
+  ).toBe(true);
+  expect(isSketchProfileOutputCurrent(invalidValidity)).toBe(false);
+  const invalidFeedback = getSketchSessionPreviewLabel(currentSession());
+  expect(invalidFeedback).toMatch(/residual/i);
+
+  applyDefinitionAction(2);
+  expect(getSketchSessionDerivedValidity(currentSession()).state).toBe(
+    "current",
+  );
+  expect(
+    isSketchProfileOutputCurrent(
+      getSketchSessionDerivedValidity(currentSession()),
+    ),
+  ).toBe(true);
+
+  loop.dispatch({ type: "history.undoRequested" });
+  const undoneValidity = getSketchSessionDerivedValidity(currentSession());
+  expect(currentSession().derivedValidity).toEqual(invalidValidity);
+  expect(undoneValidity).toEqual(invalidValidity);
+  expect(getSketchSessionPreviewLabel(currentSession())).toBe(invalidFeedback);
+  expect(isSketchProfileOutputCurrent(undoneValidity)).toBe(false);
+
+  loop.dispatch({ type: "history.redoRequested" });
+  const redoneValidity = getSketchSessionDerivedValidity(currentSession());
+  expect(currentSession().derivedValidity.state).toBe("current");
+  expect(redoneValidity.state).toBe("current");
+  expect(isSketchProfileOutputCurrent(redoneValidity)).toBe(true);
   loop.stop();
 });
 

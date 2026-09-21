@@ -136,6 +136,7 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
         planeSupport: plane.support,
         definition,
         solvedSnapshot: solved.solvedSnapshot,
+        derivedValidity: { state: "current", diagnostics: [] },
         regions: [],
       },
     } satisfies SketchSnapshotRecord);

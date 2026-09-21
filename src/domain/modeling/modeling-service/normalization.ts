@@ -76,6 +76,7 @@ import type {
   SketchReferenceDefinition,
   SketchSolveDiagnostic,
   SketchDefinition,
+  SketchDerivedValidity,
   SketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPointDefinition,
@@ -2054,10 +2055,30 @@ export function normalizeSketchRecord(value: unknown): SketchRecord {
     planeSupport: assertSketchPlaneSupportRef(value.planeSupport),
     definition: normalizeSketchDefinition(value.definition),
     solvedSnapshot: normalizeSolvedSketchSnapshot(value.solvedSnapshot),
+    derivedValidity: normalizeSketchDerivedValidity(value.derivedValidity),
     projectedReferences: normalizeProjectedSketchReferences(
       value.projectedReferences ?? [],
     ),
     regions: normalizeRegionRecords(value.regions),
+  };
+}
+
+export function normalizeSketchDerivedValidity(
+  value: unknown,
+): SketchDerivedValidity {
+  if (
+    !isRecord(value) ||
+    (value.state !== "current" &&
+      value.state !== "invalid" &&
+      value.state !== "stale") ||
+    !Array.isArray(value.diagnostics)
+  ) {
+    throw new Error("Invalid sketch derived validity payload.");
+  }
+
+  return {
+    state: value.state,
+    diagnostics: value.diagnostics.map(normalizeSketchSolveDiagnostic),
   };
 }
 

@@ -21,8 +21,12 @@ import type {
   ConstructionId,
   FeatureId,
   ObjectTreeNodeId,
+  RegionId,
 } from "@/contracts/shared/ids";
-import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type {
+  FeatureDefinition,
+  WorkspaceSnapshot,
+} from "@/contracts/modeling/schema";
 import {
   combineAdvancedFeatureExample,
   deleteSolidAdvancedFeatureExample,
@@ -3870,6 +3874,253 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
     ).toBe("rejected");
   }
 
+  async function testFeaturesRequireCurrentSketchDerivedInputs() {
+    const sketchEntityTarget = {
+      kind: "sketchEntity" as const,
+      sketchId: "sketch_primary" as const,
+      entityId: "sketch_entity_1_rect-bottom" as const,
+    };
+    const sketchPointTarget = {
+      kind: "sketchPoint" as const,
+      sketchId: "sketch_primary" as const,
+      pointId: "sketch_point_1_rect-bottom-left" as const,
+    };
+
+    const makeDefinitions = (
+      regionId: RegionId,
+    ): readonly FeatureDefinition[] => [
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "surface",
+          profiles: [sketchEntityTarget],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 4 },
+          },
+        },
+      },
+      {
+        kind: "sweep",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          operationIntent: "create",
+          participants: [
+            {
+              role: "profile",
+              targets: [
+                { kind: "region", sketchId: "sketch_primary", regionId },
+              ],
+            },
+            { role: "path", targets: [sketchEntityTarget] },
+          ],
+        },
+      },
+      {
+        ...holeAdvancedFeatureExample,
+        parameters: {
+          participants: [
+            { role: "location", targets: [sketchPointTarget] },
+            {
+              role: "body",
+              targets: [{ kind: "body", bodyId: "body_part-1" }],
+            },
+          ],
+          options: {
+            style: "simple",
+            mainDiameter: 1,
+            direction: "forward",
+            termination: "throughAll",
+          },
+        },
+      },
+      {
+        kind: "linearPattern",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "body",
+              targets: [{ kind: "body", bodyId: "body_part-1" }],
+            },
+            { role: "direction", targets: [sketchEntityTarget] },
+          ],
+          options: {
+            instanceCount: 2,
+            spacing: 10,
+            centered: false,
+            oppositeDirection: false,
+          },
+        },
+      },
+      {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "solid",
+          profiles: [
+            { kind: "face", bodyId: "body_part-1", faceId: "face_top" },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: {
+              kind: "upToVertex",
+              direction: "positive",
+              target: sketchPointTarget,
+            },
+          },
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
+        },
+      },
+    ];
+
+    for (const validityState of ["invalid", "stale"] as const) {
+      for (const index of makeDefinitions(
+        "region_placeholder" as RegionId,
+      ).keys()) {
+        const adapter = new MockKernelAdapter();
+        const mutableSnapshot = await (
+          adapter as unknown as { getSnapshot(): Promise<WorkspaceSnapshot> }
+        ).getSnapshot();
+        const primarySketch = mutableSnapshot.document.sketches.find(
+          (entry) => entry.sketchId === "sketch_primary",
+        );
+        expect(primarySketch).toBeTruthy();
+        const regionId = primarySketch.sketch.regions[0]?.regionId;
+        expect(
+          regionId,
+          "The invalid/stale matrix must retain cached region data while feature consumption is blocked.",
+        ).toBeTruthy();
+        const definition = makeDefinitions(regionId)[index]!;
+        primarySketch.sketch.derivedValidity = {
+          state: validityState,
+          diagnostics: primarySketch.sketch.derivedValidity.diagnostics,
+        };
+
+        const preview = await adapter.evaluatePreview({
+          contractVersion: "modeling-contract/v1alpha1",
+          documentId: "doc_workspace",
+          baseRevisionId: mutableSnapshot.document.revisionId,
+          previewId: `preview_${validityState}_${index}`,
+          definition,
+        });
+        const create = await adapter.createFeature({
+          contractVersion: "modeling-contract/v1alpha1",
+          documentId: "doc_workspace",
+          baseRevisionId: mutableSnapshot.document.revisionId,
+          definition,
+        });
+
+        expect(
+          preview.render.records,
+          `${definition.kind} preview must not consume ${validityState} sketch-derived inputs.`,
+        ).toHaveLength(0);
+        expect(
+          preview.diagnostics.length,
+          `${definition.kind} preview must diagnose ${validityState} sketch-derived inputs.`,
+        ).toBeGreaterThan(0);
+        expect(
+          create.revisionState.kind,
+          `${definition.kind} commit must reject ${validityState} sketch-derived inputs.`,
+        ).toBe("rejected");
+
+        const entityResolution = await adapter.resolveReference({
+          contractVersion: "modeling-contract/v1alpha1",
+          documentId: "doc_workspace",
+          target: sketchEntityTarget,
+        });
+        const pointResolution = await adapter.resolveReference({
+          contractVersion: "modeling-contract/v1alpha1",
+          documentId: "doc_workspace",
+          target: sketchPointTarget,
+        });
+        expect(
+          entityResolution.resolution.invalidation,
+          "Invalid or stale authored entities must remain available to generic resolution/editing.",
+        ).toBeNull();
+        expect(
+          pointResolution.resolution.invalidation,
+          "Invalid or stale authored points must remain available to generic resolution/editing.",
+        ).toBeNull();
+      }
+    }
+
+    const peerAdapter = new MockKernelAdapter();
+    const peerSnapshot = await (
+      peerAdapter as unknown as { getSnapshot(): Promise<WorkspaceSnapshot> }
+    ).getSnapshot();
+    const primarySketch = peerSnapshot.document.sketches.find(
+      (entry) => entry.sketchId === "sketch_primary",
+    );
+    expect(primarySketch).toBeTruthy();
+    primarySketch.sketch.derivedValidity = {
+      state: "invalid",
+      diagnostics: primarySketch.sketch.derivedValidity.diagnostics,
+    };
+    peerSnapshot.document.sketches.push({
+      ...structuredClone(primarySketch),
+      sketchId: "sketch_peer",
+      sketch: {
+        ...structuredClone(primarySketch.sketch),
+        derivedValidity: { state: "current", diagnostics: [] },
+      },
+    });
+    const peerFeature = await peerAdapter.createFeature({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: peerSnapshot.document.revisionId,
+      definition: {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          resultBodyType: "surface",
+          profiles: [
+            {
+              ...sketchEntityTarget,
+              sketchId: "sketch_peer",
+            },
+          ],
+          startExtent: { kind: "profilePlane" },
+          extent: {
+            mode: "oneSide",
+            end: { kind: "blind", direction: "positive", distance: 4 },
+          },
+        },
+      },
+    });
+    expect(
+      peerFeature.revisionState.kind,
+      "An invalid sketch must not prevent features from consuming an independent current peer.",
+    ).toBe("accepted");
+
+    for (const index of makeDefinitions(
+      "region_placeholder" as RegionId,
+    ).keys()) {
+      const adapter = new MockKernelAdapter();
+      const snapshot = await adapter.getDocumentSnapshot({
+        contractVersion: "modeling-contract/v1alpha1",
+        documentId: "doc_workspace",
+      });
+      const regionId = getPrimaryRegionTarget(snapshot.snapshot).regionId;
+      const definition = makeDefinitions(regionId)[index]!;
+      const current = await adapter.createFeature({
+        contractVersion: "modeling-contract/v1alpha1",
+        documentId: "doc_workspace",
+        baseRevisionId: snapshot.snapshot.document.revisionId,
+        definition,
+      });
+      expect(
+        current.revisionState.kind,
+        `${definition.kind} must continue accepting current sketch-derived inputs (${index}).`,
+      ).toBe("accepted");
+    }
+  }
+
+  await testFeaturesRequireCurrentSketchDerivedInputs();
   await testExtrudePreviewDependsOnDefinition();
   await testProfileCollectionContractBoundaryRejectsInvalidPayloads();
   await testCoplanarPlaneCreationIsAcceptedByMock();

@@ -1385,6 +1385,16 @@ export interface RegionRecord extends OwnershipRecord {
 }
 
 /**
+ * Explicit relationship between the current authored definition and its
+ * recomputed solve/profile output. Stale output may be displayed for context,
+ * but only current output is consumable.
+ */
+export interface SketchDerivedValidity {
+  state: "current" | "invalid" | "stale";
+  diagnostics: SketchSolveDiagnostic[];
+}
+
+/**
  * Durable authored sketch snapshot payload shared by document snapshots.
  * Authored graph, solved graph, and derived regions are separated explicitly.
  */
@@ -1399,6 +1409,8 @@ export interface SketchRecord extends OwnershipRecord {
   definition: SketchDefinition;
   /** Solver-owned solved state corresponding to `definition` at the current revision. */
   solvedSnapshot: SolvedSketchSnapshot;
+  /** Explicit validity of all derived output for this exact authored definition. */
+  derivedValidity: SketchDerivedValidity;
   /** Solver-owned live projection data for the current revision; never authored sketch geometry. */
   projectedReferences?: import("@/contracts/solver/schema").ProjectedSketchReferenceRecord[];
   /** Derived regions owned by the solver/kernel layer for the current solved sketch state. */

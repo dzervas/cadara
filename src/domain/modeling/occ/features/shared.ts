@@ -8,6 +8,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { RegionRecord } from "@/contracts/sketch/schema";
+import { getConsumableSketchRegions } from "@/contracts/sketch/derived-validity";
 import type {
   BodyId,
   ConstructionId,
@@ -110,6 +111,11 @@ export function requireSketchSnapshot(
       `Sketch ${sketchId} does not resolve in the current OCC authoring state.`,
     );
   }
+  if (sketch.sketch.derivedValidity.state !== "current") {
+    throw new Error(
+      `Sketch ${sketchId} derived geometry is ${sketch.sketch.derivedValidity.state} and cannot be consumed by a feature.`,
+    );
+  }
 
   return sketch;
 }
@@ -179,7 +185,10 @@ export function requireRegion(
   sketch: SketchSnapshotRecord,
   regionId: RegionRecord["regionId"],
 ) {
-  const region = resolveCompatibleRegion(sketch.sketch.regions, regionId);
+  const region = resolveCompatibleRegion(
+    getConsumableSketchRegions(sketch.sketch),
+    regionId,
+  );
   if (region) {
     return region;
   }

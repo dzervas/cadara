@@ -176,6 +176,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
         dimensionStatuses: [],
         diagnostics: [],
       },
+      derivedValidity: { state: "current", diagnostics: [] },
       regions,
     };
 
@@ -803,6 +804,69 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       (entity) => entity.label === "top",
     )!;
     const context = await createContext({ sketches: [sketch] })();
+    const staleSketch = {
+      ...sketch,
+      sketch: {
+        ...sketch.sketch,
+        derivedValidity: {
+          state: "stale" as const,
+          diagnostics: sketch.sketch.derivedValidity.diagnostics,
+        },
+      },
+    };
+    const staleContext = { ...context, sketches: [staleSketch] };
+    expect(() =>
+      executeOccFeature(
+        staleContext,
+        "feature_stale_surface_extrude_rejected" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "surface",
+            profiles: [
+              {
+                kind: "sketchEntity",
+                sketchId: staleSketch.sketchId,
+                entityId: bottom.entityId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 2 },
+            },
+          },
+        },
+      ),
+    ).toThrow(/derived geometry is stale/);
+    expect(() =>
+      executeOccFeature(
+        staleContext,
+        "feature_stale_solid_extrude_rejected" as FeatureId,
+        {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "solid",
+            profiles: [
+              {
+                kind: "region",
+                sketchId: staleSketch.sketchId,
+                regionId: region.regionId,
+              },
+            ],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: { kind: "blind", direction: "positive", distance: 2 },
+            },
+            operation: "newBody",
+            booleanScope: { kind: "standalone" },
+          },
+        },
+      ),
+    ).toThrow(/derived geometry is stale/);
 
     const extrude = executeOccFeature(
       context,

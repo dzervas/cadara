@@ -14,6 +14,7 @@ import {
   deriveSketchDisplayEntities,
   finishSketchGeometryDrag,
   getConnectedSketchEntitySelectionTargets,
+  getSketchSessionDerivedValidity,
   getSketchSessionRegionDiagnostics,
   getSketchSessionDisplayRenderables,
   getStableSketchSessionDisplayKey,
@@ -516,6 +517,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         planeSupport: plane.support,
         definition,
         solvedSnapshot: solved.solvedSnapshot,
+        derivedValidity: { state: "current", diagnostics: [] },
         regions: [],
       },
     } satisfies SketchSnapshotRecord);
@@ -1149,7 +1151,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     expect(
       session.liveRegionState?.freshness,
       "Accepted drag movement should defer live region extraction until the debounce interval settles.",
-    ).toBe("pendingRefresh");
+    ).toBe("stale");
+    expect(
+      getSketchSessionDerivedValidity(session).state,
+      "Deferred profile output must be explicitly stale.",
+    ).toBe("stale");
     session = refreshLiveRegionsAfterDebounce(session, 100);
     expect(
       getSketchSessionRegionDiagnostics(session).some(
@@ -1188,7 +1194,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         expect(
           session.liveRegionState?.freshness,
           "Moving drag frames should defer live region extraction.",
-        ).toBe("pendingRefresh");
+        ).toBe("stale");
+        expect(
+          getSketchSessionDisplayRenderables(session)
+            .filter((renderable) => renderable.semanticClass === "region")
+            .every((renderable) => renderable.target === null),
+          "Stale profile display must not expose selectable region targets.",
+        ).toBeTruthy();
       }
     }
     const elapsed = performance.now() - startedAt;
@@ -3119,6 +3131,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
         planeSupport: sketch.plane.support,
         definition: sketch.definition,
         solvedSnapshot: solved.solvedSnapshot,
+        derivedValidity: { state: "current", diagnostics: [] },
         regions: [],
       },
     } satisfies SketchSnapshotRecord);
