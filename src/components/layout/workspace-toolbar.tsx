@@ -409,7 +409,7 @@ export function WorkspaceToolbar({
     </ToolbarPill>
   );
 
-  return (
+  const toolbar = (
     <div
       className="absolute left-4 right-4 top-3 z-30 grid gap-x-2 gap-y-2 text-[var(--workbench-shell-text)]"
       style={{
@@ -683,6 +683,8 @@ export function WorkspaceToolbar({
       ) : null}
     </div>
   );
+
+  return <Tooltip.Group openDelay={100}>{toolbar}</Tooltip.Group>;
 }
 
 const pillCommonStyle: CSSProperties = {
