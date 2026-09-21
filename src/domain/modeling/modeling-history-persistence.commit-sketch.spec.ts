@@ -1,13 +1,11 @@
 import { test, expect } from "vitest";
 import {
   createCreateFeatureHistoryEntry,
-  createDeleteTargetHistoryEntry,
   createEmptyOperationHistory,
 } from "@/contracts/modeling/operation-history";
 import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import type {
   CommitSketchRequest,
-  CreateFeatureRequest,
   WorkspaceSnapshot,
   FeatureSnapshotRecord,
   SketchSnapshotRecord,
@@ -469,6 +467,8 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
   function createStrictReplayAdapter(): ModelingKernelAdapter {
     let currentSnapshot = createWorkspaceSnapshot("rev_0001");
     let revisionCounter = 1;
+    let allocationCounter = 0;
+    const issuedSketchIds = new Set<string>();
 
     function nextRevisionId() {
       revisionCounter += 1;
@@ -476,23 +476,15 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     }
 
     function allocateSketchId() {
-      if (
-        !currentSnapshot.document.sketches.some(
-          (entry) => entry.sketchId === "sketch_primary",
-        )
-      ) {
-        return "sketch_primary" as const;
-      }
-
-      let maxOrdinal = 1;
-      for (const sketch of currentSnapshot.document.sketches) {
-        const match = /^sketch_(\d+)$/.exec(sketch.sketchId);
-        if (match) {
-          maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10));
-        }
-      }
-
-      return `sketch_${maxOrdinal + 1}` as const;
+      let sketchId: `sketch_${string}`;
+      do {
+        allocationCounter += 1;
+        sketchId = `sketch_00000000-0000-4000-8000-${String(
+          allocationCounter,
+        ).padStart(12, "0")}`;
+      } while (issuedSketchIds.has(sketchId));
+      issuedSketchIds.add(sketchId);
+      return sketchId;
     }
 
     return {
@@ -503,20 +495,27 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
         };
       },
       async commitSketch(request) {
-        if (
+        const existingSketch = currentSnapshot.document.sketches.find(
+          (entry) => entry.sketchId === request.sketchId,
+        );
+        const invalidRestore =
+          request.restoreRecordedSketchId === true &&
+          (request.sketchId === null || existingSketch !== undefined);
+        const missingOrdinaryEdit =
+          request.restoreRecordedSketchId !== true &&
           request.sketchId !== null &&
-          !currentSnapshot.document.sketches.some(
-            (entry) => entry.sketchId === request.sketchId,
-          )
-        ) {
+          existingSketch === undefined;
+        if (invalidRestore || missingOrdinaryEdit) {
           return {
             contractVersion: CONTRACT_VERSION,
             documentId: "doc_workspace",
             revisionId: currentSnapshot.document.revisionId,
-            sketchId: request.sketchId,
+            sketchId: request.sketchId ?? "sketch_invalid_restore",
             revisionState: {
               kind: "rejected" as const,
-              reasonCode: "occ-missing-sketch",
+              reasonCode: invalidRestore
+                ? "occ-sketch-id-collision"
+                : "occ-missing-sketch",
             },
             rebuildResult: {
               kind: "skipped" as const,
@@ -531,10 +530,27 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
 
         const revisionId = nextRevisionId();
         const sketchId = request.sketchId ?? allocateSketchId();
+        issuedSketchIds.add(sketchId);
         const normalizedDefinition = normalizeDefinitionForSketchId(
           request.definition,
           sketchId,
         );
+        const solvedSnapshot = solveSketchDefinitionCore({
+          definition: normalizedDefinition,
+          tolerances: {
+            coincidence: 1e-6,
+            angleRadians: 1e-6,
+            minimumSegmentLength: 1e-6,
+          },
+          partialSolvePolicy: "failOnConflict",
+        }).solvedSnapshot;
+        const regions = deriveSketchRegionsCore({
+          documentId: "doc_workspace",
+          revisionId,
+          sketchId,
+          definition: normalizedDefinition,
+          solvedSnapshot,
+        }).regions;
         const sketch: SketchSnapshotRecord = {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: revisionId,
@@ -554,25 +570,19 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
             label: request.sketchLabel,
             planeSupport: request.plane.support,
             definition: normalizedDefinition,
-            solvedSnapshot: {
-              schemaVersion: SOLVED_SKETCH_SCHEMA_VERSION,
-              status: {
-                solveState: "solved",
-                constraintState: "wellConstrained",
-              },
-              solvedEntities: [],
-              solvedPoints: [],
-              constraintStatuses: [],
-              dimensionStatuses: [],
-              diagnostics: [],
-            },
-            regions: [],
+            solvedSnapshot,
+            regions,
           },
         };
-        currentSnapshot = createWorkspaceSnapshot(revisionId, [
-          ...currentSnapshot.document.sketches,
-          sketch,
-        ]);
+        currentSnapshot = createWorkspaceSnapshot(
+          revisionId,
+          existingSketch
+            ? currentSnapshot.document.sketches.map((entry) =>
+                entry.sketchId === sketchId ? sketch : entry,
+              )
+            : [...currentSnapshot.document.sketches, sketch],
+          currentSnapshot.document.features,
+        );
 
         return {
           contractVersion: CONTRACT_VERSION,
@@ -783,6 +793,11 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     ).toBeTruthy();
     expect(
       persistedEntry?.kind === "commitSketch" &&
+        !("restoreRecordedSketchId" in persistedEntry.payload),
+      "Replay-only restoration intent must not be persisted in operation history.",
+    ).toBeTruthy();
+    expect(
+      persistedEntry?.kind === "commitSketch" &&
         persistedEntry.payload.definition.points.every(
           (point) => point.target.sketchId === result.sketchId,
         ),
@@ -845,83 +860,72 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     ).toBeTruthy();
   }
 
-  async function testExplicitAllocatorCompatibleSketchIdsReplayDuringRestore() {
-    const draftDefinition = createDraftSketchDefinition("sketch_primary");
-    const sketchRequest = {
-      contractVersion: "modeling-contract/v1alpha1",
-      documentId: "doc_workspace",
-      baseRevisionId: "rev_0001",
-      solverCorrelation: {
-        requestId: "request_commit_restore",
-        projectionRequestId: "request_commit_restore:project",
-        validationRequestId: "request_commit_restore:validate",
-        solveRequestId: "request_commit_restore:solve",
-        regionRequestId: "request_commit_restore:regions",
-      },
-      sketchId: "sketch_primary",
-      sketchLabel: "Replay Sketch",
-      plane: {
-        key: "xy",
-        support: {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        frame: {
-          origin: [0, 0, 0],
-          xAxis: [1, 0, 0],
-          yAxis: [0, 1, 0],
-          normal: [0, 0, 1],
-          linearUnit: "documentLength",
-          handedness: "rightHanded",
-        },
-      },
-      definition: draftDefinition,
-    } satisfies CommitSketchRequest;
+  async function testRecordedSketchUuidAndDependentReferencesReplayExactly() {
+    const recordedSketchId =
+      "sketch_550e8400-e29b-41d4-a716-446655440000" as const;
+    const draftDefinition = createDraftSketchDefinition(recordedSketchId);
     const replayRegionId = getFirstDerivedRegionId(
       "doc_workspace",
       "rev_0002",
-      "sketch_primary",
+      recordedSketchId,
       draftDefinition,
     );
-    const extrudeRequest = {
-      contractVersion: "modeling-contract/v1alpha1",
-      documentId: "doc_workspace",
-      baseRevisionId: "rev_0002",
-      definition: {
-        kind: "extrude",
-        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
-        parameters: {
-          resultBodyType: "solid",
-          profiles: [
-            {
-              kind: "region",
-              sketchId: "sketch_primary",
-              regionId: replayRegionId,
-            },
-          ],
-          startExtent: { kind: "profilePlane" },
-          extent: {
-            mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 10 },
-          },
-          operation: "newBody",
-          booleanScope: { kind: "standalone" },
-        },
-      },
-    } satisfies CreateFeatureRequest;
     const persistedHistory = {
       ...createEmptyOperationHistory("doc_workspace"),
       entries: [
         {
           kind: "commitSketch" as const,
           payload: {
-            sketchId: sketchRequest.sketchId,
-            sketchLabel: sketchRequest.sketchLabel,
-            plane: sketchRequest.plane,
-            definition: sketchRequest.definition,
+            sketchId: recordedSketchId,
+            sketchLabel: "Recorded UUID Sketch",
+            plane: {
+              key: "xy" as const,
+              support: {
+                kind: "construction" as const,
+                constructionId: "construction_plane-xy" as const,
+              },
+              frame: {
+                origin: [0, 0, 0] as const,
+                xAxis: [1, 0, 0] as const,
+                yAxis: [0, 1, 0] as const,
+                normal: [0, 0, 1] as const,
+                linearUnit: "documentLength" as const,
+                handedness: "rightHanded" as const,
+              },
+            },
+            definition: draftDefinition,
           },
         },
-        createCreateFeatureHistoryEntry(extrudeRequest),
+        createCreateFeatureHistoryEntry({
+          contractVersion: "modeling-contract/v1alpha1",
+          documentId: "doc_workspace",
+          baseRevisionId: "rev_0002",
+          definition: {
+            kind: "extrude",
+            featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              resultBodyType: "solid",
+              profiles: [
+                {
+                  kind: "region",
+                  sketchId: recordedSketchId,
+                  regionId: replayRegionId,
+                },
+              ],
+              startExtent: { kind: "profilePlane" },
+              extent: {
+                mode: "oneSide",
+                end: {
+                  kind: "blind",
+                  direction: "positive",
+                  distance: 10,
+                },
+              },
+              operation: "newBody",
+              booleanScope: { kind: "standalone" },
+            },
+          },
+        }),
       ],
     };
     const service = createModelingService(createStrictReplayAdapter(), {
@@ -934,294 +938,48 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
 
     expect(
       restoreState.kind,
-      "Allocator-compatible explicit sketch ids should restore successfully on an empty strict adapter.",
+      "Replay should restore an absent recorded UUID through explicit restore intent.",
     ).toBe("restored");
     expect(
       restoreState.entriesReplayed,
-      "Replay should apply both the sketch and feature entries.",
+      "Replay should apply the recorded sketch before its dependent feature.",
     ).toBe(2);
 
     const snapshot = await service.getCurrentDocumentSnapshot();
-
+    const restoredSketch = snapshot.document.sketches.find(
+      (entry) => entry.sketchId === recordedSketchId,
+    );
     expect(
-      snapshot.document.sketches.some(
-        (entry) => entry.sketchId === "sketch_primary",
+      restoredSketch?.sketch.regions.some(
+        (region) => region.regionId === replayRegionId,
       ),
-      "Replay should recreate the expected primary sketch id.",
+      "Replay should derive the recorded region under the exact recorded sketch identity.",
     ).toBeTruthy();
     expect(
-      snapshot.document.features.some(
-        (entry) =>
-          entry.featureId === "feature_extrude-1" &&
-          entry.definition.kind === "extrude",
-      ),
-      "Replay should continue into downstream feature history after recreating the sketch.",
-    ).toBeTruthy();
-  }
-
-  async function testSketchDeleteReplayAllowsReusedAllocatorSketchId() {
-    const firstDefinition = createDraftSketchDefinition("sketch_primary");
-    const secondDefinition = createDraftSketchDefinition("sketch_2");
-    const reusedDefinition = createDraftSketchDefinition("sketch_primary");
-    const sketchRequest = {
-      contractVersion: "modeling-contract/v1alpha1",
-      documentId: "doc_workspace",
-      baseRevisionId: "rev_0001",
-      solverCorrelation: {
-        requestId: "request_commit_restore_reuse",
-        projectionRequestId: "request_commit_restore_reuse:project",
-        validationRequestId: "request_commit_restore_reuse:validate",
-        solveRequestId: "request_commit_restore_reuse:solve",
-        regionRequestId: "request_commit_restore_reuse:regions",
-      },
-      sketchId: "sketch_primary",
-      sketchLabel: "Original Replay Sketch",
-      plane: {
-        key: "xy",
-        support: {
-          kind: "construction",
-          constructionId: "construction_plane-xy",
-        },
-        frame: {
-          origin: [0, 0, 0],
-          xAxis: [1, 0, 0],
-          yAxis: [0, 1, 0],
-          normal: [0, 0, 1],
-          linearUnit: "documentLength",
-          handedness: "rightHanded",
-        },
-      },
-      definition: firstDefinition,
-    } satisfies CommitSketchRequest;
-    const secondSketchRequest = {
-      ...sketchRequest,
-      baseRevisionId: "rev_0002",
-      solverCorrelation: {
-        requestId: "request_commit_restore_reuse_secondary",
-        projectionRequestId: "request_commit_restore_reuse_secondary:project",
-        validationRequestId: "request_commit_restore_reuse_secondary:validate",
-        solveRequestId: "request_commit_restore_reuse_secondary:solve",
-        regionRequestId: "request_commit_restore_reuse_secondary:regions",
-      },
-      sketchId: "sketch_2",
-      sketchLabel: "Secondary Replay Sketch",
-      definition: secondDefinition,
-    } satisfies CommitSketchRequest;
-    const reusedSketchRequest = {
-      ...sketchRequest,
-      baseRevisionId: "rev_0004",
-      solverCorrelation: {
-        requestId: "request_commit_restore_reuse_after_delete",
-        projectionRequestId:
-          "request_commit_restore_reuse_after_delete:project",
-        validationRequestId:
-          "request_commit_restore_reuse_after_delete:validate",
-        solveRequestId: "request_commit_restore_reuse_after_delete:solve",
-        regionRequestId: "request_commit_restore_reuse_after_delete:regions",
-      },
-      sketchLabel: "Reused Replay Sketch",
-      definition: reusedDefinition,
-    } satisfies CommitSketchRequest;
-    const persistedHistory = {
-      ...createEmptyOperationHistory("doc_workspace"),
-      entries: [
-        {
-          kind: "commitSketch" as const,
-          payload: {
-            sketchId: sketchRequest.sketchId,
-            sketchLabel: sketchRequest.sketchLabel,
-            plane: sketchRequest.plane,
-            definition: sketchRequest.definition,
-          },
-        },
-        {
-          kind: "commitSketch" as const,
-          payload: {
-            sketchId: secondSketchRequest.sketchId,
-            sketchLabel: secondSketchRequest.sketchLabel,
-            plane: secondSketchRequest.plane,
-            definition: secondSketchRequest.definition,
-          },
-        },
-        createDeleteTargetHistoryEntry({
-          contractVersion: "modeling-contract/v1alpha1",
-          documentId: "doc_workspace",
-          baseRevisionId: "rev_0003",
-          target: { kind: "sketch", sketchId: "sketch_primary" },
-        }),
-        {
-          kind: "commitSketch" as const,
-          payload: {
-            sketchId: reusedSketchRequest.sketchId,
-            sketchLabel: reusedSketchRequest.sketchLabel,
-            plane: reusedSketchRequest.plane,
-            definition: reusedSketchRequest.definition,
-          },
-        },
-      ],
-    };
-    const service = createModelingService(createStrictReplayAdapter(), {
-      currentDocumentId: "doc_workspace",
-      operationHistoryStore:
-        createMemoryOperationHistoryStore(persistedHistory),
-    });
-
-    const restoreState = await service.getHistoryRestoreState();
-
-    expect(
-      restoreState.kind,
-      "Sketch delete replay should remove deleted sketches from the cursor before resolving reused sketch ids.",
-    ).toBe("restored");
-    expect(
-      restoreState.entriesReplayed,
-      "Replay should apply create, secondary create, delete, and recreated sketch entries.",
-    ).toBe(4);
-
-    const snapshot = await service.getCurrentDocumentSnapshot();
-
-    expect(
-      snapshot.document.sketches.length === 2 &&
-        snapshot.document.sketches.some(
-          (entry) => entry.sketchId === "sketch_2",
-        ) &&
-        snapshot.document.sketches.some(
-          (entry) => entry.sketchId === "sketch_primary",
-        ),
-      "Replay should recreate the allocator-compatible sketch id after deletion.",
-    ).toBeTruthy();
-    expect(
-      snapshot.document.sketches.find(
-        (entry) => entry.sketchId === "sketch_primary",
-      )?.label,
-      "Replay should preserve the final reused sketch entry.",
-    ).toBe("Reused Replay Sketch");
-  }
-
-  async function testSketchDeleteReplayUsesNextOrdinalAfterMiddleDelete() {
-    function createRequest(
-      sketchId: "sketch_primary" | "sketch_2" | "sketch_3" | "sketch_4",
-      baseRevisionId: `rev_${string}`,
-      label: string,
-    ) {
-      return {
-        contractVersion: "modeling-contract/v1alpha1",
-        documentId: "doc_workspace",
-        baseRevisionId,
-        solverCorrelation: {
-          requestId: `request_commit_restore_gap_${sketchId}` as const,
-          projectionRequestId:
-            `request_commit_restore_gap_${sketchId}:project` as const,
-          validationRequestId:
-            `request_commit_restore_gap_${sketchId}:validate` as const,
-          solveRequestId:
-            `request_commit_restore_gap_${sketchId}:solve` as const,
-          regionRequestId:
-            `request_commit_restore_gap_${sketchId}:regions` as const,
-        },
-        sketchId,
-        sketchLabel: label,
-        plane: {
-          key: "xy",
-          support: {
-            kind: "construction" as const,
-            constructionId: "construction_plane-xy",
-          },
-          frame: {
-            origin: [0, 0, 0],
-            xAxis: [1, 0, 0],
-            yAxis: [0, 1, 0],
-            normal: [0, 0, 1],
-            linearUnit: "documentLength" as const,
-            handedness: "rightHanded" as const,
-          },
-        },
-        definition: createDraftSketchDefinition(sketchId),
-      } satisfies CommitSketchRequest;
-    }
-
-    function createHistoryEntry(request: CommitSketchRequest) {
-      return {
-        kind: "commitSketch" as const,
-        payload: {
-          sketchId: request.sketchId,
-          sketchLabel: request.sketchLabel,
-          plane: request.plane,
-          definition: request.definition,
-        },
-      };
-    }
-
-    const primaryRequest = createRequest(
-      "sketch_primary",
-      "rev_0001",
-      "Primary Replay Sketch",
-    );
-    const secondRequest = createRequest(
-      "sketch_2",
-      "rev_0002",
-      "Second Replay Sketch",
-    );
-    const thirdRequest = createRequest(
-      "sketch_3",
-      "rev_0003",
-      "Third Replay Sketch",
-    );
-    const fourthRequest = createRequest(
-      "sketch_4",
-      "rev_0005",
-      "Fourth Replay Sketch",
-    );
-    const persistedHistory = {
-      ...createEmptyOperationHistory("doc_workspace"),
-      entries: [
-        createHistoryEntry(primaryRequest),
-        createHistoryEntry(secondRequest),
-        createHistoryEntry(thirdRequest),
-        createDeleteTargetHistoryEntry({
-          contractVersion: "modeling-contract/v1alpha1",
-          documentId: "doc_workspace",
-          baseRevisionId: "rev_0004",
-          target: { kind: "sketch", sketchId: "sketch_2" },
-        }),
-        createHistoryEntry(fourthRequest),
-      ],
-    };
-    const service = createModelingService(createStrictReplayAdapter(), {
-      currentDocumentId: "doc_workspace",
-      operationHistoryStore:
-        createMemoryOperationHistoryStore(persistedHistory),
-    });
-
-    const restoreState = await service.getHistoryRestoreState();
-
-    expect(
-      restoreState.kind,
-      "Sketch delete replay should resolve allocator-compatible ids from the max remaining sketch ordinal.",
-    ).toBe("restored");
-    expect(
-      restoreState.entriesReplayed,
-      "Replay should apply all entries across the middle sketch delete.",
-    ).toBe(5);
-
-    const snapshot = await service.getCurrentDocumentSnapshot();
-
-    expect(
-      snapshot.document.sketches.some(
-        (entry) => entry.sketchId === "sketch_2",
+      restoredSketch?.sketch.definition.points.every(
+        (point) => point.target.sketchId === recordedSketchId,
       ) &&
-        snapshot.document.sketches.some(
-          (entry) => entry.sketchId === "sketch_3",
-        ) &&
-        snapshot.document.sketches.some(
-          (entry) => entry.sketchId === "sketch_4",
+        restoredSketch.sketch.definition.entities.every(
+          (entity) => entity.target.sketchId === recordedSketchId,
         ),
-      "Replay should skip the deleted ordinal and restore the next allocated sketch id.",
-    ).toBeFalsy();
+      "Replay should preserve exact dependent point and entity sketch references.",
+    ).toBeTruthy();
+
+    const restoredExtrude = snapshot.document.features.find(
+      (entry) => entry.featureId === "feature_extrude-1",
+    );
+    expect(
+      restoredExtrude?.definition.kind === "extrude" &&
+        restoredExtrude.definition.parameters.profiles[0],
+      "Replay should continue into the downstream feature after restoring the sketch.",
+    ).toEqual({
+      kind: "region",
+      sketchId: recordedSketchId,
+      regionId: replayRegionId,
+    });
   }
 
   await testCommitSketchPersistenceNormalizesSketchIds();
   await testLegacyCommitSketchHistoryRestores();
-  await testExplicitAllocatorCompatibleSketchIdsReplayDuringRestore();
-  await testSketchDeleteReplayAllowsReusedAllocatorSketchId();
-  await testSketchDeleteReplayUsesNextOrdinalAfterMiddleDelete();
+  await testRecordedSketchUuidAndDependentReferencesReplayExactly();
 });

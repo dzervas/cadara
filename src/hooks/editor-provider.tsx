@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
 
 import { getEditorViewState } from "@/domain/editor/state-machine";
@@ -14,6 +14,7 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { EditorContext } from "@/hooks/editor-context";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { createEditorDebugTraceRecorder } from "@/application/editor/editor-debug-trace";
+import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
 
 interface EditorProviderProps extends PropsWithChildren {
   modelingService: ModelingService;
@@ -38,12 +39,25 @@ export function EditorProvider({
     [editorDependencies.importProviders, editorDependencies.sketchSpecialModes],
   );
   const traceRecorder = useMemo(() => createEditorDebugTraceRecorder(), []);
+  const [sketchActionsByDocument] = useState(
+    () => new Map<string, SketchAuthoredActions>(),
+  );
+  const sketchActions = useMemo(() => {
+    const existing = sketchActionsByDocument.get(
+      modelingService.currentDocumentId,
+    );
+    if (existing) return existing;
+    const created = new SketchAuthoredActions();
+    sketchActionsByDocument.set(modelingService.currentDocumentId, created);
+    return created;
+  }, [modelingService.currentDocumentId, sketchActionsByDocument]);
   const { machineState, dispatch } = useEditorEventLoop(
     runtime,
     errorReporter,
     stableEditorDependencies,
     undefined,
     traceRecorder.record,
+    sketchActions,
   );
 
   useEffect(() => {

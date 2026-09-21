@@ -1146,7 +1146,7 @@ test("worker transport preserves candidate bases, conflict atomicity, actor iden
       await client.getDurableHistoryAvailability({
         documentId: seed.documentId,
       }),
-    ).toEqual({ canUndo: false, canRedo: false });
+    ).toMatchObject({ canUndo: false, canRedo: false });
   } finally {
     client.dispose();
   }

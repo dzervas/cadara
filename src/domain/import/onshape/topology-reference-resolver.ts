@@ -158,6 +158,26 @@ export interface CapturedBodyScopeResult {
   detail: string;
 }
 
+export function capturedBodyScopeEvidence(
+  snapshot: RollbackTopologySnapshot | null,
+  deterministicId: string | null,
+) {
+  if (!snapshot || !deterministicId) return null;
+  const capturedBody = snapshot.bodies.find((body) =>
+    body.faces.some((face) => face.id === deterministicId),
+  );
+  if (!capturedBody) return null;
+  const siblingSignatures = capturedBody.faces
+    .filter((face) => face.id !== deterministicId)
+    .map((face) => signatureFromPoints("face", pointsForFace(face)))
+    .filter((signature): signature is OnshapeGeometricSignature => signature !== null)
+    .map(normalizeOnshapeTopologySignature);
+  return {
+    capturedBodyId: capturedBody.id,
+    siblingSignatures,
+  };
+}
+
 /**
  * Restrict live candidates to the one live body that the captured face's OWN
  * captured body resolves to.
@@ -190,9 +210,10 @@ export function scopeLiveSignaturesToCapturedBody(input: {
   if (!input.snapshot || !input.deterministicId) {
     return unscoped("no rollback snapshot or deterministic id for body scoping");
   }
-  const capturedBody = input.snapshot.bodies.find((body) =>
-    body.faces.some((face) => face.id === input.deterministicId),
-  );
+  const evidence = capturedBodyScopeEvidence(input.snapshot, input.deterministicId);
+  const capturedBody = evidence
+    ? input.snapshot.bodies.find((body) => body.id === evidence.capturedBodyId)
+    : null;
   if (!capturedBody) {
     return unscoped(
       `captured face ${input.deterministicId} has no owning body in the rollback snapshot`,
@@ -201,17 +222,13 @@ export function scopeLiveSignaturesToCapturedBody(input: {
 
   const votes = new Set<BodyId>();
   let matchedSiblings = 0;
-  for (const face of capturedBody.faces) {
-    if (face.id === input.deterministicId) continue;
-    const points = pointsForFace(face);
-    const signature = signatureFromPoints("face", points);
-    if (!signature) continue;
+  for (const signature of evidence!.siblingSignatures) {
     // Body attribution is all-or-nothing: unlike ordinary feature selection,
     // it may not choose the nearer of multiple geometrically admissible faces.
     // An infinite ambiguity margin makes `matchSignature` return `ambiguous`
     // whenever more than one candidate passes the exact tolerance gates.
     const match = matchSignature(
-      normalizeOnshapeTopologySignature(signature),
+      signature,
       input.liveSignatures,
       { ...input.tolerance, ambiguityMargin: Number.POSITIVE_INFINITY },
     );

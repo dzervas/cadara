@@ -111,6 +111,7 @@ import {
   resolveTopologyReferences,
   resolveUniquePrefixBody,
   scopeLiveSignaturesToCapturedBody,
+  capturedBodyScopeEvidence,
   type TopologyResolutionResult,
 } from "@/domain/import/onshape/topology-reference-resolver";
 import {
@@ -3049,6 +3050,7 @@ async function buildPreparedActions(input: {
   const commitSketches: ImportCommitSketchRequest[] = [];
   const createFeatures: ImportCreateFeatureRequest[] = [];
   const orderedActions: ImportPreparedActionRef[] = [];
+  const bodyScopeBindings: NonNullable<ImportPreparedActions["bodyScopeBindings"]> = [];
   const diagnostics: ImportDiagnostic[] = [];
   // Onshape feature id -> its position in `orderedActions`, so deferred
   // references can address producing actions by ordered-sequence position
@@ -3115,6 +3117,63 @@ async function buildPreparedActions(input: {
   const exactProducerActionIndexByFeatureId = new Map<string, number>();
   const exactProducerActionCountByFeatureId = new Map<string, number>();
   const firstRollbackFeatureId = input.read.studio.rollbackSnapshots?.[0]?.featureId;
+
+  const bodyScopeBindingKey = (
+    consumerActionIndex: number,
+    selector: ImportDeferredTopologyRef,
+  ) => JSON.stringify([
+    consumerActionIndex,
+    selector.bodyScope,
+    selector.source.consumerFeatureId,
+    selector.source.parameterId,
+    selector.source.deterministicId,
+  ]);
+  const bodyScopeBindingKeys = new Set<string>();
+  const captureBodyScopeBindings = (
+    value: unknown,
+    consumerActionIndex: number,
+  ): void => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach((entry) => captureBodyScopeBindings(entry, consumerActionIndex));
+      return;
+    }
+    if (
+      (value as { kind?: unknown }).kind === "topologyOf" &&
+      typeof (value as { bodyScope?: unknown }).bodyScope === "string"
+    ) {
+      const selector = value as ImportDeferredTopologyRef;
+      const evidence = capturedBodyScopeEvidence(
+        rollbackTimeline?.snapshotBeforeFeature(selector.source.consumerFeatureId) ?? null,
+        selector.source.deterministicId,
+      );
+      const producer = evidence
+        ? bodyProducerByDeterministicId.get(evidence.capturedBodyId)
+        : undefined;
+      if (producer && evidence && evidence.siblingSignatures.length > 0) {
+        if (producer.actionIndex >= consumerActionIndex) {
+          throw new Error(
+            `Body-scope producer action ${producer.actionIndex} must precede consumer action ${consumerActionIndex}.`,
+          );
+        }
+        const key = bodyScopeBindingKey(consumerActionIndex, selector);
+        if (bodyScopeBindingKeys.has(key)) {
+          throw new Error(`Duplicate prepared body-scope binding for ${key}.`);
+        }
+        bodyScopeBindingKeys.add(key);
+        bodyScopeBindings.push({
+          probeBodyId: selector.bodyScope!,
+          consumerActionIndex,
+          source: selector.source,
+          producerActionIndex: producer.actionIndex,
+          siblingSignatures: evidence.siblingSignatures,
+        });
+      }
+    }
+    Object.values(value).forEach((entry) =>
+      captureBodyScopeBindings(entry, consumerActionIndex)
+    );
+  };
 
   const recordBodyTransition = (
     featureId: string,
@@ -3276,6 +3335,7 @@ async function buildPreparedActions(input: {
     featurePlan: FeaturePlan,
     request: ImportCreateFeatureRequest,
   ) => {
+    captureBodyScopeBindings(request, orderedActions.length);
     if (!input.materializeTopologyFallback || !rollbackTimeline) return;
     const selectedBodyIds = deferredBodyTopologyIds(request.definition);
     if (selectedBodyIds.length === 0) return;
@@ -3697,6 +3757,9 @@ async function buildPreparedActions(input: {
               },
             }
           : featurePlan.target.probedFaceSelector;
+        if (!splitInterfaceQuery && planeSupport?.kind === "topologyOf") {
+          captureBodyScopeBindings(planeSupport, orderedActions.length);
+        }
       }
       commitSketches.push({
         contractVersion: context.contractVersion,
@@ -4324,6 +4387,7 @@ async function buildPreparedActions(input: {
     commitSketches,
     createFeatures,
     orderedActions,
+    ...(bodyScopeBindings.length > 0 ? { bodyScopeBindings } : {}),
     diagnostics,
   };
 

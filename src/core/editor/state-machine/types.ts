@@ -24,6 +24,7 @@ import type {
   SnapshotMutationBasis,
 } from "@/contracts/modeling/schema";
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
+import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
@@ -33,6 +34,7 @@ import type {
   FeatureId,
   RequestId,
   RevisionId,
+  SketchId,
   SketchAuthoringOperationId,
 } from "@/contracts/shared/ids";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
@@ -285,8 +287,8 @@ export interface DocumentSnapshotLoadedEvent {
 /** Replaces the active document basis through an explicit whole-document handoff. */
 export interface DocumentReplacedEvent {
   type: "document.replaced";
-  /** Compensation refresh retains private contexts; explicit file opening starts fresh. */
-  preserveAuthoredHistory?: boolean;
+  /** Only an explicit saved-file open starts a fresh action-history lifetime. */
+  historyDisposition?: "fresh-file-open";
   /** Full typed snapshot payload that becomes the next authoritative document basis. */
   snapshot: WorkspaceSnapshot;
 }
@@ -454,11 +456,13 @@ export interface DocumentHistoryCursorRequestedEvent {
 /** Requests an undo step in the active authored history context. */
 export interface HistoryUndoRequestedEvent {
   type: "history.undoRequested";
+  actionSequence?: number;
 }
 
 /** Requests a redo step in the active authored history context. */
 export interface HistoryRedoRequestedEvent {
   type: "history.redoRequested";
+  actionSequence?: number;
 }
 
 /** Replaces the active sketch draft with a repository-backed durable-history state. */
@@ -761,6 +765,10 @@ export type EditorEvent =
       diagnostics: ModelingDiagnostic[];
       /** Actual revision encountered when `accepted` is false due to conflict. */
       actualRevisionId?: RevisionId;
+      /** Kernel-normalized identity used to retain private history across publication. */
+      publishedSketchId?: SketchId;
+      /** Publication reached the live shared CRDT but its durability flush is pending. */
+      durabilityPending?: boolean;
       /** Structured error context preserved when `accepted` is false. */
       errorContext?: AppErrorContextEntry[];
     }
@@ -1016,6 +1024,11 @@ export type EditorEffect =
       mutationBasis: SnapshotMutationBasis;
       /** Sketch session snapshot captured when the commit request was emitted. */
       session: SketchSessionState;
+      /** Original shared sketch basis; null means this is a new private draft. */
+      publicationBase?: {
+        actionContextId: SketchId;
+        expectedSketch: AuthoredActionSketch | null;
+      };
     }
   | {
       type: "sketchPlane.commit";
@@ -1095,11 +1108,17 @@ export interface EditorEffectRuntime {
     baseRevisionId: RevisionId;
     baseRepositoryHeads?: readonly string[];
     session: SketchSessionState;
+    publicationBase?: {
+      actionContextId: SketchId;
+      expectedSketch: AuthoredActionSketch | null;
+    };
   }): Promise<{
     revisionId: RevisionId;
     accepted: boolean;
     diagnostics: ModelingDiagnostic[];
     actualRevisionId?: RevisionId;
+    publishedSketchId?: SketchId;
+    durabilityPending?: boolean;
     errorContext?: AppErrorContextEntry[];
   } | null>;
   /** Recommits a committed sketch with an updated support-plane definition. */

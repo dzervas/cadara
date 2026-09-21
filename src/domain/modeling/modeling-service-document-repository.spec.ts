@@ -267,7 +267,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     const secondSketch = await unwrapModelingResult(
       service.commitSketch({
         baseRevisionId: initial.document.revisionId,
-        sketchId: "sketch_after_tail",
+        sketchId: null,
         sketchLabel: "Sketch After Tail",
         plane: sourceSketch.plane,
         solverCorrelation: {
@@ -296,6 +296,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       secondSketch.revisionState.kind,
       "Second sketch commit should be accepted.",
     ).toBe("accepted");
+    const secondSketchId = secondSketch.sketchId;
 
     const rollback = await unwrapModelingResult(
       service.setFeatureCursor({
@@ -314,9 +315,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       "Accepted cursor rollback should persist an authored document.",
     ).toBeTruthy();
     expect(
-      persisted.sketches.some(
-        (sketch) => sketch.sketchId === "sketch_after_tail",
-      ),
+      persisted.sketches.some((sketch) => sketch.sketchId === secondSketchId),
       "Persisted authored document should include future sketches after the cursor.",
     ).toBeTruthy();
     expect(
@@ -337,7 +336,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         .join(">"),
       "Persisted authored document should keep the complete history order.",
     ).toBe(
-      "sketch_primary>feature_extrude-1>feature_fillet-1>sketch_after_tail",
+      `sketch_primary>feature_extrude-1>feature_fillet-1>${secondSketchId}`,
     );
     expect(
       persisted.cursor.kind === "feature" &&
@@ -1029,7 +1028,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     const committed = await unwrapModelingResult(
       service.commitSketch({
         baseRevisionId: snapshot.document.revisionId,
-        sketchId: "sketch_reference_image",
+        sketchId: null,
         sketchLabel: "Reference Image Sketch",
         plane: sourceSketch.plane,
         solverCorrelation: {
@@ -1090,7 +1089,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       JSON.stringify(documentRepository.getRestoreStatus("doc_workspace")),
     ).toBeDefined();
     const persistedSketch = persisted?.sketches.find(
-      (sketch) => sketch.sketchId === "sketch_reference_image",
+      (sketch) => sketch.sketchId === committed.sketchId,
     );
     const expectedReferenceImageOperations = [
       {
@@ -1145,7 +1144,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     });
     const restoredSnapshot = await restoredService.getCurrentDocumentSnapshot();
     const restoredSketch = restoredSnapshot.document.sketches.find(
-      (sketch) => sketch.sketchId === "sketch_reference_image",
+      (sketch) => sketch.sketchId === committed.sketchId,
     );
 
     expect(
@@ -1980,6 +1979,323 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     ).toBeFalsy();
   }
 
+  async function testSketchPublicationUsesOriginalSketchBaseAndOneDocumentAction() {
+    const repository = createMemoryDocumentRepository();
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+    });
+    const originalSnapshot = await service.getCurrentDocumentSnapshot();
+    const originalDocument =
+      createAuthoredModelDocumentFromSnapshot(originalSnapshot);
+    const originalSketch = originalDocument.sketches[0]!;
+    const editedDefinition = structuredClone(originalSketch.definition);
+    editedDefinition.points[0] = {
+      ...editedDefinition.points[0]!,
+      position: [41, 17],
+    };
+
+    const peerDocument = structuredClone(originalDocument);
+    peerDocument.bodyLabels[0] = {
+      ...peerDocument.bodyLabels[0]!,
+      label: "Peer Body Label",
+    };
+    expect(
+      (await repository.receivePeerDocument(peerDocument, originalDocument)).ok,
+    ).toBeTruthy();
+
+    const published = await unwrapModelingResult(
+      service.commitSketch({
+        baseRevisionId: originalSnapshot.document.revisionId,
+        sketchId: originalSketch.sketchId,
+        sketchLabel: originalSketch.label,
+        plane: originalSketch.plane,
+        definition: editedDefinition,
+        solverCorrelation: {
+          requestId: "request_publish_sketch",
+          projectionRequestId: "request_publish_sketch:project",
+          validationRequestId: "request_publish_sketch:validate",
+          solveRequestId: "request_publish_sketch:solve",
+          regionRequestId: "request_publish_sketch:regions",
+        },
+        publicationBase: {
+          actionContextId: originalSketch.sketchId,
+          expectedSketch: originalSketch,
+        },
+      }),
+    );
+    expect(published.revisionState.kind).toBe("accepted");
+    const availability = await repository.getDurableHistoryAvailability(
+      originalDocument.documentId,
+    );
+    expect(availability.undoEntries).toEqual([
+      expect.objectContaining({ label: "Publish Sketch" }),
+    ]);
+    const undone = await repository.undoDurableHistory(
+      originalDocument.documentId,
+    );
+    expect(undone?.ok).toBe(true);
+    if (!undone?.ok) throw new Error("Publication undo should apply.");
+    expect(undone.document.bodyLabels[0]?.label).toBe("Peer Body Label");
+    expect(undone.document.sketches[0]?.definition).toEqual(
+      originalSketch.definition,
+    );
+
+    const afterUndo = structuredClone(undone.document);
+    const peerSketchEdit = structuredClone(afterUndo);
+    peerSketchEdit.sketches[0]!.definition.points[0] = {
+      ...peerSketchEdit.sketches[0]!.definition.points[0]!,
+      position: [99, 12],
+    };
+    expect(
+      (await repository.receivePeerDocument(peerSketchEdit, afterUndo)).ok,
+    ).toBeTruthy();
+    const conflict = await service.commitSketch({
+      baseRevisionId: originalSnapshot.document.revisionId,
+      sketchId: originalSketch.sketchId,
+      sketchLabel: originalSketch.label,
+      plane: originalSketch.plane,
+      definition: editedDefinition,
+      solverCorrelation: {
+        requestId: "request_publish_conflict",
+        projectionRequestId: "request_publish_conflict:project",
+        validationRequestId: "request_publish_conflict:validate",
+        solveRequestId: "request_publish_conflict:solve",
+        regionRequestId: "request_publish_conflict:regions",
+      },
+      publicationBase: {
+        actionContextId: originalSketch.sketchId,
+        expectedSketch: originalSketch,
+      },
+    });
+    expect(conflict.isErr()).toBe(true);
+    const current = await repository.load({
+      documentId: originalDocument.documentId,
+      seedDocument: originalDocument,
+    });
+    expect(
+      current.ok &&
+        current.document.sketches[0]?.definition.points[0]?.position,
+    ).toEqual([99, 12]);
+    if (!current.ok) throw new Error("Expected current peer document.");
+    const deleted = {
+      ...structuredClone(current.document),
+      sketches: [],
+      features: [],
+      featureOrder: [],
+      historyOrder: [],
+      cursor: { kind: "empty" as const },
+      topologyLineage: [],
+    };
+    expect(
+      (await repository.receivePeerDocument(deleted, current.document)).ok,
+    ).toBeTruthy();
+    const deletedPublication = await service.commitSketch({
+      baseRevisionId: originalSnapshot.document.revisionId,
+      sketchId: originalSketch.sketchId,
+      sketchLabel: originalSketch.label,
+      plane: originalSketch.plane,
+      definition: editedDefinition,
+      solverCorrelation: {
+        requestId: "request_publish_deleted",
+        projectionRequestId: "request_publish_deleted:project",
+        validationRequestId: "request_publish_deleted:validate",
+        solveRequestId: "request_publish_deleted:solve",
+        regionRequestId: "request_publish_deleted:regions",
+      },
+      publicationBase: {
+        actionContextId: originalSketch.sketchId,
+        expectedSketch: originalSketch,
+      },
+    });
+    expect(deletedPublication.isErr()).toBe(true);
+    const afterDeletion = await repository.load({
+      documentId: originalDocument.documentId,
+      seedDocument: originalDocument,
+    });
+    expect(afterDeletion.ok && afterDeletion.document.sketches).toEqual([]);
+  }
+
+  async function testPriorDurabilityFailureRejectsPublicationAndRestoresSharedKernel() {
+    const inner = createMemoryDocumentRepository();
+    let rejectMutations = false;
+    let rejectLoads = false;
+    const failedStatus = {
+      kind: "failed" as const,
+      documentId: "doc_workspace" as const,
+      diagnostic: {
+        reasonCode: "automerge-durability-pending",
+        message: "A prior write is pending.",
+      },
+    };
+    const repository: DocumentRepository = {
+      load: (input) =>
+        rejectLoads
+          ? Promise.resolve({ ok: false as const, status: failedStatus })
+          : inner.load(input),
+      initialize: (input) => inner.initialize(input),
+      mutate: (input) =>
+        rejectMutations
+          ? Promise.resolve({ ok: false as const, status: failedStatus })
+          : inner.mutate(input),
+      subscribe: (id, listener) => inner.subscribe(id, listener),
+      reset: (id) => inner.reset(id),
+      getRestoreStatus: (id) => inner.getRestoreStatus(id),
+      getMetadata: (id) => inner.getMetadata(id),
+      getDurableHistoryAvailability: (id) =>
+        inner.getDurableHistoryAvailability(id),
+      undoDurableHistory: (id, sequence) =>
+        inner.undoDurableHistory(id, sequence),
+      redoDurableHistory: (id, sequence) =>
+        inner.redoDurableHistory(id, sequence),
+    };
+    class RestoreFailingAdapter extends MockKernelAdapter {
+      rejectRestore = false;
+      override async restoreAuthoredModelDocument(
+        document: AuthoredModelDocument,
+        diagnostics: readonly ModelingDiagnostic[] = [],
+      ) {
+        if (this.rejectRestore) throw new Error("Injected restore failure");
+        return super.restoreAuthoredModelDocument(document, diagnostics);
+      }
+    }
+    const adapter = new RestoreFailingAdapter();
+    const service = createModelingService(adapter, {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+    });
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const document = createAuthoredModelDocumentFromSnapshot(snapshot);
+    const sketch = document.sketches[0]!;
+    const definition = structuredClone(sketch.definition);
+    definition.points[0] = {
+      ...definition.points[0]!,
+      position: [123, 456],
+    };
+    rejectMutations = true;
+    rejectLoads = true;
+    const commitInput = {
+      baseRevisionId: document.revisionId,
+      sketchId: sketch.sketchId,
+      sketchLabel: sketch.label,
+      plane: sketch.plane,
+      definition,
+      solverCorrelation: {
+        requestId: "request_prior_durability" as const,
+        projectionRequestId: "request_prior_durability:project" as const,
+        validationRequestId: "request_prior_durability:validate" as const,
+        solveRequestId: "request_prior_durability:solve" as const,
+        regionRequestId: "request_prior_durability:regions" as const,
+      },
+      publicationBase: {
+        actionContextId: sketch.sketchId,
+        expectedSketch: sketch,
+      },
+    };
+    const result = await service.commitSketch(commitInput);
+    expect(result.isErr()).toBe(true);
+    const restored = await service.getCurrentDocumentSnapshot();
+    expect(
+      restored.document.sketches[0]?.sketch.definition.points[0]?.position,
+    ).toEqual(sketch.definition.points[0]?.position);
+    expect(
+      restored.document.diagnostics.some(
+        (diagnostic) => diagnostic.code === "automerge-durability-pending",
+      ),
+    ).toBe(true);
+
+    adapter.rejectRestore = true;
+    const restoreFailure = await service.commitSketch(commitInput);
+    expect(restoreFailure.isErr() && restoreFailure.error.message).toBe(
+      "Injected restore failure",
+    );
+  }
+
+  async function testAppliedLivePublicationRestoresMergedAuthoritativeDocument() {
+    const inner = createMemoryDocumentRepository();
+    let reportAppliedLive = false;
+    const repository: DocumentRepository = {
+      load: (input) => inner.load(input),
+      initialize: (input) => inner.initialize(input),
+      mutate: async (input) => {
+        if (!reportAppliedLive) return inner.mutate(input);
+        const merged = structuredClone(input.document);
+        merged.bodyLabels[0] = {
+          ...merged.bodyLabels[0]!,
+          label: "Peer merged body",
+        };
+        return {
+          ok: false as const,
+          status: {
+            kind: "failed" as const,
+            documentId: input.documentId,
+            diagnostic: {
+              reasonCode: "automerge-durability-failed",
+              message: "flush failed",
+            },
+          },
+          appliedLive: {
+            document: merged,
+            metadata: inner.getMetadata(input.documentId),
+          },
+        };
+      },
+      subscribe: (id, listener) => inner.subscribe(id, listener),
+      reset: (id) => inner.reset(id),
+      getRestoreStatus: (id) => inner.getRestoreStatus(id),
+      getMetadata: (id) => inner.getMetadata(id),
+      getDurableHistoryAvailability: (id) =>
+        inner.getDurableHistoryAvailability(id),
+      undoDurableHistory: (id, sequence) =>
+        inner.undoDurableHistory(id, sequence),
+      redoDurableHistory: (id, sequence) =>
+        inner.redoDurableHistory(id, sequence),
+    };
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+    });
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const document = createAuthoredModelDocumentFromSnapshot(snapshot);
+    const sketch = document.sketches[0]!;
+    const definition = structuredClone(sketch.definition);
+    definition.points[0] = {
+      ...definition.points[0]!,
+      position: [22, 33],
+    };
+    reportAppliedLive = true;
+    const result = await unwrapModelingResult(
+      service.commitSketch({
+        baseRevisionId: document.revisionId,
+        sketchId: sketch.sketchId,
+        sketchLabel: sketch.label,
+        plane: sketch.plane,
+        definition,
+        solverCorrelation: {
+          requestId: "request_applied_live",
+          projectionRequestId: "request_applied_live:project",
+          validationRequestId: "request_applied_live:validate",
+          solveRequestId: "request_applied_live:solve",
+          regionRequestId: "request_applied_live:regions",
+        },
+        publicationBase: {
+          actionContextId: sketch.sketchId,
+          expectedSketch: sketch,
+        },
+      }),
+    );
+    expect(result.revisionState.kind).toBe("accepted");
+    expect(result.durabilityPending).toBe(true);
+    const restored = await service.getCurrentDocumentSnapshot();
+    expect(restored.document.bodies[0]?.label).toBe("Peer merged body");
+    expect(
+      restored.document.sketches[0]?.sketch.definition.points[0]?.position,
+    ).toEqual([22, 33]);
+  }
+
+  await testPriorDurabilityFailureRejectsPublicationAndRestoresSharedKernel();
+  await testAppliedLivePublicationRestoresMergedAuthoritativeDocument();
+  await testSketchPublicationUsesOriginalSketchBaseAndOneDocumentAction();
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot();
   await testRepositoryCursorPersistenceExportsCompleteAuthoredState();
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict();

@@ -275,6 +275,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     documentId: DocumentId,
     source: "local" | "undo" | "redo",
     input?: Parameters<DocumentRepository["mutate"]>[0],
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult> {
     const handle = this.handles.get(documentId);
     if (!handle)
@@ -301,7 +302,11 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
               input.label ?? "Edit document",
               documentActionState(input.expected),
             )
-          : staged[source === "undo" ? "undo" : "redo"](identity, current);
+          : staged[source === "undo" ? "undo" : "redo"](
+              identity,
+              current,
+              actionSequence,
+            );
         if (result.status === "blocked") return;
         if (result.status === "applied")
           applyCollaborativeWrites(storage, result.writes);
@@ -336,8 +341,10 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     } catch (error) {
       if (this.durabilityFailures.has(documentId)) {
         const failed = this.durabilityFailed(documentId, error);
-        await this.publish(documentId, handle, source);
-        return failed;
+        const published = await this.publish(documentId, handle, source);
+        return !published.ok && published.appliedLive
+          ? { ...failed, appliedLive: published.appliedLive }
+          : failed;
       }
       return this.failure(
         documentId,
@@ -374,23 +381,33 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     return {
       canUndo: entries.undo.length > 0,
       canRedo: entries.redo.length > 0,
+      undoEntries: entries.undo.map(({ sequence, label }) => ({
+        sequence,
+        label,
+      })),
+      redoEntries: entries.redo.map(({ sequence, label }) => ({
+        sequence,
+        label,
+      })),
     };
   }
   undoDurableHistory(
     documentId: DocumentId,
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null> {
     return this.enqueue(documentId, async () =>
       (await this.getDurableHistoryAvailability(documentId)).canUndo
-        ? this.transact(documentId, "undo")
+        ? this.transact(documentId, "undo", undefined, actionSequence)
         : null,
     );
   }
   redoDurableHistory(
     documentId: DocumentId,
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null> {
     return this.enqueue(documentId, async () =>
       (await this.getDurableHistoryAvailability(documentId)).canRedo
-        ? this.transact(documentId, "redo")
+        ? this.transact(documentId, "redo", undefined, actionSequence)
         : null,
     );
   }
@@ -467,18 +484,21 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     };
     this.statuses.set(documentId, status);
     this.metadata.set(documentId, metadata);
-    const result = {
-      ok: true as const,
+    const appliedLive = {
       document: parsed.document,
       diagnostics: assets.diagnostics,
       assetAvailability: assets.availability,
-      status,
       metadata,
+    };
+    const result = {
+      ok: true as const,
+      ...appliedLive,
+      status,
     };
     this.publishedEvents.set(documentId, structuredClone(result));
     for (const listener of this.listeners.get(documentId) ?? [])
       listener(structuredClone(result));
-    return unresolved ? { ok: false, status: unresolved } : result;
+    return unresolved ? { ok: false, status: unresolved, appliedLive } : result;
   }
   subscribe(
     documentId: DocumentId,

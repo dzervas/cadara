@@ -138,7 +138,7 @@ test("active sketch curve picking selects semantic curves without pixel-perfect 
   }
 });
 
-test("repository-backed sketch commit stays responsive and survives immediate refresh without file system access", async ({
+test("repository-backed sketch commit waits for publication acknowledgement and survives immediate refresh without file system access", async ({
   page,
 }, testInfo) => {
   const workbench = new SketchWorkbenchHarness(page);
@@ -167,7 +167,6 @@ test("repository-backed sketch commit stays responsive and survives immediate re
     .toContain("1 entities staged");
 
   await workbench.activateTool("Exit the active sketch.");
-  await workbench.expectMachine("idle");
   await expect
     .poll(
       () =>
@@ -179,6 +178,13 @@ test("repository-backed sketch commit stays responsive and survives immediate re
       },
     )
     .toBeGreaterThan(0);
+  await workbench.expectMachine("editingSketch");
+
+  await page.evaluate(() => {
+    window.__cadDelayDocumentSyncMutations = false;
+    window.__cadReleaseDelayedDocumentSyncMutations?.();
+  });
+  await workbench.expectMachine("idle");
   await expect(
     page.getByRole("button", {
       name: "Select Sketch Draft. Double-click to reopen.",
@@ -216,9 +222,6 @@ test("repository-backed sketch commit stays responsive and survives immediate re
 
   expect(persistedSketch?.entityCount).toBeGreaterThanOrEqual(1);
 
-  await page.evaluate(() => {
-    window.__cadDelayDocumentSyncMutations = false;
-  });
   await workbench.reloadPreservingRepositoryStorage(repositoryPath);
 
   await expect(page.getByText("History restore failed")).toHaveCount(0);

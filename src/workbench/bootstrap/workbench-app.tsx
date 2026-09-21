@@ -177,9 +177,16 @@ export function WorkbenchApp({
     [documentRepository, modelingService],
   );
 
+  const mountedModelingServicesRef = useRef(new Set([modelingService]));
   useEffect(() => {
+    // Strict Mode replays effects; defer disposal so its immediate remount can retain this service.
+    const mountedServices = mountedModelingServicesRef.current;
+    mountedServices.add(modelingService);
     return () => {
-      modelingService.dispose();
+      mountedServices.delete(modelingService);
+      queueMicrotask(() => {
+        if (!mountedServices.has(modelingService)) modelingService.dispose();
+      });
     };
   }, [modelingService]);
 

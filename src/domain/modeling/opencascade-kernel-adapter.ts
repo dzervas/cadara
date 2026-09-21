@@ -175,7 +175,6 @@ import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_DOCUMENT_NAME,
   OCC_KERNEL_INITIAL_REVISION_ID,
-  OCC_KERNEL_PRIMARY_SKETCH_ID,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { getOccTessellationTier } from "@/domain/modeling/occ/tessellation";
@@ -976,24 +975,8 @@ function capitalizeFeatureKind(kind: FeatureDefinition["kind"]) {
   return `${kind[0]!.toUpperCase()}${kind.slice(1)}`;
 }
 
-function allocateSketchId(state: OccAuthoringState) {
-  if (
-    !state.sketches.some(
-      (sketch) => sketch.sketchId === OCC_KERNEL_PRIMARY_SKETCH_ID,
-    )
-  ) {
-    return OCC_KERNEL_PRIMARY_SKETCH_ID;
-  }
-
-  let maxOrdinal = 1;
-  for (const sketch of state.sketches) {
-    const match = /^sketch_(\d+)$/.exec(sketch.sketchId);
-    if (match) {
-      maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10));
-    }
-  }
-
-  return `sketch_${maxOrdinal + 1}` as SketchId;
+function allocateSketchId(_state: OccAuthoringState) {
+  return `sketch_${crypto.randomUUID()}` as SketchId;
 }
 
 function allocateFeatureId(
@@ -2406,10 +2389,30 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   ): ModelingDiagnostic[] {
     const diagnostics: ModelingDiagnostic[] = [];
 
-    if (
-      request.sketchId !== null &&
-      !state.sketches.some((entry) => entry.sketchId === request.sketchId)
-    ) {
+    const existingSketch = state.sketches.some(
+      (entry) => entry.sketchId === request.sketchId,
+    );
+    if (request.restoreRecordedSketchId) {
+      if (request.sketchId === null) {
+        diagnostics.push(
+          createDiagnostic(
+            "occ-invalid-restored-sketch-id",
+            "error",
+            "Recorded sketch restoration requires a non-null sketch identity.",
+            null,
+          ),
+        );
+      } else if (existingSketch) {
+        diagnostics.push(
+          createDiagnostic(
+            "occ-sketch-id-collision",
+            "error",
+            `Recorded sketch identity ${request.sketchId} already exists in the current OCC authoring state.`,
+            { kind: "sketch", sketchId: request.sketchId },
+          ),
+        );
+      }
+    } else if (request.sketchId !== null && !existingSketch) {
       diagnostics.push(
         createDiagnostic(
           "occ-missing-sketch",

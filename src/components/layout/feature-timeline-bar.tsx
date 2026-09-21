@@ -107,6 +107,7 @@ interface HistoryTimelineVisualItem {
   dataFeatureError?: string;
   dataDerivedHighlighted?: string;
   dataHistoryFeatureId?: string;
+  dataHistorySketchId?: string;
   dataDeleteSupported?: string;
   dataRepairGuidance?: string;
   onClick: () => void;
@@ -542,6 +543,7 @@ function HistoryTimelineSurface({
                           data-feature-error={item.dataFeatureError}
                           data-derived-highlighted={item.dataDerivedHighlighted}
                           data-history-feature-id={item.dataHistoryFeatureId}
+                          data-history-sketch-id={item.dataHistorySketchId}
                           data-history-feature-suppressed={
                             item.isSuppressed ? "true" : undefined
                           }
@@ -979,6 +981,8 @@ export function FeatureTimelineBar({
           dataDerivedHighlighted: isHistoryHighlighted ? "true" : undefined,
           dataHistoryFeatureId:
             item.kind === "feature" ? item.featureId : undefined,
+          dataHistorySketchId:
+            item.kind === "sketch" ? item.sketchId : undefined,
           dataDeleteSupported: "true",
           dataRepairGuidance: primaryFeatureDiagnostic
             ? (repairMessage ?? undefined)

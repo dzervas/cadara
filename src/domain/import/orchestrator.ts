@@ -316,6 +316,20 @@ export function orderedOutputKey(actionIndex: number) {
   return `ordered:${actionIndex}`;
 }
 
+function bodyScopeBindingKey(
+  consumerActionIndex: number,
+  probeBodyId: BodyId,
+  source: ImportDeferredTopologyRef["source"],
+) {
+  return JSON.stringify([
+    consumerActionIndex,
+    probeBodyId,
+    source.consumerFeatureId,
+    source.parameterId,
+    source.deterministicId,
+  ]);
+}
+
 function isDeferredValue(value: unknown): value is ImportDeferredValue {
   if (!value || typeof value !== "object") {
     return false;
@@ -524,7 +538,9 @@ export class ImportDeferredMaterializer {
       "getCurrentDocumentSnapshot" | "buildNativeExactBrepPayload"
     >;
     outputRecords: Map<string, ImportActionOutputRecord>;
+    bodyScopeBindings: ReadonlyMap<string, NonNullable<ImportPreparedActions["bodyScopeBindings"]>[number]>;
   };
+  private activeConsumerActionIndex: number | undefined;
   private topologyFallbackSource: ImportDeferredTopologyRef["source"] | null = null;
   private liveSignatureCache: {
     revisionId: WorkspaceSnapshot["document"]["revisionId"];
@@ -554,8 +570,34 @@ export class ImportDeferredMaterializer {
       "getCurrentDocumentSnapshot" | "buildNativeExactBrepPayload"
     >;
     outputRecords: Map<string, ImportActionOutputRecord>;
+    bodyScopeBindings?: readonly NonNullable<ImportPreparedActions["bodyScopeBindings"]>[number][];
   }) {
-    this.input = input;
+    const bodyScopeBindings = new Map<
+      string,
+      NonNullable<ImportPreparedActions["bodyScopeBindings"]>[number]
+    >();
+    for (const binding of input.bodyScopeBindings ?? []) {
+      if (
+        !Number.isInteger(binding.producerActionIndex) ||
+        !Number.isInteger(binding.consumerActionIndex) ||
+        binding.producerActionIndex < 0 ||
+        binding.producerActionIndex >= binding.consumerActionIndex
+      ) {
+        throw new Error(
+          `Body-scope producer action ${binding.producerActionIndex} must precede consumer action ${binding.consumerActionIndex}.`,
+        );
+      }
+      const key = bodyScopeBindingKey(
+        binding.consumerActionIndex,
+        binding.probeBodyId,
+        binding.source,
+      );
+      if (bodyScopeBindings.has(key)) {
+        throw new Error(`Duplicate body-scope binding declaration for ${key}.`);
+      }
+      bodyScopeBindings.set(key, binding);
+    }
+    this.input = { ...input, bodyScopeBindings };
   }
 
   /** Retain exact signatures already sampled for the current immutable revision. */
@@ -837,18 +879,79 @@ export class ImportDeferredMaterializer {
     return `${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}`;
   }
 
+  private async resolveDeferredBodyScope(
+    selector: ImportDeferredTopologyRef,
+    consumerActionIndex: number | undefined,
+  ): Promise<BodyId | undefined> {
+    if (!selector.bodyScope) return undefined;
+    const scope = consumerActionIndex === undefined
+      ? undefined
+      : this.input.bodyScopeBindings.get(
+          bodyScopeBindingKey(consumerActionIndex, selector.bodyScope, selector.source),
+        );
+    if (!scope) return selector.bodyScope;
+    const output = this.input.outputRecords.get(
+      orderedOutputKey(scope.producerActionIndex),
+    );
+    const outputBodyIds = new Set(output?.bodyIds ?? []);
+    if (outputBodyIds.size === 0) {
+      throw new TopologyApplyRematchError(
+        selector,
+        `body scope producer action ${scope.producerActionIndex} produced no body ids`,
+      );
+    }
+    const snapshot = await this.input.modelingService.getCurrentDocumentSnapshot();
+    const result = await deriveLiveBodySignatures({
+      snapshot,
+      service: this.input.modelingService,
+    });
+    if (result.status !== "available") {
+      throw new TopologyApplyRematchError(selector, "body scope signatures unavailable");
+    }
+    const candidates = result.signatures.filter(
+      (signature) =>
+        signature.entityClass === "face" &&
+        "bodyId" in signature.reference &&
+        outputBodyIds.has(signature.reference.bodyId),
+    );
+    const votes = new Set<BodyId>();
+    let matchedSiblingCount = 0;
+    for (const siblingSignature of scope.siblingSignatures) {
+      const match = matchSignature(siblingSignature, candidates, {
+        ...selector.tolerance,
+        ambiguityMargin: Number.POSITIVE_INFINITY,
+      });
+      if (match.kind === "unique" && "bodyId" in match.reference) {
+        votes.add(match.reference.bodyId);
+        matchedSiblingCount += 1;
+      }
+    }
+    if (votes.size !== 1 || matchedSiblingCount !== scope.siblingSignatures.length) {
+      throw new TopologyApplyRematchError(
+        selector,
+        `body scope action ${scope.producerActionIndex} matched ${matchedSiblingCount}/${scope.siblingSignatures.length} sibling faces across ${votes.size} live bodies`,
+      );
+    }
+    return [...votes][0]!;
+  }
+
   async resolveDeferredTopologyRef(
     selector: ImportDeferredTopologySelector,
+    consumerActionIndex = this.activeConsumerActionIndex,
   ): Promise<DurableRef> {
     if (selector.kind === "historicalTopologyOf") {
       return this.resolveDeferredHistoricalTopologyRef(selector);
     }
+    const bodyScope = await this.resolveDeferredBodyScope(
+      selector,
+      consumerActionIndex,
+    );
     let cache = this.liveSignatureCache;
-    let signatureResult = cache?.byBodyScope.get(selector.bodyScope);
+    let signatureResult = cache?.byBodyScope.get(bodyScope);
     const allBodyResult = cache?.byBodyScope.get(undefined);
     if (
       !signatureResult &&
-      selector.bodyScope !== undefined &&
+      bodyScope !== undefined &&
       allBodyResult?.status === "available"
     ) {
       signatureResult = {
@@ -856,10 +959,10 @@ export class ImportDeferredMaterializer {
         signatures: allBodyResult.signatures.filter(
           (signature) =>
             "bodyId" in signature.reference &&
-            signature.reference.bodyId === selector.bodyScope,
+            signature.reference.bodyId === bodyScope,
         ),
       };
-      cache?.byBodyScope.set(selector.bodyScope, signatureResult);
+      cache?.byBodyScope.set(bodyScope, signatureResult);
     }
 
     if (!signatureResult) {
@@ -868,16 +971,16 @@ export class ImportDeferredMaterializer {
         cache = { revisionId: snapshot.document.revisionId, byBodyScope: new Map() };
         this.liveSignatureCache = cache;
       }
-      signatureResult = cache.byBodyScope.get(selector.bodyScope);
+      signatureResult = cache.byBodyScope.get(bodyScope);
       if (!signatureResult) {
-        const scopedSnapshot = selector.bodyScope === undefined
+        const scopedSnapshot = bodyScope === undefined
           ? snapshot
           : {
               ...snapshot,
               document: {
                 ...snapshot.document,
                 bodies: snapshot.document.bodies.filter(
-                  (body) => body.bodyId === selector.bodyScope,
+                  (body) => body.bodyId === bodyScope,
                 ),
               },
             };
@@ -885,7 +988,7 @@ export class ImportDeferredMaterializer {
           snapshot: scopedSnapshot,
           service: this.input.modelingService,
         });
-        cache.byBodyScope.set(selector.bodyScope, signatureResult);
+        cache.byBodyScope.set(bodyScope, signatureResult);
       }
     }
     const allSignatures: HistoryProbeTopologySignature[] =
@@ -894,9 +997,9 @@ export class ImportDeferredMaterializer {
       (signature) =>
         signature.entityClass === selector.expectedKind &&
         signature.reference.kind === selector.expectedKind &&
-        (selector.bodyScope === undefined ||
+        (bodyScope === undefined ||
           ("bodyId" in signature.reference &&
-            signature.reference.bodyId === selector.bodyScope)),
+            signature.reference.bodyId === bodyScope)),
     );
     const match = matchSignature(selector.capturedSignature, signatures, selector.tolerance);
     if (match.kind !== "unique" || match.reference.kind !== selector.expectedKind) {
@@ -1187,6 +1290,19 @@ export class ImportDeferredMaterializer {
     } as ExtrudeFeatureExtent;
   }
 
+  private async withConsumerActionIndex<T>(
+    consumerActionIndex: number | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.activeConsumerActionIndex;
+    this.activeConsumerActionIndex = consumerActionIndex;
+    try {
+      return await operation();
+    } finally {
+      this.activeConsumerActionIndex = previous;
+    }
+  }
+
   async materializeFeatureRequest(
     request: ImportPreparedActions["createFeatures"] extends
       | (infer Entry)[]
@@ -1194,20 +1310,23 @@ export class ImportDeferredMaterializer {
       ? Entry
       : never,
     consumer: ImportPreparedActionRef,
+    consumerActionIndex?: number,
   ): Promise<CreateFeatureRequest> {
-    try {
-      return await this.materializeFeatureRequestUnchecked(request, consumer);
-    } catch (error) {
-      if (!(error instanceof TopologyApplyRematchError) || !request.topologyFallback) {
-        throw error;
+    return this.withConsumerActionIndex(consumerActionIndex, async () => {
+      try {
+        return await this.materializeFeatureRequestUnchecked(request, consumer);
+      } catch (error) {
+        if (!(error instanceof TopologyApplyRematchError) || !request.topologyFallback) {
+          throw error;
+        }
+        if (error.selector.kind !== "topologyOf") throw error;
+        this.topologyFallbackSource = error.selector.source;
+        return this.materializeFeatureRequestUnchecked(
+          request.topologyFallback,
+          consumer,
+        );
       }
-      if (error.selector.kind !== "topologyOf") throw error;
-      this.topologyFallbackSource = error.selector.source;
-      return this.materializeFeatureRequestUnchecked(
-        request.topologyFallback,
-        consumer,
-      );
-    }
+    });
   }
 
   private async materializeFeatureRequestUnchecked(
@@ -1487,33 +1606,36 @@ export class ImportDeferredMaterializer {
   async materializeCommitSketchRequest(
     request: ImportCommitSketchRequest,
     consumer: ImportPreparedActionRef,
+    consumerActionIndex?: number,
   ): Promise<CommitSketchRequest> {
-    const support = request.plane.support;
-    if (support.kind === "splitInterfaceFaceOf") {
-      const resolvedSupport = await this.resolveDeferredSplitInterfaceFace(support);
+    return this.withConsumerActionIndex(consumerActionIndex, async () => {
+      const support = request.plane.support;
+      if (support.kind === "splitInterfaceFaceOf") {
+        const resolvedSupport = await this.resolveDeferredSplitInterfaceFace(support);
+        return {
+          ...request,
+          plane: { ...request.plane, support: resolvedSupport },
+        } as CommitSketchRequest;
+      }
+      if (isDeferredTopologyRef(support)) {
+        const resolvedSupport = await this.resolveDeferredTopologyRef(support);
+        return {
+          ...request,
+          plane: { ...request.plane, support: resolvedSupport },
+        } as CommitSketchRequest;
+      }
+      if (!isDeferredValue(support)) {
+        return request as unknown as CommitSketchRequest;
+      }
+      const resolvedSupport = await this.resolveDeferredValue(support, consumer);
       return {
         ...request,
-        plane: { ...request.plane, support: resolvedSupport },
-      } as CommitSketchRequest;
-    }
-    if (isDeferredTopologyRef(support)) {
-      const resolvedSupport = await this.resolveDeferredTopologyRef(support);
-      return {
-        ...request,
-        plane: { ...request.plane, support: resolvedSupport },
-      } as CommitSketchRequest;
-    }
-    if (!isDeferredValue(support)) {
-      return request as unknown as CommitSketchRequest;
-    }
-    const resolvedSupport = await this.resolveDeferredValue(support, consumer);
-    return {
-      ...request,
-      plane: {
-        ...request.plane,
-        support: resolvedSupport,
-      },
-    } as unknown as CommitSketchRequest;
+        plane: {
+          ...request.plane,
+          support: resolvedSupport,
+        },
+      } as unknown as CommitSketchRequest;
+    });
   }
 }
 
@@ -1545,6 +1667,7 @@ export async function applyImportPreparedActions(input: {
   const materializer = new ImportDeferredMaterializer({
     modelingService: input.modelingService,
     outputRecords,
+    bodyScopeBindings: input.actions.bodyScopeBindings,
   });
 
   const applyVariable = async (index: number) => {
@@ -1575,7 +1698,11 @@ export async function applyImportPreparedActions(input: {
   const applyFeature = async (index: number) => {
     const request = (input.actions.createFeatures ?? [])[index];
     const consumer = { kind: "createFeature" as const, index };
-    const materialized = await materializer.materializeFeatureRequest(request, consumer);
+    const materialized = await materializer.materializeFeatureRequest(
+      request,
+      consumer,
+      currentOrderedPosition,
+    );
     const fallbackSource = materializer.takeTopologyFallbackSource();
     const result = await input.modelingService.createFeature({
       ...materialized,
@@ -1634,7 +1761,11 @@ export async function applyImportPreparedActions(input: {
     const request = (input.actions.commitSketches ?? [])[index];
     const consumer = { kind: "commitSketch" as const, index };
     const result = await input.modelingService.commitSketch({
-      ...(await materializer.materializeCommitSketchRequest(request, consumer)),
+      ...(await materializer.materializeCommitSketchRequest(
+        request,
+        consumer,
+        currentOrderedPosition,
+      )),
       baseRevisionId: revisionId,
     });
     if (result.isErr()) throw result.error;

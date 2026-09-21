@@ -155,6 +155,18 @@ export interface SketchEditToolState {
 export interface SketchSessionState {
   actionContextId: SketchId;
   actionAvailability?: { canUndo: boolean; canRedo: boolean };
+  actionHistory?: {
+    undo: readonly {
+      sequence: number;
+      label: string;
+      blockedReason?: string;
+    }[];
+    redo: readonly {
+      sequence: number;
+      label: string;
+      blockedReason?: string;
+    }[];
+  };
   sketchId: SketchId | null;
   sketchLabel: string;
   plane: SketchPlaneDefinition;

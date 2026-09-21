@@ -153,6 +153,55 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       "Worker-backed mutations should preserve repository metadata.",
     ).toBeTruthy();
 
+    const pendingFailure = repository.mutate({
+      expected: seed,
+      documentId: seed.documentId,
+      document: seed,
+    });
+    const failedMutateRequest = worker.takePosted("mutate");
+    worker.emit({
+      kind: "mutated",
+      requestId: failedMutateRequest.requestId,
+      result: {
+        ok: false,
+        status: {
+          kind: "failed",
+          documentId: seed.documentId,
+          diagnostic: {
+            reasonCode: "automerge-durability-failed",
+            message: "flush failed",
+          },
+        },
+        appliedLive: {
+          document: { ...seed, name: "Live merged publication" },
+          metadata: {
+            documentId: seed.documentId,
+            actorId: "actor_worker",
+            heads: ["head_live"],
+            source: "local",
+          },
+        },
+      },
+    });
+    await flushAsync();
+    const failedNormalizeRequest = worker.takePosted("normalize");
+    worker.emit({
+      kind: "normalized",
+      requestId: failedNormalizeRequest.requestId,
+      result: {
+        document: failedNormalizeRequest.document,
+        diagnostics: [],
+        metadata: failedNormalizeRequest.metadata,
+      },
+    });
+    const failedMutation = await pendingFailure;
+    expect(
+      !failedMutation.ok && failedMutation.appliedLive?.document.name,
+    ).toBe("Live merged publication");
+    expect(
+      !failedMutation.ok && failedMutation.appliedLive?.metadata.heads,
+    ).toEqual(["head_live"]);
+
     const asset = await createDeterministicGeometryAsset({
       ownerFeatureIds: [seed.features[0]!.featureId],
     });
@@ -332,8 +381,9 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
       "Worker-backed repositories should proxy durable-history availability queries.",
     ).toBeTruthy();
 
-    const undoPromise = repository.undoDurableHistory(seed.documentId);
+    const undoPromise = repository.undoDurableHistory(seed.documentId, 17);
     const undoRequest = worker.takePosted("undoDurableHistory");
+    expect(undoRequest.actionSequence).toBe(17);
     worker.emit({
       kind: "durableHistoryMutated",
       requestId: undoRequest.requestId,

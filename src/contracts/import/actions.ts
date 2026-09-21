@@ -76,6 +76,19 @@ export interface ImportTopologySelectorSource {
   deterministicId: string;
 }
 
+export interface ImportBodyScopeBinding {
+  /** Probe-session body id referenced by this exact prepared topology selector. */
+  probeBodyId: BodyId;
+  /** Ordered action that consumes the selector. */
+  consumerActionIndex: number;
+  /** Existing selector provenance disambiguating fields/queries within the consumer. */
+  source: ImportTopologySelectorSource;
+  /** Exact earlier prepared action whose accepted result produced candidate bodies. */
+  producerActionIndex: number;
+  /** Captured sibling-face evidence that must vote unanimously for one live output body. */
+  siblingSignatures: readonly OnshapeGeometricSignature[];
+}
+
 /** Selector rematched against live topology immediately before its consumer applies. */
 export interface ImportDeferredTopologyRef {
   kind: "topologyOf";
@@ -94,9 +107,8 @@ export interface ImportDeferredTopologyRef {
    * Split pieces share a coincident face, so a geometric signature alone names
    * two live faces. Review derives this scope from the captured body that owns
    * the captured entity (exact per-face evidence, see
-   * `scopeLiveSignaturesToCapturedBody`) and carries it into apply, where the
-   * same prefix reproduces the same deterministic body ids. Absent means no
-   * scope was provable and the rematch stays unrestricted.
+   * `scopeLiveSignaturesToCapturedBody`). Absent means no scope was provable
+   * and the rematch stays unrestricted.
    */
   bodyScope?: BodyId;
 }
@@ -477,6 +489,8 @@ export interface ImportPreparedActions {
    * a permutation referencing every prepared action exactly once.
    */
   orderedActions?: ImportPreparedActionRef[];
+  /** Action-relative bindings for probe-local body scopes used by topology selectors. */
+  bodyScopeBindings?: ImportBodyScopeBinding[];
   binding?: ImportBinding;
   diagnostics?: ImportDiagnostic[];
 }

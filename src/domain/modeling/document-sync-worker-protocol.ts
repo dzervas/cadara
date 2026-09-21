@@ -164,11 +164,13 @@ export type DocumentSyncWorkerRequest =
       kind: "undoDurableHistory";
       requestId: RequestId;
       documentId: DocumentId;
+      actionSequence?: number;
     }
   | {
       kind: "redoDurableHistory";
       requestId: RequestId;
       documentId: DocumentId;
+      actionSequence?: number;
     };
 
 export type DocumentSyncWorkerResponse =

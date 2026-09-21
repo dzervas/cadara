@@ -17,9 +17,11 @@ export interface DurableHistoryService {
   }): Promise<DurableHistoryAvailability>;
   undo(input: {
     documentId: DocumentId;
+    actionSequence?: number;
   }): Promise<DurableHistoryActionResult | null>;
   redo(input: {
     documentId: DocumentId;
+    actionSequence?: number;
   }): Promise<DurableHistoryActionResult | null>;
 }
 export const DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS = 90_000;
@@ -143,14 +145,15 @@ export function createDurableHistoryService(input: {
   async function compensate(
     documentId: DocumentId,
     direction: "undo" | "redo",
+    actionSequence?: number,
   ): Promise<DurableHistoryActionResult | null> {
     if (!documentRepository) return null;
     await modelingService.waitForPersistence();
     const waiter = createRepositoryChangeWaiter(documentId);
     try {
       const result = await (direction === "undo"
-        ? documentRepository.undoDurableHistory(documentId)
-        : documentRepository.redoDurableHistory(documentId));
+        ? documentRepository.undoDurableHistory(documentId, actionSequence)
+        : documentRepository.redoDurableHistory(documentId, actionSequence));
       if (!result) return null;
       if (!result.ok)
         throw new Error(
@@ -170,7 +173,9 @@ export function createDurableHistoryService(input: {
   }
   return {
     getAvailability,
-    undo: ({ documentId }) => compensate(documentId, "undo"),
-    redo: ({ documentId }) => compensate(documentId, "redo"),
+    undo: ({ documentId, actionSequence }) =>
+      compensate(documentId, "undo", actionSequence),
+    redo: ({ documentId, actionSequence }) =>
+      compensate(documentId, "redo", actionSequence),
   };
 }

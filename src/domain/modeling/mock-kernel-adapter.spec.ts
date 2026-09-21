@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { MockKernelAdapter } from "./mock-kernel-adapter";
 import {
   createModelingService,
@@ -721,6 +722,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
         regionRequestId: "request_commit_1:regions",
       },
       sketchId: "sketch_phase8",
+      restoreRecordedSketchId: true,
       sketchLabel: "Phase 8 Sketch",
       plane: sourceSketch.plane,
       definition: sourceSketch.sketch.definition,
@@ -730,11 +732,35 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       contractVersion: "modeling-contract/v1alpha1",
       documentId: "doc_workspace",
     });
+    const collision = await adapter.commitSketch({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: committed.revisionId,
+      solverCorrelation: {
+        requestId: "request_commit_collision",
+        projectionRequestId: "request_commit_collision:project",
+        validationRequestId: "request_commit_collision:validate",
+        solveRequestId: "request_commit_collision:solve",
+        regionRequestId: "request_commit_collision:regions",
+      },
+      sketchId: committed.sketchId,
+      restoreRecordedSketchId: true,
+      sketchLabel: "Colliding restore",
+      plane: sourceSketch.plane,
+      definition: sourceSketch.sketch.definition,
+    });
 
     expect(
       committed.revisionState.kind,
       "Accepted sketch commits must report accepted revision state.",
     ).toBe("accepted");
+    expect(
+      collision.revisionState.kind,
+      "Restoring an already-live recorded identity must reject the collision.",
+    ).toBe("rejected");
+    expect(collision.revisionState).toMatchObject({
+      reasonCode: "mock-sketch-id-collision",
+    });
     expect(
       after.snapshot.document.revisionId,
       "Committed sketch revisions must match the observed snapshot revision.",
@@ -957,6 +983,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
         regionRequestId: "request_commit_projection:regions",
       },
       sketchId: "sketch_projected_snapshot",
+      restoreRecordedSketchId: true,
       sketchLabel: "Projected Snapshot Sketch",
       plane: sourceSketch.plane,
       definition,
@@ -1001,6 +1028,24 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       documentId: "doc_workspace",
     });
 
+    const sourceSketch = snapshot.snapshot.document.sketches[0]!;
+    const missingSketchEdit = await adapter.commitSketch({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: snapshot.snapshot.document.revisionId,
+      solverCorrelation: {
+        requestId: "request_commit_missing",
+        projectionRequestId: "request_commit_missing:project",
+        validationRequestId: "request_commit_missing:validate",
+        solveRequestId: "request_commit_missing:solve",
+        regionRequestId: "request_commit_missing:regions",
+      },
+      sketchId: "sketch_missing",
+      sketchLabel: "Missing Sketch",
+      plane: sourceSketch.plane,
+      definition: sourceSketch.sketch.definition,
+    });
+
     const missingUpdate = await adapter.updateFeature({
       contractVersion: "modeling-contract/v1alpha1",
       documentId: "doc_workspace",
@@ -1036,6 +1081,13 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       beforeFeatureId: "feature_missing",
     });
 
+    expect(
+      missingSketchEdit.revisionState.kind,
+      "Editing a missing sketch must reject rather than upsert.",
+    ).toBe("rejected");
+    expect(missingSketchEdit.revisionState).toMatchObject({
+      reasonCode: "mock-missing-sketch",
+    });
     expect(
       missingUpdate.revisionState.kind,
       "Updates targeting missing features must be rejected.",
@@ -1110,6 +1162,35 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       ),
       "Generic sketch deletion should remove the sketch from authored history.",
     ).toBeTruthy();
+    const replacementAdapter = new MockKernelAdapter({
+      solverAdapter: new MockSketchSolverAdapter({
+        documentId: "doc_workspace",
+        revisionId: afterSketchDelete.snapshot.document.revisionId,
+      }),
+    });
+    await replacementAdapter.restoreAuthoredModelDocument(
+      createAuthoredModelDocumentFromSnapshot(afterSketchDelete.snapshot),
+    );
+    const replacementSketch = await replacementAdapter.commitSketch({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: afterSketchDelete.snapshot.document.revisionId,
+      solverCorrelation: {
+        requestId: "request_replacement_sketch",
+        projectionRequestId: "request_replacement_sketch:project",
+        validationRequestId: "request_replacement_sketch:validate",
+        solveRequestId: "request_replacement_sketch:solve",
+        regionRequestId: "request_replacement_sketch:regions",
+      },
+      sketchId: null,
+      sketchLabel: "Replacement Sketch",
+      plane: initialSketch.snapshot.document.sketches[0]!.plane,
+      definition:
+        initialSketch.snapshot.document.sketches[0]!.sketch.definition,
+    });
+    expect(replacementSketch.revisionState.kind).toBe("accepted");
+    expect(replacementSketch.sketchId).toMatch(/^sketch_[0-9a-f-]{36}$/);
+    expect(replacementSketch.sketchId).not.toBe("sketch_primary");
 
     const bodyAdapter = new MockKernelAdapter();
     const initialBody = await bodyAdapter.getDocumentSnapshot({

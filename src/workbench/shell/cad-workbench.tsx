@@ -600,6 +600,7 @@ export function CadWorkbench({
     snapshot,
   });
   const {
+    contextualActionHistory,
     handleDocumentHistoryReorder,
     handleVariableUpdate,
     isDocumentHistoryReorderRunning,
@@ -1448,6 +1449,10 @@ export function CadWorkbench({
                   onExportDocumentItem={handleDocumentHistoryExport}
                   onRenameDocumentItem={handleDocumentHistoryRename}
                   onSuppressFeature={handleFeatureSuppressionRequested}
+                  actionHistory={contextualActionHistory}
+                  actionHistoryDisabled={isUndoRedoRunning}
+                  onUndoAction={requestUndo}
+                  onRedoAction={requestRedo}
                 />
               </div>
               <div className="pointer-events-auto mt-3">

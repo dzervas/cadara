@@ -162,7 +162,7 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
           solveRequestId: "request_history_commit:solve",
           regionRequestId: "request_history_commit:regions",
         },
-        sketchId: "sketch_history",
+        sketchId: null,
         sketchLabel: "History Sketch",
         plane: seedSketch.plane,
         definition: seedSketch.sketch.definition,
@@ -183,7 +183,7 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
           solveRequestId: "request_history_rename_sketch:solve",
           regionRequestId: "request_history_rename_sketch:regions",
         },
-        sketchId: "sketch_history",
+        sketchId: sketch.sketchId,
         sketchLabel: "Renamed History Sketch",
         plane: seedSketch.plane,
         definition: seedSketch.sketch.definition,
@@ -248,7 +248,7 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
       service.reorderDocumentHistory({
         baseRevisionId: reordered.revisionId,
         item: { kind: "feature", featureId: created.featureId },
-        beforeItem: { kind: "sketch", sketchId: "sketch_history" },
+        beforeItem: { kind: "sketch", sketchId: sketch.sketchId },
       }),
     );
     expect(
@@ -308,7 +308,7 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
     ).toBe(finalHistory.entries.length);
     expect(
       restoredSnapshot.document.sketches.some(
-        (entry) => entry.sketchId === "sketch_history",
+        (entry) => entry.sketchId === sketch.sketchId,
       ),
       "Replay should rebuild persisted sketches.",
     ).toBeTruthy();
@@ -368,10 +368,10 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
     ).toBeTruthy();
     expect(
       originalSnapshot.document.sketches.find(
-        (entry) => entry.sketchId === "sketch_history",
+        (entry) => entry.sketchId === sketch.sketchId,
       )?.label === "Renamed History Sketch" &&
         restoredSnapshot.document.sketches.find(
-          (entry) => entry.sketchId === "sketch_history",
+          (entry) => entry.sketchId === sketch.sketchId,
         )?.label === "Renamed History Sketch",
       "Replay should preserve persisted sketch rename labels.",
     ).toBeTruthy();

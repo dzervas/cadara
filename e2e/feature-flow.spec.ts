@@ -15,9 +15,9 @@ test("extrude previews and commits from the shared feature harness", async ({
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
 
-  await workbench.openWithRectangleProfileFixture();
+  const fixture = await workbench.openWithRectangleProfileFixture();
   await workbench.activateFeature("extrude");
-  await workbench.selectReference(FEATURE_FIXTURE.profile);
+  await workbench.selectReference(fixture.profileTarget);
 
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-1");

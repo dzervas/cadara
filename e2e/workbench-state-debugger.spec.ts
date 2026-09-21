@@ -1,9 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import {
-  FeatureWorkbenchHarness,
-  FEATURE_FIXTURE,
-} from "./helpers/feature-workbench";
+import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import { createBaseExtrudeOperationHistory } from "./helpers/modeling-fixtures";
 
 test.setTimeout(90_000);
@@ -43,9 +40,9 @@ test("feature inspector omits debugger-only contract and revision readouts", asy
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
 
-  await workbench.openWithRectangleProfileFixture();
+  const fixture = await workbench.openWithRectangleProfileFixture();
   await workbench.activateFeature("extrude");
-  await workbench.selectReference(FEATURE_FIXTURE.profile);
+  await workbench.selectReference(fixture.profileTarget);
 
   const inspector = page
     .locator("main")

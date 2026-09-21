@@ -168,6 +168,11 @@ export function createModelingService(
   let repositoryChangePromise = Promise.resolve();
   let repositoryPersistencePromise = Promise.resolve();
   let isRestoringRepositoryDocument = documentRepository !== null;
+  let disposed = false;
+  let adapterDisposed = false;
+  let initializationSettled = false;
+  let initializationPromise: Promise<void> | null = null;
+  let unsubscribeDocumentRepository: (() => void) | undefined;
   const documentChangeListeners = new Set<
     (event: ModelingServiceDocumentChangeEvent) => void
   >();
@@ -701,6 +706,159 @@ export function createModelingService(
     };
   }
 
+  function publicationDocument(
+    base: AuthoredModelDocument,
+    sketchId: AuthoredModelDocument["sketches"][number]["sketchId"],
+    sketch: AuthoredModelDocument["sketches"][number] | null,
+  ) {
+    const document = structuredClone(base);
+    const index = document.sketches.findIndex(
+      (entry) => entry.sketchId === sketchId,
+    );
+    if (sketch === null) {
+      if (index >= 0) document.sketches.splice(index, 1);
+    } else if (index >= 0) {
+      document.sketches[index] = structuredClone(sketch);
+    } else {
+      document.sketches.push(structuredClone(sketch));
+    }
+    return document;
+  }
+
+  async function publishCommittedSketch<
+    T extends {
+      revisionId: RevisionId;
+      revisionState: MutationRevisionState;
+      rebuildResult: RebuildResult;
+      changedTargets: PrimitiveRef[];
+      diagnostics: ModelingDiagnostic[];
+      sketchId: AuthoredModelDocument["sketches"][number]["sketchId"];
+    },
+  >(input: {
+    latestShared: AuthoredModelDocument;
+    normalizedCandidate: AuthoredModelDocument;
+    expectedSketch: AuthoredModelDocument["sketches"][number] | null;
+    result: T;
+  }): Promise<T & { durabilityPending?: boolean }> {
+    if (!documentRepository || input.result.revisionState.kind !== "accepted") {
+      return input.result;
+    }
+    const normalizedSketch = input.normalizedCandidate.sketches.find(
+      (sketch) => sketch.sketchId === input.result.sketchId,
+    );
+    if (!normalizedSketch)
+      throw new Error(
+        `Published sketch ${input.result.sketchId} is missing from the normalized kernel candidate.`,
+      );
+    const expectedSketch = input.expectedSketch
+      ? {
+          ...structuredClone(input.expectedSketch),
+          regionSlots: input.latestShared.sketches.find(
+            (sketch) => sketch.sketchId === input.expectedSketch?.sketchId,
+          )?.regionSlots,
+        }
+      : null;
+    const expected = publicationDocument(
+      input.latestShared,
+      input.result.sketchId,
+      expectedSketch,
+    );
+    const candidate = publicationDocument(
+      expected,
+      input.result.sketchId,
+      normalizedSketch,
+    );
+    if (
+      input.expectedSketch === null &&
+      !candidate.historyOrder.some(
+        (entry) =>
+          entry.kind === "sketch" && entry.sketchId === input.result.sketchId,
+      )
+    ) {
+      candidate.historyOrder.push({
+        kind: "sketch",
+        sketchId: input.result.sketchId,
+      });
+      candidate.cursor = {
+        kind: "sketch",
+        sketchId: input.result.sketchId,
+      };
+    }
+    candidate.revisionId = input.normalizedCandidate.revisionId;
+    const write = await documentRepository.mutate({
+      documentId: currentDocumentId,
+      expected,
+      document: candidate,
+      label: "Publish Sketch",
+    });
+    if (write.ok) {
+      markRepositorySnapshotFresh(write.metadata);
+      await restoreAuthoredRepositoryDocument(
+        write.document,
+        write.diagnostics,
+      );
+      return { ...input.result, revisionId: write.document.revisionId };
+    }
+    if (write.appliedLive) {
+      canPersistAuthoredDocument = false;
+      markRepositorySnapshotFresh(write.appliedLive.metadata);
+      await restoreAuthoredRepositoryDocument(
+        write.appliedLive.document,
+        write.appliedLive.diagnostics,
+      );
+      return {
+        ...input.result,
+        revisionId: write.appliedLive.document.revisionId,
+        durabilityPending: true,
+        diagnostics: [
+          ...input.result.diagnostics,
+          ...(write.appliedLive.diagnostics ?? []),
+          createDocumentRepositoryDiagnostic(write.status),
+        ],
+      };
+    }
+    const restored = await documentRepository.load({
+      documentId: currentDocumentId,
+      seedDocument: input.latestShared,
+    });
+    if (restored.ok) {
+      markRepositorySnapshotFresh(restored.metadata);
+      await restoreAuthoredRepositoryDocument(
+        restored.document,
+        restored.diagnostics,
+      );
+    } else {
+      await restoreAuthoredRepositoryDocument(input.latestShared, [
+        createDocumentRepositoryDiagnostic(restored.status),
+      ]);
+    }
+    const actualRevisionId = restored.ok
+      ? restored.document.revisionId
+      : input.latestShared.revisionId;
+    return {
+      ...input.result,
+      revisionId: actualRevisionId,
+      revisionState: {
+        kind: "conflict",
+        expectedRevisionId: input.latestShared.revisionId,
+        actualRevisionId,
+      },
+      rebuildResult: {
+        kind: "skipped",
+        reasonCode: "revisionConflict",
+        invalidatedTargets: [],
+        diagnostics: [createDocumentRepositoryDiagnostic(write.status)],
+      },
+      changedTargets: [],
+      diagnostics: [
+        createDocumentRepositoryDiagnostic(write.status),
+        ...(restored.ok
+          ? []
+          : [createDocumentRepositoryDiagnostic(restored.status)]),
+      ],
+    };
+  }
+
   async function finalizeMutationResult<
     T extends {
       revisionId: RevisionId;
@@ -760,34 +918,47 @@ export function createModelingService(
     }
   }
 
-  const unsubscribeDocumentRepository = documentRepository?.subscribe(
-    currentDocumentId,
-    (event) => {
-      rememberRepositoryMetadata(event.metadata);
-      if (
-        event.metadata.source !== "peer" &&
-        event.metadata.source !== "undo" &&
-        event.metadata.source !== "redo"
-      ) {
-        if (isRestoringRepositoryDocument) {
+  function subscribeToDocumentRepository() {
+    if (disposed || unsubscribeDocumentRepository || !documentRepository) {
+      return;
+    }
+
+    const unsubscribe = documentRepository.subscribe(
+      currentDocumentId,
+      (event) => {
+        if (disposed) return;
+        rememberRepositoryMetadata(event.metadata);
+        if (
+          event.metadata.source !== "peer" &&
+          event.metadata.source !== "undo" &&
+          event.metadata.source !== "redo"
+        ) {
+          if (isRestoringRepositoryDocument) {
+            return;
+          }
+
+          notifyModelingDocumentChange(event);
           return;
         }
 
-        notifyModelingDocumentChange(event);
-        return;
-      }
-
-      repositoryChangePromise = repositoryChangePromise.then(async () => {
-        await restorePromise;
-        rememberRepositoryMetadata(event.metadata);
-        await restoreAuthoredRepositoryDocument(
-          event.document,
-          event.diagnostics,
-        );
-        notifyModelingDocumentChange(event);
-      });
-    },
-  );
+        repositoryChangePromise = repositoryChangePromise.then(async () => {
+          await ensureInitialized();
+          if (disposed) return;
+          rememberRepositoryMetadata(event.metadata);
+          await restoreAuthoredRepositoryDocument(
+            event.document,
+            event.diagnostics,
+          );
+          if (!disposed) notifyModelingDocumentChange(event);
+        });
+      },
+    );
+    if (disposed) {
+      unsubscribe();
+      return;
+    }
+    unsubscribeDocumentRepository = unsubscribe;
+  }
 
   async function replayOperationHistoryPayload(
     loadResultPayload: ModelingOperationHistoryPayload,
@@ -1013,29 +1184,47 @@ export function createModelingService(
     };
   }
 
-  const restorePromise = (async () => {
-    if (documentRepository) {
-      await restoreRepositoryBackedDocument();
-      return;
+  function ensureInitialized(): Promise<void> {
+    if (disposed) {
+      return Promise.reject(new Error("Modeling service has been disposed."));
     }
+    if (initializationPromise) return initializationPromise;
 
-    await restoreOperationHistoryCompatibility();
-  })()
-    .catch((error: unknown) => {
-      canPersistOperationHistory = false;
-      canPersistAuthoredDocument = false;
-      historyRestoreState = createRestoreFailure(
-        "replay-exception",
-        error instanceof Error
-          ? error.message
-          : "Operation history replay failed unexpectedly.",
-        historyRestoreState.entriesReplayed,
-        historyRestoreState.entriesReplayed,
-      );
-    })
-    .finally(() => {
-      isRestoringRepositoryDocument = false;
+    const initialize = Promise.resolve().then(async () => {
+      if (documentRepository) {
+        await restoreRepositoryBackedDocument();
+        return;
+      }
+
+      await restoreOperationHistoryCompatibility();
     });
+    initializationPromise = initialize
+      .catch((error: unknown) => {
+        canPersistOperationHistory = false;
+        canPersistAuthoredDocument = false;
+        historyRestoreState = createRestoreFailure(
+          "replay-exception",
+          error instanceof Error
+            ? error.message
+            : "Operation history replay failed unexpectedly.",
+          historyRestoreState.entriesReplayed,
+          historyRestoreState.entriesReplayed,
+        );
+      })
+      .finally(() => {
+        isRestoringRepositoryDocument = false;
+        initializationSettled = true;
+        if (disposed) disposeAdapter();
+      });
+    subscribeToDocumentRepository();
+    return initializationPromise;
+  }
+
+  function disposeAdapter() {
+    if (adapterDisposed) return;
+    adapterDisposed = true;
+    adapter.dispose?.();
+  }
 
   function resetOperationHistory() {
     operationHistoryStore?.clear();
@@ -1212,11 +1401,19 @@ export function createModelingService(
     currentDocumentId,
     sketchSolver,
     dispose() {
+      if (disposed) return;
+      disposed = true;
       unsubscribeDocumentRepository?.();
-      adapter.dispose?.();
+      unsubscribeDocumentRepository = undefined;
+      documentChangeListeners.clear();
+      if (!initializationPromise || initializationSettled) {
+        disposeAdapter();
+      }
     },
     subscribeToDocumentChanges(listener) {
+      if (disposed) return () => undefined;
       documentChangeListeners.add(listener);
+      void ensureInitialized();
       if (latestDocumentChangeEvent) {
         queueMicrotask(() => {
           if (
@@ -1240,12 +1437,12 @@ export function createModelingService(
       };
     },
     async waitForPersistence() {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       await repositoryPersistencePromise;
     },
     async getHistoryRestoreState() {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       return historyRestoreState;
     },
@@ -1254,7 +1451,7 @@ export function createModelingService(
       return adapter.setSnapshotLodTier?.(tierId) ?? false;
     },
     async getCurrentDocumentSnapshot() {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       const response = await adapter.getDocumentSnapshot(
         buildDocumentRequest(currentDocumentId),
@@ -1264,7 +1461,7 @@ export function createModelingService(
       );
     },
     async buildNativeExactBrepPayload(input) {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       if (!adapter.buildNativeExactBrepPayload) {
         return {
@@ -1287,12 +1484,12 @@ export function createModelingService(
       return result as OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>;
     },
     async createNewDocument() {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       return replaceCurrentAuthoredDocument(await getSeedAuthoredDocument());
     },
     async importDocument(input) {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       const normalized = normalizeImportedDocument(input.document);
       if (!normalized.ok) {
@@ -1305,7 +1502,7 @@ export function createModelingService(
       );
     },
     async renameDocument(input) {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       const document = await exportAuthoredDocumentForRepository();
       if (document.name === input.name) {
@@ -1328,7 +1525,7 @@ export function createModelingService(
       });
     },
     async bindLocalFile(input) {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       if (!isLocalFileSyncDocumentRepository(documentRepository)) {
         return {
@@ -1372,7 +1569,7 @@ export function createModelingService(
       };
     },
     async restoreLocalFileBinding() {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       if (!isLocalFileSyncDocumentRepository(documentRepository)) {
         return null;
@@ -1399,7 +1596,7 @@ export function createModelingService(
       });
     },
     async exportCurrentDocument() {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       const document = await exportAuthoredDocumentForRepository();
 
@@ -1420,15 +1617,41 @@ export function createModelingService(
         requestId: input.solverCorrelation?.requestId,
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
-          const request = normalizeCommitSketchInput(input, currentDocumentId);
-          const expected = await exportAuthoredDocumentForRepository();
+          const latestShared = await exportAuthoredDocumentForRepository();
+          const request = normalizeCommitSketchInput(
+            input.publicationBase
+              ? {
+                  ...input,
+                  baseRevisionId: latestShared.revisionId,
+                  baseRepositoryHeads: undefined,
+                }
+              : input,
+            currentDocumentId,
+          );
           const response = await adapter.commitSketch(request);
+          const result = mapCommitSketchResponse(response, currentDocumentId);
+          if (input.publicationBase && isAcceptedMutation(response)) {
+            const normalizedCandidate =
+              await exportAuthoredDocumentForRepository();
+            const published = await publishCommittedSketch({
+              latestShared,
+              normalizedCandidate,
+              expectedSketch: input.publicationBase.expectedSketch,
+              result,
+            });
+            if (published.revisionState.kind === "accepted") {
+              appendOperationHistoryEntry(
+                createCommitSketchHistoryEntry(request, response.sketchId),
+              );
+            }
+            return published;
+          }
           return finalizeMutationResult(
-            expected,
+            latestShared,
             response,
-            mapCommitSketchResponse(response, currentDocumentId),
+            result,
             input,
             () => createCommitSketchHistoryEntry(request, response.sketchId),
           );
@@ -1436,7 +1659,7 @@ export function createModelingService(
       });
     },
     async projectSketchExternalReferences(input) {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       return adapter.projectSketchExternalReferences(
         withContractVersion<ProjectSketchExternalReferencesRequest>({
@@ -1451,7 +1674,7 @@ export function createModelingService(
         fallbackMessage: "Add document variable failed.",
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeAddDocumentVariableInput(
             input,
@@ -1482,7 +1705,7 @@ export function createModelingService(
           { key: "variableId", value: input.variableId },
         ],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeUpdateDocumentVariableInput(
             input,
@@ -1506,7 +1729,7 @@ export function createModelingService(
         fallbackMessage: "Create feature failed.",
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeCreateFeatureInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
@@ -1530,7 +1753,7 @@ export function createModelingService(
           { key: "featureId", value: input.featureId },
         ],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeUpdateFeatureInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
@@ -1556,7 +1779,7 @@ export function createModelingService(
           { key: "featureId", value: input.featureId },
         ],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeSetFeatureSuppressionInput(
             input,
@@ -1583,7 +1806,7 @@ export function createModelingService(
           { key: "featureId", value: input.featureId },
         ],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeDeleteFeatureInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
@@ -1607,7 +1830,7 @@ export function createModelingService(
           { key: "target", value: getPrimitiveRefKey(input.target) },
         ],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeDeleteTargetInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
@@ -1631,7 +1854,7 @@ export function createModelingService(
           { key: "bodyId", value: input.bodyId },
         ],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeRenameBodyInput(input, currentDocumentId);
           const expected = await exportAuthoredDocumentForRepository();
@@ -1655,7 +1878,7 @@ export function createModelingService(
           { key: "featureId", value: input.featureId },
         ],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeReorderFeatureInput(
             input,
@@ -1688,7 +1911,7 @@ export function createModelingService(
           },
         ],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeReorderDocumentHistoryInput(
             input,
@@ -1712,7 +1935,7 @@ export function createModelingService(
         fallbackMessage: "Set feature cursor failed.",
         context: [{ key: "baseRevisionId", value: input.baseRevisionId }],
         action: async () => {
-          await restorePromise;
+          await ensureInitialized();
           await repositoryChangePromise;
           const request = normalizeSetFeatureCursorInput(
             input,
@@ -1733,7 +1956,7 @@ export function createModelingService(
       });
     },
     async evaluatePreview(input) {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       const response = await adapter.evaluatePreview(
         normalizePreviewInput(input, currentDocumentId),
@@ -1742,7 +1965,7 @@ export function createModelingService(
       return mapPreviewResponse(response, currentDocumentId);
     },
     async exportDocument(input) {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       const request = normalizeExportDocumentInput(input, currentDocumentId);
 
@@ -1811,7 +2034,7 @@ export function createModelingService(
       });
     },
     async resolveReference(target) {
-      await restorePromise;
+      await ensureInitialized();
       await repositoryChangePromise;
       const response = await adapter.resolveReference(
         normalizeResolveReferenceInput(target, currentDocumentId),

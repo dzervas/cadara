@@ -11,6 +11,10 @@ import {
   writeHistoryTimelineCollapsedPreference,
 } from "@/components/layout/history-timeline-shell-state";
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
+import {
+  HistoryActionStrip,
+  type HistoryActionStripEntry,
+} from "@/components/layout/history-action-strip";
 import { type SketchSessionState } from "@/domain/editor/sketch-session";
 import type {
   DocumentFeatureCursor,
@@ -46,6 +50,13 @@ interface HistoryTimelineShellProps {
     item: Extract<DocumentHistoryItemRecord, { kind: "feature" }>,
   ) => void;
   visibleSelection: PrimitiveRef[];
+  actionHistory?: {
+    undo: readonly HistoryActionStripEntry[];
+    redo: readonly HistoryActionStripEntry[];
+  };
+  onUndoAction?: (actionSequence: number) => void;
+  onRedoAction?: (actionSequence: number) => void;
+  actionHistoryDisabled?: boolean;
 }
 
 export function HistoryTimelineShell({
@@ -64,6 +75,10 @@ export function HistoryTimelineShell({
   onChangeSketchPlaneTarget,
   onSuppressFeature,
   visibleSelection,
+  actionHistory = { undo: [], redo: [] },
+  onUndoAction = () => undefined,
+  onRedoAction = () => undefined,
+  actionHistoryDisabled = false,
 }: HistoryTimelineShellProps) {
   const activeMode = sketchSession ? "sketch" : "document";
   const [collapsed, setCollapsed] = useState(() =>
@@ -127,6 +142,17 @@ export function HistoryTimelineShell({
           </ActionIcon>
         </Tooltip>
       </div>
+      {!collapsed ? (
+        <div className="pointer-events-auto absolute bottom-16 right-7 z-20 max-w-[70vw] overflow-x-auto">
+          <HistoryActionStrip
+            undo={actionHistory.undo}
+            redo={actionHistory.redo}
+            disabled={actionHistoryDisabled}
+            onUndo={onUndoAction}
+            onRedo={onRedoAction}
+          />
+        </div>
+      ) : null}
       <div
         className={`motion-reduce:transition-none ${collapsed ? "pointer-events-none" : ""}`}
         aria-hidden={panelMotion.ariaHidden}
