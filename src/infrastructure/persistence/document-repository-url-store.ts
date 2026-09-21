@@ -7,6 +7,8 @@ import type { DocumentId } from "@/contracts/shared/ids";
 const DEFAULT_DOCUMENT_REPOSITORY_URL_STORAGE_KEY =
   "cad.documentRepository.automergeUrls.v1";
 const DEFAULT_DOCUMENT_REPOSITORY_NAMESPACE = "cad-authored-documents";
+const LOCAL_PEER_DOCUMENT_REPOSITORY_NAMESPACE_PREFIX =
+  "cad-local-peer-channel:";
 
 export interface DocumentRepositoryUrlStore {
   get(documentId: DocumentId): AutomergeUrl | null;
@@ -88,8 +90,16 @@ export function createDocumentRepositoryUrlStorageKey(
 }
 
 export function getDocumentRepositoryStorageNamespace(search: string) {
+  const searchParams = new URLSearchParams(search);
+  if (searchParams.get("cadLocalPeerSync") === "1") {
+    const channelName =
+      searchParams.get("cadLocalPeerSyncChannel") ??
+      DEFAULT_DOCUMENT_REPOSITORY_NAMESPACE;
+    return `${LOCAL_PEER_DOCUMENT_REPOSITORY_NAMESPACE_PREFIX}${encodeURIComponent(channelName)}`;
+  }
+
   return (
-    new URLSearchParams(search).get("cadRepositoryDbName") ??
+    searchParams.get("cadRepositoryDbName") ??
     DEFAULT_DOCUMENT_REPOSITORY_NAMESPACE
   );
 }

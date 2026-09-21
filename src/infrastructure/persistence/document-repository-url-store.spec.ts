@@ -80,6 +80,33 @@ test("src/infrastructure/persistence/document-repository-url-store.spec.ts", () 
       "?cadRepositoryDbName=cad-e2e-alt-db",
     ) === "cad-e2e-alt-db" &&
       getDocumentRepositoryStorageNamespace("") === "cad-authored-documents",
-    "Repository storage namespaces should derive from the backend search params and fall back to the default database name.",
+    "Non-peer repository storage namespaces should derive from the backend search params and fall back to the default database name.",
+  ).toBeTruthy();
+
+  const peerChannelNamespace = getDocumentRepositoryStorageNamespace(
+    "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=team%3Aalpha&cadRepositoryDbName=peer-db-a",
+  );
+  expect(
+    peerChannelNamespace ===
+      getDocumentRepositoryStorageNamespace(
+        "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=team%3Aalpha&cadRepositoryDbName=peer-db-b",
+      ),
+    "Opt-in peers on the same channel should share one Automerge URL namespace despite using distinct repository databases.",
+  ).toBeTruthy();
+  expect(
+    peerChannelNamespace !==
+      getDocumentRepositoryStorageNamespace(
+        "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=team%253Aalpha&cadRepositoryDbName=peer-db-a",
+      ) &&
+      peerChannelNamespace !== "team:alpha" &&
+      peerChannelNamespace !== "peer-db-a",
+    "Peer channel namespaces should encode channel identities without colliding with raw channel or database namespaces.",
+  ).toBeTruthy();
+  expect(
+    getDocumentRepositoryStorageNamespace("?cadLocalPeerSync=1") ===
+      getDocumentRepositoryStorageNamespace(
+        "?cadLocalPeerSync=1&cadLocalPeerSyncChannel=cad-authored-documents",
+      ),
+    "Peer sync without a channel should use the network adapter's default channel namespace.",
   ).toBeTruthy();
 });
