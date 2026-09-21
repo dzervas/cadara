@@ -19,6 +19,7 @@ import {
   createEditorEventLoop,
   type EditorEventLoop,
 } from "@/application/editor/editor-event-loop";
+import type { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
 
 export function useEditorEventLoop(
   runtime: EditorEffectRuntime,
@@ -29,6 +30,7 @@ export function useEditorEventLoop(
     runtime: EditorEffectRuntime,
   ) => Promise<EditorEvent>,
   traceListener?: EditorEventLoopTraceListener,
+  sketchActions?: SketchAuthoredActions,
 ) {
   const eventLoopRef = useRef<EditorEventLoop | null>(null);
   const pendingEventsRef = useRef<EditorEvent[]>([]);
@@ -40,8 +42,9 @@ export function useEditorEventLoop(
         errorReporter,
         executeEffect,
         dependencies,
+        sketchActions,
       ),
-    [dependencies, errorReporter, executeEffect, runtime],
+    [dependencies, errorReporter, executeEffect, runtime, sketchActions],
   );
   const [machineState, setMachineState] = useState(
     () => eventLoop.getState() ?? initialEditorState,

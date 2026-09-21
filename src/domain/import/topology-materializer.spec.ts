@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import type {
+  ImportBodyScopeBinding,
   ImportCreateFeatureRequest,
   ImportDeferredTopologyRef,
 } from "@/contracts/import/actions";
@@ -14,6 +15,7 @@ import {
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
 import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
+import cylinderFixture from "@/domain/modeling/occ/fixtures/topology-signatures/cylinder-boss.payload.json";
 
 function region(regionId: string, entityId = "boundary"): RegionRecord {
   return {
@@ -36,19 +38,31 @@ function region(regionId: string, entityId = "boundary"): RegionRecord {
   } as RegionRecord;
 }
 
-function payload(bodyId: BodyId) {
+function payloadFromFixture(
+  bodyId: BodyId,
+  fixture: { exactBrep: unknown },
+) {
   return createOccNativeExactBrepPayloadFromShimPayload({
     revisionId: "rev_live" as RevisionId,
     target: { kind: "body", bodyId },
     bodyId,
-    bodyLabel: "Live box",
-    nativePayload: parseNativeShimPayloadJson(JSON.stringify(boxFixture.exactBrep)),
+    bodyLabel: "Live body",
+    nativePayload: parseNativeShimPayloadJson(JSON.stringify(fixture.exactBrep)),
   });
+}
+
+function payload(bodyId: BodyId) {
+  return payloadFromFixture(bodyId, boxFixture);
 }
 
 const livePayload = payload("body_live" as BodyId);
 const derived = deriveKernelTopologySignaturesFromExactBrepPayload(livePayload);
-if (derived.status !== "available") throw new Error("Expected fixture signatures.");
+const cylinderDerived = deriveKernelTopologySignaturesFromExactBrepPayload(
+  payloadFromFixture("body_cylinder" as BodyId, cylinderFixture),
+);
+if (derived.status !== "available" || cylinderDerived.status !== "available") {
+  throw new Error("Expected fixture signatures.");
+}
 
 function selector(kind: "body" | "face" | "edge" | "vertex"): ImportDeferredTopologyRef {
   const signature = derived.signatures.find((entry) => entry.entityClass === kind)!;
@@ -869,6 +883,227 @@ test("materializes advanced bodyOf participants as durable body targets", async 
       ],
     },
   });
+});
+
+function capturedSignature(
+  signature: (typeof derived.signatures)[number],
+) {
+  return {
+    entityClass: signature.entityClass,
+    geometryType: signature.geometryType,
+    definingData: signature.definingData,
+    centroid: signature.centroid,
+    boundingBox: signature.boundingBox,
+  };
+}
+
+function scopedSelector(
+  consumerFeatureId: string,
+  parameterId: string,
+  deterministicId: string,
+) {
+  const face = derived.signatures.find((entry) => entry.entityClass === "face")!;
+  return {
+    ...selector("face"),
+    capturedSignature: capturedSignature(face),
+    source: { consumerFeatureId, parameterId, deterministicId },
+    bodyScope: "body_probe_shared" as BodyId,
+  };
+}
+
+function scopeBinding(input: {
+  consumerActionIndex: number;
+  producerActionIndex: number;
+  selector: ImportDeferredTopologyRef;
+  siblingSignatures?: ImportBodyScopeBinding["siblingSignatures"];
+}): ImportBodyScopeBinding {
+  const sibling = derived.signatures.find(
+    (entry) =>
+      entry.entityClass === "face" &&
+      JSON.stringify(capturedSignature(entry)) !==
+        JSON.stringify(input.selector.capturedSignature),
+  )!;
+  return {
+    probeBodyId: input.selector.bodyScope!,
+    consumerActionIndex: input.consumerActionIndex,
+    source: input.selector.source,
+    producerActionIndex: input.producerActionIndex,
+    siblingSignatures: input.siblingSignatures ?? [capturedSignature(sibling)],
+  };
+}
+
+function bodyScopeMaterializer(input: {
+  bodies: readonly { bodyId: BodyId; fixture: { exactBrep: unknown } }[];
+  outputs?: ReadonlyMap<string, { bodyIds: BodyId[] }>;
+  bindings?: readonly ImportBodyScopeBinding[];
+}) {
+  const fixtureByBody = new Map(
+    input.bodies.map(({ bodyId, fixture }) => [bodyId, fixture]),
+  );
+  return new ImportDeferredMaterializer({
+    outputRecords: new Map(input.outputs),
+    bodyScopeBindings: input.bindings,
+    modelingService: {
+      async getCurrentDocumentSnapshot() {
+        return {
+          document: {
+            revisionId: "rev_scoped_binding",
+            bodies: input.bodies.map(({ bodyId }) => ({ bodyId })),
+          },
+        } as never;
+      },
+      async buildNativeExactBrepPayload(request) {
+        const fixture = fixtureByBody.get(request.target.bodyId);
+        if (!fixture) throw new Error(`No current body ${request.target.bodyId}.`);
+        return {
+          kind: "nativeTopologyPayload" as const,
+          payload: payloadFromFixture(request.target.bodyId, fixture),
+          diagnostics: [],
+        };
+      },
+    },
+  });
+}
+
+// Lane: logic. Seam: consumer-specific body-scope declarations select only
+// their own exact producer/evidence even when the probe body id is reused.
+test("keeps body-scope bindings distinct for two consumers sharing one probe body", async () => {
+  const first = scopedSelector("consumer-a", "face-a", "captured-a");
+  const second = scopedSelector("consumer-b", "face-b", "captured-b");
+  const instance = bodyScopeMaterializer({
+    bodies: [
+      { bodyId: "body_first" as BodyId, fixture: boxFixture },
+      { bodyId: "body_second" as BodyId, fixture: boxFixture },
+    ],
+    outputs: new Map([
+      ["ordered:0", { bodyIds: ["body_first" as BodyId] }],
+      ["ordered:1", { bodyIds: ["body_second" as BodyId] }],
+    ]),
+    bindings: [
+      scopeBinding({ consumerActionIndex: 2, producerActionIndex: 0, selector: first }),
+      scopeBinding({ consumerActionIndex: 3, producerActionIndex: 1, selector: second }),
+    ],
+  });
+
+  await expect(instance.resolveDeferredTopologyRef(first, 2)).resolves.toMatchObject({
+    bodyId: "body_first",
+  });
+  await expect(instance.resolveDeferredTopologyRef(second, 3)).resolves.toMatchObject({
+    bodyId: "body_second",
+  });
+});
+
+test("accepts a multi-output producer only when every sibling votes for one current body", async () => {
+  const target = scopedSelector("consumer", "face", "captured");
+  const boxSiblings = derived.signatures
+    .filter((entry) => entry.entityClass === "face")
+    .slice(1, 3)
+    .map(capturedSignature);
+  const instance = bodyScopeMaterializer({
+    bodies: [
+      { bodyId: "body_box" as BodyId, fixture: boxFixture },
+      { bodyId: "body_cylinder" as BodyId, fixture: cylinderFixture },
+    ],
+    outputs: new Map([["ordered:0", {
+      bodyIds: ["body_box" as BodyId, "body_cylinder" as BodyId],
+    }]]),
+    bindings: [scopeBinding({
+      consumerActionIndex: 1,
+      producerActionIndex: 0,
+      selector: target,
+      siblingSignatures: boxSiblings,
+    })],
+  });
+
+  await expect(instance.resolveDeferredTopologyRef(target, 1)).resolves.toMatchObject({
+    bodyId: "body_box",
+  });
+});
+
+test.each([
+  ["ambiguous", () => [capturedSignature(derived.signatures.find((entry) => entry.entityClass === "face")!)]],
+  ["unmatched", () => [{
+    ...capturedSignature(derived.signatures.find((entry) => entry.entityClass === "face")!),
+    centroid: [10_000, 10_000, 10_000] as [number, number, number],
+    boundingBox: {
+      low: [9_999, 9_999, 9_999] as [number, number, number],
+      high: [10_001, 10_001, 10_001] as [number, number, number],
+    },
+  }]],
+  ["split votes", () => [
+    capturedSignature(derived.signatures.find((entry) => entry.entityClass === "face")!),
+    capturedSignature(cylinderDerived.signatures.find((entry) => entry.entityClass === "face")!),
+  ]],
+])("rejects %s sibling evidence instead of choosing a body", async (_case, evidence) => {
+  const target = scopedSelector("consumer", "face", "captured");
+  const instance = bodyScopeMaterializer({
+    bodies: [
+      { bodyId: "body_box" as BodyId, fixture: boxFixture },
+      { bodyId: "body_cylinder" as BodyId, fixture: cylinderFixture },
+      ...(_case === "ambiguous"
+        ? [{ bodyId: "body_box_copy" as BodyId, fixture: boxFixture }]
+        : []),
+    ],
+    outputs: new Map([["ordered:0", {
+      bodyIds: [
+        "body_box" as BodyId,
+        "body_cylinder" as BodyId,
+        ...(_case === "ambiguous" ? ["body_box_copy" as BodyId] : []),
+      ],
+    }]]),
+    bindings: [scopeBinding({
+      consumerActionIndex: 1,
+      producerActionIndex: 0,
+      selector: target,
+      siblingSignatures: evidence(),
+    })],
+  });
+
+  await expect(instance.resolveDeferredTopologyRef(target, 1)).rejects.toThrow(
+    "Live topology rematch failed",
+  );
+});
+
+test.each([
+  ["missing producer output", new Map<string, { bodyIds: BodyId[] }>(), [
+    { bodyId: "body_box" as BodyId, fixture: boxFixture },
+  ]],
+  ["producer body absent from current document", new Map([["ordered:0", {
+    bodyIds: ["body_absent" as BodyId],
+  }]]), [
+    { bodyId: "body_box" as BodyId, fixture: boxFixture },
+  ]],
+])("rejects a %s", async (_case, outputs, bodies) => {
+  const target = scopedSelector("consumer", "face", "captured");
+  const instance = bodyScopeMaterializer({
+    bodies,
+    outputs,
+    bindings: [scopeBinding({
+      consumerActionIndex: 1,
+      producerActionIndex: 0,
+      selector: target,
+    })],
+  });
+  await expect(instance.resolveDeferredTopologyRef(target, 1)).rejects.toThrow(
+    "Live topology rematch failed",
+  );
+});
+
+test("rejects future producers and duplicate body-scope declarations", () => {
+  const target = scopedSelector("consumer", "face", "captured");
+  const binding = scopeBinding({
+    consumerActionIndex: 1,
+    producerActionIndex: 0,
+    selector: target,
+  });
+  expect(() => bodyScopeMaterializer({
+    bodies: [],
+    bindings: [{ ...binding, producerActionIndex: 1 }],
+  })).toThrow("must precede consumer action");
+  expect(() => bodyScopeMaterializer({
+    bodies: [],
+    bindings: [binding, { ...binding, siblingSignatures: [] }],
+  })).toThrow("Duplicate body-scope binding declaration");
 });
 
 test("honors an exact body scope during apply-time topology rematching", async () => {

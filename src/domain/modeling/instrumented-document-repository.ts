@@ -105,19 +105,19 @@ export function createInstrumentedDocumentRepository<
         repository.getDurableHistoryAvailability(documentId),
       );
     },
-    undoDurableHistory(documentId) {
+    undoDurableHistory(documentId, actionSequence) {
       return measure(
         "undoDurableHistory",
         documentId,
-        () => repository.undoDurableHistory(documentId),
+        () => repository.undoDurableHistory(documentId, actionSequence),
         nullableMutationResultAttributes,
       );
     },
-    redoDurableHistory(documentId) {
+    redoDurableHistory(documentId, actionSequence) {
       return measure(
         "redoDurableHistory",
         documentId,
-        () => repository.redoDurableHistory(documentId),
+        () => repository.redoDurableHistory(documentId, actionSequence),
         nullableMutationResultAttributes,
       );
     },

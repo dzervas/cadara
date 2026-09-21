@@ -35,7 +35,7 @@ export class EditorEventLoop {
     runtime: EditorEffectRuntime,
   ) => Promise<EditorEvent>;
   private state: EditorState = initialEditorState;
-  private readonly sketchActions = new SketchAuthoredActions();
+  private readonly sketchActions: SketchAuthoredActions;
 
   private transition(event: EditorEvent) {
     return this.sketchActions.transition(this.state, event, (state) =>
@@ -58,11 +58,13 @@ export class EditorEventLoop {
       effect: EditorEffect,
       runtime: EditorEffectRuntime,
     ) => Promise<EditorEvent>,
+    sketchActions: SketchAuthoredActions = new SketchAuthoredActions(),
   ) {
     this.runtime = runtime;
     this.dependencies = dependencies;
     this.errorReporter = errorReporter;
     this.executeEffect = executeEffect;
+    this.sketchActions = sketchActions;
   }
 
   dispatch(event: EditorEvent) {
@@ -282,11 +284,13 @@ export function createEditorEventLoop(
     runtime: EditorEffectRuntime,
   ) => Promise<EditorEvent> = runEditorEffect,
   dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
+  sketchActions?: SketchAuthoredActions,
 ) {
   return new EditorEventLoop(
     runtime,
     dependencies,
     errorReporter,
     executeEffect,
+    sketchActions,
   );
 }

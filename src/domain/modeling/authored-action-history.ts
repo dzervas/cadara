@@ -8,6 +8,7 @@ import type {
   AuthoredPresence,
   AuthoredValue,
 } from "@/contracts/modeling/authored-actions";
+import type { SketchId } from "@/contracts/shared/ids";
 
 export {
   encode as encodeAuthoredActionState,
@@ -42,6 +43,61 @@ const canonicalIds = {
 };
 const object = (value: unknown): value is Fields =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+function remapSemanticSketchIds<T>(
+  value: T,
+  replacements: ReadonlyMap<string, string>,
+): T {
+  if (Array.isArray(value))
+    return value.map((entry) =>
+      remapSemanticSketchIds(entry, replacements),
+    ) as T;
+  if (!object(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      key === "sketchId" && typeof entry === "string"
+        ? (replacements.get(entry) ?? entry)
+        : remapSemanticSketchIds(entry, replacements),
+    ]),
+  ) as T;
+}
+
+function remapAddress(
+  address: AuthoredAddress,
+  replacements: ReadonlyMap<string, string>,
+): AuthoredAddress {
+  return address.map((part, index) =>
+    index > 0 && address[index - 1] === "sketches"
+      ? (replacements.get(part) ?? part)
+      : part,
+  );
+}
+
+function remapDependencyPath(
+  path: string,
+  replacements: ReadonlyMap<string, string>,
+) {
+  try {
+    const parsed: unknown = JSON.parse(path);
+    return Array.isArray(parsed) &&
+      parsed.every((part) => typeof part === "string")
+      ? JSON.stringify(remapAddress(parsed, replacements))
+      : path;
+  } catch {
+    return path;
+  }
+}
+
+function withoutUndefined(value: unknown): AuthoredValue {
+  if (Array.isArray(value)) return value.map(withoutUndefined);
+  if (!object(value)) return value as AuthoredValue;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [key, withoutUndefined(entry)]),
+  );
+}
+
 function equal(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (Array.isArray(a) && Array.isArray(b))
@@ -88,7 +144,7 @@ function sketch(data: Fields, encode: boolean) {
  * Feature/history order, spline fit/control points, operands and other meaningful sequences stay atomic.
  */
 function encode(state: AuthoredActionState): Fields {
-  const data = structuredClone(state.data) as unknown as Fields;
+  const data = withoutUndefined(structuredClone(state.data)) as Fields;
   if (state.context.kind === "sketch") sketch(data, true);
   else {
     delete data.revisionId;
@@ -260,13 +316,81 @@ export class AuthoredActionHistory {
     return staged;
   }
 
-  private ledger(identity: AuthoredActionIdentity) {
-    const key = JSON.stringify([
+  private ledgerKey(identity: AuthoredActionIdentity) {
+    return JSON.stringify([
       identity.actorId,
       identity.documentId,
       identity.context.kind,
       identity.context.kind === "sketch" ? identity.context.sketchId : null,
     ]);
+  }
+
+  /** Reconciles a private draft context with the published identity.
+   * Only semantic sketch IDs and stable address segments are replaced; arbitrary authored
+   * strings and property keys remain byte-for-byte unchanged.
+   */
+  remapSketchContext(
+    identity: AuthoredActionIdentity,
+    publishedSketchId: SketchId,
+    aliases: readonly string[] = [],
+  ): AuthoredActionIdentity {
+    if (identity.context.kind !== "sketch") return identity;
+    const nextIdentity: AuthoredActionIdentity = {
+      ...identity,
+      context: { kind: "sketch", sketchId: publishedSketchId },
+    };
+    const oldKey = this.ledgerKey(identity);
+    const nextKey = this.ledgerKey(nextIdentity);
+    if (oldKey !== nextKey && this.ledgers.has(nextKey))
+      throw new Error(
+        `Sketch action history already exists for ${publishedSketchId}.`,
+      );
+    const ledger = this.ledgers.get(oldKey);
+    if (!ledger) return nextIdentity;
+    const replacements = new Map<string, string>([
+      [identity.context.sketchId, publishedSketchId],
+      ...aliases.map((alias) => [alias, publishedSketchId] as const),
+    ]);
+    const remapPresence = (presence: AuthoredPresence): AuthoredPresence =>
+      presence.exists
+        ? {
+            exists: true,
+            value: remapSemanticSketchIds(presence.value, replacements),
+          }
+        : presence;
+    const remapAction = (action: AuthoredAction): AuthoredAction => ({
+      ...action,
+      identity: structuredClone(nextIdentity),
+      writes: action.writes.map((change) => ({
+        address: remapAddress(change.address, replacements),
+        before: remapPresence(change.before),
+        after: remapPresence(change.after),
+      })),
+      dependencies: action.dependencies.map((dependency) => ({
+        ...dependency,
+        address: remapAddress(dependency.address, replacements),
+        id:
+          dependency.address[0] === "sketches"
+            ? (replacements.get(dependency.id) ?? dependency.id)
+            : dependency.id,
+        before: dependency.before.map((path) =>
+          remapDependencyPath(path, replacements),
+        ),
+        after: dependency.after.map((path) =>
+          remapDependencyPath(path, replacements),
+        ),
+      })),
+    });
+    if (oldKey !== nextKey) this.ledgers.delete(oldKey);
+    this.ledgers.set(nextKey, {
+      undo: ledger.undo.map(remapAction),
+      redo: ledger.redo.map(remapAction),
+    });
+    return nextIdentity;
+  }
+
+  private ledger(identity: AuthoredActionIdentity) {
+    const key = this.ledgerKey(identity);
     let ledger = this.ledgers.get(key);
     if (!ledger) {
       ledger = { undo: [], redo: [] };

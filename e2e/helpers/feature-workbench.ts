@@ -10,7 +10,6 @@ import {
   createTwoExtrudeBodiesOperationHistory,
   FEATURE_FIXTURE,
   OPEN_CURVE_FIXTURE,
-  SECONDARY_EXTRUDE_FIXTURE,
 } from "./modeling-fixtures";
 
 export { FEATURE_FIXTURE, OPEN_CURVE_FIXTURE } from "./modeling-fixtures";
@@ -58,7 +57,10 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     );
 
     return {
-      profileTarget: FEATURE_FIXTURE.profile,
+      profileTarget: await this.requireSingleSelectableTarget(
+        /^sketch_[^.]+\.region_[^.]*-sketch_entity_1_rect-bottom-[^.]+$/,
+        "primary rectangle profile",
+      ),
     };
   }
 
@@ -66,7 +68,10 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     await this.openWithOperationHistory(createBaseExtrudeOperationHistory());
 
     return {
-      profileTarget: FEATURE_FIXTURE.profile,
+      profileTarget: await this.requireSingleSelectableTarget(
+        /^sketch_[^.]+\.region_[^.]*-sketch_entity_1_rect-bottom-[^.]+$/,
+        "primary rectangle profile",
+      ),
       bodyTarget: FEATURE_FIXTURE.body,
     };
   }
@@ -77,7 +82,16 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     );
 
     return {
-      profileTargets: OPEN_CURVE_FIXTURE.profiles,
+      profileTargets: await Promise.all([
+        this.requireSingleSelectableTarget(
+          /^sketch_[^.]+\.sketch_entity_open_first$/,
+          "first open-chain entity",
+        ),
+        this.requireSingleSelectableTarget(
+          /^sketch_[^.]+\.sketch_entity_open_second$/,
+          "second open-chain entity",
+        ),
+      ]),
     };
   }
 
@@ -95,8 +109,14 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     );
 
     return {
-      firstProfileTarget: FEATURE_FIXTURE.profile,
-      secondProfileTarget: SECONDARY_EXTRUDE_FIXTURE.profile,
+      firstProfileTarget: await this.requireSingleSelectableTarget(
+        /^sketch_[^.]+\.region_[^.]*-sketch_entity_1_rect-bottom-[^.]+$/,
+        "first rectangle profile",
+      ),
+      secondProfileTarget: await this.requireSingleSelectableTarget(
+        /^sketch_[^.]+\.region_[^.]*-sketch_entity_2_rect-bottom-[^.]+$/,
+        "second rectangle profile",
+      ),
       targetBody: "body_feature_extrude-1",
       toolBody: "body_feature_extrude-2",
     };
@@ -448,6 +468,19 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
       .locator("aside")
       .filter({ hasText: /Create|Edit/ })
       .first();
+  }
+
+  private async requireSingleSelectableTarget(
+    pattern: RegExp,
+    description: string,
+  ) {
+    const targets = await this.currentSelectableTargetsMatching(pattern);
+    if (targets.length !== 1) {
+      throw new Error(
+        `Expected exactly one ${description}, received ${targets.length}: ${targets.join(", ")}`,
+      );
+    }
+    return targets[0]!;
   }
 
   private async selectFirstReferenceMatchingCurrentUi(pattern: RegExp) {

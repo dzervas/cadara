@@ -23,7 +23,11 @@ import { normalizeFeatureDefinitionAuthoredValues } from "@/contracts/modeling/f
 
 export type PersistedCommitSketchPayload = Omit<
   CommitSketchRequest,
-  "contractVersion" | "documentId" | "baseRevisionId" | "solverCorrelation"
+  | "contractVersion"
+  | "documentId"
+  | "baseRevisionId"
+  | "solverCorrelation"
+  | "restoreRecordedSketchId"
 >;
 export type PersistedCreateFeaturePayload = Omit<
   CreateFeatureRequest,

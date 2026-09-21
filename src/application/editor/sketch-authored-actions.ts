@@ -2,7 +2,7 @@ import type {
   AuthoredActionIdentity,
   AuthoredActionState,
 } from "@/contracts/modeling/authored-actions";
-import type { DocumentId } from "@/contracts/shared/ids";
+import type { DocumentId, SketchId } from "@/contracts/shared/ids";
 import type {
   EditorEvent,
   EditorState,
@@ -54,6 +54,54 @@ function restoreAuthoredSession(
 
 const ANNOTATION_DRAG_THRESHOLD_PX = 6;
 
+function actionLabel(event: EditorEvent) {
+  switch (event.type) {
+    case "sketch.geometryDragEnded":
+      return "Move Sketch Geometry";
+    case "sketch.annotationDeleteRequested":
+      return "Delete Sketch Item";
+    case "sketch.toolPatched":
+      return event.patch.intent === "setDimensionAnnotationPlacement"
+        ? "Move Dimension Label"
+        : event.patch.intent === "setConstraintAnnotationPlacement"
+          ? "Move Constraint Label"
+          : typeof event.patch.intent === "string"
+            ? event.patch.intent
+                .replace(/([A-Z])/g, " $1")
+                .replace(/^./, (value) => value.toUpperCase())
+            : "Update Sketch";
+    case "sketch.pointerReleased":
+      return "Create Sketch Geometry";
+    case "sketch.specialModeDragEnded":
+      return "Edit Sketch Operation";
+    default:
+      return event.type
+        .replace(/^sketch\./, "")
+        .replace(/([A-Z])/g, " $1")
+        .replace(/^./, (value) => value.toUpperCase());
+  }
+}
+
+function replaceSemanticSketchIdentity<T>(
+  value: T,
+  aliases: ReadonlySet<string>,
+  publishedSketchId: SketchId,
+): T {
+  if (Array.isArray(value))
+    return value.map((entry) =>
+      replaceSemanticSketchIdentity(entry, aliases, publishedSketchId),
+    ) as T;
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      key === "sketchId" && typeof entry === "string" && aliases.has(entry)
+        ? publishedSketchId
+        : replaceSemanticSketchIdentity(entry, aliases, publishedSketchId),
+    ]),
+  ) as T;
+}
+
 function annotationGesturePhase(event: EditorEvent) {
   if (
     event.type !== "sketch.toolPatched" ||
@@ -89,6 +137,10 @@ export class SketchAuthoredActions {
   private history = new AuthoredActionHistory();
   private readonly localActorId = crypto.randomUUID();
   private readonly accepted = new Map<string, AuthoredActionState>();
+  private readonly publicationBases = new Map<
+    string,
+    Extract<AuthoredActionState, { context: { kind: "sketch" } }>["data"]
+  >();
   private readonly annotationGestures = new Map<
     string,
     readonly [number, number] | null
@@ -97,6 +149,7 @@ export class SketchAuthoredActions {
   reset() {
     this.history = new AuthoredActionHistory();
     this.accepted.clear();
+    this.publicationBases.clear();
     this.annotationGestures.clear();
   }
 
@@ -105,7 +158,10 @@ export class SketchAuthoredActions {
     event: EditorEvent,
     reduce: (state: EditorState) => EditorTransitionResult,
   ): EditorTransitionResult {
-    if (event.type === "document.replaced" && !event.preserveAuthoredHistory)
+    if (
+      event.type === "document.replaced" &&
+      event.historyDisposition === "fresh-file-open"
+    )
       this.reset();
     const beforeIdentity: AuthoredActionIdentity | null =
       before.kind === "editingSketch" && before.snapshot
@@ -119,6 +175,19 @@ export class SketchAuthoredActions {
           }
         : null;
     const beforeKey = beforeIdentity ? JSON.stringify(beforeIdentity) : null;
+    if (
+      before.kind === "editingSketch" &&
+      beforeIdentity?.context.kind === "sketch" &&
+      event.type === "effect.sketchCommitted" &&
+      event.accepted &&
+      event.publishedSketchId
+    ) {
+      this.reconcilePublishedIdentity(
+        beforeIdentity,
+        event.publishedSketchId,
+        before.session,
+      );
+    }
     const annotationPhase = annotationGesturePhase(event);
     const annotationClientPoint = annotationGestureClientPoint(event);
     if (beforeKey && annotationPhase === "start") {
@@ -169,6 +238,25 @@ export class SketchAuthoredActions {
       this.annotationGestures.delete(beforeKey);
     }
     const result = reduce(before);
+    if (
+      before.kind === "editingSketch" &&
+      beforeKey &&
+      event.type === "tool.activated" &&
+      event.toolId === "finishSketch"
+    ) {
+      const publicationBase = this.publicationBases.get(beforeKey);
+      result.effects = result.effects.map((effect) =>
+        effect.type === "sketch.commit"
+          ? {
+              ...effect,
+              publicationBase: {
+                actionContextId: before.session.actionContextId,
+                expectedSketch: structuredClone(publicationBase ?? null),
+              },
+            }
+          : effect,
+      );
+    }
     if (result.state.kind !== "editingSketch") return result;
     const state = result.state;
     const documentId = state.snapshot?.document.documentId;
@@ -184,6 +272,24 @@ export class SketchAuthoredActions {
       before.session.actionContextId !== state.session.actionContextId;
     if (entered || !this.accepted.has(key)) {
       this.accepted.set(key, authoredState(documentId, state.session));
+      if (entered || !this.publicationBases.has(key)) {
+        const sharedSketch = state.session.sketchId
+          ? state.snapshot?.document.sketches.find(
+              (sketch) => sketch.sketchId === state.session.sketchId,
+            )
+          : null;
+        this.publicationBases.set(
+          key,
+          sharedSketch
+            ? {
+                sketchId: sharedSketch.sketchId,
+                label: sharedSketch.label,
+                plane: structuredClone(sharedSketch.plane),
+                definition: structuredClone(sharedSketch.sketch.definition),
+              }
+            : null,
+        );
+      }
       return this.withAvailability(result, identity);
     }
     const expected = this.accepted.get(key)!;
@@ -217,18 +323,47 @@ export class SketchAuthoredActions {
           ? "redo"
           : null;
     if (direction) {
-      const action = this.history[direction](identity, expected);
-      if (action.status === "blocked")
+      const actionSequence =
+        event.type === "history.undoRequested" ||
+        event.type === "history.redoRequested"
+          ? event.actionSequence
+          : undefined;
+      const action = this.history[direction](
+        identity,
+        expected,
+        actionSequence,
+      );
+      if (action.status === "blocked") {
+        const available = this.withAvailability(result, identity);
+        if (available.state.kind !== "editingSketch") return available;
+        const blockedSequence =
+          actionSequence ??
+          available.state.session.actionHistory?.[direction].at(-1)?.sequence;
         return {
-          ...result,
+          ...available,
           state: {
-            ...state,
+            ...available.state,
             session: {
-              ...state.session,
+              ...available.state.session,
               validationMessage: `Cannot ${direction}: ${action.reason}`,
+              actionHistory: {
+                undo:
+                  available.state.session.actionHistory?.undo.map((entry) =>
+                    direction === "undo" && entry.sequence === blockedSequence
+                      ? { ...entry, blockedReason: action.reason }
+                      : entry,
+                  ) ?? [],
+                redo:
+                  available.state.session.actionHistory?.redo.map((entry) =>
+                    direction === "redo" && entry.sequence === blockedSequence
+                      ? { ...entry, blockedReason: action.reason }
+                      : entry,
+                  ) ?? [],
+              },
             },
           },
         };
+      }
       const restored = action.status === "applied" ? action.state : expected;
       if (action.status === "applied") this.accepted.set(key, restored);
       if (
@@ -274,13 +409,58 @@ export class SketchAuthoredActions {
       identity,
       expected,
       candidate,
-      event.type,
+      actionLabel(event),
       expected,
     );
     if (action.status === "blocked")
       throw new Error(`Sketch action rejected: ${action.reason}`);
     if (action.status === "applied") this.accepted.set(key, action.state);
     return this.withAvailability(result, identity);
+  }
+
+  private reconcilePublishedIdentity(
+    identity: AuthoredActionIdentity,
+    publishedSketchId: SketchId,
+    session: SketchSessionState,
+  ) {
+    if (identity.context.kind !== "sketch") return;
+    const aliases = new Set([identity.context.sketchId, "sketch_draft"]);
+    const nextIdentity = this.history.remapSketchContext(
+      identity,
+      publishedSketchId,
+      ["sketch_draft"],
+    );
+    const oldKey = JSON.stringify(identity);
+    const nextKey = JSON.stringify(nextIdentity);
+    const accepted = this.accepted.get(oldKey);
+    if (accepted) {
+      this.accepted.delete(oldKey);
+      this.accepted.set(
+        nextKey,
+        replaceSemanticSketchIdentity(accepted, aliases, publishedSketchId),
+      );
+    }
+    const publicationBase = this.publicationBases.get(oldKey);
+    this.publicationBases.delete(oldKey);
+    this.publicationBases.set(
+      nextKey,
+      publicationBase
+        ? replaceSemanticSketchIdentity(
+            publicationBase,
+            aliases,
+            publishedSketchId,
+          )
+        : replaceSemanticSketchIdentity(
+            {
+              sketchId: identity.context.sketchId,
+              label: session.sketchLabel,
+              plane: session.plane,
+              definition: session.definition,
+            },
+            aliases,
+            publishedSketchId,
+          ),
+    );
   }
 
   private withAvailability(
@@ -298,6 +478,16 @@ export class SketchAuthoredActions {
           actionAvailability: {
             canUndo: entries.undo.length > 0,
             canRedo: entries.redo.length > 0,
+          },
+          actionHistory: {
+            undo: entries.undo.map(({ sequence, label }) => ({
+              sequence,
+              label,
+            })),
+            redo: entries.redo.map(({ sequence, label }) => ({
+              sequence,
+              label,
+            })),
           },
         },
       },

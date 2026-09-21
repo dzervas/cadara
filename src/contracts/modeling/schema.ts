@@ -1529,6 +1529,8 @@ export interface CommitSketchRequest extends DocumentMutationRequest {
   } | null;
   /** Existing durable sketch to update in place, or null to create a new sketch. */
   sketchId: SketchId | null;
+  /** Replay-only intent to create the exact recorded non-null sketch identity. */
+  restoreRecordedSketchId?: boolean;
   /** Human-readable sketch label owned by the caller. */
   sketchLabel: string;
   /** Explicit plane support and embedding for the committed sketch definition. */

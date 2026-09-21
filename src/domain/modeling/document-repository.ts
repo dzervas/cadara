@@ -44,6 +44,13 @@ export type DocumentRepositoryRestoreStatus =
       diagnostic: AuthoredModelDocumentDiagnostic;
     };
 
+export interface DocumentRepositoryAppliedLiveState {
+  document: AuthoredModelDocument;
+  diagnostics?: ModelingDiagnostic[];
+  assetAvailability?: readonly GeometryAssetAvailability[];
+  metadata: DocumentRepositoryMetadata;
+}
+
 export type DocumentRepositoryLoadResult =
   | {
       ok: true;
@@ -56,11 +63,12 @@ export type DocumentRepositoryLoadResult =
   | {
       ok: false;
       status: Extract<DocumentRepositoryRestoreStatus, { kind: "failed" }>;
+      appliedLive?: DocumentRepositoryAppliedLiveState;
     };
 
-/** A durability failure reports an already-applied live change, not rollback.
+/** A durability failure may carry transaction-specific `appliedLive` evidence.
+ * A failure reason by itself never proves that the attempted mutation was applied.
  * Its matching action ledger is retained; further writes fail closed until load retries persistence.
- * The failed status distinguishes this from an atomic expected-state/provenance rejection.
  */
 export type DocumentRepositoryMutationResult =
   | {
@@ -74,6 +82,7 @@ export type DocumentRepositoryMutationResult =
   | {
       ok: false;
       status: Extract<DocumentRepositoryRestoreStatus, { kind: "failed" }>;
+      appliedLive?: DocumentRepositoryAppliedLiveState;
     };
 
 export interface DocumentRepositoryChangeEvent {
@@ -114,9 +123,11 @@ export interface DocumentRepository {
   ): Promise<DurableHistoryAvailability>;
   undoDurableHistory(
     documentId: DocumentId,
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null>;
   redoDurableHistory(
     documentId: DocumentId,
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null>;
 }
 

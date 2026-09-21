@@ -5,10 +5,7 @@ import type {
   ModelingOperationResult,
 } from "@/contracts/modeling/schema";
 import type { RequestId } from "@/contracts/shared/ids";
-import type {
-  ModelingOperationHistoryEntry,
-  PersistedCommitSketchPayload,
-} from "@/contracts/modeling/operation-history";
+import type { ModelingOperationHistoryEntry } from "@/contracts/modeling/operation-history";
 import type { ModelingCommitSketchCorrelation } from "./types";
 import { CONTRACT_VERSION, isAcceptedMutation } from "./helpers";
 import { validateSnapshotResponse, buildDocumentRequest } from "./snapshot";
@@ -48,41 +45,6 @@ export function createHistoryReplayCorrelation(
   };
 }
 
-export function getExpectedAllocatedReplaySketchId(
-  sketchIds: ReadonlySet<SketchId>,
-): SketchId {
-  if (!sketchIds.has("sketch_primary" as SketchId)) {
-    return "sketch_primary" as SketchId;
-  }
-
-  let maxOrdinal = 1;
-  for (const sketchId of sketchIds) {
-    const match = /^sketch_(\d+)$/.exec(sketchId);
-    if (match) {
-      maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10));
-    }
-  }
-
-  return `sketch_${maxOrdinal + 1}` as SketchId;
-}
-
-export function resolveReplayCommitSketchId(
-  cursor: HistoryReplayCursor,
-  sketchId: PersistedCommitSketchPayload["sketchId"],
-): PersistedCommitSketchPayload["sketchId"] {
-  if (sketchId === null) {
-    return null;
-  }
-
-  if (cursor.sketchIds.has(sketchId)) {
-    return sketchId;
-  }
-
-  return sketchId === getExpectedAllocatedReplaySketchId(cursor.sketchIds)
-    ? null
-    : sketchId;
-}
-
 export function advanceHistoryReplayCursor(
   cursor: HistoryReplayCursor,
   entry: ModelingOperationHistoryEntry,
@@ -93,7 +55,8 @@ export function advanceHistoryReplayCursor(
   }
 
   if (entry.kind === "deleteTarget" && entry.payload.target.kind === "sketch") {
-    if (!cursor.sketchIds.has(entry.payload.target.sketchId)) {
+    const deletedSketchId = entry.payload.target.sketchId;
+    if (!cursor.sketchIds.has(deletedSketchId)) {
       return {
         ...cursor,
         revisionId: response.revisionId,
@@ -101,9 +64,10 @@ export function advanceHistoryReplayCursor(
     }
 
     const nextSketchIds = new Set(cursor.sketchIds);
-    nextSketchIds.delete(entry.payload.target.sketchId);
+    nextSketchIds.delete(deletedSketchId);
 
     return {
+      ...cursor,
       revisionId: response.revisionId,
       sketchIds: nextSketchIds,
     };
@@ -117,7 +81,6 @@ export function advanceHistoryReplayCursor(
   }
 
   const sketchId = (response as CommitSketchResponse).sketchId;
-
   if (cursor.sketchIds.has(sketchId)) {
     return {
       ...cursor,
@@ -145,15 +108,16 @@ export async function replayHistoryEntry(input: {
   cursor: HistoryReplayCursor;
 }> {
   const baseRevisionId = input.cursor.revisionId;
+  const entry = input.entry;
 
-  switch (input.entry.kind) {
+  switch (entry.kind) {
     case "commitSketch": {
+      const restoreRecordedSketchId =
+        entry.payload.sketchId !== null &&
+        !input.cursor.sketchIds.has(entry.payload.sketchId);
       const response = await input.adapter.commitSketch({
-        ...input.entry.payload,
-        sketchId: resolveReplayCommitSketchId(
-          input.cursor,
-          input.entry.payload.sketchId,
-        ),
+        ...entry.payload,
+        restoreRecordedSketchId,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -167,7 +131,7 @@ export async function replayHistoryEntry(input: {
     }
     case "createFeature": {
       const response = await input.adapter.createFeature({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -180,7 +144,7 @@ export async function replayHistoryEntry(input: {
     }
     case "updateFeature": {
       const response = await input.adapter.updateFeature({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -193,7 +157,7 @@ export async function replayHistoryEntry(input: {
     }
     case "setFeatureSuppression": {
       const response = await input.adapter.setFeatureSuppression({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -206,7 +170,7 @@ export async function replayHistoryEntry(input: {
     }
     case "deleteFeature": {
       const response = await input.adapter.deleteFeature({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -219,7 +183,7 @@ export async function replayHistoryEntry(input: {
     }
     case "deleteTarget": {
       const response = await input.adapter.deleteTarget({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -232,7 +196,7 @@ export async function replayHistoryEntry(input: {
     }
     case "renameBody": {
       const response = await input.adapter.renameBody({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -245,7 +209,7 @@ export async function replayHistoryEntry(input: {
     }
     case "reorderFeature": {
       const response = await input.adapter.reorderFeature({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -258,7 +222,7 @@ export async function replayHistoryEntry(input: {
     }
     case "reorderDocumentHistory": {
       const response = await input.adapter.reorderDocumentHistory({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -271,7 +235,7 @@ export async function replayHistoryEntry(input: {
     }
     case "setFeatureCursor": {
       const response = await input.adapter.setFeatureCursor({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -283,7 +247,7 @@ export async function replayHistoryEntry(input: {
     }
     case "addDocumentVariable": {
       const response = await input.adapter.addDocumentVariable({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -296,7 +260,7 @@ export async function replayHistoryEntry(input: {
     }
     case "updateDocumentVariable": {
       const response = await input.adapter.updateDocumentVariable({
-        ...input.entry.payload,
+        ...entry.payload,
         contractVersion: CONTRACT_VERSION,
         documentId: input.documentId,
         baseRevisionId,
@@ -308,7 +272,7 @@ export async function replayHistoryEntry(input: {
       };
     }
     default:
-      input.entry satisfies never;
+      entry satisfies never;
       throw new Error("Unsupported operation history entry.");
   }
 }

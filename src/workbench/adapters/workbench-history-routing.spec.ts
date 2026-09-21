@@ -134,17 +134,17 @@ test("useWorkbenchHistory routes sketch undo and redo to the editor action owner
     }),
   );
 
-  controller.requestUndo();
-  controller.requestRedo();
+  controller.requestUndo(12);
+  controller.requestRedo(9);
   await flushMicrotasks();
 
   expect(
     JSON.stringify(dispatched),
-    "Sketch undo and redo should dispatch to the sole editor owner.",
+    "Sketch undo and redo should dispatch selected actions to the sole editor owner.",
   ).toBe(
     JSON.stringify([
-      { type: "history.undoRequested" },
-      { type: "history.redoRequested" },
+      { type: "history.undoRequested", actionSequence: 12 },
+      { type: "history.redoRequested", actionSequence: 9 },
     ]),
   );
 });
@@ -216,12 +216,10 @@ test("useWorkbenchHistory routes document undo and redo through the durable hist
       {
         type: "document.replaced",
         snapshot: undoSnapshot,
-        preserveAuthoredHistory: true,
       },
       {
         type: "document.replaced",
         snapshot: redoSnapshot,
-        preserveAuthoredHistory: true,
       },
     ]),
   );

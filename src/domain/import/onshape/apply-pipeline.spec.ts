@@ -3917,11 +3917,20 @@ test("applyImportPreparedActions uses innermost containment for nested region se
     ],
   };
 
+  let committedSketchId: SketchId | undefined;
+  const commitSketch = service.commitSketch.bind(service);
+  service.commitSketch = async (request) => {
+    const response = await commitSketch(request);
+    if (response.isOk() && response.value.revisionState.kind === "accepted") {
+      committedSketchId = response.value.sketchId;
+    }
+    return response;
+  };
   const getSnapshot = service.getCurrentDocumentSnapshot.bind(service);
   service.getCurrentDocumentSnapshot = async () => {
     const snapshotWithSketch = await getSnapshot();
     const sketch = snapshotWithSketch.document.sketches.find(
-      (entry) => entry.sketchId === "sketch_2",
+      (entry) => entry.sketchId === committedSketchId,
     ) as
       | ((typeof snapshotWithSketch.document.sketches)[number] & {
           sketch?: {
@@ -5811,6 +5820,14 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
       capabilities: prepareCapabilities,
     });
     expect(validateImportPreparedActions(actions).success).toBe(true);
+    expect(actions.bodyScopeBindings?.length ?? 0).toBeGreaterThan(0);
+    for (const binding of actions.bodyScopeBindings ?? []) {
+      expect(binding.producerActionIndex).toBeLessThan(binding.consumerActionIndex);
+      expect(actions.orderedActions?.[binding.producerActionIndex]?.kind).toBe(
+        "createFeature",
+      );
+      expect(actions.orderedActions?.[binding.consumerActionIndex]).toBeDefined();
+    }
 
     const result = await applyImportPreparedActions({
       modelingService: service,
@@ -5824,6 +5841,12 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
       "Every prepared d3cd9 action must commit without an error diagnostic.",
     ).toEqual([]);
     expect(result.rolledBack).toBe(false);
+    expect(
+      result.diagnostics.filter(
+        (diagnostic) => diagnostic.code === "topology-apply-rematch-failed",
+      ),
+      "The consumer-specific d3cd9 bindings must avoid topology fallback.",
+    ).toEqual([]);
     expect(
       result.appliedOperationCount,
       "Every ordered d3cd9 action must apply.",

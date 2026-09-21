@@ -480,6 +480,7 @@ export function createDocumentSyncWorkerMessageHandler(
             requestId: request.requestId,
             result: await options.repository.undoDurableHistory(
               request.documentId,
+              request.actionSequence,
             ),
           });
           return;
@@ -490,6 +491,7 @@ export function createDocumentSyncWorkerMessageHandler(
             requestId: request.requestId,
             result: await options.repository.redoDurableHistory(
               request.documentId,
+              request.actionSequence,
             ),
           });
           return;

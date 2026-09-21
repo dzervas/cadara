@@ -77,6 +77,7 @@ test("appending a tail sketch preserves built feature state without replaying fe
       regionRequestId: "request_occ_seed_sketch:regions",
     },
     sketchId: sourceSketch.sketchId,
+    restoreRecordedSketchId: true,
     sketchLabel: sourceSketch.label,
     plane: sourceSketch.plane,
     definition: sourceSketch.sketch.definition,

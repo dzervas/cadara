@@ -41,6 +41,20 @@ function projection(session: SketchSessionState) {
     },
   });
 }
+function remapTestSketchIds<T>(value: T, nextSketchId: string): T {
+  if (Array.isArray(value))
+    return value.map((entry) => remapTestSketchIds(entry, nextSketchId)) as T;
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      key === "sketchId"
+        ? nextSketchId
+        : remapTestSketchIds(entry, nextSketchId),
+    ]),
+  ) as T;
+}
+
 async function fixture(constrained = false) {
   const owner = new SketchAuthoredActions();
   const session = line(
@@ -483,7 +497,80 @@ test("Finish never publishes an uncompleted drag preview", async () => {
     expect(projection(commit.session)).toEqual(before);
 });
 
-test("compensation refresh preserves the same private owner; explicit file replacement starts fresh", async () => {
+test("Finish carries the original private base and reconciles retained history to the published identity", async () => {
+  const f = await fixture();
+  const draftContextId = f.session.actionContextId;
+  f.apply(
+    { type: "selection.cleared" },
+    { ...f.session, sketchLabel: "sketch_draft" },
+  );
+  const original = projection(f.session);
+  f.apply({ type: "selection.cleared" }, mutations.style(f.session));
+  const finish = f.owner.transition(
+    f.state,
+    { type: "tool.activated", toolId: "finishSketch" },
+    (state) =>
+      transitionEditorState(state, {
+        type: "tool.activated",
+        toolId: "finishSketch",
+      }),
+  );
+  const commit = finish.effects.find(
+    (effect) => effect.type === "sketch.commit",
+  );
+  expect(commit?.type).toBe("sketch.commit");
+  if (commit?.type !== "sketch.commit")
+    throw new Error("Expected sketch commit.");
+  expect(commit.publicationBase).toEqual({
+    actionContextId: draftContextId,
+    expectedSketch: null,
+  });
+
+  f.owner.transition(
+    f.state,
+    {
+      type: "effect.sketchCommitted",
+      requestId: "request_publish",
+      documentId: "doc_workspace",
+      commandSessionId: "command_test",
+      baseRevisionId: "rev_1",
+      revisionId: "rev_2",
+      accepted: true,
+      diagnostics: [],
+      publishedSketchId: "sketch_published",
+    },
+    () => ({ state: initialEditorState, effects: [] }),
+  );
+  const publishedSession = remapTestSketchIds(
+    structuredClone(f.session),
+    "sketch_published",
+  ) as SketchSessionState;
+  publishedSession.sketchId = "sketch_published";
+  publishedSession.actionContextId = "sketch_published";
+  const reentry = {
+    ...f.state,
+    session: publishedSession,
+  } as SketchEditorState;
+  const entered = f.owner.transition(
+    initialEditorState,
+    { type: "selection.cleared" },
+    () => ({ state: reentry, effects: [] }),
+  );
+  const undone = f.owner.transition(
+    entered.state,
+    { type: "history.undoRequested" },
+    (state) => ({ state, effects: [] }),
+  );
+  expect(undone.state.kind).toBe("editingSketch");
+  if (undone.state.kind === "editingSketch") {
+    expect(projection(undone.state.session)).toEqual(
+      remapTestSketchIds(original, "sketch_published"),
+    );
+    expect(undone.state.session.sketchLabel).toBe("sketch_draft");
+  }
+});
+
+test("ordinary document replacement preserves private contexts; explicit file open starts only that owner fresh", async () => {
   const f = await fixture();
   const before = projection(f.session);
   f.apply({ type: "selection.cleared" }, mutations.style(f.session));
@@ -493,7 +580,6 @@ test("compensation refresh preserves the same private owner; explicit file repla
     {
       type: "document.replaced",
       snapshot: retained.snapshot!,
-      preserveAuthoredHistory: true,
     },
     () => ({ state: initialEditorState, effects: [] }),
   );
@@ -512,7 +598,11 @@ test("compensation refresh preserves the same private owner; explicit file repla
     expect(projection(undone.state.session)).toEqual(before);
   f.owner.transition(
     retained,
-    { type: "document.replaced", snapshot: retained.snapshot! },
+    {
+      type: "document.replaced",
+      snapshot: retained.snapshot!,
+      historyDisposition: "fresh-file-open",
+    },
     () => ({ state: initialEditorState, effects: [] }),
   );
   const fresh = f.owner.transition(
@@ -559,5 +649,8 @@ test("reentry uses latest authored state and retains blocked actions instead of 
   expect(result.state.session.actionAvailability).toEqual({
     canUndo: true,
     canRedo: false,
+  });
+  expect(result.state.session.actionHistory?.undo.at(-1)).toMatchObject({
+    blockedReason: "expected-state-changed",
   });
 });

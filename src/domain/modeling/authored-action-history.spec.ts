@@ -491,6 +491,163 @@ describe("authored action boundary", () => {
     applied(removal.commit(identity, before, deleted, "Delete", before));
     expect(removal.undo(identity, before)).toMatchObject({ status: "blocked" });
   });
+  test("publication remaps draft context and semantic target identities without changing authored UUIDs", () => {
+    const history = new AuthoredActionHistory();
+    const before = seed();
+    const candidate = changed(before, (data) => {
+      data.definition.pointIds = ["point-retained"];
+      data.definition.points = [
+        {
+          pointId: "point-retained",
+          label: "Point",
+          target: {
+            kind: "sketchPoint",
+            sketchId: "sketch_draft",
+            pointId: "point-retained",
+          },
+          position: { x: 1, y: 2 },
+          isConstruction: false,
+        },
+      ];
+    });
+    applied(
+      history.commit(identity, before, candidate, "Create Point", before),
+    );
+    const publishedIdentity = history.remapSketchContext(
+      identity,
+      "sketch-published",
+      ["sketch_draft"],
+    );
+    const entry = history.entries(publishedIdentity).undo[0]!;
+    expect(entry.identity.context).toEqual({
+      kind: "sketch",
+      sketchId: "sketch-published",
+    });
+    expect(JSON.stringify(entry.writes)).toContain("sketch-published");
+    expect(JSON.stringify(entry.writes)).not.toContain("sketch_draft");
+    expect(JSON.stringify(entry.writes)).toContain("point-retained");
+
+    const sameIdentityHistory = new AuthoredActionHistory();
+    applied(
+      sameIdentityHistory.commit(
+        identity,
+        before,
+        candidate,
+        "Create Point",
+        before,
+      ),
+    );
+    sameIdentityHistory.remapSketchContext(identity, "sketch-a", [
+      "sketch_draft",
+    ]);
+    expect(
+      JSON.stringify(sameIdentityHistory.entries(identity).undo[0]!.writes),
+    ).not.toContain("sketch_draft");
+  });
+
+  test("publication preserves arbitrary strings and keys that equal draft aliases", () => {
+    const history = new AuthoredActionHistory();
+    const before = changed(seed(), (data) => {
+      data.label = "sketch_draft";
+    });
+    const renamed = changed(before, (data) => {
+      data.label = "Renamed";
+    });
+    applied(history.commit(identity, before, renamed, "Rename", before));
+    const publishedIdentity = history.remapSketchContext(
+      identity,
+      "sketch-published",
+      ["sketch_draft"],
+    );
+    const published = changed(renamed, (data) => {
+      data.sketchId = "sketch-published";
+    });
+    published.context = publishedIdentity.context;
+    const undone = applied(history.undo(publishedIdentity, published));
+    expect(undone.data).toMatchObject({ label: "sketch_draft" });
+
+    const keyedHistory = new AuthoredActionHistory();
+    const keyedCandidate = changed(seed(), (data) => {
+      (data as unknown as Record<string, unknown>).sketch_draft = "user value";
+    });
+    applied(
+      keyedHistory.commit(
+        identity,
+        seed(),
+        keyedCandidate,
+        "Set user key",
+        seed(),
+      ),
+    );
+    keyedHistory.remapSketchContext(identity, "sketch-published", [
+      "sketch_draft",
+    ]);
+    expect(
+      keyedHistory.entries({
+        ...identity,
+        context: { kind: "sketch", sketchId: "sketch-published" },
+      }).undo[0]?.writes[0]?.address,
+    ).toEqual(["sketch_draft"]);
+  });
+
+  test("a fresh UUID context remains independent from a deleted sketch ledger and its Redo", () => {
+    const history = new AuthoredActionHistory();
+    const originalIdentity = {
+      ...identity,
+      context: { kind: "sketch" as const, sketchId: "sketch_primary" },
+    };
+    const originalBefore = changed(seed(), (data) => {
+      data.sketchId = "sketch_primary";
+    });
+    originalBefore.context = originalIdentity.context;
+    const originalAfter = changed(originalBefore, (data) => {
+      data.label = "Original renamed";
+    });
+    const committedOriginal = applied(
+      history.commit(
+        originalIdentity,
+        originalBefore,
+        originalAfter,
+        "Rename original",
+        originalBefore,
+      ),
+    );
+    const deletedOriginal = applied(
+      history.undo(originalIdentity, committedOriginal),
+    );
+
+    const freshIdentity = {
+      ...identity,
+      context: { kind: "sketch" as const, sketchId: "sketch_private_new" },
+    };
+    const freshBefore = changed(seed(), (data) => {
+      data.sketchId = "sketch_private_new";
+    });
+    freshBefore.context = freshIdentity.context;
+    const freshAfter = changed(freshBefore, (data) => {
+      data.label = "Fresh renamed";
+    });
+    applied(
+      history.commit(
+        freshIdentity,
+        freshBefore,
+        freshAfter,
+        "Rename fresh",
+        freshBefore,
+      ),
+    );
+    const publishedFresh = history.remapSketchContext(
+      freshIdentity,
+      "sketch_12345678-1234-4234-8234-123456789abc",
+      ["sketch_draft"],
+    );
+    expect(history.entries(publishedFresh).undo).toHaveLength(1);
+    expect(history.entries(originalIdentity).redo).toHaveLength(1);
+    expect(
+      applied(history.redo(originalIdentity, deletedOriginal)).data,
+    ).toMatchObject({ label: "Original renamed", sketchId: "sketch_primary" });
+  });
+
   test("actor/document/context isolation and deleted contexts", () => {
     const history = new AuthoredActionHistory(),
       before = seed();

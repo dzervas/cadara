@@ -29,6 +29,7 @@ import type { LocalFileBindingMetadata } from "@/domain/modeling/local-file-bind
 import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
 import type { LocalFileSystemFileHandle } from "@/lib/local-file-system-access";
 import type { DocumentRepositoryMetadata } from "@/domain/modeling/document-repository";
+import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
 import type { OperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
 import type { AppResultAsync } from "@/contracts/errors";
@@ -255,6 +256,8 @@ export interface ModelingSetFeatureCursorResult {
 export interface ModelingCommitSketchResult {
   revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   sketchId: SketchId;
+  /** True when the live shared publication applied but its persistence flush failed. */
+  durabilityPending?: boolean;
   revisionState: schema.MutationRevisionState;
   rebuildResult: schema.RebuildResult;
   changedTargets: PrimitiveRef[];
@@ -363,6 +366,10 @@ export interface ModelingCommitSketchInput
     Omit<schema.CommitSketchRequest, "contractVersion" | "documentId">,
     Partial<ModelingMutationBasisInput> {
   solverCorrelation: ModelingCommitSketchCorrelation | null;
+  publicationBase?: {
+    actionContextId: SketchId;
+    expectedSketch: AuthoredActionSketch | null;
+  };
 }
 export type ModelingEvaluatePreviewInput = Omit<
   schema.EvaluatePreviewRequest,

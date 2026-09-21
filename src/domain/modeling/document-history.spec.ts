@@ -203,7 +203,7 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
     contractVersion: "modeling-contract/v1alpha1",
     documentId: "doc_workspace",
     baseRevisionId: snapshot.document.revisionId,
-    sketchId: "sketch_after_seed_feature",
+    sketchId: null,
     sketchLabel: "Sketch After Seed Feature",
     plane: snapshot.document.sketches[0]!.plane,
     planeTarget: snapshot.document.sketches[0]!.planeTarget,
@@ -234,6 +234,7 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
     "History-order sketch commit should be accepted.",
   ).toBe("accepted");
 
+  const committedSketchId = committed.sketchId;
   const interleaved = (
     await adapter.getDocumentSnapshot({
       contractVersion: "modeling-contract/v1alpha1",
@@ -244,8 +245,7 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
     item.kind === "sketch" ? item.sketchId : item.featureId,
   );
   expect(
-    order.indexOf("feature_extrude-1") <
-      order.indexOf("sketch_after_seed_feature"),
+    order.indexOf("feature_extrude-1") < order.indexOf(committedSketchId),
     "Sketches committed after a feature must remain after that feature in document history.",
   ).toBeTruthy();
 
@@ -256,7 +256,7 @@ test("src/domain/modeling/document-history.spec.ts", async () => {
     ) ?? [];
   expect(
     authoredOrder.indexOf("feature_extrude-1") <
-      authoredOrder.indexOf("sketch_after_seed_feature"),
+      authoredOrder.indexOf(committedSketchId),
     "Authored document persistence must preserve interleaved sketch/feature history order.",
   ).toBeTruthy();
 });

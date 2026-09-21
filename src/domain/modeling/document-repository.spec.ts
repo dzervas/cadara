@@ -84,7 +84,7 @@ for (const [name, make] of [
     });
     expect(
       await repository.getDurableHistoryAvailability(seed.documentId),
-    ).toEqual({ canUndo: false, canRedo: false });
+    ).toMatchObject({ canUndo: false, canRedo: false });
   });
   test(`${name}: deletion compensation carries non-history sketch provenance`, async () => {
     const seed = await createSeedAuthoredModelDocument(),
@@ -144,7 +144,7 @@ for (const [name, make] of [
     expect(invalid.ok).toBe(false);
     expect(
       await repository.getDurableHistoryAvailability(seed.documentId),
-    ).toEqual({ canUndo: false, canRedo: false });
+    ).toMatchObject({ canUndo: false, canRedo: false });
     const document = {
       ...seed,
       assets: { ...seed.assets, records: [asset.asset] },
@@ -232,7 +232,7 @@ test("real Automerge peer merge preserves unrelated fields and history, blocks a
   handleA.merge(handleB);
   const blocked = await a.undoDurableHistory(seed.documentId);
   expect(blocked?.ok).toBe(false);
-  expect(await a.getDurableHistoryAvailability(seed.documentId)).toEqual({
+  expect(await a.getDurableHistoryAvailability(seed.documentId)).toMatchObject({
     canUndo: true,
     canRedo: false,
   });
@@ -295,6 +295,53 @@ test("Automerge peer changes during a pending local flush are not hidden from su
   ).toBe(true);
 });
 
+test("Automerge flush failure returns the merged live document as transaction-specific evidence", async () => {
+  const seed = await createSeedAuthoredModelDocument(),
+    repo = new RealAutomergeRepo(),
+    urls = new MemoryDocumentRepositoryUrlStore(),
+    repository = persistent(repo, urls);
+  await repository.load({ documentId: seed.documentId, seedDocument: seed });
+  const handle = await repo.find<CollaborativeDocument>(
+    urls.get(seed.documentId)!,
+  );
+  const peer = handle.fork();
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const pending = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  repo.flush = async () => {
+    started();
+    await gate;
+    throw new Error("Injected persistence failure");
+  };
+  const write = repository.mutate({
+    documentId: seed.documentId,
+    expected: seed,
+    document: { ...seed, name: "Local publication" },
+    label: "Publish Sketch",
+  });
+  await pending;
+  const peerTolerance = seed.settings.modelingTolerance * 2;
+  peer.change((storage) => {
+    storage.authored.settings.modelingTolerance = peerTolerance;
+  });
+  handle.merge(peer);
+  release();
+  const result = await write;
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.appliedLive?.document).toMatchObject({
+    name: "Local publication",
+    settings: { modelingTolerance: peerTolerance },
+  });
+  expect(!result.ok && result.appliedLive?.metadata.heads).toEqual(
+    handle.heads(),
+  );
+});
+
 for (const direction of ["commit", "undo", "redo"] as const) {
   test(`Automerge ${direction} flush failure retains the applied ledger, fails closed and explicitly retries durability`, async () => {
     const seed = await createSeedAuthoredModelDocument(),
@@ -326,6 +373,9 @@ for (const direction of ["commit", "undo", "redo"] as const) {
           ? await repository.undoDurableHistory(seed.documentId)
           : await repository.redoDurableHistory(seed.documentId);
     expect(result?.ok).toBe(false);
+    expect(result && !result.ok && result.appliedLive?.document.name).toBe(
+      direction === "undo" ? seed.name : local.name,
+    );
     expect(repository.getRestoreStatus(seed.documentId)).toMatchObject({
       kind: "failed",
       diagnostic: { reasonCode: "automerge-durability-failed" },
@@ -334,17 +384,21 @@ for (const direction of ["commit", "undo", "redo"] as const) {
     expect(current.name).toBe(direction === "undo" ? seed.name : local.name);
     expect(
       await repository.getDurableHistoryAvailability(seed.documentId),
-    ).toEqual({ canUndo: direction !== "undo", canRedo: direction === "undo" });
+    ).toMatchObject({
+      canUndo: direction !== "undo",
+      canRedo: direction === "undo",
+    });
     const heads = handle.heads();
+    const rejectedWhilePending = await repository.mutate({
+      documentId: seed.documentId,
+      expected: current,
+      document: { ...current, name: "Must fail closed" },
+    });
+    expect(rejectedWhilePending.ok).toBe(false);
     expect(
-      (
-        await repository.mutate({
-          documentId: seed.documentId,
-          expected: current,
-          document: { ...current, name: "Must fail closed" },
-        })
-      ).ok,
-    ).toBe(false);
+      !rejectedWhilePending.ok && rejectedWhilePending.appliedLive,
+      "A prior pending write must not be evidence that this rejected mutation applied.",
+    ).toBeUndefined();
     expect(handle.heads()).toEqual(heads);
     expect(
       (
@@ -399,7 +453,7 @@ for (const direction of ["commit", "undo", "redo"] as const) {
     ).toBe(true);
     expect(
       await reopened.getDurableHistoryAvailability(seed.documentId),
-    ).toEqual({ canUndo: false, canRedo: false });
+    ).toMatchObject({ canUndo: false, canRedo: false });
   });
 }
 

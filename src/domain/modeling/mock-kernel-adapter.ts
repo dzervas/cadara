@@ -150,21 +150,9 @@ const SKETCH_ID = "sketch_primary" as const;
 const CONSTRUCTION_PICK_PRIORITY = 40;
 
 function allocateMockSketchId(
-  sketches: readonly { sketchId: SketchId }[],
+  _sketches: readonly { sketchId: SketchId }[],
 ): SketchId {
-  if (!sketches.some((sketch) => sketch.sketchId === SKETCH_ID)) {
-    return SKETCH_ID;
-  }
-
-  let maxOrdinal = 1;
-  for (const sketch of sketches) {
-    const match = /^sketch_(\d+)$/.exec(sketch.sketchId);
-    if (match) {
-      maxOrdinal = Math.max(maxOrdinal, Number.parseInt(match[1]!, 10));
-    }
-  }
-
-  return `sketch_${maxOrdinal + 1}` as SketchId;
+  return `sketch_${crypto.randomUUID()}` as SketchId;
 }
 
 function applyCursorToMockSnapshot(snapshot: WorkspaceSnapshot) {
@@ -5388,6 +5376,49 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     const existingSketch = snapshot.document.sketches.find(
       (entry) => entry.sketchId === request.sketchId,
     );
+    const identityDiagnostic = request.restoreRecordedSketchId
+      ? request.sketchId === null
+        ? {
+            code: "mock-invalid-restored-sketch-id",
+            severity: "error" as const,
+            message:
+              "Recorded sketch restoration requires a non-null sketch identity.",
+            target: null,
+            detail: null,
+          }
+        : existingSketch
+          ? {
+              code: "mock-sketch-id-collision",
+              severity: "error" as const,
+              message: `Recorded sketch identity ${request.sketchId} already exists in the current revision.`,
+              target: createSketchTarget(request.sketchId),
+              detail: null,
+            }
+          : null
+      : request.sketchId !== null && !existingSketch
+        ? createMissingSketchDiagnostic(request.sketchId)
+        : null;
+    if (identityDiagnostic) {
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        sketchId,
+        revisionState: {
+          kind: "rejected",
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: identityDiagnostic.code,
+        },
+        rebuildResult: createRebuildResult({
+          kind: "skipped",
+          reasonCode: "validationRejected",
+          diagnostics: [identityDiagnostic],
+        }),
+        changedTargets: [],
+        diagnostics: [identityDiagnostic],
+      };
+    }
+
     if (isSketchRenameOnlyRequest(request, existingSketch)) {
       return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
         const mutableSketch = mutableSnapshot.document.sketches.find(

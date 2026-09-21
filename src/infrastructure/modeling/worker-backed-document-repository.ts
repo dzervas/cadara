@@ -49,10 +49,7 @@ export class WorkerBackedDocumentRepository
       ...input,
       storageKey: this.urlStore?.get(input.documentId) ?? null,
     });
-    if (!result.ok) {
-      this.statuses.set(input.documentId, result.status);
-      return result;
-    }
+    if (!result.ok) return this.normalizeFailure(result);
 
     return this.normalizeResult(result);
   }
@@ -61,10 +58,7 @@ export class WorkerBackedDocumentRepository
     input: Parameters<DocumentRepository["initialize"]>[0],
   ): Promise<DocumentRepositoryMutationResult> {
     const result = await this.client.initialize(input);
-    if (!result.ok) {
-      this.statuses.set(input.documentId, result.status);
-      return result;
-    }
+    if (!result.ok) return this.normalizeFailure(result);
     return this.normalizeResult(result);
   }
 
@@ -72,10 +66,7 @@ export class WorkerBackedDocumentRepository
     input: Parameters<DocumentRepository["mutate"]>[0],
   ): Promise<DocumentRepositoryMutationResult> {
     const result = await this.client.mutate(input);
-    if (!result.ok) {
-      this.statuses.set(input.documentId, result.status);
-      return result;
-    }
+    if (!result.ok) return this.normalizeFailure(result);
 
     return this.normalizeResult(result);
   }
@@ -159,28 +150,26 @@ export class WorkerBackedDocumentRepository
 
   async undoDurableHistory(
     documentId: DocumentId,
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null> {
-    const result = await this.client.undoDurableHistory({ documentId });
-    if (!result?.ok) {
-      if (result) {
-        this.statuses.set(documentId, result.status);
-      }
-      return result;
-    }
+    const result = await this.client.undoDurableHistory({
+      documentId,
+      actionSequence,
+    });
+    if (!result?.ok) return result ? this.normalizeFailure(result) : result;
 
     return this.normalizeResult(result);
   }
 
   async redoDurableHistory(
     documentId: DocumentId,
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null> {
-    const result = await this.client.redoDurableHistory({ documentId });
-    if (!result?.ok) {
-      if (result) {
-        this.statuses.set(documentId, result.status);
-      }
-      return result;
-    }
+    const result = await this.client.redoDurableHistory({
+      documentId,
+      actionSequence,
+    });
+    if (!result?.ok) return result ? this.normalizeFailure(result) : result;
 
     return this.normalizeResult(result);
   }
@@ -221,6 +210,34 @@ export class WorkerBackedDocumentRepository
     listener: (status: DocumentSyncWriteStatus) => void,
   ) {
     return this.client.subscribeToWriteStatus(listener);
+  }
+
+  private async normalizeFailure<
+    T extends Extract<
+      DocumentRepositoryLoadResult | DocumentRepositoryMutationResult,
+      { ok: false }
+    >,
+  >(result: T): Promise<T> {
+    this.statuses.set(result.status.documentId, result.status);
+    if (!result.appliedLive) return result;
+    const normalized = await this.client.normalize({
+      document: result.appliedLive.document,
+      metadata: result.appliedLive.metadata,
+    });
+    this.persistMetadata(normalized.metadata);
+    this.metadata.set(normalized.metadata.documentId, normalized.metadata);
+    return {
+      ...result,
+      appliedLive: {
+        ...result.appliedLive,
+        document: normalized.document,
+        diagnostics: [
+          ...(result.appliedLive.diagnostics ?? []),
+          ...normalized.diagnostics,
+        ],
+        metadata: normalized.metadata,
+      },
+    };
   }
 
   private async normalizeResult<

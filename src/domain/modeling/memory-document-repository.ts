@@ -456,22 +456,32 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
     return {
       canUndo: state.undo.length > 0,
       canRedo: state.redo.length > 0,
+      undoEntries: state.undo.map(({ sequence, label }) => ({
+        sequence,
+        label,
+      })),
+      redoEntries: state.redo.map(({ sequence, label }) => ({
+        sequence,
+        label,
+      })),
     };
   }
 
   async undoDurableHistory(
     documentId: DocumentId,
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null> {
     return this.enqueue(documentId, async () =>
-      this.compensate(documentId, "undo"),
+      this.compensate(documentId, "undo", actionSequence),
     );
   }
 
   async redoDurableHistory(
     documentId: DocumentId,
+    actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null> {
     return this.enqueue(documentId, async () =>
-      this.compensate(documentId, "redo"),
+      this.compensate(documentId, "redo", actionSequence),
     );
   }
 
@@ -533,13 +543,18 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
       message: `Document action blocked: ${result.reason} (${result.targets.map((p) => p.join(".")).join(", ")})`,
     });
   }
-  private compensate(documentId: DocumentId, direction: "undo" | "redo") {
+  private compensate(
+    documentId: DocumentId,
+    direction: "undo" | "redo",
+    actionSequence?: number,
+  ) {
     const current = this.currentDocument(documentId);
     if (!current) return null;
     const staged = this.actionOwner(documentId).fork();
     const action = staged[direction](
       this.identity(documentId),
       documentActionState(current),
+      actionSequence,
     );
     if (action.status === "unchanged") return null;
     if (action.status === "blocked") return this.blocked(documentId, action);

@@ -21,7 +21,9 @@ import type {
   FeatureId,
   RequestId,
   RevisionId,
+  SketchId,
 } from "@/contracts/shared/ids";
+import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { resolveSketchDerivationDistances } from "@/domain/modeling/sketch-dimension-expressions";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
@@ -207,6 +209,7 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
             baseRevisionId: effect.baseRevisionId,
             baseRepositoryHeads: effect.mutationBasis.baseRepositoryHeads,
             session: effect.session,
+            publicationBase: effect.publicationBase,
           });
 
           if (!result) {
@@ -232,6 +235,8 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
             accepted: result.accepted,
             diagnostics: result.diagnostics,
             actualRevisionId: result.actualRevisionId,
+            publishedSketchId: result.publishedSketchId,
+            durabilityPending: result.durabilityPending,
             errorContext: result.errorContext,
           };
         } catch (error: unknown) {
@@ -476,6 +481,10 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     requestId: RequestId;
     baseRevisionId: RevisionId;
     baseRepositoryHeads?: readonly string[];
+    publicationBase?: {
+      actionContextId: SketchId;
+      expectedSketch: AuthoredActionSketch | null;
+    };
     sketchId: SketchSessionState["commitRequest"] extends null
       ? never
       : NonNullable<SketchSessionState["commitRequest"]>["sketchId"];
@@ -495,6 +504,8 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     } | null;
   }) => AppResultAsync<{
     revisionId: RevisionId;
+    sketchId: SketchId;
+    durabilityPending?: boolean;
     revisionState:
       | { kind: "accepted" }
       | { kind: "conflict"; actualRevisionId: RevisionId }
@@ -572,6 +583,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         requestId: input.requestId,
         baseRevisionId: input.baseRevisionId,
         baseRepositoryHeads: input.baseRepositoryHeads,
+        publicationBase: input.publicationBase,
         sketchId: input.session.commitRequest?.sketchId ?? null,
         sketchLabel:
           input.session.commitRequest?.sketchLabel ?? input.session.sketchLabel,
@@ -612,6 +624,8 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         revisionId: result.value.revisionId,
         accepted: true,
         diagnostics: result.value.diagnostics,
+        publishedSketchId: result.value.sketchId,
+        durabilityPending: result.value.durabilityPending,
       };
     },
     async commitSketchPlane(input) {
