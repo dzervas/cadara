@@ -57,6 +57,8 @@ export function translateSolvedSketch(input: {
     featureId: input.featureId,
     label: input.label,
     planeKey: input.planeKey,
+    sourceFrame: input.solved.sketchFrame,
+    projectionFrame: input.planeFrame,
     entities,
     constraints: input.constraints,
     sourceSolveStatus: input.solved.sketchSolveStatus,

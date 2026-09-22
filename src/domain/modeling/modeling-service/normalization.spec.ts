@@ -5,6 +5,7 @@ import {
   normalizeRegionRecords,
   normalizeShellFeatureParameters,
   normalizeSketchDerivationDefinition,
+  normalizeSketchEntityDefinition,
 } from "@/domain/modeling/modeling-service/normalization";
 
 // Lane: logic (per docs/testing.md — normalization is a domain persistence/normalization
@@ -54,6 +55,44 @@ function makeShellPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeSplinePayload() {
+  return {
+    kind: "spline",
+    entityId: "sketch_entity_spline",
+    label: "Spline",
+    target: {
+      kind: "sketchEntity",
+      sketchId: "sketch_normalization",
+      entityId: "sketch_entity_spline",
+    },
+    isConstruction: false,
+    pointOccurrenceIds: [
+      "occurrence-start",
+      "occurrence-middle",
+      "occurrence-end",
+    ],
+    pointOccurrences: [
+      {
+        occurrenceId: "occurrence-middle",
+        pointId: "sketch_point_middle",
+        tangent: { kind: "authored", vector: [0, 0] },
+      },
+      {
+        occurrenceId: "occurrence-end",
+        pointId: "sketch_point_alias",
+        tangent: { kind: "automatic" },
+      },
+      {
+        occurrenceId: "occurrence-start",
+        pointId: "sketch_point_alias",
+        tangent: { kind: "automatic" },
+      },
+    ],
+    closure: "positional",
+    interpolationPolicy: "centripetal-mean-arm-v1",
+  };
+}
+
 test("src/domain/modeling/modeling-service/normalization.spec.ts", () => {
   const normalized = normalizeSketchDerivationDefinition(makeOffsetPayload());
   expect(
@@ -65,7 +104,8 @@ test("src/domain/modeling/modeling-service/normalization.spec.ts", () => {
     "Joint outputs should survive normalization.",
   ).toBe(1);
   expect(
-    normalized.kind === "offset" && isExpressionAuthoredValue(normalized.distance),
+    normalized.kind === "offset" &&
+      isExpressionAuthoredValue(normalized.distance),
     "An authored expression distance should survive normalization.",
   ).toBeTruthy();
 
@@ -89,8 +129,61 @@ test("src/domain/modeling/modeling-service/normalization.spec.ts", () => {
 
   expect(
     () =>
-      normalizeSketchDerivationDefinition(makeOffsetPayload({ jointOutputs: "nope" })),
+      normalizeSketchDerivationDefinition(
+        makeOffsetPayload({ jointOutputs: "nope" }),
+      ),
     "A non-array jointOutputs field should be rejected at the normalization boundary.",
+  ).toThrow();
+});
+
+test("spline normalization rejects unknown fields without changing authored ordering or tangent intent", () => {
+  const payload = makeSplinePayload();
+  const normalized = normalizeSketchEntityDefinition(payload);
+  expect(normalized).toEqual(payload);
+  expect(normalized.kind).toBe("spline");
+  if (normalized.kind !== "spline") return;
+  expect(normalized.pointOccurrenceIds).toEqual([
+    "occurrence-start",
+    "occurrence-middle",
+    "occurrence-end",
+  ]);
+  expect(
+    normalized.pointOccurrences.map(({ occurrenceId }) => occurrenceId),
+  ).toEqual(["occurrence-middle", "occurrence-end", "occurrence-start"]);
+  expect(normalized.pointOccurrences[0]?.tangent).toEqual({
+    kind: "authored",
+    vector: [0, 0],
+  });
+  expect(normalized.pointOccurrences[1]?.pointId).toBe("sketch_point_alias");
+  expect(normalized.pointOccurrences[2]?.pointId).toBe("sketch_point_alias");
+  expect(normalized.closure).toBe("positional");
+
+  expect(() =>
+    normalizeSketchEntityDefinition({ ...payload, unknownEntityField: true }),
+  ).toThrow();
+  expect(() =>
+    normalizeSketchEntityDefinition({
+      ...payload,
+      pointOccurrences: [
+        { ...payload.pointOccurrences[0], unknownOccurrenceField: true },
+        ...payload.pointOccurrences.slice(1),
+      ],
+    }),
+  ).toThrow();
+  expect(() =>
+    normalizeSketchEntityDefinition({
+      ...payload,
+      pointOccurrences: [
+        {
+          ...payload.pointOccurrences[0],
+          tangent: {
+            ...payload.pointOccurrences[0]!.tangent,
+            unknownTangentField: true,
+          },
+        },
+        ...payload.pointOccurrences.slice(1),
+      ],
+    }),
   ).toThrow();
 });
 
@@ -99,46 +192,70 @@ test("src/domain/modeling/modeling-service/normalization.spec.ts", () => {
 // Seam: normalizeShellFeatureParameters distinguishes legacy open-face shells,
 // closed cavities, and whole-solid offsets before OCC execution.
 test("normalizes split-boundary positions without accepting partial positions", () => {
-  const payload = [{
-    ownerDocumentId: "doc_workspace",
-    ownerRevisionId: "rev_0001",
-    ownerFeatureId: null,
-    ownerSketchId: "sketch_split",
-    ownerBodyId: null,
-    regionId: "region_split",
-    label: "Split region",
-    target: { kind: "region", sketchId: "sketch_split", regionId: "region_split" },
-    sourceSketch: { kind: "sketch", sketchId: "sketch_split" },
-    loops: [{
-      loopId: "region_loop_split_0",
-      role: "outer",
-      orientation: "counterClockwise",
-      segments: [{
-        source: { kind: "entity", entityId: "sketch_entity_circle" },
-        startPointId: null,
-        endPointId: null,
-        sourceSegmentOrdinal: 1,
-        startPosition: [2, 0],
-        endPosition: [-2, 0],
-      }],
-      boundaryPointIds: [],
+  const payload = [
+    {
+      ownerDocumentId: "doc_workspace",
+      ownerRevisionId: "rev_0001",
+      ownerFeatureId: null,
+      ownerSketchId: "sketch_split",
+      ownerBodyId: null,
+      regionId: "region_split",
+      label: "Split region",
+      target: {
+        kind: "region",
+        sketchId: "sketch_split",
+        regionId: "region_split",
+      },
+      sourceSketch: { kind: "sketch", sketchId: "sketch_split" },
+      loops: [
+        {
+          loopId: "region_loop_split_0",
+          role: "outer",
+          orientation: "counterClockwise",
+          segments: [
+            {
+              source: { kind: "entity", entityId: "sketch_entity_circle" },
+              startPointId: null,
+              endPointId: null,
+              sourceSegmentOrdinal: 1,
+              startPosition: [2, 0],
+              endPosition: [-2, 0],
+            },
+          ],
+          boundaryPointIds: [],
+          isClosed: true,
+        },
+      ],
       isClosed: true,
-    }],
-    isClosed: true,
-  }];
+    },
+  ];
   const normalized = normalizeRegionRecords(payload);
   expect(normalized[0]?.loops[0]?.segments[0]?.startPosition).toEqual([2, 0]);
   expect(normalized[0]?.loops[0]?.segments[0]?.endPosition).toEqual([-2, 0]);
   expect(normalized[0]?.loops[0]?.segments[0]?.sourceSegmentOrdinal).toBe(1);
-  expect(() => normalizeRegionRecords([{
-    ...payload[0],
-    loops: [{ ...payload[0]!.loops[0], segments: [{ ...payload[0]!.loops[0]!.segments[0], endPosition: undefined }] }],
-  }])).toThrow("Invalid region boundary segment payload");
+  expect(() =>
+    normalizeRegionRecords([
+      {
+        ...payload[0],
+        loops: [
+          {
+            ...payload[0]!.loops[0],
+            segments: [
+              { ...payload[0]!.loops[0]!.segments[0], endPosition: undefined },
+            ],
+          },
+        ],
+      },
+    ]),
+  ).toThrow("Invalid region boundary segment payload");
 });
 
 test("normalizes shell closedHollow and offsetAllFaces without weakening open-face validation", () => {
   const openFaces = normalizeShellFeatureParameters(makeShellPayload());
-  expect(openFaces.mode, "Legacy shell payloads should remain open-face shells.").toBeUndefined();
+  expect(
+    openFaces.mode,
+    "Legacy shell payloads should remain open-face shells.",
+  ).toBeUndefined();
   expect(openFaces.faceTargets.length).toBe(1);
 
   const closedHollow = normalizeShellFeatureParameters(
@@ -162,7 +279,11 @@ test("normalizes shell closedHollow and offsetAllFaces without weakening open-fa
   ).toThrow("cannot include face targets");
   expect(() =>
     normalizeShellFeatureParameters(
-      makeShellPayload({ mode: "closedHollow", faceTargets: [], direction: "outside" }),
+      makeShellPayload({
+        mode: "closedHollow",
+        faceTargets: [],
+        direction: "outside",
+      }),
     ),
   ).toThrow("requires an inside direction");
   expect(() =>

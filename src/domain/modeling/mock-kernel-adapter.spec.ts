@@ -4164,3 +4164,51 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   await testDocumentVariableUpdateRebuildsImportedExpressionSketch();
   await testSketchCommitRejectsUnresolvableConstructionSupport();
 });
+
+test("mock kernel reports neutral curve queries unsupported instead of pretending native exactness", async () => {
+  const adapter = new MockKernelAdapter();
+  const result = await adapter.queryNeutralCurves({
+    modelingTolerance: 1e-6,
+    first: {
+      curveId: "first",
+      kind: "circle",
+      center: [0, 0],
+      radius: 1,
+      xAxis: [1, 0],
+      sourceDomain: [0, Math.PI * 2],
+      provenance: { sourceEntityId: "first", sourceSpanId: "full" },
+    },
+    second: {
+      curveId: "second",
+      kind: "circle",
+      center: [2, 0],
+      radius: 1,
+      xAxis: [1, 0],
+      sourceDomain: [0, Math.PI * 2],
+      provenance: { sourceEntityId: "second", sourceSpanId: "full" },
+    },
+  });
+  expect(result).toMatchObject({
+    kind: "unsupported",
+    code: "mock-neutral-curve-query-unsupported",
+  });
+  const self = await adapter.queryNeutralCurveSelfIntersections({
+    modelingTolerance: 1e-6,
+    curve: {
+      curveId: "self",
+      kind: "cubicBezier",
+      poles: [
+        [0, 0],
+        [1, 2],
+        [-1, 2],
+        [0, 0],
+      ],
+      sourceDomain: [0, 1],
+      provenance: { sourceEntityId: "self", sourceSpanId: "full" },
+    },
+  });
+  expect(self).toMatchObject({
+    kind: "unsupported",
+    code: "mock-neutral-curve-self-intersection-unsupported",
+  });
+});

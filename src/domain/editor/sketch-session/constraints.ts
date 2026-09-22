@@ -52,7 +52,7 @@ import {
   updateDimensionAnnotationPlacementInDefinition,
 } from "./annotations";
 import {
-  applyPointPositionsToDefinition,
+  applySolvedSketchToDefinition,
   addAnchorOffset,
 } from "./definition-patches";
 
@@ -627,12 +627,9 @@ export function solveCommittedConstraintDefinition(
   }
 
   return {
-    definition: applyPointPositionsToDefinition(
+    definition: applySolvedSketchToDefinition(
       definition,
-      solved.solvedSnapshot.solvedPoints.map((point) => ({
-        pointId: point.pointId,
-        position: point.solvedPosition,
-      })),
+      solved.solvedSnapshot,
     ),
     solvedSnapshot: solved.solvedSnapshot,
   };

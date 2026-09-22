@@ -2,8 +2,10 @@ import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   SketchDefinition,
   SketchPointDefinition,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
 import { projectedSplineDisplayPoints } from "@/contracts/solver/schema";
 import type { SketchToolAnchorDescriptor } from "@/core/sketch-tools/editor-schema";
 
@@ -43,6 +45,59 @@ export function applyPointPositionsToDefinition(
   };
 
   return evaluateSketchDerivations(nextDefinition).definition;
+}
+
+export function applySolvedSketchToDefinition(
+  definition: SketchDefinition,
+  solvedSnapshot: SolvedSketchSnapshot,
+): SketchDefinition {
+  const solvedPointPositions = new Map(
+    solvedSnapshot.solvedPoints.map((point) => [
+      point.pointId,
+      point.solvedPosition,
+    ]),
+  );
+  const solvedSplines = new Map(
+    solvedSnapshot.solvedEntities.flatMap((entity) =>
+      entity.kind === "spline" && entity.reconstruction.validity === "valid"
+        ? [[entity.entityId, entity.reconstruction] as const]
+        : [],
+    ),
+  );
+
+  const acceptedDefinition = {
+    ...definition,
+    points: definition.points.map((point) => {
+      const position = solvedPointPositions.get(point.pointId);
+      return position ? { ...point, position } : point;
+    }),
+    entities: definition.entities.map((entity) => {
+      if (entity.kind !== "spline") return entity;
+      const reconstruction = solvedSplines.get(entity.entityId);
+      const ordered = orderedSplineOccurrences(entity);
+      if (!reconstruction || !ordered) return entity;
+      const solvedByOccurrence = new Map(
+        ordered.map((occurrence, index) => [
+          occurrence.occurrenceId,
+          reconstruction.handles[index],
+        ]),
+      );
+      return {
+        ...entity,
+        pointOccurrences: entity.pointOccurrences.map((occurrence) => {
+          const vector = solvedByOccurrence.get(occurrence.occurrenceId);
+          return occurrence.tangent.kind === "authored" && vector
+            ? {
+                ...occurrence,
+                tangent: { kind: "authored" as const, vector },
+              }
+            : occurrence;
+        }),
+      };
+    }),
+  };
+
+  return evaluateSketchDerivations(acceptedDefinition).definition;
 }
 
 export function getSketchDatumGuideExtent(

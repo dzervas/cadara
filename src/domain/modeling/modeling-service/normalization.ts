@@ -91,6 +91,7 @@ import type {
 } from "@/contracts/solver/schema";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { RegionId } from "@/contracts/shared/ids";
+import { requireSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import {
   normalizeConstraintDefinitionCore,
@@ -2759,6 +2760,45 @@ export function normalizeSketchPointDefinition(
   };
 }
 
+function requireStrictSplineEntityDefinition(
+  value: Record<string, unknown>,
+): void {
+  const sketchId =
+    isRecord(value.target) && isString(value.target.sketchId)
+      ? value.target.sketchId
+      : "sketch_invalid";
+  const pointIds = Array.isArray(value.pointOccurrences)
+    ? Array.from(
+        new Set(
+          value.pointOccurrences.flatMap((occurrence) =>
+            isRecord(occurrence) && isString(occurrence.pointId)
+              ? [occurrence.pointId]
+              : [],
+          ),
+        ),
+      )
+    : [];
+  requireSketchDefinition({
+    schemaVersion: "sketch-definition/v1alpha1",
+    referenceIds: [],
+    references: [],
+    pointIds,
+    points: pointIds.map((pointId) => ({
+      pointId,
+      label: pointId,
+      target: { kind: "sketchPoint", sketchId, pointId },
+      position: [0, 0],
+      isConstruction: false,
+    })),
+    entityIds: [value.entityId],
+    entities: [value],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+  });
+}
+
 export function normalizeSketchEntityDefinition(
   value: unknown,
 ): SketchEntityDefinition {
@@ -2866,6 +2906,64 @@ export function normalizeSketchEntityDefinition(
       startPointId: assertSketchPointId(value.startPointId),
       endPointId: assertSketchPointId(value.endPointId),
       sweepDirection: value.sweepDirection,
+      style: normalizeSketchStyleDefinition(value.style),
+    };
+  }
+
+  if (value.kind === "spline") {
+    requireStrictSplineEntityDefinition(value);
+    if (
+      !isRecord(value.target) ||
+      typeof value.isConstruction !== "boolean" ||
+      !Array.isArray(value.pointOccurrenceIds) ||
+      !value.pointOccurrenceIds.every(isString) ||
+      !Array.isArray(value.pointOccurrences) ||
+      (value.closure !== "open" &&
+        value.closure !== "positional" &&
+        value.closure !== "smooth") ||
+      value.interpolationPolicy !== "centripetal-mean-arm-v1"
+    ) {
+      throw new Error("Invalid spline definition payload.");
+    }
+    const pointOccurrences = value.pointOccurrences.map((occurrence) => {
+      if (
+        !isRecord(occurrence) ||
+        !isString(occurrence.occurrenceId) ||
+        !isString(occurrence.pointId) ||
+        !isRecord(occurrence.tangent) ||
+        (occurrence.tangent.kind !== "automatic" &&
+          occurrence.tangent.kind !== "authored")
+      ) {
+        throw new Error("Invalid spline point occurrence payload.");
+      }
+      return {
+        occurrenceId: occurrence.occurrenceId,
+        pointId: assertSketchPointId(occurrence.pointId),
+        tangent:
+          occurrence.tangent.kind === "automatic"
+            ? ({ kind: "automatic" } as const)
+            : ({
+                kind: "authored",
+                vector: normalizePoint2D(
+                  occurrence.tangent.vector,
+                  "Invalid spline tangent vector payload.",
+                ),
+              } as const),
+      };
+    });
+
+    return {
+      kind: "spline",
+      entityId: assertSketchEntityId(value.entityId),
+      label: value.label,
+      target: assertPrimitiveRef(
+        value.target,
+      ) as SketchEntityDefinition["target"],
+      isConstruction: value.isConstruction,
+      pointOccurrenceIds: [...value.pointOccurrenceIds],
+      pointOccurrences,
+      closure: value.closure,
+      interpolationPolicy: value.interpolationPolicy,
       style: normalizeSketchStyleDefinition(value.style),
     };
   }

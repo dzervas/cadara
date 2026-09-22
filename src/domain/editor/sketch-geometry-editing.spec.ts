@@ -24,6 +24,7 @@ import {
   patchSketchStyleValue,
   patchSketchEditToolValue,
   refreshLiveRegionsAfterDebounce,
+  selectSketchConstraintTarget,
   selectSketchEditToolTarget,
   startSketchDraw,
   toggleSketchSvgRendering,
@@ -3069,6 +3070,139 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
     ).not.toBe(stablePreview);
   }
 
+  function testConstrainedSplineDragPersistsAcceptedTangentsAcrossFreshReentry() {
+    const points = [
+      makePoint("sketch_point_s0", "S0", 0, 0),
+      makePoint("sketch_point_s1", "S1", 1, 1),
+      makePoint("sketch_point_s2", "S2", 2, 0),
+      makePoint("sketch_point_contact", "Contact", 0.55, 0.8),
+    ];
+    const spline = {
+      ...makeSpline("sketch_entity_spline", "Spline", [
+        "sketch_point_s0",
+        "sketch_point_s1",
+        "sketch_point_s2",
+      ]),
+      // Record order is deliberately different from stable occurrence order.
+      pointOccurrences: [
+        {
+          occurrenceId: "occ-2",
+          pointId: "sketch_point_s2" as const,
+          tangent: { kind: "automatic" as const },
+        },
+        {
+          occurrenceId: "occ-0",
+          pointId: "sketch_point_s0" as const,
+          tangent: { kind: "authored" as const, vector: [0.3, 0.15] as const },
+        },
+        {
+          occurrenceId: "occ-1",
+          pointId: "sketch_point_s1" as const,
+          tangent: { kind: "authored" as const, vector: [0, 0] as const },
+        },
+      ],
+    };
+    const constraints: SketchDefinition["constraints"] = [
+      ...points.slice(0, 3).map((point, index) => ({
+        constraintId: `constraint_fix_spline_${index}` as const,
+        kind: "fixPoint" as const,
+        label: `Fix ${index}`,
+        pointId: point.pointId,
+        position: point.position,
+      })),
+    ];
+    const definition: SketchDefinition = {
+      ...makeDefinition({
+        pointIds: points.map((point) => point.pointId),
+        points,
+        entityIds: [spline.entityId],
+        entities: [spline],
+      }),
+      constraintIds: constraints.map((constraint) => constraint.constraintId),
+      constraints,
+    };
+    const initialVectors = spline.pointOccurrences.map((occurrence) =>
+      occurrence.tangent.kind === "authored" ? occurrence.tangent.vector : null,
+    );
+    let session = createSessionFromDefinition(definition);
+    const initialSequence = session.sequence;
+    const target = session.definition.points.find(
+      (point) => point.pointId === "sketch_point_contact",
+    )!.target;
+    session = beginSketchTool(session, "constraintCoincident");
+    session = selectSketchConstraintTarget(session, target);
+    session = selectSketchConstraintTarget(session, spline.target);
+    expect(
+      session.definition.constraints.some(
+        (constraint) => constraint.kind === "pointOnCurve",
+      ),
+    ).toBe(true);
+    expect(session.constraintAuthoring).toBe(null);
+    expect(session.sequence).toBe(initialSequence + 1);
+
+    session = beginSketchGeometryDrag(session, target, [0.55, 0.8]);
+    session = finishSketchGeometryDrag(session, [0.7, 0.65]);
+    expect(session.sequence).toBe(initialSequence + 1);
+
+    const acceptedSpline = session.definition.entities.find(
+      (entity) => entity.entityId === spline.entityId,
+    );
+    expect(acceptedSpline?.kind).toBe("spline");
+    if (acceptedSpline?.kind !== "spline") return;
+    const acceptedVectors = acceptedSpline.pointOccurrences.map((occurrence) =>
+      occurrence.tangent.kind === "authored" ? occurrence.tangent.vector : null,
+    );
+    expect(acceptedVectors).not.toEqual(initialVectors);
+    expect(
+      acceptedSpline.pointOccurrences.find(
+        (occurrence) => occurrence.occurrenceId === "occ-2",
+      )?.tangent.kind,
+    ).toBe("automatic");
+
+    const persistedDefinition = JSON.parse(
+      JSON.stringify(session.commitRequest!.definition),
+    ) as SketchDefinition;
+    const fresh = createSessionFromDefinition(persistedDefinition);
+    expect(fresh.definition.entities).toEqual(persistedDefinition.entities);
+    const freshSolved = solveSketchDefinitionCore({
+      definition: fresh.definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(freshSolved.status.solveState).toBe("solved");
+
+    const fixedContact: SketchDefinition = {
+      ...fresh.definition,
+      constraintIds: [
+        ...fresh.definition.constraintIds,
+        "constraint_fix_contact",
+      ],
+      constraints: [
+        ...fresh.definition.constraints,
+        {
+          constraintId: "constraint_fix_contact",
+          kind: "fixPoint",
+          label: "Fix contact",
+          pointId: "sketch_point_contact",
+          position: fresh.definition.points.find(
+            (point) => point.pointId === "sketch_point_contact",
+          )!.position,
+        },
+      ],
+    };
+    let blocked = createSessionFromDefinition(fixedContact);
+    const beforeBlocked = structuredClone(blocked.definition);
+    const beforeSequence = blocked.sequence;
+    blocked = beginSketchGeometryDrag(blocked, target, [0.7, 0.65]);
+    blocked = finishSketchGeometryDrag(blocked, [5, 5]);
+    expect(blocked.definition).toEqual(beforeBlocked);
+    expect(blocked.sequence).toBe(beforeSequence);
+  }
+
   function testNoOpPointerMovementPreservesSessionIdentity() {
     const idleSession = createSessionFromDefinition(
       createSquareDefinition(false),
@@ -3200,6 +3334,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", () => {
   testDerivedLinearPatternGeometryParticipatesInProfiles();
   testPointerOnlyPreviewReusesStableDisplayRenderables();
   testAcceptedSketchEditInvalidatesStableDisplayRenderables();
+  testConstrainedSplineDragPersistsAcceptedTangentsAcrossFreshReentry();
   testNoOpPointerMovementPreservesSessionIdentity();
   testLogoCadaraPointerPreviewReusesStableDisplayBasis();
 });
