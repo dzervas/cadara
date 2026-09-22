@@ -651,6 +651,8 @@ namespace {
     bool needsDiagnosticComma = false;
 
     std::ostringstream out;
+    // Exact geometry is authored again by consumers; round-trip binary64 values.
+    out << std::setprecision(17);
     out
       << "{\"schemaVersion\":\"occ-native-topology-payload/v1alpha1\""
       << ",\"source\":\"occt7-shim\""

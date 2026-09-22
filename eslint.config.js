@@ -20,6 +20,7 @@ export default defineConfig([
     "test-results",
     ".tmp-*",
     "public/cadara-occ.d.ts",
+    ".scratch/**/cadara-occ.d.ts",
   ]),
   {
     files: ["**/*.{ts,tsx}"],

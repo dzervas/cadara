@@ -763,6 +763,127 @@ test("line bounds cover a nonmonotone projection across the complete proof brack
   });
 });
 
+test("production custom OCC enforces structural overlap and analytic circle acceptance at the exported adapter seam", async () => {
+  let loads = 0;
+  let runtime: Promise<OpenCascadeInstance> | undefined;
+  const loadCustomOpenCascade = () => {
+    loads += 1;
+    runtime ??= (async () => {
+      const module = (await import("../../../../public/cadara-occ.js")) as {
+        default: new (input: {
+          wasmBinary: Uint8Array;
+        }) => Promise<OpenCascadeInstance>;
+      };
+      const wasmBinary = new Uint8Array(
+        readFileSync(
+          fileURLToPath(
+            new URL("../../../../public/cadara-occ.wasm", import.meta.url),
+          ),
+        ),
+      );
+      return new module.default({ wasmBinary });
+    })();
+    return runtime;
+  };
+  const capability = createOpenCascadeNeutralCurveQueryCapability(
+    loadCustomOpenCascade,
+  );
+  const poles = [
+    [0, 0],
+    [1, 1],
+    [2, 1],
+    [3, 0],
+  ] as const;
+
+  await expect(
+    capability.queryNeutralCurves({
+      modelingTolerance: 1e-6,
+      first: {
+        curveId: "partial-overlap-first",
+        kind: "cubicBezier",
+        poles,
+        sourceDomain: [0, 1],
+        provenance: { sourceEntityId: "first", sourceSpanId: "span" },
+      },
+      second: {
+        curveId: "partial-overlap-reversed",
+        kind: "cubicBezier",
+        poles: [...poles].reverse() as unknown as typeof poles,
+        sourceDomain: [0, 1],
+        queryDomain: [0.2, 0.8],
+        provenance: { sourceEntityId: "second", sourceSpanId: "span" },
+      },
+    }),
+  ).resolves.toEqual({
+    kind: "verified",
+    points: [],
+    overlaps: [
+      {
+        orientation: "opposite",
+        firstInterval: [1 - 0.8, 0.8],
+        secondInterval: [0.8, 0.2],
+        proof: {
+          kind: "structuralCubicPoleIdentity",
+          poleOrder: "reversed",
+          firstProvenance: {
+            sourceEntityId: "first",
+            sourceSpanId: "span",
+          },
+          secondProvenance: {
+            sourceEntityId: "second",
+            sourceSpanId: "span",
+          },
+        },
+      },
+    ],
+  });
+  expect(loads).toBe(0);
+
+  const touching = await capability.queryNeutralCurves({
+    modelingTolerance: 1e-6,
+    first: makeCircle("touching-first", [1.5, 0]),
+    second: makeCircle("touching-second", [3.5, 0]),
+  });
+  const positiveGaps = await Promise.all(
+    [5e-7, 2e-6].map((gap) =>
+      capability.queryNeutralCurves({
+        modelingTolerance: 1e-6,
+        first: makeCircle(`gap-first-${gap}`, [1.5, 0]),
+        second: makeCircle(`gap-second-${gap}`, [3.5 + gap, 0]),
+      }),
+    ),
+  );
+  expect(loads).toBe(3);
+
+  const oc = (await runtime!) as OpenCascadeInstance & Record<string, unknown>;
+  const missingAnalyticCircleBindings = [
+    "IntAna2d_AnaIntersection_3",
+    "IntAna2d_IntPoint",
+    "gp_Circ2d",
+  ].filter((name) => typeof oc[name] !== "function");
+  expect(
+    missingAnalyticCircleBindings,
+    "Production custom OCC must provide the analytic circle bindings; unsupported is not acceptance.",
+  ).toEqual([]);
+
+  expect(touching).toEqual({
+    kind: "verified",
+    points: [
+      {
+        classification: "tangent",
+        firstParameter: Math.PI * 2,
+        secondParameter: Math.PI,
+        position: [2.5, 0],
+        proof: { kind: "nativeAnalyticCircleIntersection" },
+      },
+    ],
+    overlaps: [],
+  });
+  for (const result of positiveGaps) {
+    expect(result).toEqual({ kind: "verified", points: [], overlaps: [] });
+  }
+}, 65_000);
+
 test("installed full OCC rejects positive endpoint gaps and verifies a bounded crossing", async () => {
   const { default: initializeOpenCascade } =
     await import("opencascade.js/dist/node.js");

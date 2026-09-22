@@ -519,6 +519,34 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
     return new module.default({ wasmBinary });
   }
 
+  async function testNativeExactBrepPreservesDoublePrecision() {
+    const oc = await loadNativeOpenCascadeForTest();
+    const expectedX = 0.12345678901234566;
+    const origin = new oc.gp_Pnt_3(expectedX, 0, 0);
+    const builder = new oc.BRepPrimAPI_MakeBox_3(origin, 1, 2, 3);
+    const shape = builder.Shape();
+    const bodyId = "body_native_precision" as BodyId;
+    try {
+      const payload = createOccNativeExactBrepPayloadFromShimPayload({
+        revisionId: "rev_native_precision" as RevisionId,
+        target: { kind: "body", bodyId },
+        bodyId,
+        bodyLabel: "Native precision probe",
+        nativePayload: parseNativeShimPayloadJson(
+          oc.CadaraBuildNativeExactBrepPayload.BuildJson(shape, bodyId, "t_precision"),
+        ),
+      });
+      expect(
+        Math.min(...payload.brep.bodies[0]!.topology.vertices.map(vertex => vertex.point[0])),
+        "Exact BRep values must round-trip doubles, not truncate them to stream-default precision.",
+      ).toBe(expectedX);
+    } finally {
+      shape.delete?.();
+      builder.delete?.();
+      origin.delete?.();
+    }
+  }
+
   async function testNativeShimReturnsFlatTopologyAndMeshPayloads() {
     const oc = await loadNativeOpenCascadeForTest();
     const boxBuilder = new oc.BRepPrimAPI_MakeBox_2(1, 2, 3);
@@ -1417,6 +1445,7 @@ test("src/domain/modeling/occ/native-topology-payload.spec.ts", async () => {
   testNativeSheetSplitToolHistoryRejectsMalformedMembership();
   testNativeBooleanOperandHistoryRejectsMalformedIncidence();
   testNativeShimPayloadRejectsMalformedPrimitiveInvariants();
+  await testNativeExactBrepPreservesDoublePrecision();
   await testNativeShimReturnsFlatTopologyAndMeshPayloads();
   await testNativeShimReturnsStructuredDiagnosticsForInvalidCommittedShapes();
   await testNativeExactBrepExtractsCurvedTopologyInsteadOfFlatteningIt();
