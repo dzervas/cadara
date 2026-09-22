@@ -14,7 +14,7 @@ export function shouldTransformWithTypia(filePath: string) {
 
 export function createTypiaPluginOptions(rootDir: string) {
   return {
-    cache: true,
+    cache: false,
     include: typiaTransformInclude,
     tsconfig: path.resolve(rootDir, "tsconfig.app.json"),
   };
