@@ -684,7 +684,7 @@ export function WorkspaceToolbar({
     </div>
   );
 
-  return <Tooltip.Group openDelay={100}>{toolbar}</Tooltip.Group>;
+  return <Tooltip.Group openDelay={0}>{toolbar}</Tooltip.Group>;
 }
 
 const pillCommonStyle: CSSProperties = {
