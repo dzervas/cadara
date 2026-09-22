@@ -3,6 +3,11 @@ import type {
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
 import type {
+  NeutralCurveQueryCapability,
+  NeutralCurveQueryRequest,
+  NeutralCurveSelfIntersectionRequest,
+} from "@/contracts/modeling/neutral-curve-query";
+import type {
   ExportCapabilities,
   MeshExportAccuracy,
 } from "@/contracts/export/capabilities";
@@ -186,6 +191,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { getOccTessellationTier } from "@/domain/modeling/occ/tessellation";
+import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
 
 interface OpenCascadeKernelAdapterOptions {
   solverAdapter: SketchSolverAdapter;
@@ -322,7 +328,6 @@ function createAuthoredModelDocumentFromAuthoringState(
     topologyLineage: serializeCurrentOccTopologyLineage(state),
   };
 }
-
 
 function getVariableMutationChangedTargetsFromOccState(
   state: OccAuthoringState,
@@ -735,14 +740,20 @@ function createDerivedValidity(input: {
     input.diagnostics,
     input.validationIsValid
       ? []
-      : [{
-          code: "sketch-validation-failed",
-          severity: "error" as const,
-          message: "The authored sketch has invalid or unresolved requirements.",
-          target: null,
-        }],
+      : [
+          {
+            code: "sketch-validation-failed",
+            severity: "error" as const,
+            message:
+              "The authored sketch has invalid or unresolved requirements.",
+            target: null,
+          },
+        ],
   );
-  return deriveSketchValidity({ solvedSnapshot: input.solvedSnapshot, diagnostics });
+  return deriveSketchValidity({
+    solvedSnapshot: input.solvedSnapshot,
+    diagnostics,
+  });
 }
 
 function normalizeSketchDefinitionForSketchId(
@@ -992,7 +1003,10 @@ function collectBakedBodyAssetReferences(
   features: readonly Pick<OccAuthoringFeatureRecord, "definition">[],
   extraDefinitions: readonly FeatureDefinition[] = [],
 ) {
-  const referencesById = new Map<GeometryAssetId, BakedGeometryAssetReference>();
+  const referencesById = new Map<
+    GeometryAssetId,
+    BakedGeometryAssetReference
+  >();
   for (const definition of [
     ...features.map((feature) => feature.definition),
     ...extraDefinitions,
@@ -1281,8 +1295,10 @@ function isCursorAtDocumentHistoryTail(state: OccAuthoringState) {
   const tail = state.historyOrder.at(-1);
   if (!tail) return state.cursor.kind === "empty";
   if (state.cursor.kind === "empty") return false;
-  return getDocumentHistoryOrderEntryKey(tail) ===
-    getDocumentHistoryOrderEntryKey(state.cursor);
+  return (
+    getDocumentHistoryOrderEntryKey(tail) ===
+    getDocumentHistoryOrderEntryKey(state.cursor)
+  );
 }
 
 function repairCursorAfterHistoryDeletion(
@@ -1746,6 +1762,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private assetResolver: GeometryAssetResolver | undefined;
   private readonly documentId: DocumentId;
   private readonly tolerances: SolverTolerancePolicy;
+  private readonly neutralCurveQueries: NeutralCurveQueryCapability;
 
   private initializationPromise: Promise<OccKernelRuntimeState> | null = null;
   private runtimeState: OccKernelRuntimeState | null = null;
@@ -1761,12 +1778,25 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.solverAdapterFactory = options.solverAdapterFactory;
     this.loadOpenCascadeInstance =
       options.getOpenCascadeInstance ?? getOpenCascadeInstance;
+    this.neutralCurveQueries = createOpenCascadeNeutralCurveQueryCapability(
+      this.loadOpenCascadeInstance,
+    );
     this.initialSnapshotRequiresRuntime =
       options.initialSnapshotRequiresRuntime ?? false;
     this.workerSnapshotClient = options.workerSnapshotClient ?? null;
     this.assetResolver = options.assetResolver;
     this.documentId = options.documentId ?? OCC_KERNEL_DOCUMENT_ID;
     this.tolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES;
+  }
+
+  queryNeutralCurves(request: NeutralCurveQueryRequest) {
+    return this.neutralCurveQueries.queryNeutralCurves(request);
+  }
+
+  queryNeutralCurveSelfIntersections(
+    request: NeutralCurveSelfIntersectionRequest,
+  ) {
+    return this.neutralCurveQueries.queryNeutralCurveSelfIntersections(request);
   }
 
   dispose(): void {
@@ -2038,7 +2068,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
     const validatedDocument = parsed.document;
     this.assetResolver = assetResolver ?? this.assetResolver;
-    const assetBlobs = await resolveGeometryAssetBlobs(validatedDocument, assetResolver);
+    const assetBlobs = await resolveGeometryAssetBlobs(
+      validatedDocument,
+      assetResolver,
+    );
     const assets = createGeometryAssetBlobInputs(validatedDocument, assetBlobs);
 
     if (this.workerSnapshotClient) {
@@ -2078,7 +2111,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         validatedDocument,
         assetResolver,
       );
-      const assets = createGeometryAssetBlobInputs(validatedDocument, assetBlobs);
+      const assets = createGeometryAssetBlobInputs(
+        validatedDocument,
+        assetBlobs,
+      );
       await this.workerSnapshotClient.validateAuthoredModelDocument(
         validatedDocument,
         diagnostics,
@@ -2111,8 +2147,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver);
     const restoreDiagnostics = [...diagnostics];
     const historyOrder = createAuthoredHistoryRestoreOrder(document);
-    const previousFeatureTopologyLineage =
-      createOccFeatureTopologyLineageMap(document.topologyLineage);
+    const previousFeatureTopologyLineage = createOccFeatureTopologyLineageMap(
+      document.topologyLineage,
+    );
     const sketchById = new Map(
       document.sketches.map((sketch) => [sketch.sketchId, sketch]),
     );
@@ -2373,7 +2410,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
-      resolvedGeometryAssets: runtimeState.authoringState.resolvedGeometryAssets,
+      resolvedGeometryAssets:
+        runtimeState.authoringState.resolvedGeometryAssets,
       bakedShapeCache: runtimeState.authoringState.bakedShapeCache,
       embeddedBinaryAssets: runtimeState.authoringState.embeddedBinaryAssets,
       constructions: runtimeState.authoringState.baseConstructions,
@@ -2637,7 +2675,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
-      resolvedGeometryAssets: runtimeState.authoringState.resolvedGeometryAssets,
+      resolvedGeometryAssets:
+        runtimeState.authoringState.resolvedGeometryAssets,
       bakedShapeCache: runtimeState.authoringState.bakedShapeCache,
       embeddedBinaryAssets: runtimeState.authoringState.embeddedBinaryAssets,
       constructions: runtimeState.authoringState.baseConstructions,
@@ -2887,63 +2926,63 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const nativeBodies = state.bodies
       .filter((body) => body.topologyPresentation !== "bodyOnlyMesh")
       .map((body) => {
-      const cacheKey = this.createNativeTopologyBodyPayloadCacheKey({
-        bodyId: body.bodyId,
-        topologyToken: body.topologyToken,
-        lodTierId: tier.id,
-        transactionMode,
-      });
-      const bodyNativePayload = options.useCommittedShapeTransaction
-        ? body.nativeTopologyPayload
-        : undefined;
+        const cacheKey = this.createNativeTopologyBodyPayloadCacheKey({
+          bodyId: body.bodyId,
+          topologyToken: body.topologyToken,
+          lodTierId: tier.id,
+          transactionMode,
+        });
+        const bodyNativePayload = options.useCommittedShapeTransaction
+          ? body.nativeTopologyPayload
+          : undefined;
 
-      if (bodyNativePayload) {
+        if (bodyNativePayload) {
+          this.nativeTopologyBodyPayloadCache.set(cacheKey, {
+            bodyId: body.bodyId,
+            topologyToken: body.topologyToken,
+            lodTierId: tier.id,
+            transactionMode,
+            nativePayload: bodyNativePayload,
+          });
+
+          return {
+            bodyId: body.bodyId,
+            nativePayload: bodyNativePayload,
+          };
+        }
+
+        const cached = this.nativeTopologyBodyPayloadCache.get(cacheKey);
+
+        if (cached) {
+          return {
+            bodyId: body.bodyId,
+            nativePayload: cached.nativePayload,
+          };
+        }
+
+        const nativePayload = parseNativeShimPayloadJson(
+          builder(
+            body.shape,
+            body.bodyId,
+            body.topologyToken,
+            tier.linearDeflectionModelUnits,
+            tier.angularDeflectionRadians,
+          ),
+        );
+
         this.nativeTopologyBodyPayloadCache.set(cacheKey, {
           bodyId: body.bodyId,
           topologyToken: body.topologyToken,
           lodTierId: tier.id,
           transactionMode,
-          nativePayload: bodyNativePayload,
+          nativePayload,
         });
 
         return {
           bodyId: body.bodyId,
-          nativePayload: bodyNativePayload,
+          nativePayload,
         };
-      }
-
-      const cached = this.nativeTopologyBodyPayloadCache.get(cacheKey);
-
-      if (cached) {
-        return {
-          bodyId: body.bodyId,
-          nativePayload: cached.nativePayload,
-        };
-      }
-
-      const nativePayload = parseNativeShimPayloadJson(
-        builder(
-          body.shape,
-          body.bodyId,
-          body.topologyToken,
-          tier.linearDeflectionModelUnits,
-          tier.angularDeflectionRadians,
-        ),
-      );
-
-      this.nativeTopologyBodyPayloadCache.set(cacheKey, {
-        bodyId: body.bodyId,
-        topologyToken: body.topologyToken,
-        lodTierId: tier.id,
-        transactionMode,
-        nativePayload,
       });
-
-      return {
-        bodyId: body.bodyId,
-        nativePayload,
-      };
-    });
     const payload = createOccNativeTopologyPayloadFromShimPayloads({
       revisionId: state.revisionId,
       lodTierId: tier.id,
@@ -3711,7 +3750,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       diagnostics: sketchDiagnostics,
       validationIsValid,
     });
-    solvedSnapshot = { ...solvedSnapshot, diagnostics: derivedValidity.diagnostics };
+    solvedSnapshot = {
+      ...solvedSnapshot,
+      diagnostics: derivedValidity.diagnostics,
+    };
     const solverDiagnostics = derivedValidity.diagnostics.map((diagnostic) =>
       mapSketchSolverDiagnostic(sketchId, diagnostic),
     );
@@ -5058,16 +5100,19 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const nextSequence = runtimeState.revisionSequence + 1;
     const nextRevisionId = createRevisionId(nextSequence);
     const candidateDocument = {
-      ...createAuthoredModelDocumentFromAuthoringState(runtimeState.authoringState),
+      ...createAuthoredModelDocumentFromAuthoringState(
+        runtimeState.authoringState,
+      ),
       revisionId: nextRevisionId,
       variables: candidateVariables,
     } satisfies AuthoredModelDocument;
-    const nextRuntimeState = await this.restoreAuthoredModelDocumentOnMainThread(
-      candidateDocument,
-      [],
-      runtimeState.authoringState.assetResolver,
-      { replaceRuntimeState: false },
-    );
+    const nextRuntimeState =
+      await this.restoreAuthoredModelDocumentOnMainThread(
+        candidateDocument,
+        [],
+        runtimeState.authoringState.assetResolver,
+        { replaceRuntimeState: false },
+      );
 
     this.replaceRuntimeState(nextRuntimeState);
 
@@ -5130,7 +5175,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       replacedFeatureIndex >= 0
         ? runtimeState.authoringState.features[replacedFeatureIndex]!
         : null;
-    if (replacedFeature && replacedFeature.definition.kind !== request.definition.kind) {
+    if (
+      replacedFeature &&
+      replacedFeature.definition.kind !== request.definition.kind
+    ) {
       throw new Error(
         `Preview replacement cannot change ${replacedFeature.definition.kind} into ${request.definition.kind}.`,
       );
@@ -5151,7 +5199,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
     const previewHistoryOrder = replacedFeature
       ? runtimeState.authoringState.historyOrder.map((item) =>
-          item.kind === "feature" && item.featureId === replacedFeature.featureId
+          item.kind === "feature" &&
+          item.featureId === replacedFeature.featureId
             ? { kind: "feature" as const, featureId: previewFeatureId }
             : item,
         )

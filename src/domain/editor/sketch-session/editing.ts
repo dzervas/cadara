@@ -68,7 +68,10 @@ import {
   buildSketchEditToolPresentation,
   selectSketchEditTarget,
 } from "./tools";
-import { applyPointPositionsToDefinition } from "./definition-patches";
+import {
+  applyPointPositionsToDefinition,
+  applySolvedSketchToDefinition,
+} from "./definition-patches";
 
 import {
   getSelectedReferenceImageOperationIds,
@@ -1206,12 +1209,9 @@ export function solveDraggedPointEdit(
 
   return {
     kind: "accepted",
-    definition: applyPointPositionsToDefinition(
+    definition: applySolvedSketchToDefinition(
       definition,
-      solved.solvedSnapshot.solvedPoints.map((point) => ({
-        pointId: point.pointId,
-        position: point.solvedPosition,
-      })),
+      solved.solvedSnapshot,
     ),
     solvedSnapshot: solved.solvedSnapshot,
     interactiveSolveSession: solveSession,

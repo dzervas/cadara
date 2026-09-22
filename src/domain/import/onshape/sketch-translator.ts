@@ -71,6 +71,10 @@ export interface SketchTranslationInput {
   label: string;
   planeKey?: SketchPlaneKey;
   plane?: SketchPlaneDefinition;
+  /** Onshape's authored sketch-coordinate frame for directional constraints. */
+  sourceFrame?: SketchPlaneFrame;
+  /** Frame into which `entities` were projected; defaults to the output plane frame. */
+  projectionFrame?: SketchPlaneFrame;
   entities: readonly SolvedSketchEntityGeometry[];
   constraints?: readonly OnshapeSketchConstraint[];
   sourceSolveStatus?: string;
@@ -244,6 +248,7 @@ const POINT_SUFFIXES = ["start", "end", "center", "middle", "point"] as const;
 const DIMENSION_KINDS = new Set(["DISTANCE", "LENGTH", "DIAMETER", "ANGLE", "RADIUS"]);
 const DERIVATION_KINDS = new Set(["MIRROR", "LINEAR_PATTERN", "OFFSET"]);
 const LINEAR_PATTERN_VECTOR_TOLERANCE = 1e-4;
+const AXIS_ALIGNMENT_TOLERANCE = 1e-4;
 
 function dot3(
   a: readonly [number, number, number],
@@ -484,13 +489,47 @@ function entityPointIds(
   }
 }
 
+function translatedDirectionalConstraintKind(input: {
+  sourceKind: "horizontal" | "vertical";
+  sourceFrame?: SketchPlaneFrame;
+  projectionFrame: SketchPlaneFrame;
+}): "horizontal" | "vertical" | null {
+  if (!input.sourceFrame) {
+    return input.sourceKind;
+  }
+  const sourceAxis = input.sourceKind === "horizontal"
+    ? input.sourceFrame.xAxis
+    : input.sourceFrame.yAxis;
+  const projectedX = dot3(sourceAxis, input.projectionFrame.xAxis);
+  const projectedY = dot3(sourceAxis, input.projectionFrame.yAxis);
+  const projectedNormal = dot3(sourceAxis, input.projectionFrame.normal);
+  if (Math.abs(projectedNormal) > AXIS_ALIGNMENT_TOLERANCE) {
+    return null;
+  }
+  if (
+    Math.abs(projectedY) <= AXIS_ALIGNMENT_TOLERANCE &&
+    Math.abs(Math.abs(projectedX) - 1) <= AXIS_ALIGNMENT_TOLERANCE
+  ) {
+    return "horizontal";
+  }
+  if (
+    Math.abs(projectedX) <= AXIS_ALIGNMENT_TOLERANCE &&
+    Math.abs(Math.abs(projectedY) - 1) <= AXIS_ALIGNMENT_TOLERANCE
+  ) {
+    return "vertical";
+  }
+  return null;
+}
+
 function translateConstraintRecord(input: {
   featureId: string;
   record: OnshapeSketchConstraint;
   maps: TranslationMaps;
   diagnostics: SketchTranslationDiagnostic[];
+  sourceFrame?: SketchPlaneFrame;
+  projectionFrame: SketchPlaneFrame;
 }): ConstraintDefinition | null {
-  const { featureId, record, maps, diagnostics } = input;
+  const { featureId, record, maps, diagnostics, sourceFrame, projectionFrame } = input;
   const label = record.entityId;
   const id = constraintId(featureId, record.entityId);
   const first = parseOperand(
@@ -545,15 +584,23 @@ function translateConstraintRecord(input: {
       }
       break;
     }
-    case "HORIZONTAL": {
-      if (first.kind === "entity") {
-        return { constraintId: id, kind: "horizontal", label, entityId: first.entityId };
-      }
-      break;
-    }
+    case "HORIZONTAL":
     case "VERTICAL": {
       if (first.kind === "entity") {
-        return { constraintId: id, kind: "vertical", label, entityId: first.entityId };
+        const kind = translatedDirectionalConstraintKind({
+          sourceKind: record.constraintType === "HORIZONTAL" ? "horizontal" : "vertical",
+          sourceFrame,
+          projectionFrame,
+        });
+        if (kind) {
+          return { constraintId: id, kind, label, entityId: first.entityId };
+        }
+        dropRelationship(
+          diagnostics,
+          record,
+          "authored sketch axis is not aligned with either axis of the translated sketch frame",
+        );
+        return null;
       }
       break;
     }
@@ -1591,7 +1638,14 @@ export function translateSketch(
       continue;
     }
     const before = diagnostics.length;
-    const constraint = translateConstraintRecord({ featureId: input.featureId, record, maps, diagnostics });
+    const constraint = translateConstraintRecord({
+      featureId: input.featureId,
+      record,
+      maps,
+      diagnostics,
+      sourceFrame: input.sourceFrame,
+      projectionFrame: input.projectionFrame ?? plane.frame,
+    });
     if (constraint) {
       constraints.push(constraint);
       relationshipSummary.constraints.carried += 1;

@@ -391,6 +391,291 @@ export function sampleSplineGeometry(
     : [];
 }
 
+export interface ClosestSplineSpanLocation {
+  readonly spanIndex: number;
+  readonly u: number;
+  readonly distanceSquared: number;
+}
+
+function evaluatePolynomial(coefficients: readonly number[], value: number) {
+  let result = 0;
+  for (let index = coefficients.length - 1; index >= 0; index -= 1)
+    result = result * value + coefficients[index]!;
+  return result;
+}
+
+/**
+ * Produces floating-point root candidates in [0, 1]. Recursive derivative
+ * isolation partitions the polynomial into monotone intervals, so this does
+ * not depend on sampling density or Newton seeds. Isolation stops only when
+ * the bracket endpoints are adjacent floating-point values and preserves both
+ * representatives. This is a numerical candidate set, not symbolic proof.
+ */
+function unitIntervalPolynomialRoots(coefficients: readonly number[]) {
+  const scale = Math.max(...coefficients.map(Math.abs), 0);
+  if (scale === 0) return [];
+  const normalized = coefficients.map((coefficient) => coefficient / scale);
+  while (normalized.length > 1 && normalized.at(-1) === 0) normalized.pop();
+  if (normalized.length === 1) return [];
+  if (normalized.length === 2) {
+    const root = -normalized[0]! / normalized[1]!;
+    return root >= 0 && root <= 1 ? [root] : [];
+  }
+
+  const derivative = normalized
+    .slice(1)
+    .map((value, index) => value * (index + 1));
+  const critical = unitIntervalPolynomialRoots(derivative).filter(
+    (root) => root > 0 && root < 1,
+  );
+  const boundaries = [0, ...critical, 1];
+  const roots: number[] = [];
+  const addRoot = (root: number) => {
+    const clamped = Math.max(0, Math.min(1, root));
+    if (!roots.includes(clamped)) roots.push(clamped);
+  };
+
+  for (const boundary of boundaries) {
+    if (evaluatePolynomial(normalized, boundary) === 0) addRoot(boundary);
+  }
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    let lo = boundaries[index]!;
+    let hi = boundaries[index + 1]!;
+    let loValue = evaluatePolynomial(normalized, lo);
+    const hiValue = evaluatePolynomial(normalized, hi);
+    if (
+      loValue === 0 ||
+      hiValue === 0 ||
+      Math.sign(loValue) === Math.sign(hiValue)
+    )
+      continue;
+    for (;;) {
+      const mid = lo + (hi - lo) / 2;
+      if (mid === lo || mid === hi) break;
+      const midValue = evaluatePolynomial(normalized, mid);
+      if (midValue === 0) {
+        lo = mid;
+        hi = mid;
+        break;
+      }
+      if (Math.sign(midValue) === Math.sign(loValue)) {
+        lo = mid;
+        loValue = midValue;
+      } else {
+        hi = mid;
+      }
+    }
+    // Preserve both adjacent floating-point representatives of the isolated
+    // root. The geometric owner decides between them; averaging can round
+    // away from an exactly representable contact.
+    addRoot(lo);
+    addRoot(hi);
+  }
+  return roots.sort((left, right) => left - right);
+}
+
+/** Physical distance magnitude represented in logarithmic, unsquared form. */
+function splineCandidateDistance(
+  position: SplineVector,
+  poles: SplinePoles,
+  u: number,
+) {
+  const coordinateData = ([0, 1] as const).map((component) => {
+    let relative = poles.map((pole) => pole[component] - position[component]);
+    let coordinateScale = Math.max(...relative.map(Math.abs), 0);
+    if (!Number.isFinite(coordinateScale)) {
+      coordinateScale = Math.max(
+        Math.abs(position[component]),
+        ...poles.map((pole) => Math.abs(pole[component])),
+      );
+      if (!Number.isFinite(coordinateScale) || coordinateScale === 0)
+        return null;
+      relative = poles.map(
+        (pole) =>
+          pole[component] / coordinateScale -
+          position[component] / coordinateScale,
+      );
+    } else if (coordinateScale === 0) {
+      coordinateScale = 1;
+    } else {
+      relative = relative.map((value) => value / coordinateScale);
+    }
+    return { relative, coordinateScale };
+  });
+  if (coordinateData.some((value) => value === null)) return null;
+  const [xData, yData] = coordinateData as [
+    { relative: number[]; coordinateScale: number },
+    { relative: number[]; coordinateScale: number },
+  ];
+  const normalizedPoles = xData.relative.map(
+    (x, index) => [x, yData.relative[index]!] as SplineVector,
+  ) as unknown as SplinePoles;
+  const normalized = evaluateSplineSpan(
+    {
+      interval: [0, 1],
+      poles: normalizedPoles,
+      differential: {
+        interval: [0, 0],
+        poles: [zero, zero, zero, zero],
+      },
+    },
+    { kind: "local", value: u },
+  ).position;
+  const components = normalized.map((value, component) =>
+    value === 0
+      ? { log: Number.NEGATIVE_INFINITY, value: 0 }
+      : {
+          log:
+            Math.log(Math.abs(value)) +
+            Math.log(coordinateData[component]!.coordinateScale),
+          value: value * coordinateData[component]!.coordinateScale,
+        },
+  );
+  const [x, y] = components;
+  const largest = Math.max(x!.log, y!.log);
+  return {
+    logDistance:
+      largest === Number.NEGATIVE_INFINITY
+        ? largest
+        : largest +
+          Math.log(
+            Math.hypot(Math.exp(x!.log - largest), Math.exp(y!.log - largest)),
+          ),
+    distance: Math.hypot(x!.value, y!.value),
+  };
+}
+
+/**
+ * Returns the best floating-point candidate over cubic spans by comparing both
+ * endpoints and all isolated stationary candidates. Root computation is scaled
+ * per span. Candidate comparison re-evaluates each original coordinate with an
+ * independent scale, preserving physical gaps that a dominant span or axis
+ * would erase. Distances remain unsquared until the public result is formed.
+ * Numerical root isolation does not constitute a symbolic global-minimum proof.
+ */
+export function closestSplineSpanLocation(
+  position: SplineVector,
+  spans: readonly Pick<SplineSpan, "interval" | "poles" | "differential">[],
+): ClosestSplineSpanLocation | null {
+  let best: {
+    spanIndex: number;
+    u: number;
+    logDistance: number;
+    distance: number;
+  } | null = null;
+  for (let spanIndex = 0; spanIndex < spans.length; spanIndex += 1) {
+    const span = spans[spanIndex]!;
+    const relativePoles = span.poles.map(
+      (pole) => [pole[0] - position[0], pole[1] - position[1]] as SplineVector,
+    ) as unknown as SplinePoles;
+    let spanScale = Math.max(
+      ...relativePoles.flatMap((pole) => pole.map(Math.abs)),
+      0,
+    );
+    let poles: SplinePoles;
+    if (Number.isFinite(spanScale)) {
+      if (spanScale === 0) spanScale = 1;
+      poles = relativePoles.map(
+        (pole) => [pole[0] / spanScale, pole[1] / spanScale] as SplineVector,
+      ) as unknown as SplinePoles;
+    } else {
+      spanScale = Math.max(
+        Math.abs(position[0]),
+        Math.abs(position[1]),
+        ...span.poles.flatMap((pole) => pole.map(Math.abs)),
+      );
+      if (!Number.isFinite(spanScale) || spanScale === 0) continue;
+      poles = span.poles.map(
+        (pole) =>
+          [
+            pole[0] / spanScale - position[0] / spanScale,
+            pole[1] / spanScale - position[1] / spanScale,
+          ] as SplineVector,
+      ) as unknown as SplinePoles;
+    }
+
+    const [p0, p1, p2, p3] = poles;
+    const components = [0, 1] as const;
+    const curve = components.map((component) => [
+      p0[component],
+      3 * (p1[component] - p0[component]),
+      3 * (p0[component] - 2 * p1[component] + p2[component]),
+      -p0[component] + 3 * p1[component] - 3 * p2[component] + p3[component],
+    ]);
+    const stationary = Array.from({ length: 6 }, () => 0);
+    for (const coefficients of curve) {
+      const derivative = coefficients
+        .slice(1)
+        .map((value, index) => value * (index + 1));
+      coefficients.forEach((left, leftIndex) =>
+        derivative.forEach((right, rightIndex) => {
+          stationary[leftIndex + rightIndex]! += left * right;
+        }),
+      );
+    }
+    const candidates = [0, ...unitIntervalPolynomialRoots(stationary), 1];
+    const relativeSpan = {
+      ...span,
+      poles,
+      differential: {
+        interval: [0, 0] as const,
+        poles: [zero, zero, zero, zero] as SplinePoles,
+      },
+    };
+    for (const isolated of candidates) {
+      let u = isolated;
+      let evaluated = evaluateSplineSpan(relativeSpan, {
+        kind: "local",
+        value: u,
+      });
+      let normalizedDistance = Math.hypot(...evaluated.position);
+      for (;;) {
+        const slope =
+          evaluated.position[0] * evaluated.first[0] +
+          evaluated.position[1] * evaluated.first[1];
+        const curvature =
+          evaluated.first[0] ** 2 +
+          evaluated.first[1] ** 2 +
+          evaluated.position[0] * evaluated.second[0] +
+          evaluated.position[1] * evaluated.second[1];
+        if (curvature === 0 || !Number.isFinite(curvature)) break;
+        const nextU = Math.max(0, Math.min(1, u - slope / curvature));
+        if (nextU === u) break;
+        const next = evaluateSplineSpan(relativeSpan, {
+          kind: "local",
+          value: nextU,
+        });
+        const nextDistance = Math.hypot(...next.position);
+        if (!(nextDistance < normalizedDistance)) break;
+        u = nextU;
+        evaluated = next;
+        normalizedDistance = nextDistance;
+      }
+      const physical = splineCandidateDistance(position, span.poles, u);
+      if (
+        physical &&
+        Number.isFinite(normalizedDistance) &&
+        (!best || physical.logDistance < best.logDistance)
+      )
+        best = { spanIndex, u, ...physical };
+    }
+  }
+  if (!best) return null;
+
+  if (best.logDistance === Number.NEGATIVE_INFINITY)
+    return { spanIndex: best.spanIndex, u: best.u, distanceSquared: 0 };
+  // Saturation is explicit when the physical squared distance lies outside
+  // Number's range: Infinity above it, MIN_VALUE below it, never a false zero.
+  const logDistanceSquared = 2 * best.logDistance;
+  const distanceSquared =
+    logDistanceSquared > Math.log(Number.MAX_VALUE)
+      ? Number.POSITIVE_INFINITY
+      : logDistanceSquared < Math.log(Number.MIN_VALUE)
+        ? Number.MIN_VALUE
+        : best.distance ** 2;
+  return { spanIndex: best.spanIndex, u: best.u, distanceSquared };
+}
+
 export interface SplineEvaluation {
   readonly position: SplineVector;
   /** Derivatives in the requested parameter units (local u or source t). */
@@ -407,7 +692,7 @@ export interface SplineEvaluation {
  * Source-parameter differentiation accounts for moving cumulative knots. The
  * supplied span is held fixed; this API does not choose sides at a moving knot. */
 export function evaluateSplineSpan(
-  span: SplineSpan,
+  span: Pick<SplineSpan, "interval" | "poles" | "differential">,
   parameter: {
     readonly kind: "local" | "source";
     readonly value: number;
@@ -428,35 +713,40 @@ export function evaluateSplineSpan(
       "Spline parameter must be finite and inside its source span",
     );
   const v = 1 - u;
-  const weights = [v ** 3, 3 * v * v * u, 3 * v * u * u, u ** 3];
-  const firstWeights = [
-    -3 * v * v,
-    3 * v * v - 6 * v * u,
-    6 * v * u - 3 * u * u,
-    3 * u * u,
-  ];
-  const secondWeights = [6 * v, -12 * v + 6 * u, 6 * v - 12 * u, 6 * u];
-  const sum = (poles: SplinePoles, factors: readonly number[]) =>
-    poles.reduce<SplineVector>(
-      (sum, p, i) => add(sum, scale(p, factors[i])),
-      zero,
+  const evaluatePoles = (poles: SplinePoles) => {
+    const [p0, p1, p2, p3] = poles;
+    const d1 = sub(p1, p0);
+    const d2 = sub(p2, p1);
+    const d3 = sub(p3, p2);
+    const position =
+      u === 0
+        ? p0
+        : u === 1
+          ? p3
+          : add(
+              p0,
+              add(
+                scale(d1, 3 * u),
+                add(
+                  scale(sub(d2, d1), 3 * u * u),
+                  scale(add(sub(d3, scale(d2, 2)), d1), u ** 3),
+                ),
+              ),
+            );
+    const first = scale(
+      add(add(scale(d1, v * v), scale(d2, 2 * v * u)), scale(d3, u * u)),
+      3,
     );
-  const position = sum(span.poles, weights),
-    first = sum(span.poles, firstWeights),
-    second = sum(span.poles, secondWeights);
-  const third = sum(span.poles, [-6, 18, -18, 6]);
-  const dPosition = add(
-    sum(span.differential.poles, weights),
-    scale(first, du),
-  );
-  const dFirst = add(
-    sum(span.differential.poles, firstWeights),
-    scale(second, du),
-  );
-  const dSecond = add(
-    sum(span.differential.poles, secondWeights),
-    scale(third, du),
-  );
+    const second = scale(add(scale(sub(d2, d1), v), scale(sub(d3, d2), u)), 6);
+    const third = scale(add(sub(d3, scale(d2, 2)), d1), 6);
+    return { position, first, second, third };
+  };
+  const evaluated = evaluatePoles(span.poles);
+  const differential = evaluatePoles(span.differential.poles);
+  const { position, first, second, third } = evaluated;
+  const dPosition = add(differential.position, scale(first, du));
+  const dFirst = add(differential.first, scale(second, du));
+  const dSecond = add(differential.second, scale(third, du));
   const unit = source ? h : 1,
     dUnit = source ? dh : 0;
   return {

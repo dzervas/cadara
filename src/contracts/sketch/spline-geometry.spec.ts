@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  closestSplineSpanLocation,
   evaluateSplineSpan,
   reconstructSpline,
   reconstructSplineAggregate,
@@ -471,6 +472,276 @@ describe("neutral spline reconstruction owner", () => {
       }
     },
   );
+
+  test("closest location compares every stationary candidate across and within spans", () => {
+    const points: V[] = [
+      [0, 0],
+      [1, -0.28642033599317074],
+      [2, -0.8654971411451697],
+    ];
+    const geometry = build(
+      input(points, "open", {
+        0: [3.0955284759402275, -3.686498027294874],
+        1: [7.648204565048218, 7.480724450200796],
+        2: [0.6425580456852913, 5.708081874996424],
+      }),
+    );
+    const closest = closestSplineSpanLocation(
+      [0.3154072277247906, -1.2599992523901165],
+      geometry.spans,
+    );
+    expect(closest?.spanIndex).toBe(0);
+    expect(closest?.u).toBeCloseTo(0.9592206079, 8);
+    expect(closest?.distanceSquared).toBeCloseTo(0.03953738724, 9);
+
+    const secondSpanPoint = evaluateSplineSpan(geometry.spans[1], {
+      kind: "local",
+      value: 0.73,
+    }).position;
+    const acrossSpans = closestSplineSpanLocation(
+      secondSpanPoint,
+      geometry.spans,
+    );
+    expect(acrossSpans?.spanIndex).toBe(1);
+    expect(acrossSpans?.u).toBeCloseTo(0.73, 9);
+  });
+
+  test("closest location preserves representably distinct roots beside endpoints", () => {
+    const zeroDifferential = {
+      interval: [0, 0] as const,
+      poles: [
+        [0, 0],
+        [0, 0],
+        [0, 0],
+        [0, 0],
+      ] as const,
+    };
+    const span = {
+      interval: [0, 1] as const,
+      poles: [
+        [0, 0],
+        [0, 1e12],
+        [0, -1e12],
+        [0, 0],
+      ] as const,
+      differential: zeroDifferential,
+    };
+
+    for (const scale of [1, 1e-9, 1e9]) {
+      const scaledSpan = {
+        ...span,
+        poles: span.poles.map(
+          ([x, y]) => [x * scale, y * scale] as const,
+        ) as unknown as typeof span.poles,
+      };
+      for (const query of [
+        [0, 0.001 * scale],
+        [0, scale],
+      ] as const) {
+        const closest = closestSplineSpanLocation(query, [scaledSpan]);
+        expect(closest?.u).toBeGreaterThan(0);
+        expect(closest!.distanceSquared / scale ** 2).toBeLessThanOrEqual(
+          Number.EPSILON ** 2,
+        );
+        if (scale === 1) expect(closest?.distanceSquared).toBe(0);
+      }
+    }
+
+    for (const scale of [1e145, 1e200, 1e-200]) {
+      const scaledSpan = {
+        ...span,
+        poles: span.poles.map(
+          ([x, y]) => [x * scale, y * scale] as const,
+        ) as unknown as typeof span.poles,
+      };
+      const closest = closestSplineSpanLocation([0, scale], [scaledSpan]);
+      expect(closest).not.toBeNull();
+      expect(closest!.u).toBeGreaterThan(0);
+      expect(Math.abs(closest!.u - 1 / 3e12) / (1 / 3e12)).toBeLessThan(1e-3);
+      expect(closest!.distanceSquared).toBe(0);
+    }
+  });
+
+  test("closest location reports representable numeric limits for unrepresentable squared distances", () => {
+    const constantSpan = (x: number, y = 0) => ({
+      interval: [0, 1] as const,
+      poles: [
+        [x, y],
+        [x, y],
+        [x, y],
+        [x, y],
+      ] as const,
+      differential: {
+        interval: [0, 0] as const,
+        poles: [
+          [0, 0],
+          [0, 0],
+          [0, 0],
+          [0, 0],
+        ] as const,
+      },
+    });
+
+    expect(closestSplineSpanLocation([0, 0], [constantSpan(1e200)])).toEqual({
+      spanIndex: 0,
+      u: 0,
+      distanceSquared: Number.POSITIVE_INFINITY,
+    });
+    expect(closestSplineSpanLocation([0, 0], [constantSpan(1e-200)])).toEqual({
+      spanIndex: 0,
+      u: 0,
+      distanceSquared: Number.MIN_VALUE,
+    });
+    expect(
+      closestSplineSpanLocation(
+        [0, 0],
+        [constantSpan(1e200), constantSpan(1e-200)],
+      ),
+    ).toEqual({ spanIndex: 1, u: 0, distanceSquared: Number.MIN_VALUE });
+
+    const mixedAxisSpan = {
+      ...constantSpan(0, 1e-200),
+      poles: [
+        [0, 1e-200],
+        [1e200, 1e-200],
+        [-1e200, 1e-200],
+        [0, 1e-200],
+      ] as const,
+    };
+    expect(closestSplineSpanLocation([0, 0], [mixedAxisSpan])).toMatchObject({
+      spanIndex: 0,
+      distanceSquared: Number.MIN_VALUE,
+    });
+  });
+
+  test("closest location retains repeated stationary roots", () => {
+    const repeatedMinimum = {
+      interval: [0, 1] as const,
+      poles: [
+        [0.25, 0],
+        [-1 / 12, 0],
+        [-1 / 12, 0],
+        [0.25, 0],
+      ] as const,
+      differential: {
+        interval: [0, 0] as const,
+        poles: [
+          [0, 0],
+          [0, 0],
+          [0, 0],
+          [0, 0],
+        ] as const,
+      },
+    };
+    const closest = closestSplineSpanLocation([0, 0], [repeatedMinimum]);
+    expect(closest?.u).toBeCloseTo(0.5, 7);
+    expect(closest?.distanceSquared).toBeLessThan(Number.EPSILON ** 4);
+  });
+
+  test("owner evaluation is stable under common translation", () => {
+    const differential = {
+      interval: [0.2, -0.1] as const,
+      poles: [
+        [0.3, -0.2],
+        [-0.4, 0.5],
+        [0.7, -0.6],
+        [-0.8, 0.9],
+      ] as const,
+    };
+    const poles = [
+      [0, 0],
+      [0, 1e12],
+      [0, -1e12],
+      [0, 0],
+    ] as const;
+    const translatedPoles = poles.map(
+      ([x, y]) => [x + 1e9, y - 2e9] as const,
+    ) as unknown as typeof poles;
+    const base = { interval: [2, 5] as const, poles, differential };
+    const translated = { ...base, poles: translatedPoles };
+
+    for (const kind of ["local", "source"] as const) {
+      const value = kind === "local" ? 0.37 : 3.11;
+      const first = evaluateSplineSpan(base, {
+        kind,
+        value,
+        differential: 0.13,
+      });
+      const second = evaluateSplineSpan(translated, {
+        kind,
+        value,
+        differential: 0.13,
+      });
+      near(
+        [second.position[0] - 1e9, second.position[1] + 2e9],
+        first.position,
+        1e-7,
+      );
+      near(second.first, first.first, 1e-7);
+      near(second.second, first.second, 1e-7);
+      near(second.differential.position, first.differential.position, 1e-7);
+      near(second.differential.first, first.differential.first, 1e-7);
+      near(second.differential.second, first.differential.second, 1e-7);
+    }
+
+    const closest = closestSplineSpanLocation([1e9, -2e9 + 1], [translated]);
+    expect(closest?.distanceSquared).toBe(0);
+  });
+
+  test("closest location includes seams, endpoints, and zero-derivative cubics", () => {
+    const wrapped = build(
+      input(
+        [
+          [0, 0],
+          [2, 0],
+          [1, 2],
+        ],
+        "smooth",
+      ),
+    );
+    const seam = closestSplineSpanLocation([0, 0], wrapped.spans);
+    expect(seam?.distanceSquared).toBeLessThan(1e-20);
+
+    const zero = {
+      interval: [0, 1] as const,
+      poles: [
+        [2, 3],
+        [2, 3],
+        [2, 3],
+        [2, 3],
+      ] as const,
+      differential: {
+        interval: [0, 0] as const,
+        poles: [
+          [0, 0],
+          [0, 0],
+          [0, 0],
+          [0, 0],
+        ] as const,
+      },
+    };
+    const stationaryEverywhere = closestSplineSpanLocation([5, 7], [zero]);
+    expect(stationaryEverywhere).toMatchObject({
+      spanIndex: 0,
+      u: 0,
+      distanceSquared: 25,
+    });
+    const endpoint = closestSplineSpanLocation(
+      [3, 0],
+      [
+        {
+          ...zero,
+          poles: [
+            [0, 0],
+            [1, 0],
+            [2, 0],
+            [3, 0],
+          ] as const,
+        },
+      ],
+    );
+    expect(endpoint).toMatchObject({ spanIndex: 0, u: 1, distanceSquared: 0 });
+  });
 
   test("parameter derivatives and source/local mapping agree independently", () => {
     const span = build(input(uneven, "open", { 2: [0.2, -0.4] })).spans[2];

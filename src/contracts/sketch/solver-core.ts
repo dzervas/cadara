@@ -7,6 +7,7 @@ import type {
   ProjectedSketchGeometryRef,
   NumericSketchDefinition as SketchDefinition,
   SketchCurveConstraintOperand,
+  SketchDerivationDefinition,
   SketchEntityDefinition,
   SketchPointConstraintOperand,
   SketchPoint2D,
@@ -16,15 +17,17 @@ import type {
   SolvedSketchStatus,
 } from "@/contracts/sketch/schema";
 import { SOLVED_SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import {
+  evaluateSketchDerivations,
+  prepareSketchDerivationPullback,
+  type SketchDerivationVariation,
+} from "@/contracts/sketch/derived-geometry";
+import {
+  closestSplineSpanLocation,
+  evaluateSplineSpan,
   orderedSplineOccurrences,
   reconstructSplineAggregate,
 } from "@/contracts/sketch/spline-geometry";
-import {
-  projectedSplineDisplayPoints,
-  projectedSplineIsClosed,
-} from "@/contracts/solver/schema";
 import type {
   ProjectedSketchReferenceGeometry,
   ProjectedSketchReferenceRecord,
@@ -106,6 +109,14 @@ type ArcState = {
   baseIndex: number;
 };
 
+type SplineTangentState = {
+  kind: "splineTangent";
+  entityId: SketchEntityId;
+  occurrenceId: string;
+  occurrenceIndex: number;
+  baseIndex: number;
+};
+
 type SolverEntityState = PointState | CircleState | ArcState;
 
 type ScalarConstraintEvaluation = {
@@ -132,11 +143,23 @@ type SolverPointRecord = {
   baseIndex: number;
 };
 
+type SolverParameterProjection = {
+  projectValues(values: Float64Array): Float64Array;
+  projectVariableIndices(variableIndices: readonly number[]): number[];
+  authorityVariableIndices: readonly number[];
+  wrapConstraint(
+    constraint: ScalarConstraintRecord,
+    variableIndices?: readonly number[],
+  ): ScalarConstraintRecord;
+};
+
 type BuildSystemResult = {
   parameterCount: number;
   initialValues: Float64Array;
   pointRecords: Map<SketchPointId, SolverPointRecord>;
   entityStates: Map<SketchEntityId, SolverEntityState>;
+  splineTangentStates: Map<string, SplineTangentState>;
+  parameterProjection: SolverParameterProjection;
   scalarConstraints: ScalarConstraintRecord[];
 };
 
@@ -248,6 +271,13 @@ function dot(left: Float64Array, right: Float64Array) {
   return value;
 }
 
+function halfSquaredDistanceWithSaturation(distanceSquared: number) {
+  if (distanceSquared === 0 || !Number.isFinite(distanceSquared)) {
+    return 0.5 * distanceSquared;
+  }
+  return Math.max(Number.MIN_VALUE, 0.5 * distanceSquared);
+}
+
 function euclideanNorm(values: Float64Array) {
   return Math.sqrt(dot(values, values));
 }
@@ -293,10 +323,6 @@ function length(point: SketchPoint2D) {
 
 function dot2(left: SketchPoint2D, right: SketchPoint2D) {
   return left[0] * right[0] + left[1] * right[1];
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
 }
 
 function addPointGradient(
@@ -754,59 +780,347 @@ function resolvePointDimensionOperand(
   return point ? getPoint(values, point) : null;
 }
 
-function pointSegmentDistance(
-  point: SketchPoint2D,
-  start: SketchPoint2D,
-  end: SketchPoint2D,
-) {
-  const segment = subtract(end, start);
-  const lengthSquared = dot2(segment, segment);
-
-  if (lengthSquared <= DEGENERATE_NORM_EPSILON) {
-    return length(subtract(point, start));
-  }
-
-  const t = clamp(dot2(subtract(point, start), segment) / lengthSquared, 0, 1);
-  return length(
-    subtract(point, [start[0] + segment[0] * t, start[1] + segment[1] * t]),
-  );
-}
-
-function pointPolylineDistance(
-  point: SketchPoint2D,
-  points: readonly SketchPoint2D[],
-  isClosed: boolean,
-) {
-  const fitPoints =
-    isClosed && points.length > 2 ? [...points, points[0]!] : points;
-
-  if (fitPoints.length === 0) {
-    return 0;
-  }
-
-  let best = Number.POSITIVE_INFINITY;
-  for (let index = 0; index < fitPoints.length - 1; index += 1) {
-    best = Math.min(
-      best,
-      pointSegmentDistance(point, fitPoints[index]!, fitPoints[index + 1]!),
-    );
-  }
-  return Number.isFinite(best) ? best : length(subtract(point, fitPoints[0]!));
-}
-
-function pointSplineDistance(
-  point: SketchPoint2D,
-  geometry: Extract<ProjectedSketchReferenceGeometry, { kind: "spline" }>,
-) {
-  return pointPolylineDistance(
-    point,
-    projectedSplineDisplayPoints(geometry),
-    projectedSplineIsClosed(geometry),
-  );
+function splineTangentStateKey(entityId: SketchEntityId, occurrenceId: string) {
+  return `${entityId}\u0000${occurrenceId}`;
 }
 
 function midpoint(start: SketchPoint2D, end: SketchPoint2D): SketchPoint2D {
   return [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+}
+
+function createDerivedParameterProjection(input: {
+  definition: SketchDefinition;
+  parameterCount: number;
+  pointRecords: Map<SketchPointId, SolverPointRecord>;
+  splineTangentStates: Map<string, SplineTangentState>;
+}): SolverParameterProjection {
+  const { definition, parameterCount, pointRecords, splineTangentStates } =
+    input;
+  if ((definition.derivedRelationships?.length ?? 0) === 0) {
+    return {
+      projectValues: cloneValues,
+      projectVariableIndices: (variableIndices) =>
+        uniqueSortedIndices(variableIndices),
+      authorityVariableIndices: Array.from(
+        { length: parameterCount },
+        (_, index) => index,
+      ),
+      wrapConstraint: (constraint) => constraint,
+    };
+  }
+
+  const entityById = new Map(
+    definition.entities.map((entity) => [entity.entityId, entity]),
+  );
+  const dependenciesByDrivenIndex = new Map<number, Set<number>>();
+  const pointIndices = (pointId: SketchPointId) => {
+    const point = pointRecords.get(pointId);
+    return point ? [point.baseIndex, point.baseIndex + 1] : [];
+  };
+  const mirrorAxisIndices = (relationship: SketchDerivationDefinition) => {
+    if (relationship.kind !== "mirror") return [];
+    const axis = entityById.get(relationship.mirrorReference.entityId);
+    return axis ? getEntityPoints(axis).flatMap(pointIndices) : [];
+  };
+  const setDrivenDependencies = (
+    drivenIndices: readonly number[],
+    dependencyIndices: readonly number[],
+  ) => {
+    for (const drivenIndex of drivenIndices) {
+      dependenciesByDrivenIndex.set(drivenIndex, new Set(dependencyIndices));
+    }
+  };
+
+  for (const relationship of definition.derivedRelationships ?? []) {
+    const axisIndices = mirrorAxisIndices(relationship);
+    for (const output of relationship.outputs) {
+      const seed = entityById.get(output.seedEntityId);
+      const target = entityById.get(output.outputEntityId);
+      const seedPointIds =
+        output.seedPointIds.length > 0
+          ? output.seedPointIds
+          : seed
+            ? getEntityPoints(seed)
+            : [];
+      output.outputPointIds.forEach((outputPointId, index) => {
+        setDrivenDependencies(
+          pointIndices(outputPointId),
+          relationship.kind === "offset"
+            ? []
+            : [...pointIndices(seedPointIds[index]!), ...axisIndices],
+        );
+      });
+
+      if (seed?.kind !== "spline" || target?.kind !== "spline") continue;
+      const seedOccurrences = orderedSplineOccurrences(seed) ?? [];
+      const outputOccurrences = orderedSplineOccurrences(target) ?? [];
+      outputOccurrences.forEach((occurrence, index) => {
+        const outputState = splineTangentStates.get(
+          splineTangentStateKey(target.entityId, occurrence.occurrenceId),
+        );
+        const seedOccurrence = seedOccurrences[index];
+        const seedState = seedOccurrence
+          ? splineTangentStates.get(
+              splineTangentStateKey(seed.entityId, seedOccurrence.occurrenceId),
+            )
+          : undefined;
+        if (!outputState) return;
+        setDrivenDependencies(
+          [outputState.baseIndex, outputState.baseIndex + 1],
+          relationship.kind === "offset" || !seedState
+            ? []
+            : [seedState.baseIndex, seedState.baseIndex + 1, ...axisIndices],
+        );
+      });
+    }
+    if (relationship.kind === "offset") {
+      relationship.jointOutputs.forEach((output) =>
+        setDrivenDependencies(pointIndices(output.centerPointId), []),
+      );
+    }
+  }
+
+  const resolveAuthority = (
+    variableIndex: number,
+    visiting = new Set<number>(),
+  ): number[] => {
+    const dependencies = dependenciesByDrivenIndex.get(variableIndex);
+    if (!dependencies) return [variableIndex];
+    if (visiting.has(variableIndex)) return [];
+    const nextVisiting = new Set(visiting).add(variableIndex);
+    return uniqueSortedIndices(
+      [...dependencies].flatMap((dependency) =>
+        resolveAuthority(dependency, nextVisiting),
+      ),
+    );
+  };
+  const projectVariableIndices = (variableIndices: readonly number[]) =>
+    uniqueSortedIndices(
+      variableIndices.flatMap((index) => resolveAuthority(index)),
+    );
+  const authorityVariableIndices = Array.from(
+    { length: parameterCount },
+    (_, index) => index,
+  ).filter((index) => !dependenciesByDrivenIndex.has(index));
+
+  const pointDefinitionIndexById = new Map(
+    definition.points.map((point, index) => [point.pointId, index]),
+  );
+  const drivenPointRecords = [...pointRecords.values()].flatMap((record) => {
+    if (
+      !dependenciesByDrivenIndex.has(record.baseIndex) &&
+      !dependenciesByDrivenIndex.has(record.baseIndex + 1)
+    ) {
+      return [];
+    }
+    const definitionIndex = pointDefinitionIndexById.get(record.pointId);
+    return definitionIndex === undefined ? [] : [{ record, definitionIndex }];
+  });
+  const entityDefinitionIndexById = new Map(
+    definition.entities.map((entity, index) => [entity.entityId, index]),
+  );
+  const drivenTangentStates = [...splineTangentStates.values()].flatMap(
+    (state) => {
+      if (
+        !dependenciesByDrivenIndex.has(state.baseIndex) &&
+        !dependenciesByDrivenIndex.has(state.baseIndex + 1)
+      ) {
+        return [];
+      }
+      const entityIndex = entityDefinitionIndexById.get(state.entityId);
+      const entity =
+        entityIndex === undefined ? undefined : definition.entities[entityIndex];
+      if (entity?.kind !== "spline") return [];
+      const occurrenceIndex = entity.pointOccurrences.findIndex(
+        (occurrence) => occurrence.occurrenceId === state.occurrenceId,
+      );
+      return occurrenceIndex < 0
+        ? []
+        : [{ state, entityIndex: entityIndex!, occurrenceIndex }];
+    },
+  );
+
+  let cachedInput: Float64Array | null = null;
+  let cachedValues: Float64Array | null = null;
+  let cachedPullback: ReturnType<typeof prepareSketchDerivationPullback> | null =
+    null;
+  const project = (
+    values: Float64Array,
+    validationIndices?: readonly number[],
+  ) => {
+    if (
+      cachedInput &&
+      cachedValues &&
+      cachedPullback &&
+      (validationIndices
+        ? validationIndices.every(
+            (index) => cachedInput![index] === values[index],
+          )
+        : cachedInput.every((value, index) => value === values[index]))
+    ) {
+      return { values: cachedValues, pullback: cachedPullback };
+    }
+
+    const solverDefinition: SketchDefinition = {
+      ...definition,
+      points: definition.points.map((point) => {
+        const record = pointRecords.get(point.pointId);
+        return record
+          ? { ...point, position: getPoint(values, record) }
+          : point;
+      }),
+      entities:
+        splineTangentStates.size === 0
+          ? definition.entities
+          : definition.entities.map((entity) => {
+              if (entity.kind !== "spline") return entity;
+              return {
+                ...entity,
+                pointOccurrences: entity.pointOccurrences.map((occurrence) => {
+                  if (occurrence.tangent.kind !== "authored") return occurrence;
+                  const state = splineTangentStates.get(
+                    splineTangentStateKey(
+                      entity.entityId,
+                      occurrence.occurrenceId,
+                    ),
+                  );
+                  return state
+                    ? {
+                        ...occurrence,
+                        tangent: {
+                          kind: "authored" as const,
+                          vector: [
+                            values[state.baseIndex]!,
+                            values[state.baseIndex + 1]!,
+                          ] as const,
+                        },
+                      }
+                    : occurrence;
+                }),
+              };
+            }),
+    };
+    const evaluated = evaluateSketchDerivations(solverDefinition).definition;
+    const projected = cloneValues(values);
+    for (const { record, definitionIndex } of drivenPointRecords) {
+      const point = evaluated.points[definitionIndex]!;
+      projected[record.baseIndex] = point.position[0];
+      projected[record.baseIndex + 1] = point.position[1];
+    }
+    for (const { state, entityIndex, occurrenceIndex } of drivenTangentStates) {
+      const entity = evaluated.entities[entityIndex];
+      if (entity?.kind !== "spline") continue;
+      const occurrence = entity.pointOccurrences[occurrenceIndex];
+      if (occurrence?.tangent.kind !== "authored") continue;
+      projected[state.baseIndex] = occurrence.tangent.vector[0];
+      projected[state.baseIndex + 1] = occurrence.tangent.vector[1];
+    }
+
+    const pullback = prepareSketchDerivationPullback(evaluated);
+    cachedInput = cloneValues(values);
+    cachedValues = projected;
+    cachedPullback = pullback;
+    return { values: projected, pullback };
+  };
+
+  return {
+    projectValues: (values) => cloneValues(project(values).values),
+    projectVariableIndices,
+    authorityVariableIndices,
+    wrapConstraint: (constraint, variableIndices) => {
+      const support = variableIndices ? new Set(variableIndices) : null;
+      const projectedSupport = variableIndices
+        ? projectVariableIndices(variableIndices)
+        : [];
+      const projectionValidationIndices =
+        projectedSupport.length > 0 ? projectedSupport : undefined;
+      const relevantDrivenPointRecords = support
+        ? drivenPointRecords.filter(
+            ({ record }) =>
+              support.has(record.baseIndex) || support.has(record.baseIndex + 1),
+          )
+        : drivenPointRecords;
+      const relevantDrivenTangentStates = support
+        ? drivenTangentStates.filter(
+            ({ state }) =>
+              support.has(state.baseIndex) || support.has(state.baseIndex + 1),
+          )
+        : drivenTangentStates;
+      if (
+        relevantDrivenPointRecords.length === 0 &&
+        relevantDrivenTangentStates.length === 0
+      ) {
+        return constraint;
+      }
+
+      return {
+        ...constraint,
+        evaluate(values) {
+          const projected = project(values, projectionValidationIndices);
+          const evaluated = constraint.evaluate(projected.values);
+          const pointCotangent: Partial<Record<SketchPointId, SketchPoint2D>> =
+            {};
+          const tangentCotangent: Partial<
+            Record<SketchEntityId, Record<string, SketchPoint2D>>
+          > = {};
+          let hasDrivenCotangent = false;
+          for (const { record } of relevantDrivenPointRecords) {
+          const x = evaluated.gradient[record.baseIndex]!;
+          const y = evaluated.gradient[record.baseIndex + 1]!;
+          if (x === 0 && y === 0) continue;
+          pointCotangent[record.pointId] = [x, y];
+          hasDrivenCotangent = true;
+        }
+          for (const { state } of relevantDrivenTangentStates) {
+            const x = evaluated.gradient[state.baseIndex]!;
+            const y = evaluated.gradient[state.baseIndex + 1]!;
+            if (x === 0 && y === 0) continue;
+            const entity = tangentCotangent[state.entityId] ?? {};
+            entity[state.occurrenceId] = [x, y];
+            tangentCotangent[state.entityId] = entity;
+            hasDrivenCotangent = true;
+          }
+          if (!hasDrivenCotangent) return evaluated;
+
+          const gradient = evaluated.gradient.slice();
+          for (const { record } of relevantDrivenPointRecords) {
+            gradient[record.baseIndex] = 0;
+            gradient[record.baseIndex + 1] = 0;
+          }
+          for (const { state } of relevantDrivenTangentStates) {
+            gradient[state.baseIndex] = 0;
+            gradient[state.baseIndex + 1] = 0;
+          }
+          const cotangent: SketchDerivationVariation = {
+            points: pointCotangent,
+            splineTangents: tangentCotangent,
+          };
+          const pulled = projected.pullback(cotangent);
+          for (const [pointId, value] of Object.entries(pulled.points ?? {})) {
+            const record = pointRecords.get(pointId as SketchPointId);
+            if (!record || !value) continue;
+            gradient[record.baseIndex] += value[0];
+            gradient[record.baseIndex + 1] += value[1];
+          }
+          for (const [entityId, occurrences] of Object.entries(
+            pulled.splineTangents ?? {},
+          )) {
+            for (const [occurrenceId, value] of Object.entries(
+              occurrences ?? {},
+            )) {
+              const state = splineTangentStates.get(
+                splineTangentStateKey(entityId as SketchEntityId, occurrenceId),
+              );
+              if (!state || !value) continue;
+              gradient[state.baseIndex] += value[0];
+              gradient[state.baseIndex + 1] += value[1];
+            }
+          }
+          return { residual: evaluated.residual, gradient };
+        },
+      };
+    },
+  };
 }
 
 function isAdvancedSketchEntity(entity: SketchEntityDefinition) {
@@ -1036,6 +1350,7 @@ function buildSystem(
 ): BuildSystemResult {
   const pointRecords = new Map<SketchPointId, SolverPointRecord>();
   const entityStates = new Map<SketchEntityId, SolverEntityState>();
+  const splineTangentStates = new Map<string, SplineTangentState>();
   const scalarConstraints: ScalarConstraintRecord[] = [];
   const dimensionDrivenCircleIds = new Set(
     definition.dimensions.flatMap((dimension) =>
@@ -1092,6 +1407,26 @@ function buildSystem(
     }
   }
 
+  for (const entity of definition.entities) {
+    if (entity.kind !== "spline") continue;
+    const occurrences = orderedSplineOccurrences(entity);
+    if (!occurrences) continue;
+    occurrences.forEach((occurrence, occurrenceIndex) => {
+      if (occurrence.tangent.kind !== "authored") return;
+      splineTangentStates.set(
+        splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+        {
+          kind: "splineTangent",
+          entityId: entity.entityId,
+          occurrenceId: occurrence.occurrenceId,
+          occurrenceIndex,
+          baseIndex: parameterCount,
+        },
+      );
+      parameterCount += 2;
+    });
+  }
+
   const initialValues = new Float64Array(parameterCount);
   for (const record of pointRecords.values()) {
     initialValues[record.baseIndex] = record.initial[0];
@@ -1099,6 +1434,20 @@ function buildSystem(
   }
 
   for (const entity of definition.entities) {
+    if (entity.kind === "spline") {
+      const occurrences = orderedSplineOccurrences(entity) ?? [];
+      for (const occurrence of occurrences) {
+        if (occurrence.tangent.kind !== "authored") continue;
+        const state = splineTangentStates.get(
+          splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+        );
+        if (!state) continue;
+        initialValues[state.baseIndex] = occurrence.tangent.vector[0];
+        initialValues[state.baseIndex + 1] = occurrence.tangent.vector[1];
+      }
+      continue;
+    }
+
     if (entity.kind === "circle") {
       const circleState = entityStates.get(entity.entityId);
       if (circleState?.kind === "circle") {
@@ -1161,6 +1510,139 @@ function buildSystem(
   } | null =>
     getLocalCircleLikeGeometry(values, entity, pointRecords, entityStates);
 
+  const currentSplineAggregate = (
+    values: Float64Array,
+    entity: Extract<SketchEntityDefinition, { kind: "spline" }>,
+  ) => ({
+    ...entity,
+    pointOccurrences: entity.pointOccurrences.map((occurrence) => {
+      if (occurrence.tangent.kind !== "authored") return occurrence;
+      const state = splineTangentStates.get(
+        splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+      );
+      return state
+        ? {
+            ...occurrence,
+            tangent: {
+              kind: "authored" as const,
+              vector: [
+                values[state.baseIndex]!,
+                values[state.baseIndex + 1]!,
+              ] as const,
+            },
+          }
+        : occurrence;
+    }),
+  });
+
+  const currentSplinePositions = (values: Float64Array) =>
+    Object.fromEntries(
+      [...pointRecords.entries()].map(([pointId, record]) => [
+        pointId,
+        getPoint(values, record),
+      ]),
+    ) as Record<SketchPointId, SketchPoint2D>;
+
+  const reconstructCurrentSpline = (
+    values: Float64Array,
+    entity: Extract<SketchEntityDefinition, { kind: "spline" }>,
+    variation: Parameters<typeof reconstructSplineAggregate>[2] = {},
+  ) =>
+    reconstructSplineAggregate(
+      currentSplineAggregate(values, entity),
+      currentSplinePositions(values),
+      variation,
+    );
+
+  const closestSplineLocation = (
+    position: SketchPoint2D,
+    geometry: ReturnType<typeof reconstructSplineAggregate>,
+  ) =>
+    geometry.validity === "valid"
+      ? closestSplineSpanLocation(position, geometry.spans)
+      : null;
+
+  const splineVariationForVariable = (
+    entity: Extract<SketchEntityDefinition, { kind: "spline" }>,
+    variableIndex: number,
+  ) => {
+    for (const occurrence of orderedSplineOccurrences(entity) ?? []) {
+      const state = splineTangentStates.get(
+        splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+      );
+      if (!state) continue;
+      if (variableIndex === state.baseIndex)
+        return { tangents: { [state.occurrenceIndex]: [1, 0] as const } };
+      if (variableIndex === state.baseIndex + 1)
+        return { tangents: { [state.occurrenceIndex]: [0, 1] as const } };
+    }
+    for (const occurrence of orderedSplineOccurrences(entity) ?? []) {
+      const point = pointRecords.get(occurrence.pointId);
+      if (!point) continue;
+      if (variableIndex === point.baseIndex)
+        return { points: { [occurrence.pointId]: [1, 0] as const } };
+      if (variableIndex === point.baseIndex + 1)
+        return { points: { [occurrence.pointId]: [0, 1] as const } };
+    }
+    return {};
+  };
+
+  const createSplinePointConstraint = (
+    constraint: Extract<ConstraintDefinition, { kind: "pointOnCurve" }>,
+    point: SolverPointRecord,
+    entity: Extract<SketchEntityDefinition, { kind: "spline" }>,
+  ): ScalarConstraintRecord => {
+    const affectedVariableIndices = uniqueSortedIndices([
+      ...pIdx(point),
+      ...entityIdx(entity.entityId),
+    ]);
+    return {
+      id: constraint.constraintId,
+      targetKind: "constraint",
+      evaluate(values) {
+        const gradient = zeroVector(parameterCount);
+        const position = getPoint(values, point);
+        const geometry = reconstructCurrentSpline(values, entity);
+        const closest = closestSplineLocation(position, geometry);
+        if (!closest || geometry.validity !== "valid") {
+          return { residual: Number.POSITIVE_INFINITY, gradient };
+        }
+        const span = geometry.spans[closest.spanIndex]!;
+        const evaluated = evaluateSplineSpan(span, {
+          kind: "local",
+          value: closest.u,
+        });
+        const delta = subtract(evaluated.position, position);
+        for (const variableIndex of affectedVariableIndices) {
+          const varied = reconstructCurrentSpline(
+            values,
+            entity,
+            splineVariationForVariable(entity, variableIndex),
+          );
+          if (varied.validity !== "valid") continue;
+          const differential = evaluateSplineSpan(
+            varied.spans[closest.spanIndex]!,
+            { kind: "local", value: closest.u },
+          ).differential.position;
+          const targetDerivative: SketchPoint2D =
+            variableIndex === point.baseIndex
+              ? [1, 0]
+              : variableIndex === point.baseIndex + 1
+                ? [0, 1]
+                : [0, 0];
+          gradient[variableIndex] = dot2(
+            delta,
+            subtract(differential, targetDerivative),
+          );
+        }
+        return {
+          residual: halfSquaredDistanceWithSaturation(closest.distanceSquared),
+          gradient,
+        };
+      },
+    };
+  };
+
   const pointOnLocalCurveResidual = (
     values: Float64Array,
     point: SolverPointRecord,
@@ -1178,19 +1660,6 @@ function buildSystem(
             getPoint(values, end),
           )
         : 0;
-    }
-
-    if (entity.kind === "spline") {
-      const occurrences = orderedSplineOccurrences(entity) ?? [];
-      const fitPoints = occurrences.flatMap(({ pointId }) => {
-        const fitPoint = pointRecords.get(pointId);
-        return fitPoint ? [getPoint(values, fitPoint)] : [];
-      });
-      return pointPolylineDistance(
-        position,
-        fitPoints,
-        entity.closure !== "open",
-      );
     }
 
     const circleLike = getLocalCircleLike(values, entity);
@@ -1227,7 +1696,18 @@ function buildSystem(
     }
 
     if (projected.kind === "spline") {
-      return pointSplineDistance(position, projected);
+      if (projected.representation.kind === "sourceSamples")
+        return Number.POSITIVE_INFINITY;
+      const closest = closestSplineSpanLocation(
+        position,
+        projected.representation.spans,
+      );
+      if (!closest) return Number.POSITIVE_INFINITY;
+      const evaluated = evaluateSplineSpan(
+        projected.representation.spans[closest.spanIndex]!,
+        { kind: "local", value: closest.u },
+      );
+      return length(subtract(evaluated.position, position));
     }
 
     const circleLike = projectedCircleLikeGeometry(projected);
@@ -1315,10 +1795,20 @@ function buildSystem(
   const entityIdx = (entityId: SketchEntityId) => {
     const entity = definition.entities.find((e) => e.entityId === entityId);
     if (!entity) return [];
-    return [
+    const tangentIndices =
+      entity.kind === "spline"
+        ? (orderedSplineOccurrences(entity) ?? []).flatMap((occurrence) => {
+            const state = splineTangentStates.get(
+              splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+            );
+            return state ? [state.baseIndex, state.baseIndex + 1] : [];
+          })
+        : [];
+    return uniqueSortedIndices([
       ...getEntityPoints(entity).flatMap((pid) => pIdx(pointRecords.get(pid))),
       ...eIdx(entityId),
-    ];
+      ...tangentIndices,
+    ]);
   };
 
   const collinearTargetIdx = (target: LocalCollinearTargetOperand) => {
@@ -1681,28 +2171,58 @@ function buildSystem(
         continue;
       }
 
-      scalarConstraints.push(
-        createNumericalScalarConstraint({
+      if (
+        projected?.kind === "spline" &&
+        projected.representation.kind === "neutralCubicSpans"
+      ) {
+        const projectedSpans = projected.representation.spans;
+        scalarConstraints.push({
           id: constraint.constraintId,
           targetKind: "constraint",
-          parameterCount,
-          affectedVariableIndices: pIdx(point),
-          evaluateResidual(values) {
-            return projected
-              ? pointOnProjectedCurveResidual(
-                  getPoint(values, point),
-                  projected,
-                )
-              : Math.abs(
-                  pointLineSignedDistance(
-                    getPoint(values, point),
-                    datumLine!.start,
-                    datumLine!.end,
-                  ),
-                );
+          evaluate(values) {
+            const gradient = zeroVector(parameterCount);
+            const position = getPoint(values, point);
+            const closest = closestSplineSpanLocation(position, projectedSpans);
+            if (!closest)
+              return { residual: Number.POSITIVE_INFINITY, gradient };
+            const evaluated = evaluateSplineSpan(
+              projectedSpans[closest.spanIndex]!,
+              { kind: "local", value: closest.u },
+            );
+            const delta = subtract(position, evaluated.position);
+            addPointGradient(gradient, point, delta[0], delta[1]);
+            return {
+              residual: halfSquaredDistanceWithSaturation(
+                closest.distanceSquared,
+              ),
+              gradient,
+            };
           },
-        }),
-      );
+        });
+      } else {
+        scalarConstraints.push(
+          createNumericalScalarConstraint({
+            id: constraint.constraintId,
+            targetKind: "constraint",
+            parameterCount,
+            affectedVariableIndices: pIdx(point),
+            evaluateResidual(values) {
+              return projected
+                ? pointOnProjectedCurveResidual(
+                    getPoint(values, point),
+                    projected,
+                  )
+                : Math.abs(
+                    pointLineSignedDistance(
+                      getPoint(values, point),
+                      datumLine!.start,
+                      datumLine!.end,
+                    ),
+                  );
+            },
+          }),
+        );
+      }
       continue;
     }
 
@@ -1786,18 +2306,20 @@ function buildSystem(
       }
 
       scalarConstraints.push(
-        createNumericalScalarConstraint({
-          id: constraint.constraintId,
-          targetKind: "constraint",
-          parameterCount,
-          affectedVariableIndices: [
-            ...pIdx(point),
-            ...entityIdx(curve.entityId),
-          ],
-          evaluateResidual(values) {
-            return pointOnLocalCurveResidual(values, point, curve);
-          },
-        }),
+        curve.kind === "spline"
+          ? createSplinePointConstraint(constraint, point, curve)
+          : createNumericalScalarConstraint({
+              id: constraint.constraintId,
+              targetKind: "constraint",
+              parameterCount,
+              affectedVariableIndices: [
+                ...pIdx(point),
+                ...entityIdx(curve.entityId),
+              ],
+              evaluateResidual(values) {
+                return pointOnLocalCurveResidual(values, point, curve);
+              },
+            }),
       );
       continue;
     }
@@ -2727,8 +3249,19 @@ function buildSystem(
               );
               if (!first || !second) return dimension.value;
               return component === "parallel"
-                ? lineParallelResidual(first.start, first.end, second.start, second.end)
-                : Math.abs(pointLineSignedDistance(second.start, first.start, first.end)) - dimension.value;
+                ? lineParallelResidual(
+                    first.start,
+                    first.end,
+                    second.start,
+                    second.end,
+                  )
+                : Math.abs(
+                    pointLineSignedDistance(
+                      second.start,
+                      first.start,
+                      first.end,
+                    ),
+                  ) - dimension.value;
             },
           }),
         );
@@ -2917,13 +3450,34 @@ function buildSystem(
     }
   }
 
-  return {
+  const parameterProjection = createDerivedParameterProjection({
+    definition,
     parameterCount,
-    initialValues,
+    pointRecords,
+    splineTangentStates,
+  });
+
+  const system: BuildSystemResult = {
+    parameterCount,
+    initialValues: parameterProjection.projectValues(initialValues),
     pointRecords,
     entityStates,
+    splineTangentStates,
+    parameterProjection,
     scalarConstraints,
   };
+  const structuralVariables = structuralEquationVariableIndexMap(
+    system,
+    definition,
+  );
+  system.scalarConstraints = scalarConstraints.map((constraint) => {
+    const variables = structuralVariables.get(constraint.id);
+    return parameterProjection.wrapConstraint(
+      constraint,
+      variables && variables.length > 0 ? variables : undefined,
+    );
+  });
+  return system;
 }
 
 function validateDefinition(
@@ -3795,6 +4349,23 @@ function validateDefinition(
               "projectedSpline",
             ],
           );
+          const projected = findProjectedGeometry(
+            projectedReferences,
+            constraint.projectedCurve.reference,
+          );
+          if (
+            projected?.kind === "spline" &&
+            projected.representation.kind === "sourceSamples"
+          ) {
+            diagnostics.push(
+              makeDiagnostic(
+                "unsupported-projected-spline-samples",
+                "error",
+                `Constraint ${constraint.constraintId} targets sampled projected spline geometry, which is display-only and cannot define an exact solver constraint.`,
+                { kind: "constraint", constraintId: constraint.constraintId },
+              ),
+            );
+          }
         } else {
           validateDatumConstraintTarget(
             constraint.constraintId,
@@ -4878,8 +5449,21 @@ function entityVariableIndices(
             entityState.baseIndex + 2,
           ]
       : [];
+  const tangentIndices =
+    entity.kind === "spline"
+      ? (orderedSplineOccurrences(entity) ?? []).flatMap((occurrence) => {
+          const state = system.splineTangentStates.get(
+            splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+          );
+          return state ? [state.baseIndex, state.baseIndex + 1] : [];
+        })
+      : [];
 
-  return uniqueSortedIndices([...pointIndices, ...stateIndices]);
+  return uniqueSortedIndices([
+    ...pointIndices,
+    ...stateIndices,
+    ...tangentIndices,
+  ]);
 }
 
 function curveOperandVariableIndices(
@@ -5155,32 +5739,28 @@ function buildCompiledComponentData(
   );
   const equationVariables = system.scalarConstraints.map((constraint) => {
     const variables = structuralVariables.get(constraint.id);
-    return variables && variables.length > 0
-      ? variables
-      : perturbedEquationVariableIndices(constraint, system.initialValues);
+    return system.parameterProjection.projectVariableIndices(
+      variables && variables.length > 0
+        ? variables
+        : perturbedEquationVariableIndices(constraint, system.initialValues),
+    );
   });
 
   for (const point of system.pointRecords.values()) {
-    unionFind.union(point.baseIndex, point.baseIndex + 1);
+    const variables = system.parameterProjection.projectVariableIndices([
+      point.baseIndex,
+      point.baseIndex + 1,
+    ]);
+    const [first, ...rest] = variables;
+    if (first !== undefined) {
+      for (const next of rest) unionFind.union(first, next);
+    }
   }
 
   for (const entity of definition.entities) {
-    const pointBases = getEntityPoints(entity).flatMap((pointId) => {
-      const point = system.pointRecords.get(pointId);
-      return point ? [point.baseIndex, point.baseIndex + 1] : [];
-    });
-    const entityState = system.entityStates.get(entity.entityId);
-    const entityBases =
-      entityState && entityState.kind !== "point"
-        ? entityState.kind === "circle"
-          ? [entityState.baseIndex]
-          : [
-              entityState.baseIndex,
-              entityState.baseIndex + 1,
-              entityState.baseIndex + 2,
-            ]
-        : [];
-    const variables = [...pointBases, ...entityBases];
+    const variables = system.parameterProjection.projectVariableIndices(
+      entityVariableIndices(entity, system),
+    );
     const [first, ...rest] = variables;
     if (first === undefined) {
       continue;
@@ -5201,7 +5781,7 @@ function buildCompiledComponentData(
   }
 
   const variablesByRoot = new Map<number, number[]>();
-  for (let index = 0; index < system.parameterCount; index += 1) {
+  for (const index of system.parameterProjection.authorityVariableIndices) {
     const root = unionFind.find(index);
     const variables = variablesByRoot.get(root) ?? [];
     variables.push(index);
@@ -5238,20 +5818,28 @@ function buildCompiledComponentData(
 
   const pointIdsByComponent = new Map<number, SketchPointId[]>();
   for (const point of system.pointRecords.values()) {
-    const componentId =
-      rootToComponentId.get(unionFind.find(point.baseIndex)) ?? 0;
+    const authority = system.parameterProjection.projectVariableIndices([
+      point.baseIndex,
+      point.baseIndex + 1,
+    ]);
+    const first = authority[0];
+    if (first === undefined) continue;
+    const componentId = rootToComponentId.get(unionFind.find(first));
+    if (componentId === undefined) continue;
     const pointIds = pointIdsByComponent.get(componentId) ?? [];
     pointIds.push(point.pointId);
     pointIdsByComponent.set(componentId, pointIds);
   }
 
   const entityIdsByComponent = new Map<number, SketchEntityId[]>();
-  for (const entity of system.entityStates.values()) {
-    if (entity.kind === "point") {
-      continue;
-    }
-    const componentId =
-      rootToComponentId.get(unionFind.find(entity.baseIndex)) ?? 0;
+  for (const entity of definition.entities) {
+    const authority = system.parameterProjection.projectVariableIndices(
+      entityVariableIndices(entity, system),
+    );
+    const first = authority[0];
+    if (first === undefined) continue;
+    const componentId = rootToComponentId.get(unionFind.find(first));
+    if (componentId === undefined) continue;
     const entityIds = entityIdsByComponent.get(componentId) ?? [];
     entityIds.push(entity.entityId);
     entityIdsByComponent.set(componentId, entityIds);
@@ -5463,6 +6051,31 @@ function seedSolveValuesFromSnapshot(
       );
       seeded = true;
     }
+    if (
+      entity.kind === "spline" &&
+      entity.reconstruction.validity === "valid"
+    ) {
+      const reconstruction = entity.reconstruction;
+      const authored = program.definition.entities.find(
+        (candidate) =>
+          candidate.entityId === entity.entityId && candidate.kind === "spline",
+      );
+      if (authored?.kind === "spline") {
+        (orderedSplineOccurrences(authored) ?? []).forEach(
+          (occurrence, occurrenceIndex) => {
+            if (occurrence.tangent.kind !== "authored") return;
+            const tangentState = program.system.splineTangentStates.get(
+              splineTangentStateKey(authored.entityId, occurrence.occurrenceId),
+            );
+            const handle = reconstruction.handles[occurrenceIndex];
+            if (!tangentState || !handle) return;
+            values[tangentState.baseIndex] = handle[0];
+            values[tangentState.baseIndex + 1] = handle[1];
+            seeded = true;
+          },
+        );
+      }
+    }
   }
 
   return { values, warmStarted: seeded };
@@ -5478,11 +6091,14 @@ function materializeSolveResult(
     ...program.validation.diagnostics,
   ];
   const definition = program.definition;
+  const projectedValues =
+    program.system.parameterProjection.projectValues(values);
   const solvedEntities = buildSolvedEntities(
     definition,
     program.system.pointRecords,
     program.system.entityStates,
-    values,
+    program.system.splineTangentStates,
+    projectedValues,
   );
   const solvedPoints = definition.points.flatMap((point) => {
     const record = program.system.pointRecords.get(point.pointId);
@@ -5491,11 +6107,30 @@ function materializeSolveResult(
           {
             pointId: point.pointId,
             target: point.target,
-            solvedPosition: getPoint(values, record),
+            solvedPosition: getPoint(projectedValues, record),
           },
         ]
       : [];
   });
+
+  const constraintStatuses = buildConstraintStatuses(
+    definition,
+    program.system.pointRecords,
+    program.tolerances,
+    solved.perConstraint,
+    program.projectedReferences,
+  );
+  const dimensionStatuses = buildDimensionStatuses(
+    definition,
+    program.system.pointRecords,
+    program.system.entityStates,
+    projectedValues,
+    solved.perConstraint,
+    program.projectedReferences,
+  );
+  const requirementsSatisfied =
+    constraintStatuses.every((entry) => entry.status === "satisfied") &&
+    dimensionStatuses.every((entry) => entry.status !== "unsatisfied");
 
   let status: SolvedSketchStatus;
   if (!program.validation.isValid) {
@@ -5512,20 +6147,35 @@ function materializeSolveResult(
       constraintState:
         definition.entities.length === 0 ? "unknown" : "underConstrained",
     };
-  } else if (solved.loss < SOLVED_LOSS_THRESHOLD) {
+  } else if (solved.loss < SOLVED_LOSS_THRESHOLD && requirementsSatisfied) {
     status = {
       solveState: "solved",
       constraintState: "wellConstrained",
     };
   } else {
-    diagnostics.push(
-      makeDiagnostic(
-        "solver-residual-too-large",
-        "warning",
-        `Sketch solve ended with residual ${solved.loss}.`,
-        null,
-      ),
-    );
+    if (
+      !Number.isFinite(solved.loss) ||
+      solved.loss >= SOLVED_LOSS_THRESHOLD
+    ) {
+      diagnostics.push(
+        makeDiagnostic(
+          "solver-residual-too-large",
+          "warning",
+          `Sketch solve ended with residual ${solved.loss}.`,
+          null,
+        ),
+      );
+    }
+    if (!requirementsSatisfied) {
+      diagnostics.push(
+        makeDiagnostic(
+          "solver-requirement-unsatisfied",
+          "warning",
+          "Sketch solve ended with one or more requirements outside their authored tolerance.",
+          null,
+        ),
+      );
+    }
     status = {
       solveState:
         program.partialSolvePolicy === "bestEffort"
@@ -5540,21 +6190,8 @@ function materializeSolveResult(
     status,
     solvedEntities,
     solvedPoints,
-    constraintStatuses: buildConstraintStatuses(
-      definition,
-      program.system.pointRecords,
-      program.tolerances,
-      solved.perConstraint,
-      program.projectedReferences,
-    ),
-    dimensionStatuses: buildDimensionStatuses(
-      definition,
-      program.system.pointRecords,
-      program.system.entityStates,
-      values,
-      solved.perConstraint,
-      program.projectedReferences,
-    ),
+    constraintStatuses,
+    dimensionStatuses,
     diagnostics,
   };
 
@@ -5650,20 +6287,24 @@ function createDragTargetConstraint(
     return null;
   }
 
-  return {
-    id: `constraint_drag_target_${dragTarget.pointId}` as ConstraintId,
-    targetKind: "constraint",
-    evaluate(values) {
-      const gradient = zeroVector(system.parameterCount);
-      const actual = getPoint(values, point);
-      const delta = subtract(actual, dragTarget.position);
-      addPointGradient(gradient, point, weight * delta[0], weight * delta[1]);
-      return {
-        residual: 0.5 * weight * (delta[0] * delta[0] + delta[1] * delta[1]),
-        gradient,
-      };
+  return system.parameterProjection.wrapConstraint(
+    {
+      id: `constraint_drag_target_${dragTarget.pointId}` as ConstraintId,
+      targetKind: "constraint",
+      evaluate(values) {
+        const gradient = zeroVector(system.parameterCount);
+        const actual = getPoint(values, point);
+        const delta = subtract(actual, dragTarget.position);
+        addPointGradient(gradient, point, weight * delta[0], weight * delta[1]);
+        return {
+          residual:
+            0.5 * weight * (delta[0] * delta[0] + delta[1] * delta[1]),
+          gradient,
+        };
+      },
     },
-  };
+    [point.baseIndex, point.baseIndex + 1],
+  );
 }
 
 function findComponentForPoint(
@@ -5694,9 +6335,11 @@ function tryTranslateDraggedComponent(
     return null;
   }
 
+  const currentValues =
+    session.program.system.parameterProjection.projectValues(session.values);
   const delta = subtract(
     dragTarget.position,
-    getPoint(session.values, draggedPoint),
+    getPoint(currentValues, draggedPoint),
   );
   const candidateValues = cloneValues(session.values);
 
@@ -5827,22 +6470,28 @@ function createMinimumMotionAnchorConstraint(input: {
   anchorValues: Float64Array;
   variableIndices: readonly number[];
   weight: number;
+  parameterProjection: SolverParameterProjection;
 }): ScalarConstraintRecord {
-  const indices = [...input.variableIndices];
-  return {
-    id: input.id,
-    targetKind: "constraint",
-    evaluate(values) {
-      const gradient = zeroVector(input.parameterCount);
-      let residual = 0;
-      for (const index of indices) {
-        const delta = values[index]! - input.anchorValues[index]!;
-        residual += 0.5 * input.weight * delta * delta;
-        gradient[index] += input.weight * delta;
-      }
-      return { residual, gradient };
+  const indices = input.parameterProjection.projectVariableIndices(
+    input.variableIndices,
+  );
+  return input.parameterProjection.wrapConstraint(
+    {
+      id: input.id,
+      targetKind: "constraint",
+      evaluate(values) {
+        const gradient = zeroVector(input.parameterCount);
+        let residual = 0;
+        for (const index of indices) {
+          const delta = values[index]! - input.anchorValues[index]!;
+          residual += 0.5 * input.weight * delta * delta;
+          gradient[index] += input.weight * delta;
+        }
+        return { residual, gradient };
+      },
     },
-  };
+    indices,
+  );
 }
 
 // D1/D2/D4: solve a single continuous drag frame for one cursor position.
@@ -5862,7 +6511,11 @@ function solveDraggedPointFrame(input: {
   session: SketchCompiledSolveSession;
   component: SketchCompiledSolveComponent | null;
   dragTarget: SketchDraggedPointTarget;
-}): { accepted: boolean; values: Float64Array; materialized: SketchCoreSolveResult } | null {
+}): {
+  accepted: boolean;
+  values: Float64Array;
+  materialized: SketchCoreSolveResult;
+} | null {
   const { session, component, dragTarget } = input;
   const program = session.program;
   const parameterCount = program.system.parameterCount;
@@ -5904,6 +6557,7 @@ function solveDraggedPointFrame(input: {
       anchorValues: previousFrame,
       variableIndices: nonDraggedVariableIndices,
       weight: DRAG_MINIMUM_MOTION_EPSILON,
+      parameterProjection: program.system.parameterProjection,
     }),
   ];
   const solvedA = solveSystemValues(
@@ -5920,7 +6574,11 @@ function solveDraggedPointFrame(input: {
     createDraggedPointAcceptance({ program, materialized: evalA.materialized })
       .accepted
   ) {
-    return { accepted: true, values: candidateA, materialized: evalA.materialized };
+    return {
+      accepted: true,
+      values: candidateA,
+      materialized: evalA.materialized,
+    };
   }
 
   // Phase B: project the phase-A candidate onto the hard-constraint manifold by
@@ -5973,7 +6631,10 @@ export function sketchDraggedPointHasFreeDof(
     return false;
   }
   const component = findComponentForPoint(session.program, pointId);
-  const current = getPoint(session.values, record);
+  const current = getPoint(
+    session.program.system.parameterProjection.projectValues(session.values),
+    record,
+  );
   const probe = DRAG_DOF_PROBE_DISTANCE;
   const moveThreshold = probe * DRAG_DOF_PROBE_MOVE_FRACTION;
   const directions: readonly SketchPoint2D[] = [
@@ -5996,7 +6657,17 @@ export function sketchDraggedPointHasFreeDof(
       continue;
     }
     if (
-      length(subtract(getPoint(frame.values, record), current)) > moveThreshold
+      length(
+        subtract(
+          getPoint(
+            session.program.system.parameterProjection.projectValues(
+              frame.values,
+            ),
+            record,
+          ),
+          current,
+        ),
+      ) > moveThreshold
     ) {
       return true;
     }
@@ -6045,6 +6716,22 @@ export function updateCompiledSketchSolveSession(
     };
   }
 
+  if (!dragTarget.position.every(Number.isFinite)) {
+    return {
+      kind: "blocked",
+      reason: "nonConvergent",
+      solvedSnapshot: session.lastAcceptedSnapshot,
+      diagnostics: [
+        makeDiagnostic(
+          "drag-target-nonconvergent",
+          "warning",
+          "Dragged point frame contains a non-finite target and cannot be solved.",
+          { kind: "point", pointId: dragTarget.pointId },
+        ),
+      ],
+    };
+  }
+
   const component = findComponentForPoint(session.program, dragTarget.pointId);
   const draggedRecord = session.program.system.pointRecords.get(
     dragTarget.pointId,
@@ -6070,7 +6757,10 @@ export function updateCompiledSketchSolveSession(
   // solution tracks the constraint manifold instead of teleporting past
   // singularities. A non-convergent substep keeps the last accepted frame
   // (geometry lags the cursor) rather than escalating to a discontinuous search.
-  const startPosition = getPoint(session.values, draggedRecord);
+  const startPosition = getPoint(
+    session.program.system.parameterProjection.projectValues(session.values),
+    draggedRecord,
+  );
   const totalDelta = subtract(dragTarget.position, startPosition);
   const distance = length(totalDelta);
   const substeps = Math.max(
@@ -6145,7 +6835,8 @@ export function updateCompiledSketchSolveSession(
   return {
     kind: "solved",
     solvedSnapshot: session.lastAcceptedSnapshot,
-    diagnostics: lastAccepted?.diagnostics ?? session.lastAcceptedSnapshot.diagnostics,
+    diagnostics:
+      lastAccepted?.diagnostics ?? session.lastAcceptedSnapshot.diagnostics,
   };
 }
 
@@ -6153,6 +6844,7 @@ function buildSolvedEntities(
   definition: SketchDefinition,
   pointRecords: Map<SketchPointId, SolverPointRecord>,
   entityStates: Map<SketchEntityId, SolverEntityState>,
+  splineTangentStates: Map<string, SplineTangentState>,
   values: Float64Array,
 ): SolvedSketchEntityGeometryRecord[] {
   const solved: SolvedSketchEntityGeometryRecord[] = [];
@@ -6207,10 +6899,31 @@ function buildSolvedEntities(
           getPoint(values, point),
         ]),
       ) as Record<SketchPointId, SketchPoint2D>;
+      const currentEntity = {
+        ...entity,
+        pointOccurrences: entity.pointOccurrences.map((occurrence) => {
+          if (occurrence.tangent.kind !== "authored") return occurrence;
+          const state = splineTangentStates.get(
+            splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+          );
+          return state
+            ? {
+                ...occurrence,
+                tangent: {
+                  kind: "authored" as const,
+                  vector: [
+                    values[state.baseIndex]!,
+                    values[state.baseIndex + 1]!,
+                  ] as const,
+                },
+              }
+            : occurrence;
+        }),
+      };
       solved.push({
         entityId: entity.entityId,
         kind: "spline",
-        reconstruction: reconstructSplineAggregate(entity, positions),
+        reconstruction: reconstructSplineAggregate(currentEntity, positions),
       });
       continue;
     }

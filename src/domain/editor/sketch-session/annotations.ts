@@ -70,7 +70,7 @@ import {
 import {
   addAnchorOffset,
   getSketchDatumGuideExtent,
-  applyPointPositionsToDefinition,
+  applySolvedSketchToDefinition,
 } from "./definition-patches";
 import {
   getSketchConstraintDisplayForTarget,
@@ -617,12 +617,9 @@ export function solveEditedAnnotationDefinition(
 
   return {
     kind: "accepted" as const,
-    definition: applyPointPositionsToDefinition(
+    definition: applySolvedSketchToDefinition(
       definition,
-      solved.solvedSnapshot.solvedPoints.map((point) => ({
-        pointId: point.pointId,
-        position: point.solvedPosition,
-      })),
+      solved.solvedSnapshot,
     ),
     solvedSnapshot: solved.solvedSnapshot,
   };

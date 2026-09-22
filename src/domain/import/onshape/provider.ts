@@ -2735,6 +2735,7 @@ function projectSketchForPlan(input: {
     label: input.featurePlan.label,
     planeKey,
     plane,
+    sourceFrame: solved?.sketchFrame,
     entities,
     constraints: feature?.constraints,
     sourceSolveStatus: solved?.sketchSolveStatus,

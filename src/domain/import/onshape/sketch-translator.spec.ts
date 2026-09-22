@@ -287,6 +287,154 @@ test("groups Onshape linear-pattern local instances by entity slot and derives a
   ]);
 });
 
+test("remaps captured pattern helper axes into the probed face frame without dropping authored requirements", async () => {
+  const translation = translateSketch({
+    featureId: "FcPi2PXMdBYVGkq_1",
+    label: "Sketch 2",
+    plane: {
+      support: { kind: "construction", constructionId: "construction_pattern_face" },
+      frame: {
+        origin: [52.5, 110.5, 191.392],
+        xAxis: [0, -0.5, -0.866025],
+        yAxis: [0.9999993006250001, 0, 0],
+        normal: [0, -0.866025, 0.5],
+        linearUnit: "documentLength",
+        handedness: "rightHanded",
+      },
+      key: null,
+    },
+    sourceFrame: {
+      origin: [0, -6.009258394948636e-15, 3.4694469519536173e-15],
+      xAxis: [1, 0, 0],
+      yAxis: [0, 0.5000000000000004, 0.8660254037844385],
+      normal: [0, -0.8660254037844385, 0.5000000000000004],
+      linearUnit: "documentLength",
+      handedness: "rightHanded",
+    },
+    entities: [
+      { entityId: "JpThTKh4sHM0.0", entityType: "circle", center: [201.00026379375163, -89.99993705625], radius: 3 },
+      { entityId: "Lwf1pdanXeGN", entityType: "circle", center: [201.00026379375163, -89.99993705625], radius: 1.5 },
+      { entityId: "HaWWOCY0Klnz.0.0.1", entityType: "circle", center: [170.00027463406664, -89.99993705625], radius: 3 },
+      { entityId: "HaWWOCY0Klnz.1.0.1", entityType: "circle", center: [170.00027463406664, -89.99993705625], radius: 1.5 },
+      { entityId: "HaWWOCY0Klnz.direction1", entityType: "lineSegment", start: [201.00026379375163, -89.99993705625], end: [201.00026379375163, -14.999989509375009], isConstruction: true },
+      { entityId: "HaWWOCY0Klnz.direction2", entityType: "lineSegment", start: [201.00026379375163, -89.99993705625], end: [170.00027463406664, -89.99993705625], isConstruction: true },
+    ],
+    constraints: [
+      relationship("COINCIDENT", "HaWWOCY0Klnz.originJoin", [
+        { parameterId: "localFirst", value: "HaWWOCY0Klnz.direction1.start" },
+        { parameterId: "localSecond", value: "HaWWOCY0Klnz.direction2.start" },
+        { parameterId: "sketchToolType", value: "PATTERN" },
+      ]),
+      relationship("HORIZONTAL", "HaWWOCY0Klnz.hv1", [
+        { parameterId: "localFirst", value: "HaWWOCY0Klnz.direction1" },
+        { parameterId: "sketchToolType", value: "PATTERN" },
+      ]),
+      relationship("VERTICAL", "HaWWOCY0Klnz.hv2", [
+        { parameterId: "localFirst", value: "HaWWOCY0Klnz.direction2" },
+        { parameterId: "sketchToolType", value: "PATTERN" },
+      ]),
+      relationship("COINCIDENT", "HaWWOCY0Klnz.len1.c1", [
+        { parameterId: "localFirst", value: "HaWWOCY0Klnz.direction1.start" },
+        { parameterId: "localSecond", value: "JpThTKh4sHM0.0.center" },
+        { parameterId: "sketchToolType", value: "PATTERN" },
+      ]),
+      relationship("COINCIDENT", "HaWWOCY0Klnz.len2.c1", [
+        { parameterId: "localFirst", value: "HaWWOCY0Klnz.direction2.start" },
+        { parameterId: "localSecond", value: "JpThTKh4sHM0.0.center" },
+        { parameterId: "sketchToolType", value: "PATTERN" },
+      ]),
+      relationship("COINCIDENT", "HaWWOCY0Klnz.len2.c2", [
+        { parameterId: "localFirst", value: "HaWWOCY0Klnz.direction2.end" },
+        { parameterId: "localSecond", value: "HaWWOCY0Klnz.0.0.1.center" },
+        { parameterId: "sketchToolType", value: "PATTERN" },
+      ]),
+      relationship("LINEAR_PATTERN", "HaWWOCY0Klnz.pattern", [
+        { parameterId: "patternc1", expression: "1" },
+        { parameterId: "patternc2", expression: "2" },
+        { parameterId: "localInstance0,0,0", value: "JpThTKh4sHM0.0" },
+        { parameterId: "localInstance2,0,0", value: "Lwf1pdanXeGN" },
+        { parameterId: "localInstance0,0,1", value: "HaWWOCY0Klnz.0.0.1" },
+        { parameterId: "localInstance2,0,1", value: "HaWWOCY0Klnz.1.0.1" },
+        { parameterId: "localDirection1", value: "HaWWOCY0Klnz.direction1" },
+        { parameterId: "localDirection2", value: "HaWWOCY0Klnz.direction2" },
+        { parameterId: "sketchToolType", value: "PATTERN" },
+      ]),
+    ],
+  });
+
+  expect(translation.definition.constraints.map((constraint) => [constraint.label, constraint.kind])).toContainEqual([
+    "HaWWOCY0Klnz.hv1",
+    "vertical",
+  ]);
+  expect(translation.definition.constraints.map((constraint) => [constraint.label, constraint.kind])).toContainEqual([
+    "HaWWOCY0Klnz.hv2",
+    "horizontal",
+  ]);
+  const pattern = translation.definition.derivedRelationships?.find(
+    (relationship) => relationship.kind === "linearPattern",
+  );
+  expect(pattern?.kind === "linearPattern" && {
+    vector: pattern.vector,
+    instanceCount: pattern.instanceCount,
+    outputs: pattern.outputs.map((output) => output.outputEntityId),
+  }).toEqual({
+    vector: [-30.999989159684986, 0],
+    instanceCount: 2,
+    outputs: [
+      "sketch_entity_FcPi2PXMdBYVGkq_1_HaWWOCY0Klnz_0_0_1",
+      "sketch_entity_FcPi2PXMdBYVGkq_1_HaWWOCY0Klnz_1_0_1",
+    ],
+  });
+
+  const delegate = new SketchConstraintSolverAdapter({
+    documentId: "doc_pattern_frame",
+    revisionId: "rev_pattern_frame",
+  });
+  const solveStates: string[] = [];
+  let solvedPoints = new Map<string, readonly [number, number]>();
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: {
+      solveSketch: async (request) => {
+        const response = await delegate.solveSketch(request);
+        solveStates.push(response.status.solveState);
+        solvedPoints = new Map(
+          response.solvedSnapshot.solvedPoints.map((point) => [
+            point.pointId,
+            point.solvedPosition,
+          ]),
+        );
+        return response;
+      },
+    },
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_pattern_frame",
+    revisionId: "rev_pattern_frame",
+    sketchId: translation.definition.points[0]!.target.sketchId,
+    plane: translation.plane,
+    definition: translation.definition,
+    relationshipSummary: translation.relationshipSummary,
+  });
+
+  expect(solveStates).toEqual(["solved"]);
+  expect(verified.diagnostics).toEqual([]);
+  expect(verified.definition.constraints).toHaveLength(6);
+  expect(
+    verified.definition.points
+      .filter((point) => point.label.startsWith("HaWWOCY0Klnz.") && point.label.endsWith(".center"))
+      .map((point) => point.position),
+    "Both captured generated circle centers must remain at their captured target-frame positions.",
+  ).toEqual([
+    [170.00027463406664, -89.99993705625],
+    [170.00027463406664, -89.99993705625],
+  ]);
+  for (const output of pattern?.kind === "linearPattern" ? pattern.outputs : []) {
+    for (const pointId of output.outputPointIds) {
+      expect(solvedPoints.get(pointId)?.[0]).toBeCloseTo(170.00027463406664, 8);
+      expect(solvedPoints.get(pointId)?.[1]).toBeCloseTo(-89.99993705625, 8);
+    }
+  }
+});
+
 test("drops linear-pattern records when the translated vector is zero", () => {
   const result = translateSketch({
     featureId: "sketch_linear_pattern_zero",

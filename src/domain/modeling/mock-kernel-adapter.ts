@@ -69,6 +69,10 @@ import type {
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
 import type {
+  NeutralCurveQueryRequest,
+  NeutralCurveSelfIntersectionRequest,
+} from "@/contracts/modeling/neutral-curve-query";
+import type {
   ExportCapabilities,
   MeshExportAccuracy,
   MeshTriangle,
@@ -411,8 +415,9 @@ function createSketchTarget(sketchId: SketchId): DurableRef {
   return { kind: "sketch", sketchId };
 }
 
-
-function getSketchRecordChangedTargets(sketchRecord: SketchRecord): DurableRef[] {
+function getSketchRecordChangedTargets(
+  sketchRecord: SketchRecord,
+): DurableRef[] {
   return [
     createSketchTarget(sketchRecord.sketchId),
     ...sketchRecord.regions.map((region) => region.target),
@@ -591,14 +596,16 @@ function createMockBakedBodyArtifacts(input: {
   featureLabel: string;
   revisionId: RevisionId;
 }) {
-  const suffix = input.featureId.replace(/^feature_/, "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const suffix = input.featureId
+    .replace(/^feature_/, "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_");
   const bodyId = `body_baked_${suffix}` as BodyId;
   const faceId = `face_baked_${suffix}_mesh` as FaceId;
-  const edgeIds = [0, 1, 2].map((index) =>
-    `edge_baked_${suffix}_${index}` as EdgeId,
+  const edgeIds = [0, 1, 2].map(
+    (index) => `edge_baked_${suffix}_${index}` as EdgeId,
   );
-  const vertexIds = [0, 1, 2].map((index) =>
-    `vertex_baked_${suffix}_${index}` as VertexId,
+  const vertexIds = [0, 1, 2].map(
+    (index) => `vertex_baked_${suffix}_${index}` as VertexId,
   );
   const bodyTarget = { kind: "body" as const, bodyId };
   const faceTarget = { kind: "face" as const, bodyId, faceId };
@@ -674,8 +681,11 @@ function resolveMockPlaneFrame(input: {
     const source = input.constructions.find(
       (entry) =>
         entry.constructionId ===
-        (definition.parameters as { reference: { target: { constructionId: ConstructionId } } })
-          .reference.target.constructionId,
+        (
+          definition.parameters as {
+            reference: { target: { constructionId: ConstructionId } };
+          }
+        ).reference.target.constructionId,
     );
     if (source) {
       return source.plane.frame;
@@ -1320,7 +1330,9 @@ type MockPatternDefinition = AdvancedSolidFeatureDefinition & {
 function isMockPatternDefinition(
   definition: FeatureDefinition,
 ): definition is MockPatternDefinition {
-  return definition.kind === "linearPattern" || definition.kind === "circularPattern";
+  return (
+    definition.kind === "linearPattern" || definition.kind === "circularPattern"
+  );
 }
 
 function validatePatternAdvancedContract(
@@ -1352,15 +1364,20 @@ function getMockLinearPatternOffset(
   definition: MockPatternDefinition & { kind: "linearPattern" },
   instanceIndex: number,
 ): readonly [number, number, number] {
-  const spacing = authoredOptionLiteral<number>(definition.parameters.options?.spacing) ?? 0;
+  const spacing =
+    authoredOptionLiteral<number>(definition.parameters.options?.spacing) ?? 0;
   const opposite =
-    authoredOptionLiteral<boolean>(definition.parameters.options?.oppositeDirection) === true;
-  const directionTarget = getAdvancedParticipant(definition, "direction")?.targets[0];
+    authoredOptionLiteral<boolean>(
+      definition.parameters.options?.oppositeDirection,
+    ) === true;
+  const directionTarget = getAdvancedParticipant(definition, "direction")
+    ?.targets[0];
   const direction = (() => {
     if (directionTarget?.kind === "construction") {
       return (
         snapshot.document.constructions.find(
-          (construction) => construction.constructionId === directionTarget.constructionId,
+          (construction) =>
+            construction.constructionId === directionTarget.constructionId,
         )?.plane.frame.normal ?? [1, 0, 0]
       );
     }
@@ -1381,11 +1398,17 @@ function getMockCircularPatternAngleRadians(
 ) {
   const count = getMockPatternInstanceCount(definition);
   const angleDegrees =
-    authoredOptionLiteral<number>(definition.parameters.options?.angleDegrees) ?? 0;
+    authoredOptionLiteral<number>(
+      definition.parameters.options?.angleDegrees,
+    ) ?? 0;
   const equalSpace =
-    authoredOptionLiteral<boolean>(definition.parameters.options?.equalSpace) === true;
+    authoredOptionLiteral<boolean>(
+      definition.parameters.options?.equalSpace,
+    ) === true;
   const opposite =
-    authoredOptionLiteral<boolean>(definition.parameters.options?.oppositeDirection) === true;
+    authoredOptionLiteral<boolean>(
+      definition.parameters.options?.oppositeDirection,
+    ) === true;
   const step = equalSpace
     ? Math.abs(angleDegrees) === 360
       ? angleDegrees / count
@@ -1403,7 +1426,11 @@ function translatePoint(point: MockPoint3, offset: MockPoint3): MockPoint3 {
 function rotatePointAroundZ(point: MockPoint3, radians: number): MockPoint3 {
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
-  return [point[0] * cos - point[1] * sin, point[0] * sin + point[1] * cos, point[2]];
+  return [
+    point[0] * cos - point[1] * sin,
+    point[0] * sin + point[1] * cos,
+    point[2],
+  ];
 }
 
 function transformMockRenderableGeometry(
@@ -1451,9 +1478,9 @@ function createMockPatternBodyArtifacts(input: {
   revisionId: RevisionId;
   definition: MockPatternDefinition;
 }) {
-  const seedTargets = (getAdvancedParticipant(input.definition, "body")?.targets ?? []).flatMap(
-    (target) => (target.kind === "body" ? [target] : []),
-  );
+  const seedTargets = (
+    getAdvancedParticipant(input.definition, "body")?.targets ?? []
+  ).flatMap((target) => (target.kind === "body" ? [target] : []));
   const instanceCount = getMockPatternInstanceCount(input.definition);
   const bodies: WorkspaceSnapshot["document"]["bodies"] = [];
   const objects: WorkspaceSnapshot["presentation"]["objects"] = [];
@@ -1466,9 +1493,15 @@ function createMockPatternBodyArtifacts(input: {
       (body) => body.bodyId === seedTarget.bodyId,
     );
     const seedRenderable = input.snapshot.document.render.records.find(
-      (record) => record.ownerBodyId === seedTarget.bodyId && record.geometry.kind === "mesh",
+      (record) =>
+        record.ownerBodyId === seedTarget.bodyId &&
+        record.geometry.kind === "mesh",
     );
-    for (let instanceIndex = 1; instanceIndex < instanceCount; instanceIndex += 1) {
+    for (
+      let instanceIndex = 1;
+      instanceIndex < instanceCount;
+      instanceIndex += 1
+    ) {
       const slot = `${input.definition.kind === "linearPattern" ? "linear" : "circular"}_seed${seedIndex + 1}_instance${instanceIndex}`;
       const bodyId = `body_${input.featureId}_${slot}` as BodyId;
       const target = { kind: "body" as const, bodyId };
@@ -1484,14 +1517,19 @@ function createMockPatternBodyArtifacts(input: {
       } else {
         offset = [seedIndex * 12, instanceIndex * 12, 0];
         const radians = getMockCircularPatternAngleRadians(
-          input.definition as MockPatternDefinition & { kind: "circularPattern" },
+          input.definition as MockPatternDefinition & {
+            kind: "circularPattern";
+          },
           instanceIndex,
         );
         transformPoint = (point) =>
           translatePoint(rotatePointAroundZ(point, radians), offset);
       }
       const geometry = seedRenderable
-        ? transformMockRenderableGeometry(seedRenderable.geometry, transformPoint)
+        ? transformMockRenderableGeometry(
+            seedRenderable.geometry,
+            transformPoint,
+          )
         : createMockPatternFallbackMesh(offset);
       const label = `${input.featureLabel} ${seedIndex + 1}.${instanceIndex}`;
 
@@ -1511,7 +1549,9 @@ function createMockPatternBodyArtifacts(input: {
       objects.push({
         id: `object_tree_node_${bodyId}` as ObjectTreeNodeId,
         label,
-        description: seedBody ? `Pattern copy of ${seedBody.label}` : "Pattern body copy",
+        description: seedBody
+          ? `Pattern copy of ${seedBody.label}`
+          : "Pattern body copy",
         kind: "body",
         target,
         ownerBodyId: bodyId,
@@ -1569,13 +1609,16 @@ function removeMockGeneratedBodyOutputs(
     (body) => !removedBodyIds.has(body.bodyId),
   );
   snapshot.presentation.objects = snapshot.presentation.objects.filter(
-    (object) => object.ownerBodyId === null || !removedBodyIds.has(object.ownerBodyId),
+    (object) =>
+      object.ownerBodyId === null || !removedBodyIds.has(object.ownerBodyId),
   );
   snapshot.document.render.records = snapshot.document.render.records.filter(
-    (record) => record.ownerBodyId === null || !removedBodyIds.has(record.ownerBodyId),
+    (record) =>
+      record.ownerBodyId === null || !removedBodyIds.has(record.ownerBodyId),
   );
   snapshot.presentation.entities = snapshot.presentation.entities.filter(
-    (entry) => entry.ownerBodyId === null || !removedBodyIds.has(entry.ownerBodyId),
+    (entry) =>
+      entry.ownerBodyId === null || !removedBodyIds.has(entry.ownerBodyId),
   );
   snapshot.document.objects = snapshot.presentation.objects;
   snapshot.document.entities = snapshot.presentation.entities;
@@ -1773,9 +1816,12 @@ function validateFeatureDefinitionAgainstSnapshot(
       return { accepted: true as const, diagnostics: [] };
     }
     case "fillet": {
-      const resolvedFilletRadius = getAuthoredLiteralValue(definition.parameters.radius);
+      const resolvedFilletRadius = getAuthoredLiteralValue(
+        definition.parameters.radius,
+      );
       if (
-        resolvedFilletRadius === null || resolvedFilletRadius <= 0 ||
+        resolvedFilletRadius === null ||
+        resolvedFilletRadius <= 0 ||
         definition.parameters.edgeTargets.length === 0
       ) {
         return {
@@ -2415,7 +2461,9 @@ function validateFeatureDefinitionAgainstSnapshot(
       return { accepted: true as const, diagnostics: [] };
     }
     case "hole": {
-      const holeDefinition = definition as AdvancedSolidFeatureDefinition & { kind: "hole" };
+      const holeDefinition = definition as AdvancedSolidFeatureDefinition & {
+        kind: "hole";
+      };
       const contractDiagnostics = validateHoleAdvancedContract(holeDefinition);
       if (contractDiagnostics.length > 0) {
         return {
@@ -2427,7 +2475,8 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       const locationTargets =
         getAdvancedParticipant(holeDefinition, "location")?.targets ?? [];
-      const bodyTargets = getAdvancedParticipant(holeDefinition, "body")?.targets ?? [];
+      const bodyTargets =
+        getAdvancedParticipant(holeDefinition, "body")?.targets ?? [];
 
       if (
         locationTargets.some(
@@ -2450,7 +2499,8 @@ function validateFeatureDefinitionAgainstSnapshot(
 
       if (
         bodyTargets.some(
-          (target) => target.kind !== "body" || !hasBodyTarget(snapshot, target.bodyId),
+          (target) =>
+            target.kind !== "body" || !hasBodyTarget(snapshot, target.bodyId),
         )
       ) {
         return {
@@ -2838,7 +2888,11 @@ function validateFeatureDefinitionAgainstSnapshot(
         const angle = getAuthoredLiteralValue(
           definition.parameters.options?.angle,
         );
-        if (typeof angle !== "number" || !Number.isFinite(angle) || angle === 0) {
+        if (
+          typeof angle !== "number" ||
+          !Number.isFinite(angle) ||
+          angle === 0
+        ) {
           return {
             accepted: false as const,
             reasonCode: "mock-invalid-transform",
@@ -2938,7 +2992,8 @@ function validateFeatureDefinitionAgainstSnapshot(
     case "linearPattern":
     case "circularPattern": {
       const patternDefinition = definition as MockPatternDefinition;
-      const contractDiagnostics = validatePatternAdvancedContract(patternDefinition);
+      const contractDiagnostics =
+        validatePatternAdvancedContract(patternDefinition);
       if (contractDiagnostics.length > 0) {
         return {
           accepted: false as const,
@@ -2947,7 +3002,8 @@ function validateFeatureDefinitionAgainstSnapshot(
         };
       }
 
-      const bodyTargets = getAdvancedParticipant(patternDefinition, "body")?.targets ?? [];
+      const bodyTargets =
+        getAdvancedParticipant(patternDefinition, "body")?.targets ?? [];
       const referenceTargets =
         getAdvancedParticipant(
           patternDefinition,
@@ -2955,7 +3011,8 @@ function validateFeatureDefinitionAgainstSnapshot(
         )?.targets ?? [];
       if (
         bodyTargets.some(
-          (target) => target.kind !== "body" || !hasBodyTarget(snapshot, target.bodyId),
+          (target) =>
+            target.kind !== "body" || !hasBodyTarget(snapshot, target.bodyId),
         )
       ) {
         return {
@@ -2975,9 +3032,17 @@ function validateFeatureDefinitionAgainstSnapshot(
         (referenceTarget?.kind === "construction" &&
           !hasConstructionTarget(snapshot, referenceTarget.constructionId)) ||
         (referenceTarget?.kind === "face" &&
-          !hasFaceTarget(snapshot, referenceTarget.bodyId, referenceTarget.faceId)) ||
+          !hasFaceTarget(
+            snapshot,
+            referenceTarget.bodyId,
+            referenceTarget.faceId,
+          )) ||
         (referenceTarget?.kind === "edge" &&
-          !hasEdgeTarget(snapshot, referenceTarget.bodyId, referenceTarget.edgeId)) ||
+          !hasEdgeTarget(
+            snapshot,
+            referenceTarget.bodyId,
+            referenceTarget.edgeId,
+          )) ||
         (referenceTarget?.kind === "sketchEntity" &&
           !hasSketchEntityTarget(
             snapshot,
@@ -3040,7 +3105,9 @@ function buildPreviewRenderables(
 
   if (definition.kind === "hole") {
     const location = getAdvancedParticipant(definition, "location")?.targets[0];
-    return location ? createPreviewRenderableSet(getPrimitiveRefKey(location)) : [];
+    return location
+      ? createPreviewRenderableSet(getPrimitiveRefKey(location))
+      : [];
   }
 
   if (definition.kind === "thicken") {
@@ -3481,12 +3548,9 @@ async function buildSketchRecord(
         evaluation.regions.diagnostics,
       ),
     }),
-    regions: evaluation.validation.isValid
-      ? evaluation.regions.regions
-      : [],
+    regions: evaluation.validation.isValid ? evaluation.regions.regions : [],
   };
 }
-
 
 async function rebuildSketchesForDocumentVariables(input: {
   solverAdapter: SketchSolverAdapter;
@@ -3538,7 +3602,8 @@ async function rebuildSketchesForDocumentVariables(input: {
       continue;
     }
 
-    const requestId = `request_variable_rebuild_${sketch.sketchId}` as RequestId;
+    const requestId =
+      `request_variable_rebuild_${sketch.sketchId}` as RequestId;
     const projection = projectSketchExternalReferencesFromSnapshot(
       input.snapshot,
       {
@@ -3618,12 +3683,15 @@ async function rebuildSketchesForDocumentVariables(input: {
         regions.diagnostics,
         validation.isValid
           ? []
-          : [{
-              code: "sketch-validation-failed",
-              severity: "error" as const,
-              message: "The authored sketch has invalid or unresolved requirements.",
-              target: null,
-            }],
+          : [
+              {
+                code: "sketch-validation-failed",
+                severity: "error" as const,
+                message:
+                  "The authored sketch has invalid or unresolved requirements.",
+                target: null,
+              },
+            ],
       ),
     });
 
@@ -4882,28 +4950,30 @@ function applyMockInPlaceBodySnapshotMutation(
   );
   snapshot.document.objects = snapshot.presentation.objects;
 
-  snapshot.document.render.records = snapshot.document.render.records.map((record) =>
-    record.ownerBodyId !== null && bodyIdSet.has(record.ownerBodyId)
-      ? {
-          ...record,
-          ownerFeatureId: featureId,
-          label: record.label.includes(labelSuffix)
-            ? record.label
-            : `${record.label} ${labelSuffix}`,
-        }
-      : record,
+  snapshot.document.render.records = snapshot.document.render.records.map(
+    (record) =>
+      record.ownerBodyId !== null && bodyIdSet.has(record.ownerBodyId)
+        ? {
+            ...record,
+            ownerFeatureId: featureId,
+            label: record.label.includes(labelSuffix)
+              ? record.label
+              : `${record.label} ${labelSuffix}`,
+          }
+        : record,
   );
 
-  snapshot.presentation.entities = snapshot.presentation.entities.map((entry) =>
-    entry.ownerBodyId !== null && bodyIdSet.has(entry.ownerBodyId)
-      ? {
-          ...entry,
-          ownerFeatureId: featureId,
-          label: entry.label.includes(labelSuffix)
-            ? entry.label
-            : `${entry.label} ${labelSuffix}`,
-        }
-      : entry,
+  snapshot.presentation.entities = snapshot.presentation.entities.map(
+    (entry) =>
+      entry.ownerBodyId !== null && bodyIdSet.has(entry.ownerBodyId)
+        ? {
+            ...entry,
+            ownerFeatureId: featureId,
+            label: entry.label.includes(labelSuffix)
+              ? entry.label
+              : `${entry.label} ${labelSuffix}`,
+          }
+        : entry,
   );
   snapshot.document.entities = snapshot.presentation.entities;
 }
@@ -4968,6 +5038,26 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     this.solverAdapter =
       options?.solverAdapter ?? new MockSketchSolverAdapter();
     this.assetResolver = options?.assetResolver;
+  }
+
+  async queryNeutralCurves(_request: NeutralCurveQueryRequest) {
+    return {
+      kind: "unsupported" as const,
+      code: "mock-neutral-curve-query-unsupported",
+      message:
+        "The mock kernel does not provide native exact neutral-curve queries.",
+    };
+  }
+
+  async queryNeutralCurveSelfIntersections(
+    _request: NeutralCurveSelfIntersectionRequest,
+  ) {
+    return {
+      kind: "unsupported" as const,
+      code: "mock-neutral-curve-self-intersection-unsupported",
+      message:
+        "The mock kernel does not provide native exact neutral-curve self-intersections.",
+    };
   }
 
   private async getSnapshot() {
@@ -5040,7 +5130,8 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
             plane: sketch.plane.frame,
             tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
             definition: resolvedDefinition.definition,
-            requestId: `request_restore_${sketch.sketchId}_regions` as RequestId,
+            requestId:
+              `request_restore_${sketch.sketchId}_regions` as RequestId,
           })
         : null;
       const expressionDiagnostics = resolvedDefinition.ok
@@ -5048,7 +5139,8 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         : resolvedDefinition.diagnostics.map(
             mapModelingDiagnosticToSketchDiagnostic,
           );
-      const solvedSnapshot = evaluation?.solve.solvedSnapshot ??
+      const solvedSnapshot =
+        evaluation?.solve.solvedSnapshot ??
         createInvalidSolvedSnapshot(expressionDiagnostics);
       const derivedDiagnostics = evaluation
         ? mergeSketchSolveDiagnostics(
@@ -5257,14 +5349,14 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         hash: resolvedDefinition.definition.parameters.hash,
         byteLength: resolvedDefinition.definition.parameters.byteLength,
       });
-      const diagnostic =
-        !resolvedAsset
-          ? createBakedBodyDiagnostic(
-              resolvedDefinition.definition,
-              "assetMissing",
-              `Baked geometry asset ${resolvedDefinition.definition.parameters.assetId} is unavailable.`,
-            )
-          : resolvedAsset.format !== resolvedDefinition.definition.parameters.format
+      const diagnostic = !resolvedAsset
+        ? createBakedBodyDiagnostic(
+            resolvedDefinition.definition,
+            "assetMissing",
+            `Baked geometry asset ${resolvedDefinition.definition.parameters.assetId} is unavailable.`,
+          )
+        : resolvedAsset.format !==
+            resolvedDefinition.definition.parameters.format
           ? createBakedBodyDiagnostic(
               resolvedDefinition.definition,
               "formatInvalid",
@@ -5414,34 +5506,45 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         }),
       );
 
-      if (bakedBodyArtifacts && resolvedDefinition.definition.kind === "bakedBody") {
-        const replacement = resolvedDefinition.definition.parameters.replacement;
+      if (
+        bakedBodyArtifacts &&
+        resolvedDefinition.definition.kind === "bakedBody"
+      ) {
+        const replacement =
+          resolvedDefinition.definition.parameters.replacement;
         const replacedBodyIds =
           replacement.kind === "replaceBodies"
             ? new Set(replacement.bodyIds)
             : null;
         if (replacedBodyIds) {
-          mutableSnapshot.document.bodies = mutableSnapshot.document.bodies.filter(
-            (body) => !replacedBodyIds.has(body.bodyId),
-          );
+          mutableSnapshot.document.bodies =
+            mutableSnapshot.document.bodies.filter(
+              (body) => !replacedBodyIds.has(body.bodyId),
+            );
           mutableSnapshot.presentation.entities =
             mutableSnapshot.presentation.entities.filter(
               (entry) =>
-                entry.ownerBodyId === null || !replacedBodyIds.has(entry.ownerBodyId),
+                entry.ownerBodyId === null ||
+                !replacedBodyIds.has(entry.ownerBodyId),
             );
           mutableSnapshot.document.render.records =
             mutableSnapshot.document.render.records.filter(
               (record) =>
-                record.ownerBodyId === null || !replacedBodyIds.has(record.ownerBodyId),
+                record.ownerBodyId === null ||
+                !replacedBodyIds.has(record.ownerBodyId),
             );
         }
         mutableSnapshot.document.bodies.push(bakedBodyArtifacts.body);
         mutableSnapshot.presentation.entities.push(bakedBodyArtifacts.entity);
-        mutableSnapshot.document.render.records.push(bakedBodyArtifacts.renderRecord);
+        mutableSnapshot.document.render.records.push(
+          bakedBodyArtifacts.renderRecord,
+        );
       }
 
       if (planeArtifacts) {
-        mutableSnapshot.document.constructions.push(planeArtifacts.construction);
+        mutableSnapshot.document.constructions.push(
+          planeArtifacts.construction,
+        );
         mutableSnapshot.presentation.entities.push(planeArtifacts.entity);
       }
 
@@ -5781,12 +5884,15 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         regions.diagnostics,
         validation.isValid
           ? []
-          : [{
-              code: "sketch-validation-failed",
-              severity: "error" as const,
-              message: "The authored sketch has invalid or unresolved requirements.",
-              target: null,
-            }],
+          : [
+              {
+                code: "sketch-validation-failed",
+                severity: "error" as const,
+                message:
+                  "The authored sketch has invalid or unresolved requirements.",
+                target: null,
+              },
+            ],
       );
     }
 
@@ -5794,7 +5900,10 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       solvedSnapshot,
       diagnostics: sketchDiagnostics,
     });
-    solvedSnapshot = { ...solvedSnapshot, diagnostics: derivedValidity.diagnostics };
+    solvedSnapshot = {
+      ...solvedSnapshot,
+      diagnostics: derivedValidity.diagnostics,
+    };
     const commitDiagnostics = derivedValidity.diagnostics.map((diagnostic) =>
       mapSketchSolverDiagnostic(sketchId, diagnostic),
     );
@@ -5824,7 +5933,10 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
 
       const changedTargets = [
         createSketchTarget(sketchId),
-        ...sketchRecord.regions.map((region) => ({ ...region.target, sketchId })),
+        ...sketchRecord.regions.map((region) => ({
+          ...region.target,
+          sketchId,
+        })),
         ...normalizedDefinition.entities.map((entity) => ({
           ...entity.target,
           sketchId,
@@ -7509,9 +7621,8 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           }
         : variable,
     );
-    const variableValidation = evaluateDocumentVariableExpressions(
-      candidateVariables,
-    );
+    const variableValidation =
+      evaluateDocumentVariableExpressions(candidateVariables);
 
     if (!variableValidation.ok) {
       const diagnostics = createDocumentVariableExpressionDiagnostics(
@@ -7538,7 +7649,6 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         diagnostics,
       };
     }
-
 
     const nextRevisionId =
       `rev_${String(this.revisionSequence + 1).padStart(4, "0")}` as RevisionId;
@@ -7579,7 +7689,9 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
 
     return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
       mutableSnapshot.document.variables = structuredClone(candidateVariables);
-      mutableSnapshot.document.sketches = structuredClone(sketchRebuild.sketches);
+      mutableSnapshot.document.sketches = structuredClone(
+        sketchRebuild.sketches,
+      );
 
       const diagnostics: UpdateDocumentVariableResponse["diagnostics"] = [
         ...sketchRebuild.diagnostics,

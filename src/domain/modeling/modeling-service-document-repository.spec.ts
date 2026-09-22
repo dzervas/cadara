@@ -1979,6 +1979,98 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     ).toBeFalsy();
   }
 
+  async function testAcceptedSplineTangentsSurviveRepositoryReopen() {
+    const repository = createMemoryDocumentRepository();
+    const service = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+    });
+    const initial = await service.getCurrentDocumentSnapshot();
+    const document = createAuthoredModelDocumentFromSnapshot(initial);
+    const sketch = document.sketches[0]!;
+    const definition = structuredClone(sketch.definition);
+    const pointIds = definition.points
+      .slice(0, 3)
+      .map((point) => point.pointId);
+    expect(pointIds.length).toBe(3);
+    const entityId = "sketch_entity_persisted_spline" as const;
+    const changedTangent = [0.875, -0.375] as const;
+    definition.referenceIds = [];
+    definition.references = [];
+    definition.pointIds = pointIds;
+    definition.points = definition.points.slice(0, 3);
+    definition.entityIds = [entityId];
+    definition.entities = [
+      {
+        kind: "spline",
+        entityId,
+        label: "Persisted spline",
+        target: {
+          kind: "sketchEntity",
+          sketchId: sketch.sketchId,
+          entityId,
+        },
+        isConstruction: true,
+        pointOccurrenceIds: ["persist-occ-0", "persist-occ-1", "persist-occ-2"],
+        pointOccurrences: pointIds.map((pointId, index) => ({
+          occurrenceId: `persist-occ-${index}`,
+          pointId,
+          tangent:
+            index === 1
+              ? { kind: "authored" as const, vector: changedTangent }
+              : { kind: "automatic" as const },
+        })),
+        closure: "open",
+        interpolationPolicy: "centripetal-mean-arm-v1",
+      },
+    ];
+    definition.constraintIds = [];
+    definition.constraints = [];
+    definition.dimensionIds = [];
+    definition.dimensions = [];
+    definition.derivedRelationships = [];
+
+    const committed = await unwrapModelingResult(
+      service.commitSketch({
+        baseRevisionId: initial.document.revisionId,
+        sketchId: null,
+        sketchLabel: "Persisted tangent sketch",
+        plane: sketch.plane,
+        definition,
+        solverCorrelation: {
+          requestId: "request_persist_spline_tangent",
+          projectionRequestId: "request_persist_spline_tangent:project",
+          validationRequestId: "request_persist_spline_tangent:validate",
+          solveRequestId: "request_persist_spline_tangent:solve",
+          regionRequestId: "request_persist_spline_tangent:regions",
+        },
+        publicationBase: {
+          actionContextId: "sketch_persist_tangent",
+          expectedSketch: null,
+        },
+      }),
+    );
+    expect(committed.revisionState.kind).toBe("accepted");
+    await service.waitForPersistence();
+
+    const reopenedService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+    });
+    const reopened = createAuthoredModelDocumentFromSnapshot(
+      await reopenedService.getCurrentDocumentSnapshot(),
+    );
+    const reopenedSpline = reopened.sketches
+      .flatMap((entry) => entry.definition.entities)
+      .find((entity) => entity.entityId === entityId);
+    expect(reopenedSpline?.kind).toBe("spline");
+    if (reopenedSpline?.kind !== "spline") return;
+    expect(reopenedSpline.pointOccurrences[1]?.tangent).toEqual({
+      kind: "authored",
+      vector: changedTangent,
+    });
+  }
+
   async function testSketchPublicationUsesOriginalSketchBaseAndOneDocumentAction() {
     const repository = createMemoryDocumentRepository();
     const service = createModelingService(new MockKernelAdapter(), {
@@ -2296,6 +2388,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
   await testPriorDurabilityFailureRejectsPublicationAndRestoresSharedKernel();
   await testAppliedLivePublicationRestoresMergedAuthoritativeDocument();
   await testSketchPublicationUsesOriginalSketchBaseAndOneDocumentAction();
+  await testAcceptedSplineTangentsSurviveRepositoryReopen();
   await testAcceptedMutationsPersistButPreviewAndRejectedMutationsDoNot();
   await testRepositoryCursorPersistenceExportsCompleteAuthoredState();
   await testRepositoryCursorMovesBackAndForthWithoutRefreshConflict();

@@ -1,4 +1,5 @@
 import type { ExportCapabilities } from "@/contracts/export/capabilities";
+import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import type { RevisionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -89,7 +90,7 @@ export interface GeometryAssetResolver {
  * contracts and must reject invalid feature definitions explicitly rather than
  * inferring omitted semantics from UI conventions.
  */
-export interface ModelingKernelAdapter {
+export interface ModelingKernelAdapter extends NeutralCurveQueryCapability {
   /** Releases kernel-owned runtime state when the modeling service is disposed. */
   dispose?(): void;
   /** Updates the requested viewport snapshot tessellation tier when supported. */

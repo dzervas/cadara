@@ -7,7 +7,11 @@ import type {
   SketchPoint2D,
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
-import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import {
+  evaluateSketchDerivationJvp,
+  evaluateSketchDerivations,
+  prepareSketchDerivationPullback,
+} from "@/contracts/sketch/derived-geometry";
 
 test("evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep direction", () => {
   const definition = makeSketchDefinition({
@@ -52,6 +56,10 @@ test("evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep
     ],
   });
 
+  const authoredSnapshot = structuredClone(definition);
+  const axisStart = definition.points.find(
+    (point) => point.pointId === "axis_start",
+  );
   const result = evaluateSketchDerivations(definition);
   const center = pointPosition(result.definition, "mirror_center");
   const start = pointPosition(result.definition, "mirror_start");
@@ -82,6 +90,10 @@ test("evaluateSketchDerivations mirrors geometry and reverses mirrored arc sweep
     result.diagnostics.length,
     "Valid mirror relationships should not emit diagnostics.",
   ).toBe(0);
+  expect(definition).toEqual(authoredSnapshot);
+  expect(
+    result.definition.points.find((point) => point.pointId === "axis_start"),
+  ).toBe(axisStart);
 });
 
 test("evaluateSketchDerivations applies linear, circular, and transform relationships through the exported seam", () => {
@@ -243,6 +255,22 @@ test("evaluateSketchDerivations applies linear, circular, and transform relation
     result.diagnostics.length,
     "Valid derived relationships should not emit diagnostics.",
   ).toBe(0);
+
+  const differential = evaluateSketchDerivationJvp(result.definition, {
+    points: {
+      line_seed_start: [2, 3],
+      circle_center: [1, -2],
+      pattern_seed: [1, 0],
+      spline_seed_b: [1, 0],
+    },
+  });
+  expect(differential.points.line_out_start).toEqual([2, 3]);
+  expect(differential.points.circle_out_center?.[0]).toBeCloseTo(-4, 12);
+  expect(differential.points.circle_out_center?.[1]).toBeCloseTo(-2, 12);
+  expect(differential.points.pattern_out?.[0]).toBeCloseTo(0, 12);
+  expect(differential.points.pattern_out?.[1]).toBeCloseTo(1, 12);
+  expect(differential.points.spline_out_b?.[0]).toBeCloseTo(0, 12);
+  expect(differential.points.spline_out_b?.[1]).toBeCloseTo(1, 12);
 });
 
 test("evaluateSketchDerivations preserves complete spline aggregates and linearly transforms authored tangents", () => {
@@ -418,6 +446,64 @@ test("evaluateSketchDerivations preserves complete spline aggregates and linearl
     { kind: "authored", vector: [0, 0] },
     { kind: "automatic" },
   ]);
+
+  const differential = evaluateSketchDerivationJvp(first.definition, {
+    splineTangents: {
+      seed_spline: { "seed-occ-a": [3, -1], "seed-occ-b": [0, 0] },
+    },
+  });
+  expect(differential.splineTangents.mirrored_spline?.["mirror-occ-a"]).toEqual(
+    [-3, -1],
+  );
+  expect(
+    differential.splineTangents.transformed_spline?.["transform-occ-a"]?.[0],
+  ).toBeCloseTo(2, 12);
+  expect(
+    differential.splineTangents.transformed_spline?.["transform-occ-a"]?.[1],
+  ).toBeCloseTo(6, 12);
+  expect(
+    differential.splineTangents.mirrored_spline?.["mirror-occ-b"],
+    "Explicit zero authored handles retain a zero JVP instead of reverting to automatic behavior.",
+  ).toEqual([0, 0]);
+
+  const variation = {
+    points: {
+      axis_start: [0.2, -0.3] as const,
+      axis_end: [-0.4, 0.5] as const,
+    },
+    splineTangents: {
+      seed_spline: { "seed-occ-a": [3, -1] as const },
+    },
+  };
+  const mirrorDifferential = evaluateSketchDerivationJvp(
+    first.definition,
+    variation,
+  );
+  const outputCotangent = [0.7, -1.2] as const;
+  const pulled = prepareSketchDerivationPullback(first.definition)({
+    splineTangents: {
+      mirrored_spline: { "mirror-occ-a": outputCotangent },
+    },
+  });
+  const outputDifferential =
+    mirrorDifferential.splineTangents.mirrored_spline?.["mirror-occ-a"];
+  expect(outputDifferential).toBeDefined();
+  if (!outputDifferential) {
+    throw new Error("Expected a mirrored authored-handle differential.");
+  }
+  const inputDot =
+    variation.points.axis_start[0] * (pulled.points?.axis_start?.[0] ?? 0) +
+    variation.points.axis_start[1] * (pulled.points?.axis_start?.[1] ?? 0) +
+    variation.points.axis_end[0] * (pulled.points?.axis_end?.[0] ?? 0) +
+    variation.points.axis_end[1] * (pulled.points?.axis_end?.[1] ?? 0) +
+    variation.splineTangents.seed_spline["seed-occ-a"][0] *
+      (pulled.splineTangents?.seed_spline?.["seed-occ-a"]?.[0] ?? 0) +
+    variation.splineTangents.seed_spline["seed-occ-a"][1] *
+      (pulled.splineTangents?.seed_spline?.["seed-occ-a"]?.[1] ?? 0);
+  const outputDot =
+    outputCotangent[0] * outputDifferential[0] +
+    outputCotangent[1] * outputDifferential[1];
+  expect(inputDot).toBeCloseTo(outputDot, 12);
 });
 
 test("evaluateSketchDerivations emits diagnostics for missing seed, missing output, and missing mirror axis seams", () => {
