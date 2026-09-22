@@ -5520,6 +5520,9 @@ test.skipIf(!existsSync(PART_STUDIO_9841_CAPTURE_FIXTURE))(
       reviewedPlans
         .filter((plan) => ["Split 1", "Sketch 3", "Sketch 4"].includes(plan.label))
         .map((plan) => ({ label: plan.label, tier: plan.tier })),
+      `Split 1 must be parametric: ${JSON.stringify(
+        reviewedPlans.find((plan) => plan.label === "Split 1"),
+      )}`,
     ).toEqual([
       { label: "Split 1", tier: "parametric" },
       { label: "Sketch 3", tier: "parametric" },

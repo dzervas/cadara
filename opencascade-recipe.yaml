@@ -1,9 +1,11 @@
-# To build: docker run --rm -it -v "$(pwd):/src" -u "$(id -u):$(id -g)" donalffons/opencascade.js opencascade-recipe.yaml
-# TODO: Migrate to CI
+# Stage a pinned build without mounting/overwriting the repository:
+# bash scripts/stage-occ-build.sh /absolute/path/to/new-stage
+# Then run the printed build command on a Docker-capable host.
 mainBuild:
   name: cadara-occ.js
 
   bindings:
+    - symbol: Adaptor2d_Curve2d
     - symbol: Adaptor3d_Curve
     - symbol: Adaptor3d_Surface
     - symbol: BRepAdaptor_Curve
@@ -66,7 +68,33 @@ mainBuild:
     - symbol: GC_MakeArcOfCircle
     - symbol: GC_MakeCircle
     - symbol: GC_Root
+    # Neutral curves: explicit cubics, analytic lines/circles, source-preserving trims.
+    # Include base classes: Embind does not automatically bind inheritance dependencies.
     - symbol: Geom2dAdaptor_Curve
+    - symbol: Geom2dInt_GInter
+    # Analytic circle/circle query plus its value-type input/output closure.
+    - symbol: IntAna2d_AnaIntersection
+    - symbol: IntAna2d_IntPoint
+    - symbol: gp_Circ2d
+    - symbol: IntRes2d_Intersection
+    - symbol: IntRes2d_IntersectionPoint
+    - symbol: IntRes2d_IntersectionSegment
+    - symbol: Geom2d_Geometry
+    - symbol: Geom2d_Curve
+    - symbol: Geom2d_BoundedCurve
+    - symbol: Geom2d_Conic
+    - symbol: Geom2d_BezierCurve
+    - symbol: Geom2d_Circle
+    - symbol: Geom2d_Line
+    - symbol: Geom2d_TrimmedCurve
+    - symbol: Geom_Geometry
+    - symbol: Geom_Curve
+    - symbol: Geom_BoundedCurve
+    - symbol: Geom_BezierCurve
+    - symbol: Geom_TrimmedCurve
+    - symbol: Handle_Geom2d_Curve
+    - symbol: TColgp_Array1OfPnt2d
+    - symbol: TColgp_Array1OfPnt
     - symbol: GProp_GProps
     - symbol: GeomAbs_CurveType
     - symbol: GeomAbs_JoinType
@@ -117,6 +145,10 @@ mainBuild:
     - symbol: TopTools_IndexedDataMapOfShapeListOfShape
     - symbol: TopTools_IndexedMapOfShape
     - symbol: TopTools_ListOfShape
+    - symbol: gp_Ax2d
+    - symbol: gp_Dir2d
+    - symbol: gp_Pnt2d
+    - symbol: gp_Vec2d
     - symbol: gp_Ax1
     - symbol: gp_Ax2
     - symbol: gp_Ax3
