@@ -1,5 +1,5 @@
-/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
@@ -91,6 +91,10 @@ const shouldUploadSentrySourceMaps = Boolean(
 export default defineConfig({
   define: createBuildMetadataDefines(buildMetadata),
   test: {
+    exclude:
+      process.env.CADARA_VITEST_INCLUDE_SCRATCH === "1"
+        ? configDefaults.exclude
+        : [...configDefaults.exclude, "**/.scratch/**"],
     testTimeout: 15_000,
   },
   worker: {
