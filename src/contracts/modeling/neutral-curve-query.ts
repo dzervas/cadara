@@ -1,4 +1,9 @@
 import {
+  circleParameterInsideAngularDomain,
+  getCircleAngularSearchBounds,
+  validateCircleAngularDomain,
+} from "@/contracts/modeling/circle-angular-domain";
+import {
   evaluateSplineSpan,
   type SplinePoles,
   type SplineVector,
@@ -11,15 +16,36 @@ export interface NeutralCurveProvenance {
 
 interface NeutralCurveBase {
   readonly curveId: string;
+  readonly provenance: NeutralCurveProvenance;
+}
+
+interface BoundedNeutralCurveBase extends NeutralCurveBase {
   /** Increasing source-parameter interval. Query parameters always use these units. */
   readonly sourceDomain: readonly [number, number];
   /** Increasing active subinterval in the same source-parameter units. */
   readonly queryDomain?: readonly [number, number];
-  readonly provenance: NeutralCurveProvenance;
+}
+
+export type CircleSourceDomain =
+  | {
+      readonly kind: "arc";
+      /** Closed, increasing, unwrapped real-radian interval shorter than 2π. */
+      readonly interval: readonly [number, number];
+    }
+  | {
+      /** One symbolic winding [seam, seam + 2π), with the upper seam identified. */
+      readonly kind: "fullTurn";
+      readonly seam: number;
+    };
+
+export interface CircleQueryDomain {
+  readonly kind: "arc";
+  /** Closed active arc represented in the source domain's selected winding. */
+  readonly interval: readonly [number, number];
 }
 
 export type NeutralCurve =
-  | (NeutralCurveBase & {
+  | (BoundedNeutralCurveBase & {
       readonly kind: "line";
       readonly origin: SplineVector;
       /** Unit vector. The source parameter is signed model-space distance. */
@@ -29,10 +55,12 @@ export type NeutralCurve =
       readonly kind: "circle";
       readonly center: SplineVector;
       readonly radius: number;
-      /** Unit radial direction at parameter zero. Parameters are unwrapped radians. */
+      /** Nonzero radial direction at parameter zero; normalized by the sole evaluator. */
       readonly xAxis: SplineVector;
+      readonly sourceDomain: CircleSourceDomain;
+      readonly queryDomain?: CircleQueryDomain;
     })
-  | (NeutralCurveBase & {
+  | (BoundedNeutralCurveBase & {
       readonly kind: "cubicBezier";
       readonly poles: SplinePoles;
       /** The source domain maps affinely to the Bézier local interval [0, 1]. */
@@ -56,9 +84,22 @@ export interface NeutralCurvePointWitness {
   readonly firstParameter: number;
   readonly secondParameter: number;
   readonly position: SplineVector;
-  /** Identifies the native algorithm that established semantic contact. */
+  /** Identifies the exact or independently verified algorithm establishing contact. */
   readonly proof:
-    | { readonly kind: "nativeAnalyticCircleIntersection" }
+    | {
+        readonly kind: "nativeAnalyticCircleIntersection";
+        readonly firstParameterBounds: readonly [number, number];
+        readonly secondParameterBounds: readonly [number, number];
+      }
+    | {
+        readonly kind: "exactFiniteLineIntersection";
+        /**
+         * Singleton bounds on the correctly rounded representatives, not root
+         * enclosures. Exact rational predicates establish contact before rounding.
+         */
+        readonly firstParameterBounds: readonly [number, number];
+        readonly secondParameterBounds: readonly [number, number];
+      }
     | {
         readonly kind: "nativeParametricCurveIntersection";
         /**
@@ -71,6 +112,49 @@ export interface NeutralCurvePointWitness {
           | "exactEndpointLineIncidence";
         readonly firstParameterBounds: readonly [number, number];
         readonly secondParameterBounds: readonly [number, number];
+      }
+    | {
+        readonly kind: "exactImplicitLineRootSet";
+        readonly family: "lineCircle" | "lineCubic";
+        readonly verification:
+          | "exactRoot"
+          | "boundedSignChange"
+          | "exactMultiplicity";
+        /** Present when exact derivative/GCD work proves a repeated root. */
+        readonly rootMultiplicity?: number;
+        /** Every distinct active root is matched once before witnesses return. */
+        readonly firstParameterBounds: readonly [number, number];
+        readonly secondParameterBounds: readonly [number, number];
+      }
+    | {
+        readonly kind: "exactAlgebraicCurveRootSet";
+        readonly family:
+          | "circlePair"
+          | "circleCubic"
+          | "cubicCubic"
+          | "cubicSelf";
+        /** Multiplicity in the exact support polynomial when applicable. */
+        readonly rootMultiplicity?: number;
+        /** Outward-containing dyadic enclosures of the exact source parameters. */
+        readonly firstParameterBounds: readonly [number, number];
+        readonly secondParameterBounds: readonly [number, number];
+      }
+    | {
+        readonly kind: "exactCubicPairRootSet";
+        /** Outward-containing dyadic enclosures of the exact source parameters. */
+        readonly firstParameterBounds: readonly [number, number];
+        readonly secondParameterBounds: readonly [number, number];
+        /** Optional outward enclosure in source-parameter derivative units. */
+        readonly sourceUnitTangentDeterminantBounds?: readonly [number, number];
+      }
+    | {
+        /** Exact endpoint of the proven same/reversed affine cubic correspondence. */
+        readonly kind: "exactStructuralCubicCorrespondenceEndpoint";
+        readonly poleOrder: "same" | "reversed";
+        readonly firstProvenance: NeutralCurveProvenance;
+        readonly secondProvenance: NeutralCurveProvenance;
+        readonly firstParameterBounds: readonly [number, number];
+        readonly secondParameterBounds: readonly [number, number];
       };
 }
 
@@ -78,30 +162,68 @@ export interface NeutralCurveOverlapWitness {
   readonly orientation: "same" | "opposite";
   readonly firstInterval: readonly [number, number];
   readonly secondInterval: readonly [number, number];
-  /**
-   * Complete correspondence was derived from exact cubic poles and their
-   * affine source domains, not from native segment endpoints or sampling.
-   */
-  readonly proof: {
-    readonly kind: "structuralCubicPoleIdentity";
-    readonly poleOrder: "same" | "reversed";
-    readonly firstProvenance: NeutralCurveProvenance;
-    readonly secondProvenance: NeutralCurveProvenance;
-  };
+  /** Complete correspondence is structural/exact, never inferred from tolerance-defined native segments or sampling. */
+  readonly proof:
+    | {
+        readonly kind: "structuralCubicPoleIdentity";
+        readonly poleOrder: "same" | "reversed";
+        readonly firstProvenance: NeutralCurveProvenance;
+        readonly secondProvenance: NeutralCurveProvenance;
+      }
+    | {
+        readonly kind: "exactCollinearLineOverlap";
+        readonly firstProvenance: NeutralCurveProvenance;
+        readonly secondProvenance: NeutralCurveProvenance;
+      };
 }
+
+export type NeutralCurveIsolatedRootFamily =
+  | "finiteLinePair"
+  | "lineCircle"
+  | "lineCubic"
+  | "circlePair"
+  | "circleCubic"
+  | "cubicCubic"
+  | "cubicSelf";
+
+export type NeutralCurveCompletenessProof =
+  | {
+      readonly kind: "completeIsolatedRootSet";
+      readonly family: NeutralCurveIsolatedRootFamily;
+      readonly distinctRootCount: number;
+    }
+  | {
+      readonly kind: "completeStructuralCorrespondence";
+      readonly family: "finiteLinePair" | "structuralCubicOverlap";
+      /** Disposition of the exact same/reversed affine correspondence in both active domains. */
+      readonly correspondence: "disjoint" | "interval" | "endpoint";
+      /** Point witnesses on the correspondence (zero for disjoint/interval, one for an endpoint). */
+      readonly correspondencePointCount: 0 | 1;
+      /** Complete finite root set away from the represented correspondence. */
+      readonly offCorrespondenceDistinctRootCount: number;
+    };
 
 export type NeutralCurveQueryResult =
   | {
-      /** Every point has native semantic proof; every overlap has structural proof. */
+      /** Every point and overlap carries proof, and this tag certifies completeness. */
       readonly kind: "verified";
       readonly points: readonly NeutralCurvePointWitness[];
       readonly overlaps: readonly NeutralCurveOverlapWitness[];
+      readonly completenessProof: NeutralCurveCompletenessProof;
     }
   | {
       readonly kind: "unsupported" | "uncertain";
       readonly code: string;
       readonly message: string;
     };
+
+/** Synchronous, kernel-free dependency for future offset topology work. */
+export interface CertifiedNeutralCurveQuery {
+  queryPair(request: NeutralCurveQueryRequest): NeutralCurveQueryResult;
+  querySelf(
+    request: NeutralCurveSelfIntersectionRequest,
+  ): NeutralCurveQueryResult;
+}
 
 export interface NeutralCurveQueryCapability {
   queryNeutralCurves(
@@ -137,8 +259,45 @@ function validDomain(domain: readonly [number, number]) {
   );
 }
 
-export function getNeutralCurveActiveDomain(curve: NeutralCurve) {
-  return curve.queryDomain ?? curve.sourceDomain;
+export function getNeutralCurveActiveSearchBounds(
+  curve: NeutralCurve,
+): readonly [number, number] {
+  if (curve.kind !== "circle") return curve.queryDomain ?? curve.sourceDomain;
+  const angular = validateCircleAngularDomain(
+    curve.sourceDomain,
+    curve.queryDomain,
+  );
+  return angular
+    ? getCircleAngularSearchBounds(angular)
+    : [Number.NaN, Number.NaN];
+}
+
+/** Tests the selected winding; a full turn owns its lower seam, never its upper copy. */
+export function neutralCurveSourceParameterInside(
+  curve: NeutralCurve,
+  parameter: number,
+) {
+  if (curve.kind !== "circle") {
+    return neutralCurveParameterInside(
+      parameter,
+      curve.queryDomain ?? curve.sourceDomain,
+    );
+  }
+  const angular = validateCircleAngularDomain(
+    curve.sourceDomain,
+    curve.queryDomain,
+  );
+  return angular
+    ? circleParameterInsideAngularDomain(angular, parameter)
+    : false;
+}
+
+/** The sole circle-basis normalization used by neutral evaluation and OCC construction. */
+export function getNeutralCircleUnitXAxis(
+  circle: Extract<NeutralCurve, { kind: "circle" }>,
+): SplineVector {
+  const length = Math.hypot(circle.xAxis[0], circle.xAxis[1]);
+  return [circle.xAxis[0] / length, circle.xAxis[1] / length];
 }
 
 export function neutralCurveParameterInside(
@@ -158,6 +317,10 @@ function unitVector(value: SplineVector) {
   return Number.isFinite(length) && Math.abs(length - 1) <= Number.EPSILON * 8;
 }
 
+function nonzeroDirection(value: SplineVector) {
+  return finiteVector(value) && (value[0] !== 0 || value[1] !== 0);
+}
+
 function validCurveGeometry(curve: NeutralCurve) {
   if (curve.kind === "line") {
     return finiteVector(curve.origin) && unitVector(curve.direction);
@@ -167,8 +330,7 @@ function validCurveGeometry(curve: NeutralCurve) {
       finiteVector(curve.center) &&
       Number.isFinite(curve.radius) &&
       curve.radius > 0 &&
-      unitVector(curve.xAxis) &&
-      curve.sourceDomain[1] - curve.sourceDomain[0] <= Math.PI * 2
+      nonzeroDirection(curve.xAxis)
     );
   }
   return curve.poles.every(finiteVector);
@@ -182,7 +344,13 @@ export function validateNeutralCurveQueryRequest(
     Number.isFinite(request.modelingTolerance) &&
     request.modelingTolerance > 0 &&
     curves.every((curve) => {
-      const active = getNeutralCurveActiveDomain(curve);
+      if (curve.kind === "circle") {
+        return (
+          validateCircleAngularDomain(curve.sourceDomain, curve.queryDomain) !==
+            null && validCurveGeometry(curve)
+        );
+      }
+      const active = getNeutralCurveActiveSearchBounds(curve);
       return (
         validDomain(curve.sourceDomain) &&
         validDomain(active) &&
@@ -206,7 +374,7 @@ export function evaluateNeutralCurve(
   curve: NeutralCurve,
   sourceParameter: number,
 ): SplineVector {
-  if (!neutralCurveParameterInside(sourceParameter, curve.sourceDomain)) {
+  if (!neutralCurveSourceParameterInside(curve, sourceParameter)) {
     throw new RangeError(
       "Neutral curve parameter is outside its source domain",
     );
@@ -220,12 +388,11 @@ export function evaluateNeutralCurve(
   if (curve.kind === "circle") {
     const cosine = Math.cos(sourceParameter);
     const sine = Math.sin(sourceParameter);
-    const yAxis: SplineVector = [-curve.xAxis[1], curve.xAxis[0]];
+    const xAxis = getNeutralCircleUnitXAxis(curve);
+    const yAxis: SplineVector = [-xAxis[1], xAxis[0]];
     return [
-      curve.center[0] +
-        curve.radius * (curve.xAxis[0] * cosine + yAxis[0] * sine),
-      curve.center[1] +
-        curve.radius * (curve.xAxis[1] * cosine + yAxis[1] * sine),
+      curve.center[0] + curve.radius * (xAxis[0] * cosine + yAxis[0] * sine),
+      curve.center[1] + curve.radius * (xAxis[1] * cosine + yAxis[1] * sine),
     ];
   }
   return evaluateSplineSpan(
@@ -273,7 +440,7 @@ export function evaluateNeutralCurveInFrame(
 export function getNeutralCurveLocalScale(curve: NeutralCurve) {
   if (curve.kind === "circle") return Math.max(1, curve.radius);
   if (curve.kind === "line") {
-    const domain = getNeutralCurveActiveDomain(curve);
+    const domain = getNeutralCurveActiveSearchBounds(curve);
     return Math.max(1, domain[1] - domain[0]);
   }
   let diameter = 0;
@@ -324,12 +491,14 @@ export function checkNeutralCurvePointConsistency(
     !finiteVector(witness.position) ||
     !neutralCurveParameterInside(
       witness.firstParameter,
-      getNeutralCurveActiveDomain(request.first),
+      getNeutralCurveActiveSearchBounds(request.first),
     ) ||
+    !neutralCurveSourceParameterInside(request.first, witness.firstParameter) ||
     !neutralCurveParameterInside(
       witness.secondParameter,
-      getNeutralCurveActiveDomain(request.second),
-    )
+      getNeutralCurveActiveSearchBounds(request.second),
+    ) ||
+    !neutralCurveSourceParameterInside(request.second, witness.secondParameter)
   ) {
     return {
       kind: "uncertain",
@@ -339,7 +508,7 @@ export function checkNeutralCurvePointConsistency(
     };
   }
   if (
-    witness.proof.kind === "nativeParametricCurveIntersection" &&
+    "firstParameterBounds" in witness.proof &&
     (!neutralCurveParameterInside(
       witness.firstParameter,
       witness.proof.firstParameterBounds,
@@ -353,7 +522,7 @@ export function checkNeutralCurvePointConsistency(
       kind: "uncertain",
       code: "neutral-curve-witness-outside-proof-bounds",
       message:
-        "Native point parameters are outside the bounded incidence certificate.",
+        "Point parameters are outside the bounded incidence certificate.",
     };
   }
   const first = evaluateNeutralCurveInFrame(
@@ -382,11 +551,33 @@ export function checkNeutralCurvePointConsistency(
     ) *
     64;
   const residual = Math.hypot(first[0] - second[0], first[1] - second[1]);
-  const reportedResidual = Math.max(
-    Math.hypot(first[0], first[1]),
-    Math.hypot(second[0], second[1]),
+  const parameterMotionBound = (
+    curve: NeutralCurve,
+    parameter: number,
+    parameterBounds: readonly [number, number],
+  ) =>
+    curve.kind === "circle"
+      ? curve.radius *
+        Math.max(
+          Math.abs(parameter - parameterBounds[0]),
+          Math.abs(parameterBounds[1] - parameter),
+        )
+      : 0;
+  const firstMotion = parameterMotionBound(
+    request.first,
+    witness.firstParameter,
+    witness.proof.firstParameterBounds,
   );
-  return residual <= bound && reportedResidual <= bound
+  const secondMotion = parameterMotionBound(
+    request.second,
+    witness.secondParameter,
+    witness.proof.secondParameterBounds,
+  );
+  const firstReportedResidual = Math.hypot(first[0], first[1]);
+  const secondReportedResidual = Math.hypot(second[0], second[1]);
+  return residual <= bound + firstMotion + secondMotion &&
+    firstReportedResidual <= bound + firstMotion &&
+    secondReportedResidual <= bound + secondMotion
     ? null
     : {
         kind: "uncertain",
@@ -394,295 +585,4 @@ export function checkNeutralCurvePointConsistency(
         message:
           "Native point parameters failed translation-independent source-curve consistency checking.",
       };
-}
-
-function sameVector(first: SplineVector, second: SplineVector) {
-  return first[0] === second[0] && first[1] === second[1];
-}
-
-type ExactFraction = {
-  readonly numerator: bigint;
-  readonly denominator: bigint;
-};
-
-function exactFractionFromFiniteDouble(value: number): ExactFraction {
-  if (value === 0) return { numerator: 0n, denominator: 1n };
-  const bytes = new ArrayBuffer(8);
-  const view = new DataView(bytes);
-  view.setFloat64(0, value, false);
-  const high = view.getUint32(0, false);
-  const low = view.getUint32(4, false);
-  const exponentBits = (high >>> 20) & 0x7ff;
-  const fractionBits = (BigInt(high & 0xfffff) << 32n) | BigInt(low);
-  const significand =
-    exponentBits === 0 ? fractionBits : (1n << 52n) | fractionBits;
-  const exponent = (exponentBits === 0 ? -1022 : exponentBits - 1023) - 52;
-  let numerator = high >>> 31 === 0 ? significand : -significand;
-  let denominator = 1n;
-  if (exponent >= 0) numerator <<= BigInt(exponent);
-  else denominator <<= BigInt(-exponent);
-  return { numerator, denominator };
-}
-
-function subtractExact(
-  first: ExactFraction,
-  second: ExactFraction,
-): ExactFraction {
-  return {
-    numerator:
-      first.numerator * second.denominator -
-      second.numerator * first.denominator,
-    denominator: first.denominator * second.denominator,
-  };
-}
-
-function addExact(first: ExactFraction, second: ExactFraction): ExactFraction {
-  return {
-    numerator:
-      first.numerator * second.denominator +
-      second.numerator * first.denominator,
-    denominator: first.denominator * second.denominator,
-  };
-}
-
-function multiplyExact(
-  first: ExactFraction,
-  second: ExactFraction,
-): ExactFraction {
-  return {
-    numerator: first.numerator * second.numerator,
-    denominator: first.denominator * second.denominator,
-  };
-}
-
-function roundedIntegerQuotient(numerator: bigint, denominator: bigint) {
-  const quotient = numerator / denominator;
-  const remainder = numerator % denominator;
-  const comparison = remainder * 2n - denominator;
-  return comparison > 0n || (comparison === 0n && quotient % 2n !== 0n)
-    ? quotient + 1n
-    : quotient;
-}
-
-/** Correctly rounds an exact rational to binary64 without first overflowing either term. */
-function exactFractionToNumber(value: ExactFraction) {
-  if (value.numerator === 0n) return 0;
-  const negative = value.numerator < 0n !== value.denominator < 0n;
-  const numerator = value.numerator < 0n ? -value.numerator : value.numerator;
-  const denominator =
-    value.denominator < 0n ? -value.denominator : value.denominator;
-  const bitLength = (integer: bigint) => integer.toString(2).length;
-  let exponent = bitLength(numerator) - bitLength(denominator);
-  const belowPower =
-    exponent >= 0
-      ? numerator < denominator << BigInt(exponent)
-      : numerator << BigInt(-exponent) < denominator;
-  if (belowPower) exponent -= 1;
-
-  let rounded: number;
-  if (exponent < -1022) {
-    const significand = roundedIntegerQuotient(numerator << 1074n, denominator);
-    rounded = Number(significand) * Number.MIN_VALUE;
-  } else {
-    const shift = 52 - exponent;
-    const significand = roundedIntegerQuotient(
-      shift >= 0 ? numerator << BigInt(shift) : numerator,
-      shift >= 0 ? denominator : denominator << BigInt(-shift),
-    );
-    rounded = Number(significand) * 2 ** (exponent - 52);
-  }
-  return negative ? -rounded : rounded;
-}
-
-function mapNormalizedExactToDomain(
-  normalized: ExactFraction,
-  domain: readonly [number, number],
-  reversed: boolean,
-) {
-  const start = exactFractionFromFiniteDouble(reversed ? domain[1] : domain[0]);
-  const length = subtractExact(
-    exactFractionFromFiniteDouble(domain[1]),
-    exactFractionFromFiniteDouble(domain[0]),
-  );
-  const offset = multiplyExact(normalized, length);
-  return exactFractionToNumber(
-    reversed ? subtractExact(start, offset) : addExact(start, offset),
-  );
-}
-
-function normalizedExact(
-  parameter: number,
-  domain: readonly [number, number],
-): ExactFraction {
-  const offset = subtractExact(
-    exactFractionFromFiniteDouble(parameter),
-    exactFractionFromFiniteDouble(domain[0]),
-  );
-  const length = subtractExact(
-    exactFractionFromFiniteDouble(domain[1]),
-    exactFractionFromFiniteDouble(domain[0]),
-  );
-  return {
-    numerator: offset.numerator * length.denominator,
-    denominator: offset.denominator * length.numerator,
-  };
-}
-
-function compareExact(first: ExactFraction, second: ExactFraction) {
-  const difference =
-    first.numerator * second.denominator - second.numerator * first.denominator;
-  return difference < 0n ? -1 : difference > 0n ? 1 : 0;
-}
-
-function reverseExact(value: ExactFraction): ExactFraction {
-  return {
-    numerator: value.denominator - value.numerator,
-    denominator: value.denominator,
-  };
-}
-
-export function haveExactStructuralCubicBasis(
-  first: NeutralCurve,
-  second: NeutralCurve,
-) {
-  if (first.kind !== "cubicBezier" || second.kind !== "cubicBezier") {
-    return false;
-  }
-  return (
-    first.poles.every((pole, index) =>
-      sameVector(pole, second.poles[index]!),
-    ) ||
-    first.poles.every((pole, index) =>
-      sameVector(pole, second.poles[3 - index]!),
-    )
-  );
-}
-
-function exactStructuralCubicOverlap(
-  first: NeutralCurve,
-  second: NeutralCurve,
-) {
-  if (first.kind !== "cubicBezier" || second.kind !== "cubicBezier") {
-    return null;
-  }
-  const same = first.poles.every((pole, index) =>
-    sameVector(pole, second.poles[index]!),
-  );
-  const reversed = first.poles.every((pole, index) =>
-    sameVector(pole, second.poles[3 - index]!),
-  );
-  if (!same && !reversed) return null;
-
-  const firstActive = getNeutralCurveActiveDomain(first);
-  const secondActive = getNeutralCurveActiveDomain(second);
-  const firstLocal = firstActive.map((parameter) =>
-    normalizedExact(parameter, first.sourceDomain),
-  ) as [ExactFraction, ExactFraction];
-  const secondLocal = secondActive.map((parameter) =>
-    normalizedExact(parameter, second.sourceDomain),
-  ) as [ExactFraction, ExactFraction];
-  const secondInFirstBasis: readonly [ExactFraction, ExactFraction] = reversed
-    ? [reverseExact(secondLocal[1]), reverseExact(secondLocal[0])]
-    : secondLocal;
-  const lowerFromFirst =
-    compareExact(firstLocal[0], secondInFirstBasis[0]) >= 0;
-  const upperFromFirst =
-    compareExact(firstLocal[1], secondInFirstBasis[1]) <= 0;
-  const lower = lowerFromFirst ? firstLocal[0] : secondInFirstBasis[0];
-  const upper = upperFromFirst ? firstLocal[1] : secondInFirstBasis[1];
-  if (compareExact(lower, upper) >= 0) return null;
-  return {
-    firstActive,
-    secondActive,
-    reversed,
-    lowerFromFirst,
-    upperFromFirst,
-    lower,
-    upper,
-  };
-}
-
-export function hasExactStructuralCubicActiveOverlap(
-  first: NeutralCurve,
-  second: NeutralCurve,
-) {
-  return exactStructuralCubicOverlap(first, second) !== null;
-}
-
-/**
- * The only overlap constructor. Exact pole equality proves the entire cubic
- * interior and its affine basis correspondence. The returned interval is the
- * strict intersection of both active ranges in that common basis; no endpoint
- * proximity or native segment label can enlarge it.
- */
-export function proveStructuralCubicOverlap(
-  first: NeutralCurve,
-  second: NeutralCurve,
-): NeutralCurveOverlapWitness | null {
-  const overlap = exactStructuralCubicOverlap(first, second);
-  if (!overlap) return null;
-  const {
-    firstActive,
-    secondActive,
-    reversed,
-    lowerFromFirst,
-    upperFromFirst,
-    lower,
-    upper,
-  } = overlap;
-  const firstInterval: readonly [number, number] = [
-    lowerFromFirst
-      ? firstActive[0]
-      : mapNormalizedExactToDomain(lower, first.sourceDomain, false),
-    upperFromFirst
-      ? firstActive[1]
-      : mapNormalizedExactToDomain(upper, first.sourceDomain, false),
-  ];
-  const secondLowerFromOwnBoundary = reversed
-    ? !upperFromFirst
-    : !lowerFromFirst;
-  const secondUpperFromOwnBoundary = reversed
-    ? !lowerFromFirst
-    : !upperFromFirst;
-  const secondInterval: readonly [number, number] = reversed
-    ? [
-        secondUpperFromOwnBoundary
-          ? secondActive[1]
-          : mapNormalizedExactToDomain(lower, second.sourceDomain, true),
-        secondLowerFromOwnBoundary
-          ? secondActive[0]
-          : mapNormalizedExactToDomain(upper, second.sourceDomain, true),
-      ]
-    : [
-        secondLowerFromOwnBoundary
-          ? secondActive[0]
-          : mapNormalizedExactToDomain(lower, second.sourceDomain, false),
-        secondUpperFromOwnBoundary
-          ? secondActive[1]
-          : mapNormalizedExactToDomain(upper, second.sourceDomain, false),
-      ];
-  const firstValid =
-    firstInterval.every(Number.isFinite) &&
-    firstInterval[1] > firstInterval[0] &&
-    firstInterval.every((parameter) =>
-      neutralCurveParameterInside(parameter, firstActive),
-    );
-  const secondValid =
-    secondInterval.every(Number.isFinite) &&
-    Math.abs(secondInterval[1] - secondInterval[0]) > 0 &&
-    secondInterval.every((parameter) =>
-      neutralCurveParameterInside(parameter, secondActive),
-    );
-  if (!firstValid || !secondValid) return null;
-  return {
-    orientation: reversed ? "opposite" : "same",
-    firstInterval,
-    secondInterval,
-    proof: {
-      kind: "structuralCubicPoleIdentity",
-      poleOrder: reversed ? "reversed" : "same",
-      firstProvenance: first.provenance,
-      secondProvenance: second.provenance,
-    },
-  };
 }
