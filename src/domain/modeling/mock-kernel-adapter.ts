@@ -14,6 +14,7 @@ import {
   SOLVER_SCHEMA_VERSION,
   type ProjectSketchExternalReferencesRequest,
   type ProjectSketchExternalReferencesResponse,
+  type SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import { validateSketchPlaneFrameInvariants } from "@/contracts/shared/sketch-plane-frame-invariants";
@@ -148,7 +149,6 @@ import {
 import type { ModelingCommitSketchCorrelation } from "@/domain/modeling/modeling-service";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
-  DEFAULT_MOCK_SOLVER_TOLERANCES,
   MockSketchSolverAdapter,
   evaluateMockSketchDefinition,
 } from "@/domain/solver/mock-sketch-solver-adapter";
@@ -162,6 +162,24 @@ const DOCUMENT_ID = "doc_workspace" as const;
 const DOCUMENT_NAME = "Workspace";
 const SKETCH_ID = "sketch_primary" as const;
 const CONSTRUCTION_PICK_PRIORITY = 40;
+const MOCK_DOCUMENT_SETTINGS = {
+  linearUnit: "millimeter",
+  modelingTolerance: 0.001,
+  angularToleranceRadians: 0.0001,
+} as const;
+
+function createDocumentSolverTolerances(
+  settings: Pick<
+    WorkspaceSnapshot["document"]["settings"],
+    "modelingTolerance" | "angularToleranceRadians"
+  >,
+): SolverTolerancePolicy {
+  return {
+    coincidence: settings.modelingTolerance,
+    angleRadians: settings.angularToleranceRadians,
+    minimumSegmentLength: settings.modelingTolerance,
+  };
+}
 
 function allocateMockSketchId(
   _sketches: readonly { sketchId: SketchId }[],
@@ -3508,6 +3526,7 @@ async function buildSketchRecord(
     sketchId: "sketch_primary";
     label: string;
     definition: SketchDefinition;
+    settings: WorkspaceSnapshot["document"]["settings"];
   },
 ): Promise<SketchRecord> {
   const evaluation = evaluateMockSketchDefinition({
@@ -3521,7 +3540,7 @@ async function buildSketchRecord(
       },
       planeKey: "xy",
     }),
-    tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+    tolerances: createDocumentSolverTolerances(input.settings),
     definition: input.definition,
     requestId: "request_mock-snapshot-bootstrap",
   });
@@ -3548,12 +3567,17 @@ async function buildSketchRecord(
         evaluation.regions.diagnostics,
       ),
     }),
+    projectedReferences: evaluation.projectedReferences,
     regions: evaluation.validation.isValid ? evaluation.regions.regions : [],
   };
 }
 
 async function rebuildSketchesForDocumentVariables(input: {
   solverAdapter: SketchSolverAdapter;
+  projectExternalReferences: (
+    snapshot: WorkspaceSnapshot,
+    request: ProjectSketchExternalReferencesRequest,
+  ) => ProjectSketchExternalReferencesResponse;
   snapshot: WorkspaceSnapshot;
   variables: readonly DocumentVariableRecord[];
   nextRevisionId: RevisionId;
@@ -3604,32 +3628,33 @@ async function rebuildSketchesForDocumentVariables(input: {
 
     const requestId =
       `request_variable_rebuild_${sketch.sketchId}` as RequestId;
-    const projection = projectSketchExternalReferencesFromSnapshot(
-      input.snapshot,
-      {
-        contractVersion: CONTRACT_VERSION,
-        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-        requestId: `${requestId}:project` as RequestId,
-        documentId: input.snapshot.document.documentId,
-        revisionId: input.snapshot.document.revisionId,
-        sketchId: sketch.sketchId,
-        plane: sketch.plane.frame,
-        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-        references: definition.references.map((reference) => ({
-          referenceId: reference.referenceId,
-          reference,
-        })),
-      },
-    );
+    const projection = input.projectExternalReferences(input.snapshot, {
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: `${requestId}:project` as RequestId,
+      documentId: input.snapshot.document.documentId,
+      revisionId: input.snapshot.document.revisionId,
+      sketchId: sketch.sketchId,
+      plane: sketch.plane.frame,
+      tolerances: createDocumentSolverTolerances(
+        input.snapshot.document.settings,
+      ),
+      references: definition.references.map((reference) => ({
+        referenceId: reference.referenceId,
+        reference,
+      })),
+    });
     const validation = await input.solverAdapter.validateSketch({
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
       requestId: `${requestId}:validate` as RequestId,
       documentId: input.snapshot.document.documentId,
-      revisionId: REVISION_ID,
+      revisionId: input.snapshot.document.revisionId,
       sketchId: sketch.sketchId,
       plane: sketch.plane.frame,
-      tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+      tolerances: createDocumentSolverTolerances(
+        input.snapshot.document.settings,
+      ),
       definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
     });
@@ -3638,10 +3663,12 @@ async function rebuildSketchesForDocumentVariables(input: {
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
       requestId: `${requestId}:solve` as RequestId,
       documentId: input.snapshot.document.documentId,
-      revisionId: REVISION_ID,
+      revisionId: input.snapshot.document.revisionId,
       sketchId: sketch.sketchId,
       plane: sketch.plane.frame,
-      tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+      tolerances: createDocumentSolverTolerances(
+        input.snapshot.document.settings,
+      ),
       partialSolvePolicy: "bestEffort",
       definition: resolvedDefinition.definition,
       projectedReferences: projection.projectedReferences,
@@ -3651,7 +3678,7 @@ async function rebuildSketchesForDocumentVariables(input: {
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,
       requestId: `${requestId}:regions` as RequestId,
       documentId: input.snapshot.document.documentId,
-      revisionId: REVISION_ID,
+      revisionId: input.snapshot.document.revisionId,
       sketchId: sketch.sketchId,
       solvedSnapshot: solved.solvedSnapshot,
       definition: resolvedDefinition.definition,
@@ -3733,6 +3760,7 @@ async function buildSnapshot(
     sketchId: SKETCH_ID,
     label: "Sketch 1",
     definition: sketchDefinition,
+    settings: MOCK_DOCUMENT_SETTINGS,
   });
   const primaryRegion = sketchRecord.regions[0];
 
@@ -4142,11 +4170,7 @@ async function buildSnapshot(
     documentId: DOCUMENT_ID,
     name: DOCUMENT_NAME,
     revisionId: REVISION_ID,
-    settings: {
-      linearUnit: "millimeter",
-      modelingTolerance: 0.001,
-      angularToleranceRadians: 0.0001,
-    },
+    settings: MOCK_DOCUMENT_SETTINGS,
     capabilities: {
       supportedFeatureKinds: [
         "extrude",
@@ -5022,7 +5046,8 @@ function parseMockRevisionSequence(revisionId: RevisionId) {
 }
 
 export class MockKernelAdapter implements ModelingKernelAdapter {
-  private readonly solverAdapter: SketchSolverAdapter;
+  private solverAdapter: SketchSolverAdapter;
+  private readonly ownsSolverAdapter: boolean;
 
   private snapshotPromise: Promise<WorkspaceSnapshot> | null = null;
   private currentRevisionId: RevisionId = REVISION_ID;
@@ -5035,9 +5060,19 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     solverAdapter?: SketchSolverAdapter;
     assetResolver?: GeometryAssetResolver;
   }) {
+    this.ownsSolverAdapter = options?.solverAdapter === undefined;
     this.solverAdapter =
       options?.solverAdapter ?? new MockSketchSolverAdapter();
     this.assetResolver = options?.assetResolver;
+  }
+
+  private solverAdapterForRevision(
+    documentId: RepositoryAuthoredModelDocument["documentId"],
+    revisionId: RevisionId,
+  ) {
+    return this.ownsSolverAdapter
+      ? new MockSketchSolverAdapter({ documentId, revisionId })
+      : this.solverAdapter;
   }
 
   async queryNeutralCurves(_request: NeutralCurveQueryRequest) {
@@ -5091,6 +5126,10 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     diagnostics: readonly ModelingDiagnostic[] = [],
   ): Promise<void> {
     const snapshot = structuredClone(await this.getSnapshot());
+    const restoreSolverAdapter = this.solverAdapterForRevision(
+      document.documentId,
+      document.revisionId,
+    );
     this.authoredAssets = structuredClone(document.assets);
     this.authoredEmbeddedBinaryAssets = structuredClone(
       document.embeddedBinaryAssets,
@@ -5117,81 +5156,137 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     snapshot.document.name = document.name;
     snapshot.document.settings = structuredClone(document.settings);
     snapshot.document.variables = structuredClone(document.variables);
-    snapshot.document.sketches = document.sketches.map((sketch) => {
-      const resolvedDefinition = resolveSketchDimensionValues({
-        definition: sketch.definition,
-        variables: document.variables,
-      });
-      const evaluation = resolvedDefinition.ok
-        ? evaluateMockSketchDefinition({
-            documentId: document.documentId,
-            revisionId: document.revisionId,
-            sketchId: sketch.sketchId,
-            plane: sketch.plane.frame,
-            tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
-            definition: resolvedDefinition.definition,
-            requestId:
-              `request_restore_${sketch.sketchId}_regions` as RequestId,
-          })
-        : null;
-      const expressionDiagnostics = resolvedDefinition.ok
-        ? []
-        : resolvedDefinition.diagnostics.map(
-            mapModelingDiagnosticToSketchDiagnostic,
-          );
-      const solvedSnapshot =
-        evaluation?.solve.solvedSnapshot ??
-        createInvalidSolvedSnapshot(expressionDiagnostics);
-      const derivedDiagnostics = evaluation
-        ? mergeSketchSolveDiagnostics(
-            evaluation.validation.diagnostics,
-            evaluation.solve.diagnostics,
-            evaluation.regions.diagnostics,
-          )
-        : expressionDiagnostics;
-      const derivedValidity = deriveSketchValidity({
-        solvedSnapshot,
-        diagnostics: derivedDiagnostics,
-      });
-      const sketchRecord: SketchRecord = {
-        ownerDocumentId: document.documentId,
-        ownerRevisionId: document.revisionId,
-        ownerFeatureId: null,
-        ownerSketchId: sketch.sketchId,
-        ownerBodyId: null,
-        sketchId: sketch.sketchId,
-        label: sketch.label,
-        planeSupport: sketch.plane.support,
-        definition: structuredClone(sketch.definition),
-        solvedSnapshot: {
-          ...solvedSnapshot,
-          diagnostics: derivedValidity.diagnostics,
-        },
-        derivedValidity,
-        projectedReferences: structuredClone(
-          evaluation?.projectedReferences ?? [],
-        ),
-        regions:
-          derivedValidity.state === "current"
-            ? (evaluation?.regions.regions ?? []).map((region) => ({
-                ...region,
-                ownerRevisionId: document.revisionId,
-              }))
-            : [],
-      };
+    snapshot.document.sketches = await Promise.all(
+      document.sketches.map(async (sketch) => {
+        const resolvedDefinition = resolveSketchDimensionValues({
+          definition: sketch.definition,
+          variables: document.variables,
+        });
+        const evaluation = resolvedDefinition.ok
+          ? await (async () => {
+              const tolerances = createDocumentSolverTolerances(
+                document.settings,
+              );
+              const requestId =
+                `request_restore_${sketch.sketchId}` as RequestId;
+              const projected =
+                await restoreSolverAdapter.projectExternalReferences({
+                  contractVersion: CONTRACT_VERSION,
+                  solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+                  requestId: `${requestId}:project` as RequestId,
+                  documentId: document.documentId,
+                  revisionId: document.revisionId,
+                  sketchId: sketch.sketchId,
+                  plane: sketch.plane.frame,
+                  tolerances,
+                  references: sketch.definition.references.map((reference) => ({
+                    referenceId: reference.referenceId,
+                    reference,
+                  })),
+                });
+              const validation = await restoreSolverAdapter.validateSketch({
+                contractVersion: CONTRACT_VERSION,
+                solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+                requestId: `${requestId}:validate` as RequestId,
+                documentId: document.documentId,
+                revisionId: document.revisionId,
+                sketchId: sketch.sketchId,
+                plane: sketch.plane.frame,
+                tolerances,
+                definition: resolvedDefinition.definition,
+                projectedReferences: projected.projectedReferences,
+              });
+              const solve = await restoreSolverAdapter.solveSketch({
+                contractVersion: CONTRACT_VERSION,
+                solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+                requestId: `${requestId}:solve` as RequestId,
+                documentId: document.documentId,
+                revisionId: document.revisionId,
+                sketchId: sketch.sketchId,
+                plane: sketch.plane.frame,
+                tolerances,
+                partialSolvePolicy: "bestEffort",
+                definition: resolvedDefinition.definition,
+                projectedReferences: projected.projectedReferences,
+              });
+              const regions = await restoreSolverAdapter.deriveSketchRegions({
+                contractVersion: CONTRACT_VERSION,
+                solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+                requestId: `${requestId}:regions` as RequestId,
+                documentId: document.documentId,
+                revisionId: document.revisionId,
+                sketchId: sketch.sketchId,
+                solvedSnapshot: solve.solvedSnapshot,
+                definition: resolvedDefinition.definition,
+                projectedReferences: projected.projectedReferences,
+              });
+              return {
+                projectedReferences: projected.projectedReferences,
+                validation,
+                solve,
+                regions,
+              };
+            })()
+          : null;
+        const expressionDiagnostics = resolvedDefinition.ok
+          ? []
+          : resolvedDefinition.diagnostics.map(
+              mapModelingDiagnosticToSketchDiagnostic,
+            );
+        const solvedSnapshot =
+          evaluation?.solve.solvedSnapshot ??
+          createInvalidSolvedSnapshot(expressionDiagnostics);
+        const derivedDiagnostics = evaluation
+          ? mergeSketchSolveDiagnostics(
+              evaluation.validation.diagnostics,
+              evaluation.solve.diagnostics,
+              evaluation.regions.diagnostics,
+            )
+          : expressionDiagnostics;
+        const derivedValidity = deriveSketchValidity({
+          solvedSnapshot,
+          diagnostics: derivedDiagnostics,
+        });
+        const sketchRecord: SketchRecord = {
+          ownerDocumentId: document.documentId,
+          ownerRevisionId: document.revisionId,
+          ownerFeatureId: null,
+          ownerSketchId: sketch.sketchId,
+          ownerBodyId: null,
+          sketchId: sketch.sketchId,
+          label: sketch.label,
+          planeSupport: sketch.plane.support,
+          definition: structuredClone(sketch.definition),
+          solvedSnapshot: {
+            ...solvedSnapshot,
+            diagnostics: derivedValidity.diagnostics,
+          },
+          derivedValidity,
+          projectedReferences: structuredClone(
+            evaluation?.projectedReferences ?? [],
+          ),
+          regions:
+            derivedValidity.state === "current"
+              ? (evaluation?.regions.regions ?? []).map((region) => ({
+                  ...region,
+                  ownerRevisionId: document.revisionId,
+                }))
+              : [],
+        };
 
-      return {
-        ownerDocumentId: document.documentId,
-        ownerRevisionId: document.revisionId,
-        ownerFeatureId: null,
-        ownerSketchId: sketch.sketchId,
-        ownerBodyId: null,
-        sketchId: sketch.sketchId,
-        label: sketch.label,
-        plane: structuredClone(sketch.plane),
-        sketch: sketchRecord,
-      };
-    });
+        return {
+          ownerDocumentId: document.documentId,
+          ownerRevisionId: document.revisionId,
+          ownerFeatureId: null,
+          ownerSketchId: sketch.sketchId,
+          ownerBodyId: null,
+          sketchId: sketch.sketchId,
+          label: sketch.label,
+          plane: structuredClone(sketch.plane),
+          sketch: sketchRecord,
+        };
+      }),
+    );
     snapshot.document.features = orderedFeatures.map((feature) => ({
       ownerDocumentId: document.documentId,
       ownerRevisionId: document.revisionId,
@@ -5239,6 +5334,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     stampSnapshotRevision(snapshot, document.revisionId);
     this.currentRevisionId = document.revisionId;
     this.revisionSequence = parseMockRevisionSequence(document.revisionId);
+    this.solverAdapter = restoreSolverAdapter;
     this.snapshotPromise = Promise.resolve(snapshot);
   }
 
@@ -5255,6 +5351,10 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     const response = mutate(snapshot, nextRevisionId);
     stampSnapshotRevision(snapshot, nextRevisionId);
     this.currentRevisionId = nextRevisionId;
+    this.solverAdapter = this.solverAdapterForRevision(
+      snapshot.document.documentId,
+      nextRevisionId,
+    );
     return response;
   }
 
@@ -5271,11 +5371,18 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
+  protected projectSketchReferencesFromSnapshot(
+    snapshot: WorkspaceSnapshot,
+    request: ProjectSketchExternalReferencesRequest,
+  ): ProjectSketchExternalReferencesResponse {
+    return projectSketchExternalReferencesFromSnapshot(snapshot, request);
+  }
+
   async projectSketchExternalReferences(
     request: ProjectSketchExternalReferencesRequest,
   ): Promise<ProjectSketchExternalReferencesResponse> {
     assertSupportedModelingRequest(request);
-    return projectSketchExternalReferencesFromSnapshot(
+    return this.projectSketchReferencesFromSnapshot(
       applyCursorToMockSnapshot(structuredClone(await this.getSnapshot())),
       request,
     );
@@ -5832,7 +5939,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         revisionId: request.baseRevisionId,
         sketchId,
         plane: referenceFrame,
-        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+        tolerances: createDocumentSolverTolerances(snapshot.document.settings),
         references: normalizedDefinition.references.map((reference) => ({
           referenceId: reference.referenceId,
           reference,
@@ -5847,7 +5954,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         revisionId: request.baseRevisionId,
         sketchId,
         plane: referenceFrame,
-        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+        tolerances: createDocumentSolverTolerances(snapshot.document.settings),
         definition: resolvedDefinition.definition,
         projectedReferences,
       });
@@ -5859,7 +5966,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         revisionId: request.baseRevisionId,
         sketchId,
         plane: referenceFrame,
-        tolerances: DEFAULT_MOCK_SOLVER_TOLERANCES,
+        tolerances: createDocumentSolverTolerances(snapshot.document.settings),
         partialSolvePolicy: "bestEffort",
         definition: resolvedDefinition.definition,
         projectedReferences,
@@ -7654,6 +7761,11 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       `rev_${String(this.revisionSequence + 1).padStart(4, "0")}` as RevisionId;
     const sketchRebuild = await rebuildSketchesForDocumentVariables({
       solverAdapter: this.solverAdapter,
+      projectExternalReferences: (sourceSnapshot, projectionRequest) =>
+        this.projectSketchReferencesFromSnapshot(
+          sourceSnapshot,
+          projectionRequest,
+        ),
       snapshot,
       variables: candidateVariables,
       nextRevisionId,

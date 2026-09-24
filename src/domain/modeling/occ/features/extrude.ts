@@ -7,6 +7,7 @@ import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import {
   getExtrudeExtentEnds,
   getExtrudeFeatureExtent,
+  getSurfaceExtrudeGeneratedSideFaceEndRole,
 } from "@/contracts/modeling/feature-extents";
 import type { BodyId, EdgeId, FeatureId, RegionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -43,13 +44,19 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import {
   applyBooleanPolicy,
+  createBooleanBuilder,
   mapFeatureSourceTargets,
   projectFeatureSourceShapes,
   runBoolean,
   trackSurfaceFeatureResult,
   type OccFeatureSourceShapeMap,
 } from "@/domain/modeling/occ/features/boolean-operations";
-import { deleteOccObject } from "@/domain/modeling/occ/memory";
+import {
+  combineOccCleanupError,
+  deleteOccObject,
+  releaseOccObjects,
+  type OccDisposable,
+} from "@/domain/modeling/occ/memory";
 import {
   formatExactSuccessorTopologySourceKey,
   formatGeneratedFaceCompleteBoundaryTopologySourceKey,
@@ -74,6 +81,8 @@ interface BuiltExtrudeShape {
   /** Complete semantic source sets carried through whole-operand OCC history. */
   compositeOperands: CompositeOperand[];
   unsupportedSourceKeys: Set<OccTopologySourceKey>;
+  /** Proven up-to-next terminating plane level of this per-profile end. */
+  upToNextTermination?: { endRole: string; projection: number };
 }
 
 export function formatExtrudeProfileCapSourceKey(input: {
@@ -476,26 +485,154 @@ export function getShapeVertexPoints(
   return points;
 }
 
-function selectNearestForwardProjection(
-  candidates: Array<{ projection: number; source: string }>,
+/**
+ * Level of the first plane, perpendicular to `direction`, that completely
+ * terminates the profile sweep, or null when the sweep meets no body face.
+ *
+ * Candidate levels come only from planar body-face images inside the
+ * through-all sweep (exact BOP Common history); the through-all prism is an
+ * encounter envelope and never the stop. A candidate is accepted only when a
+ * General Fuse of the prism up to it with every context body proves:
+ * V1, the prism stays one solid bounded only by images of its own faces
+ * (nothing foreign inside or on the open sweep); V2, every image of its last
+ * cap IsSame an image of a body face (the whole profile is covered). A V1
+ * failure persists for every farther level, so it ends the search.
+ */
+function resolveUpToNextTerminalProjection(
+  context: OccFeatureExecutionContext,
+  profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+  direction: Vec3,
+  startProjection: number,
 ) {
-  const sortedCandidates = [...candidates].sort(
-    (left, right) => left.projection - right.projection,
-  );
-  const nearest = sortedCandidates[0];
+  const { oc } = context;
+  type Shape = InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+  const proofFailed =
+    "advanced-feature-unsupported-kernel-case: OCC extrude up-to-next encounter proof failed.";
+  const owned: OccDisposable[] = [];
+  const own = <T extends OccDisposable>(value: T) => {
+    owned.push(value);
+    return value;
+  };
+  const faces = (shape: Shape) => {
+    const map = own(new oc.TopTools_IndexedMapOfShape_1());
+    oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE as never, map);
+    return Array.from({ length: map.Size() }, (_, index) =>
+      own(map.FindKey(index + 1)),
+    );
+  };
+  const images = (
+    history: {
+      IsDeleted(shape: Shape): boolean;
+      Modified(
+        shape: Shape,
+      ): InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>;
+    },
+    shape: Shape,
+  ) => {
+    if (history.IsDeleted(shape)) return [];
+    const modified = listOccShapes(oc, history.Modified(shape)).map(own);
+    return modified.length > 0 ? modified : [shape];
+  };
+  const prism = (height: number) => {
+    const maker = own(
+      new oc.BRepPrimAPI_MakePrism_1(
+        profileShape,
+        own(toGpVec(oc, scale(direction, height))),
+        false,
+        true,
+      ),
+    );
+    maker.Build(own(new oc.Message_ProgressRange_1()));
+    if (!maker.IsDone()) throw new Error(proofFailed);
+    return { shape: own(maker.Shape()), lastCap: own(maker.LastShape_1()) };
+  };
+  const prove = () => {
+    const envelope = prism(
+      getThroughAllDistance(context, profileShape, direction),
+    );
+    const levels = new Set<number>();
+    for (const body of context.bodies) {
+      const common = own(
+        createBooleanBuilder(oc, "intersect", envelope.shape, body.shape),
+      );
+      common.SetToFillHistory(true);
+      common.Build(own(new oc.Message_ProgressRange_1()));
+      if (!common.IsDone() || common.HasErrors()) throw new Error(proofFailed);
+      for (const face of faces(body.shape)) {
+        for (const piece of images(common, face)) {
+          const surface = own(
+            new oc.BRepAdaptor_Surface_2(own(oc.TopoDS.Face_1(piece)), true),
+          );
+          if (surface.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+            continue;
+          }
+          const location = own(own(surface.Plane()).Location());
+          const level = dot(toVec3FromGpPoint(location), direction);
+          if (level > startProjection + context.modelingTolerance) {
+            levels.add(level);
+          }
+        }
+      }
+    }
+    if (levels.size === 0) return null;
 
-  if (!nearest) {
-    return null;
+    for (const level of [...levels].sort((left, right) => left - right)) {
+      const bounded = prism(level - startProjection);
+      const arguments_ = own(new oc.TopTools_ListOfShape_1());
+      arguments_.Append_1(bounded.shape);
+      for (const body of context.bodies) arguments_.Append_1(body.shape);
+      const fuse = own(new oc.BRepAlgoAPI_BuilderAlgo_1());
+      fuse.SetArguments(arguments_);
+      fuse.SetToFillHistory(true);
+      fuse.Build(own(new oc.Message_ProgressRange_1()));
+      if (!fuse.IsDone() || fuse.HasErrors()) throw new Error(proofFailed);
+
+      const solids = images(fuse, bounded.shape);
+      const prismFaceImages = faces(bounded.shape).flatMap((face) =>
+        images(fuse, face),
+      );
+      const openSweepIsClean =
+        solids.length === 1 &&
+        faces(solids[0]!).every((face) =>
+          prismFaceImages.some((image) => image.IsSame(face)),
+        );
+      if (!openSweepIsClean) {
+        throw new Error(
+          "advanced-feature-unsupported-kernel-case: OCC extrude up-to-next meets geometry inside the swept profile before a complete terminating plane.",
+        );
+      }
+
+      const bodyFaceImages = context.bodies.flatMap((body) =>
+        faces(body.shape).flatMap((face) => images(fuse, face)),
+      );
+      const capPieces = images(fuse, bounded.lastCap);
+      if (
+        capPieces.length > 0 &&
+        capPieces.every((piece) =>
+          bodyFaceImages.some((image) => image.IsSame(piece)),
+        )
+      ) {
+        return level;
+      }
+    }
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC extrude up-to-next is not completely terminated by one plane perpendicular to the extrude direction covering the whole profile.",
+    );
+  };
+
+  let terminal: number | null;
+  try {
+    terminal = prove();
+  } catch (error) {
+    try {
+      releaseOccObjects(owned);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
   }
-
-  // Every candidate within `tolerance` of the nearest defines the same
-  // termination plane, so terminating at `nearest.projection` is deterministic
-  // even when several bodies contribute coincident faces there. "Up to next"
-  // stops at the next face's plane; coincident faces from different bodies land
-  // on that same plane and produce identical geometry, so this is not an
-  // ambiguous selection (no nearest-geometry scoring or tolerance relaxation is
-  // involved — the tolerance only identifies which candidates are coincident).
-  return nearest.projection;
+  releaseOccObjects(owned);
+  return terminal;
 }
 
 /**
@@ -530,29 +667,18 @@ function resolveSketchPointWorldPosition(
 }
 function getExtrudeTargetProjection(
   context: OccFeatureExecutionContext,
+  profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
   end: ExtrudeEndCondition,
   direction: Vec3,
   startProjection: number,
 ) {
   if (end.kind === "upToNext") {
-    const candidates = context.bodies
-      .flatMap((body) => {
-        const range = getShapeProjectionRange(
-          context.oc,
-          body.shape,
-          direction,
-        );
-        return [
-          { projection: range.min, source: body.bodyId },
-          { projection: range.max, source: body.bodyId },
-        ];
-      })
-      .filter(
-        (candidate) =>
-          candidate.projection > startProjection + context.modelingTolerance,
-      );
-
-    return selectNearestForwardProjection(candidates);
+    return resolveUpToNextTerminalProjection(
+      context,
+      profileShape,
+      direction,
+      startProjection,
+    );
   }
 
   if (end.kind === "upToFace") {
@@ -605,17 +731,40 @@ function resolveExtrudeDistance(
   profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
   direction: Vec3,
   end: ExtrudeEndCondition,
-) {
+): { distance: number; upToNextProjection?: number } {
   if (end.kind === "blind") {
     const distance = getAuthoredLiteralValue(end.distance) ?? 0;
     if (distance <= 0) {
       throw new Error("Extrude blind distance must be positive.");
     }
-    return distance;
+    return { distance };
   }
 
   if (end.kind === "throughAll") {
-    return getThroughAllDistance(context, profileShape, direction);
+    return {
+      distance: getThroughAllDistance(context, profileShape, direction),
+    };
+  }
+
+  if (end.kind === "upToNext") {
+    if (
+      (profileShape.ShapeType() as unknown as number) !==
+      (context.oc.TopAbs_ShapeEnum.TopAbs_FACE as unknown as number)
+    ) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC surface extrude up-to-next is not supported.",
+      );
+    }
+    // The proof prism is undrafted, so any nonzero (or unresolved) draft is
+    // refused rather than rounded to zero by the linear modeling tolerance.
+    if (
+      end.draftAngle !== undefined &&
+      getAuthoredLiteralValue(end.draftAngle) !== 0
+    ) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC extrude up-to-next with draft is not supported.",
+      );
+    }
   }
 
   const profileRange = getShapeProjectionRange(
@@ -625,6 +774,7 @@ function resolveExtrudeDistance(
   );
   const targetProjection = getExtrudeTargetProjection(
     context,
+    profileShape,
     end,
     direction,
     profileRange.max,
@@ -645,7 +795,9 @@ function resolveExtrudeDistance(
     );
   }
 
-  return distance;
+  return end.kind === "upToNext"
+    ? { distance, upToNextProjection: targetProjection }
+    : { distance };
 }
 
 interface BuiltSurfaceExtrudeProfile {
@@ -1182,21 +1334,23 @@ function buildExtrudeEndShape(
             direction: extrusionDirection,
             offset: startOffset,
           });
-    return {
-      ...moved,
-      // Measured from the authored start plane, so an up-to terminator spans
-      // start→terminator and a blind depth is the authored depth from start.
-      distance: resolveExtrudeDistance(
-        context,
-        moved.profileShape,
-        extrusionDirection,
-        input.end,
-      ),
-    };
+    // Measured from the authored start plane, so an up-to terminator spans
+    // start→terminator and a blind depth is the authored depth from start.
+    const { distance, upToNextProjection } = resolveExtrudeDistance(
+      context,
+      moved.profileShape,
+      extrusionDirection,
+      input.end,
+    );
+    return { ...moved, distance, upToNextProjection };
   });
   const profileShape = started.profileShape;
   const sketchProvenance = started.sketchProvenance;
   const distance = started.distance;
+  const upToNextTermination =
+    input.end.kind === "upToNext" && started.upToNextProjection !== undefined
+      ? { endRole: input.endRole, projection: started.upToNextProjection }
+      : undefined;
   const profileRange = getShapeProjectionRange(
     context.oc,
     profileShape,
@@ -1320,6 +1474,7 @@ function buildExtrudeEndShape(
           },
         ],
         unsupportedSourceKeys,
+        upToNextTermination,
       },
       extrusionDirection,
       profileRange.max,
@@ -1362,7 +1517,7 @@ function resolveStartedSurfaceExtrudeEnd(
           direction,
           offset: startOffset,
         });
-  const distance = resolveExtrudeDistance(
+  const { distance } = resolveExtrudeDistance(
     context,
     moved.profileShape,
     direction,
@@ -1431,6 +1586,10 @@ function buildSurfaceExtrudeFeatureShape(
 
   const profile = buildSurfaceExtrudeProfile(context, parameters);
   const extent = getExtrudeFeatureExtent(parameters);
+  const generatedSideFaceEndRole = getSurfaceExtrudeGeneratedSideFaceEndRole(parameters);
+  if (generatedSideFaceEndRole === null) {
+    throw new Error("OCC surface extrude requires a surface result body type.");
+  }
   const ends: Array<{ end: ExtrudeEndCondition; role: string }> =
     extent.mode === "twoSide"
       ? [
@@ -1468,7 +1627,7 @@ function buildSurfaceExtrudeFeatureShape(
       started.sketchProvenance,
       started.direction,
       started.distance,
-      ends[0]!.role,
+      generatedSideFaceEndRole,
     );
   }
 
@@ -1532,7 +1691,7 @@ function buildSurfaceExtrudeFeatureShape(
     moved.sketchProvenance,
     first.direction,
     totalDistance,
-    "combined-ends",
+    generatedSideFaceEndRole,
   );
 }
 
@@ -1564,6 +1723,31 @@ export function buildExtrudeFeatureShape(
       parameters.startExtent,
     ),
   );
+
+  // Whole-profile termination: every profile of one up-to-next end must be a
+  // region of one sketch stopping on exactly the same proven plane level. No
+  // tolerance merges distinct levels; anything else fails closed.
+  if (parameters.profiles.length > 1) {
+    const levelsByEndRole = new Map<string, number>();
+    for (const built of extrudedShapes) {
+      if (!built.upToNextTermination) continue;
+      const { endRole, projection } = built.upToNextTermination;
+      const firstProfile = parameters.profiles[0]!;
+      const oneSketch = parameters.profiles.every(
+        (profile) =>
+          profile.kind === "region" &&
+          firstProfile.kind === "region" &&
+          profile.sketchId === firstProfile.sketchId,
+      );
+      const level = levelsByEndRole.get(endRole) ?? projection;
+      if (!oneSketch || level !== projection) {
+        throw new Error(
+          "advanced-feature-unsupported-kernel-case: OCC extrude up-to-next profiles of one end do not terminate on one plane.",
+        );
+      }
+      levelsByEndRole.set(endRole, level);
+    }
+  }
 
   if (extrudedShapes.length === 1) {
     return extrudedShapes[0]!;

@@ -22,6 +22,10 @@ import type { DocumentId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
+  combineOccCleanupError,
+  releaseDiscardedOccAuthoringStateObjects,
+} from "@/domain/modeling/occ/memory";
+import {
   parseNativeShimPayloadJson,
   type OccNativeShimPayload,
   type OpenCascadeNativeTopologyKernelHost,
@@ -1554,11 +1558,25 @@ export function trackDerivedSolidBody(
     shape: input.shape,
     meshExportFallback: input.meshExportFallback,
   });
-  const contributors = deriveGeneratedTopologyContributors(oc, {
-    previous: input.previous,
-    generated,
-    historySources: input.historySources,
-  });
+  let contributors: ReturnType<typeof deriveGeneratedTopologyContributors>;
+  try {
+    contributors = deriveGeneratedTopologyContributors(oc, {
+      previous: input.previous,
+      generated,
+      historySources: input.historySources,
+    });
+  } catch (error) {
+    // The generated body owns fresh wrappers and its own naming document (no
+    // attribute handle of it is pending); the source body is only retained.
+    try {
+      releaseDiscardedOccAuthoringStateObjects({ bodies: [generated] }, [
+        { bodies: [input.previous] },
+      ]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
 
   return {
     ...generated,

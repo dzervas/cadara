@@ -8,6 +8,13 @@ import type {
 import type { DurableRef } from "@/contracts/shared/references";
 import type { AuthoredTopologyLineageOutput } from "@/contracts/modeling/authored-document";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import {
+  OccCleanupError,
+  collectOccCleanupErrors,
+  combineOccCleanupError,
+  releaseOccObjects,
+  type OccDisposable,
+} from "@/domain/modeling/occ/memory";
 import type { OccTopologyStageOutput } from "@/domain/modeling/occ/topology-stage";
 import type {
   OccReferenceInvalidationRecord,
@@ -344,9 +351,99 @@ function topologyRefKey(target: DurableRef) {
   }
 }
 
+/**
+ * Runs `operation`, then releases `owned()` whether or not it failed. An
+ * operation error stays primary and is combined with any cleanup error.
+ */
+function releaseAfter<T>(
+  operation: () => T,
+  owned: () => Iterable<OccDisposable>,
+): T {
+  let result: T;
+  try {
+    result = operation();
+  } catch (error) {
+    try {
+      releaseOccObjects(owned());
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
+  releaseOccObjects(owned());
+  return result;
+}
+
+/**
+ * The document release waits behind pending attribute cleanups: a TNaming
+ * attribute handle must be released while its document is alive. Only label
+ * retries are safe after their document.
+ */
+function deferNamingDocumentRelease(
+  document: OccDocument,
+  attributeCleanups: readonly OccCleanupError[],
+) {
+  let releaseDocument: (() => void) | undefined;
+  return new OccCleanupError(
+    [
+      new Error(
+        "An OCC naming document is retained until its pending attribute cleanup succeeds.",
+      ),
+    ],
+    () => {
+      for (const cleanup of attributeCleanups) cleanup.retry();
+      if (releaseDocument) return releaseDocument();
+      releaseDocument = () => {};
+      try {
+        releaseOccObjects([document]);
+      } catch (error) {
+        // Share the failed release's own pending set so no path deletes twice.
+        releaseDocument =
+          error instanceof OccCleanupError ? error.retry : undefined;
+        throw error;
+      }
+    },
+  );
+}
+
+/**
+ * Releases naming created locally (labels, then its document) after `failure`
+ * and rethrows it, combined with any cleanup error. `attributeCleanups` are
+ * pending attribute-handle releases that the document must wait for.
+ */
+function rethrowAfterReleasingLocalNaming(
+  failure: unknown,
+  labels: Iterable<OccLabel>,
+  document: OccDocument,
+  attributeCleanups: readonly OccCleanupError[],
+): never {
+  const errors: unknown[] = [];
+  try {
+    releaseOccObjects(
+      attributeCleanups.length === 0 ? [...labels, document] : labels,
+    );
+  } catch (cleanupError) {
+    errors.push(cleanupError);
+  }
+  if (attributeCleanups.length > 0) {
+    errors.push(deferNamingDocumentRelease(document, attributeCleanups));
+  }
+  if (errors.length === 0) throw failure;
+  throw combineOccCleanupError(
+    failure,
+    errors.length === 1 ? errors[0] : new AggregateError(errors),
+  );
+}
+
 function createDocument(oc: OpenCascadeInstance) {
-  return new oc.TDocStd_Document(
-    new oc.TCollection_ExtendedString_2("CadaraOccNaming", true),
+  // TDocStd_Document stores a copy of its storage format (a value member).
+  const storageFormat = new oc.TCollection_ExtendedString_2(
+    "CadaraOccNaming",
+    true,
+  );
+  return releaseAfter(
+    () => new oc.TDocStd_Document(storageFormat),
+    () => [storageFormat],
   );
 }
 
@@ -376,22 +473,35 @@ function hasShapeType(shape: OccShape, expected: OccShape) {
   return shape.ShapeType() === expected.ShapeType();
 }
 
-function readNamedShape(oc: OpenCascadeInstance, namedShape: OccNamedShape) {
+/**
+ * Returns the unique shapes of `namedShape`. Every JS-owned TopoDS copy read,
+ * including dropped duplicates, is appended to `owned` for the caller to
+ * release after its final use.
+ */
+function readNamedShape(
+  oc: OpenCascadeInstance,
+  namedShape: OccNamedShape,
+  owned: OccDisposable[],
+) {
   if (namedShape.IsNull()) {
     return [];
   }
 
   const shapes: OccShape[] = [];
+  const read = (shape: OccShape) => {
+    owned.push(shape);
+    shapes.push(shape);
+  };
 
   try {
-    shapes.push(oc.TNaming_Tool.GetShape(namedShape));
+    read(oc.TNaming_Tool.GetShape(namedShape));
   } catch {
     // Some unresolved selected names cannot be materialized by OCJS.
     ignoreOccNamingResolutionError();
   }
 
   try {
-    shapes.push(oc.TNaming_Tool.CurrentShape_1(namedShape));
+    read(oc.TNaming_Tool.CurrentShape_1(namedShape));
   } catch {
     // CurrentShape can throw for unresolved or deleted selector states.
     ignoreOccNamingResolutionError();
@@ -407,35 +517,42 @@ function selectIntoSelectorLabel(
   context: OccShape,
 ) {
   const selector = new oc.TNaming_Selector(label);
+  // Attribute handles and read copies first, then the selector, all while the
+  // document is alive; a failed delete never skips the remaining ones.
+  const owned: OccDisposable[] = [];
 
-  try {
-    try {
-      const selectedWithContext = selector.Select_1(
-        selection,
-        context,
-        false,
-        true,
-      );
-      const selectedShapes = readNamedShape(oc, selector.NamedShape());
+  return releaseAfter(
+    () => {
+      try {
+        const selectedWithContext = selector.Select_1(
+          selection,
+          context,
+          false,
+          true,
+        );
+        const namedShape = selector.NamedShape();
+        owned.push(namedShape);
+        const selectedShapes = readNamedShape(oc, namedShape, owned);
 
-      if (
-        selectedWithContext &&
-        selectedShapes.some(
-          (shape) => shape.IsSame(selection) && hasShapeType(shape, selection),
-        )
-      ) {
-        return label;
+        if (
+          selectedWithContext &&
+          selectedShapes.some(
+            (shape) =>
+              shape.IsSame(selection) && hasShapeType(shape, selection),
+          )
+        ) {
+          return label;
+        }
+      } catch {
+        // Fall back to direct shape selection below; Select_1 is not reliable for every OCJS case.
+        ignoreOccNamingResolutionError();
       }
-    } catch {
-      // Fall back to direct shape selection below; Select_1 is not reliable for every OCJS case.
-      ignoreOccNamingResolutionError();
-    }
 
-    selector.Select_2(selection, false, true);
-    return label;
-  } finally {
-    selector.delete();
-  }
+      selector.Select_2(selection, false, true);
+      return label;
+    },
+    () => [...owned, selector],
+  );
 }
 
 function directlyReselectSelectorLabel(
@@ -458,12 +575,18 @@ function createSelectorLabel(
   selection: OccShape,
   context: OccShape,
 ) {
-  return selectIntoSelectorLabel(
-    oc,
-    parent.NewChild(),
-    selection,
-    context,
-  );
+  const label = parent.NewChild();
+  try {
+    return selectIntoSelectorLabel(oc, label, selection, context);
+  } catch (error) {
+    // Not yet stored in any naming map; a label release is safe at any time.
+    try {
+      releaseOccObjects([label]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
 }
 
 function modifyLabel(
@@ -492,7 +615,9 @@ function createBodyLabel(
   document: OccDocument,
   shape: OccShape,
 ) {
-  const label = document.Main().NewChild();
+  const main = document.Main();
+  const label = main.NewChild();
+  main.delete();
   const builder = new oc.TNaming_Builder(label);
   builder.Generated_1(shape);
   builder.delete();
@@ -500,15 +625,60 @@ function createBodyLabel(
   return label;
 }
 
+function namingLabels(naming: {
+  bodyLabel?: OccLabel;
+  topologyLabelsByKey: ReadonlyMap<string, OccLabel>;
+  selectorLabelsByKey: ReadonlyMap<string, OccLabel>;
+}) {
+  return [
+    ...(naming.bodyLabel ? [naming.bodyLabel] : []),
+    ...naming.topologyLabelsByKey.values(),
+    ...naming.selectorLabelsByKey.values(),
+  ];
+}
+
 function createInitialNamingState(
   oc: OpenCascadeInstance,
   body: TrackedTopologyInput,
 ): OccTopologyNamingBodyState {
   const document = createDocument(oc);
-  const bodyLabel = createBodyLabel(oc, document, body.shape);
   const topologyLabelsByKey = new Map<string, OccLabel>();
   const selectorLabelsByKey = new Map<string, OccLabel>();
+  let bodyLabel: OccLabel | undefined;
+  try {
+    bodyLabel = createBodyLabel(oc, document, body.shape);
+    populateInitialNamingLabels(
+      oc,
+      body,
+      bodyLabel,
+      topologyLabelsByKey,
+      selectorLabelsByKey,
+    );
+  } catch (error) {
+    rethrowAfterReleasingLocalNaming(
+      error,
+      namingLabels({ bodyLabel, topologyLabelsByKey, selectorLabelsByKey }),
+      document,
+      collectOccCleanupErrors(error),
+    );
+  }
 
+  return {
+    strategy: OCC_TOPOLOGY_NAMING_STRATEGY,
+    document,
+    bodyLabel,
+    topologyLabelsByKey,
+    selectorLabelsByKey,
+  };
+}
+
+function populateInitialNamingLabels(
+  oc: OpenCascadeInstance,
+  body: TrackedTopologyInput,
+  bodyLabel: OccLabel,
+  topologyLabelsByKey: Map<string, OccLabel>,
+  selectorLabelsByKey: Map<string, OccLabel>,
+) {
   for (const [faceId, face] of body.facesById) {
     const key = topologyRefKey({ kind: "face", bodyId: body.bodyId, faceId });
     topologyLabelsByKey.set(key, createPrimitiveLabel(oc, bodyLabel, face));
@@ -539,14 +709,6 @@ function createInitialNamingState(
       createSelectorLabel(oc, bodyLabel, vertex, body.shape),
     );
   }
-
-  return {
-    strategy: OCC_TOPOLOGY_NAMING_STRATEGY,
-    document,
-    bodyLabel,
-    topologyLabelsByKey,
-    selectorLabelsByKey,
-  };
 }
 
 export function seedOccTopologyNaming(
@@ -592,7 +754,9 @@ function createValidLabelMap(
   naming: OccTopologyNamingBodyState,
 ) {
   const labels = new oc.TDF_LabelMap_1();
-  labels.Add(naming.document.Main());
+  const main = naming.document.Main();
+  labels.Add(main);
+  main.delete();
   labels.Add(naming.bodyLabel);
 
   for (const label of naming.topologyLabelsByKey.values()) {
@@ -625,19 +789,23 @@ function mapFinalIndexes(
   return indexes;
 }
 
+/** Like readNamedShape: every copy and attribute handle read is appended to `owned`. */
 function readCurrentNamedShape(
   oc: OpenCascadeInstance,
   namedShape: OccNamedShape,
   validLabels: OccLabelMap,
+  owned: OccDisposable[],
 ) {
   if (namedShape.IsNull()) {
     return [];
   }
 
-  const shapes = readNamedShape(oc, namedShape);
+  const shapes = readNamedShape(oc, namedShape, owned);
 
   try {
-    shapes.push(oc.TNaming_Tool.CurrentShape_2(namedShape, validLabels));
+    const current = oc.TNaming_Tool.CurrentShape_2(namedShape, validLabels);
+    owned.push(current);
+    shapes.push(current);
   } catch {
     // OCJS throws when the selected name cannot be solved in the current label set.
     ignoreOccNamingResolutionError();
@@ -648,7 +816,8 @@ function readCurrentNamedShape(
       namedShape,
       validLabels,
     );
-    shapes.push(...readNamedShape(oc, currentNamedShape));
+    owned.push(currentNamedShape);
+    shapes.push(...readNamedShape(oc, currentNamedShape, owned));
   } catch {
     // CurrentNamedShape has the same unresolved-name failure mode as CurrentShape.
     ignoreOccNamingResolutionError();
@@ -670,22 +839,28 @@ function resolveSelectorFinalSuccessors(
   }
 
   const selector = new oc.TNaming_Selector(selectorLabel);
+  // Attribute handles and read copies first, then the selector, all while the
+  // document is alive; a failed delete never skips the remaining ones.
+  const owned: OccDisposable[] = [];
 
-  try {
-    try {
-      selector.Solve(validLabels);
-    } catch {
-      // Unsolved selectors still expose their last named shape; history is the fallback.
-      ignoreOccNamingResolutionError();
-    }
+  return releaseAfter(
+    () => {
+      try {
+        selector.Solve(validLabels);
+      } catch {
+        // Unsolved selectors still expose their last named shape; history is the fallback.
+        ignoreOccNamingResolutionError();
+      }
 
-    return mapFinalIndexes(
-      finalShapeMap,
-      readCurrentNamedShape(oc, selector.NamedShape(), validLabels),
-    );
-  } finally {
-    selector.delete();
-  }
+      const namedShape = selector.NamedShape();
+      owned.push(namedShape);
+      return mapFinalIndexes(
+        finalShapeMap,
+        readCurrentNamedShape(oc, namedShape, validLabels, owned),
+      );
+    },
+    () => [...owned, selector],
+  );
 }
 
 export function isOccTopologyHistoryDeleted(
@@ -1217,12 +1392,72 @@ export function deriveGeneratedTopologyContributors(
     historySources: readonly OccTopologyHistorySource[];
   },
 ): OccGeneratedTopologyContributorResult {
-  const previousNaming =
-    input.previous.naming ?? createInitialNamingState(oc, input.previous);
+  if (input.previous.naming) {
+    return deriveGeneratedTopologyContributorsWithNaming(
+      oc,
+      input,
+      input.previous.naming,
+    );
+  }
+
+  // The seeded source naming is local to this derivation; no body owns it.
+  const temporaryNaming = createInitialNamingState(oc, input.previous);
+  let result: OccGeneratedTopologyContributorResult;
+  try {
+    result = deriveGeneratedTopologyContributorsWithNaming(
+      oc,
+      input,
+      temporaryNaming,
+    );
+  } catch (error) {
+    rethrowAfterReleasingLocalNaming(
+      error,
+      namingLabels(temporaryNaming),
+      temporaryNaming.document,
+      collectOccCleanupErrors(error),
+    );
+  }
+  releaseOccObjects([
+    ...namingLabels(temporaryNaming),
+    temporaryNaming.document,
+  ]);
+  return result;
+}
+
+function deriveGeneratedTopologyContributorsWithNaming(
+  oc: OpenCascadeInstance,
+  input: {
+    previous: OccTrackedBody;
+    generated: TrackedTopologyInput;
+    historySources: readonly OccTopologyHistorySource[];
+  },
+  previousNaming: OccTopologyNamingBodyState,
+): OccGeneratedTopologyContributorResult {
+  const temporaries: OccDisposable[] = [];
+  return releaseAfter(
+    () => deriveWithTemporaries(oc, input, previousNaming, temporaries),
+    () => temporaries,
+  );
+}
+
+function deriveWithTemporaries(
+  oc: OpenCascadeInstance,
+  input: {
+    previous: OccTrackedBody;
+    generated: TrackedTopologyInput;
+    historySources: readonly OccTopologyHistorySource[];
+  },
+  previousNaming: OccTopologyNamingBodyState,
+  temporaries: OccDisposable[],
+): OccGeneratedTopologyContributorResult {
   const validLabels = createValidLabelMap(oc, previousNaming);
+  temporaries.push(validLabels);
   const faceShapeMap = buildShapeMap(oc, "face", input.generated.shape);
+  temporaries.push(faceShapeMap);
   const edgeShapeMap = buildShapeMap(oc, "edge", input.generated.shape);
+  temporaries.push(edgeShapeMap);
   const vertexShapeMap = buildShapeMap(oc, "vertex", input.generated.shape);
+  temporaries.push(vertexShapeMap);
 
   const faceContributingFeatureIdsById = deriveGeneratedKindContributorIds(oc, {
     kind: "face",
@@ -1270,11 +1505,6 @@ export function deriveGeneratedTopologyContributors(
     },
   );
 
-  faceShapeMap.delete();
-  edgeShapeMap.delete();
-  vertexShapeMap.delete();
-  validLabels.delete();
-
   return {
     topology: createTopologyFromMaps(
       input.generated.facesById,
@@ -1304,18 +1534,97 @@ export function reconcileReplacementTopology(
     historySources: readonly OccTopologyHistorySource[];
   },
 ): OccTopologyReconciliationResult {
+  // Stored naming is borrowed from the input body, which keeps owning it (and
+  // the labels this reconciliation leaves out). Seeded naming is local: its
+  // document and body label transfer to the result, and every seeded label the
+  // result does not carry is released here.
+  const seeded = input.previous.naming
+    ? undefined
+    : createInitialNamingState(oc, input.previous);
+  const previousNaming = input.previous.naming ?? seeded!;
+  const borrowedLabels = new Set(seeded ? [] : namingLabels(previousNaming));
+  const next = {
+    topologyLabelsByKey: new Map<string, OccLabel>(),
+    selectorLabelsByKey: new Map<string, OccLabel>(),
+  };
+  const temporaries: OccDisposable[] = [];
+  const localLabels = () =>
+    [...(seeded ? namingLabels(seeded) : []), ...namingLabels(next)].filter(
+      (label) => !borrowedLabels.has(label),
+    );
+
+  let result: OccTopologyReconciliationResult;
+  try {
+    result = releaseAfter(
+      () => reconcileWithNaming(oc, input, previousNaming, next, temporaries),
+      () => temporaries,
+    );
+  } catch (error) {
+    if (!seeded) {
+      // The borrowed document stays with its owner; only new labels are local.
+      try {
+        releaseOccObjects(localLabels());
+      } catch (cleanupError) {
+        throw combineOccCleanupError(error, cleanupError);
+      }
+      throw error;
+    }
+    rethrowAfterReleasingLocalNaming(
+      error,
+      localLabels(),
+      seeded.document,
+      collectOccCleanupErrors(error),
+    );
+  }
+
+  if (seeded) {
+    const carried = new Set(namingLabels(next));
+    const dropped = namingLabels(seeded).filter(
+      (label) => label !== seeded.bodyLabel && !carried.has(label),
+    );
+    try {
+      releaseOccObjects(dropped);
+    } catch (error) {
+      // Only labels are pending, and label retries are safe after the document.
+      rethrowAfterReleasingLocalNaming(
+        error,
+        localLabels().filter((label) => !dropped.includes(label)),
+        seeded.document,
+        [],
+      );
+    }
+  }
+  return result;
+}
+
+function reconcileWithNaming(
+  oc: OpenCascadeInstance,
+  input: {
+    previous: OccTrackedBody;
+    replacement: TrackedTopologyInput;
+    historySources: readonly OccTopologyHistorySource[];
+  },
+  previousNaming: OccTopologyNamingBodyState,
+  next: {
+    topologyLabelsByKey: Map<string, OccLabel>;
+    selectorLabelsByKey: Map<string, OccLabel>;
+  },
+  temporaries: OccDisposable[],
+): OccTopologyReconciliationResult {
   const invalidations = new Map<string, OccReferenceInvalidationRecord>();
-  const previousNaming =
-    input.previous.naming ?? createInitialNamingState(oc, input.previous);
   const bodyLabel = previousNaming.bodyLabel;
   modifyLabel(oc, bodyLabel, input.previous.shape, input.replacement.shape);
 
-  const nextLabelsByKey = new Map<string, OccLabel>();
-  const nextSelectorLabelsByKey = new Map<string, OccLabel>();
+  const nextLabelsByKey = next.topologyLabelsByKey;
+  const nextSelectorLabelsByKey = next.selectorLabelsByKey;
   const validLabels = createValidLabelMap(oc, previousNaming);
+  temporaries.push(validLabels);
   const faceShapeMap = buildShapeMap(oc, "face", input.replacement.shape);
+  temporaries.push(faceShapeMap);
   const edgeShapeMap = buildShapeMap(oc, "edge", input.replacement.shape);
+  temporaries.push(edgeShapeMap);
   const vertexShapeMap = buildShapeMap(oc, "vertex", input.replacement.shape);
+  temporaries.push(vertexShapeMap);
 
   const facesById = reconcileKind(oc, {
     kind: "face",
@@ -1380,11 +1689,6 @@ export function reconcileReplacementTopology(
     validLabels,
     invalidations,
   });
-
-  faceShapeMap.delete();
-  edgeShapeMap.delete();
-  vertexShapeMap.delete();
-  validLabels.delete();
 
   return {
     topology: createTopologyFromMaps(

@@ -34,7 +34,11 @@ import {
   isProjectedRegionSegmentSourceSupported,
 } from "@/domain/modeling/occ/implementation-policy";
 import { getClosedCurveSampleCount } from "@/contracts/sketch/region-geometry";
-import { deleteOccObject } from "@/domain/modeling/occ/memory";
+import {
+  combineOccCleanupError,
+  deleteOccObject,
+  releaseOccObjects,
+} from "@/domain/modeling/occ/memory";
 
 export type ProjectedSketchProfileEdgeKey =
   `projected:${ReferenceId}/${string}`;
@@ -53,7 +57,8 @@ export type SketchProfileEdgeSourceKey =
  * source-curve parameter order), never a geometric match, so the key is exact
  * and reproducible. Sources contributing a single segment keep their bare key.
  */
-export type SplitSketchProfileEdgeKey = `${SketchProfileBaseEdgeSourceKey}#${number}`;
+export type SplitSketchProfileEdgeKey =
+  `${SketchProfileBaseEdgeSourceKey}#${number}`;
 export type SketchProfileVertexSourceKey =
   | SketchPointId
   | ProjectedSketchProfileVertexKey;
@@ -80,6 +85,15 @@ export interface BuiltSketchProfileFace {
   plane: SketchPlaneDefinition;
   normal: Vec3;
   provenance: SketchProfileProvenance;
+}
+
+/** Releases every wrapper identity owned by a successful profile-face result. */
+export function releaseBuiltSketchProfileFace(result: BuiltSketchProfileFace) {
+  releaseOccObjects([
+    result.face,
+    ...result.provenance.edges.values(),
+    ...result.provenance.vertices.values(),
+  ]);
 }
 
 interface MutableSketchProfileProvenance {
@@ -219,7 +233,10 @@ function assertLoopCanBuildProfile(
   }
 
   for (const segment of loop.segments) {
-    if ((segment.startPosition === undefined) !== (segment.endPosition === undefined)) {
+    if (
+      (segment.startPosition === undefined) !==
+      (segment.endPosition === undefined)
+    ) {
       throw new Error(
         `Region loop ${loop.loopId} has an incomplete bounded segment.`,
       );
@@ -471,7 +488,6 @@ function createProfileVertex(
     deleteOccObject(point);
   }
 }
-
 
 function buildLineEdgeFromWorld(
   oc: OpenCascadeInstance,
@@ -831,7 +847,10 @@ function getLoopSegmentTraversal(
     };
   }
 
-  if (baseGeometry.kind === "closed" || baseGeometry.kind === "closedPolyline") {
+  if (
+    baseGeometry.kind === "closed" ||
+    baseGeometry.kind === "closedPolyline"
+  ) {
     return baseGeometry;
   }
 
@@ -1119,7 +1138,9 @@ function createRegionSegmentEdgeKeyResolver(
       segmentCounts.set(baseKey, (segmentCounts.get(baseKey) ?? 0) + 1);
     }
   }
-  return (segment: RegionBoundarySegment): SketchProfileEdgeSourceKey | null => {
+  return (
+    segment: RegionBoundarySegment,
+  ): SketchProfileEdgeSourceKey | null => {
     const baseKey = getRegionSegmentBaseEdgeKey(segment);
     if ((segmentCounts.get(baseKey) ?? 0) <= 1) {
       return baseKey;
@@ -1245,7 +1266,9 @@ function buildLoopWire(
           case "lineSegment": {
             if (isTrimmedEntitySegment(segment)) {
               if (segmentGeometry.kind !== "open") {
-                throw new Error(`Line ${geometry.entityId} did not resolve to open loop geometry.`);
+                throw new Error(
+                  `Line ${geometry.entityId} did not resolve to open loop geometry.`,
+                );
               }
               const edge = buildLineEdge(
                 oc,
@@ -1263,7 +1286,11 @@ function buildLoopWire(
               );
             }
             const startVertex = resolveProfileVertex(
-              getSolvedBoundaryPointPosition(plane, sketch, entity.startPointId),
+              getSolvedBoundaryPointPosition(
+                plane,
+                sketch,
+                entity.startPointId,
+              ),
               entity.startPointId,
             );
             const endVertex = resolveProfileVertex(
@@ -1287,7 +1314,9 @@ function buildLoopWire(
           case "circle": {
             if (isTrimmedEntitySegment(segment)) {
               if (segmentGeometry.kind !== "open") {
-                throw new Error(`Circle ${geometry.entityId} did not resolve to open loop geometry.`);
+                throw new Error(
+                  `Circle ${geometry.entityId} did not resolve to open loop geometry.`,
+                );
               }
               const edge = buildArcEdgeFromSketchGeometry(
                 oc,
@@ -1319,7 +1348,9 @@ function buildLoopWire(
           case "arc": {
             if (isTrimmedEntitySegment(segment)) {
               if (segmentGeometry.kind !== "open") {
-                throw new Error(`Arc ${geometry.entityId} did not resolve to open loop geometry.`);
+                throw new Error(
+                  `Arc ${geometry.entityId} did not resolve to open loop geometry.`,
+                );
               }
               const edge = buildArcEdgeFromSketchGeometry(
                 oc,
@@ -1347,7 +1378,11 @@ function buildLoopWire(
               );
             }
             const startVertex = resolveProfileVertex(
-              getSolvedBoundaryPointPosition(plane, sketch, entity.startPointId),
+              getSolvedBoundaryPointPosition(
+                plane,
+                sketch,
+                entity.startPointId,
+              ),
               entity.startPointId,
             );
             const endVertex = resolveProfileVertex(
@@ -1462,9 +1497,10 @@ export function buildRegionProfileFace(
     unsupportedSources: [],
   };
   const resolveSegmentEdgeKey = createRegionSegmentEdgeKeyResolver(
-    region.loops.filter((loop) => loop.role === "outer" || loop.role === "inner"),
+    region.loops.filter(
+      (loop) => loop.role === "outer" || loop.role === "inner",
+    ),
   );
-  let succeeded = false;
   let outerWire: ReturnType<typeof buildLoopWire> | null = null;
   let faceBuilder: {
     Add(wire: unknown): void;
@@ -1473,6 +1509,7 @@ export function buildRegionProfileFace(
     delete?: () => void;
   } | null = null;
 
+  let result: BuiltSketchProfileFace;
   try {
     outerWire = buildLoopWire(
       oc,
@@ -1511,26 +1548,40 @@ export function buildRegionProfileFace(
       );
     }
 
-    const result = {
+    result = {
       face: faceBuilder.Face(),
       plane,
       normal: plane.frame.normal,
       provenance,
     };
-    succeeded = true;
-    return result;
-  } finally {
-    deleteOccObject(faceBuilder);
-    deleteOccObject(outerWire);
-    if (!succeeded) {
-      for (const edge of provenance.edges.values()) {
-        deleteOccObject(edge);
-      }
-      for (const vertex of provenance.vertices.values()) {
-        deleteOccObject(vertex);
-      }
+  } catch (error) {
+    try {
+      releaseOccObjects([
+        ...(faceBuilder ? [faceBuilder] : []),
+        ...(outerWire ? [outerWire] : []),
+        ...provenance.edges.values(),
+        ...provenance.vertices.values(),
+      ]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
     }
+    throw error;
   }
+
+  try {
+    releaseOccObjects([
+      ...(faceBuilder ? [faceBuilder] : []),
+      ...(outerWire ? [outerWire] : []),
+    ]);
+  } catch (cleanupError) {
+    try {
+      releaseBuiltSketchProfileFace(result);
+    } catch (resultCleanupError) {
+      throw combineOccCleanupError(cleanupError, resultCleanupError);
+    }
+    throw cleanupError;
+  }
+  return result;
 }
 
 /**
@@ -1544,13 +1595,11 @@ export interface BuiltSketchProfileWire {
   provenance: SketchProfileProvenance;
 }
 
-function releaseProfileProvenance(provenance: MutableSketchProfileProvenance) {
-  for (const edge of provenance.edges.values()) {
-    deleteOccObject(edge);
-  }
-  for (const vertex of provenance.vertices.values()) {
-    deleteOccObject(vertex);
-  }
+function releaseProfileProvenance(provenance: SketchProfileProvenance) {
+  releaseOccObjects([
+    ...provenance.edges.values(),
+    ...provenance.vertices.values(),
+  ]);
 }
 
 /**
@@ -1723,7 +1772,9 @@ function orderConnectedOpenCurveSegments(
       throw new Error(
         `unsupported-profile-group: Open sketch curves ${remaining
           .map((segment) => segment.entityId)
-          .join(", ")} are not connected to the rest of the surface profile chain.`,
+          .join(
+            ", ",
+          )} are not connected to the rest of the surface profile chain.`,
       );
     }
 

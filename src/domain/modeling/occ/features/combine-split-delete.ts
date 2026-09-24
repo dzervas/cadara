@@ -405,11 +405,24 @@ type SheetSplitTrackedOutput = {
   finalFacesByNativeId: ReadonlyMap<string, FaceId>;
 };
 
+// Keep opaque topology identities on the same deterministic 64-bit FNV-1a /
+// base-36 algorithm used privately for stable sketch-region identities.
+function hashStableString(value: string) {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index));
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(36);
+}
+
 function sheetSplitOutputBodyId(
   ownerFeatureId: FeatureId,
   outputSlotKey: string,
 ): BodyId {
-  return `body_${ownerFeatureId}_sheet_split_${encodeURIComponent(outputSlotKey)}` as BodyId;
+  return `body_${ownerFeatureId}_sheet_split_${hashStableString(outputSlotKey)}` as BodyId;
 }
 
 function hasExactWitnessSet(witnesses: readonly string[]) {
@@ -515,7 +528,14 @@ function formatSheetSplitSemanticOutputSlot(input: {
   targetBodyId: BodyId;
   sourceTargetProvenanceIds: readonly OccCanonicalTopologyProvenanceId[];
 }) {
-  return `sheet-split-output:target:${input.targetBodyId}:target-face-provenance:${input.sourceTargetProvenanceIds.map(encodeURIComponent).join(",")}`;
+  // The complete exact witnesses remain authoritative in outputWitnesses. This
+  // key is only their compact opaque representation; collisions fail closed in
+  // semanticSlotOwners below.
+  const exactIdentity = JSON.stringify([
+    input.targetBodyId,
+    ...input.sourceTargetProvenanceIds,
+  ]);
+  return `sheet-split-output:${hashStableString(exactIdentity)}`;
 }
 
 /**
@@ -941,6 +961,31 @@ function trackSheetSplitOutputs(input: {
       outputWitnesses: output.sourceTargetProvenanceIds,
     })),
   });
+  const previousBodyIds = new Set(
+    previousOutputs.map((previous) => previous.outputSlot),
+  );
+  const bodyIdByOutputSlot = new Map<string, BodyId>();
+  const claimedBodyIds = new Map<BodyId, string>();
+  for (const output of input.history.outputs) {
+    const reassociatedBodyId = reassociatedBodyIds.get(output.outputSlotKey);
+    const bodyId =
+      reassociatedBodyId ??
+      sheetSplitOutputBodyId(input.ownerFeatureId, output.outputSlotKey);
+    if (previousBodyIds.has(bodyId) && reassociatedBodyId !== bodyId) {
+      throw new Error(
+        `occ-native-sheet-split-history-output-body-id-collision: generated body id ${bodyId} collides with an unreassociated prior output.`,
+      );
+    }
+    const claimedOutputSlot = claimedBodyIds.get(bodyId);
+    if (claimedOutputSlot !== undefined) {
+      throw new Error(
+        `occ-native-sheet-split-history-output-body-id-collision: semantic output slots ${claimedOutputSlot} and ${output.outputSlotKey} resolve to ${bodyId}.`,
+      );
+    }
+    claimedBodyIds.set(bodyId, output.outputSlotKey);
+    bodyIdByOutputSlot.set(output.outputSlotKey, bodyId);
+  }
+
   for (const output of input.history.outputs) {
     const shape = input.shapeByOutputSlot.get(output.nativeOutputSlotKey);
     if (!shape) {
@@ -949,9 +994,7 @@ function trackSheetSplitOutputs(input: {
       );
     }
     const body = trackNewSolidBody(input.context.oc, {
-      bodyId:
-        reassociatedBodyIds.get(output.outputSlotKey) ??
-        sheetSplitOutputBodyId(input.ownerFeatureId, output.outputSlotKey),
+      bodyId: bodyIdByOutputSlot.get(output.outputSlotKey)!,
       label: `${input.ownerFeatureId}_split`,
       ownerFeatureId: input.ownerFeatureId,
       shape,

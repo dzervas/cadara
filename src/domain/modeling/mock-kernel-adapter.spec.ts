@@ -27,6 +27,11 @@ import type {
   FeatureDefinition,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
+import type {
+  ProjectSketchExternalReferencesRequest,
+  ProjectSketchExternalReferencesResponse,
+  SolverTolerancePolicy,
+} from "@/contracts/solver/schema";
 import {
   combineAdvancedFeatureExample,
   deleteSolidAdvancedFeatureExample,
@@ -233,6 +238,237 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       ),
       "Supported source-backed references should all project successfully.",
     ).toBeTruthy();
+  }
+
+  async function testDocumentToleranceRoutesThroughSolverRequests() {
+    type CapturedRequest = {
+      kind: "project" | "validate" | "solve";
+      requestId: string;
+      tolerances: SolverTolerancePolicy;
+    };
+
+    class CapturingSolverAdapter extends MockSketchSolverAdapter {
+      readonly requests: CapturedRequest[] = [];
+
+      override async projectExternalReferences(
+        request: Parameters<
+          MockSketchSolverAdapter["projectExternalReferences"]
+        >[0],
+      ) {
+        this.requests.push({
+          kind: "project",
+          requestId: request.requestId,
+          tolerances: structuredClone(request.tolerances),
+        });
+        return new MockSketchSolverAdapter({
+          documentId: request.documentId,
+          revisionId: request.revisionId,
+        }).projectExternalReferences(request);
+      }
+
+      override async validateSketch(
+        request: Parameters<MockSketchSolverAdapter["validateSketch"]>[0],
+      ) {
+        this.requests.push({
+          kind: "validate",
+          requestId: request.requestId,
+          tolerances: structuredClone(request.tolerances),
+        });
+        return new MockSketchSolverAdapter({
+          documentId: request.documentId,
+          revisionId: request.revisionId,
+        }).validateSketch(request);
+      }
+
+      override async solveSketch(
+        request: Parameters<MockSketchSolverAdapter["solveSketch"]>[0],
+      ) {
+        this.requests.push({
+          kind: "solve",
+          requestId: request.requestId,
+          tolerances: structuredClone(request.tolerances),
+        });
+        return new MockSketchSolverAdapter({
+          documentId: request.documentId,
+          revisionId: request.revisionId,
+        }).solveSketch(request);
+      }
+
+      override async deriveSketchRegions(
+        request: Parameters<MockSketchSolverAdapter["deriveSketchRegions"]>[0],
+      ) {
+        return new MockSketchSolverAdapter({
+          documentId: request.documentId,
+          revisionId: request.revisionId,
+        }).deriveSketchRegions(request);
+      }
+    }
+
+    class CapturingMockKernelAdapter extends MockKernelAdapter {
+      readonly projectionTolerances: SolverTolerancePolicy[] = [];
+
+      protected override projectSketchReferencesFromSnapshot(
+        snapshot: WorkspaceSnapshot,
+        request: ProjectSketchExternalReferencesRequest,
+      ): ProjectSketchExternalReferencesResponse {
+        this.projectionTolerances.push(structuredClone(request.tolerances));
+        return super.projectSketchReferencesFromSnapshot(snapshot, request);
+      }
+    }
+
+    const expectedBootstrap = {
+      coincidence: 0.001,
+      angleRadians: 0.0001,
+      minimumSegmentLength: 0.001,
+    };
+    const expectedAuthored = {
+      coincidence: 0.025,
+      angleRadians: 0.003,
+      minimumSegmentLength: 0.025,
+    };
+    const solverAdapter = new CapturingSolverAdapter();
+    const adapter = new CapturingMockKernelAdapter({ solverAdapter });
+    const initial = await adapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+
+    expect(
+      initial.snapshot.document.settings,
+      "Mock bootstrap evaluation must derive tolerance from the settings exposed by the seeded document.",
+    ).toMatchObject({
+      modelingTolerance: expectedBootstrap.coincidence,
+      angularToleranceRadians: expectedBootstrap.angleRadians,
+    });
+
+    const document = createAuthoredModelDocumentFromSnapshot(initial.snapshot);
+    const variableId = "variable_tolerance_width" as const;
+    const widthDimension = document.sketches[0]!.definition.dimensions.find(
+      (dimension) => dimension.dimensionId === "dimension_1_width",
+    );
+    if (widthDimension?.kind !== "distance") {
+      throw new Error("Seed sketch must expose the width dimension.");
+    }
+    widthDimension.value = createExpressionAuthoredValue("toleranceWidth");
+    document.variables = [
+      ...document.variables,
+      { variableId, name: "toleranceWidth", valueText: "8" },
+    ];
+    document.settings.modelingTolerance = expectedAuthored.coincidence;
+    document.settings.angularToleranceRadians = expectedAuthored.angleRadians;
+    solverAdapter.requests.length = 0;
+    await adapter.restoreAuthoredModelDocument(document);
+
+    expect(
+      solverAdapter.requests
+        .filter((request) => request.requestId.includes("request_restore_"))
+        .map((request) => [request.kind, request.tolerances]),
+      "Mock restore projection, validation, and solve must use persisted document settings.",
+    ).toEqual([
+      ["project", expectedAuthored],
+      ["validate", expectedAuthored],
+      ["solve", expectedAuthored],
+    ]);
+
+    solverAdapter.requests.length = 0;
+    const updated = await adapter.updateDocumentVariable({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: document.revisionId,
+      variableId,
+      name: "toleranceWidth",
+      valueText: "12",
+    });
+    expect(updated.revisionState.kind).toBe("accepted");
+    expect(
+      adapter.projectionTolerances,
+      "Mock variable rebuild projection must preserve restored document settings.",
+    ).toEqual([expectedAuthored]);
+    expect(
+      solverAdapter.requests.map((request) => [
+        request.kind,
+        request.tolerances,
+      ]),
+      "Mock variable rebuild validation and solve must preserve restored document settings.",
+    ).toEqual([
+      ["validate", expectedAuthored],
+      ["solve", expectedAuthored],
+    ]);
+
+    const exported = await adapter.exportAuthoredModelDocument("doc_workspace");
+    expect(exported.settings).toMatchObject({
+      modelingTolerance: expectedAuthored.coincidence,
+      angularToleranceRadians: expectedAuthored.angleRadians,
+    });
+
+    solverAdapter.requests.length = 0;
+    adapter.projectionTolerances.length = 0;
+    const sourceSketch = exported.sketches[0]!;
+    await adapter.commitSketch({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: exported.revisionId,
+      solverCorrelation: {
+        requestId: "request_tolerance_commit",
+        projectionRequestId: "request_tolerance_commit:project",
+        validationRequestId: "request_tolerance_commit:validate",
+        solveRequestId: "request_tolerance_commit:solve",
+        regionRequestId: "request_tolerance_commit:regions",
+      },
+      sketchId: sourceSketch.sketchId,
+      sketchLabel: sourceSketch.label,
+      plane: sourceSketch.plane,
+      definition: sourceSketch.definition,
+    });
+
+    expect(
+      adapter.projectionTolerances,
+      "Mock commit projection must use the active document settings.",
+    ).toEqual([expectedAuthored]);
+    expect(
+      solverAdapter.requests.map((request) => [
+        request.kind,
+        request.tolerances,
+      ]),
+      "Mock commit validation and solve must use the active document settings.",
+    ).toEqual([
+      ["validate", expectedAuthored],
+      ["solve", expectedAuthored],
+    ]);
+
+    const freshSolver = new CapturingSolverAdapter();
+    const freshAdapter = new CapturingMockKernelAdapter({
+      solverAdapter: freshSolver,
+    });
+    const freshSnapshot = await freshAdapter.getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    freshSolver.requests.length = 0;
+    await freshAdapter.commitSketch({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+      baseRevisionId: freshSnapshot.snapshot.document.revisionId,
+      solverCorrelation: {
+        requestId: "request_fresh_tolerance_commit",
+        projectionRequestId: "request_fresh_tolerance_commit:project",
+        validationRequestId: "request_fresh_tolerance_commit:validate",
+        solveRequestId: "request_fresh_tolerance_commit:solve",
+        regionRequestId: "request_fresh_tolerance_commit:regions",
+      },
+      sketchId: null,
+      sketchLabel: "Fresh tolerance sketch",
+      plane: freshSnapshot.snapshot.document.sketches[0]!.plane,
+      definition:
+        freshSnapshot.snapshot.document.sketches[0]!.sketch.definition,
+    });
+    expect(freshAdapter.projectionTolerances).toEqual([expectedBootstrap]);
+    expect(
+      freshSolver.requests.map((request) => [request.kind, request.tolerances]),
+    ).toEqual([
+      ["validate", expectedBootstrap],
+      ["solve", expectedBootstrap],
+    ]);
   }
 
   async function testExtrudePreviewDependsOnDefinition() {
@@ -4121,6 +4357,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   }
 
   await testFeaturesRequireCurrentSketchDerivedInputs();
+  await testDocumentToleranceRoutesThroughSolverRequests();
   await testExtrudePreviewDependsOnDefinition();
   await testProfileCollectionContractBoundaryRejectsInvalidPayloads();
   await testCoplanarPlaneCreationIsAcceptedByMock();
@@ -4175,7 +4412,7 @@ test("mock kernel reports neutral curve queries unsupported instead of pretendin
       center: [0, 0],
       radius: 1,
       xAxis: [1, 0],
-      sourceDomain: [0, Math.PI * 2],
+      sourceDomain: { kind: "fullTurn", seam: 0 },
       provenance: { sourceEntityId: "first", sourceSpanId: "full" },
     },
     second: {
@@ -4184,7 +4421,7 @@ test("mock kernel reports neutral curve queries unsupported instead of pretendin
       center: [2, 0],
       radius: 1,
       xAxis: [1, 0],
-      sourceDomain: [0, Math.PI * 2],
+      sourceDomain: { kind: "fullTurn", seam: 0 },
       provenance: { sourceEntityId: "second", sourceSpanId: "full" },
     },
   });

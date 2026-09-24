@@ -19,6 +19,22 @@ export function getRevolveFeatureExtent(
   return parameters.extent;
 }
 
+export type SurfaceExtrudeGeneratedSideFaceEndRole =
+  | "one-side-end"
+  | "combined-ends";
+
+/**
+ * The surface-prism provenance role is determined solely by the authored
+ * surface extrude extent, including when that extent originated in an import.
+ */
+export function getSurfaceExtrudeGeneratedSideFaceEndRole(input: {
+  resultBodyType: ExtrudeFeatureParameters["resultBodyType"];
+  extent: Pick<ExtrudeFeatureExtent, "mode">;
+}): SurfaceExtrudeGeneratedSideFaceEndRole | null {
+  if (input.resultBodyType !== "surface") return null;
+  return input.extent.mode === "oneSide" ? "one-side-end" : "combined-ends";
+}
+
 export function getExtrudeExtentEnds(
   extent: ExtrudeFeatureExtent,
 ): readonly ExtrudeEndCondition[] {

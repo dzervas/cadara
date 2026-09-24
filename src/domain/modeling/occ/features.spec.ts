@@ -23,8 +23,12 @@ import {
   extractSolidShapes,
   getOccDurableRefKey,
   OCC_REFERENCE_INVALIDATION_REASONS,
+  trackNewSheetBody,
   trackNewSolidBody,
 } from "@/domain/modeling/occ/topology";
+import { createOccTopologyProvenanceIndex } from "@/domain/modeling/occ/topology-stage";
+import { createBooleanBuilder } from "@/domain/modeling/occ/features/boolean-operations";
+import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
@@ -55,7 +59,11 @@ import {
   type SketchDefinition,
   type SketchRecord,
 } from "@/contracts/sketch/schema";
-import { extractPlanarFaceData, toGpPnt } from "@/domain/modeling/occ/planes";
+import {
+  extractPlanarFaceData,
+  toGpDir,
+  toGpPnt,
+} from "@/domain/modeling/occ/planes";
 import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
 
@@ -1573,6 +1581,569 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     ).toBeGreaterThan(0);
   }
 
+  /**
+   * Up-to-next terminates at the first complete terminating plane actually met
+   * by the swept profile (Onshape: "If it doesn't completely terminate, then
+   * the Extrude fails"). Anything met earlier inside the sweep, or a plane that
+   * does not cover the whole profile, is a structured unsupported case.
+   */
+  async function testExtrudeUpToNextProvesFirstCompleteTerminatingPlane() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const unsupported = "advanced-feature-unsupported-kernel-case: ";
+    const occluderError = `${unsupported}OCC extrude up-to-next meets geometry inside the swept profile before a complete terminating plane.`;
+    const noTerminationError = `${unsupported}OCC extrude up-to-next found no terminating geometry.`;
+    const onePlaneError = `${unsupported}OCC extrude up-to-next profiles of one end do not terminate on one plane.`;
+    const plane = createStandardPlaneDefinition("xy");
+    const { sketch, region } = createRectangleSketch(
+      "sketch_up_to_next_proof" as SketchId,
+      plane,
+    );
+    const regionProfile = {
+      kind: "region" as const,
+      sketchId: sketch.sketchId,
+      regionId: region.regionId,
+    };
+    let bodyIndex = 0;
+    const track = (shape: InstanceType<typeof oc.TopoDS_Shape>) => {
+      bodyIndex += 1;
+      return trackNewSolidBody(oc, {
+        bodyId: `body_up_to_next_proof_${bodyIndex}` as BodyId,
+        label: `up-to-next proof ${bodyIndex}`,
+        ownerFeatureId: "feature_up_to_next_proof_seed" as FeatureId,
+        shape,
+      });
+    };
+    const boxShape = (
+      min: readonly [number, number, number],
+      max: readonly [number, number, number],
+    ) => {
+      const box = new oc.BRepPrimAPI_MakeBox_3(
+        toGpPnt(oc, min),
+        max[0] - min[0],
+        max[1] - min[1],
+        max[2] - min[2],
+      );
+      box.Build(new oc.Message_ProgressRange_1());
+      return box.Shape();
+    };
+    const box = (
+      min: readonly [number, number, number],
+      max: readonly [number, number, number],
+    ) => track(boxShape(min, max));
+    /** Outer box minus a strictly inner box: every wall is 1 thick. */
+    const hollowBox = (zMin: number) => {
+      const cut = createBooleanBuilder(
+        oc,
+        "cut",
+        boxShape([-2, -2, zMin], [6, 5, zMin + 10]),
+        boxShape([-1, -1, zMin + 1], [5, 4, zMin + 9]),
+      );
+      cut.Build(new oc.Message_ProgressRange_1());
+      return track(cut.Shape());
+    };
+    const coveringSlab = (zMin: number, zMax: number) =>
+      box([-1, -1, zMin], [5, 4, zMax]);
+    const cylinderAlongX = (y: number, z: number) => {
+      const axis = new oc.gp_Ax2_3(
+        toGpPnt(oc, [-1, y, z]),
+        toGpDir(oc, [1, 0, 0]),
+      );
+      const cylinder = new oc.BRepPrimAPI_MakeCylinder_3(axis, 0.5, 6);
+      cylinder.Build(new oc.Message_ProgressRange_1());
+      return track(cylinder.Shape());
+    };
+    const sheet = (points: readonly (readonly [number, number, number])[]) => {
+      const polygon = new oc.BRepBuilderAPI_MakePolygon_4(
+        toGpPnt(oc, points[0]!),
+        toGpPnt(oc, points[1]!),
+        toGpPnt(oc, points[2]!),
+        toGpPnt(oc, points[3]!),
+        true,
+      );
+      const face = new oc.BRepBuilderAPI_MakeFace_15(polygon.Wire(), true);
+      bodyIndex += 1;
+      return trackNewSheetBody(oc, {
+        bodyId: `body_up_to_next_proof_${bodyIndex}` as BodyId,
+        label: `up-to-next proof sheet ${bodyIndex}`,
+        ownerFeatureId: "feature_up_to_next_proof_seed" as FeatureId,
+        shape: face.Face(),
+      });
+    };
+    const tiltedPlate = () => {
+      const rotation = new oc.gp_Trsf_1();
+      rotation.SetRotation_1(
+        new oc.gp_Ax1_2(toGpPnt(oc, [0, 0, 0]), toGpDir(oc, [1, 0, 0])),
+        0.3,
+      );
+      const transform = new oc.BRepBuilderAPI_Transform_2(
+        boxShape([-2, 0.5, 2], [6, 2.5, 2.2]),
+        rotation,
+        true,
+      );
+      return track(transform.Shape());
+    };
+    const contextFor = async (
+      bodies: OccFeatureExecutionContext["bodies"],
+      sketches: OccFeatureExecutionContext["sketches"] = [sketch],
+    ): Promise<OccFeatureExecutionContext> => ({
+      ...(await createContext({ bodies, sketches })()),
+      assets: { records: [] },
+      assetBlobs: new Map(),
+      resolvedGeometryAssets: new Map(),
+      bakedShapeCache: new Map(),
+      previousTopologyStage: null,
+      topologyProvenanceIndex: createOccTopologyProvenanceIndex({
+        stages: new Map(),
+        previousLineage: new Map(),
+        historyOrder: [],
+      }),
+    });
+    /**
+     * Authored literals go through the production value-resolution seam first,
+     * exactly as the authoring state does before executeOccFeature.
+     */
+    const run = (
+      context: OccFeatureExecutionContext,
+      name: string,
+      parameters: ExtrudeFeatureParameters,
+    ) => {
+      const resolved = resolveFeatureDefinitionValues({
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters,
+        },
+        variables: [],
+      });
+      if (!resolved.ok) {
+        throw new Error(resolved.diagnostics.map((d) => d.message).join(" "));
+      }
+      try {
+        return {
+          definition: resolved.definition,
+          result: executeOccFeature(
+            context,
+            `feature_up_to_next_proof_${name}` as FeatureId,
+            resolved.definition,
+          ),
+          error: null,
+        };
+      } catch (error) {
+        return {
+          definition: resolved.definition,
+          result: null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    };
+    const newBodyUpToNext = (
+      extent: ExtrudeFeatureParameters["extent"],
+      profiles: Extract<
+        ExtrudeFeatureParameters,
+        { resultBodyType: "solid" }
+      >["profiles"] = [regionProfile],
+    ): ExtrudeFeatureParameters => ({
+      resultBodyType: "solid",
+      profiles,
+      startExtent: { kind: "profilePlane" },
+      extent,
+      operation: { source: "literal", value: "newBody" },
+      booleanScope: { kind: "standalone" },
+    });
+    const positiveUpToNext = {
+      mode: "oneSide",
+      end: { kind: "upToNext", direction: "positive" },
+    } as const;
+    const expectNewBodyVolume = async (
+      outcome: ReturnType<typeof run>,
+      expected: number,
+      message: string,
+    ) => {
+      expect(outcome.error, message).toBeNull();
+      let total = 0;
+      for (const target of outcome.result?.producedTargets ?? []) {
+        if (target.kind !== "body") continue;
+        const body = outcome.result?.bodies.find(
+          (entry) => entry.bodyId === target.bodyId,
+        );
+        expect(body != null, message).toBe(true);
+        total += await bodyVolume(oc, body!.shape);
+      }
+      assertClose(total, expected, 1e-6, message);
+    };
+
+    // Hollow box, cut from the outer top face down (the 9841 Extrude2
+    // analogue) and, reversed, from the outer bottom face up. The old
+    // whole-body projection rule stopped at the far outer face, removing 24
+    // through both walls, with each generated side-face key claiming 2 faces.
+    for (const variant of [
+      { name: "top", zMin: -10, direction: "negative" as const },
+      { name: "bottom", zMin: 0, direction: "positive" as const },
+    ]) {
+      const hollow = hollowBox(variant.zMin);
+      const before = await bodyVolume(oc, hollow.shape);
+      const cut = run(await contextFor([hollow]), `hollow_${variant.name}`, {
+        resultBodyType: "solid",
+        profiles: [regionProfile],
+        startExtent: { kind: "profilePlane" },
+        extent: {
+          mode: "oneSide",
+          end: { kind: "upToNext", direction: variant.direction },
+        },
+        operation: { source: "literal", value: "cut" },
+        booleanScope: { kind: "targetBody", bodyId: hollow.bodyId },
+      });
+      expect(
+        cut.error,
+        `Hollow ${variant.name} up-to-next cut must succeed.`,
+      ).toBeNull();
+      const cutBody = cut.result?.bodies.find(
+        (b) => b.bodyId === hollow.bodyId,
+      );
+      assertClose(
+        before - (await bodyVolume(oc, cutBody!.shape)),
+        12,
+        1e-6,
+        `Hollow ${variant.name} up-to-next must remove only the near wall (4x3x1)`,
+      );
+      expect(
+        cutBody?.topology.faceIds.length,
+        `Hollow ${variant.name} up-to-next must leave the far wall unpierced (16 faces, not 20).`,
+      ).toBe(16);
+      const sideFaceClaims = [
+        ...(cut.result?.topologyStage?.outputs.get(hollow.bodyId)
+          ?.sourceTargets ?? new Map()),
+      ]
+        .filter(([key]) => String(key).endsWith(":generated-side-face"))
+        .map(
+          ([, targets]) =>
+            (targets as readonly { kind: string }[]).filter(
+              (t) => t.kind === "face",
+            ).length,
+        );
+      expect(
+        sideFaceClaims,
+        `Hollow ${variant.name} up-to-next must create exactly one side face per sketch edge.`,
+      ).toEqual([1, 1, 1, 1]);
+    }
+
+    // Anything met inside the sweep before a complete plane fails closed:
+    // a partial planar box, a curved body, a small sheet, a tilted plate, and
+    // a face within modelingTolerance of the start (no gap healing).
+    for (const occluder of [
+      { name: "partial", bodies: () => [box([1, 1, 1], [2, 2, 1.5])] },
+      { name: "curved", bodies: () => [cylinderAlongX(1.5, 1.5)] },
+      {
+        name: "sheet",
+        bodies: () => [
+          sheet([
+            [1, 1, 1],
+            [2, 1, 1],
+            [2, 2, 1],
+            [1, 2, 1],
+          ]),
+        ],
+      },
+      { name: "tilted", bodies: () => [tiltedPlate()] },
+    ]) {
+      const outcome = run(
+        await contextFor([coveringSlab(5, 6), ...occluder.bodies()]),
+        `occluder_${occluder.name}`,
+        newBodyUpToNext(positiveUpToNext),
+      );
+      expect(
+        outcome.error,
+        `An earlier ${occluder.name} occluder inside the sweep must fail closed.`,
+      ).toBe(occluderError);
+    }
+    expect(
+      run(
+        await contextFor([coveringSlab(0.0005, 1)]),
+        "near_start",
+        newBodyUpToNext(positiveUpToNext),
+      ).error,
+      "A face within tolerance above the start crosses the sweep and must fail closed.",
+    ).toBe(occluderError);
+
+    // A clean sweep whose only plane covers part of the profile never
+    // completely terminates.
+    expect(
+      run(
+        await contextFor([
+          sheet([
+            [-1, -1, 2],
+            [2, -1, 2],
+            [2, 4, 2],
+            [-1, 4, 2],
+          ]),
+        ]),
+        "half_covered",
+        newBodyUpToNext(positiveUpToNext),
+      ).error,
+      "A plane covering only part of the profile must not terminate up-to-next.",
+    ).toBe(
+      `${unsupported}OCC extrude up-to-next is not completely terminated by one plane perpendicular to the extrude direction covering the whole profile.`,
+    );
+
+    // Nearer geometry outside the profile does not terminate it (old rule: 1).
+    await expectNewBodyVolume(
+      run(
+        await contextFor([
+          coveringSlab(3, 4),
+          box([10, 0, 1], [11, 1, 2]),
+          cylinderAlongX(10, 1.5),
+        ]),
+        "off_profile",
+        newBodyUpToNext(positiveUpToNext),
+      ),
+      36,
+      "Up-to-next must ignore bodies outside the swept profile",
+    );
+
+    // A face profile with a hole: a pin inside only the hole is not met.
+    const holedPlate = (() => {
+      const cut = createBooleanBuilder(
+        oc,
+        "cut",
+        boxShape([0, 0, -1], [4, 3, 0]),
+        boxShape([1.5, 1, -1], [2.5, 2, 0]),
+      );
+      cut.Build(new oc.Message_ProgressRange_1());
+      return track(cut.Shape());
+    })();
+    const holedFaceId = holedPlate.topology.faceIds.find((faceId) => {
+      const facePlane = extractPlanarFaceData(
+        oc,
+        holedPlate.facesById.get(faceId)!,
+      );
+      return (
+        Math.abs(facePlane.frame.origin[2]) < 1e-9 &&
+        Math.abs(facePlane.frame.normal[2]) > 0.999999
+      );
+    });
+    const holedFace = holedPlate.facesById.get(holedFaceId!)!;
+    const holedDirection =
+      getExtrusionNormalForPlanarFace(oc, holedFace, "positive")[2] > 0
+        ? ("positive" as const)
+        : ("negative" as const);
+    await expectNewBodyVolume(
+      run(
+        await contextFor([
+          holedPlate,
+          coveringSlab(3, 4),
+          box([1.6, 1.1, 1], [2.4, 1.9, 3]),
+        ]),
+        "holed_face",
+        newBodyUpToNext(
+          {
+            mode: "oneSide",
+            end: { kind: "upToNext", direction: holedDirection },
+          },
+          [{ kind: "face", bodyId: holedPlate.bodyId, faceId: holedFaceId! }],
+        ),
+      ),
+      3 * (12 - 1),
+      "A body met only inside the profile's hole must not terminate up-to-next",
+    );
+
+    // twoSide: each end is proven independently.
+    expect(
+      run(
+        await contextFor([coveringSlab(2, 3)]),
+        "two_side_open",
+        newBodyUpToNext({
+          mode: "twoSide",
+          firstEnd: { kind: "upToNext", direction: "positive" },
+          secondEnd: { kind: "upToNext", direction: "negative" },
+        }),
+      ).error,
+      "A twoSide end with nothing to meet must fail even when the other end terminates.",
+    ).toBe(noTerminationError);
+    await expectNewBodyVolume(
+      run(
+        await contextFor([coveringSlab(2, 3), coveringSlab(-4, -1)]),
+        "two_side_closed",
+        newBodyUpToNext({
+          mode: "twoSide",
+          firstEnd: { kind: "upToNext", direction: "positive" },
+          secondEnd: { kind: "upToNext", direction: "negative" },
+        }),
+      ),
+      12 * (2 + 1),
+      "Each twoSide up-to-next end must stop at its own first complete plane",
+    );
+
+    // Authored offsets keep the existing arithmetic on the proven plane.
+    for (const offset of [
+      { direction: "shorten" as const, expected: 12 * 1.5 },
+      { direction: "extend" as const, expected: 12 * 2.5 },
+    ]) {
+      const outcome = run(
+        await contextFor([coveringSlab(2, 3)]),
+        `offset_${offset.direction}`,
+        newBodyUpToNext({
+          mode: "oneSide",
+          end: {
+            kind: "upToNext",
+            direction: "positive",
+            offset: {
+              distance: { source: "literal", value: 0.5 },
+              direction: offset.direction,
+            },
+          },
+        }),
+      );
+      const resolvedEnd =
+        outcome.definition.kind === "extrude" &&
+        outcome.definition.parameters.extent.mode === "oneSide" &&
+        outcome.definition.parameters.extent.end.kind === "upToNext"
+          ? outcome.definition.parameters.extent.end
+          : null;
+      expect(
+        resolvedEnd?.offset?.distance,
+        "The production value seam resolves the authored offset literal to its number.",
+      ).toBe(0.5);
+      await expectNewBodyVolume(
+        outcome,
+        offset.expected,
+        `Up-to-next ${offset.direction} offset must apply to the proven plane`,
+      );
+    }
+
+    // The proof prism is undrafted: any nonzero draft is refused, even one
+    // below the linear modeling tolerance.
+    expect(
+      run(
+        await contextFor([coveringSlab(2, 3)]),
+        "draft",
+        newBodyUpToNext({
+          mode: "oneSide",
+          end: {
+            kind: "upToNext",
+            direction: "positive",
+            draftAngle: { source: "literal", value: 1e-6 },
+          },
+        }),
+      ).error,
+      "Up-to-next must refuse a nonzero draft rather than round it to zero.",
+    ).toBe(`${unsupported}OCC extrude up-to-next with draft is not supported.`);
+
+    // A wire profile has no area whose coverage could be proven.
+    const bottomEntityId = sketch.sketch.definition.entities[0]!.entityId;
+    expect(
+      run(await contextFor([coveringSlab(2, 3)]), "surface", {
+        resultBodyType: "surface",
+        profiles: [
+          {
+            kind: "sketchEntity",
+            sketchId: sketch.sketchId,
+            entityId: bottomEntityId,
+          },
+        ],
+        startExtent: { kind: "profilePlane" },
+        extent: positiveUpToNext,
+      }).error,
+      "Surface up-to-next must be a structured unsupported case.",
+    ).toBe(`${unsupported}OCC surface extrude up-to-next is not supported.`);
+
+    // Multiple profiles of one end must share one proven terminating plane.
+    const pair = createRectangleSketch(
+      "sketch_up_to_next_pair" as SketchId,
+      plane,
+    );
+    const pairSecond = createRectangleSketch(
+      "sketch_up_to_next_pair_second" as SketchId,
+      plane,
+      { origin: [10, 0] },
+    );
+    const pairDefinition = pair.sketch.sketch.definition;
+    const secondDefinition = pairSecond.sketch.sketch.definition;
+    const secondRegion: RegionRecord = {
+      ...pairSecond.region,
+      ownerSketchId: pair.sketch.sketchId,
+      target: {
+        kind: "region",
+        sketchId: pair.sketch.sketchId,
+        regionId: pairSecond.region.regionId,
+      },
+      sourceSketch: { kind: "sketch", sketchId: pair.sketch.sketchId },
+    };
+    const twoRegionSketch = createSketchRecord(
+      pair.sketch.sketchId,
+      plane,
+      {
+        ...pairDefinition,
+        pointIds: [...pairDefinition.pointIds, ...secondDefinition.pointIds],
+        points: [...pairDefinition.points, ...secondDefinition.points],
+        entityIds: [...pairDefinition.entityIds, ...secondDefinition.entityIds],
+        entities: [...pairDefinition.entities, ...secondDefinition.entities],
+      },
+      [
+        ...pair.sketch.sketch.solvedSnapshot.solvedEntities,
+        ...pairSecond.sketch.sketch.solvedSnapshot.solvedEntities,
+      ],
+      [pair.region, secondRegion],
+    );
+    const twoRegionProfiles = [
+      {
+        kind: "region",
+        sketchId: pair.sketch.sketchId,
+        regionId: pair.region.regionId,
+      },
+      {
+        kind: "region",
+        sketchId: pair.sketch.sketchId,
+        regionId: secondRegion.regionId,
+      },
+    ] as const;
+    await expectNewBodyVolume(
+      run(
+        await contextFor(
+          [coveringSlab(2, 3), box([9, -1, 2], [15, 4, 3])],
+          [twoRegionSketch],
+        ),
+        "regions_one_plane",
+        newBodyUpToNext(positiveUpToNext, twoRegionProfiles),
+      ),
+      24 + 24,
+      "Regions of one sketch terminating on one plane must succeed",
+    );
+    expect(
+      run(
+        await contextFor(
+          [coveringSlab(2, 3), box([9, -1, 3], [15, 4, 4])],
+          [twoRegionSketch],
+        ),
+        "regions_two_planes",
+        newBodyUpToNext(positiveUpToNext, twoRegionProfiles),
+      ).error,
+      "Regions of one end terminating on distinct planes must fail closed.",
+    ).toBe(onePlaneError);
+    const otherSketch = createRectangleSketch(
+      "sketch_up_to_next_other" as SketchId,
+      plane,
+      { origin: [10, 0] },
+    );
+    expect(
+      run(
+        await contextFor(
+          [coveringSlab(2, 3), box([9, -1, 2], [15, 4, 3])],
+          [sketch, otherSketch.sketch],
+        ),
+        "mixed_sketches",
+        newBodyUpToNext(positiveUpToNext, [
+          regionProfile,
+          {
+            kind: "region",
+            sketchId: otherSketch.sketch.sketchId,
+            regionId: otherSketch.region.regionId,
+          },
+        ]),
+      ).error,
+      "Up-to-next profiles of one end from different sketches must fail closed.",
+    ).toBe(onePlaneError);
+  }
+
   async function testExtrudeStartExtentBoundToDurableEntity() {
     const oc = await getDefaultOpenCascadeInstance();
     const sourceBody = await makeBoxBody(
@@ -2475,14 +3046,16 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
       booleanScope: { kind: "standalone" as const },
     };
 
-    // Two bodies present coincident nearest faces (both near faces at z=2).
-    // "Up to next" terminates at that shared plane deterministically — coincident
-    // faces from different bodies produce identical geometry, so this is not an
-    // ambiguous selection and must succeed rather than diagnose an error.
-    let coincidentError: string | null = null;
-    let coincidentBodyCount = 0;
+    // Partial coverage: box A covers only a 1x1 corner of the 4x3 profile at
+    // z=2 and box B only touches the profile's x=4 boundary edge. The old
+    // whole-body projection rule stopped at z=2 and succeeded, although 11/12
+    // of the profile meets nothing there; Onshape documents that an up-to-next
+    // extrude which does not completely terminate fails. At z=2 part of the cap
+    // is uncovered, and at z=3 box A lies inside the sweep, so this is the
+    // specific structured occluder case rather than a success.
+    let partialCoverageError: string | null = null;
     try {
-      const result = executeOccFeature(
+      executeOccFeature(
         ambiguousContext,
         "feature_phase4_extrude_ambiguous_up_to_next" as FeatureId,
         {
@@ -2497,9 +3070,9 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
           },
         },
       );
-      coincidentBodyCount = result.bodies.length;
     } catch (error) {
-      coincidentError = error instanceof Error ? error.message : String(error);
+      partialCoverageError =
+        error instanceof Error ? error.message : String(error);
     }
 
     let missingExtrudeTarget: string | null = null;
@@ -2525,13 +3098,11 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     }
 
     expect(
-      coincidentError,
-      "Extrude up-to-next should terminate deterministically at coincident nearest faces.",
-    ).toBeNull();
-    expect(
-      coincidentBodyCount,
-      "Extrude up-to-next at a coincident termination plane should produce a body.",
-    ).toBeGreaterThan(0);
+      partialCoverageError,
+      "Extrude up-to-next that does not completely terminate the profile must fail closed.",
+    ).toBe(
+      "advanced-feature-unsupported-kernel-case: OCC extrude up-to-next meets geometry inside the swept profile before a complete terminating plane.",
+    );
     expect(
       missingExtrudeTarget?.includes(
         "advanced-feature-unsupported-kernel-case",
@@ -4987,6 +5558,7 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
   await testExtrudePublishesSemanticPrismHistoryProvenance();
   await testMultiProfileFusePublishesStableCompositeFaceProvenance();
   await testExtrudeUpToNextSkipsCoplanarStartFace();
+  await testExtrudeUpToNextProvesFirstCompleteTerminatingPlane();
   await testExtrudeStartExtentBoundToDurableEntity();
   await testExtrudeBlindStartOffsetIsSignedAlongExtrudeDirection();
   await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds();
