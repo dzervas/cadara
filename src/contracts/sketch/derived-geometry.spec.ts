@@ -1,5 +1,6 @@
 import { test, expect } from "vitest";
 
+import type { SketchPointId } from "@/contracts/shared/ids";
 import type {
   SketchDefinition,
   SketchDerivationDefinition,
@@ -688,6 +689,47 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
     "Recompute should keep output entity identities stable.",
   ).toEqual(initial.definition.entities.map((entry) => entry.entityId));
 
+  const variation = {
+    points: {
+      a: [0.2, -0.4] as const,
+      b: [0.7, 0.3] as const,
+      c: [-0.1, 0.6] as const,
+    },
+  };
+  const differential = evaluateSketchDerivationJvp(
+    initial.definition,
+    variation,
+  );
+  const cotangent = {
+    points: {
+      o1s: [0.8, -0.2] as const,
+      o1e: [-0.3, 0.9] as const,
+      o2s: [0.5, 0.4] as const,
+      o2e: [-0.6, 0.1] as const,
+    },
+  };
+  const pulled = prepareSketchDerivationPullback(initial.definition)(cotangent);
+  const dot = (left: SketchPoint2D, right: SketchPoint2D) =>
+    left[0] * right[0] + left[1] * right[1];
+  const forwardDot = Object.entries(cotangent.points).reduce(
+    (sum, [pointId, value]) =>
+      sum + dot(differential.points[pointId as SketchPointId]!, value),
+    0,
+  );
+  const reverseDot = Object.entries(variation.points).reduce(
+    (sum, [pointId, value]) =>
+      sum + dot(pulled.points?.[pointId as SketchPointId] ?? [0, 0], value),
+    0,
+  );
+  expect(
+    reverseDot,
+    "Offset pullback should be the transpose of the analytic owner JVP.",
+  ).toBeCloseTo(forwardDot, 9);
+  expect(
+    pulled.points?.o1e,
+    "Offset output slots must not receive authority cotangents.",
+  ).toBeUndefined();
+
   const distanceEdited = evaluateSketchDerivations(
     makeOffsetDefinition({ bX: 4, distance: 0.5 }),
   );
@@ -726,6 +768,155 @@ test("evaluateSketchDerivations recomputes offset chains from seed edits with st
     [0, 0],
     "Unresolved distances should keep outputs in their last resolvable state.",
   );
+});
+
+test("offset derivatives compose through transform relationships in both directions", () => {
+  const definition = makeSketchDefinition({
+    points: [
+      makePoint("a", [0, 0]),
+      makePoint("b", [2, 0]),
+      makePoint("offset_a", [0, 0]),
+      makePoint("offset_b", [0, 0]),
+      makePoint("offset_transform_a", [0, 0]),
+      makePoint("offset_transform_b", [0, 0]),
+      makePoint("c", [0, 3]),
+      makePoint("d", [2, 3]),
+      makePoint("transform_a", [0, 0]),
+      makePoint("transform_b", [0, 0]),
+      makePoint("transform_offset_a", [0, 0]),
+      makePoint("transform_offset_b", [0, 0]),
+    ],
+    entities: [
+      makeLine("seed_ab", "a", "b"),
+      makeLine("offset_ab", "offset_a", "offset_b"),
+      makeLine(
+        "offset_transform_ab",
+        "offset_transform_a",
+        "offset_transform_b",
+      ),
+      makeLine("seed_cd", "c", "d"),
+      makeLine("transform_cd", "transform_a", "transform_b"),
+      makeLine(
+        "transform_offset_cd",
+        "transform_offset_a",
+        "transform_offset_b",
+      ),
+    ],
+    derivedRelationships: [
+      makeRelationship({
+        kind: "offset",
+        derivationId: "sketch_derivation_compose_offset_first",
+        label: "offset first",
+        seedEntityIds: ["seed_ab"],
+        distance: 0.5,
+        jointPolicy: "trimExtendArcFallback",
+        jointOutputs: [],
+        outputs: [
+          {
+            seedEntityId: "seed_ab",
+            outputEntityId: "offset_ab",
+            instanceIndex: 1,
+            seedPointIds: ["a", "b"],
+            outputPointIds: ["offset_a", "offset_b"],
+          },
+        ],
+      } as SketchDerivationDefinition),
+      makeRelationship({
+        kind: "transform",
+        derivationId: "sketch_derivation_compose_transform_second",
+        label: "transform second",
+        seedEntityIds: ["offset_ab"],
+        translation: [2, 0],
+        rotationRadians: 0,
+        scale: 1,
+        origin: [0, 0],
+        outputs: [
+          {
+            seedEntityId: "offset_ab",
+            outputEntityId: "offset_transform_ab",
+            instanceIndex: 1,
+            seedPointIds: ["offset_a", "offset_b"],
+            outputPointIds: ["offset_transform_a", "offset_transform_b"],
+          },
+        ],
+      } as SketchDerivationDefinition),
+      makeRelationship({
+        kind: "transform",
+        derivationId: "sketch_derivation_compose_transform_first",
+        label: "transform first",
+        seedEntityIds: ["seed_cd"],
+        translation: [1, 0],
+        rotationRadians: 0,
+        scale: 1,
+        origin: [0, 0],
+        outputs: [
+          {
+            seedEntityId: "seed_cd",
+            outputEntityId: "transform_cd",
+            instanceIndex: 1,
+            seedPointIds: ["c", "d"],
+            outputPointIds: ["transform_a", "transform_b"],
+          },
+        ],
+      } as SketchDerivationDefinition),
+      makeRelationship({
+        kind: "offset",
+        derivationId: "sketch_derivation_compose_offset_second",
+        label: "offset second",
+        seedEntityIds: ["transform_cd"],
+        distance: -0.25,
+        jointPolicy: "trimExtendArcFallback",
+        jointOutputs: [],
+        outputs: [
+          {
+            seedEntityId: "transform_cd",
+            outputEntityId: "transform_offset_cd",
+            instanceIndex: 1,
+            seedPointIds: ["transform_a", "transform_b"],
+            outputPointIds: ["transform_offset_a", "transform_offset_b"],
+          },
+        ],
+      } as SketchDerivationDefinition),
+    ],
+  });
+  const evaluated = evaluateSketchDerivations(definition).definition;
+  const variation = {
+    points: {
+      a: [0.2, -0.1] as const,
+      b: [0.4, 0.3] as const,
+      c: [-0.3, 0.5] as const,
+      d: [0.6, -0.2] as const,
+    },
+  };
+  const jvp = evaluateSketchDerivationJvp(evaluated, variation);
+  const cotangent = {
+    points: {
+      offset_transform_a: [0.7, -0.4] as const,
+      offset_transform_b: [-0.2, 0.8] as const,
+      transform_offset_a: [0.3, 0.6] as const,
+      transform_offset_b: [-0.9, 0.1] as const,
+    },
+  };
+  const pulled = prepareSketchDerivationPullback(evaluated)(cotangent);
+  const dot = (left: SketchPoint2D, right: SketchPoint2D) =>
+    left[0] * right[0] + left[1] * right[1];
+  const forward = Object.entries(cotangent.points).reduce(
+    (sum, [pointId, value]) =>
+      sum + dot(jvp.points[pointId as SketchPointId]!, value),
+    0,
+  );
+  const reverse = Object.entries(variation.points).reduce(
+    (sum, [pointId, value]) =>
+      sum + dot(pulled.points?.[pointId as SketchPointId] ?? [0, 0], value),
+    0,
+  );
+  expect(reverse).toBeCloseTo(forward, 9);
+  for (const pointId of Object.keys(cotangent.points)) {
+    expect(
+      pulled.points?.[pointId as SketchPointId],
+      `${pointId} must remain a driven output rather than pullback authority.`,
+    ).toBeUndefined();
+  }
 });
 
 test("evaluateSketchDerivations maintains offset joint arcs and reports structured offset diagnostics", () => {
@@ -812,6 +1003,14 @@ test("evaluateSketchDerivations maintains offset joint arcs and reports structur
     pointPosition(arcJoined.definition, "o2s"),
     [5, 0],
     "The joint arc end should sit at the second segment's offset start.",
+  );
+  const jointDifferential = evaluateSketchDerivationJvp(arcJoined.definition, {
+    points: { b: [0.4, -0.3] },
+  });
+  assertPoint(
+    jointDifferential.points.joint_center!,
+    [0.4, -0.3],
+    "Committed joint centers should carry the shared seed vertex differential.",
   );
 
   const topologyFlip = evaluateSketchDerivations(makeJointDefinition(1));
@@ -928,6 +1127,87 @@ function entity(
   ).toBeTruthy();
   return candidate;
 }
+
+test("circle scalar derivatives compose transitively and pull back only to source authority", () => {
+  const definition = evaluateSketchDerivations(
+    makeSketchDefinition({
+      points: [
+        makePoint("circle_seed_center", [0, 0]),
+        makePoint("circle_offset_center", [0, 0]),
+        makePoint("circle_transform_center", [0, 0]),
+      ],
+      entities: [
+        makeCircle("circle_seed", "circle_seed_center", 2),
+        makeCircle("circle_offset", "circle_offset_center", 1),
+        makeCircle("circle_transform", "circle_transform_center", 2),
+      ],
+      derivedRelationships: [
+        makeRelationship({
+          kind: "offset",
+          derivationId: "circle_scalar_offset",
+          label: "Circle scalar offset",
+          seedEntityIds: ["circle_seed"],
+          distance: 1,
+          jointPolicy: "trimExtendArcFallback",
+          jointOutputs: [],
+          outputs: [
+            {
+              seedEntityId: "circle_seed",
+              outputEntityId: "circle_offset",
+              instanceIndex: 1,
+              seedPointIds: ["circle_seed_center"],
+              outputPointIds: ["circle_offset_center"],
+            },
+          ],
+        } as SketchDerivationDefinition),
+        makeRelationship({
+          kind: "transform",
+          derivationId: "circle_scalar_transform",
+          label: "Circle scalar transform",
+          seedEntityIds: ["circle_offset"],
+          translation: [0, 0],
+          rotationRadians: 0,
+          scale: 2,
+          origin: [0, 0],
+          outputs: [
+            {
+              seedEntityId: "circle_offset",
+              outputEntityId: "circle_transform",
+              instanceIndex: 1,
+              seedPointIds: ["circle_offset_center"],
+              outputPointIds: ["circle_transform_center"],
+            },
+          ],
+        } as SketchDerivationDefinition),
+      ],
+    }),
+  ).definition;
+  const variation = {
+    entities: {
+      circle_seed: { kind: "circle" as const, radius: 0.3 },
+    },
+  };
+  const jvp = evaluateSketchDerivationJvp(definition, variation);
+  expect(jvp.entities.circle_offset).toEqual({ kind: "circle", radius: 0.3 });
+  expect(jvp.entities.circle_transform).toEqual({
+    kind: "circle",
+    radius: 0.6,
+  });
+
+  const cotangent = {
+    entities: {
+      circle_transform: { kind: "circle" as const, radius: 1.5 },
+    },
+  };
+  const pulled = prepareSketchDerivationPullback(definition)(cotangent);
+  const forward = 1.5 * (jvp.entities.circle_transform?.radius ?? 0);
+  const reverse =
+    variation.entities.circle_seed.radius *
+    (pulled.entities?.circle_seed?.radius ?? 0);
+  expect(reverse).toBeCloseTo(forward, 10);
+  expect(pulled.entities?.circle_offset).toBeUndefined();
+  expect(pulled.entities?.circle_transform).toBeUndefined();
+});
 
 function makeSketchDefinition(overrides: {
   points: SketchPointDefinition[];

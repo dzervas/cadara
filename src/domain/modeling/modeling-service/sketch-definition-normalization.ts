@@ -133,6 +133,35 @@ export function normalizeConstraintDefinitionCore(
     };
   }
 
+  if (value.kind === "equalOffset") {
+    if (!Array.isArray(value.pairs) || value.pairs.length !== 2) {
+      throw new Error("Invalid equal-offset constraint payload.");
+    }
+
+    const pairs = value.pairs.map((pair) => {
+      if (
+        !isRecord(pair) ||
+        !isString(pair.seedEntityId) ||
+        !isString(pair.offsetEntityId) ||
+        (pair.side !== "left" && pair.side !== "right")
+      ) {
+        throw new Error("Invalid equal-offset pair payload.");
+      }
+      return {
+        seedEntityId: assertSketchEntityId(pair.seedEntityId),
+        offsetEntityId: assertSketchEntityId(pair.offsetEntityId),
+        side: pair.side as "left" | "right",
+      };
+    });
+
+    return {
+      constraintId: assertConstraintId(value.constraintId),
+      kind: "equalOffset",
+      label: value.label,
+      pairs: [pairs[0]!, pairs[1]!],
+    };
+  }
+
   if (
     value.kind === "parallel" ||
     value.kind === "perpendicular" ||
@@ -415,7 +444,7 @@ export function normalizeDimensionDefinitionCore(
         value.axis !== "vertical") ||
       !Array.isArray(value.pointIds) ||
       value.pointIds.length !== 2 ||
-      !isAuthoredValue(value.value) && typeof value.value !== "number"
+      (!isAuthoredValue(value.value) && typeof value.value !== "number")
     ) {
       throw new Error("Invalid distance dimension payload.");
     }
@@ -437,7 +466,10 @@ export function normalizeDimensionDefinitionCore(
   }
 
   if (value.kind === "circleRadius") {
-    if (!isString(value.entityId) || !isAuthoredValue(value.value) && typeof value.value !== "number") {
+    if (
+      !isString(value.entityId) ||
+      (!isAuthoredValue(value.value) && typeof value.value !== "number")
+    ) {
       throw new Error("Invalid circle radius dimension payload.");
     }
 
@@ -454,7 +486,10 @@ export function normalizeDimensionDefinitionCore(
   }
 
   if (value.kind === "diameter") {
-    if (!isString(value.entityId) || !isAuthoredValue(value.value) && typeof value.value !== "number") {
+    if (
+      !isString(value.entityId) ||
+      (!isAuthoredValue(value.value) && typeof value.value !== "number")
+    ) {
       throw new Error("Invalid diameter dimension payload.");
     }
 
@@ -471,7 +506,10 @@ export function normalizeDimensionDefinitionCore(
   }
 
   if (value.kind === "lineLength") {
-    if (!isString(value.entityId) || !isAuthoredValue(value.value) && typeof value.value !== "number") {
+    if (
+      !isString(value.entityId) ||
+      (!isAuthoredValue(value.value) && typeof value.value !== "number")
+    ) {
       throw new Error("Invalid line length dimension payload.");
     }
 
@@ -512,7 +550,10 @@ export function normalizeDimensionDefinitionCore(
       };
     }
 
-    if (!isAuthoredValue(value.valueRadians) && typeof value.valueRadians !== "number") {
+    if (
+      !isAuthoredValue(value.valueRadians) &&
+      typeof value.valueRadians !== "number"
+    ) {
       throw new Error("Invalid line angle dimension payload.");
     }
 
@@ -535,7 +576,7 @@ export function normalizeDimensionDefinitionCore(
     if (
       !isRecord(value.line) ||
       !isRecord(value.point) ||
-      !isAuthoredValue(value.value) && typeof value.value !== "number"
+      (!isAuthoredValue(value.value) && typeof value.value !== "number")
     ) {
       throw new Error("Invalid point-line distance dimension payload.");
     }
@@ -560,7 +601,7 @@ export function normalizeDimensionDefinitionCore(
     if (
       !Array.isArray(value.pointIds) ||
       value.pointIds.length !== 2 ||
-      !isAuthoredValue(value.value) && typeof value.value !== "number"
+      (!isAuthoredValue(value.value) && typeof value.value !== "number")
     ) {
       throw new Error("Invalid directional distance dimension payload.");
     }

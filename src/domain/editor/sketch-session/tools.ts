@@ -2016,6 +2016,12 @@ export function getConstraintDedupeKey(
   switch (constraint.kind) {
     case "coincident":
       return `${constraint.kind}:${[...constraint.pointIds].sort().join(":")}`;
+    case "equalOffset":
+      return `${constraint.kind}:${constraint.pairs
+        .map(
+          (pair) => `${pair.seedEntityId}:${pair.offsetEntityId}:${pair.side}`,
+        )
+        .join(":")}`;
     case "parallel":
     case "perpendicular":
     case "equalLength":

@@ -126,6 +126,7 @@ function getSketchConstraintToolIcon(
       return "constraintCollinear";
     case "parallel":
     case "parallelProjectedLine":
+    case "equalOffset":
       return "constraintParallel";
     case "perpendicular":
     case "perpendicularProjectedLine":

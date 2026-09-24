@@ -87,6 +87,11 @@ export function getConstraintAffectedGeometryRefs(
     case "horizontal":
     case "vertical":
       return [createSketchEntityRef(sketchId, constraint.entityId)];
+    case "equalOffset":
+      return constraint.pairs.flatMap((pair) => [
+        createSketchEntityRef(sketchId, pair.seedEntityId),
+        createSketchEntityRef(sketchId, pair.offsetEntityId),
+      ]);
     case "parallel":
     case "perpendicular":
     case "equalLength":

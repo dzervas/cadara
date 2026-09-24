@@ -566,6 +566,15 @@ export interface SketchStyleRecord {
  * Durable authored geometric constraint definition.
  * The editor may author these; the solver owns their satisfaction status.
  */
+export interface SketchOffsetPair {
+  /** Existing line whose solved direction defines the pair's signed normal. */
+  seedEntityId: SketchEntityId;
+  /** Existing line constrained to remain at the shared offset from the seed. */
+  offsetEntityId: SketchEntityId;
+  /** Authored side of the seed direction used to normalize signed distance. */
+  side: "left" | "right";
+}
+
 export type ConstraintDefinition =
   | {
       constraintId: ConstraintId;
@@ -800,6 +809,14 @@ export type ConstraintDefinition =
       label: string;
       /** Two line entities whose solved lengths must match. */
       entityIds: readonly [SketchEntityId, SketchEntityId];
+    }
+  | {
+      constraintId: ConstraintId;
+      kind: "equalOffset";
+      /** Human-readable label owned by the producer of the sketch definition. */
+      label: string;
+      /** Exactly two existing line pairs whose side-normalized offsets must match. */
+      pairs: readonly [SketchOffsetPair, SketchOffsetPair];
     }
   | {
       constraintId: ConstraintId;

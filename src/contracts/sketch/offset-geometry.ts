@@ -36,6 +36,7 @@ export const OFFSET_DIAGNOSTIC_CODES = {
   unsupportedSeed: "derived-offset-unsupported-seed",
   unresolvedDistance: "derived-offset-unresolved-distance",
   jointUnsatisfied: "derived-offset-joint-unsatisfied",
+  derivativeUnavailable: "derived-offset-derivative-unavailable",
 } as const;
 
 export type OffsetDiagnosticCode =
@@ -139,6 +140,66 @@ export interface OffsetChainFailure {
 
 export type OffsetChainResult = OffsetChainSuccess | OffsetChainFailure;
 
+export type OffsetSeedCurveVariation =
+  | {
+      kind: "lineSegment";
+      start: SketchPoint2D;
+      end: SketchPoint2D;
+    }
+  | {
+      kind: "circle";
+      center: SketchPoint2D;
+      radius: number;
+    }
+  | {
+      kind: "arc";
+      center: SketchPoint2D;
+      start: SketchPoint2D;
+      end: SketchPoint2D;
+    }
+  | {
+      kind: "spline";
+      points: readonly SketchPoint2D[];
+    };
+
+export type OffsetSegmentVariation =
+  | {
+      kind: "lineSegment";
+      seedEntityId: SketchEntityId;
+      start: SketchPoint2D;
+      end: SketchPoint2D;
+    }
+  | {
+      kind: "circle";
+      seedEntityId: SketchEntityId;
+      center: SketchPoint2D;
+      radius: number;
+    }
+  | {
+      kind: "arc";
+      seedEntityId: SketchEntityId;
+      center: SketchPoint2D;
+      start: SketchPoint2D;
+      end: SketchPoint2D;
+      radius: number;
+    };
+
+export interface OffsetJointVariation {
+  firstSeedEntityId: SketchEntityId;
+  secondSeedEntityId: SketchEntityId;
+  center: SketchPoint2D;
+  start: SketchPoint2D;
+  end: SketchPoint2D;
+}
+
+export type OffsetChainJvpResult =
+  | {
+      ok: true;
+      segments: readonly OffsetSegmentVariation[];
+      joints: readonly OffsetJointVariation[];
+    }
+  | OffsetChainFailure;
+
 function add(left: SketchPoint2D, right: SketchPoint2D): SketchPoint2D {
   return [left[0] + right[0], left[1] + right[1]];
 }
@@ -179,6 +240,128 @@ function leftNormal(vector: SketchPoint2D): SketchPoint2D | null {
 
 function midpoint(left: SketchPoint2D, right: SketchPoint2D): SketchPoint2D {
   return [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2];
+}
+
+function normalizedDifferential(
+  vector: SketchPoint2D,
+  differential: SketchPoint2D,
+): SketchPoint2D | null {
+  const unit = normalize(vector);
+  const magnitude = Math.hypot(vector[0], vector[1]);
+  if (!unit || magnitude <= EPSILON) return null;
+  const along = dot(unit, differential);
+  return [
+    (differential[0] - unit[0] * along) / magnitude,
+    (differential[1] - unit[1] * along) / magnitude,
+  ];
+}
+
+function solveDifferentialSystem(
+  firstRow: SketchPoint2D,
+  secondRow: SketchPoint2D,
+  firstValue: number,
+  secondValue: number,
+): SketchPoint2D | null {
+  const determinant = cross(firstRow, secondRow);
+  if (Math.abs(determinant) <= EPSILON) return null;
+  return [
+    (firstValue * secondRow[1] - firstRow[1] * secondValue) / determinant,
+    (firstRow[0] * secondValue - firstValue * secondRow[0]) / determinant,
+  ];
+}
+
+function lineCircleIntersectionDifferential(input: {
+  intersection: SketchPoint2D;
+  lineStart: SketchPoint2D;
+  lineEnd: SketchPoint2D;
+  center: SketchPoint2D;
+  radius: number;
+  lineStartVariation: SketchPoint2D;
+  lineEndVariation: SketchPoint2D;
+  centerVariation: SketchPoint2D;
+  radiusVariation: number;
+}): SketchPoint2D | null {
+  const direction = subtract(input.lineEnd, input.lineStart);
+  const directionVariation = subtract(
+    input.lineEndVariation,
+    input.lineStartVariation,
+  );
+  const fromStart = subtract(input.intersection, input.lineStart);
+  const radial = subtract(input.intersection, input.center);
+  return solveDifferentialSystem(
+    [-direction[1], direction[0]],
+    radial,
+    cross(direction, input.lineStartVariation) -
+      cross(directionVariation, fromStart),
+    dot(radial, input.centerVariation) + input.radius * input.radiusVariation,
+  );
+}
+
+function circleCircleIntersectionDifferential(input: {
+  intersection: SketchPoint2D;
+  firstCenter: SketchPoint2D;
+  firstRadius: number;
+  secondCenter: SketchPoint2D;
+  secondRadius: number;
+  firstCenterVariation: SketchPoint2D;
+  firstRadiusVariation: number;
+  secondCenterVariation: SketchPoint2D;
+  secondRadiusVariation: number;
+}): SketchPoint2D | null {
+  const firstRadial = subtract(input.intersection, input.firstCenter);
+  const secondRadial = subtract(input.intersection, input.secondCenter);
+  return solveDifferentialSystem(
+    firstRadial,
+    secondRadial,
+    dot(firstRadial, input.firstCenterVariation) +
+      input.firstRadius * input.firstRadiusVariation,
+    dot(secondRadial, input.secondCenterVariation) +
+      input.secondRadius * input.secondRadiusVariation,
+  );
+}
+
+function lineIntersectionDifferential(input: {
+  start: SketchPoint2D;
+  end: SketchPoint2D;
+  otherStart: SketchPoint2D;
+  otherEnd: SketchPoint2D;
+  startVariation: SketchPoint2D;
+  endVariation: SketchPoint2D;
+  otherStartVariation: SketchPoint2D;
+  otherEndVariation: SketchPoint2D;
+}): SketchPoint2D | null {
+  const direction = subtract(input.end, input.start);
+  const otherDirection = subtract(input.otherEnd, input.otherStart);
+  const directionVariation = subtract(input.endVariation, input.startVariation);
+  const otherDirectionVariation = subtract(
+    input.otherEndVariation,
+    input.otherStartVariation,
+  );
+  const separation = subtract(input.otherStart, input.start);
+  const separationVariation = subtract(
+    input.otherStartVariation,
+    input.startVariation,
+  );
+  const denominator = cross(direction, otherDirection);
+  if (Math.abs(denominator) <= EPSILON) return null;
+  const numerator = cross(separation, otherDirection);
+  const denominatorVariation =
+    cross(directionVariation, otherDirection) +
+    cross(direction, otherDirectionVariation);
+  const numeratorVariation =
+    cross(separationVariation, otherDirection) +
+    cross(separation, otherDirectionVariation);
+  const parameter = numerator / denominator;
+  const parameterVariation =
+    (numeratorVariation * denominator - numerator * denominatorVariation) /
+    (denominator * denominator);
+  return add(
+    input.startVariation,
+    add(
+      scale(directionVariation, parameter),
+      scale(direction, parameterVariation),
+    ),
+  );
 }
 
 /** Offsets both endpoints of a line to the left of start->end by `distance`. */
@@ -1064,6 +1247,496 @@ export function computeOffsetChain(input: {
     segments,
     joints,
   };
+}
+
+/**
+ * Evaluates the analytic directional derivative of `computeOffsetChain` while
+ * retaining its resolved topology. This bounded owner supports exact
+ * line/circle/arc segments, line-line trim intersections, and committed arc
+ * joins. Spline offsets are intentionally rejected here: the current spline
+ * offset is a fit-point-polyline approximation, not the authoritative neutral
+ * cubic spline geometry, so it cannot become solver derivative authority.
+ */
+export function computeOffsetChainJvp(input: {
+  curves: readonly OffsetSeedCurve[];
+  curveVariations: readonly OffsetSeedCurveVariation[];
+  distance: number;
+  distanceVariation?: number;
+  splineFitPointCounts?: ReadonlyMap<SketchEntityId, number>;
+}): OffsetChainJvpResult {
+  if (input.curves.length !== input.curveVariations.length) {
+    return failure(
+      OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+      "Offset derivative inputs do not match the seed chain.",
+    );
+  }
+  if (input.curves.some((curve) => curve.kind === "spline")) {
+    return failure(
+      OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+      "Spline offset derivatives require the authoritative neutral-cubic offset owner.",
+      input.curves.find((curve) => curve.kind === "spline")!.seedEntityId,
+    );
+  }
+  const primal = computeOffsetChain(input);
+  if (!primal.ok) return primal;
+
+  const distanceVariation = input.distanceVariation ?? 0;
+  const variationBySeed = new Map<SketchEntityId, OffsetSeedCurveVariation>();
+  input.curves.forEach((curve, index) => {
+    variationBySeed.set(curve.seedEntityId, input.curveVariations[index]!);
+  });
+  const reversedBySeed = new Map(
+    primal.order.map((entry) => [entry.seedEntityId, entry.reversed] as const),
+  );
+  const segmentVariations: OffsetSegmentVariation[] = [];
+
+  for (const segment of primal.segments) {
+    const curve = input.curves.find(
+      (candidate) => candidate.seedEntityId === segment.seedEntityId,
+    );
+    const variation = variationBySeed.get(segment.seedEntityId);
+    if (!curve || !variation || curve.kind !== variation.kind) {
+      return failure(
+        OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+        "Offset derivative seed geometry is inconsistent.",
+        segment.seedEntityId,
+      );
+    }
+    const reversed = reversedBySeed.get(segment.seedEntityId) ?? false;
+    const effectiveDistance = reversed ? -input.distance : input.distance;
+    const effectiveDistanceVariation = reversed
+      ? -distanceVariation
+      : distanceVariation;
+
+    if (
+      curve.kind === "lineSegment" &&
+      variation.kind === "lineSegment" &&
+      segment.kind === "lineSegment"
+    ) {
+      const direction = subtract(curve.end, curve.start);
+      const directionVariation = subtract(variation.end, variation.start);
+      const unit = normalize(direction);
+      const unitVariation = normalizedDifferential(
+        direction,
+        directionVariation,
+      );
+      if (!unit || !unitVariation) {
+        return failure(
+          OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+          "Offset line derivative is singular.",
+          curve.seedEntityId,
+        );
+      }
+      const normal: SketchPoint2D = [-unit[1], unit[0]];
+      const normalVariation: SketchPoint2D = [
+        -unitVariation[1],
+        unitVariation[0],
+      ];
+      const offsetVariation = add(
+        scale(normalVariation, effectiveDistance),
+        scale(normal, effectiveDistanceVariation),
+      );
+      segmentVariations.push({
+        kind: "lineSegment",
+        seedEntityId: curve.seedEntityId,
+        start: add(variation.start, offsetVariation),
+        end: add(variation.end, offsetVariation),
+      });
+      continue;
+    }
+
+    if (
+      curve.kind === "circle" &&
+      variation.kind === "circle" &&
+      segment.kind === "circle"
+    ) {
+      segmentVariations.push({
+        kind: "circle",
+        seedEntityId: curve.seedEntityId,
+        center: variation.center,
+        radius: variation.radius - distanceVariation,
+      });
+      continue;
+    }
+
+    if (
+      curve.kind === "arc" &&
+      variation.kind === "arc" &&
+      segment.kind === "arc"
+    ) {
+      const startRelative = subtract(curve.start, curve.center);
+      const startRelativeVariation = subtract(
+        variation.start,
+        variation.center,
+      );
+      const startUnit = normalize(startRelative);
+      const startUnitVariation = normalizedDifferential(
+        startRelative,
+        startRelativeVariation,
+      );
+      const endRelative = subtract(curve.end, curve.center);
+      const endRelativeVariation = subtract(variation.end, variation.center);
+      const endUnit = normalize(endRelative);
+      const endUnitVariation = normalizedDifferential(
+        endRelative,
+        endRelativeVariation,
+      );
+      if (!startUnit || !startUnitVariation || !endUnit || !endUnitVariation) {
+        return failure(
+          OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+          "Offset arc derivative is singular.",
+          curve.seedEntityId,
+        );
+      }
+      const radius = Math.hypot(startRelative[0], startRelative[1]);
+      const radiusVariation = dot(startUnit, startRelativeVariation);
+      const traversalSweep = reversed
+        ? flipSweep(curve.sweepDirection)
+        : curve.sweepDirection;
+      const sign = traversalSweep === "counterClockwise" ? -1 : 1;
+      const shifted = radius + sign * input.distance;
+      const shiftedVariation = radiusVariation + sign * distanceVariation;
+      const endpointVariation = (
+        unit: SketchPoint2D,
+        unitVariation: SketchPoint2D,
+      ): SketchPoint2D =>
+        add(
+          variation.center,
+          add(scale(unitVariation, shifted), scale(unit, shiftedVariation)),
+        );
+      segmentVariations.push({
+        kind: "arc",
+        seedEntityId: curve.seedEntityId,
+        center: variation.center,
+        start: endpointVariation(startUnit, startUnitVariation),
+        end: endpointVariation(endUnit, endUnitVariation),
+        radius: shiftedVariation,
+      });
+      continue;
+    }
+
+    return failure(
+      OFFSET_DIAGNOSTIC_CODES.unsupportedSeed,
+      "Offset derivative output no longer matches its seed geometry.",
+      segment.seedEntityId,
+    );
+  }
+
+  const segmentVariationBySeed = new Map(
+    segmentVariations.map(
+      (segment) => [segment.seedEntityId, segment] as const,
+    ),
+  );
+  const rawSegmentVariationBySeed = new Map(
+    segmentVariations.map(
+      (segment) =>
+        [
+          segment.seedEntityId,
+          segment.kind === "lineSegment"
+            ? {
+                ...segment,
+                start: [...segment.start] as SketchPoint2D,
+                end: [...segment.end] as SketchPoint2D,
+              }
+            : segment,
+        ] as const,
+    ),
+  );
+  const segmentBySeed = new Map(
+    primal.segments.map((segment) => [segment.seedEntityId, segment] as const),
+  );
+  const rawSegmentBySeed = new Map<SketchEntityId, OffsetSegmentGeometry>();
+  for (const curve of input.curves) {
+    const reversed = reversedBySeed.get(curve.seedEntityId) ?? false;
+    const effective = reversed ? -input.distance : input.distance;
+    if (curve.kind === "lineSegment") {
+      const offset = offsetLinePoints(curve.start, curve.end, effective);
+      if (offset) {
+        rawSegmentBySeed.set(curve.seedEntityId, {
+          kind: "lineSegment",
+          seedEntityId: curve.seedEntityId,
+          ...offset,
+        });
+      }
+    } else if (curve.kind === "arc") {
+      const traversalSweep = reversed
+        ? flipSweep(curve.sweepDirection)
+        : curve.sweepDirection;
+      const radius = distanceBetween(curve.center, curve.start);
+      const shifted =
+        traversalSweep === "counterClockwise"
+          ? radius - input.distance
+          : radius + input.distance;
+      const start = scalePointFromCenter(curve.center, curve.start, shifted);
+      const end = scalePointFromCenter(curve.center, curve.end, shifted);
+      if (start && end) {
+        rawSegmentBySeed.set(curve.seedEntityId, {
+          kind: "arc",
+          seedEntityId: curve.seedEntityId,
+          center: curve.center,
+          start,
+          end,
+          sweepDirection: curve.sweepDirection,
+        });
+      }
+    }
+  }
+  const traversalEndpoint = (
+    segment: Exclude<OffsetSegmentGeometry, { kind: "circle" | "spline" }>,
+    reversed: boolean,
+    endpoint: "start" | "end",
+  ) =>
+    endpoint === "start"
+      ? reversed
+        ? segment.end
+        : segment.start
+      : reversed
+        ? segment.start
+        : segment.end;
+  const variationEndpoint = (
+    segment: Exclude<OffsetSegmentVariation, { kind: "circle" }>,
+    reversed: boolean,
+    endpoint: "start" | "end",
+  ) =>
+    endpoint === "start"
+      ? reversed
+        ? segment.end
+        : segment.start
+      : reversed
+        ? segment.start
+        : segment.end;
+  const setVariationEndpoint = (
+    segment: Exclude<OffsetSegmentVariation, { kind: "circle" }>,
+    reversed: boolean,
+    endpoint: "start" | "end",
+    value: SketchPoint2D,
+  ) => {
+    const naturalEndpoint = reversed
+      ? endpoint === "start"
+        ? "end"
+        : "start"
+      : endpoint;
+    segment[naturalEndpoint] = value;
+  };
+  const jointPairs = new Set(
+    primal.joints.map(
+      (joint) => `${joint.firstSeedEntityId}\u0000${joint.secondSeedEntityId}`,
+    ),
+  );
+  const adjacentCount =
+    primal.order.length === 1
+      ? 0
+      : primal.closed
+        ? primal.order.length
+        : primal.order.length - 1;
+  for (let index = 0; index < adjacentCount; index += 1) {
+    const firstOrder = primal.order[index]!;
+    const secondOrder = primal.order[(index + 1) % primal.order.length]!;
+    if (
+      jointPairs.has(
+        `${firstOrder.seedEntityId}\u0000${secondOrder.seedEntityId}`,
+      )
+    ) {
+      continue;
+    }
+    const first = segmentBySeed.get(firstOrder.seedEntityId);
+    const second = segmentBySeed.get(secondOrder.seedEntityId);
+    const firstRaw = rawSegmentBySeed.get(firstOrder.seedEntityId);
+    const secondRaw = rawSegmentBySeed.get(secondOrder.seedEntityId);
+    const firstVariation = segmentVariationBySeed.get(firstOrder.seedEntityId);
+    const secondVariation = segmentVariationBySeed.get(
+      secondOrder.seedEntityId,
+    );
+    const firstRawVariation = rawSegmentVariationBySeed.get(
+      firstOrder.seedEntityId,
+    );
+    const secondRawVariation = rawSegmentVariationBySeed.get(
+      secondOrder.seedEntityId,
+    );
+    if (
+      !first ||
+      !second ||
+      first.kind === "circle" ||
+      first.kind === "spline" ||
+      second.kind === "circle" ||
+      second.kind === "spline" ||
+      !firstRaw ||
+      firstRaw.kind === "circle" ||
+      firstRaw.kind === "spline" ||
+      !secondRaw ||
+      secondRaw.kind === "circle" ||
+      secondRaw.kind === "spline" ||
+      !firstVariation ||
+      firstVariation.kind === "circle" ||
+      !secondVariation ||
+      secondVariation.kind === "circle" ||
+      !firstRawVariation ||
+      firstRawVariation.kind === "circle" ||
+      !secondRawVariation ||
+      secondRawVariation.kind === "circle"
+    ) {
+      return failure(
+        OFFSET_DIAGNOSTIC_CODES.derivativeUnavailable,
+        "Offset adjacency derivative topology is unsupported.",
+        firstOrder.seedEntityId,
+      );
+    }
+    const firstRawEnd = traversalEndpoint(firstRaw, firstOrder.reversed, "end");
+    const secondRawStart = traversalEndpoint(
+      secondRaw,
+      secondOrder.reversed,
+      "start",
+    );
+    let reconciledVariation: SketchPoint2D | null;
+    if (pointsAlmostEqual(firstRawEnd, secondRawStart)) {
+      reconciledVariation = variationEndpoint(
+        firstRawVariation,
+        firstOrder.reversed,
+        "end",
+      );
+    } else {
+      const intersection = traversalEndpoint(first, firstOrder.reversed, "end");
+      if (firstRaw.kind === "lineSegment" && secondRaw.kind === "lineSegment") {
+        reconciledVariation = lineIntersectionDifferential({
+          start: firstRaw.start,
+          end: firstRaw.end,
+          otherStart: secondRaw.start,
+          otherEnd: secondRaw.end,
+          startVariation: firstRawVariation.start,
+          endVariation: firstRawVariation.end,
+          otherStartVariation: secondRawVariation.start,
+          otherEndVariation: secondRawVariation.end,
+        });
+      } else if (
+        firstRaw.kind === "lineSegment" &&
+        secondRaw.kind === "arc" &&
+        firstRawVariation.kind === "lineSegment" &&
+        secondRawVariation.kind === "arc"
+      ) {
+        reconciledVariation = lineCircleIntersectionDifferential({
+          intersection,
+          lineStart: firstRaw.start,
+          lineEnd: firstRaw.end,
+          center: secondRaw.center,
+          radius: distanceBetween(secondRaw.center, secondRaw.start),
+          lineStartVariation: firstRawVariation.start,
+          lineEndVariation: firstRawVariation.end,
+          centerVariation: secondRawVariation.center,
+          radiusVariation: secondRawVariation.radius,
+        });
+      } else if (
+        firstRaw.kind === "arc" &&
+        secondRaw.kind === "lineSegment" &&
+        firstRawVariation.kind === "arc" &&
+        secondRawVariation.kind === "lineSegment"
+      ) {
+        reconciledVariation = lineCircleIntersectionDifferential({
+          intersection,
+          lineStart: secondRaw.start,
+          lineEnd: secondRaw.end,
+          center: firstRaw.center,
+          radius: distanceBetween(firstRaw.center, firstRaw.start),
+          lineStartVariation: secondRawVariation.start,
+          lineEndVariation: secondRawVariation.end,
+          centerVariation: firstRawVariation.center,
+          radiusVariation: firstRawVariation.radius,
+        });
+      } else if (
+        firstRaw.kind === "arc" &&
+        secondRaw.kind === "arc" &&
+        firstRawVariation.kind === "arc" &&
+        secondRawVariation.kind === "arc"
+      ) {
+        reconciledVariation = circleCircleIntersectionDifferential({
+          intersection,
+          firstCenter: firstRaw.center,
+          firstRadius: distanceBetween(firstRaw.center, firstRaw.start),
+          secondCenter: secondRaw.center,
+          secondRadius: distanceBetween(secondRaw.center, secondRaw.start),
+          firstCenterVariation: firstRawVariation.center,
+          firstRadiusVariation: firstRawVariation.radius,
+          secondCenterVariation: secondRawVariation.center,
+          secondRadiusVariation: secondRawVariation.radius,
+        });
+      } else {
+        reconciledVariation = null;
+      }
+    }
+    if (!reconciledVariation) {
+      return failure(
+        OFFSET_DIAGNOSTIC_CODES.derivativeUnavailable,
+        "Offset adjacency derivative is singular for the resolved topology.",
+        firstOrder.seedEntityId,
+      );
+    }
+    setVariationEndpoint(
+      firstVariation,
+      firstOrder.reversed,
+      "end",
+      reconciledVariation,
+    );
+    setVariationEndpoint(
+      secondVariation,
+      secondOrder.reversed,
+      "start",
+      reconciledVariation,
+    );
+  }
+
+  const jointVariations: OffsetJointVariation[] = [];
+  for (const joint of primal.joints) {
+    const firstOrder = primal.order.find(
+      (entry) => entry.seedEntityId === joint.firstSeedEntityId,
+    );
+    const firstIndex = firstOrder ? primal.order.indexOf(firstOrder) : -1;
+    const firstCurve = input.curves.find(
+      (curve) => curve.seedEntityId === joint.firstSeedEntityId,
+    );
+    const firstCurveVariation = variationBySeed.get(joint.firstSeedEntityId);
+    const firstSegmentVariation = segmentVariationBySeed.get(
+      joint.firstSeedEntityId,
+    );
+    const secondSegmentVariation = segmentVariationBySeed.get(
+      joint.secondSeedEntityId,
+    );
+    if (
+      firstIndex < 0 ||
+      !firstCurve ||
+      firstCurve.kind === "circle" ||
+      !firstCurveVariation ||
+      firstCurveVariation.kind === "circle" ||
+      firstCurveVariation.kind === "spline" ||
+      !firstSegmentVariation ||
+      !secondSegmentVariation ||
+      firstSegmentVariation.kind === "circle" ||
+      secondSegmentVariation.kind === "circle"
+    ) {
+      return failure(
+        OFFSET_DIAGNOSTIC_CODES.jointUnsatisfied,
+        "Offset joint derivative topology is unsupported.",
+        joint.firstSeedEntityId,
+      );
+    }
+    const center = firstOrder!.reversed
+      ? firstCurveVariation.start
+      : firstCurveVariation.end;
+    const start = firstOrder!.reversed
+      ? firstSegmentVariation.start
+      : firstSegmentVariation.end;
+    const secondOrder = primal.order[(firstIndex + 1) % primal.order.length]!;
+    const end = secondOrder.reversed
+      ? secondSegmentVariation.end
+      : secondSegmentVariation.start;
+    jointVariations.push({
+      firstSeedEntityId: joint.firstSeedEntityId,
+      secondSeedEntityId: joint.secondSeedEntityId,
+      center,
+      start,
+      end,
+    });
+  }
+
+  return { ok: true, segments: segmentVariations, joints: jointVariations };
 }
 
 function segmentSharedSeedVertex(

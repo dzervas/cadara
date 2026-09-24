@@ -21,6 +21,7 @@ import {
   evaluateSketchDerivations,
   prepareSketchDerivationPullback,
   type SketchDerivationVariation,
+  type SketchDerivedEntityVariation,
 } from "@/contracts/sketch/derived-geometry";
 import {
   closestSplineSpanLocation,
@@ -145,6 +146,7 @@ type SolverPointRecord = {
 
 type SolverParameterProjection = {
   projectValues(values: Float64Array): Float64Array;
+  projectionDiagnostics(values: Float64Array): readonly SketchSolveDiagnostic[];
   projectVariableIndices(variableIndices: readonly number[]): number[];
   authorityVariableIndices: readonly number[];
   wrapConstraint(
@@ -792,13 +794,20 @@ function createDerivedParameterProjection(input: {
   definition: SketchDefinition;
   parameterCount: number;
   pointRecords: Map<SketchPointId, SolverPointRecord>;
+  entityStates: Map<SketchEntityId, SolverEntityState>;
   splineTangentStates: Map<string, SplineTangentState>;
 }): SolverParameterProjection {
-  const { definition, parameterCount, pointRecords, splineTangentStates } =
-    input;
+  const {
+    definition,
+    parameterCount,
+    pointRecords,
+    entityStates,
+    splineTangentStates,
+  } = input;
   if ((definition.derivedRelationships?.length ?? 0) === 0) {
     return {
       projectValues: cloneValues,
+      projectionDiagnostics: () => [],
       projectVariableIndices: (variableIndices) =>
         uniqueSortedIndices(variableIndices),
       authorityVariableIndices: Array.from(
@@ -813,10 +822,20 @@ function createDerivedParameterProjection(input: {
     definition.entities.map((entity) => [entity.entityId, entity]),
   );
   const dependenciesByDrivenIndex = new Map<number, Set<number>>();
+  const pointDefinedArcEntityIds = new Set<SketchEntityId>();
   const pointIndices = (pointId: SketchPointId) => {
     const point = pointRecords.get(pointId);
     return point ? [point.baseIndex, point.baseIndex + 1] : [];
   };
+  const entityIndices = (entityId: SketchEntityId) => {
+    const state = entityStates.get(entityId);
+    if (!state || state.kind === "point") return [];
+    return state.kind === "circle"
+      ? [state.baseIndex]
+      : [state.baseIndex, state.baseIndex + 1, state.baseIndex + 2];
+  };
+  const derivedEntitySeedIndices = (entityId: SketchEntityId) =>
+    entityById.get(entityId)?.kind === "circle" ? entityIndices(entityId) : [];
   const mirrorAxisIndices = (relationship: SketchDerivationDefinition) => {
     if (relationship.kind !== "mirror") return [];
     const axis = entityById.get(relationship.mirrorReference.entityId);
@@ -833,6 +852,25 @@ function createDerivedParameterProjection(input: {
 
   for (const relationship of definition.derivedRelationships ?? []) {
     const axisIndices = mirrorAxisIndices(relationship);
+    const offsetSeedIndices =
+      relationship.kind === "offset"
+        ? relationship.seedEntityIds.flatMap((entityId) => {
+            const entity = entityById.get(entityId);
+            if (entity?.kind === "arc") {
+              pointDefinedArcEntityIds.add(entity.entityId);
+              setDrivenDependencies(
+                entityIndices(entity.entityId),
+                getEntityPoints(entity).flatMap(pointIndices),
+              );
+            }
+            return entity
+              ? [
+                  ...getEntityPoints(entity).flatMap(pointIndices),
+                  ...derivedEntitySeedIndices(entityId),
+                ]
+              : [];
+          })
+        : [];
     for (const output of relationship.outputs) {
       const seed = entityById.get(output.seedEntityId);
       const target = entityById.get(output.outputEntityId);
@@ -846,10 +884,20 @@ function createDerivedParameterProjection(input: {
         setDrivenDependencies(
           pointIndices(outputPointId),
           relationship.kind === "offset"
-            ? []
+            ? offsetSeedIndices
             : [...pointIndices(seedPointIds[index]!), ...axisIndices],
         );
       });
+      setDrivenDependencies(
+        entityIndices(output.outputEntityId),
+        relationship.kind === "offset"
+          ? offsetSeedIndices
+          : [
+              ...derivedEntitySeedIndices(output.seedEntityId),
+              ...seedPointIds.flatMap(pointIndices),
+              ...axisIndices,
+            ],
+      );
 
       if (seed?.kind !== "spline" || target?.kind !== "spline") continue;
       const seedOccurrences = orderedSplineOccurrences(seed) ?? [];
@@ -875,7 +923,15 @@ function createDerivedParameterProjection(input: {
     }
     if (relationship.kind === "offset") {
       relationship.jointOutputs.forEach((output) =>
-        setDrivenDependencies(pointIndices(output.centerPointId), []),
+        setDrivenDependencies(
+          [
+            ...pointIndices(output.centerPointId),
+            ...pointIndices(output.startPointId),
+            ...pointIndices(output.endPointId),
+            ...entityIndices(output.outputEntityId),
+          ],
+          offsetSeedIndices,
+        ),
       );
     }
   }
@@ -919,6 +975,15 @@ function createDerivedParameterProjection(input: {
   const entityDefinitionIndexById = new Map(
     definition.entities.map((entity, index) => [entity.entityId, index]),
   );
+  const drivenEntityStates = [...entityStates.values()].flatMap((state) => {
+    if (state.kind === "point") return [];
+    const indices = entityIndices(state.entityId);
+    if (!indices.some((index) => dependenciesByDrivenIndex.has(index))) {
+      return [];
+    }
+    const entityIndex = entityDefinitionIndexById.get(state.entityId);
+    return entityIndex === undefined ? [] : [{ state, entityIndex }];
+  });
   const drivenTangentStates = [...splineTangentStates.values()].flatMap(
     (state) => {
       if (
@@ -929,7 +994,9 @@ function createDerivedParameterProjection(input: {
       }
       const entityIndex = entityDefinitionIndexById.get(state.entityId);
       const entity =
-        entityIndex === undefined ? undefined : definition.entities[entityIndex];
+        entityIndex === undefined
+          ? undefined
+          : definition.entities[entityIndex];
       if (entity?.kind !== "spline") return [];
       const occurrenceIndex = entity.pointOccurrences.findIndex(
         (occurrence) => occurrence.occurrenceId === state.occurrenceId,
@@ -942,8 +1009,10 @@ function createDerivedParameterProjection(input: {
 
   let cachedInput: Float64Array | null = null;
   let cachedValues: Float64Array | null = null;
-  let cachedPullback: ReturnType<typeof prepareSketchDerivationPullback> | null =
-    null;
+  let cachedPullback: ReturnType<
+    typeof prepareSketchDerivationPullback
+  > | null = null;
+  let cachedDiagnostics: readonly SketchSolveDiagnostic[] = [];
   const project = (
     values: Float64Array,
     validationIndices?: readonly number[],
@@ -958,7 +1027,11 @@ function createDerivedParameterProjection(input: {
           )
         : cachedInput.every((value, index) => value === values[index]))
     ) {
-      return { values: cachedValues, pullback: cachedPullback };
+      return {
+        values: cachedValues,
+        pullback: cachedPullback,
+        diagnostics: cachedDiagnostics,
+      };
     }
 
     const solverDefinition: SketchDefinition = {
@@ -969,43 +1042,71 @@ function createDerivedParameterProjection(input: {
           ? { ...point, position: getPoint(values, record) }
           : point;
       }),
-      entities:
-        splineTangentStates.size === 0
-          ? definition.entities
-          : definition.entities.map((entity) => {
-              if (entity.kind !== "spline") return entity;
-              return {
-                ...entity,
-                pointOccurrences: entity.pointOccurrences.map((occurrence) => {
-                  if (occurrence.tangent.kind !== "authored") return occurrence;
-                  const state = splineTangentStates.get(
-                    splineTangentStateKey(
-                      entity.entityId,
-                      occurrence.occurrenceId,
-                    ),
-                  );
-                  return state
-                    ? {
-                        ...occurrence,
-                        tangent: {
-                          kind: "authored" as const,
-                          vector: [
-                            values[state.baseIndex]!,
-                            values[state.baseIndex + 1]!,
-                          ] as const,
-                        },
-                      }
-                    : occurrence;
-                }),
-              };
-            }),
+      entities: definition.entities.map((entity) => {
+        const state = entityStates.get(entity.entityId);
+        if (entity.kind === "circle" && state?.kind === "circle") {
+          return { ...entity, radius: getCircleRadius(values, state) };
+        }
+        if (entity.kind !== "spline") return entity;
+        return {
+          ...entity,
+          pointOccurrences: entity.pointOccurrences.map((occurrence) => {
+            if (occurrence.tangent.kind !== "authored") return occurrence;
+            const tangentState = splineTangentStates.get(
+              splineTangentStateKey(entity.entityId, occurrence.occurrenceId),
+            );
+            return tangentState
+              ? {
+                  ...occurrence,
+                  tangent: {
+                    kind: "authored" as const,
+                    vector: [
+                      values[tangentState.baseIndex]!,
+                      values[tangentState.baseIndex + 1]!,
+                    ] as const,
+                  },
+                }
+              : occurrence;
+          }),
+        };
+      }),
     };
-    const evaluated = evaluateSketchDerivations(solverDefinition).definition;
+    const derivationEvaluation = evaluateSketchDerivations(solverDefinition);
+    const evaluated = derivationEvaluation.definition;
     const projected = cloneValues(values);
     for (const { record, definitionIndex } of drivenPointRecords) {
       const point = evaluated.points[definitionIndex]!;
       projected[record.baseIndex] = point.position[0];
       projected[record.baseIndex + 1] = point.position[1];
+    }
+    for (const { state, entityIndex } of drivenEntityStates) {
+      const entity = evaluated.entities[entityIndex];
+      if (state.kind === "circle" && entity?.kind === "circle") {
+        projected[state.baseIndex] = entity.radius;
+      } else if (state.kind === "arc" && entity?.kind === "arc") {
+        const center = evaluated.points.find(
+          (point) => point.pointId === entity.centerPointId,
+        )?.position;
+        const start = evaluated.points.find(
+          (point) => point.pointId === entity.startPointId,
+        )?.position;
+        const end = evaluated.points.find(
+          (point) => point.pointId === entity.endPointId,
+        )?.position;
+        if (center && start && end) {
+          const startOffset = subtract(start, center);
+          const endOffset = subtract(end, center);
+          projected[state.baseIndex] = length(startOffset);
+          projected[state.baseIndex + 1] = Math.atan2(
+            startOffset[1],
+            startOffset[0],
+          );
+          projected[state.baseIndex + 2] = Math.atan2(
+            endOffset[1],
+            endOffset[0],
+          );
+        }
+      }
     }
     for (const { state, entityIndex, occurrenceIndex } of drivenTangentStates) {
       const entity = evaluated.entities[entityIndex];
@@ -1020,11 +1121,17 @@ function createDerivedParameterProjection(input: {
     cachedInput = cloneValues(values);
     cachedValues = projected;
     cachedPullback = pullback;
-    return { values: projected, pullback };
+    cachedDiagnostics = derivationEvaluation.diagnostics;
+    return {
+      values: projected,
+      pullback,
+      diagnostics: cachedDiagnostics,
+    };
   };
 
   return {
     projectValues: (values) => cloneValues(project(values).values),
+    projectionDiagnostics: (values) => [...project(values).diagnostics],
     projectVariableIndices,
     authorityVariableIndices,
     wrapConstraint: (constraint, variableIndices) => {
@@ -1037,9 +1144,15 @@ function createDerivedParameterProjection(input: {
       const relevantDrivenPointRecords = support
         ? drivenPointRecords.filter(
             ({ record }) =>
-              support.has(record.baseIndex) || support.has(record.baseIndex + 1),
+              support.has(record.baseIndex) ||
+              support.has(record.baseIndex + 1),
           )
         : drivenPointRecords;
+      const relevantDrivenEntityStates = support
+        ? drivenEntityStates.filter(({ state }) =>
+            entityIndices(state.entityId).some((index) => support.has(index)),
+          )
+        : drivenEntityStates;
       const relevantDrivenTangentStates = support
         ? drivenTangentStates.filter(
             ({ state }) =>
@@ -1048,6 +1161,7 @@ function createDerivedParameterProjection(input: {
         : drivenTangentStates;
       if (
         relevantDrivenPointRecords.length === 0 &&
+        relevantDrivenEntityStates.length === 0 &&
         relevantDrivenTangentStates.length === 0
       ) {
         return constraint;
@@ -1060,17 +1174,93 @@ function createDerivedParameterProjection(input: {
           const evaluated = constraint.evaluate(projected.values);
           const pointCotangent: Partial<Record<SketchPointId, SketchPoint2D>> =
             {};
+          const entityCotangent: Partial<
+            Record<SketchEntityId, SketchDerivedEntityVariation>
+          > = {};
           const tangentCotangent: Partial<
             Record<SketchEntityId, Record<string, SketchPoint2D>>
           > = {};
           let hasDrivenCotangent = false;
+          const addPointCotangent = (
+            pointId: SketchPointId,
+            value: SketchPoint2D,
+          ) => {
+            const current = pointCotangent[pointId] ?? [0, 0];
+            pointCotangent[pointId] = [
+              current[0] + value[0],
+              current[1] + value[1],
+            ];
+          };
           for (const { record } of relevantDrivenPointRecords) {
-          const x = evaluated.gradient[record.baseIndex]!;
-          const y = evaluated.gradient[record.baseIndex + 1]!;
-          if (x === 0 && y === 0) continue;
-          pointCotangent[record.pointId] = [x, y];
-          hasDrivenCotangent = true;
-        }
+            const x = evaluated.gradient[record.baseIndex]!;
+            const y = evaluated.gradient[record.baseIndex + 1]!;
+            if (x === 0 && y === 0) continue;
+            addPointCotangent(record.pointId, [x, y]);
+            hasDrivenCotangent = true;
+          }
+          for (const { state } of relevantDrivenEntityStates) {
+            if (state.kind === "circle") {
+              const radius = evaluated.gradient[state.baseIndex]!;
+              if (radius !== 0) {
+                entityCotangent[state.entityId] = { kind: "circle", radius };
+                hasDrivenCotangent = true;
+              }
+              continue;
+            }
+
+            const radius = evaluated.gradient[state.baseIndex]!;
+            const startAngle = evaluated.gradient[state.baseIndex + 1]!;
+            const endAngle = evaluated.gradient[state.baseIndex + 2]!;
+            if (radius === 0 && startAngle === 0 && endAngle === 0) continue;
+            const entity = entityById.get(state.entityId);
+            if (
+              entity?.kind === "arc" &&
+              pointDefinedArcEntityIds.has(entity.entityId)
+            ) {
+              const centerRecord = pointRecords.get(entity.centerPointId);
+              const startRecord = pointRecords.get(entity.startPointId);
+              const endRecord = pointRecords.get(entity.endPointId);
+              if (!centerRecord || !startRecord || !endRecord) continue;
+              const center = getPoint(projected.values, centerRecord);
+              const start = getPoint(projected.values, startRecord);
+              const end = getPoint(projected.values, endRecord);
+              const startOffset = subtract(start, center);
+              const endOffset = subtract(end, center);
+              const startLengthSquared =
+                startOffset[0] ** 2 + startOffset[1] ** 2;
+              const endLengthSquared = endOffset[0] ** 2 + endOffset[1] ** 2;
+              if (
+                startLengthSquared <= DEGENERATE_NORM_EPSILON ** 2 ||
+                endLengthSquared <= DEGENERATE_NORM_EPSILON ** 2
+              ) {
+                continue;
+              }
+              const startCotangent: SketchPoint2D = [
+                (radius * startOffset[0]) / Math.sqrt(startLengthSquared) -
+                  (startAngle * startOffset[1]) / startLengthSquared,
+                (radius * startOffset[1]) / Math.sqrt(startLengthSquared) +
+                  (startAngle * startOffset[0]) / startLengthSquared,
+              ];
+              const endCotangent: SketchPoint2D = [
+                (-endAngle * endOffset[1]) / endLengthSquared,
+                (endAngle * endOffset[0]) / endLengthSquared,
+              ];
+              addPointCotangent(entity.startPointId, startCotangent);
+              addPointCotangent(entity.endPointId, endCotangent);
+              addPointCotangent(entity.centerPointId, [
+                -startCotangent[0] - endCotangent[0],
+                -startCotangent[1] - endCotangent[1],
+              ]);
+            } else {
+              entityCotangent[state.entityId] = {
+                kind: "arc",
+                radius,
+                startAngle,
+                endAngle,
+              };
+            }
+            hasDrivenCotangent = true;
+          }
           for (const { state } of relevantDrivenTangentStates) {
             const x = evaluated.gradient[state.baseIndex]!;
             const y = evaluated.gradient[state.baseIndex + 1]!;
@@ -1087,12 +1277,18 @@ function createDerivedParameterProjection(input: {
             gradient[record.baseIndex] = 0;
             gradient[record.baseIndex + 1] = 0;
           }
+          for (const { state } of relevantDrivenEntityStates) {
+            for (const index of entityIndices(state.entityId)) {
+              gradient[index] = 0;
+            }
+          }
           for (const { state } of relevantDrivenTangentStates) {
             gradient[state.baseIndex] = 0;
             gradient[state.baseIndex + 1] = 0;
           }
           const cotangent: SketchDerivationVariation = {
             points: pointCotangent,
+            entities: entityCotangent,
             splineTangents: tangentCotangent,
           };
           const pulled = projected.pullback(cotangent);
@@ -1101,6 +1297,17 @@ function createDerivedParameterProjection(input: {
             if (!record || !value) continue;
             gradient[record.baseIndex] += value[0];
             gradient[record.baseIndex + 1] += value[1];
+          }
+          for (const [entityId, value] of Object.entries(
+            pulled.entities ?? {},
+          )) {
+            const state = entityStates.get(entityId as SketchEntityId);
+            if (!state || !value || state.kind !== value.kind) continue;
+            gradient[state.baseIndex] += value.radius;
+            if (state.kind === "arc" && value.kind === "arc") {
+              gradient[state.baseIndex + 1] += value.startAngle;
+              gradient[state.baseIndex + 2] += value.endAngle;
+            }
           }
           for (const [entityId, occurrences] of Object.entries(
             pulled.splineTangents ?? {},
@@ -1352,14 +1559,6 @@ function buildSystem(
   const entityStates = new Map<SketchEntityId, SolverEntityState>();
   const splineTangentStates = new Map<string, SplineTangentState>();
   const scalarConstraints: ScalarConstraintRecord[] = [];
-  const dimensionDrivenCircleIds = new Set(
-    definition.dimensions.flatMap((dimension) =>
-      dimension.kind === "circleRadius" || dimension.kind === "diameter"
-        ? [dimension.entityId]
-        : [],
-    ),
-  );
-
   let parameterCount = 0;
   for (const point of definition.points) {
     pointRecords.set(point.pointId, {
@@ -1371,10 +1570,7 @@ function buildSystem(
   }
 
   for (const entity of definition.entities) {
-    if (
-      entity.kind === "circle" &&
-      dimensionDrivenCircleIds.has(entity.entityId)
-    ) {
+    if (entity.kind === "circle") {
       entityStates.set(entity.entityId, {
         kind: "circle",
         entityId: entity.entityId,
@@ -1838,7 +2034,292 @@ function buildSystem(
     return [];
   };
 
+  const offsetSeedArcIds = new Set(
+    (definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset" ? relationship.seedEntityIds : [],
+    ),
+  );
+  for (const entity of definition.entities) {
+    if (entity.kind !== "arc" || !offsetSeedArcIds.has(entity.entityId)) {
+      continue;
+    }
+    const center = pointRecords.get(entity.centerPointId);
+    const start = pointRecords.get(entity.startPointId);
+    const end = pointRecords.get(entity.endPointId);
+    if (!center || !start || !end) continue;
+
+    scalarConstraints.push({
+      id: `constraint_internal_arc_common_radius_${entity.entityId}` as ConstraintId,
+      targetKind: "constraint",
+      evaluate(values) {
+        const gradient = zeroVector(parameterCount);
+        const centerPosition = getPoint(values, center);
+        const startOffset = subtract(getPoint(values, start), centerPosition);
+        const endOffset = subtract(getPoint(values, end), centerPosition);
+        const startRadius = length(startOffset);
+        const endRadius = length(endOffset);
+        if (
+          startRadius <= DEGENERATE_NORM_EPSILON ||
+          endRadius <= DEGENERATE_NORM_EPSILON
+        ) {
+          return { residual: Number.POSITIVE_INFINITY, gradient };
+        }
+        const delta = endRadius - startRadius;
+        const startUnit: SketchPoint2D = [
+          startOffset[0] / startRadius,
+          startOffset[1] / startRadius,
+        ];
+        const endUnit: SketchPoint2D = [
+          endOffset[0] / endRadius,
+          endOffset[1] / endRadius,
+        ];
+        addPointGradient(
+          gradient,
+          center,
+          delta * (startUnit[0] - endUnit[0]),
+          delta * (startUnit[1] - endUnit[1]),
+        );
+        addPointGradient(
+          gradient,
+          start,
+          -delta * startUnit[0],
+          -delta * startUnit[1],
+        );
+        addPointGradient(gradient, end, delta * endUnit[0], delta * endUnit[1]);
+        return { residual: 0.5 * delta * delta, gradient };
+      },
+    });
+  }
+
   for (const constraint of definition.constraints) {
+    if (constraint.kind === "equalOffset") {
+      if (
+        constraint.pairs.some(
+          (pair) => pair.seedEntityId === pair.offsetEntityId,
+        )
+      ) {
+        continue;
+      }
+      const pairLines = constraint.pairs.map((pair) => ({
+        pair,
+        seed: lineEntityMap.get(pair.seedEntityId),
+        offset: lineEntityMap.get(pair.offsetEntityId),
+      }));
+      if (pairLines.some(({ seed, offset }) => !seed || !offset)) {
+        continue;
+      }
+
+      const records = pairLines.map(({ pair, seed, offset }) => ({
+        pair,
+        seedStart: pointRecords.get(seed!.startPointId),
+        seedEnd: pointRecords.get(seed!.endPointId),
+        offsetStart: pointRecords.get(offset!.startPointId),
+        offsetEnd: pointRecords.get(offset!.endPointId),
+      }));
+      if (
+        records.some(
+          ({ seedStart, seedEnd, offsetStart, offsetEnd }) =>
+            !seedStart || !seedEnd || !offsetStart || !offsetEnd,
+        )
+      ) {
+        continue;
+      }
+
+      scalarConstraints.push({
+        id: constraint.constraintId,
+        targetKind: "constraint",
+        evaluate(values) {
+          const gradient = zeroVector(parameterCount);
+          const evaluations = records.map((record) => {
+            const seedStart = record.seedStart!;
+            const seedEnd = record.seedEnd!;
+            const offsetStart = record.offsetStart!;
+            const offsetEnd = record.offsetEnd!;
+            const seedVector = subtract(
+              getPoint(values, seedEnd),
+              getPoint(values, seedStart),
+            );
+            const offsetVector = subtract(
+              getPoint(values, offsetEnd),
+              getPoint(values, offsetStart),
+            );
+            const seedLength = length(seedVector);
+            const offsetLength = length(offsetVector);
+            if (
+              !Number.isFinite(seedLength) ||
+              !Number.isFinite(offsetLength) ||
+              seedLength < DEGENERATE_NORM_EPSILON ||
+              offsetLength < DEGENERATE_NORM_EPSILON
+            ) {
+              return null;
+            }
+
+            const seedUnit: SketchPoint2D = [
+              seedVector[0] / seedLength,
+              seedVector[1] / seedLength,
+            ];
+            const offsetUnit: SketchPoint2D = [
+              offsetVector[0] / offsetLength,
+              offsetVector[1] / offsetLength,
+            ];
+            const seedNormal: SketchPoint2D = [-seedUnit[1], seedUnit[0]];
+            const side = record.pair.side === "left" ? 1 : -1;
+            const startDelta = subtract(
+              getPoint(values, offsetStart),
+              getPoint(values, seedStart),
+            );
+            const distance = side * dot2(seedNormal, startDelta);
+
+            const seedUnitJacobian = [
+              [
+                (1 - seedUnit[0] * seedUnit[0]) / seedLength,
+                -(seedUnit[0] * seedUnit[1]) / seedLength,
+              ],
+              [
+                -(seedUnit[0] * seedUnit[1]) / seedLength,
+                (1 - seedUnit[1] * seedUnit[1]) / seedLength,
+              ],
+            ] as const;
+            const offsetUnitJacobian = [
+              [
+                (1 - offsetUnit[0] * offsetUnit[0]) / offsetLength,
+                -(offsetUnit[0] * offsetUnit[1]) / offsetLength,
+              ],
+              [
+                -(offsetUnit[0] * offsetUnit[1]) / offsetLength,
+                (1 - offsetUnit[1] * offsetUnit[1]) / offsetLength,
+              ],
+            ] as const;
+
+            const parallel =
+              seedUnit[0] * offsetUnit[1] - seedUnit[1] * offsetUnit[0];
+            const parallelSeedUnitGradient: SketchPoint2D = [
+              offsetUnit[1],
+              -offsetUnit[0],
+            ];
+            const parallelOffsetUnitGradient: SketchPoint2D = [
+              -seedUnit[1],
+              seedUnit[0],
+            ];
+            const parallelSeedVectorGradient: SketchPoint2D = [
+              parallelSeedUnitGradient[0] * seedUnitJacobian[0][0] +
+                parallelSeedUnitGradient[1] * seedUnitJacobian[1][0],
+              parallelSeedUnitGradient[0] * seedUnitJacobian[0][1] +
+                parallelSeedUnitGradient[1] * seedUnitJacobian[1][1],
+            ];
+            const parallelOffsetVectorGradient: SketchPoint2D = [
+              parallelOffsetUnitGradient[0] * offsetUnitJacobian[0][0] +
+                parallelOffsetUnitGradient[1] * offsetUnitJacobian[1][0],
+              parallelOffsetUnitGradient[0] * offsetUnitJacobian[0][1] +
+                parallelOffsetUnitGradient[1] * offsetUnitJacobian[1][1],
+            ];
+
+            const rotatedDelta: SketchPoint2D = [startDelta[1], -startDelta[0]];
+            const distanceSeedVectorGradient: SketchPoint2D = [
+              side *
+                (seedUnitJacobian[0][0] * rotatedDelta[0] +
+                  seedUnitJacobian[0][1] * rotatedDelta[1]),
+              side *
+                (seedUnitJacobian[1][0] * rotatedDelta[0] +
+                  seedUnitJacobian[1][1] * rotatedDelta[1]),
+            ];
+            const distanceDeltaGradient: SketchPoint2D = [
+              side * seedNormal[0],
+              side * seedNormal[1],
+            ];
+
+            return {
+              distance,
+              parallel,
+              seedStart,
+              seedEnd,
+              offsetStart,
+              offsetEnd,
+              parallelSeedVectorGradient,
+              parallelOffsetVectorGradient,
+              distanceSeedVectorGradient,
+              distanceDeltaGradient,
+            };
+          });
+
+          const first = evaluations[0];
+          const second = evaluations[1];
+          if (!first || !second) {
+            return { residual: Number.POSITIVE_INFINITY, gradient };
+          }
+
+          for (const evaluation of evaluations as [
+            NonNullable<typeof first>,
+            NonNullable<typeof second>,
+          ]) {
+            addPointGradient(
+              gradient,
+              evaluation.seedStart,
+              -evaluation.parallel * evaluation.parallelSeedVectorGradient[0],
+              -evaluation.parallel * evaluation.parallelSeedVectorGradient[1],
+            );
+            addPointGradient(
+              gradient,
+              evaluation.seedEnd,
+              evaluation.parallel * evaluation.parallelSeedVectorGradient[0],
+              evaluation.parallel * evaluation.parallelSeedVectorGradient[1],
+            );
+            addPointGradient(
+              gradient,
+              evaluation.offsetStart,
+              -evaluation.parallel * evaluation.parallelOffsetVectorGradient[0],
+              -evaluation.parallel * evaluation.parallelOffsetVectorGradient[1],
+            );
+            addPointGradient(
+              gradient,
+              evaluation.offsetEnd,
+              evaluation.parallel * evaluation.parallelOffsetVectorGradient[0],
+              evaluation.parallel * evaluation.parallelOffsetVectorGradient[1],
+            );
+          }
+
+          const distanceDelta = first.distance - second.distance;
+          const distanceScales = [distanceDelta, -distanceDelta] as const;
+          evaluations.forEach((evaluation, index) => {
+            if (!evaluation) return;
+            const scale = distanceScales[index]!;
+            addPointGradient(
+              gradient,
+              evaluation.seedStart,
+              scale *
+                (-evaluation.distanceSeedVectorGradient[0] -
+                  evaluation.distanceDeltaGradient[0]),
+              scale *
+                (-evaluation.distanceSeedVectorGradient[1] -
+                  evaluation.distanceDeltaGradient[1]),
+            );
+            addPointGradient(
+              gradient,
+              evaluation.seedEnd,
+              scale * evaluation.distanceSeedVectorGradient[0],
+              scale * evaluation.distanceSeedVectorGradient[1],
+            );
+            addPointGradient(
+              gradient,
+              evaluation.offsetStart,
+              scale * evaluation.distanceDeltaGradient[0],
+              scale * evaluation.distanceDeltaGradient[1],
+            );
+          });
+
+          return {
+            residual:
+              0.5 *
+              (first.parallel * first.parallel +
+                second.parallel * second.parallel +
+                distanceDelta * distanceDelta),
+            gradient,
+          };
+        },
+      });
+      continue;
+    }
+
     if (constraint.kind === "coincident") {
       const left = pointRecords.get(constraint.pointIds[0]);
       const right = pointRecords.get(constraint.pointIds[1]);
@@ -3454,6 +3935,7 @@ function buildSystem(
     definition,
     parameterCount,
     pointRecords,
+    entityStates,
     splineTangentStates,
   });
 
@@ -4147,6 +4629,50 @@ function validateDefinition(
           );
         }
         break;
+      case "equalOffset": {
+        const pairEntities = constraint.pairs.flatMap((pair) => [
+          entityMap.get(pair.seedEntityId),
+          entityMap.get(pair.offsetEntityId),
+        ]);
+        const hasInvalidOperands =
+          pairEntities.some((entity) => entity?.kind !== "lineSegment") ||
+          constraint.pairs.some(
+            (pair) => pair.seedEntityId === pair.offsetEntityId,
+          );
+        if (hasInvalidOperands) {
+          diagnostics.push(
+            makeDiagnostic(
+              "invalid-equal-offset-line-pair",
+              "error",
+              `Constraint ${constraint.constraintId} requires two distinct seed/offset line pairs.`,
+              { kind: "constraint", constraintId: constraint.constraintId },
+            ),
+          );
+        } else if (
+          pairEntities.some((entity) => {
+            if (entity?.kind !== "lineSegment") return false;
+            const start = pointMap.get(entity.startPointId);
+            const end = pointMap.get(entity.endPointId);
+            return (
+              start !== undefined &&
+              end !== undefined &&
+              !Number.isFinite(
+                length(subtract(start.position, end.position)),
+              )
+            );
+          })
+        ) {
+          diagnostics.push(
+            makeDiagnostic(
+              "non-finite-equal-offset-geometry",
+              "error",
+              `Constraint ${constraint.constraintId} cannot evaluate non-finite line geometry.`,
+              { kind: "constraint", constraintId: constraint.constraintId },
+            ),
+          );
+        }
+        break;
+      }
       case "parallel":
       case "perpendicular":
       case "equalLength":
@@ -5513,6 +6039,13 @@ function structuralConstraintVariableIndices(
       return entityVariableIndices(entityById.get(constraint.entityId), system);
     case "fixPoint":
       return pointVariableIndices(system.pointRecords.get(constraint.pointId));
+    case "equalOffset":
+      return uniqueSortedIndices(
+        constraint.pairs.flatMap((pair) => [
+          ...entityVariableIndices(entityById.get(pair.seedEntityId), system),
+          ...entityVariableIndices(entityById.get(pair.offsetEntityId), system),
+        ]),
+      );
     case "parallel":
     case "perpendicular":
     case "equalLength":
@@ -6081,18 +6614,70 @@ function seedSolveValuesFromSnapshot(
   return { values, warmStarted: seeded };
 }
 
+function offsetArcCommonCircleDiagnostics(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+): SketchSolveDiagnostic[] {
+  const offsetSeedEntityIds = new Set(
+    (program.definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset" ? relationship.seedEntityIds : [],
+    ),
+  );
+  const diagnostics: SketchSolveDiagnostic[] = [];
+
+  for (const entity of program.definition.entities) {
+    if (entity.kind !== "arc" || !offsetSeedEntityIds.has(entity.entityId)) {
+      continue;
+    }
+    const center = program.system.pointRecords.get(entity.centerPointId);
+    const start = program.system.pointRecords.get(entity.startPointId);
+    const end = program.system.pointRecords.get(entity.endPointId);
+    if (!center || !start || !end) continue;
+
+    const centerPosition = getPoint(values, center);
+    const startRadius = length(subtract(getPoint(values, start), centerPosition));
+    const endRadius = length(subtract(getPoint(values, end), centerPosition));
+    const radialGap = Math.abs(endRadius - startRadius);
+    if (
+      Number.isFinite(radialGap) &&
+      radialGap <= program.tolerances.coincidence
+    ) {
+      continue;
+    }
+
+    diagnostics.push(
+      makeDiagnostic(
+        "offset-arc-common-circle-unsatisfied",
+        "error",
+        `Offset source arc ${entity.entityId} has endpoint radii ${startRadius} and ${endRadius}; radial gap ${radialGap} exceeds coincidence tolerance ${program.tolerances.coincidence}.`,
+        { kind: "entity", entityId: entity.entityId },
+      ),
+    );
+  }
+
+  return diagnostics;
+}
+
 function materializeSolveResult(
   program: SketchCompiledSolveProgram,
   values: Float64Array,
   solved: ReturnType<typeof solveSystemValues>,
 ): SketchCoreSolveResult {
-  const diagnostics = [
-    ...program.diagnostics,
-    ...program.validation.diagnostics,
-  ];
+  const projectionDiagnostics =
+    program.system.parameterProjection.projectionDiagnostics(values);
   const definition = program.definition;
   const projectedValues =
     program.system.parameterProjection.projectValues(values);
+  const commonCircleDiagnostics = offsetArcCommonCircleDiagnostics(
+    program,
+    projectedValues,
+  );
+  const diagnostics = [
+    ...program.diagnostics,
+    ...program.validation.diagnostics,
+    ...projectionDiagnostics,
+    ...commonCircleDiagnostics,
+  ];
   const solvedEntities = buildSolvedEntities(
     definition,
     program.system.pointRecords,
@@ -6116,6 +6701,7 @@ function materializeSolveResult(
   const constraintStatuses = buildConstraintStatuses(
     definition,
     program.system.pointRecords,
+    projectedValues,
     program.tolerances,
     solved.perConstraint,
     program.projectedReferences,
@@ -6126,14 +6712,20 @@ function materializeSolveResult(
     program.system.entityStates,
     projectedValues,
     solved.perConstraint,
+    program.tolerances,
     program.projectedReferences,
   );
+  const geometryValid = ![
+    ...projectionDiagnostics,
+    ...commonCircleDiagnostics,
+  ].some((diagnostic) => diagnostic.severity === "error");
   const requirementsSatisfied =
+    geometryValid &&
     constraintStatuses.every((entry) => entry.status === "satisfied") &&
     dimensionStatuses.every((entry) => entry.status !== "unsatisfied");
 
   let status: SolvedSketchStatus;
-  if (!program.validation.isValid) {
+  if (!program.validation.isValid || !geometryValid) {
     status = {
       solveState:
         program.partialSolvePolicy === "bestEffort"
@@ -6153,10 +6745,7 @@ function materializeSolveResult(
       constraintState: "wellConstrained",
     };
   } else {
-    if (
-      !Number.isFinite(solved.loss) ||
-      solved.loss >= SOLVED_LOSS_THRESHOLD
-    ) {
+    if (!Number.isFinite(solved.loss) || solved.loss >= SOLVED_LOSS_THRESHOLD) {
       diagnostics.push(
         makeDiagnostic(
           "solver-residual-too-large",
@@ -6218,6 +6807,82 @@ export function solveCompiledSketchProgram(
   return materializeSolveResult(program, solved.values, solved);
 }
 
+function isAcceptableSolvedSnapshot(snapshot: SolvedSketchSnapshot) {
+  return (
+    snapshot.status.solveState !== "failed" &&
+    snapshot.constraintStatuses.every(
+      (status) => status.status === "satisfied",
+    ) &&
+    snapshot.dimensionStatuses.every(
+      (status) => status.status !== "unsatisfied",
+    ) &&
+    !snapshot.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
+  );
+}
+
+function hasOnlyFiniteNumericGeometry(value: unknown): boolean {
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(hasOnlyFiniteNumericGeometry);
+  if (value && typeof value === "object") {
+    return Object.values(value).every(hasOnlyFiniteNumericGeometry);
+  }
+  return true;
+}
+
+function solvedSnapshotStructurallyCoversProgram(
+  snapshot: SolvedSketchSnapshot,
+  program: SketchCompiledSolveProgram,
+) {
+  const solvedPoints = new Map(
+    snapshot.solvedPoints.map((point) => [point.pointId, point]),
+  );
+  if (
+    solvedPoints.size !== snapshot.solvedPoints.length ||
+    !program.definition.points.every((point) => {
+      const solved = solvedPoints.get(point.pointId);
+      return solved && solved.solvedPosition.every(Number.isFinite);
+    })
+  ) {
+    return false;
+  }
+
+  const solvedEntities = new Map(
+    snapshot.solvedEntities.map((entity) => [entity.entityId, entity]),
+  );
+  if (
+    solvedEntities.size !== snapshot.solvedEntities.length ||
+    !program.definition.entities.every((entity) => {
+      const solved = solvedEntities.get(entity.entityId);
+      return (
+        solved?.kind === entity.kind && hasOnlyFiniteNumericGeometry(solved)
+      );
+    })
+  ) {
+    return false;
+  }
+
+  const constraintStatuses = new Map(
+    snapshot.constraintStatuses.map((status) => [status.constraintId, status]),
+  );
+  const dimensionStatuses = new Map(
+    snapshot.dimensionStatuses.map((status) => [status.dimensionId, status]),
+  );
+  return (
+    program.definition.constraints.every(
+      (constraint) =>
+        constraintStatuses.get(constraint.constraintId)?.status ===
+        "satisfied",
+    ) &&
+    program.definition.dimensions.every(
+      (dimension) =>
+        dimensionStatuses.get(dimension.dimensionId)?.status !== undefined &&
+        dimensionStatuses.get(dimension.dimensionId)?.status !== "unsatisfied",
+    )
+  );
+}
+
 export function createCompiledSketchSolveSession(input: {
   sessionId: `interactive_sketch_solve_${string}`;
   program: SketchCompiledSolveProgram;
@@ -6235,9 +6900,15 @@ export function createCompiledSketchSolveSession(input: {
     initialValues,
     input.program.system.scalarConstraints,
   );
+  const initialCommonCircleValid =
+    offsetArcCommonCircleDiagnostics(
+      input.program,
+      input.program.system.parameterProjection.projectValues(initialValues),
+    ).length === 0;
   const solvedValues =
-    initialState.loss < SOLVED_LOSS_THRESHOLD ||
-    uniformNorm(initialState.gradient) < 1e-8
+    initialCommonCircleValid &&
+    (initialState.loss < SOLVED_LOSS_THRESHOLD ||
+      uniformNorm(initialState.gradient) < 1e-8)
       ? {
           values: cloneValues(initialValues),
           loss: initialState.loss,
@@ -6253,11 +6924,51 @@ export function createCompiledSketchSolveSession(input: {
     solvedValues.values,
     solvedValues,
   );
+  const solvedIsAcceptable = isAcceptableSolvedSnapshot(
+    solved.solvedSnapshot,
+  );
+  const priorIsAcceptable =
+    input.priorSolvedSnapshot !== null &&
+    input.priorSolvedSnapshot !== undefined &&
+    isAcceptableSolvedSnapshot(input.priorSolvedSnapshot) &&
+    solvedSnapshotStructurallyCoversProgram(
+      input.priorSolvedSnapshot,
+      input.program,
+    ) &&
+    offsetArcCommonCircleDiagnostics(
+      input.program,
+      input.program.system.parameterProjection.projectValues(seeded.values),
+    ).length === 0;
+  if (!solvedIsAcceptable && !priorIsAcceptable) {
+    const commonCircleDiagnostic = solved.diagnostics.find(
+      (diagnostic) =>
+        diagnostic.code === "offset-arc-common-circle-unsatisfied",
+    );
+    if (commonCircleDiagnostic) {
+      throw new Error(
+        `Cannot initialize ${input.sessionId} without a valid common-circle snapshot: ${commonCircleDiagnostic.message}`,
+      );
+    }
+    const errorDiagnostic = solved.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error",
+    );
+    throw new Error(
+      `Cannot initialize ${input.sessionId} without an acceptable solved snapshot${
+        errorDiagnostic
+          ? `: ${errorDiagnostic.code}: ${errorDiagnostic.message}`
+          : "."
+      }`,
+    );
+  }
   return {
     sessionId: input.sessionId,
     program: input.program,
-    values: cloneValues(solvedValues.values),
-    lastAcceptedSnapshot: solved.solvedSnapshot,
+    values: cloneValues(
+      solvedIsAcceptable ? solvedValues.values : seeded.values,
+    ),
+    lastAcceptedSnapshot: solvedIsAcceptable
+      ? solved.solvedSnapshot
+      : input.priorSolvedSnapshot!,
     disposed: false,
     warmStarted: seeded.warmStarted,
   };
@@ -6297,8 +7008,7 @@ function createDragTargetConstraint(
         const delta = subtract(actual, dragTarget.position);
         addPointGradient(gradient, point, weight * delta[0], weight * delta[1]);
         return {
-          residual:
-            0.5 * weight * (delta[0] * delta[0] + delta[1] * delta[1]),
+          residual: 0.5 * weight * (delta[0] * delta[0] + delta[1] * delta[1]),
           gradient,
         };
       },
@@ -6383,9 +7093,13 @@ function tryTranslateDraggedComponent(
     materialized.solvedSnapshot.dimensionStatuses.every(
       (status) => status.status !== "unsatisfied",
     );
+  const derivationsValid = !materialized.diagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  );
 
   if (
     session.program.validation.isValid &&
+    derivationsValid &&
     targetDistance <= targetTolerance &&
     constraintsSatisfied &&
     dimensionsSatisfied
@@ -6414,6 +7128,9 @@ function createDraggedPointAcceptance(input: {
     input.materialized.solvedSnapshot.dimensionStatuses.every(
       (status) => status.status !== "unsatisfied",
     );
+  const derivationsValid = !input.materialized.diagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  );
   // D1 (minimum-motion-sketch-drag): the cursor is a SOFT objective and is never
   // part of frame acceptance. A frame is accepted whenever the authored (hard)
   // constraints and dimensions are satisfied within tolerance, regardless of how
@@ -6422,6 +7139,7 @@ function createDraggedPointAcceptance(input: {
   // `blocked`; `blocked` is reserved for invalid/non-convergent solves.
   const accepted =
     input.program.validation.isValid &&
+    derivationsValid &&
     constraintsSatisfied &&
     dimensionsSatisfied;
 
@@ -6820,6 +7538,7 @@ export function updateCompiledSketchSolveSession(
         reason: "nonConvergent",
         solvedSnapshot: session.lastAcceptedSnapshot,
         diagnostics: [
+          ...(frame?.materialized.diagnostics ?? []),
           makeDiagnostic(
             "drag-target-nonconvergent",
             "warning",
@@ -6848,6 +7567,17 @@ function buildSolvedEntities(
   values: Float64Array,
 ): SolvedSketchEntityGeometryRecord[] {
   const solved: SolvedSketchEntityGeometryRecord[] = [];
+  const pointDefinedArcEntityIds = new Set(
+    (definition.derivedRelationships ?? []).flatMap((relationship) =>
+      relationship.kind === "offset"
+        ? relationship.seedEntityIds.filter(
+            (entityId) =>
+              definition.entities.find((entity) => entity.entityId === entityId)
+                ?.kind === "arc",
+          )
+        : [],
+    ),
+  );
   for (const entity of definition.entities) {
     if (entity.kind === "point") {
       const point = pointRecords.get(entity.pointId);
@@ -7014,20 +7744,27 @@ function buildSolvedEntities(
     }
 
     const center = pointRecords.get(entity.centerPointId);
+    const start = pointRecords.get(entity.startPointId);
+    const end = pointRecords.get(entity.endPointId);
     const arcState = entityStates.get(entity.entityId);
-    if (!center || !arcState || arcState.kind !== "arc") {
+    if (!center || !start || !end || !arcState || arcState.kind !== "arc") {
       continue;
     }
     const centerPos = getPoint(values, center);
+    const pointDefined = pointDefinedArcEntityIds.has(entity.entityId);
     const { radius, startAngle, endAngle } = getArcParameters(values, arcState);
-    const startPosition = add(centerPos, [
-      radius * Math.cos(startAngle),
-      radius * Math.sin(startAngle),
-    ]);
-    const endPosition = add(centerPos, [
-      radius * Math.cos(endAngle),
-      radius * Math.sin(endAngle),
-    ]);
+    const startPosition = pointDefined
+      ? getPoint(values, start)
+      : add(centerPos, [
+          radius * Math.cos(startAngle),
+          radius * Math.sin(startAngle),
+        ]);
+    const endPosition = pointDefined
+      ? getPoint(values, end)
+      : add(centerPos, [
+          radius * Math.cos(endAngle),
+          radius * Math.sin(endAngle),
+        ]);
     solved.push({
       entityId: entity.entityId,
       kind: "arc",
@@ -7043,6 +7780,7 @@ function buildSolvedEntities(
 function buildConstraintStatuses(
   definition: SketchDefinition,
   pointRecords: Map<SketchPointId, SolverPointRecord>,
+  values: Float64Array,
   tolerance: SketchSolveTolerancePolicy,
   perConstraint: Map<string, number>,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
@@ -7067,7 +7805,85 @@ function buildConstraintStatuses(
         ? tolerance.angleRadians
         : tolerance.coincidence;
 
-    if (constraint.kind === "horizontal" || constraint.kind === "vertical") {
+    if (constraint.kind === "equalOffset") {
+      const pairPrimitives = constraint.pairs.map((pair) => {
+        if (pair.seedEntityId === pair.offsetEntityId) return null;
+        const seed = lineEntityMap.get(pair.seedEntityId);
+        const offset = lineEntityMap.get(pair.offsetEntityId);
+        if (!seed || !offset) return null;
+        const seedStart = pointRecords.get(seed.startPointId);
+        const seedEnd = pointRecords.get(seed.endPointId);
+        const offsetStart = pointRecords.get(offset.startPointId);
+        const offsetEnd = pointRecords.get(offset.endPointId);
+        if (!seedStart || !seedEnd || !offsetStart || !offsetEnd) return null;
+
+        const seedVector = subtract(
+          getPoint(values, seedEnd),
+          getPoint(values, seedStart),
+        );
+        const offsetVector = subtract(
+          getPoint(values, offsetEnd),
+          getPoint(values, offsetStart),
+        );
+        const seedLength = length(seedVector);
+        const offsetLength = length(offsetVector);
+        if (
+          !Number.isFinite(seedLength) ||
+          !Number.isFinite(offsetLength) ||
+          seedLength < DEGENERATE_NORM_EPSILON ||
+          offsetLength < DEGENERATE_NORM_EPSILON
+        ) {
+          return null;
+        }
+        const seedUnit: SketchPoint2D = [
+          seedVector[0] / seedLength,
+          seedVector[1] / seedLength,
+        ];
+        const offsetUnit: SketchPoint2D = [
+          offsetVector[0] / offsetLength,
+          offsetVector[1] / offsetLength,
+        ];
+        const side = pair.side === "left" ? 1 : -1;
+        const signedDistance =
+          side *
+          dot2(
+            [-seedUnit[1], seedUnit[0]],
+            subtract(
+              getPoint(values, offsetStart),
+              getPoint(values, seedStart),
+            ),
+          );
+        const parallel =
+          seedUnit[0] * offsetUnit[1] - seedUnit[1] * offsetUnit[0];
+        return { parallel, signedDistance };
+      });
+      const first = pairPrimitives[0];
+      const second = pairPrimitives[1];
+      if (!first || !second) {
+        status = "conflicting";
+      } else {
+        const firstAngularError = Math.asin(
+          Math.min(1, Math.abs(first.parallel)),
+        );
+        const secondAngularError = Math.asin(
+          Math.min(1, Math.abs(second.parallel)),
+        );
+        status =
+          Number.isFinite(firstAngularError) &&
+          Number.isFinite(secondAngularError) &&
+          Number.isFinite(first.signedDistance) &&
+          Number.isFinite(second.signedDistance) &&
+          firstAngularError <= tolerance.angleRadians &&
+          secondAngularError <= tolerance.angleRadians &&
+          Math.abs(first.signedDistance - second.signedDistance) <=
+            tolerance.coincidence
+            ? "satisfied"
+            : "unsatisfied";
+      }
+    } else if (
+      constraint.kind === "horizontal" ||
+      constraint.kind === "vertical"
+    ) {
       const entity = lineEntityMap.get(constraint.entityId);
       if (!entity) {
         status = "conflicting";
@@ -7358,6 +8174,7 @@ function buildDimensionStatuses(
   entityStates: Map<SketchEntityId, SolverEntityState>,
   values: Float64Array,
   perConstraint: Map<string, number>,
+  tolerance: SketchSolveTolerancePolicy,
   projectedReferences: readonly ProjectedSketchReferenceRecord[] = [],
 ): DimensionStatusRecord[] {
   const entityMap = new Map(
@@ -7511,11 +8328,18 @@ function buildDimensionStatuses(
       solvedValue = state?.kind === "arc" ? 0 : null;
     }
 
+    const residualTolerance =
+      dimension.kind === "lineAngle"
+        ? tolerance.angleRadians
+        : tolerance.coincidence;
     return {
       dimensionId: dimension.dimensionId,
       status:
         solvedValue === null ||
-        (perConstraint.get(dimension.dimensionId) ?? 0) > 1e-6
+        !isConstraintResidualWithinTolerance(
+          perConstraint.get(dimension.dimensionId) ?? 0,
+          residualTolerance,
+        )
           ? "unsatisfied"
           : "driving",
       solvedValue,
