@@ -24,6 +24,15 @@ const resources = new Map([
       readFileSync(new URL("./neutral-curve-conformance.mjs", import.meta.url)),
     ],
   ],
+  [
+    "/native-semantic.mjs",
+    [
+      "text/javascript",
+      readFileSync(
+        new URL("./native-semantic-conformance.mjs", import.meta.url),
+      ),
+    ],
+  ],
   ["/", ["text/html", "<!doctype html><title>Staged OCC smoke</title>"]],
   [
     "/worker.mjs",
@@ -32,9 +41,13 @@ const resources = new Map([
       `
     import init from '/cadara-occ.js';
     import { runNeutralCurveConformance } from '/conformance.mjs';
+    import { runNativeSemanticDispatcherConformance } from '/native-semantic.mjs';
     try {
       const oc = await init({locateFile: path => '/' + path});
-      postMessage({result: runNeutralCurveConformance(oc)});
+      postMessage({result: {
+        semantic: runNeutralCurveConformance(oc),
+        dispatcher: runNativeSemanticDispatcherConformance(oc),
+      }});
     } catch (error) { postMessage({error: String(error), stack: error.stack}); }
   `,
     ],
@@ -58,8 +71,13 @@ try {
   const result = await page.evaluate(async () => {
     const { default: init } = await import("/cadara-occ.js");
     const { runNeutralCurveConformance } = await import("/conformance.mjs");
+    const { runNativeSemanticDispatcherConformance } =
+      await import("/native-semantic.mjs");
     const oc = await init({ locateFile: (path) => "/" + path });
-    const main = runNeutralCurveConformance(oc);
+    const main = {
+      semantic: runNeutralCurveConformance(oc),
+      dispatcher: runNativeSemanticDispatcherConformance(oc),
+    };
     const worker = await new Promise((resolve, reject) => {
       const worker = new Worker("/worker.mjs", { type: "module" });
       const timeout = setTimeout(() => {
@@ -88,8 +106,14 @@ try {
       JSON.stringify(result, null, 2) + "\n",
     );
   console.log(JSON.stringify(result));
-  if (result.main.summary.error || result.worker.summary.error)
+  if (
+    result.main.semantic.summary.error ||
+    result.main.dispatcher.summary.error ||
+    result.worker.semantic.summary.error ||
+    result.worker.dispatcher.summary.error
+  ) {
     process.exitCode = 1;
+  }
 } finally {
   try {
     await browser?.close();

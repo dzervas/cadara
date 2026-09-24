@@ -4,7 +4,11 @@ import { resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-import { runNeutralCurveConformance } from "./neutral-curve-conformance.mjs";
+import {
+  runNeutralCurveConformance,
+  runRawGInterCharacterization,
+} from "./neutral-curve-conformance.mjs";
+import { runNativeSemanticDispatcherConformance } from "./native-semantic-conformance.mjs";
 
 const directory = resolve(
   process.argv[2] ?? fileURLToPath(new URL("../../public", import.meta.url)),
@@ -33,11 +37,16 @@ const { default: init } = await import(
 const oc = await init({
   wasmBinary: readFileSync(resolve(directory, "cadara-occ.wasm")),
 });
+const semantic = runNeutralCurveConformance(oc);
+const rawGInterCharacterization = runRawGInterCharacterization(oc);
+const nativeDispatcher = runNativeSemanticDispatcherConformance(oc);
 const result = {
   runtime: process.version,
   directory,
   assets,
-  ...runNeutralCurveConformance(oc),
+  ...semantic,
+  rawGInterCharacterization,
+  nativeDispatcher,
 };
 // The same rebuild must include the independently owned native precision correction.
 const expectedX = 0.12345678901234566;
@@ -69,4 +78,19 @@ if (process.argv[3])
     JSON.stringify(result, null, 2) + "\n",
   );
 console.log(JSON.stringify(result));
-if (result.summary.error || !result.nativePrecision.pass) process.exitCode = 1;
+const rawExpectedFailures = rawGInterCharacterization.cases
+  .filter((entry) => entry.status === "error")
+  .map((entry) => entry.name)
+  .sort();
+const expectedRawFailures = [
+  "point-touching-circles",
+  "reversed-partial-cubic-overlap",
+];
+if (
+  result.summary.error ||
+  nativeDispatcher.summary.error ||
+  JSON.stringify(rawExpectedFailures) !== JSON.stringify(expectedRawFailures) ||
+  !result.nativePrecision.pass
+) {
+  process.exitCode = 1;
+}

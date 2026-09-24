@@ -1,0 +1,11 @@
+--- a/src/bindings.py
++++ b/src/bindings.py
+@@ -158,7 +158,7 @@
+     # Epilog
+     nonPublicDestructor = any(x.kind == clang.cindex.CursorKind.DESTRUCTOR and not x.access_specifier == clang.cindex.AccessSpecifier.PUBLIC for x in theClass.get_children())
+     placementDelete = next((x for x in theClass.get_children() if x.spelling == "operator delete" and len(list(x.get_arguments())) == 2), None) is not None
+-    if nonPublicDestructor or placementDelete:
++    if nonPublicDestructor:
+       output += "namespace emscripten { namespace internal { template<> void raw_destructor<" + theClass.spelling + ">(" + theClass.spelling + "* ptr) { /* do nothing */ } } }\n"
+     return output
+ 
