@@ -32,6 +32,10 @@ export interface OnshapeSketchParameter {
   value?: string | number | boolean;
   expression?: string;
   hasExternalQuery: boolean;
+  queries?: readonly {
+    deterministicIds: readonly string[];
+    queryString: string;
+  }[];
 }
 
 export interface OnshapeSketchConstraint {
@@ -122,6 +126,20 @@ function normalizeSketchParameter(raw: unknown): OnshapeSketchParameter | null {
   }
   if (typeof record.expression === "string") {
     normalized.expression = record.expression;
+  }
+  if (Array.isArray(record.queries)) {
+    normalized.queries = record.queries.flatMap((query) => {
+      if (typeof query !== "object" || query === null) return [];
+      const queryRecord = query as Record<string, unknown>;
+      if (!Array.isArray(queryRecord.deterministicIds)) return [];
+      const deterministicIds = queryRecord.deterministicIds.filter(
+        (id): id is string => typeof id === "string",
+      );
+      return [{
+        deterministicIds,
+        queryString: typeof queryRecord.queryString === "string" ? queryRecord.queryString : "",
+      }];
+    });
   }
   return normalized;
 }

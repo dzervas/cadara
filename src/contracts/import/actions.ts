@@ -18,8 +18,18 @@ import type {
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
 import type { FeatureReplayFeatureParameters } from "@/contracts/modeling/feature-replay";
 import type { ImportRegionBoundaryIdentity } from "@/contracts/import/region-boundary-identity";
-import type { BodyId, FeatureId, SketchId, SketchPointId } from "@/contracts/shared/ids";
-import type { SketchPoint2D } from "@/contracts/sketch/schema";
+import type {
+  BodyId,
+  FeatureId,
+  SketchEntityId,
+  SketchId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
+import type {
+  SketchDefinition,
+  SketchPoint2D,
+  SketchReferenceDefinition,
+} from "@/contracts/sketch/schema";
 import type {
   SketchPlaneDefinition,
   SketchPlaneSupportRef,
@@ -133,8 +143,9 @@ export interface ImportDeferredSplitInterfaceFaceRef {
   toolExtrudeActionIndex: number;
   splitActionIndex: number;
   profileSketchActionIndex: number;
-  profileEntityId: "c.0" | "c.1";
-  endRole: "one-side-end";
+  /** Authored id of the profile sketch entity whose side face the tool extrude generated. */
+  profileEntityId: SketchEntityId;
+  endRole: "one-side-end" | "combined-ends";
   source: ImportTopologySelectorSource;
 }
 
@@ -431,9 +442,26 @@ export interface ImportDeferredSketchPlaneDefinition
   support: ImportDeferredSketchPlaneSupportRef;
 }
 
+export type ImportDeferredSketchReferenceDefinition =
+  | Exclude<SketchReferenceDefinition, { kind: "modelReference" | "sketchReference" }>
+  | (Omit<Extract<SketchReferenceDefinition, { kind: "modelReference" }>, "source"> & {
+      source: Extract<SketchReferenceDefinition, { kind: "modelReference" }>["source"]
+        | ImportDeferredTopologySelector;
+    })
+  | (Omit<Extract<SketchReferenceDefinition, { kind: "sketchReference" }>, "source"> & {
+      source: Extract<SketchReferenceDefinition, { kind: "sketchReference" }>["source"]
+        | ImportDeferredSketchEntityRef
+        | ImportDeferredSketchPointRef;
+    });
+
+export interface ImportDeferredSketchDefinition extends Omit<SketchDefinition, "references"> {
+  references: ImportDeferredSketchReferenceDefinition[];
+}
+
 export interface ImportCommitSketchRequest
-  extends Omit<CommitSketchRequest, "plane"> {
+  extends Omit<CommitSketchRequest, "plane" | "definition"> {
   plane: ImportDeferredSketchPlaneDefinition;
+  definition: ImportDeferredSketchDefinition;
 }
 
 export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
@@ -452,6 +480,7 @@ export const IMPORT_DEFERRED_VALUE_BLESSED_POSITIONS = {
     "createFeatures[].definition.parameters.extent.end.target.sketchId",
     "createFeatures[].definition.parameters.extent.firstEnd.target.sketchId",
     "createFeatures[].definition.parameters.extent.secondEnd.target.sketchId",
+    "commitSketches[].definition.references[].source.sketchId",
   ],
   constructionOf: [
     "createFeatures[].definition.parameters.participants[].targets[]",
@@ -473,6 +502,7 @@ export const IMPORT_DEFERRED_TOPOLOGY_BLESSED_POSITIONS = [
   "createFeatures[].definition.parameters.extent.firstEnd.target",
   "createFeatures[].definition.parameters.extent.secondEnd.target",
   "commitSketches[].plane.support",
+  "commitSketches[].definition.references[].source",
 ] as const;
 
 /**

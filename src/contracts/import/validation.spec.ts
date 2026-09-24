@@ -641,6 +641,93 @@ test("src/contracts/import/validation.spec.ts", async () => {
     }).success,
     "Prepared action validation should reject a non-face topologyOf sketch-plane support.",
   ).toBeFalsy();
+
+  const sketchOnSplitInterface = (endRole: string) => ({
+    ...sketchRequest(),
+    plane: {
+      ...sketchRequest().plane,
+      support: {
+        kind: "splitInterfaceFaceOf" as const,
+        profileSketchActionIndex: 0,
+        toolExtrudeActionIndex: 1,
+        splitActionIndex: 2,
+        profileEntityId: "sketch_entity_profile_line",
+        endRole,
+        source: {
+          consumerFeatureId: "S_SPLIT_INTERFACE",
+          parameterId: "sketchPlane",
+          deterministicId: "split-interface:profile-line",
+        },
+      },
+    },
+  });
+  const splitInterfaceActions = (endRole: string) => ({
+    commitSketches: [sketchRequest(), sketchOnSplitInterface(endRole) as never],
+    createFeatures: [planeRequest(), planeRequest()],
+    orderedActions: [
+      { kind: "commitSketch" as const, index: 0 },
+      { kind: "createFeature" as const, index: 0 },
+      { kind: "createFeature" as const, index: 1 },
+      { kind: "commitSketch" as const, index: 1 },
+    ],
+  });
+  expect(
+    validateImportPreparedActions(splitInterfaceActions("one-side-end")).success,
+    "Prepared action validation should admit a one-sided surface-tool selector role.",
+  ).toBeTruthy();
+  expect(
+    validateImportPreparedActions(splitInterfaceActions("combined-ends")).success,
+    "Prepared action validation should admit a symmetric or two-sided surface-tool selector role.",
+  ).toBeTruthy();
+  expect(
+    validateImportPreparedActions(splitInterfaceActions("unsupported-role")).success,
+    "Prepared action validation must reject an unrecognized split-interface selector role.",
+  ).toBeFalsy();
+
+  const withReference = (reference: unknown) => ({
+    ...sketchRequest(),
+    definition: {
+      ...sketchRequest().definition,
+      referenceIds: ["ref_external"],
+      references: [reference],
+    },
+  });
+  const deferredModelReference = {
+    referenceId: "ref_external",
+    kind: "modelReference",
+    label: "Body edge",
+    projectionMode: "projectAlongPlaneNormal",
+    source: { ...probedFaceSupport, expectedKind: "edge" },
+  };
+  expect(validateImportPreparedActions({
+    createFeatures: [planeRequest()],
+    commitSketches: [withReference(deferredModelReference) as never],
+    orderedActions: [{ kind: "createFeature", index: 0 }, { kind: "commitSketch", index: 0 }],
+  }).success).toBe(true);
+  expect(validateImportPreparedActions({
+    commitSketches: [withReference(deferredModelReference) as never],
+    orderedActions: [{ kind: "commitSketch", index: 0 }],
+  }).success).toBe(false);
+
+  const priorSketchReference = (actionIndex: number) => ({
+    referenceId: "ref_external",
+    kind: "sketchReference",
+    label: "Prior sketch line",
+    projectionMode: "useExistingCoplanarGeometry",
+    source: {
+      kind: "sketchEntity",
+      sketchId: { kind: "sketchIdOf", actionIndex },
+      entityId: "sketch_entity_prior_line",
+    },
+  });
+  expect(validateImportPreparedActions({
+    commitSketches: [sketchRequest(), withReference(priorSketchReference(0)) as never],
+    orderedActions: [{ kind: "commitSketch", index: 0 }, { kind: "commitSketch", index: 1 }],
+  }).success).toBe(true);
+  expect(validateImportPreparedActions({
+    commitSketches: [withReference(priorSketchReference(1)) as never, sketchRequest()],
+    orderedActions: [{ kind: "commitSketch", index: 0 }, { kind: "commitSketch", index: 1 }],
+  }).success).toBe(false);
 });
 
 test("validates deferred revolve boolean scope and advanced construction participants", () => {

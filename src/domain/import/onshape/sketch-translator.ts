@@ -6,13 +6,15 @@
  * solved positions so under-constrained sketches do not drift on import.
  * Supported entity kinds (line/circle/arc/point) translate table-driven;
  * supported local constraints, dimensions, and derivations are carried when
- * their operands resolve against the translated sketch graph. Unsupported or
- * external records degrade per-record with structured diagnostics.
+ * their operands resolve against the translated sketch graph. Preclassified
+ * external point/line references can supply projected constraint operands;
+ * unsupported records degrade per-record with structured diagnostics.
  */
-import {
-  createExpressionAuthoredValue,
-  createLiteralAuthoredValue,
-} from "@/contracts/modeling/authored-values";
+import type {
+  ImportDeferredSketchDefinition,
+  ImportDeferredSketchReferenceDefinition,
+} from "@/contracts/import/actions";
+import { createExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   ConstraintId,
   DimensionId,
@@ -35,18 +37,24 @@ import {
   type DimensionDefinition,
   type LocalSketchEntityConstraintOperand,
   type LocalSketchPointConstraintOperand,
+  type ProjectedSketchGeometryConstraintOperand,
   type SketchDefinition,
   type SketchDerivationDefinition,
   type SketchDimensionAuthoredValue,
   type SketchEntityDefinition,
+  type SketchOffsetPair,
   type SketchPoint2D,
   type SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 
 import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
-import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import {
+  SOLVER_SCHEMA_VERSION,
+  type ProjectedSketchReferenceRecord,
+} from "@/contracts/solver/schema";
 import type { OnshapeSketchConstraint } from "@/domain/import/onshape/bundle-reader";
+import { createProjectedGeometryId } from "@/domain/modeling/sketch-reference-projection";
 
 export type SolvedSketchEntityKind =
   | "lineSegment"
@@ -60,10 +68,30 @@ export interface SolvedSketchEntityGeometry {
   isConstruction?: boolean;
   start?: SketchPoint2D;
   end?: SketchPoint2D;
+  /** Exact authored startParam→endParam direction, projected into this sketch frame. */
+  authoredParameterDirection?: SketchPoint2D;
   center?: SketchPoint2D;
   radius?: number;
   position?: SketchPoint2D;
   sweepDirection?: "clockwise" | "counterClockwise";
+}
+
+export type SketchExternalReferenceVerificationGeometry =
+  | {
+      kind: "point";
+      position3d: readonly [number, number, number];
+    }
+  | {
+      kind: "lineSegment";
+      start3d: readonly [number, number, number];
+      end3d: readonly [number, number, number];
+    };
+
+export interface SketchExternalReference {
+  definition: ImportDeferredSketchReferenceDefinition;
+  geometryKind: "point" | "lineSegment";
+  /** Captured authoritative geometry used only for pre-commit consistency verification. */
+  verificationGeometry?: SketchExternalReferenceVerificationGeometry;
 }
 
 export interface SketchTranslationInput {
@@ -78,6 +106,7 @@ export interface SketchTranslationInput {
   entities: readonly SolvedSketchEntityGeometry[];
   constraints?: readonly OnshapeSketchConstraint[];
   sourceSolveStatus?: string;
+  externalReferences?: ReadonlyMap<string, SketchExternalReference>;
 }
 
 export interface SketchRelationshipSummary {
@@ -107,12 +136,13 @@ export interface SketchTranslationDiagnostic {
 export interface SketchTranslationResult {
   plane: SketchPlaneDefinition;
   definition: SketchDefinition;
+  projectedReferences: ProjectedSketchReferenceRecord[];
   diagnostics: SketchTranslationDiagnostic[];
   relationshipSummary: SketchRelationshipSummary;
   sourceSolveStatus?: string;
 }
 
-function normalizeCoincidentPointTopology(definition: SketchDefinition) {
+function normalizeCoincidentPointTopology<T extends ImportDeferredSketchDefinition>(definition: T): T {
   const parentByPointId = new Map<SketchPointId, SketchPointId>(
     definition.pointIds.map((pointId) => [pointId, pointId]),
   );
@@ -163,7 +193,7 @@ function normalizeCoincidentPointTopology(definition: SketchDefinition) {
 
   const normalized = replacePointIds(
     structuredClone(definition),
-  ) as SketchDefinition;
+  ) as T;
   normalized.points = normalized.points.filter(
     (point, index, all) =>
       all.findIndex((candidate) => candidate.pointId === point.pointId) === index,
@@ -179,14 +209,15 @@ export interface SketchSolveConsistencyInput {
   revisionId: RevisionId;
   sketchId: SketchId;
   plane: SketchPlaneDefinition;
-  definition: SketchDefinition;
+  definition: ImportDeferredSketchDefinition;
+  projectedReferences?: readonly ProjectedSketchReferenceRecord[];
   relationshipSummary: SketchRelationshipSummary;
   sourceSolveStatus?: string;
   tolerance?: number;
 }
 
 export interface SketchSolveConsistencyResult {
-  definition: SketchDefinition;
+  definition: ImportDeferredSketchDefinition;
   diagnostics: SketchTranslationDiagnostic[];
   relationshipSummary: SketchRelationshipSummary;
 }
@@ -199,12 +230,18 @@ interface CanonicalPlaneSpec {
 interface TranslationMaps {
   entitiesByRawId: Map<string, SketchEntityDefinition>;
   pointsByRawOperand: Map<string, SketchPointId>;
+  externalReferences: NonNullable<SketchTranslationInput["externalReferences"]>;
 }
 
 type ParsedOperand =
   | { kind: "point"; raw: string; pointId: SketchPointId }
   | { kind: "entity"; raw: string; entityId: SketchEntityId }
-  | { kind: "external"; raw: string }
+  | {
+      kind: "external";
+      raw: string;
+      operand: ProjectedSketchGeometryConstraintOperand;
+      geometryKind: "point" | "lineSegment";
+    }
   | { kind: "missing"; raw: string };
 
 const CANONICAL_PLANE_SPECS: Record<SketchPlaneKey, CanonicalPlaneSpec> = {
@@ -246,7 +283,7 @@ const CANONICAL_PLANE_SPECS: Record<SketchPlaneKey, CanonicalPlaneSpec> = {
 const METERS_TO_MM = 1000;
 const POINT_SUFFIXES = ["start", "end", "center", "middle", "point"] as const;
 const DIMENSION_KINDS = new Set(["DISTANCE", "LENGTH", "DIAMETER", "ANGLE", "RADIUS"]);
-const DERIVATION_KINDS = new Set(["MIRROR", "LINEAR_PATTERN", "OFFSET"]);
+const DERIVATION_KINDS = new Set(["MIRROR", "LINEAR_PATTERN"]);
 const LINEAR_PATTERN_VECTOR_TOLERANCE = 1e-4;
 const AXIS_ALIGNMENT_TOLERANCE = 1e-4;
 
@@ -375,19 +412,57 @@ function hasExternalOperand(record: OnshapeSketchConstraint): boolean {
   );
 }
 
+function firstConstraintOperand(
+  record: OnshapeSketchConstraint,
+  parameterIds: readonly string[],
+  maps: TranslationMaps,
+): string | null {
+  for (const parameterId of parameterIds) {
+    const entry = parameter(record, parameterId);
+    if (typeof entry?.value === "string") return entry.value;
+    const externalIds = entry?.queries
+      ?.flatMap((query) => query.deterministicIds)
+      .filter((id) => maps.externalReferences.has(id)) ?? [];
+    if (entry?.hasExternalQuery && externalIds.length === 1) return externalIds[0]!;
+  }
+  return null;
+}
+
 function rawOperands(record: OnshapeSketchConstraint): string[] {
   return record.parameters
     .filter((entry) => {
       const id = entry.parameterId.toLowerCase();
       return id.startsWith("local") || id.startsWith("external");
     })
-    .map((entry) => entry.value)
-    .filter((value): value is string => typeof value === "string");
+    .flatMap((entry) => {
+      if (typeof entry.value === "string") return [entry.value];
+      return entry.queries?.flatMap((query) => query.deterministicIds) ?? [];
+    });
 }
 
 function parseOperand(raw: string | null, maps: TranslationMaps): ParsedOperand {
   if (!raw) {
     return { kind: "missing", raw: "" };
+  }
+  const external = maps.externalReferences.get(raw);
+  if (external) {
+    const referenceId = external.definition.referenceId;
+    return {
+      kind: "external",
+      raw,
+      geometryKind: external.geometryKind,
+      operand: {
+        kind: "projectedGeometry",
+        reference: {
+          kind: external.geometryKind === "point" ? "projectedPoint" : "projectedLineSegment",
+          referenceId,
+          geometryId: createProjectedGeometryId(
+            referenceId,
+            external.geometryKind === "point" ? "point" : "edge",
+          ),
+        },
+      },
+    };
   }
   const directPoint = maps.pointsByRawOperand.get(raw);
   if (directPoint) {
@@ -533,21 +608,21 @@ function translateConstraintRecord(input: {
   const label = record.entityId;
   const id = constraintId(featureId, record.entityId);
   const first = parseOperand(
-    firstStringParameter(record, [
+    firstConstraintOperand(record, [
       "localFirst",
       "localEntity1",
       "externalFirst",
       "externalEntity1",
-    ]),
+    ], maps),
     maps,
   );
   const second = parseOperand(
-    firstStringParameter(record, [
+    firstConstraintOperand(record, [
       "localSecond",
       "localEntity2",
       "externalSecond",
       "externalEntity2",
-    ]),
+    ], maps),
     maps,
   );
 
@@ -556,28 +631,42 @@ function translateConstraintRecord(input: {
       if (first.kind === "point" && second.kind === "point") {
         return { constraintId: id, kind: "coincident", label, pointIds: [first.pointId, second.pointId] };
       }
+      const point = pointOperand(first) ?? pointOperand(second);
+      const external = first.kind === "external" ? first : second.kind === "external" ? second : null;
+      if (point && external) {
+        return external.geometryKind === "point"
+          ? { constraintId: id, kind: "coincidentProjectedPoint", label, point, projectedPoint: external.operand }
+          : { constraintId: id, kind: "pointOnProjectedCurve", label, point, projectedCurve: external.operand };
+      }
+      const curve = entityOperand(first) ?? entityOperand(second);
+      if (point && curve) {
+        return { constraintId: id, kind: "pointOnCurve", label, point, curve };
+      }
       break;
     }
     case "MIDPOINT": {
       const midpoint = parseOperand(
-        firstStringParameter(record, [
+        firstConstraintOperand(record, [
           "localMidpoint",
           "localEntity1",
           "externalMidpoint",
           "externalEntity1",
-        ]),
+        ], maps),
         maps,
       );
       const line = parseOperand(
-        firstStringParameter(record, [
+        firstConstraintOperand(record, [
           "localEntity2",
           "localSecond",
           "externalEntity2",
           "externalSecond",
-        ]),
+        ], maps),
         maps,
       );
       const point = pointOperand(midpoint);
+      if (point && line.kind === "external" && line.geometryKind === "lineSegment") {
+        return { constraintId: id, kind: "midpointProjectedLine", label, point, projectedLine: line.operand };
+      }
       const lineEntity = entityOperand(line);
       if (point && lineEntity) {
         return { constraintId: id, kind: "midpoint", label, point, line: lineEntity };
@@ -611,6 +700,11 @@ function translateConstraintRecord(input: {
       break;
     }
     case "PERPENDICULAR": {
+      const line = entityOperand(first) ?? entityOperand(second);
+      const external = first.kind === "external" ? first : second.kind === "external" ? second : null;
+      if (line && external?.geometryKind === "lineSegment") {
+        return { constraintId: id, kind: "perpendicularProjectedLine", label, line, projectedLine: external.operand };
+      }
       if (first.kind === "entity" && second.kind === "entity") {
         return { constraintId: id, kind: "perpendicular", label, entityIds: [first.entityId, second.entityId] };
       }
@@ -835,142 +929,81 @@ function averageLinearPatternVector(vectors: readonly SketchPoint2D[]): SketchPo
   return isConsistent ? average : null;
 }
 
-function pointForEntityRole(
-  entity: SketchEntityDefinition,
-  role: "start" | "end" | "center" | "point",
-  pointsById: ReadonlyMap<SketchPointId, SketchPointDefinition>,
-): SketchPoint2D | null {
-  switch (entity.kind) {
-    case "lineSegment":
-      return pointsById.get(role === "end" ? entity.endPointId : entity.startPointId)?.position ?? null;
-    case "circle":
-      return pointsById.get(entity.centerPointId)?.position ?? null;
-    case "arc": {
-      const pointId =
-        role === "start"
-          ? entity.startPointId
-          : role === "end"
-            ? entity.endPointId
-            : entity.centerPointId;
-      return pointsById.get(pointId)?.position ?? null;
-    }
-    case "point":
-      return pointsById.get(entity.pointId)?.position ?? null;
-    default:
-      return null;
-  }
-}
-
-function firstHalfSpaceSign(record: OnshapeSketchConstraint): 1 | -1 | null {
-  const halfSpace = record.parameters.find(
-    (entry) =>
-      entry.parameterId.toLowerCase().startsWith("halfspace") &&
-      typeof entry.value === "string",
-  )?.value;
-  if (halfSpace === "LEFT") {
-    return 1;
-  }
-  if (halfSpace === "RIGHT") {
-    return -1;
-  }
-  return null;
-}
-
-function radiusForCircleLike(
-  entity: SketchEntityDefinition,
-  pointsById: ReadonlyMap<SketchPointId, SketchPointDefinition>,
-): number | null {
-  if (entity.kind === "circle") {
-    return entity.radius;
-  }
-  if (entity.kind !== "arc") {
-    return null;
-  }
-  const center = pointForEntityRole(entity, "center", pointsById);
-  const start = pointForEntityRole(entity, "start", pointsById);
-  return center && start ? Math.hypot(start[0] - center[0], start[1] - center[1]) : null;
-}
-
-function signedOffsetDistance(input: {
-  seed: SketchEntityDefinition;
-  output: SketchEntityDefinition;
-  pointsById: ReadonlyMap<SketchPointId, SketchPointDefinition>;
-  halfSpaceSign: 1 | -1 | null;
-}): number | null {
-  const { seed, output, pointsById, halfSpaceSign } = input;
-  if (seed.kind === "lineSegment" && output.kind === "lineSegment") {
-    const seedStart = pointForEntityRole(seed, "start", pointsById);
-    const seedEnd = pointForEntityRole(seed, "end", pointsById);
-    const outputStart = pointForEntityRole(output, "start", pointsById);
-    const outputEnd = pointForEntityRole(output, "end", pointsById);
-    if (!seedStart || !seedEnd || !outputStart || !outputEnd) {
-      return null;
-    }
-    const dx = seedEnd[0] - seedStart[0];
-    const dy = seedEnd[1] - seedStart[1];
-    const length = Math.hypot(dx, dy);
-    if (length === 0) {
-      return null;
-    }
-    const normal: SketchPoint2D = [-dy / length, dx / length];
-    const startDistance =
-      (outputStart[0] - seedStart[0]) * normal[0] +
-      (outputStart[1] - seedStart[1]) * normal[1];
-    const endDistance =
-      (outputEnd[0] - seedEnd[0]) * normal[0] +
-      (outputEnd[1] - seedEnd[1]) * normal[1];
-    const signed = (startDistance + endDistance) / 2;
-    return halfSpaceSign === null ? signed : Math.abs(signed) * halfSpaceSign;
-  }
-
-  if (
-    (seed.kind === "circle" || seed.kind === "arc") &&
-    (output.kind === "circle" || output.kind === "arc")
-  ) {
-    const seedRadius = radiusForCircleLike(seed, pointsById);
-    const outputRadius = radiusForCircleLike(output, pointsById);
-    if (seedRadius == null || outputRadius == null) {
-      return null;
-    }
-    // The offset contract measures distance to the left of traversal: a
-    // counter-clockwise circle/arc SHRINKS by a positive distance, and a
-    // clockwise arc grows. Reporting the raw radius delta inverts that sign and
-    // makes an authored outward offset collapse the curve at solve time.
-    const shrinksWithPositiveDistance =
-      seed.kind === "circle" || seed.sweepDirection === "counterClockwise";
-    const signed = shrinksWithPositiveDistance
-      ? seedRadius - outputRadius
-      : outputRadius - seedRadius;
-    return halfSpaceSign === null ? signed : Math.abs(signed) * halfSpaceSign;
-  }
-
-  return null;
-}
-
-function normalizeOffsetDistance(input: {
+function equalOffsetPair(input: {
   record: OnshapeSketchConstraint;
-  seeds: readonly SketchEntityDefinition[];
-  outputs: readonly SketchEntityDefinition[];
+  seedParameterId: "localMaster" | "localSecond";
+  offsetParameterId: "localOffset" | "localSecondOffset";
+  maps: TranslationMaps;
   pointsById: ReadonlyMap<SketchPointId, SketchPointDefinition>;
-}): SketchDimensionAuthoredValue | null {
-  const halfSpaceSign = firstHalfSpaceSign(input.record);
-  const distances = input.seeds
-    .map((seed, index) =>
-      signedOffsetDistance({
-        seed,
-        output: input.outputs[index]!,
-        pointsById: input.pointsById,
-        halfSpaceSign,
-      }),
-    )
-    .filter((distance): distance is number =>
-      distance !== null && Number.isFinite(distance),
-    );
-  if (distances.length === 0) {
+}): SketchOffsetPair | null {
+  const seed = input.maps.entitiesByRawId.get(
+    stringParameter(input.record, input.seedParameterId) ?? "",
+  );
+  const offset = input.maps.entitiesByRawId.get(
+    stringParameter(input.record, input.offsetParameterId) ?? "",
+  );
+  if (seed?.kind !== "lineSegment" || offset?.kind !== "lineSegment") {
     return null;
   }
-  const average = distances.reduce((sum, distance) => sum + distance, 0) / distances.length;
-  return createLiteralAuthoredValue(average);
+  const seedStart = input.pointsById.get(seed.startPointId)?.position;
+  const seedEnd = input.pointsById.get(seed.endPointId)?.position;
+  const offsetStart = input.pointsById.get(offset.startPointId)?.position;
+  if (!seedStart || !seedEnd || !offsetStart) {
+    return null;
+  }
+  const dx = seedEnd[0] - seedStart[0];
+  const dy = seedEnd[1] - seedStart[1];
+  const length = Math.hypot(dx, dy);
+  if (length === 0) {
+    return null;
+  }
+  // Preserve the side in the captured sketch frame: positive dot product with
+  // the directed seed's left normal is left, negative is right. A coincident
+  // capture has no justified side and therefore fails closed.
+  const signedNormalDistance =
+    (offsetStart[0] - seedStart[0]) * (-dy / length) +
+    (offsetStart[1] - seedStart[1]) * (dx / length);
+  if (signedNormalDistance === 0) {
+    return null;
+  }
+  return {
+    seedEntityId: seed.entityId,
+    offsetEntityId: offset.entityId,
+    side: signedNormalDistance > 0 ? "left" : "right",
+  };
+}
+
+function translateEqualOffsetRecord(input: {
+  featureId: string;
+  record: OnshapeSketchConstraint;
+  maps: TranslationMaps;
+  pointsById: ReadonlyMap<SketchPointId, SketchPointDefinition>;
+  diagnostics: SketchTranslationDiagnostic[];
+}): Extract<ConstraintDefinition, { kind: "equalOffset" }> | null {
+  const first = equalOffsetPair({
+    ...input,
+    seedParameterId: "localMaster",
+    offsetParameterId: "localOffset",
+  });
+  const second = equalOffsetPair({
+    ...input,
+    seedParameterId: "localSecond",
+    offsetParameterId: "localSecondOffset",
+  });
+  if (!first || !second) {
+    dropRelationship(
+      input.diagnostics,
+      input.record,
+      "equal offset requires two resolved non-coincident local line pairs",
+    );
+    return null;
+  }
+  return {
+    constraintId: constraintId(input.featureId, input.record.entityId),
+    kind: "equalOffset",
+    label: input.record.entityId,
+    pairs: [first, second],
+  };
 }
 
 function translateDerivationRecord(input: {
@@ -1008,48 +1041,6 @@ function translateDerivationRecord(input: {
         seedEntityIds: [seed.entityId],
         outputs: [makeOutput(seed, output, 1)],
         mirrorReference: { kind: "lineEntity", entityId: mirrorOperand.entityId },
-      };
-    }
-    case "OFFSET": {
-      const seeds: SketchEntityDefinition[] = [];
-      const derivedEntities: SketchEntityDefinition[] = [];
-      const outputs: ReturnType<typeof makeOutput>[] = [];
-      for (const [masterKey, offsetKey] of [
-        ["localMaster", "localOffset"],
-        ["externalMaster", "localOffset"],
-        ["externalSecond", "localSecondOffset"],
-      ] as const) {
-        const masterRaw = stringParameter(record, masterKey);
-        const offsetRaw = stringParameter(record, offsetKey);
-        const master = masterRaw ? maps.entitiesByRawId.get(masterRaw) : undefined;
-        const output = offsetRaw ? maps.entitiesByRawId.get(offsetRaw) : undefined;
-        if (master && output) {
-          seeds.push(master);
-          derivedEntities.push(output);
-          outputs.push(makeOutput(master, output, 1));
-        }
-      }
-      if (outputs.length === 0) {
-        break;
-      }
-      const distance = normalizeOffsetDistance({
-        record,
-        seeds,
-        outputs: derivedEntities,
-        pointsById,
-      });
-      if (!distance) {
-        break;
-      }
-      return {
-        derivationId: id,
-        kind: "offset",
-        label,
-        seedEntityIds: seeds.map((seed) => seed.entityId),
-        outputs,
-        distance,
-        jointPolicy: "trimExtendArcFallback",
-        jointOutputs: [],
       };
     }
     case "LINEAR_PATTERN": {
@@ -1155,7 +1146,7 @@ function dimensionForSolve(dimension: DimensionDefinition): DimensionDefinition 
   return null;
 }
 
-function verifiableRelationships(definition: SketchDefinition): VerifiableRelationship[] {
+function verifiableRelationships(definition: ImportDeferredSketchDefinition): VerifiableRelationship[] {
   return [
     ...definition.constraints.map((constraint) => ({
       kind: "constraint" as const,
@@ -1180,9 +1171,9 @@ function verifiableRelationships(definition: SketchDefinition): VerifiableRelati
 }
 
 function definitionWithRelationships(
-  definition: SketchDefinition,
+  definition: ImportDeferredSketchDefinition,
   relationships: readonly VerifiableRelationship[],
-): SketchDefinition {
+): ImportDeferredSketchDefinition {
   const constraints = relationships
     .filter((relationship): relationship is Extract<VerifiableRelationship, { kind: "constraint" }> => relationship.kind === "constraint")
     .map((relationship) => relationship.constraint);
@@ -1199,9 +1190,9 @@ function definitionWithRelationships(
 }
 
 function definitionWithoutRelationships(
-  definition: SketchDefinition,
+  definition: ImportDeferredSketchDefinition,
   relationships: readonly VerifiableRelationship[],
-): SketchDefinition {
+): ImportDeferredSketchDefinition {
   const droppedConstraintIds = new Set(
     relationships
       .filter((relationship) => relationship.kind === "constraint")
@@ -1228,7 +1219,7 @@ function definitionWithoutRelationships(
 }
 
 function solvedDeviation(
-  definition: SketchDefinition,
+  definition: ImportDeferredSketchDefinition,
   solvedPoints: readonly { pointId: SketchPointId; solvedPosition: SketchPoint2D }[],
 ): number {
   const solvedById = new Map(solvedPoints.map((point) => [point.pointId, point.solvedPosition]));
@@ -1246,6 +1237,87 @@ function solvedDeviation(
   return maxDeviation;
 }
 
+/**
+ * Build semantic geometry components for pose probing. Entity incidence is
+ * deliberately stronger than the solver's scalar-variable components: the two
+ * ends of a free line are one deformable shape, not two rigid bodies. Local ids
+ * in constraints, dimensions, and derivations then close those entity groups.
+ */
+function sketchGeometryPointComponents(
+  definition: ImportDeferredSketchDefinition,
+): SketchPointId[][] {
+  const parentByPointId = new Map<SketchPointId, SketchPointId>(
+    definition.pointIds.map((id) => [id, id]),
+  );
+  const find = (id: SketchPointId): SketchPointId => {
+    const parent = parentByPointId.get(id) ?? id;
+    if (parent === id) return id;
+    const root = find(parent);
+    parentByPointId.set(id, root);
+    return root;
+  };
+  const union = (ids: readonly SketchPointId[]) => {
+    const first = ids[0];
+    if (!first) return;
+    const root = find(first);
+    for (const id of ids.slice(1)) {
+      parentByPointId.set(find(id), root);
+    }
+  };
+  const pointIdsByEntityId = new Map(
+    definition.entities.map((entity) => [entity.entityId, entityPointIds(entity)]),
+  );
+
+  for (const pointIds of pointIdsByEntityId.values()) {
+    union(pointIds);
+  }
+
+  const localIdsIn = (
+    value: unknown,
+    ids: Set<SketchPointId>,
+    propertyName = "",
+  ): void => {
+    if (typeof value === "string") {
+      if (!/(?:point|entity)Ids?$/i.test(propertyName)) return;
+      if (parentByPointId.has(value as SketchPointId)) {
+        ids.add(value as SketchPointId);
+      }
+      for (const pointId of pointIdsByEntityId.get(value as SketchEntityId) ?? []) {
+        ids.add(pointId);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) localIdsIn(entry, ids, propertyName);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [key, entry] of Object.entries(value)) {
+        localIdsIn(entry, ids, key);
+      }
+    }
+  };
+
+  for (const relationship of [
+    ...definition.constraints,
+    ...definition.dimensions,
+    ...(definition.derivedRelationships ?? []),
+  ]) {
+    const ids = new Set<SketchPointId>();
+    localIdsIn(relationship, ids);
+    union([...ids]);
+  }
+
+  const componentsByRoot = new Map<SketchPointId, SketchPointId[]>();
+  for (const pointId of definition.pointIds) {
+    const root = find(pointId);
+    const component = componentsByRoot.get(root);
+    if (component) component.push(pointId);
+    else componentsByRoot.set(root, [pointId]);
+  }
+  return [...componentsByRoot.values()];
+}
+
 export async function verifySketchTranslationSolveConsistency(
   input: SketchSolveConsistencyInput,
 ): Promise<SketchSolveConsistencyResult> {
@@ -1253,7 +1325,18 @@ export async function verifySketchTranslationSolveConsistency(
   const relationships = verifiableRelationships(input.definition);
   let requestSequence = 0;
 
-  const solveDefinition = async (definition: SketchDefinition) => {
+  const solveDefinition = async (definition: ImportDeferredSketchDefinition) => {
+    const projectedReferenceIds = new Set(
+      (input.projectedReferences ?? [])
+        .filter((reference) => reference.status === "projected")
+        .map((reference) => reference.referenceId),
+    );
+    const missingProjection = definition.referenceIds.find(
+      (referenceId) => !projectedReferenceIds.has(referenceId),
+    );
+    if (missingProjection) {
+      throw new Error(`Sketch solve-consistency verification is missing projected geometry for ${missingProjection}.`);
+    }
     requestSequence += 1;
     return input.solver.solveSketch({
       contractVersion: input.contractVersion,
@@ -1269,17 +1352,19 @@ export async function verifySketchTranslationSolveConsistency(
         minimumSegmentLength: tolerance,
       },
       partialSolvePolicy: "failOnConflict",
-      definition,
-      projectedReferences: [],
+      // Projection is materialized above. Deferred source selectors are not
+      // consulted by solve once every authored reference has an exact record.
+      definition: definition as unknown as SketchDefinition,
+      projectedReferences: [...(input.projectedReferences ?? [])],
     });
   };
 
   const isBad = async (candidate: readonly VerifiableRelationship[]) => {
-    const definition = definitionWithRelationships(input.definition, candidate);
-    const response = await solveDefinition(definition);
+    const candidateDefinition = definitionWithRelationships(input.definition, candidate);
+    const response = await solveDefinition(candidateDefinition);
     return (
       response.status.solveState === "failed" ||
-      solvedDeviation(definition, response.solvedSnapshot.solvedPoints) > tolerance
+      solvedDeviation(candidateDefinition, response.solvedSnapshot.solvedPoints) > tolerance
     );
   };
 
@@ -1344,89 +1429,162 @@ export async function verifySketchTranslationSolveConsistency(
 
   if (input.sourceSolveStatus === "WELL_DEFINED" && definition.points.length > 0) {
     const perturbDistance = Math.max(1, tolerance * 100);
-    const hasResidualMobility = async (candidate: SketchDefinition) => {
+    const pointsById = new Map(definition.points.map((point) => [point.pointId, point]));
+    const components = sketchGeometryPointComponents(definition);
+    const rigidShapeDeviation = (
+      pointIds: readonly SketchPointId[],
+      solvedPoints: readonly { pointId: SketchPointId; solvedPosition: SketchPoint2D }[],
+    ): number => {
+      const solvedById = new Map(
+        solvedPoints.map((point) => [point.pointId, point.solvedPosition]),
+      );
+      let maxDeviation = 0;
+      for (let leftIndex = 0; leftIndex < pointIds.length; leftIndex += 1) {
+        const left = pointsById.get(pointIds[leftIndex]!);
+        const solvedLeft = left && solvedById.get(left.pointId);
+        if (!left || !solvedLeft) return Number.POSITIVE_INFINITY;
+        for (let rightIndex = leftIndex + 1; rightIndex < pointIds.length; rightIndex += 1) {
+          const right = pointsById.get(pointIds[rightIndex]!);
+          const solvedRight = right && solvedById.get(right.pointId);
+          if (!right || !solvedRight) return Number.POSITIVE_INFINITY;
+          maxDeviation = Math.max(
+            maxDeviation,
+            Math.abs(
+              Math.hypot(
+                solvedRight[0] - solvedLeft[0],
+                solvedRight[1] - solvedLeft[1],
+              ) - Math.hypot(
+                right.position[0] - left.position[0],
+                right.position[1] - left.position[1],
+              ),
+            ),
+          );
+        }
+      }
+      return maxDeviation;
+    };
+    const componentSolvedDeviation = (
+      pointIds: readonly SketchPointId[],
+      solvedPoints: readonly { pointId: SketchPointId; solvedPosition: SketchPoint2D }[],
+    ): number => {
+      const solvedById = new Map(
+        solvedPoints.map((point) => [point.pointId, point.solvedPosition]),
+      );
+      let maxDeviation = 0;
+      for (const pointId of pointIds) {
+        const point = pointsById.get(pointId);
+        const solved = solvedById.get(pointId);
+        if (!point || !solved) return Number.POSITIVE_INFINITY;
+        maxDeviation = Math.max(
+          maxDeviation,
+          Math.hypot(
+            solved[0] - point.position[0],
+            solved[1] - point.position[1],
+          ),
+        );
+      }
+      return maxDeviation;
+    };
+    const hasRigidPoseFreedom = async (
+      candidate: ImportDeferredSketchDefinition,
+      pointIds: readonly SketchPointId[],
+      transform: (position: SketchPoint2D) => SketchPoint2D,
+    ) => {
+      const componentPointIds = new Set(pointIds);
       const solveReady = definitionWithRelationships(
         candidate,
         verifiableRelationships(candidate),
       );
-      const perturbed: SketchDefinition = {
+      const perturbed: ImportDeferredSketchDefinition = {
         ...solveReady,
-        points: solveReady.points.map((point) => ({
-          ...point,
-          position: [
-            point.position[0] + perturbDistance,
-            point.position[1] + perturbDistance * 0.75,
-          ],
-        })),
+        points: solveReady.points.map((point) => componentPointIds.has(point.pointId)
+          ? { ...point, position: transform(point.position) }
+          : point),
       };
       const response = await solveDefinition(perturbed);
-      return (
-        response.status.solveState !== "failed" &&
-        solvedDeviation(candidate, response.solvedSnapshot.solvedPoints) > tolerance
-      );
+      return response.status.solveState !== "failed" &&
+        componentSolvedDeviation(pointIds, response.solvedSnapshot.solvedPoints) > tolerance &&
+        rigidShapeDeviation(pointIds, response.solvedSnapshot.solvedPoints) <= tolerance;
     };
 
-    if (await hasResidualMobility(definition)) {
-      const preferredPoints = definition.points.filter(
-        (point) => !point.isConstruction,
+    const groundingConstraints: ConstraintDefinition[] = [];
+    let hasRotationFreedom = false;
+    for (const componentPointIds of components) {
+      const hasTranslationFreedom = await hasRigidPoseFreedom(
+        definition,
+        componentPointIds,
+        ([x, y]) => [x + perturbDistance, y + perturbDistance * 0.75],
       );
-      const candidates = preferredPoints.length > 0 ? preferredPoints : definition.points;
-      const first = candidates[0]!;
-      const second = candidates
-        .slice(1)
-        .sort(
-          (left, right) =>
-            Math.hypot(
-              right.position[0] - first.position[0],
-              right.position[1] - first.position[1],
-            ) -
-            Math.hypot(
-              left.position[0] - first.position[0],
-              left.position[1] - first.position[1],
-            ),
-        )[0];
-      const groundingPoints = second ? [first, second] : [first];
-      let remainsMobile = true;
-      let groundedPointCount = 0;
-
-      for (const point of groundingPoints) {
-        groundedPointCount += 1;
-        const groundingConstraint: ConstraintDefinition = {
-          constraintId:
-            `constraint_${sanitizeId(input.sketchId)}_import_ground_${groundedPointCount}` as ConstraintId,
-          kind: "fixPoint",
-          label: `Imported source anchor ${groundedPointCount}`,
-          pointId: point.pointId,
-          position: point.position,
-        };
-        definition = {
-          ...definition,
-          constraintIds: [
-            ...definition.constraintIds,
-            groundingConstraint.constraintId,
-          ],
-          constraints: [...definition.constraints, groundingConstraint],
-        };
-        remainsMobile = await hasResidualMobility(definition);
-        if (!remainsMobile) {
-          break;
+      let groundingPoint: SketchPointDefinition | undefined;
+      if (hasTranslationFreedom) {
+        groundingPoint = componentPointIds
+          .map((pointId) => pointsById.get(pointId))
+          .find((point) => point?.isConstruction === false) ??
+          pointsById.get(componentPointIds[0]!);
+        if (groundingPoint) {
+          const ordinal = groundingConstraints.length + 1;
+          const groundingConstraint: ConstraintDefinition = {
+            constraintId:
+              `constraint_${sanitizeId(input.sketchId)}_import_ground_${ordinal}` as ConstraintId,
+            kind: "fixPoint",
+            label: `Imported source anchor ${ordinal}`,
+            pointId: groundingPoint.pointId,
+            position: groundingPoint.position,
+          };
+          groundingConstraints.push(groundingConstraint);
+          definition = {
+            ...definition,
+            constraintIds: [...definition.constraintIds, groundingConstraint.constraintId],
+            constraints: [...definition.constraints, groundingConstraint],
+          };
         }
       }
 
+      const componentPoints = componentPointIds
+        .map((pointId) => pointsById.get(pointId))
+        .filter((point): point is SketchPointDefinition => point !== undefined);
+      const pivot = groundingPoint?.position ?? (() => {
+        const sum = componentPoints.reduce(
+          (total, point) => [
+            total[0] + point.position[0],
+            total[1] + point.position[1],
+          ] as SketchPoint2D,
+          [0, 0] as SketchPoint2D,
+        );
+        return [
+          sum[0] / componentPoints.length,
+          sum[1] / componentPoints.length,
+        ] as SketchPoint2D;
+      })();
+      const rotationRadians = 0.1;
+      const cosine = Math.cos(rotationRadians);
+      const sine = Math.sin(rotationRadians);
+      hasRotationFreedom ||= await hasRigidPoseFreedom(
+        definition,
+        componentPointIds,
+        ([x, y]) => {
+          const dx = x - pivot[0];
+          const dy = y - pivot[1];
+          return [
+            pivot[0] + dx * cosine - dy * sine,
+            pivot[1] + dx * sine + dy * cosine,
+          ];
+        },
+      );
+    }
+
+    if (groundingConstraints.length > 0 || hasRotationFreedom) {
       diagnostics.push({
-        code: remainsMobile
+        code: hasRotationFreedom
           ? "onshape-sketch-residual-mobility"
           : "onshape-sketch-residual-mobility-grounded",
-        message: remainsMobile
-          ? `Source sketch ${input.sketchId} was WELL_DEFINED, but translated geometry remained mobile after grounding ${groundedPointCount} suitable points.`
-          : `Source sketch ${input.sketchId} was WELL_DEFINED; ${groundedPointCount} suitable point anchor${groundedPointCount === 1 ? " was" : "s were"} carried to replace residual rigid motion from unavailable external references.`,
+        message: hasRotationFreedom
+          ? `Source sketch ${input.sketchId} was WELL_DEFINED, but translated geometry retained rigid rotation after grounding translation without capturing a variable-driven shape degree of freedom.`
+          : `Source sketch ${input.sketchId} was WELL_DEFINED; ${groundingConstraints.length} component translation anchor${groundingConstraints.length === 1 ? " was" : "s were"} carried to replace residual rigid translation from unavailable external references.`,
         relationshipKind: "fixPoint",
-        operands: definition.constraints
-          .filter((constraint) => constraint.kind === "fixPoint")
-          .slice(-groundedPointCount)
-          .map((constraint) => constraint.constraintId),
-        reason: remainsMobile
-          ? "residual-mobility-after-grounding"
+        operands: groundingConstraints.map((constraint) => constraint.constraintId),
+        reason: hasRotationFreedom
+          ? "residual-rigid-rotation-after-grounding"
           : "source-well-defined-residual-mobility-grounded",
       });
     }
@@ -1437,8 +1595,14 @@ export async function verifySketchTranslationSolveConsistency(
 
 /** Translate one Onshape solved sketch into a cadara sketch commit definition. */
 export function translateSketch(
+  input: SketchTranslationInput & { externalReferences?: undefined },
+): SketchTranslationResult;
+export function translateSketch(
   input: SketchTranslationInput,
-): SketchTranslationResult {
+): Omit<SketchTranslationResult, "definition"> & { definition: ImportDeferredSketchDefinition };
+export function translateSketch(
+  input: SketchTranslationInput,
+): Omit<SketchTranslationResult, "definition"> & { definition: ImportDeferredSketchDefinition } {
   const points: SketchPointDefinition[] = [];
   const entities: SketchEntityDefinition[] = [];
   const constraints: ConstraintDefinition[] = [];
@@ -1453,6 +1617,7 @@ export function translateSketch(
   const maps: TranslationMaps = {
     entitiesByRawId: new Map(),
     pointsByRawOperand: new Map(),
+    externalReferences: input.externalReferences ?? new Map(),
   };
   const plane =
     input.plane ?? (input.planeKey ? planeDefinition(input.planeKey) : null);
@@ -1505,8 +1670,21 @@ export function translateSketch(
           });
           break;
         }
-        const startPointId = addPoint(entity.entityId, "start", entity.start, isConstruction);
-        const endPointId = addPoint(entity.entityId, "end", entity.end, isConstruction);
+        const solvedDirection: SketchPoint2D = [
+          entity.end[0] - entity.start[0],
+          entity.end[1] - entity.start[1],
+        ];
+        const authoredDirection = entity.authoredParameterDirection;
+        const solvedOrderIsReversed = authoredDirection !== undefined &&
+          solvedDirection[0] * authoredDirection[0] + solvedDirection[1] * authoredDirection[1] < 0;
+        // Solved-sketch responses do not always preserve the source curve's
+        // authored parameter order. Endpoint ids are authored identities, so a
+        // proven opposite direction is an exact permutation, not a geometric
+        // nearest-point inference. Swap before deriving directed relationships.
+        const start = solvedOrderIsReversed ? entity.end : entity.start;
+        const end = solvedOrderIsReversed ? entity.start : entity.end;
+        const startPointId = addPoint(entity.entityId, "start", start, isConstruction);
+        const endPointId = addPoint(entity.entityId, "end", end, isConstruction);
         const definition: SketchEntityDefinition = {
           kind: "lineSegment",
           entityId: eid,
@@ -1610,20 +1788,45 @@ export function translateSketch(
   const pointsById = new Map(points.map((point) => [point.pointId, point]));
 
   for (const record of input.constraints ?? []) {
-    if (DIMENSION_KINDS.has(record.constraintType)) {
+    if (!DIMENSION_KINDS.has(record.constraintType)) continue;
+    const before = diagnostics.length;
+    const dimension = translateDimensionRecord({ featureId: input.featureId, record, maps, diagnostics });
+    if (dimension) {
+      dimensions.push(dimension);
+      relationshipSummary.dimensions.carried += 1;
+    } else if (diagnostics.length > before) {
+      relationshipSummary.dimensions.dropped += 1;
+    }
+  }
+
+  for (const record of input.constraints ?? []) {
+    if (DIMENSION_KINDS.has(record.constraintType)) continue;
+    if (record.constraintType === "OFFSET") {
       const before = diagnostics.length;
-      const dimension = translateDimensionRecord({ featureId: input.featureId, record, maps, diagnostics });
-      if (dimension) {
-        dimensions.push(dimension);
-        relationshipSummary.dimensions.carried += 1;
+      const constraint = translateEqualOffsetRecord({
+        featureId: input.featureId,
+        record,
+        maps,
+        pointsById,
+        diagnostics,
+      });
+      if (constraint) {
+        constraints.push(constraint);
+        relationshipSummary.constraints.carried += 1;
       } else if (diagnostics.length > before) {
-        relationshipSummary.dimensions.dropped += 1;
+        relationshipSummary.constraints.dropped += 1;
       }
       continue;
     }
     if (DERIVATION_KINDS.has(record.constraintType)) {
       const before = diagnostics.length;
-      const derivation = translateDerivationRecord({ featureId: input.featureId, record, maps, pointsById, diagnostics });
+      const derivation = translateDerivationRecord({
+        featureId: input.featureId,
+        record,
+        maps,
+        pointsById,
+        diagnostics,
+      });
       if (derivation) {
         derivedRelationships.push(derivation);
         relationshipSummary.derivations.carried += 1;
@@ -1654,10 +1857,23 @@ export function translateSketch(
     }
   }
 
+  const usedReferenceIds = new Set(constraints.flatMap((constraint) => {
+    const operand = constraint.kind === "coincidentProjectedPoint"
+      ? constraint.projectedPoint
+      : constraint.kind === "pointOnProjectedCurve"
+        ? constraint.projectedCurve
+        : constraint.kind === "midpointProjectedLine" || constraint.kind === "perpendicularProjectedLine"
+          ? constraint.projectedLine
+          : null;
+    return operand?.kind === "projectedGeometry" ? [operand.reference.referenceId] : [];
+  }));
+  const references = [...maps.externalReferences.values()]
+    .map((entry) => entry.definition)
+    .filter((reference) => usedReferenceIds.has(reference.referenceId));
   const definition = normalizeCoincidentPointTopology({
     schemaVersion: SKETCH_SCHEMA_VERSION,
-    referenceIds: [],
-    references: [],
+    referenceIds: references.map((reference) => reference.referenceId),
+    references,
     pointIds: points.map((point) => point.pointId),
     points,
     entityIds: entities.map((entity) => entity.entityId),
@@ -1671,10 +1887,34 @@ export function translateSketch(
     svgRenderingEnabled: true,
     derivedRelationships,
   });
+  const projectedReferences = references.flatMap((reference) => {
+    const captured = [...maps.externalReferences.values()].find(
+      (entry) => entry.definition.referenceId === reference.referenceId,
+    )?.verificationGeometry;
+    if (!captured) return [];
+    return [{
+      referenceId: reference.referenceId,
+      status: "projected" as const,
+      geometry: captured.kind === "point"
+        ? [{
+            geometryId: createProjectedGeometryId(reference.referenceId, "point"),
+            kind: "point" as const,
+            position: projectPointToSketchPlane(captured.position3d, plane),
+          }]
+        : [{
+            geometryId: createProjectedGeometryId(reference.referenceId, "edge"),
+            kind: "lineSegment" as const,
+            startPosition: projectPointToSketchPlane(captured.start3d, plane),
+            endPosition: projectPointToSketchPlane(captured.end3d, plane),
+          }],
+      diagnostics: [],
+    }];
+  });
 
   return {
     plane,
     definition,
+    projectedReferences,
     diagnostics,
     relationshipSummary,
     sourceSolveStatus: input.sourceSolveStatus,

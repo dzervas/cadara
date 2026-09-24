@@ -349,7 +349,7 @@ test("materializes topologyOf only in every blessed feature and sketch position"
     }),
   ];
   const sketch = await materializer().materializeCommitSketchRequest(
-    { plane: { support: selector("face") } } as never,
+    { plane: { support: selector("face") }, definition: { references: [] } } as never,
     { kind: "commitSketch", index: 0 },
   );
 
@@ -358,6 +358,52 @@ test("materializes topologyOf only in every blessed feature and sketch position"
   expect(sketch.plane.support.kind).toBe("face");
 });
 
+
+test("materializes deferred model and prior-sketch reference sources", async () => {
+  const modelInstance = materializer();
+  const modelSketch = await modelInstance.materializeCommitSketchRequest({
+    plane: { support: { kind: "construction", constructionId: "construction_plane-xy" } },
+    definition: {
+      references: [{
+        referenceId: "ref_external_edge",
+        kind: "modelReference",
+        label: "External edge",
+        projectionMode: "projectAlongPlaneNormal",
+        source: selector("edge"),
+      }],
+    },
+  } as never, { kind: "commitSketch", index: 0 });
+  expect(modelSketch.definition.references[0]?.source).toMatchObject({
+    kind: "edge",
+    bodyId: "body_live",
+  });
+  expect(JSON.stringify(modelSketch)).not.toContain("topologyOf");
+
+  const sketchInstance = materializer();
+  sketchInstance.recordSketchOutput(0, "sketch_prior_live" as SketchId);
+  const sketch = await sketchInstance.materializeCommitSketchRequest({
+    plane: { support: { kind: "construction", constructionId: "construction_plane-xy" } },
+    definition: {
+      references: [{
+        referenceId: "ref_prior_line",
+        kind: "sketchReference",
+        label: "Prior line",
+        projectionMode: "useExistingCoplanarGeometry",
+        source: {
+          kind: "sketchEntity",
+          sketchId: { kind: "sketchIdOf", actionIndex: 0 },
+          entityId: "sketch_entity_prior_line",
+        },
+      }],
+    },
+  } as never, { kind: "commitSketch", index: 1 });
+  expect(sketch.definition.references[0]?.source).toEqual({
+    kind: "sketchEntity",
+    sketchId: "sketch_prior_live",
+    entityId: "sketch_entity_prior_line",
+  });
+  expect(JSON.stringify(sketch)).not.toContain("sketchIdOf");
+});
 
 test("materializes deferred sketchPoint participants without changing body participants", async () => {
   const instance = materializer();

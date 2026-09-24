@@ -13,7 +13,13 @@ import type { OnshapeSketchConstraint } from "@/domain/import/onshape/bundle-rea
 function relationship(
   constraintType: string,
   entityId: string,
-  parameters: readonly { parameterId: string; value?: string | number; expression?: string; hasExternalQuery?: boolean }[],
+  parameters: readonly {
+    parameterId: string;
+    value?: string | number;
+    expression?: string;
+    hasExternalQuery?: boolean;
+    queries?: readonly { deterministicIds: readonly string[]; queryString: string }[];
+  }[],
 ): OnshapeSketchConstraint {
   return {
     constraintType,
@@ -82,6 +88,90 @@ test("src/domain/import/onshape/sketch-translator.spec.ts", () => {
     validateSketchDefinition(result.definition).success,
     "The translated definition should validate against the sketch contract.",
   ).toBeTruthy();
+});
+
+test("carries only preclassified external point and line relationships", () => {
+  const external = (deterministicId: string) => ({
+    parameterId: "externalSecond",
+    hasExternalQuery: true,
+    queries: [{ deterministicIds: [deterministicId], queryString: "" }],
+  });
+  const result = translateSketch({
+    featureId: "external_relations",
+    label: "External relations",
+    planeKey: "xy",
+    entities: [
+      { entityId: "line", entityType: "lineSegment", start: [0, 0], end: [0, 10] },
+      { entityId: "point", entityType: "point", position: [5, 5] },
+    ],
+    externalReferences: new Map([
+      ["BODY_EDGE", {
+        geometryKind: "lineSegment" as const,
+        definition: {
+          referenceId: "ref_body_edge" as const,
+          kind: "modelReference" as const,
+          label: "Body edge",
+          projectionMode: "projectAlongPlaneNormal" as const,
+          source: {
+            kind: "topologyOf" as const,
+            expectedKind: "edge" as const,
+            capturedSignature: { entityClass: "edge" as const, geometryType: "line" },
+            tolerance: { linear: 0.01, angularRadians: 0.001, relative: 0.000001, ambiguityMargin: 0.000001 },
+            source: { consumerFeatureId: "external_relations", parameterId: "externalSecond", deterministicId: "BODY_EDGE" },
+          },
+        },
+      }],
+      ["PRIOR_POINT", {
+        geometryKind: "point" as const,
+        definition: {
+          referenceId: "ref_prior_point" as const,
+          kind: "sketchReference" as const,
+          label: "Prior point",
+          projectionMode: "useExistingCoplanarGeometry" as const,
+          source: {
+            kind: "sketchPoint" as const,
+            sketchId: { kind: "sketchIdOf" as const, actionIndex: 0 },
+            pointId: "sketch_point_prior_point" as const,
+          },
+        },
+      }],
+    ]),
+    constraints: [
+      relationship("MIDPOINT", "mid", [
+        { parameterId: "localEntity1", value: "line.start" },
+        external("BODY_EDGE"),
+      ]),
+      relationship("PERPENDICULAR", "perpendicular", [
+        { parameterId: "localFirst", value: "line" },
+        external("BODY_EDGE"),
+      ]),
+      relationship("COINCIDENT", "prior", [
+        { parameterId: "localFirst", value: "point" },
+        external("PRIOR_POINT"),
+      ]),
+      relationship("COINCIDENT", "local-point-on-curve", [
+        { parameterId: "localFirst", value: "point" },
+        { parameterId: "localSecond", value: "line" },
+      ]),
+      relationship("COINCIDENT", "unsupported", [
+        { parameterId: "localFirst", value: "line.end" },
+        external("UNPROVENANCED"),
+      ]),
+    ],
+  });
+
+  expect(result.definition.references.map((reference) => reference.kind)).toEqual([
+    "modelReference",
+    "sketchReference",
+  ]);
+  expect(result.definition.constraints.map((constraint) => constraint.kind)).toEqual([
+    "midpointProjectedLine",
+    "perpendicularProjectedLine",
+    "coincidentProjectedPoint",
+    "pointOnCurve",
+  ]);
+  expect(result.relationshipSummary.constraints).toEqual({ carried: 4, dropped: 1 });
+  expect(result.diagnostics.at(-1)?.code).toBe("onshape-sketch-external-reference-dropped");
 });
 
 test("translates local Onshape constraints and expression-backed dimensions", () => {
@@ -201,7 +291,7 @@ test("drops unsupported, missing, and external relationship records individually
   ).toBe(1);
 });
 
-test("translates mirror, linear-pattern, and offset derivation records", () => {
+test("translates mirror and linear-pattern derivations plus relational equal offsets", () => {
   const result = translateSketch({
     featureId: "sketch_derivations",
     label: "Derived sketch",
@@ -212,6 +302,8 @@ test("translates mirror, linear-pattern, and offset derivation records", () => {
       { entityId: "mirrored", entityType: "lineSegment", start: [0, 10], end: [10, 10] },
       { entityId: "pattern.1", entityType: "lineSegment", start: [0, 20], end: [10, 20] },
       { entityId: "offset.1", entityType: "lineSegment", start: [0, -2], end: [10, -2] },
+      { entityId: "seed.2", entityType: "lineSegment", start: [10, 10], end: [0, 10] },
+      { entityId: "offset.2", entityType: "lineSegment", start: [10, 12], end: [0, 12] },
     ],
     constraints: [
       relationship("MIRROR", "mirror-rel", [
@@ -226,16 +318,17 @@ test("translates mirror, linear-pattern, and offset derivation records", () => {
       relationship("OFFSET", "offset-rel", [
         { parameterId: "localMaster", value: "seed" },
         { parameterId: "localOffset", value: "offset.1" },
-        { parameterId: "halfSpace0", value: "RIGHT" },
+        { parameterId: "localSecond", value: "seed.2" },
+        { parameterId: "localSecondOffset", value: "offset.2" },
       ]),
     ],
   });
 
-  expect(result.relationshipSummary.derivations).toEqual({ carried: 3, dropped: 0 });
+  expect(result.relationshipSummary.constraints).toEqual({ carried: 1, dropped: 0 });
+  expect(result.relationshipSummary.derivations).toEqual({ carried: 2, dropped: 0 });
   expect(result.definition.derivedRelationships?.map((entry) => entry.kind)).toEqual([
     "mirror",
     "linearPattern",
-    "offset",
   ]);
   const linearPattern = result.definition.derivedRelationships?.find(
     (entry) => entry.kind === "linearPattern",
@@ -244,13 +337,23 @@ test("translates mirror, linear-pattern, and offset derivation records", () => {
     linearPattern?.kind === "linearPattern" && linearPattern.vector,
     "LINEAR_PATTERN vector should be derived from solved seed/output geometry, not hardcoded to zero.",
   ).toEqual([0, 20]);
-  const offset = result.definition.derivedRelationships?.find(
-    (entry) => entry.kind === "offset",
-  );
-  expect(
-    offset?.kind === "offset" && offset.distance,
-    "OFFSET distance should be normalized from translated seed/output geometry, not hardcoded to zero.",
-  ).toEqual({ source: "literal", value: -2 });
+  expect(result.definition.constraints).toContainEqual({
+    constraintId: "constraint_sketch_derivations_offset_rel",
+    kind: "equalOffset",
+    label: "offset-rel",
+    pairs: [
+      {
+        seedEntityId: "sketch_entity_sketch_derivations_seed",
+        offsetEntityId: "sketch_entity_sketch_derivations_offset_1",
+        side: "right",
+      },
+      {
+        seedEntityId: "sketch_entity_sketch_derivations_seed_2",
+        offsetEntityId: "sketch_entity_sketch_derivations_offset_2",
+        side: "right",
+      },
+    ],
+  });
   expect(validateSketchDefinition(result.definition).success).toBe(true);
 });
 
@@ -480,6 +583,245 @@ test("binds external operands when projection geometry was imported", () => {
   expect(result.definition.constraints[0]?.kind).toBe("coincident");
 });
 
+test("retains both OFFSET pairs independently of partial, reversed, unrelated, or disagreeing dimensions", () => {
+  const translate = (dimension: OnshapeSketchConstraint) => translateSketch({
+    featureId: "sketch_offset_driver_roles",
+    label: "Offset driver roles",
+    planeKey: "xy",
+    entities: [
+      { entityId: "seed-a", entityType: "lineSegment", start: [0, 0], end: [10, 0] },
+      { entityId: "offset-a", entityType: "lineSegment", start: [0, 3], end: [10, 3] },
+      { entityId: "seed-b", entityType: "lineSegment", start: [10, 10], end: [0, 10] },
+      { entityId: "offset-b", entityType: "lineSegment", start: [10, 13], end: [0, 13] },
+    ],
+    constraints: [
+      dimension,
+      relationship("OFFSET", "offset-relation", [
+        { parameterId: "localMaster", value: "seed-a" },
+        { parameterId: "localOffset", value: "offset-a" },
+        { parameterId: "localSecond", value: "seed-b" },
+        { parameterId: "localSecondOffset", value: "offset-b" },
+      ]),
+    ],
+  });
+  const dimensionRecord = (
+    first: string,
+    second: string,
+    value: number,
+    expression?: string,
+  ) => relationship("DISTANCE", "candidate-driver", [
+    { parameterId: "localFirst", value: first },
+    { parameterId: "localSecond", value: second },
+    { parameterId: "length", value, expression },
+  ]);
+  const assertPreserved = (result: ReturnType<typeof translate>) => {
+    expect(result.definition.dimensions).toHaveLength(1);
+    expect(result.relationshipSummary.constraints).toEqual({ carried: 1, dropped: 0 });
+    expect(result.relationshipSummary.derivations).toEqual({ carried: 0, dropped: 0 });
+    expect(result.definition.derivedRelationships).toEqual([]);
+    expect(result.definition.constraints).toContainEqual({
+      constraintId: "constraint_sketch_offset_driver_roles_offset_relation",
+      kind: "equalOffset",
+      label: "offset-relation",
+      pairs: [
+        {
+          seedEntityId: "sketch_entity_sketch_offset_driver_roles_seed_a",
+          offsetEntityId: "sketch_entity_sketch_offset_driver_roles_offset_a",
+          side: "left",
+        },
+        {
+          seedEntityId: "sketch_entity_sketch_offset_driver_roles_seed_b",
+          offsetEntityId: "sketch_entity_sketch_offset_driver_roles_offset_b",
+          side: "right",
+        },
+      ],
+    });
+  };
+
+  for (const dimension of [
+    dimensionRecord("seed-a", "offset-a", 0, "gap"),
+    dimensionRecord("offset-a", "seed-a", 3),
+    dimensionRecord("offset-a", "offset-b", 10),
+    dimensionRecord("seed-a", "offset-a", 7),
+  ]) {
+    assertPreserved(translate(dimension));
+  }
+});
+
+test("uses exact authored parameter direction before canonicalizing OFFSET seed endpoints", () => {
+  const reversedSolvedStart = [0, 10] as const;
+  const reversedSolvedEnd = [0, 0] as const;
+  const rawSignedDistance = -3;
+  const rawNormalizedDistance = rawSignedDistance * -1; // raw down seed classified right
+
+  const result = translateSketch({
+    featureId: "offset_endpoint_provenance",
+    label: "Offset endpoint provenance",
+    planeKey: "xy",
+    entities: [
+      { entityId: "bottom", entityType: "lineSegment", start: [0, 0], end: [10, 0] },
+      {
+        entityId: "top",
+        entityType: "lineSegment",
+        start: [0, 10],
+        end: [10, 10],
+        authoredParameterDirection: [10, 0],
+      },
+      {
+        entityId: "left",
+        entityType: "lineSegment",
+        start: reversedSolvedStart,
+        end: reversedSolvedEnd,
+        authoredParameterDirection: [0, 10],
+      },
+      { entityId: "top-offset", entityType: "lineSegment", start: [0, 13], end: [10, 13] },
+      { entityId: "left-offset", entityType: "lineSegment", start: [-3, 0], end: [-3, 10] },
+    ],
+    constraints: [
+      relationship("COINCIDENT", "left-bottom", [
+        { parameterId: "localFirst", value: "bottom.start" },
+        { parameterId: "localSecond", value: "left.start" },
+      ]),
+      relationship("COINCIDENT", "left-top", [
+        { parameterId: "localFirst", value: "top.start" },
+        { parameterId: "localSecond", value: "left.end" },
+      ]),
+      relationship("OFFSET", "offset", [
+        { parameterId: "localMaster", value: "top" },
+        { parameterId: "localOffset", value: "top-offset" },
+        { parameterId: "localSecond", value: "left" },
+        { parameterId: "localSecondOffset", value: "left-offset" },
+      ]),
+    ],
+  });
+
+  expect([reversedSolvedStart, reversedSolvedEnd], "The solved payload is demonstrably opposite authored start→end.")
+    .toEqual([[0, 10], [0, 0]]);
+  const top = result.definition.entities.find((entity) => entity.label === "top");
+  expect(top, "A solved line already in authored parameter order must remain unchanged.").toMatchObject({
+    kind: "lineSegment",
+    startPointId: "sketch_point_offset_endpoint_provenance_top_start",
+    endPointId: "sketch_point_offset_endpoint_provenance_top_end",
+  });
+  const left = result.definition.entities.find((entity) => entity.label === "left");
+  expect(left).toMatchObject({
+    kind: "lineSegment",
+    startPointId: "sketch_point_offset_endpoint_provenance_bottom_start",
+    endPointId: "sketch_point_offset_endpoint_provenance_top_start",
+  });
+  const points = new Map<string, readonly [number, number]>(
+    result.definition.points.map((point) => [point.pointId, point.position]),
+  );
+  expect(points.get("sketch_point_offset_endpoint_provenance_bottom_start")).toEqual([0, 0]);
+  expect(points.get("sketch_point_offset_endpoint_provenance_top_start")).toEqual([0, 10]);
+  const equalOffset = result.definition.constraints.find((constraint) => constraint.kind === "equalOffset");
+  expect(equalOffset).toMatchObject({
+    pairs: [
+      { side: "left" },
+      {
+        seedEntityId: "sketch_entity_offset_endpoint_provenance_left",
+        offsetEntityId: "sketch_entity_offset_endpoint_provenance_left_offset",
+        side: "left",
+      },
+    ],
+  });
+  const canonicalSignedDistance = 3;
+  expect(
+    canonicalSignedDistance,
+    "Flipping right→left with the proven endpoint reversal must preserve the physical west half-plane.",
+  ).toBe(rawNormalizedDistance);
+});
+
+test("solve-consistency verifies complete mixed local/projected semantics", async () => {
+  const translation = translateSketch({
+    featureId: "sketch_projected_verification",
+    label: "Projected verification",
+    planeKey: "xy",
+    entities: [
+      { entityId: "line", entityType: "lineSegment", start: [0, 0], end: [0, 10] },
+      { entityId: "point", entityType: "point", position: [5, 0] },
+    ],
+    externalReferences: new Map([["EDGE", {
+      geometryKind: "lineSegment" as const,
+      definition: {
+        referenceId: "ref_projected_verification" as const,
+        kind: "modelReference" as const,
+        label: "Projected edge",
+        projectionMode: "projectAlongPlaneNormal" as const,
+        source: {
+          kind: "topologyOf" as const,
+          expectedKind: "edge" as const,
+          capturedSignature: { entityClass: "edge" as const, geometryType: "line" },
+          tolerance: { linear: 0.01, angularRadians: 0.001, relative: 0.000001, ambiguityMargin: 0.000001 },
+          source: { consumerFeatureId: "sketch_projected_verification", parameterId: "externalSecond", deterministicId: "EDGE" },
+        },
+      },
+      verificationGeometry: {
+        kind: "lineSegment" as const,
+        start3d: [0, 0, 0] as const,
+        end3d: [0.01, 0, 0] as const,
+      },
+    }]]),
+    constraints: [
+      relationship("VERTICAL", "local-vertical", [
+        { parameterId: "localFirst", value: "line" },
+      ]),
+      relationship("MIDPOINT", "projected-midpoint", [
+        { parameterId: "localEntity1", value: "point" },
+        {
+          parameterId: "externalSecond",
+          hasExternalQuery: true,
+          queries: [{ deterministicIds: ["EDGE"], queryString: "" }],
+        },
+      ]),
+    ],
+  });
+  const sketchId = translation.definition.points[0]!.target.sketchId;
+  const seenProjectedReferenceCounts: number[] = [];
+  const delegate = new SketchConstraintSolverAdapter({
+    documentId: "doc_projected_verification",
+    revisionId: "rev_projected_verification",
+  });
+
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: {
+      ...delegate,
+      solveSketch: async (request) => {
+        seenProjectedReferenceCounts.push(request.projectedReferences.length);
+        return delegate.solveSketch(request);
+      },
+    },
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_projected_verification",
+    revisionId: "rev_projected_verification",
+    sketchId,
+    plane: translation.plane,
+    definition: translation.definition,
+    projectedReferences: translation.projectedReferences,
+    relationshipSummary: translation.relationshipSummary,
+  });
+
+  expect(seenProjectedReferenceCounts.length).toBeGreaterThan(0);
+  expect(seenProjectedReferenceCounts.every((count) => count === 1)).toBe(true);
+  expect(verified.diagnostics).toEqual([]);
+  expect(verified.definition.constraints.map((constraint) => constraint.kind)).toEqual([
+    "vertical",
+    "midpointProjectedLine",
+  ]);
+
+  await expect(verifySketchTranslationSolveConsistency({
+    solver: delegate,
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_projected_verification",
+    revisionId: "rev_projected_verification",
+    sketchId,
+    plane: translation.plane,
+    definition: translation.definition,
+    projectedReferences: [],
+    relationshipSummary: translation.relationshipSummary,
+  })).rejects.toThrow("missing projected geometry for ref_projected_verification");
+});
+
 test("solve-consistency verification isolates and drops a bad translated relationship", async () => {
   const translation = translateSketch({
     featureId: "sketch_solve_consistency",
@@ -516,6 +858,253 @@ test("solve-consistency verification isolates and drops a bad translated relatio
   expect(verified.diagnostics[0]?.code).toBe("onshape-sketch-solve-consistency-failed");
 });
 
+
+test("solve-consistency verifies equal-offset constraints with every other source relationship", async () => {
+  const translation = translateSketch({
+    featureId: "sketch_equal_offset_verification",
+    label: "Invalid captured equal offset",
+    planeKey: "xy",
+    sourceSolveStatus: "WELL_DEFINED",
+    entities: [
+      { entityId: "seed-a", entityType: "lineSegment", start: [0, 0], end: [10, 0] },
+      { entityId: "offset-a", entityType: "lineSegment", start: [0, 2], end: [10, 2] },
+      { entityId: "seed-b", entityType: "lineSegment", start: [0, 10], end: [10, 10] },
+      { entityId: "offset-b", entityType: "lineSegment", start: [0, 13], end: [10, 13] },
+    ],
+    constraints: [
+      relationship("OFFSET", "unequal-offset", [
+        { parameterId: "localMaster", value: "seed-a" },
+        { parameterId: "localOffset", value: "offset-a" },
+        { parameterId: "localSecond", value: "seed-b" },
+        { parameterId: "localSecondOffset", value: "offset-b" },
+      ]),
+    ],
+  });
+  const sketchId = translation.definition.points[0]!.target.sketchId;
+
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: new SketchConstraintSolverAdapter({
+      documentId: "doc_equal_offset_verification",
+      revisionId: "rev_equal_offset_verification",
+    }),
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_equal_offset_verification",
+    revisionId: "rev_equal_offset_verification",
+    sketchId,
+    plane: translation.plane,
+    definition: translation.definition,
+    relationshipSummary: translation.relationshipSummary,
+    sourceSolveStatus: translation.sourceSolveStatus,
+  });
+
+  expect(verified.definition.constraints.some((constraint) => constraint.kind === "equalOffset")).toBe(false);
+  expect(verified.diagnostics).toContainEqual(expect.objectContaining({
+    code: "onshape-sketch-solve-consistency-failed",
+    relationshipKind: "equalOffset",
+    operands: ["constraint_sketch_equal_offset_verification_unequal_offset"],
+  }));
+});
+
+test("grounds disconnected rigid components independently", async () => {
+  const translation = translateSketch({
+    featureId: "sketch_disconnected_rigid_grounding",
+    label: "Disconnected rigid lines",
+    planeKey: "xy",
+    sourceSolveStatus: "WELL_DEFINED",
+    entities: [
+      { entityId: "a", entityType: "lineSegment", start: [0, 0], end: [10, 0] },
+      { entityId: "b", entityType: "lineSegment", start: [100, 0], end: [110, 0] },
+    ],
+    constraints: [
+      relationship("HORIZONTAL", "a-horizontal", [{ parameterId: "localFirst", value: "a" }]),
+      relationship("LENGTH", "a-length", [
+        { parameterId: "localFirst", value: "a" },
+        { parameterId: "length", value: 10 },
+      ]),
+      relationship("HORIZONTAL", "b-horizontal", [{ parameterId: "localFirst", value: "b" }]),
+      relationship("LENGTH", "b-length", [
+        { parameterId: "localFirst", value: "b" },
+        { parameterId: "length", value: 10 },
+      ]),
+    ],
+  });
+  const sketchId = translation.definition.points[0]!.target.sketchId;
+
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: new SketchConstraintSolverAdapter({
+      documentId: "doc_disconnected_rigid_grounding",
+      revisionId: "rev_disconnected_rigid_grounding",
+    }),
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_disconnected_rigid_grounding",
+    revisionId: "rev_disconnected_rigid_grounding",
+    sketchId,
+    plane: translation.plane,
+    definition: translation.definition,
+    relationshipSummary: translation.relationshipSummary,
+    sourceSolveStatus: translation.sourceSolveStatus,
+  });
+
+  expect(
+    verified.definition.constraints.filter((constraint) => constraint.kind === "fixPoint"),
+    "Each disconnected rigid line has its own translation gauge.",
+  ).toHaveLength(2);
+  expect(verified.diagnostics).toEqual([
+    expect.objectContaining({ code: "onshape-sketch-residual-mobility-grounded" }),
+  ]);
+});
+
+test("grounds a free rigid component without anchoring projected-authority geometry", async () => {
+  const translation = translateSketch({
+    featureId: "sketch_mixed_authority_grounding",
+    label: "Projected point and free line",
+    planeKey: "xy",
+    sourceSolveStatus: "WELL_DEFINED",
+    entities: [
+      { entityId: "datum-point", entityType: "point", position: [0, 0] },
+      { entityId: "line", entityType: "lineSegment", start: [100, 0], end: [110, 0] },
+    ],
+    externalReferences: new Map([["PROJECTED_POINT", {
+      geometryKind: "point" as const,
+      definition: {
+        referenceId: "ref_mixed_authority_point" as const,
+        kind: "sketchReference" as const,
+        label: "Projected authority",
+        projectionMode: "useExistingCoplanarGeometry" as const,
+        source: {
+          kind: "sketchPoint" as const,
+          sketchId: { kind: "sketchIdOf" as const, actionIndex: 0 },
+          pointId: "sketch_point_authority" as const,
+        },
+      },
+      verificationGeometry: {
+        kind: "point" as const,
+        position3d: [0, 0, 0] as const,
+      },
+    }]]),
+    constraints: [
+      relationship("COINCIDENT", "projected-anchor", [
+        { parameterId: "localFirst", value: "datum-point" },
+        {
+          parameterId: "externalSecond",
+          hasExternalQuery: true,
+          queries: [{ deterministicIds: ["PROJECTED_POINT"], queryString: "" }],
+        },
+      ]),
+      relationship("HORIZONTAL", "line-horizontal", [{ parameterId: "localFirst", value: "line" }]),
+      relationship("LENGTH", "line-length", [
+        { parameterId: "localFirst", value: "line" },
+        { parameterId: "length", value: 10 },
+      ]),
+    ],
+  });
+  const sketchId = translation.definition.points[0]!.target.sketchId;
+
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: new SketchConstraintSolverAdapter({
+      documentId: "doc_mixed_authority_grounding",
+      revisionId: "rev_mixed_authority_grounding",
+    }),
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_mixed_authority_grounding",
+    revisionId: "rev_mixed_authority_grounding",
+    sketchId,
+    plane: translation.plane,
+    definition: translation.definition,
+    projectedReferences: translation.projectedReferences,
+    relationshipSummary: translation.relationshipSummary,
+    sourceSolveStatus: translation.sourceSolveStatus,
+  });
+
+  const anchors = verified.definition.constraints.filter(
+    (constraint) => constraint.kind === "fixPoint",
+  );
+  expect(anchors).toHaveLength(1);
+  expect(anchors[0]).toMatchObject({
+    pointId: "sketch_point_sketch_mixed_authority_grounding_line_start",
+  });
+  expect(verified.diagnostics).toEqual([
+    expect.objectContaining({ code: "onshape-sketch-residual-mobility-grounded" }),
+  ]);
+});
+
+test("treats an unconstrained line as one deformable component without fixing both endpoints", async () => {
+  const translation = translateSketch({
+    featureId: "sketch_unconstrained_line_grounding",
+    label: "Unconstrained line",
+    planeKey: "xy",
+    sourceSolveStatus: "WELL_DEFINED",
+    entities: [
+      { entityId: "line", entityType: "lineSegment", start: [0, 0], end: [10, 4] },
+    ],
+  });
+  const sketchId = translation.definition.points[0]!.target.sketchId;
+
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: new SketchConstraintSolverAdapter({
+      documentId: "doc_unconstrained_line_grounding",
+      revisionId: "rev_unconstrained_line_grounding",
+    }),
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_unconstrained_line_grounding",
+    revisionId: "rev_unconstrained_line_grounding",
+    sketchId,
+    plane: translation.plane,
+    definition: translation.definition,
+    relationshipSummary: translation.relationshipSummary,
+    sourceSolveStatus: translation.sourceSolveStatus,
+  });
+
+  expect(
+    verified.definition.constraints.filter((constraint) => constraint.kind === "fixPoint"),
+    "Entity incidence must keep free endpoints in one shape component.",
+  ).toHaveLength(1);
+  expect(verified.diagnostics).toEqual([
+    expect.objectContaining({
+      code: "onshape-sketch-residual-mobility",
+      reason: "residual-rigid-rotation-after-grounding",
+    }),
+  ]);
+});
+
+test("grounds only rigid translation and leaves variable-driven shape freedom unlocked", async () => {
+  const translation = translateSketch({
+    featureId: "sketch_variable_shape_grounding",
+    label: "Variable-length grounded line",
+    planeKey: "xy",
+    sourceSolveStatus: "WELL_DEFINED",
+    entities: [
+      { entityId: "line", entityType: "lineSegment", start: [0, 0], end: [10, 0] },
+    ],
+    constraints: [
+      relationship("HORIZONTAL", "horizontal", [
+        { parameterId: "localFirst", value: "line" },
+      ]),
+    ],
+  });
+  const sketchId = translation.definition.points[0]!.target.sketchId;
+
+  const verified = await verifySketchTranslationSolveConsistency({
+    solver: new SketchConstraintSolverAdapter({
+      documentId: "doc_variable_shape_grounding",
+      revisionId: "rev_variable_shape_grounding",
+    }),
+    contractVersion: CONTRACT_VERSION,
+    documentId: "doc_variable_shape_grounding",
+    revisionId: "rev_variable_shape_grounding",
+    sketchId,
+    plane: translation.plane,
+    definition: translation.definition,
+    relationshipSummary: translation.relationshipSummary,
+    sourceSolveStatus: translation.sourceSolveStatus,
+  });
+
+  expect(
+    verified.definition.constraints.filter((constraint) => constraint.kind === "fixPoint"),
+    "The free line length is a shape degree of freedom, so grounding must not capture its second endpoint.",
+  ).toHaveLength(1);
+  expect(verified.definition.constraints).toHaveLength(2);
+});
 
 test("grounds residual rigid motion from dropped external anchors on a WELL_DEFINED source sketch", async () => {
   const translation = translateSketch({
@@ -578,11 +1167,7 @@ test("grounds residual rigid motion from dropped external anchors on a WELL_DEFI
   expect(validateSketchDefinition(verified.definition).success).toBe(true);
 });
 
-test("a circle OFFSET carries the shrink-positive distance the offset contract expects", () => {
-  // The offset contract measures to the LEFT of traversal, so a
-  // counter-clockwise circle shrinks under a positive distance. Reporting the
-  // raw radius delta inverts the sign and makes an authored outward offset
-  // collapse the circle at solve time.
+test("does not forge a generative derivation for an OFFSET outside the equal-line-pair contract", () => {
   const result = translateSketch({
     featureId: "sketch_circle_offset",
     label: "Circle offset",
@@ -599,13 +1184,13 @@ test("a circle OFFSET carries the shrink-positive distance the offset contract e
     ],
   });
 
-  const offset = result.definition.derivedRelationships?.find(
-    (entry) => entry.kind === "offset",
-  );
-  expect(
-    offset?.kind === "offset" && offset.distance,
-    "Growing a circle must yield a negative offset distance under the left-of-travel contract.",
-  ).toEqual({ source: "literal", value: -1.5 });
+  expect(result.definition.derivedRelationships).toEqual([]);
+  expect(result.definition.constraints).toEqual([]);
+  expect(result.relationshipSummary.constraints).toEqual({ carried: 0, dropped: 1 });
+  expect(result.diagnostics.at(-1)).toMatchObject({
+    relationshipKind: "OFFSET",
+    reason: "equal offset requires two resolved non-coincident local line pairs",
+  });
 });
 
 test("Onshape DISTANCE against a circle is dropped instead of forging a line dimension", () => {
