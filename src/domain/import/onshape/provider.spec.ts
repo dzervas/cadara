@@ -22,6 +22,8 @@ import {
 import {
   onshapeImportProvider,
   cascadeUnavailableActionConsumers,
+  classifySketchExternalReferences,
+  containmentFailureReasonDetail,
   rebaseExactBodyOwnerForPreparedActions,
   rebaseHistoricalTopologySelectorForPreparedActions,
 } from "@/domain/import/onshape/provider";
@@ -55,6 +57,143 @@ import {
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
 import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
+import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
+
+test("classifies external sketch IDs by authoritative provenance before body witnesses", () => {
+  const sketchEntityQuery =
+    'query=qCompressed(1.0,"%B5$QueryM5Sa$entityTypeBa$EntityTypeS4$EDGESb$historyTypeS8$CREATIONSb$operationIdB2$IdA1Sd.6$SKETCH_SOURCEwireOpS9$queryTypeSd$SKETCH_ENTITYSe$sketchEntityIdSb$source_line",id);';
+  const queryParameter = (deterministicId: string, queryString = "") => ({
+    parameterId: "externalSecond",
+    hasExternalQuery: true,
+    queries: [{ deterministicIds: [deterministicId], queryString }],
+  });
+  const bodyEdgeSignature = {
+    entityClass: "edge",
+    geometryType: "line",
+    boundingBox: { low: [0, 0, 0], high: [0.01, 0, 0] },
+    centroid: [0.005, 0, 0],
+    definingData: { origin: [0, 0, 0], direction: [1, 0, 0] },
+  };
+  const read = {
+    features: [
+      {
+        featureType: "newSketch",
+        featureId: "SKETCH_SOURCE",
+        constraints: [{
+          constraintType: "COINCIDENT",
+          entityId: "source-origin",
+          parameters: [
+            queryParameter("IB"),
+            queryParameter("JFB", sketchEntityQuery),
+          ],
+        }],
+      },
+      { featureType: "extrude", featureId: "SOLID", constraints: [] },
+      {
+        featureType: "newSketch",
+        featureId: "SKETCH_EARLIER_BODY_CONSUMER",
+        constraints: [{
+          constraintType: "COINCIDENT",
+          entityId: "earlier-body-external",
+          parameters: [queryParameter("BODY_EDGE")],
+        }],
+      },
+      {
+        featureType: "newSketch",
+        featureId: "SKETCH_CONSUMER",
+        constraints: [{
+          constraintType: "COINCIDENT",
+          entityId: "consumer-external",
+          parameters: [
+            queryParameter("IB"),
+            queryParameter("JFB"),
+            queryParameter("BODY_EDGE"),
+          ],
+        }],
+      },
+    ],
+    studio: {
+      rollbackSnapshots: [{
+        featureId: "SOLID",
+        tessellationTolerance: 0.001,
+        tessellatedFaces: { bodies: [{ id: "captured-body", faces: [] }] },
+      }],
+      resolvedReferences: [
+        {
+          deterministicId: "BODY_EDGE",
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: "SKETCH_EARLIER_BODY_CONSUMER",
+          signature: bodyEdgeSignature,
+        },
+        {
+          deterministicId: "BODY_EDGE",
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: "SKETCH_CONSUMER",
+          signature: bodyEdgeSignature,
+        },
+        {
+          deterministicId: "IB",
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: "SKETCH_CONSUMER",
+          signature: { entityClass: "vertex", geometryType: "point" },
+        },
+      ],
+    },
+    solvedSketchesByFeatureId: new Map([[
+      "SKETCH_SOURCE",
+      {
+        featureId: "SKETCH_SOURCE",
+        entities: [{
+          entityId: "source_line",
+          entityType: "lineSegment",
+          onshapeEntityType: "skLineSegment",
+          isConstruction: false,
+          start3d: [0, 0, 0],
+          end3d: [0.01, 0, 0],
+        }],
+      },
+    ]]),
+    diagnostics: [],
+  } as unknown as ReturnType<typeof readPartStudio>;
+
+  const references = classifySketchExternalReferences({
+    read,
+    consumerFeatureId: "SKETCH_CONSUMER",
+    orderedIndexByFeatureId: new Map([["SKETCH_SOURCE", 0]]),
+  });
+
+  expect(references.get("JFB")?.definition).toMatchObject({
+    kind: "sketchReference",
+    source: {
+      kind: "sketchEntity",
+      sketchId: { kind: "sketchIdOf", actionIndex: 0 },
+      entityId: "sketch_entity_SKETCH_SOURCE_source_line",
+    },
+  });
+  expect(references.get("BODY_EDGE")?.definition).toMatchObject({
+    kind: "modelReference",
+    source: { kind: "topologyOf", expectedKind: "edge" },
+  });
+  expect(references.has("IB"), "IB has no decoded provenance and occurs before any body exists.").toBe(false);
+
+  const resolvedReferences = read.studio.resolvedReferences as unknown as Array<Record<string, unknown>>;
+  const earlierIndex = resolvedReferences.findIndex(
+    (reference) => reference.consumingFeatureId === "SKETCH_EARLIER_BODY_CONSUMER",
+  );
+  const [earlierEvidence] = resolvedReferences.splice(earlierIndex, 1);
+  expect(classifySketchExternalReferences({
+    read,
+    consumerFeatureId: "SKETCH_CONSUMER",
+    orderedIndexByFeatureId: new Map([["SKETCH_SOURCE", 0]]),
+  }).has("BODY_EDGE"), "A missing signature at an earlier occurrence must block body fallback.").toBe(false);
+
+  resolvedReferences.push(earlierEvidence!, { ...earlierEvidence! });
+  expect(classifySketchExternalReferences({
+    read,
+    consumerFeatureId: "SKETCH_CONSUMER",
+    orderedIndexByFeatureId: new Map([["SKETCH_SOURCE", 0]]),
+  }).has("BODY_EDGE"), "Multiple signatures at an earlier occurrence must block body fallback.").toBe(false);
+});
 
 // Lane: logic. Seam: preparation replaces exploratory review action positions
 // with the final emitted source-feature actions before the import contract leaves
@@ -1852,6 +1991,25 @@ test("src/domain/import/onshape/provider.spec.ts contains a non-topology kernel 
   });
 });
 
+// Lane: logic. Seam: exported containment diagnostic formatting retains the
+// actual failed step as primary and marks stale planning context as secondary.
+test("src/domain/import/onshape/provider.spec.ts exposes current containment failure before provisional planning context", () => {
+  expect(containmentFailureReasonDetail({
+    provisionalReasonDetail: "No earlier action has a unique historical topology witness.",
+    failedStep: {
+      status: "failed",
+      diagnostics: [{
+        severity: "error",
+        code: "feature-kernel-build-failed",
+        message: "current full-plan split refusal",
+      }],
+    },
+  })).toBe(
+    "feature-kernel-build-failed: current full-plan split refusal || " +
+      "Earlier planning detail: No earlier action has a unique historical topology witness.",
+  );
+});
+
 test("src/domain/import/onshape/provider.spec.ts registration and acceptance", async () => {
   const registry = createBuiltinImportProviderRegistry();
   const bundle = await assembleFixtureCaptureBundle();
@@ -1983,6 +2141,15 @@ test.skipIf(!existsSync(D3_CAPTURE_FIXTURE))(
     const featuresByLabel = new Map(
       (actions.createFeatures ?? []).map((feature) => [feature.featureLabel, feature]),
     );
+    const sketch8 = actions.commitSketches?.find((sketch) => sketch.sketchLabel === "Sketch 8");
+    expect(
+      sketch8?.plane.support,
+      "d3 Sketch 8 must select the symmetric surface tool's combined generated-side-face role.",
+    ).toMatchObject({
+      kind: "splitInterfaceFaceOf",
+      profileEntityId: "sketch_entity_FKWYNHKIeueDP4T_1_QVjrWHJnA2A9",
+      endRole: "combined-ends",
+    });
     const actionIndexFor = (featureLabel: string) => {
       const feature = featuresByLabel.get(featureLabel);
       expect(feature, `Expected prepared feature ${featureLabel}.`).toBeDefined();
@@ -2520,9 +2687,9 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
       (entry) => entry.featureId === "FOoap8tw3jKAJf5_0",
     );
   expect(fixtureRelationships?.summary).toEqual({
-    constraints: { carried: 1, dropped: 0 },
+    constraints: { carried: 1, dropped: 1 },
     dimensions: { carried: 1, dropped: 0 },
-    derivations: { carried: 1, dropped: 0 },
+    derivations: { carried: 0, dropped: 0 },
   });
 
   const selections = onshapeImportProvider.createDefaultSelections(review);
@@ -2571,7 +2738,7 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
     (candidate) => candidate.id === `feature-${sketchPlan?.onshapeFeatureId}`,
   );
   expect(sketchField?.kind === "summary" && sketchField.value).toContain(
-    "carried/dropped: constraints 1/0, dimensions 1/0, derivations 1/0",
+    "carried/dropped: constraints 1/1, dimensions 1/0, derivations 0/0",
   );
 
   const actions = await onshapeImportProvider.prepare({
@@ -2598,16 +2765,51 @@ test("src/domain/import/onshape/provider.spec.ts review -> prepare pipeline", as
   const preparedFixtureSketch = actions.commitSketches?.find(
     (commit) => commit.sketchLabel === "Sketch 1",
   );
-  expect(preparedFixtureSketch?.definition.constraints.map((entry) => entry.kind)).toEqual([
-    "horizontal",
-    "fixPoint",
+  expect(
+    preparedFixtureSketch?.definition.constraints.filter(
+      (constraint) => constraint.kind !== "fixPoint",
+    ),
+    "Prepare must preserve the fixture's exact carried source constraint set.",
+  ).toEqual([{
+    constraintId: "constraint_FOoap8tw3jKAJf5_0_seed_horizontal",
+    kind: "horizontal",
+    label: "seed-horizontal",
+    entityId: "sketch_entity_FOoap8tw3jKAJf5_0_seed_line",
+  }]);
+  expect(
+    preparedFixtureSketch?.definition.constraints.filter(
+      (constraint) => constraint.kind === "fixPoint",
+    ),
+    "Each ID-disconnected mobile component must retain its exact source-position anchor.",
+  ).toEqual([
+    {
+      constraintId: "constraint_sketch_pending_FOoap8tw3jKAJf5_0_import_ground_1",
+      kind: "fixPoint",
+      label: "Imported source anchor 1",
+      pointId: "sketch_point_FOoap8tw3jKAJf5_0_circle1_center",
+      position: [0, 0],
+    },
+    {
+      constraintId: "constraint_sketch_pending_FOoap8tw3jKAJf5_0_import_ground_2",
+      kind: "fixPoint",
+      label: "Imported source anchor 2",
+      pointId: "sketch_point_FOoap8tw3jKAJf5_0_seed_line_start",
+      position: [0, 0],
+    },
+    {
+      constraintId: "constraint_sketch_pending_FOoap8tw3jKAJf5_0_import_ground_3",
+      kind: "fixPoint",
+      label: "Imported source anchor 3",
+      pointId: "sketch_point_FOoap8tw3jKAJf5_0_offset_line_start",
+      position: [0, -2],
+    },
   ]);
   expect(preparedFixtureSketch?.definition.dimensions.map((entry) => entry.kind)).toEqual([
     "lineLength",
   ]);
   expect(
     preparedFixtureSketch?.definition.derivedRelationships?.map((entry) => entry.kind),
-  ).toEqual(["offset"]);
+  ).toEqual([]);
 
   expect(
     actions.createFeatures?.some((action) => action.definition.kind === "extrude"),

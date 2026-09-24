@@ -633,10 +633,63 @@ function validateImportDeferredValueInvariants(
       return;
     }
     const request = actions.commitSketches?.[ref.index];
-    const support = request?.plane?.support;
-    if (!support) {
-      return;
-    }
+    if (!request) return;
+
+    request.definition.references.forEach((reference, referenceIndex) => {
+      const source = reference.source;
+      const referencePath = `commitSketches.${ref.index}.definition.references.${referenceIndex}.source`;
+      if (reference.kind === "modelReference" && isDeferredTopologyRef(source)) {
+        if (source.expectedKind === "body") {
+          issues.push({
+            path: `${referencePath}.expectedKind`,
+            expected: "edge, face, or vertex",
+            value: source.expectedKind,
+            message: "Sketch model references cannot resolve bodies.",
+          });
+        }
+        const hasEarlierProducer = isDeferredHistoricalTopologyRef(source)
+          ? Number.isInteger(source.witnessActionIndex) && source.witnessActionIndex >= 0 &&
+            source.witnessActionIndex < orderedPosition &&
+            getActionAtOrderedPosition(actions, source.witnessActionIndex)?.kind === "createFeature"
+          : actions.orderedActions?.slice(0, orderedPosition)
+              .some((action) => action.kind === "createFeature") ?? false;
+        if (!hasEarlierProducer) {
+          issues.push({
+            path: referencePath,
+            expected: "an earlier createFeature producer action",
+            value: source,
+            message: "A deferred sketch model reference must follow its topology producer.",
+          });
+        }
+        if (isDeferredHistoricalTopologyRef(source) && !source.successorActionIndexes.every(
+          (index, position, indexes) => Number.isInteger(index) && index > source.witnessActionIndex &&
+            index < orderedPosition && getActionAtOrderedPosition(actions, index)?.kind === "createFeature" &&
+            (position === 0 || index > indexes[position - 1]!),
+        )) {
+          issues.push({
+            path: `${referencePath}.successorActionIndexes`,
+            expected: "strictly ordered earlier createFeature action indexes",
+            value: source.successorActionIndexes,
+            message: "Historical topology successors must be exact earlier feature actions in ascending order.",
+          });
+        }
+      }
+      if (
+        reference.kind === "sketchReference" &&
+        (source.kind === "sketchEntity" || source.kind === "sketchPoint")
+      ) {
+        if (!isDeferredValue(source.sketchId)) return;
+        blessed.add(source.sketchId);
+        issues.push(...validateDeferredReference(
+          actions,
+          source.sketchId,
+          orderedPosition,
+          `${referencePath}.sketchId`,
+        ));
+      }
+    });
+
+    const support = request.plane.support;
     const path = `commitSketches.${ref.index}.plane.support`;
     if (isDeferredSplitInterfaceFaceRef(support)) {
       const indexes = [
@@ -651,7 +704,7 @@ function validateImportDeferredValueInvariants(
           getActionAtOrderedPosition(actions, actionIndex)?.kind === kinds[index],
       ) && support.profileSketchActionIndex < support.toolExtrudeActionIndex &&
         support.toolExtrudeActionIndex < support.splitActionIndex &&
-        support.endRole === "one-side-end";
+        (support.endRole === "one-side-end" || support.endRole === "combined-ends");
       if (!validChain) {
         issues.push({
           path,

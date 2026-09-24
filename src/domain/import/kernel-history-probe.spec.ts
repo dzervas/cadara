@@ -16,7 +16,7 @@ import {
   createImportCapabilities,
   TopologyApplyRematchError,
 } from "@/domain/import/orchestrator";
-import type { BodyId, DocumentId, RevisionId } from "@/contracts/shared/ids";
+import type { BodyId, DocumentId, RevisionId, SketchEntityId } from "@/contracts/shared/ids";
 
 import type { ImportPreparedActions } from "@/contracts/import/actions";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
@@ -394,6 +394,329 @@ test("kernel history probe reuses an internally sampled historical witness", asy
   expect(actionCalls).toBe(2);
   expect(result.steps.every((step) => step.status === "rebuilt")).toBe(true);
   expect(JSON.stringify(selector)).not.toContain(bodyId);
+});
+
+function faceRefsOf(bodyId: BodyId) {
+  const derived = deriveKernelTopologySignaturesFromExactBrepPayload(makeExactPayload(bodyId));
+  if (derived.status !== "available") throw new Error("Expected exact face signatures.");
+  return derived.signatures.flatMap((signature) =>
+    signature.reference.kind === "face" ? [signature.reference] : [],
+  );
+}
+
+/**
+ * Profile sketch -> tool extrude -> Split -> two split-interface sketches
+ * (the 9841 Sketch 3/4 shape). The fake kernel publishes exact native lineage
+ * under the source keys the real OCC extrude and sheet-split stages emit. Like
+ * OCC, it derives each tool side-face key from the entity ids the profile sketch
+ * actually committed (never from a selector), with one distinct face per entity
+ * and one distinct alias output per tool face, so a wrong or unauthored id
+ * resolves nothing and a swapped id picks a different face. Split consumes the
+ * tool body, so tool faces are only observable at the tool action itself.
+ */
+const PROFILE_ENTITY_E1 = "sketch_entity_probe_square_e1" as SketchEntityId;
+const PROFILE_ENTITY_E2 = "sketch_entity_probe_square_e2" as SketchEntityId;
+
+function makeSplitInterfaceScenario(options: {
+  omitSplitAlias?: boolean;
+  sketch3Entity?: string;
+} = {}) {
+  const toolBody = "body_split_tool" as BodyId;
+  const splitBodies = ["body_split_a", "body_split_b"] as BodyId[];
+  const toolFaces = faceRefsOf(toolBody);
+  const outputFaces = faceRefsOf(splitBodies[0]!);
+  const profileSketchId = "sketch_profile";
+  const selector = (entity: string, consumer: string) => ({
+    kind: "splitInterfaceFaceOf" as const,
+    profileSketchActionIndex: 0,
+    toolExtrudeActionIndex: 1,
+    splitActionIndex: 2,
+    profileEntityId: entity,
+    endRole: "one-side-end" as const,
+    source: { consumerFeatureId: consumer, parameterId: "plane", deterministicId: `split-interface:${consumer}` },
+  });
+  const profile = sketchExtrudeCandidate("doc_split" as DocumentId).commitSketches![0]!;
+  const consumerSketch = (label: string, entity: string) => ({
+    ...profile,
+    sketchLabel: label,
+    plane: { ...profile.plane, support: selector(entity, label) },
+  }) as never;
+  // Sketch 3 names e2 and Sketch 4 names e1, so neither consumer order nor
+  // entity order can stand in for the authored id.
+  const full: ImportPreparedActions = {
+    commitSketches: [
+      profile,
+      consumerSketch("Sketch 3", options.sketch3Entity ?? PROFILE_ENTITY_E2),
+      consumerSketch("Sketch 4", PROFILE_ENTITY_E1),
+    ],
+    createFeatures: [
+      { featureLabel: "Tool extrude" } as never,
+      { featureLabel: "Split 1" } as never,
+      { featureLabel: "Tail" } as never,
+    ],
+    orderedActions: [
+      { kind: "commitSketch", index: 0 },
+      { kind: "createFeature", index: 0 },
+      { kind: "createFeature", index: 1 },
+      { kind: "commitSketch", index: 1 },
+      { kind: "commitSketch", index: 2 },
+      { kind: "createFeature", index: 2 },
+    ],
+  };
+  const toolKey = (entity: string) =>
+    `extrude:feature_tool:profile-sketch:${profileSketchId}:end:one-side-end:sketch-entity:${profileSketchId}:${entity}:generated-side-face`;
+  const aliasKey = (toolFace: { faceId: string }) =>
+    `sheet-split-tool-successor:feature_split:${toolBody}:face:${toolFace.faceId}`;
+  const lineage = (featureId: string, outputSlot: BodyId, claims: [string, object][]) => ({
+    featureId,
+    outputs: [{
+      outputSlot,
+      topologyToken: `${featureId}-token`,
+      topology: { faceIds: [], edgeIds: [], vertexIds: [] },
+      sourceTargets: claims.map(([sourceKey, target]) => ({ sourceKey, targets: [target] })),
+      unsupportedSourceKeys: [],
+    }],
+  });
+  // Tool face i belongs to committed profile entity i; its Split alias is a
+  // different output face, so tool and output ids cannot be confused.
+  const aliasOutputOf = (toolFaceIndex: number) => outputFaces[toolFaceIndex + 1]!;
+
+  const state = {
+    serviceCount: 0,
+    committedSupports: [] as { sketchLabel: string; support: unknown }[],
+    committedProfileEntityIds: [] as string[],
+  };
+  const expectedOutputFace = (entity: string) => {
+    const index = state.committedProfileEntityIds.indexOf(entity);
+    if (index < 0) throw new Error(`Profile entity ${entity} was never committed.`);
+    return aliasOutputOf(index);
+  };
+  const createService = () => {
+    state.serviceCount += 1;
+    let revision = 0;
+    let bodies: BodyId[] = [];
+    let features: string[] = [];
+    let profileEntityIds: string[] = [];
+    const accepted = (value: object) => {
+      revision += 1;
+      return ok({ revisionId: `rev_split_${revision}`, diagnostics: [], revisionState: { kind: "accepted" }, ...value });
+    };
+    return {
+      async getCurrentDocumentSnapshot() {
+        return makeSnapshot(`rev_split_${revision}` as RevisionId, bodies.map((bodyId) => ({ bodyId })));
+      },
+      async commitSketch(input: {
+        sketchLabel: string;
+        plane: { support: unknown };
+        definition: { entities: readonly { entityId: string }[] };
+      }) {
+        state.committedSupports.push({ sketchLabel: input.sketchLabel, support: input.plane.support });
+        if (input.sketchLabel === profile.sketchLabel) {
+          profileEntityIds = input.definition.entities.map((entity) => entity.entityId);
+          state.committedProfileEntityIds = profileEntityIds;
+        }
+        return accepted({ sketchId: input.sketchLabel === profile.sketchLabel ? profileSketchId : `sketch_${revision}` });
+      },
+      async createFeature(input: { featureLabel: string }) {
+        if (input.featureLabel === "Tool extrude") {
+          bodies = [toolBody];
+          features = ["feature_tool"];
+          return accepted({ featureId: "feature_tool", changedTargets: [{ kind: "body", bodyId: toolBody }] });
+        }
+        if (input.featureLabel === "Split 1") {
+          bodies = [...splitBodies];
+          features = ["feature_tool", "feature_split"];
+          return accepted({
+            featureId: "feature_split",
+            changedTargets: splitBodies.map((bodyId) => ({ kind: "body", bodyId })),
+          });
+        }
+        return accepted({ featureId: "feature_tail", changedTargets: [] });
+      },
+      async addDocumentVariable() {
+        return ok({}) as never;
+      },
+      async buildNativeExactBrepPayload(input: { target: { bodyId: BodyId } }) {
+        const toolLineage = lineage("feature_tool", toolBody, profileEntityIds.map(
+          (entity, index) => [toolKey(entity), toolFaces[index]!],
+        ));
+        const splitLineage = lineage("feature_split", splitBodies[0]!, options.omitSplitAlias
+          ? []
+          : profileEntityIds.map((_, index) => [aliasKey(toolFaces[index]!), aliasOutputOf(index)]));
+        return {
+          kind: "nativeTopologyPayload" as const,
+          payload: {
+            ...makeExactPayload(input.target.bodyId),
+            topologyLineage: [
+              ...(features.includes("feature_tool") && bodies.includes(toolBody) ? [toolLineage] : []),
+              ...(features.includes("feature_split") ? [splitLineage] : []),
+            ],
+          },
+          diagnostics: [],
+        };
+      },
+    } as never;
+  };
+  const consumerSupports = () =>
+    state.committedSupports.filter(({ sketchLabel }) => sketchLabel !== profile.sketchLabel);
+  return { full, profile, consumerSketch, createService, state, consumerSupports, expectedOutputFace };
+}
+
+const stepOutcomes = (result: Awaited<ReturnType<ReturnType<typeof createKernelHistoryProbeSession>["evaluateHistoryProbe"]>>) =>
+  result.steps.map((step) => step.status === "rebuilt" ? "rebuilt" : step.diagnostics[0]?.message);
+
+const expectedSplitInterfaceSupports = (
+  scenario: ReturnType<typeof makeSplitInterfaceScenario>,
+) => [
+  { sketchLabel: "Sketch 3", support: scenario.expectedOutputFace(PROFILE_ENTITY_E2) },
+  { sketchLabel: "Sketch 4", support: scenario.expectedOutputFace(PROFILE_ENTITY_E1) },
+];
+
+// Lane: logic. Seam: the probe mirrors apply's split-interface lifecycle, so a
+// sketch on a Split interface face commits on the exact output face bound from
+// the tool action's exact side face, in fresh and continued probe sessions.
+test("kernel history probe binds split-interface sketch planes to the exact split output face", async () => {
+  const fresh = makeSplitInterfaceScenario();
+  const freshResult = await createKernelHistoryProbeSession({ service: fresh.createService() })
+    .evaluateHistoryProbe({ actions: fresh.full });
+  expect(
+    stepOutcomes(freshResult),
+    "No probe step may fail with 'Split-interface face was not bound in this apply session'.",
+  ).toEqual(["rebuilt", "rebuilt", "rebuilt", "rebuilt", "rebuilt", "rebuilt"]);
+  expect(
+    fresh.state.committedProfileEntityIds,
+    "The fixture's selector ids must be the ids the profile sketch actually committed.",
+  ).toEqual(expect.arrayContaining([PROFILE_ENTITY_E1, PROFILE_ENTITY_E2]));
+  expect(
+    fresh.consumerSupports(),
+    "Each split-interface sketch must commit on the exact output face aliased from its own tool side face.",
+  ).toEqual(expectedSplitInterfaceSupports(fresh));
+
+  // Continuation from a prefix that ends before the tool: bindings happen as
+  // the reused session resumes through the tool and Split actions.
+  const continued = makeSplitInterfaceScenario();
+  const continuedProbe = createKernelHistoryProbeSession({ createService: continued.createService });
+  await continuedProbe.evaluateHistoryProbe({ actions: takePreparedActionPrefix(continued.full, 1) });
+  const continuedResult = await continuedProbe.evaluateHistoryProbe({ actions: continued.full });
+  expect(stepOutcomes(continuedResult)).toEqual(Array(6).fill("rebuilt"));
+  expect(continued.state.serviceCount, "A resumable prefix continues in the same session.").toBe(1);
+  expect(continued.consumerSupports()).toEqual(expectedSplitInterfaceSupports(continued));
+  await continuedProbe.dispose?.();
+});
+
+// Lane: logic. Seam: the tool side-face key is the committed profile entity's
+// authored id; a selector naming any other id (e.g. the former positional
+// "c.1" label) resolves no tool face and fails at the tool action.
+test("kernel history probe fails the tool step when the selector names an uncommitted profile entity", async () => {
+  const scenario = makeSplitInterfaceScenario({ sketch3Entity: "c.1" });
+  const result = await createKernelHistoryProbeSession({ service: scenario.createService() })
+    .evaluateHistoryProbe({ actions: scenario.full });
+  expect(stepOutcomes(result)).toEqual([
+    "rebuilt",
+    "History probe failed at step 2: Split-interface source extrude:feature_tool:profile-sketch:sketch_profile:end:one-side-end:sketch-entity:sketch_profile:c.1:generated-side-face resolved 0 tool faces, expected exactly one.",
+  ]);
+  expect(scenario.consumerSupports()).toEqual([]);
+});
+
+// Lane: logic. Seam: a retained session whose tool/Split actions were applied
+// before the split-interface consumer was declared cannot recover the tool face
+// (Split consumed the tool body), so it restarts fresh; an accepted session that
+// already bound them keeps its bindings for later extensions.
+test("kernel history probe restarts or retains split-interface bindings across reused sessions", async () => {
+  const scenario = makeSplitInterfaceScenario();
+  const probe = createKernelHistoryProbeSession({ createService: scenario.createService });
+
+  const beforeConsumers = await probe.evaluateHistoryProbe({
+    actions: takePreparedActionPrefix(scenario.full, 3),
+  });
+  expect(stepOutcomes(beforeConsumers)).toEqual(Array(3).fill("rebuilt"));
+  expect(scenario.state.serviceCount).toBe(1);
+
+  const withConsumers = await probe.evaluateHistoryProbe({
+    actions: takePreparedActionPrefix(scenario.full, 5),
+  });
+  expect(
+    stepOutcomes(withConsumers),
+    "Split-interface sketches declared after their tool action must not fail as unbound.",
+  ).toEqual(["rebuilt", "rebuilt", "rebuilt", "rebuilt", "rebuilt"]);
+  expect(scenario.state.serviceCount, "Unbindable retained prefixes restart in a fresh session.").toBe(2);
+  expect(scenario.consumerSupports()).toEqual(expectedSplitInterfaceSupports(scenario));
+
+  const extended = await probe.evaluateHistoryProbe({ actions: scenario.full });
+  expect(stepOutcomes(extended)).toEqual(Array(6).fill("rebuilt"));
+  expect(scenario.state.serviceCount, "Accepted bindings survive an exact prefix extension.").toBe(2);
+  await probe.dispose?.();
+});
+
+// Lane: logic. Seam: a retained prefix that ends after the tool but before the
+// Split has already lost the tool face for a newly declared selector (it is
+// bound only at the tool action), even though the Split has not run yet.
+test("kernel history probe restarts a retained prefix that ends between the tool and the split", async () => {
+  const scenario = makeSplitInterfaceScenario();
+  const probe = createKernelHistoryProbeSession({ createService: scenario.createService });
+
+  const throughTool = await probe.evaluateHistoryProbe({
+    actions: takePreparedActionPrefix(scenario.full, 2),
+  });
+  expect(stepOutcomes(throughTool)).toEqual(["rebuilt", "rebuilt"]);
+  expect(scenario.state.serviceCount).toBe(1);
+
+  const result = await probe.evaluateHistoryProbe({ actions: scenario.full });
+  expect(
+    stepOutcomes(result),
+    "The Split must not fail for want of a tool face the retained session never bound.",
+  ).toEqual(Array(6).fill("rebuilt"));
+  expect(scenario.state.serviceCount, "A tool applied before its selector was declared forces a fresh session.").toBe(2);
+  expect(scenario.consumerSupports()).toEqual(expectedSplitInterfaceSupports(scenario));
+  await probe.dispose?.();
+});
+
+// Lane: logic. Seam: a retained session whose registered split-interface
+// declaration conflicts with the new input's declaration for the same selector
+// key restarts, so the result matches a fresh apply of the new plan instead of
+// throwing or reusing the stale binding.
+test("kernel history probe restarts when a retained split-interface declaration conflicts", async () => {
+  const scenario = makeSplitInterfaceScenario();
+  const probe = createKernelHistoryProbeSession({ createService: scenario.createService });
+
+  // Retained input declares Sketch 3 on e1 while only its producer chain is ordered.
+  const stale: ImportPreparedActions = {
+    ...scenario.full,
+    commitSketches: [
+      scenario.profile,
+      scenario.consumerSketch("Sketch 3", PROFILE_ENTITY_E1),
+      scenario.consumerSketch("Sketch 4", PROFILE_ENTITY_E1),
+    ],
+    orderedActions: scenario.full.orderedActions!.slice(0, 3),
+  };
+  const staleResult = await probe.evaluateHistoryProbe({ actions: stale });
+  expect(stepOutcomes(staleResult)).toEqual(Array(3).fill("rebuilt"));
+  expect(scenario.state.serviceCount).toBe(1);
+
+  const result = await probe.evaluateHistoryProbe({ actions: scenario.full });
+  expect(stepOutcomes(result)).toEqual(Array(6).fill("rebuilt"));
+  expect(scenario.state.serviceCount, "A conflicting declaration forces a fresh session.").toBe(2);
+  expect(
+    scenario.consumerSupports(),
+    "Sketch 3 must commit on e2's aliased face, not the stale e1 binding.",
+  ).toEqual(expectedSplitInterfaceSupports(scenario));
+  await probe.dispose?.();
+});
+
+// Lane: logic. Seam: like apply, a Split whose exact alias claim is missing
+// fails at the Split step rather than at a downstream consumer.
+test("kernel history probe fails the split step when its exact interface alias is missing", async () => {
+  const scenario = makeSplitInterfaceScenario({ omitSplitAlias: true });
+  const result = await createKernelHistoryProbeSession({ service: scenario.createService() })
+    .evaluateHistoryProbe({ actions: scenario.full });
+  expect(result.steps.map((step) => step.status)).toEqual(["rebuilt", "rebuilt", "failed"]);
+  expect(result.steps[2]).toMatchObject({
+    diagnostics: [{
+      code: "kernel-history-probe-step-failed",
+      message: expect.stringContaining("History probe failed at step 3: Split-interface alias sheet-split-tool-successor:feature_split:body_split_tool:face:"),
+    }],
+  });
+  expect(scenario.consumerSupports()).toEqual([]);
 });
 
 test("kernel history probe awaits async service disposal after a failed evaluation", async () => {

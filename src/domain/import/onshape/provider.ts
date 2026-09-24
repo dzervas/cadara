@@ -44,8 +44,10 @@ import type {
 } from "@/contracts/modeling/schema";
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import { getSurfaceExtrudeGeneratedSideFaceEndRole } from "@/contracts/modeling/feature-extents";
 import type {
   HistoryProbeResult,
+  HistoryProbeStepResult,
   HistoryProbeTopologySignature,
   ImportCapabilities,
 } from "@/contracts/import/capabilities";
@@ -53,7 +55,7 @@ import type {
   SketchPlaneDefinition,
   SketchPlaneFrame,
 } from "@/contracts/shared/sketch-plane";
-import type { BodyId, ConstructionId, FaceId, RequestId } from "@/contracts/shared/ids";
+import type { BodyId, ConstructionId, FaceId, ReferenceId, RequestId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type {
   FeatureEditorFormSchema,
@@ -84,8 +86,11 @@ import {
 import {
   projectPointToPlane,
   projectPointToSketchPlane,
+  importedOnshapeSketchEntityId,
   translateSketch,
   verifySketchTranslationSolveConsistency,
+  type SketchExternalReference,
+  type SketchExternalReferenceVerificationGeometry,
   type SolvedSketchEntityGeometry,
 } from "@/domain/import/onshape/sketch-translator";
 import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
@@ -120,6 +125,7 @@ import {
   computeParametricTransformReframe,
 } from "@/domain/import/onshape/capture-frame";
 import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
+import { readCompressedQueryLiteralFields } from "@/domain/import/onshape/compressed-query-decoder";
 import {
   resolveExactBodyProducerBindings,
   type DeferredBodyOfSourceFeature,
@@ -1099,6 +1105,22 @@ function durableRefLabel(reference: DurableRef): string {
       return reference.kind;
   }
 }
+export function containmentFailureReasonDetail(input: {
+  provisionalReasonDetail?: string;
+  failedStep?: HistoryProbeStepResult;
+}): string | undefined {
+  const failureDetail = input.failedStep?.status === "failed"
+    ? input.failedStep.diagnostics
+        .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
+        .join("; ") || undefined
+    : undefined;
+  if (!failureDetail) return input.provisionalReasonDetail;
+  if (!input.provisionalReasonDetail || input.provisionalReasonDetail === failureDetail) {
+    return failureDetail;
+  }
+  return `${failureDetail} || Earlier planning detail: ${input.provisionalReasonDetail}`;
+}
+
 async function activateProbeBackedPlanning(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: ReturnType<typeof planStudioFidelity>;
@@ -1176,6 +1198,7 @@ async function activateProbeBackedPlanning(input: {
       read: input.read,
       plan: verificationPlan,
       capabilities: input.capabilities,
+      deferSketchExternalReferences: true,
       materializeBake: false,
       deferUnresolvedExactBodyOwners: true,
       orderedPositionToFeatureId,
@@ -1272,6 +1295,9 @@ async function activateProbeBackedPlanning(input: {
         // exploratory prefix used; checkpoint validation happens separately,
         // after promotion has re-planned the remaining baked runs.
         materializeBake: options.materializeBake,
+        // External sketch topology is proved by the exact pre-consumer prefix
+        // below; this whole-plan containment runs before that promotion.
+        deferSketchExternalReferences: true,
         // Full containment validates only planner-owned baked segments.
         // Per-feature fallback checkpoints are apply recovery, never topology
         // evidence and therefore must not alter a consumer's proof.
@@ -1332,14 +1358,12 @@ async function activateProbeBackedPlanning(input: {
       // A failed full-plan probe is an apply-equivalent refusal. Do not let a
       // later fixed-point pass re-promote the same selector after containment.
       containmentRejectedFeatureIds.add(failedFeatureId);
-      // Keep the kernel's own first message: `feature-kernel-build-failed` alone
-      // says nothing about which invariant the live prefix rejected.
-      const failureDetail =
-        failedStep?.status === "failed"
-          ? failedStep.diagnostics
-              .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
-              .join("; ") || undefined
-          : undefined;
+      // The current apply-equivalent refusal is primary. Earlier planning
+      // context remains visible only as explicitly secondary information.
+      const reasonDetail = containmentFailureReasonDetail({
+        provisionalReasonDetail: failedPlan.reasonDetail,
+        failedStep,
+      });
       workingPlan = recomputePlanWithFeaturePlans(
         workingPlan,
         replanDependentFeatures({
@@ -1352,9 +1376,7 @@ async function activateProbeBackedPlanning(input: {
                     tier: "baked" as const,
                     target: { kind: "suppressed" as const },
                     reasonCodes: ["feature-kernel-build-failed" as const],
-                    ...(plan.reasonDetail ?? failureDetail
-                      ? { reasonDetail: plan.reasonDetail ?? failureDetail }
-                      : {}),
+                    ...(reasonDetail ? { reasonDetail } : {}),
                     suppressed: true,
                   }
                 : plan,
@@ -1513,6 +1535,7 @@ async function activateProbeBackedPlanning(input: {
         plan: prefixPlan,
         capabilities: input.capabilities,
         materializeBake: false,
+        deferSketchExternalReferences: true,
         featureIdToOrderedPrefixPosition,
         orderedPositionToFeatureId,
         featureIdToOrderedActionIndex,
@@ -1820,6 +1843,7 @@ async function activateProbeBackedPlanning(input: {
         plan: sketchPrefixPlan,
         capabilities: input.capabilities,
         materializeBake: false,
+        deferSketchExternalReferences: true,
         featureIdToOrderedPrefixPosition,
         featureIdToOrderedActionIndex,
         orderedPositionToFeatureId,
@@ -1985,7 +2009,7 @@ async function activateProbeBackedPlanning(input: {
           source: {
             consumerFeatureId: featurePlan.onshapeFeatureId,
             parameterId: "sketchPlane",
-            deterministicId: `split-interface:${splitInterfaceQuery.profileEntityId}`,
+            deterministicId: `split-interface:${splitInterfaceQuery.profileSourceEntityId}`,
           },
         };
         return {
@@ -2682,9 +2706,338 @@ function sanitizeCorrelationPart(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_]/g, "_");
 }
 
+interface DecodedSketchEntityProvenance {
+  sourceFeatureId: string;
+  sourceEntityId: string;
+  geometryKind: "point" | "lineSegment";
+}
+
+function decodedSketchEntityProvenance(
+  read: ReturnType<typeof readPartStudio>,
+): ReadonlyMap<string, DecodedSketchEntityProvenance | null> {
+  const byDeterministicId = new Map<string, DecodedSketchEntityProvenance | null>();
+  for (const feature of read.features) {
+    for (const constraint of feature.constraints ?? []) {
+      for (const parameter of constraint.parameters) {
+        for (const query of parameter.queries ?? []) {
+          const fields = readCompressedQueryLiteralFields(query.queryString);
+          if (!fields) continue;
+          const field = (name: string) => {
+            const index = fields.findIndex((parts) => parts.length === 1 && parts[0] === name);
+            return index >= 0 ? fields[index + 1] ?? [] : [];
+          };
+          const operationId = field("operationId");
+          const sourceEntityId = field("sketchEntityId")[0];
+          const entityType = field("entityType")[0];
+          const queryType = field("queryType")[0];
+          const sourceFeatureId = operationId[1] === "wireOp" ? operationId[0] : undefined;
+          const geometryKind = entityType === "EDGE"
+            ? "lineSegment"
+            : entityType === "VERTEX"
+              ? "point"
+              : null;
+          if (!sourceFeatureId || !sourceEntityId || queryType !== "SKETCH_ENTITY" || !geometryKind) continue;
+          const provenance = { sourceFeatureId, sourceEntityId, geometryKind } as const;
+          for (const deterministicId of query.deterministicIds) {
+            const existing = byDeterministicId.get(deterministicId);
+            byDeterministicId.set(
+              deterministicId,
+              existing === undefined ||
+                (existing !== null && existing.sourceFeatureId === provenance.sourceFeatureId &&
+                  existing.sourceEntityId === provenance.sourceEntityId &&
+                  existing.geometryKind === provenance.geometryKind)
+                ? provenance
+                : null,
+            );
+          }
+        }
+      }
+    }
+  }
+  return byDeterministicId;
+}
+
+function finiteVector3(value: unknown): readonly [number, number, number] | null {
+  return Array.isArray(value) && value.length === 3 && value.every(
+    (entry) => typeof entry === "number" && Number.isFinite(entry),
+  )
+    ? value as unknown as readonly [number, number, number]
+    : null;
+}
+
+function lineVerificationGeometry(
+  signature: OnshapeGeometricSignature,
+): SketchExternalReferenceVerificationGeometry | null {
+  const origin = finiteVector3(signature.definingData?.origin);
+  const direction = finiteVector3(signature.definingData?.direction);
+  const low = finiteVector3(signature.boundingBox?.low);
+  const high = finiteVector3(signature.boundingBox?.high);
+  if (!origin || !direction || !low || !high) return null;
+
+  let minimum = Number.NEGATIVE_INFINITY;
+  let maximum = Number.POSITIVE_INFINITY;
+  for (let axis = 0; axis < 3; axis += 1) {
+    const component = direction[axis]!;
+    if (Math.abs(component) <= 1e-12) {
+      if (origin[axis]! < low[axis]! - 1e-12 || origin[axis]! > high[axis]! + 1e-12) return null;
+      continue;
+    }
+    const first = (low[axis]! - origin[axis]!) / component;
+    const second = (high[axis]! - origin[axis]!) / component;
+    minimum = Math.max(minimum, Math.min(first, second));
+    maximum = Math.min(maximum, Math.max(first, second));
+  }
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum - minimum <= 1e-12) return null;
+  const pointAt = (parameter: number): readonly [number, number, number] => [
+    origin[0] + parameter * direction[0],
+    origin[1] + parameter * direction[1],
+    origin[2] + parameter * direction[2],
+  ];
+  return { kind: "lineSegment", start3d: pointAt(minimum), end3d: pointAt(maximum) };
+}
+
+function sketchVerificationGeometry(input: {
+  read: ReturnType<typeof readPartStudio>;
+  provenance: DecodedSketchEntityProvenance;
+}): SketchExternalReferenceVerificationGeometry | null {
+  const entity = input.read.solvedSketchesByFeatureId
+    .get(input.provenance.sourceFeatureId)
+    ?.entities.find((candidate) => candidate.entityId === input.provenance.sourceEntityId);
+  if (!entity) return null;
+  if (
+    input.provenance.geometryKind === "lineSegment" &&
+    entity.entityType === "lineSegment" &&
+    entity.start3d &&
+    entity.end3d
+  ) {
+    return { kind: "lineSegment", start3d: entity.start3d, end3d: entity.end3d };
+  }
+  if (
+    input.provenance.geometryKind === "point" &&
+    entity.entityType === "point" &&
+    entity.center3d
+  ) {
+    return { kind: "point", position3d: entity.center3d };
+  }
+  return null;
+}
+
+/** Classify captured sketch references using query provenance or a unique prior body witness. */
+export function classifySketchExternalReferences(input: {
+  read: ReturnType<typeof readPartStudio>;
+  consumerFeatureId: string;
+  orderedIndexByFeatureId: ReadonlyMap<string, number>;
+}): ReadonlyMap<string, SketchExternalReference> {
+  const consumer = input.read.features.find((feature) => feature.featureId === input.consumerFeatureId);
+  if (!consumer) return new Map();
+  const featureOrder = new Map(input.read.features.map((feature, index) => [feature.featureId, index]));
+  const consumerOrder = featureOrder.get(input.consumerFeatureId) ?? -1;
+  const provenanceById = decodedSketchEntityProvenance(input.read);
+  const timeline = createRollbackTopologyTimeline({
+    featureIds: input.read.features.map((feature) => feature.featureId),
+    snapshots: input.read.studio.rollbackSnapshots,
+  });
+  const occurrencesById = new Map<string, Set<string>>();
+  for (const feature of input.read.features) {
+    for (const constraint of feature.constraints ?? []) {
+      for (const parameter of constraint.parameters) {
+        for (const deterministicId of parameter.queries?.flatMap((query) => query.deterministicIds) ?? []) {
+          const consumers = occurrencesById.get(deterministicId) ?? new Set<string>();
+          consumers.add(feature.featureId);
+          occurrencesById.set(deterministicId, consumers);
+        }
+      }
+    }
+  }
+
+  const references = new Map<string, SketchExternalReference>();
+  const consumerIds = new Set(
+    consumer.constraints?.flatMap((constraint) => constraint.parameters.flatMap((parameter) =>
+      parameter.queries?.flatMap((query) => query.deterministicIds) ?? [],
+    )) ?? [],
+  );
+  for (const deterministicId of consumerIds) {
+    const provenance = provenanceById.get(deterministicId);
+    if (provenance) {
+      const sourceOrder = featureOrder.get(provenance.sourceFeatureId) ?? Number.MAX_SAFE_INTEGER;
+      const actionIndex = input.orderedIndexByFeatureId.get(provenance.sourceFeatureId);
+      const verificationGeometry = sketchVerificationGeometry({ read: input.read, provenance });
+      if (sourceOrder >= consumerOrder || actionIndex === undefined || !verificationGeometry) continue;
+      const referenceId = `ref_${sanitizeCorrelationPart(input.consumerFeatureId)}_${sanitizeCorrelationPart(deterministicId)}` as ReferenceId;
+      references.set(deterministicId, {
+        geometryKind: provenance.geometryKind,
+        verificationGeometry,
+        definition: {
+          referenceId,
+          kind: "sketchReference",
+          label: deterministicId,
+          projectionMode: "useExistingCoplanarGeometry",
+          source: {
+            kind: "sketchEntity",
+            sketchId: { kind: "sketchIdOf", actionIndex },
+            entityId: importedOnshapeSketchEntityId(
+              provenance.sourceFeatureId,
+              provenance.sourceEntityId,
+            ),
+          },
+        },
+      });
+      continue;
+    }
+    // An ID with decoded but conflicting sketch provenance is not eligible for body fallback.
+    if (provenance === null) continue;
+    const occurrenceConsumers = occurrencesById.get(deterministicId) ?? new Set();
+    const occurrenceSignatures = new Map<string, ReturnType<typeof normalizeOnshapeTopologySignature>>();
+    let hasAuthoritativeBodyWitnesses = true;
+    for (const featureId of occurrenceConsumers) {
+      if (timeline.snapshotBeforeFeature(featureId)?.bodies.length !== 1) {
+        hasAuthoritativeBodyWitnesses = false;
+        break;
+      }
+      const records = input.read.studio.resolvedReferences.filter((reference) =>
+        reference.deterministicId === deterministicId &&
+        reference.evaluatedAt === "historyPoint" &&
+        reference.consumingFeatureId === featureId &&
+        "signature" in reference,
+      );
+      if (records.length !== 1 || !("signature" in records[0]!)) {
+        hasAuthoritativeBodyWitnesses = false;
+        break;
+      }
+      occurrenceSignatures.set(
+        featureId,
+        normalizeOnshapeTopologySignature(records[0]!.signature),
+      );
+    }
+    if (!hasAuthoritativeBodyWitnesses) continue;
+    const signature = occurrenceSignatures.get(input.consumerFeatureId);
+    if (!signature) continue;
+    const geometryKind = signature.entityClass === "vertex"
+      ? "point"
+      : signature.entityClass === "edge" && signature.geometryType === "line"
+        ? "lineSegment"
+        : null;
+    if (
+      !geometryKind ||
+      [...occurrenceSignatures.values()].some((occurrenceSignature) =>
+        geometryKind === "point"
+          ? occurrenceSignature.entityClass !== "vertex"
+          : occurrenceSignature.entityClass !== "edge" || occurrenceSignature.geometryType !== "line"
+      )
+    ) continue;
+    const capturedSignatureRecord = input.read.studio.resolvedReferences.find((reference) =>
+      reference.deterministicId === deterministicId &&
+      reference.evaluatedAt === "historyPoint" &&
+      reference.consumingFeatureId === input.consumerFeatureId &&
+      "signature" in reference
+    );
+    if (!capturedSignatureRecord || !("signature" in capturedSignatureRecord)) continue;
+    const capturedCentroid = finiteVector3(capturedSignatureRecord.signature.centroid);
+    const verificationGeometry = geometryKind === "point"
+      ? (capturedCentroid
+          ? { kind: "point" as const, position3d: capturedCentroid }
+          : null)
+      : lineVerificationGeometry(capturedSignatureRecord.signature);
+    if (!verificationGeometry) continue;
+    const referenceId = `ref_${sanitizeCorrelationPart(input.consumerFeatureId)}_${sanitizeCorrelationPart(deterministicId)}` as ReferenceId;
+    references.set(deterministicId, {
+      geometryKind,
+      verificationGeometry,
+      definition: {
+        referenceId,
+        kind: "modelReference",
+        label: deterministicId,
+        projectionMode: "projectAlongPlaneNormal",
+        source: {
+          kind: "topologyOf",
+          expectedKind: geometryKind === "point" ? "vertex" : "edge",
+          capturedSignature: signature,
+          tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+          source: {
+            consumerFeatureId: input.consumerFeatureId,
+            parameterId: "externalSketchReference",
+            deterministicId,
+          },
+        },
+      },
+    });
+  }
+  return references;
+}
+
+function authoredLineParameterDirections(input: {
+  feature: ReturnType<typeof readPartStudio>["features"][number] | undefined;
+  sourceFrame: SketchPlaneFrame | undefined;
+  plane: SketchPlaneDefinition | undefined;
+  planeKey: "xy" | "yz" | "xz";
+}): ReadonlyMap<string, readonly [number, number]> {
+  if (!input.feature || !input.sourceFrame) return new Map();
+  const rawEntities = (input.feature as unknown as { entities?: unknown }).entities;
+  if (!Array.isArray(rawEntities)) return new Map();
+
+  const project = (point: readonly [number, number, number]) =>
+    input.plane
+      ? projectPointToSketchPlane(point, input.plane)
+      : projectPointToPlane(point, input.planeKey);
+  const sourceOrigin: readonly [number, number, number] = [
+    input.sourceFrame.origin[0] / 1000,
+    input.sourceFrame.origin[1] / 1000,
+    input.sourceFrame.origin[2] / 1000,
+  ];
+  const directions = new Map<string, readonly [number, number]>();
+  for (const rawEntity of rawEntities) {
+    if (!rawEntity || typeof rawEntity !== "object") continue;
+    const entity = rawEntity as {
+      entityId?: unknown;
+      startParam?: unknown;
+      endParam?: unknown;
+      geometry?: { dirX?: unknown; dirY?: unknown };
+    };
+    const { entityId, startParam, endParam } = entity;
+    const dirX = entity.geometry?.dirX;
+    const dirY = entity.geometry?.dirY;
+    if (
+      typeof entityId !== "string" ||
+      typeof startParam !== "number" || !Number.isFinite(startParam) ||
+      typeof endParam !== "number" || !Number.isFinite(endParam) ||
+      typeof dirX !== "number" || !Number.isFinite(dirX) ||
+      typeof dirY !== "number" || !Number.isFinite(dirY)
+    ) {
+      continue;
+    }
+    const parameterDelta = endParam - startParam;
+    const localDirection: readonly [number, number] = [
+      dirX * parameterDelta,
+      dirY * parameterDelta,
+    ];
+    if (localDirection[0] === 0 && localDirection[1] === 0) continue;
+    const worldEnd: readonly [number, number, number] = [
+      sourceOrigin[0] +
+        input.sourceFrame.xAxis[0] * localDirection[0] +
+        input.sourceFrame.yAxis[0] * localDirection[1],
+      sourceOrigin[1] +
+        input.sourceFrame.xAxis[1] * localDirection[0] +
+        input.sourceFrame.yAxis[1] * localDirection[1],
+      sourceOrigin[2] +
+        input.sourceFrame.xAxis[2] * localDirection[0] +
+        input.sourceFrame.yAxis[2] * localDirection[1],
+    ];
+    const projectedStart = project(sourceOrigin);
+    const projectedEnd = project(worldEnd);
+    directions.set(entityId, [
+      projectedEnd[0] - projectedStart[0],
+      projectedEnd[1] - projectedStart[1],
+    ]);
+  }
+  return directions;
+}
+
 function projectSketchForPlan(input: {
   read: ReturnType<typeof readPartStudio>;
   featurePlan: FeaturePlan;
+  orderedIndexByFeatureId?: ReadonlyMap<string, number>;
+  deferExternalReferences?: boolean;
+  externalReferences?: ReadonlyMap<string, SketchExternalReference>;
 }): ReturnType<typeof translateSketch> | null {
   if (input.featurePlan.target.kind !== "sketch") {
     return null;
@@ -2707,8 +3060,17 @@ function projectSketchForPlan(input: {
   const solved = input.read.solvedSketchesByFeatureId.get(
     input.featurePlan.onshapeFeatureId,
   );
+  const authoredDirections = authoredLineParameterDirections({
+    feature,
+    sourceFrame: solved?.sketchFrame,
+    plane,
+    planeKey,
+  });
   const entities: SolvedSketchEntityGeometry[] = (solved?.entities ?? []).map(
     (curve) => ({
+      ...(authoredDirections.has(curve.entityId)
+        ? { authoredParameterDirection: authoredDirections.get(curve.entityId)! }
+        : {}),
       entityId: curve.entityId,
       entityType: curve.entityType,
       isConstruction: curve.isConstruction,
@@ -2730,6 +3092,13 @@ function projectSketchForPlan(input: {
       radius: curve.radius === undefined ? undefined : curve.radius * 1000,
     }),
   );
+  const externalReferences = input.externalReferences ?? (input.deferExternalReferences
+    ? new Map<string, SketchExternalReference>()
+    : classifySketchExternalReferences({
+        read: input.read,
+        consumerFeatureId: input.featurePlan.onshapeFeatureId,
+        orderedIndexByFeatureId: input.orderedIndexByFeatureId ?? new Map(),
+      }));
   return translateSketch({
     featureId: input.featurePlan.onshapeFeatureId,
     label: input.featurePlan.label,
@@ -2737,6 +3106,7 @@ function projectSketchForPlan(input: {
     plane,
     sourceFrame: solved?.sketchFrame,
     entities,
+    externalReferences,
     constraints: feature?.constraints,
     sourceSolveStatus: solved?.sketchSolveStatus,
   });
@@ -3039,6 +3409,8 @@ async function buildPreparedActions(input: {
   featureIdToBodyProducerActionIndex?: Map<string, number>;
   /** Exploratory review may omit an exact-owner consumer until its source action exists. */
   deferUnresolvedExactBodyOwners?: boolean;
+  /** Preliminary whole-plan probes run before topology-consumer promotion. */
+  deferSketchExternalReferences?: boolean;
 }): Promise<ImportPreparedActions> {
   const demoted = new Set(input.demotedFeatureIds ?? []);
   const featuresById = new Map(input.read.features.map((f) => [f.featureId, f]));
@@ -3601,7 +3973,20 @@ async function buildPreparedActions(input: {
     }
 
     if (featurePlan.target.kind === "sketch") {
-      let translation = projectSketchForPlan({ read: input.read, featurePlan });
+      const externalReferences = input.deferSketchExternalReferences
+        ? new Map<string, SketchExternalReference>()
+        : classifySketchExternalReferences({
+            read: input.read,
+            consumerFeatureId: featurePlan.onshapeFeatureId,
+            orderedIndexByFeatureId,
+          });
+      let translation = projectSketchForPlan({
+        read: input.read,
+        featurePlan,
+        orderedIndexByFeatureId,
+        deferExternalReferences: input.deferSketchExternalReferences,
+        externalReferences,
+      });
       if (!translation) {
         diagnostics.push({
           severity: "warning",
@@ -3620,6 +4005,7 @@ async function buildPreparedActions(input: {
           sketchId: verificationSketchId,
           plane: translation.plane,
           definition: translation.definition,
+          projectedReferences: translation.projectedReferences,
           relationshipSummary: translation.relationshipSummary,
           sourceSolveStatus: translation.sourceSolveStatus,
         });
@@ -3729,15 +4115,40 @@ async function buildPreparedActions(input: {
         const splitActionIndex = splitInterfaceQuery
           ? orderedIndexByFeatureId.get(splitInterfaceQuery.splitFeatureId)
           : undefined;
+        const profileEntityId = splitInterfaceQuery
+          ? importedOnshapeSketchEntityId(
+              splitInterfaceQuery.profileSketchFeatureId,
+              splitInterfaceQuery.profileSourceEntityId,
+            )
+          : undefined;
+        const profileAction = profileSketchActionIndex === undefined
+          ? undefined
+          : orderedActions[profileSketchActionIndex];
+        const profileEntityEmitted = profileAction?.kind === "commitSketch" &&
+          commitSketches[profileAction.index]!.definition.entities.some(
+            (entity) => entity.entityId === profileEntityId,
+          );
+        const toolAction = toolExtrudeActionIndex === undefined
+          ? undefined
+          : orderedActions[toolExtrudeActionIndex];
+        const toolDefinition = toolAction?.kind === "createFeature"
+          ? createFeatures[toolAction.index]?.definition
+          : undefined;
+        const endRole = toolDefinition?.kind === "extrude"
+          ? getSurfaceExtrudeGeneratedSideFaceEndRole(toolDefinition.parameters)
+          : null;
         if (
           splitInterfaceQuery &&
           (profileSketchActionIndex === undefined ||
             toolExtrudeActionIndex === undefined ||
-            splitActionIndex === undefined)
+            splitActionIndex === undefined ||
+            !profileEntityEmitted ||
+            endRole === null)
         ) {
           // The exact split-interface selector is meaningful only with its full
-          // producer chain. A transient review prefix must not substitute the
-          // generic face selector and then demote this sketch on that artifact.
+          // producer chain, including the authored profile entity it names. A
+          // transient review prefix must not substitute the generic face
+          // selector and then demote this sketch on that artifact.
           if (input.deferUnresolvedExactBodyOwners) continue;
           throw new Error(
             `Split-interface sketch ${featurePlan.label} is missing an emitted profile, tool, or Split action.`,
@@ -3749,12 +4160,12 @@ async function buildPreparedActions(input: {
               profileSketchActionIndex: profileSketchActionIndex!,
               toolExtrudeActionIndex: toolExtrudeActionIndex!,
               splitActionIndex: splitActionIndex!,
-              profileEntityId: splitInterfaceQuery.profileEntityId,
-              endRole: splitInterfaceQuery.endRole,
+              profileEntityId: profileEntityId!,
+              endRole: endRole!,
               source: {
                 consumerFeatureId: featurePlan.onshapeFeatureId,
                 parameterId: "sketchPlane",
-                deterministicId: `split-interface:${splitInterfaceQuery.profileEntityId}`,
+                deterministicId: `split-interface:${splitInterfaceQuery.profileSourceEntityId}`,
               },
             }
           : featurePlan.target.probedFaceSelector;

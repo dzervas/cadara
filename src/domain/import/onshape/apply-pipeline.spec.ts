@@ -5305,6 +5305,12 @@ test.skipIf(!existsSync(LAPTOP_STAND_CAPTURE_FIXTURE))(
       candidate.featurePlans.some((plan) => plan.label === "Sketch 4"),
     );
     expect(
+      studio?.featurePlans.find((plan) => plan.label === "Sketch 1")?.tier,
+    ).toBe("parametric");
+    expect(
+      studio?.featurePlans.find((plan) => plan.label === "Extrude 1")?.tier,
+    ).toBe("parametric");
+    expect(
       studio?.featurePlans.find((plan) => plan.label === "Sketch 4")?.tier,
     ).toBe("parametric");
     expect(
@@ -5323,6 +5329,180 @@ test.skipIf(!existsSync(LAPTOP_STAND_CAPTURE_FIXTURE))(
         }),
       }),
     });
+    const sketch1 = actions.commitSketches.find((request) => request.sketchLabel === "Sketch 1");
+    const sketch1SourceConstraintIds = [
+      "1UPfceAHDDjr.endSnap0",
+      "1UPfceAHDDjr.startSnap0",
+      "B4JEqDFNmZSS.0.offset",
+      "B4JEqDFNmZSS.1.offset",
+      "B4JEqDFNmZSS.2.offset",
+      "B4JEqDFNmZSS.coi0",
+      "B4JEqDFNmZSS.coi1",
+      "B4JEqDFNmZSS.coi2",
+      "B4JEqDFNmZSS.coi3",
+      "Ba7xqJmKTOxO.corner0",
+      "Ba7xqJmKTOxO.corner1",
+      "Ba7xqJmKTOxO.corner2",
+      "Ba7xqJmKTOxO.corner3",
+      "Ba7xqJmKTOxO.horizontal",
+      "Ba7xqJmKTOxO.parallel.1",
+      "Ba7xqJmKTOxO.parallel.2",
+      "Ba7xqJmKTOxO.perpendicular",
+      "FL4OuyjxusJQ.corner0",
+      "FL4OuyjxusJQ.corner1",
+      "FL4OuyjxusJQ.corner2",
+      "FL4OuyjxusJQ.corner3",
+      "FL4OuyjxusJQ.horizontal",
+      "FL4OuyjxusJQ.parallel.1",
+      "FL4OuyjxusJQ.parallel.2",
+      "FL4OuyjxusJQ.perpendicular",
+      "aWWWKbdRS9N5.positionSnap0",
+    ];
+    expect(
+      sketch1?.definition.constraints
+        .filter((constraint) => constraint.kind !== "fixPoint")
+        .map((constraint) => constraint.label)
+        .sort(),
+      "All 26 translatable source constraints must survive verification.",
+    ).toEqual(sketch1SourceConstraintIds);
+    expect(
+      sketch1?.definition.constraints.filter((constraint) => constraint.kind === "fixPoint"),
+      "The 27 constraints comprise 26 source constraints plus one translation-only grounding constraint.",
+    ).toHaveLength(1);
+    expect(sketch1?.definition.constraints).toHaveLength(27);
+    expect(
+      sketch1?.definition.dimensions.map((dimension) => dimension.label).sort(),
+      "All seven source dimension IDs must survive verification.",
+    ).toEqual([
+      "0cN5JK9a0OEM",
+      "3cA7XZlBsbIi",
+      "B4JEqDFNmZSS.distance",
+      "HSql6LK34dK3",
+      "Rxf5Q1NcRyKT",
+      "bxsG9zXhmtnt",
+      "jGrA2K5Et8N8",
+    ]);
+    expect(sketch1?.definition.dimensions).toHaveLength(7);
+    const sketch1EntityLabels = new Map(
+      sketch1?.definition.entities.map((entity) => [entity.entityId, entity.label]) ?? [],
+    );
+    const sourceSketch1 = (bundle.partStudios[0]?.features as { features?: Array<{
+      featureId?: string;
+      entities?: Array<{
+        entityId?: string;
+        geometry?: { dirX?: number; dirY?: number };
+        startParam?: number;
+        endParam?: number;
+      }>;
+    }> } | undefined)?.features?.find((feature) => feature.featureId === "FlesR6N3uuoL4Ii_0");
+    for (const entityId of ["FL4OuyjxusJQ.left", "FL4OuyjxusJQ.right"]) {
+      expect(
+        sourceSketch1?.entities?.find((entity) => entity.entityId === entityId),
+        `${entityId} has an exact upward authored startParam→endParam direction despite the reversed solved payload.`,
+      ).toMatchObject({
+        geometry: { dirX: 0, dirY: -1 },
+        startParam: expect.any(Number),
+        endParam: expect.any(Number),
+      });
+      const source = sourceSketch1?.entities?.find((entity) => entity.entityId === entityId);
+      expect((source?.endParam ?? 0) - (source?.startParam ?? 0)).toBeLessThan(0);
+    }
+    const sketch1OffsetDriver = sketch1?.definition.dimensions.find(
+      (dimension) => dimension.label === "B4JEqDFNmZSS.distance",
+    );
+    expect(sketch1OffsetDriver).toMatchObject({ kind: "lineDistance" });
+    expect(
+      sketch1?.definition.dimensions.filter((dimension) =>
+        dimension.kind === "lineDistance" &&
+        dimension.lines.every((line) =>
+          line.kind === "localEntity" &&
+          ["FL4OuyjxusJQ.top", "B4JEqDFNmZSS.3"].includes(
+            sketch1EntityLabels.get(line.entityId) ?? "",
+          )
+        )
+      ),
+      "The separate top-to-offset line distance remains the sole scalar offset driver.",
+    ).toEqual([sketch1OffsetDriver]);
+    const sketch1Offsets = sketch1?.definition.constraints.filter(
+      (constraint) => constraint.kind === "equalOffset",
+    ) ?? [];
+    expect(sketch1Offsets).toHaveLength(3);
+    expect(
+      sketch1?.definition.derivedRelationships?.filter(
+        (relationship) => relationship.kind === "offset",
+      ) ?? [],
+      "Onshape OFFSET records must not become output-owning generated geometry.",
+    ).toEqual([]);
+    expect(sketch1Offsets.flatMap((constraint) =>
+      constraint.kind === "equalOffset"
+        ? constraint.pairs.map((pair) => [
+            constraint.label,
+            sketch1EntityLabels.get(pair.seedEntityId),
+            sketch1EntityLabels.get(pair.offsetEntityId),
+            pair.side,
+          ])
+        : []
+    )).toEqual([
+      ["B4JEqDFNmZSS.2.offset", "FL4OuyjxusJQ.top", "B4JEqDFNmZSS.3", "left"],
+      ["B4JEqDFNmZSS.2.offset", "FL4OuyjxusJQ.left", "B4JEqDFNmZSS.2", "left"],
+      ["B4JEqDFNmZSS.0.offset", "FL4OuyjxusJQ.top", "B4JEqDFNmZSS.3", "left"],
+      ["B4JEqDFNmZSS.0.offset", "FL4OuyjxusJQ.right", "B4JEqDFNmZSS.0", "right"],
+      ["B4JEqDFNmZSS.1.offset", "FL4OuyjxusJQ.top", "B4JEqDFNmZSS.3", "left"],
+      ["B4JEqDFNmZSS.1.offset", "FL4OuyjxusJQ.bottom", "B4JEqDFNmZSS.1", "right"],
+    ]);
+    expect(new Set(sketch1Offsets.flatMap((constraint) =>
+      constraint.kind === "equalOffset"
+        ? constraint.pairs.map((pair) =>
+            `${pair.seedEntityId}->${pair.offsetEntityId}`
+          )
+        : []
+    )).size).toBe(4);
+    const sketch1Points = new Map<string, readonly [number, number]>(
+      sketch1?.definition.points.map((point) => [point.pointId, point.position]) ?? [],
+    );
+    const lineByLabel = (label: string) => sketch1?.definition.entities.find(
+      (entity) => entity.kind === "lineSegment" && entity.label === label,
+    );
+    expect(lineByLabel("FL4OuyjxusJQ.left")).toMatchObject({
+      startPointId: "sketch_point_FlesR6N3uuoL4Ii_0_FL4OuyjxusJQ_bottom_start",
+      endPointId: "sketch_point_FlesR6N3uuoL4Ii_0_FL4OuyjxusJQ_top_start",
+    });
+    expect(lineByLabel("FL4OuyjxusJQ.right")).toMatchObject({
+      startPointId: "sketch_point_FlesR6N3uuoL4Ii_0_FL4OuyjxusJQ_bottom_end",
+      endPointId: "sketch_point_FlesR6N3uuoL4Ii_0_FL4OuyjxusJQ_top_end",
+    });
+    expect(sketch1Points.get("sketch_point_FlesR6N3uuoL4Ii_0_FL4OuyjxusJQ_bottom_start"))
+      .toEqual([-148.5, 50.75000000000002]);
+    expect(sketch1Points.get("sketch_point_FlesR6N3uuoL4Ii_0_FL4OuyjxusJQ_top_start"))
+      .toEqual([-148.5, 63.249999999999986]);
+    expect(sketch1Points.get("sketch_point_FlesR6N3uuoL4Ii_0_FL4OuyjxusJQ_bottom_end"))
+      .toEqual([148.5, 50.75]);
+    expect(sketch1Points.get("sketch_point_FlesR6N3uuoL4Ii_0_FL4OuyjxusJQ_top_end"))
+      .toEqual([148.5, 63.24999999999997]);
+    const signedNormalDistance = (seedLabel: string, offsetLabel: string) => {
+      const seed = lineByLabel(seedLabel);
+      const offset = lineByLabel(offsetLabel);
+      if (seed?.kind !== "lineSegment" || offset?.kind !== "lineSegment") {
+        throw new Error(`Expected ${seedLabel} and ${offsetLabel} to be translated lines.`);
+      }
+      const start = sketch1Points.get(seed.startPointId);
+      const end = sketch1Points.get(seed.endPointId);
+      const offsetStart = sketch1Points.get(offset.startPointId);
+      if (!start || !end || !offsetStart) throw new Error("Expected translated line endpoint provenance.");
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const length = Math.hypot(dx, dy);
+      return (offsetStart[0] - start[0]) * (-dy / length) +
+        (offsetStart[1] - start[1]) * (dx / length);
+    };
+    expect(
+      signedNormalDistance("FL4OuyjxusJQ.left", "B4JEqDFNmZSS.2"),
+      "The authored-up left seed keeps its physical west output in its left half-plane.",
+    ).toBe(3);
+    expect(
+      signedNormalDistance("FL4OuyjxusJQ.right", "B4JEqDFNmZSS.0"),
+      "The authored-up right seed keeps its physical east output in its right half-plane.",
+    ).toBe(-3);
     expect(validateImportPreparedActions(actions).success).toBe(true);
     const applied = await applyImportPreparedActions({
       modelingService: service,

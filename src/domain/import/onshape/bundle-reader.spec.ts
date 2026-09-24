@@ -53,6 +53,10 @@ test("normalizes raw sketch relationship records", async () => {
       parameters: [
         { parameterId: "localFirst", value: "line1.start" },
         { parameterId: "localSecond", value: "line2.end" },
+        {
+          parameterId: "externalSecond",
+          queries: [{ deterministicIds: ["JFB"], queryString: "captured-query" }],
+        },
       ],
     },
   ];
@@ -65,6 +69,11 @@ test("normalizes raw sketch relationship records", async () => {
       parameters: [
         { parameterId: "localFirst", value: "line1.start", hasExternalQuery: false },
         { parameterId: "localSecond", value: "line2.end", hasExternalQuery: false },
+        {
+          parameterId: "externalSecond",
+          hasExternalQuery: true,
+          queries: [{ deterministicIds: ["JFB"], queryString: "captured-query" }],
+        },
       ],
     },
   ]);

@@ -1609,6 +1609,32 @@ export class ImportDeferredMaterializer {
     consumerActionIndex?: number,
   ): Promise<CommitSketchRequest> {
     return this.withConsumerActionIndex(consumerActionIndex, async () => {
+      const references = await Promise.all(request.definition.references.map(async (reference) => {
+        if (reference.kind === "modelReference" && isDeferredTopologyRef(reference.source)) {
+          const source = await this.resolveDeferredTopologyRef(reference.source);
+          if (source.kind !== "edge" && source.kind !== "face" && source.kind !== "vertex") {
+            throw new Error("A sketch model reference must resolve an edge, face, or vertex.");
+          }
+          return { ...reference, source };
+        }
+        if (
+          reference.kind === "sketchReference" &&
+          isDeferredSketchTargetRef(reference.source)
+        ) {
+          return {
+            ...reference,
+            source: {
+              ...reference.source,
+              sketchId: await this.resolveDeferredValue(
+                reference.source.sketchId,
+                consumer,
+              ) as SketchId,
+            },
+          };
+        }
+        return reference;
+      }));
+      request = { ...request, definition: { ...request.definition, references } };
       const support = request.plane.support;
       if (support.kind === "splitInterfaceFaceOf") {
         const resolvedSupport = await this.resolveDeferredSplitInterfaceFace(support);

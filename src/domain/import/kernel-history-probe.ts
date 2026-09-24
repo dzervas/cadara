@@ -5,6 +5,7 @@ import type {
   ImportHistoryProbeCapabilities,
 } from "@/contracts/import/capabilities";
 import type {
+  ImportDeferredSplitInterfaceFaceRef,
   ImportPreparedActionRef,
   ImportPreparedActions,
 } from "@/contracts/import/actions";
@@ -177,7 +178,33 @@ type KernelHistoryProbeExecution = {
   evidenceByOrdinal: Map<number, NonNullable<RebuiltHistoryProbeStep["exactTopologyEvidence"]>>;
   outputRecords: Map<string, ImportActionOutputRecord>;
   basis: { documentId: DocumentId; baseRevisionId: RevisionId } | null;
+  /**
+   * Split-interface selectors registered in `materializer`, keyed like the
+   * materializer. Registration always precedes the applied suffix, so every
+   * entry is bound at each of its tool/split actions this session applied.
+   */
+  splitInterfaceSelectors: Map<string, string>;
 };
+
+function splitInterfaceSelectorsOf(
+  actions: ImportPreparedActions,
+): ImportDeferredSplitInterfaceFaceRef[] {
+  const selectors: ImportDeferredSplitInterfaceFaceRef[] = [];
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    if ((value as { kind?: unknown }).kind === "splitInterfaceFaceOf") {
+      selectors.push(value as ImportDeferredSplitInterfaceFaceRef);
+      return;
+    }
+    for (const entry of Array.isArray(value) ? value : Object.values(value)) visit(entry);
+  };
+  visit(actions);
+  return selectors;
+}
+
+function splitInterfaceSelectorKey(selector: ImportDeferredSplitInterfaceFaceRef) {
+  return `${selector.source.consumerFeatureId}:${selector.source.parameterId}:${selector.source.deterministicId}`;
+}
 
 function historicalWitnessActionIndexes(actions: ImportPreparedActions): ReadonlySet<number> {
   const indexes = new Set<number>();
@@ -312,6 +339,7 @@ function createProbeExecution(
     evidenceByOrdinal: new Map(),
     outputRecords,
     basis: null,
+    splitInterfaceSelectors: new Map(),
   };
 }
 
@@ -328,6 +356,17 @@ function canContinueProbeExecution(
   if ([...historicalWitnesses].some(
     (ordinal) => ordinal < execution.actionKeys.length && !execution.signaturesByOrdinal.has(ordinal),
   )) return false;
+  // A split-interface binding is observable only at its tool and split
+  // actions (Split consumes the tool body), so a selector first declared after
+  // either was applied cannot be bound in this session; neither can one that
+  // conflicts with the registered declaration.
+  if (splitInterfaceSelectorsOf(input.actions).some((selector) => {
+    const registered = execution.splitInterfaceSelectors.get(splitInterfaceSelectorKey(selector));
+    return registered === undefined
+      ? Math.min(selector.toolExtrudeActionIndex, selector.splitActionIndex) <
+        execution.actionKeys.length
+      : registered !== JSON.stringify(selector);
+  })) return false;
 
   const requested = input.requestedSignatureStepOrdinals;
   if (requested === undefined) {
@@ -345,6 +384,13 @@ async function evaluateHistoryProbeInKernelSession(
   execution: KernelHistoryProbeExecution,
 ): Promise<{ result: HistoryProbeResult; reusable: boolean }> {
   execution.materializer.registerHistoricalSelectors(input.actions);
+  execution.materializer.registerSplitInterfaceSelectors(input.actions);
+  for (const selector of splitInterfaceSelectorsOf(input.actions)) {
+    execution.splitInterfaceSelectors.set(
+      splitInterfaceSelectorKey(selector),
+      JSON.stringify(selector),
+    );
+  }
   const actionRefs = getOrderedActionRefs(input.actions);
   const actionKeys = getOrderedActionKeys(input.actions);
   const requestedSignatureStepOrdinals = input.requestedSignatureStepOrdinals === undefined
@@ -387,6 +433,11 @@ async function evaluateHistoryProbeInKernelSession(
         execution.materializer,
         execution.basis!,
       );
+      // Same binding sequence as applyImportPreparedActions after each action.
+      if (applyResult.ok) {
+        await execution.materializer.bindSplitInterfaceToolFacesAtAction(orderedPosition);
+        await execution.materializer.bindSplitInterfaceOutputFacesAtAction(orderedPosition);
+      }
     } catch (error) {
       if (isTopologyApplyRematchError(error)) {
         if (!input.containTopologyRematchFailures) throw error;
