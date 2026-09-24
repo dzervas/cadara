@@ -50,6 +50,7 @@ export type SplineOffsetResult =
   | SplineOffsetFailure;
 
 export interface SplineOffsetInput {
+  /** Ordered spans (or a contiguous subset) from one fresh, valid reconstruction; never persisted, projected, or mixed across revisions. */
   readonly spans: readonly SplineSpan[];
   readonly distance: number;
   readonly distanceDifferential?: number;
@@ -476,28 +477,88 @@ function upperVectorDistance(value: SplineVector, enclosure: IntervalVector) {
   return root?.[1] ?? Number.POSITIVE_INFINITY;
 }
 
+/**
+ * Source knots whose offset endpoint pole is emitted once and reused verbatim.
+ * Authority is the reconstruction provenance invariant documented on
+ * `SplineSpan.source`: the same spline, consecutive span indices (or the
+ * complete smooth wrap) and one shared occurrence. The exact knot coordinate
+ * and point identity must then agree; a disagreement contradicts the source
+ * and fails closed. Coordinates, array adjacency alone, reversed order,
+ * disconnected subsets and positional (C0) closure never share a knot.
+ */
+function sharedSourceKnots(
+  spans: readonly SplineSpan[],
+):
+  | { ok: true; sharesStart: readonly boolean[]; wrap: boolean }
+  | { ok: false; sourceSpanIndex: number } {
+  const agrees = (left: SplineSpan, right: SplineSpan) =>
+    left.source.endPointId === right.source.startPointId &&
+    Object.is(left.poles[3][0], right.poles[0][0]) &&
+    Object.is(left.poles[3][1], right.poles[0][1]);
+  const sharesStart: boolean[] = [];
+  for (let index = 0; index < spans.length; index += 1) {
+    const span = spans[index]!;
+    if (span.source.startOccurrenceId === span.source.endOccurrenceId)
+      return { ok: false, sourceSpanIndex: index };
+    const previous = spans[index - 1];
+    const linked =
+      !!previous &&
+      previous.source.splineId === span.source.splineId &&
+      span.source.spanIndex === previous.source.spanIndex + 1 &&
+      previous.source.endOccurrenceId === span.source.startOccurrenceId;
+    if (linked && !agrees(previous, span))
+      return { ok: false, sourceSpanIndex: index };
+    sharesStart.push(linked);
+  }
+  const first = spans[0];
+  const last = spans.at(-1);
+  const wrap =
+    !!first &&
+    !!last &&
+    spans.length >= 2 &&
+    sharesStart.slice(1).every(Boolean) &&
+    spans.every(
+      (span, index) =>
+        span.source.splineId === first.source.splineId &&
+        span.source.spanIndex === index,
+    ) &&
+    last.source.endOccurrenceId === first.source.startOccurrenceId;
+  if (wrap && !agrees(last, first))
+    return { ok: false, sourceSpanIndex: spans.length - 1 };
+  return { ok: true, sharesStart, wrap };
+}
+
+/** An already emitted endpoint pole and its JVP, reused verbatim at a shared knot. */
+interface SharedEndpoint {
+  readonly position: SplineVector;
+  readonly differential: SplineVector;
+}
+
 function makeOutput(
   span: SplineSpan,
   local: readonly [number, number],
   distance: number,
   distanceDifferential: number,
   hermiteRemainder: number,
+  shared: { start?: SharedEndpoint; end?: SharedEndpoint } = {},
 ): SplineOffsetCubicSpan | null {
   const start = offsetEndpoint(span, local[0], distance, distanceDifferential);
   const end = offsetEndpoint(span, local[1], distance, distanceDifferential);
   if (!start || !end) return null;
   const width = local[1] - local[0];
+  // Only the endpoint pole and its JVP are shared; interior Hermite poles keep
+  // this span's own position, tangent and differentials.
   const poles: SplinePoles = [
-    start[0],
+    shared.start?.position ?? start[0],
     add(start[0], scale(start[1], width / 3)),
     subtract(end[0], scale(end[1], width / 3)),
-    end[0],
+    shared.end?.position ?? end[0],
   ];
   const differentialPoles: SplinePoles = [
-    start[2],
+    shared.start?.differential ?? start[2],
     add(start[2], scale(start[3], width / 3)),
     subtract(end[2], scale(end[3], width / 3)),
-    end[2],
+    shared.end?.differential ?? end[2],
   ];
   const map = (values: readonly [number, number]) => {
     const delta = values[1] - values[0];
@@ -572,6 +633,15 @@ export function approximateSplineOffset(
       sourceLocalInterval: null,
     };
 
+  const knots = sharedSourceKnots(input.spans);
+  if (!knots.ok)
+    return {
+      ok: false,
+      code: "certification-failed",
+      sourceSpanIndex: knots.sourceSpanIndex,
+      sourceLocalInterval: [0, 1],
+    };
+
   const output: SplineOffsetCubicSpan[] = [];
   for (
     let sourceSpanIndex = 0;
@@ -579,6 +649,25 @@ export function approximateSplineOffset(
     sourceSpanIndex += 1
   ) {
     const span = input.spans[sourceSpanIndex]!;
+    const emittedEnd = (item: SplineOffsetCubicSpan | undefined) =>
+      item && {
+        position: item.poles[3],
+        differential: item.differential.poles[3],
+      };
+    const sharedStart = knots.sharesStart[sourceSpanIndex]
+      ? emittedEnd(output.at(-1))
+      : undefined;
+    const sharedEnd =
+      knots.wrap && sourceSpanIndex === input.spans.length - 1
+        ? output[0] && {
+            position: output[0].poles[0],
+            differential: output[0].differential.poles[0],
+          }
+        : undefined;
+    const sharedFor = (local: readonly [number, number]) => ({
+      start: local[0] === 0 ? sharedStart : undefined,
+      end: local[1] === 1 ? sharedEnd : undefined,
+    });
     if (
       !span.poles.every(finiteVector) ||
       !span.differential.poles.every(finiteVector) ||
@@ -602,6 +691,7 @@ export function approximateSplineOffset(
           0,
           input.distanceDifferential ?? 0,
           0,
+          sharedFor([0, 1]),
         );
         if (!analytic)
           return {
@@ -638,6 +728,7 @@ export function approximateSplineOffset(
             input.distance,
             input.distanceDifferential ?? 0,
             certificate.error,
+            sharedFor(local),
           )
         : null;
       if (certificate.ok && !result)

@@ -82,6 +82,15 @@ export interface SplineVariation {
   readonly tangents?: Readonly<Record<number, SplineVector>>;
 }
 export interface SplineSpan {
+  /**
+   * Reconstruction provenance. Invariant of `reconstructSpline`: occurrence IDs
+   * are unique within one spline, and consecutive spans `i`/`i + 1` of one
+   * `splineId` (plus the last/first pair of a smooth closure) share one
+   * occurrence, one bitwise knot position and one source derivative at that
+   * knot. Positional closure ends on a distinct occurrence and is a C0 corner.
+   * The shared derivative is authored smoothness intent; rounded binary64 poles
+   * make the one-sided pole tangents only approximately parallel.
+   */
   readonly source: {
     readonly splineId: string;
     readonly spanIndex: number;
@@ -200,7 +209,11 @@ export function reconstructSpline(
     diagnostics.push({ code: "unsupported-policy" });
   if (n < 2) diagnostics.push({ code: "too-few-points" });
   const canonical = new Map<string, SplineVector>();
+  const occurrences = new Set<string>();
   points.forEach((p, i) => {
+    if (occurrences.has(p.occurrenceId))
+      diagnostics.push({ code: "invalid-occurrence-order", pointIndex: i });
+    occurrences.add(p.occurrenceId);
     if (
       !finite(p.position) ||
       (p.tangent.kind === "authored" && !finite(p.tangent.vector)) ||

@@ -252,6 +252,81 @@ describe("neutral spline reconstruction owner", () => {
     });
   });
 
+  test("span provenance: consecutive spans and the smooth wrap share one occurrence, knot and derivative; positional closure does not", () => {
+    const points: V[] = [
+      [0, 0],
+      [3, 0.5],
+      [2.5, 3],
+      [-0.5, 2],
+    ];
+    const tangentAt = (poles: readonly V[], end: boolean, h: number): V =>
+      end
+        ? mul(sub(poles[3]!, poles[2]!), 3 / h)
+        : mul(sub(poles[1]!, poles[0]!), 3 / h);
+    const shared = (
+      left: (typeof smooth.spans)[number],
+      right: typeof left,
+    ) => {
+      expect(left.source.splineId).toBe(right.source.splineId);
+      expect(left.source.endOccurrenceId).toBe(right.source.startOccurrenceId);
+      expect(left.source.endPointId).toBe(right.source.startPointId);
+      expect(Object.is(left.poles[3][0], right.poles[0][0])).toBe(true);
+      expect(Object.is(left.poles[3][1], right.poles[0][1])).toBe(true);
+      // One source derivative D: p2 = P - D h_i / 3 and p1 = P + D h_{i+1} / 3.
+      near(
+        tangentAt(left.poles, true, left.interval[1] - left.interval[0]),
+        tangentAt(right.poles, false, right.interval[1] - right.interval[0]),
+        1e-12,
+      );
+    };
+    const smooth = build(input(points, "smooth"));
+    smooth.spans.forEach((span, index) => {
+      expect(span.source.spanIndex).toBe(index);
+      if (index > 0) shared(smooth.spans[index - 1]!, span);
+    });
+    shared(smooth.spans.at(-1)!, smooth.spans[0]!);
+    const open = build(input(points));
+    for (let index = 1; index < open.spans.length; index += 1)
+      shared(open.spans[index - 1]!, open.spans[index]!);
+    // Positional closure aliases the canonical point through a distinct occurrence.
+    const closing = input([...points, points[0]!], "positional");
+    const positional = build({
+      ...closing,
+      points: closing.points.map((point, index) =>
+        index === points.length
+          ? { ...point, id: closing.points[0]!.id }
+          : point,
+      ),
+    });
+    expect(positional.spans.at(-1)!.source.endPointId).toBe(
+      positional.spans[0]!.source.startPointId,
+    );
+    expect(positional.spans.at(-1)!.source.endOccurrenceId).not.toBe(
+      positional.spans[0]!.source.startOccurrenceId,
+    );
+  });
+
+  test("direct reconstruction rejects duplicate occurrence identities", () => {
+    const data = input([
+      [0, 0],
+      [1, 1],
+      [2, -3],
+    ]);
+    const duplicated: ResolvedSplineInput = {
+      ...data,
+      points: data.points.map((point, index) =>
+        index === 2
+          ? { ...point, occurrenceId: data.points[0]!.occurrenceId }
+          : point,
+      ),
+    };
+    expect(reconstructSpline(duplicated)).toMatchObject({
+      validity: "invalid",
+      spans: [],
+      diagnostics: [{ code: "invalid-occurrence-order", pointIndex: 2 }],
+    });
+  });
+
   test("transforms commute, moved points carry authored vectors, distant spans are unchanged", () => {
     const H: V = [0.7, -0.4];
     const base = build(input(uneven, "open", { 2: H }));

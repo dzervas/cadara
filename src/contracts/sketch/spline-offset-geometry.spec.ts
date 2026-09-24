@@ -3,7 +3,13 @@ import {
   approximateSplineOffset,
   type SplineOffsetCubicSpan,
 } from "./spline-offset-geometry";
-import type { SplinePoles, SplineSpan, SplineVector } from "./spline-geometry";
+import {
+  reconstructSpline,
+  type SplinePoles,
+  type SplineSpan,
+  type SplineVariation,
+  type SplineVector,
+} from "./spline-geometry";
 
 const zeroPoles = [
   [0, 0],
@@ -338,3 +344,465 @@ describe("bounded standalone true-normal spline offset owner", () => {
     ).toMatchObject({ ok: false, code: "topology-changed" });
   });
 });
+
+function realSpans(
+  points: readonly SplineVector[],
+  closure: "open" | "smooth" | "positional" = "open",
+  handles: Readonly<Record<number, SplineVector>> = {},
+  variation: SplineVariation = {},
+  pointAliases: Readonly<Record<number, number>> = {},
+): readonly SplineSpan[] {
+  const result = reconstructSpline(
+    {
+      id: "knot-source",
+      policy: "centripetal-mean-arm-v1",
+      closure,
+      points: points.map((position, index) => ({
+        occurrenceId: `o${index}`,
+        id: `p${pointAliases[index] ?? index}`,
+        position,
+        tangent: handles[index]
+          ? { kind: "authored" as const, vector: handles[index]! }
+          : { kind: "automatic" as const },
+      })),
+    },
+    variation,
+  );
+  if (result.validity !== "valid")
+    throw new Error(JSON.stringify(result.diagnostics));
+  return result.spans;
+}
+
+/** Output boundary located by source provenance, never by output index. */
+function knotBoundary(
+  output: readonly SplineOffsetCubicSpan[],
+  leftSourceSpan: number,
+  rightSourceSpan: number,
+) {
+  const index = output.findIndex(
+    (item, position) =>
+      item.source.spanIndex === leftSourceSpan &&
+      item.sourceLocalInterval[1] === 1 &&
+      output[position + 1]?.source.spanIndex === rightSourceSpan &&
+      output[position + 1]!.sourceLocalInterval[0] === 0,
+  );
+  if (index < 0) throw new Error("source knot boundary not found");
+  return [output[index]!, output[index + 1]!] as const;
+}
+
+const knotFixture: readonly SplineVector[] = [
+  [0, 0],
+  [1, 1],
+  [2, -3],
+];
+
+describe("shared smooth source-knot endpoints", () => {
+  test("red fixture: a one-ulp source-knot gap becomes one shared emitted pole", () => {
+    const spans = realSpans(knotFixture);
+    expect(spans[0]!.source.endOccurrenceId).toBe(
+      spans[1]!.source.startOccurrenceId,
+    );
+    // Pre-repair left end / right start at occurrence o1 (recorded values).
+    const preLeftY = 1.9637149282107609;
+    const preRightY = 1.963714928210761;
+    expect(preRightY - preLeftY).toBe(2.220446049250313e-16);
+    const result = successful({
+      spans,
+      distance: 1,
+      modelingTolerance: 1e-3,
+    });
+    const [left, right] = knotBoundary(result.spans, 0, 1);
+    expect(left.source.endOccurrenceId).toBe("o1");
+    expect(right.source.startOccurrenceId).toBe("o1");
+    expect(Object.is(right.poles[0][0], left.poles[3][0])).toBe(true);
+    expect(Object.is(right.poles[0][1], left.poles[3][1])).toBe(true);
+    expect(left.poles[3]).toEqual([1.2669335818958114, preLeftY]);
+    expect(right.differential.poles[0]).toEqual(left.differential.poles[3]);
+    for (const output of result.spans) {
+      expect(output.certifiedError).toBeLessThanOrEqual(1e-3);
+      sampleCertifiedSpan(spans[output.source.spanIndex]!, output, 1);
+    }
+  });
+
+  test("certificate is recomputed on the copied pole before acceptance and refinement", () => {
+    // Fabricated provenance: same occurrence and knot, but a real tangent corner.
+    const leftPoles: SplinePoles = [
+      [-3, 0],
+      [-2, 0],
+      [-1, 0],
+      [0, 0],
+    ];
+    const rightPoles: SplinePoles = [
+      [0, 0],
+      [0.7, 0.7],
+      [1.4, 1.4],
+      [2.1, 2.1],
+    ];
+    const make = (
+      poles: SplinePoles,
+      spanIndex: number,
+      start: string,
+      end: string,
+      interval: readonly [number, number],
+    ): SplineSpan => ({
+      source: {
+        splineId: "corner",
+        spanIndex,
+        startPointId: start,
+        endPointId: end,
+        startOccurrenceId: `${start}-use`,
+        endOccurrenceId: `${end}-use`,
+      },
+      orientation: "forward",
+      interval,
+      poles,
+      validity: "valid",
+      differential: { interval: [0, 0], poles: zeroPoles },
+    });
+    const corner = [
+      make(leftPoles, 0, "a", "k", [0, 3]),
+      make(rightPoles, 1, "k", "b", [3, 6]),
+    ];
+    const rejected = approximateSplineOffset({
+      spans: corner,
+      distance: 0.5,
+      modelingTolerance: 1e-3,
+      maxDepth: 12,
+    });
+    expect(rejected).toMatchObject({
+      ok: false,
+      code: "refinement-budget-exceeded",
+      sourceSpanIndex: 1,
+    });
+    // The copied pole lies ~0.5*|n_left - n_right| from the right ideal endpoint.
+    expect(!rejected.ok && rejected.certifiedError).toBeGreaterThan(0.1);
+
+    // Corner and disconnected lookalikes are emitted independently.
+    const lookalikes: SplineSpan[][] = [
+      [
+        corner[0]!,
+        {
+          ...corner[1]!,
+          source: { ...corner[1]!.source, startOccurrenceId: "other-use" },
+        },
+      ],
+      [
+        corner[0]!,
+        { ...corner[1]!, source: { ...corner[1]!.source, splineId: "other" } },
+      ],
+      [
+        corner[0]!,
+        { ...corner[1]!, source: { ...corner[1]!.source, spanIndex: 2 } },
+      ],
+      [corner[1]!, corner[0]!],
+    ];
+    for (const spans of lookalikes) {
+      const accepted = successful({
+        spans,
+        distance: 0.5,
+        modelingTolerance: 1e-3,
+        maxDepth: 12,
+      });
+      accepted.spans.forEach((output) =>
+        expect(output.certifiedError).toBeLessThanOrEqual(1e-3),
+      );
+    }
+  });
+
+  test("fails closed when shared provenance contradicts the exact knot", () => {
+    const spans = realSpans(knotFixture);
+    const shifted: SplineSpan = {
+      ...spans[1]!,
+      poles: [
+        [spans[1]!.poles[0][0], nextAfter(spans[1]!.poles[0][1])],
+        spans[1]!.poles[1],
+        spans[1]!.poles[2],
+        spans[1]!.poles[3],
+      ],
+    };
+    expect(
+      approximateSplineOffset({
+        spans: [spans[0]!, shifted],
+        distance: 1,
+        modelingTolerance: 1e-3,
+      }),
+    ).toMatchObject({
+      ok: false,
+      code: "certification-failed",
+      sourceSpanIndex: 1,
+      sourceLocalInterval: [0, 1],
+    });
+    const renamedPoint: SplineSpan = {
+      ...spans[1]!,
+      source: { ...spans[1]!.source, startPointId: "elsewhere" },
+    };
+    expect(
+      approximateSplineOffset({
+        spans: [spans[0]!, renamedPoint],
+        distance: 1,
+        modelingTolerance: 1e-3,
+      }),
+    ).toMatchObject({ ok: false, code: "certification-failed" });
+    const selfLoop: SplineSpan = {
+      ...spans[0]!,
+      source: { ...spans[0]!.source, endOccurrenceId: "o0" },
+    };
+    expect(
+      approximateSplineOffset({
+        spans: [selfLoop],
+        distance: 1,
+        modelingTolerance: 1e-3,
+      }),
+    ).toMatchObject({ ok: false, code: "certification-failed" });
+  });
+
+  test("disconnected subsets and reversed order never join; contiguous subsets share their knot", () => {
+    const spans = realSpans([
+      [0, 0],
+      [2, 1],
+      [4, 0],
+      [6, 1],
+    ]);
+    const full = successful({ spans, distance: 0.2, modelingTolerance: 1e-3 });
+    const standalone = (span: SplineSpan) =>
+      successful({ spans: [span], distance: 0.2, modelingTolerance: 1e-3 })
+        .spans;
+    const skip = successful({
+      spans: [spans[0]!, spans[2]!],
+      distance: 0.2,
+      modelingTolerance: 1e-3,
+    });
+    expect(skip.spans).toEqual([
+      ...standalone(spans[0]!),
+      ...standalone(spans[2]!),
+    ]);
+    const reversed = successful({
+      spans: [spans[1]!, spans[0]!],
+      distance: 0.2,
+      modelingTolerance: 1e-3,
+    });
+    expect(reversed.spans).toEqual([
+      ...standalone(spans[1]!),
+      ...standalone(spans[0]!),
+    ]);
+    const contiguous = successful({
+      spans: [spans[1]!, spans[2]!],
+      distance: 0.2,
+      modelingTolerance: 1e-3,
+    });
+    const [left, right] = knotBoundary(contiguous.spans, 1, 2);
+    expect(right.poles[0]).toEqual(left.poles[3]);
+    const [fullLeft, fullRight] = knotBoundary(full.spans, 1, 2);
+    expect(fullRight.poles[0]).toEqual(fullLeft.poles[3]);
+  });
+
+  test("smooth closure shares the complete wrap; positional C0 closure stays a corner", () => {
+    const loop: SplineVector[] = [
+      [0, 0],
+      [3, 0.5],
+      [2.5, 3],
+      [-0.5, 2],
+    ];
+    const smooth = realSpans(loop, "smooth");
+    expect(smooth.at(-1)!.source.endOccurrenceId).toBe(
+      smooth[0]!.source.startOccurrenceId,
+    );
+    const closed = successful({
+      spans: smooth,
+      distance: 0.2,
+      modelingTolerance: 1e-3,
+    });
+    expect(closed.spans.at(-1)!.poles[3]).toEqual(closed.spans[0]!.poles[0]);
+    expect(closed.spans.at(-1)!.differential.poles[3]).toEqual(
+      closed.spans[0]!.differential.poles[0],
+    );
+    for (let index = 0; index + 1 < closed.spans.length; index += 1)
+      expect(closed.spans[index + 1]!.poles[0]).toEqual(
+        closed.spans[index]!.poles[3],
+      );
+
+    // Incomplete wrap subset (last + first) never joins the wrap.
+    const subset = successful({
+      spans: [smooth.at(-1)!, smooth[0]!],
+      distance: 0.2,
+      modelingTolerance: 1e-3,
+    });
+    expect(subset.spans).toEqual([
+      ...successful({
+        spans: [smooth.at(-1)!],
+        distance: 0.2,
+        modelingTolerance: 1e-3,
+      }).spans,
+      ...successful({
+        spans: [smooth[0]!],
+        distance: 0.2,
+        modelingTolerance: 1e-3,
+      }).spans,
+    ]);
+
+    const positional = realSpans(
+      [...loop, loop[0]!],
+      "positional",
+      {},
+      {},
+      {
+        [loop.length]: 0,
+      },
+    );
+    expect(positional.at(-1)!.source.endPointId).toBe(
+      positional[0]!.source.startPointId,
+    );
+    expect(positional.at(-1)!.source.endOccurrenceId).not.toBe(
+      positional[0]!.source.startOccurrenceId,
+    );
+    const corner = successful({
+      spans: positional,
+      distance: 0.2,
+      modelingTolerance: 1e-3,
+    });
+    expect(corner.spans.at(-1)!.poles[3]).not.toEqual(
+      corner.spans[0]!.poles[0],
+    );
+  });
+
+  test("zero authored tangent at a shared knot fails before any reuse", () => {
+    const spans = realSpans(knotFixture, "open", { 1: [0, 0] });
+    expect(
+      approximateSplineOffset({
+        spans,
+        distance: 1,
+        modelingTolerance: 1e-3,
+      }),
+    ).toMatchObject({ ok: false, sourceSpanIndex: 0 });
+  });
+
+  test("tight tolerance, output cap and expected topology behave as before with reuse", () => {
+    const spans = realSpans(knotFixture);
+    const base = successful({ spans, distance: 1, modelingTolerance: 1e-3 });
+    expect(
+      successful({
+        spans,
+        distance: 1,
+        modelingTolerance: 1e-3,
+        maxOutputSpans: base.spans.length,
+        expectedTopology: base.topology,
+      }).spans,
+    ).toEqual(base.spans);
+    expect(
+      approximateSplineOffset({
+        spans,
+        distance: 1,
+        modelingTolerance: 1e-3,
+        maxOutputSpans: base.spans.length - 1,
+      }),
+    ).toMatchObject({ ok: false, code: "refinement-budget-exceeded" });
+    expect(
+      approximateSplineOffset({
+        spans,
+        distance: 1,
+        modelingTolerance: 1e-3,
+        expectedTopology: base.topology.slice(1),
+      }),
+    ).toMatchObject({ ok: false, code: "topology-changed" });
+    const tight = approximateSplineOffset({
+      spans,
+      distance: 1,
+      modelingTolerance: Number.MIN_VALUE,
+      maxDepth: 6,
+    });
+    expect(tight).toMatchObject({
+      ok: false,
+      code: "refinement-budget-exceeded",
+    });
+  });
+
+  const jvpCases: readonly {
+    name: string;
+    distance: number;
+    handles: Readonly<Record<number, SplineVector>>;
+    variation: SplineVariation;
+  }[] = [
+    {
+      name: "distance and source points",
+      distance: 1,
+      handles: {},
+      variation: {
+        points: { p0: [0.3, -0.2], p1: [-0.5, 0.4], p2: [0.2, 0.7] },
+      },
+    },
+    {
+      name: "authored knot handle",
+      distance: 0.3,
+      handles: { 1: [0.9, -0.4] },
+      variation: { tangents: { 1: [-0.3, 0.6] }, points: { p1: [0.1, 0.2] } },
+    },
+  ];
+
+  test.each(jvpCases)(
+    "real-source fixed-topology JVP of shared and interior poles agrees with finite differences ($name)",
+    ({ distance, handles, variation }) => {
+      const distanceDifferential = -0.37;
+      const tolerance = 1e-3;
+      const moved = (
+        value: SplineVector,
+        delta: SplineVector | undefined,
+        epsilon: number,
+      ): SplineVector => [
+        value[0] + epsilon * (delta?.[0] ?? 0),
+        value[1] + epsilon * (delta?.[1] ?? 0),
+      ];
+      const at = (epsilon: number) => {
+        const points = knotFixture.map((point, index) =>
+          moved(point, variation.points?.[`p${index}`], epsilon),
+        );
+        const perturbedHandles: Record<number, SplineVector> = {};
+        for (const [index, handle] of Object.entries(handles))
+          perturbedHandles[Number(index)] = moved(
+            handle,
+            variation.tangents?.[Number(index)],
+            epsilon,
+          );
+        return realSpans(points, "open", perturbedHandles);
+      };
+      const base = successful({
+        spans: realSpans(knotFixture, "open", handles, variation),
+        distance,
+        distanceDifferential,
+        modelingTolerance: tolerance,
+      });
+      const epsilon = 1e-6;
+      const run = (sign: number) =>
+        successful({
+          spans: at(sign * epsilon),
+          distance: distance + sign * epsilon * distanceDifferential,
+          modelingTolerance: tolerance,
+          expectedTopology: base.topology,
+        });
+      const plus = run(1);
+      const minus = run(-1);
+      const [left, right] = knotBoundary(base.spans, 0, 1);
+      expect(right.poles[0]).toEqual(left.poles[3]);
+      expect(right.differential.poles[0]).toEqual(left.differential.poles[3]);
+      base.spans.forEach((output, spanIndex) => {
+        output.poles.forEach((_, poleIndex) => {
+          const difference = (axis: 0 | 1) =>
+            (plus.spans[spanIndex]!.poles[poleIndex]![axis] -
+              minus.spans[spanIndex]!.poles[poleIndex]![axis]) /
+            (2 * epsilon);
+          expectVectorClose(
+            output.differential.poles[poleIndex]!,
+            [difference(0), difference(1)],
+            2e-5,
+          );
+        });
+      });
+    },
+  );
+});
+
+function nextAfter(value: number) {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value);
+  view.setBigUint64(0, view.getBigUint64(0) + (value >= 0 ? 1n : -1n));
+  return view.getFloat64(0);
+}
