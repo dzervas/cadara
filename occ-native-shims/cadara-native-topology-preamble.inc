@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <set>
@@ -21,7 +23,14 @@
 #include <Geom_BSplineSurface.hxx>
 #include <Geom2d_BezierCurve.hxx>
 #include <Geom2d_BSplineCurve.hxx>
+#include <Geom2d_Circle.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
+#include <Geom2dInt_GInter.hxx>
+#include <IntAna2d_AnaIntersection.hxx>
+#include <IntAna2d_IntPoint.hxx>
+#include <IntRes2d_IntersectionPoint.hxx>
+#include <IntRes2d_IntersectionSegment.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Solid.hxx>

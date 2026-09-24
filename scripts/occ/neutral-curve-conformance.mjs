@@ -1,6 +1,6 @@
 // Logic-lane shared OCC binding conformance; independent polynomial oracles are test-only.
 // Reused by the staged build gate and production regression. No runtime/full-package fallback.
-export function runNeutralCurveConformance(oc) {
+function runConformance(oc, provider) {
   const tolerance = 1e-6,
     numericTolerance = 1e-10;
   const arch = [
@@ -116,7 +116,54 @@ export function runNeutralCurveConformance(oc) {
     };
   }
   function intersections(a, b, self = false) {
-    // Own the lower-level intersector: the high-level copied return failed the feasibility probe.
+    const finish = (parameterBackend, points, segments) => ({
+      done: true,
+      parameterBackend,
+      points: points.map((point) => {
+        const residual = distance(point.first, point.second);
+        return {
+          ...point,
+          residual,
+          reportedResidual: Math.max(
+            distance(point.first, point.reported),
+            distance(point.second, point.reported),
+          ),
+          withinCandidateBudget: residual <= tolerance,
+        };
+      }),
+      segments: segments.map((segment) => ({
+        ...segment,
+        first: segment.first ? finish("", [segment.first], []).points[0] : null,
+        last: segment.last ? finish("", [segment.last], []).points[0] : null,
+      })),
+    });
+    if (provider === "semantic") {
+      needed.add("CadaraNativeNeutralCurveQuery");
+      assert(
+        typeof oc.CadaraNativeNeutralCurveQuery?.QueryJson === "function",
+        "Missing custom OCC binding: CadaraNativeNeutralCurveQuery.QueryJson",
+      );
+      const query = JSON.parse(
+        oc.CadaraNativeNeutralCurveQuery.QueryJson(
+          a.h,
+          a.c.FirstParameter(),
+          a.c.LastParameter(),
+          b.h,
+          b.c.FirstParameter(),
+          b.c.LastParameter(),
+          self,
+          tolerance,
+        ),
+      );
+      assert(
+        query.status === "verified" || query.status === "candidate",
+        `Native semantic query ${query.status}: ${query.reason ?? "unknown"}`,
+      );
+      return finish(query.backend, query.points, query.segments);
+    }
+
+    // Raw characterization is intentionally retained: these are the original
+    // unmodified GInter calls, not the production semantic provider.
     const aa = make("Geom2dAdaptor_Curve_2", a.h);
     const inter = self
       ? make("Geom2dInt_GInter_2", aa, tolerance, tolerance)
@@ -128,44 +175,27 @@ export function runNeutralCurveConformance(oc) {
           tolerance,
         );
     assert(inter.IsDone(), "Direct Geom2dInt_GInter not done");
-    const sample = (point) => {
-      const u = point.ParamOnFirst(),
-        v = point.ParamOnSecond();
-      const first = a.evaluate(u),
-        second = b.evaluate(v),
-        reported = xy(keep(point.Value()));
-      const residual = distance(first, second);
-      return {
-        u,
-        v,
-        first,
-        second,
-        reported,
-        residual,
-        reportedResidual: Math.max(
-          distance(first, reported),
-          distance(second, reported),
-        ),
-        withinCandidateBudget: residual <= tolerance,
-      };
-    };
-    const points = Array.from({ length: inter.NbPoints() }, (_, i) =>
-      sample(keep(inter.Point(i + 1))),
-    );
-    const segments = Array.from({ length: inter.NbSegments() }, (_, i) => {
-      const s = keep(inter.Segment(i + 1));
-      return {
-        opposite: s.IsOpposite(),
-        first: s.HasFirstPoint() ? sample(keep(s.FirstPoint())) : null,
-        last: s.HasLastPoint() ? sample(keep(s.LastPoint())) : null,
-      };
+    const sample = (point) => ({
+      u: point.ParamOnFirst(),
+      v: point.ParamOnSecond(),
+      first: a.evaluate(point.ParamOnFirst()),
+      second: b.evaluate(point.ParamOnSecond()),
+      reported: xy(keep(point.Value())),
     });
-    return {
-      done: true,
-      parameterBackend: "direct Geom2dInt_GInter",
-      points,
-      segments,
-    };
+    return finish(
+      "direct Geom2dInt_GInter",
+      Array.from({ length: inter.NbPoints() }, (_, i) =>
+        sample(keep(inter.Point(i + 1))),
+      ),
+      Array.from({ length: inter.NbSegments() }, (_, i) => {
+        const s = keep(inter.Segment(i + 1));
+        return {
+          opposite: s.IsOpposite(),
+          first: s.HasFirstPoint() ? sample(keep(s.FirstPoint())) : null,
+          last: s.HasLastPoint() ? sample(keep(s.LastPoint())) : null,
+        };
+      }),
+    );
   }
   function run(name, fn) {
     owned = [];
@@ -369,6 +399,8 @@ export function runNeutralCurveConformance(oc) {
         close(p.reportedResidual, 0);
       });
   });
+  // Raw GInter known algorithm gap: its polygonal path fragments/truncates
+  // this exact overlap. The production semantic provider must still pass.
   run("reversed-partial-cubic-overlap", (out) => {
     const a = bezier(arch),
       b = bezier([...arch].reverse());
@@ -397,6 +429,8 @@ export function runNeutralCurveConformance(oc) {
       close(p.reportedResidual, 0);
     });
   });
+  // Raw GInter known algorithm gap: tolerance contact neighborhoods are
+  // returned as segments. Exact analytic circle dispatch must return one point.
   run("point-touching-circles", (out) => {
     const a = circle();
     const axis = make(
@@ -557,4 +591,17 @@ export function runNeutralCurveConformance(oc) {
     error: result.cases.filter((c) => c.status === "error").length,
   };
   return result;
+}
+
+// Mandatory production-native semantic provider: all 13 assertions remain
+// identical to the raw characterization above.
+export function runNeutralCurveConformance(oc) {
+  return runConformance(oc, "semantic");
+}
+
+// Visible expected characterization only. Exactly the two documented OCCT
+// algorithm gaps are allowed by the staged build gate; this never passes as
+// production acceptance and is never skipped.
+export function runRawGInterCharacterization(oc) {
+  return runConformance(oc, "raw-ginter");
 }

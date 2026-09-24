@@ -1,20 +1,35 @@
 import {
-  checkNeutralCurvePointConsistency,
-  evaluateNeutralCurveInFrame,
-  getNeutralCurveActiveDomain,
-  getNeutralCurveLocalScale,
-  hasExactStructuralCubicActiveOverlap,
-  haveExactStructuralCubicBasis,
+  liftNativeCircleParameter,
+  validateCircleAngularDomain,
+} from "@/contracts/modeling/circle-angular-domain";
+import {
+  getNeutralCircleUnitXAxis,
+  getNeutralCurveActiveSearchBounds,
   neutralCurveParameterInside,
-  proveStructuralCubicOverlap,
   validateNeutralCurveQueryRequest,
   type NeutralCurve,
-  type NeutralCurvePointWitness,
   type NeutralCurveQueryCapability,
   type NeutralCurveQueryRequest,
   type NeutralCurveQueryResult,
   type NeutralCurveSelfIntersectionRequest,
 } from "@/contracts/modeling/neutral-curve-query";
+import { validateCertifiedCircleAngularDomain } from "@/domain/modeling/neutral-curve-certification/circle-angular-certification";
+import {
+  certifyCircleCubicPair,
+  certifyCirclePairCandidates,
+  certifyCubicSelfIntersection,
+  certifyStructuralCubicPair,
+  ExactQueryProofBudgetExceeded,
+  proveFiniteLinePair,
+  verifyCompleteLineCurveRootSet,
+  type NativeCirclePairCandidate,
+  type NativeLineCurveCandidate,
+} from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
+import {
+  ExactProofBudget,
+  type ExactProofBudgetSnapshot,
+} from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+import { parseNativeNeutralCurveQueryPayload } from "@/domain/modeling/occ/native-neutral-curve-query.runtime-schema";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 
 interface Deletable {
@@ -23,9 +38,6 @@ interface Deletable {
 interface Point2d extends Deletable {
   X(): number;
   Y(): number;
-}
-interface GeomCircle extends Deletable {
-  Circ2d(): Deletable;
 }
 interface NativeIntersectionPoint extends Deletable {
   ParamOnFirst(): number;
@@ -48,15 +60,26 @@ interface PointArray extends Deletable {
 type CurveHandle = Deletable;
 type CurveAdaptor = Deletable;
 type Constructor<T> = new (...args: unknown[]) => T;
+interface NativeNeutralCurveQuery {
+  QueryJson(
+    first: CurveHandle,
+    firstStart: number,
+    firstEnd: number,
+    second: CurveHandle,
+    secondStart: number,
+    secondEnd: number,
+    selfQuery: boolean,
+    tolerance: number,
+  ): string;
+}
 
 type NeutralOccBindings = OpenCascadeInstance & {
   gp_Pnt2d_3?: Constructor<Point2d>;
   gp_Dir2d_4?: Constructor<Deletable>;
   gp_Ax2d_2?: Constructor<Deletable>;
-  Geom2d_Circle_2?: Constructor<GeomCircle>;
-  IntAna2d_AnaIntersection_3?: Constructor<NativeIntersection>;
-  IntAna2d_IntPoint?: Constructor<NativeIntersectionPoint>;
-  gp_Circ2d?: Constructor<Deletable>;
+  Geom2d_Circle_2?: Constructor<Deletable>;
+  CadaraNativeNeutralCurveQuery?: NativeNeutralCurveQuery &
+    Constructor<Deletable>;
   Geom2d_Line_3?: Constructor<Deletable>;
   TColgp_Array1OfPnt2d_2?: Constructor<PointArray>;
   Geom2d_BezierCurve_1?: Constructor<Deletable>;
@@ -68,14 +91,10 @@ type NeutralOccBindings = OpenCascadeInstance & {
   IntRes2d_IntersectionSegment?: Constructor<Deletable>;
 };
 
-const ANALYTIC_CIRCLE_BINDINGS = [
+const NATIVE_SEMANTIC_QUERY_BINDINGS = [
   "gp_Pnt2d_3",
-  "gp_Dir2d_4",
-  "gp_Ax2d_2",
-  "Geom2d_Circle_2",
-  "IntAna2d_AnaIntersection_3",
-  "IntAna2d_IntPoint",
-  "gp_Circ2d",
+  "Handle_Geom2d_Curve_2",
+  "CadaraNativeNeutralCurveQuery",
 ] as const;
 
 const PARAMETRIC_QUERY_BINDINGS = [
@@ -94,11 +113,9 @@ const CURVE_CONSTRUCTION_BINDINGS = {
   cubicBezier: ["TColgp_Array1OfPnt2d_2", "Geom2d_BezierCurve_1"],
 } as const;
 
-/** Exact additional symbols needed by a future coordinated production stage. */
+/** Exact additive ABI required from the coordinated production OCC stage. */
 export const OCC_NEUTRAL_CURVE_QUERY_REQUIRED_NEW_SYMBOLS = [
-  "IntAna2d_AnaIntersection",
-  "IntAna2d_IntPoint",
-  "gp_Circ2d",
+  "CadaraNativeNeutralCurveQuery",
 ] as const;
 
 function unsupported(code: string, message: string): NeutralCurveQueryResult {
@@ -141,6 +158,13 @@ function withOwned<T>(
       cleanupErrors.push(error);
     }
   }
+  if (
+    operationFailed &&
+    operationError instanceof ExactQueryProofBudgetExceeded &&
+    cleanupErrors.length === 0
+  ) {
+    throw operationError;
+  }
   if (operationFailed || cleanupErrors.length > 0) {
     throw new AggregateError(
       operationFailed ? [operationError, ...cleanupErrors] : cleanupErrors,
@@ -150,114 +174,60 @@ function withOwned<T>(
   return result as T;
 }
 
-function liftCircleParameter(
-  parameter: number,
-  domain: readonly [number, number],
-): number | null {
-  const period = Math.PI * 2;
-  const minimumTurn = Math.ceil((domain[0] - parameter) / period);
-  const maximumTurn = Math.floor((domain[1] - parameter) / period);
-  if (minimumTurn > maximumTurn) return null;
-  const midpoint = (domain[0] + domain[1]) / 2;
-  const turn = Math.max(
-    minimumTurn,
-    Math.min(maximumTurn, Math.round((midpoint - parameter) / period)),
-  );
-  return parameter + turn * period;
-}
-
 function sourceParameter(
   curve: NeutralCurve,
   nativeParameter: number,
 ): number | null {
-  const active = getNeutralCurveActiveDomain(curve);
+  const active = getNeutralCurveActiveSearchBounds(curve);
   if (curve.kind === "circle") {
-    return liftCircleParameter(nativeParameter, active);
+    const angular = validateCircleAngularDomain(
+      curve.sourceDomain,
+      curve.queryDomain,
+    );
+    if (!angular) return null;
+    const lifted = liftNativeCircleParameter(angular, nativeParameter);
+    if (lifted !== null || angular.active.kind === "fullTurn") return lifted;
+    const active = angular.active.interval;
+    const turn = Math.round(
+      ((active[0] + active[1]) / 2 - nativeParameter) / 6.283185307179586,
+    );
+    if (!Number.isSafeInteger(turn)) return null;
+    for (const offset of [0, -1, 1]) {
+      const candidate = nativeParameter + (turn + offset) * 6.283185307179586;
+      if (neutralCurveParameterInside(candidate, active)) return candidate;
+    }
+    return null;
   }
   const source =
     curve.kind === "cubicBezier"
       ? curve.sourceDomain[0] +
         nativeParameter * (curve.sourceDomain[1] - curve.sourceDomain[0])
-      : nativeParameter;
+      : nativeParameter / Math.hypot(curve.direction[0], curve.direction[1]);
   return neutralCurveParameterInside(source, active) ? source : null;
 }
 
-function checkedPoints(
-  request: NeutralCurveQueryRequest,
-  points: readonly NeutralCurvePointWitness[],
-): NeutralCurveQueryResult {
-  for (const point of points) {
-    const inconsistency = checkNeutralCurvePointConsistency(request, point);
-    if (inconsistency) return inconsistency;
+function transferCurveToHandle(
+  geometry: Deletable,
+  Handle: Constructor<CurveHandle>,
+  own: <V extends Deletable>(value: V) => V,
+) {
+  try {
+    // OCCT Handle(Standard_Transient*) takes intrusive ownership. Deleting the
+    // raw Embind wrapper after this succeeds can free the pointee before the
+    // owning Handle and double-free it during cleanup.
+    return own(new Handle(geometry));
+  } catch (error) {
+    // Transfer did not occur, so the raw constructor result remains ours.
+    try {
+      geometry.delete();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "OCC curve-handle transfer and raw-geometry cleanup failed.",
+      );
+    }
+    throw error;
   }
-  return { kind: "verified", points, overlaps: [] };
-}
-
-function queryAnalyticCircles(
-  oc: NeutralOccBindings,
-  request: NeutralCurveQueryRequest & {
-    first: Extract<NeutralCurve, { kind: "circle" }>;
-    second: Extract<NeutralCurve, { kind: "circle" }>;
-  },
-): NeutralCurveQueryResult {
-  return withOwned((own) => {
-    const Point = oc.gp_Pnt2d_3!;
-    const Direction = oc.gp_Dir2d_4!;
-    const Axis = oc.gp_Ax2d_2!;
-    const Circle = oc.Geom2d_Circle_2!;
-    const Intersection = oc.IntAna2d_AnaIntersection_3!;
-    const makeCircle = (curve: Extract<NeutralCurve, { kind: "circle" }>) => {
-      const axis = own(
-        new Axis(
-          own(new Point(curve.center[0], curve.center[1])),
-          own(new Direction(curve.xAxis[0], curve.xAxis[1])),
-        ),
-      );
-      const geometry = own(new Circle(axis, curve.radius, true));
-      return own(geometry.Circ2d());
-    };
-    const intersection = own(
-      new Intersection(makeCircle(request.first), makeCircle(request.second)),
-    );
-    if (!intersection.IsDone()) {
-      return uncertain(
-        "occ-neutral-curve-query-not-done",
-        "OCC analytic circle query did not complete.",
-      );
-    }
-    if (intersection.IdenticalElements?.()) {
-      return uncertain(
-        "occ-neutral-curve-identical-elements",
-        "OCC reported identical circles without bounded source-parameter correspondence proof.",
-      );
-    }
-    if (intersection.IsEmpty()) {
-      return { kind: "verified", points: [], overlaps: [] };
-    }
-    const nativeCount = intersection.NbPoints();
-    const points: NeutralCurvePointWitness[] = [];
-    for (let index = 1; index <= nativeCount; index += 1) {
-      const point = own(intersection.Point(index));
-      const firstParameter = sourceParameter(
-        request.first,
-        point.ParamOnFirst(),
-      );
-      const secondParameter = sourceParameter(
-        request.second,
-        point.ParamOnSecond(),
-      );
-      if (firstParameter === null || secondParameter === null) continue;
-      const position = own(point.Value());
-      points.push({
-        classification: nativeCount === 1 ? "tangent" : "crossing",
-        firstParameter,
-        secondParameter,
-        position: [position.X(), position.Y()],
-        proof: { kind: "nativeAnalyticCircleIntersection" },
-      });
-    }
-    return checkedPoints(request, points);
-  });
 }
 
 function makeNativeCurve(
@@ -273,199 +243,147 @@ function makeNativeCurve(
       own(new Point(curve.origin[0], curve.origin[1])),
       own(new Direction(curve.direction[0], curve.direction[1])),
     );
-    return own(new Handle(geometry));
+    return transferCurveToHandle(geometry, Handle, own);
   }
   if (curve.kind === "circle") {
+    const xAxis = getNeutralCircleUnitXAxis(curve);
     const axis = own(
       new oc.gp_Ax2d_2!(
         own(new Point(curve.center[0], curve.center[1])),
-        own(new Direction(curve.xAxis[0], curve.xAxis[1])),
+        own(new Direction(xAxis[0], xAxis[1])),
       ),
     );
     const geometry = new oc.Geom2d_Circle_2!(axis, curve.radius, true);
-    return own(new Handle(geometry));
+    return transferCurveToHandle(geometry, Handle, own);
   }
   const poles = own(new oc.TColgp_Array1OfPnt2d_2!(1, 4));
   curve.poles.forEach((pole, index) => {
     poles.SetValue(index + 1, own(new Point(pole[0], pole[1])));
   });
   const geometry = new oc.Geom2d_BezierCurve_1!(poles);
-  return own(new Handle(geometry));
+  return transferCurveToHandle(geometry, Handle, own);
 }
 
-function lineParameterFromRelativePoint(
-  line: Extract<NeutralCurve, { kind: "line" }>,
-  point: readonly [number, number],
-) {
-  return point[0] * line.direction[0] + point[1] * line.direction[1];
-}
-
-function lineSideFromRelativePoint(
-  line: Extract<NeutralCurve, { kind: "line" }>,
-  point: readonly [number, number],
-) {
-  return line.direction[0] * point[1] - line.direction[1] * point[0];
-}
-
-function localizedParameterBounds(
-  curve: Exclude<NeutralCurve, { kind: "line" }>,
-  parameter: number,
-): readonly [number, number] | null {
-  const active = getNeutralCurveActiveDomain(curve);
+function nativeParameter(curve: NeutralCurve, sourceParameter: number) {
   if (curve.kind === "cubicBezier") {
-    const length = curve.sourceDomain[1] - curve.sourceDomain[0];
-    const local = (parameter - curve.sourceDomain[0]) / length;
-    const localRadius = Number.EPSILON * Math.max(1, Math.abs(local)) * 1_024;
-    const mappedLower = curve.sourceDomain[0] + (local - localRadius) * length;
-    const mappedUpper = curve.sourceDomain[0] + (local + localRadius) * length;
-    const lower = Math.max(active[0], Math.min(parameter, mappedLower));
-    const upper = Math.min(active[1], Math.max(parameter, mappedUpper));
-    return lower < parameter && parameter < upper ? [lower, upper] : null;
-  }
-  const radius = Number.EPSILON * Math.max(1, Math.abs(parameter)) * 1_024;
-  const lower = Math.max(active[0], parameter - radius);
-  const upper = Math.min(active[1], parameter + radius);
-  return lower < parameter && parameter < upper ? [lower, upper] : null;
-}
-
-/**
- * Conservative projection range over the whole curve. Cubic Bézier geometry
- * lies in its control hull; a circle's projection is center ± radius. Using
- * the whole source curve is intentionally stricter than endpoint projections
- * and therefore also bounds every localized proof bracket.
- */
-function lineProjectionBounds(
-  line: Extract<NeutralCurve, { kind: "line" }>,
-  curve: Exclude<NeutralCurve, { kind: "line" }>,
-): readonly [number, number] | null {
-  let projections: number[];
-  if (curve.kind === "cubicBezier") {
-    projections = curve.poles.map((point) =>
-      lineParameterFromRelativePoint(line, [
-        point[0] - line.origin[0],
-        point[1] - line.origin[1],
-      ]),
+    return (
+      (sourceParameter - curve.sourceDomain[0]) /
+      (curve.sourceDomain[1] - curve.sourceDomain[0])
     );
-  } else {
-    const centerProjection = lineParameterFromRelativePoint(line, [
-      curve.center[0] - line.origin[0],
-      curve.center[1] - line.origin[1],
-    ]);
-    projections = [
-      centerProjection - curve.radius,
-      centerProjection + curve.radius,
-    ];
   }
-  if (!projections.every(Number.isFinite)) return null;
-  const arithmeticBound =
-    Number.EPSILON *
-    Math.max(
-      1,
-      Math.abs(line.origin[0]),
-      Math.abs(line.origin[1]),
-      ...projections.map(Math.abs),
-      getNeutralCurveLocalScale(curve),
-    ) *
-    64;
-  return [
-    Math.min(...projections) - arithmeticBound,
-    Math.max(...projections) + arithmeticBound,
-  ];
+  if (curve.kind === "line") {
+    return sourceParameter * Math.hypot(curve.direction[0], curve.direction[1]);
+  }
+  return sourceParameter;
 }
 
-/**
- * Verifies semantic contact without treating native tolerance or residual as
- * proof. It does not search for roots: around an isolated native candidate it
- * proves either exact endpoint incidence or a strict line-side sign change.
- * The latter establishes a transverse incidence inside the recorded bounds by
- * continuity. Interior tangencies and non-line pairs remain unresolved.
- */
-function verifyParametricLineIncidence(
+function runNativeSemanticQuery(
+  oc: NeutralOccBindings,
   request: NeutralCurveQueryRequest,
-  firstParameter: number,
-  secondParameter: number,
-): Extract<
-  NeutralCurvePointWitness["proof"],
-  { kind: "nativeParametricCurveIntersection" }
-> | null {
-  const firstIsLine = request.first.kind === "line";
-  let line: Extract<NeutralCurve, { kind: "line" }>;
-  let curve: Exclude<NeutralCurve, { kind: "line" }>;
-  if (request.first.kind === "line" && request.second.kind !== "line") {
-    line = request.first;
-    curve = request.second;
-  } else if (request.second.kind === "line" && request.first.kind !== "line") {
-    line = request.second;
-    curve = request.first;
-  } else {
-    return null;
-  }
-  const curveParameter = firstIsLine ? secondParameter : firstParameter;
-  const curveDomain = getNeutralCurveActiveDomain(curve);
-  const lineDomain = getNeutralCurveActiveDomain(line);
-  const atBoundary =
-    curveParameter === curveDomain[0] || curveParameter === curveDomain[1];
-  if (atBoundary) {
-    const point = evaluateNeutralCurveInFrame(
-      curve,
-      curveParameter,
-      line.origin,
-    );
-    const projected = lineParameterFromRelativePoint(line, point);
-    const linePoint = neutralCurveParameterInside(projected, lineDomain)
-      ? evaluateNeutralCurveInFrame(line, projected, line.origin)
-      : null;
-    if (linePoint && linePoint[0] === point[0] && linePoint[1] === point[1]) {
-      const curveBounds = [curveParameter, curveParameter] as const;
-      const lineBounds = [projected, projected] as const;
-      return {
-        kind: "nativeParametricCurveIntersection",
-        verification: "exactEndpointLineIncidence",
-        firstParameterBounds: firstIsLine ? lineBounds : curveBounds,
-        secondParameterBounds: firstIsLine ? curveBounds : lineBounds,
-      };
+  selfQuery: boolean,
+):
+  | {
+      readonly kind: "ok";
+      readonly payload: ReturnType<typeof parseNativeNeutralCurveQueryPayload>;
+      readonly candidates: readonly NativeCirclePairCandidate[];
     }
-    return null;
-  }
+  | NeutralCurveQueryResult {
+  return withOwned((own) => {
+    const firstHandle = makeNativeCurve(oc, request.first, own);
+    const secondHandle = makeNativeCurve(oc, request.second, own);
+    const firstActive = getNeutralCurveActiveSearchBounds(request.first);
+    const secondActive = getNeutralCurveActiveSearchBounds(request.second);
+    const payload = parseNativeNeutralCurveQueryPayload(
+      oc.CadaraNativeNeutralCurveQuery!.QueryJson(
+        firstHandle,
+        nativeParameter(request.first, firstActive[0]),
+        nativeParameter(request.first, firstActive[1]),
+        secondHandle,
+        nativeParameter(request.second, secondActive[0]),
+        nativeParameter(request.second, secondActive[1]),
+        selfQuery,
+        request.modelingTolerance,
+      ),
+    );
+    const candidates: NativeCirclePairCandidate[] = [];
+    const mapPoint = (
+      point: (typeof payload.points)[number],
+      collect: boolean,
+    ) => {
+      const firstParameter = sourceParameter(request.first, point.u);
+      const secondParameter = sourceParameter(request.second, point.v);
+      if (firstParameter === null || secondParameter === null) return false;
+      if (collect) {
+        candidates.push({
+          firstParameter,
+          secondParameter,
+          position: point.reported,
+        });
+      }
+      return true;
+    };
+    if (!payload.points.every((point) => mapPoint(point, true))) {
+      const angular =
+        request.first.kind === "circle" || request.second.kind === "circle";
+      return uncertain(
+        angular
+          ? "occ-neutral-curve-circle-active-domain-proof-unavailable"
+          : "occ-native-neutral-curve-parameter-outside-active-domain",
+        "The native dispatcher returned a parameter outside the mapped active domain.",
+      );
+    }
+    for (const segment of payload.segments) {
+      for (const endpoint of [segment.first, segment.last]) {
+        if (endpoint && !mapPoint(endpoint, false)) {
+          return uncertain(
+            "occ-native-neutral-curve-parameter-outside-active-domain",
+            "The native dispatcher returned a segment endpoint outside the mapped active domain.",
+          );
+        }
+      }
+    }
+    return { kind: "ok", payload, candidates };
+  });
+}
 
-  const localizedBounds = localizedParameterBounds(curve, curveParameter);
-  if (!localizedBounds) return null;
-  const [lower, upper] = localizedBounds;
-  const lowerPoint = evaluateNeutralCurveInFrame(curve, lower, line.origin);
-  const upperPoint = evaluateNeutralCurveInFrame(curve, upper, line.origin);
-  const lowerSide = lineSideFromRelativePoint(line, lowerPoint);
-  const upperSide = lineSideFromRelativePoint(line, upperPoint);
-  const signReliabilityBound =
-    Number.EPSILON * getNeutralCurveLocalScale(curve) * 128;
-  if (
-    !Number.isFinite(lowerSide) ||
-    !Number.isFinite(upperSide) ||
-    Math.abs(lowerSide) <= signReliabilityBound ||
-    Math.abs(upperSide) <= signReliabilityBound ||
-    Math.sign(lowerSide) === Math.sign(upperSide)
-  ) {
+function nativeFailureResult(
+  payload: ReturnType<typeof parseNativeNeutralCurveQueryPayload>,
+): NeutralCurveQueryResult | null {
+  if (payload.status !== "uncertain" && payload.status !== "nativeFailure") {
     return null;
   }
-  const lineBounds = lineProjectionBounds(line, curve);
-  if (
-    !lineBounds ||
-    !neutralCurveParameterInside(lineBounds[0], lineDomain) ||
-    !neutralCurveParameterInside(lineBounds[1], lineDomain)
-  ) {
-    return null;
+  return uncertain(
+    `occ-native-neutral-curve-${payload.status}`,
+    payload.reason ??
+      `The native neutral-curve query returned ${payload.status}.`,
+  );
+}
+
+function queryNativeCirclePair(
+  oc: NeutralOccBindings,
+  request: NeutralCurveQueryRequest & {
+    first: Extract<NeutralCurve, { kind: "circle" }>;
+    second: Extract<NeutralCurve, { kind: "circle" }>;
+  },
+  budget: ExactProofBudget,
+): NeutralCurveQueryResult {
+  const native = runNativeSemanticQuery(oc, request, false);
+  if (native.kind !== "ok") return native;
+  const failure = nativeFailureResult(native.payload);
+  if (failure) return failure;
+  if (native.payload.backend !== "IntAna2d") {
+    return uncertain(
+      "occ-native-neutral-curve-unexpected-backend",
+      `Circle dispatch used unexpected backend ${native.payload.backend}.`,
+    );
   }
-  const curveBounds = [lower, upper] as const;
-  return {
-    kind: "nativeParametricCurveIntersection",
-    verification: "boundedTransverseLineIncidence",
-    firstParameterBounds: firstIsLine ? lineBounds : curveBounds,
-    secondParameterBounds: firstIsLine ? curveBounds : lineBounds,
-  };
+  return certifyCirclePairCandidates(request, native.candidates, budget);
 }
 
 function queryParametricCurves(
   oc: NeutralOccBindings,
   request: NeutralCurveQueryRequest,
+  budget: ExactProofBudget,
 ): NeutralCurveQueryResult {
   return withOwned((own) => {
     const firstHandle = makeNativeCurve(oc, request.first, own);
@@ -492,15 +410,8 @@ function queryParametricCurves(
         "OCC returned tolerance-defined segments without complete source-parameter correspondence proof.",
       );
     }
-    const nativePointCount = intersection.NbPoints();
-    if (nativePointCount === 0) {
-      return uncertain(
-        "occ-neutral-curve-empty-proof-unavailable",
-        "OCC returned no parametric candidates, but this adapter has no independent certificate that the bounded line/curve pair is disjoint.",
-      );
-    }
-    const points: NeutralCurvePointWitness[] = [];
-    for (let index = 1; index <= nativePointCount; index += 1) {
+    const candidates: NativeLineCurveCandidate[] = [];
+    for (let index = 1; index <= intersection.NbPoints(); index += 1) {
       const point = own(intersection.Point(index));
       const firstParameter = sourceParameter(
         request.first,
@@ -511,126 +422,232 @@ function queryParametricCurves(
         point.ParamOnSecond(),
       );
       if (firstParameter === null || secondParameter === null) continue;
-      const proof = verifyParametricLineIncidence(
-        request,
-        firstParameter,
-        secondParameter,
-      );
-      if (!proof) {
-        return uncertain(
-          "occ-neutral-curve-point-proof-unavailable",
-          "An isolated OCC parametric candidate lacked independent bounded incidence proof; native labels and residual proximity are not semantic contact proof.",
-        );
-      }
       const position = own(point.Value());
-      points.push({
-        classification:
-          proof.verification === "boundedTransverseLineIncidence"
-            ? "crossing"
-            : "unclassified",
+      candidates.push({
         firstParameter,
         secondParameter,
         position: [position.X(), position.Y()],
-        proof,
       });
     }
-    if (points.length === 0) {
-      return uncertain(
-        "occ-neutral-curve-empty-proof-unavailable",
-        "OCC returned no in-domain parametric candidates, but this adapter has no independent certificate that the bounded line/curve pair is disjoint.",
-      );
+    const circleCubic = certifyCircleCubicPair(request, budget);
+    if (circleCubic) {
+      if (
+        circleCubic.kind === "verified" &&
+        circleCubic.points.length !== candidates.length
+      ) {
+        return uncertain(
+          "occ-neutral-curve-root-set-incomplete",
+          "Native candidates do not correspond one-to-one with the complete exact circle/cubic root set.",
+        );
+      }
+      return circleCubic;
     }
-    return checkedPoints(request, points);
+    return (
+      verifyCompleteLineCurveRootSet(request, candidates, budget) ??
+      uncertain(
+        "occ-neutral-curve-root-proof-unavailable",
+        "The parametric pair has no complete line/curve root-set verifier.",
+      )
+    );
   });
+}
+
+type LowerProofLimits = ConstructorParameters<typeof ExactProofBudget>[0];
+
+function createCapability(
+  loadOpenCascade: () => Promise<OpenCascadeInstance>,
+  lowerLimits?: LowerProofLimits,
+  observeBudget?: (snapshot: ExactProofBudgetSnapshot) => void,
+): NeutralCurveQueryCapability {
+  return {
+    async queryNeutralCurves(request) {
+      const budget = new ExactProofBudget(lowerLimits);
+      try {
+        budget.operation(64);
+        const invalid = validateNeutralCurveQueryRequest(request);
+        if (invalid) return invalid;
+        for (const curve of [request.first, request.second]) {
+          if (
+            curve.kind === "circle" &&
+            !validateCertifiedCircleAngularDomain(curve, budget)
+          ) {
+            return uncertain(
+              "invalid-neutral-curve-query",
+              "Neutral queries require finite geometry, unit directions, positive radii and tolerance, and finite increasing bounded domains.",
+            );
+          }
+        }
+
+        const finiteLineResult = proveFiniteLinePair(request, budget);
+        if (finiteLineResult) return finiteLineResult;
+
+        let structural: NeutralCurveQueryResult | null = null;
+        if (
+          request.first.kind === "cubicBezier" &&
+          request.second.kind === "cubicBezier"
+        ) {
+          structural = certifyStructuralCubicPair(
+            {
+              ...request,
+              first: request.first,
+              second: request.second,
+            },
+            budget,
+          );
+          const needsNativeComponent =
+            structural?.kind === "verified" &&
+            structural.completenessProof.kind ===
+              "completeStructuralCorrespondence" &&
+            structural.completenessProof.correspondence === "interval";
+          if (structural && !needsNativeComponent) return structural;
+        }
+
+        const circlePair =
+          request.first.kind === "circle" && request.second.kind === "circle";
+        const circleCubic =
+          (request.first.kind === "circle" &&
+            request.second.kind === "cubicBezier") ||
+          (request.second.kind === "circle" &&
+            request.first.kind === "cubicBezier");
+        const supportedParametricPair =
+          circleCubic ||
+          (request.first.kind === "line" && request.second.kind !== "line") ||
+          (request.second.kind === "line" && request.first.kind !== "line");
+        if (!circlePair && !supportedParametricPair && !structural) {
+          return unsupported(
+            "occ-neutral-curve-pair-unsupported",
+            "Only exact finite line/line, analytic circle/circle, and independently verified line/circle or line/cubic queries are supported; non-structural cubic/cubic and circle/cubic pairs have no semantic verifier.",
+          );
+        }
+
+        const oc = (await loadOpenCascade()) as NeutralOccBindings;
+        if (circlePair || structural) {
+          const required = [
+            ...NATIVE_SEMANTIC_QUERY_BINDINGS,
+            ...CURVE_CONSTRUCTION_BINDINGS[request.first.kind],
+            ...CURVE_CONSTRUCTION_BINDINGS[request.second.kind],
+          ];
+          const missing = missingBindings(oc, [...new Set(required)]);
+          if (missing.length > 0) {
+            return unsupported(
+              "occ-neutral-curve-query-bindings-unavailable",
+              `Production OCC is missing required native semantic-query bindings: ${missing.join(", ")}.`,
+            );
+          }
+          if (circlePair) {
+            return queryNativeCirclePair(
+              oc,
+              {
+                ...request,
+                first: request.first,
+                second: request.second,
+              },
+              budget,
+            );
+          }
+          const native = runNativeSemanticQuery(oc, request, false);
+          if (native.kind !== "ok") return native;
+          const failure = nativeFailureResult(native.payload);
+          if (failure) return failure;
+          if (
+            native.payload.backend !== "structuralBezierOverlap" ||
+            (native.payload.status !== "verified" &&
+              native.payload.status !== "candidate")
+          ) {
+            return uncertain(
+              "occ-native-neutral-curve-unexpected-backend",
+              `Structural cubic dispatch returned ${native.payload.status}/${native.payload.backend}.`,
+            );
+          }
+          // Native overlap classification is only a component candidate. The
+          // exact TypeScript result remains the completeness, endpoint, and
+          // off-diagonal self-pair authority.
+          return structural!;
+        }
+
+        const required = [
+          ...PARAMETRIC_QUERY_BINDINGS,
+          ...CURVE_CONSTRUCTION_BINDINGS[request.first.kind],
+          ...CURVE_CONSTRUCTION_BINDINGS[request.second.kind],
+        ];
+        const missing = missingBindings(oc, [...new Set(required)]);
+        if (missing.length > 0) {
+          return unsupported(
+            "occ-neutral-curve-query-bindings-unavailable",
+            `Production OCC is missing required parametric neutral-query bindings: ${missing.join(", ")}.`,
+          );
+        }
+        return queryParametricCurves(oc, request, budget);
+      } catch (error) {
+        if (error instanceof ExactQueryProofBudgetExceeded) {
+          return uncertain(
+            "exact-query-proof-budget-exhausted",
+            "The deterministic exact-query arithmetic budget was exhausted.",
+          );
+        }
+        throw error;
+      } finally {
+        observeBudget?.(budget.snapshot());
+      }
+    },
+
+    async queryNeutralCurveSelfIntersections(
+      request: NeutralCurveSelfIntersectionRequest,
+    ) {
+      const budget = new ExactProofBudget(lowerLimits);
+      try {
+        budget.operation(64);
+        const invalid = validateNeutralCurveQueryRequest({
+          modelingTolerance: request.modelingTolerance,
+          first: request.curve,
+          second: request.curve,
+        });
+        if (invalid) return invalid;
+        if (request.curve.kind !== "cubicBezier") {
+          return unsupported(
+            "occ-neutral-curve-self-intersection-unsupported",
+            "Only cubic Bézier self-intersection certification is admitted.",
+          );
+        }
+        return certifyCubicSelfIntersection(
+          request.curve,
+          request.modelingTolerance,
+          budget,
+        );
+      } catch (error) {
+        if (error instanceof ExactQueryProofBudgetExceeded) {
+          return uncertain(
+            "exact-query-proof-budget-exhausted",
+            "The deterministic exact-query arithmetic budget was exhausted.",
+          );
+        }
+        throw error;
+      } finally {
+        observeBudget?.(budget.snapshot());
+      }
+    },
+  };
 }
 
 /** Lazy by construction: adapter creation and standalone solving never initialize OCC. */
 export function createOpenCascadeNeutralCurveQueryCapability(
   loadOpenCascade: () => Promise<OpenCascadeInstance>,
 ): NeutralCurveQueryCapability {
-  return {
-    async queryNeutralCurves(request) {
-      const invalid = validateNeutralCurveQueryRequest(request);
-      if (invalid) return invalid;
+  return createCapability(loadOpenCascade);
+}
 
-      const structuralOverlap = proveStructuralCubicOverlap(
-        request.first,
-        request.second,
-      );
-      if (structuralOverlap) {
-        return { kind: "verified", points: [], overlaps: [structuralOverlap] };
-      }
-      if (haveExactStructuralCubicBasis(request.first, request.second)) {
-        if (
-          hasExactStructuralCubicActiveOverlap(request.first, request.second)
-        ) {
-          return uncertain(
-            "structural-cubic-overlap-numerically-unrepresentable",
-            "The exact cubic active ranges overlap, but their source-parameter correspondence cannot be represented as finite nondegenerate binary64 intervals.",
-          );
-        }
-        return uncertain(
-          "structural-cubic-disjoint-parameter-contact-unresolved",
-          "Exact cubic bases have no affine active-range overlap, but distinct parameter ranges can still meet at a self-intersection; use the explicit self-intersection operation.",
-        );
-      }
+/** Test-only lower ceilings; construction clamps every value to production. */
+export function createOpenCascadeNeutralCurveQueryCapabilityWithLowerBudgetForTest(
+  loadOpenCascade: () => Promise<OpenCascadeInstance>,
+  lowerLimits: LowerProofLimits,
+): NeutralCurveQueryCapability {
+  return createCapability(loadOpenCascade, lowerLimits);
+}
 
-      const circlePair =
-        request.first.kind === "circle" && request.second.kind === "circle";
-      const supportedParametricPair =
-        (request.first.kind === "line" && request.second.kind !== "line") ||
-        (request.second.kind === "line" && request.first.kind !== "line");
-      if (!circlePair && !supportedParametricPair) {
-        return unsupported(
-          "occ-neutral-curve-pair-unsupported",
-          "Only analytic circle/circle and independently verified line/circle or line/cubic queries are supported; line/line and non-structural cubic/cubic or circle/cubic pairs have no semantic verifier.",
-        );
-      }
-
-      const oc = (await loadOpenCascade()) as NeutralOccBindings;
-      if (circlePair) {
-        const missing = missingBindings(oc, ANALYTIC_CIRCLE_BINDINGS);
-        if (missing.length > 0) {
-          return unsupported(
-            "occ-neutral-curve-query-bindings-unavailable",
-            `Production OCC is missing required analytic circle-query bindings: ${missing.join(", ")}.`,
-          );
-        }
-        return queryAnalyticCircles(oc, {
-          ...request,
-          first: request.first,
-          second: request.second,
-        });
-      }
-
-      const required = [
-        ...PARAMETRIC_QUERY_BINDINGS,
-        ...CURVE_CONSTRUCTION_BINDINGS[request.first.kind],
-        ...CURVE_CONSTRUCTION_BINDINGS[request.second.kind],
-      ];
-      const missing = missingBindings(oc, [...new Set(required)]);
-      if (missing.length > 0) {
-        return unsupported(
-          "occ-neutral-curve-query-bindings-unavailable",
-          `Production OCC is missing required parametric neutral-query bindings: ${missing.join(", ")}.`,
-        );
-      }
-      return queryParametricCurves(oc, request);
-    },
-
-    async queryNeutralCurveSelfIntersections(
-      request: NeutralCurveSelfIntersectionRequest,
-    ) {
-      const invalid = validateNeutralCurveQueryRequest({
-        modelingTolerance: request.modelingTolerance,
-        first: request.curve,
-        second: request.curve,
-      });
-      if (invalid) return invalid;
-      return uncertain(
-        "occ-neutral-curve-self-intersection-proof-unavailable",
-        "The available Geom2dInt_GInter_2 self-query can locate candidates, but no independent semantic verifier yet proves their contact and parameter correspondence.",
-      );
-    },
-  };
+/** Test-only whole-request meter observation at the production OCC entrypoint. */
+export function createOpenCascadeNeutralCurveQueryCapabilityWithBudgetObserverForTest(
+  loadOpenCascade: () => Promise<OpenCascadeInstance>,
+  observeBudget: (snapshot: ExactProofBudgetSnapshot) => void,
+): NeutralCurveQueryCapability {
+  return createCapability(loadOpenCascade, undefined, observeBudget);
 }

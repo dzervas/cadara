@@ -62,6 +62,7 @@ mainBuild:
     - symbol: CadaraBuildNativeTopologyPayload
     - symbol: CadaraExecuteNativeFeatureTransaction
     - symbol: CadaraNativeFeatureTransactionResult
+    - symbol: CadaraNativeNeutralCurveQuery
     - symbol: CadaraNativeTopologyProbe
     - symbol: ChFi3d_FilletShape
     - symbol: CDM_Document
@@ -194,6 +195,10 @@ additionalCppCode: |
 
   #include "/src/occ-native-shims/cadara-native-topology-helpers.inc"
   #include "/src/occ-native-shims/cadara-native-exact-brep-helpers.inc"
+
+  class CadaraNativeNeutralCurveQuery {
+  #include "/src/occ-native-shims/cadara-native-neutral-curve-query.inc"
+  };
 
   class CadaraNativeTopologyProbe {
   #include "/src/occ-native-shims/cadara-native-topology-probe.inc"
