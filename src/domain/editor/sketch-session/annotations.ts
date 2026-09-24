@@ -1282,6 +1282,7 @@ export function getConstraintGlyphKind(
     case "collinearProjectedLine":
       return "constraintCollinear";
     case "parallel":
+    case "equalOffset":
       return "constraintParallel";
     case "equalLength":
       return "constraintEqual";
@@ -1370,6 +1371,11 @@ export function getConstraintAffectedGeometryRefs(
     case "horizontal":
     case "vertical":
       return [createSketchEntityRef(sketchId, constraint.entityId)];
+    case "equalOffset":
+      return constraint.pairs.flatMap((pair) => [
+        createSketchEntityRef(sketchId, pair.seedEntityId),
+        createSketchEntityRef(sketchId, pair.offsetEntityId),
+      ]);
     case "parallel":
     case "perpendicular":
     case "equalLength":
@@ -1549,6 +1555,16 @@ export function createConstraintAnnotationAnchor(
     case "vertical":
       return createOffsetAnnotationAnchor(
         getEntityAnchor(definition, constraint.entityId),
+      );
+    case "equalOffset":
+      return createOffsetAnnotationAnchor(
+        getAverageEntityAnchor(
+          definition,
+          constraint.pairs.flatMap((pair) => [
+            pair.seedEntityId,
+            pair.offsetEntityId,
+          ]),
+        ),
       );
     case "parallel":
     case "perpendicular":
@@ -2938,6 +2954,8 @@ export function describeConstraint(constraint: ConstraintDefinition) {
       return "Coincident points";
     case "parallel":
       return "Parallel lines";
+    case "equalOffset":
+      return "Equal line offsets";
     case "equalLength":
       return "Equal-length lines";
     case "horizontal":

@@ -16,8 +16,10 @@ import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import {
   OFFSET_DIAGNOSTIC_CODES,
   computeOffsetChain,
+  computeOffsetChainJvp,
   offsetSeedCurveFromEntity,
   type OffsetSeedCurve,
+  type OffsetSeedCurveVariation,
 } from "@/contracts/sketch/offset-geometry";
 
 interface SketchDerivationEvaluationResult {
@@ -41,8 +43,20 @@ interface RelationshipTransform {
   ) => SplineVector;
 }
 
+export type SketchDerivedEntityVariation =
+  | { kind: "circle"; radius: number }
+  | {
+      kind: "arc";
+      radius: number;
+      startAngle: number;
+      endAngle: number;
+    };
+
 export interface SketchDerivationVariation {
   points?: Readonly<Partial<Record<SketchPointId, SketchPoint2D>>>;
+  entities?: Readonly<
+    Partial<Record<SketchEntityId, SketchDerivedEntityVariation>>
+  >;
   splineTangents?: Readonly<
     Partial<Record<SketchEntityId, Readonly<Record<string, SplineVector>>>>
   >;
@@ -50,6 +64,9 @@ export interface SketchDerivationVariation {
 
 export interface SketchDerivationJvp {
   points: Readonly<Record<SketchPointId, SketchPoint2D>>;
+  entities: Readonly<
+    Partial<Record<SketchEntityId, SketchDerivedEntityVariation>>
+  >;
   splineTangents: Readonly<
     Partial<Record<SketchEntityId, Readonly<Record<string, SplineVector>>>>
   >;
@@ -569,13 +586,195 @@ function evaluateOffsetRelationship(
 
 const ZERO_VECTOR: SketchPoint2D = [0, 0];
 
-/**
- * Applies the exact directional derivative of the one-way transform
- * derivations. Offset outputs deliberately receive a zero differential until
- * offset geometry exposes its own analytic JVP; solver requirements on those
- * outputs therefore fail closed instead of treating output coordinates as
- * independent authority.
- */
+function circleLikeVariationFromPoints(
+  entity: Extract<SketchEntityDefinition, { kind: "arc" }>,
+  pointById: Map<SketchPointId, SketchPointDefinition>,
+  pointVariations: Readonly<Record<SketchPointId, SketchPoint2D>>,
+): SketchDerivedEntityVariation | null {
+  const center = pointById.get(entity.centerPointId)?.position;
+  const start = pointById.get(entity.startPointId)?.position;
+  const end = pointById.get(entity.endPointId)?.position;
+  if (!center || !start || !end) return null;
+  const centerVariation = pointVariations[entity.centerPointId] ?? ZERO_VECTOR;
+  const startVariation = pointVariations[entity.startPointId] ?? ZERO_VECTOR;
+  const endVariation = pointVariations[entity.endPointId] ?? ZERO_VECTOR;
+  const startRelative: SketchPoint2D = [
+    start[0] - center[0],
+    start[1] - center[1],
+  ];
+  const endRelative: SketchPoint2D = [end[0] - center[0], end[1] - center[1]];
+  const startDifferential: SketchPoint2D = [
+    startVariation[0] - centerVariation[0],
+    startVariation[1] - centerVariation[1],
+  ];
+  const endDifferential: SketchPoint2D = [
+    endVariation[0] - centerVariation[0],
+    endVariation[1] - centerVariation[1],
+  ];
+  const startLengthSquared = startRelative[0] ** 2 + startRelative[1] ** 2;
+  const endLengthSquared = endRelative[0] ** 2 + endRelative[1] ** 2;
+  if (startLengthSquared <= EPSILON || endLengthSquared <= EPSILON) return null;
+  return {
+    kind: "arc",
+    radius:
+      (startRelative[0] * startDifferential[0] +
+        startRelative[1] * startDifferential[1]) /
+      Math.sqrt(startLengthSquared),
+    startAngle:
+      (startRelative[0] * startDifferential[1] -
+        startRelative[1] * startDifferential[0]) /
+      startLengthSquared,
+    endAngle:
+      (endRelative[0] * endDifferential[1] -
+        endRelative[1] * endDifferential[0]) /
+      endLengthSquared,
+  };
+}
+
+interface OffsetRelationshipJvp {
+  points: Map<SketchPointId, SketchPoint2D>;
+  entities: Map<SketchEntityId, SketchDerivedEntityVariation>;
+}
+
+function evaluateOffsetRelationshipJvp(
+  relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>,
+  entityById: Map<SketchEntityId, SketchEntityDefinition>,
+  pointById: Map<SketchPointId, SketchPointDefinition>,
+  pointVariations: Readonly<Record<SketchPointId, SketchPoint2D>>,
+  entityVariations: Readonly<
+    Partial<Record<SketchEntityId, SketchDerivedEntityVariation>>
+  >,
+): OffsetRelationshipJvp | null {
+  const distance = getAuthoredLiteralValue<number>(relationship.distance);
+  if (typeof distance !== "number" || !Number.isFinite(distance)) return null;
+
+  const curves: OffsetSeedCurve[] = [];
+  const curveVariations: OffsetSeedCurveVariation[] = [];
+  const splineFitPointCounts = new Map<SketchEntityId, number>();
+  for (const seedEntityId of relationship.seedEntityIds) {
+    const entity = entityById.get(seedEntityId);
+    if (!entity) return null;
+    const curve = offsetSeedCurveFromEntity(
+      entity,
+      (pointId) => pointById.get(pointId)?.position ?? null,
+    );
+    if (!curve) return null;
+    curves.push(curve);
+    const pointVariation = (pointId: SketchPointId) =>
+      pointVariations[pointId] ?? ZERO_VECTOR;
+    switch (entity.kind) {
+      case "lineSegment":
+        curveVariations.push({
+          kind: "lineSegment",
+          start: pointVariation(entity.startPointId),
+          end: pointVariation(entity.endPointId),
+        });
+        break;
+      case "circle": {
+        const entityVariation = entityVariations[entity.entityId];
+        curveVariations.push({
+          kind: "circle",
+          center: pointVariation(entity.centerPointId),
+          radius:
+            entityVariation?.kind === "circle" ? entityVariation.radius : 0,
+        });
+        break;
+      }
+      case "arc":
+        curveVariations.push({
+          kind: "arc",
+          center: pointVariation(entity.centerPointId),
+          start: pointVariation(entity.startPointId),
+          end: pointVariation(entity.endPointId),
+        });
+        break;
+      case "spline": {
+        const pointIds = orderedSplinePointIds(entity);
+        curveVariations.push({
+          kind: "spline",
+          points: pointIds.map(pointVariation),
+        });
+        const output = relationship.outputs.find(
+          (candidate) => candidate.seedEntityId === seedEntityId,
+        );
+        if (output)
+          splineFitPointCounts.set(seedEntityId, output.outputPointIds.length);
+        break;
+      }
+      default:
+        return null;
+    }
+  }
+
+  const result = computeOffsetChainJvp({
+    curves,
+    curveVariations,
+    distance,
+    splineFitPointCounts,
+  });
+  if (!result.ok) return null;
+  const output = new Map<SketchPointId, SketchPoint2D>();
+  const entityOutput = new Map<SketchEntityId, SketchDerivedEntityVariation>();
+  const segmentBySeed = new Map(
+    result.segments.map((segment) => [segment.seedEntityId, segment] as const),
+  );
+  for (const mapping of relationship.outputs) {
+    const segment = segmentBySeed.get(mapping.seedEntityId);
+    if (!segment) return null;
+    const values =
+      segment.kind === "lineSegment"
+        ? [segment.start, segment.end]
+        : segment.kind === "circle"
+          ? [segment.center]
+          : [segment.center, segment.start, segment.end];
+    if (values.length !== mapping.outputPointIds.length) return null;
+    mapping.outputPointIds.forEach((pointId, index) =>
+      output.set(pointId, values[index]!),
+    );
+    if (segment.kind === "circle") {
+      entityOutput.set(mapping.outputEntityId, {
+        kind: "circle",
+        radius: segment.radius,
+      });
+    }
+  }
+  const jointKey = (first: SketchEntityId, second: SketchEntityId) =>
+    `${first}\u0000${second}`;
+  const jointBySeeds = new Map(
+    result.joints.map(
+      (joint) =>
+        [
+          jointKey(joint.firstSeedEntityId, joint.secondSeedEntityId),
+          joint,
+        ] as const,
+    ),
+  );
+  for (const mapping of relationship.jointOutputs) {
+    const joint = jointBySeeds.get(
+      jointKey(mapping.firstSeedEntityId, mapping.secondSeedEntityId),
+    );
+    if (!joint) return null;
+    output.set(mapping.centerPointId, joint.center);
+    output.set(mapping.startPointId, joint.start);
+    output.set(mapping.endPointId, joint.end);
+  }
+  for (const outputEntityId of [
+    ...relationship.outputs.map((mapping) => mapping.outputEntityId),
+    ...relationship.jointOutputs.map((mapping) => mapping.outputEntityId),
+  ]) {
+    const entity = entityById.get(outputEntityId);
+    if (entity?.kind !== "arc") continue;
+    const variation = circleLikeVariationFromPoints(
+      entity,
+      pointById,
+      Object.fromEntries(output),
+    );
+    if (variation) entityOutput.set(entity.entityId, variation);
+  }
+  return { points: output, entities: entityOutput };
+}
+
+/** Applies exact directional derivatives of supported one-way derivations. */
 export function evaluateSketchDerivationJvp(
   definition: SketchDefinition,
   variation: SketchDerivationVariation,
@@ -593,6 +792,9 @@ export function evaluateSketchDerivationJvp(
       variation.points?.[point.pointId] ?? ZERO_VECTOR,
     ]),
   ) as Record<SketchPointId, SketchPoint2D>;
+  const entities: Partial<
+    Record<SketchEntityId, SketchDerivedEntityVariation>
+  > = { ...variation.entities };
   const splineTangents: Partial<
     Record<SketchEntityId, Record<string, SplineVector>>
   > = {};
@@ -610,9 +812,22 @@ export function evaluateSketchDerivationJvp(
 
   for (const relationship of evaluatedDefinition.derivedRelationships ?? []) {
     if (relationship.kind === "offset") {
+      const outputVariations = evaluateOffsetRelationshipJvp(
+        relationship,
+        entityById,
+        pointById,
+        points,
+        entities,
+      );
       for (const output of relationship.outputs) {
-        for (const pointId of output.outputPointIds)
-          points[pointId] = ZERO_VECTOR;
+        for (const pointId of output.outputPointIds) {
+          points[pointId] =
+            outputVariations?.points.get(pointId) ?? ZERO_VECTOR;
+        }
+        const entityVariation = outputVariations?.entities.get(
+          output.outputEntityId,
+        );
+        if (entityVariation) entities[output.outputEntityId] = entityVariation;
         const outputEntity = entityById.get(output.outputEntityId);
         if (outputEntity?.kind === "spline") {
           splineTangents[output.outputEntityId] = Object.fromEntries(
@@ -624,7 +839,16 @@ export function evaluateSketchDerivationJvp(
         }
       }
       for (const output of relationship.jointOutputs) {
-        points[output.centerPointId] = ZERO_VECTOR;
+        points[output.centerPointId] =
+          outputVariations?.points.get(output.centerPointId) ?? ZERO_VECTOR;
+        points[output.startPointId] =
+          outputVariations?.points.get(output.startPointId) ?? ZERO_VECTOR;
+        points[output.endPointId] =
+          outputVariations?.points.get(output.endPointId) ?? ZERO_VECTOR;
+        const entityVariation = outputVariations?.entities.get(
+          output.outputEntityId,
+        );
+        if (entityVariation) entities[output.outputEntityId] = entityVariation;
       }
       continue;
     }
@@ -665,6 +889,25 @@ export function evaluateSketchDerivationJvp(
         );
       }
 
+      if (seed.kind === "circle" && target.kind === "circle") {
+        const seedVariation = entities[seed.entityId];
+        entities[target.entityId] = {
+          kind: "circle",
+          radius:
+            (seedVariation?.kind === "circle" ? seedVariation.radius : 0) *
+            (relationship.kind === "transform"
+              ? Math.abs(relationship.scale)
+              : 1),
+        };
+      } else if (seed.kind === "arc" && target.kind === "arc") {
+        const targetVariation = circleLikeVariationFromPoints(
+          target,
+          pointById,
+          points,
+        );
+        if (targetVariation) entities[target.entityId] = targetVariation;
+      }
+
       if (seed.kind === "spline" && target.kind === "spline") {
         const seedOccurrences = orderedSplineOccurrences(seed) ?? [];
         const outputOccurrences = orderedSplineOccurrences(target) ?? [];
@@ -685,7 +928,7 @@ export function evaluateSketchDerivationJvp(
     }
   }
 
-  return { points, splineTangents };
+  return { points, entities, splineTangents };
 }
 
 /**
@@ -703,7 +946,11 @@ export function prepareSketchDerivationPullback(
     definition.entities.map((entity) => [entity.entityId, entity]),
   );
   type PointProducer =
-    | { kind: "offset" }
+    | {
+        kind: "offset";
+        relationship: Extract<SketchDerivationDefinition, { kind: "offset" }>;
+        outputPointId: SketchPointId;
+      }
     | {
         kind: "transform";
         relationship: Exclude<SketchDerivationDefinition, { kind: "offset" }>;
@@ -720,26 +967,35 @@ export function prepareSketchDerivationPullback(
         seedOccurrenceId: string;
       };
   const pointProducers = new Map<SketchPointId, PointProducer>();
+  const entityProducers = new Set<SketchEntityId>();
   const tangentProducers = new Map<string, TangentProducer>();
   const tangentKey = (entityId: SketchEntityId, occurrenceId: string) =>
     `${entityId}\u0000${occurrenceId}`;
 
   for (const relationship of definition.derivedRelationships ?? []) {
     for (const output of relationship.outputs) {
-      output.outputPointIds.forEach((pointId) =>
-        pointProducers.set(pointId, { kind: "offset" }),
-      );
       const target = entityById.get(output.outputEntityId);
-      if (target?.kind === "spline") {
-        for (const occurrence of orderedSplineOccurrences(target) ?? []) {
-          tangentProducers.set(
-            tangentKey(target.entityId, occurrence.occurrenceId),
-            { kind: "offset" },
-          );
+      if (relationship.kind === "offset") {
+        entityProducers.add(output.outputEntityId);
+        output.outputPointIds.forEach((pointId) =>
+          pointProducers.set(pointId, {
+            kind: "offset",
+            relationship,
+            outputPointId: pointId,
+          }),
+        );
+        if (target?.kind === "spline") {
+          for (const occurrence of orderedSplineOccurrences(target) ?? []) {
+            tangentProducers.set(
+              tangentKey(target.entityId, occurrence.occurrenceId),
+              { kind: "offset" },
+            );
+          }
         }
+        continue;
       }
-      if (relationship.kind === "offset") continue;
 
+      entityProducers.add(output.outputEntityId);
       const seed = entityById.get(output.seedEntityId);
       if (
         !seed ||
@@ -770,19 +1026,33 @@ export function prepareSketchDerivationPullback(
       outputOccurrences.forEach((occurrence, index) => {
         const seedOccurrence = seedOccurrences[index]!;
         if (seedOccurrence.tangent.kind !== "authored") return;
-        tangentProducers.set(tangentKey(target.entityId, occurrence.occurrenceId), {
-          kind: "transform",
-          relationship,
-          instanceIndex: output.instanceIndex,
-          seedEntityId: seed.entityId,
-          seedOccurrenceId: seedOccurrence.occurrenceId,
-        });
+        tangentProducers.set(
+          tangentKey(target.entityId, occurrence.occurrenceId),
+          {
+            kind: "transform",
+            relationship,
+            instanceIndex: output.instanceIndex,
+            seedEntityId: seed.entityId,
+            seedOccurrenceId: seedOccurrence.occurrenceId,
+          },
+        );
       });
     }
     if (relationship.kind === "offset") {
-      relationship.jointOutputs.forEach((output) =>
-        pointProducers.set(output.centerPointId, { kind: "offset" }),
-      );
+      relationship.jointOutputs.forEach((output) => {
+        entityProducers.add(output.outputEntityId);
+        for (const pointId of [
+          output.centerPointId,
+          output.startPointId,
+          output.endPointId,
+        ]) {
+          pointProducers.set(pointId, {
+            kind: "offset",
+            relationship,
+            outputPointId: pointId,
+          });
+        }
+      });
     }
   }
 
@@ -801,6 +1071,9 @@ export function prepareSketchDerivationPullback(
 
   return (cotangent) => {
     const points: Partial<Record<SketchPointId, SketchPoint2D>> = {};
+    const entities: Partial<
+      Record<SketchEntityId, SketchDerivedEntityVariation>
+    > = {};
     const splineTangents: Partial<
       Record<SketchEntityId, Record<string, SplineVector>>
     > = {};
@@ -808,6 +1081,28 @@ export function prepareSketchDerivationPullback(
       if (isZero(value)) return;
       const current = points[pointId] ?? ZERO_VECTOR;
       points[pointId] = [current[0] + value[0], current[1] + value[1]];
+    };
+    const addEntity = (
+      entityId: SketchEntityId,
+      value: SketchDerivedEntityVariation,
+    ) => {
+      const current = entities[entityId];
+      if (value.kind === "circle") {
+        entities[entityId] = {
+          kind: "circle",
+          radius:
+            (current?.kind === "circle" ? current.radius : 0) + value.radius,
+        };
+        return;
+      }
+      entities[entityId] = {
+        kind: "arc",
+        radius: (current?.kind === "arc" ? current.radius : 0) + value.radius,
+        startAngle:
+          (current?.kind === "arc" ? current.startAngle : 0) + value.startAngle,
+        endAngle:
+          (current?.kind === "arc" ? current.endAngle : 0) + value.endAngle,
+      };
     };
     const addTangent = (
       entityId: SketchEntityId,
@@ -817,10 +1112,7 @@ export function prepareSketchDerivationPullback(
       if (isZero(value)) return;
       const entity = splineTangents[entityId] ?? {};
       const current = entity[occurrenceId] ?? ZERO_VECTOR;
-      entity[occurrenceId] = [
-        current[0] + value[0],
-        current[1] + value[1],
-      ];
+      entity[occurrenceId] = [current[0] + value[0], current[1] + value[1]];
       splineTangents[entityId] = entity;
     };
     const pullPoint = (
@@ -834,7 +1126,36 @@ export function prepareSketchDerivationPullback(
         addPoint(pointId, value);
         return;
       }
-      if (producer.kind === "offset" || visiting.has(pointId)) return;
+      if (visiting.has(pointId)) return;
+      if (producer.kind === "offset") {
+        const dependencies = producer.relationship.seedEntityIds
+          .flatMap((entityId) => {
+            const entity = entityById.get(entityId);
+            return entity ? getEntityPointIds(entity) : [];
+          })
+          .filter(
+            (dependency, index, all) => all.indexOf(dependency) === index,
+          );
+        const nextVisiting = new Set(visiting).add(pointId);
+        for (const dependency of dependencies) {
+          const pulled: [number, number] = [0, 0];
+          for (let component = 0; component < 2; component += 1) {
+            const basis: SketchPoint2D = component === 0 ? [1, 0] : [0, 1];
+            const differential = evaluateOffsetRelationshipJvp(
+              producer.relationship,
+              entityById,
+              pointById,
+              { [dependency]: basis } as Readonly<
+                Record<SketchPointId, SketchPoint2D>
+              >,
+              {},
+            )?.points.get(producer.outputPointId);
+            if (differential) pulled[component] = dotPoint(value, differential);
+          }
+          pullPoint(dependency, pulled, nextVisiting);
+        }
+        return;
+      }
       const seedPoint = pointById.get(producer.seedPointId);
       if (!seedPoint) return;
       const dependencies = [
@@ -939,19 +1260,62 @@ export function prepareSketchDerivationPullback(
     for (const [pointId, value] of Object.entries(cotangent.points ?? {})) {
       if (value) pullPoint(pointId as SketchPointId, value, new Set());
     }
+    for (const [outputEntityId, value] of Object.entries(
+      cotangent.entities ?? {},
+    )) {
+      if (!value || !entityProducers.has(outputEntityId as SketchEntityId)) {
+        if (value) addEntity(outputEntityId as SketchEntityId, value);
+        continue;
+      }
+      const scalarDot = (
+        variation: SketchDerivedEntityVariation | undefined,
+      ) => {
+        if (!variation || variation.kind !== value.kind) return 0;
+        return value.kind === "circle" && variation.kind === "circle"
+          ? value.radius * variation.radius
+          : value.kind === "arc" && variation.kind === "arc"
+            ? value.radius * variation.radius +
+              value.startAngle * variation.startAngle +
+              value.endAngle * variation.endAngle
+            : 0;
+      };
+      for (const point of definition.points) {
+        if (pointProducers.has(point.pointId)) continue;
+        const pulled: [number, number] = [0, 0];
+        for (let component = 0; component < 2; component += 1) {
+          const basis: SketchPoint2D = component === 0 ? [1, 0] : [0, 1];
+          pulled[component] = scalarDot(
+            evaluateSketchDerivationJvp(definition, {
+              points: { [point.pointId]: basis },
+            }).entities[outputEntityId as SketchEntityId],
+          );
+        }
+        addPoint(point.pointId, pulled);
+      }
+      for (const entity of definition.entities) {
+        if (entity.kind !== "circle" || entityProducers.has(entity.entityId)) {
+          continue;
+        }
+        const radius = scalarDot(
+          evaluateSketchDerivationJvp(definition, {
+            entities: {
+              [entity.entityId]: { kind: "circle", radius: 1 },
+            },
+          }).entities[outputEntityId as SketchEntityId],
+        );
+        if (radius !== 0) {
+          addEntity(entity.entityId, { kind: "circle", radius });
+        }
+      }
+    }
     for (const [entityId, occurrences] of Object.entries(
       cotangent.splineTangents ?? {},
     )) {
       for (const [occurrenceId, value] of Object.entries(occurrences ?? {})) {
-        pullTangent(
-          entityId as SketchEntityId,
-          occurrenceId,
-          value,
-          new Set(),
-        );
+        pullTangent(entityId as SketchEntityId, occurrenceId, value, new Set());
       }
     }
-    return { points, splineTangents };
+    return { points, entities, splineTangents };
   };
 }
 

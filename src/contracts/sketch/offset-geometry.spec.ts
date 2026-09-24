@@ -6,8 +6,11 @@ import {
   OFFSET_DIAGNOSTIC_CODES,
   OFFSET_SPLINE_RELATIVE_TOLERANCE,
   computeOffsetChain,
+  computeOffsetChainJvp,
   offsetSplineFitPoints,
+  type OffsetChainSuccess,
   type OffsetSeedCurve,
+  type OffsetSeedCurveVariation,
 } from "@/contracts/sketch/offset-geometry";
 
 test("src/contracts/sketch/offset-geometry.spec.ts", () => {
@@ -28,7 +31,14 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
     end: SketchPoint2D,
     sweepDirection: "clockwise" | "counterClockwise",
   ): OffsetSeedCurve {
-    return { kind: "arc", seedEntityId: id(seed), center, start, end, sweepDirection };
+    return {
+      kind: "arc",
+      seedEntityId: id(seed),
+      center,
+      start,
+      end,
+      sweepDirection,
+    };
   }
 
   function expectClose(
@@ -70,7 +80,12 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
 
     const shrunkCircle = computeOffsetChain({
       curves: [
-        { kind: "circle", seedEntityId: id("seed_circle"), center: [1, 1], radius: 2 },
+        {
+          kind: "circle",
+          seedEntityId: id("seed_circle"),
+          center: [1, 1],
+          radius: 2,
+        },
       ],
       distance: 0.5,
     });
@@ -84,7 +99,12 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
 
     const grownCircle = computeOffsetChain({
       curves: [
-        { kind: "circle", seedEntityId: id("seed_circle"), center: [1, 1], radius: 2 },
+        {
+          kind: "circle",
+          seedEntityId: id("seed_circle"),
+          center: [1, 1],
+          radius: 2,
+        },
       ],
       distance: -1,
     });
@@ -130,7 +150,12 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
   function testDegeneracyDiagnostics() {
     const collapsedCircle = computeOffsetChain({
       curves: [
-        { kind: "circle", seedEntityId: id("seed_circle"), center: [0, 0], radius: 2 },
+        {
+          kind: "circle",
+          seedEntityId: id("seed_circle"),
+          center: [0, 0],
+          radius: 2,
+        },
       ],
       distance: 2,
     });
@@ -173,7 +198,12 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
     const circleInChain = computeOffsetChain({
       curves: [
         line("seed_a", [0, 0], [1, 0]),
-        { kind: "circle", seedEntityId: id("seed_circle"), center: [2, 0], radius: 1 },
+        {
+          kind: "circle",
+          seedEntityId: id("seed_circle"),
+          center: [2, 0],
+          radius: 1,
+        },
       ],
       distance: 0.25,
     });
@@ -250,10 +280,9 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
     });
     expect(arcJoined.ok, "Convex corner offset should succeed.").toBeTruthy();
     if (arcJoined.ok) {
-      expect(
-        arcJoined.joints.length,
-        "Convex corners get an arc join.",
-      ).toBe(1);
+      expect(arcJoined.joints.length, "Convex corners get an arc join.").toBe(
+        1,
+      );
       const joint = arcJoined.joints[0]!;
       expect(joint.firstSeedEntityId, "Joint first seed identity").toBe(
         id("seed_ab"),
@@ -262,10 +291,21 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
         id("seed_bc"),
       );
       expectClose(joint.center, [4, 0], "Joint arc centers on the seed vertex");
-      expectClose(joint.start, [4, -1], "Joint arc starts at the first offset end");
-      expectClose(joint.end, [5, 0], "Joint arc ends at the second offset start");
+      expectClose(
+        joint.start,
+        [4, -1],
+        "Joint arc starts at the first offset end",
+      );
+      expectClose(
+        joint.end,
+        [5, 0],
+        "Joint arc ends at the second offset start",
+      );
       expect(
-        Math.hypot(joint.start[0] - joint.center[0], joint.start[1] - joint.center[1]),
+        Math.hypot(
+          joint.start[0] - joint.center[0],
+          joint.start[1] - joint.center[1],
+        ),
         "Joint arc radius equals |distance|.",
       ).toBeCloseTo(1, 9);
       expect(joint.sweepDirection, "Joint sweeps the short way").toBe(
@@ -383,10 +423,13 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
   }
 
   function testSplineToleranceConformance() {
-    const seedPoints: SketchPoint2D[] = Array.from({ length: 9 }, (_, index) => {
-      const angle = (Math.PI / 2) * (index / 8);
-      return [Math.cos(angle) * 4, Math.sin(angle) * 4];
-    });
+    const seedPoints: SketchPoint2D[] = Array.from(
+      { length: 9 },
+      (_, index) => {
+        const angle = (Math.PI / 2) * (index / 8);
+        return [Math.cos(angle) * 4, Math.sin(angle) * 4];
+      },
+    );
 
     function distanceToPolyline(
       point: SketchPoint2D,
@@ -480,6 +523,290 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
     }
   }
 
+  function testAnalyticOffsetJvpAgainstFiniteDifferenceOracle() {
+    const epsilon = 1e-6;
+    const cases: Array<{
+      label: string;
+      curves: OffsetSeedCurve[];
+      variations: OffsetSeedCurveVariation[];
+      distance: number;
+    }> = [
+      {
+        label: "line",
+        curves: [line("seed_line", [0.3, -0.2], [4.2, 1.1])],
+        variations: [
+          { kind: "lineSegment", start: [0.2, -0.4], end: [0.7, 0.3] },
+        ],
+        distance: 0.6,
+      },
+      {
+        label: "circle",
+        curves: [
+          {
+            kind: "circle",
+            seedEntityId: id("seed_circle"),
+            center: [1, 2],
+            radius: 3,
+          },
+        ],
+        variations: [{ kind: "circle", center: [-0.3, 0.8], radius: 0.4 }],
+        distance: 0.5,
+      },
+      {
+        label: "arc",
+        curves: [
+          arc(
+            "seed_arc",
+            [0.2, -0.1],
+            [2.3, 0.4],
+            [0.1, 2.2],
+            "counterClockwise",
+          ),
+        ],
+        variations: [
+          {
+            kind: "arc",
+            center: [0.1, -0.2],
+            start: [0.6, 0.3],
+            end: [-0.4, 0.5],
+          },
+        ],
+        distance: 0.35,
+      },
+      {
+        label: "mixed line-arc reconciliation",
+        curves: [
+          line("seed_line", [0, 0], [2, 0]),
+          arc("seed_arc", [2, 1], [2, 0], [3, 1], "counterClockwise"),
+        ],
+        variations: [
+          {
+            kind: "lineSegment",
+            start: [0.15, -0.1],
+            end: [0.3, 0.2],
+          },
+          {
+            kind: "arc",
+            center: [-0.2, 0.1],
+            start: [0.3, 0.2],
+            end: [0.4, -0.3],
+          },
+        ],
+        distance: -0.4,
+      },
+      {
+        label: "mixed line-arc trim intersection",
+        curves: [
+          line("seed_trim_line", [0, 0], [4, 0]),
+          arc(
+            "seed_trim_arc",
+            [2, -2],
+            [4, 0],
+            [2 + Math.sqrt(8), -2],
+            "clockwise",
+          ),
+        ],
+        variations: [
+          {
+            kind: "lineSegment",
+            start: [0.1, -0.2],
+            end: [0.3, 0.25],
+          },
+          {
+            kind: "arc",
+            center: [-0.15, 0.4],
+            start: [0.3, 0.25],
+            end: [0.2, -0.35],
+          },
+        ],
+        distance: -1,
+      },
+      {
+        label: "arc-arc reconciliation",
+        curves: [
+          arc("seed_arc_a", [0, 0], [0, -1], [1, 0], "counterClockwise"),
+          arc("seed_arc_b", [0, 0], [1, 0], [0, 1], "counterClockwise"),
+        ],
+        variations: [
+          {
+            kind: "arc",
+            center: [0.1, -0.2],
+            start: [-0.3, 0.4],
+            end: [0.2, 0.3],
+          },
+          {
+            kind: "arc",
+            center: [0.1, -0.2],
+            start: [0.2, 0.3],
+            end: [-0.4, 0.2],
+          },
+        ],
+        distance: 0.2,
+      },
+      {
+        label: "trimmed line joint",
+        curves: [
+          line("seed_ab", [0, 0], [4, 0]),
+          line("seed_cb", [4, 4], [4, 0]),
+        ],
+        variations: [
+          { kind: "lineSegment", start: [0.1, -0.2], end: [0.4, 0.3] },
+          { kind: "lineSegment", start: [-0.2, 0.6], end: [0.4, 0.3] },
+        ],
+        distance: 0.7,
+      },
+      {
+        label: "committed arc joint",
+        curves: [
+          line("seed_ab", [0, 0], [4, 0]),
+          line("seed_bc", [4, 0], [4, 4]),
+        ],
+        variations: [
+          { kind: "lineSegment", start: [0.1, -0.2], end: [0.4, 0.3] },
+          { kind: "lineSegment", start: [0.4, 0.3], end: [-0.2, 0.6] },
+        ],
+        distance: -0.7,
+      },
+    ];
+    const perturb = (
+      curve: OffsetSeedCurve,
+      variation: OffsetSeedCurveVariation,
+      amount: number,
+    ): OffsetSeedCurve => {
+      const point = (
+        value: SketchPoint2D,
+        delta: SketchPoint2D,
+      ): SketchPoint2D => [
+        value[0] + amount * delta[0],
+        value[1] + amount * delta[1],
+      ];
+      if (curve.kind === "lineSegment" && variation.kind === "lineSegment")
+        return {
+          ...curve,
+          start: point(curve.start, variation.start),
+          end: point(curve.end, variation.end),
+        };
+      if (curve.kind === "circle" && variation.kind === "circle")
+        return {
+          ...curve,
+          center: point(curve.center, variation.center),
+          radius: curve.radius + amount * variation.radius,
+        };
+      if (curve.kind === "arc" && variation.kind === "arc")
+        return {
+          ...curve,
+          center: point(curve.center, variation.center),
+          start: point(curve.start, variation.start),
+          end: point(curve.end, variation.end),
+        };
+      throw new Error("Mismatched offset test variation.");
+    };
+    const flatten = (result: OffsetChainSuccess) => [
+      ...result.segments.flatMap((segment) =>
+        segment.kind === "lineSegment"
+          ? [...segment.start, ...segment.end]
+          : segment.kind === "circle"
+            ? [...segment.center, segment.radius]
+            : segment.kind === "arc"
+              ? [...segment.center, ...segment.start, ...segment.end]
+              : [],
+      ),
+      ...result.joints.flatMap((joint) => [
+        ...joint.center,
+        ...joint.start,
+        ...joint.end,
+      ]),
+    ];
+    const flattenJvp = (
+      result: Extract<ReturnType<typeof computeOffsetChainJvp>, { ok: true }>,
+    ) => [
+      ...result.segments.flatMap((segment) =>
+        segment.kind === "lineSegment"
+          ? [...segment.start, ...segment.end]
+          : segment.kind === "circle"
+            ? [...segment.center, segment.radius]
+            : [...segment.center, ...segment.start, ...segment.end],
+      ),
+      ...result.joints.flatMap((joint) => [
+        ...joint.center,
+        ...joint.start,
+        ...joint.end,
+      ]),
+    ];
+
+    for (const fixture of cases) {
+      const analytic = computeOffsetChainJvp({
+        curves: fixture.curves,
+        curveVariations: fixture.variations,
+        distance: fixture.distance,
+      });
+      expect(
+        analytic.ok,
+        `${fixture.label} analytic JVP should exist.`,
+      ).toBeTruthy();
+      const plus = computeOffsetChain({
+        curves: fixture.curves.map((curve, index) =>
+          perturb(curve, fixture.variations[index]!, epsilon),
+        ),
+        distance: fixture.distance,
+      });
+      const minus = computeOffsetChain({
+        curves: fixture.curves.map((curve, index) =>
+          perturb(curve, fixture.variations[index]!, -epsilon),
+        ),
+        distance: fixture.distance,
+      });
+      expect(
+        plus.ok && minus.ok,
+        `${fixture.label} oracle frames should preserve topology.`,
+      ).toBeTruthy();
+      if (!analytic.ok || !plus.ok || !minus.ok) continue;
+      const actual = flattenJvp(analytic);
+      const plusValues = flatten(plus);
+      const minusValues = flatten(minus);
+      expect(actual.length).toBe(plusValues.length);
+      actual.forEach((value, index) =>
+        expect(
+          value,
+          `${fixture.label} derivative component ${index}`,
+        ).toBeCloseTo(
+          (plusValues[index]! - minusValues[index]!) / (2 * epsilon),
+          5,
+        ),
+      );
+    }
+
+    const spline = computeOffsetChainJvp({
+      curves: [
+        {
+          kind: "spline",
+          seedEntityId: id("seed_spline"),
+          points: [
+            [0, 0],
+            [1, 1],
+            [2, 0],
+          ],
+        },
+      ],
+      curveVariations: [
+        {
+          kind: "spline",
+          points: [
+            [1, 0],
+            [0, 0],
+            [0, 0],
+          ],
+        },
+      ],
+      distance: 0.2,
+      splineFitPointCounts: new Map([[id("seed_spline"), 3]]),
+    });
+    expect(
+      !spline.ok && spline.code,
+      "The fit-point-polyline spline approximation must not become solver derivative authority.",
+    ).toBe(OFFSET_DIAGNOSTIC_CODES.unsupportedSeed);
+  }
+
   function testTraversalAnchoring() {
     const anchoredForward = computeOffsetChain({
       curves: [
@@ -521,5 +848,6 @@ test("src/contracts/sketch/offset-geometry.spec.ts", () => {
   testJointResolution();
   testClosedLoops();
   testSplineToleranceConformance();
+  testAnalyticOffsetJvpAgainstFiniteDifferenceOracle();
   testTraversalAnchoring();
 });

@@ -13,6 +13,8 @@ import {
   type SketchSolveStrategy,
 } from "@/contracts/sketch/solver-core";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
+import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
+import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import {
   evaluateSplineSpan,
   reconstructSplineAggregate,
@@ -983,23 +985,61 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       makePoint("sketch_point_d", "D", 4.5, -50),
     ];
     const entities = [
-      makeLine("sketch_entity_left", "Left", points[0]!.pointId, points[1]!.pointId),
-      makeLine("sketch_entity_right", "Right", points[2]!.pointId, points[3]!.pointId),
+      makeLine(
+        "sketch_entity_left",
+        "Left",
+        points[0]!.pointId,
+        points[1]!.pointId,
+      ),
+      makeLine(
+        "sketch_entity_right",
+        "Right",
+        points[2]!.pointId,
+        points[3]!.pointId,
+      ),
     ];
     const definition: SketchDefinition = {
-      schemaVersion: "sketch-definition/v1alpha1", referenceIds: [], references: [],
-      points, pointIds: points.map((point) => point.pointId),
-      entities, entityIds: entities.map((entity) => entity.entityId),
-      constraintIds: [], constraints: [], dimensionIds: ["dimension_gap"],
-      dimensions: [{ dimensionId: "dimension_gap", kind: "lineDistance", label: "Gap",
-        lines: [{ kind: "localEntity", entityId: entities[0]!.entityId },
-          { kind: "localEntity", entityId: entities[1]!.entityId }], value: 12 }],
-      styleIds: [], styles: [], svgRenderingEnabled: true,
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      points,
+      pointIds: points.map((point) => point.pointId),
+      entities,
+      entityIds: entities.map((entity) => entity.entityId),
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: ["dimension_gap"],
+      dimensions: [
+        {
+          dimensionId: "dimension_gap",
+          kind: "lineDistance",
+          label: "Gap",
+          lines: [
+            { kind: "localEntity", entityId: entities[0]!.entityId },
+            { kind: "localEntity", entityId: entities[1]!.entityId },
+          ],
+          value: 12,
+        },
+      ],
+      styleIds: [],
+      styles: [],
+      svgRenderingEnabled: true,
     };
-    const solved = solveSketchDefinitionCore({ definition, tolerances, partialSolvePolicy: "failOnConflict" });
-    expect(solved.status.solveState, "An edited distance must not stall when initially parallel lines rotate during iteration.").toBe("solved");
-    assertClose(solved.solvedSnapshot.dimensionStatuses[0]!.solvedValue!, 12, 1e-4,
-      "The edited line gap must reach its authored distance.");
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(
+      solved.status.solveState,
+      "An edited distance must not stall when initially parallel lines rotate during iteration.",
+    ).toBe("solved");
+    assertClose(
+      solved.solvedSnapshot.dimensionStatuses[0]!.solvedValue!,
+      12,
+      1e-4,
+      "The edited line gap must reach its authored distance.",
+    );
   }
 
   async function testExpandedDimensionStatuses() {
@@ -3357,7 +3397,8 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         entityId: entities[index]!.entityId,
       })),
       ...[1, 3, 5, 7].map((index) => ({
-        constraintId: `constraint_horizontal_${index}` as `constraint_${string}`,
+        constraintId:
+          `constraint_horizontal_${index}` as `constraint_${string}`,
         kind: "horizontal" as const,
         label: `Horizontal ${index}`,
         entityId: entities[index]!.entityId,
@@ -3432,7 +3473,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     for (const [index, line] of entities.entries()) {
       const start = solvedPoints.get(line.startPointId)!;
       const end = solvedPoints.get(line.endPointId)!;
-      const axisDelta = index % 2 === 0 ? Math.abs(start[0] - end[0]) : Math.abs(start[1] - end[1]);
+      const axisDelta =
+        index % 2 === 0
+          ? Math.abs(start[0] - end[0])
+          : Math.abs(start[1] - end[1]);
       expect(
         axisDelta,
         `Solved imported profile line ${index} should not render crooked.`,
@@ -4050,7 +4094,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     };
     const gradientDefinition: SketchDefinition = {
       ...definition,
-      constraintIds: [...definition.constraintIds, outputRequirement.constraintId],
+      constraintIds: [
+        ...definition.constraintIds,
+        outputRequirement.constraintId,
+      ],
       constraints: [...definition.constraints, outputRequirement],
     };
     assertGradientMatchesFiniteDifference(
@@ -4066,8 +4113,11 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     const outputScalar = gradientProgram.system.scalarConstraints.find(
       (constraint) => constraint.id === outputRequirement.constraintId,
     )!;
-    const mutableValues = new Float64Array(gradientProgram.system.initialValues);
-    const axisGradientAtZeroPose = outputScalar.evaluate(mutableValues).gradient;
+    const mutableValues = new Float64Array(
+      gradientProgram.system.initialValues,
+    );
+    const axisGradientAtZeroPose =
+      outputScalar.evaluate(mutableValues).gradient;
     mutableValues[1] = 1;
     mutableValues[7] = 0.5;
     const mutatedEvaluation = outputScalar.evaluate(mutableValues);
@@ -4076,7 +4126,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       constraintId: outputRequirement.constraintId,
       values: new Float64Array(mutableValues),
     });
-    expect(mutatedEvaluation.residual).toBeCloseTo(freshEvaluation.residual, 12);
+    expect(mutatedEvaluation.residual).toBeCloseTo(
+      freshEvaluation.residual,
+      12,
+    );
     expect([...mutatedEvaluation.gradient]).toEqual([
       ...freshEvaluation.gradient,
     ]);
@@ -4135,7 +4188,146 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     expect(solvedPoints.get(points[2]!.pointId)?.[1]).toBeCloseTo(-2, 3);
   }
 
-  async function testUnsupportedOffsetRequirementFailsToleranceStatus() {
+  async function testDimensionStatusUsesLinearAndAngularTolerancePolicies() {
+    const solveWithTolerance = (
+      definition: SketchDefinition,
+      policy: typeof tolerances,
+    ) =>
+      solveSketchDefinitionCore({
+        definition,
+        tolerances: policy,
+        partialSolvePolicy: "bestEffort",
+      });
+    const fixedConstraints = (
+      points: readonly ReturnType<typeof makePoint>[],
+    ) =>
+      points.map((point, index) => ({
+        constraintId:
+          `constraint_policy_fix_${index}` as `constraint_${string}`,
+        kind: "fixPoint" as const,
+        label: `Fix ${index}`,
+        pointId: point.pointId,
+        position: point.position,
+      }));
+
+    const linearPoints = [
+      makePoint("sketch_point_policy_a", "A", 0, 0),
+      makePoint("sketch_point_policy_b", "B", 1.01, 0),
+    ];
+    const linearConstraints = fixedConstraints(linearPoints);
+    const linearDimension = {
+      dimensionId: "dimension_policy_linear" as const,
+      kind: "distance" as const,
+      label: "Linear policy boundary",
+      pointIds: [linearPoints[0]!.pointId, linearPoints[1]!.pointId] as const,
+      axis: "aligned" as const,
+      value: 1,
+    };
+    const linearDefinition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: linearPoints.map((point) => point.pointId),
+      points: linearPoints,
+      entityIds: [],
+      entities: [],
+      constraintIds: linearConstraints.map(
+        (constraint) => constraint.constraintId,
+      ),
+      constraints: linearConstraints,
+      dimensionIds: [linearDimension.dimensionId],
+      dimensions: [linearDimension],
+    };
+    const looseLinear = solveWithTolerance(linearDefinition, {
+      ...tolerances,
+      coincidence: 0.01,
+    });
+    const strictLinear = solveWithTolerance(linearDefinition, {
+      ...tolerances,
+      coincidence: 1e-5,
+    });
+    expect(
+      looseLinear.solvedSnapshot.dimensionStatuses[0]?.status,
+      "A linear dimension residual inside the supplied linear policy should be driving.",
+    ).toBe("driving");
+    expect(
+      strictLinear.solvedSnapshot.dimensionStatuses[0]?.status,
+      "The same linear residual outside a stricter linear policy should be unsatisfied.",
+    ).toBe("unsatisfied");
+
+    const anglePoints = [
+      makePoint("sketch_point_policy_o", "O", 0, 0),
+      makePoint("sketch_point_policy_x", "X", 1, 0),
+      makePoint("sketch_point_policy_y", "Y", 0, 1),
+    ];
+    const angleLines = [
+      makeLine(
+        "sketch_entity_policy_x",
+        "X axis",
+        anglePoints[0]!.pointId,
+        anglePoints[1]!.pointId,
+      ),
+      makeLine(
+        "sketch_entity_policy_y",
+        "Y axis",
+        anglePoints[0]!.pointId,
+        anglePoints[2]!.pointId,
+      ),
+    ];
+    const angleConstraints = fixedConstraints(anglePoints);
+    const angleDimension = {
+      dimensionId: "dimension_policy_angle" as const,
+      kind: "lineAngle" as const,
+      label: "Angular policy boundary",
+      lines: angleLines.map((line) => ({
+        kind: "localEntity" as const,
+        entityId: line.entityId,
+      })) as [
+        {
+          kind: "localEntity";
+          entityId: (typeof angleLines)[number]["entityId"];
+        },
+        {
+          kind: "localEntity";
+          entityId: (typeof angleLines)[number]["entityId"];
+        },
+      ],
+      valueRadians: Math.PI / 2 + 0.01,
+    };
+    const angleDefinition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: anglePoints.map((point) => point.pointId),
+      points: anglePoints,
+      entityIds: angleLines.map((line) => line.entityId),
+      entities: angleLines,
+      constraintIds: angleConstraints.map(
+        (constraint) => constraint.constraintId,
+      ),
+      constraints: angleConstraints,
+      dimensionIds: [angleDimension.dimensionId],
+      dimensions: [angleDimension],
+    };
+    const looseAngle = solveWithTolerance(angleDefinition, {
+      coincidence: 1,
+      angleRadians: 0.01,
+      minimumSegmentLength: 1e-6,
+    });
+    const strictAngle = solveWithTolerance(angleDefinition, {
+      coincidence: 1,
+      angleRadians: 1e-5,
+      minimumSegmentLength: 1e-6,
+    });
+    expect(looseAngle.solvedSnapshot.dimensionStatuses[0]?.status).toBe(
+      "driving",
+    );
+    expect(strictAngle.solvedSnapshot.dimensionStatuses[0]?.status).toBe(
+      "unsatisfied",
+    );
+  }
+
+  async function testOffsetOutputRequirementDrivesSourceAuthority() {
     const points = [
       makePoint("sketch_point_offset_a", "A", 0, 0),
       makePoint("sketch_point_offset_b", "B", 4, 0),
@@ -4144,6 +4336,7 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       makePoint("sketch_point_offset_o1e", "O1E", 0, 0),
       makePoint("sketch_point_offset_o2s", "O2S", 0, 0),
       makePoint("sketch_point_offset_o2e", "O2E", 0, 0),
+      makePoint("sketch_point_offset_joint", "Joint center", 0, 0),
     ];
     const entities = [
       makeLine(
@@ -4170,13 +4363,27 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         points[5]!.pointId,
         points[6]!.pointId,
       ),
+      makeArc(
+        "sketch_entity_offset_joint",
+        "Joint",
+        points[7]!.pointId,
+        points[4]!.pointId,
+        points[5]!.pointId,
+      ),
     ];
     const constraint = {
       constraintId: "constraint_fix_offset_output" as const,
       kind: "fixPoint" as const,
       label: "Near offset output",
       pointId: points[3]!.pointId,
-      position: [0, 1.00001] as const,
+      position: [0, -1.00001] as const,
+    };
+    const jointConstraint = {
+      constraintId: "constraint_fix_offset_joint" as const,
+      kind: "fixPoint" as const,
+      label: "Drive committed joint center",
+      pointId: points[7]!.pointId,
+      position: [5, 0] as const,
     };
     const unrelatedSourceConstraint = {
       constraintId: "constraint_move_offset_source" as const,
@@ -4195,9 +4402,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
       entities,
       constraintIds: [
         constraint.constraintId,
+        jointConstraint.constraintId,
         unrelatedSourceConstraint.constraintId,
       ],
-      constraints: [constraint, unrelatedSourceConstraint],
+      constraints: [constraint, jointConstraint, unrelatedSourceConstraint],
       dimensionIds: [],
       dimensions: [],
       derivedRelationshipIds: ["derivation_offset"],
@@ -4207,9 +4415,18 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
           kind: "offset",
           label: "Offset",
           seedEntityIds: [entities[0]!.entityId, entities[1]!.entityId],
-          distance: 1,
+          distance: -1,
           jointPolicy: "trimExtendArcFallback",
-          jointOutputs: [],
+          jointOutputs: [
+            {
+              firstSeedEntityId: entities[0]!.entityId,
+              secondSeedEntityId: entities[1]!.entityId,
+              outputEntityId: entities[4]!.entityId,
+              centerPointId: points[7]!.pointId,
+              startPointId: points[4]!.pointId,
+              endPointId: points[5]!.pointId,
+            },
+          ],
           outputs: [
             {
               seedEntityId: entities[0]!.entityId,
@@ -4229,27 +4446,574 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
         },
       ],
     };
+    assertGradientMatchesFiniteDifference(
+      definition,
+      constraint.constraintId,
+      1e-5,
+    );
     const result = solveSketchDefinitionCore({
       definition,
       tolerances,
       partialSolvePolicy: "failOnConflict",
     });
-    expect(result.status.solveState).toBe("failed");
+    expect(result.status.solveState).toBe("solved");
     expect(result.solvedSnapshot.constraintStatuses).toContainEqual({
       constraintId: constraint.constraintId,
-      status: "unsatisfied",
+      status: "satisfied",
     });
-    expect(result.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: "solver-residual-too-large" }),
-        expect.objectContaining({ code: "solver-requirement-unsatisfied" }),
+    expect(result.solvedSnapshot.constraintStatuses).toContainEqual({
+      constraintId: jointConstraint.constraintId,
+      status: "satisfied",
+    });
+    expect(result.solvedSnapshot.constraintStatuses).toContainEqual({
+      constraintId: unrelatedSourceConstraint.constraintId,
+      status: "satisfied",
+    });
+    const solvedPositions = new Map(
+      result.solvedSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
       ]),
     );
+    expect(solvedPositions.get(points[1]!.pointId)![0]).toBeCloseTo(5, 6);
+    expect(solvedPositions.get(points[1]!.pointId)![1]).toBeCloseTo(0, 6);
     expect(
-      result.solvedSnapshot.solvedPoints.find(
-        (point) => point.pointId === points[1]!.pointId,
-      )?.solvedPosition,
-    ).toEqual([5, 0]);
+      Math.abs(solvedPositions.get(points[0]!.pointId)![1]) > 1e-7,
+      "The offset-output requirement should move seed authority rather than an output slot.",
+    ).toBeTruthy();
+    const freshlyDerived = evaluateSketchDerivations({
+      ...definition,
+      points: definition.points.map((point) => ({
+        ...point,
+        position: solvedPositions.get(point.pointId) ?? point.position,
+      })),
+    }).definition;
+    const freshOutput = freshlyDerived.points.find(
+      (point) => point.pointId === points[3]!.pointId,
+    )!.position;
+    expect(solvedPositions.get(points[3]!.pointId)![0]).toBeCloseTo(
+      freshOutput[0],
+      8,
+    );
+    expect(solvedPositions.get(points[3]!.pointId)![1]).toBeCloseTo(
+      freshOutput[1],
+      8,
+    );
+
+    const anchorConstraints = (
+      bPosition: readonly [number, number],
+    ): SketchDefinition["constraints"] => [
+      {
+        constraintId: "constraint_offset_topology_a",
+        kind: "fixPoint",
+        label: "Anchor A",
+        pointId: points[0]!.pointId,
+        position: [0, 0],
+      },
+      {
+        constraintId: "constraint_offset_topology_b",
+        kind: "fixPoint",
+        label: "Force topology frame",
+        pointId: points[1]!.pointId,
+        position: bPosition,
+      },
+      {
+        constraintId: "constraint_offset_topology_c",
+        kind: "fixPoint",
+        label: "Anchor C",
+        pointId: points[2]!.pointId,
+        position: [4, 4],
+      },
+    ];
+    const definitionWithAnchors = (
+      bPosition: readonly [number, number],
+    ): SketchDefinition => {
+      const constraints = anchorConstraints(bPosition);
+      return {
+        ...definition,
+        constraintIds: constraints.map((candidate) => candidate.constraintId),
+        constraints,
+      };
+    };
+    const accepted = solveSketchDefinitionCore({
+      definition: definitionWithAnchors([4, 0]),
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    const topologyProgram = compileSketchSolveProgram({
+      definition: definitionWithAnchors([4, 5]),
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    const topologySession = createCompiledSketchSolveSession({
+      sessionId: "interactive_offset_topology_change",
+      program: topologyProgram,
+      priorSolvedSnapshot: accepted.solvedSnapshot,
+    });
+    const blocked = updateCompiledSketchSolveSession(topologySession, {
+      kind: "sketchPoint",
+      pointId: points[1]!.pointId,
+      position: [4, 5],
+    });
+    expect(blocked.kind).toBe("blocked");
+    expect(blocked.solvedSnapshot).toEqual(accepted.solvedSnapshot);
+    expect(
+      blocked.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === OFFSET_DIAGNOSTIC_CODES.jointUnsatisfied ||
+          diagnostic.code === OFFSET_DIAGNOSTIC_CODES.selfIntersection,
+      ),
+      "A committed offset joint topology change should block with its targeted diagnostic.",
+    ).toBeTruthy();
+  }
+
+  async function testOffsetCircleScalarAuthorityMovesTheSource() {
+    const points = [
+      makePoint("sketch_point_offset_circle_seed", "Seed center", 0, 0),
+      makePoint("sketch_point_offset_circle_output", "Output center", 0, 0),
+    ];
+    const entities = [
+      makeCircle(
+        "sketch_entity_offset_circle_seed",
+        "Seed circle",
+        points[0]!.pointId,
+        2,
+      ),
+      makeCircle(
+        "sketch_entity_offset_circle_output",
+        "Offset circle",
+        points[1]!.pointId,
+        1,
+      ),
+    ];
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: points.map((point) => point.pointId),
+      points,
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: ["dimension_offset_circle_radius"],
+      dimensions: [
+        {
+          dimensionId: "dimension_offset_circle_radius",
+          kind: "circleRadius",
+          label: "Derived radius",
+          entityId: entities[1]!.entityId,
+          value: 1.2,
+        },
+      ],
+      derivedRelationshipIds: ["derivation_offset_circle"],
+      derivedRelationships: [
+        {
+          derivationId: "derivation_offset_circle",
+          kind: "offset",
+          label: "Circle offset",
+          seedEntityIds: [entities[0]!.entityId],
+          distance: 1,
+          jointPolicy: "trimExtendArcFallback",
+          jointOutputs: [],
+          outputs: [
+            {
+              seedEntityId: entities[0]!.entityId,
+              outputEntityId: entities[1]!.entityId,
+              instanceIndex: 1,
+              seedPointIds: [points[0]!.pointId],
+              outputPointIds: [points[1]!.pointId],
+            },
+          ],
+        },
+      ],
+    };
+
+    const program = compileSketchSolveProgram({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    const seedState = program.system.entityStates.get(entities[0]!.entityId)!;
+    const outputState = program.system.entityStates.get(entities[1]!.entityId)!;
+    expect(seedState.kind).toBe("circle");
+    expect(outputState.kind).toBe("circle");
+    expect(
+      program.system.parameterProjection.authorityVariableIndices,
+    ).toContain(seedState.baseIndex);
+    expect(
+      program.system.parameterProjection.authorityVariableIndices,
+      "A derived output radius must not remain an independent solver variable.",
+    ).not.toContain(outputState.baseIndex);
+    assertGradientMatchesFiniteDifference(
+      definition,
+      "dimension_offset_circle_radius",
+      1e-5,
+    );
+
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(solved.status.solveState).toBe("solved");
+    expect(solved.solvedSnapshot.dimensionStatuses[0]?.status).toBe("driving");
+    expect(solved.solvedSnapshot.dimensionStatuses[0]?.solvedValue).toBeCloseTo(
+      1.2,
+      10,
+    );
+    const solvedCircles = new Map(
+      solved.solvedSnapshot.solvedEntities
+        .filter((entity) => entity.kind === "circle")
+        .map((entity) => [entity.entityId, entity] as const),
+    );
+    const solvedSeed = solvedCircles.get(entities[0]!.entityId)!;
+    const solvedOutput = solvedCircles.get(entities[1]!.entityId)!;
+    expect(solvedSeed.solvedRadius).toBeCloseTo(2.2, 6);
+    expect(solvedOutput.solvedRadius).toBeCloseTo(1.2, 8);
+    expect(solvedSeed.solvedRadius).not.toBeCloseTo(2, 6);
+
+    const fresh = evaluateSketchDerivations({
+      ...definition,
+      entities: definition.entities.map((entity) =>
+        entity.entityId === solvedSeed.entityId && entity.kind === "circle"
+          ? { ...entity, radius: solvedSeed.solvedRadius }
+          : entity,
+      ),
+    }).definition;
+    const freshOutput = fresh.entities.find(
+      (entity) => entity.entityId === solvedOutput.entityId,
+    );
+    expect(freshOutput?.kind).toBe("circle");
+    if (freshOutput?.kind === "circle") {
+      expect(solvedOutput.solvedRadius).toBeCloseTo(freshOutput.radius, 10);
+    }
+  }
+
+  async function testOffsetArcScalarStateFollowsDefiningPoints() {
+    const points = [
+      makePoint("sketch_point_offset_arc_c", "Seed center", 0, 0),
+      makePoint("sketch_point_offset_arc_s", "Seed start", 2, 0),
+      makePoint("sketch_point_offset_arc_e", "Seed end", 0, 2),
+      makePoint("sketch_point_offset_arc_oc", "Output center", 0, 0),
+      makePoint("sketch_point_offset_arc_os", "Output start", 1, 0),
+      makePoint("sketch_point_offset_arc_oe", "Output end", 0, 1),
+    ];
+    const entities = [
+      makeArc(
+        "sketch_entity_offset_arc_seed",
+        "Seed arc",
+        points[0]!.pointId,
+        points[1]!.pointId,
+        points[2]!.pointId,
+      ),
+      makeArc(
+        "sketch_entity_offset_arc_output",
+        "Output arc",
+        points[3]!.pointId,
+        points[4]!.pointId,
+        points[5]!.pointId,
+      ),
+    ];
+    const definition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: points.map((point) => point.pointId),
+      points,
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: ["dimension_offset_arc_diameter"],
+      dimensions: [
+        {
+          dimensionId: "dimension_offset_arc_diameter",
+          kind: "diameter",
+          label: "Derived arc diameter",
+          entityId: entities[1]!.entityId,
+          value: 2.4,
+        },
+      ],
+      derivedRelationshipIds: ["derivation_offset_arc"],
+      derivedRelationships: [
+        {
+          derivationId: "derivation_offset_arc",
+          kind: "offset",
+          label: "Arc offset",
+          seedEntityIds: [entities[0]!.entityId],
+          distance: 1,
+          jointPolicy: "trimExtendArcFallback",
+          jointOutputs: [],
+          outputs: [
+            {
+              seedEntityId: entities[0]!.entityId,
+              outputEntityId: entities[1]!.entityId,
+              instanceIndex: 1,
+              seedPointIds: points.slice(0, 3).map((point) => point.pointId),
+              outputPointIds: points.slice(3).map((point) => point.pointId),
+            },
+          ],
+        },
+      ],
+    };
+    const program = compileSketchSolveProgram({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    const seedState = program.system.entityStates.get(entities[0]!.entityId)!;
+    const outputState = program.system.entityStates.get(entities[1]!.entityId)!;
+    expect(seedState.kind).toBe("arc");
+    expect(outputState.kind).toBe("arc");
+    if (seedState.kind !== "arc" || outputState.kind !== "arc") return;
+    for (const scalarIndex of [
+      seedState.baseIndex,
+      seedState.baseIndex + 1,
+      seedState.baseIndex + 2,
+      outputState.baseIndex,
+      outputState.baseIndex + 1,
+      outputState.baseIndex + 2,
+    ]) {
+      expect(
+        program.system.parameterProjection.authorityVariableIndices,
+        "Offset source/output arc scalars must follow their authoritative defining points.",
+      ).not.toContain(scalarIndex);
+    }
+    const commonRadiusValues = new Float64Array(program.system.initialValues);
+    const seedEndRecord = program.system.pointRecords.get(points[2]!.pointId)!;
+    commonRadiusValues[seedEndRecord.baseIndex] += 0.2;
+    assertGradientMatchesFiniteDifference(
+      definition,
+      `constraint_internal_arc_common_radius_${entities[0]!.entityId}`,
+      1e-5,
+      1e-6,
+      commonRadiusValues,
+    );
+    assertGradientMatchesFiniteDifference(
+      definition,
+      "dimension_offset_arc_diameter",
+      1e-5,
+    );
+    const sourceDimensionDefinition: SketchDefinition = {
+      ...definition,
+      dimensionIds: ["dimension_offset_arc_source_diameter"],
+      dimensions: [
+        {
+          ...definition.dimensions[0]!,
+          dimensionId: "dimension_offset_arc_source_diameter",
+          label: "Source arc diameter",
+          entityId: entities[0]!.entityId,
+          value: 4.4,
+        },
+      ],
+    };
+    assertGradientMatchesFiniteDifference(
+      sourceDimensionDefinition,
+      "dimension_offset_arc_source_diameter",
+      1e-5,
+    );
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(solved.status.solveState).toBe("solved");
+    const dimensionStatus = solved.solvedSnapshot.dimensionStatuses[0];
+    expect(dimensionStatus?.status).toBe("driving");
+    expect(dimensionStatus?.solvedValue).toBeCloseTo(2.4, 6);
+    const seed = solved.solvedSnapshot.solvedEntities.find(
+      (entity) => entity.entityId === entities[0]!.entityId,
+    );
+    const output = solved.solvedSnapshot.solvedEntities.find(
+      (entity) => entity.entityId === entities[1]!.entityId,
+    );
+    expect(seed?.kind).toBe("arc");
+    expect(output?.kind).toBe("arc");
+    if (seed?.kind !== "arc" || output?.kind !== "arc") return;
+    const solvedPoints = new Map(
+      solved.solvedSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+    const seedCenter = solvedPoints.get(points[0]!.pointId)!;
+    const seedStart = solvedPoints.get(points[1]!.pointId)!;
+    const seedEnd = solvedPoints.get(points[2]!.pointId)!;
+    const center = solvedPoints.get(points[3]!.pointId)!;
+    const start = solvedPoints.get(points[4]!.pointId)!;
+    const end = solvedPoints.get(points[5]!.pointId)!;
+    expect(
+      Math.hypot(
+        seedStart[0] - points[1]!.position[0],
+        seedStart[1] - points[1]!.position[1],
+      ),
+      "The output diameter must move source defining points rather than private output state.",
+    ).toBeGreaterThan(0.09);
+    const seedStartRadius = Math.hypot(
+      seedStart[0] - seedCenter[0],
+      seedStart[1] - seedCenter[1],
+    );
+    const seedEndRadius = Math.hypot(
+      seedEnd[0] - seedCenter[0],
+      seedEnd[1] - seedCenter[1],
+    );
+    expect(Math.abs(seedStartRadius - 2.2)).toBeLessThan(
+      tolerances.coincidence,
+    );
+    expect(Math.abs(seedEndRadius - 2.2)).toBeLessThan(tolerances.coincidence);
+    expect(Math.abs(seedEndRadius - seedStartRadius)).toBeLessThan(
+      tolerances.coincidence,
+    );
+    expect(seed.centerPosition[0]).toBeCloseTo(seedCenter[0], 10);
+    expect(seed.centerPosition[1]).toBeCloseTo(seedCenter[1], 10);
+    expect(seed.startPosition[0]).toBeCloseTo(seedStart[0], 10);
+    expect(seed.startPosition[1]).toBeCloseTo(seedStart[1], 10);
+    expect(seed.endPosition[0]).toBeCloseTo(seedEnd[0], 10);
+    expect(seed.endPosition[1]).toBeCloseTo(seedEnd[1], 10);
+    expect(output.centerPosition[0]).toBeCloseTo(center[0], 10);
+    expect(output.centerPosition[1]).toBeCloseTo(center[1], 10);
+    expect(output.startPosition[0]).toBeCloseTo(start[0], 10);
+    expect(output.startPosition[1]).toBeCloseTo(start[1], 10);
+    expect(output.endPosition[0]).toBeCloseTo(end[0], 10);
+    expect(output.endPosition[1]).toBeCloseTo(end[1], 10);
+    expect(
+      Math.hypot(
+        output.startPosition[0] - output.centerPosition[0],
+        output.startPosition[1] - output.centerPosition[1],
+      ),
+    ).toBeCloseTo(Math.hypot(start[0] - center[0], start[1] - center[1]), 10);
+    expect(
+      Math.atan2(
+        output.startPosition[1] - output.centerPosition[1],
+        output.startPosition[0] - output.centerPosition[0],
+      ),
+    ).toBeCloseTo(Math.atan2(start[1] - center[1], start[0] - center[0]), 10);
+    expect(
+      Math.atan2(
+        output.endPosition[1] - output.centerPosition[1],
+        output.endPosition[0] - output.centerPosition[0],
+      ),
+    ).toBeCloseTo(Math.atan2(end[1] - center[1], end[0] - center[0]), 10);
+
+    const fresh = evaluateSketchDerivations({
+      ...definition,
+      points: definition.points.map((point) => ({
+        ...point,
+        position: solvedPoints.get(point.pointId) ?? point.position,
+      })),
+    }).definition;
+    for (const pointId of [
+      points[3]!.pointId,
+      points[4]!.pointId,
+      points[5]!.pointId,
+    ]) {
+      const solvedPosition = solvedPoints.get(pointId)!;
+      const freshPosition = fresh.points.find(
+        (point) => point.pointId === pointId,
+      )!.position;
+      expect(solvedPosition[0]).toBeCloseTo(freshPosition[0], 10);
+      expect(solvedPosition[1]).toBeCloseTo(freshPosition[1], 10);
+    }
+    const outputStartRadius = Math.hypot(
+      start[0] - center[0],
+      start[1] - center[1],
+    );
+    const outputEndRadius = Math.hypot(end[0] - center[0], end[1] - center[1]);
+    expect(Math.abs(outputStartRadius - 1.2)).toBeLessThan(
+      tolerances.coincidence,
+    );
+    expect(Math.abs(outputEndRadius - outputStartRadius)).toBeLessThan(
+      tolerances.coincidence,
+    );
+
+    const radialGap = 1e-5;
+    const mismatchedDefinition: SketchDefinition = {
+      ...definition,
+      points: definition.points.map((point) =>
+        point.pointId === points[2]!.pointId
+          ? { ...point, position: [0, 2 + radialGap] }
+          : point,
+      ),
+      dimensionIds: [],
+      dimensions: [],
+    };
+    const mismatched = solveSketchDefinitionCore({
+      definition: mismatchedDefinition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+      strategy: "gaussNewton",
+    });
+    expect(0.5 * radialGap * radialGap).toBeLessThan(1e-8);
+    expect(radialGap).toBeGreaterThan(tolerances.coincidence);
+    expect(mismatched.status.solveState).toBe("failed");
+    expect(mismatched.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "offset-arc-common-circle-unsatisfied",
+        severity: "error",
+        target: { kind: "entity", entityId: entities[0]!.entityId },
+      }),
+    );
+    expect(
+      () =>
+        createCompiledSketchSolveSession({
+          sessionId: "interactive_sketch_solve_offset_arc_invalid_initial",
+          program: compileSketchSolveProgram({
+            definition: mismatchedDefinition,
+            tolerances,
+            partialSolvePolicy: "failOnConflict",
+            strategy: "gaussNewton",
+          }),
+        }),
+      "An invalid initial common-circle snapshot must not become lastAcceptedSnapshot.",
+    ).toThrow(/common-circle snapshot.*radial gap/);
+
+    const dragProgram = compileSketchSolveProgram({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+      strategy: "gaussNewton",
+    });
+    const dragSession = createCompiledSketchSolveSession({
+      sessionId: "interactive_sketch_solve_offset_arc_radial_gap",
+      program: dragProgram,
+      priorSolvedSnapshot: solved.solvedSnapshot,
+    });
+    const acceptedBeforeDrag = dragSession.lastAcceptedSnapshot;
+    const dragEndRecord = dragProgram.system.pointRecords.get(
+      points[2]!.pointId,
+    )!;
+    const acceptedEnd = acceptedBeforeDrag.solvedPoints.find(
+      (point) => point.pointId === points[2]!.pointId,
+    )!.solvedPosition;
+    const acceptedCenter = acceptedBeforeDrag.solvedPoints.find(
+      (point) => point.pointId === points[0]!.pointId,
+    )!.solvedPosition;
+    const acceptedRadius = Math.hypot(
+      acceptedEnd[0] - acceptedCenter[0],
+      acceptedEnd[1] - acceptedCenter[1],
+    );
+    const radialScale = (acceptedRadius + radialGap) / acceptedRadius;
+    const invalidDragEnd = [
+      acceptedCenter[0] + (acceptedEnd[0] - acceptedCenter[0]) * radialScale,
+      acceptedCenter[1] + (acceptedEnd[1] - acceptedCenter[1]) * radialScale,
+    ] as const;
+    dragSession.values[dragEndRecord.baseIndex] = invalidDragEnd[0];
+    dragSession.values[dragEndRecord.baseIndex + 1] = invalidDragEnd[1];
+    const dragged = updateCompiledSketchSolveSession(dragSession, {
+      kind: "sketchPoint",
+      pointId: points[2]!.pointId,
+      position: invalidDragEnd,
+    });
+    expect(dragged.kind).toBe("blocked");
+    expect(dragged.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "offset-arc-common-circle-unsatisfied",
+        severity: "error",
+      }),
+    );
+    expect(dragged.solvedSnapshot).toBe(acceptedBeforeDrag);
+    expect(dragSession.lastAcceptedSnapshot).toBe(acceptedBeforeDrag);
   }
 
   async function testSplinePointResidualPreservesSubnormalPhysicalGap() {
@@ -4454,7 +5218,510 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     ).toMatchObject({ reconstruction: { validity: "invalid" } });
   }
 
+  function makeEqualOffsetDefinition(input?: {
+    points?: readonly (readonly [number, number])[];
+    sides?: readonly ["left" | "right", "left" | "right"];
+    reverseEntities?: readonly string[];
+    drivenDistance?: number;
+  }): SketchDefinition {
+    const coordinates =
+      input?.points ??
+      ([
+        [0, 0],
+        [4, 0],
+        [0, 2],
+        [4, 2],
+        [0, 6],
+        [4, 6],
+        [0, 8],
+        [4, 8],
+      ] as const);
+    const points = coordinates.map((position, index) =>
+      makePoint(
+        `sketch_point_equal_offset_${index}`,
+        `Equal offset ${index}`,
+        position[0],
+        position[1],
+      ),
+    );
+    const reverse = new Set(input?.reverseEntities ?? []);
+    const lines = [0, 1, 2, 3].map((index) => {
+      const first = points[index * 2]!.pointId;
+      const second = points[index * 2 + 1]!.pointId;
+      const entityId = `sketch_entity_equal_offset_${index}`;
+      return makeLine(
+        entityId,
+        `Equal offset line ${index}`,
+        reverse.has(entityId) ? second : first,
+        reverse.has(entityId) ? first : second,
+      );
+    });
+    const equalOffset = {
+      constraintId: "constraint_equal_offset" as const,
+      kind: "equalOffset" as const,
+      label: "Equal offsets",
+      pairs: [
+        {
+          seedEntityId: lines[0]!.entityId,
+          offsetEntityId: lines[1]!.entityId,
+          side: input?.sides?.[0] ?? "left",
+        },
+        {
+          seedEntityId: lines[2]!.entityId,
+          offsetEntityId: lines[3]!.entityId,
+          side: input?.sides?.[1] ?? "left",
+        },
+      ] as const,
+    };
+    const dimension =
+      input?.drivenDistance === undefined
+        ? []
+        : [
+            {
+              dimensionId: "dimension_equal_offset_magnitude" as const,
+              kind: "lineDistance" as const,
+              label: "Offset magnitude",
+              lines: [
+                { kind: "localEntity" as const, entityId: lines[0]!.entityId },
+                { kind: "localEntity" as const, entityId: lines[1]!.entityId },
+              ] as const,
+              value: input.drivenDistance,
+            },
+          ];
+    return {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: points.map((point) => point.pointId),
+      points,
+      entityIds: lines.map((line) => line.entityId),
+      entities: lines,
+      constraintIds: [equalOffset.constraintId],
+      constraints: [equalOffset],
+      dimensionIds: dimension.map((entry) => entry.dimensionId),
+      dimensions: dimension,
+    };
+  }
+
+  async function testEqualOffsetFreeMagnitudeAndComponentCoupling() {
+    const definition = makeEqualOffsetDefinition();
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(solved.status.solveState).toBe("solved");
+    expect(solved.solvedSnapshot.constraintStatuses).toEqual([
+      { constraintId: "constraint_equal_offset", status: "satisfied" },
+    ]);
+    expect(definition.derivedRelationships).toBeUndefined();
+    expect(solved.solvedSnapshot.solvedEntities).toHaveLength(4);
+
+    const program = compileSketchSolveProgram({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    const metadata = program.equationMetadata.find(
+      (entry) => entry.id === "constraint_equal_offset",
+    );
+    expect(metadata?.variableIndices).toHaveLength(16);
+    expect(program.components).toHaveLength(1);
+    expect(program.components[0]?.entityIds).toEqual(definition.entityIds);
+    const session = createCompiledSketchSolveSession({
+      sessionId: "interactive_sketch_solve_equal_offset",
+      program,
+      priorSolvedSnapshot: solved.solvedSnapshot,
+    });
+    expect(sketchDraggedPointHasFreeDof(session, definition.pointIds[0]!)).toBe(
+      true,
+    );
+  }
+
+  async function testEqualOffsetUsesSeparateMagnitudeDriver() {
+    const definition = makeEqualOffsetDefinition({
+      points: [
+        [0, 0],
+        [4, 0],
+        [0, 3],
+        [4, 3],
+        [0, 6],
+        [4, 6],
+        [0, 9],
+        [4, 9],
+      ],
+      drivenDistance: 3,
+    });
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+      strategy: "levenbergMarquardt",
+    });
+    expect(solved.status.solveState).toBe("solved");
+    expect(solved.solvedSnapshot.constraintStatuses[0]?.status).toBe(
+      "satisfied",
+    );
+    expect(solved.solvedSnapshot.dimensionStatuses[0]).toMatchObject({
+      dimensionId: "dimension_equal_offset_magnitude",
+      status: "driving",
+      solvedValue: 3,
+    });
+  }
+
+  async function testEqualOffsetOrientationSideObliqueAndGradient() {
+    const angle = 0.63;
+    const axis = [Math.cos(angle), Math.sin(angle)] as const;
+    const normal = [-axis[1], axis[0]] as const;
+    const point = (
+      along: number,
+      across: number,
+    ): readonly [number, number] => [
+      axis[0] * along + normal[0] * across,
+      axis[1] * along + normal[1] * across,
+    ];
+    const definition = makeEqualOffsetDefinition({
+      points: [
+        point(0, 0),
+        point(5, 0),
+        point(0, 2),
+        point(5, 2),
+        point(1, 7),
+        point(6, 7),
+        point(1, 5),
+        point(6, 5),
+      ],
+      sides: ["right", "right"],
+      reverseEntities: [
+        "sketch_entity_equal_offset_0",
+        "sketch_entity_equal_offset_3",
+      ],
+    });
+    const initial = evaluateSketchScalarConstraintForTest({
+      definition,
+      constraintId: "constraint_equal_offset",
+      values: getSketchSolveInitialValuesForTest(definition),
+    });
+    expect(initial.residual).toBeLessThan(1e-20);
+
+    const perturbed = getSketchSolveInitialValuesForTest(definition);
+    perturbed[5] += 0.37;
+    perturbed[10] -= 0.21;
+    assertGradientMatchesFiniteDifference(
+      definition,
+      "constraint_equal_offset",
+      2e-6,
+      1e-6,
+      perturbed,
+    );
+  }
+
+  async function testEqualOffsetClassifiesAngularAndLinearToleranceSeparately() {
+    const makeFixedDefinition = (
+      points: readonly (readonly [number, number])[],
+    ) => {
+      const definition = makeEqualOffsetDefinition({ points });
+      const fixed = definition.points.map((point, index) => ({
+        constraintId: `constraint_equal_offset_fix_${index}`,
+        kind: "fixPoint" as const,
+        label: `Fix equal-offset point ${index}`,
+        pointId: point.pointId,
+        position: point.position,
+      }));
+      definition.constraints.push(...fixed);
+      definition.constraintIds.push(
+        ...fixed.map((constraint) => constraint.constraintId),
+      );
+      return definition;
+    };
+    const angularViolation = makeFixedDefinition([
+      [0, 0],
+      [4, 0],
+      [0, 2],
+      [4, 2 + 4e-5],
+      [0, 6],
+      [4, 6],
+      [0, 8],
+      [4, 8 + 4e-5],
+    ]);
+    const angularSolve = solveSketchDefinitionCore({
+      definition: angularViolation,
+      tolerances: {
+        ...tolerances,
+        coincidence: 1e-3,
+        angleRadians: 1e-6,
+      },
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(angularSolve.status.solveState).toBe("failed");
+    expect(angularSolve.solvedSnapshot.constraintStatuses[0]).toEqual({
+      constraintId: "constraint_equal_offset",
+      status: "unsatisfied",
+    });
+
+    const linearViolation = makeFixedDefinition([
+      [0, 0],
+      [4, 0],
+      [0, 2],
+      [4, 2],
+      [0, 6],
+      [4, 6],
+      [0, 8 + 1e-5],
+      [4, 8 + 1e-5],
+    ]);
+    const linearSolve = solveSketchDefinitionCore({
+      definition: linearViolation,
+      tolerances: {
+        ...tolerances,
+        coincidence: 1e-6,
+        angleRadians: 1e-3,
+      },
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(linearSolve.status.solveState).toBe("failed");
+    expect(linearSolve.solvedSnapshot.constraintStatuses[0]).toEqual({
+      constraintId: "constraint_equal_offset",
+      status: "unsatisfied",
+    });
+
+    const angularGap = 1e-7;
+    const angularAccepted = makeFixedDefinition([
+      [0, 0],
+      [4, 0],
+      [0, 2],
+      [4 * Math.cos(angularGap), 2 + 4 * Math.sin(angularGap)],
+      [0, 6],
+      [4, 6],
+      [0, 8],
+      [4 * Math.cos(angularGap), 8 + 4 * Math.sin(angularGap)],
+    ]);
+    const angularBoundary = Math.asin(
+      Math.abs(
+        Math.sin(angularGap) /
+          Math.hypot(Math.cos(angularGap), Math.sin(angularGap)),
+      ),
+    );
+    for (const angleRadians of [angularBoundary, angularBoundary + 1e-9]) {
+      const accepted = solveSketchDefinitionCore({
+        definition: angularAccepted,
+        tolerances: { ...tolerances, coincidence: 1e-3, angleRadians },
+        partialSolvePolicy: "failOnConflict",
+      });
+      expect(accepted.status.solveState).toBe("solved");
+      expect(accepted.solvedSnapshot.constraintStatuses[0]?.status).toBe(
+        "satisfied",
+      );
+      expect(
+        accepted.solvedSnapshot.solvedPoints.map((point) =>
+          point.solvedPosition,
+        ),
+      ).toEqual(angularAccepted.points.map((point) => point.position));
+    }
+
+    const linearGap = 1e-7;
+    const linearAccepted = makeFixedDefinition([
+      [0, 0],
+      [4, 0],
+      [0, 2],
+      [4, 2],
+      [0, 6],
+      [4, 6],
+      [0, 8 + linearGap],
+      [4, 8 + linearGap],
+    ]);
+    const linearBoundary = Math.abs(2 - (8 + linearGap - 6));
+    for (const coincidence of [linearBoundary, linearBoundary + 1e-9]) {
+      const accepted = solveSketchDefinitionCore({
+        definition: linearAccepted,
+        tolerances: { ...tolerances, coincidence, angleRadians: 1e-3 },
+        partialSolvePolicy: "failOnConflict",
+      });
+      expect(accepted.status.solveState).toBe("solved");
+      expect(accepted.solvedSnapshot.constraintStatuses[0]?.status).toBe(
+        "satisfied",
+      );
+      expect(
+        accepted.solvedSnapshot.solvedPoints.map((point) =>
+          point.solvedPosition,
+        ),
+      ).toEqual(linearAccepted.points.map((point) => point.position));
+    }
+  }
+
+  async function testEqualOffsetRejectsIncompatibleAndDegeneratePairs() {
+    const incompatible = makeEqualOffsetDefinition();
+    incompatible.entities[3] = {
+      kind: "circle",
+      entityId: incompatible.entities[3]!.entityId,
+      label: "Not a line",
+      target: incompatible.entities[3]!.target,
+      isConstruction: false,
+      centerPointId: incompatible.points[6]!.pointId,
+      radius: 2,
+    };
+    const incompatibleValidation = validateSketchDefinitionCore({
+      definition: incompatible,
+      tolerances,
+    });
+    expect(incompatibleValidation.isValid).toBe(false);
+    expect(incompatibleValidation.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "invalid-equal-offset-line-pair" }),
+    );
+
+    const selfPaired = makeEqualOffsetDefinition();
+    const equalOffset = selfPaired.constraints[0];
+    if (equalOffset?.kind !== "equalOffset") {
+      throw new Error("Expected equal-offset fixture constraint.");
+    }
+    equalOffset.pairs[0].offsetEntityId = equalOffset.pairs[0].seedEntityId;
+    const selfPairedProgram = compileSketchSolveProgram({
+      definition: selfPaired,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(
+      selfPairedProgram.equationMetadata.some(
+        (metadata) => metadata.id === "constraint_equal_offset",
+      ),
+    ).toBe(false);
+    const selfPairedSolve = solveSketchDefinitionCore({
+      definition: selfPaired,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    });
+    expect(selfPairedSolve.status.solveState).toBe("failed");
+    expect(selfPairedSolve.solvedSnapshot.constraintStatuses[0]).toEqual({
+      constraintId: "constraint_equal_offset",
+      status: "conflicting",
+    });
+
+    const validPrior = solveSketchDefinitionCore({
+      definition: makeEqualOffsetDefinition(),
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    }).solvedSnapshot;
+    for (const nonFiniteCoordinate of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const nonFinite = makeEqualOffsetDefinition();
+      nonFinite.points[1]!.position = [nonFiniteCoordinate, 0];
+      const nonFiniteEvaluation = evaluateSketchScalarConstraintForTest({
+        definition: nonFinite,
+        constraintId: "constraint_equal_offset",
+        values: getSketchSolveInitialValuesForTest(nonFinite),
+      });
+      expect(nonFiniteEvaluation.residual).toBe(Number.POSITIVE_INFINITY);
+      expect(
+        [...nonFiniteEvaluation.gradient].every(
+          (component) => Number.isFinite(component) && component === 0,
+        ),
+      ).toBe(true);
+      const nonFiniteSolve = solveSketchDefinitionCore({
+        definition: nonFinite,
+        tolerances,
+        partialSolvePolicy: "failOnConflict",
+      });
+      expect(nonFiniteSolve.status.solveState).toBe("failed");
+      expect(nonFiniteSolve.diagnostics).toContainEqual(
+        expect.objectContaining({
+          code: "non-finite-equal-offset-geometry",
+          severity: "error",
+        }),
+      );
+      expect(nonFiniteSolve.solvedSnapshot.constraintStatuses[0]).toEqual({
+        constraintId: "constraint_equal_offset",
+        status: "conflicting",
+      });
+
+      const nonFiniteProgram = compileSketchSolveProgram({
+        definition: nonFinite,
+        tolerances,
+        partialSolvePolicy: "failOnConflict",
+      });
+      expect(() =>
+        createCompiledSketchSolveSession({
+          sessionId: "interactive_sketch_solve_equal_offset_non_finite",
+          program: nonFiniteProgram,
+        }),
+      ).toThrow(/without an acceptable solved snapshot/);
+      expect(() =>
+        createCompiledSketchSolveSession({
+          sessionId: "interactive_sketch_solve_equal_offset_failed_prior",
+          program: nonFiniteProgram,
+          priorSolvedSnapshot: nonFiniteSolve.solvedSnapshot,
+        }),
+      ).toThrow(/without an acceptable solved snapshot/);
+
+      const sessionWithValidPrior = createCompiledSketchSolveSession({
+        sessionId: "interactive_sketch_solve_equal_offset_valid_prior",
+        program: nonFiniteProgram,
+        priorSolvedSnapshot: validPrior,
+      });
+      expect(sessionWithValidPrior.lastAcceptedSnapshot).toBe(validPrior);
+    }
+
+    const sharedPoint = makePoint(
+      "sketch_point_equal_offset_0",
+      "Only shared point",
+      0,
+      0,
+    );
+    const oldPoint = makePoint("sketch_point_old", "Old point", 1, 0);
+    const oldLine = makeLine(
+      "sketch_entity_old",
+      "Old line",
+      sharedPoint.pointId,
+      oldPoint.pointId,
+    );
+    const unrelatedDefinition: SketchDefinition = {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: [sharedPoint.pointId, oldPoint.pointId],
+      points: [sharedPoint, oldPoint],
+      entityIds: [oldLine.entityId],
+      entities: [oldLine],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+    const unrelatedPrior = solveSketchDefinitionCore({
+      definition: unrelatedDefinition,
+      tolerances,
+      partialSolvePolicy: "failOnConflict",
+    }).solvedSnapshot;
+    expect(unrelatedPrior.status.solveState).toBe("solved");
+    const invalidForUnrelatedPrior = makeEqualOffsetDefinition();
+    invalidForUnrelatedPrior.points[1]!.position = [Number.NaN, 0];
+    expect(() =>
+      createCompiledSketchSolveSession({
+        sessionId: "interactive_sketch_solve_equal_offset_unrelated_prior",
+        program: compileSketchSolveProgram({
+          definition: invalidForUnrelatedPrior,
+          tolerances,
+          partialSolvePolicy: "failOnConflict",
+        }),
+        priorSolvedSnapshot: unrelatedPrior,
+      }),
+    ).toThrow(/without an acceptable solved snapshot/);
+
+    const degenerate = makeEqualOffsetDefinition();
+    degenerate.points[1]!.position = degenerate.points[0]!.position;
+    const degenerateValidation = validateSketchDefinitionCore({
+      definition: degenerate,
+      tolerances,
+    });
+    expect(degenerateValidation.isValid).toBe(false);
+    expect(degenerateValidation.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "degenerate-line-segment" }),
+    );
+  }
+
   async function run() {
+    await testEqualOffsetFreeMagnitudeAndComponentCoupling();
+    await testEqualOffsetUsesSeparateMagnitudeDriver();
+    await testEqualOffsetOrientationSideObliqueAndGradient();
+    await testEqualOffsetClassifiesAngularAndLinearToleranceSeparately();
+    await testEqualOffsetRejectsIncompatibleAndDegeneratePairs();
     await testFixPoint();
     await testEuclideanDistance();
     await testHorizontalDistance();
@@ -4497,7 +5764,10 @@ test("src/contracts/sketch/solver-core.spec.ts", async () => {
     await testOrdinarySplineAliasClosureKeepsAutomaticTangentsDerivedAndExactZeroAuthored();
     await testDrivenOutputConstraintUsesSourceAndAxisJacobians();
     await testProjectionSupportClosesOverOrderedDerivedChains();
-    await testUnsupportedOffsetRequirementFailsToleranceStatus();
+    await testDimensionStatusUsesLinearAndAngularTolerancePolicies();
+    await testOffsetOutputRequirementDrivesSourceAuthority();
+    await testOffsetCircleScalarAuthorityMovesTheSource();
+    await testOffsetArcScalarStateFollowsDefiningPoints();
     await testSplinePointResidualPreservesSubnormalPhysicalGap();
     await testProjectedSourceSamplesAreRejectedAsDisplayOnly();
     await testInvalidOrdinarySplineSolveDoesNotMutateAuthoredInput();

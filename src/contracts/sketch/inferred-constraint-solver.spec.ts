@@ -175,6 +175,9 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
   );
   const mid = solvedPoints.get("sketch_point_mid");
   const curvePoint = solvedPoints.get("sketch_point_curve");
+  const solvedCircle = solved.solvedSnapshot.solvedEntities.find(
+    (entity) => entity.entityId === "sketch_entity_circle",
+  );
   expect(
     mid,
     "Midpoint solve should return the midpoint target point.",
@@ -188,8 +191,20 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     "Midpoint constraint should solve the point to the line midpoint.",
   ).toBeTruthy();
   expect(
-    Math.abs(Math.hypot(curvePoint[0] - 7, curvePoint[1] - 3) - 2) < 1e-3,
-    "Point-on-curve should solve the point onto the circle.",
+    solvedCircle?.kind === "circle" &&
+      Number.isFinite(solvedCircle.solvedRadius) &&
+      solvedCircle.solvedRadius > 0,
+    "Point-on-curve should retain a finite positive solved circle radius.",
+  ).toBeTruthy();
+  expect(
+    solvedCircle?.kind === "circle" &&
+      Math.abs(
+        Math.hypot(
+          curvePoint[0] - solvedCircle.centerPosition[0],
+          curvePoint[1] - solvedCircle.centerPosition[1],
+        ) - solvedCircle.solvedRadius,
+      ) < 1e-3,
+    "Point-on-curve should solve the point onto the solved circle geometry.",
   ).toBeTruthy();
   expect(
     solved.solvedSnapshot.constraintStatuses.every(
@@ -197,6 +212,88 @@ test("src/contracts/sketch/inferred-constraint-solver.spec.ts", () => {
     ),
     "Solved inferred constraints should report satisfied statuses.",
   ).toBeTruthy();
+
+  // A numeric initial radius is not a radius dimension. Prove both directions
+  // of point-on-circle coupling without prescribing an underconstrained pose.
+  for (const fixRadius of [true, false]) {
+    const constrainedDefinition: SketchDefinition = fixRadius
+      ? {
+          ...definition,
+          dimensionIds: ["dimension_circle_radius"],
+          dimensions: [
+            {
+              dimensionId: "dimension_circle_radius",
+              kind: "circleRadius",
+              label: "Radius 2",
+              entityId: "sketch_entity_circle",
+              value: 2,
+            },
+          ],
+        }
+      : {
+          ...definition,
+          constraintIds: [...definition.constraintIds, "constraint_fix_curve"],
+          constraints: [
+            ...definition.constraints,
+            {
+              constraintId: "constraint_fix_curve",
+              kind: "fixPoint",
+              label: "Fix curve point",
+              pointId: "sketch_point_curve",
+              position: [2, 3],
+            },
+          ],
+        };
+    const constrained = solveSketchDefinitionCore({
+      definition: constrainedDefinition,
+      tolerances,
+      partialSolvePolicy: "bestEffort",
+    });
+    const circle = constrained.solvedSnapshot.solvedEntities.find(
+      (entity) => entity.entityId === "sketch_entity_circle",
+    );
+    const point = constrained.solvedSnapshot.solvedPoints.find(
+      (entry) => entry.pointId === "sketch_point_curve",
+    );
+    const expectedRadius = fixRadius ? 2 : 5;
+    expect(constrained.status.solveState).toBe("solved");
+    expect(
+      circle?.kind === "circle" &&
+        Math.abs(circle.solvedRadius - expectedRadius) < 1e-3,
+      fixRadius
+        ? "The radius dimension must keep the circle at radius 2."
+        : "The fixed point must drive the free circle radius to 5.",
+    ).toBeTruthy();
+    expect(
+      point &&
+        Math.abs(
+          Math.hypot(point.solvedPosition[0] - 7, point.solvedPosition[1] - 3) -
+            expectedRadius,
+        ) < 1e-3,
+      "Point-on-curve must solve onto the independently required circle.",
+    ).toBeTruthy();
+    expect(constrained.solvedSnapshot.constraintStatuses).toHaveLength(
+      constrainedDefinition.constraints.length,
+    );
+    expect(
+      constrained.solvedSnapshot.constraintStatuses.every(
+        (status) => status.status === "satisfied",
+      ),
+      JSON.stringify({
+        fixRadius,
+        constraints: constrained.solvedSnapshot.constraintStatuses,
+      }),
+    ).toBeTruthy();
+    expect(constrained.solvedSnapshot.dimensionStatuses).toHaveLength(
+      fixRadius ? 1 : 0,
+    );
+    if (fixRadius) {
+      expect(constrained.solvedSnapshot.dimensionStatuses[0]).toMatchObject({
+        dimensionId: "dimension_circle_radius",
+        status: "driving",
+      });
+    }
+  }
 
   const tangentAndConcentric: SketchDefinition = {
     schemaVersion: "sketch-definition/v1alpha1",

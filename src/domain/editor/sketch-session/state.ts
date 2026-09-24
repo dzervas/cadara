@@ -78,7 +78,8 @@ export function createSketchSessionFromSnapshot(
   const fullDefinition = cloneDefinition(sketch.sketch.definition);
   const definition = fullDefinition;
   const planeKey = sketch.plane.key ?? null;
-  const imageReferences = buildReferenceImageAnchorProjectedReferences(definition);
+  const imageReferences =
+    buildReferenceImageAnchorProjectedReferences(definition);
   const imageReferenceIds = new Set(
     imageReferences.map((reference) => reference.referenceId),
   );
@@ -380,6 +381,12 @@ export function constraintReferencesSketchGeometry(
     case "tangentProjectedCurve":
     case "concentricProjectedCurve":
       return deletedEntityIds.has(constraint.curve.entityId);
+    case "equalOffset":
+      return constraint.pairs.some(
+        (pair) =>
+          deletedEntityIds.has(pair.seedEntityId) ||
+          deletedEntityIds.has(pair.offsetEntityId),
+      );
     case "tangent":
     case "concentric":
     case "parallel":
