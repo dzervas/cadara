@@ -168,6 +168,7 @@ function createSheetSplitAuthoringState(
   target: ReturnType<typeof makeTrackedBox>,
   tool: ReturnType<typeof makeTrackedCrossingSheet>,
   previousFeatureTopologyLineage = createOccFeatureTopologyLineageMap([]),
+  targetRootPrefix = "extrude:target-root",
 ) {
   const targetFeatureId = "feature_test_sheet_split_target_root" as FeatureId;
   const toolFeatureId = "feature_test_sheet_split_tool_root" as FeatureId;
@@ -176,7 +177,7 @@ function createSheetSplitAuthoringState(
     featureTopologyStages: new Map([
       [
         targetFeatureId,
-        producerStage(targetFeatureId, target, "extrude:target-root"),
+        producerStage(targetFeatureId, target, targetRootPrefix),
       ],
       [toolFeatureId, producerStage(toolFeatureId, tool, "extrude:tool-root")],
     ]),
@@ -457,8 +458,11 @@ test("translateSheetSplitToolHistoryToSemanticIds rejects incomplete aliases and
     ...aliases,
   });
 
-  expect(semantic.outputs[0]?.outputSlotKey).toBe(
-    `sheet-split-output:target:body_sheet_split_target:target-face-provenance:${encodeURIComponent("extrude:feature_target:profile:0:first-face")}`,
+  expect(semantic.outputs[0]?.outputSlotKey).toMatch(
+    /^sheet-split-output:[0-9a-z]+$/,
+  );
+  expect(semantic.outputs[0]?.outputSlotKey).not.toContain(
+    "extrude:feature_target:profile:0:first-face",
   );
   expect(semantic.toolFaceRelations[0]?.sourceToolFaceProvenanceId).toBe(
     "extrude:feature_tool:profile:0:generated-side-face",
@@ -628,6 +632,28 @@ test("translateSheetSplitToolHistoryToSemanticIds derives slots from exact exclu
     fallback.outputs.map((output) => output.sourceTargetProvenanceIds),
     "A slot whose members are all shared derives its identity from the full membership set.",
   ).toEqual([["canonical-witness-a"], ["canonical-witness-shared"]]);
+  const orderedWitnesses = translate(
+    makeHistory([
+      {
+        outputSlotKey: "native-slot-ordered",
+        sourceTargetFaceNativeIds: ["face_native_a", "face_native_b"],
+      },
+    ]),
+  );
+  const permutedWitnesses = translate(
+    makeHistory([
+      {
+        outputSlotKey: "native-slot-permuted",
+        sourceTargetFaceNativeIds: ["face_native_b", "face_native_a"],
+      },
+    ]),
+  );
+  expect(permutedWitnesses.outputs[0]?.outputSlotKey).toBe(
+    orderedWitnesses.outputs[0]?.outputSlotKey,
+  );
+  expect(permutedWitnesses.outputs[0]?.sourceTargetProvenanceIds).toEqual(
+    orderedWitnesses.outputs[0]?.sourceTargetProvenanceIds,
+  );
   expect(() =>
     translate(
       makeHistory([
@@ -1036,6 +1062,7 @@ test.skipIf(!CUSTOM_OCC_HAS_SHEET_SPLIT_TOOL_HISTORY)(
     const featureId = "feature_sheet_split_semantic_rebuild" as FeatureId;
     const targetBodyId = "body_sheet_split_semantic_target" as BodyId;
     const toolBodyId = "body_sheet_split_semantic_tool" as BodyId;
+    const amplifiedTargetRoot = `extrude:target-root:${"w".repeat(50_000)}`;
     const firstTarget = makeTrackedBox(
       oc,
       targetBodyId,
@@ -1056,10 +1083,37 @@ test.skipIf(!CUSTOM_OCC_HAS_SHEET_SPLIT_TOOL_HISTORY)(
       producedTargets: [],
     };
     const first = applyOccFeatureToAuthoringState(
-      createSheetSplitAuthoringState(oc, firstTarget, firstTool),
+      createSheetSplitAuthoringState(
+        oc,
+        firstTarget,
+        firstTool,
+        createOccFeatureTopologyLineageMap([]),
+        amplifiedTargetRoot,
+      ),
       feature,
     );
     const firstStage = first.featureTopologyStages.get(featureId);
+    const collectWitnesses = (
+      stage: OccFeatureTopologyStage | undefined,
+    ) =>
+      [...(stage?.outputs.values() ?? [])]
+        .map((output) => [
+          output.outputSlot,
+          [...(output.outputWitnesses ?? [])],
+        ] as const)
+        .sort(([left], [right]) => left.localeCompare(right));
+    const firstWitnesses = collectWitnesses(firstStage);
+    expect(
+      [...(firstStage?.outputs.values() ?? [])].every(
+        (output) =>
+          output.outputSlot.length < 256 &&
+          output.outputWitnesses?.length !== 0 &&
+          output.outputWitnesses?.every((witness) =>
+            witness.includes(amplifiedTargetRoot),
+          ),
+      ),
+      "Large complete exact witness arrays must remain authoritative while public output identities stay compact.",
+    ).toBeTruthy();
     const firstInterfaceClaim = [...(firstStage?.outputs.values() ?? [])]
       .flatMap((output) => [...output.sourceTargets])
       .find(([sourceKey]) =>
@@ -1088,16 +1142,91 @@ test.skipIf(!CUSTOM_OCC_HAS_SHEET_SPLIT_TOOL_HISTORY)(
       new Map(),
       new Set([featureId]),
     );
+    const persistedSplitLineage = persistedLineage.find(
+      (record) => record.featureId === featureId,
+    );
+    expect(persistedSplitLineage).toBeTruthy();
+    expect(
+      [...(persistedSplitLineage?.outputs ?? [])]
+        .map((output) => [
+          output.outputSlot,
+          [...(output.outputWitnesses ?? [])],
+        ] as const)
+        .sort(([left], [right]) => left.localeCompare(right)),
+      "Persistence must retain every exact output witness in order.",
+    ).toEqual(firstWitnesses);
+    if (!persistedSplitLineage) {
+      throw new Error("Expected persisted sheet-split topology lineage.");
+    }
+
+    const longPriorBodyId = `body_${"p".repeat(295)}` as BodyId;
+    const longPriorLineage = {
+      ...persistedSplitLineage,
+      outputs: persistedSplitLineage.outputs.map((output, index) =>
+        index === 0 ? { ...output, outputSlot: longPriorBodyId } : output,
+      ),
+    };
+    const longPriorResult = executeSplitFeature(
+      {
+        ...createSheetSplitAuthoringState(
+          oc,
+          firstTarget,
+          firstTool,
+          createOccFeatureTopologyLineageMap([]),
+          amplifiedTargetRoot,
+        ),
+        previousTopologyLineage: longPriorLineage,
+      },
+      featureId,
+      splitDefinition(targetBodyId, toolBodyId),
+    );
+    expect(longPriorBodyId).toHaveLength(300);
+    expect(longPriorResult.producedTargets).toContainEqual({
+      kind: "body",
+      bodyId: longPriorBodyId,
+    });
+
+    const collidingPriorLineage = {
+      ...persistedSplitLineage,
+      outputs: [
+        {
+          ...persistedSplitLineage.outputs[0]!,
+          outputWitnesses: ["unrelated-exact-witness"],
+        },
+      ],
+    };
+    expect(() =>
+      executeSplitFeature(
+        {
+          ...createSheetSplitAuthoringState(
+            oc,
+            firstTarget,
+            firstTool,
+            createOccFeatureTopologyLineageMap([]),
+            amplifiedTargetRoot,
+          ),
+          previousTopologyLineage: collidingPriorLineage,
+        },
+        featureId,
+        splitDefinition(targetBodyId, toolBodyId),
+      ),
+    ).toThrow(/generated body id .* collides with an unreassociated prior output/);
+
     const rebuilt = applyOccFeatureToAuthoringState(
       createSheetSplitAuthoringState(
         oc,
         rebuiltTarget,
         rebuiltTool,
         createOccFeatureTopologyLineageMap(persistedLineage),
+        amplifiedTargetRoot,
       ),
       feature,
     );
     const rebuiltStage = rebuilt.featureTopologyStages.get(featureId);
+    expect(
+      collectWitnesses(rebuiltStage),
+      "Rebuild must retain the complete persisted exact witness arrays.",
+    ).toEqual(firstWitnesses);
     const rebuiltInterfaceClaim = [...(rebuiltStage?.outputs.values() ?? [])]
       .flatMap((output) => [...output.sourceTargets])
       .find(([sourceKey]) => sourceKey === firstInterfaceClaim?.[0]);

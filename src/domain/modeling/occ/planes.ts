@@ -13,6 +13,11 @@ import {
   type Vec3,
 } from "@/domain/modeling/occ/math";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import {
+  combineOccCleanupError,
+  releaseOccObjects,
+  type OccDisposable,
+} from "@/domain/modeling/occ/memory";
 
 const UNIT_TOLERANCE = 1e-6;
 const ORTHOGONAL_TOLERANCE = 1e-6;
@@ -28,6 +33,7 @@ export interface OpenCascadePlaneAxes {
 
 export interface ExtractedPlanarFaceData {
   frame: SketchPlaneFrame;
+  /** Owned by the caller, which must release it. */
   plane: ReturnType<
     InstanceType<OpenCascadeInstance["BRepAdaptor_Surface_2"]>["Plane"]
   >;
@@ -200,17 +206,54 @@ export function extractPlanarFaceData(
   face: InstanceType<OpenCascadeInstance["TopoDS_Face"]>,
   nonPlanarMessage = "Face is not planar.",
 ): ExtractedPlanarFaceData {
-  const surface = new oc.BRepAdaptor_Surface_2(face, true);
+  // The adaptor and the axis value copies read into the frame are released
+  // here; the returned plane is released here only if extraction fails.
+  const temporaries: OccDisposable[] = [];
+  const own = <T extends OccDisposable>(temporary: T) => {
+    temporaries.push(temporary);
+    return temporary;
+  };
+  const result: OccDisposable[] = [];
+  let extracted: ExtractedPlanarFaceData;
+  try {
+    const surface = own(new oc.BRepAdaptor_Surface_2(face, true));
 
-  if (surface.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
-    throw new Error(nonPlanarMessage);
+    if (surface.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+      throw new Error(nonPlanarMessage);
+    }
+
+    const plane = surface.Plane();
+    result.push(plane);
+    const position = own(plane.Position());
+    extracted = {
+      frame: toSketchPlaneFrameFromGpAx3({
+        Location: () => own(position.Location()),
+        XDirection: () => own(position.XDirection()),
+        YDirection: () => own(position.YDirection()),
+        Direction: () => own(position.Direction()),
+      }),
+      plane,
+    };
+  } catch (error) {
+    try {
+      releaseOccObjects([...temporaries, ...result]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
   }
 
-  const plane = surface.Plane();
-  return {
-    frame: toSketchPlaneFrameFromGpPlane(plane),
-    plane,
-  };
+  try {
+    releaseOccObjects(temporaries);
+  } catch (cleanupError) {
+    try {
+      releaseOccObjects(result);
+    } catch (resultCleanupError) {
+      throw combineOccCleanupError(cleanupError, resultCleanupError);
+    }
+    throw cleanupError;
+  }
+  return extracted;
 }
 
 export function buildConstructionPlaneFromPlanarFace(

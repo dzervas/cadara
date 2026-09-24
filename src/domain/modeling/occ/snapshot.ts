@@ -67,8 +67,17 @@ import {
   getAppliedSketchIdsForDocumentCursor,
 } from "@/domain/modeling/document-history";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
-import { buildRegionProfileFace } from "@/domain/modeling/occ/sketch-profile";
-import { deleteOccObject } from "@/domain/modeling/occ/memory";
+import {
+  buildRegionProfileFace,
+  releaseBuiltSketchProfileFace,
+} from "@/domain/modeling/occ/sketch-profile";
+import {
+  collectOccCleanupErrors,
+  combineOccCleanupError,
+  deleteOccObject,
+  releaseOccObjects,
+  type OccDisposable,
+} from "@/domain/modeling/occ/memory";
 import {
   getOccDurableRefKey,
   type OccTrackedBody,
@@ -173,6 +182,57 @@ function toRenderPoint(point: {
   return [point.X(), point.Y(), point.Z()];
 }
 
+type OwnSnapshotTemporary = <T extends OccDisposable>(temporary: T) => T;
+
+/**
+ * Runs one native read and then releases every temporary it registered with
+ * `own`. The result must already be copied into JS values. A read failure is
+ * preserved together with any cleanup failure, and failed releases stay
+ * retryable through the nested OccCleanupError.
+ */
+function readWithSnapshotTemporaries<T>(
+  read: (own: OwnSnapshotTemporary) => T,
+): T {
+  const temporaries: OccDisposable[] = [];
+  let result: T;
+  try {
+    result = read((temporary) => {
+      temporaries.push(temporary);
+      return temporary;
+    });
+  } catch (error) {
+    try {
+      releaseOccObjects(temporaries);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
+  releaseOccObjects(temporaries);
+  return result;
+}
+
+type OwnedRenderPoint = OccDisposable & {
+  X(): number;
+  Y(): number;
+  Z(): number;
+};
+
+/** Copies an owned point value into JS and releases it. */
+function consumeRenderPoint(point: OwnedRenderPoint): RenderPoint3D {
+  return readWithSnapshotTemporaries((own) => toRenderPoint(own(point)));
+}
+
+/** Copies an owned point value, transformed, into JS and releases both copies. */
+function consumeTransformedRenderPoint(
+  point: InstanceType<OccAuthoringState["oc"]["gp_Pnt"]>,
+  transformation: InstanceType<OccAuthoringState["oc"]["gp_Trsf"]>,
+): RenderPoint3D {
+  return readWithSnapshotTemporaries((own) =>
+    toRenderPoint(own(own(point).Transformed(transformation))),
+  );
+}
+
 function buildFeatureLabel(featureId: FeatureId, explicitLabel?: string) {
   return explicitLabel ?? featureId;
 }
@@ -180,18 +240,23 @@ function getFaceSemanticClasses(
   state: OccAuthoringState,
   face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
 ) {
+  let plane: ReturnType<typeof extractPlanarFaceData>["plane"];
   try {
-    extractPlanarFaceData(state.oc, face);
-    return {
-      entity: ["face", "planarFace", "planarReference"] as const,
-      render: "planarFace" as const,
-    };
-  } catch {
+    plane = extractPlanarFaceData(state.oc, face).plane;
+  } catch (error) {
+    if (collectOccCleanupErrors(error).length > 0) {
+      throw error;
+    }
     return {
       entity: ["face"] as const,
       render: "bodyFace" as const,
     };
   }
+  releaseOccObjects([plane]);
+  return {
+    entity: ["face", "planarFace", "planarReference"] as const,
+    render: "planarFace" as const,
+  };
 }
 
 type FaceSemanticClasses = ReturnType<typeof getFaceSemanticClasses>;
@@ -986,79 +1051,78 @@ function buildMeshGeometryFromFace(
   state: OccAuthoringState,
   face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
 ) {
-  const location = new state.oc.TopLoc_Location_1();
-  const triangulationHandle = state.oc.BRep_Tool.Triangulation(
-    face,
-    location,
-    0 as never,
-  );
-
-  if (triangulationHandle.IsNull()) {
-    return null;
-  }
-
-  const triangulation = triangulationHandle.get();
-  const nodeCount = triangulation.NbNodes();
-  const triangleCount = triangulation.NbTriangles();
-  const hasNormals = triangulation.HasNormals();
-  const isReversed = getFaceOrientationIsReversed(state, face);
-  const vertexPositions = new Array<RenderPoint3D>(nodeCount);
-  const vertexNormals = hasNormals ? new Array<RenderPoint3D>(nodeCount) : null;
-  const triangleIndices = new Array<readonly [number, number, number]>(
-    triangleCount,
-  );
-
-  for (let index = 1; index <= nodeCount; index += 1) {
-    vertexPositions[index - 1] = applyLocationToPoint(
-      triangulation.Node(index),
-      location,
+  return readWithSnapshotTemporaries((own) => {
+    const location = own(new state.oc.TopLoc_Location_1());
+    const triangulationHandle = own(
+      state.oc.BRep_Tool.Triangulation(face, location, 0 as never),
     );
 
-    if (vertexNormals) {
-      const transformedNormal = triangulation
-        .Normal_1(index)
-        .Transformed(location.Transformation());
-      const baseNormal: RenderPoint3D = [
-        transformedNormal.X(),
-        transformedNormal.Y(),
-        transformedNormal.Z(),
-      ];
-
-      vertexNormals[index - 1] = isReversed
-        ? [-baseNormal[0], -baseNormal[1], -baseNormal[2]]
-        : baseNormal;
+    if (triangulationHandle.IsNull()) {
+      return null;
     }
-  }
 
-  for (let index = 1; index <= triangleCount; index += 1) {
-    const triangle = triangulation.Triangle(index);
-    const first = triangle.Value(1) - 1;
-    const second = triangle.Value(2) - 1;
-    const third = triangle.Value(3) - 1;
+    // Borrowed from triangulationHandle: read only inside this owner scope.
+    const triangulation = triangulationHandle.get();
+    const transformation = own(location.Transformation());
+    const nodeCount = triangulation.NbNodes();
+    const triangleCount = triangulation.NbTriangles();
+    const hasNormals = triangulation.HasNormals();
+    const isReversed = getFaceOrientationIsReversed(state, face);
+    const vertexPositions = new Array<RenderPoint3D>(nodeCount);
+    const vertexNormals = hasNormals
+      ? new Array<RenderPoint3D>(nodeCount)
+      : null;
+    const triangleIndices = new Array<readonly [number, number, number]>(
+      triangleCount,
+    );
 
-    triangleIndices[index - 1] = isReversed
-      ? [first, third, second]
-      : [first, second, third];
-  }
+    for (let index = 1; index <= nodeCount; index += 1) {
+      vertexPositions[index - 1] = consumeTransformedRenderPoint(
+        triangulation.Node(index),
+        transformation,
+      );
 
-  return {
-    vertexPositions,
-    vertexNormals,
-    triangleIndices,
-  };
-}
+      if (vertexNormals) {
+        const baseNormal = readWithSnapshotTemporaries(
+          (ownNormal): RenderPoint3D => {
+            const transformedNormal = ownNormal(
+              ownNormal(triangulation.Normal_1(index)).Transformed(
+                transformation,
+              ),
+            );
+            return [
+              transformedNormal.X(),
+              transformedNormal.Y(),
+              transformedNormal.Z(),
+            ];
+          },
+        );
 
-function applyLocationToPoint(
-  point: {
-    Transformed(theT: InstanceType<OccAuthoringState["oc"]["gp_Trsf"]>): {
-      X(): number;
-      Y(): number;
-      Z(): number;
+        vertexNormals[index - 1] = isReversed
+          ? [-baseNormal[0], -baseNormal[1], -baseNormal[2]]
+          : baseNormal;
+      }
+    }
+
+    for (let index = 1; index <= triangleCount; index += 1) {
+      triangleIndices[index - 1] = readWithSnapshotTemporaries(
+        (ownTriangle): readonly [number, number, number] => {
+          const triangle = ownTriangle(triangulation.Triangle(index));
+          const first = triangle.Value(1) - 1;
+          const second = triangle.Value(2) - 1;
+          const third = triangle.Value(3) - 1;
+
+          return isReversed ? [first, third, second] : [first, second, third];
+        },
+      );
+    }
+
+    return {
+      vertexPositions,
+      vertexNormals,
+      triangleIndices,
     };
-  },
-  location: InstanceType<OccAuthoringState["oc"]["TopLoc_Location"]>,
-) {
-  return toRenderPoint(point.Transformed(location.Transformation()));
+  });
 }
 
 function getFaceOrientationIsReversed(
@@ -1329,36 +1393,60 @@ function buildNativeFaceRenderRecords(
   return records;
 }
 
+type MeshedBodyFaceMap =
+  /** Fresh face copies owned, and released, by the snapshot read. */
+  | {
+      ownership: "snapshot";
+      facesById: ReadonlyMap<
+        FaceId,
+        InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>
+      >;
+    }
+  /** The body's state-owned faces; the snapshot must never release them. */
+  | { ownership: "body"; facesById: OccTrackedBody["facesById"] };
+
 function buildCurrentFaceMapForMeshedBody(
   state: OccAuthoringState,
   body: OccTrackedBody,
-) {
-  const faceMap = new state.oc.TopTools_IndexedMapOfShape_1();
-  state.oc.TopExp.MapShapes_1(
-    body.shape,
-    state.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
-    faceMap,
-  );
-
+): MeshedBodyFaceMap {
+  const facesById = new Map<
+    FaceId,
+    InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>
+  >();
   try {
-    if (faceMap.Size() !== body.topology.faceIds.length) {
-      return body.facesById;
-    }
+    return readWithSnapshotTemporaries((own): MeshedBodyFaceMap => {
+      const faceMap = own(new state.oc.TopTools_IndexedMapOfShape_1());
+      state.oc.TopExp.MapShapes_1(
+        body.shape,
+        state.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+        faceMap,
+      );
 
-    const facesById = new Map<
-      FaceId,
-      InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>
-    >();
-    for (let index = 1; index <= faceMap.Size(); index += 1) {
-      const faceId = body.topology.faceIds[index - 1];
-      if (faceId) {
-        facesById.set(faceId, state.oc.TopoDS.Face_1(faceMap.FindKey(index)));
+      if (faceMap.Size() !== body.topology.faceIds.length) {
+        return { ownership: "body", facesById: body.facesById };
       }
-    }
 
-    return facesById;
-  } finally {
-    faceMap.delete();
+      for (let index = 1; index <= faceMap.Size(); index += 1) {
+        const faceId = body.topology.faceIds[index - 1];
+        if (faceId) {
+          facesById.set(
+            faceId,
+            state.oc.TopoDS.Face_1(own(faceMap.FindKey(index))),
+          );
+        }
+      }
+
+      return { ownership: "snapshot", facesById };
+    });
+  } catch (error) {
+    // Fresh face copies never escape a failed build, including a failed
+    // release of the map or of the FindKey shape copies.
+    try {
+      releaseOccObjects(facesById.values());
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
   }
 }
 
@@ -1383,6 +1471,9 @@ function buildRegionRenderRecords(
           region,
         );
       } catch (error) {
+        if (collectOccCleanupErrors(error).length > 0) {
+          throw error;
+        }
         if (!isProjectedRegionContractGap(error)) {
           console.warn(
             `[occ-snapshot] Skipping region render ${region.regionId}: failed to build profile face.`,
@@ -1411,32 +1502,37 @@ function buildRegionRenderRecords(
           console.warn(
             `[occ-snapshot] Skipping region render ${region.regionId}: profile face produced no mesh geometry.`,
           );
-          continue;
+        } else {
+          const target = region.target as RegionRef;
+          records.push({
+            id: createRenderableId(target),
+            label: region.label,
+            ownerBodyId: region.ownerBodyId,
+            ownerFeatureId: region.ownerFeatureId,
+            binding: {
+              pickId: createPickId(target),
+              pickPriority: REGION_PICK_PRIORITY,
+              target,
+              topology: null,
+              semanticClass: "region",
+            },
+            geometry: {
+              kind: "mesh",
+              vertexPositions: geometry.vertexPositions,
+              vertexNormals: geometry.vertexNormals,
+              triangleIndices: geometry.triangleIndices,
+            },
+          });
         }
-
-        const target = region.target as RegionRef;
-        records.push({
-          id: createRenderableId(target),
-          label: region.label,
-          ownerBodyId: region.ownerBodyId,
-          ownerFeatureId: region.ownerFeatureId,
-          binding: {
-            pickId: createPickId(target),
-            pickPriority: REGION_PICK_PRIORITY,
-            target,
-            topology: null,
-            semanticClass: "region",
-          },
-          geometry: {
-            kind: "mesh",
-            vertexPositions: geometry.vertexPositions,
-            vertexNormals: geometry.vertexNormals,
-            triangleIndices: geometry.triangleIndices,
-          },
-        });
-      } finally {
-        deleteOccObject(profileFace.face);
+      } catch (error) {
+        try {
+          releaseBuiltSketchProfileFace(profileFace);
+        } catch (cleanupError) {
+          throw combineOccCleanupError(error, cleanupError);
+        }
+        throw error;
       }
+      releaseBuiltSketchProfileFace(profileFace);
     }
   }
 
@@ -1457,36 +1553,38 @@ function sampleCurveByParameters(
   edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
   sampleCount: number,
 ) {
-  const curve = new state.oc.BRepAdaptor_Curve_2(edge);
-  const first = curve.FirstParameter();
-  const last = curve.LastParameter();
-  const points: RenderPoint3D[] = [];
+  return readWithSnapshotTemporaries((own) => {
+    const curve = own(new state.oc.BRepAdaptor_Curve_2(edge));
+    const first = curve.FirstParameter();
+    const last = curve.LastParameter();
+    const points: RenderPoint3D[] = [];
 
-  if (!Number.isFinite(first) || !Number.isFinite(last) || sampleCount < 2) {
-    return null;
-  }
+    if (!Number.isFinite(first) || !Number.isFinite(last) || sampleCount < 2) {
+      return null;
+    }
 
-  for (let index = 0; index < sampleCount; index += 1) {
-    const parameter = first + ((last - first) * index) / (sampleCount - 1);
-    points.push(toRenderPoint(curve.Value(parameter)));
-  }
+    for (let index = 0; index < sampleCount; index += 1) {
+      const parameter = first + ((last - first) * index) / (sampleCount - 1);
+      points.push(consumeRenderPoint(curve.Value(parameter)));
+    }
 
-  const isClosed =
-    curve.GetType() === state.oc.GeomAbs_CurveType.GeomAbs_Circle &&
-    points.length > 2 &&
-    points[0] !== undefined &&
-    points[points.length - 1] !== undefined &&
-    Math.abs(points[0][0] - points[points.length - 1]![0]) <
-      state.modelingTolerance &&
-    Math.abs(points[0][1] - points[points.length - 1]![1]) <
-      state.modelingTolerance &&
-    Math.abs(points[0][2] - points[points.length - 1]![2]) <
-      state.modelingTolerance;
+    const isClosed =
+      curve.GetType() === state.oc.GeomAbs_CurveType.GeomAbs_Circle &&
+      points.length > 2 &&
+      points[0] !== undefined &&
+      points[points.length - 1] !== undefined &&
+      Math.abs(points[0][0] - points[points.length - 1]![0]) <
+        state.modelingTolerance &&
+      Math.abs(points[0][1] - points[points.length - 1]![1]) <
+        state.modelingTolerance &&
+      Math.abs(points[0][2] - points[points.length - 1]![2]) <
+        state.modelingTolerance;
 
-  return {
-    points,
-    isClosed,
-  };
+    return {
+      points,
+      isClosed,
+    };
+  });
 }
 
 function countDistinctRenderPoints(points: readonly RenderPoint3D[]) {
@@ -1500,53 +1598,69 @@ function buildEdgePolylineFromTriangulation(
   faces: Iterable<InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>>,
 ) {
   for (const face of faces) {
-    const triangulationLocation = new state.oc.TopLoc_Location_1();
-    const triangulationHandle = state.oc.BRep_Tool.Triangulation(
-      face,
-      triangulationLocation,
-      0 as never,
-    );
-
-    if (triangulationHandle.IsNull()) {
-      continue;
-    }
-
-    const polygonLocation = new state.oc.TopLoc_Location_1();
-    const polygonHandle = state.oc.BRep_Tool.PolygonOnTriangulation_1(
-      edge,
-      triangulationHandle,
-      polygonLocation,
-    );
-
-    if (polygonHandle.IsNull()) {
-      continue;
-    }
-
-    const triangulation = triangulationHandle.get();
-    const polygon = polygonHandle.get();
-    const points: RenderPoint3D[] = [];
-
-    for (let index = 1; index <= polygon.NbNodes(); index += 1) {
-      const nodeIndex = polygon.Node(index);
-      points.push(
-        applyLocationToPoint(triangulation.Node(nodeIndex), polygonLocation),
+    const polyline = readWithSnapshotTemporaries((own) => {
+      const triangulationLocation = own(new state.oc.TopLoc_Location_1());
+      const triangulationHandle = own(
+        state.oc.BRep_Tool.Triangulation(
+          face,
+          triangulationLocation,
+          0 as never,
+        ),
       );
-    }
 
-    const isClosed = state.oc.BRep_Tool.IsClosed_4(
-      edge,
-      triangulationHandle,
-      polygonLocation,
-    );
+      if (triangulationHandle.IsNull()) {
+        return null;
+      }
 
-    if (
-      points.length >= 2 &&
-      (!isClosed || countDistinctRenderPoints(points) >= 3)
-    ) {
-      return {
-        points,
-        isClosed,
-      };
+      const polygonLocation = own(new state.oc.TopLoc_Location_1());
+      const polygonHandle = own(
+        state.oc.BRep_Tool.PolygonOnTriangulation_1(
+          edge,
+          triangulationHandle,
+          polygonLocation,
+        ),
+      );
+
+      if (polygonHandle.IsNull()) {
+        return null;
+      }
+
+      // Borrowed from their handles: read only inside this owner scope.
+      const triangulation = triangulationHandle.get();
+      const polygon = polygonHandle.get();
+      const transformation = own(polygonLocation.Transformation());
+      const points: RenderPoint3D[] = [];
+
+      for (let index = 1; index <= polygon.NbNodes(); index += 1) {
+        const nodeIndex = polygon.Node(index);
+        points.push(
+          consumeTransformedRenderPoint(
+            triangulation.Node(nodeIndex),
+            transformation,
+          ),
+        );
+      }
+
+      const isClosed = state.oc.BRep_Tool.IsClosed_4(
+        edge,
+        triangulationHandle,
+        polygonLocation,
+      );
+
+      if (
+        points.length >= 2 &&
+        (!isClosed || countDistinctRenderPoints(points) >= 3)
+      ) {
+        return {
+          points,
+          isClosed,
+        };
+      }
+      return null;
+    });
+
+    if (polyline) {
+      return polyline;
     }
   }
 
@@ -1557,29 +1671,35 @@ function buildEdgePolylineFromPolygon3D(
   state: OccAuthoringState,
   edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
 ) {
-  const location = new state.oc.TopLoc_Location_1();
-  const polygonHandle = state.oc.BRep_Tool.Polygon3D(edge, location);
+  return readWithSnapshotTemporaries((own) => {
+    const location = own(new state.oc.TopLoc_Location_1());
+    const polygonHandle = own(state.oc.BRep_Tool.Polygon3D(edge, location));
 
-  if (polygonHandle.IsNull()) {
-    return null;
-  }
+    if (polygonHandle.IsNull()) {
+      return null;
+    }
 
-  const polygon = polygonHandle.get();
-  const nodes = polygon.Nodes();
-  const points: RenderPoint3D[] = [];
+    // Borrowed from polygonHandle: read only inside this owner scope.
+    const polygon = polygonHandle.get();
+    const nodes = own(polygon.Nodes());
+    const transformation = own(location.Transformation());
+    const points: RenderPoint3D[] = [];
 
-  for (let index = 1; index <= polygon.NbNodes(); index += 1) {
-    points.push(applyLocationToPoint(nodes.Value(index), location));
-  }
+    for (let index = 1; index <= polygon.NbNodes(); index += 1) {
+      points.push(
+        consumeTransformedRenderPoint(nodes.Value(index), transformation),
+      );
+    }
 
-  if (points.length < 2) {
-    return null;
-  }
+    if (points.length < 2) {
+      return null;
+    }
 
-  return {
-    points,
-    isClosed: false,
-  };
+    return {
+      points,
+      isClosed: false,
+    };
+  });
 }
 
 function buildEdgeRenderRecord(
@@ -1642,7 +1762,7 @@ function buildVertexRenderRecord(
     },
     geometry: {
       kind: "marker",
-      position: toRenderPoint(state.oc.BRep_Tool.Pnt(vertex)),
+      position: consumeRenderPoint(state.oc.BRep_Tool.Pnt(vertex)),
       displayRadius: DEFAULT_POINT_DISPLAY_RADIUS,
     },
   };
@@ -1713,57 +1833,66 @@ function buildBodyRenderRecords(
   );
   deleteOccObject(mesher);
 
-  const meshedFacesById = buildCurrentFaceMapForMeshedBody(state, body);
+  const meshedFaces = buildCurrentFaceMapForMeshedBody(state, body);
+  const meshedFacesById = meshedFaces.facesById;
 
-  for (const faceId of body.topology.faceIds) {
-    const face = meshedFacesById.get(faceId);
-
-    if (!face) {
-      continue;
+  // Snapshot-owned face copies must outlive face rendering and the edge
+  // triangulation fallback below; body-owned faces are never released here.
+  return readWithSnapshotTemporaries((own) => {
+    if (meshedFaces.ownership === "snapshot") {
+      for (const face of meshedFaces.facesById.values()) own(face);
     }
 
-    const record = buildFaceRenderRecord(
-      state,
-      body,
-      faceId,
-      face,
-      faceSemanticClasses,
-    );
-    if (record) {
-      records.push(record);
-    }
-  }
+    for (const faceId of body.topology.faceIds) {
+      const face = meshedFacesById.get(faceId);
 
-  for (const edgeId of body.topology.edgeIds) {
-    const edge = body.edgesById.get(edgeId);
+      if (!face) {
+        continue;
+      }
 
-    if (!edge) {
-      continue;
-    }
-
-    const record = buildEdgeRenderRecord(
-      state,
-      body,
-      edgeId,
-      edge,
-      meshedFacesById.values(),
-    );
-    if (record) {
-      records.push(record);
-    }
-  }
-
-  for (const vertexId of body.topology.vertexIds) {
-    const vertex = body.verticesById.get(vertexId);
-
-    if (!vertex) {
-      continue;
+      const record = buildFaceRenderRecord(
+        state,
+        body,
+        faceId,
+        face,
+        faceSemanticClasses,
+      );
+      if (record) {
+        records.push(record);
+      }
     }
 
-    records.push(buildVertexRenderRecord(state, body, vertexId, vertex));
-  }
+    for (const edgeId of body.topology.edgeIds) {
+      const edge = body.edgesById.get(edgeId);
 
-  return records;
+      if (!edge) {
+        continue;
+      }
+
+      const record = buildEdgeRenderRecord(
+        state,
+        body,
+        edgeId,
+        edge,
+        meshedFacesById.values(),
+      );
+      if (record) {
+        records.push(record);
+      }
+    }
+
+    for (const vertexId of body.topology.vertexIds) {
+      const vertex = body.verticesById.get(vertexId);
+
+      if (!vertex) {
+        continue;
+      }
+
+      records.push(buildVertexRenderRecord(state, body, vertexId, vertex));
+    }
+
+    return records;
+  });
 }
 
 function sampleCirclePoints(
@@ -2264,7 +2393,7 @@ export function buildOccKernelDocumentSnapshot(
     settings: {
       linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
       modelingTolerance: state.modelingTolerance,
-      angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
+      angularToleranceRadians: state.angularToleranceRadians,
     },
     capabilities: OCC_KERNEL_CAPABILITIES,
     featureTree,

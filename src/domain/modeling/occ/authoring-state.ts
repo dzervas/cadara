@@ -39,6 +39,11 @@ import {
 import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
+  combineOccCleanupError,
+  releaseDiscardedOccAuthoringStateObjects,
+  releaseOccObjects,
+} from "@/domain/modeling/occ/memory";
+import {
   createFeatureTopologyStage,
   createOccTopologyProvenanceIndex,
   getPreviousFeatureTopologyLineage,
@@ -71,6 +76,7 @@ export interface OccAuthoringFeatureRecord {
 
 export interface OccAuthoringState extends OccFeatureExecutionContext {
   name: string;
+  angularToleranceRadians: number;
   baseBodies: readonly OccTrackedBody[];
   baseConstructions: OccFeatureExecutionContext["constructions"];
   baseConstructionPlanes: ReadonlyMap<ConstructionId, SketchPlaneDefinition>;
@@ -224,6 +230,7 @@ export function createOccAuthoringState(
     name?: string;
     revisionId?: OccFeatureExecutionContext["revisionId"];
     modelingTolerance?: number;
+    angularToleranceRadians?: number;
     previousReferenceState?: OccReferenceState;
     featureTopologyStages?: OccFeatureTopologyStageMap;
     previousFeatureTopologyStages?: OccFeatureTopologyStageMap;
@@ -305,6 +312,9 @@ export function createOccAuthoringState(
     revisionId,
     modelingTolerance:
       input.modelingTolerance ?? OCC_KERNEL_SETTINGS.modelingTolerance,
+    angularToleranceRadians:
+      input.angularToleranceRadians ??
+      OCC_KERNEL_SETTINGS.angularToleranceRadians,
     sketches,
     constructions: baseConstructions,
     constructionPlanes,
@@ -498,10 +508,14 @@ function applyFeatureResult(
   const featureTopologyStages = new Map(state.featureTopologyStages);
   featureTopologyStages.set(feature.featureId, reconciled.topologyStage);
   const historyOrder = state.historyOrder.some(
-    (entry) => entry.kind === "feature" && entry.featureId === feature.featureId,
+    (entry) =>
+      entry.kind === "feature" && entry.featureId === feature.featureId,
   )
     ? state.historyOrder
-    : [...state.historyOrder, { kind: "feature" as const, featureId: feature.featureId }];
+    : [
+        ...state.historyOrder,
+        { kind: "feature" as const, featureId: feature.featureId },
+      ];
   const topologyProvenanceIndex = createOccTopologyProvenanceIndex({
     stages: featureTopologyStages,
     previousLineage: state.previousFeatureTopologyLineage,
@@ -528,6 +542,64 @@ function applyFeatureResult(
   };
 }
 
+type OccNamingOwnershipGraph = Pick<
+  OccAuthoringState,
+  "bodies" | "featureTopologyStages"
+> &
+  Partial<
+    Pick<OccAuthoringState, "baseBodies" | "previousFeatureTopologyStages">
+  >;
+
+function collectOccNamingStates(state: Partial<OccNamingOwnershipGraph>) {
+  const bodies = [...(state.baseBodies ?? []), ...(state.bodies ?? [])];
+  for (const stages of [
+    state.featureTopologyStages,
+    state.previousFeatureTopologyStages,
+  ]) {
+    for (const stage of stages?.values() ?? []) {
+      for (const output of stage.outputs.values()) bodies.push(output.body);
+    }
+  }
+  return bodies.flatMap((body) => (body.naming ? [body.naming] : []));
+}
+
+/**
+ * Semantic stage reconciliation replaces result bodies with re-identified
+ * bodies that share their shape wrappers but drop the stale naming state.
+ * Releases the dropped naming wrappers that no retained state still owns:
+ * labels first, then the documents that own their native label nodes.
+ */
+function releaseDroppedOccNaming(
+  result: Partial<OccNamingOwnershipGraph>,
+  retained: readonly OccNamingOwnershipGraph[],
+) {
+  const retainedOwners = new Set<unknown>();
+  for (const naming of retained.flatMap(collectOccNamingStates)) {
+    retainedOwners.add(naming.document);
+    retainedOwners.add(naming.bodyLabel);
+    for (const label of naming.topologyLabelsByKey.values()) {
+      retainedOwners.add(label);
+    }
+    for (const label of naming.selectorLabelsByKey.values()) {
+      retainedOwners.add(label);
+    }
+  }
+
+  const labels = new Set<{ delete(): void }>();
+  const documents = new Set<{ delete(): void }>();
+  for (const naming of collectOccNamingStates(result)) {
+    for (const label of [
+      naming.bodyLabel,
+      ...naming.topologyLabelsByKey.values(),
+      ...naming.selectorLabelsByKey.values(),
+    ]) {
+      if (!retainedOwners.has(label)) labels.add(label);
+    }
+    if (!retainedOwners.has(naming.document)) documents.add(naming.document);
+  }
+  releaseOccObjects([...labels, ...documents]);
+}
+
 export function applyOccFeatureToAuthoringState(
   state: OccAuthoringState,
   feature: OccAuthoringFeatureRecord,
@@ -550,10 +622,14 @@ export function applyOccFeatureToAuthoringState(
     feature.featureId,
   );
   const historyOrder = state.historyOrder.some(
-    (entry) => entry.kind === "feature" && entry.featureId === feature.featureId,
+    (entry) =>
+      entry.kind === "feature" && entry.featureId === feature.featureId,
   )
     ? state.historyOrder
-    : [...state.historyOrder, { kind: "feature" as const, featureId: feature.featureId }];
+    : [
+        ...state.historyOrder,
+        { kind: "feature" as const, featureId: feature.featureId },
+      ];
   const topologyProvenanceIndex = createOccTopologyProvenanceIndex({
     stages: state.featureTopologyStages,
     previousLineage: state.previousFeatureTopologyLineage,
@@ -561,23 +637,49 @@ export function applyOccFeatureToAuthoringState(
     beforeFeatureId: feature.featureId,
   });
 
-  return applyFeatureResult(
-    state,
-    feature,
-    executeOccFeature(
-      {
-        ...state,
-        previousTopologyStage,
-        previousTopologyLineage: getPreviousFeatureTopologyLineage(
-          state.previousFeatureTopologyLineage,
-          feature.featureId,
-        ),
-        topologyProvenanceIndex,
-      },
-      feature.featureId,
-      resolvedDefinition.definition,
-    ),
+  const result = executeOccFeature(
+    {
+      ...state,
+      previousTopologyStage,
+      previousTopologyLineage: getPreviousFeatureTopologyLineage(
+        state.previousFeatureTopologyLineage,
+        feature.featureId,
+      ),
+      topologyProvenanceIndex,
+    },
+    feature.featureId,
+    resolvedDefinition.definition,
   );
+
+  const resultOwnership = {
+    bodies: result.bodies,
+    featureTopologyStages: result.topologyStage
+      ? new Map([[feature.featureId, result.topologyStage]])
+      : undefined,
+  };
+  let next: OccAuthoringState;
+  try {
+    next = applyFeatureResult(state, feature, result);
+  } catch (error) {
+    try {
+      releaseDiscardedOccAuthoringStateObjects(resultOwnership, [state]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
+
+  try {
+    releaseDroppedOccNaming(resultOwnership, [state, next]);
+  } catch (error) {
+    try {
+      releaseDiscardedOccAuthoringStateObjects(next, [state]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
+  return next;
 }
 
 export function rebuildOccAuthoringState(
@@ -589,6 +691,7 @@ export function rebuildOccAuthoringState(
     name: state.name,
     revisionId: state.revisionId,
     modelingTolerance: state.modelingTolerance,
+    angularToleranceRadians: state.angularToleranceRadians,
     sketches: state.sketches,
     variables: state.variables,
     bodies: state.baseBodies,

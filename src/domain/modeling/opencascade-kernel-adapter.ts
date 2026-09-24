@@ -115,8 +115,10 @@ import {
 } from "@/domain/modeling/occ/authoring-state";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import {
+  collectOccCleanupErrors,
+  combineOccCleanupError,
+  releaseDiscardedOccAuthoringStateObjects,
   releaseOccAuthoringStateObjects,
-  releaseReplacedOccBakedShapeCache,
 } from "@/domain/modeling/occ/memory";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import {
@@ -300,7 +302,7 @@ function createAuthoredModelDocumentFromAuthoringState(
     settings: {
       linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
       modelingTolerance: state.modelingTolerance,
-      angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
+      angularToleranceRadians: state.angularToleranceRadians,
     },
     variables: structuredClone([...state.variables]),
     sketches: state.sketches.map((sketch) => ({
@@ -870,15 +872,16 @@ function createRestoreSolverCorrelation(
   };
 }
 
-function createRestoreSolverTolerances(
-  document: AuthoredModelDocument,
-  fallback: SolverTolerancePolicy,
+function createDocumentSolverTolerances(
+  settings: Pick<
+    AuthoredModelDocument["settings"],
+    "modelingTolerance" | "angularToleranceRadians"
+  >,
 ): SolverTolerancePolicy {
   return {
-    ...fallback,
-    coincidence: document.settings.modelingTolerance,
-    angleRadians: document.settings.angularToleranceRadians,
-    minimumSegmentLength: document.settings.modelingTolerance,
+    coincidence: settings.modelingTolerance,
+    angleRadians: settings.angularToleranceRadians,
+    minimumSegmentLength: settings.modelingTolerance,
   };
 }
 
@@ -1751,6 +1754,10 @@ function getNonRepairableFeatureDiagnostics(
   );
 }
 
+type OccOwnerGraph = Parameters<
+  typeof releaseDiscardedOccAuthoringStateObjects
+>[0];
+
 export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly solverAdapter: SketchSolverAdapter;
   private readonly solverAdapterFactory?: (
@@ -1761,11 +1768,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly workerSnapshotClient: OccWorkerSnapshotClient | null;
   private assetResolver: GeometryAssetResolver | undefined;
   private readonly documentId: DocumentId;
-  private readonly tolerances: SolverTolerancePolicy;
+  private readonly initialDocumentSettings: AuthoredModelDocument["settings"];
   private readonly neutralCurveQueries: NeutralCurveQueryCapability;
 
   private initializationPromise: Promise<OccKernelRuntimeState> | null = null;
   private runtimeState: OccKernelRuntimeState | null = null;
+  private runtimeGeneration = 0;
+  private operationTail: Promise<void> = Promise.resolve();
+  private activeOperations = 0;
+  private disposed = false;
+  private readonly pendingCleanupRetries = new Set<() => void>();
+  /** Retries that already succeeded; an operation rethrowing their error must not re-queue them. */
+  private readonly completedCleanupRetries = new WeakSet<() => void>();
+  /** Discarded owner graphs waiting for a fully successful retry pass, oldest first. */
+  private readonly parkedOwnerGraphs: OccOwnerGraph[] = [];
   private workerRestoredDocument: WorkerRestoredAuthoredDocument | null = null;
   private snapshotLodTierId: OccTessellationTierId = "startup";
   private nativeTopologyBodyPayloadCache = new Map<
@@ -1786,7 +1802,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.workerSnapshotClient = options.workerSnapshotClient ?? null;
     this.assetResolver = options.assetResolver;
     this.documentId = options.documentId ?? OCC_KERNEL_DOCUMENT_ID;
-    this.tolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES;
+    const initialTolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES;
+    this.initialDocumentSettings = {
+      linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
+      modelingTolerance: initialTolerances.coincidence,
+      angularToleranceRadians: initialTolerances.angleRadians,
+    };
   }
 
   queryNeutralCurves(request: NeutralCurveQueryRequest) {
@@ -1800,14 +1821,299 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.runtimeGeneration += 1;
+    this.workerRestoredDocument = null;
+    this.nativeTopologyBodyPayloadCache.clear();
+    if (this.activeOperations === 0) this.releaseDisposedOwnership();
+  }
+
+  private assertNotDisposed() {
+    if (this.disposed) {
+      throw new Error("OpenCascade kernel adapter has been disposed.");
+    }
+  }
+
+  private rememberCleanupFailure(error: unknown) {
+    for (const cleanupError of collectOccCleanupErrors(error)) {
+      if (this.completedCleanupRetries.has(cleanupError.retry)) continue;
+      this.pendingCleanupRetries.add(cleanupError.retry);
+    }
+  }
+
+  private rethrowCleanupFailure(error: unknown) {
+    if (collectOccCleanupErrors(error).length === 0) return;
+    this.rememberCleanupFailure(error);
+    throw error;
+  }
+
+  /**
+   * Releases a discarded owner graph (replaced runtime, rejected or preview
+   * candidate, disposed runtime) only after one fully successful pass over the
+   * pending cleanup retries: a pending retry, such as a TNaming attribute
+   * handle, may still need a naming document that this graph owns. A failed
+   * pass parks the graph and surfaces the retry failures.
+   */
+  private releaseDiscardedState(
+    discarded: OccOwnerGraph,
+    retained: readonly OccOwnerGraph[],
+  ) {
+    const retryErrors = this.releaseAfterCleanupRetries(discarded, retained);
+    if (retryErrors.length > 0) {
+      throw new AggregateError(
+        retryErrors,
+        "Pending OpenCascade cleanup retries failed; the discarded resources are retained.",
+      );
+    }
+  }
+
+  /**
+   * Releases a superseded intermediate state of an in-progress build. Its
+   * exclusive wrappers were created by that build, so no pending retry depends
+   * on them; parked graphs stay protected.
+   */
+  private releaseIntermediateState(
+    previous: OccOwnerGraph,
+    retained: readonly OccOwnerGraph[],
+  ) {
+    try {
+      releaseDiscardedOccAuthoringStateObjects(previous, [
+        ...retained,
+        ...this.parkedOwnerGraphs,
+      ]);
+    } catch (error) {
+      this.rememberCleanupFailure(error);
+      throw error;
+    }
+  }
+
+  /** Runs every retry pending at call time once; retries they surface wait for the next pass. */
+  private runCleanupRetryPass() {
+    const errors: unknown[] = [];
+    for (const retry of [...this.pendingCleanupRetries]) {
+      try {
+        retry();
+        this.pendingCleanupRetries.delete(retry);
+        this.completedCleanupRetries.add(retry);
+      } catch (error) {
+        this.rememberCleanupFailure(error);
+        errors.push(error);
+      }
+    }
+    return errors;
+  }
+
+  /**
+   * Parks `discarded`, then drains every parked graph oldest first if the retry
+   * pass succeeded. Returns the pass errors; throws a graph release failure.
+   */
+  private releaseAfterCleanupRetries(
+    discarded: OccOwnerGraph | null,
+    retained: readonly OccOwnerGraph[],
+  ) {
+    const retryErrors = this.runCleanupRetryPass();
+    if (discarded) this.parkedOwnerGraphs.push(discarded);
+    if (retryErrors.length > 0) return retryErrors;
+
+    const current = this.runtimeState?.authoringState;
+    while (this.parkedOwnerGraphs.length > 0) {
+      // A partly failed release leaves its remaining wrappers to its own
+      // retry, so the graph leaves the queue either way.
+      const graph = this.parkedOwnerGraphs.shift()!;
+      const protectedGraphs = [...this.parkedOwnerGraphs, ...retained];
+      if (current && !protectedGraphs.includes(current)) {
+        protectedGraphs.push(current);
+      }
+      try {
+        if (protectedGraphs.length === 0) {
+          releaseOccAuthoringStateObjects(graph);
+        } else {
+          releaseDiscardedOccAuthoringStateObjects(graph, protectedGraphs);
+        }
+      } catch (error) {
+        this.rememberCleanupFailure(error);
+        throw error;
+      }
+    }
+    return [];
+  }
+
+  private releaseDisposedOwnership() {
     const runtimeState = this.runtimeState;
     this.runtimeState = null;
     this.initializationPromise = null;
-    this.workerRestoredDocument = null;
-    this.nativeTopologyBodyPayloadCache.clear();
-    if (runtimeState) {
-      releaseOccAuthoringStateObjects(runtimeState.authoringState);
+    let errors: unknown[];
+    try {
+      errors = this.releaseAfterCleanupRetries(
+        runtimeState?.authoringState ?? null,
+        [],
+      );
+    } catch (error) {
+      errors = [error];
     }
+
+    if (errors.length > 0) {
+      throw new AggregateError(
+        errors,
+        "OpenCascade adapter disposal could not release every resource.",
+      );
+    }
+  }
+
+  private runSerializedOperation<Result>(operation: () => Promise<Result>) {
+    const run = this.operationTail.then(async () => {
+      this.assertNotDisposed();
+      this.activeOperations += 1;
+      let operationResult: Result | undefined;
+      let operationError: unknown;
+      try {
+        operationResult = await operation();
+      } catch (error) {
+        this.rememberCleanupFailure(error);
+        operationError = error;
+      }
+      this.activeOperations -= 1;
+
+      if (this.disposed && this.activeOperations === 0) {
+        try {
+          this.releaseDisposedOwnership();
+        } catch (cleanupError) {
+          if (operationError !== undefined) {
+            throw combineOccCleanupError(operationError, cleanupError);
+          }
+          throw cleanupError;
+        }
+      }
+      if (operationError !== undefined) throw operationError;
+      return operationResult as Result;
+    });
+    this.operationTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  restoreAuthoredModelDocument(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+    assetResolver?: GeometryAssetResolver,
+  ) {
+    return this.runSerializedOperation(() =>
+      this.restoreAuthoredModelDocumentSerialized(
+        document,
+        diagnostics,
+        assetResolver,
+      ),
+    );
+  }
+
+  validateAuthoredModelDocument(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+    assetResolver?: GeometryAssetResolver,
+  ) {
+    return this.runSerializedOperation(() =>
+      this.validateAuthoredModelDocumentSerialized(
+        document,
+        diagnostics,
+        assetResolver,
+      ),
+    );
+  }
+
+  executeNativeFeatureHistoryRebuild(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[] = [],
+    assets: readonly GeometryAssetBlobInput[] = [],
+    lodTierId?: OccTessellationTierId,
+  ) {
+    return this.runSerializedOperation(() =>
+      this.executeNativeFeatureHistoryRebuildSerialized(
+        document,
+        diagnostics,
+        assets,
+        lodTierId,
+      ),
+    );
+  }
+
+  commitSketch(request: CommitSketchRequest) {
+    return this.runSerializedOperation(() =>
+      this.commitSketchSerialized(request),
+    );
+  }
+
+  createFeature(request: CreateFeatureRequest) {
+    return this.runSerializedOperation(() =>
+      this.createFeatureSerialized(request),
+    );
+  }
+
+  updateFeature(request: UpdateFeatureRequest) {
+    return this.runSerializedOperation(() =>
+      this.updateFeatureSerialized(request),
+    );
+  }
+
+  setFeatureSuppression(request: SetFeatureSuppressionRequest) {
+    return this.runSerializedOperation(() =>
+      this.setFeatureSuppressionSerialized(request),
+    );
+  }
+
+  deleteFeature(request: DeleteFeatureRequest) {
+    return this.runSerializedOperation(() =>
+      this.deleteFeatureSerialized(request),
+    );
+  }
+
+  deleteTarget(request: DeleteDocumentTargetRequest) {
+    return this.runSerializedOperation(() =>
+      this.deleteTargetSerialized(request),
+    );
+  }
+
+  renameBody(request: RenameBodyRequest) {
+    return this.runSerializedOperation(() =>
+      this.renameBodySerialized(request),
+    );
+  }
+
+  reorderFeature(request: ReorderFeatureRequest) {
+    return this.runSerializedOperation(() =>
+      this.reorderFeatureSerialized(request),
+    );
+  }
+
+  reorderDocumentHistory(request: ReorderDocumentHistoryRequest) {
+    return this.runSerializedOperation(() =>
+      this.reorderDocumentHistorySerialized(request),
+    );
+  }
+
+  setFeatureCursor(request: SetFeatureCursorRequest) {
+    return this.runSerializedOperation(() =>
+      this.setFeatureCursorSerialized(request),
+    );
+  }
+
+  addDocumentVariable(request: AddDocumentVariableRequest) {
+    return this.runSerializedOperation(() =>
+      this.addDocumentVariableSerialized(request),
+    );
+  }
+
+  updateDocumentVariable(request: UpdateDocumentVariableRequest) {
+    return this.runSerializedOperation(() =>
+      this.updateDocumentVariableSerialized(request),
+    );
+  }
+
+  evaluatePreview(request: EvaluatePreviewRequest) {
+    return this.runSerializedOperation(() =>
+      this.evaluatePreviewSerialized(request),
+    );
   }
 
   preloadRuntime(): Promise<void> {
@@ -1865,6 +2171,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   private async getRuntimeState() {
+    this.assertNotDisposed();
     if (this.workerRestoredDocument) {
       const restored = this.workerRestoredDocument;
       this.workerRestoredDocument = null;
@@ -1880,15 +2187,47 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     if (!this.initializationPromise) {
-      this.initializationPromise = this.initializeRuntimeState()
+      const generation = this.runtimeGeneration;
+      const initialization = this.initializeRuntimeState()
         .then((state) => {
+          if (this.disposed) {
+            const disposedError = new Error(
+              "OpenCascade kernel adapter has been disposed.",
+            );
+            try {
+              this.releaseDiscardedState(state.authoringState, []);
+            } catch (cleanupError) {
+              throw combineOccCleanupError(disposedError, cleanupError);
+            }
+            throw disposedError;
+          }
+          if (
+            generation !== this.runtimeGeneration ||
+            this.initializationPromise !== initialization
+          ) {
+            const acceptedRuntime = this.runtimeState;
+            this.releaseDiscardedState(
+              state.authoringState,
+              acceptedRuntime ? [acceptedRuntime.authoringState] : [],
+            );
+            if (!acceptedRuntime) {
+              throw new Error(
+                "OpenCascade runtime initialization was superseded without an accepted runtime.",
+              );
+            }
+            return acceptedRuntime;
+          }
           this.runtimeState = state;
           return state;
         })
         .catch((error: unknown) => {
-          this.initializationPromise = null;
+          this.rememberCleanupFailure(error);
+          if (this.initializationPromise === initialization) {
+            this.initializationPromise = null;
+          }
           throw error;
         });
+      this.initializationPromise = initialization;
     }
 
     return this.initializationPromise;
@@ -1900,7 +2239,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       documentId: this.documentId,
       name: OCC_KERNEL_DOCUMENT_NAME,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
-      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      modelingTolerance: this.initialDocumentSettings.modelingTolerance,
+      angularToleranceRadians:
+        this.initialDocumentSettings.angularToleranceRadians,
       assetResolver: this.assetResolver,
     });
 
@@ -1957,8 +2298,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       document.revisionId,
     );
     const solverAdapter = this.getSolverAdapter(document.revisionId);
-    const tolerances = createRestoreSolverTolerances(document, this.tolerances);
-    const projection = projectSketchExternalReferencesFromSnapshot(
+    const tolerances = createDocumentSolverTolerances(document.settings);
+    const projection = this.projectSketchReferencesFromSnapshot(
       buildOccWorkspaceSnapshot(sourceState),
       {
         contractVersion: CONTRACT_VERSION,
@@ -2057,7 +2398,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
   }
 
-  async restoreAuthoredModelDocument(
+  private async restoreAuthoredModelDocumentSerialized(
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
@@ -2095,7 +2436,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
   }
 
-  async validateAuthoredModelDocument(
+  private async validateAuthoredModelDocumentSerialized(
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
     assetResolver?: GeometryAssetResolver,
@@ -2176,6 +2517,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: document.name,
       revisionId: document.revisionId,
       modelingTolerance: document.settings.modelingTolerance,
+      angularToleranceRadians: document.settings.angularToleranceRadians,
       assetResolver,
       variables: structuredClone(document.variables),
       bodyLabels: new Map(
@@ -2189,117 +2531,150 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cursor: { kind: "empty" },
       previousFeatureTopologyLineage,
     });
-    await this.preResolveBakedBodyAssets(
-      projectionState,
-      features.map((feature) => feature.definition),
-    );
-    const pendingProjectionFeatures: OccAuthoringFeatureRecord[] = [];
-    const failedProjectionFeatures: FailedFeatureRecord[] = [];
+    let retainedRestoreState: OccAuthoringState | null = null;
+    let restoredRuntimeState: OccKernelRuntimeState | null = null;
+    let restoreError: unknown;
+    try {
+      await this.preResolveBakedBodyAssets(
+        projectionState,
+        features.map((feature) => feature.definition),
+      );
+      const pendingProjectionFeatures: OccAuthoringFeatureRecord[] = [];
+      const failedProjectionFeatures: FailedFeatureRecord[] = [];
 
-    for (const item of historyOrder) {
-      if (item.kind === "sketch") {
-        const authoredSketch = sketchById.get(item.sketchId);
-        if (!authoredSketch) {
+      for (const item of historyOrder) {
+        if (item.kind === "sketch") {
+          const authoredSketch = sketchById.get(item.sketchId);
+          if (!authoredSketch) {
+            continue;
+          }
+
+          for (const feature of pendingProjectionFeatures.splice(0)) {
+            if (findBlockingFeature(failedProjectionFeatures, feature)) {
+              failedProjectionFeatures.push(createFailedFeatureRecord(feature));
+              continue;
+            }
+
+            const previousProjectionState = projectionState;
+            try {
+              projectionState = applyOccFeatureToAuthoringState(
+                projectionState,
+                feature,
+              );
+            } catch (error) {
+              this.rethrowCleanupFailure(error);
+              failedProjectionFeatures.push(createFailedFeatureRecord(feature));
+              continue;
+            }
+            this.releaseIntermediateState(previousProjectionState, [
+              projectionState,
+              ...(this.runtimeState ? [this.runtimeState.authoringState] : []),
+            ]);
+          }
+
+          const rebuiltSketch = await this.rebuildAuthoredSketchRecord(
+            document,
+            authoredSketch,
+            projectionState,
+          );
+          sketches.push(rebuiltSketch);
+          projectionState = {
+            ...projectionState,
+            sketches: [...projectionState.sketches, rebuiltSketch],
+          };
           continue;
         }
 
-        for (const feature of pendingProjectionFeatures.splice(0)) {
-          if (findBlockingFeature(failedProjectionFeatures, feature)) {
+        const feature = featureRecordById.get(item.featureId);
+        if (feature) {
+          if (feature.suppressed) {
             failedProjectionFeatures.push(createFailedFeatureRecord(feature));
             continue;
           }
 
-          try {
-            projectionState = applyOccFeatureToAuthoringState(
-              projectionState,
-              feature,
-            );
-          } catch {
+          if (options.deferredFeatureIds?.has(feature.featureId)) {
             failedProjectionFeatures.push(createFailedFeatureRecord(feature));
+            continue;
           }
-        }
 
-        const rebuiltSketch = await this.rebuildAuthoredSketchRecord(
-          document,
-          authoredSketch,
-          projectionState,
-        );
-        sketches.push(rebuiltSketch);
-        projectionState = {
-          ...projectionState,
-          sketches: [...projectionState.sketches, rebuiltSketch],
-        };
-        continue;
+          pendingProjectionFeatures.push(feature);
+        }
       }
 
-      const feature = featureRecordById.get(item.featureId);
-      if (feature) {
-        if (feature.suppressed) {
-          failedProjectionFeatures.push(createFailedFeatureRecord(feature));
-          continue;
-        }
+      let authoringState = createOccAuthoringState(oc, {
+        documentId: document.documentId,
+        name: document.name,
+        revisionId: document.revisionId,
+        modelingTolerance: document.settings.modelingTolerance,
+        angularToleranceRadians: document.settings.angularToleranceRadians,
+        assetResolver,
+        sketches,
+        variables: structuredClone(document.variables),
+        bodyLabels: new Map(
+          document.bodyLabels.map((label) => [label.bodyId, label.label]),
+        ),
+        assets: document.assets,
+        assetBlobs,
+        embeddedBinaryAssets: document.embeddedBinaryAssets,
+        historyOrder,
+        diagnostics: restoreDiagnostics,
+        cursor: { kind: "empty" },
+        previousFeatureTopologyLineage,
+      });
+      authoringState = {
+        ...authoringState,
+        resolvedGeometryAssets: projectionState.resolvedGeometryAssets,
+        bakedShapeCache: projectionState.bakedShapeCache,
+      };
 
-        if (options.deferredFeatureIds?.has(feature.featureId)) {
-          failedProjectionFeatures.push(createFailedFeatureRecord(feature));
-          continue;
-        }
-
-        pendingProjectionFeatures.push(feature);
-      }
-    }
-
-    let authoringState = createOccAuthoringState(oc, {
-      documentId: document.documentId,
-      name: document.name,
-      revisionId: document.revisionId,
-      modelingTolerance: document.settings.modelingTolerance,
-      assetResolver,
-      sketches,
-      variables: structuredClone(document.variables),
-      bodyLabels: new Map(
-        document.bodyLabels.map((label) => [label.bodyId, label.label]),
-      ),
-      assets: document.assets,
-      assetBlobs,
-      embeddedBinaryAssets: document.embeddedBinaryAssets,
-      historyOrder,
-      diagnostics: restoreDiagnostics,
-      cursor: { kind: "empty" },
-      previousFeatureTopologyLineage,
-    });
-    authoringState = {
-      ...authoringState,
-      resolvedGeometryAssets: projectionState.resolvedGeometryAssets,
-      bakedShapeCache: projectionState.bakedShapeCache,
-    };
-
-    const rebuiltAuthoringState = this.tryBuildNextAuthoringState(
-      {
+      const rebuiltAuthoringState = this.tryBuildNextAuthoringState(
+        {
+          authoringState,
+          revisionSequence: parseRevisionSequence(document.revisionId),
+        },
+        {
+          revisionId: document.revisionId,
+          features,
+          cursor: document.cursor,
+          deferredFeatureIds: options.deferredFeatureIds,
+        },
+      ).state;
+      authoringState = {
+        ...rebuiltAuthoringState,
+        diagnostics: mergeModelingDiagnostics(
+          rebuiltAuthoringState.diagnostics,
+          restoreDiagnostics,
+        ),
+      };
+      const runtimeState = {
         authoringState,
         revisionSequence: parseRevisionSequence(document.revisionId),
-      },
-      {
-        revisionId: document.revisionId,
-        features,
-        cursor: document.cursor,
-        deferredFeatureIds: options.deferredFeatureIds,
-      },
-    ).state;
-    authoringState = {
-      ...rebuiltAuthoringState,
-      diagnostics: mergeModelingDiagnostics(
-        rebuiltAuthoringState.diagnostics,
-        restoreDiagnostics,
-      ),
-    };
-    const runtimeState = {
-      authoringState,
-      revisionSequence: parseRevisionSequence(document.revisionId),
-    };
-    if (options.replaceRuntimeState !== false) {
-      this.replaceRuntimeState(runtimeState);
+      };
+      retainedRestoreState = authoringState;
+      if (options.replaceRuntimeState !== false) {
+        this.replaceRuntimeState(runtimeState);
+      }
+      restoredRuntimeState = runtimeState;
+    } catch (error) {
+      restoreError = error;
     }
-    return runtimeState;
+
+    try {
+      this.releaseDiscardedState(projectionState, [
+        ...(retainedRestoreState ? [retainedRestoreState] : []),
+        ...(this.runtimeState ? [this.runtimeState.authoringState] : []),
+      ]);
+    } catch (cleanupError) {
+      if (restoreError !== undefined) {
+        throw combineOccCleanupError(restoreError, cleanupError);
+      }
+      throw cleanupError;
+    }
+    if (restoreError !== undefined) throw restoreError;
+    if (!restoredRuntimeState) {
+      throw new Error("OpenCascade restore completed without a runtime state.");
+    }
+    return restoredRuntimeState;
   }
 
   async exportAuthoredModelDocument(
@@ -2337,7 +2712,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       documentId: this.documentId,
       name: OCC_KERNEL_DOCUMENT_NAME,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
-      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+      modelingTolerance: this.initialDocumentSettings.modelingTolerance,
+      angularToleranceRadians:
+        this.initialDocumentSettings.angularToleranceRadians,
       assetResolver: this.assetResolver,
     });
 
@@ -2345,15 +2722,28 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   private replaceRuntimeState(runtimeState: OccKernelRuntimeState) {
+    if (this.disposed) {
+      try {
+        this.releaseDiscardedState(runtimeState.authoringState, []);
+      } catch (cleanupError) {
+        throw combineOccCleanupError(
+          new Error("OpenCascade kernel adapter has been disposed."),
+          cleanupError,
+        );
+      }
+      throw new Error("OpenCascade kernel adapter has been disposed.");
+    }
     const previousRuntimeState = this.runtimeState;
+    this.runtimeGeneration += 1;
     this.workerRestoredDocument = null;
     this.pruneNativeTopologyBodyPayloadCache(runtimeState.authoringState);
     this.runtimeState = runtimeState;
     this.initializationPromise = Promise.resolve(runtimeState);
-    releaseReplacedOccBakedShapeCache(
-      previousRuntimeState?.authoringState.bakedShapeCache,
-      runtimeState.authoringState.bakedShapeCache,
-    );
+    if (previousRuntimeState) {
+      this.releaseDiscardedState(previousRuntimeState.authoringState, [
+        runtimeState.authoringState,
+      ]);
+    }
   }
 
   private createNativeTopologyBodyPayloadCacheKey(input: {
@@ -2403,6 +2793,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: runtimeState.authoringState.name,
       revisionId: input.revisionId,
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
+      angularToleranceRadians:
+        runtimeState.authoringState.angularToleranceRadians,
       assetResolver: runtimeState.authoringState.assetResolver,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
       variables: input.variables ?? runtimeState.authoringState.variables,
@@ -2431,12 +2823,26 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const features = input.features ?? runtimeState.authoringState.features;
     const cursor = input.cursor ?? runtimeState.authoringState.cursor;
 
-    for (const feature of getAppliedFeatures(
-      features,
-      cursor,
-      baseState.historyOrder,
-    )) {
-      current = applyOccFeatureToAuthoringState(current, feature);
+    try {
+      for (const feature of getAppliedFeatures(
+        features,
+        cursor,
+        baseState.historyOrder,
+      )) {
+        const previous = current;
+        current = applyOccFeatureToAuthoringState(current, feature);
+        this.releaseIntermediateState(previous, [
+          current,
+          runtimeState.authoringState,
+        ]);
+      }
+    } catch (error) {
+      try {
+        this.releaseDiscardedState(current, [runtimeState.authoringState]);
+      } catch (cleanupError) {
+        throw combineOccCleanupError(error, cleanupError);
+      }
+      throw error;
     }
 
     const rebuiltFeatures = new Map(
@@ -2548,6 +2954,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     try {
       this.validateSketchPlaneSupport(state, request.plane);
     } catch (error) {
+      this.rethrowCleanupFailure(error);
       diagnostics.push(
         createValidationDiagnostic(
           error instanceof Error
@@ -2668,6 +3075,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       name: runtimeState.authoringState.name,
       revisionId: input.revisionId,
       modelingTolerance: runtimeState.authoringState.modelingTolerance,
+      angularToleranceRadians:
+        runtimeState.authoringState.angularToleranceRadians,
       assetResolver: runtimeState.authoringState.assetResolver,
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
       variables: input.variables ?? runtimeState.authoringState.variables,
@@ -2777,9 +3186,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         continue;
       }
 
+      const previous = current;
       try {
         current = applyOccFeatureToAuthoringState(current, feature);
       } catch (error) {
+        this.rethrowCleanupFailure(error);
         const consumedTargets = getFeatureConsumedTargets(feature.definition);
         const invalidDiagnostics = consumedTargets.flatMap((target) => {
           const resolved = resolveOccReference(
@@ -2810,7 +3221,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           ),
         );
         failedFeatures.push(createFailedFeatureRecord(feature));
+        continue;
       }
+      this.releaseIntermediateState(previous, [
+        current,
+        runtimeState.authoringState,
+      ]);
     }
 
     const rebuiltFeatures = new Map(
@@ -3048,42 +3464,47 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       );
     }
 
-    if (
-      !this.initialSnapshotRequiresRuntime &&
-      !this.runtimeState &&
-      !this.initializationPromise
-    ) {
+    try {
+      if (
+        !this.initialSnapshotRequiresRuntime &&
+        !this.runtimeState &&
+        !this.initializationPromise
+      ) {
+        return {
+          contractVersion: CONTRACT_VERSION,
+          snapshot: this.buildInitialSnapshotWithoutRuntime(),
+        };
+      }
+
+      const runtimeState = await this.getRuntimeState();
+      const nativeTopologyResult = this.buildNativeTopologyPayloadForState(
+        runtimeState.authoringState,
+        this.snapshotLodTierId,
+      );
+
+      if (
+        nativeTopologyResult.kind !== "nativeTopologyPayload" &&
+        runtimeState.authoringState.bodies.some(
+          (body) => body.topologyPresentation !== "bodyOnlyMesh",
+        )
+      ) {
+        throw this.createNativeTopologyUnavailableError(nativeTopologyResult);
+      }
+
       return {
         contractVersion: CONTRACT_VERSION,
-        snapshot: this.buildInitialSnapshotWithoutRuntime(),
+        snapshot: buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
+          lodTierId: this.snapshotLodTierId,
+          nativeTopologyPayload:
+            nativeTopologyResult.kind === "nativeTopologyPayload"
+              ? nativeTopologyResult.payload
+              : undefined,
+        }),
       };
+    } catch (error) {
+      this.rememberCleanupFailure(error);
+      throw error;
     }
-
-    const runtimeState = await this.getRuntimeState();
-    const nativeTopologyResult = this.buildNativeTopologyPayloadForState(
-      runtimeState.authoringState,
-      this.snapshotLodTierId,
-    );
-
-    if (
-      nativeTopologyResult.kind !== "nativeTopologyPayload" &&
-      runtimeState.authoringState.bodies.some(
-        (body) => body.topologyPresentation !== "bodyOnlyMesh",
-      )
-    ) {
-      throw this.createNativeTopologyUnavailableError(nativeTopologyResult);
-    }
-
-    return {
-      contractVersion: CONTRACT_VERSION,
-      snapshot: buildOccWorkspaceSnapshot(runtimeState.authoringState, [], {
-        lodTierId: this.snapshotLodTierId,
-        nativeTopologyPayload:
-          nativeTopologyResult.kind === "nativeTopologyPayload"
-            ? nativeTopologyResult.payload
-            : undefined,
-      }),
-    };
   }
 
   async buildNativeTopologySnapshot(
@@ -3128,7 +3549,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
   }
 
-  async executeNativeFeatureHistoryRebuild(
+  private async executeNativeFeatureHistoryRebuildSerialized(
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[] = [],
     assets: readonly GeometryAssetBlobInput[] = [],
@@ -3563,6 +3984,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
+  protected projectSketchReferencesFromSnapshot(
+    snapshot: Parameters<typeof projectSketchExternalReferencesFromSnapshot>[0],
+    request: ProjectSketchExternalReferencesRequest,
+  ): ProjectSketchExternalReferencesResponse {
+    return projectSketchExternalReferencesFromSnapshot(snapshot, request);
+  }
+
   async projectSketchExternalReferences(
     request: ProjectSketchExternalReferencesRequest,
   ): Promise<ProjectSketchExternalReferencesResponse> {
@@ -3573,20 +4001,25 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     if (!this.runtimeState && !this.initializationPromise) {
-      return projectSketchExternalReferencesFromSnapshot(
+      return this.projectSketchReferencesFromSnapshot(
         this.buildInitialSnapshotWithoutRuntime(),
         request,
       );
     }
 
-    const runtimeState = await this.getRuntimeState();
-    return projectSketchExternalReferencesFromSnapshot(
-      buildOccWorkspaceSnapshot(runtimeState.authoringState),
-      request,
-    );
+    try {
+      const runtimeState = await this.getRuntimeState();
+      return this.projectSketchReferencesFromSnapshot(
+        buildOccWorkspaceSnapshot(runtimeState.authoringState),
+        request,
+      );
+    } catch (error) {
+      this.rememberCleanupFailure(error);
+      throw error;
+    }
   }
 
-  async commitSketch(
+  private async commitSketchSerialized(
     request: CommitSketchRequest,
   ): Promise<CommitSketchResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -3667,6 +4100,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       request.solverCorrelation ??
       createDefaultSolverCorrelation(sketchId, request.baseRevisionId);
     const solverAdapter = this.getSolverAdapter(request.baseRevisionId);
+    const tolerances = createDocumentSolverTolerances({
+      modelingTolerance: runtimeState.authoringState.modelingTolerance,
+      angularToleranceRadians:
+        runtimeState.authoringState.angularToleranceRadians,
+    });
     let projectedReferences: ProjectedSketchReferenceRecord[] = [];
     let solvedSnapshot: SolvedSketchSnapshot;
     let derivedRegions: RegionRecord[] = [];
@@ -3680,23 +4118,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       solvedSnapshot = createInvalidSolvedSketchSnapshot(sketchDiagnostics);
     } else {
       const solverDefinition = resolvedDefinition.definition;
-      const projection =
-        normalizedDefinition.references.length === 0
-          ? { projectedReferences: [], diagnostics: [] }
-          : await this.projectSketchExternalReferences({
-              contractVersion: CONTRACT_VERSION,
-              solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-              requestId: correlation.projectionRequestId,
-              documentId: this.documentId,
-              revisionId: request.baseRevisionId,
-              sketchId,
-              plane: request.plane.frame,
-              tolerances: this.tolerances,
-              references: normalizedDefinition.references.map((reference) => ({
-                referenceId: reference.referenceId,
-                reference,
-              })),
-            });
+      const projection = await this.projectSketchExternalReferences({
+        contractVersion: CONTRACT_VERSION,
+        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+        requestId: correlation.projectionRequestId,
+        documentId: this.documentId,
+        revisionId: request.baseRevisionId,
+        sketchId,
+        plane: request.plane.frame,
+        tolerances,
+        references: normalizedDefinition.references.map((reference) => ({
+          referenceId: reference.referenceId,
+          reference,
+        })),
+      });
       projectedReferences = [...projection.projectedReferences];
       const validation = await solverAdapter.validateSketch({
         contractVersion: CONTRACT_VERSION,
@@ -3706,7 +4141,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         revisionId: request.baseRevisionId,
         sketchId,
         plane: request.plane.frame,
-        tolerances: this.tolerances,
+        tolerances,
         definition: solverDefinition,
         projectedReferences,
       });
@@ -3718,7 +4153,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         revisionId: request.baseRevisionId,
         sketchId,
         plane: request.plane.frame,
-        tolerances: this.tolerances,
+        tolerances,
         partialSolvePolicy: "bestEffort",
         definition: solverDefinition,
         projectedReferences,
@@ -3837,7 +4272,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
-  async createFeature(
+  private async createFeatureSerialized(
     request: CreateFeatureRequest,
   ): Promise<CreateFeatureResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -3916,7 +4351,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           partial: false,
           diagnostics: [],
         };
-      } catch {
+      } catch (error) {
+        this.rethrowCleanupFailure(error);
         nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
           revisionId: nextRevisionId,
           features: nextFeatures,
@@ -3942,6 +4378,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         nonRepairableDiagnostics,
         nonRepairableDiagnostics[0]!.code,
       );
+      this.releaseDiscardedState(nextAuthoringState.state, [
+        runtimeState.authoringState,
+      ]);
 
       return {
         ...this.withOperationEnvelope({
@@ -3977,7 +4416,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
-  async updateFeature(
+  private async updateFeatureSerialized(
     request: UpdateFeatureRequest,
   ): Promise<UpdateFeatureResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -4056,6 +4495,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         nonRepairableDiagnostics,
         nonRepairableDiagnostics[0]!.code,
       );
+      this.releaseDiscardedState(nextAuthoringState.state, [
+        runtimeState.authoringState,
+      ]);
 
       return {
         ...this.withOperationEnvelope({
@@ -4092,7 +4534,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
-  async setFeatureSuppression(
+  private async setFeatureSuppressionSerialized(
     request: SetFeatureSuppressionRequest,
   ): Promise<SetFeatureSuppressionResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -4207,7 +4649,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
-  async deleteFeature(
+  private async deleteFeatureSerialized(
     request: DeleteFeatureRequest,
   ): Promise<DeleteFeatureResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -4303,7 +4745,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
-  async deleteTarget(
+  private async deleteTargetSerialized(
     request: DeleteDocumentTargetRequest,
   ): Promise<DeleteDocumentTargetResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -4497,7 +4939,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     });
   }
 
-  async renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse> {
+  private async renameBodySerialized(
+    request: RenameBodyRequest,
+  ): Promise<RenameBodyResponse> {
     assertSupportedModelingRequest(request, this.documentId);
 
     if (this.workerSnapshotClient) {
@@ -4570,7 +5014,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     });
   }
 
-  async reorderFeature(
+  private async reorderFeatureSerialized(
     request: ReorderFeatureRequest,
   ): Promise<ReorderFeatureResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -4691,7 +5135,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
-  async reorderDocumentHistory(
+  private async reorderDocumentHistorySerialized(
     request: ReorderDocumentHistoryRequest,
   ): Promise<ReorderDocumentHistoryResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -4845,7 +5289,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     });
   }
 
-  async setFeatureCursor(
+  private async setFeatureCursorSerialized(
     request: SetFeatureCursorRequest,
   ): Promise<SetFeatureCursorResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -4936,7 +5380,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     });
   }
 
-  async addDocumentVariable(
+  private async addDocumentVariableSerialized(
     request: AddDocumentVariableRequest,
   ): Promise<AddDocumentVariableResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -5017,7 +5461,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     });
   }
 
-  async updateDocumentVariable(
+  private async updateDocumentVariableSerialized(
     request: UpdateDocumentVariableRequest,
   ): Promise<UpdateDocumentVariableResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -5142,7 +5586,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     });
   }
 
-  async evaluatePreview(
+  private async evaluatePreviewSerialized(
     request: EvaluatePreviewRequest,
   ): Promise<EvaluatePreviewResponse> {
     assertSupportedModelingRequest(request, this.documentId);
@@ -5216,8 +5660,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       previewFeatures.map((feature) => feature.definition),
     );
 
+    let previewState: OccAuthoringState | null = null;
     try {
-      const previewState = this.buildNextAuthoringState(runtimeState, {
+      previewState = this.buildNextAuthoringState(runtimeState, {
         revisionId: currentRevisionId,
         features: previewFeatures,
         historyOrder: previewHistoryOrder,
@@ -5267,6 +5712,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         diagnostics,
       };
     } catch (error) {
+      this.rethrowCleanupFailure(error);
       const diagnostics = [
         ...(request.baseRevisionId === currentRevisionId
           ? []
@@ -5323,6 +5769,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         },
         diagnostics,
       };
+    } finally {
+      if (previewState) {
+        this.releaseDiscardedState(previewState, [runtimeState.authoringState]);
+      }
     }
   }
 

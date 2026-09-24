@@ -574,6 +574,29 @@ function createExtrudeDefinition(
   };
 }
 
+function createSurfaceExtrudeDefinition(
+  sketch: SketchSnapshotRecord,
+  region: RegionRecord,
+  extent: Extract<FeatureDefinition, { kind: "extrude" }>["parameters"]["extent"],
+): FeatureDefinition {
+  return {
+    kind: "extrude",
+    featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+    parameters: {
+      resultBodyType: "surface",
+      profiles: [
+        {
+          kind: "region",
+          sketchId: sketch.sketchId,
+          regionId: region.regionId,
+        },
+      ],
+      startExtent: { kind: "profilePlane" },
+      extent,
+    },
+  };
+}
+
 function createPlaneDefinition(
   bodyId: BodyId,
   faceId: FaceId,
@@ -682,6 +705,99 @@ function applyFeature(
 ) {
   return applyOccFeatureToAuthoringState(state, feature);
 }
+
+// Lane: logic. Seam: real OCC surface-prism provenance must use the same
+// extent-derived side-face role that import selectors request.
+test("surface extrudes publish each authored side face under their extent-derived role", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const plane = createStandardPlaneDefinition("xy");
+  const cases = [
+    {
+      name: "one-side",
+      extent: {
+        mode: "oneSide",
+        end: {
+          kind: "blind",
+          direction: "positive",
+          distance: { source: "literal", value: 6 },
+        },
+      },
+      role: "one-side-end",
+      otherRole: "combined-ends",
+    },
+    {
+      name: "symmetric",
+      extent: {
+        mode: "symmetric",
+        end: {
+          kind: "blind",
+          direction: "positive",
+          distance: { source: "literal", value: 6 },
+        },
+      },
+      role: "combined-ends",
+      otherRole: "one-side-end",
+    },
+    {
+      name: "two-side",
+      extent: {
+        mode: "twoSide",
+        firstEnd: {
+          kind: "blind",
+          direction: "positive",
+          distance: { source: "literal", value: 6 },
+        },
+        secondEnd: {
+          kind: "blind",
+          direction: "negative",
+          distance: { source: "literal", value: 4 },
+        },
+      },
+      role: "combined-ends",
+      otherRole: "one-side-end",
+    },
+  ] as const;
+
+  for (const entry of cases) {
+    const sketchId = `sketch_occ_surface_role_${entry.name}` as SketchId;
+    const surfaceFeatureId = featureId(`surface_role_${entry.name}`);
+    const rectangle = createRectangleSketch(sketchId, plane, {
+      width: 10,
+      height: 8,
+    });
+    const state = applyFeature(
+      createOccAuthoringState(oc, { sketches: [rectangle.sketch] }),
+      {
+        featureId: surfaceFeatureId,
+        definition: createSurfaceExtrudeDefinition(
+          rectangle.sketch,
+          rectangle.region,
+          entry.extent,
+        ),
+        suppressed: false,
+      },
+    );
+    const output = state.featureTopologyStages
+      .get(surfaceFeatureId)
+      ?.outputs.values()
+      .next().value;
+    if (!output) {
+      throw new Error(`Expected ${entry.name} surface extrude topology output.`);
+    }
+    for (const entity of rectangle.sketch.sketch.definition.entities) {
+      const prefix = `extrude:${surfaceFeatureId}:profile-sketch:${sketchId}:end`;
+      const suffix = `sketch-entity:${sketchId}:${entity.entityId}:generated-side-face`;
+      expect(
+        output.sourceTargets.get(`${prefix}:${entry.role}:${suffix}`),
+        `${entry.name} must publish exactly one ${entry.role} side face for ${entity.entityId}.`,
+      ).toHaveLength(1);
+      expect(
+        output.sourceTargets.get(`${prefix}:${entry.otherRole}:${suffix}`),
+        `${entry.name} must not publish ${entity.entityId} under the other provenance role.`,
+      ).toBeUndefined();
+    }
+  }
+});
 
 function requireBody(state: OccAuthoringState, bodyId: BodyId) {
   const body = state.bodies.find((entry) => entry.bodyId === bodyId);
