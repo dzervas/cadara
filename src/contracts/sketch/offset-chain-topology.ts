@@ -1,20 +1,35 @@
 import type {
   CertifiedCubicTubeChain,
   CertifiedNeutralCurveQuery,
+  CertifiedTubePieceChain,
   CubicTubeChainResult,
   NeutralCurve,
   NeutralCurvePointWitness,
   NeutralCurveQueryRequest,
   NeutralCurveQueryResult,
+  TubeChainPiece,
+  TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
-import type { SketchEntityId } from "@/contracts/shared/ids";
+import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
+import type { DeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import {
   OFFSET_DIAGNOSTIC_CODES,
+  offsetLinePoints,
   type OffsetChainFailure,
 } from "@/contracts/sketch/offset-geometry";
-import type { SketchPoint2D } from "@/contracts/sketch/schema";
-import { evaluateSplineSpan } from "@/contracts/sketch/spline-geometry";
-import type { SplineOffsetCubicSpan } from "@/contracts/sketch/spline-offset-geometry";
+import type {
+  SketchDefinition,
+  SketchPoint2D,
+} from "@/contracts/sketch/schema";
+import {
+  evaluateSplineSpan,
+  reconstructSplineAggregate,
+  type SplineVector,
+} from "@/contracts/sketch/spline-geometry";
+import {
+  approximateSplineOffset,
+  type SplineOffsetCubicSpan,
+} from "@/contracts/sketch/spline-offset-geometry";
 
 /**
  * Certified topology of one offset chain's emitted approximant.
@@ -740,9 +755,129 @@ export function resolveOffsetChainTopology(
 }
 
 export type OffsetChainTubeStabilityCertificate = Extract<
-  CubicTubeChainResult,
+  TubePieceChainResult,
   { readonly kind: "verified" }
 >["certificate"];
+
+/** Natural-order source authority of one piece from one fresh adapter call. */
+export type DeclaredOffsetPieceSource =
+  | {
+      readonly kind: "line";
+      readonly source: readonly [SketchPoint2D, SketchPoint2D];
+      /** Owner distance reversed ? −d : d, bitwise. */
+      readonly distance: number;
+      readonly startPointId: SketchPointId;
+      readonly endPointId: SketchPointId;
+    }
+  | {
+      readonly kind: "spline";
+      readonly distance: number;
+      /** The single owner call's spans (the resolver piece holds this array). */
+      readonly spans: readonly SplineOffsetCubicSpan[];
+    };
+
+export interface DeclaredOffsetChainPieces {
+  readonly ok: true;
+  readonly connectivity: DeclaredOffsetChainConnectivity;
+  readonly distance: number;
+  readonly modelingTolerance: number;
+  /** Raw resolver pieces in declared traversal order, forwarded by reference. */
+  readonly pieces: readonly OffsetChainPiece[];
+  readonly sources: readonly DeclaredOffsetPieceSource[];
+}
+
+/**
+ * Fresh N2 → N1 adapter: per declared piece in traversal order, owner distance
+ * d_i = reversed ? −d : d. A line is `offsetLinePoints` of its positions; a
+ * spline is ONE reconstruction and ONE owner call, forwarded unchanged. No
+ * coordinate proximity is consulted. Arcs, circles and other seeds are outside
+ * the tube-stability scope.
+ */
+export function declaredOffsetChainPieces(input: {
+  /** Points carry the solve-accepted positions. */
+  readonly definition: Pick<SketchDefinition, "points" | "entities">;
+  readonly connectivity: DeclaredOffsetChainConnectivity;
+  readonly distance: number;
+  readonly modelingTolerance: number;
+}): DeclaredOffsetChainPieces | OffsetChainFailure {
+  const { definition, connectivity, distance, modelingTolerance } = input;
+  const positions: Record<string, SplineVector> = {};
+  for (const point of definition.points)
+    positions[point.pointId] = point.position;
+  const pieces: OffsetChainPiece[] = [];
+  const sources: DeclaredOffsetPieceSource[] = [];
+  for (const { seedEntityId, reversed } of connectivity.pieces) {
+    const entity = definition.entities.find(
+      (candidate) => candidate.entityId === seedEntityId,
+    );
+    const effective = reversed ? -distance : distance;
+    if (entity?.kind === "lineSegment") {
+      const start = positions[entity.startPointId];
+      const end = positions[entity.endPointId];
+      const offset = start && end && offsetLinePoints(start, end, effective);
+      if (!start || !end || !offset)
+        return failure(
+          codes.unsupportedSeed,
+          "Offset seed segment is missing or too short.",
+          seedEntityId,
+        );
+      pieces.push({
+        kind: "lineSegment",
+        seedEntityId,
+        reversed,
+        start: offset.start,
+        end: offset.end,
+      });
+      sources.push({
+        kind: "line",
+        source: [start, end],
+        distance: effective,
+        startPointId: entity.startPointId,
+        endPointId: entity.endPointId,
+      });
+      continue;
+    }
+    if (entity?.kind !== "spline")
+      return failure(
+        codes.topologyStabilityUnsupported,
+        "Tube stability supports declared line and spline pieces only.",
+        seedEntityId,
+      );
+    const geometry = reconstructSplineAggregate(entity, positions);
+    if (geometry.validity !== "valid")
+      return failure(
+        codes.unsupportedSeed,
+        "Offset seed spline does not reconstruct.",
+        seedEntityId,
+      );
+    const owner = approximateSplineOffset({
+      spans: geometry.spans,
+      distance: effective,
+      modelingTolerance,
+    });
+    if (!owner.ok)
+      return failure(
+        codes.splineFitFailure,
+        `The spline offset owner did not certify (${owner.code}).`,
+        seedEntityId,
+      );
+    pieces.push({
+      kind: "derivedCubic",
+      seedEntityId,
+      reversed,
+      spans: owner.spans,
+    });
+    sources.push({ kind: "spline", distance: effective, spans: owner.spans });
+  }
+  return {
+    ok: true,
+    connectivity,
+    distance,
+    modelingTolerance,
+    pieces,
+    sources,
+  };
+}
 
 export type OffsetChainTubeStabilityResult =
   | {
@@ -765,11 +900,34 @@ export type OffsetChainTubeStabilityResult =
  * natural-order derivative enclosure and source normal. The tolerance, errors
  * and proof metadata are forwarded unchanged; binding them to one fresh owner
  * call remains the caller's obligation. Certifier exceptions propagate.
+ *
+ * With `declared` (L1b): the resolution must be of exactly that adapter
+ * output (piece identity), every declared join a shared canonical point that
+ * is both pieces' traversal terminal, and the certificate is conditional on
+ * those premises: it concerns the abstract chain trimmed at the exact
+ * witnessed roots only (never the rounded emitted ends). Declared coincident
+ * joins are unsupported.
  */
 export function certifyOffsetChainTubeStability(
   resolved: OffsetChainTopologySuccess,
   certifier: CertifiedCubicTubeChain,
+): OffsetChainTubeStabilityResult;
+export function certifyOffsetChainTubeStability(
+  resolved: OffsetChainTopologySuccess,
+  certifier: CertifiedTubePieceChain,
+  declared: DeclaredOffsetChainPieces,
+): OffsetChainTubeStabilityResult;
+export function certifyOffsetChainTubeStability(
+  resolved: OffsetChainTopologySuccess,
+  certifier: CertifiedCubicTubeChain | CertifiedTubePieceChain,
+  declared?: DeclaredOffsetChainPieces,
 ): OffsetChainTubeStabilityResult {
+  if (declared)
+    return certifyDeclaredTubeStability(
+      resolved,
+      certifier as CertifiedTubePieceChain,
+      declared,
+    );
   const { pieces, closed, modelingTolerance } = resolved.input;
   const piece = pieces.length === 1 ? pieces[0] : undefined;
   const seedEntityId = pieces[0]?.seedEntityId ?? null;
@@ -802,7 +960,7 @@ export function certifyOffsetChainTubeStability(
       piece.seedEntityId,
     );
   }
-  const result = certifier.certifyChain({
+  const result = (certifier as CertifiedCubicTubeChain).certifyChain({
     modelingTolerance,
     closed,
     tubes: piece.spans.map((span) => ({
@@ -813,11 +971,20 @@ export function certifyOffsetChainTubeStability(
       sourceLocalInterval: span.sourceLocalInterval,
     })),
   });
+  return tubeStabilityResult(resolved, piece.seedEntityId, result, "spans");
+}
+
+function tubeStabilityResult(
+  resolved: OffsetChainTopologySuccess,
+  seedEntityId: SketchEntityId,
+  result: TubePieceChainResult | CubicTubeChainResult,
+  indices: "spans" | "leaves",
+): OffsetChainTubeStabilityResult {
   if (result.kind === "verified") {
     return {
       ok: true,
       resolved,
-      seedEntityId: piece.seedEntityId,
+      seedEntityId,
       certificate: result.certificate,
     };
   }
@@ -832,12 +999,165 @@ export function certifyOffsetChainTubeStability(
   const where =
     result.first === undefined
       ? ""
-      : ` (spans ${result.first}${result.second === undefined ? "" : `/${result.second}`})`;
+      : ` (${indices} ${result.first}${result.second === undefined ? "" : `/${result.second}`})`;
   return failure(
     code,
     `Tube stability is not certified${where}: ${result.kind} ${result.code}: ${result.message}`,
-    piece.seedEntityId,
+    seedEntityId,
   );
+}
+
+function certifyDeclaredTubeStability(
+  resolved: OffsetChainTopologySuccess,
+  certifier: CertifiedTubePieceChain,
+  declared: DeclaredOffsetChainPieces,
+): OffsetChainTubeStabilityResult {
+  const { pieces, closed, modelingTolerance } = resolved.input;
+  const { connectivity, sources } = declared;
+  const count = pieces.length;
+  const seedEntityId = pieces[0]?.seedEntityId ?? null;
+  const mismatch = (message: string) =>
+    failure(codes.topologyUncertain, message, seedEntityId);
+  // Identity binding: the resolution is of exactly this adapter output.
+  if (
+    count === 0 ||
+    count !== declared.pieces.length ||
+    count !== sources.length ||
+    count !== connectivity.pieces.length ||
+    closed !== connectivity.closed ||
+    !Object.is(modelingTolerance, declared.modelingTolerance) ||
+    pieces.some(
+      (piece, index) =>
+        piece !== declared.pieces[index] ||
+        piece.seedEntityId !== connectivity.pieces[index]!.seedEntityId ||
+        piece.reversed !== connectivity.pieces[index]!.reversed,
+    )
+  )
+    return mismatch(
+      "The resolution was not resolved from this declared adapter output.",
+    );
+  const coincident = connectivity.joins.findIndex(
+    (join) => join.kind !== "sharedPoint",
+  );
+  if (coincident >= 0)
+    return failure(
+      codes.topologyStabilityUnsupported,
+      "Tube stability supports shared canonical point joins only; declared coincident joins are not certified.",
+      pieces[coincident]!.seedEntityId,
+    );
+  // A single closed piece closes through its own bitwise owner knot.
+  const wrap = closed && count > 1;
+  if (
+    resolved.joints.length !== connectivity.joins.length ||
+    connectivity.joins.length !== (wrap ? count : count - 1)
+  )
+    return mismatch("The resolved joints are not the declared joins.");
+
+  // Traversal-terminal canonical point of each piece (view, not coordinates).
+  const terminalPoint = (index: number, exiting: boolean) => {
+    const source = sources[index]!;
+    const naturalEnd = exiting !== pieces[index]!.reversed;
+    if (source.kind === "line")
+      return naturalEnd ? source.endPointId : source.startPointId;
+    return naturalEnd
+      ? source.spans.at(-1)?.source.endPointId
+      : source.spans[0]?.source.startPointId;
+  };
+  for (const [index, join] of connectivity.joins.entries()) {
+    const next = (index + 1) % count;
+    const joint = resolved.joints[index]!;
+    if (
+      join.kind !== "sharedPoint" ||
+      join.pointId !== terminalPoint(index, true) ||
+      join.pointId !== terminalPoint(next, false) ||
+      joint.firstSeedEntityId !== pieces[index]!.seedEntityId ||
+      joint.secondSeedEntityId !== pieces[next]!.seedEntityId
+    )
+      return mismatch(
+        `Declared join ${index} is not the shared traversal terminal of its pieces.`,
+      );
+  }
+
+  // Domain ends bind resolver joint indices to the declared adjacencies.
+  const expectedEnd = (index: number, exiting: boolean) => {
+    if (exiting) return wrap || index < count - 1 ? index : null;
+    return wrap || index > 0 ? (index - 1 + count) % count : null;
+  };
+  const isEnd = (end: OffsetChainDomainEnd, expected: number | null) =>
+    expected === null
+      ? end.kind === "source"
+      : end.kind === "joint" && end.jointIndex === expected;
+  const requestPieces: TubeChainPiece[] = [];
+  for (const [index, piece] of pieces.entries()) {
+    const source = sources[index]!;
+    const [low, high] = piece.reversed
+      ? [expectedEnd(index, true), expectedEnd(index, false)]
+      : [expectedEnd(index, false), expectedEnd(index, true)];
+    if (piece.kind === "lineSegment" && source.kind === "line") {
+      const ends = resolved.lineArcEndpoints.get(piece.seedEntityId);
+      if (
+        !ends ||
+        !isEnd(ends.startDomainEnd, low) ||
+        !isEnd(ends.endDomainEnd, high)
+      )
+        return mismatch("The resolution does not describe its own line piece.");
+      requestPieces.push({
+        kind: "line",
+        reversed: piece.reversed,
+        // Raw resolver supports only; never lineArcEndpoints or witness.position.
+        tube: {
+          emitted: [piece.start, piece.end],
+          source: source.source,
+          distance: source.distance,
+        },
+      });
+      continue;
+    }
+    if (piece.kind !== "derivedCubic" || source.kind !== "spline")
+      return failure(
+        codes.topologyStabilityUnsupported,
+        "Tube stability supports declared line and spline pieces only.",
+        piece.seedEntityId,
+      );
+    const spans = resolved.cubics.get(piece.seedEntityId);
+    const last = piece.spans.length - 1;
+    if (
+      piece.spans !== source.spans ||
+      spans?.length !== piece.spans.length ||
+      spans.some(
+        (item, offset) =>
+          item.span !== piece.spans[offset] ||
+          !isEnd(item.start, offset === 0 ? low : null) ||
+          !isEnd(item.end, offset === last ? high : null),
+      )
+    )
+      return mismatch("The resolution does not describe its own owner spans.");
+    requestPieces.push({
+      kind: "cubic",
+      reversed: piece.reversed,
+      tubes: piece.spans.map((span) => ({
+        poles: span.poles,
+        certifiedError: span.certifiedError,
+        reference: span.reference,
+        source: span.source,
+        sourceLocalInterval: span.sourceLocalInterval,
+        // The stored query domain the witnesses are expressed in.
+        queryDomain: span.sourceInterval,
+      })),
+    });
+  }
+  const result = certifier.certifyPieceChain({
+    modelingTolerance,
+    closed,
+    distance: declared.distance,
+    pieces: requestPieces,
+    trims: resolved.joints.map((joint, jointIndex) => ({
+      jointIndex,
+      firstParameterBounds: joint.firstParameterBounds,
+      secondParameterBounds: joint.secondParameterBounds,
+    })),
+  });
+  return tubeStabilityResult(resolved, seedEntityId!, result, "leaves");
 }
 
 interface CurveFrame {

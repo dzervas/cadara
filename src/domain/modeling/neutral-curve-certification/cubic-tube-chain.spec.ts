@@ -2,7 +2,11 @@ import { describe, expect, test } from "vitest";
 import type {
   CubicTubeChainRequest,
   CubicTubeChainResult,
+  NeutralCubicPieceTube,
   NeutralCubicTube,
+  PieceTubeChainRequest,
+  TubeChainPiece,
+  TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
 import {
   reconstructSpline,
@@ -1677,3 +1681,818 @@ describe("cubic tube chain: one shared proof budget per request", () => {
     ).toMatchObject({ code: "exact-query-proof-budget-exhausted" });
   });
 });
+
+describe("piece tube chain (L1b): Lemma-T trims under one meter", () => {
+  type Vector = readonly [number, number];
+  const pieceVerified = (result: TubePieceChainResult) => {
+    if (result.kind !== "verified")
+      throw new Error(`${result.kind} ${result.code}: ${result.message}`);
+    return result.certificate;
+  };
+  /** Owner-style line tube: emitted = source + d·leftNormal (+ optional shift). */
+  const linePiece = (
+    start: Vector,
+    end: Vector,
+    ownerDistance: number,
+    {
+      reversed = false,
+      shift = [0, 0] as Vector,
+    }: { reversed?: boolean; shift?: Vector } = {},
+  ): TubeChainPiece => {
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    const normal: Vector = [
+      -(end[1] - start[1]) / length,
+      (end[0] - start[0]) / length,
+    ];
+    const offset = (point: Vector): Vector => [
+      point[0] + normal[0] * ownerDistance + shift[0],
+      point[1] + normal[1] * ownerDistance + shift[1],
+    ];
+    return {
+      kind: "line",
+      reversed,
+      tube: {
+        emitted: [offset(start), offset(end)],
+        source: [start, end],
+        distance: ownerDistance,
+      },
+    };
+  };
+  /** Hand-built adversary cubic leaf with an explicit query domain. */
+  const pieceTube = (
+    poles: SplinePoles,
+    sourcePoles: SplinePoles,
+    derivative: Box,
+    ownerDistance: number,
+    {
+      certifiedError = 0,
+      sourceLocalInterval = [0, 1] as readonly [number, number],
+      queryDomain = [0, 1] as readonly [number, number],
+      splineId = "adversary",
+    } = {},
+  ): NeutralCubicPieceTube => ({
+    poles,
+    certifiedError,
+    reference: { derivative, sourcePoles, distance: ownerDistance },
+    source: {
+      splineId,
+      spanIndex: 0,
+      startOccurrenceId: "o0",
+      endOccurrenceId: "o1",
+    },
+    sourceLocalInterval,
+    queryDomain,
+  });
+  const cubicPiece = (
+    tubes: readonly NeutralCubicPieceTube[],
+    reversed = false,
+  ): TubeChainPiece => ({ kind: "cubic", reversed, tubes });
+  const pieceRequest = (
+    pieces: readonly TubeChainPiece[],
+    trims: readonly (readonly [Vector, Vector])[],
+    {
+      distance,
+      closed = false,
+      modelingTolerance = TOLERANCE,
+    }: {
+      distance: number;
+      closed?: boolean;
+      modelingTolerance?: number;
+    },
+  ): PieceTubeChainRequest => ({
+    modelingTolerance,
+    closed,
+    distance,
+    pieces,
+    trims: trims.map(([first, second], jointIndex) => ({
+      jointIndex,
+      firstParameterBounds: first,
+      secondParameterBounds: second,
+    })),
+  });
+  const at = (value: number): Vector => [value, value];
+
+  /**
+   * Reversed natural-up straight source (0,0)→(0,0.75), split once at local
+   * 0.5 (same-leaf), traversed downward into a line going right at the
+   * shared vertex (0,0): a left turn, concave at d = 1/64. Leaf 0 is the
+   * trimmed terminal; leaf 1 is its non-terminal neighbour and sits next to
+   * the line in the flattened order [leaf 0, leaf 1, line] WITHOUT being
+   * adjacent to it. The larger ε on leaf 1 is an honest (loose) bound.
+   */
+  const D8 = 1 / 64;
+  const RISE: SplinePoles = [
+    [0, 0],
+    [0, 0.25],
+    [0, 0.5],
+    [0, 0.75],
+  ];
+  const RISE_BOX: Box = [
+    [0, 0],
+    [0.75, 0.75],
+  ];
+  const reversedRise = ({
+    upperError = 0.3,
+    lowerDomain = [0, 0.5] as Vector,
+    ownerDistance = -D8,
+  } = {}) => {
+    const leaf = (
+      poles: SplinePoles,
+      sourceLocalInterval: Vector,
+      certifiedError: number,
+      queryDomain: Vector,
+    ) =>
+      pieceTube(poles, RISE, RISE_BOX, ownerDistance, {
+        certifiedError,
+        sourceLocalInterval,
+        queryDomain,
+        splineId: "rise",
+      });
+    // Emitted crossing: τ̂ = D8/0.375 on leaf 0, through its stored domain.
+    const query =
+      lowerDomain[0] + (D8 / 0.375) * (lowerDomain[1] - lowerDomain[0]);
+    return pieceRequest(
+      [
+        cubicPiece(
+          [
+            leaf(
+              [
+                [D8, 0],
+                [D8, 0.125],
+                [D8, 0.25],
+                [D8, 0.375],
+              ],
+              [0, 0.5],
+              0,
+              lowerDomain,
+            ),
+            leaf(
+              [
+                [D8, 0.375],
+                [D8, 0.5],
+                [D8, 0.625],
+                [D8, 0.75],
+              ],
+              [0.5, 1],
+              upperError,
+              [0.5, 1],
+            ),
+          ],
+          true,
+        ),
+        linePiece([0, 0], [1, 0], D8),
+      ],
+      [[at(query), at(D8)]],
+      { distance: D8, modelingTolerance: 1 },
+    );
+  };
+
+  test("exact reversal: a reversed piece keeps natural leaves, owner distance −d and a fixed s", () => {
+    const certificate = pieceVerified(
+      certifier.certifyPieceChain(reversedRise()),
+    );
+    expect(certificate.joins).toHaveLength(2);
+    expect(certificate.joins[0]).toMatchObject({
+      first: 0,
+      second: 1,
+      kind: "same-leaf",
+    });
+    const trim = certificate.joins[1]!;
+    expect(trim).toMatchObject({
+      kind: "trim",
+      jointIndex: 0,
+      first: 0,
+      second: 2,
+      line: "second",
+      // s_trav = −sgn(d) (line second), negated exactly on the reversed leaf.
+      orientation: 1,
+    });
+    if (trim.kind !== "trim") throw new Error("not a trim");
+    const tau = D8 / 0.375;
+    expect(trim.firstRootBounds[0]).toBeLessThanOrEqual(tau);
+    expect(trim.firstRootBounds[1]).toBeGreaterThanOrEqual(tau);
+    expect(trim.secondRootBounds[0]).toBeLessThanOrEqual(D8);
+    expect(trim.secondRootBounds[1]).toBeGreaterThanOrEqual(D8);
+    // Leaf 1 and the line are NOT adjacent although flattened neighbours.
+    expect(certificate.clearedPairs).toEqual([[1, 2]]);
+    expect(certificate.leaves).toHaveLength(3);
+  });
+
+  test("signed distance: each piece's owner distance is bitwise reversed ? −d : d, −0 visible", () => {
+    expect(
+      certifier.certifyPieceChain(reversedRise({ ownerDistance: D8 })),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "invalid-cubic-tube-chain",
+      message: expect.stringContaining("piece-oriented chain distance"),
+    });
+    const lone = (ownerDistance: number) =>
+      certifier.certifyPieceChain(
+        pieceRequest(
+          [linePiece([0, 0], [1, 0], ownerDistance, { reversed: true })],
+          [],
+          { distance: 0 },
+        ),
+      );
+    expect(lone(0)).toMatchObject({ code: "invalid-cubic-tube-chain" });
+    expect(lone(-0).kind).toBe("verified");
+  });
+
+  test("root bounds at 0.1 use the stored query-domain map, never the source-local leaf", () => {
+    const trim = pieceVerified(
+      certifier.certifyPieceChain(reversedRise({ lowerDomain: [0, 0.1] })),
+    ).joins[1]!;
+    if (trim.kind !== "trim") throw new Error("not a trim");
+    // τ̂ = D8/0.375 ≈ 0.0417; a map over sourceLocalInterval [0, 0.5] would
+    // report ≈ 0.0083 instead.
+    const tau = D8 / 0.375;
+    expect(trim.firstRootBounds[0]).toBeLessThanOrEqual(tau + 1e-15);
+    expect(trim.firstRootBounds[1]).toBeGreaterThanOrEqual(tau - 1e-15);
+    expect(trim.firstRootBounds[1] - trim.firstRootBounds[0]).toBeLessThan(
+      1e-12,
+    );
+  });
+
+  test("MR5 terminal source gate: a trimmed cubic must expose its natural terminal leaf end", () => {
+    const base = reversedRise();
+    const cubic = base.pieces[0] as Extract<TubeChainPiece, { kind: "cubic" }>;
+    const first = cubic.tubes[0]!;
+    expect(
+      certifier.certifyPieceChain({
+        ...base,
+        pieces: [
+          {
+            ...cubic,
+            tubes: [
+              { ...first, sourceLocalInterval: [0.125, 0.5] },
+              cubic.tubes[1]!,
+            ],
+          },
+          base.pieces[1]!,
+        ],
+      }),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "trim-side-unproven",
+      message: expect.stringContaining("tangents at the trim vertex"),
+    });
+  });
+
+  test("near-nonterminal clearance: a flattened neighbour that is not adjacent is cleared, and fails closed when its tube reaches the line", () => {
+    expect(
+      certifier.certifyPieceChain(reversedRise({ upperError: 0.6 })),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "cubic-tube-clearance-unproven",
+      first: 1,
+      second: 2,
+    });
+  });
+
+  test("line tube: same-parameter ε from the literal emitted ends, no √ulp cancellation at d = 100", () => {
+    const [leaf] = pieceVerified(
+      certifier.certifyPieceChain(
+        pieceRequest([linePiece([0.1, 0.2], [3.1, 4.2], 100)], [], {
+          distance: 100,
+        }),
+      ),
+    ).leaves;
+    // The scalar |D|² + d² − 2d·D·ν form would lose ≈ 2e-6 here.
+    expect(leaf!.baseErrorStar).toBeLessThan(1e-12);
+    expect(leaf!.clearanceRadius).toBe(leaf!.baseErrorStar);
+    // A literal end moved off the true offset is measured, never recomputed.
+    const [moved] = pieceVerified(
+      certifier.certifyPieceChain(
+        pieceRequest(
+          [linePiece([0, 0], [1, 0], 0.25, { shift: [0, 2 ** -12] })],
+          [],
+          { distance: 0.25 },
+        ),
+      ),
+    ).leaves;
+    expect(moved!.baseErrorStar).toBeGreaterThanOrEqual(2 ** -12);
+    expect(
+      certifier.certifyPieceChain(
+        pieceRequest(
+          [linePiece([0, 0], [1, 0], 0.25, { shift: [0, 2 ** -9] })],
+          [],
+          { distance: 0.25 },
+        ),
+      ),
+    ).toMatchObject({ code: "line-tube-error-unproven" });
+  });
+
+  // CX1 (review §1.3): source line (0,0)→(0.01,0), d = 0.0103, a straight
+  // curve up from the shared vertex whose emitted cubic is shifted 4e-4 along
+  // ℓ. Every emitted check passes (t̂ = 0.01 interior), but the true line
+  // offset is consumed: t* ≈ −0.03, and η/L_lo = 0.08 > t̂.
+  const CX1_D = 0.0103;
+  const cx1 = (lineStart: Vector) => {
+    const x = 0.0001;
+    const up: SplinePoles = [
+      [0.01, 0],
+      [0.01, 0.25],
+      [0.01, 0.5],
+      [0.01, 0.75],
+    ];
+    const tHat = (x - lineStart[0]) / (0.01 - lineStart[0]);
+    return pieceRequest(
+      [
+        linePiece(lineStart, [0.01, 0], CX1_D),
+        cubicPiece([
+          pieceTube(
+            [
+              [x, 0],
+              [x, 0.25],
+              [x, 0.5],
+              [x, 0.75],
+            ],
+            up,
+            RISE_BOX,
+            CX1_D,
+            { certifiedError: 4.0001e-4 },
+          ),
+        ]),
+      ],
+      [
+        [
+          [tHat - 1e-7, tHat + 1e-7],
+          [CX1_D / 0.75 - 1e-7, CX1_D / 0.75 + 1e-7],
+        ],
+      ],
+      { distance: CX1_D },
+    );
+  };
+
+  test("X1/CX1 line-consumed: the true line root leaves the segment and fails closed", () => {
+    expect(certifier.certifyPieceChain(cx1([0, 0]))).toMatchObject({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message: expect.stringContaining("strictly inside"),
+    });
+    // Control: the same corner on a long line keeps its true root inside.
+    const certificate = pieceVerified(
+      certifier.certifyPieceChain(cx1([-0.99, 0])),
+    );
+    expect(certificate.joins).toMatchObject([
+      { kind: "trim", line: "first", orientation: 1 },
+    ]);
+  });
+
+  test("X2/CX2 convex gap: a coincident-style convex line↔line corner is never a trim", () => {
+    // Right turn of 1e-6 rad with a 1e-3 source gap; d > 0 (convex).
+    expect(
+      certifier.certifyPieceChain(
+        pieceRequest(
+          [
+            linePiece([-1, 0], [0, 0], 0.01),
+            linePiece([-0.001, 5e-13], [0.999, 5e-13 - 1e-6], 0.01),
+          ],
+          [[at(0.999), at(0.0005)]],
+          { distance: 0.01 },
+        ),
+      ),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "trim-side-unproven",
+      message: expect.stringContaining("not concave"),
+    });
+  });
+
+  test("X3 convex shared vertex with λ < 0 on the terminal leaf: the gate, not a free sign, decides", () => {
+    // O′ = −S′ (λ = −1) would pass the leaf-wide cone with s = +1.
+    const down: SplinePoles = [
+      [0, 0],
+      [0.25, -0.25],
+      [0.5, -0.5],
+      [0.75, -0.75],
+    ];
+    expect(
+      certifier.certifyPieceChain(
+        pieceRequest(
+          [
+            linePiece([-1, 0], [0, 0], 0.125),
+            cubicPiece([
+              pieceTube(
+                down,
+                down,
+                [
+                  [-0.75, -0.75],
+                  [0.75, 0.75],
+                ],
+                0.125,
+              ),
+            ]),
+          ],
+          [[at(0.9), at(0.2)]],
+          { distance: 0.125 },
+        ),
+      ),
+    ).toMatchObject({ kind: "uncertain", code: "trim-side-unproven" });
+  });
+
+  /** U chain line → straight cubic up (h = 3/256) → line back, d/h = 0.45. */
+  const uChain = (curveError: number, modelingTolerance = 1e-2) => {
+    const h = 3 / 256;
+    const d = 0.45 * h;
+    const up: SplinePoles = [
+      [0, 0],
+      [0, 1 / 256],
+      [0, 2 / 256],
+      [0, 3 / 256],
+    ];
+    return pieceRequest(
+      [
+        linePiece([-1, 0], [0, 0], d),
+        cubicPiece([
+          pieceTube(
+            up.map(([, y]) => [-d, y]) as unknown as SplinePoles,
+            up,
+            [
+              [0, 0],
+              [h, h],
+            ],
+            d,
+            { certifiedError: curveError },
+          ),
+        ]),
+        linePiece([0, h], [-1, h], d),
+      ],
+      [
+        [at(1 - d), at(0.45)],
+        [at(0.55), at(d)],
+      ],
+      { distance: d, modelingTolerance },
+    );
+  };
+
+  test("MR1 trim composition: both Mδ tails are included in the corrected error", () => {
+    expect(certifier.certifyPieceChain(uChain(1e-5, 1e-5))).toMatchObject({
+      kind: "uncertain",
+      code: "trim-composition-unproven",
+      message: expect.stringContaining("corrected base error exceeds"),
+      first: 0,
+    });
+  });
+
+  test("MR4 leaf-wide cone: a terminal derivative enclosure may not reach zero", () => {
+    const base = uChain(1e-5);
+    const cubic = base.pieces[1] as Extract<TubeChainPiece, { kind: "cubic" }>;
+    expect(
+      certifier.certifyPieceChain({
+        ...base,
+        pieces: [
+          base.pieces[0]!,
+          {
+            ...cubic,
+            tubes: cubic.tubes.map((tube) => ({
+              ...tube,
+              reference: {
+                ...tube.reference,
+                derivative: [
+                  [0, 0],
+                  [0, 3 / 256],
+                ],
+              },
+            })),
+          },
+          base.pieces[2]!,
+        ],
+      }),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message: expect.stringContaining("leaf-wide cone"),
+      first: 0,
+      second: 1,
+    });
+  });
+
+  test("MR7 curve-side terminal removal: an admission adversary at the curve end is rejected", () => {
+    const base = uChain(1e-5);
+    expect(
+      certifier.certifyPieceChain({
+        ...base,
+        trims: [
+          { ...base.trims[0]!, secondParameterBounds: [0, 0] },
+          base.trims[1]!,
+        ],
+      }),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message: expect.stringContaining("strictly inside"),
+      first: 0,
+      second: 1,
+    });
+  });
+
+  test("X4 both-end order: a doubly trimmed single leaf needs strictly ordered true-root enclosures", () => {
+    expect(certifier.certifyPieceChain(uChain(1.2e-3))).toMatchObject({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message: expect.stringContaining("retained domain"),
+      first: 1,
+    });
+    const certificate = pieceVerified(
+      certifier.certifyPieceChain(uChain(1e-5)),
+    );
+    expect(certificate.joins.map((join) => join.kind)).toEqual([
+      "trim",
+      "trim",
+    ]);
+    expect(certificate.clearedPairs).toEqual([[0, 2]]);
+  });
+
+  test("X6 a short line trimmed at both ends by widened line-side enclosures fails closed", () => {
+    const d = 0.0045;
+    const s = 0.01;
+    expect(
+      certifier.certifyPieceChain(
+        pieceRequest(
+          [
+            linePiece([-1, 0], [0, 0], d),
+            linePiece([0, 0], [0, s], d, { shift: [0, 5e-4] }),
+            linePiece([0, s], [-1, s], d),
+          ],
+          [
+            [at(1 - d), at(0.4)],
+            [at(0.5), at(d)],
+          ],
+          // Room for L1's own trim-end displacement ε_B + Mδ ≈ 1e-3.
+          { distance: d, modelingTolerance: 2e-3 },
+        ),
+      ),
+    ).toMatchObject({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message: expect.stringContaining("retained domain"),
+      first: 1,
+    });
+  });
+
+  test("X5 premise-violating admission adversary: a claimed trim enclosure inside the J2′-removed end fails closed", () => {
+    // The stored trim bounds are deliberately not a true-root enclosure: this
+    // is admission-adversary coverage only, not isolated mixed-order evidence.
+    const length = 5033 * C;
+    const inset = 1007 * C;
+    const tubes = straightTubeChain(
+      [axis(0, inset, length - inset, length), turned([length, 0], 1)],
+      0.1,
+    );
+    const pieces = (tau: number) =>
+      pieceRequest(
+        [
+          linePiece([0, 1], [0, 0], 0.1),
+          cubicPiece(tubes.map((tube) => ({ ...tube, queryDomain: [0, 1] }))),
+        ],
+        [[at(0.5), at(tau)]],
+        { distance: 0.1 },
+      );
+    // The cubic piece alone certifies its concave J2′ knot with t_e > 0.5.
+    const knot = verified(certifier.certifyChain(request(tubes))).joins[0]!;
+    if (knot.kind !== "nonparallel-knot" || knot.side !== "concave")
+      throw new Error("fixture must keep its concave J2′ knot");
+    expect(knot.trim[0]).toBeGreaterThan(0.5);
+    expect(certifier.certifyPieceChain(pieces(0.5))).toMatchObject({
+      kind: "uncertain",
+      code: "trim-window-unproven",
+      message: expect.stringContaining("retained domain"),
+      first: 1,
+    });
+  });
+
+  test("a closed mixed chain with any J2′ knot keeps the flattened n ≥ 5 gate", () => {
+    const spans = makeOwnerTubes(F1_ASYM, 0.2);
+    if (!spans.ok) throw new Error(spans.code);
+    const knotPair = spans.spans.slice(2, 4);
+    expect(
+      certifier.certifyPieceChain(
+        pieceRequest(
+          [
+            cubicPiece(
+              knotPair.map((span) => ({
+                ...span,
+                queryDomain: span.sourceInterval,
+              })),
+            ),
+            linePiece([2.5, 0], [2.5, 1], 0.2),
+            linePiece([2.5, 1], [0, 1], 0.2),
+          ],
+          [
+            [at(0.5), at(0.5)],
+            [at(0.5), at(0.5)],
+            [at(0.5), at(0.5)],
+          ],
+          { distance: 0.2, closed: true },
+        ),
+      ),
+    ).toMatchObject({
+      code: KNOT_UNPROVEN_CODE,
+      message: expect.stringContaining("at least five"),
+    });
+  });
+
+  test("a trim between two cubic pieces is not covered by the line-curve lemma", () => {
+    const tube = pieceTube(straight(0, 1), LINE_SOURCE, POSITIVE_X, 0.125);
+    expect(
+      certifier.certifyPieceChain(
+        pieceRequest(
+          [cubicPiece([tube]), cubicPiece([tube])],
+          [[at(0.5), at(0.5)]],
+          {
+            distance: 0.125,
+          },
+        ),
+      ),
+    ).toMatchObject({ code: "trim-pair-unsupported" });
+  });
+  // Literal whole-chain meters, measured once on the baseline implementation
+  // (evidence piece-meter-measurement.log) and pinned: a per-piece, per-trim
+  // or reset meter measures less and cannot recalibrate its own boundary.
+  const PIECE_METERS = [
+    [
+      "reversed rise (same-leaf + trim)",
+      () => reversedRise(),
+      {
+        operations: 8_638,
+        euclideanSteps: 607,
+      },
+    ],
+    [
+      "U chain (two trims on one leaf)",
+      () => uChain(1e-5),
+      {
+        operations: 21_155,
+        euclideanSteps: 3_822,
+      },
+    ],
+  ] as const;
+
+  test.each(
+    PIECE_METERS.flatMap(([label, build, meter]) =>
+      (["operations", "euclideanSteps"] as const).map(
+        (kind) => [label, kind, build, meter[kind]] as const,
+      ),
+    ),
+  )(
+    "%s: the literal %s count passes and count − 1 exhausts the whole request with no partial certificate",
+    (_label, kind, build, total) => {
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: total,
+        }).certifyPieceChain(build()).kind,
+      ).toBe("verified");
+      expect(
+        createCertifiedCubicTubeChainWithLowerBudgetForTest({
+          [kind]: total - 1,
+        }).certifyPieceChain(build()),
+      ).toEqual(EXHAUSTED_RESULT);
+    },
+  );
+
+  test("a single cubic piece without trims is the legacy chain: identical receipt-pinned meter", () => {
+    for (const [points, meter] of [
+      [F1, { operations: 33_173, euclideanSteps: 8_248 }],
+      [F1_ASYM, { operations: 316_931, euclideanSteps: 91_109 }],
+    ] as const) {
+      const tubes = ownerTubes(points, 0.2).map((tube) => ({
+        ...tube,
+        queryDomain: [0, 1] as const,
+      }));
+      let snapshot: ExactProofBudgetSnapshot | undefined;
+      const result = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+        (value) => {
+          snapshot = value;
+        },
+      ).certifyPieceChain(
+        pieceRequest([cubicPiece(tubes)], [], { distance: 0.2 }),
+      );
+      expect(result).toEqual(certifier.certifyChain(request(tubes)));
+      expect(snapshot).toMatchObject({ ...meter, refinementSteps: 0 });
+    }
+  });
+
+  test("pieces and trims are precharged exactly before any element read", () => {
+    const base = uChain(1e-5);
+    const read = new Error("element read");
+    const untouchable = <T extends object>(target: T) =>
+      new Proxy(target, {
+        get(inner, key, receiver) {
+          if (key === "length") return Reflect.get(inner, key, receiver);
+          throw read;
+        },
+      });
+    const run = (operations?: number) => {
+      const snapshots: ExactProofBudgetSnapshot[] = [];
+      const chain =
+        operations === undefined
+          ? createCertifiedCubicTubeChainWithBudgetObserverForTest((value) =>
+              snapshots.push(value),
+            )
+          : createCertifiedCubicTubeChainWithLowerBudgetForTest({ operations });
+      let thrown: unknown;
+      try {
+        return {
+          result: chain.certifyPieceChain({
+            ...base,
+            pieces: untouchable([...base.pieces]),
+            trims: untouchable([...base.trims]),
+          }),
+          snapshots,
+        };
+      } catch (error) {
+        thrown = error;
+      }
+      return { thrown, snapshots };
+    };
+    expect(run(4)).toEqual({ result: EXHAUSTED_RESULT, snapshots: [] });
+    expect(run(5).thrown).toBe(read);
+    const production = run();
+    expect(production.thrown).toBe(read);
+    expect(production.snapshots).toEqual([
+      expect.objectContaining({ operations: 5, euclideanSteps: 0 }),
+    ]);
+  });
+
+  test("each cubic piece's leaves are charged before they are enumerated", () => {
+    const base = uChain(1e-5);
+    const cubic = base.pieces[1] as Extract<TubeChainPiece, { kind: "cubic" }>;
+    let reads = 0;
+    const tubes = new Proxy(new Array(1_000).fill(cubic.tubes[0]), {
+      get(inner, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) reads += 1;
+        return Reflect.get(inner, key, receiver);
+      },
+    });
+    expect(
+      createCertifiedCubicTubeChainWithLowerBudgetForTest({
+        operations: 1_004,
+      }).certifyPieceChain({
+        ...base,
+        pieces: [base.pieces[0]!, { ...cubic, tubes }, base.pieces[2]!],
+      }),
+    ).toEqual(EXHAUSTED_RESULT);
+    expect(reads).toBe(0);
+  });
+
+  test("one observer snapshot per piece request, delegate included", () => {
+    const snapshots: ExactProofBudgetSnapshot[] = [];
+    const chain = createCertifiedCubicTubeChainWithBudgetObserverForTest(
+      (value) => snapshots.push(value),
+    );
+    expect(chain.certifyPieceChain(uChain(1e-5)).kind).toBe("verified");
+    const tubes = ownerTubes(F1, 0.2).map((tube) => ({
+      ...tube,
+      queryDomain: [0, 1] as const,
+    }));
+    expect(
+      chain.certifyPieceChain(
+        pieceRequest([cubicPiece(tubes)], [], { distance: 0.2 }),
+      ).kind,
+    ).toBe("verified");
+    const cubic = uChain(1e-5).pieces[1] as Extract<
+      TubeChainPiece,
+      { kind: "cubic" }
+    >;
+    expect(
+      chain.certifyPieceChain({
+        ...uChain(1e-5),
+        pieces: [
+          uChain(1e-5).pieces[0]!,
+          { ...cubic, tubes: new Array(10_000_000) },
+          uChain(1e-5).pieces[2]!,
+        ],
+      }),
+    ).toEqual(EXHAUSTED_RESULT);
+    expect(snapshots.map(({ operations }) => operations)).toEqual([
+      21_155, 33_173, 10_000_005,
+    ]);
+  });
+
+  test("a line tube needs exactly two emitted and two source ends", () => {
+    const base = uChain(1e-5);
+    const line = base.pieces[0] as Extract<TubeChainPiece, { kind: "line" }>;
+    for (const key of ["emitted", "source"] as const) {
+      const ends = [...line.tube[key], line.tube[key][1]];
+      expect(
+        certifier.certifyPieceChain({
+          ...base,
+          pieces: [
+            {
+              ...line,
+              tube: {
+                ...line.tube,
+                [key]: ends as unknown as typeof line.tube.emitted,
+              },
+            },
+            base.pieces[1]!,
+            base.pieces[2]!,
+          ],
+        }),
+      ).toMatchObject({ code: "invalid-cubic-tube-chain", first: 0 });
+    }
+  });
+});
+
+const KNOT_UNPROVEN_CODE = "cubic-tube-knot-incidence-unproven";
