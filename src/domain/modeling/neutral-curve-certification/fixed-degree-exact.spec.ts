@@ -10,6 +10,7 @@ import {
   proveStructuralCubicOverlap as proveStructuralCubicOverlapWithMeter,
 } from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
 import { ExactProofBudget } from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curve-certification/query";
 
 const proveStructuralCubicOverlap = (
   first: NeutralCurve,
@@ -356,6 +357,170 @@ test("request-aware admission rejects malformed boxes, duplicates, and provenanc
       },
     ),
   ).toThrow("Invalid neutral-curve witness boxes or provenance.");
+});
+
+test("implicit-line admission accepts truthful optional multiplicity and rejects contradictions", () => {
+  const provenance = (id: string) => ({ sourceEntityId: id, sourceSpanId: id });
+  const lineCubicRequest = (
+    poles: Extract<NeutralCurve, { kind: "cubicBezier" }>["poles"],
+    origin: readonly [number, number],
+    direction: readonly [number, number],
+    sourceDomain: readonly [number, number],
+  ) => ({
+    modelingTolerance: 1e-7,
+    first: {
+      kind: "line" as const,
+      curveId: "line",
+      provenance: provenance("line"),
+      origin,
+      direction,
+      sourceDomain,
+    },
+    second: {
+      kind: "cubicBezier" as const,
+      curveId: "cubic",
+      provenance: provenance("cubic"),
+      poles,
+      sourceDomain: [0, 1] as const,
+    },
+  });
+  const certifiedPoint = (request: ReturnType<typeof lineCubicRequest>) => {
+    const result = createCertifiedNeutralCurveQuery().queryPair(request);
+    if (result.kind !== "verified" || result.points.length !== 1)
+      throw new Error("fixture must certify one root");
+    return result.points[0]!;
+  };
+  const completeness = {
+    kind: "completeIsolatedRootSet" as const,
+    family: "lineCubic" as const,
+    distinctRootCount: 1,
+  };
+  const admit = (
+    request: ReturnType<typeof lineCubicRequest>,
+    witness: NeutralCurvePointWitness,
+  ) => admitVerifiedNeutralCurveResult(request, [witness], [], completeness);
+  const withMultiplicity = (
+    witness: NeutralCurvePointWitness,
+    rootMultiplicity: number | undefined,
+    verification?: "exactRoot" | "boundedSignChange" | "exactMultiplicity",
+    classification = witness.classification,
+  ): NeutralCurvePointWitness => {
+    if (witness.proof.kind !== "exactImplicitLineRootSet")
+      throw new Error("fixture must be implicit-line");
+    const proof = { ...witness.proof };
+    delete proof.rootMultiplicity;
+    return {
+      ...witness,
+      classification,
+      proof: {
+        ...proof,
+        ...(verification ? { verification } : {}),
+        ...(rootMultiplicity === undefined ? {} : { rootMultiplicity }),
+      },
+    };
+  };
+
+  const exactRequest = lineCubicRequest(
+    [
+      [0, 0],
+      [1, 0],
+      [2, 0],
+      [3, 0],
+    ],
+    [1.5, -1],
+    [0, 1],
+    [0, 2],
+  );
+  const exactRoot = certifiedPoint(exactRequest);
+  expect(exactRoot.proof).toMatchObject({
+    verification: "exactRoot",
+    rootMultiplicity: 1,
+  });
+  expect(admit(exactRequest, exactRoot).kind).toBe("verified");
+  // An older native producer omits the field; absence stays admitted as unknown.
+  expect(admit(exactRequest, withMultiplicity(exactRoot, undefined)).kind).toBe(
+    "verified",
+  );
+
+  const signRequest = lineCubicRequest(
+    [
+      [0, 0],
+      [1, 1],
+      [2, 1],
+      [3, 0],
+    ],
+    [2.5, 1],
+    [0, -1],
+    [0, 2],
+  );
+  const signChange = certifiedPoint(signRequest);
+  expect(signChange.proof).toMatchObject({
+    verification: "boundedSignChange",
+    rootMultiplicity: 1,
+  });
+  expect(admit(signRequest, signChange).kind).toBe("verified");
+  expect(admit(signRequest, withMultiplicity(signChange, 3)).kind).toBe(
+    "verified",
+  );
+
+  const tripleRequest = lineCubicRequest(
+    [
+      [-1, -1],
+      [-1 / 3, 1],
+      [1 / 3, -1],
+      [1, 1],
+    ],
+    [-2, 0],
+    [1, 0],
+    [0, 4],
+  );
+  const triple = certifiedPoint(tripleRequest);
+  expect(triple).toMatchObject({
+    classification: "crossing",
+    proof: { rootMultiplicity: 3 },
+  });
+  expect(admit(tripleRequest, triple).kind).toBe("verified");
+
+  for (const [label, witness] of [
+    ["zero", withMultiplicity(exactRoot, 0)],
+    ["negative", withMultiplicity(exactRoot, -1)],
+    ["fractional", withMultiplicity(exactRoot, 1.5)],
+    ["NaN", withMultiplicity(exactRoot, Number.NaN)],
+    ["infinite", withMultiplicity(exactRoot, Number.POSITIVE_INFINITY)],
+    ["unsafe", withMultiplicity(exactRoot, 2 ** 53)],
+    ["even crossing exact root", withMultiplicity(exactRoot, 2)],
+    ["even sign change", withMultiplicity(signChange, 2)],
+    [
+      "even sign change without crossing",
+      withMultiplicity(signChange, 4, undefined, "tangent"),
+    ],
+    [
+      "odd exact multiplicity",
+      withMultiplicity(exactRoot, 3, "exactMultiplicity", "tangent"),
+    ],
+    [
+      "missing exact multiplicity",
+      withMultiplicity(exactRoot, undefined, "exactMultiplicity", "tangent"),
+    ],
+    [
+      "crossing exact multiplicity",
+      withMultiplicity(exactRoot, 2, "exactMultiplicity"),
+    ],
+  ] as const) {
+    expect(
+      () =>
+        admit(
+          label.includes("sign change") ? signRequest : exactRequest,
+          witness,
+        ),
+      label,
+    ).toThrow("Invalid exact implicit-root multiplicity proof.");
+  }
+  // Even multiplicity on a non-crossing exact root remains admissible.
+  expect(
+    admit(exactRequest, withMultiplicity(exactRoot, 2, "exactRoot", "tangent"))
+      .kind,
+  ).toBe("verified");
 });
 
 test("structural admission rejects diagonal impostors in both pole orders", () => {

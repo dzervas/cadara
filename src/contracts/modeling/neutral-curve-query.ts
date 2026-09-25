@@ -120,7 +120,11 @@ export interface NeutralCurvePointWitness {
           | "exactRoot"
           | "boundedSignChange"
           | "exactMultiplicity";
-        /** Present when exact derivative/GCD work proves a repeated root. */
+        /**
+         * Exact support-root multiplicity. Required for `exactMultiplicity`.
+         * The synchronous constructive certifier always attaches it; other
+         * producers may omit it, and absence means unknown, never simple.
+         */
         readonly rootMultiplicity?: number;
         /** Every distinct active root is matched once before witnesses return. */
         readonly firstParameterBounds: readonly [number, number];
