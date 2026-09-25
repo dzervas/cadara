@@ -927,6 +927,34 @@ describe("owner proof metadata for the tube-stability certificate", () => {
     }
   });
 
+  test("every branch records the call's bitwise signed distance (−0 kept) as frame-only metadata", () => {
+    for (const distance of [0.2, -0.2, 0, -0]) {
+      for (const spans of [
+        [curved],
+        realSpans([
+          [0, 0],
+          [1, 0.1],
+          [2.5, 0],
+        ]),
+      ]) {
+        const result = successful({
+          spans,
+          distance,
+          modelingTolerance: 1e-3,
+        });
+        for (const output of result.spans) {
+          expect(Object.keys(output.reference).sort()).toEqual([
+            "derivative",
+            "distance",
+            "sourcePoles",
+          ]);
+          expect(Object.is(output.reference.distance, distance)).toBe(true);
+          expect(Object.isFrozen(output.reference)).toBe(true);
+        }
+      }
+    }
+  });
+
   test("the zero-distance branch carries the source derivative box and source poles", () => {
     const result = successful({
       spans: [curved],

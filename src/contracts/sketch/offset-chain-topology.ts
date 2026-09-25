@@ -756,9 +756,9 @@ export type OffsetChainTubeStabilityResult =
   | OffsetChainFailure;
 
 /**
- * C6-S1′ bounded helper, not wired into any frame: certifies that an accepted
- * resolution's emitted cubics carry the true offset's topology under the
- * owner's error tubes. Scope is one untrimmed spline offset piece with no
+ * C6-S1′/J2′ bounded helper, not wired into any frame: certifies that an
+ * accepted resolution's emitted cubics carry the topology of the declared-join-
+ * corrected true offset under the owner's error tubes. Scope is one untrimmed spline offset piece with no
  * joints; everything else is unsupported, never assumed stable.
  *
  * Owner spans are forwarded unchanged in natural source order, whatever the

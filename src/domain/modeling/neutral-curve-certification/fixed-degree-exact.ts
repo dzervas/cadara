@@ -1699,7 +1699,7 @@ function absoluteExact(
   return value.numerator < 0n ? negateExact(value, budget) : value;
 }
 
-function exactSqrtInterval(
+export function exactSqrtInterval(
   value: ExactFraction,
   budget: ExactProofBudget,
 ): CertifiedInterval | null {
