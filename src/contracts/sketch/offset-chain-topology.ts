@@ -274,20 +274,19 @@ function buildCurves(pieces: readonly OffsetChainPiece[]) {
         ),
       );
     } else if (piece.kind === "lineSegment") {
-      const dx = piece.end[0] - piece.start[0];
-      const dy = piece.end[1] - piece.start[1];
-      const length = Math.hypot(dx, dy);
+      // The query support is exactly the displayed segment: 0 is start, 1 is end.
       push(
         0,
         {
           kind: "line",
+          form: "endpointSegment",
           ...neutralBase(piece.seedEntityId, 0),
-          origin: piece.start,
-          direction: [dx / length, dy / length],
-          sourceDomain: [0, length],
+          start: piece.start,
+          end: piece.end,
+          sourceDomain: [0, 1],
         },
         true,
-        [0, length],
+        [0, 1],
       );
     } else {
       const angle = (point: SketchPoint2D) =>
@@ -852,11 +851,13 @@ interface CurveJet extends CurveFrame {
   readonly variation: SketchPoint2D;
 }
 
+/**
+ * Segment parameter t ∈ [0, 1]: position start + t·(end − start). The binary64
+ * `end − start` is the correctly rounded exact difference and serves only as a
+ * representative derivative; joint authority stays with the exact query.
+ */
 function lineFrame(start: SketchPoint2D, end: SketchPoint2D) {
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
-  const length = Math.hypot(dx, dy);
-  return { length, direction: [dx / length, dy / length] as const };
+  return [end[0] - start[0], end[1] - start[1]] as const;
 }
 
 function curveFrame(
@@ -884,13 +885,13 @@ function curveFrame(
     };
   }
   if (piece.kind === "lineSegment") {
-    const { direction } = lineFrame(piece.start, piece.end);
+    const derivative = lineFrame(piece.start, piece.end);
     return {
       position: [
-        piece.start[0] + direction[0] * parameter,
-        piece.start[1] + direction[1] * parameter,
+        piece.start[0] + parameter * derivative[0],
+        piece.start[1] + parameter * derivative[1],
       ],
-      first: direction,
+      first: derivative,
     };
   }
   const cosine = Math.cos(parameter);
@@ -941,21 +942,13 @@ function curveJet(
     );
   }
   if (piece.kind === "lineSegment" && variation.kind === "lineSegment") {
-    const { length, direction } = lineFrame(piece.start, piece.end);
-    const dd = [
-      variation.end[0] - variation.start[0],
-      variation.end[1] - variation.start[1],
-    ] as const;
-    const along = direction[0] * dd[0] + direction[1] * dd[1];
-    const dDirection = [
-      (dd[0] - direction[0] * along) / length,
-      (dd[1] - direction[1] * along) / length,
-    ] as const;
+    // At fixed t the position varies by dStart + t·(dEnd − dStart).
+    const derivative = lineFrame(variation.start, variation.end);
     return {
       ...frame,
       variation: [
-        variation.start[0] + dDirection[0] * parameter,
-        variation.start[1] + dDirection[1] * parameter,
+        variation.start[0] + parameter * derivative[0],
+        variation.start[1] + parameter * derivative[1],
       ],
     };
   }

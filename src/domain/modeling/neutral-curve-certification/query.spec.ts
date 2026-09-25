@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type {
+  EndpointNeutralSegment,
   NeutralCurve,
   NeutralCurvePointWitness,
   NeutralCurveQueryRequest,
@@ -8,6 +9,7 @@ import { reconstructSpline } from "@/contracts/sketch/spline-geometry";
 import { approximateSplineOffset } from "@/contracts/sketch/spline-offset-geometry";
 import {
   createCertifiedNeutralCurveQuery,
+  createCertifiedNeutralCurveQueryWithBudgetObserverForTest,
   createCertifiedNeutralCurveQueryWithLowerBudgetForTest,
 } from "@/domain/modeling/neutral-curve-certification/query";
 
@@ -891,5 +893,341 @@ describe("constructive numeric neutral-curve dispatcher", () => {
     ]);
     const result = query.querySelf({ modelingTolerance: 1e-7, curve: loop });
     expect(result.kind).toBe("verified");
+  });
+});
+
+const segment = (
+  id: string,
+  start: readonly [number, number],
+  end: readonly [number, number],
+  queryDomain?: readonly [number, number],
+): EndpointNeutralSegment => ({
+  kind: "line",
+  form: "endpointSegment",
+  curveId: id,
+  provenance: provenance(id),
+  start,
+  end,
+  sourceDomain: [0, 1],
+  ...(queryDomain ? { queryDomain } : {}),
+});
+const bitwise = (
+  actual: readonly [number, number],
+  expected: readonly [number, number],
+) => Object.is(actual[0], expected[0]) && Object.is(actual[1], expected[1]);
+const swapped = (point: NeutralCurvePointWitness) => ({
+  firstParameter: point.secondParameter,
+  secondParameter: point.firstParameter,
+  firstParameterBounds: point.proof.secondParameterBounds,
+  secondParameterBounds: point.proof.firstParameterBounds,
+});
+/** Runs both argument orders; the second result is reported in first-order terms. */
+const bothOrders = (first: NeutralCurve, second: NeutralCurve) => [
+  verified(query.queryPair(request(first, second))),
+  verified(query.queryPair(request(second, first))),
+];
+
+describe("endpoint segments at the constructive dispatcher (not a T09 conversion claim)", () => {
+  test("a shared declared endpoint is one exact finite-line root at (1, 0), exactly [3, 4], in both orders", () => {
+    const first = segment("first", [0, 0], [3, 4]);
+    const second = segment("second", [3, 4], [6, 0]);
+    const [forward, backward] = bothOrders(first, second);
+    for (const [result, order] of [
+      [forward!, "forward"],
+      [backward!, "backward"],
+    ] as const) {
+      expect(result.points, order).toHaveLength(1);
+      const point = result.points[0]!;
+      expect(point).toMatchObject({
+        classification: "unclassified",
+        proof: { kind: "exactFiniteLineIntersection" },
+      });
+      expect(bitwise(point.position, [3, 4]), order).toBe(true);
+      expect(result.completenessProof).toEqual({
+        kind: "completeIsolatedRootSet",
+        family: "finiteLinePair",
+        distinctRootCount: 1,
+      });
+    }
+    expect(forward!.points[0]).toMatchObject({
+      firstParameter: 1,
+      secondParameter: 0,
+    });
+    expect(swapped(backward!.points[0]!)).toMatchObject({
+      firstParameter: 1,
+      secondParameter: 0,
+      firstParameterBounds: [1, 1],
+      secondParameterBounds: [0, 0],
+    });
+    // Preserved numeric semantics: the normalized binary64 conversion of the
+    // same pair is a false verified empty (the reason segments exist).
+    const normalized = (
+      id: string,
+      start: [number, number],
+      end: [number, number],
+    ) => {
+      const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+      return line(
+        id,
+        start,
+        [(end[0] - start[0]) / length, (end[1] - start[1]) / length],
+        [0, length],
+      );
+    };
+    expect(
+      verified(
+        query.queryPair(
+          request(
+            normalized("numeric-first", [0, 0], [3, 4]),
+            normalized("numeric-second", [3, 4], [6, 0]),
+          ),
+        ),
+      ).points,
+    ).toEqual([]);
+  });
+
+  test("the exact support uses exact end - start, not the rounded binary64 difference", () => {
+    // Binary64 1e-20 - 1 rounds to -1, whose affine end would be (0, 1).
+    const start = [1, 0] as const;
+    const end = [1e-20, 1] as const;
+    expect(start[0] + (end[0] - start[0])).toBe(0);
+    const tilted = segment("tilted", start, end);
+    for (const other of [
+      segment("upward", end, [1e-20, 2]),
+      cubic("from-end", [end, [1, 2], [2, 2], [3, 1]]),
+    ]) {
+      for (const [result, reversed] of bothOrders(tilted, other).map(
+        (value, index) => [value, index === 1] as const,
+      )) {
+        expect(result.points, other.curveId).toHaveLength(1);
+        const point = result.points[0]!;
+        const oriented = reversed
+          ? swapped(point)
+          : {
+              firstParameter: point.firstParameter,
+              secondParameter: point.secondParameter,
+            };
+        expect(oriented).toMatchObject({
+          firstParameter: 1,
+          secondParameter: 0,
+        });
+        expect(bitwise(point.position, end), other.curveId).toBe(true);
+      }
+    }
+  });
+
+  test("reversed partial collinear overlap maps exactly through the finite-line structural correspondence", () => {
+    const first = segment("overlap-first", [0, 0], [2, 0]);
+    const second = segment("overlap-second", [2, 0], [1, 0]);
+    const [forward, backward] = bothOrders(first, second);
+    expect(forward!.overlaps).toEqual([
+      {
+        orientation: "opposite",
+        firstInterval: [0.5, 1],
+        secondInterval: [1, 0],
+        proof: {
+          kind: "exactCollinearLineOverlap",
+          firstProvenance: first.provenance,
+          secondProvenance: second.provenance,
+        },
+      },
+    ]);
+    expect(backward!.overlaps).toMatchObject([
+      {
+        orientation: "opposite",
+        firstInterval: [0, 1],
+        secondInterval: [1, 0.5],
+      },
+    ]);
+    for (const result of [forward!, backward!]) {
+      expect(result.points).toEqual([]);
+      expect(result.completenessProof).toMatchObject({
+        kind: "completeStructuralCorrespondence",
+        family: "finiteLinePair",
+        correspondence: "interval",
+      });
+    }
+  });
+
+  test("a query clip before the shared endpoint proves verified empty in both orders", () => {
+    for (const result of bothOrders(
+      segment("clipped", [0, 0], [3, 4], [0, 0.5]),
+      segment("second", [3, 4], [6, 0]),
+    )) {
+      expect(result.points).toEqual([]);
+      expect(result.overlaps).toEqual([]);
+    }
+  });
+
+  test("preserved literal-arc semantics: a segment end on the full turn is an exact root; the literal quarter arc stays empty", () => {
+    const vertical = segment("to-top", [0, 0.25], [0, 1]);
+    const [forward, backward] = bothOrders(vertical, circle("unit", [0, 0], 1));
+    for (const result of [forward!, backward!]) {
+      expect(result.points).toHaveLength(1);
+      expect(result.points[0]!.proof).toMatchObject({
+        kind: "exactImplicitLineRootSet",
+        family: "lineCircle",
+        verification: "exactRoot",
+      });
+      expect(bitwise(result.points[0]!.position, [0, 1])).toBe(true);
+    }
+    expect(forward!.points[0]!.firstParameter).toBe(1);
+    expect(backward!.points[0]!.secondParameter).toBe(1);
+    const quarter = circle("quarter", [0, 0], 1, {
+      sourceDomain: { kind: "arc", interval: [0, Math.PI / 2] },
+    });
+    for (const result of bothOrders(vertical, quarter)) {
+      expect(result.points).toEqual([]);
+    }
+  });
+
+  test("a segment ending on a cubic start pole is the exact endpoint root in both orders", () => {
+    const [forward, backward] = bothOrders(
+      segment("to-pole", [0, 0], [3, 4]),
+      cubic("from-pole", [
+        [3, 4],
+        [4, 6],
+        [5, 6],
+        [6, 5],
+      ]),
+    );
+    for (const result of [forward!, backward!]) {
+      expect(result.points).toHaveLength(1);
+      expect(result.points[0]).toMatchObject({
+        classification: "unclassified",
+        proof: {
+          kind: "exactImplicitLineRootSet",
+          family: "lineCubic",
+          verification: "exactRoot",
+        },
+      });
+      expect(bitwise(result.points[0]!.position, [3, 4])).toBe(true);
+    }
+    expect(forward!.points[0]).toMatchObject({
+      firstParameter: 1,
+      secondParameter: 0,
+    });
+    expect(swapped(backward!.points[0]!)).toMatchObject({
+      firstParameter: 1,
+      secondParameter: 0,
+    });
+  });
+
+  test("crossings exactly at a segment queryDomain bound are admitted once for line, circle and cubic in both orders", () => {
+    const clipped = segment("clipped", [0, 0], [4, 0], [0.25, 1]);
+    for (const other of [
+      segment("vertical", [1, -1], [1, 1]),
+      circle("radius-one", [0, 0], 1),
+      cubic("vertical-cubic", [
+        [1, -1],
+        [1, -1 / 3],
+        [1, 1 / 3],
+        [1, 1],
+      ]),
+    ]) {
+      const [forward, backward] = bothOrders(clipped, other);
+      for (const result of [forward!, backward!]) {
+        expect(result.points, other.curveId).toHaveLength(1);
+        expect(result.points[0]!.classification, other.curveId).toBe(
+          "unclassified",
+        );
+        expect(bitwise(result.points[0]!.position, [1, 0]), other.curveId).toBe(
+          true,
+        );
+      }
+      expect(forward!.points[0]!.firstParameter).toBe(0.25);
+      expect(backward!.points[0]!.secondParameter).toBe(0.25);
+    }
+  });
+
+  test("M2: a long large-coordinate segment crossing a circle with a positive-width box is admitted", () => {
+    const long = segment("long", [1e6, 1e6 + 0.5], [2e6, 2e6 + 0.5]);
+    const target = circle("target", [1.5e6, 1.5e6], 1000);
+    const [forward, backward] = bothOrders(long, target);
+    for (const [result, segmentSide] of [
+      [forward!, "firstParameterBounds"],
+      [backward!, "secondParameterBounds"],
+    ] as const) {
+      expect(result.points).toHaveLength(2);
+      for (const point of result.points) {
+        expect(point.proof).toMatchObject({
+          kind: "exactImplicitLineRootSet",
+          family: "lineCircle",
+          verification: "boundedSignChange",
+          rootMultiplicity: 1,
+        });
+        const bounds = point.proof[segmentSide];
+        expect(bounds[1] - bounds[0], "segment box width").toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test("overflowing endpoint differences are invalid and underflowing ones stay exact", () => {
+    expect(
+      query.queryPair(
+        request(
+          segment("overflow", [-Number.MAX_VALUE, 0], [Number.MAX_VALUE, 0]),
+          segment("vertical", [0, -1], [0, 1]),
+        ),
+      ),
+    ).toMatchObject({ kind: "uncertain", code: "invalid-neutral-curve-query" });
+    for (const result of bothOrders(
+      segment("tiny", [0, 0], [Number.MIN_VALUE, 0]),
+      segment("vertical", [0, -1], [0, 1]),
+    )) {
+      expect(result.points).toHaveLength(1);
+      expect(bitwise(result.points[0]!.position, [0, 0])).toBe(true);
+    }
+  });
+
+  test("one meter governs segment families: the measured whole request passes and one fewer exhausts", () => {
+    // Receipt-backed literals (both orders): segment/segment, /circle, /cubic.
+    const expectedOperations = [1121, 1132, 163438, 163438, 87487, 87487];
+    for (const pair of [
+      [segment("m-a", [0, 0], [3, 4]), segment("m-b", [3, 0], [0, 4])],
+      [segment("m-c", [-2, 0.5], [2, 0.5]), circle("m-circle", [0, 0], 1)],
+      [
+        segment("m-d", [-2, 0.5], [2, 0.5]),
+        cubic("m-cubic", [
+          [-1, -1],
+          [-1 / 3, 2],
+          [1 / 3, 2],
+          [1, -1],
+        ]),
+      ],
+    ] as const) {
+      for (const input of [
+        request(pair[0], pair[1]),
+        request(pair[1], pair[0]),
+      ]) {
+        const snapshots: { operations: number }[] = [];
+        verified(
+          createCertifiedNeutralCurveQueryWithBudgetObserverForTest(
+            (snapshot) => snapshots.push(snapshot),
+          ).queryPair(input),
+        );
+        expect(snapshots).toHaveLength(1);
+        const operations = snapshots[0]!.operations;
+        expect(
+          operations,
+          "receipt-backed whole-request segment cost (meter-review pinned)",
+        ).toBe(expectedOperations.shift());
+        verified(
+          createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
+            operations,
+          }).queryPair(input),
+        );
+        expect(
+          createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
+            operations: operations - 1,
+          }).queryPair(input),
+        ).toEqual({
+          kind: "uncertain",
+          code: "exact-query-proof-budget-exhausted",
+          message:
+            "The deterministic exact-query arithmetic budget was exhausted.",
+        });
+      }
+    }
   });
 });

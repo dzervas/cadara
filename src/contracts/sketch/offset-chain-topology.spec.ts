@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
-import type {
-  CertifiedCubicTubeChain,
-  CertifiedNeutralCurveQuery,
-  CubicTubeChainRequest,
-  NeutralCurvePointWitness,
+import {
+  evaluateNeutralCurve,
+  type CertifiedCubicTubeChain,
+  type CertifiedNeutralCurveQuery,
+  type CubicTubeChainRequest,
+  type EndpointNeutralSegment,
+  type NeutralCurvePointWitness,
 } from "@/contracts/modeling/neutral-curve-query";
 import type { SketchEntityId } from "@/contracts/shared/ids";
 import {
@@ -424,13 +426,182 @@ describe("offset chain trim joints", () => {
       "exactFiniteLineIntersection",
       "exactImplicitLineRootSet",
     ]);
-    expect(result.joints[0]!.firstParameterBounds).toEqual([
-      1 - 2 ** -53,
-      1 + 2 ** -52,
-    ]);
+    // Segment parameter: the exact root x = 1 on [0, 0] -> [3, 0] is t = 1/3.
     expect(result.joints[0]!.witness.proof.firstParameterBounds).toEqual([
-      1, 1,
+      1 / 3,
+      1 / 3,
     ]);
+    const enclosure = result.joints[0]!.firstParameterBounds;
+    expect(enclosure).toEqual([1 / 3 - 2 ** -54, 1 / 3 + 2 ** -54]);
+    const low = exactDouble(enclosure[0]);
+    const high = exactDouble(enclosure[1]);
+    expect(3n * low.numerator < low.denominator).toBe(true);
+    expect(3n * high.numerator > high.denominator).toBe(true);
+  });
+});
+
+describe("offset chain line pieces are exact endpoint segments", () => {
+  const bitwise = (actual: Point, expected: Point) =>
+    Object.is(actual[0], expected[0]) && Object.is(actual[1], expected[1]);
+  const recordingSegments = () => {
+    const segments: EndpointNeutralSegment[] = [];
+    const recorded: CertifiedNeutralCurveQuery = {
+      queryPair: (request) => {
+        for (const curve of [request.first, request.second]) {
+          if (curve.kind === "line" && curve.form === "endpointSegment") {
+            segments.push(curve);
+          }
+        }
+        return query.queryPair(request);
+      },
+      querySelf: (request) => query.querySelf(request),
+    };
+    return { segments, query: recorded };
+  };
+
+  test("the four plan-probe segments reach the resolver with their displayed ends as bitwise query endpoints", () => {
+    const receipt: readonly (readonly [Point, Point])[] = [
+      [
+        [0.1, 0.2],
+        [1.3, 0.7],
+      ],
+      [
+        [-1, 0.2],
+        [0, 0.2],
+      ],
+      [
+        [0, 0],
+        [1, 1e-9],
+      ],
+      [
+        [0.3, 0.1],
+        [2.1, -0.2],
+      ],
+    ];
+    receipt.forEach(([start, end], index) => {
+      // Receipt: the former numeric support end is not bitwise the displayed end for the fourth segment.
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const length = Math.hypot(dx, dy);
+      const numericEnd: Point = [
+        start[0] + (dx / length) * length,
+        start[1] + (dy / length) * length,
+      ];
+      expect(bitwise(numericEnd, end), `receipt ${index}`).toBe(index !== 3);
+      const middle: Point = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+      const across = line(
+        "across",
+        [middle[0] - dy, middle[1] + dx],
+        [middle[0] + dy, middle[1] - dx],
+      );
+      const probe = line("probe", start, end);
+      for (const pieces of [
+        [probe, across],
+        [
+          { ...across, reversed: true },
+          { ...probe, reversed: true },
+        ],
+      ]) {
+        const { segments, query: recorded } = recordingSegments();
+        const result = resolved(
+          makeOffsetChainFixture(pieces, { query: recorded }),
+        );
+        expect(result.joints, `segment ${index}`).toHaveLength(1);
+        const submitted = segments.filter(
+          (curve) => curve.provenance.sourceEntityId === id("probe"),
+        );
+        expect(submitted.length, `segment ${index}`).toBeGreaterThan(0);
+        for (const curve of submitted) {
+          expect(curve.sourceDomain).toEqual([0, 1]);
+          expect(bitwise(curve.start, start), `segment ${index}`).toBe(true);
+          expect(bitwise(curve.end, end), `segment ${index}`).toBe(true);
+          expect(bitwise(evaluateNeutralCurve(curve, 0), start)).toBe(true);
+          expect(bitwise(evaluateNeutralCurve(curve, 1), end)).toBe(true);
+        }
+        const joint = result.joints[0]!;
+        const probeIsFirst = joint.firstSeedEntityId === id("probe");
+        const parameter = probeIsFirst
+          ? joint.firstParameter
+          : joint.secondParameter;
+        expect(0 < parameter && parameter < 1, `segment ${index}`).toBe(true);
+        const endpoints = result.lineArcEndpoints.get(id("probe"))!;
+        expect(endpoints.startDomainEnd).toEqual({ kind: "source" });
+        expect(bitwise(endpoints.start, start), `segment ${index}`).toBe(true);
+        expect(endpoints.end).toBe(joint.position);
+      }
+    });
+  });
+
+  test("line/line and line/cubic trims agree in both traversal directions on the segment parameter", () => {
+    const cap = cubic("cap", [
+      fabricatedSpan([
+        [0, 1.5],
+        [1, 2.5],
+        [2, 2.5],
+        [3, 1.5],
+      ]),
+    ]);
+    const horizontal = line("horizontal", [0, 0], [3, 0]);
+    const vertical = line("vertical", [1, -1], [1, 3]);
+    const forward = resolved(
+      makeOffsetChainFixture([horizontal, vertical, cap]),
+    );
+    const backward = resolved(
+      makeOffsetChainFixture(
+        [cap, vertical, horizontal].map((piece) => ({
+          ...piece,
+          reversed: true,
+        })),
+      ),
+    );
+    for (const result of [forward, backward]) {
+      expect(result.joints).toHaveLength(2);
+      const lineLine = result.joints.find(
+        (joint) => joint.witness.proof.kind === "exactFiniteLineIntersection",
+      )!;
+      expect(bitwise(lineLine.position, [1, 0])).toBe(true);
+      const onHorizontal =
+        lineLine.firstSeedEntityId === id("horizontal") ? "first" : "second";
+      const onVertical = onHorizontal === "first" ? "second" : "first";
+      expect(lineLine.witness.proof[`${onHorizontal}ParameterBounds`]).toEqual([
+        1 / 3,
+        1 / 3,
+      ]);
+      expect(lineLine.witness.proof[`${onVertical}ParameterBounds`]).toEqual([
+        0.25, 0.25,
+      ]);
+      for (const curve of [lineLine.request.first, lineLine.request.second]) {
+        expect(curve).toMatchObject({
+          kind: "line",
+          form: "endpointSegment",
+          sourceDomain: [0, 1],
+        });
+      }
+      const lineCubic = result.joints.find(
+        (joint) => joint.witness.proof.kind === "exactImplicitLineRootSet",
+      )!;
+      const verticalParameter =
+        lineCubic.firstSeedEntityId === id("vertical")
+          ? lineCubic.firstParameter
+          : lineCubic.secondParameter;
+      expect(0.75 < verticalParameter && verticalParameter < 1).toBe(true);
+    }
+    for (const seed of ["horizontal", "vertical"]) {
+      const a = forward.lineArcEndpoints.get(id(seed))!;
+      const b = backward.lineArcEndpoints.get(id(seed))!;
+      expect(bitwise(a.start, b.start), seed).toBe(true);
+      expect(bitwise(a.end, b.end), seed).toBe(true);
+      expect([a.startDomainEnd.kind, a.endDomainEnd.kind]).toEqual([
+        b.startDomainEnd.kind,
+        b.endDomainEnd.kind,
+      ]);
+    }
+    const horizontalEnds = forward.lineArcEndpoints.get(id("horizontal"))!;
+    expect(bitwise(horizontalEnds.start, [0, 0])).toBe(true);
+    expect(bitwise(horizontalEnds.end, [1, 0])).toBe(true);
+    expect(
+      backward.cubics.get(id("cap"))![0]!.representativeQueryDomain,
+    ).toEqual(forward.cubics.get(id("cap"))![0]!.representativeQueryDomain);
   });
 });
 
@@ -1174,6 +1345,56 @@ describe("offset chain fixed-topology JVP", () => {
     }));
   });
 
+  test("line/line and line/cubic trims agree with the oracle under independent segment endpoint variation", () => {
+    const horizontalVariation = {
+      start: [0.5, 0.25],
+      end: [-0.25, 1],
+    } as const;
+    const verticalVariation = {
+      start: [0.125, -0.5],
+      end: [0.75, 0.25],
+    } as const;
+    const shift = (point: Point, variation: Point, e: number): Point => [
+      point[0] + e * variation[0],
+      point[1] + e * variation[1],
+    ];
+    const cap = cubic("cap", [
+      fabricatedSpan([
+        [0, 1.5],
+        [1, 2.5],
+        [2, 2.5],
+        [3, 1.5],
+      ]),
+    ]);
+    for (const reversedTraversal of [false, true]) {
+      checkAgainstFiniteDifference(2 ** -20, (epsilon) => {
+        const horizontal = line(
+          "horizontal",
+          shift([0, 0], horizontalVariation.start, epsilon),
+          shift([3, 0], horizontalVariation.end, epsilon),
+        );
+        const vertical = line(
+          "vertical",
+          shift([1, -1], verticalVariation.start, epsilon),
+          shift([1, 3], verticalVariation.end, epsilon),
+        );
+        const pieces = reversedTraversal
+          ? [cap, vertical, horizontal].map((piece) => ({
+              ...piece,
+              reversed: true,
+            }))
+          : [horizontal, vertical, cap];
+        return {
+          input: makeOffsetChainFixture(pieces),
+          variations: new Map<SketchEntityId, OffsetChainPieceVariation>([
+            [id("horizontal"), { kind: "lineSegment", ...horizontalVariation }],
+            [id("vertical"), { kind: "lineSegment", ...verticalVariation }],
+          ]),
+        };
+      });
+    }
+  });
+
   test("untrimmed cubic domain ends carry the owner's source-interval differential", () => {
     const span: SplineOffsetCubicSpan = {
       ...fabricatedSpan(ARCH),
@@ -1221,13 +1442,14 @@ describe("offset chain fixed-topology JVP", () => {
         points: [
           {
             classification: "crossing",
-            firstParameter: 1,
-            secondParameter: 1,
+            // Interior segment parameter, so the primal reaches the determinant.
+            firstParameter: 0.5,
+            secondParameter: 0.5,
             position: [1, 0],
             proof: {
               kind: "exactFiniteLineIntersection",
-              firstParameterBounds: [1, 1],
-              secondParameterBounds: [1, 1],
+              firstParameterBounds: [0.5, 0.5],
+              secondParameterBounds: [0.5, 0.5],
             },
           },
         ],

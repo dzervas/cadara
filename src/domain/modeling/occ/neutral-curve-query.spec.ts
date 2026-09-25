@@ -5,8 +5,10 @@ import { expect, test } from "vitest";
 import {
   evaluateNeutralCurve,
   type NeutralCurve,
+  type NumericNeutralLine,
 } from "@/contracts/modeling/neutral-curve-query";
 import { ExactQueryProofBudgetExceeded } from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
+import { createCertifiedNeutralCurveQueryWithBudgetObserverForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import {
   createOpenCascadeNeutralCurveQueryCapability,
   createOpenCascadeNeutralCurveQueryCapabilityWithBudgetObserverForTest,
@@ -32,8 +34,8 @@ const makeCircle = (
 const makeLine = (
   curveId: string,
   origin: readonly [number, number],
-  overrides: Partial<Extract<NeutralCurve, { kind: "line" }>> = {},
-): Extract<NeutralCurve, { kind: "line" }> => ({
+  overrides: Partial<NumericNeutralLine> = {},
+): NumericNeutralLine => ({
   curveId,
   kind: "line",
   origin,
@@ -2697,3 +2699,116 @@ test("installed full OCC rejects positive endpoint gaps and verifies a bounded c
     });
   }
 }, 65_000);
+
+test("endpoint segments route to the kernel-free exact owners on one meter and never load OCC", async () => {
+  const neverLoad = async (): Promise<OpenCascadeInstance> => {
+    throw new Error("endpoint segments must never load OCC");
+  };
+  const segment = (
+    curveId: string,
+    start: readonly [number, number],
+    end: readonly [number, number],
+  ): NeutralCurve => ({
+    curveId,
+    kind: "line",
+    form: "endpointSegment",
+    start,
+    end,
+    sourceDomain: [0, 1],
+    provenance: { sourceEntityId: curveId, sourceSpanId: `${curveId}:full` },
+  });
+  const across = segment("across", [-2, 0.5], [2, 0.5]);
+  const cases = [
+    [across, segment("down", [0, 2], [0, -2]), "finiteLinePair", 1],
+    [across, makeLine("numeric", [0.25, -1]), "finiteLinePair", 1],
+    [across, makeCircle("circle", [0, 0]), "lineCircle", 2],
+    [
+      across,
+      {
+        ...makeStraightCubic("arch"),
+        poles: [
+          [-1, -1],
+          [-1 / 3, 2],
+          [1 / 3, 2],
+          [1, -1],
+        ],
+      },
+      "lineCubic",
+      2,
+    ],
+  ] as const;
+  const syncQuery = createCertifiedNeutralCurveQueryWithBudgetObserverForTest;
+  for (const [first, second, family, count] of cases) {
+    for (const request of [
+      { modelingTolerance: 1e-6, first, second },
+      { modelingTolerance: 1e-6, first: second, second: first },
+    ]) {
+      const occOperations: number[] = [];
+      const result =
+        await createOpenCascadeNeutralCurveQueryCapabilityWithBudgetObserverForTest(
+          neverLoad,
+          (snapshot) => occOperations.push(snapshot.operations),
+        ).queryNeutralCurves(request);
+      expect(result, family).toMatchObject({
+        kind: "verified",
+        completenessProof: { family, distinctRootCount: count },
+      });
+      if (result.kind !== "verified") continue;
+      expect(result.points).toHaveLength(count);
+      const syncOperations: number[] = [];
+      expect(
+        syncQuery((snapshot) =>
+          syncOperations.push(snapshot.operations),
+        ).queryPair(request),
+        "the adapter composes the same exact owner as the sync dispatcher",
+      ).toEqual(result);
+      expect(occOperations).toEqual(syncOperations);
+      await expect(
+        createOpenCascadeNeutralCurveQueryCapabilityWithLowerBudgetForTest(
+          neverLoad,
+          { operations: occOperations[0]! - 1 },
+        ).queryNeutralCurves(request),
+      ).resolves.toMatchObject({
+        kind: "uncertain",
+        code: "exact-query-proof-budget-exhausted",
+      });
+    }
+  }
+});
+
+test("a spoofed or overflowing segment form is invalid before any OCC load", async () => {
+  const capability = createOpenCascadeNeutralCurveQueryCapability(async () => {
+    throw new Error("invalid requests must never load OCC");
+  });
+  const base = {
+    curveId: "spoof",
+    kind: "line",
+    start: [0, 0],
+    end: [1, 0],
+    sourceDomain: [0, 1],
+    provenance: { sourceEntityId: "spoof", sourceSpanId: "spoof:full" },
+  } as const;
+  for (const spoof of [
+    { ...base, form: "endpointArc" },
+    // A numeric form without numeric fields cannot inherit segment meaning.
+    base,
+    {
+      ...base,
+      form: "endpointSegment",
+      end: [Number.MAX_VALUE, 0],
+      start: [-Number.MAX_VALUE, 0],
+    },
+    { ...base, form: "endpointSegment", end: [0, 0] },
+  ]) {
+    await expect(
+      capability.queryNeutralCurves({
+        modelingTolerance: 1e-6,
+        first: spoof as unknown as NeutralCurve,
+        second: makeCircle("circle", [0, 0]),
+      }),
+    ).resolves.toMatchObject({
+      kind: "uncertain",
+      code: "invalid-neutral-curve-query",
+    });
+  }
+});
