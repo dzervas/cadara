@@ -1,10 +1,13 @@
 import { describe, expect, test } from "vitest";
 import type {
+  CertifiedCubicTubeChain,
   CertifiedNeutralCurveQuery,
+  CubicTubeChainRequest,
   NeutralCurvePointWitness,
 } from "@/contracts/modeling/neutral-curve-query";
 import type { SketchEntityId } from "@/contracts/shared/ids";
 import {
+  certifyOffsetChainTubeStability,
   offsetChainRootEnclosure,
   resolveOffsetChainTopology,
   resolveOffsetChainTopologyJvp,
@@ -23,6 +26,7 @@ import {
   approximateSplineOffset,
   type SplineOffsetCubicSpan,
 } from "@/contracts/sketch/spline-offset-geometry";
+import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import {
   createCertifiedNeutralCurveQuery,
   createCertifiedNeutralCurveQueryWithLowerBudgetForTest,
@@ -82,6 +86,14 @@ function fabricatedSpan(
     poles,
     differential: { sourceInterval: [0, 0], poles: differentialPoles },
     certifiedError: 0,
+    // Dummy owner metadata: its derivative box contains 0, so it never certifies.
+    reference: {
+      derivative: [
+        [0, 0],
+        [0, 0],
+      ],
+      sourcePoles: ZERO_POLES,
+    },
   };
 }
 
@@ -1248,3 +1260,300 @@ describe("offset chain fixed-topology JVP", () => {
     ).toThrow(RangeError);
   });
 });
+
+describe("offset chain tube-stability mapping (bounded helper, not live)", () => {
+  const tubeCertifier = createCertifiedCubicTubeChain();
+  const ownerChain = (
+    points: readonly Point[],
+    distance: number,
+    closure: "open" | "smooth" = "open",
+  ) => {
+    const geometry = reconstructSpline({
+      id: "seed",
+      policy: "centripetal-mean-arm-v1",
+      closure,
+      points: points.map((position, index) => ({
+        occurrenceId: `o${index}`,
+        id: `p${index}`,
+        position,
+        tangent: { kind: "automatic" as const },
+      })),
+    });
+    if (geometry.validity !== "valid") throw new Error("invalid fixture");
+    const owner = approximateSplineOffset({
+      spans: geometry.spans,
+      distance,
+      modelingTolerance: 1e-3,
+    });
+    if (!owner.ok) throw new Error(owner.code);
+    return owner.spans;
+  };
+  const F1_POINTS: readonly Point[] = [
+    [0, 0],
+    [1, 0.1],
+    [2, 0],
+  ];
+  /**
+   * Mapping-seam fake only, never topology evidence: reports exactly the
+   * bitwise-shared knot of each owner span pair as its single root so the
+   * resolver accepts untrimmed owner chains without the slow exact queries.
+   */
+  const knotOnlyQuery: CertifiedNeutralCurveQuery = {
+    queryPair: ({ first, second }) => {
+      if (first.kind !== "cubicBezier" || second.kind !== "cubicBezier") {
+        throw new Error("knot-only fake admits owner cubics only");
+      }
+      const at = samePointForTest(first.poles[3], second.poles[0])
+        ? ([first.sourceDomain[1], second.sourceDomain[0]] as const)
+        : samePointForTest(second.poles[3], first.poles[0])
+          ? ([first.sourceDomain[0], second.sourceDomain[1]] as const)
+          : null;
+      return {
+        kind: "verified",
+        points: at
+          ? [
+              {
+                classification: "unclassified",
+                firstParameter: at[0],
+                secondParameter: at[1],
+                position: first.poles[at[0] === first.sourceDomain[1] ? 3 : 0],
+                proof: {
+                  kind: "exactCubicPairRootSet",
+                  firstParameterBounds: [at[0], at[0]],
+                  secondParameterBounds: [at[1], at[1]],
+                },
+              },
+            ]
+          : [],
+        overlaps: [],
+        completenessProof: {
+          kind: "completeIsolatedRootSet",
+          family: "cubicCubic",
+          distinctRootCount: at ? 1 : 0,
+        },
+      };
+    },
+    querySelf: verifiedEmptySelf,
+  };
+  const recordingCertifier = () => {
+    const requests: CubicTubeChainRequest[] = [];
+    const certifier: CertifiedCubicTubeChain = {
+      certifyChain: (request) => {
+        requests.push(request);
+        return tubeCertifier.certifyChain(request);
+      },
+    };
+    return { requests, certifier };
+  };
+  const refusingCertifier: CertifiedCubicTubeChain = {
+    certifyChain: () => {
+      throw new Error("out-of-scope chains never reach the certifier");
+    },
+  };
+
+  test("real F1 resolution and real certifier: ok for the same resolution", () => {
+    const spans = ownerChain(F1_POINTS, 0.2);
+    const input = makeOffsetChainFixture([cubic("s", spans)]);
+    const accepted = resolved(input);
+    const result = certifyOffsetChainTubeStability(accepted, tubeCertifier);
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    expect(result.resolved).toBe(accepted);
+    expect(result.seedEntityId).toBe(id("s"));
+    expect(result.certificate.joins.map((join) => join.kind)).toEqual([
+      "same-leaf",
+      "parallel-knot",
+      "same-leaf",
+    ]);
+  }, 60_000);
+
+  test("forwards owner spans, errors, metadata and the tolerance unchanged in natural order for both traversals", () => {
+    const spans = ownerChain(F1_POINTS, 0.2);
+    for (const reversed of [false, true]) {
+      for (const modelingTolerance of [1e-3, 2.5e-2]) {
+        const { requests, certifier } = recordingCertifier();
+        const accepted = resolved(
+          makeOffsetChainFixture([cubic("s", spans, reversed)], {
+            modelingTolerance,
+            query: knotOnlyQuery,
+          }),
+        );
+        expect(certifyOffsetChainTubeStability(accepted, certifier).ok).toBe(
+          true,
+        );
+        expect(requests).toHaveLength(1);
+        const [request] = requests;
+        expect(request!.modelingTolerance).toBe(modelingTolerance);
+        expect(request!.closed).toBe(false);
+        expect(request!.tubes).toHaveLength(spans.length);
+        request!.tubes.forEach((tube, index) => {
+          expect(tube.poles, "never reversed").toBe(spans[index]!.poles);
+          expect(tube.reference).toBe(spans[index]!.reference);
+          expect(tube.certifiedError).toBe(spans[index]!.certifiedError);
+          expect(tube.sourceLocalInterval).toBe(
+            spans[index]!.sourceLocalInterval,
+          );
+          expect(tube.source).toBe(spans[index]!.source);
+        });
+      }
+    }
+  });
+
+  test("the real closed 40-span diamond maps to a verified closed chain", () => {
+    const spans = ownerChain(
+      [
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+      ],
+      0.1,
+      "smooth",
+    );
+    const result = certifyOffsetChainTubeStability(
+      resolved(
+        makeOffsetChainFixture([cubic("diamond", spans)], {
+          closed: true,
+          query: knotOnlyQuery,
+        }),
+      ),
+      tubeCertifier,
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    expect(result.certificate.joins).toHaveLength(40);
+    expect(result.certificate.joins.at(-1)).toMatchObject({
+      first: 39,
+      second: 0,
+      kind: "parallel-knot",
+    });
+  });
+
+  test("trimmed or multi-piece chains and the closed two-span lens are unsupported", () => {
+    const distance = -0.25;
+    expect(
+      certifyOffsetChainTubeStability(
+        resolved(
+          makeOffsetChainFixture(
+            ownerLineCubicLine(distance, ownerSpans({ distance })),
+          ),
+        ),
+        refusingCertifier,
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: codes.topologyStabilityUnsupported,
+      seedEntityId: id("first"),
+    });
+    const lens = [
+      fabricatedSpan(ARCH),
+      fabricatedSpan([
+        [3, 0],
+        [2, -1],
+        [1, -1],
+        [0, 0],
+      ]),
+    ];
+    expect(
+      certifyOffsetChainTubeStability(
+        resolved(
+          makeOffsetChainFixture([cubic("lens", lens)], { closed: true }),
+        ),
+        tubeCertifier,
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: codes.topologyStabilityUnsupported,
+      seedEntityId: id("lens"),
+    });
+  });
+
+  test("certifier outcomes map to clearance, knot-incidence and topology-uncertain codes", () => {
+    const accepted = resolved(
+      makeOffsetChainFixture([cubic("s", ownerChain(F1_POINTS, 0.2))], {
+        query: knotOnlyQuery,
+      }),
+    );
+    const answering = (
+      code: string,
+      kind: "uncertain" | "unsupported" = "uncertain",
+    ): CertifiedCubicTubeChain => ({
+      certifyChain: () => ({ kind, code, message: "m", first: 0, second: 2 }),
+    });
+    for (const [code, kind, expected] of [
+      [
+        "cubic-tube-clearance-unproven",
+        "uncertain",
+        codes.topologyClearanceUnproven,
+      ],
+      [
+        "cubic-tube-knot-incidence-unproven",
+        "uncertain",
+        codes.knotIncidenceUnproven,
+      ],
+      [
+        "exact-query-proof-budget-exhausted",
+        "uncertain",
+        codes.topologyUncertain,
+      ],
+      ["cubic-tube-cone-unproven", "uncertain", codes.topologyUncertain],
+      [
+        "cubic-tube-chain-closed-too-short",
+        "unsupported",
+        codes.topologyStabilityUnsupported,
+      ],
+    ] as const) {
+      expect(
+        certifyOffsetChainTubeStability(accepted, answering(code, kind)),
+      ).toEqual({
+        ok: false,
+        code: expected,
+        message: expect.stringContaining(`${code}: m`),
+        seedEntityId: id("s"),
+      });
+    }
+    const asymmetric = resolved(
+      makeOffsetChainFixture(
+        [
+          cubic(
+            "s",
+            ownerChain(
+              [
+                [0, 0],
+                [1, 0.1],
+                [2.5, 0],
+              ],
+              0.2,
+            ),
+          ),
+        ],
+        { query: knotOnlyQuery },
+      ),
+    );
+    expect(
+      certifyOffsetChainTubeStability(asymmetric, tubeCertifier),
+    ).toMatchObject({ ok: false, code: codes.knotIncidenceUnproven });
+  });
+
+  test("certifier exceptions propagate by identity", () => {
+    const error = new Error("ordinary failure");
+    const accepted = resolved(
+      makeOffsetChainFixture([cubic("s", ownerChain(F1_POINTS, 0.2))], {
+        query: knotOnlyQuery,
+      }),
+    );
+    let thrown: unknown;
+    try {
+      certifyOffsetChainTubeStability(accepted, {
+        certifyChain: () => {
+          throw error;
+        },
+      });
+    } catch (caught) {
+      thrown = caught;
+    }
+    expect(thrown).toBe(error);
+  });
+});
+
+function samePointForTest(first: Point, second: Point) {
+  return Object.is(first[0], second[0]) && Object.is(first[1], second[1]);
+}

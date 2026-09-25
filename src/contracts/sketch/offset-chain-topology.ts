@@ -1,5 +1,7 @@
 import type {
+  CertifiedCubicTubeChain,
   CertifiedNeutralCurveQuery,
+  CubicTubeChainResult,
   NeutralCurve,
   NeutralCurvePointWitness,
   NeutralCurveQueryRequest,
@@ -736,6 +738,107 @@ export function resolveOffsetChainTopology(
     });
   }
   return { ok: true, input, cubics, lineArcEndpoints, joints };
+}
+
+export type OffsetChainTubeStabilityCertificate = Extract<
+  CubicTubeChainResult,
+  { readonly kind: "verified" }
+>["certificate"];
+
+export type OffsetChainTubeStabilityResult =
+  | {
+      readonly ok: true;
+      readonly resolved: OffsetChainTopologySuccess;
+      readonly seedEntityId: SketchEntityId;
+      /** Join and pair indices are the owner's natural span order. */
+      readonly certificate: OffsetChainTubeStabilityCertificate;
+    }
+  | OffsetChainFailure;
+
+/**
+ * C6-S1′ bounded helper, not wired into any frame: certifies that an accepted
+ * resolution's emitted cubics carry the true offset's topology under the
+ * owner's error tubes. Scope is one untrimmed spline offset piece with no
+ * joints; everything else is unsupported, never assumed stable.
+ *
+ * Owner spans are forwarded unchanged in natural source order, whatever the
+ * traversal direction: reversing poles would pair them with the owner's
+ * natural-order derivative enclosure and source normal. The tolerance, errors
+ * and proof metadata are forwarded unchanged; binding them to one fresh owner
+ * call remains the caller's obligation. Certifier exceptions propagate.
+ */
+export function certifyOffsetChainTubeStability(
+  resolved: OffsetChainTopologySuccess,
+  certifier: CertifiedCubicTubeChain,
+): OffsetChainTubeStabilityResult {
+  const { pieces, closed, modelingTolerance } = resolved.input;
+  const piece = pieces.length === 1 ? pieces[0] : undefined;
+  const seedEntityId = pieces[0]?.seedEntityId ?? null;
+  if (
+    !piece ||
+    piece.kind !== "derivedCubic" ||
+    resolved.joints.length !== 0 ||
+    resolved.lineArcEndpoints.size !== 0
+  ) {
+    return failure(
+      codes.topologyStabilityUnsupported,
+      "Tube stability is certified only for one untrimmed spline offset without joints.",
+      seedEntityId,
+    );
+  }
+  const spans = resolved.cubics.get(piece.seedEntityId);
+  if (
+    resolved.cubics.size !== 1 ||
+    spans?.length !== piece.spans.length ||
+    spans.some(
+      (item, index) =>
+        item.span !== piece.spans[index] ||
+        item.start.kind !== "source" ||
+        item.end.kind !== "source",
+    )
+  ) {
+    return failure(
+      codes.topologyUncertain,
+      "The resolution does not describe its own untrimmed owner spans.",
+      piece.seedEntityId,
+    );
+  }
+  const result = certifier.certifyChain({
+    modelingTolerance,
+    closed,
+    tubes: piece.spans.map((span) => ({
+      poles: span.poles,
+      certifiedError: span.certifiedError,
+      reference: span.reference,
+      source: span.source,
+      sourceLocalInterval: span.sourceLocalInterval,
+    })),
+  });
+  if (result.kind === "verified") {
+    return {
+      ok: true,
+      resolved,
+      seedEntityId: piece.seedEntityId,
+      certificate: result.certificate,
+    };
+  }
+  const code =
+    result.kind === "unsupported"
+      ? codes.topologyStabilityUnsupported
+      : result.code === "cubic-tube-clearance-unproven"
+        ? codes.topologyClearanceUnproven
+        : result.code === "cubic-tube-knot-incidence-unproven"
+          ? codes.knotIncidenceUnproven
+          : codes.topologyUncertain;
+  const where =
+    result.first === undefined
+      ? ""
+      : ` (spans ${result.first}${result.second === undefined ? "" : `/${result.second}`})`;
+  return failure(
+    code,
+    `Tube stability is not certified${where}: ${result.kind} ${result.code}: ${result.message}`,
+    piece.seedEntityId,
+  );
 }
 
 interface CurveFrame {

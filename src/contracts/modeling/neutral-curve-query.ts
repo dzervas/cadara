@@ -229,6 +229,85 @@ export interface CertifiedNeutralCurveQuery {
   ): NeutralCurveQueryResult;
 }
 
+/**
+ * One emitted cubic of a certified tube chain plus the owner proof metadata
+ * it was emitted with. The certifier trusts that every field comes from one
+ * fresh owner result (caller obligation); metadata presence is not provenance.
+ */
+export interface NeutralCubicTube {
+  /** Emitted binary64 poles E, unchanged. */
+  readonly poles: SplinePoles;
+  /** Owner certificate ε: |E(u) − O(a + u·(b − a))| ≤ ε on the leaf [a, b]. */
+  readonly certifiedError: number;
+  readonly reference: {
+    /** Outward box of the true one-sided offset derivative O′ over the leaf. */
+    readonly derivative: readonly [
+      readonly [number, number],
+      readonly [number, number],
+    ];
+    /** Binary64 poles of the source span the leaf belongs to. */
+    readonly sourcePoles: SplinePoles;
+  };
+  readonly source: {
+    readonly splineId: string;
+    readonly spanIndex: number;
+    readonly startOccurrenceId: string;
+    readonly endOccurrenceId: string;
+  };
+  /** The leaf [a, b] ⊆ [0, 1] in the source span's local parameter. */
+  readonly sourceLocalInterval: readonly [number, number];
+}
+
+export interface CubicTubeChainRequest {
+  /** The consuming document's authored settings.modelingTolerance. */
+  readonly modelingTolerance: number;
+  /** Declared joins are (k, k + 1), plus (n − 1, 0) when closed. */
+  readonly closed: boolean;
+  readonly tubes: readonly NeutralCubicTube[];
+}
+
+export interface CubicTubeChainJoin {
+  readonly first: number;
+  readonly second: number;
+  /** How the exact true-offset endpoint identity O_first(b) = O_second(a) is proved. */
+  readonly kind: "same-leaf" | "parallel-knot";
+  /** Binary64 cone candidate e; both hodographs and O′ boxes are strictly e-positive. */
+  readonly direction: SplineVector;
+}
+
+export type CubicTubeChainResult =
+  | {
+      readonly kind: "verified";
+      readonly certificate: {
+        readonly joins: readonly CubicTubeChainJoin[];
+        /** Present only for a single open span. */
+        readonly isolatedSpanDirection?: SplineVector;
+        /** Every non-join pair, each separated by more than ε_i + ε_j. */
+        readonly clearedPairs: readonly (readonly [number, number])[];
+        readonly maxSplits: number;
+      };
+    }
+  | {
+      /**
+       * Uncertain never asserts that the true geometry is unstable: a failed
+       * clearance only means the certified error tubes are not proved apart.
+       */
+      readonly kind: "unsupported" | "uncertain";
+      readonly code: string;
+      readonly message: string;
+      readonly first?: number;
+      readonly second?: number;
+    };
+
+/**
+ * Synchronous, kernel-free topology-stability certificate of one emitted cubic
+ * chain against its owner's error tubes. A separate proof kind from root-set
+ * queries: it proves simplicity and separation, never contact.
+ */
+export interface CertifiedCubicTubeChain {
+  certifyChain(request: CubicTubeChainRequest): CubicTubeChainResult;
+}
+
 export interface NeutralCurveQueryCapability {
   queryNeutralCurves(
     request: NeutralCurveQueryRequest,
