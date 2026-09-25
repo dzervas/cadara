@@ -20,10 +20,12 @@ import {
 import type {
   SketchDefinition,
   SketchPoint2D,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
   evaluateSplineSpan,
   reconstructSplineAggregate,
+  type SplineSpan,
   type SplineVector,
 } from "@/contracts/sketch/spline-geometry";
 import {
@@ -786,21 +788,106 @@ export interface DeclaredOffsetChainPieces {
   readonly sources: readonly DeclaredOffsetPieceSource[];
 }
 
+function sameVector(first: SketchPoint2D, second: SketchPoint2D) {
+  return Object.is(first[0], second[0]) && Object.is(first[1], second[1]);
+}
+
+function sameSpanGeometry(first: SplineSpan, second: SplineSpan) {
+  return (
+    Object.is(first.interval[0], second.interval[0]) &&
+    Object.is(first.interval[1], second.interval[1]) &&
+    first.source.splineId === second.source.splineId &&
+    first.source.spanIndex === second.source.spanIndex &&
+    first.source.startPointId === second.source.startPointId &&
+    first.source.endPointId === second.source.endPointId &&
+    first.source.startOccurrenceId === second.source.startOccurrenceId &&
+    first.source.endOccurrenceId === second.source.endOccurrenceId &&
+    first.poles.every((pole, index) => sameVector(pole, second.poles[index]!))
+  );
+}
+
 /**
- * Fresh N2 → N1 adapter: per declared piece in traversal order, owner distance
- * d_i = reversed ? −d : d. A line is `offsetLinePoints` of its positions; a
- * spline is ONE reconstruction and ONE owner call, forwarded unchanged. No
- * coordinate proximity is consulted. Arcs, circles and other seeds are outside
- * the tube-stability scope.
+ * Fresh N2 → N1 adapter. It accepts only a trusted `(definition,
+ * solvedSnapshot)` pair from one accepted solve: E1–E4 check the producer's
+ * solved status, ordered ID coverage, seed geometry bitwise against solved
+ * entities, and each direct coincident declaration. `satisfied` is relative to
+ * that producer's solve policy. This does not detect same-ID parameter edits,
+ * changes to unselected entities, or forged snapshots; a future consumer must
+ * bind inside `deriveSolvedRegionsForSession`'s accepted-pair scope, never a
+ * session definition with a cached incomplete-drag snapshot.
+ *
+ * Per declared piece, d_i = reversed ? −d : d. A line is
+ * `offsetLinePoints` of its positions; a spline is ONE reconstruction and ONE
+ * owner call, forwarded unchanged. No coordinate proximity is consulted.
  */
 export function declaredOffsetChainPieces(input: {
-  /** Points carry the solve-accepted positions. */
-  readonly definition: Pick<SketchDefinition, "points" | "entities">;
+  readonly definition: Pick<
+    SketchDefinition,
+    "points" | "entities" | "constraints" | "dimensions"
+  >;
+  readonly solvedSnapshot: SolvedSketchSnapshot;
   readonly connectivity: DeclaredOffsetChainConnectivity;
   readonly distance: number;
   readonly modelingTolerance: number;
 }): DeclaredOffsetChainPieces | OffsetChainFailure {
-  const { definition, connectivity, distance, modelingTolerance } = input;
+  const {
+    definition,
+    solvedSnapshot,
+    connectivity,
+    distance,
+    modelingTolerance,
+  } = input;
+  const uncertain = (
+    message: string,
+    seedEntityId: SketchEntityId | null = null,
+  ) => failure(codes.topologyUncertain, message, seedEntityId);
+  if (
+    solvedSnapshot.status.solveState !== "solved" ||
+    solvedSnapshot.constraintStatuses.some(
+      (status) => status.status !== "satisfied",
+    ) ||
+    solvedSnapshot.dimensionStatuses.some(
+      (status) => status.status === "unsatisfied",
+    ) ||
+    solvedSnapshot.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
+  )
+    return uncertain("The solve frame is not solver-accepted.");
+  const sameIds = (actual: readonly string[], expected: readonly string[]) =>
+    actual.length === expected.length &&
+    actual.every((id, index) => id === expected[index]);
+  if (
+    !sameIds(
+      solvedSnapshot.constraintStatuses.map((item) => item.constraintId),
+      definition.constraints.map((item) => item.constraintId),
+    ) ||
+    !sameIds(
+      solvedSnapshot.dimensionStatuses.map((item) => item.dimensionId),
+      definition.dimensions.map((item) => item.dimensionId),
+    ) ||
+    !sameIds(
+      solvedSnapshot.solvedPoints.map((item) => item.pointId),
+      definition.points.map((item) => item.pointId),
+    )
+  )
+    return uncertain("The solve frame does not cover this definition.");
+  for (const join of connectivity.joins) {
+    if (join.kind !== "coincidentConstraint") continue;
+    const constraints = definition.constraints.filter(
+      (constraint) => constraint.constraintId === join.constraintId,
+    );
+    const constraint = constraints[0];
+    if (
+      constraints.length !== 1 ||
+      constraint?.kind !== "coincident" ||
+      constraint.pointIds[0] !== join.pointIds[0] ||
+      constraint.pointIds[1] !== join.pointIds[1]
+    )
+      return uncertain(
+        "The declared coincident join is not a direct constraint of this definition.",
+      );
+  }
   const positions: Record<string, SplineVector> = {};
   for (const point of definition.points)
     positions[point.pointId] = point.position;
@@ -810,12 +897,28 @@ export function declaredOffsetChainPieces(input: {
     const entity = definition.entities.find(
       (candidate) => candidate.entityId === seedEntityId,
     );
+    const solvedEntities = solvedSnapshot.solvedEntities.filter(
+      (candidate) => candidate.entityId === seedEntityId,
+    );
     const effective = reversed ? -distance : distance;
     if (entity?.kind === "lineSegment") {
+      const solved = solvedEntities[0];
       const start = positions[entity.startPointId];
       const end = positions[entity.endPointId];
-      const offset = start && end && offsetLinePoints(start, end, effective);
-      if (!start || !end || !offset)
+      if (
+        solvedEntities.length !== 1 ||
+        solved?.kind !== "lineSegment" ||
+        !start ||
+        !end ||
+        !sameVector(start, solved.startPosition) ||
+        !sameVector(end, solved.endPosition)
+      )
+        return uncertain(
+          "The line seed geometry does not match the solve frame.",
+          seedEntityId,
+        );
+      const offset = offsetLinePoints(start, end, effective);
+      if (!offset)
         return failure(
           codes.unsupportedSeed,
           "Offset seed segment is missing or too short.",
@@ -844,10 +947,20 @@ export function declaredOffsetChainPieces(input: {
         seedEntityId,
       );
     const geometry = reconstructSplineAggregate(entity, positions);
-    if (geometry.validity !== "valid")
-      return failure(
-        codes.unsupportedSeed,
-        "Offset seed spline does not reconstruct.",
+    const solved = solvedEntities[0];
+    if (
+      solvedEntities.length !== 1 ||
+      solved?.kind !== "spline" ||
+      geometry.validity !== "valid" ||
+      solved.reconstruction.validity !== "valid" ||
+      geometry.spans.length !== solved.reconstruction.spans.length ||
+      geometry.spans.some(
+        (span, index) =>
+          !sameSpanGeometry(span, solved.reconstruction.spans[index]!),
+      )
+    )
+      return uncertain(
+        "The spline seed geometry does not match the solve frame.",
         seedEntityId,
       );
     const owner = approximateSplineOffset({
@@ -901,12 +1014,15 @@ export type OffsetChainTubeStabilityResult =
  * and proof metadata are forwarded unchanged; binding them to one fresh owner
  * call remains the caller's obligation. Certifier exceptions propagate.
  *
- * With `declared` (L1b): the resolution must be of exactly that adapter
- * output (piece identity), every declared join a shared canonical point that
- * is both pieces' traversal terminal, and the certificate is conditional on
- * those premises: it concerns the abstract chain trimmed at the exact
- * witnessed roots only (never the rounded emitted ends). Declared coincident
- * joins are unsupported.
+ * With `declared` (L1b/R_C): the resolution must be of exactly that adapter
+ * output (piece identity). Shared-point joins use one traversal-terminal ID;
+ * direct coincident joins use the distinct terminal IDs as an unordered pair.
+ * Coincident certification is conditional on R_C/H2 and the adapter's trusted
+ * E1–E4 `(definition, solvedSnapshot)` premise. Those checks do not detect
+ * same-ID parameter edits or forged snapshots; a future consumer must bind the
+ * accepted pair inside `deriveSolvedRegionsForSession`, never combine a session
+ * definition with a cached incomplete-drag snapshot. The certificate concerns
+ * the abstract chain trimmed at exact witnessed roots only (never rounded ends).
  */
 export function certifyOffsetChainTubeStability(
   resolved: OffsetChainTopologySuccess,
@@ -1036,15 +1152,6 @@ function certifyDeclaredTubeStability(
     return mismatch(
       "The resolution was not resolved from this declared adapter output.",
     );
-  const coincident = connectivity.joins.findIndex(
-    (join) => join.kind !== "sharedPoint",
-  );
-  if (coincident >= 0)
-    return failure(
-      codes.topologyStabilityUnsupported,
-      "Tube stability supports shared canonical point joins only; declared coincident joins are not certified.",
-      pieces[coincident]!.seedEntityId,
-    );
   // A single closed piece closes through its own bitwise owner knot.
   const wrap = closed && count > 1;
   if (
@@ -1066,10 +1173,16 @@ function certifyDeclaredTubeStability(
   for (const [index, join] of connectivity.joins.entries()) {
     const next = (index + 1) % count;
     const joint = resolved.joints[index]!;
+    const exiting = terminalPoint(index, true);
+    const entering = terminalPoint(next, false);
+    const declaredTerminal =
+      join.kind === "sharedPoint"
+        ? join.pointId === exiting && join.pointId === entering
+        : join.pointIds[0] !== join.pointIds[1] &&
+          ((join.pointIds[0] === exiting && join.pointIds[1] === entering) ||
+            (join.pointIds[1] === exiting && join.pointIds[0] === entering));
     if (
-      join.kind !== "sharedPoint" ||
-      join.pointId !== terminalPoint(index, true) ||
-      join.pointId !== terminalPoint(next, false) ||
+      !declaredTerminal ||
       joint.firstSeedEntityId !== pieces[index]!.seedEntityId ||
       joint.secondSeedEntityId !== pieces[next]!.seedEntityId
     )
