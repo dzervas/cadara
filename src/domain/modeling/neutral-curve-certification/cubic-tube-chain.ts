@@ -1,9 +1,16 @@
 import type {
   CertifiedCubicTubeChain,
+  CertifiedTubePieceChain,
   CubicTubeChainJoin,
   CubicTubeChainRequest,
   CubicTubeChainResult,
+  NeutralCubicPieceTube,
   NeutralCubicTube,
+  NeutralLineTube,
+  PieceTubeChainRequest,
+  TubeChainTrimJoin,
+  TubePieceChainJoin,
+  TubePieceChainResult,
 } from "@/contracts/modeling/neutral-curve-query";
 import type {
   SplinePoles,
@@ -12,6 +19,7 @@ import type {
 import {
   crossExact,
   exactSqrtInterval,
+  normalizedExact,
   restrictCubicBernstein,
 } from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
 import {
@@ -90,6 +98,20 @@ import {
  * normal arc: a signed-normal construction, not a nearest-distance claim.
  * A failed check is uncertain, never a claim that the true geometry changed
  * topology or that curves actually touch.
+ *
+ * L1b piece chains (`certifyPieceChain`) add, on their own paths only: line
+ * tubes (same-parameter ε from the literal emitted ends against O = A + dν,
+ * ν boxed by rot(a)/[L_lo, L_hi]); Lemma T at every inter-piece trim with
+ * the exact source-tangent concavity gate sgn(d)·cross(u_in, u_out) > 0
+ * fixing s, W = the whole terminal leaf (leaf-wide cone m′ > 0, which is also
+ * that leaf's injectivity cone), δ = (ε_A + ε_B)L_hi/m′ on the curve root
+ * through the STORED query-domain map, η/L_lo with η = ε_A + ε_B + Mδ on the
+ * line root, both strictly interior and ordered against the leaf's other end
+ * (trim or J2′); cubic leaves add Mδ per trim end, lines take the larger end
+ * displacement; K3 covers every pair outside the explicit adjacency set.
+ * The trim certificate concerns only the abstract chain trimmed at the exact
+ * witnessed roots (premises: stored bounds, ε, sources); it never claims the
+ * rounded emitted ends connect. Cubic↔cubic trims are unsupported.
  */
 
 type ExactPoint = readonly [ExactFraction, ExactFraction];
@@ -237,10 +259,51 @@ type J2Report =
     }
   | { readonly side: "convex"; readonly arcDeviation: ExactFraction };
 
+/**
+ * Piece-path flattening (never built for a legacy request). Leaf k of the
+ * flattened chain is a cubic tube (`tubes[k]`) or a line (`lines[k]`, with
+ * `tubes[k]` absent and never read). Leaves are in traversal piece order and
+ * natural order inside each piece; adjacency is explicit, never k ± 1.
+ */
+interface GeneralChain {
+  readonly distance: number;
+  readonly pieces: PieceTubeChainRequest["pieces"];
+  readonly trims: PieceTubeChainRequest["trims"];
+  readonly firstLeaf: readonly number[];
+  readonly pieceOf: readonly number[];
+  readonly lines: readonly (NeutralLineTube | undefined)[];
+}
+
+const finitePoint = (point: SplineVector | undefined) =>
+  Array.isArray(point) &&
+  Number.isFinite(point[0]) &&
+  Number.isFinite(point[1]);
+
+const strictlyOrderedFinite = (interval: readonly [number, number]) =>
+  Array.isArray(interval) &&
+  Number.isFinite(interval[0]) &&
+  Number.isFinite(interval[1]) &&
+  interval[0] < interval[1];
+
+function lineAdmissionDefect(line: NeutralLineTube): string | null {
+  if (
+    !Array.isArray(line.emitted) ||
+    line.emitted.length !== 2 ||
+    !Array.isArray(line.source) ||
+    line.source.length !== 2 ||
+    ![...line.emitted, ...line.source].every(finitePoint)
+  )
+    return "non-finite line tube ends";
+  if (!Number.isFinite(line.distance))
+    return "missing or non-finite owner offset distance";
+  return null;
+}
+
 function certifyChain(
   request: CubicTubeChainRequest,
   budget: ExactProofBudget,
-): CubicTubeChainResult {
+  general?: GeneralChain,
+): TubePieceChainResult {
   const { tubes, closed, modelingTolerance } = request;
   const count = tubes.length;
   // Admission and preallocation guard: charged before any per-tube work.
@@ -263,7 +326,15 @@ function certifyChain(
       "The modeling tolerance must be finite and positive.",
     );
   for (const [index, tube] of tubes.entries()) {
-    const defect = admissionDefect(tube, modelingTolerance);
+    const line = general?.lines[index];
+    const defect = !general
+      ? admissionDefect(tube, modelingTolerance)
+      : line
+        ? lineAdmissionDefect(line)
+        : (admissionDefect(tube, modelingTolerance) ??
+          (strictlyOrderedFinite((tube as NeutralCubicPieceTube).queryDomain)
+            ? null
+            : "invalid query domain"));
     if (defect)
       return uncertain(
         "invalid-cubic-tube-chain",
@@ -273,20 +344,46 @@ function certifyChain(
   }
   // One owner call has one signed distance: bitwise, so −0 differs from 0.
   budget.operation(count);
-  const distanceValue = tubes[0]!.reference.distance;
-  for (let index = 1; index < count; index += 1)
-    if (!Object.is(tubes[index]!.reference.distance, distanceValue))
-      return uncertain(
-        "invalid-cubic-tube-chain",
-        "The tubes do not carry one bitwise owner offset distance.",
-        0,
-        index,
-      );
+  const distanceValue = general
+    ? general.distance
+    : tubes[0]!.reference.distance;
+  if (general) {
+    // Piece i's owner distance is bitwise reversed ? −d : d (−0 visible).
+    for (let index = 0; index < count; index += 1) {
+      const owner =
+        general.lines[index]?.distance ?? tubes[index]!.reference.distance;
+      const reversed = general.pieces[general.pieceOf[index]!]!.reversed;
+      if (!Object.is(owner, reversed ? -distanceValue : distanceValue))
+        return uncertain(
+          "invalid-cubic-tube-chain",
+          `Tube ${index}: the owner distance is not the piece-oriented chain distance.`,
+          index,
+        );
+    }
+  } else
+    for (let index = 1; index < count; index += 1)
+      if (!Object.is(tubes[index]!.reference.distance, distanceValue))
+        return uncertain(
+          "invalid-cubic-tube-chain",
+          "The tubes do not carry one bitwise owner offset distance.",
+          0,
+          index,
+        );
 
   const joins: (readonly [number, number])[] = [];
-  for (let index = 0; index + 1 < count; index += 1)
-    joins.push([index, index + 1]);
-  if (closed) joins.push([count - 1, 0]);
+  if (general) {
+    // Intra-piece natural joins only; every inter-piece adjacency is a trim.
+    general.pieces.forEach((piece, pieceIndex) => {
+      if (piece.kind !== "cubic") return;
+      const first = general.firstLeaf[pieceIndex]!;
+      for (let offset = 0; offset + 1 < piece.tubes.length; offset += 1)
+        joins.push([first + offset, first + offset + 1]);
+    });
+  } else {
+    for (let index = 0; index + 1 < count; index += 1)
+      joins.push([index, index + 1]);
+    if (closed) joins.push([count - 1, 0]);
+  }
   for (const [first, second] of joins) {
     if (!samePoint(tubes[first]!.poles[3], tubes[second]!.poles[0]))
       return uncertain(
@@ -315,23 +412,166 @@ function certifyChain(
     );
   const positive = (value: ExactFraction) =>
     compareExact(value, zero, budget) > 0;
+  /** Existing verified √ bounds; the lower bound must be finite and > 0. */
+  const squareRoot = (value: ExactFraction): ExactRange | null => {
+    const root = exactSqrtInterval(value, budget);
+    budget.operation(3);
+    if (
+      !root ||
+      !Number.isFinite(root.lower) ||
+      !Number.isFinite(root.upper) ||
+      !(root.lower > 0)
+    )
+      return null;
+    return [
+      exactFromNumber(root.lower, budget),
+      exactFromNumber(root.upper, budget),
+    ];
+  };
+  /** Upper verified √ bound only (piece path); null when not finite. */
+  const squareRootUpper = (value: ExactFraction) => {
+    const root = exactSqrtInterval(value, budget);
+    budget.operation(3);
+    return root && Number.isFinite(root.upper)
+      ? exactFromNumber(root.upper, budget)
+      : null;
+  };
+
+  // §1.1 line tubes (piece path only): same-parameter ε_k from the literal
+  // emitted ends, the exact source direction a and the ν box rot(a)/[L_lo, L_hi].
+  const lineData = new Map<
+    number,
+    {
+      readonly poles: ExactCubic;
+      readonly box: ExactFraction[][];
+      readonly direction: ExactPoint;
+      readonly length: ExactRange;
+      readonly endErrors: readonly [ExactFraction, ExactFraction];
+      readonly error: ExactFraction;
+    }
+  >();
+  if (general) {
+    const lineTolerance = exactFromNumber(modelingTolerance, budget);
+    for (const [index, line] of general.lines.entries()) {
+      if (!line) continue;
+      budget.operation(48);
+      const fail = (reason: string) =>
+        uncertain(
+          "line-tube-error-unproven",
+          `Line ${index}: ${reason}.`,
+          index,
+        );
+      const emitted = line.emitted.map(exactPoint);
+      const source = line.source.map(exactPoint);
+      const direction = difference(source[1]!, source[0]!);
+      const length = squareRoot(dot(direction, direction));
+      if (!length)
+        return fail("the source segment length is not proved positive");
+      const d = exactFromNumber(line.distance, budget);
+      const rotated = [negateExact(direction[1], budget), direction[0]];
+      // ν = rot(a)/|a| lies between rot(a)/L_hi and rot(a)/L_lo, per axis.
+      const normal = rotated.map((value) => {
+        const near = divideExact(value, length[1], budget);
+        const far = divideExact(value, length[0], budget);
+        return compareExact(near, far, budget) <= 0
+          ? ([near, far] as const)
+          : ([far, near] as const);
+      });
+      const endError = (end: 0 | 1) => {
+        let squared = zero;
+        for (const axis of [0, 1] as const) {
+          const offset = subtractExact(
+            emitted[end]![axis],
+            source[end]![axis],
+            budget,
+          );
+          const corners = normal[axis]!.map((value) => {
+            const gap = subtractExact(
+              offset,
+              multiplyExact(d, value, budget),
+              budget,
+            );
+            return multiplyExact(gap, gap, budget);
+          });
+          squared = addExact(
+            squared,
+            compareExact(corners[0]!, corners[1]!, budget) >= 0
+              ? corners[0]!
+              : corners[1]!,
+            budget,
+          );
+        }
+        return squareRootUpper(squared);
+      };
+      const startError = endError(0);
+      const endErrorValue = endError(1);
+      if (!startError || !endErrorValue)
+        return fail("a verified square-root bound is not finite");
+      const error =
+        compareExact(startError, endErrorValue, budget) >= 0
+          ? startError
+          : endErrorValue;
+      if (compareExact(error, lineTolerance, budget) > 0)
+        return fail("the line tube error exceeds the modeling tolerance");
+      // Exact never-emitted elevation of the emitted segment, for K3 only.
+      const step = difference(emitted[1]!, emitted[0]!);
+      const along = (fraction: ExactFraction): ExactPoint => [
+        addExact(
+          emitted[0]![0],
+          multiplyExact(step[0], fraction, budget),
+          budget,
+        ),
+        addExact(
+          emitted[0]![1],
+          multiplyExact(step[1], fraction, budget),
+          budget,
+        ),
+      ];
+      lineData.set(index, {
+        poles: [
+          emitted[0]!,
+          along(exact(1n, 3n, budget)),
+          along(exact(2n, 3n, budget)),
+          emitted[1]!,
+        ],
+        box: direction.map((value) => [value, value]),
+        direction,
+        length,
+        endErrors: [startError, endErrorValue],
+        error,
+      });
+    }
+  }
+
   const poles: ExactCubic[] = tubes.map(
-    (tube) => tube.poles.map(exactPoint) as unknown as ExactCubic,
+    (tube, index) =>
+      lineData.get(index)?.poles ??
+      (tube.poles.map(exactPoint) as unknown as ExactCubic),
   );
   const hodographs = poles.map((cubic) =>
     [0, 1, 2].map((index) => difference(cubic[index + 1]!, cubic[index]!)),
   );
-  const derivatives = tubes.map((tube) =>
-    tube.reference.derivative.map((axis) => [
-      exactFromNumber(axis[0], budget),
-      exactFromNumber(axis[1], budget),
-    ]),
+  const derivatives = tubes.map(
+    (tube, index) =>
+      lineData.get(index)?.box ??
+      tube.reference.derivative.map((axis) => [
+        exactFromNumber(axis[0], budget),
+        exactFromNumber(axis[1], budget),
+      ]),
   );
-  const errors = tubes.map((tube) =>
-    exactFromNumber(tube.certifiedError, budget),
+  const errors = tubes.map(
+    (tube, index) =>
+      lineData.get(index)?.error ??
+      exactFromNumber(tube.certifiedError, budget),
   );
   const distance = exactFromNumber(distanceValue, budget);
   const tolerance = exactFromNumber(modelingTolerance, budget);
+  // J2′ runs on natural data with the piece's owner distance (−d if reversed).
+  const pieceDistances = general?.pieces.map((piece) =>
+    piece.reversed ? negateExact(distance, budget) : distance,
+  );
+  const distanceOf = (leaf: number) =>
+    pieceDistances ? pieceDistances[general!.pieceOf[leaf]!]! : distance;
 
   // J1: exact true-offset endpoint identity, or a structural J2′ candidate.
   const kinds: CubicTubeChainJoin["kind"][] = [];
@@ -372,6 +612,7 @@ function certifyChain(
     const consecutive =
       right.source.spanIndex === left.source.spanIndex + 1 ||
       (closed &&
+        !general &&
         second === 0 &&
         right.source.spanIndex === 0 &&
         left.source.spanIndex > 0);
@@ -434,7 +675,7 @@ function certifyChain(
     cones.push(cone.e);
   }
   let isolatedSpanDirection: SplineVector | undefined;
-  if (count === 1) {
+  if (count === 1 && !general) {
     const cone = coneDirection([0]);
     if (!cone)
       return uncertain(
@@ -519,22 +760,6 @@ function certifyChain(
       : null;
   const excludesZero = (value: ExactRange) =>
     positive(value[0]) || negative(value[1]);
-  /** Existing verified √ bounds; the lower bound must be finite and > 0. */
-  const squareRoot = (value: ExactFraction): ExactRange | null => {
-    const root = exactSqrtInterval(value, budget);
-    budget.operation(3);
-    if (
-      !root ||
-      !Number.isFinite(root.lower) ||
-      !Number.isFinite(root.upper) ||
-      !(root.lower > 0)
-    )
-      return null;
-    return [
-      exactFromNumber(root.lower, budget),
-      exactFromNumber(root.upper, budget),
-    ];
-  };
 
   // Exactly restricted source leaf R: hodograph R′ and R″ control points in
   // leaf τ-units, then (concave only) the e-independent κ-only λ enclosure.
@@ -573,6 +798,7 @@ function certifyChain(
   const leafCurvature = (index: number): LeafCurvature => {
     const cached = curvatures.get(index);
     if (cached) return cached;
+    const distance = distanceOf(index);
     const shape = leafShape(index);
     const axisHull = (vectors: readonly ExactPoint[], axis: 0 | 1) =>
       hull(vectors.map((vector) => vector[axis]));
@@ -613,6 +839,7 @@ function certifyChain(
   for (const { join, first, second, incoming, outgoing, cross } of candidates) {
     const fail = (reason: keyof typeof J2_MESSAGES) =>
       uncertain(KNOT_UNPROVEN, J2_MESSAGES[reason], first, second);
+    const distance = distanceOf(first);
     const e = cones[join]!;
     const alongIncoming = dot(e, incoming);
     const alongOutgoing = dot(e, outgoing);
@@ -811,13 +1038,236 @@ function certifyChain(
     reports.set(join, { side: "concave", tail, trim });
   }
 
+  // Lemma T at every inter-piece trim (piece path only). W is the WHOLE
+  // terminal leaf; s is fixed by the exact source-tangent concavity gate.
+  const trimReports: TubeChainTrimJoin[] = [];
+  const trimmedLeaves = new Set<number>();
+  const lineJointStart: (ExactFraction | undefined)[] = [];
+  const lineJointEnd: (ExactFraction | undefined)[] = [];
+  if (general) {
+    const pieceCount = general.pieces.length;
+    const down = (value: ExactFraction) =>
+      outwardExactNumber(value, "down", budget);
+    const up = (value: ExactFraction) =>
+      outwardExactNumber(value, "up", budget);
+    const negated = (vector: ExactPoint): ExactPoint => [
+      negateExact(vector[0], budget),
+      negateExact(vector[1], budget),
+    ];
+    /** Traversal-terminal leaf of a piece and the natural side it ends on. */
+    const terminal = (pieceIndex: number, exiting: boolean) => {
+      const piece = general.pieces[pieceIndex]!;
+      const first = general.firstLeaf[pieceIndex]!;
+      const size = piece.kind === "cubic" ? piece.tubes.length : 1;
+      const naturalEnd = exiting !== piece.reversed;
+      return {
+        leaf: naturalEnd ? first + size - 1 : first,
+        side: naturalEnd ? ("end" as const) : ("start" as const),
+        reversed: piece.reversed,
+      };
+    };
+    type Terminal = ReturnType<typeof terminal>;
+    /** Exact traversal source tangent at the vertex; null when not proved. */
+    const vertexTangent = (end: Terminal): ExactPoint | null => {
+      let natural = lineData.get(end.leaf)?.direction;
+      if (!natural) {
+        const tube = tubes[end.leaf]!;
+        const p = tube.reference.sourcePoles;
+        if (
+          end.side === "end"
+            ? tube.sourceLocalInterval[1] !== 1
+            : tube.sourceLocalInterval[0] !== 0
+        )
+          return null;
+        natural =
+          end.side === "end"
+            ? difference(exactPoint(p[3]), exactPoint(p[2]))
+            : difference(exactPoint(p[1]), exactPoint(p[0]));
+        if (!positive(dot(natural, natural))) return null;
+      }
+      return end.reversed ? negated(natural) : natural;
+    };
+    for (const [jointIndex, declaration] of general.trims.entries()) {
+      budget.operation(64);
+      const firstEnd = terminal(jointIndex, true);
+      const secondEnd = terminal((jointIndex + 1) % pieceCount, false);
+      const fail = (code: string, message: string) =>
+        uncertain(code, message, firstEnd.leaf, secondEnd.leaf);
+      const firstIsLine = lineData.has(firstEnd.leaf);
+      if (!firstIsLine && !lineData.has(secondEnd.leaf))
+        return fail(
+          "trim-pair-unsupported",
+          "A trim between two cubic pieces is not covered by the line-curve trim lemma.",
+        );
+      // H2 gate: sgn(d)·cross(u_in, u_out) > 0 on exact source tangents.
+      const incoming = vertexTangent(firstEnd);
+      const outgoing = vertexTangent(secondEnd);
+      if (!incoming || !outgoing || distanceValue === 0)
+        return fail(
+          "trim-side-unproven",
+          "The source tangents at the trim vertex or the offset side are not proved.",
+        );
+      const turn = crossExact(incoming, outgoing, budget);
+      if (!(positive(distance) ? positive(turn) : negative(turn)))
+        return fail(
+          "trim-side-unproven",
+          "The exact source-tangent turn is not concave toward the offset side.",
+        );
+      const lineEnd = firstIsLine ? firstEnd : secondEnd;
+      const curveEnd = firstIsLine ? secondEnd : firstEnd;
+      const line = lineData.get(lineEnd.leaf)!;
+      const curveLine = lineData.get(curveEnd.leaf);
+      // s_trav = +sgn(d) line-first, −sgn(d) line-second; exact negation on a
+      // reversed curve leaf (never 1 − τ).
+      const travelling: 1 | -1 = firstIsLine === positive(distance) ? 1 : -1;
+      const orientation: 1 | -1 = curveEnd.reversed
+        ? travelling === 1
+          ? -1
+          : 1
+        : travelling;
+      const along = lineEnd.reversed ? negated(line.direction) : line.direction;
+      const rotated: ExactPoint = [negateExact(along[1], budget), along[0]];
+      const w = orientation > 0 ? rotated : negated(rotated);
+      const box = derivatives[curveEnd.leaf]!;
+      const corner: ExactPoint = [
+        box[0]![positive(w[0]) ? 0 : 1]!,
+        box[1]![positive(w[1]) ? 0 : 1]!,
+      ];
+      const local = tubes[curveEnd.leaf]?.sourceLocalInterval;
+      const width = local
+        ? subtractExact(
+            exactFromNumber(local[1], budget),
+            exactFromNumber(local[0], budget),
+            budget,
+          )
+        : one;
+      // H1 on the whole leaf: m′ = min over the O′ box of s·rot(a)·B′(τ).
+      const advance = multiplyExact(dot(w, corner), width, budget);
+      if (!positive(advance))
+        return fail(
+          "trim-window-unproven",
+          "The leaf-wide cone s·rot(a)·B′ > 0 is not proved on the terminal leaf.",
+        );
+      const lineError = line.error;
+      const curveError = errors[curveEnd.leaf]!;
+      // δ = (ε_A + ε_B)·L_hi/m′ and M = max corner |O′|·(b − a), upper √.
+      const shift = divideExact(
+        multiplyExact(
+          addExact(lineError, curveError, budget),
+          line.length[1],
+          budget,
+        ),
+        advance,
+        budget,
+      );
+      let speedSquared = zero;
+      for (const axis of box) {
+        const low = multiplyExact(axis[0]!, axis[0]!, budget);
+        const high = multiplyExact(axis[1]!, axis[1]!, budget);
+        speedSquared = addExact(
+          speedSquared,
+          compareExact(low, high, budget) >= 0 ? low : high,
+          budget,
+        );
+      }
+      const speed = curveLine
+        ? curveLine.length[1]
+        : squareRootUpper(speedSquared);
+      if (!speed)
+        return fail(
+          "trim-window-unproven",
+          "A verified square-root bound is not finite.",
+        );
+      const tail = multiplyExact(
+        multiplyExact(speed, width, budget),
+        shift,
+        budget,
+      );
+      // Curve side: stored bounds through the stored query-domain map, ±δ.
+      const curveBounds = firstIsLine
+        ? declaration.secondParameterBounds
+        : declaration.firstParameterBounds;
+      const toLeaf = (value: number) =>
+        curveLine
+          ? exactFromNumber(value, budget)
+          : normalizedExact(
+              value,
+              (tubes[curveEnd.leaf] as NeutralCubicPieceTube).queryDomain,
+              budget,
+            );
+      const curveRoot: ExactRange = [
+        subtractExact(toLeaf(curveBounds[0]), shift, budget),
+        addExact(toLeaf(curveBounds[1]), shift, budget),
+      ];
+      // Line side (H1 of the review): |t* − t̂| ≤ η/L_lo, η = ε_A + ε_B + Mδ.
+      const widen = divideExact(
+        addExact(addExact(lineError, curveError, budget), tail, budget),
+        line.length[0],
+        budget,
+      );
+      const lineBounds = firstIsLine
+        ? declaration.firstParameterBounds
+        : declaration.secondParameterBounds;
+      const lineRoot: ExactRange = [
+        subtractExact(exactFromNumber(lineBounds[0], budget), widen, budget),
+        addExact(exactFromNumber(lineBounds[1], budget), widen, budget),
+      ];
+      const jointDisplacement = addExact(curveError, tail, budget);
+      for (const [end, root] of [
+        [curveEnd, curveRoot],
+        [lineEnd, lineRoot],
+      ] as const) {
+        // Strictly interior: the true terminal point is removed and the far
+        // end retained; ordering against the other end is the leaf check.
+        if (!positive(root[0]) || compareExact(root[1], one, budget) >= 0)
+          return fail(
+            "trim-window-unproven",
+            "A true-root enclosure is not strictly inside its terminal leaf.",
+          );
+        trimmedLeaves.add(end.leaf);
+        const isLine = lineData.has(end.leaf);
+        if (end.side === "start") {
+          trimStart[end.leaf] = root[1];
+          if (isLine) lineJointStart[end.leaf] = jointDisplacement;
+          else correctionStart[end.leaf] = tail;
+        } else {
+          trimEnd[end.leaf] = subtractExact(one, root[0], budget);
+          if (isLine) lineJointEnd[end.leaf] = jointDisplacement;
+          else correctionEnd[end.leaf] = tail;
+        }
+      }
+      const firstRoot = firstIsLine ? lineRoot : curveRoot;
+      const secondRoot = firstIsLine ? curveRoot : lineRoot;
+      trimReports.push({
+        kind: "trim",
+        jointIndex: declaration.jointIndex,
+        first: firstEnd.leaf,
+        second: secondEnd.leaf,
+        line: firstIsLine ? "first" : "second",
+        orientation,
+        firstRootBounds: [down(firstRoot[0]), up(firstRoot[1])],
+        secondRootBounds: [down(secondRoot[0]), up(secondRoot[1])],
+        tail: up(tail),
+      });
+    }
+  }
+
   // Per-leaf composition (sums of both ends) and the K3 radii.
   budget.operation(4 * count);
   const stars: ExactFraction[] = [];
   const radii: ExactFraction[] = [];
   for (let index = 0; index < count; index += 1) {
+    const trimmed = trimmedLeaves.has(index);
     const leafFailure = (reason: string) =>
-      uncertain(KNOT_UNPROVEN, `Leaf ${index}: ${reason}.`, index);
+      uncertain(
+        trimmed
+          ? reason.startsWith("retained")
+            ? "trim-window-unproven"
+            : "trim-composition-unproven"
+          : KNOT_UNPROVEN,
+        `Leaf ${index}: ${reason}.`,
+        index,
+      );
     const startTrim = trimStart[index];
     const endTrim = trimEnd[index];
     if (
@@ -832,6 +1282,14 @@ function certifyChain(
     let star = errors[index]!;
     for (const correction of [correctionStart[index], correctionEnd[index]])
       if (correction) star = addExact(star, correction, budget);
+    const line = lineData.get(index);
+    if (line) {
+      // Affine map of the retained segment: the larger end displacement.
+      const startValue = lineJointStart[index] ?? line.endErrors[0];
+      const endValue = lineJointEnd[index] ?? line.endErrors[1];
+      star =
+        compareExact(startValue, endValue, budget) >= 0 ? startValue : endValue;
+    }
     const convex = arcStart[index] !== undefined || arcEnd[index] !== undefined;
     const comparison = compareExact(star, tolerance, budget);
     if (convex ? comparison >= 0 : comparison > 0)
@@ -848,8 +1306,18 @@ function certifyChain(
   }
 
   // K3: exact hull clearance of every non-join pair.
+  // Piece path: explicit adjacency (intra-piece natural joins, trims, wrap).
+  const adjacency =
+    general &&
+    new Set(
+      [...joins, ...trimReports.map((trim) => [trim.first, trim.second])].map(
+        ([a, b]) => `${Math.min(a!, b!)}:${Math.max(a!, b!)}`,
+      ),
+    );
   const isJoin = (first: number, second: number) =>
-    second === first + 1 || (closed && first === 0 && second === count - 1);
+    adjacency
+      ? adjacency.has(`${first}:${second}`)
+      : second === first + 1 || (closed && first === 0 && second === count - 1);
   const box = (cubic: ExactCubic) =>
     ([0, 1] as const).map((axis) => {
       const values = cubic.map((point) => point[axis]);
@@ -939,7 +1407,9 @@ function certifyChain(
   const up = (value: ExactFraction) => outwardExactNumber(value, "up", budget);
   const leaves = tubes.map((tube, index) => {
     const unchanged = (value: ExactFraction) =>
-      value === errors[index] ? tube.certifiedError : up(value);
+      value === errors[index] && !lineData.has(index)
+        ? tube.certifiedError
+        : up(value);
     const baseErrorStar = unchanged(stars[index]!);
     return {
       baseErrorStar,
@@ -948,7 +1418,7 @@ function certifyChain(
       clearanceRadius: unchanged(radii[index]!),
     };
   });
-  const certifiedJoins = joins.map(
+  const certifiedJoins: TubePieceChainJoin[] = joins.map(
     ([first, second], index): CubicTubeChainJoin => {
       const direction = directions[index]!;
       const report = reports.get(index);
@@ -980,6 +1450,8 @@ function certifyChain(
           };
     },
   );
+  // Trim records were bounded outward in their own metered step.
+  certifiedJoins.push(...trimReports);
   return {
     kind: "verified",
     certificate: {
@@ -992,42 +1464,132 @@ function certifyChain(
   };
 }
 
+const invalidPieceChain = (message: string): Failure =>
+  uncertain("invalid-cubic-tube-chain", message);
+
+/**
+ * Piece-chain entry. A single cubic piece without trims IS the legacy chain:
+ * a constant-time bitwise distance binding on its first tube (uncharged) and
+ * then exactly the legacy sequence. Otherwise pieces + trims are precharged
+ * BEFORE any enumeration, then the flattened admission cost in the core.
+ */
+function certifyPieceChain(
+  request: PieceTubeChainRequest,
+  budget: ExactProofBudget,
+): TubePieceChainResult {
+  const { pieces, trims, closed, modelingTolerance, distance } = request;
+  const only = pieces.length === 1 ? pieces[0] : undefined;
+  if (only?.kind === "cubic" && trims.length === 0) {
+    const owner = only.tubes[0]?.reference?.distance;
+    if (
+      owner !== undefined &&
+      !Object.is(owner, only.reversed ? -distance : distance)
+    )
+      return invalidPieceChain(
+        "The owner distance is not the piece-oriented chain distance.",
+      );
+    return certifyChain(
+      { modelingTolerance, closed, tubes: only.tubes },
+      budget,
+    );
+  }
+  budget.operation(pieces.length + trims.length);
+  if (pieces.length === 0)
+    return {
+      kind: "unsupported",
+      code: "cubic-tube-chain-empty",
+      message: "A cubic tube chain needs at least one emitted cubic.",
+    };
+  if (!Number.isFinite(distance))
+    return invalidPieceChain("The chain distance must be finite.");
+  if (trims.length !== (closed ? pieces.length : pieces.length - 1))
+    return invalidPieceChain(
+      "One trim declaration is required per inter-piece adjacency.",
+    );
+  for (const [index, trim] of trims.entries())
+    if (
+      trim.jointIndex !== index ||
+      !orderedFinite(trim.firstParameterBounds) ||
+      !orderedFinite(trim.secondParameterBounds)
+    )
+      return invalidPieceChain(`Trim ${index}: invalid joint bounds.`);
+  const tubes: (NeutralCubicPieceTube | undefined)[] = [];
+  const lines: (NeutralLineTube | undefined)[] = [];
+  const firstLeaf: number[] = [];
+  const pieceOf: number[] = [];
+  for (const [pieceIndex, piece] of pieces.entries()) {
+    firstLeaf.push(tubes.length);
+    if (piece.kind === "line") {
+      tubes.push(undefined);
+      lines.push(piece.tube);
+      pieceOf.push(pieceIndex);
+      continue;
+    }
+    if (piece.kind !== "cubic" || piece.tubes.length === 0)
+      return invalidPieceChain(`Piece ${pieceIndex}: no emitted leaves.`);
+    budget.operation(piece.tubes.length);
+    for (const tube of piece.tubes) {
+      tubes.push(tube);
+      lines.push(undefined);
+      pieceOf.push(pieceIndex);
+    }
+  }
+  return certifyChain(
+    {
+      modelingTolerance,
+      closed,
+      // Line leaves have no cubic tube; the core reads them through `lines`.
+      tubes: tubes as readonly NeutralCubicTube[],
+    },
+    budget,
+    { distance, pieces, trims, firstLeaf, pieceOf, lines },
+  );
+}
+
 function createCertifier(
   lowerLimits?: LowerProofLimits,
   observeBudget?: (snapshot: ExactProofBudgetSnapshot) => void,
-): CertifiedCubicTubeChain {
+): CertifiedCubicTubeChain & CertifiedTubePieceChain {
+  // One budget for the whole request: admission, conversion, every join,
+  // knot, trim, leaf, pair, split and the certificate. Never reset or replaced.
+  const run = <T>(
+    certify: (budget: ExactProofBudget) => T,
+  ): T | typeof EXHAUSTED => {
+    const budget = new ExactProofBudget(lowerLimits);
+    try {
+      return certify(budget);
+    } catch (error) {
+      if (error instanceof ExactQueryProofBudgetExceeded) return EXHAUSTED;
+      throw error;
+    } finally {
+      observeBudget?.(budget.snapshot());
+    }
+  };
   return {
-    certifyChain(request) {
-      // One budget for the whole request: admission, conversion, every join,
-      // knot, leaf, pair, split and the certificate. Never reset or replaced.
-      const budget = new ExactProofBudget(lowerLimits);
-      try {
-        return certifyChain(request, budget);
-      } catch (error) {
-        if (error instanceof ExactQueryProofBudgetExceeded) return EXHAUSTED;
-        throw error;
-      } finally {
-        observeBudget?.(budget.snapshot());
-      }
-    },
+    certifyChain: (request) =>
+      // Without a piece chain the core never emits trim joins.
+      run((budget) => certifyChain(request, budget) as CubicTubeChainResult),
+    certifyPieceChain: (request) =>
+      run((budget) => certifyPieceChain(request, budget)),
   };
 }
 
 /** Production certifier under the unchanged exact-proof ceilings. */
-export function createCertifiedCubicTubeChain(): CertifiedCubicTubeChain {
+export function createCertifiedCubicTubeChain(): CertifiedCubicTubeChain &
+  CertifiedTubePieceChain {
   return createCertifier();
 }
 
 /** Test-only lower ceilings; construction clamps every value to production. */
 export function createCertifiedCubicTubeChainWithLowerBudgetForTest(
   lowerLimits: LowerProofLimits,
-): CertifiedCubicTubeChain {
+): CertifiedCubicTubeChain & CertifiedTubePieceChain {
   return createCertifier(lowerLimits);
 }
 
 /** Test-only whole-request meter observation under production ceilings. */
 export function createCertifiedCubicTubeChainWithBudgetObserverForTest(
   observeBudget: (snapshot: ExactProofBudgetSnapshot) => void,
-): CertifiedCubicTubeChain {
+): CertifiedCubicTubeChain & CertifiedTubePieceChain {
   return createCertifier(undefined, observeBudget);
 }

@@ -3,13 +3,24 @@ import {
   evaluateNeutralCurve,
   type CertifiedCubicTubeChain,
   type CertifiedNeutralCurveQuery,
+  type CertifiedTubePieceChain,
   type CubicTubeChainRequest,
   type EndpointNeutralSegment,
   type NeutralCurvePointWitness,
+  type PieceTubeChainRequest,
 } from "@/contracts/modeling/neutral-curve-query";
-import type { SketchEntityId } from "@/contracts/shared/ids";
+import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
+import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type { SketchToolCommitContribution } from "@/core/sketch-tools/definition";
+import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
+import { splineSketchToolDefinition } from "@/core/sketch-tools/tools/spline";
+import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
+import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   certifyOffsetChainTubeStability,
+  declaredOffsetChainPieces,
   offsetChainRootEnclosure,
   resolveOffsetChainTopology,
   resolveOffsetChainTopologyJvp,
@@ -1790,3 +1801,573 @@ describe("offset chain tube-stability mapping (bounded helper, not live)", () =>
 function samePointForTest(first: Point, second: Point) {
   return Object.is(first[0], second[0]) && Object.is(first[1], second[1]);
 }
+
+describe("declared multi-piece tube stability (L1b, bounded helper, not live)", () => {
+  const TOLERANCE = 1e-3;
+  const pieceCertifier = createCertifiedCubicTubeChain();
+  type Vector = readonly [number, number];
+  type Authored = SketchToolCommitContribution;
+  let sequence = 0;
+  const factory = createSessionCommitFactories(1, "sketch_l1b" as never);
+  /** Full authored definition of native commit contributions. */
+  const sketch = (patches: readonly Authored[]): SketchDefinition => {
+    const points = patches.flatMap((patch) => patch.points);
+    const entities = patches.flatMap((patch) => patch.entities);
+    const constraints = patches.flatMap((patch) => patch.constraints ?? []);
+    return {
+      schemaVersion: "sketch-definition/v1alpha1",
+      referenceIds: [],
+      references: [],
+      pointIds: points.map((point) => point.pointId),
+      points,
+      entityIds: entities.map((entity) => entity.entityId),
+      entities,
+      constraintIds: constraints.map((constraint) => constraint.constraintId),
+      constraints,
+      dimensionIds: [],
+      dimensions: [],
+    } as SketchDefinition;
+  };
+  const endpointSnap = (pointId: SketchPointId, point: Vector) => ({
+    key: `endpoint:${pointId}`,
+    kind: "endpoint" as const,
+    point,
+    rawPointer: point,
+    distance: 0,
+    priority: 0,
+    sources: [{ kind: "localPoint" as const, pointId }],
+    preview: { label: "endpoint", glyph: "endpoint" as const },
+  });
+  /** Native tool commit plus the session's endpoint-snap inference. */
+  const author = (
+    previous: readonly Authored[],
+    activeTool: "line" | "spline",
+    patch: Authored,
+    start: Vector,
+    end: Vector,
+    snaps: { start?: SketchPointId; end?: SketchPointId } = {},
+  ) =>
+    appendInferredSnapConstraints({
+      previousDefinition: sketch(previous),
+      patch,
+      activeTool,
+      startSnap: snaps.start ? endpointSnap(snaps.start, start) : null,
+      endSnap: snaps.end ? endpointSnap(snaps.end, end) : null,
+      sequence,
+      createConstraintId: (name: string) => `constraint_${name}` as never,
+    });
+  const drawLine = (
+    previous: readonly Authored[],
+    start: Vector,
+    end: Vector,
+    snaps: { start?: SketchPointId; end?: SketchPointId } = {},
+  ) => {
+    sequence += 1;
+    return author(
+      previous,
+      "line",
+      lineSketchToolDefinition.createCommitContribution({
+        sequence,
+        start,
+        end,
+        isConstruction: false,
+        factories: factory,
+      }),
+      start,
+      end,
+      snaps,
+    );
+  };
+  const drawSpline = (
+    previous: readonly Authored[],
+    points: readonly Vector[],
+    snaps: { start?: SketchPointId } = {},
+  ) => {
+    sequence += 1;
+    return author(
+      previous,
+      "spline",
+      splineSketchToolDefinition.createCommitContribution({
+        sequence,
+        start: points[0]!,
+        end: points.at(-1)!,
+        points: points as [number, number][],
+        isConstruction: false,
+        factories: factory,
+      }),
+      points[0]!,
+      points.at(-1)!,
+      snaps,
+    );
+  };
+  const lineEnds = (patch: Authored) => {
+    const entity = patch.entities[0]!;
+    if (entity.kind !== "lineSegment") throw new Error("not a line");
+    return [entity.startPointId, entity.endPointId] as const;
+  };
+  const splineEnds = (patch: Authored) => {
+    const entity = patch.entities[0]!;
+    if (entity.kind !== "spline") throw new Error("not a spline");
+    return [
+      entity.pointOccurrences[0]!.pointId,
+      entity.pointOccurrences.at(-1)!.pointId,
+    ] as const;
+  };
+  const ARCH_POINTS: readonly Vector[] = [
+    [0, 0],
+    [1, 0.1],
+    [2, 0],
+  ];
+
+  /** commit → solve → N2 → fresh adapter → N1 resolver (real query). */
+  const nativeChain = (patches: readonly Authored[], distance: number) => {
+    const definition = sketch(patches);
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      partialSolvePolicy: "bestEffort",
+    });
+    expect(solved.status.solveState).toBe("solved");
+    const positions = new Map(
+      solved.solvedSnapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+    const solvedDefinition = {
+      ...definition,
+      points: definition.points.map((point) => ({
+        ...point,
+        position: positions.get(point.pointId)!,
+      })),
+    };
+    const connectivity = extractDeclaredOffsetChainConnectivity({
+      definition: solvedDefinition,
+      seedIds: definition.entities.map((entity) => entity.entityId),
+    });
+    if (!connectivity.ok) throw new Error(connectivity.message);
+    const adapt = () => {
+      const declared = declaredOffsetChainPieces({
+        definition: solvedDefinition,
+        connectivity,
+        distance,
+        modelingTolerance: TOLERANCE,
+      });
+      if (!declared.ok) throw new Error(declared.message);
+      return declared;
+    };
+    const declared = adapt();
+    const resolution = resolveOffsetChainTopology({
+      pieces: declared.pieces,
+      closed: connectivity.closed,
+      modelingTolerance: TOLERANCE,
+      query,
+    });
+    return { connectivity, declared, resolution, adapt };
+  };
+  const accepted = (chain: ReturnType<typeof nativeChain>) => {
+    if (!chain.resolution.ok)
+      throw new Error(`${chain.resolution.code}: ${chain.resolution.message}`);
+    return chain.resolution;
+  };
+  const recording = () => {
+    const requests: PieceTubeChainRequest[] = [];
+    const certifier: CertifiedTubePieceChain = {
+      certifyPieceChain: (request) => {
+        requests.push(request);
+        return pieceCertifier.certifyPieceChain(request);
+      },
+    };
+    return { requests, certifier };
+  };
+  const refusing: CertifiedTubePieceChain = {
+    certifyPieceChain: () => {
+      throw new Error("the certifier must not be reached");
+    },
+  };
+  const TRIM_KEYS = [
+    "first",
+    "firstRootBounds",
+    "jointIndex",
+    "kind",
+    "line",
+    "orientation",
+    "second",
+    "secondRootBounds",
+    "tail",
+  ];
+
+  const splineThenLine = (fromStart: boolean) => {
+    const spline = drawSpline([], ARCH_POINTS);
+    const [start, end] = splineEnds(spline);
+    const line = fromStart
+      ? drawLine([spline], [0, 0], [0, 1], { start })
+      : drawLine([spline], [2, 0], [2, 1], { start: end });
+    return [spline, line];
+  };
+
+  test("native spline → line from its end: a concave line↔cubic trim is verified on the declared branch", () => {
+    const patches = splineThenLine(false);
+    const chain = nativeChain(patches, 0.01);
+    // The line tool reused the spline's end point ID (no constraint).
+    expect(chain.connectivity.joins).toEqual([
+      { kind: "sharedPoint", pointId: splineEnds(patches[0]!)[1] },
+    ]);
+    const resolved = accepted(chain);
+    const { requests, certifier } = recording();
+    const result = certifyOffsetChainTubeStability(
+      resolved,
+      certifier,
+      chain.declared,
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    expect(requests).toHaveLength(1);
+    const [request] = requests;
+    const [splinePiece, linePiece] = resolved.input.pieces;
+    if (
+      splinePiece?.kind !== "derivedCubic" ||
+      linePiece?.kind !== "lineSegment"
+    )
+      throw new Error("unexpected piece kinds");
+    // One fresh owner call, forwarded by identity with its stored query domains.
+    expect(chain.declared.sources[0]).toMatchObject({
+      spans: splinePiece.spans,
+    });
+    const cubicTubes = request!.pieces[0]!;
+    if (cubicTubes.kind !== "cubic") throw new Error("cubic piece");
+    cubicTubes.tubes.forEach((tube, index) => {
+      expect(tube.poles).toBe(splinePiece.spans[index]!.poles);
+      expect(tube.queryDomain).toBe(splinePiece.spans[index]!.sourceInterval);
+    });
+    // H1 binding: raw resolver supports, never the joint representative.
+    const lineTube = request!.pieces[1]!;
+    if (lineTube.kind !== "line") throw new Error("line piece");
+    expect(lineTube.tube.emitted[0]).toBe(linePiece.start);
+    expect(lineTube.tube.emitted[1]).toBe(linePiece.end);
+    expect(lineTube.tube.emitted[0]).not.toBe(
+      resolved.lineArcEndpoints.get(linePiece.seedEntityId)!.start,
+    );
+    expect(request!.trims).toEqual([
+      {
+        jointIndex: 0,
+        firstParameterBounds: resolved.joints[0]!.firstParameterBounds,
+        secondParameterBounds: resolved.joints[0]!.secondParameterBounds,
+      },
+    ]);
+    const trims = result.certificate.joins.filter(
+      (join) => join.kind === "trim",
+    );
+    expect(trims).toEqual([
+      expect.objectContaining({
+        kind: "trim",
+        jointIndex: 0,
+        first: splinePiece.spans.length - 1,
+        second: splinePiece.spans.length,
+        line: "second",
+        orientation: -1,
+      }),
+    ]);
+    // X10: joint identity + true-root enclosures only; no representative.
+    expect(Object.keys(trims[0]!).sort()).toEqual(TRIM_KEYS);
+    expect(result.certificate.leaves).toHaveLength(
+      splinePiece.spans.length + 1,
+    );
+    for (const leaf of result.certificate.leaves)
+      expect(leaf.displacementBound).toBeLessThanOrEqual(TOLERANCE);
+  }, 120_000);
+
+  test.each([
+    [0.01, 1],
+    [-0.01, -1],
+  ] as const)(
+    "native reversed spline at d = %s preserves its signed owner distance and trim orientation",
+    (distance, orientation) => {
+      const spline = drawSpline([], ARCH_POINTS);
+      const [start] = splineEnds(spline);
+      const line = drawLine([spline], [0, 0], distance > 0 ? [0, -1] : [0, 1], {
+        start,
+      });
+      const chain = nativeChain([line, spline], distance);
+      expect(chain.connectivity.pieces.map((piece) => piece.reversed)).toEqual([
+        true,
+        false,
+      ]);
+      const { requests, certifier } = recording();
+      const result = certifyOffsetChainTubeStability(
+        accepted(chain),
+        certifier,
+        chain.declared,
+      );
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      const requestedLine = requests[0]!.pieces.find(
+        (piece) => piece.kind === "line",
+      );
+      const requestedSpline = requests[0]!.pieces.find(
+        (piece) => piece.kind === "cubic",
+      );
+      if (requestedLine?.kind !== "line" || requestedSpline?.kind !== "cubic")
+        throw new Error("mixed request");
+      expect(requestedSpline.reversed).toBe(true);
+      expect(Object.is(requestedLine.tube.distance, distance)).toBe(true);
+      expect(
+        Object.is(requestedSpline.tubes[0]!.reference.distance, -distance),
+      ).toBe(true);
+      expect(
+        result.certificate.joins.filter((join) => join.kind === "trim"),
+      ).toEqual([
+        expect.objectContaining({
+          jointIndex: 0,
+          first: 0,
+          second: 2,
+          line: "second",
+          orientation,
+        }),
+      ]);
+    },
+    120_000,
+  );
+
+  test.each([
+    [0.01, "convex"],
+    [-0.01, "concave"],
+  ] as const)(
+    "native reversed multi-leaf spline at d = %s reaches J2′ on its actual side",
+    (distance, side) => {
+      const spline = drawSpline(
+        [],
+        [
+          [0, 0],
+          [1, 0.3],
+          [2, -0.2],
+          [3, 0],
+        ],
+      );
+      const [start] = splineEnds(spline);
+      const line = drawLine([spline], [0, 0], distance > 0 ? [0, -1] : [0, 1], {
+        start,
+      });
+      const chain = nativeChain([line, spline], distance);
+      const { requests, certifier } = recording();
+      const result = certifyOffsetChainTubeStability(
+        accepted(chain),
+        certifier,
+        chain.declared,
+      );
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      const splinePiece = requests[0]!.pieces.find(
+        (piece) => piece.kind === "cubic",
+      );
+      if (!splinePiece || splinePiece.kind !== "cubic")
+        throw new Error("reversed spline piece");
+      expect(splinePiece.reversed).toBe(true);
+      expect(
+        Object.is(splinePiece.tubes[0]!.reference.distance, -distance),
+      ).toBe(true);
+      expect(result.certificate.joins).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "nonparallel-knot", side }),
+        ]),
+      );
+    },
+    120_000,
+  );
+
+  test("native reversed traversal: the line drawn from the spline start is reversed with owner distance −d", () => {
+    const distance = 0.01;
+    const chain = nativeChain(splineThenLine(true), distance);
+    expect(chain.connectivity.pieces.map((piece) => piece.reversed)).toEqual([
+      true,
+      false,
+    ]);
+    const { requests, certifier } = recording();
+    const result = certifyOffsetChainTubeStability(
+      accepted(chain),
+      certifier,
+      chain.declared,
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    const [line] = requests[0]!.pieces;
+    if (line?.kind !== "line") throw new Error("line first");
+    expect(line.reversed).toBe(true);
+    expect(Object.is(line.tube.distance, -distance)).toBe(true);
+    expect(
+      result.certificate.joins.filter((join) => join.kind === "trim"),
+    ).toEqual([
+      expect.objectContaining({
+        jointIndex: 0,
+        first: 0,
+        second: 1,
+        line: "first",
+      }),
+    ]);
+  }, 120_000);
+
+  const closedLoop = (vertices: readonly Vector[]) => {
+    const patches: Authored[] = [];
+    let first: SketchPointId | undefined;
+    let previous: SketchPointId | undefined;
+    vertices.forEach((vertex, index) => {
+      const next = vertices[(index + 1) % vertices.length]!;
+      const closing = index === vertices.length - 1;
+      const patch = drawLine(patches, vertex, next, {
+        ...(previous ? { start: previous } : {}),
+        ...(closing && first ? { end: first } : {}),
+      });
+      const [start, end] = lineEnds(patch);
+      first ??= start;
+      previous = end;
+      patches.push(patch);
+    });
+    return patches;
+  };
+
+  test("native closed all-line rectangle and triangle: trim-only closed chains verify without the n ≥ 5 gate", () => {
+    for (const [vertices, cleared] of [
+      [
+        [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, 1],
+        ],
+        [
+          [0, 2],
+          [1, 3],
+        ],
+      ],
+      [
+        [
+          [0, 0],
+          [1, 0],
+          [0.5, 1],
+        ],
+        [],
+      ],
+    ] as const) {
+      const chain = nativeChain(closedLoop(vertices), 0.01);
+      expect(chain.connectivity.closed).toBe(true);
+      const result = certifyOffsetChainTubeStability(
+        accepted(chain),
+        pieceCertifier,
+        chain.declared,
+      );
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      expect(result.certificate.joins.map((join) => join.kind)).toEqual(
+        vertices.map(() => "trim"),
+      );
+      expect(result.certificate.clearedPairs).toEqual(cleared);
+    }
+  }, 120_000);
+
+  test("T2/T8 convex corners fail in the resolver with splineJointUnsupported before any certifier", () => {
+    for (const patches of [
+      splineThenLine(false),
+      closedLoop([
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+      ]),
+    ]) {
+      expect(nativeChain(patches, -0.01).resolution).toMatchObject({
+        ok: false,
+        code: codes.splineJointUnsupported,
+      });
+    }
+  }, 120_000);
+
+  test("a declared coincident join fails closed (no R_C, no point merging)", () => {
+    const line = drawLine([], [-1, 0], [0, 0]);
+    const [, lineEnd] = lineEnds(line);
+    const spline = drawSpline(
+      [line],
+      [
+        [0, 0],
+        [0.1, 1],
+        [0, 2],
+      ],
+      { start: lineEnd },
+    );
+    const chain = nativeChain([line, spline], 0.01);
+    expect(chain.connectivity.joins[0]!.kind).toBe("coincidentConstraint");
+    expect(
+      certifyOffsetChainTubeStability(
+        accepted(chain),
+        refusing,
+        chain.declared,
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: codes.topologyStabilityUnsupported,
+      message: expect.stringContaining("shared canonical point joins only"),
+    });
+  }, 120_000);
+
+  test("MR6 wrapper binding: every resolver domain end names its declared joint", () => {
+    const chain = nativeChain(splineThenLine(false), 0.01);
+    const resolution = accepted(chain);
+    const line = resolution.input.pieces.find(
+      (piece) => piece.kind === "lineSegment",
+    );
+    if (!line || line.kind !== "lineSegment") throw new Error("line piece");
+    const ends = resolution.lineArcEndpoints.get(line.seedEntityId)!;
+    const forged = {
+      ...resolution,
+      lineArcEndpoints: new Map(resolution.lineArcEndpoints).set(
+        line.seedEntityId,
+        { ...ends, startDomainEnd: { kind: "joint" as const, jointIndex: 99 } },
+      ),
+    };
+    expect(
+      certifyOffsetChainTubeStability(forged, refusing, chain.declared),
+    ).toMatchObject({ ok: false, code: codes.topologyUncertain });
+  }, 120_000);
+
+  test("X9 binding: a resolution of another adapter call or a mismatched shared point is rejected", () => {
+    const chain = nativeChain(splineThenLine(false), 0.01);
+    const resolved = accepted(chain);
+    expect(
+      certifyOffsetChainTubeStability(resolved, refusing, chain.adapt()),
+    ).toMatchObject({ ok: false, code: codes.topologyUncertain });
+    // All-line chains have no owner-span backstop: piece identity alone binds.
+    const loop = nativeChain(
+      closedLoop([
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+      ]),
+      0.01,
+    );
+    expect(
+      certifyOffsetChainTubeStability(accepted(loop), refusing, loop.adapt()),
+    ).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("not resolved from this declared"),
+    });
+    const wrongPoint = {
+      ...chain.declared,
+      connectivity: {
+        ...chain.connectivity,
+        joins: [
+          {
+            kind: "sharedPoint" as const,
+            pointId: "sketch_point_other" as SketchPointId,
+          },
+        ],
+      },
+    };
+    expect(
+      certifyOffsetChainTubeStability(resolved, refusing, wrongPoint),
+    ).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("shared traversal terminal"),
+    });
+  }, 120_000);
+});

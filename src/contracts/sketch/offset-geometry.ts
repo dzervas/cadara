@@ -45,7 +45,7 @@ export const OFFSET_DIAGNOSTIC_CODES = {
   topologyClearanceUnproven: "derived-offset-topology-clearance-unproven",
   /** A declared join's true-offset endpoints are not proved exactly identical. */
   knotIncidenceUnproven: "derived-offset-knot-incidence-unproven",
-  /** Temporary: chains outside the tube-stability certificate's single-spline scope. */
+  /** Chains or joins outside the tube-stability certificate's supported scope. */
   topologyStabilityUnsupported: "derived-offset-topology-stability-unsupported",
 } as const;
 

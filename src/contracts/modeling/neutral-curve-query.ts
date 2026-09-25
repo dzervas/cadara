@@ -383,6 +383,111 @@ export interface CertifiedCubicTubeChain {
   certifyChain(request: CubicTubeChainRequest): CubicTubeChainResult;
 }
 
+/**
+ * One emitted offset line of a piece chain (natural order). The certifier
+ * trusts that `emitted` are the literal raw resolver supports and that
+ * `source`/`distance` come from the same fresh adapter call (caller
+ * obligation). The true offset is O(t) = A₀ + t(A₁ − A₀) + d·ν, ν the unit
+ * left normal of A₁ − A₀; nothing is rounded into a line identity.
+ */
+export interface NeutralLineTube {
+  /** Literal emitted segment ends Ê₀, Ê₁: parameter 0 and 1 of the query support. */
+  readonly emitted: readonly [SplineVector, SplineVector];
+  /** Source segment ends A₀, A₁. */
+  readonly source: readonly [SplineVector, SplineVector];
+  /** Owner signed distance of this piece's natural direction (left positive). */
+  readonly distance: number;
+}
+
+/** A cubic tube plus the stored binary64 query domain its witnesses use. */
+export interface NeutralCubicPieceTube extends NeutralCubicTube {
+  /** The resolver's `sourceDomain` for this cubic (the owner `sourceInterval`). */
+  readonly queryDomain: readonly [number, number];
+}
+
+/** One traversal piece, always in natural data order (never re-ordered). */
+export type TubeChainPiece =
+  | {
+      readonly kind: "cubic";
+      readonly reversed: boolean;
+      readonly tubes: readonly NeutralCubicPieceTube[];
+    }
+  | {
+      readonly kind: "line";
+      readonly reversed: boolean;
+      readonly tube: NeutralLineTube;
+    };
+
+/**
+ * A resolver trim joint between traversal pieces i and i + 1 (the wrap last).
+ * Bounds are the stored conservative root enclosures of the joint witness in
+ * each terminal curve's query parameter (first = traversal-first piece).
+ */
+export interface TubeChainTrimDeclaration {
+  readonly jointIndex: number;
+  readonly firstParameterBounds: readonly [number, number];
+  readonly secondParameterBounds: readonly [number, number];
+}
+
+export interface PieceTubeChainRequest {
+  /** The consuming document's authored settings.modelingTolerance. */
+  readonly modelingTolerance: number;
+  readonly closed: boolean;
+  /** Chain distance d; piece i's owner distance is bitwise reversed ? −d : d. */
+  readonly distance: number;
+  readonly pieces: readonly TubeChainPiece[];
+  /** One per inter-piece adjacency (n − 1 open, n closed), in traversal order. */
+  readonly trims: readonly TubeChainTrimDeclaration[];
+}
+
+/**
+ * Lemma-T trim at a concave line↔cubic or line↔line joint. The certificate
+ * concerns ONLY the abstract chain trimmed at the exact (unknown) witnessed
+ * roots of `jointIndex`: bounds enclose the TRUE-offset roots, outward, in each
+ * leaf's natural parameter (Bézier τ, or segment t). No representative
+ * parameter or position is claimed; rounded emitted ends are NOT claimed to
+ * connect (emitted representation and JVP remain a later batch's obligation).
+ */
+export interface TubeChainTrimJoin {
+  readonly kind: "trim";
+  readonly jointIndex: number;
+  /** Flattened leaf indices (traversal-first piece's terminal leaf first). */
+  readonly first: number;
+  readonly second: number;
+  /** Which side carries the Lemma-T line ℓ. */
+  readonly line: "first" | "second";
+  /** Fixed sign s in the other leaf's natural parameter: s·rot(a)·B′ > 0. */
+  readonly orientation: 1 | -1;
+  readonly firstRootBounds: readonly [number, number];
+  readonly secondRootBounds: readonly [number, number];
+  /** Upper bound M·δ on the removed-tail parameter-shift displacement. */
+  readonly tail: number;
+}
+
+export type TubePieceChainJoin = CubicTubeChainJoin | TubeChainTrimJoin;
+
+/** Leaves are flattened per piece in traversal order, natural order inside a piece. */
+export type TubePieceChainResult =
+  | {
+      readonly kind: "verified";
+      readonly certificate: {
+        readonly joins: readonly TubePieceChainJoin[];
+        readonly isolatedSpanDirection?: SplineVector;
+        readonly leaves: readonly CubicTubeChainLeaf[];
+        readonly clearedPairs: readonly (readonly [number, number])[];
+        readonly maxSplits: number;
+      };
+    }
+  | Exclude<CubicTubeChainResult, { readonly kind: "verified" }>;
+
+/**
+ * Multi-piece tube certificate: one exact meter per request. A single cubic
+ * piece without trims is exactly `certifyChain`.
+ */
+export interface CertifiedTubePieceChain {
+  certifyPieceChain(request: PieceTubeChainRequest): TubePieceChainResult;
+}
+
 export interface NeutralCurveQueryCapability {
   queryNeutralCurves(
     request: NeutralCurveQueryRequest,
