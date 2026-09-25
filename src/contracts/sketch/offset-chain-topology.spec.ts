@@ -804,7 +804,8 @@ describe("offset chain adjacency and global validity", () => {
     ).toContain(`${s(0)}|${s(2)}`);
   });
 
-  test("characterization: real multi-span owner output currently exhausts the unchanged cubic/cubic budget", () => {
+  /** Real four-span owner output: (0,0),(1,0.1),(2,0), offset 0.2, tolerance 1e-3. */
+  const realMultiSpanOwner = () => {
     const geometry = reconstructSpline({
       id: "seed",
       policy: "centripetal-mean-arm-v1",
@@ -829,14 +830,68 @@ describe("offset chain adjacency and global validity", () => {
       modelingTolerance: 1e-3,
     });
     if (!owner.ok) throw new Error(owner.code);
-    expect(owner.spans.length).toBeGreaterThan(1);
+    return owner.spans;
+  };
+  const recordingQuery = (inner: CertifiedNeutralCurveQuery) => {
+    const outcomes: string[] = [];
+    const recorded: CertifiedNeutralCurveQuery = {
+      queryPair: (request) => {
+        const result = inner.queryPair(request);
+        outcomes.push(result.kind);
+        return result;
+      },
+      querySelf: (request) => {
+        const result = inner.querySelf(request);
+        outcomes.push(result.kind);
+        return result;
+      },
+    };
+    return { outcomes, query: recorded };
+  };
+
+  test("real multi-span owner output resolves under the unchanged production caps", () => {
+    const spans = realMultiSpanOwner();
+    expect(spans).toHaveLength(4);
+    const { outcomes, query: recorded } = recordingQuery(query);
+    const result = resolved(
+      makeOffsetChainFixture([cubic("s", spans)], { query: recorded }),
+    );
+    expect(result.joints).toEqual([]);
     expect(
-      failed(makeOffsetChainFixture([cubic("s", owner.spans)])),
-    ).toMatchObject({
+      result.cubics.get(id("s"))!.map((span) => [span.start, span.end]),
+    ).toEqual(spans.map(() => [{ kind: "source" }, { kind: "source" }]));
+    expect(outcomes).toHaveLength(7);
+    expect(outcomes.every((kind) => kind === "verified")).toBe(true);
+  }, 60_000);
+
+  test("real multi-span owner output fails closed when a later query exhausts an injected lower budget", () => {
+    // Receipt-backed literal: above the two adjacent pairs 0-1 (3,997,928)
+    // and 1-2 (3,700,096) operations, below pair 2-3 (4,412,250).
+    const { outcomes, query: recorded } = recordingQuery(
+      createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
+        operations: 4_200_000,
+      }),
+    );
+    expect(
+      resolveOffsetChainTopology(
+        makeOffsetChainFixture([cubic("s", realMultiSpanOwner())], {
+          query: recorded,
+        }),
+      ),
+    ).toEqual({
+      ok: false,
       code: codes.topologyUncertain,
       message: expect.stringContaining("exact-query-proof-budget-exhausted"),
+      seedEntityId: id("s"),
     });
-  }, 30_000);
+    expect(outcomes.at(-1)).toBe("uncertain");
+    expect(outcomes.slice(0, -1)).toEqual([
+      "verified",
+      "verified",
+      "verified",
+      "verified",
+    ]);
+  }, 60_000);
 });
 
 describe("offset chain seam contracts", () => {
@@ -1076,8 +1131,8 @@ describe("offset chain fixed-topology JVP", () => {
       [2.5, 0],
       [2.75, -1],
     ];
-    // Generic simultaneous pole variations exhaust the unchanged cubic/cubic
-    // budget (see the Batch 1 evidence); one moving pole plus a translation does not.
+    // Before the polynomial budget repair, generic simultaneous pole variations
+    // exhausted the budget. This bounded fixture retains one moving pole and a translation.
     const firstVariation: SplinePoles = [
       [0, 0],
       [0, 1],
