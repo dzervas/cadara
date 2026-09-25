@@ -549,6 +549,87 @@ describe("constructive numeric neutral-curve dispatcher", () => {
     ]);
   });
 
+  test("always publishes the computed implicit-line root multiplicity", () => {
+    const straight = cubic("multiplicity-straight", [
+      [0, 0],
+      [1, 0],
+      [2, 0],
+      [3, 0],
+    ]);
+    const exactRoot = verified(
+      query.queryPair(
+        request(line("exact-root", [1.5, -1], [0, 1], [0, 2]), straight),
+      ),
+    );
+    expect(exactRoot.points).toMatchObject([
+      {
+        classification: "crossing",
+        proof: {
+          kind: "exactImplicitLineRootSet",
+          family: "lineCubic",
+          verification: "exactRoot",
+          rootMultiplicity: 1,
+        },
+      },
+    ]);
+    const arch = cubic("multiplicity-arch", [
+      [0, 0],
+      [1, 1],
+      [2, 1],
+      [3, 0],
+    ]);
+    const signLine = line("sign-change", [2.5, 1], [0, -1], [0, 2]);
+    for (const [first, second] of [
+      [signLine, arch],
+      [arch, signLine],
+    ]) {
+      expect(
+        verified(query.queryPair(request(first!, second!))).points,
+      ).toMatchObject([
+        {
+          classification: "crossing",
+          proof: { verification: "boundedSignChange", rootMultiplicity: 1 },
+        },
+      ]);
+    }
+    // y = x³ has an order-three inflection contact with y = 0: a crossing, not transverse.
+    const inflection = cubic("inflection", [
+      [-1, -1],
+      [-1 / 3, 1],
+      [1 / 3, -1],
+      [1, 1],
+    ]);
+    const inflectionLine = line("inflection-line", [-2, 0], [1, 0], [0, 4]);
+    for (const [first, second] of [
+      [inflectionLine, inflection],
+      [inflection, inflectionLine],
+    ]) {
+      expect(
+        verified(query.queryPair(request(first!, second!))).points,
+      ).toMatchObject([
+        {
+          classification: "crossing",
+          proof: { family: "lineCubic", rootMultiplicity: 3 },
+        },
+      ]);
+    }
+    const secant = verified(
+      query.queryPair(
+        request(
+          line("circle-secant", [-2, 0.5], [1, 0], [0, 4]),
+          circle("circle-secant-support", [0, 0], 1),
+        ),
+      ),
+    );
+    expect(secant.points).toHaveLength(2);
+    for (const point of secant.points) {
+      expect(point).toMatchObject({
+        classification: "crossing",
+        proof: { family: "lineCircle", rootMultiplicity: 1 },
+      });
+    }
+  });
+
   test("lower-only meters govern every dispatcher family and cubic self", () => {
     const zero = createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
       operations: 0,

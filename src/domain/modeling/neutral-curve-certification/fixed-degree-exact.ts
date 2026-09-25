@@ -302,8 +302,13 @@ export function admitVerifiedNeutralCurveResult(
         point.proof.rootMultiplicity % 2 !== 0 ||
         point.classification === "crossing"
       : point.proof.kind === "exactImplicitLineRootSet" &&
-        point.proof.verification !== "exactMultiplicity" &&
-        point.proof.rootMultiplicity !== undefined,
+        point.proof.rootMultiplicity !== undefined &&
+        (!Number.isSafeInteger(point.proof.rootMultiplicity) ||
+          point.proof.rootMultiplicity < 1 ||
+          (point.proof.verification === "boundedSignChange" &&
+            point.proof.rootMultiplicity % 2 === 0) ||
+          (point.proof.rootMultiplicity % 2 === 0 &&
+            point.classification === "crossing")),
   );
   if (invalidImplicitMultiplicityProof) {
     throw new Error("Invalid exact implicit-root multiplicity proof.");

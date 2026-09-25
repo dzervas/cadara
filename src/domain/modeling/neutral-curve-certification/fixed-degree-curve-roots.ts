@@ -62,6 +62,7 @@ function evenMultiplicity(multiplicity: number, budget: ExactProofBudget) {
   return multiplicity % 2 === 0;
 }
 
+/** Always publishes the already-computed support-root multiplicity. */
 function implicitLineVerification(
   root: IsolatedCurveRoot,
   budget: ExactProofBudget,
@@ -70,7 +71,10 @@ function implicitLineVerification(
     compareExact(root.normalizedBounds[0], root.normalizedBounds[1], budget) ===
     0
   ) {
-    return { verification: "exactRoot" as const };
+    return {
+      verification: "exactRoot" as const,
+      rootMultiplicity: root.multiplicity,
+    };
   }
   if (evenMultiplicity(root.multiplicity, budget)) {
     return {
@@ -78,7 +82,10 @@ function implicitLineVerification(
       rootMultiplicity: root.multiplicity,
     };
   }
-  return { verification: "boundedSignChange" as const };
+  return {
+    verification: "boundedSignChange" as const,
+    rootMultiplicity: root.multiplicity,
+  };
 }
 
 function rootEqualsValue(

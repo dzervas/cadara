@@ -37,6 +37,10 @@ export const OFFSET_DIAGNOSTIC_CODES = {
   unresolvedDistance: "derived-offset-unresolved-distance",
   jointUnsatisfied: "derived-offset-joint-unsatisfied",
   derivativeUnavailable: "derived-offset-derivative-unavailable",
+  topologyUncertain: "derived-offset-topology-uncertain",
+  topologyChanged: "derived-offset-topology-changed",
+  /** Temporary: fallback-arc and tangent-continuous joints with a spline side. */
+  splineJointUnsupported: "derived-offset-spline-joint-unsupported",
 } as const;
 
 export type OffsetDiagnosticCode =
