@@ -29,12 +29,14 @@ export interface SplineOffsetCubicSpan {
    * `derivative` is the owner's existing outward enclosure of the true offset
    * derivative d/du (S + distance·N) over `sourceLocalInterval`, in source-local
    * units. `sourcePoles` is the source span's pole array itself (a reference).
+   * `distance` is this owner call's signed input `distance`, bitwise (−0 kept).
    * Binding to one fresh owner result is the caller's obligation: the presence
    * of this metadata never validates provenance.
    */
   readonly reference: {
     readonly derivative: IntervalVector;
     readonly sourcePoles: SplinePoles;
+    readonly distance: number;
   };
 }
 
@@ -622,6 +624,7 @@ function makeOutput(
         Object.freeze(offsetFirst[1]),
       ] as const),
       sourcePoles: span.poles,
+      distance,
     }),
   };
 }
@@ -732,6 +735,11 @@ export function approximateSplineOffset(
                 : analytic.differential.poles,
           },
           certifiedError: 0,
+          // The analytic branch computes with a literal 0; record the call's bitwise d.
+          reference: Object.freeze({
+            ...analytic.reference,
+            distance: input.distance,
+          }),
         });
         continue;
       }

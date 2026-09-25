@@ -237,7 +237,11 @@ export interface CertifiedNeutralCurveQuery {
 export interface NeutralCubicTube {
   /** Emitted binary64 poles E, unchanged. */
   readonly poles: SplinePoles;
-  /** Owner certificate ε: |E(u) − O(a + u·(b − a))| ≤ ε on the leaf [a, b]. */
+  /**
+   * Owner certificate ε, a SAME-PARAMETER bound: |E(u) − O(a + u·(b − a))| ≤ ε
+   * on the leaf [a, b]. The J2′ composition's parametric-shift argument relies
+   * on this form.
+   */
   readonly certifiedError: number;
   readonly reference: {
     /** Outward box of the true one-sided offset derivative O′ over the leaf. */
@@ -247,6 +251,8 @@ export interface NeutralCubicTube {
     ];
     /** Binary64 poles of the source span the leaf belongs to. */
     readonly sourcePoles: SplinePoles;
+    /** The owner call's signed offset distance d; bitwise equal across one chain. */
+    readonly distance: number;
   };
   readonly source: {
     readonly splineId: string;
@@ -266,13 +272,59 @@ export interface CubicTubeChainRequest {
   readonly tubes: readonly NeutralCubicTube[];
 }
 
-export interface CubicTubeChainJoin {
+interface CubicTubeChainJoinBase {
   readonly first: number;
   readonly second: number;
-  /** How the exact true-offset endpoint identity O_first(b) = O_second(a) is proved. */
-  readonly kind: "same-leaf" | "parallel-knot";
   /** Binary64 cone candidate e; both hodographs and O′ boxes are strictly e-positive. */
   readonly direction: SplineVector;
+}
+
+/**
+ * Every bound below is outward (up) binary64 and finite: each is dominated by
+ * the finite modeling tolerance.
+ */
+export type CubicTubeChainJoin =
+  | (CubicTubeChainJoinBase & {
+      /** Exact true-offset endpoint identity O_first(b) = O_second(a). */
+      readonly kind: "same-leaf" | "parallel-knot";
+    })
+  | (CubicTubeChainJoinBase & {
+      /**
+       * J2′ at a declared smooth source knot with exactly nonzero tangent cross:
+       * the one-sided true offsets cross once; the unique crossing X* is
+       * RETAINED as the join vertex and only the proved tails beyond it leave
+       * the corrected reference.
+       */
+      readonly kind: "nonparallel-knot";
+      readonly side: "concave";
+      readonly retainedCrossing: true;
+      /** Upper bounds on the removed tails' displacement [first, second]. */
+      readonly tail: readonly [number, number];
+      /** Upper bounds on the removed leaf-parameter fractions [first, second]. */
+      readonly trim: readonly [number, number];
+    })
+  | (CubicTubeChainJoinBase & {
+      /**
+       * J2′ convex: the one-sided true offsets are disjoint; the corrected
+       * reference inserts the short arc of radius |d| about the source knot.
+       */
+      readonly kind: "nonparallel-knot";
+      readonly side: "convex";
+      /** δ⁺ ≥ |A − B|; every arc point lies within δ⁺ of both arc ends. */
+      readonly arcDeviation: number;
+    });
+
+/** Per-emitted-cubic J2′ report; never conflates the three quantities. */
+export interface CubicTubeChainLeaf {
+  /** ε* = ε + both end corrections (sum). NOT the full bound on a convex-END leaf. */
+  readonly baseErrorStar: number;
+  /**
+   * Proved sup |E − Φ| against the declared-join-corrected reference O*: exactly
+   * the modeling tolerance on a convex-END leaf (arc reserve, slack 0), else ε*.
+   */
+  readonly displacementBound: number;
+  /** K3 radius r = ε + δ⁺ of each convex end (concave tails are never added). */
+  readonly clearanceRadius: number;
 }
 
 export type CubicTubeChainResult =
@@ -282,7 +334,9 @@ export type CubicTubeChainResult =
         readonly joins: readonly CubicTubeChainJoin[];
         /** Present only for a single open span. */
         readonly isolatedSpanDirection?: SplineVector;
-        /** Every non-join pair, each separated by more than ε_i + ε_j. */
+        /** One entry per tube, in request order. */
+        readonly leaves: readonly CubicTubeChainLeaf[];
+        /** Every non-join pair, each separated by more than r_i + r_j. */
         readonly clearedPairs: readonly (readonly [number, number])[];
         readonly maxSplits: number;
       };
@@ -302,7 +356,9 @@ export type CubicTubeChainResult =
 /**
  * Synchronous, kernel-free topology-stability certificate of one emitted cubic
  * chain against its owner's error tubes. A separate proof kind from root-set
- * queries: it proves simplicity and separation, never contact.
+ * queries: exact contact structure at declared joins; separation elsewhere.
+ * The tube reference is the declared-join-corrected true offset O*, not the
+ * raw union of one-sided offsets.
  */
 export interface CertifiedCubicTubeChain {
   certifyChain(request: CubicTubeChainRequest): CubicTubeChainResult;

@@ -93,6 +93,7 @@ function fabricatedSpan(
         [0, 0],
       ],
       sourcePoles: ZERO_POLES,
+      distance: 0,
     },
   };
 }
@@ -1528,9 +1529,19 @@ describe("offset chain tube-stability mapping (bounded helper, not live)", () =>
         { query: knotOnlyQuery },
       ),
     );
-    expect(
-      certifyOffsetChainTubeStability(asymmetric, tubeCertifier),
-    ).toMatchObject({ ok: false, code: codes.knotIncidenceUnproven });
+    // Formerly knot-incidence-unproven; J2′ now certifies its concave knot.
+    const certified = certifyOffsetChainTubeStability(
+      asymmetric,
+      tubeCertifier,
+    );
+    if (!certified.ok)
+      throw new Error(`${certified.code}: ${certified.message}`);
+    expect(certified.certificate.joins[2]).toMatchObject({
+      first: 2,
+      second: 3,
+      kind: "nonparallel-knot",
+      side: "concave",
+    });
   });
 
   test("certifier exceptions propagate by identity", () => {
