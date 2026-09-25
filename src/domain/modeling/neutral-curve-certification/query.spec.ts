@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
 import type {
   NeutralCurve,
+  NeutralCurvePointWitness,
   NeutralCurveQueryRequest,
 } from "@/contracts/modeling/neutral-curve-query";
+import { reconstructSpline } from "@/contracts/sketch/spline-geometry";
+import { approximateSplineOffset } from "@/contracts/sketch/spline-offset-geometry";
 import {
   createCertifiedNeutralCurveQuery,
   createCertifiedNeutralCurveQueryWithLowerBudgetForTest,
@@ -671,19 +674,29 @@ describe("constructive numeric neutral-curve dispatcher", () => {
     });
   });
 
-  test("one meter can exhaust after earlier circle-pair stages", () => {
-    const limited = createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
-      operations: 300_000,
-    });
-    const result = limited.queryPair(
-      request(
-        circle("stage-first", [0, 0], 1),
-        circle("stage-second", [1, 0], 1),
-      ),
+  test("one meter spans every circle-pair stage and can exhaust after the first root certifies", () => {
+    const stagePair = request(
+      circle("stage-first", [0, 0], 1),
+      circle("stage-second", [1, 0], 1),
     );
-    expect(result).toMatchObject({
+    expect(
+      verified(
+        createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
+          operations: 300_000,
+        }).queryPair(stagePair),
+      ).points,
+    ).toHaveLength(2);
+    // Receipt-backed literal (T08 polynomial budget repair): isolation 63,300,
+    // first root 60,812, second root 73,810, total 197,954 operations. This
+    // cap is above every single stage and the first root's completion, and
+    // below the whole request, so only a shared unreset meter exhausts.
+    const result = createCertifiedNeutralCurveQueryWithLowerBudgetForTest({
+      operations: 160_000,
+    }).queryPair(stagePair);
+    expect(result).toEqual({
       kind: "uncertain",
       code: "exact-query-proof-budget-exhausted",
+      message: "The deterministic exact-query arithmetic budget was exhausted.",
     });
     expect("points" in result).toBe(false);
   });
@@ -731,6 +744,142 @@ describe("constructive numeric neutral-curve dispatcher", () => {
       code: "exact-query-proof-budget-exhausted",
     });
     expect(verified(query.queryPair(input)).points).toHaveLength(2);
+  });
+
+  describe("real spline-offset owner output under production caps", () => {
+    // F1: (0,0),(1,0.1),(2,0) automatic tangents, offset 0.2, tolerance 1e-3.
+    const owner = () => {
+      const geometry = reconstructSpline({
+        id: "F1",
+        policy: "centripetal-mean-arm-v1",
+        closure: "open",
+        points: (
+          [
+            [0, 0],
+            [1, 0.1],
+            [2, 0],
+          ] as const
+        ).map((position, index) => ({
+          occurrenceId: `F1-o${index}`,
+          id: `F1-p${index}`,
+          position,
+          tangent: { kind: "automatic" as const },
+        })),
+      });
+      if (geometry.validity !== "valid") throw new Error("invalid F1 fixture");
+      const offset = approximateSplineOffset({
+        spans: geometry.spans,
+        distance: 0.2,
+        modelingTolerance: 1e-3,
+      });
+      if (!offset.ok) throw new Error(offset.code);
+      return offset.spans;
+    };
+    const spans = owner();
+    const span = (index: number) =>
+      cubic(`F1-${index}`, spans[index]!.poles, {
+        sourceDomain: spans[index]!.sourceInterval,
+      });
+    const ownerRequest = (first: NeutralCurve, second: NeutralCurve) => ({
+      ...request(first, second),
+      modelingTolerance: 1e-3,
+    });
+    const bezier = (index: number, t: number) => {
+      const poles = spans[index]!.poles;
+      const u = 1 - t;
+      return [0, 1].map(
+        (axis) =>
+          u * u * u * poles[0]![axis]! +
+          3 * u * u * t * poles[1]![axis]! +
+          3 * u * t * t * poles[2]![axis]! +
+          t * t * t * poles[3]![axis]!,
+      );
+    };
+    /** Float oracle: squared distance to the circle minus r² at local t. */
+    const support = (
+      index: number,
+      center: readonly [number, number],
+      radius: number,
+      t: number,
+    ) => {
+      const [x, y] = bezier(index, t);
+      return (x! - center[0]) ** 2 + (y! - center[1]) ** 2 - radius ** 2;
+    };
+    const expectOnCircleInsideBounds = (
+      point: NeutralCurvePointWitness,
+      index: number,
+      center: readonly [number, number],
+      radius: number,
+    ) => {
+      const [low, high] = spans[index]!.sourceInterval;
+      const t =
+        ((point.proof.firstParameterBounds[0] +
+          point.proof.firstParameterBounds[1]) /
+          2 -
+          low) /
+        (high - low);
+      expect(Math.abs(support(index, center, radius, t))).toBeLessThan(1e-9);
+    };
+
+    test("an adjacent pair has exactly its bitwise-shared knot", () => {
+      expect(spans).toHaveLength(4);
+      expect(spans[2]!.poles[3]).toEqual(spans[3]!.poles[0]);
+      const result = verified(query.queryPair(ownerRequest(span(2), span(3))));
+      expect(result.points).toHaveLength(1);
+      const knot = spans[2]!.sourceInterval[1];
+      expect(spans[3]!.sourceInterval[0]).toBe(knot);
+      const [first, second] = [
+        result.points[0]!.proof.firstParameterBounds,
+        result.points[0]!.proof.secondParameterBounds,
+      ];
+      expect(first[0]).toBeLessThanOrEqual(knot);
+      expect(first[1]).toBeGreaterThanOrEqual(knot);
+      expect(second[0]).toBeLessThanOrEqual(knot);
+      expect(second[1]).toBeGreaterThanOrEqual(knot);
+    }, 60_000);
+
+    test("a non-adjacent pair with disjoint pole boxes has no point", () => {
+      const box = (index: number) => {
+        const poles = spans[index]!.poles;
+        return [0, 1].map((axis) => [
+          Math.min(...poles.map((pole) => pole[axis]!)),
+          Math.max(...poles.map((pole) => pole[axis]!)),
+        ]);
+      };
+      expect(box(0)[0]![1]).toBeLessThan(box(2)[0]![0]!);
+      expect(
+        verified(query.queryPair(ownerRequest(span(0), span(2)))).points,
+      ).toEqual([]);
+    }, 60_000);
+
+    test("cubic/arc crossings previously beyond the Euclid cap certify one point", () => {
+      const quarterArc = circle("F1-arc", [2, 1], 0.8, {
+        sourceDomain: { kind: "arc", interval: [-Math.PI / 2, 0] },
+      });
+      const smallCircle = circle("F1-small", [1, 0.3], 0.25, {
+        sourceDomain: { kind: "arc", interval: [-Math.PI, Math.PI] },
+      });
+      // Independent float sign changes of |B(t) − c|² − r² with margin.
+      expect(support(3, [2, 1], 0.8, 0.9)).toBeLessThan(-1e-3);
+      expect(support(3, [2, 1], 0.8, 1)).toBeGreaterThan(1e-3);
+      expect(support(2, [1, 0.3], 0.25, 0.4)).toBeLessThan(-1e-3);
+      expect(support(2, [1, 0.3], 0.25, 0.5)).toBeGreaterThan(1e-3);
+      for (const [index, other, center, radius] of [
+        [3, quarterArc, [2, 1], 0.8],
+        [2, smallCircle, [1, 0.3], 0.25],
+      ] as const) {
+        const result = verified(
+          query.queryPair(ownerRequest(span(index), other)),
+        );
+        expect(result.points).toHaveLength(1);
+        expect(result.points[0]!.classification).toBe("crossing");
+        expectOnCircleInsideBounds(result.points[0]!, index, center, radius);
+      }
+      expect(
+        verified(query.queryPair(ownerRequest(span(3), quarterArc))).points[0]!
+          .secondParameter,
+      ).toBeGreaterThan(-Math.PI / 2);
+    }, 60_000);
   });
 
   test("dispatches cubic self intersections through the same synchronous object", () => {

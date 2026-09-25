@@ -787,6 +787,99 @@ export function polynomialRemainder(
   return polynomialTrim(result, budget);
 }
 
+/**
+ * Integer coefficients L·cᵢ of a polynomial, where L > 0 is the lcm of the
+ * coefficient denominators. Every denominator is first proved positive, since a
+ * non-canonical caller coefficient would otherwise flip signs silently.
+ */
+function positiveDenominatorMultiple(
+  polynomial: ExactPolynomial,
+  budget?: ExactProofBudget,
+) {
+  const meter = budgetOf(budget);
+  const coefficients = polynomial.map((coefficient) =>
+    reduceExact(coefficient, meter),
+  );
+  let lcm = 1n;
+  for (const coefficient of coefficients) {
+    meter.bigintComparison();
+    if (coefficient.denominator === 1n) continue;
+    const common = gcdBigInt(lcm, coefficient.denominator, meter);
+    meter.bigintDivision(coefficient.denominator, common);
+    const factor = coefficient.denominator / common;
+    meter.stored(factor);
+    meter.product(lcm, factor);
+    lcm *= factor;
+    meter.stored(lcm);
+  }
+  return coefficients.map((coefficient) => {
+    meter.bigintDivision(lcm, coefficient.denominator);
+    const multiplier = lcm / coefficient.denominator;
+    meter.stored(multiplier);
+    meter.product(coefficient.numerator, multiplier);
+    const integer = coefficient.numerator * multiplier;
+    meter.stored(integer);
+    return integer;
+  });
+}
+
+/**
+ * Private (L/c)·rem(A, B) with L > 0 the denominator lcm and c > 0 the integer
+ * content: a positive multiple of the exact remainder. Only the gcd, Sturm and
+ * isolated-sign owners may use it, because they depend on a remainder solely up
+ * to a positive scalar. It never normalizes the leading sign.
+ */
+function remainderUpToPositiveScale(
+  dividend: ExactPolynomial,
+  divisor: ExactPolynomial,
+  budget?: ExactProofBudget,
+): ExactFraction[] {
+  const remainder = polynomialRemainder(dividend, divisor, budget);
+  if (polynomialIsZero(remainder, budget)) return remainder;
+  const meter = budgetOf(budget);
+  const integers = positiveDenominatorMultiple(remainder, meter);
+  let content = 0n;
+  for (const integer of integers) content = gcdBigInt(content, integer, meter);
+  return integers.map((integer) => {
+    meter.bigintDivision(integer, content);
+    const numerator = integer / content;
+    meter.stored(numerator);
+    return { numerator, denominator: 1n };
+  });
+}
+
+/**
+ * Private fraction-free exact sign of P(p/q): for q > 0 and L > 0,
+ * Σ L·cᵢ·pⁱ·q^(n−i) = L·qⁿ·P(p/q) has the same sign and zero set.
+ */
+function polynomialSignAt(
+  polynomial: ExactPolynomial,
+  parameter: ExactFraction,
+  budget?: ExactProofBudget,
+): -1 | 0 | 1 {
+  const meter = budgetOf(budget);
+  const { numerator, denominator } = reduceExact(parameter, meter);
+  const coefficients = positiveDenominatorMultiple(polynomial, meter);
+  let accumulator = coefficients.at(-1)!;
+  let denominatorPower = 1n;
+  for (let index = coefficients.length - 2; index >= 0; index -= 1) {
+    meter.product(denominatorPower, denominator);
+    denominatorPower *= denominator;
+    meter.stored(denominatorPower);
+    meter.product(accumulator, numerator);
+    const scaled = accumulator * numerator;
+    meter.stored(scaled);
+    meter.product(coefficients[index]!, denominatorPower);
+    const term = coefficients[index]! * denominatorPower;
+    meter.stored(term);
+    meter.operation();
+    accumulator = scaled + term;
+    meter.stored(accumulator);
+  }
+  meter.bigintComparison(2);
+  return accumulator < 0n ? -1 : accumulator > 0n ? 1 : 0;
+}
+
 export function polynomialExactDivide(
   dividend: ExactPolynomial,
   divisor: ExactPolynomial,
@@ -833,7 +926,7 @@ export function polynomialGcd(
   let left = polynomialTrim(first, budget);
   let right = polynomialTrim(second, budget);
   while (!polynomialIsZero(right, budget)) {
-    const remainder = polynomialRemainder(left, right, budget);
+    const remainder = remainderUpToPositiveScale(left, right, budget);
     left = right;
     right = remainder;
   }
@@ -859,7 +952,7 @@ function sturmSequence(polynomial: ExactPolynomial, budget?: ExactProofBudget) {
   );
   const sequence: ExactFraction[][] = [squareFree, derivative];
   while (!polynomialIsZero(sequence.at(-1)!, budget)) {
-    const remainder = polynomialRemainder(
+    const remainder = remainderUpToPositiveScale(
       sequence.at(-2)!,
       sequence.at(-1)!,
       budget,
@@ -878,10 +971,7 @@ function sturmVariations(
   let previous = 0;
   let variations = 0;
   for (const polynomial of sequence) {
-    const sign = exactSign(
-      polynomialEvaluate(polynomial, parameter, budget),
-      budget,
-    );
+    const sign = polynomialSignAt(polynomial, parameter, budget);
     if (sign === 0) continue;
     if (previous !== 0 && sign !== previous) variations += 1;
     previous = sign;
@@ -900,15 +990,14 @@ function sturmVariationsAtSide(
   for (const polynomial of sequence) {
     let derivative = polynomial;
     let order = 0;
-    let value = polynomialEvaluate(derivative, parameter, budget);
-    while (exactIsZero(value, budget) && derivative.length > 1) {
+    let valueSign = polynomialSignAt(derivative, parameter, budget);
+    while (valueSign === 0 && derivative.length > 1) {
       derivative = polynomialDerivative(derivative, budget);
       order += 1;
-      value = polynomialEvaluate(derivative, parameter, budget);
+      valueSign = polynomialSignAt(derivative, parameter, budget);
     }
-    const valueSign = exactSign(value, budget);
     if (valueSign === 0) continue;
-    let sign = valueSign;
+    let sign: number = valueSign;
     if (side === "left" && order % 2 === 1) sign = -sign;
     if (previous !== 0 && sign !== previous) variations += 1;
     previous = sign;
@@ -933,12 +1022,8 @@ export function countDistinctRoots(
   if (common.length > 1)
     squareFree = polynomialExactDivide(squareFree, common, budget);
   const sequence = sturmSequence(squareFree, budget);
-  const lowerRoot = exactIsZero(
-    polynomialEvaluate(squareFree, interval[0], budget),
-    budget,
-  )
-    ? 1
-    : 0;
+  const lowerRoot =
+    polynomialSignAt(squareFree, interval[0], budget) === 0 ? 1 : 0;
   return (
     sturmVariations(sequence, interval[0], budget) -
     sturmVariations(sequence, interval[1], budget) +
@@ -977,7 +1062,7 @@ export function isolateDistinctRootsClosed(
   for (const endpoint of interval) {
     if (
       polynomial.length > 1 &&
-      exactIsZero(polynomialEvaluate(polynomial, endpoint, budget), budget)
+      polynomialSignAt(polynomial, endpoint, budget) === 0
     ) {
       roots.push([endpoint, endpoint]);
       polynomial = divideLinear(polynomial, endpoint, budget);
@@ -990,7 +1075,7 @@ export function isolateDistinctRootsClosed(
   const squareFree = polynomial;
   const sequence = sturmSequence(squareFree, budget);
   const isRoot = (parameter: ExactFraction) =>
-    exactIsZero(polynomialEvaluate(squareFree, parameter, budget), budget);
+    polynomialSignAt(squareFree, parameter, budget) === 0;
   const countOpenWithSequence = (bounds: ExactInterval) =>
     sturmVariationsAtSide(sequence, bounds[0], "right", budget) -
     sturmVariationsAtSide(sequence, bounds[1], "left", budget);
@@ -1058,7 +1143,7 @@ export function refineIsolatedRoot(
     exact(2n, 1n, budgetOf(budget)),
     budget,
   );
-  if (exactIsZero(polynomialEvaluate(polynomial, midpoint, budget), budget))
+  if (polynomialSignAt(polynomial, midpoint, budget) === 0)
     return [midpoint, midpoint];
   const left: ExactInterval = [interval[0], midpoint];
   return countDistinctRoots(polynomial, left, budget) === 1
@@ -1122,7 +1207,7 @@ export function signAtIsolatedRoot(
   valuePolynomial: ExactPolynomial,
   budget?: ExactProofBudget,
 ) {
-  const remainder = polynomialRemainder(
+  const remainder = remainderUpToPositiveScale(
     valuePolynomial,
     rootPolynomial,
     budget,
