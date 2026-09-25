@@ -24,6 +24,18 @@ export interface SplineOffsetCubicSpan {
   };
   /** Conservative Euclidean parameter-corresponding error certificate. */
   readonly certifiedError: number;
+  /**
+   * Frame-only, immutable proof metadata of this owner call; never persisted.
+   * `derivative` is the owner's existing outward enclosure of the true offset
+   * derivative d/du (S + distance·N) over `sourceLocalInterval`, in source-local
+   * units. `sourcePoles` is the source span's pole array itself (a reference).
+   * Binding to one fresh owner result is the caller's obligation: the presence
+   * of this metadata never validates provenance.
+   */
+  readonly reference: {
+    readonly derivative: IntervalVector;
+    readonly sourcePoles: SplinePoles;
+  };
 }
 
 export type SplineOffsetFailureCode =
@@ -290,7 +302,7 @@ function certify(
   interval: Interval,
   distance: number,
 ):
-  | { ok: true; error: number }
+  | { ok: true; error: number; offsetFirst: IntervalVector }
   | {
       ok: false;
       code: Exclude<
@@ -381,7 +393,7 @@ function certify(
     ![q1, q2, q3, q4].flat().every(Number.isFinite)
   )
     return { ok: false, code: "certification-failed" };
-  return { ok: true, error };
+  return { ok: true, error, offsetFirst };
 }
 
 function offsetEndpoint(
@@ -540,7 +552,8 @@ function makeOutput(
   distance: number,
   distanceDifferential: number,
   hermiteRemainder: number,
-  shared: { start?: SharedEndpoint; end?: SharedEndpoint } = {},
+  shared: { start?: SharedEndpoint; end?: SharedEndpoint },
+  offsetFirst: IntervalVector,
 ): SplineOffsetCubicSpan | null {
   const start = offsetEndpoint(span, local[0], distance, distanceDifferential);
   const end = offsetEndpoint(span, local[1], distance, distanceDifferential);
@@ -603,6 +616,13 @@ function makeOutput(
       poles: differentialPoles,
     },
     certifiedError,
+    reference: Object.freeze({
+      derivative: Object.freeze([
+        Object.freeze(offsetFirst[0]),
+        Object.freeze(offsetFirst[1]),
+      ] as const),
+      sourcePoles: span.poles,
+    }),
   };
 }
 
@@ -692,6 +712,7 @@ export function approximateSplineOffset(
           input.distanceDifferential ?? 0,
           0,
           sharedFor([0, 1]),
+          regular.offsetFirst,
         );
         if (!analytic)
           return {
@@ -729,6 +750,7 @@ export function approximateSplineOffset(
             input.distanceDifferential ?? 0,
             certificate.error,
             sharedFor(local),
+            certificate.offsetFirst,
           )
         : null;
       if (certificate.ok && !result)

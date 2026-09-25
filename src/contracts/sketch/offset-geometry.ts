@@ -41,6 +41,12 @@ export const OFFSET_DIAGNOSTIC_CODES = {
   topologyChanged: "derived-offset-topology-changed",
   /** Temporary: fallback-arc and tangent-continuous joints with a spline side. */
   splineJointUnsupported: "derived-offset-spline-joint-unsupported",
+  /** Certified error tubes overlap: true-offset separation is not proved (never "unstable"). */
+  topologyClearanceUnproven: "derived-offset-topology-clearance-unproven",
+  /** A declared join's true-offset endpoints are not proved exactly identical. */
+  knotIncidenceUnproven: "derived-offset-knot-incidence-unproven",
+  /** Temporary: chains outside the tube-stability certificate's single-spline scope. */
+  topologyStabilityUnsupported: "derived-offset-topology-stability-unsupported",
 } as const;
 
 export type OffsetDiagnosticCode =

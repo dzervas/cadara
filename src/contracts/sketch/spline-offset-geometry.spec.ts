@@ -800,6 +800,158 @@ describe("shared smooth source-knot endpoints", () => {
   );
 });
 
+/** Independent analytic source derivatives at local u (test oracle only). */
+function sourceDerivatives(poles: SplinePoles, u: number) {
+  const v = 1 - u;
+  const axis = (index: 0 | 1) => {
+    const [p0, p1, p2, p3] = poles.map((pole) => pole[index]!);
+    return [
+      3 * (v * v * (p1! - p0!) + 2 * v * u * (p2! - p1!) + u * u * (p3! - p2!)),
+      6 * (v * (p2! - 2 * p1! + p0!) + u * (p3! - 2 * p2! + p1!)),
+    ] as const;
+  };
+  const x = axis(0);
+  const y = axis(1);
+  return { first: [x[0], y[0]] as const, second: [x[1], y[1]] as const };
+}
+
+/** Analytic O′(u) = S′ + d·rot(S″/|S′| − S′(S′·S″)/|S′|³) (test oracle only). */
+function analyticOffsetDerivative(
+  poles: SplinePoles,
+  u: number,
+  distance: number,
+): SplineVector {
+  const { first, second } = sourceDerivatives(poles, u);
+  const speed = Math.hypot(...first);
+  const along = first[0] * second[0] + first[1] * second[1];
+  const normalFirst = [0, 1].map(
+    (axis) => second[axis]! / speed - (first[axis]! * along) / speed ** 3,
+  );
+  return [
+    first[0] - distance * normalFirst[1]!,
+    first[1] + distance * normalFirst[0]!,
+  ];
+}
+
+describe("owner proof metadata for the tube-stability certificate", () => {
+  test("sanity only: each leaf's derivative box contains sampled analytic O′ and references its source poles", () => {
+    const spans = realSpans([
+      [0, 0],
+      [1, 0.1],
+      [2, 0],
+    ]);
+    const result = successful({
+      spans,
+      distance: 0.2,
+      modelingTolerance: 1e-3,
+    });
+    expect(result.spans).toHaveLength(4);
+    for (const output of result.spans) {
+      const source = spans[output.source.spanIndex]!;
+      expect(
+        output.reference.sourcePoles,
+        "a reference to the source span's own pole array",
+      ).toBe(source.poles);
+      expect(Object.isFrozen(output.reference)).toBe(true);
+      expect(Object.isFrozen(output.reference.derivative)).toBe(true);
+      const [a, b] = output.sourceLocalInterval;
+      const box = output.reference.derivative;
+      // Sampling is a sanity check of the enclosure, never a proof of it.
+      for (let index = 0; index < 64; index += 1) {
+        const value = analyticOffsetDerivative(
+          source.poles,
+          a + ((b - a) * index) / 63,
+          0.2,
+        );
+        for (const axis of [0, 1] as const) {
+          expect(box[axis][0]).toBeLessThanOrEqual(value[axis]);
+          expect(value[axis]).toBeLessThanOrEqual(box[axis][1]);
+        }
+      }
+    }
+  });
+
+  test("metadata is deterministic and the only field added to emitted spans", () => {
+    // Byte-identity of poles, errors, partition, sharing and JVP against the
+    // pre-metadata owner is a private baseline comparison (scratch evidence):
+    // literal digests would pin engine-specific Math.hypot rounding.
+    for (const [points, distance] of [
+      [
+        [
+          [0, 0],
+          [1, 0.1],
+          [2, 0],
+        ],
+        0.2,
+      ],
+      [
+        [
+          [0, 0],
+          [1, 1],
+          [2, 0],
+          [3, 1],
+        ],
+        0.1,
+      ],
+      [
+        [
+          [0, 0],
+          [2, 0.5],
+          [4, 0],
+        ],
+        -0.3,
+      ],
+      [knotFixture, 1],
+    ] as const) {
+      const input = {
+        spans: realSpans(points),
+        distance,
+        distanceDifferential: 0.7,
+        modelingTolerance: 1e-3,
+      };
+      const result = successful(input);
+      expect(JSON.stringify(approximateSplineOffset(input))).toBe(
+        JSON.stringify(result),
+      );
+      for (const output of result.spans) {
+        expect(Object.keys(output).sort()).toEqual([
+          "certifiedError",
+          "differential",
+          "poles",
+          "reference",
+          "source",
+          "sourceInterval",
+          "sourceLocalInterval",
+        ]);
+      }
+    }
+  });
+
+  test("the zero-distance branch carries the source derivative box and source poles", () => {
+    const result = successful({
+      spans: [curved],
+      distance: 0,
+      modelingTolerance: 1e-3,
+    });
+    expect(result.spans).toHaveLength(1);
+    const [output] = result.spans;
+    expect(output!.poles).toBe(curved.poles);
+    expect(output!.certifiedError).toBe(0);
+    expect(output!.reference.sourcePoles).toBe(curved.poles);
+    for (let index = 0; index < 64; index += 1) {
+      const value = sourceDerivatives(curved.poles, index / 63).first;
+      for (const axis of [0, 1] as const) {
+        expect(output!.reference.derivative[axis][0]).toBeLessThanOrEqual(
+          value[axis],
+        );
+        expect(value[axis]).toBeLessThanOrEqual(
+          output!.reference.derivative[axis][1],
+        );
+      }
+    }
+  });
+});
+
 function nextAfter(value: number) {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value);
