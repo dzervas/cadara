@@ -1,4 +1,31 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+
+/** Pass-through call-order recorder on the adapter's exported spline seams. */
+const splineSeamCalls = vi.hoisted(() => ({ log: null as string[] | null }));
+vi.mock("@/contracts/sketch/spline-geometry", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/contracts/sketch/spline-geometry")>();
+  return {
+    ...actual,
+    reconstructSplineAggregate: ((...args) => {
+      splineSeamCalls.log?.push("reconstruct");
+      return actual.reconstructSplineAggregate(...args);
+    }) as typeof actual.reconstructSplineAggregate,
+  };
+});
+vi.mock("@/contracts/sketch/spline-offset-geometry", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/contracts/sketch/spline-offset-geometry")
+    >();
+  return {
+    ...actual,
+    approximateSplineOffset: ((...args) => {
+      splineSeamCalls.log?.push("owner");
+      return actual.approximateSplineOffset(...args);
+    }) as typeof actual.approximateSplineOffset,
+  };
+});
 import {
   evaluateNeutralCurve,
   type CertifiedCubicTubeChain,
@@ -9,13 +36,31 @@ import {
   type NeutralCurvePointWitness,
   type PieceTubeChainRequest,
 } from "@/contracts/modeling/neutral-curve-query";
-import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchEntityId,
+  SketchId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
+import type {
+  SketchDefinition,
+  SolvedSketchSnapshot,
+} from "@/contracts/sketch/schema";
 import type { SketchToolCommitContribution } from "@/core/sketch-tools/definition";
+import type { SketchConstraintToolId } from "@/core/sketch-constraints/definition";
+import {
+  getSketchConstraintDefinition,
+  resolveSketchConstraintTarget,
+} from "@/core/sketch-constraints/registry";
+import { solveCommittedConstraintDefinition } from "@/domain/editor/sketch-session/constraints";
+import { applySolvedSketchToDefinition } from "@/domain/editor/sketch-session/definition-patches";
 import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
 import { splineSketchToolDefinition } from "@/core/sketch-tools/tools/spline";
 import { appendInferredSnapConstraints } from "@/domain/editor/sketch-session/tools";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import {
+  createSessionCommitFactories,
+  createSketchPointRef,
+  SKETCH_DIRECT_EDIT_TOLERANCES,
+} from "@/domain/editor/sketch-session/internals";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
@@ -24,6 +69,7 @@ import {
   offsetChainRootEnclosure,
   resolveOffsetChainTopology,
   resolveOffsetChainTopologyJvp,
+  type DeclaredOffsetChainPieces,
   type OffsetChainPiece,
   type OffsetChainPieceVariation,
   type OffsetChainTopologyInput,
@@ -1945,14 +1991,32 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         position: positions.get(point.pointId)!,
       })),
     };
+    return pairChain(
+      { definition: solvedDefinition, solvedSnapshot: solved.solvedSnapshot },
+      distance,
+    );
+  };
+  interface AcceptedPair {
+    readonly definition: SketchDefinition;
+    readonly solvedSnapshot: SolvedSketchSnapshot;
+  }
+  /** One accepted (definition, solvedSnapshot) pair → N2 → fresh adapter → N1 resolver. */
+  const pairChain = (
+    pair: AcceptedPair,
+    distance: number,
+    seedIds: readonly SketchEntityId[] = pair.definition.entities.map(
+      (entity) => entity.entityId,
+    ),
+  ) => {
     const connectivity = extractDeclaredOffsetChainConnectivity({
-      definition: solvedDefinition,
-      seedIds: definition.entities.map((entity) => entity.entityId),
+      definition: pair.definition,
+      seedIds,
     });
     if (!connectivity.ok) throw new Error(connectivity.message);
     const adapt = () => {
       const declared = declaredOffsetChainPieces({
-        definition: solvedDefinition,
+        definition: pair.definition,
+        solvedSnapshot: pair.solvedSnapshot,
         connectivity,
         distance,
         modelingTolerance: TOLERANCE,
@@ -1967,7 +2031,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       modelingTolerance: TOLERANCE,
       query,
     });
-    return { connectivity, declared, resolution, adapt };
+    return { connectivity, declared, resolution, adapt, pair };
   };
   const accepted = (chain: ReturnType<typeof nativeChain>) => {
     if (!chain.resolution.ok)
@@ -2280,7 +2344,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
     }
   }, 120_000);
 
-  test("a declared coincident join fails closed (no R_C, no point merging)", () => {
+  test("control: an ID-distinct, zero-gap direct coincidence reaches the real certifier without merging points", () => {
     const line = drawLine([], [-1, 0], [0, 0]);
     const [, lineEnd] = lineEnds(line);
     const spline = drawSpline(
@@ -2293,19 +2357,899 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       { start: lineEnd },
     );
     const chain = nativeChain([line, spline], 0.01);
-    expect(chain.connectivity.joins[0]!.kind).toBe("coincidentConstraint");
+    const join = chain.connectivity.joins[0]!;
+    if (join.kind !== "coincidentConstraint") throw new Error("direct join");
+    expect(join.pointIds[0]).not.toBe(join.pointIds[1]);
+    // Zero-gap control, NOT R_C coverage: the solved positions are bitwise equal.
+    const [p, q] = join.pointIds.map((pointId) =>
+      positionOf(chain.pair.definition, pointId),
+    );
+    expect(samePointForTest(p!, q!)).toBe(true);
+    const { requests, certifier } = recording();
+    const result = certifyOffsetChainTubeStability(
+      accepted(chain),
+      certifier,
+      chain.declared,
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    expect(requests).toHaveLength(1);
+  }, 120_000);
+
+  // R_C: declared direct coincident joins with NONZERO solved source gaps.
+  // Every positive is one native accepted (definition, solvedSnapshot) pair:
+  // native commit → native constraint/dimension edit → the editor's real
+  // committed-edit solve. Hand-built inputs appear only in labelled
+  // admission adversaries, each a single-field change of such a pair. Same-ID
+  // parameter edits (retargeted pointIds, changed dimension values) and forged
+  // snapshots are OUTSIDE the trusted same-accepted-solve premise and are
+  // documented non-detections, not tested as rejected.
+  const SKETCH_ID = "sketch_l1b" as SketchId;
+  type ToolTarget =
+    | readonly ["point", SketchPointId]
+    | readonly ["entity", SketchEntityId];
+  /** Native constraint/dimension tool commit contribution (no solve). */
+  const commitTool = (
+    definition: SketchDefinition,
+    toolId: SketchConstraintToolId,
+    targets: readonly ToolTarget[],
+    value: number | null = null,
+  ): SketchDefinition => {
+    sequence += 1;
+    const step = sequence;
+    const contribution = getSketchConstraintDefinition(
+      toolId,
+    ).createCommitContribution({
+      sequence: step,
+      selectedTargets: targets.map(([kind, targetId]) => {
+        const record = resolveSketchConstraintTarget(
+          toolId,
+          definition,
+          kind === "point"
+            ? createSketchPointRef(SKETCH_ID, targetId)
+            : { kind: "sketchEntity", sketchId: SKETCH_ID, entityId: targetId },
+        );
+        if (!record) throw new Error(`${toolId} rejected ${targetId}`);
+        return record;
+      }),
+      pointer: null,
+      value,
+      annotationPlacement: null,
+      createConstraintId: (suffix) => `constraint_${step}_${suffix}` as const,
+      createDimensionId: (suffix) => `dimension_${step}_${suffix}` as const,
+    });
+    const constraints = contribution.constraints ?? [];
+    const dimensions = contribution.dimensions ?? [];
+    return {
+      ...definition,
+      constraintIds: [
+        ...definition.constraintIds,
+        ...constraints.map((constraint) => constraint.constraintId),
+      ],
+      constraints: [...definition.constraints, ...constraints],
+      dimensionIds: [
+        ...definition.dimensionIds,
+        ...dimensions.map((dimension) => dimension.dimensionId),
+      ],
+      dimensions: [...definition.dimensions, ...dimensions],
+    };
+  };
+  /** Native tool edit + the editor's real committed-edit solve (must accept). */
+  const acceptedEdit = (
+    ...edit: Parameters<typeof commitTool>
+  ): AcceptedPair => {
+    const solved = solveCommittedConstraintDefinition(commitTool(...edit), []);
+    if (!solved.solvedSnapshot)
+      throw new Error(`${edit[1]} edit was not solver-accepted`);
+    return solved as AcceptedPair;
+  };
+  const connectivityOf = (
+    definition: SketchDefinition,
+    seedIds = definition.entities.map((entity) => entity.entityId),
+  ) => {
+    const connectivity = extractDeclaredOffsetChainConnectivity({
+      definition,
+      seedIds,
+    });
+    if (!connectivity.ok) throw new Error(connectivity.message);
+    return connectivity;
+  };
+  /** The raw adapter result, with the exported spline seams' call order. */
+  const adaptRecorded = (
+    pair: AcceptedPair,
+    connectivity = connectivityOf(pair.definition),
+    distance = 0.01,
+  ) => {
+    const calls: string[] = [];
+    splineSeamCalls.log = calls;
+    try {
+      const result = declaredOffsetChainPieces({
+        definition: pair.definition,
+        solvedSnapshot: pair.solvedSnapshot,
+        connectivity,
+        distance,
+        modelingTolerance: TOLERANCE,
+      });
+      return { result, calls };
+    } finally {
+      splineSeamCalls.log = null;
+    }
+  };
+  const expectAdapterRejects = (
+    adapted: ReturnType<typeof adaptRecorded>,
+    message: string,
+    calls: readonly string[] = [],
+  ) => {
+    expect(adapted.result).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining(message),
+    });
+    // Fails before any owner call (E1/E2/E4 also before any reconstruction).
+    expect(adapted.calls).toEqual(calls);
+  };
+  const positionOf = (
+    definition: Pick<SketchDefinition, "points">,
+    pointId: SketchPointId,
+  ) => {
+    const point = definition.points.find((item) => item.pointId === pointId);
+    if (!point) throw new Error(`missing point ${pointId}`);
+    return point.position;
+  };
+  const coincidentJoin = (
+    chain: { connectivity: ReturnType<typeof connectivityOf> },
+    index: number,
+  ) => {
+    const join = chain.connectivity.joins[index];
+    if (join?.kind !== "coincidentConstraint")
+      throw new Error(`join ${index} is not a direct coincidence`);
+    return join;
+  };
+  /** Solved source gap q − p between the two distinct declared point IDs. */
+  const sourceGap = (
+    pair: AcceptedPair,
+    join: ReturnType<typeof coincidentJoin>,
+  ) => {
+    const [p, q] = join.pointIds.map((pointId) =>
+      positionOf(pair.definition, pointId),
+    );
+    return {
+      bitwiseEqual: samePointForTest(p!, q!),
+      delta: [q![0] - p![0], q![1] - p![1]] as const,
+    };
+  };
+  /**
+   * Common R_C positive: accepted solved frame, distinct IDs, NONZERO bitwise
+   * source gap, exactly one real certifier call, the verified trim at the
+   * coincident join, and every leaf within τ.
+   */
+  const expectVerifiedCoincidentTrim = (
+    pair: AcceptedPair,
+    distance: number,
+    joinIndex: number,
+    trim: Record<string, unknown>,
+    seedIds?: readonly SketchEntityId[],
+  ) => {
+    expect(pair.solvedSnapshot.status.solveState).toBe("solved");
+    expect(
+      pair.solvedSnapshot.constraintStatuses.map((status) => status.status),
+    ).toEqual(pair.definition.constraints.map(() => "satisfied"));
+    const chain = pairChain(pair, distance, seedIds);
+    const join = coincidentJoin(chain, joinIndex);
+    expect(join.pointIds[0]).not.toBe(join.pointIds[1]);
+    const gap = sourceGap(pair, join);
+    expect(gap.bitwiseEqual).toBe(false);
+    const { requests, certifier } = recording();
+    const result = certifyOffsetChainTubeStability(
+      accepted(chain),
+      certifier,
+      chain.declared,
+    );
+    if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+    expect(requests).toHaveLength(1);
+    const trims = result.certificate.joins.filter(
+      (item) => item.kind === "trim",
+    );
+    expect(trims).toContainEqual(
+      expect.objectContaining({ kind: "trim", jointIndex: joinIndex, ...trim }),
+    );
+    for (const leaf of result.certificate.leaves)
+      expect(leaf.displacementBound).toBeLessThanOrEqual(TOLERANCE);
+    return { chain, join, gap, trims };
+  };
+  const lineId = (patch: Authored) => patch.entities[0]!.entityId;
+  /**
+   * C1 matrix fixture: a line drawn toward/away from the join and a spline
+   * drawn from it (endpoint-snap-inferred coincidence) or to it (Coincident
+   * tool). A native Distance length edit then re-solves to a nonzero gap.
+   */
+  const lineSplineGap = (
+    bulge: number,
+    lineTowardJoin: boolean,
+    splineFromJoin: boolean,
+  ) => {
+    const line = lineTowardJoin
+      ? drawLine([], [-1, 0], [0, 0])
+      : drawLine([], [0, 0], [-1, 0]);
+    const lineJoin = lineEnds(line)[lineTowardJoin ? 1 : 0];
+    const points: readonly Vector[] = [
+      [0, 0],
+      [bulge, 1],
+      [0, 2],
+    ];
+    const spline = splineFromJoin
+      ? drawSpline([line], points, { start: lineJoin })
+      : drawSpline([line], [...points].reverse());
+    const splineJoin = splineEnds(spline)[splineFromJoin ? 0 : 1];
+    const joined = splineFromJoin
+      ? sketch([line, spline])
+      : acceptedEdit(sketch([line, spline]), "constraintCoincident", [
+          ["point", lineJoin],
+          ["point", splineJoin],
+        ]).definition;
+    const pair = acceptedEdit(
+      joined,
+      "dimensionDistance",
+      [["entity", lineId(line)]],
+      1.3,
+    );
+    return { line, spline, lineJoin, splineJoin, pair };
+  };
+  /** Fix, Fix, then the Coincident tool: accepted in place with its gap. */
+  const fixedCoincidence = (
+    definition: SketchDefinition,
+    first: SketchPointId,
+    second: SketchPointId,
+  ) => {
+    const fixed = commitTool(
+      commitTool(definition, "constraintFix", [["point", first]]),
+      "constraintFix",
+      [["point", second]],
+    );
+    return commitTool(fixed, "constraintCoincident", [
+      ["point", first],
+      ["point", second],
+    ]);
+  };
+  const nextUp = (value: number) => {
+    const view = new DataView(new ArrayBuffer(8));
+    view.setFloat64(0, value);
+    const bits = view.getBigUint64(0);
+    view.setBigUint64(0, value >= 0 ? bits + 1n : bits - 1n);
+    return view.getFloat64(0);
+  };
+  const withPointMoved = (
+    pair: AcceptedPair,
+    pointId: SketchPointId,
+  ): AcceptedPair => ({
+    ...pair,
+    definition: {
+      ...pair.definition,
+      points: pair.definition.points.map((point) =>
+        point.pointId === pointId
+          ? {
+              ...point,
+              position: [nextUp(point.position[0]), point.position[1]] as const,
+            }
+          : point,
+      ),
+    },
+  });
+
+  test("R_C P1: native snapped line→spline + Distance edit certifies a nonzero-gap trim; one reconstruction precedes one owner call", () => {
+    const { lineJoin, splineJoin, pair } = lineSplineGap(0.1, true, true);
+    const { join, gap } = expectVerifiedCoincidentTrim(pair, 0.01, 0, {
+      line: "first",
+      orientation: 1,
+    });
+    expect(gap.delta[0]).not.toBe(0);
+    // Constraint order is (entry, exit): the reverse of traversal order.
+    expect(join.pointIds).toEqual([splineJoin, lineJoin]);
+    // E3′ reuses the adapter's single fresh reconstruction, then one owner call.
+    const adapted = adaptRecorded(pair);
+    expect(adapted.result.ok).toBe(true);
+    expect(adapted.calls).toEqual(["reconstruct", "owner"]);
+  }, 300_000);
+
+  // Concave side of every C1 orientation; the other side is convex. Two of the
+  // eight concave cases exhaust the unchanged global exact-query budget and
+  // fail closed in the resolver: disclosed, not waived, no cap change.
+  test.each([
+    [0.1, true, true, 0.01, [false, false], { line: "first", orientation: 1 }],
+    [0.1, true, false, 0.01, null, "budget"],
+    [
+      0.1,
+      false,
+      true,
+      -0.01,
+      [true, false],
+      { line: "second", orientation: -1 },
+    ],
+    [0.1, false, false, -0.01, null, "budget"],
+    [-0.1, true, true, 0.01, [false, false], { line: "first", orientation: 1 }],
+    [
+      -0.1,
+      true,
+      false,
+      0.01,
+      [false, true],
+      { line: "first", orientation: -1 },
+    ],
+    [
+      -0.1,
+      false,
+      true,
+      -0.01,
+      [true, false],
+      { line: "second", orientation: -1 },
+    ],
+    [
+      -0.1,
+      false,
+      false,
+      -0.01,
+      [false, false],
+      { line: "second", orientation: 1 },
+    ],
+  ] as const)(
+    "R_C C1 bulge %s, line toward join %s, spline from join %s: concave d = %s",
+    (bulge, lineTowardJoin, splineFromJoin, distance, reversed, expected) => {
+      const { pair } = lineSplineGap(bulge, lineTowardJoin, splineFromJoin);
+      const convex = pairChain(pair, -distance);
+      expect(sourceGap(pair, coincidentJoin(convex, 0)).bitwiseEqual).toBe(
+        false,
+      );
+      expect(convex.resolution).toMatchObject({
+        ok: false,
+        code: codes.splineJointUnsupported,
+      });
+      if (expected === "budget") {
+        expect(pairChain(pair, distance).resolution).toMatchObject({
+          ok: false,
+          code: codes.topologyUncertain,
+          message: expect.stringContaining(
+            "exact-query-proof-budget-exhausted",
+          ),
+        });
+        return;
+      }
+      const { chain } = expectVerifiedCoincidentTrim(
+        pair,
+        distance,
+        0,
+        expected,
+      );
+      expect(chain.connectivity.pieces.map((piece) => piece.reversed)).toEqual(
+        reversed,
+      );
+    },
+    300_000,
+  );
+
+  test("R_C reversed LINE: spline-first seeds traverse the coincident line backwards and verify at −d", () => {
+    const line = drawLine([], [-1, 0], [0, 0]);
+    const spline = drawSpline(
+      [line],
+      [
+        [0, 2],
+        [-0.1, 1],
+        [0, 0],
+      ],
+    );
+    const joined = acceptedEdit(
+      sketch([line, spline]),
+      "constraintCoincident",
+      [
+        ["point", lineEnds(line)[1]],
+        ["point", splineEnds(spline)[1]],
+      ],
+    );
+    const pair = acceptedEdit(
+      joined.definition,
+      "dimensionDistance",
+      [["entity", lineId(line)]],
+      1.3,
+    );
+    const seeds = [spline.entities[0]!.entityId, lineId(line)];
+    const { chain } = expectVerifiedCoincidentTrim(
+      pair,
+      -0.01,
+      0,
+      { line: "second", orientation: 1 },
+      seeds,
+    );
+    expect(chain.connectivity.pieces.map((piece) => piece.reversed)).toEqual([
+      false,
+      true,
+    ]);
+  }, 300_000);
+
+  test("R_C line↔line: length + horizontal + Coincident tool leaves a gap in both coordinates and verifies in both seed orders", () => {
+    const first = drawLine([], [-1, 0], [0, 0]);
+    const second = drawLine([first], [0.002, 0.001], [0.3, 1]);
+    const sized = acceptedEdit(
+      sketch([first, second]),
+      "dimensionDistance",
+      [["entity", lineId(first)]],
+      1,
+    );
+    const level = acceptedEdit(sized.definition, "constraintHorizontal", [
+      ["entity", lineId(first)],
+    ]);
+    const pair = acceptedEdit(level.definition, "constraintCoincident", [
+      ["point", lineEnds(first)[1]],
+      ["point", lineEnds(second)[0]],
+    ]);
+    for (const seeds of [
+      [lineId(first), lineId(second)],
+      [lineId(second), lineId(first)],
+    ]) {
+      const { gap } = expectVerifiedCoincidentTrim(
+        pair,
+        0.01,
+        0,
+        { line: "first", orientation: 1 },
+        seeds,
+      );
+      expect(gap.delta[0]).not.toBe(0);
+      expect(gap.delta[1]).not.toBe(0);
+    }
+  }, 300_000);
+
+  test("R_C closed rectangle: the coincident corner verifies as the wrap join and as an interior join, four trims each", () => {
+    const a = drawLine([], [0, 0], [1, 0]);
+    const b = drawLine([a], [1, 0], [1, 1], { start: lineEnds(a)[1] });
+    const c = drawLine([a, b], [1, 1], [0, 1], { start: lineEnds(b)[1] });
+    const d = drawLine([a, b, c], [0, 1], [0.002, 0.001], {
+      start: lineEnds(c)[1],
+    });
+    const joined = acceptedEdit(sketch([a, b, c, d]), "constraintCoincident", [
+      ["point", lineEnds(d)[1]],
+      ["point", lineEnds(a)[0]],
+    ]);
+    const pair = acceptedEdit(
+      joined.definition,
+      "dimensionDistance",
+      [["entity", lineId(a)]],
+      1.25,
+    );
+    for (const [seeds, joinIndex] of [
+      [[a, b, c, d].map(lineId), 3],
+      [[b, a, c, d].map(lineId), 2],
+    ] as const) {
+      const { chain, trims } = expectVerifiedCoincidentTrim(
+        pair,
+        0.01,
+        joinIndex,
+        {},
+        seeds,
+      );
+      expect(chain.connectivity.closed).toBe(true);
+      expect(chain.connectivity.joins.map((join) => join.kind)).toEqual(
+        [0, 1, 2, 3].map((index) =>
+          index === joinIndex ? "coincidentConstraint" : "sharedPoint",
+        ),
+      );
+      expect(trims).toHaveLength(4);
+    }
+  }, 300_000);
+
+  // With H2 removed (private mutant) this fixture still fails closed later at
+  // trim-window-unproven; it pins H2 as the rejecting gate, it does not prove
+  // H2 is the only gate that would reject it.
+  test("H2: a native convex-gap crossing accepted by the real resolver is rejected at the certifier's trim-side gate", () => {
+    const first = drawLine([], [-1, 0], [0, 0]);
+    const second = drawLine([first], [-1e-6, 1e-13], [1 - 1e-6, 1e-13 - 1e-6]);
+    const solved = solveCommittedConstraintDefinition(
+      fixedCoincidence(
+        sketch([first, second]),
+        lineEnds(first)[1],
+        lineEnds(second)[0],
+      ),
+      [],
+    );
+    if (!solved.solvedSnapshot) throw new Error("not accepted in place");
+    const pair = solved as AcceptedPair;
+    expect(pair.solvedSnapshot.status.solveState).toBe("solved");
+    const convex = pairChain(pair, 0.01);
+    const gap = sourceGap(pair, coincidentJoin(convex, 0));
+    expect(gap.bitwiseEqual).toBe(false);
+    const { requests, certifier } = recording();
     expect(
       certifyOffsetChainTubeStability(
-        accepted(chain),
-        refusing,
-        chain.declared,
+        accepted(convex),
+        certifier,
+        convex.declared,
       ),
     ).toMatchObject({
       ok: false,
-      code: codes.topologyStabilityUnsupported,
-      message: expect.stringContaining("shared canonical point joins only"),
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("trim-side-unproven"),
     });
-  }, 120_000);
+    expect(requests).toHaveLength(1);
+    // The same accepted pair is concave at −d and verifies.
+    expectVerifiedCoincidentTrim(pair, -0.01, 0, {
+      line: "first",
+      orientation: -1,
+    });
+  }, 300_000);
+
+  test("E1: unaccepted frames fail before reconstruction, including partiallySolved with EVERY constraint satisfied", () => {
+    const line = drawLine([], [-1, 0], [0, 0]);
+    for (const [apart, coincidence, statuses] of [
+      // N3: editor tolerance; every status unsatisfied.
+      [1e-3, 1e-6, "unsatisfied"],
+      // N3b: document tolerance; every status satisfied, only solveState differs.
+      [1.2e-3, 1e-3, "satisfied"],
+    ] as const) {
+      const spline = drawSpline(
+        [line],
+        [
+          [apart, 0],
+          [0.1, 1],
+          [0, 2],
+        ],
+      );
+      const definition = fixedCoincidence(
+        sketch([line, spline]),
+        lineEnds(line)[1],
+        splineEnds(spline)[0],
+      );
+      const solved = solveSketchDefinitionCore({
+        definition,
+        tolerances: { ...SKETCH_DIRECT_EDIT_TOLERANCES, coincidence },
+        partialSolvePolicy: "bestEffort",
+      });
+      const snapshot = solved.solvedSnapshot;
+      expect(snapshot.status.solveState).toBe("partiallySolved");
+      expect(snapshot.constraintStatuses.map((item) => item.status)).toEqual(
+        definition.constraints.map(() => statuses),
+      );
+      expect(
+        snapshot.diagnostics.some((item) => item.severity === "error"),
+      ).toBe(false);
+      const pair = {
+        definition: applySolvedSketchToDefinition(definition, snapshot),
+        solvedSnapshot: snapshot,
+      };
+      expect(
+        sourceGap(
+          pair,
+          coincidentJoin({ connectivity: connectivityOf(pair.definition) }, 0),
+        ).bitwiseEqual,
+      ).toBe(false);
+      expectAdapterRejects(adaptRecorded(pair), "not solver-accepted");
+    }
+  }, 300_000);
+
+  test("E1 admission adversaries: one solved-frame field each (constraint status, dimension status, error diagnostic)", () => {
+    const { pair } = lineSplineGap(0.1, true, true);
+    const snapshot = pair.solvedSnapshot;
+    expect(snapshot.dimensionStatuses).toHaveLength(1);
+    for (const solvedSnapshot of [
+      {
+        ...snapshot,
+        constraintStatuses: snapshot.constraintStatuses.map((item) => ({
+          ...item,
+          status: "unsatisfied" as const,
+        })),
+      },
+      {
+        ...snapshot,
+        dimensionStatuses: snapshot.dimensionStatuses.map((item) => ({
+          ...item,
+          status: "unsatisfied" as const,
+        })),
+      },
+      {
+        ...snapshot,
+        diagnostics: [
+          ...snapshot.diagnostics,
+          {
+            code: "adversary",
+            severity: "error" as const,
+            message: "adversary",
+            target: null,
+          },
+        ],
+      },
+    ] satisfies SolvedSketchSnapshot[])
+      expectAdapterRejects(
+        adaptRecorded({ ...pair, solvedSnapshot }),
+        "not solver-accepted",
+      );
+  }, 300_000);
+
+  test("E2: ordered ID coverage rejects a rejected edit's definition with the previous snapshot, and reordered status or point records", () => {
+    const first = drawLine([], [-1, 0], [0, 0]);
+    const second = drawLine([first], [0.002, 0.001], [0.3, 1]);
+    const sized = acceptedEdit(
+      sketch([first, second]),
+      "dimensionDistance",
+      [["entity", lineId(first)]],
+      1,
+    );
+    const level = acceptedEdit(sized.definition, "constraintHorizontal", [
+      ["entity", lineId(first)],
+    ]);
+    const pair = acceptedEdit(level.definition, "constraintCoincident", [
+      ["point", lineEnds(first)[1]],
+      ["point", lineEnds(second)[0]],
+    ]);
+    expect(adaptRecorded(pair).result.ok).toBe(true);
+    // N4 (ID coverage, not a staleness proof): the solver rejects this edit
+    // and returns the unsolved definition with a new dimension ID.
+    const rejectedDefinition = commitTool(
+      pair.definition,
+      "dimensionDistance",
+      [["entity", lineId(first)]],
+      1.7,
+    );
+    expect(
+      solveCommittedConstraintDefinition(rejectedDefinition, []).solvedSnapshot,
+    ).toBeUndefined();
+    expectAdapterRejects(
+      adaptRecorded(
+        { ...pair, definition: rejectedDefinition },
+        connectivityOf(rejectedDefinition),
+      ),
+      "does not cover this definition",
+    );
+    // Admission adversaries: same ID sets, different order.
+    const snapshot = pair.solvedSnapshot;
+    expect(snapshot.constraintStatuses).toHaveLength(2);
+    for (const solvedSnapshot of [
+      {
+        ...snapshot,
+        constraintStatuses: [...snapshot.constraintStatuses].reverse(),
+      },
+      { ...snapshot, solvedPoints: [...snapshot.solvedPoints].reverse() },
+    ])
+      expectAdapterRejects(
+        adaptRecorded({ ...pair, solvedSnapshot }),
+        "does not cover this definition",
+      );
+  }, 300_000);
+
+  test("E3′: seed geometry must equal the frame's solved entities bitwise (line endpoint, spline poles, span source IDs, one record)", () => {
+    const { line, spline, lineJoin, splineJoin, pair } = lineSplineGap(
+      0.1,
+      true,
+      true,
+    );
+    const snapshot = pair.solvedSnapshot;
+    // Unsolved 1-ulp edits of either declared join point.
+    expectAdapterRejects(
+      adaptRecorded(withPointMoved(pair, lineJoin)),
+      "line seed geometry does not match",
+    );
+    expectAdapterRejects(
+      adaptRecorded(withPointMoved(pair, splineJoin)),
+      "spline seed geometry does not match",
+      ["reconstruct"],
+    );
+    // Admission adversaries on the snapshot's solved entity records.
+    const splineRecordAdversary = {
+      ...snapshot,
+      solvedEntities: snapshot.solvedEntities.map((record) => {
+        if (
+          record.kind !== "spline" ||
+          record.entityId !== spline.entities[0]!.entityId ||
+          record.reconstruction.validity !== "valid"
+        )
+          return record;
+        const [span, ...rest] = record.reconstruction.spans;
+        return {
+          ...record,
+          reconstruction: {
+            ...record.reconstruction,
+            spans: [
+              {
+                ...span!,
+                source: { ...span!.source, startOccurrenceId: "other-use" },
+              },
+              ...rest,
+            ],
+          },
+        };
+      }),
+    } satisfies SolvedSketchSnapshot;
+    expectAdapterRejects(
+      adaptRecorded({ ...pair, solvedSnapshot: splineRecordAdversary }),
+      "spline seed geometry does not match",
+      ["reconstruct"],
+    );
+    const lineRecord = snapshot.solvedEntities.find(
+      (record) => record.entityId === lineId(line),
+    )!;
+    expectAdapterRejects(
+      adaptRecorded({
+        ...pair,
+        solvedSnapshot: {
+          ...snapshot,
+          solvedEntities: [...snapshot.solvedEntities, lineRecord],
+        },
+      }),
+      "line seed geometry does not match",
+    );
+  }, 300_000);
+
+  test("E3′ (N5b): an authored tangent flipped to automatic without a re-solve keeps every position bitwise but fails on spline poles", () => {
+    const { spline, pair: gapped } = lineSplineGap(0.1, true, true);
+    const splineEntityId = spline.entities[0]!.entityId;
+    const withTangents = (
+      tangent: (index: number) => { kind: "automatic" } | null,
+      definition: SketchDefinition,
+    ): SketchDefinition => ({
+      ...definition,
+      entities: definition.entities.map((entity) =>
+        entity.kind === "spline" && entity.entityId === splineEntityId
+          ? {
+              ...entity,
+              pointOccurrences: entity.pointOccurrences.map(
+                (occurrence, index) => ({
+                  ...occurrence,
+                  tangent: tangent(index) ?? occurrence.tangent,
+                }),
+              ),
+            }
+          : entity,
+      ),
+    });
+    // An authored tangent accepted by one real committed solve.
+    const authored = solveCommittedConstraintDefinition(
+      {
+        ...gapped.definition,
+        entities: gapped.definition.entities.map((entity) =>
+          entity.kind === "spline" && entity.entityId === splineEntityId
+            ? {
+                ...entity,
+                pointOccurrences: entity.pointOccurrences.map(
+                  (occurrence, index) =>
+                    index === 1
+                      ? {
+                          ...occurrence,
+                          tangent: {
+                            kind: "authored" as const,
+                            vector: [0.2, 1.1] as const,
+                          },
+                        }
+                      : occurrence,
+                ),
+              }
+            : entity,
+        ),
+      },
+      [],
+    );
+    if (!authored.solvedSnapshot) throw new Error("authored tangent rejected");
+    const pair = authored as AcceptedPair;
+    expect(adaptRecorded(pair).result.ok).toBe(true);
+    const stale = {
+      ...pair,
+      definition: withTangents(() => ({ kind: "automatic" }), pair.definition),
+    };
+    for (const point of stale.definition.points)
+      expect(
+        samePointForTest(
+          point.position,
+          pair.solvedSnapshot.solvedPoints.find(
+            (item) => item.pointId === point.pointId,
+          )!.solvedPosition,
+        ),
+      ).toBe(true);
+    expectAdapterRejects(
+      adaptRecorded(stale),
+      "spline seed geometry does not match",
+      ["reconstruct"],
+    );
+  }, 300_000);
+
+  test("E4: each coincident join must be exactly one direct, identically ordered coincident constraint of this definition", () => {
+    const { pair } = lineSplineGap(0.1, true, true);
+    const connectivity = connectivityOf(pair.definition);
+    const join = coincidentJoin({ connectivity }, 0);
+    expect(pair.definition.constraints).toEqual([
+      expect.objectContaining({
+        kind: "coincident",
+        constraintId: join.constraintId,
+      }),
+    ]);
+    // N7: the constraint deleted and the sketch re-solved (accepted), while the
+    // connectivity still declares it.
+    const without = solveCommittedConstraintDefinition(
+      {
+        ...pair.definition,
+        constraintIds: [],
+        constraints: [],
+      },
+      [],
+    );
+    if (!without.solvedSnapshot) throw new Error("re-solve rejected");
+    expectAdapterRejects(
+      adaptRecorded(without as AcceptedPair, connectivity),
+      "not a direct constraint of this definition",
+    );
+    // Admission adversaries: join order swapped; duplicated constraint identity.
+    const swapped = {
+      ...connectivity,
+      joins: [
+        { ...join, pointIds: [join.pointIds[1], join.pointIds[0]] as const },
+      ],
+    };
+    expectAdapterRejects(
+      adaptRecorded(pair, swapped),
+      "not a direct constraint of this definition",
+    );
+    const constraint = pair.definition.constraints[0]!;
+    const duplicated: AcceptedPair = {
+      definition: {
+        ...pair.definition,
+        constraintIds: [constraint.constraintId, constraint.constraintId],
+        constraints: [constraint, constraint],
+      },
+      solvedSnapshot: {
+        ...pair.solvedSnapshot,
+        constraintStatuses: [
+          pair.solvedSnapshot.constraintStatuses[0]!,
+          pair.solvedSnapshot.constraintStatuses[0]!,
+        ],
+      },
+    };
+    expectAdapterRejects(
+      adaptRecorded(duplicated, connectivity),
+      "not a direct constraint of this definition",
+    );
+  }, 300_000);
+
+  test("W2 admission adversaries: a coincident join must bind the two distinct actual traversal terminals", () => {
+    const { line, pair } = lineSplineGap(0.1, true, true);
+    const chain = pairChain(pair, 0.01);
+    const resolved = accepted(chain);
+    const join = coincidentJoin(chain, 0);
+    const forge = (
+      joins: DeclaredOffsetChainPieces["connectivity"]["joins"],
+      declared: DeclaredOffsetChainPieces = chain.declared,
+    ) => ({
+      ...declared,
+      connectivity: { ...declared.connectivity, joins },
+    });
+    // A non-terminal ID (the line's far start) in place of the line's exit.
+    expect(
+      certifyOffsetChainTubeStability(
+        resolved,
+        refusing,
+        forge([{ ...join, pointIds: [join.pointIds[0], lineEnds(line)[0]] }]),
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("shared traversal terminal"),
+    });
+    // A shared-point chain cannot be relabelled as a coincidence of one ID.
+    const shared = nativeChain(splineThenLine(false), 0.01);
+    const sharedJoin = shared.connectivity.joins[0]!;
+    if (sharedJoin.kind !== "sharedPoint") throw new Error("shared join");
+    expect(
+      certifyOffsetChainTubeStability(
+        accepted(shared),
+        refusing,
+        forge(
+          [
+            {
+              kind: "coincidentConstraint",
+              constraintId: join.constraintId,
+              pointIds: [sharedJoin.pointId, sharedJoin.pointId],
+            },
+          ],
+          shared.declared,
+        ),
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: codes.topologyUncertain,
+      message: expect.stringContaining("shared traversal terminal"),
+    });
+  }, 300_000);
 
   test("MR6 wrapper binding: every resolver domain end names its declared joint", () => {
     const chain = nativeChain(splineThenLine(false), 0.01);
