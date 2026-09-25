@@ -7,6 +7,7 @@ import {
   checkNeutralCurvePointConsistency,
   evaluateNeutralCurve,
   validateNeutralCurveQueryRequest,
+  type EndpointNeutralSegment,
   type NeutralCurve,
   type NeutralCurveQueryRequest,
 } from "@/contracts/modeling/neutral-curve-query";
@@ -297,4 +298,94 @@ test("line, phased circle, and cubic retain their documented source parameters",
   expect(evaluateNeutralCurve(line, -2)).toEqual([2, 1]);
   expect(evaluateNeutralCurve(phased, Math.PI * 2)).toEqual([10, 21]);
   expect(evaluateNeutralCurve(cubic, 3)).toEqual([1.5, 0]);
+});
+
+const segment = (
+  curveId: string,
+  start: readonly [number, number],
+  end: readonly [number, number],
+  queryDomain?: readonly [number, number],
+): EndpointNeutralSegment => ({
+  curveId,
+  kind: "line",
+  form: "endpointSegment",
+  start,
+  end,
+  sourceDomain: [0, 1],
+  ...(queryDomain ? { queryDomain } : {}),
+  provenance: { sourceEntityId: curveId, sourceSpanId: "segment" },
+});
+
+test("endpoint segments validate exact distinct endpoints, a finite binary64 difference and the [0, 1] domain", () => {
+  const other = circle("valid", [2, 0]);
+  const valid = segment("valid-segment", [0, 0], [3, 4]);
+  expect(validateNeutralCurveQueryRequest(request(valid, other))).toBeNull();
+  expect(
+    validateNeutralCurveQueryRequest(
+      request(segment("clipped", [0, 0], [3, 4], [0.25, 1]), other),
+    ),
+  ).toBeNull();
+  expect(
+    validateNeutralCurveQueryRequest(
+      request(
+        segment("subnormal-difference", [0, 0], [Number.MIN_VALUE, 0]),
+        other,
+      ),
+    ),
+    "a gradual-underflow difference is exact and nonzero, so it is accepted",
+  ).toBeNull();
+  const invalid: unknown[] = [
+    segment("equal", [1, 2], [1, 2]),
+    segment("signed-zero-equal", [0, -0], [-0, 0]),
+    segment("nan-start", [Number.NaN, 0], [1, 0]),
+    segment("infinite-end", [0, 0], [Number.POSITIVE_INFINITY, 0]),
+    segment(
+      "difference-overflow",
+      [-Number.MAX_VALUE, 0],
+      [Number.MAX_VALUE, 0],
+    ),
+    segment(
+      "difference-overflow-y",
+      [0, Number.MAX_VALUE],
+      [1, -Number.MAX_VALUE],
+    ),
+    segment("query-outside", [0, 0], [1, 0], [0.5, 1.5]),
+    segment("query-zero-width", [0, 0], [1, 0], [0.5, 0.5]),
+    segment("query-decreasing", [0, 0], [1, 0], [0.75, 0.25]),
+    { ...valid, sourceDomain: [0, 2] },
+    { ...valid, sourceDomain: [-1, 1] },
+    { ...valid, form: "endpointArc" },
+    { ...valid, form: null },
+    { ...valid, form: undefined },
+  ];
+  for (const curve of invalid) {
+    expect(
+      validateNeutralCurveQueryRequest(request(curve as NeutralCurve, other)),
+      JSON.stringify(curve),
+    ).toMatchObject({ kind: "uncertain", code: "invalid-neutral-curve-query" });
+  }
+});
+
+test("endpoint segment evaluation returns the stored pairs exactly at 0 and 1", () => {
+  const start = [1, 0] as const;
+  const end = [1e-20, 1] as const;
+  const curve = segment("endpoint", start, end);
+  // The affine round trip loses the end: 1 + (1e-20 - 1) is 0, not 1e-20.
+  expect(start[0] + 1 * (end[0] - start[0])).toBe(0);
+  const atStart = evaluateNeutralCurve(curve, 0);
+  const atEnd = evaluateNeutralCurve(curve, 1);
+  expect(atStart.every((value, index) => Object.is(value, start[index]))).toBe(
+    true,
+  );
+  expect(atEnd.every((value, index) => Object.is(value, end[index]))).toBe(
+    true,
+  );
+  expect(atStart).not.toBe(start);
+  expect(evaluateNeutralCurve(segment("mid", [0, 0], [3, 4]), 0.5)).toEqual([
+    1.5, 2,
+  ]);
+  expect(() => evaluateNeutralCurve(curve, 1.5)).toThrow(RangeError);
+  expect(() =>
+    evaluateNeutralCurve(segment("clip", [0, 0], [1, 0], [0.5, 1]), 0.25),
+  ).toThrow(RangeError);
 });

@@ -15,6 +15,7 @@ import {
 import {
   admitVerifiedNeutralCurveResult,
   cubicPowerCoefficients,
+  exactLineSupport,
   exactVector,
   lineCirclePolynomial,
   restrictedLineCubicData,
@@ -314,8 +315,7 @@ function consistentOrUncertain(
 }
 
 function linePointPolynomials(line: Line, budget: ExactProofBudget) {
-  const origin = exactVector(line.origin, budget);
-  const direction = exactVector(line.direction, budget);
+  const { origin, direction } = exactLineSupport(line, budget);
   return [
     [origin[0], direction[0]],
     [origin[1], direction[1]],

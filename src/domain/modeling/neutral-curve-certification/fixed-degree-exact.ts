@@ -490,6 +490,33 @@ export function exactVector(value: SplineVector, budget?: ExactProofBudget) {
   ) as [ExactFraction, ExactFraction];
 }
 
+/**
+ * The sole exact reading of a line support `origin + s·direction`. A numeric
+ * line converts its binary64 fields (charges unchanged); an endpoint segment
+ * uses its exact start and the exact metered difference `end − start`, never
+ * the binary64 difference.
+ */
+export function exactLineSupport(
+  line: Extract<NeutralCurve, { kind: "line" }>,
+  budget?: ExactProofBudget,
+) {
+  if (line.form === undefined) {
+    return {
+      origin: exactVector(line.origin, budget),
+      direction: exactVector(line.direction, budget),
+    };
+  }
+  const origin = exactVector(line.start, budget);
+  const end = exactVector(line.end, budget);
+  return {
+    origin,
+    direction: [
+      subtractExact(end[0], origin[0], budget),
+      subtractExact(end[1], origin[1], budget),
+    ] as [ExactFraction, ExactFraction],
+  };
+}
+
 function interpolateExact(
   first: ExactFraction,
   second: ExactFraction,
@@ -590,8 +617,7 @@ export function restrictedLineCubicData(
   cubic: Extract<NeutralCurve, { kind: "cubicBezier" }>,
   budget?: ExactProofBudget,
 ) {
-  const origin = exactVector(line.origin, budget);
-  const direction = exactVector(line.direction, budget);
+  const { origin, direction } = exactLineSupport(line, budget);
   const relativePole = (pole: SplineVector) => {
     const exactPole = exactVector(pole, budget);
     return [
@@ -690,19 +716,19 @@ export function lineCirclePolynomial(
   circle: Extract<NeutralCurve, { kind: "circle" }>,
   budget?: ExactProofBudget,
 ) {
+  const { origin, direction } = exactLineSupport(line, budget);
   const displacement = [
     subtractExact(
-      exactFractionFromFiniteDouble(line.origin[0], budget),
+      origin[0],
       exactFractionFromFiniteDouble(circle.center[0], budget),
       budget,
     ),
     subtractExact(
-      exactFractionFromFiniteDouble(line.origin[1], budget),
+      origin[1],
       exactFractionFromFiniteDouble(circle.center[1], budget),
       budget,
     ),
   ] as const;
-  const direction = exactVector(line.direction, budget);
   const radius = exactFractionFromFiniteDouble(circle.radius, budget);
   return [
     subtractExact(
@@ -1088,8 +1114,7 @@ function exactLinePoint(
   parameter: ExactFraction,
   budget?: ExactProofBudget,
 ) {
-  const origin = exactVector(line.origin, budget);
-  const direction = exactVector(line.direction, budget);
+  const { origin, direction } = exactLineSupport(line, budget);
   return [
     addExact(origin[0], multiplyExact(direction[0], parameter, budget), budget),
     addExact(origin[1], multiplyExact(direction[1], parameter, budget), budget),
@@ -1248,10 +1273,14 @@ export function proveFiniteLinePair(
   }
   const first = request.first;
   const second = request.second;
-  const firstDirection = exactVector(first.direction, budget);
-  const secondDirection = exactVector(second.direction, budget);
-  const firstOrigin = exactVector(first.origin, budget);
-  const secondOrigin = exactVector(second.origin, budget);
+  const { origin: firstOrigin, direction: firstDirection } = exactLineSupport(
+    first,
+    budget,
+  );
+  const { origin: secondOrigin, direction: secondDirection } = exactLineSupport(
+    second,
+    budget,
+  );
   const displacement = [
     subtractExact(secondOrigin[0], firstOrigin[0], budget),
     subtractExact(secondOrigin[1], firstOrigin[1], budget),

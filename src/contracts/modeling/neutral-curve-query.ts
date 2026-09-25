@@ -44,13 +44,32 @@ export interface CircleQueryDomain {
   readonly interval: readonly [number, number];
 }
 
+export type NumericNeutralLine = BoundedNeutralCurveBase & {
+  readonly kind: "line";
+  /** Discriminant only: the literal numeric line keeps its existing meaning. */
+  readonly form?: undefined;
+  readonly origin: SplineVector;
+  /** Unit vector. The source parameter is signed model-space distance. */
+  readonly direction: SplineVector;
+};
+
+/**
+ * Endpoint-preserving finite segment. The exact support is the exact dyadic
+ * `start + t·(end − start)`; parameter 0 is exactly `start` and 1 exactly `end`.
+ */
+export type EndpointNeutralSegment = NeutralCurveBase & {
+  readonly kind: "line";
+  readonly form: "endpointSegment";
+  readonly start: SplineVector;
+  readonly end: SplineVector;
+  readonly sourceDomain: readonly [0, 1];
+  /** Increasing active subinterval of [0, 1]. */
+  readonly queryDomain?: readonly [number, number];
+};
+
 export type NeutralCurve =
-  | (BoundedNeutralCurveBase & {
-      readonly kind: "line";
-      readonly origin: SplineVector;
-      /** Unit vector. The source parameter is signed model-space distance. */
-      readonly direction: SplineVector;
-    })
+  | NumericNeutralLine
+  | EndpointNeutralSegment
   | (NeutralCurveBase & {
       readonly kind: "circle";
       readonly center: SplineVector;
@@ -462,7 +481,20 @@ function nonzeroDirection(value: SplineVector) {
 
 function validCurveGeometry(curve: NeutralCurve) {
   if (curve.kind === "line") {
-    return finiteVector(curve.origin) && unitVector(curve.direction);
+    if (curve.form === undefined) {
+      return finiteVector(curve.origin) && unitVector(curve.direction);
+    }
+    return (
+      curve.form === "endpointSegment" &&
+      finiteVector(curve.start) &&
+      finiteVector(curve.end) &&
+      // Binary64 differences are evaluation-only; exact code subtracts exactly.
+      Number.isFinite(curve.end[0] - curve.start[0]) &&
+      Number.isFinite(curve.end[1] - curve.start[1]) &&
+      (curve.start[0] !== curve.end[0] || curve.start[1] !== curve.end[1]) &&
+      curve.sourceDomain[0] === 0 &&
+      curve.sourceDomain[1] === 1
+    );
   }
   if (curve.kind === "circle") {
     return (
@@ -504,7 +536,7 @@ export function validateNeutralCurveQueryRequest(
         kind: "uncertain",
         code: "invalid-neutral-curve-query",
         message:
-          "Neutral queries require finite geometry, unit directions, positive radii and tolerance, and finite increasing bounded domains.",
+          "Neutral queries require finite geometry, unit directions or exact distinct segment endpoints, positive radii and tolerance, and finite increasing bounded domains.",
       };
 }
 
@@ -517,6 +549,14 @@ export function evaluateNeutralCurve(
     throw new RangeError(
       "Neutral curve parameter is outside its source domain",
     );
+  }
+  if (curve.kind === "line" && curve.form === "endpointSegment") {
+    if (sourceParameter === 0) return [curve.start[0], curve.start[1]];
+    if (sourceParameter === 1) return [curve.end[0], curve.end[1]];
+    return [
+      curve.start[0] + sourceParameter * (curve.end[0] - curve.start[0]),
+      curve.start[1] + sourceParameter * (curve.end[1] - curve.start[1]),
+    ];
   }
   if (curve.kind === "line") {
     return [
@@ -554,6 +594,12 @@ export function evaluateNeutralCurveInFrame(
     point[0] - frameOrigin[0],
     point[1] - frameOrigin[1],
   ];
+  if (curve.kind === "line" && curve.form === "endpointSegment") {
+    return evaluateNeutralCurve(
+      { ...curve, start: translate(curve.start), end: translate(curve.end) },
+      sourceParameter,
+    );
+  }
   if (curve.kind === "line") {
     return evaluateNeutralCurve(
       { ...curve, origin: translate(curve.origin) },
@@ -608,6 +654,13 @@ function curveEvaluationScaleInFrame(
       Math.abs(point[0] - frameOrigin[0]),
       Math.abs(point[1] - frameOrigin[1]),
     );
+  if (curve.kind === "line" && curve.form === "endpointSegment") {
+    return Math.max(
+      1,
+      coordinateScale(curve.start),
+      coordinateScale(curve.end),
+    );
+  }
   if (curve.kind === "line") {
     return Math.max(
       1,

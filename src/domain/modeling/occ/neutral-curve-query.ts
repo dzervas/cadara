@@ -7,6 +7,7 @@ import {
   getNeutralCurveActiveSearchBounds,
   neutralCurveParameterInside,
   validateNeutralCurveQueryRequest,
+  type EndpointNeutralSegment,
   type NeutralCurve,
   type NeutralCurveQueryCapability,
   type NeutralCurveQueryRequest,
@@ -25,6 +26,10 @@ import {
   type NativeCirclePairCandidate,
   type NativeLineCurveCandidate,
 } from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
+import {
+  certifyConstructiveLineCircle,
+  certifyConstructiveLineCubic,
+} from "@/domain/modeling/neutral-curve-certification/fixed-degree-curve-roots";
 import {
   ExactProofBudget,
   type ExactProofBudgetSnapshot,
@@ -57,6 +62,19 @@ interface ParametricIntersection extends NativeIntersection {
 interface PointArray extends Deletable {
   SetValue(index: number, value: Point2d): void;
 }
+/** Endpoint segments are routed to the kernel-free exact owners and never reach OCC. */
+type NativeNeutralCurve = Exclude<NeutralCurve, EndpointNeutralSegment>;
+type NativeNeutralCurveQueryRequest = NeutralCurveQueryRequest & {
+  readonly first: NativeNeutralCurve;
+  readonly second: NativeNeutralCurve;
+};
+
+function isNativeNeutralCurve(
+  curve: NeutralCurve,
+): curve is NativeNeutralCurve {
+  return curve.kind !== "line" || curve.form === undefined;
+}
+
 type CurveHandle = Deletable;
 type CurveAdaptor = Deletable;
 type Constructor<T> = new (...args: unknown[]) => T;
@@ -175,7 +193,7 @@ function withOwned<T>(
 }
 
 function sourceParameter(
-  curve: NeutralCurve,
+  curve: NativeNeutralCurve,
   nativeParameter: number,
 ): number | null {
   const active = getNeutralCurveActiveSearchBounds(curve);
@@ -232,7 +250,7 @@ function transferCurveToHandle(
 
 function makeNativeCurve(
   oc: NeutralOccBindings,
-  curve: NeutralCurve,
+  curve: NativeNeutralCurve,
   own: <V extends Deletable>(value: V) => V,
 ): CurveHandle {
   const Point = oc.gp_Pnt2d_3!;
@@ -264,7 +282,7 @@ function makeNativeCurve(
   return transferCurveToHandle(geometry, Handle, own);
 }
 
-function nativeParameter(curve: NeutralCurve, sourceParameter: number) {
+function nativeParameter(curve: NativeNeutralCurve, sourceParameter: number) {
   if (curve.kind === "cubicBezier") {
     return (
       (sourceParameter - curve.sourceDomain[0]) /
@@ -279,7 +297,7 @@ function nativeParameter(curve: NeutralCurve, sourceParameter: number) {
 
 function runNativeSemanticQuery(
   oc: NeutralOccBindings,
-  request: NeutralCurveQueryRequest,
+  request: NativeNeutralCurveQueryRequest,
   selfQuery: boolean,
 ):
   | {
@@ -382,7 +400,7 @@ function queryNativeCirclePair(
 
 function queryParametricCurves(
   oc: NeutralOccBindings,
-  request: NeutralCurveQueryRequest,
+  request: NativeNeutralCurveQueryRequest,
   budget: ExactProofBudget,
 ): NeutralCurveQueryResult {
   return withOwned((own) => {
@@ -481,6 +499,18 @@ function createCapability(
         const finiteLineResult = proveFiniteLinePair(request, budget);
         if (finiteLineResult) return finiteLineResult;
 
+        const { first, second } = request;
+        if (!isNativeNeutralCurve(first) || !isNativeNeutralCurve(second)) {
+          // A segment pairs only with a line (proved above), a circle or a cubic.
+          return (certifyConstructiveLineCircle(request, budget) ??
+            certifyConstructiveLineCubic(request, budget))!;
+        }
+        const nativeRequest: NativeNeutralCurveQueryRequest = {
+          ...request,
+          first,
+          second,
+        };
+
         let structural: NeutralCurveQueryResult | null = null;
         if (
           request.first.kind === "cubicBezier" &&
@@ -545,7 +575,7 @@ function createCapability(
               budget,
             );
           }
-          const native = runNativeSemanticQuery(oc, request, false);
+          const native = runNativeSemanticQuery(oc, nativeRequest, false);
           if (native.kind !== "ok") return native;
           const failure = nativeFailureResult(native.payload);
           if (failure) return failure;
@@ -577,7 +607,7 @@ function createCapability(
             `Production OCC is missing required parametric neutral-query bindings: ${missing.join(", ")}.`,
           );
         }
-        return queryParametricCurves(oc, request, budget);
+        return queryParametricCurves(oc, nativeRequest, budget);
       } catch (error) {
         if (error instanceof ExactQueryProofBudgetExceeded) {
           return uncertain(
