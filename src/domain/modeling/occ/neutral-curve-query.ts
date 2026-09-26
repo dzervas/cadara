@@ -15,11 +15,10 @@ import {
   type NeutralCurveSelfIntersectionRequest,
 } from "@/contracts/modeling/neutral-curve-query";
 import { validateCertifiedCircleAngularDomain } from "@/domain/modeling/neutral-curve-certification/circle-angular-certification";
+import { certifyCubicPairExact } from "@/domain/modeling/neutral-curve-certification/cubic-pair-exact";
 import {
-  certifyCircleCubicPair,
   certifyCirclePairCandidates,
   certifyCubicSelfIntersection,
-  certifyStructuralCubicPair,
   ExactQueryProofBudgetExceeded,
   proveFiniteLinePair,
   verifyCompleteLineCurveRootSet,
@@ -27,6 +26,8 @@ import {
   type NativeLineCurveCandidate,
 } from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
 import {
+  certifyConstructiveCircleCubic,
+  certifyConstructiveCirclePair,
   certifyConstructiveLineCircle,
   certifyConstructiveLineCubic,
 } from "@/domain/modeling/neutral-curve-certification/fixed-degree-curve-roots";
@@ -62,7 +63,10 @@ interface ParametricIntersection extends NativeIntersection {
 interface PointArray extends Deletable {
   SetValue(index: number, value: Point2d): void;
 }
-/** Endpoint segments are routed to the kernel-free exact owners and never reach OCC. */
+/**
+ * Endpoint segments are routed to the kernel-free exact owners and never reach
+ * OCC. Circles reach OCC only as full-turn circle/circle pairs.
+ */
 type NativeNeutralCurve = Exclude<NeutralCurve, EndpointNeutralSegment>;
 type NativeNeutralCurveQueryRequest = NeutralCurveQueryRequest & {
   readonly first: NativeNeutralCurve;
@@ -73,6 +77,15 @@ function isNativeNeutralCurve(
   curve: NeutralCurve,
 ): curve is NativeNeutralCurve {
   return curve.kind !== "line" || curve.form === undefined;
+}
+
+/** Native circle candidates cover whole turns; trimmed circle pairs prove kernel-free. */
+function hasArcActiveDomain(curve: NeutralCurve) {
+  return (
+    curve.kind === "circle" &&
+    validateCircleAngularDomain(curve.sourceDomain, curve.queryDomain)?.active
+      .kind === "arc"
+  );
 }
 
 type CurveHandle = Deletable;
@@ -202,19 +215,7 @@ function sourceParameter(
       curve.sourceDomain,
       curve.queryDomain,
     );
-    if (!angular) return null;
-    const lifted = liftNativeCircleParameter(angular, nativeParameter);
-    if (lifted !== null || angular.active.kind === "fullTurn") return lifted;
-    const active = angular.active.interval;
-    const turn = Math.round(
-      ((active[0] + active[1]) / 2 - nativeParameter) / 6.283185307179586,
-    );
-    if (!Number.isSafeInteger(turn)) return null;
-    for (const offset of [0, -1, 1]) {
-      const candidate = nativeParameter + (turn + offset) * 6.283185307179586;
-      if (neutralCurveParameterInside(candidate, active)) return candidate;
-    }
-    return null;
+    return angular ? liftNativeCircleParameter(angular, nativeParameter) : null;
   }
   const source =
     curve.kind === "cubicBezier"
@@ -447,19 +448,6 @@ function queryParametricCurves(
         position: [position.X(), position.Y()],
       });
     }
-    const circleCubic = certifyCircleCubicPair(request, budget);
-    if (circleCubic) {
-      if (
-        circleCubic.kind === "verified" &&
-        circleCubic.points.length !== candidates.length
-      ) {
-        return uncertain(
-          "occ-neutral-curve-root-set-incomplete",
-          "Native candidates do not correspond one-to-one with the complete exact circle/cubic root set.",
-        );
-      }
-      return circleCubic;
-    }
     return (
       verifyCompleteLineCurveRootSet(request, candidates, budget) ??
       uncertain(
@@ -499,11 +487,19 @@ function createCapability(
         const finiteLineResult = proveFiniteLinePair(request, budget);
         if (finiteLineResult) return finiteLineResult;
 
+        // Kernel-free exact owners. Each routed family has this one verifier
+        // and never loads OCC.
         const { first, second } = request;
+        const kernelFreeResult =
+          certifyConstructiveLineCircle(request, budget) ??
+          certifyConstructiveCircleCubic(request, budget) ??
+          (hasArcActiveDomain(first) || hasArcActiveDomain(second)
+            ? certifyConstructiveCirclePair(request, budget)
+            : null);
+        if (kernelFreeResult) return kernelFreeResult;
         if (!isNativeNeutralCurve(first) || !isNativeNeutralCurve(second)) {
-          // A segment pairs only with a line (proved above), a circle or a cubic.
-          return (certifyConstructiveLineCircle(request, budget) ??
-            certifyConstructiveLineCubic(request, budget))!;
+          // A remaining segment pairs only with a cubic.
+          return certifyConstructiveLineCubic(request, budget)!;
         }
         const nativeRequest: NativeNeutralCurveQueryRequest = {
           ...request,
@@ -512,44 +508,20 @@ function createCapability(
         };
 
         let structural: NeutralCurveQueryResult | null = null;
-        if (
-          request.first.kind === "cubicBezier" &&
-          request.second.kind === "cubicBezier"
-        ) {
-          structural = certifyStructuralCubicPair(
-            {
-              ...request,
-              first: request.first,
-              second: request.second,
-            },
-            budget,
-          );
+        if (first.kind === "cubicBezier" && second.kind === "cubicBezier") {
+          const cubicPair = certifyCubicPairExact(request, budget)!;
           const needsNativeComponent =
-            structural?.kind === "verified" &&
-            structural.completenessProof.kind ===
+            cubicPair.kind === "verified" &&
+            cubicPair.completenessProof.kind ===
               "completeStructuralCorrespondence" &&
-            structural.completenessProof.correspondence === "interval";
-          if (structural && !needsNativeComponent) return structural;
+            cubicPair.completenessProof.correspondence === "interval";
+          if (!needsNativeComponent) return cubicPair;
+          structural = cubicPair;
         }
 
-        const circlePair =
-          request.first.kind === "circle" && request.second.kind === "circle";
-        const circleCubic =
-          (request.first.kind === "circle" &&
-            request.second.kind === "cubicBezier") ||
-          (request.second.kind === "circle" &&
-            request.first.kind === "cubicBezier");
-        const supportedParametricPair =
-          circleCubic ||
-          (request.first.kind === "line" && request.second.kind !== "line") ||
-          (request.second.kind === "line" && request.first.kind !== "line");
-        if (!circlePair && !supportedParametricPair && !structural) {
-          return unsupported(
-            "occ-neutral-curve-pair-unsupported",
-            "Only exact finite line/line, analytic circle/circle, and independently verified line/circle or line/cubic queries are supported; non-structural cubic/cubic and circle/cubic pairs have no semantic verifier.",
-          );
-        }
-
+        // Only full-turn circle pairs, positive structural cubic overlaps, and
+        // numeric line/cubic pairs reach OCC.
+        const circlePair = first.kind === "circle" && second.kind === "circle";
         const oc = (await loadOpenCascade()) as NeutralOccBindings;
         if (circlePair || structural) {
           const required = [
@@ -567,11 +539,7 @@ function createCapability(
           if (circlePair) {
             return queryNativeCirclePair(
               oc,
-              {
-                ...request,
-                first: request.first,
-                second: request.second,
-              },
+              { ...request, first, second },
               budget,
             );
           }

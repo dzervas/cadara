@@ -45,6 +45,20 @@ const makeLine = (
   ...overrides,
 });
 
+const makeSegment = (
+  curveId: string,
+  start: readonly [number, number],
+  end: readonly [number, number],
+): NeutralCurve => ({
+  curveId,
+  kind: "line",
+  form: "endpointSegment",
+  start,
+  end,
+  sourceDomain: [0, 1],
+  provenance: { sourceEntityId: curveId, sourceSpanId: `${curveId}:full` },
+});
+
 const makeStraightCubic = (
   curveId: string,
   offset = 0,
@@ -187,6 +201,10 @@ function nativeSemanticRuntime(
 
 const analyticCircleRuntime = nativeSemanticRuntime;
 
+const neverLoadOpenCascade = async (): Promise<OpenCascadeInstance> => {
+  throw new Error("kernel-free query families must never load OCC");
+};
+
 function structuralCubicRuntime(
   input: NativeFixturePoint | readonly NativeFixturePoint[] = [],
 ) {
@@ -326,7 +344,7 @@ test("exported capability rejects malformed and legacy circle domains before loa
   expect(loads).toBe(0);
 });
 
-test("circle/cubic exact emptiness cannot bypass a native query failure", async () => {
+test("line/cubic exact emptiness cannot bypass a native query failure", async () => {
   class NotDoneIntersection extends Disposable {
     IsDone() {
       return false;
@@ -351,7 +369,10 @@ test("circle/cubic exact emptiness cannot bypass a native query failure", async 
   await expect(
     capability.queryNeutralCurves({
       modelingTolerance: 1e-6,
-      first: makeCircle("circle", [3, 0]),
+      first: makeLine("line", [0, 1], {
+        direction: [1, 0],
+        sourceDomain: [0, 1],
+      }),
       second: makeStraightCubic("cubic"),
     }),
   ).resolves.toMatchObject({
@@ -360,12 +381,9 @@ test("circle/cubic exact emptiness cannot bypass a native query failure", async 
   });
 });
 
-test("circle/cubic exact emptiness is certified while cubic/cubic remains explicitly unsupported", async () => {
-  let loads = 0;
-  const capability = createOpenCascadeNeutralCurveQueryCapability(async () => {
-    loads += 1;
-    return parametricRuntime();
-  });
+test("circle/cubic emptiness is certified and collinear non-structural cubic supports fail closed without loading OCC", async () => {
+  const capability =
+    createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
   const firstCubic = makeStraightCubic("first-cubic");
   const secondCubic = makeStraightCubic("second-cubic", 2);
   const circle = makeCircle("circle", [3, 0]);
@@ -381,8 +399,8 @@ test("circle/cubic exact emptiness is certified while cubic/cubic remains explic
         second,
       }),
     ).resolves.toMatchObject({
-      kind: "unsupported",
-      code: "occ-neutral-curve-pair-unsupported",
+      kind: "uncertain",
+      code: "cubic-pair-exact-projection-unresolved",
     });
   }
   for (const [first, second] of [
@@ -397,15 +415,11 @@ test("circle/cubic exact emptiness is certified while cubic/cubic remains explic
       completenessProof: { family: "circleCubic", distinctRootCount: 0 },
     });
   }
-  expect(loads).toBe(2);
 });
 
-test("circle/cubic promotes exact support emptiness but not unowned angular witnesses", async () => {
-  let loads = 0;
-  const capability = createOpenCascadeNeutralCurveQueryCapability(async () => {
-    loads += 1;
-    return parametricRuntime();
-  });
+test("circle/cubic certifies exact support emptiness and an incident endpoint root without loading OCC", async () => {
+  const capability =
+    createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
   const cubic = makeStraightCubic("diameter");
   await expect(
     capability.queryNeutralCurves({
@@ -425,10 +439,17 @@ test("circle/cubic promotes exact support emptiness but not unowned angular witn
       second: cubic,
     }),
   ).resolves.toMatchObject({
-    kind: "uncertain",
-    code: "circle-cubic-angular-certification-pending",
+    kind: "verified",
+    points: [
+      {
+        classification: "unclassified",
+        firstParameter: 0,
+        secondParameter: 1,
+        position: [1, 0],
+      },
+    ],
+    completenessProof: { family: "circleCubic", distinctRootCount: 1 },
   });
-  expect(loads).toBe(2);
 });
 
 test("finite line queries prove crossings, clipped disjointness, and reversed arguments without loading OCC", async () => {
@@ -686,6 +707,8 @@ test("complete exact root counts certify line/circle emptiness but reject a miss
   const capability = createOpenCascadeNeutralCurveQueryCapability(async () =>
     parametricRuntime(),
   );
+  const kernelFreeCapability =
+    createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
   const line = makeLine("line", [0, 0]);
   const cubic = makeStraightCubic("cubic");
   const circle = makeCircle("circle", [2, 0]);
@@ -710,7 +733,7 @@ test("complete exact root counts certify line/circle emptiness but reject a miss
     [circle, line],
   ] as const) {
     await expect(
-      capability.queryNeutralCurves({
+      kernelFreeCapability.queryNeutralCurves({
         modelingTolerance: 1e3,
         first,
         second,
@@ -719,44 +742,34 @@ test("complete exact root counts certify line/circle emptiness but reject a miss
   }
 });
 
-test("line/circle candidates require disjoint one-root certificates and count endpoint roots once", async () => {
-  const circle = makeCircle("circle", [0, 0]);
+test("numeric line/circle proves its complete root set kernel-free and counts endpoint roots once", async () => {
+  // Move the seam off both roots so only the line endpoint is unclassified.
+  const circle = makeCircle("circle", [0, 0], {
+    sourceDomain: { kind: "fullTurn", seam: 1 },
+  });
   const line = makeLine("line", [-2, 0], {
     direction: [1, 0],
     sourceDomain: [0, 4],
   });
-  const duplicateRootCapability = createOpenCascadeNeutralCurveQueryCapability(
-    async () =>
-      parametricRuntime([
-        { firstParameter: 1, secondParameter: Math.PI, position: [-1, 0] },
-        {
-          firstParameter: 1 + Number.EPSILON,
-          secondParameter: Math.PI,
-          position: [-1, 0],
-        },
-      ]),
-  );
-  await expect(
-    duplicateRootCapability.queryNeutralCurves({
-      modelingTolerance: 1e-6,
-      first: line,
-      second: circle,
-    }),
-  ).resolves.toMatchObject({
-    kind: "uncertain",
-    code: "occ-neutral-curve-root-set-incomplete",
+  const capability =
+    createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
+  const secant = await capability.queryNeutralCurves({
+    modelingTolerance: 1e-6,
+    first: line,
+    second: circle,
+  });
+  expect(secant).toMatchObject({
+    kind: "verified",
+    points: [
+      { classification: "crossing", firstParameter: 1 },
+      { classification: "crossing", firstParameter: 3 },
+    ],
+    completenessProof: { family: "lineCircle", distinctRootCount: 2 },
   });
 
   const endpointLine = { ...line, sourceDomain: [0, 3] as const };
-  const endpointCapability = createOpenCascadeNeutralCurveQueryCapability(
-    async () =>
-      parametricRuntime([
-        { firstParameter: 1, secondParameter: Math.PI, position: [-1, 0] },
-        { firstParameter: 3, secondParameter: 0, position: [1, 0] },
-      ]),
-  );
   await expect(
-    endpointCapability.queryNeutralCurves({
+    capability.queryNeutralCurves({
       modelingTolerance: 1e-6,
       first: endpointLine,
       second: circle,
@@ -764,9 +777,14 @@ test("line/circle candidates require disjoint one-root certificates and count en
   ).resolves.toMatchObject({
     kind: "verified",
     points: [
-      { firstParameter: 1, proof: { verification: "exactRoot" } },
-      { firstParameter: 3, proof: { verification: "exactRoot" } },
+      { classification: "crossing", firstParameter: 1 },
+      {
+        classification: "unclassified",
+        firstParameter: 3,
+        proof: { verification: "exactRoot" },
+      },
     ],
+    completenessProof: { family: "lineCircle", distinctRootCount: 2 },
   });
 });
 
@@ -781,28 +799,8 @@ test("full-turn line/circle roots lift into nonzero and large symbolic windings 
       sourceDomain: { kind: "fullTurn", seam },
     });
     for (const circleFirst of [false, true]) {
-      const capability = createOpenCascadeNeutralCurveQueryCapability(
-        async () =>
-          parametricRuntime(
-            circleFirst
-              ? [
-                  {
-                    firstParameter: Math.PI,
-                    secondParameter: 1,
-                    position: [-1, 0],
-                  },
-                  { firstParameter: 0, secondParameter: 3, position: [1, 0] },
-                ]
-              : [
-                  {
-                    firstParameter: 1,
-                    secondParameter: Math.PI,
-                    position: [-1, 0],
-                  },
-                  { firstParameter: 3, secondParameter: 0, position: [1, 0] },
-                ],
-          ),
-      );
+      const capability =
+        createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
       const result = await capability.queryNeutralCurves({
         modelingTolerance: 1e6,
         first: circleFirst ? circle : line,
@@ -836,29 +834,35 @@ test("full-turn line/circle roots lift into nonzero and large symbolic windings 
   }
 });
 
-test("full-turn angular enclosure exhaustion fails the whole line/circle query closed", async () => {
-  const capability = createOpenCascadeNeutralCurveQueryCapability(async () =>
-    parametricRuntime([
-      { firstParameter: 1, secondParameter: Math.PI, position: [-1, 0] },
-      { firstParameter: 3, secondParameter: 0, position: [1, 0] },
-    ]),
-  );
-  await expect(
-    capability.queryNeutralCurves({
-      modelingTolerance: 1e12,
-      first: makeLine("exhausted-line", [-2, 0], {
-        direction: [1, 0],
-        sourceDomain: [0, 4],
-      }),
-      second: makeCircle("exhausted-circle", [0, 0], {
-        xAxis: [13, 0],
-        sourceDomain: { kind: "fullTurn", seam: 2_000_000 },
-      }),
+test("far-seam nonunit-axis line/circle roots are certified kernel-free in the selected winding", async () => {
+  const seam = 2_000_000;
+  const result = await createOpenCascadeNeutralCurveQueryCapability(
+    neverLoadOpenCascade,
+  ).queryNeutralCurves({
+    modelingTolerance: 1e12,
+    first: makeLine("far-seam-line", [-2, 0], {
+      direction: [1, 0],
+      sourceDomain: [0, 4],
     }),
-  ).resolves.toMatchObject({
-    kind: "uncertain",
-    code: "occ-neutral-curve-root-association-unrepresentable",
+    second: makeCircle("far-seam-circle", [0, 0], {
+      xAxis: [13, 0],
+      sourceDomain: { kind: "fullTurn", seam },
+    }),
   });
+  expect(result, JSON.stringify(result)).toMatchObject({
+    kind: "verified",
+    points: [
+      { classification: "crossing", firstParameter: 1 },
+      { classification: "crossing", firstParameter: 3 },
+    ],
+    completenessProof: { family: "lineCircle", distinctRootCount: 2 },
+  });
+  if (result.kind === "verified") {
+    for (const point of result.points) {
+      expect(point.secondParameter).toBeGreaterThanOrEqual(seam);
+      expect(point.secondParameter).toBeLessThan(seam + 6.283185307179587);
+    }
+  }
 });
 
 test("circle/circle candidates must inject into distinct exact root side classes", async () => {
@@ -1049,14 +1053,9 @@ test("near-tangent circle candidates cannot use wrong reported positions to fake
   });
 });
 
-test("partial circle domains fail closed even for a near-boundary native representative", async () => {
-  const capability = createOpenCascadeNeutralCurveQueryCapability(async () =>
-    parametricRuntime({
-      firstParameter: 1,
-      secondParameter: Number.EPSILON,
-      position: [1, 0],
-    }),
-  );
+test("a line tangent just outside a partial circle domain is excluded exactly without loading OCC", async () => {
+  const capability =
+    createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
   await expect(
     capability.queryNeutralCurves({
       modelingTolerance: 1e-6,
@@ -1072,8 +1071,10 @@ test("partial circle domains fail closed even for a near-boundary native represe
       }),
     }),
   ).resolves.toMatchObject({
-    kind: "uncertain",
-    code: "occ-neutral-curve-circle-active-domain-proof-unavailable",
+    kind: "verified",
+    points: [],
+    overlaps: [],
+    completenessProof: { family: "lineCircle", distinctRootCount: 0 },
   });
 });
 
@@ -1208,6 +1209,51 @@ test("zero-candidate line/cubic queries require exact strict active-hull separat
   });
 });
 
+test("native line/cubic candidates with overlapping certificates cannot stand in for two distinct roots", async () => {
+  // y(t) = 9/16 - 3t(1 - t) has exactly the two roots t = 1/4 and t = 3/4.
+  const line = makeLine("duplicate-line", [0, 0], {
+    direction: [1, 0],
+    sourceDomain: [0, 1],
+  });
+  const cubic: Extract<NeutralCurve, { kind: "cubicBezier" }> = {
+    curveId: "two-root-cubic",
+    kind: "cubicBezier",
+    poles: [
+      [0, 9 / 16],
+      [1 / 3, -7 / 16],
+      [2 / 3, -7 / 16],
+      [1, 9 / 16],
+    ],
+    sourceDomain: [0, 1],
+    provenance: { sourceEntityId: "two-root-cubic", sourceSpanId: "span" },
+  };
+  // One candidate at the exact root and one at root + epsilon: the count
+  // matches the complete root set, but both certificates enclose t = 1/4.
+  const roots = [0.25, 0.25 + Number.EPSILON];
+  for (const lineFirst of [true, false]) {
+    const capability = createOpenCascadeNeutralCurveQueryCapability(async () =>
+      parametricRuntime(
+        roots.map((root) => ({
+          firstParameter: root,
+          secondParameter: root,
+          position: [root, 0] as const,
+        })),
+      ),
+    );
+    await expect(
+      capability.queryNeutralCurves({
+        modelingTolerance: 1e-6,
+        first: lineFirst ? line : cubic,
+        second: lineFirst ? cubic : line,
+      }),
+      `lineFirst ${lineFirst}`,
+    ).resolves.toMatchObject({
+      kind: "uncertain",
+      code: "occ-neutral-curve-root-set-incomplete",
+    });
+  }
+});
+
 test("line/cubic exact-root classification follows multiplicity parity", async () => {
   const line = makeLine("line", [0, 0], {
     direction: [1, 0],
@@ -1295,13 +1341,8 @@ test("complete exact root sets verify line/circle crossings and line/cubic tange
     direction: [1, 0],
     sourceDomain: [0, 4],
   });
-  const circleCapability = createOpenCascadeNeutralCurveQueryCapability(
-    async () =>
-      parametricRuntime([
-        { firstParameter: 1, secondParameter: Math.PI, position: [-1, 0] },
-        { firstParameter: 3, secondParameter: 0, position: [1, 0] },
-      ]),
-  );
+  const circleCapability =
+    createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
   const circleResult = await circleCapability.queryNeutralCurves({
     modelingTolerance: 1e3,
     first: secant,
@@ -1360,14 +1401,9 @@ test("complete exact root sets verify line/circle crossings and line/cubic tange
   });
 });
 
-test("analytic circles preserve phase and retain a tangent in an unwrapped bounded domain", async () => {
-  const capability = createOpenCascadeNeutralCurveQueryCapability(async () =>
-    analyticCircleRuntime({
-      firstParameter: 0,
-      secondParameter: 0,
-      position: [0, 1],
-    }),
-  );
+test("arc pairs preserve phase and retain a tangent in an unwrapped bounded domain without loading OCC", async () => {
+  const capability =
+    createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
   const result = await capability.queryNeutralCurves({
     modelingTolerance: 1e-6,
     first: makeCircle("first", [0, 0], {
@@ -1398,8 +1434,9 @@ test("analytic circles preserve phase and retain a tangent in an unwrapped bound
     }),
   });
   expect(clipped).toMatchObject({
-    kind: "uncertain",
-    code: "occ-neutral-curve-circle-active-domain-proof-unavailable",
+    kind: "verified",
+    points: [],
+    completenessProof: { family: "circlePair", distinctRootCount: 0 },
   });
 });
 
@@ -2108,7 +2145,7 @@ test("parametric witnesses bind both parameters and the reported point to the lo
   }
 });
 
-test("a partial circle domain remains uncertain despite a locally consistent native representative", async () => {
+test("a large-phase partial circle domain fails closed on the exact meter without loading OCC", async () => {
   const period = Math.PI * 2;
   const sourceDomain = [1e12, 1e12 + 4] as const;
   const nativeParameter = (sourceDomain[0] + 2) % period;
@@ -2158,13 +2195,8 @@ test("a partial circle domain remains uncertain despite a locally consistent nat
     sourceDomain: [0, (endpointMaximum + interiorMaximum) / 2],
     provenance: { sourceEntityId: "line", sourceSpanId: "bounded" },
   };
-  const capability = createOpenCascadeNeutralCurveQueryCapability(async () =>
-    parametricRuntime({
-      firstParameter: nativeParameter,
-      secondParameter: 1,
-      position: candidate,
-    }),
-  );
+  const capability =
+    createOpenCascadeNeutralCurveQueryCapability(neverLoadOpenCascade);
 
   await expect(
     capability.queryNeutralCurves({
@@ -2174,7 +2206,7 @@ test("a partial circle domain remains uncertain despite a locally consistent nat
     }),
   ).resolves.toMatchObject({
     kind: "uncertain",
-    code: "occ-neutral-curve-circle-active-domain-proof-unavailable",
+    code: "exact-query-proof-budget-exhausted",
   });
 });
 
@@ -2339,30 +2371,35 @@ test("native failure and malformed payloads fail closed after owned handle clean
   }
 });
 
+let productionCustomOpenCascade: Promise<OpenCascadeInstance> | undefined;
+/** The promoted `public/cadara-occ` build (or the asset-dir override), shared per spec file. */
+function loadProductionCustomOpenCascade() {
+  productionCustomOpenCascade ??= (async () => {
+    const assetDirectory = process.env.CADARA_OCC_NEUTRAL_QUERY_ASSET_DIR;
+    const moduleUrl = assetDirectory
+      ? pathToFileURL(resolve(assetDirectory, "cadara-occ.js")).href
+      : new URL("../../../../public/cadara-occ.js", import.meta.url).href;
+    const module = (await import(moduleUrl)) as {
+      default: new (input: {
+        wasmBinary: Uint8Array;
+      }) => Promise<OpenCascadeInstance>;
+    };
+    const wasmPath = assetDirectory
+      ? resolve(assetDirectory, "cadara-occ.wasm")
+      : fileURLToPath(
+          new URL("../../../../public/cadara-occ.wasm", import.meta.url),
+        );
+    const wasmBinary = new Uint8Array(readFileSync(wasmPath));
+    return new module.default({ wasmBinary });
+  })();
+  return productionCustomOpenCascade;
+}
+
 test("production custom OCC enforces structural overlap and analytic circle acceptance at the exported adapter seam", async () => {
   let loads = 0;
-  let runtime: Promise<OpenCascadeInstance> | undefined;
   const loadCustomOpenCascade = () => {
     loads += 1;
-    runtime ??= (async () => {
-      const assetDirectory = process.env.CADARA_OCC_NEUTRAL_QUERY_ASSET_DIR;
-      const moduleUrl = assetDirectory
-        ? pathToFileURL(resolve(assetDirectory, "cadara-occ.js")).href
-        : new URL("../../../../public/cadara-occ.js", import.meta.url).href;
-      const module = (await import(moduleUrl)) as {
-        default: new (input: {
-          wasmBinary: Uint8Array;
-        }) => Promise<OpenCascadeInstance>;
-      };
-      const wasmPath = assetDirectory
-        ? resolve(assetDirectory, "cadara-occ.wasm")
-        : fileURLToPath(
-            new URL("../../../../public/cadara-occ.wasm", import.meta.url),
-          );
-      const wasmBinary = new Uint8Array(readFileSync(wasmPath));
-      return new module.default({ wasmBinary });
-    })();
-    return runtime;
+    return loadProductionCustomOpenCascade();
   };
   const capability = createOpenCascadeNeutralCurveQueryCapability(
     loadCustomOpenCascade,
@@ -2492,11 +2529,11 @@ test("production custom OCC enforces structural overlap and analytic circle acce
   await expect(
     capability.queryNeutralCurves({
       modelingTolerance: 1e-6,
-      first: makeLine("native-circle-secant", [-2, 0], {
+      first: makeLine("kernel-free-circle-secant", [-2, 0], {
         direction: [1, 0],
         sourceDomain: [0, 4],
       }),
-      second: makeCircle("native-unit-circle", [0, 0]),
+      second: makeCircle("kernel-free-unit-circle", [0, 0]),
     }),
   ).resolves.toMatchObject({
     kind: "verified",
@@ -2534,7 +2571,8 @@ test("production custom OCC enforces structural overlap and analytic circle acce
       },
     ],
   });
-  expect(loads).toBe(5);
+  // Line/circle proves kernel-free, so only the three cubic pairs loaded OCC.
+  expect(loads).toBe(4);
 
   const touching = await capability.queryNeutralCurves({
     modelingTolerance: 1e-6,
@@ -2550,9 +2588,10 @@ test("production custom OCC enforces structural overlap and analytic circle acce
       }),
     ),
   );
-  expect(loads).toBe(8);
+  expect(loads).toBe(7);
 
-  const oc = (await runtime!) as OpenCascadeInstance & Record<string, unknown>;
+  const oc = (await loadProductionCustomOpenCascade()) as OpenCascadeInstance &
+    Record<string, unknown>;
   const throwingRuntime = Object.create(oc) as OpenCascadeInstance &
     Record<string, unknown>;
   Object.defineProperty(throwingRuntime, "Geom2dAdaptor_Curve_2", {
@@ -2622,7 +2661,7 @@ test("production custom OCC enforces structural overlap and analytic circle acce
       },
     ],
   });
-  expect(loads).toBe(16);
+  expect(loads).toBe(15);
 
   expect(touching).toMatchObject({
     kind: "verified",
@@ -2645,6 +2684,418 @@ test("production custom OCC enforces structural overlap and analytic circle acce
     });
   }
 }, 65_000);
+
+type MatrixCubic = Extract<NeutralCurve, { kind: "cubicBezier" }>;
+const makeMatrixCubic = (
+  curveId: string,
+  poles: MatrixCubic["poles"],
+  queryDomain?: readonly [number, number],
+): MatrixCubic => ({
+  curveId,
+  kind: "cubicBezier",
+  poles,
+  sourceDomain: [0, 1],
+  ...(queryDomain ? { queryDomain } : {}),
+  provenance: { sourceEntityId: curveId, sourceSpanId: `${curveId}:full` },
+});
+const matrixLine = (
+  curveId: string,
+  origin: readonly [number, number],
+  direction: readonly [number, number],
+  sourceDomain: readonly [number, number],
+) => makeLine(curveId, origin, { direction, sourceDomain });
+const matrixCircle = (
+  curveId: string,
+  center: readonly [number, number],
+  radius: number,
+  arc?: readonly [number, number],
+) =>
+  makeCircle(curveId, center, {
+    radius,
+    ...(arc ? { sourceDomain: { kind: "arc", interval: arc } } : {}),
+  });
+const matrixArch = makeMatrixCubic("arch", [
+  [0, 0],
+  [1, 2],
+  [3, 2],
+  [4, 0],
+]);
+
+type ProductionMatrixRow = {
+  readonly name: string;
+  readonly first: NeutralCurve;
+  readonly second: NeutralCurve;
+  readonly expected:
+    | {
+        readonly kind: "verified";
+        readonly family: string;
+        readonly classifications: readonly string[];
+        readonly overlaps: number;
+      }
+    | { readonly kind: "uncertain"; readonly code: string };
+} & (
+  | {
+      /** Exact kernel-free owner: never loads OCC; meter pinned per order. */
+      readonly route: "kernelFree";
+      readonly operations: readonly [number, number];
+    }
+  | { readonly route: "occ" }
+);
+
+const verified = (
+  family: string,
+  classifications: readonly string[],
+  overlaps = 0,
+) => ({ kind: "verified" as const, family, classifications, overlaps });
+const failClosed = (code: string) => ({ kind: "uncertain" as const, code });
+
+/**
+ * Shared production neutral-query family matrix: the supported/fail-closed
+ * list T09 consumes. Every row runs through the exported capability on the
+ * promoted custom OCC build in both argument orders.
+ */
+const PRODUCTION_QUERY_MATRIX: readonly ProductionMatrixRow[] = [
+  {
+    name: "line/line crossing",
+    first: matrixLine("h", [0, 0], [1, 0], [0, 2]),
+    second: matrixLine("v", [1, -1], [0, 1], [0, 2]),
+    route: "kernelFree",
+    expected: verified("finiteLinePair", ["crossing"]),
+    operations: [647, 757],
+  },
+  {
+    name: "line/line collinear overlap",
+    first: matrixLine("a", [0, 0], [1, 0], [0, 2]),
+    second: matrixLine("b", [1, 0], [1, 0], [0, 2]),
+    route: "kernelFree",
+    expected: verified("finiteLinePair", [], 1),
+    operations: [518, 520],
+  },
+  {
+    name: "segment/segment crossing",
+    first: makeSegment("s1", [0, 0], [2, 2]),
+    second: makeSegment("s2", [0, 2], [2, 0]),
+    route: "kernelFree",
+    expected: verified("finiteLinePair", ["crossing"]),
+    operations: [1107, 1102],
+  },
+  {
+    name: "segment/line crossing",
+    first: makeSegment("s1", [0, 0], [2, 2]),
+    second: matrixLine("v", [1, -1], [0, 1], [0, 3]),
+    route: "kernelFree",
+    expected: verified("finiteLinePair", ["crossing"]),
+    operations: [950, 947],
+  },
+  {
+    name: "line/circle two crossings",
+    first: matrixLine("l", [-2, 0.25], [1, 0], [0, 4]),
+    second: matrixCircle("c", [0, 0], 1),
+    route: "kernelFree",
+    expected: verified("lineCircle", ["crossing", "crossing"]),
+    operations: [144952, 144952],
+  },
+  {
+    name: "line/circle tangent",
+    first: matrixLine("l", [-2, 1], [1, 0], [0, 4]),
+    second: matrixCircle("c", [0, 0], 1),
+    route: "kernelFree",
+    expected: verified("lineCircle", ["tangent"]),
+    operations: [27515, 27515],
+  },
+  {
+    name: "line/arc crossing",
+    first: matrixLine("l", [0.5, -2], [0, 1], [0, 4]),
+    second: matrixCircle("arc", [0, 0], 1, [0, Math.PI]),
+    route: "kernelFree",
+    expected: verified("lineCircle", ["crossing"]),
+    operations: [187214, 187214],
+  },
+  {
+    name: "segment/arc crossing",
+    first: makeSegment("s", [0.5, -2], [0.5, 2]),
+    second: matrixCircle("arc", [0, 0], 1, [0, Math.PI]),
+    route: "kernelFree",
+    expected: verified("lineCircle", ["crossing"]),
+    operations: [191817, 191817],
+  },
+  {
+    name: "segment/circle crossing",
+    first: makeSegment("s", [-2, 0.25], [2, 0.25]),
+    second: matrixCircle("c", [0, 0], 1),
+    route: "kernelFree",
+    expected: verified("lineCircle", ["crossing", "crossing"]),
+    operations: [148243, 148243],
+  },
+  {
+    name: "circle/circle crossing",
+    first: matrixCircle("c1", [0, 0], 1),
+    second: matrixCircle("c2", [1, 0], 1),
+    route: "occ",
+    expected: verified("circlePair", ["crossing", "crossing"]),
+  },
+  {
+    name: "circle/circle external tangency",
+    first: matrixCircle("c1", [0, 0], 1),
+    second: matrixCircle("c2", [2, 0], 1),
+    route: "occ",
+    expected: verified("circlePair", ["tangent"]),
+  },
+  {
+    name: "circle/circle interior tangency",
+    first: matrixCircle("c1", [0, 0], 2),
+    second: matrixCircle("c2", [1, 0], 1),
+    route: "occ",
+    expected: verified("circlePair", ["tangent"]),
+  },
+  {
+    name: "arc/arc crossing",
+    first: matrixCircle("a1", [0, 0], 1, [0, Math.PI]),
+    second: matrixCircle("a2", [1, 0], 1, [0, Math.PI]),
+    route: "kernelFree",
+    expected: verified("circlePair", ["crossing"]),
+    operations: [273341, 275222],
+  },
+  {
+    name: "arc/circle crossing",
+    first: matrixCircle("a1", [0, 0], 1, [0, Math.PI]),
+    second: matrixCircle("c2", [1, 0], 1),
+    route: "kernelFree",
+    expected: verified("circlePair", ["crossing"]),
+    operations: [241458, 243339],
+  },
+  {
+    name: "coincident full circles",
+    first: matrixCircle("c1", [0, 0], 1),
+    second: matrixCircle("c2", [0, 0], 1),
+    route: "occ",
+    expected: failClosed("occ-native-neutral-curve-uncertain"),
+  },
+  {
+    name: "coincident arcs",
+    first: matrixCircle("a1", [0, 0], 1, [0, 2]),
+    second: matrixCircle("a2", [0, 0], 1, [1, 3]),
+    route: "kernelFree",
+    expected: failClosed("coincident-circle-supports"),
+    operations: [2725, 2725],
+  },
+  {
+    name: "line/cubic crossing",
+    first: matrixLine("l", [2, -1], [0, 1], [0, 4]),
+    second: matrixArch,
+    route: "occ",
+    expected: verified("lineCubic", ["crossing"]),
+  },
+  {
+    name: "line/cubic tangent",
+    first: matrixLine("l", [-1, 1.5], [1, 0], [0, 6]),
+    second: matrixArch,
+    route: "occ",
+    expected: verified("lineCubic", ["tangent"]),
+  },
+  {
+    name: "segment/cubic crossing",
+    first: makeSegment("s", [2, -1], [2, 3]),
+    second: matrixArch,
+    route: "kernelFree",
+    expected: verified("lineCubic", ["crossing"]),
+    operations: [15306, 15306],
+  },
+  {
+    name: "circle/cubic disjoint",
+    first: matrixCircle("c", [2, 10], 1),
+    second: matrixArch,
+    route: "kernelFree",
+    expected: verified("circleCubic", []),
+    operations: [9577, 9577],
+  },
+  {
+    name: "circle/cubic crossing",
+    first: matrixCircle("c", [2, 1.5], 0.5),
+    second: matrixArch,
+    route: "kernelFree",
+    expected: verified("circleCubic", ["crossing", "crossing"]),
+    operations: [339084, 339084],
+  },
+  {
+    name: "arc/cubic crossing (one root outside the arc)",
+    first: matrixCircle("a", [2, 1.5], 0.5, [Math.PI / 2, (3 * Math.PI) / 2]),
+    second: matrixArch,
+    route: "kernelFree",
+    expected: verified("circleCubic", ["crossing"]),
+    operations: [353581, 353581],
+  },
+  {
+    name: "cubic/cubic transverse crossing",
+    first: matrixArch,
+    second: makeMatrixCubic("down", [
+      [0, 1.5],
+      [1, -0.5],
+      [3, -0.5],
+      [4, 1.5],
+    ]),
+    route: "kernelFree",
+    expected: verified("cubicCubic", ["crossing", "crossing"]),
+    operations: [430591, 430222],
+  },
+  {
+    name: "cubic/cubic interior tangency",
+    first: matrixArch,
+    second: makeMatrixCubic("cap", [
+      [0, 3],
+      [1, 1],
+      [3, 1],
+      [4, 3],
+    ]),
+    route: "kernelFree",
+    expected: verified("cubicCubic", ["tangent"]),
+    operations: [80463, 79431],
+  },
+  {
+    name: "cubic/cubic structural reversed overlap",
+    first: matrixArch,
+    second: makeMatrixCubic(
+      "reversed",
+      [
+        [4, 0],
+        [3, 2],
+        [1, 2],
+        [0, 0],
+      ],
+      [0.2, 0.8],
+    ),
+    route: "occ",
+    expected: verified("structuralCubicOverlap", [], 1),
+  },
+  {
+    name: "cubic/cubic non-structural overlap",
+    first: matrixArch,
+    // The exact de Casteljau left half of the arch: same support, new basis.
+    second: makeMatrixCubic("left-half", [
+      [0, 0],
+      [0.5, 1],
+      [1.25, 1.5],
+      [2, 1.5],
+    ]),
+    route: "kernelFree",
+    expected: failClosed("non-structural-cubic-overlap"),
+    operations: [28311, 26636],
+  },
+];
+
+test("shared production family matrix verifies or fails closed in both argument orders on the custom OCC build", async () => {
+  let loads = 0;
+  const load = () => {
+    loads += 1;
+    return loadProductionCustomOpenCascade();
+  };
+  const syncQuery = createCertifiedNeutralCurveQueryWithBudgetObserverForTest;
+  for (const row of PRODUCTION_QUERY_MATRIX) {
+    const orders = [
+      { first: row.first, second: row.second },
+      { first: row.second, second: row.first },
+    ] as const;
+    for (const [order, curves] of orders.entries()) {
+      const label = `${row.name} (${order === 0 ? "as listed" : "swapped"})`;
+      const request = { modelingTolerance: 1e-6, ...curves };
+      const operations: number[] = [];
+      const loadsBefore = loads;
+      const result =
+        await createOpenCascadeNeutralCurveQueryCapabilityWithBudgetObserverForTest(
+          load,
+          (snapshot) => operations.push(snapshot.operations),
+        ).queryNeutralCurves(request);
+      expect(operations, label).toHaveLength(1);
+      if (row.expected.kind === "verified") {
+        expect(result, label).toMatchObject({
+          kind: "verified",
+          completenessProof: { family: row.expected.family },
+        });
+        if (result.kind === "verified") {
+          expect(
+            result.points.map((point) => point.classification).sort(),
+            label,
+          ).toEqual([...row.expected.classifications].sort());
+          expect(result.overlaps, label).toHaveLength(row.expected.overlaps);
+        }
+      } else {
+        expect(result, label).toMatchObject(row.expected);
+      }
+      if (row.route === "occ") {
+        expect(loads - loadsBefore, `${label} is OCC-backed`).toBe(1);
+        continue;
+      }
+      expect(loads - loadsBefore, `${label} never loads OCC`).toBe(0);
+      const syncOperations: number[] = [];
+      expect(
+        syncQuery((snapshot) =>
+          syncOperations.push(snapshot.operations),
+        ).queryPair(request),
+        `${label} composes the sync dispatcher's exact owner`,
+      ).toEqual(result);
+      expect(syncOperations, label).toEqual(operations);
+      expect(operations[0], `${label} meter`).toBe(row.operations[order]);
+      await expect(
+        createOpenCascadeNeutralCurveQueryCapabilityWithLowerBudgetForTest(
+          load,
+          { operations: row.operations[order]! - 1 },
+        ).queryNeutralCurves(request),
+        `${label} meter - 1`,
+      ).resolves.toMatchObject({
+        kind: "uncertain",
+        code: "exact-query-proof-budget-exhausted",
+      });
+      expect(loads - loadsBefore, label).toBe(0);
+    }
+  }
+
+  const loadsBeforeSelf = loads;
+  const capability = createOpenCascadeNeutralCurveQueryCapability(load);
+  for (const [curve, expected] of [
+    [
+      makeMatrixCubic("loop", [
+        [0, 0],
+        [3, 2],
+        [-1, 2],
+        [2, 0],
+      ]),
+      {
+        kind: "verified",
+        completenessProof: { family: "cubicSelf", distinctRootCount: 1 },
+      },
+    ],
+    [
+      matrixArch,
+      {
+        kind: "verified",
+        completenessProof: { family: "cubicSelf", distinctRootCount: 0 },
+      },
+    ],
+    [
+      matrixLine("line-self", [0, 0], [1, 0], [0, 1]),
+      {
+        kind: "unsupported",
+        code: "occ-neutral-curve-self-intersection-unsupported",
+      },
+    ],
+    [
+      matrixCircle("circle-self", [0, 0], 1),
+      {
+        kind: "unsupported",
+        code: "occ-neutral-curve-self-intersection-unsupported",
+      },
+    ],
+  ] as const) {
+    await expect(
+      capability.queryNeutralCurveSelfIntersections({
+        modelingTolerance: 1e-6,
+        curve,
+      }),
+      curve.curveId,
+    ).resolves.toMatchObject(expected);
+  }
+  expect(loads, "self queries never load OCC").toBe(loadsBeforeSelf);
+}, 120_000);
 
 test("installed full OCC rejects positive endpoint gaps and verifies a bounded crossing", async () => {
   const { default: initializeOpenCascade } =
@@ -2704,22 +3155,9 @@ test("endpoint segments route to the kernel-free exact owners on one meter and n
   const neverLoad = async (): Promise<OpenCascadeInstance> => {
     throw new Error("endpoint segments must never load OCC");
   };
-  const segment = (
-    curveId: string,
-    start: readonly [number, number],
-    end: readonly [number, number],
-  ): NeutralCurve => ({
-    curveId,
-    kind: "line",
-    form: "endpointSegment",
-    start,
-    end,
-    sourceDomain: [0, 1],
-    provenance: { sourceEntityId: curveId, sourceSpanId: `${curveId}:full` },
-  });
-  const across = segment("across", [-2, 0.5], [2, 0.5]);
+  const across = makeSegment("across", [-2, 0.5], [2, 0.5]);
   const cases = [
-    [across, segment("down", [0, 2], [0, -2]), "finiteLinePair", 1],
+    [across, makeSegment("down", [0, 2], [0, -2]), "finiteLinePair", 1],
     [across, makeLine("numeric", [0.25, -1]), "finiteLinePair", 1],
     [across, makeCircle("circle", [0, 0]), "lineCircle", 2],
     [
