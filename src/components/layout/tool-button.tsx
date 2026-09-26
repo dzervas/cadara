@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   ActionIcon,
   Paper,
@@ -32,7 +33,9 @@ interface ToolButtonProps {
   onButtonMouseEnter?: () => void;
 }
 
-export function ToolButton({
+// Memoized: the toolbar re-renders on every editor state change, but a
+// button's output depends only on its props and the stable command context.
+export const ToolButton = memo(function ToolButton({
   tool,
   inline = false,
   onTrigger,
@@ -211,4 +214,4 @@ export function ToolButton({
       {content}
     </Tooltip>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { describe, test, expect } from "vitest";
 import type {
   ConstructionSnapshotRecord,
   ExtrudeFeatureParameters,
@@ -67,7 +67,7 @@ import {
 import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
 
-test("src/domain/modeling/occ/features.spec.ts", async () => {
+describe("src/domain/modeling/occ/features.spec.ts", () => {
   function assertClose(
     actual: number,
     expected: number,
@@ -5549,49 +5549,51 @@ test("src/domain/modeling/occ/features.spec.ts", async () => {
     ).toBe(second.renderRecords.length);
   }
 
-  await testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts();
-  await testPlaneFeatureBuildsFaceBackedConstructionPlane();
-  await testPlaneFeatureBuildsExplicitFrameConstructionPlane();
-  await testRegionResolutionAcceptsLegacyTraversalLabel();
-  await testExtrudeFeatureCreatesStandaloneBodyFromRegion();
-  await testSurfaceExtrudeRevolveAndThickenUseSheetBodies();
-  await testExtrudePublishesSemanticPrismHistoryProvenance();
-  await testMultiProfileFusePublishesStableCompositeFaceProvenance();
-  await testExtrudeUpToNextSkipsCoplanarStartFace();
-  await testExtrudeUpToNextProvesFirstCompleteTerminatingPlane();
-  await testExtrudeStartExtentBoundToDurableEntity();
-  await testExtrudeBlindStartOffsetIsSignedAlongExtrudeDirection();
-  await testExtrudeDraftsOneSideSymmetricAndTwoSideEnds();
-  await testExtrudeFeatureCreatesBodiesFromMultipleRegions();
-  await testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy();
-  await testExtrudeJoinRefinesSameDomainTopology();
-  await testExtrudeJoinRejectsMultiSolidResultShapes();
-  await testExtrudeCutSeveringTargetMintsFreshBodyIdentities();
-  await testExtrudeRejectsInvalidExtentAndBooleanScope();
-  await testAdvancedEndConditionDiagnostics();
-  await testCutAndIntersectApplyPerTargetPolicy();
-  await testCombineExecutesBodyBooleansAndConsumesTools();
-  await testCombineRejectsEmptyAndMalformedBodyRoles();
-  await testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid();
-  await testSweepBuildsFromSolvedSketchEntityPath();
-  await testRevolveBuildsFullAndUpToPartWithOffsets();
-  await testRevolveRejectsImpossibleUpToOffset();
-  await testRevolveRejectsNonPlanarFaceProfilesExplicitly();
-  await testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath();
-  await testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies();
-  await testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition();
-  await testLoftBuildsStandaloneBodyFromOrderedProfiles();
-  await testLoftAdvancedControlsAndUnsupportedCombinations();
-  await testFilletReplacesAffectedBody();
-  await testFilletRejectsEmptyEdgeTargetList();
-  await testSplitReplacesTargetBodyWithExplicitResultBodies();
-  await testDeleteSolidRemovesSelectedBodiesAndKeepsInvalidationHistory();
-  await testMirrorCopiesBodiesAcrossExplicitPlanarReferences();
-  await testTransformReplacesBodyWithTranslatedResult();
-  await testShellBuildsPreviewableSolidFromExplicitBodyAndFaces();
-  await testOccAuthoringStateRebuildUsesFeatureExecutionFlow();
-  await testOccAuthoringStateRetainsTopologyStagesByFeatureAndOutputSlot();
-  await testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns();
-
-  console.log("OCC phase 4 feature execution tests passed.");
-}, 15000);
+  for (const scenario of [
+    testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts,
+    testPlaneFeatureBuildsFaceBackedConstructionPlane,
+    testPlaneFeatureBuildsExplicitFrameConstructionPlane,
+    testRegionResolutionAcceptsLegacyTraversalLabel,
+    testExtrudeFeatureCreatesStandaloneBodyFromRegion,
+    testSurfaceExtrudeRevolveAndThickenUseSheetBodies,
+    testExtrudePublishesSemanticPrismHistoryProvenance,
+    testMultiProfileFusePublishesStableCompositeFaceProvenance,
+    testExtrudeUpToNextSkipsCoplanarStartFace,
+    testExtrudeUpToNextProvesFirstCompleteTerminatingPlane,
+    testExtrudeStartExtentBoundToDurableEntity,
+    testExtrudeBlindStartOffsetIsSignedAlongExtrudeDirection,
+    testExtrudeDraftsOneSideSymmetricAndTwoSideEnds,
+    testExtrudeFeatureCreatesBodiesFromMultipleRegions,
+    testExtrudeJoinAcrossOrderedTargetBodiesFollowsSequentialPolicy,
+    testExtrudeJoinRefinesSameDomainTopology,
+    testExtrudeJoinRejectsMultiSolidResultShapes,
+    testExtrudeCutSeveringTargetMintsFreshBodyIdentities,
+    testExtrudeRejectsInvalidExtentAndBooleanScope,
+    testAdvancedEndConditionDiagnostics,
+    testCutAndIntersectApplyPerTargetPolicy,
+    testCombineExecutesBodyBooleansAndConsumesTools,
+    testCombineRejectsEmptyAndMalformedBodyRoles,
+    testRevolveRejectsConstructionAxisAndBuildsEdgeBackedSolid,
+    testSweepBuildsFromSolvedSketchEntityPath,
+    testRevolveBuildsFullAndUpToPartWithOffsets,
+    testRevolveRejectsImpossibleUpToOffset,
+    testRevolveRejectsNonPlanarFaceProfilesExplicitly,
+    testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath,
+    testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies,
+    testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition,
+    testLoftBuildsStandaloneBodyFromOrderedProfiles,
+    testLoftAdvancedControlsAndUnsupportedCombinations,
+    testFilletReplacesAffectedBody,
+    testFilletRejectsEmptyEdgeTargetList,
+    testSplitReplacesTargetBodyWithExplicitResultBodies,
+    testDeleteSolidRemovesSelectedBodiesAndKeepsInvalidationHistory,
+    testMirrorCopiesBodiesAcrossExplicitPlanarReferences,
+    testTransformReplacesBodyWithTranslatedResult,
+    testShellBuildsPreviewableSolidFromExplicitBodyAndFaces,
+    testOccAuthoringStateRebuildUsesFeatureExecutionFlow,
+    testOccAuthoringStateRetainsTopologyStagesByFeatureAndOutputSlot,
+    testOccAuthoringStateRebuildIsDeterministicAcrossRepeatedRuns,
+  ]) {
+    test(scenario.name, scenario);
+  }
+});
