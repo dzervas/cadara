@@ -374,14 +374,10 @@ export function WorkspaceToolbar({
     const disabled = isToolDisabled(tool);
 
     if (isDropdownTool(tool)) {
-      const variantTools = tool.dropdown.variantIds.map((toolId) =>
-        getToolById(toolId),
-      );
       return (
         <ToolDropdownButton
           key={tool.id}
           tool={tool}
-          variantTools={variantTools}
           active={isActive}
           disabled={disabled}
         />
@@ -409,7 +405,10 @@ export function WorkspaceToolbar({
     </ToolbarPill>
   );
 
-  const toolbar = (
+  // No Tooltip.Group: its shared delay-group context re-renders every toolbar
+  // tooltip whenever the open tooltip changes, which made mode switches (e.g.
+  // Finish Sketch under the pointer) block the main thread.
+  return (
     <div
       className="absolute left-4 right-4 top-3 z-30 grid gap-x-2 gap-y-2 text-[var(--workbench-shell-text)]"
       style={{
@@ -683,8 +682,6 @@ export function WorkspaceToolbar({
       ) : null}
     </div>
   );
-
-  return <Tooltip.Group openDelay={0}>{toolbar}</Tooltip.Group>;
 }
 
 const pillCommonStyle: CSSProperties = {

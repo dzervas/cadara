@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { flushSync } from "react-dom";
 import { ActionIcon, Menu, Text, Tooltip } from "@mantine/core";
 
@@ -7,9 +7,10 @@ import { ToolbarToolIcon } from "@/components/layout/toolbar-tool-icon";
 import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
 import { ShortcutHint } from "@/components/shortcuts/shortcut-hint";
 import { getToolbarToolCommandId } from "@/core/shortcuts/commands";
-import type {
-  DropdownToolDefinition,
-  RegisteredToolDefinition,
+import {
+  getToolById,
+  type DropdownToolDefinition,
+  type RegisteredToolDefinition,
 } from "@/core/tools/tool-registry";
 import { useWorkbenchCommandHandlers } from "@/hooks/use-workbench-command-handlers";
 import {
@@ -19,18 +20,21 @@ import {
 
 interface ToolDropdownButtonProps {
   tool: DropdownToolDefinition;
-  variantTools: RegisteredToolDefinition[];
   active?: boolean;
   disabled?: boolean;
 }
 
-export function ToolDropdownButton({
+// Memoized for the same reason as ToolButton: its output depends only on its
+// props and the stable command context.
+export const ToolDropdownButton = memo(function ToolDropdownButton({
   tool,
-  variantTools,
   active = false,
   disabled = false,
 }: ToolDropdownButtonProps) {
   const { activateTool } = useWorkbenchCommandHandlers();
+  const variantTools: RegisteredToolDefinition[] = tool.dropdown.variantIds.map(
+    (toolId) => getToolById(toolId),
+  );
   const [opened, setOpened] = useState(false);
   const commandId = getToolbarToolCommandId(tool.id);
   const controlBackground = disabled
@@ -170,4 +174,4 @@ export function ToolDropdownButton({
       {dropdown}
     </Menu>
   );
-}
+});
