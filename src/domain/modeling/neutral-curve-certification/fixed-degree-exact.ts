@@ -26,15 +26,12 @@ import {
   divideExact,
   exactFromNumber as exactFractionFromFiniteDouble,
   exactToNumber as exactFractionToNumber,
-  isolateDistinctRootsClosed,
   multiplyExact,
   negateExact,
   nextBinary64,
   outwardExactNumber,
-  polynomialAdd,
   polynomialDerivative,
   polynomialEvaluate,
-  polynomialMultiply,
   polynomialTrim,
   reduceExact as reducedExact,
   subtractExact,
@@ -1510,23 +1507,6 @@ function exactStructuralCubicOverlap(
   };
 }
 
-const polynomialAddExact = polynomialAdd;
-const polynomialMultiplyExact = polynomialMultiply;
-
-function isolateDistinctRoots01(
-  input: ExactPolynomial,
-  budget: ExactProofBudget,
-) {
-  return isolateDistinctRootsClosed(
-    input,
-    [
-      exactFractionFromFiniteDouble(0, budget),
-      exactFractionFromFiniteDouble(1, budget),
-    ],
-    budget,
-  );
-}
-
 function intervalAdd(
   first: CertifiedInterval,
   second: CertifiedInterval,
@@ -2150,59 +2130,6 @@ export function cubicPowerCoefficients(
     readonly [ExactFraction, ExactFraction],
     readonly [ExactFraction, ExactFraction],
   ];
-}
-
-/** Complete degree-six support-root certification for a circle/cubic pair. */
-export function certifyCircleCubicPair(
-  request: NeutralCurveQueryRequest,
-  budget: ExactProofBudget,
-): NeutralCurveQueryResult | null {
-  const firstIsCircle = request.first.kind === "circle";
-  const circle = firstIsCircle ? request.first : request.second;
-  const cubic = firstIsCircle ? request.second : request.first;
-  if (circle.kind !== "circle" || cubic.kind !== "cubicBezier") return null;
-  const coefficients = cubicPowerCoefficients(cubic, budget);
-  const x = coefficients.map((value) => value[0]) as ExactFraction[];
-  const y = coefficients.map((value) => value[1]) as ExactFraction[];
-  x[0] = subtractExact(
-    x[0]!,
-    exactFractionFromFiniteDouble(circle.center[0], budget),
-    budget,
-  );
-  y[0] = subtractExact(
-    y[0]!,
-    exactFractionFromFiniteDouble(circle.center[1], budget),
-    budget,
-  );
-  const radius = exactFractionFromFiniteDouble(circle.radius, budget);
-  const radiusSquared = multiplyExact(radius, radius, budget);
-  const support = polynomialAddExact(
-    polynomialAddExact(
-      polynomialMultiplyExact(x, x, budget),
-      polynomialMultiplyExact(y, y, budget),
-      budget,
-    ),
-    [negateExact(radiusSquared, budget)],
-    budget,
-  );
-  const roots = isolateDistinctRoots01(support, budget);
-  if (roots === null) {
-    return {
-      kind: "uncertain",
-      code: "circle-cubic-constant-on-circle-degeneracy",
-      message:
-        "The cubic is constant on the circle support, so no isolated root set exists.",
-    };
-  }
-  if (roots.length > 0) {
-    return {
-      kind: "uncertain",
-      code: "circle-cubic-angular-certification-pending",
-      message:
-        "The exact circle/cubic support roots require the certified angular parameter owner before promotion.",
-    };
-  }
-  return completeIsolated(request, "circleCubic", [], budget);
 }
 
 function isolateQuadraticRoots(
