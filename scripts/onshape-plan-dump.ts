@@ -17,6 +17,11 @@ import {
   type StudioPlan,
 } from "../src/domain/import/onshape/fidelity-planner.ts";
 import { onshapeImportProvider } from "../src/domain/import/onshape/provider.ts";
+import {
+  IMPORT_VERIFICATION_DOCUMENT_ID,
+  IMPORT_VERIFICATION_REVISION_ID,
+} from "../src/domain/import/onshape/profile-resolver.ts";
+import { SketchConstraintSolverAdapter } from "../src/domain/solver/sketch-constraint-solver-adapter.ts";
 import { normalizeOnshapeTopologySignature } from "../src/domain/import/onshape/topology-signature-normalizer.ts";
 import {
   computeCaptureFrameToWorld,
@@ -375,9 +380,13 @@ async function main() {
   }
 
   const read = readPartStudio(bundle, elementId);
-  const plan = planStudioFidelity(read, {
+  const plan = await planStudioFidelity(read, {
     captureFormatVersion: bundle.formatVersion,
     historyProbeAvailable: true,
+    sketchSolver: new SketchConstraintSolverAdapter({
+      documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+      revisionId: IMPORT_VERIFICATION_REVISION_ID,
+    }),
   });
   console.log(`formatVersion: ${bundle.formatVersion}`);
   console.log(`studio: ${read.studio.name} (${read.studio.elementId})`);

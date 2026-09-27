@@ -33,7 +33,9 @@ import {
   type SketchDefinition,
   type SketchRecord,
 } from "@/contracts/sketch/schema";
-import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
 import { getAutoHiddenSketchTargetKeys } from "@/domain/editor/visibility";
 import {
@@ -49,6 +51,11 @@ import {
   OCC_KERNEL_SETTINGS,
   createStandardPlaneDefinition,
 } from "@/domain/modeling/opencascade-kernel-seed";
+
+const regionSolver = new SketchConstraintSolverAdapter({
+  documentId: OCC_KERNEL_DOCUMENT_ID,
+  revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
+});
 
 test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
   function pointId(name: string) {
@@ -1100,7 +1107,10 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         solvedRadius: 1,
       },
     ];
-    const derived = deriveSketchRegionsCore({
+    const derived = await regionSolver.deriveSketchRegions({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_regions",
       documentId: OCC_KERNEL_DOCUMENT_ID,
       revisionId: OCC_KERNEL_INITIAL_REVISION_ID,
       sketchId,
@@ -1114,6 +1124,7 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
         dimensionStatuses: [],
         diagnostics: [],
       },
+      projectedReferences: [],
     });
 
     const state = createOccAuthoringState(oc, {

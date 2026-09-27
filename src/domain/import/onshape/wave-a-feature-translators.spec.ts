@@ -25,6 +25,16 @@ import {
   ImportDeferredMaterializer,
   orderedOutputKey,
 } from "@/domain/import/orchestrator";
+import {
+  IMPORT_VERIFICATION_DOCUMENT_ID,
+  IMPORT_VERIFICATION_REVISION_ID,
+} from "@/domain/import/onshape/profile-resolver";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+
+const sketchSolver = new SketchConstraintSolverAdapter({
+  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+  revisionId: IMPORT_VERIFICATION_REVISION_ID,
+});
 
 function parsedRead(bundle: unknown, elementId?: string) {
   const parsed = validateOnshapeCaptureBundle(bundle);
@@ -79,10 +89,10 @@ const capabilities: ImportCapabilities = {
   },
 };
 
-function revolvePlan(
+async function revolvePlan(
   bundle: ReturnType<typeof makeWaveARevolveBreadthCaptureBundle>,
 ) {
-  return planStudioFidelity(parsedRead(bundle)).featurePlans.find(
+  return (await planStudioFidelity(parsedRead(bundle), { sketchSolver })).featurePlans.find(
     (plan) => plan.featureType === "revolve",
   )!;
 }
@@ -100,7 +110,7 @@ function parameter(
   return feature.parameters.find((candidate) => candidate.parameterId === parameterId)!;
 }
 
-test("Wave A FULL revolve resolves qNthElement to the same-sketch construction line", () => {
+test("Wave A FULL revolve resolves qNthElement to the same-sketch construction line", async () => {
   const bundle = makeWaveARevolveCaptureBundle();
   bundle.partStudios[0]!.features.features.find(
     (feature) => feature.featureType === "revolve",
@@ -109,7 +119,7 @@ test("Wave A FULL revolve resolves qNthElement to the same-sketch construction l
     parameterId: "fullRevolve",
     value: true,
   });
-  const plan = planStudioFidelity(parsedRead(bundle))
+  const plan = (await planStudioFidelity(parsedRead(bundle), { sketchSolver }))
     .featurePlans.find((candidate) => candidate.featureType === "revolve")!;
 
   expect(plan).toMatchObject({ tier: "parametric", reasonCodes: [] });
@@ -122,8 +132,8 @@ test("Wave A FULL revolve resolves qNthElement to the same-sketch construction l
   });
 });
 
-test("Wave A revolve plans remote sketch axis, two-side extent, and deferred cut body scope", () => {
-  const plan = revolvePlan(makeWaveARevolveBreadthCaptureBundle());
+test("Wave A revolve plans remote sketch axis, two-side extent, and deferred cut body scope", async () => {
+  const plan = await revolvePlan(makeWaveARevolveBreadthCaptureBundle());
 
   expect(plan).toMatchObject({
     tier: "parametric",
@@ -146,23 +156,23 @@ test.each([
   ["ADD", "join"],
   ["REMOVE", "cut"],
   ["INTERSECT", "intersect"],
-] as const)("Wave A revolve maps %s through deferred body lineage", (operationType, operation) => {
+] as const)("Wave A revolve maps %s through deferred body lineage", async (operationType, operation) => {
   const bundle = makeWaveARevolveBreadthCaptureBundle();
   parameter(revolveFeature(bundle), "operationType").value = operationType;
 
-  expect(revolvePlan(bundle).plannedRevolve).toMatchObject({
+  expect((await revolvePlan(bundle)).plannedRevolve).toMatchObject({
     operation: { source: "literal", value: operation },
     boolean: { kind: "deferredBody", sourceFeatureId: "F_BASE" },
   });
 });
 
-test("Wave A revolve maps a symmetric blind extent", () => {
+test("Wave A revolve maps a symmetric blind extent", async () => {
   const bundle = makeWaveARevolveBreadthCaptureBundle();
   const feature = revolveFeature(bundle);
   parameter(feature, "hasSecondDirection").value = false;
   parameter(feature, "endBound").value = "SYMMETRIC";
 
-  expect(revolvePlan(bundle).plannedRevolve?.extent).toMatchObject({
+  expect((await revolvePlan(bundle)).plannedRevolve?.extent).toMatchObject({
     mode: "symmetric",
     end: { kind: "blind" },
   });
@@ -174,7 +184,7 @@ test.each([
   ["entities", "missing-profile", "revolve-profile-unresolved"],
   ["axis", "canonical-datum-axis", "revolve-axis-unresolved"],
   ["endBound", "UP_TO_FACE", "revolve-extent-unsupported"],
-] as const)("Wave A revolve reports the exact %s degradation", (parameterId, value, reason) => {
+] as const)("Wave A revolve reports the exact %s degradation", async (parameterId, value, reason) => {
   const bundle = makeWaveARevolveBreadthCaptureBundle();
   const feature = revolveFeature(bundle);
   const target = parameter(feature, parameterId);
@@ -186,7 +196,7 @@ test.each([
     target.value = value;
   }
 
-  expect(revolvePlan(bundle)).toMatchObject({
+  expect(await revolvePlan(bundle)).toMatchObject({
     tier: "baked",
     reasonCodes: [reason],
   });
@@ -223,6 +233,7 @@ function fallbackPlan(featureType: "sweep" | "loft") {
     loft: loftFeatureTranslator,
   }[featureType];
   return translator.plan({
+    sketchSolver,
     feature: read.features[0]!,
     label: featureType,
     onshapeSuppressed: false,
@@ -239,6 +250,7 @@ function waveTLoftTranslatorPlan() {
   const read = parsedRead(makeWaveTLoftCaptureBundle());
   const feature = read.features.find((candidate) => candidate.featureType === "loft")!;
   return loftFeatureTranslator.plan({
+    sketchSolver,
     feature,
     label: feature.name ?? feature.featureId,
     onshapeSuppressed: false,
@@ -254,8 +266,8 @@ function waveTLoftTranslatorPlan() {
   });
 }
 
-test("Wave T loft resolves each ordered array entry to one sketch region", () => {
-  expect(waveTLoftTranslatorPlan()).toMatchObject({
+test("Wave T loft resolves each ordered array entry to one sketch region", async () => {
+  expect(await waveTLoftTranslatorPlan()).toMatchObject({
     tier: "parametric",
     reasonCodes: [],
     inputFeatureIds: ["WT_LOFT_A", "WT_LOFT_B"],
@@ -268,7 +280,7 @@ test("Wave T loft resolves each ordered array entry to one sketch region", () =>
   });
 });
 
-test("Wave T loft accepts the ordered wireProfilesArray spelling", () => {
+test("Wave T loft accepts the ordered wireProfilesArray spelling", async () => {
   const bundle = makeWaveTLoftCaptureBundle();
   const loft = bundle.partStudios[0]!.features.features.find(
     (candidate) => candidate.featureType === "loft",
@@ -283,7 +295,8 @@ test("Wave T loft accepts the ordered wireProfilesArray spelling", () => {
 
   const read = parsedRead(bundle);
   const feature = read.features.find((candidate) => candidate.featureType === "loft")!;
-  const plan = loftFeatureTranslator.plan({
+  const plan = await loftFeatureTranslator.plan({
+    sketchSolver,
     feature,
     label: feature.name ?? feature.featureId,
     onshapeSuppressed: false,
@@ -300,7 +313,7 @@ test("Wave T loft accepts the ordered wireProfilesArray spelling", () => {
   expect(plan).toMatchObject({ tier: "parametric", reasonCodes: [] });
 });
 
-test("Wave T loft rejects an array entry that resolves to multiple regions", () => {
+test("Wave T loft rejects an array entry that resolves to multiple regions", async () => {
   const bundle = makeWaveTLoftCaptureBundle();
   const firstSketch = bundle.partStudios[0]!.sketches.sketches.find(
     (candidate) => candidate.featureId === "WT_LOFT_A",
@@ -314,7 +327,8 @@ test("Wave T loft rejects an array entry that resolves to multiple regions", () 
 
   const read = parsedRead(bundle);
   const feature = read.features.find((candidate) => candidate.featureType === "loft")!;
-  const plan = loftFeatureTranslator.plan({
+  const plan = await loftFeatureTranslator.plan({
+    sketchSolver,
     feature,
     label: feature.name ?? feature.featureId,
     onshapeSuppressed: false,
@@ -338,7 +352,7 @@ test.each([
   ["addGuides", true, "loft-guides-unsupported"],
   ["startCondition", "MATCH_TANGENT", "loft-conditions-unsupported"],
   ["makePeriodic", true, "loft-periodicity-unsupported"],
-] as const)("Wave T loft reports the exact %s degradation", (parameterId, value, reason) => {
+] as const)("Wave T loft reports the exact %s degradation", async (parameterId, value, reason) => {
   const bundle = makeWaveTLoftCaptureBundle();
   const loft = bundle.partStudios[0]!.features.features.find(
     (candidate) => candidate.featureType === "loft",
@@ -357,7 +371,8 @@ test.each([
   }
   const read = parsedRead(bundle);
   const feature = read.features.find((candidate) => candidate.featureType === "loft")!;
-  const plan = loftFeatureTranslator.plan({
+  const plan = await loftFeatureTranslator.plan({
+    sketchSolver,
     feature,
     label: feature.name ?? feature.featureId,
     onshapeSuppressed: false,
@@ -424,8 +439,8 @@ test("Wave T provider promotes the captured cPlane sketch and emits ordered defe
   expect(validateImportPreparedActions(actions).success).toBe(true);
 });
 
-test("Wave T sweep resolves one region profile and one solved sketch curve", () => {
-  const plan = planStudioFidelity(parsedRead(makeWaveTSweepCaptureBundle()))
+test("Wave T sweep resolves one region profile and one solved sketch curve", async () => {
+  const plan = (await planStudioFidelity(parsedRead(makeWaveTSweepCaptureBundle()), { sketchSolver }))
     .featurePlans.find((candidate) => candidate.featureType === "sweep")!;
 
   expect(plan).toMatchObject({
@@ -439,7 +454,7 @@ test("Wave T sweep resolves one region profile and one solved sketch curve", () 
   });
 });
 
-test("Wave T sweep keeps a multi-curve sketch path baked", () => {
+test("Wave T sweep keeps a multi-curve sketch path baked", async () => {
   const bundle = makeWaveTSweepCaptureBundle();
   const pathSketch = bundle.partStudios[0]!.sketches.sketches.find(
     (candidate) => candidate.featureId === "WT_SWEEP_PATH",
@@ -451,7 +466,7 @@ test("Wave T sweep keeps a multi-curve sketch path baked", () => {
     isConstruction: false,
   });
 
-  const plan = planStudioFidelity(parsedRead(bundle)).featurePlans.find(
+  const plan = (await planStudioFidelity(parsedRead(bundle), { sketchSolver })).featurePlans.find(
     (candidate) => candidate.featureType === "sweep",
   )!;
   expect(plan).toMatchObject({
@@ -572,15 +587,15 @@ test("Sweep path sketchIdOf materializes to the live committed sketch id", async
 });
 
 
-test("Wave A sweep degrades specifically when an Onshape path cannot be losslessly resolved", () => {
-  expect(fallbackPlan("sweep")).toMatchObject({
+test("Wave A sweep degrades specifically when an Onshape path cannot be losslessly resolved", async () => {
+  expect(await fallbackPlan("sweep")).toMatchObject({
     tier: "baked",
     reasonCodes: ["sweep-path-unresolved"],
   });
 });
 
-test("Wave A loft degrades specifically when ordered Onshape profile arrays cannot be resolved", () => {
-  expect(fallbackPlan("loft")).toMatchObject({
+test("Wave A loft degrades specifically when ordered Onshape profile arrays cannot be resolved", async () => {
+  expect(await fallbackPlan("loft")).toMatchObject({
     tier: "baked",
     reasonCodes: ["loft-profile-unresolved"],
   });

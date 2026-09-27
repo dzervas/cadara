@@ -4,7 +4,13 @@ import {
   type ImportRegionBoundaryIdentity,
 } from "@/contracts/import/region-boundary-identity";
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
-import type { DocumentId, RevisionId, SketchEntityId, SketchId } from "@/contracts/shared/ids";
+import type {
+  DocumentId,
+  RequestId,
+  RevisionId,
+  SketchEntityId,
+  SketchId,
+} from "@/contracts/shared/ids";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 import {
   SOLVED_SKETCH_SCHEMA_VERSION,
@@ -15,8 +21,10 @@ import {
   type SolvedSketchPointRecord,
   type SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
 import { REGION_POINT_TOLERANCE } from "@/contracts/sketch/region-geometry";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
   countContainingRegions,
   selectInnermostContainingRegion,
@@ -100,6 +108,8 @@ export interface ProfileResolutionInput {
     string,
     { tier: string; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame }
   >;
+  /** Region derivation boundary configured for the import verification document. */
+  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
 }
 
 const SKETCH_REGION_REFERENCE =
@@ -202,6 +212,27 @@ function buildSolvedSnapshot(definition: SketchDefinition): SolvedSketchSnapshot
 }
 
 const VERIFICATION_SKETCH_ID = "sketch_import_verification" as SketchId;
+export const IMPORT_VERIFICATION_DOCUMENT_ID = "doc_import_verification" as DocumentId;
+export const IMPORT_VERIFICATION_REVISION_ID = "rev_import_verification" as RevisionId;
+
+async function deriveVerificationRegions(
+  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">,
+  solvedSnapshot: SolvedSketchSnapshot,
+  definition: SketchDefinition,
+): Promise<RegionRecord[]> {
+  const { regions } = await sketchSolver.deriveSketchRegions({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: "request_import_verification_regions" as RequestId,
+    documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+    revisionId: IMPORT_VERIFICATION_REVISION_ID,
+    sketchId: VERIFICATION_SKETCH_ID,
+    solvedSnapshot,
+    definition,
+    projectedReferences: [],
+  });
+  return regions;
+}
 
 function* legacyInteriorPoint(selectionSketch: RegionSelectionSketch) {
   for (const region of selectionSketch.regions) {
@@ -234,9 +265,9 @@ function* legacyInteriorPoint(selectionSketch: RegionSelectionSketch) {
   }
 }
 
-function resolveLegacyNonExtrudeProfiles(
+async function resolveLegacyNonExtrudeProfiles(
   input: ProfileResolutionInput,
-): ProfileResolutionResult {
+): Promise<ProfileResolutionResult> {
   const sketchIds = referencedSketchFeatureIdsFromProfileParameter(input.profileParameter);
   if (sketchIds.length !== 1) {
     return { tier: "unresolved", reason: "needs-region-resolution", diagnostics: [] };
@@ -255,13 +286,11 @@ function resolveLegacyNonExtrudeProfiles(
     planeFrame: referencedSketch.planeFrame,
   });
   const solvedSnapshot = buildSolvedSnapshot(translation.definition);
-  const { regions } = deriveSketchRegionsCore({
-    documentId: "doc_import_verification" as DocumentId,
-    revisionId: "rev_import_verification" as RevisionId,
-    sketchId: VERIFICATION_SKETCH_ID,
+  const regions = await deriveVerificationRegions(
+    input.sketchSolver,
     solvedSnapshot,
-    definition: translation.definition,
-  });
+    translation.definition,
+  );
   const selectionSketch: RegionSelectionSketch = {
     regions: regions.filter((region) => region.isClosed),
     solvedPoints: new Map(
@@ -396,11 +425,11 @@ function verifiedRegionSelector(
   return null;
 }
 
-function resolveSketchRegionSet(input: {
+async function resolveSketchRegionSet(input: {
   evidence: Extract<OnshapeProfileEvidence, { kind: "sketchRegionSet" }>;
   resolution: ProfileResolutionInput;
   diagnostics: ProfileResolutionDiagnostic[];
-}): DeferredSketchProfile[] | null {
+}): Promise<DeferredSketchProfile[] | null> {
   const sketchFeatureId = input.evidence.sourceSketchFeatureId;
   const solved = input.resolution.solvedSketchesByFeatureId.get(sketchFeatureId);
   const referencedSketch = input.resolution.referencedSketchesByFeatureId.get(sketchFeatureId);
@@ -419,13 +448,11 @@ function resolveSketchRegionSet(input: {
     planeFrame: referencedSketch.planeFrame,
   });
   const solvedSnapshot = buildSolvedSnapshot(translation.definition);
-  const { regions } = deriveSketchRegionsCore({
-    documentId: "doc_import_verification" as DocumentId,
-    revisionId: "rev_import_verification" as RevisionId,
-    sketchId: VERIFICATION_SKETCH_ID,
+  const regions = await deriveVerificationRegions(
+    input.resolution.sketchSolver,
     solvedSnapshot,
-    definition: translation.definition,
-  });
+    translation.definition,
+  );
   const selectionSketch: RegionSelectionSketch = {
     regions: regions.filter((region) => region.isClosed),
     solvedPoints: new Map(
@@ -468,11 +495,11 @@ function resolveSketchRegionSet(input: {
   }));
 }
 
-function resolveSketchProfile(input: {
+async function resolveSketchProfile(input: {
   evidence: Extract<OnshapeProfileEvidence, { kind: "sketchRegion" }>;
   resolution: ProfileResolutionInput;
   diagnostics: ProfileResolutionDiagnostic[];
-}): DeferredSketchProfile | null {
+}): Promise<DeferredSketchProfile | null> {
   if ("unresolved" in input.evidence) {
     input.diagnostics.push({
       code: "onshape-region-witness-unresolved",
@@ -498,13 +525,11 @@ function resolveSketchProfile(input: {
     planeFrame: referencedSketch.planeFrame,
   });
   const solvedSnapshot = buildSolvedSnapshot(translation.definition);
-  const { regions } = deriveSketchRegionsCore({
-    documentId: "doc_import_verification" as DocumentId,
-    revisionId: "rev_import_verification" as RevisionId,
-    sketchId: VERIFICATION_SKETCH_ID,
+  const regions = await deriveVerificationRegions(
+    input.resolution.sketchSolver,
     solvedSnapshot,
-    definition: translation.definition,
-  });
+    translation.definition,
+  );
   const selectionSketch: RegionSelectionSketch = {
     regions: regions.filter((region) => region.isClosed),
     solvedPoints: new Map(
@@ -542,9 +567,9 @@ function resolveSketchProfile(input: {
  * derives a selector from all closed regions, decodes qCompressed, or searches
  * for a geometrically nearby source.
  */
-export function resolveOnshapeSketchProfiles(
+export async function resolveOnshapeSketchProfiles(
   input: ProfileResolutionInput,
-): ProfileResolutionResult {
+): Promise<ProfileResolutionResult> {
   // X.4 changes solid-extrude profile selection only. Existing non-extrude
   // translators retain their independently scoped region behavior until their
   // capture contract gains equivalent consumer-indexed evidence.
@@ -577,7 +602,7 @@ export function resolveOnshapeSketchProfiles(
       return { tier: "unresolved", reason: "needs-region-resolution", diagnostics };
     }
     if (queryEvidence.length === 1 && queryEvidence[0]?.kind === "sketchRegionSet") {
-      const regionSetProfiles = resolveSketchRegionSet({
+      const regionSetProfiles = await resolveSketchRegionSet({
         evidence: queryEvidence[0],
         resolution: input,
         diagnostics,
@@ -606,7 +631,7 @@ export function resolveOnshapeSketchProfiles(
     }
     for (const record of faceResultEvidence) {
       if (record.kind === "sketchRegion") {
-        const profile = resolveSketchProfile({ evidence: record, resolution: input, diagnostics });
+        const profile = await resolveSketchProfile({ evidence: record, resolution: input, diagnostics });
         if (!profile) return { tier: "unresolved", reason: "needs-region-resolution", diagnostics };
         profiles.push(profile);
         continue;
@@ -765,7 +790,7 @@ export type OpenSketchCurveResolutionResult =
  * observable from the capture), or a set that is not one connected chain — stays
  * unresolved with a specific diagnostic instead of guessing a profile.
  */
-export function resolveOnshapeOpenSketchCurveProfiles(input: {
+export async function resolveOnshapeOpenSketchCurveProfiles(input: {
   /** The Onshape `surfaceEntities` parameter carrying open-curve queries. */
   profileParameter: unknown;
   featureKind: string;
@@ -775,7 +800,8 @@ export function resolveOnshapeOpenSketchCurveProfiles(input: {
     string,
     { tier: string; planeKey: SketchPlaneKey; planeFrame?: SketchPlaneFrame }
   >;
-}): OpenSketchCurveResolutionResult {
+  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
+}): Promise<OpenSketchCurveResolutionResult> {
   const diagnostics: ProfileResolutionDiagnostic[] = [];
   const label = `${input.featureKind} "${input.featureLabel}"`;
   const unresolved = (code: string, message: string): OpenSketchCurveResolutionResult => {
@@ -837,13 +863,11 @@ export function resolveOnshapeOpenSketchCurveProfiles(input: {
   for (const entry of readable) {
     if (entry.form === "wholeSketchWire") {
       const solvedSnapshot = buildSolvedSnapshot(translation.definition);
-      const { regions } = deriveSketchRegionsCore({
-        documentId: "doc_import_verification" as DocumentId,
-        revisionId: "rev_import_verification" as RevisionId,
-        sketchId: VERIFICATION_SKETCH_ID,
+      const regions = await deriveVerificationRegions(
+        input.sketchSolver,
         solvedSnapshot,
-        definition: translation.definition,
-      });
+        translation.definition,
+      );
       if (regions.some((region) => region.isClosed)) {
         return unresolved(
           "onshape-surface-profile-wire-filter-ambiguous",

@@ -4,10 +4,14 @@ import type { AuthoredSketchRecord } from "@/contracts/modeling/authored-documen
 import {
   countSolverAnnotations,
   evaluateSketchSolverBenchmarkFixture,
+  SKETCH_SOLVER_BENCHMARK_DOCUMENT,
   SKETCH_SOLVER_BENCHMARK_FIXTURES,
 } from "@/contracts/sketch/solver-benchmark";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-test("src/contracts/sketch/solver-benchmark.spec.ts", () => {
+const sketchSolver = new SketchConstraintSolverAdapter(SKETCH_SOLVER_BENCHMARK_DOCUMENT);
+
+test("src/contracts/sketch/solver-benchmark.spec.ts", async () => {
   function assertAuthoredSketchRecord(sketch: AuthoredSketchRecord) {
     expect(
       sketch.sketchId.startsWith("sketch_"),
@@ -45,7 +49,7 @@ test("src/contracts/sketch/solver-benchmark.spec.ts", () => {
       `${fixture.name} should report its expected solver-facing annotation count.`,
     ).toBe(fixture.expectedAnnotationCount);
 
-    const result = evaluateSketchSolverBenchmarkFixture(fixture);
+    const result = await evaluateSketchSolverBenchmarkFixture(fixture, sketchSolver);
     expect(
       result.solveState,
       `${fixture.name} should solve before region extraction.`,

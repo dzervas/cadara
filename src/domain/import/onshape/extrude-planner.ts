@@ -21,6 +21,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
 import type { SketchPointId } from "@/contracts/shared/ids";
+import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import type {
   OnshapeFeatureNode,
   OnshapeSolvedSketch,
@@ -180,6 +181,8 @@ export interface ExtrudePlanInput {
   priorBodyProducingFeatureIds: readonly string[];
   /** Unique target lineage inferred from rollback body identity for default scope. */
   inferredDefaultScopeFeatureIds?: readonly string[];
+  /** Region derivation boundary used to verify sketch profiles. */
+  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
 }
 
 function findParameter(
@@ -618,13 +621,13 @@ const OPERATION_MAP: Record<string, FeatureBooleanOperation> = {
  * sheet, so a non-`NEW` surface operation or an authored draft angle bakes with
  * its own reason instead of dropping authored intent.
  */
-function planSurfaceExtrude(
+async function planSurfaceExtrude(
   input: ExtrudePlanInput,
   diagnostics: ExtrudePlanDiagnostic[],
   startExtent: PlannedExtrudeStartExtent,
   extent: PlannedExtrudeExtent,
   topologySlots: TopologyQuerySlot[],
-): ExtrudePlanResult {
+): Promise<ExtrudePlanResult> {
   const { feature } = input;
   const operationType =
     enumValue(feature, "surfaceOperationType") ??
@@ -639,12 +642,13 @@ function planSurfaceExtrude(
     return { tier: "baked", reason: "extrude-surface-draft-unsupported", diagnostics };
   }
 
-  const profileResolution = resolveOnshapeOpenSketchCurveProfiles({
+  const profileResolution = await resolveOnshapeOpenSketchCurveProfiles({
     profileParameter: findParameter(feature, "surfaceEntities"),
     featureKind: "surface extrude",
     featureLabel: feature.name ?? feature.featureId,
     solvedSketchesByFeatureId: input.solvedSketchesByFeatureId,
     referencedSketchesByFeatureId: input.referencedSketchesByFeatureId,
+    sketchSolver: input.sketchSolver,
   });
   diagnostics.push(...profileResolution.diagnostics);
   if (profileResolution.tier === "unresolved") {
@@ -663,7 +667,9 @@ function planSurfaceExtrude(
     : { tier: "parametric", plannedExtrude, diagnostics };
 }
 
-export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
+export async function planExtrudeFeature(
+  input: ExtrudePlanInput,
+): Promise<ExtrudePlanResult> {
   const diagnostics: ExtrudePlanDiagnostic[] = [];
   const { feature } = input;
   const bodyType = enumValue(feature, "bodyType") ?? "SOLID";
@@ -707,7 +713,7 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
     return { tier: "baked", reason: "unsupported-feature", diagnostics };
   }
 
-  const profileResolution = resolveOnshapeSketchProfiles({
+  const profileResolution = await resolveOnshapeSketchProfiles({
     profileParameter,
     consumerFeatureId: feature.featureId,
     featureLabel: feature.name ?? feature.featureId,
@@ -715,6 +721,7 @@ export function planExtrudeFeature(input: ExtrudePlanInput): ExtrudePlanResult {
     profileEvidence: input.profileEvidence,
     solvedSketchesByFeatureId: input.solvedSketchesByFeatureId,
     referencedSketchesByFeatureId: input.referencedSketchesByFeatureId,
+    sketchSolver: input.sketchSolver,
   });
   diagnostics.push(...profileResolution.diagnostics);
   if (profileResolution.tier === "unresolved") {

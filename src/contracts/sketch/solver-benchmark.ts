@@ -4,7 +4,9 @@ import type {
   SketchDefinition,
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
-import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
+import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
@@ -15,6 +17,7 @@ import type {
   ConstraintId,
   ConstructionId,
   DimensionId,
+  RequestId,
   SketchEntityId,
   SketchId,
   SketchPointId,
@@ -795,9 +798,16 @@ export function countSolverAnnotations(definition: SketchDefinition) {
   return definition.constraintIds.length + definition.dimensionIds.length;
 }
 
-export function evaluateSketchSolverBenchmarkFixture(
+/** Document and revision the benchmark region requests target. */
+export const SKETCH_SOLVER_BENCHMARK_DOCUMENT = {
+  documentId: "doc_benchmark",
+  revisionId: "rev_benchmark",
+} as const;
+
+export async function evaluateSketchSolverBenchmarkFixture(
   fixture: SketchSolverBenchmarkFixture,
-): SketchSolverBenchmarkEvaluation {
+  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">,
+): Promise<SketchSolverBenchmarkEvaluation> {
   const definition = fixture.sketch.definition;
   const fullSolveStartedAt = performance.now();
   const solved = solveSketchDefinitionCore({
@@ -806,12 +816,15 @@ export function evaluateSketchSolverBenchmarkFixture(
     partialSolvePolicy: "bestEffort",
   });
   const fullSolveMs = performance.now() - fullSolveStartedAt;
-  const extracted = deriveSketchRegionsCore({
-    documentId: "doc_benchmark",
-    revisionId: "rev_benchmark",
+  const extracted = await sketchSolver.deriveSketchRegions({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: `request_benchmark_${fixture.name.replaceAll("-", "_")}` as RequestId,
+    ...SKETCH_SOLVER_BENCHMARK_DOCUMENT,
     sketchId: fixture.sketch.sketchId,
     definition,
     solvedSnapshot: solved.solvedSnapshot,
+    projectedReferences: [],
   });
   const dragPoint = fixture.interactiveDragTarget
     ? definition.points.find(

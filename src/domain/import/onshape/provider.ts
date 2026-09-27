@@ -146,8 +146,17 @@ import {
   resolvedExtrudeStartExtent,
 } from "@/domain/import/onshape/extrude-planner";
 import { isTopologyApplyRematchError } from "@/domain/import/orchestrator";
+import {
+  IMPORT_VERIFICATION_DOCUMENT_ID,
+  IMPORT_VERIFICATION_REVISION_ID,
+} from "@/domain/import/onshape/profile-resolver";
 
 const ACCEPTED_EXTENSION = ".onshape-capture.json";
+/** Region derivation boundary for import-time sketch-profile verification. */
+const profileVerificationSolver = new SketchConstraintSolverAdapter({
+  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+  revisionId: IMPORT_VERIFICATION_REVISION_ID,
+});
 
 type ContainmentResult =
   | { kind: "contained" }
@@ -650,10 +659,10 @@ function planToLiveSketchMap(
   );
 }
 
-function replanDependentFeatures(input: {
+async function replanDependentFeatures(input: {
   read: ReturnType<typeof readPartStudio>;
   featurePlans: readonly FeaturePlan[];
-}): FeaturePlan[] {
+}): Promise<FeaturePlan[]> {
   const plansByFeatureId = new Map(
     input.featurePlans.map((plan) => [plan.onshapeFeatureId, plan]),
   );
@@ -672,7 +681,8 @@ function replanDependentFeatures(input: {
     bodyProducingFeatureIds: [] as string[],
   };
 
-  const replanned = input.read.features.map((feature) => {
+  const replanned: FeaturePlan[] = [];
+  for (const feature of input.read.features) {
     const currentPlan = plansByFeatureId.get(feature.featureId);
     if (!currentPlan) {
       throw new Error(`Missing plan for source feature ${feature.featureId}.`);
@@ -688,6 +698,7 @@ function replanDependentFeatures(input: {
       read: input.read,
       references,
       state,
+      sketchSolver: profileVerificationSolver,
     };
     const replaySourcesAreLive = currentPlan.plannedFeatureReplay?.sourceFeatureIds.every(
       (sourceFeatureId) => plansByFeatureId.get(sourceFeatureId)?.tier === "parametric",
@@ -710,26 +721,28 @@ function replanDependentFeatures(input: {
               solvedSketchesByFeatureId: input.read.solvedSketchesByFeatureId,
               referencedSketchesByFeatureId: state.sketchPlansByFeatureId,
               priorBodyProducingFeatureIds: state.bodyProducingFeatureIds,
+              sketchSolver: profileVerificationSolver,
             })))) ||
       (currentPlan.reasonCodes.includes("downstream-of-baked") && replaySourcesAreLive);
     if (replan) {
-      const next = translator.plan(context);
+      const next = await translator.plan(context);
       plansByFeatureId.set(feature.featureId, next);
-      return next;
+      replanned.push(next);
+      continue;
     }
 
     // Preserve the reviewed plan, but replay preceding translator state so a
     // promoted extrude sees the same body-producing prefix as initial planning.
-    if (feature.featureType !== "newSketch") translator.plan(context);
-    return currentPlan;
-  });
+    if (feature.featureType !== "newSketch") await translator.plan(context);
+    replanned.push(currentPlan);
+  }
   return cascadeUnavailableActionConsumers(replanned);
 }
 
-function activateCapturedFrameTranslation(input: {
+async function activateCapturedFrameTranslation(input: {
   read: ReturnType<typeof readPartStudio>;
   plan: OnshapeStudioPlan;
-}): OnshapeStudioPlan {
+}): Promise<OnshapeStudioPlan> {
   const references = new Map(
     input.read.studio.resolvedReferences.map((reference) => [
       reference.deterministicId,
@@ -847,11 +860,14 @@ function activateCapturedFrameTranslation(input: {
   });
 
   const sketchPlansByFeatureId = planToLiveSketchMap(nextPlans);
-  const replanned = nextPlans.map((plan, index) => {
-    if (plan.featureType !== "loft") return plan;
+  const replanned: FeaturePlan[] = [];
+  for (const [index, plan] of nextPlans.entries()) {
     const feature = input.read.features[index];
-    if (!feature) return plan;
-    return onshapeFeatureTranslatorRegistry.forFeatureType("loft").plan({
+    if (plan.featureType !== "loft" || !feature) {
+      replanned.push(plan);
+      continue;
+    }
+    replanned.push(await onshapeFeatureTranslatorRegistry.forFeatureType("loft").plan({
       feature,
       label: plan.label,
       onshapeSuppressed: feature.suppressed === true,
@@ -861,8 +877,9 @@ function activateCapturedFrameTranslation(input: {
         sketchPlansByFeatureId,
         bodyProducingFeatureIds: [],
       },
-    });
-  });
+      sketchSolver: profileVerificationSolver,
+    }));
+  }
   return recomputePlanWithFeaturePlans(
     input.plan,
     replanned,
@@ -1123,7 +1140,7 @@ export function containmentFailureReasonDetail(input: {
 
 async function activateProbeBackedPlanning(input: {
   read: ReturnType<typeof readPartStudio>;
-  plan: ReturnType<typeof planStudioFidelity>;
+  plan: Awaited<ReturnType<typeof planStudioFidelity>>;
   capabilities: ImportCapabilities;
   /**
    * Features whose apply-time topology rematch already failed in a prior probe.
@@ -1160,7 +1177,7 @@ async function activateProbeBackedPlanning(input: {
       ? input.plan
       : recomputePlanWithFeaturePlans(
           input.plan,
-          replanDependentFeatures({
+          await replanDependentFeatures({
             read: input.read,
             featurePlans: input.plan.featurePlans.map((plan) =>
               forcedBakeFeatureIds.has(plan.onshapeFeatureId)
@@ -1366,7 +1383,7 @@ async function activateProbeBackedPlanning(input: {
       });
       workingPlan = recomputePlanWithFeaturePlans(
         workingPlan,
-        replanDependentFeatures({
+        await replanDependentFeatures({
           read: input.read,
           featurePlans: cascadeUnavailableActionConsumers(
             workingPlan.featurePlans.map((plan) =>
@@ -2189,7 +2206,7 @@ async function activateProbeBackedPlanning(input: {
 
     workingPlan = recomputePlanWithFeaturePlans(
       workingPlan,
-      replanDependentFeatures({ read: input.read, featurePlans: nextPlans }),
+      await replanDependentFeatures({ read: input.read, featurePlans: nextPlans }),
       input.read.studio.groundTruth.hasBodies,
       input.read,
     );
@@ -2208,7 +2225,7 @@ async function activateProbeBackedPlanning(input: {
   if (swept.some((plan, index) => plan !== workingPlan.featurePlans[index])) {
     workingPlan = recomputePlanWithFeaturePlans(
       workingPlan,
-      replanDependentFeatures({ read: input.read, featurePlans: swept }),
+      await replanDependentFeatures({ read: input.read, featurePlans: swept }),
       input.read.studio.groundTruth.hasBodies,
       input.read,
     );
@@ -2308,9 +2325,10 @@ async function reviewStudio(
   const capabilities: ImportCapabilities = memoizedHistory
     ? { ...rawCapabilities, history: memoizedHistory }
     : rawCapabilities;
-  const planned = planStudioFidelity(read, {
+  const planned = await planStudioFidelity(read, {
     captureFormatVersion: bundle.formatVersion,
     historyProbeAvailable: capabilities.history != null,
+    sketchSolver: profileVerificationSolver,
   });
   const basePlan =
     bundle.formatVersion === 1 || read.studio.rollbackSnapshots === null
@@ -2336,7 +2354,7 @@ async function reviewStudio(
   // validates the plane→sketch chain against the real kernel and demotes it back
   // to baked if it does not resolve, so we only translate when a probe exists.
   const capturedFramePlan = capabilities.history
-    ? activateCapturedFrameTranslation({ read, plan: basePlan })
+    ? await activateCapturedFrameTranslation({ read, plan: basePlan })
     : basePlan;
   // Contain apply-time topology rematch failures at the feature level. A feature
   // the review promoted parametrically can still be rejected when a probe applies
@@ -3113,7 +3131,7 @@ function projectSketchForPlan(input: {
 }
 
 type OnshapeStudioPlan = Pick<
-  ReturnType<typeof planStudioFidelity>,
+  Awaited<ReturnType<typeof planStudioFidelity>>,
   | "featurePlans"
   | "tierCounts"
   | "bakeStrategy"
@@ -5073,12 +5091,14 @@ export const onshapeImportProvider: ImportProvider<
           bakeDiagnostics: reviewedStudio.bakeDiagnostics,
           requiresStudioBake: reviewedStudio.requiresStudioBake,
         }
-      : (() => {
+      : await (async () => {
           // Fallback only: review normally supplies the post-fixed-point plan. A
           // raw fidelity plan can still carry an optimistically promoted extrude
           // whose extent/scope topology never resolved; bake it closed so
           // `resolvedExtrudeExtent` cannot abort the whole studio at prepare.
-          const fallback = planStudioFidelity(read);
+          const fallback = await planStudioFidelity(read, {
+            sketchSolver: profileVerificationSolver,
+          });
           return {
             ...fallback,
             featurePlans: bakeUnresolvedExtrudeTopology(fallback.featurePlans),

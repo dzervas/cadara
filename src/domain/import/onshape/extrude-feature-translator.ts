@@ -88,10 +88,10 @@ function inferredDefaultScopeFeatureIds(
 
 export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["extrude"],
-  plan: (context) => {
+  plan: async (context) => {
     const { feature, label, onshapeSuppressed, read, state } = context;
     const inputDependencies: FeatureDependencyInput[] = [];
-    const extrudePlan = planExtrudeFeature({
+    const extrudePlan = await planExtrudeFeature({
       feature,
       profileEvidence: currentProfileEvidence(feature, read.studio),
       solvedSketchesByFeatureId: read.solvedSketchesByFeatureId,
@@ -101,6 +101,7 @@ export const extrudeFeatureTranslator: OnshapeFeatureTranslator = {
         feature,
         context,
       ),
+      sketchSolver: context.sketchSolver,
     });
 
     if (extrudePlan.tier !== "baked") {

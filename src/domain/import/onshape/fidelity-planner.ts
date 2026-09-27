@@ -14,6 +14,7 @@
  */
 import type { OnshapeResolvedReference } from "@/contracts/import/onshape-capture-bundle";
 import type { SketchPlaneKey } from "@/contracts/shared/sketch-plane";
+import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 
 import type { OnshapeFeatureNode, StudioReadResult } from "@/domain/import/onshape/bundle-reader";
 import {
@@ -307,6 +308,8 @@ export interface StudioFidelityPlanningOptions {
   captureFormatVersion?: 1 | 2;
   historyProbeAvailable?: boolean;
   demotedFeatureIds?: Iterable<string>;
+  /** Region derivation boundary used to verify sketch profiles. */
+  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
 }
 
 
@@ -475,7 +478,10 @@ function tierCountsFor(featurePlans: readonly FeaturePlan[]): Record<FidelityTie
   return counts;
 }
 
-function legacyFeaturePlans(read: StudioReadResult): FeaturePlan[] {
+async function legacyFeaturePlans(
+  read: StudioReadResult,
+  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">,
+): Promise<FeaturePlan[]> {
   const refs = referenceMap(read.studio.resolvedReferences);
   const featurePlans: FeaturePlan[] = [];
   const state: FidelityPlanningState = {
@@ -487,13 +493,14 @@ function legacyFeaturePlans(read: StudioReadResult): FeaturePlan[] {
   const knownFeatureIds = new Set<string>();
 
   for (const feature of read.features) {
-    const intrinsicPlan = onshapeFeatureTranslatorRegistry.forFeatureType(feature.featureType).plan({
+    const intrinsicPlan = await onshapeFeatureTranslatorRegistry.forFeatureType(feature.featureType).plan({
       feature,
       label: feature.name ?? feature.featureId,
       onshapeSuppressed: feature.suppressed === true,
       read,
       references: refs,
       state,
+      sketchSolver,
     });
     const replaySourcesLive = intrinsicPlan.plannedFeatureReplay?.sourceFeatureIds.every(
       (sourceFeatureId) =>
@@ -528,10 +535,11 @@ function legacyFeaturePlans(read: StudioReadResult): FeaturePlan[] {
   return featurePlans;
 }
 
-function segmentedFeaturePlans(input: {
+async function segmentedFeaturePlans(input: {
   read: StudioReadResult;
   demotedFeatureIds: ReadonlySet<string>;
-}): FeaturePlan[] {
+  sketchSolver: Pick<SketchSolverAdapter, "deriveSketchRegions">;
+}): Promise<FeaturePlan[]> {
   const refs = referenceMap(input.read.studio.resolvedReferences);
   const state: FidelityPlanningState = {
     sketchPlansByFeatureId: new Map(),
@@ -547,13 +555,14 @@ function segmentedFeaturePlans(input: {
   let bakedBodyBarrierSeen = false;
 
   for (const feature of input.read.features) {
-    let plan = onshapeFeatureTranslatorRegistry.forFeatureType(feature.featureType).plan({
+    let plan = await onshapeFeatureTranslatorRegistry.forFeatureType(feature.featureType).plan({
       feature,
       label: feature.name ?? feature.featureId,
       onshapeSuppressed: feature.suppressed === true,
       read: input.read,
       references: refs,
       state,
+      sketchSolver: input.sketchSolver,
     });
     if (
       plan.tier === "baked" &&
@@ -720,15 +729,15 @@ export function replanStudioBakeStrategy(
  * enabled plans use body-history segments; legacy plans retain the exact prior
  * suppression cascade.
  */
-export function planStudioFidelity(
+export async function planStudioFidelity(
   read: StudioReadResult,
-  options: StudioFidelityPlanningOptions = {},
-): StudioPlan {
+  options: StudioFidelityPlanningOptions,
+): Promise<StudioPlan> {
   const formatVersion = options.captureFormatVersion ??
     (read.studio.rollbackSnapshots === null ? 1 : 2);
   const historyProbeAvailable = options.historyProbeAvailable ?? true;
   const demotedFeatureIds = new Set(options.demotedFeatureIds ?? []);
-  const legacyPlans = legacyFeaturePlans(read);
+  const legacyPlans = await legacyFeaturePlans(read, options.sketchSolver);
   const hasLegacyBake = legacyPlans.some((plan) => plan.tier === "baked") &&
     read.studio.groundTruth.hasBodies;
 
@@ -747,7 +756,11 @@ export function planStudioFidelity(
     };
   }
 
-  const candidatePlans = segmentedFeaturePlans({ read, demotedFeatureIds });
+  const candidatePlans = await segmentedFeaturePlans({
+    read,
+    demotedFeatureIds,
+    sketchSolver: options.sketchSolver,
+  });
   const segmentResult = planBakeSegments({
     captureFormatVersion: formatVersion,
     historyProbeAvailable,

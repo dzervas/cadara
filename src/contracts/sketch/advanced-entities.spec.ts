@@ -12,7 +12,8 @@ import {
   solveSketchDefinitionCore,
   validateSketchDefinitionCore,
 } from "@/contracts/sketch/solver-core";
-import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import {
   CONTRACT_VERSION,
@@ -30,7 +31,9 @@ import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 
-test("src/contracts/sketch/advanced-entities.spec.ts", () => {
+const regionSolver = new SketchConstraintSolverAdapter();
+
+test("src/contracts/sketch/advanced-entities.spec.ts", async () => {
   const sketchId = "sketch_advanced" as const;
   const plane = createStandardPlaneDefinition("xy");
   const tolerances = {
@@ -351,12 +354,16 @@ test("src/contracts/sketch/advanced-entities.spec.ts", () => {
     "Solver validation should emit an explicit unsupported advanced-constraint diagnostic.",
   ).toBeTruthy();
 
-  const derived = deriveSketchRegionsCore({
+  const derived = await regionSolver.deriveSketchRegions({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: "request_regions",
     documentId: "doc_workspace",
     revisionId: "rev_0001",
     sketchId,
     definition,
     solvedSnapshot: solved.solvedSnapshot,
+    projectedReferences: [],
   });
   expect(
     derived.regions.length >= 2,

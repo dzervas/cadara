@@ -274,9 +274,9 @@ function resolveSweepPathSource(pathQuery: string, solvedSketch: OnshapeSolvedSk
   return curves.length === 1 ? curves[0]! : null;
 }
 
-function planSweep(
+async function planSweep(
   context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
-): PlannedSweep | null {
+): Promise<PlannedSweep | null> {
   if (
     (enumValue(context.feature, "bodyType") ?? "SOLID") !== "SOLID" ||
     (enumValue(context.feature, "operationType") ?? "NEW") !== "NEW"
@@ -292,7 +292,7 @@ function planSweep(
   if (profileSketchIds.length !== 1) return null;
 
   const sketchFeatureId = profileSketchIds[0]!;
-  const profiles = resolveOnshapeSketchProfiles({
+  const profiles = await resolveOnshapeSketchProfiles({
     profileParameter,
     consumerFeatureId: context.feature.featureId,
     featureLabel: context.label,
@@ -300,6 +300,7 @@ function planSweep(
     profileEvidence: context.read.studio.profileEvidence ?? [],
     solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
     referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
+    sketchSolver: context.sketchSolver,
   });
   if (profiles.tier !== "resolved") return null;
   const sketchProfiles = profiles.profiles.filter(
@@ -369,9 +370,9 @@ function itemParameter(item: unknown, parameterIds: readonly string[]) {
   );
 }
 
-function planLoft(
+async function planLoft(
   context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
-): LoftPlanResult {
+): Promise<LoftPlanResult> {
   if (
     booleanValue(context.feature, "addGuides") ||
     arrayItems(context.feature, "guidesArray").length > 0
@@ -425,7 +426,7 @@ function planLoft(
     }
 
     const sketchFeatureId = sketchIds[0]!;
-    const resolved = resolveOnshapeSketchProfiles({
+    const resolved = await resolveOnshapeSketchProfiles({
       profileParameter,
       consumerFeatureId: context.feature.featureId,
       featureLabel: context.label,
@@ -433,6 +434,7 @@ function planLoft(
       profileEvidence: context.read.studio.profileEvidence ?? [],
       solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
       referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
+      sketchSolver: context.sketchSolver,
     });
     if (
       resolved.tier !== "resolved" ||
@@ -487,9 +489,9 @@ function resolveBoolean(input: {
     : null;
 }
 
-function planRevolve(
+async function planRevolve(
   context: Parameters<OnshapeFeatureTranslator["plan"]>[0],
-): RevolvePlanResult {
+): Promise<RevolvePlanResult> {
   if ((enumValue(context.feature, "bodyType") ?? "SOLID") !== "SOLID") {
     return { kind: "baked", reason: "revolve-body-type-unsupported", inputFeatureIds: [] };
   }
@@ -527,7 +529,7 @@ function planRevolve(
     return { kind: "baked", reason: "revolve-profile-unresolved", inputFeatureIds: sketchIds };
   }
 
-  const profiles = resolveOnshapeSketchProfiles({
+  const profiles = await resolveOnshapeSketchProfiles({
     profileParameter,
     consumerFeatureId: context.feature.featureId,
     featureLabel: context.label,
@@ -535,6 +537,7 @@ function planRevolve(
     profileEvidence: context.read.studio.profileEvidence ?? [],
     solvedSketchesByFeatureId: context.read.solvedSketchesByFeatureId,
     referencedSketchesByFeatureId: context.state.sketchPlansByFeatureId,
+    sketchSolver: context.sketchSolver,
   });
   if (profiles.tier !== "resolved") {
     return { kind: "baked", reason: "revolve-profile-unresolved", inputFeatureIds: sketchIds };
@@ -629,8 +632,8 @@ function baked(
 
 export const revolveFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["revolve"],
-  plan: (context) => {
-    const result = planRevolve(context);
+  plan: async (context) => {
+    const result = await planRevolve(context);
     if (result.kind === "baked") {
       if ((enumValue(context.feature, "operationType") ?? "NEW") === "NEW") {
         context.state.bodyProducingFeatureIds.push(context.feature.featureId);
@@ -660,8 +663,8 @@ export const revolveFeatureTranslator: OnshapeFeatureTranslator = {
 
 export const sweepFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["sweep"],
-  plan: (context) => {
-    const sweep = planSweep(context);
+  plan: async (context) => {
+    const sweep = await planSweep(context);
     if (!sweep) {
       if ((enumValue(context.feature, "operationType") ?? "NEW") === "NEW") {
         context.state.bodyProducingFeatureIds.push(context.feature.featureId);
@@ -689,8 +692,8 @@ export const sweepFeatureTranslator: OnshapeFeatureTranslator = {
 
 export const loftFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["loft"],
-  plan: (context) => {
-    const result = planLoft(context);
+  plan: async (context) => {
+    const result = await planLoft(context);
     if (result.kind === "baked") {
       if ((enumValue(context.feature, "operationType") ?? "NEW") === "NEW") {
         context.state.bodyProducingFeatureIds.push(context.feature.featureId);
