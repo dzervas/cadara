@@ -5,8 +5,10 @@ import { expect, test } from "vitest";
 import {
   evaluateNeutralCurve,
   type NeutralCurve,
+  type NeutralCurveJoinRequest,
   type NumericNeutralLine,
 } from "@/contracts/modeling/neutral-curve-query";
+import { reconstructSpline } from "@/contracts/sketch/spline-geometry";
 import { ExactQueryProofBudgetExceeded } from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
 import { createCertifiedNeutralCurveQueryWithBudgetObserverForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import {
@@ -3095,6 +3097,366 @@ test("shared production family matrix verifies or fails closed in both argument 
     ).resolves.toMatchObject(expected);
   }
   expect(loads, "self queries never load OCC").toBe(loadsBeforeSelf);
+}, 120_000);
+
+type JoinMatrixRow = {
+  readonly name: string;
+  readonly first: NeutralCurve;
+  readonly second: NeutralCurve;
+  readonly joins: NeutralCurveJoinRequest["joins"];
+  readonly modelingTolerance?: number;
+} & (
+  | {
+      readonly kind: "verified";
+      readonly realizations: readonly string[];
+      readonly points: number;
+      /** Exact overlaps passed through from the structural owner (default 0). */
+      readonly overlaps?: number;
+      /** Whole-request meter [as listed, swapped]; equals the sync dispatcher. */
+      readonly operations: readonly [number, number];
+    }
+  | { readonly kind: "uncertain"; readonly code: string }
+);
+
+const joinArc = (
+  curveId: string,
+  center: readonly [number, number],
+  radius: number,
+  interval: readonly [number, number],
+) => matrixCircle(curveId, center, radius, interval);
+const joinSpan = (
+  curveId: string,
+  span: {
+    readonly poles: MatrixCubic["poles"];
+    readonly interval: readonly [number, number];
+  },
+): MatrixCubic => ({
+  ...makeMatrixCubic(curveId, span.poles),
+  sourceDomain: span.interval,
+});
+const joinTheta = 0.7;
+const joinCenter = [10, 5] as const;
+const joinOnArc = (angle: number, radius = 3) =>
+  [
+    joinCenter[0] + radius * Math.cos(angle),
+    joinCenter[1] + radius * Math.sin(angle),
+  ] as const;
+const joinProbeArc = joinArc("probe-arc", joinCenter, 3, [
+  joinTheta,
+  joinTheta + 1.5,
+]);
+const joinTangent = [-Math.sin(joinTheta), Math.cos(joinTheta)] as const;
+const joinSmoothSpans = reconstructSpline({
+  id: "fig8",
+  policy: "centripetal-mean-arm-v1",
+  closure: "smooth",
+  points: [
+    [0, 0],
+    [2, 1],
+    [4, 0],
+    [2, -1],
+    [0, 0.0001],
+    [-2, 1],
+    [-4, 0],
+    [-2, -1],
+  ].map((position, index) => ({
+    occurrenceId: `o${index}`,
+    id: `p${index}`,
+    position: [position[0]!, position[1]!] as const,
+    tangent: { kind: "automatic" as const },
+  })),
+}).spans;
+const joinCornerSpans = reconstructSpline({
+  id: "tri",
+  policy: "centripetal-mean-arm-v1",
+  closure: "positional",
+  points: [
+    [0, 0],
+    [3, 0.5],
+    [1.5, 2.5],
+    [0, 0],
+  ].map((position, index) => ({
+    occurrenceId: `t${index}`,
+    id: index === 3 ? "q0" : `q${index}`,
+    position: [position[0]!, position[1]!] as const,
+    tangent: { kind: "automatic" as const },
+  })),
+}).spans;
+const endToStart = [{ first: "end", second: "start" }] as const;
+
+/**
+ * Shared production declared-join matrix (T09a): every row runs through the
+ * exported production capability in both argument orders and never loads the
+ * custom OCC build. Meters match the joined-pair logic spec.
+ */
+const PRODUCTION_JOIN_MATRIX: readonly JoinMatrixRow[] = [
+  {
+    name: "line/arc transverse join",
+    first: makeSegment("join-line", [0, 0], joinOnArc(joinTheta)),
+    second: joinProbeArc,
+    joins: endToStart,
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    operations: [113414, 113414],
+  },
+  {
+    name: "line/arc tangent fillet join",
+    first: makeSegment(
+      "join-fillet",
+      [
+        joinOnArc(joinTheta)[0] - 5 * joinTangent[0],
+        joinOnArc(joinTheta)[1] - 5 * joinTangent[1],
+      ],
+      joinOnArc(joinTheta),
+    ),
+    second: joinProbeArc,
+    joins: endToStart,
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    operations: [61131, 61131],
+  },
+  {
+    name: "adjacent smooth spline spans",
+    first: joinSpan("span-0", joinSmoothSpans[0]!),
+    second: joinSpan("span-1", joinSmoothSpans[1]!),
+    joins: endToStart,
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    operations: [4004, 4004],
+  },
+  {
+    name: "adjacent positional-corner spline spans",
+    first: joinSpan(
+      "corner-last",
+      joinCornerSpans[joinCornerSpans.length - 1]!,
+    ),
+    second: joinSpan("corner-first", joinCornerSpans[0]!),
+    joins: endToStart,
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    operations: [4062, 4062],
+  },
+  {
+    name: "1e-9 overshoot corner",
+    first: makeSegment("over-a", [0, 0], [2 + 1e-9, 0]),
+    second: makeSegment("over-b", [2, -1e-9], [2, 1]),
+    joins: endToStart,
+    kind: "verified",
+    realizations: ["uniqueContactInBall"],
+    points: 0,
+    operations: [5220, 5582],
+  },
+  {
+    name: "1e-9 undershoot corner",
+    first: makeSegment("under-a", [0, 0], [2 - 1e-9, 0]),
+    second: makeSegment("under-b", [2, 1e-9], [2, 1]),
+    joins: endToStart,
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    operations: [3876, 3623],
+  },
+  {
+    name: "D-shape with two joins",
+    first: makeSegment(
+      "d-chord",
+      joinOnArc(joinTheta + 1.5),
+      joinOnArc(joinTheta),
+    ),
+    second: joinProbeArc,
+    joins: [
+      { first: "start", second: "end" },
+      { first: "end", second: "start" },
+    ],
+    kind: "verified",
+    realizations: ["declaredEnds", "declaredEnds"],
+    points: 0,
+    operations: [220507, 221452],
+  },
+  {
+    name: "T-junction on a line",
+    first: makeSegment("t-stem", [0.5, -1], [0.5, 0]),
+    second: makeSegment("t-bar", [0, 0], [1, 0]),
+    joins: [{ first: "end", second: { interior: 0.5 } }],
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    operations: [2583, 2665],
+  },
+  {
+    name: "T-junction on an arc",
+    first: makeSegment("t-arc-stem", joinCenter, joinOnArc(joinTheta + 0.6)),
+    second: joinProbeArc,
+    joins: [{ first: "end", second: { interior: joinTheta + 0.6 } }],
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    operations: [198824, 198824],
+  },
+  {
+    name: "line/arc join plus a genuine crossing",
+    first: makeSegment("x-chord", [1, 0], [-0.5, 1.2]),
+    second: joinArc("x-upper", [0, 0], 1, [0, Math.PI]),
+    joins: [{ first: "start", second: "start" }],
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 1,
+    operations: [242985, 247565],
+  },
+  {
+    name: "U6 10→11 collinear overlap at a shared corner",
+    first: makeSegment("u6-line", [0, 0], [10, 0]),
+    second: makeSegment("u6-side", [0, 0], [11, 0]),
+    joins: [{ first: "start", second: "start" }],
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    overlaps: 1,
+    operations: [732, 772],
+  },
+  {
+    name: "cubic retrace from a knot (structural pole identity)",
+    first: makeMatrixCubic("retrace-a", [
+      [0, 0],
+      [1, 2],
+      [3, 2],
+      [4, 0],
+    ]),
+    second: {
+      ...makeMatrixCubic("retrace-b", [
+        [4, 0],
+        [3, 2],
+        [1, 2],
+        [0, 0],
+      ]),
+      sourceDomain: [1, 2],
+    },
+    joins: endToStart,
+    kind: "verified",
+    realizations: ["declaredEnds"],
+    points: 0,
+    overlaps: 1,
+    operations: [6537, 6962],
+  },
+  {
+    name: "cusp: zero end tangent at the join",
+    first: makeMatrixCubic("cusp", [
+      [0, 0],
+      [1, 1],
+      [2, 0],
+      [2, 0],
+    ]),
+    second: makeSegment("cusp-after", [2, 0], [3, 1]),
+    joins: endToStart,
+    kind: "uncertain",
+    code: "join-zero-end-tangent",
+  },
+  {
+    name: "crowded join ball",
+    first: makeSegment("crowd-chord", [1, 0], [0.99, 0.2]),
+    second: joinArc("crowd-upper", [0, 0], 1, [0, Math.PI]),
+    joins: [{ first: "start", second: "start" }],
+    modelingTolerance: 0.5,
+    kind: "uncertain",
+    code: "join-ball-crowded",
+  },
+  {
+    name: "join ball larger than the tolerance",
+    first: makeSegment(
+      "gap-line",
+      [0, 0],
+      [joinOnArc(joinTheta)[0] + 2e-3, joinOnArc(joinTheta)[1]],
+    ),
+    second: joinProbeArc,
+    joins: endToStart,
+    kind: "uncertain",
+    code: "join-ball-exceeds-tolerance",
+  },
+];
+
+test("shared production declared-join matrix routes kernel-free in both orders on the custom OCC build", async () => {
+  let loads = 0;
+  const load = () => {
+    loads += 1;
+    return loadProductionCustomOpenCascade();
+  };
+  for (const row of PRODUCTION_JOIN_MATRIX) {
+    const requests: readonly NeutralCurveJoinRequest[] = [
+      {
+        modelingTolerance: row.modelingTolerance ?? 1e-3,
+        first: row.first,
+        second: row.second,
+        joins: row.joins,
+      },
+      {
+        modelingTolerance: row.modelingTolerance ?? 1e-3,
+        first: row.second,
+        second: row.first,
+        joins: row.joins.map((join) => ({
+          first: join.second,
+          second: join.first,
+        })),
+      },
+    ];
+    for (const [order, request] of requests.entries()) {
+      const label = `${row.name} (${order === 0 ? "as listed" : "swapped"})`;
+      const operations: number[] = [];
+      const result =
+        await createOpenCascadeNeutralCurveQueryCapabilityWithBudgetObserverForTest(
+          load,
+          (snapshot) => operations.push(snapshot.operations),
+        ).queryNeutralCurveJoin(request);
+      expect(loads, `${label} never loads OCC`).toBe(0);
+      expect(operations, label).toHaveLength(1);
+      const syncOperations: number[] = [];
+      expect(
+        createCertifiedNeutralCurveQueryWithBudgetObserverForTest((snapshot) =>
+          syncOperations.push(snapshot.operations),
+        ).queryJoin(request),
+        `${label} composes the sync dispatcher's join owner`,
+      ).toEqual(result);
+      expect(syncOperations, label).toEqual(operations);
+      if (row.kind === "uncertain") {
+        expect(result, label).toMatchObject({
+          kind: "uncertain",
+          code: row.code,
+        });
+        continue;
+      }
+      expect(result, label).toMatchObject({
+        kind: "verified",
+        completenessProof: {
+          kind: "completeOutsideDeclaredJoins",
+          joinCount: row.joins.length,
+          distinctRootCount: row.points,
+        },
+      });
+      if (result.kind !== "verified") continue;
+      expect(result.overlaps, label).toHaveLength(row.overlaps ?? 0);
+      expect(
+        result.joins.map((join) => join.realization),
+        label,
+      ).toEqual(row.realizations);
+      expect(operations[0], `${label} meter`).toBe(row.operations[order]);
+      await expect(
+        createOpenCascadeNeutralCurveQueryCapabilityWithLowerBudgetForTest(
+          load,
+          { operations: row.operations[order]! - 1 },
+        ).queryNeutralCurveJoin(request),
+        `${label} meter - 1`,
+      ).resolves.toEqual({
+        kind: "uncertain",
+        code: "exact-query-proof-budget-exhausted",
+        message:
+          "The deterministic exact-query arithmetic budget was exhausted.",
+      });
+      expect(loads, label).toBe(0);
+    }
+  }
 }, 120_000);
 
 test("installed full OCC rejects positive endpoint gaps and verifies a bounded crossing", async () => {

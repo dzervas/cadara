@@ -70,9 +70,11 @@ import type {
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
 import type {
+  NeutralCurveJoinRequest,
   NeutralCurveQueryRequest,
   NeutralCurveSelfIntersectionRequest,
 } from "@/contracts/modeling/neutral-curve-query";
+import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import type {
   ExportCapabilities,
   MeshExportAccuracy,
@@ -5062,24 +5064,19 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       : this.solverAdapter;
   }
 
-  async queryNeutralCurves(_request: NeutralCurveQueryRequest) {
-    return {
-      kind: "unsupported" as const,
-      code: "mock-neutral-curve-query-unsupported",
-      message:
-        "The mock kernel does not provide native exact neutral-curve queries.",
-    };
+  /** U3: the conforming test-only kernel delegates to the kernel-free certifier. */
+  async queryNeutralCurves(request: NeutralCurveQueryRequest) {
+    return createCertifiedNeutralCurveQuery().queryPair(request);
   }
 
   async queryNeutralCurveSelfIntersections(
-    _request: NeutralCurveSelfIntersectionRequest,
+    request: NeutralCurveSelfIntersectionRequest,
   ) {
-    return {
-      kind: "unsupported" as const,
-      code: "mock-neutral-curve-self-intersection-unsupported",
-      message:
-        "The mock kernel does not provide native exact neutral-curve self-intersections.",
-    };
+    return createCertifiedNeutralCurveQuery().querySelf(request);
+  }
+
+  async queryNeutralCurveJoin(request: NeutralCurveJoinRequest) {
+    return createCertifiedNeutralCurveQuery().queryJoin(request);
   }
 
   private async getSnapshot() {
