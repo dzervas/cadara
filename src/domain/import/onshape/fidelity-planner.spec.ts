@@ -22,11 +22,20 @@ import {
   type OnshapeCaptureBundle,
   type OnshapeRollbackSnapshot,
 } from "@/contracts/import/onshape-capture-bundle";
+import {
+  IMPORT_VERIFICATION_DOCUMENT_ID,
+  IMPORT_VERIFICATION_REVISION_ID,
+} from "@/domain/import/onshape/profile-resolver";
+
+const sketchSolver = new SketchConstraintSolverAdapter({
+  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+  revisionId: IMPORT_VERIFICATION_REVISION_ID,
+});
 
 test("src/domain/import/onshape/fidelity-planner.spec.ts", async () => {
   const bundle = await assembleFixtureMountsBundle();
   const read = readPartStudio(bundle, FIXTURE_PART_STUDIO_ID);
-  const plan = planStudioFidelity(read);
+  const plan = await planStudioFidelity(read, { sketchSolver });
   expect(read.features[0]?.constraints?.map((entry) => entry.constraintType)).toEqual([
     "HORIZONTAL",
     "LENGTH",
@@ -85,7 +94,8 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
         ["revolve", "thicken", "sweep", "loft"].includes(feature.featureType),
       ),
     ).toBe(false);
-    const plan = planStudioFidelity(read, {
+    const plan = await planStudioFidelity(read, {
+      sketchSolver,
       captureFormatVersion: parsed.data.formatVersion,
       historyProbeAvailable: true,
     });
@@ -95,11 +105,11 @@ test.skipIf(realBundleCases.some(([fileName]) => !existsSync(fileName)))(
   }
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts plans the two local SURFACE Extrude 4 forms as surface features outside solid body lineage", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts plans the two local SURFACE Extrude 4 forms as surface features outside solid body lineage", async () => {
   const bundle = makeWaveXSurfaceExtrudeCaptureBundle();
   expect(bundle.partStudios).toHaveLength(2);
   for (const studio of bundle.partStudios) {
-    const plan = planStudioFidelity(readPartStudio(bundle, studio.elementId));
+    const plan = await planStudioFidelity(readPartStudio(bundle, studio.elementId), { sketchSolver });
     const surface = plan.featurePlans.find((feature) => feature.label === "Extrude 4");
     const downstreamCut = plan.featurePlans.find(
       (feature) => feature.onshapeFeatureId === "E_SOLID_CUT",
@@ -253,7 +263,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts captured sketchMatrix p
     includeSketchPlaneQuery: true,
   });
   const read = readPartStudio(bundle, "e1");
-  const plan = planStudioFidelity(read, { captureFormatVersion: 2, historyProbeAvailable: true });
+  const plan = await planStudioFidelity(read, { sketchSolver, captureFormatVersion: 2, historyProbeAvailable: true });
   const sketchPlan = plan.featurePlans[0];
   expect(sketchPlan).toMatchObject({
     tier: "parametric",
@@ -300,7 +310,7 @@ test.each([
   ["FrontplaneOp", "xz"],
 ] as const)(
   "src/domain/import/onshape/fidelity-planner.spec.ts %s sketchPlane query maps to canonical %s",
-  (operationId, planeKey) => {
+  async (operationId, planeKey) => {
     const read = readPartStudio(makeSketchMatrixBundle({
       sketchMatrix: CAPTURED_SKETCH_MATRIX,
       includeSketchPlaneQuery: true,
@@ -308,7 +318,7 @@ test.each([
         queryString: `query = qCreatedBy(id + "${operationId}", EntityType.FACE);`,
       },
     }), "e1");
-    expect(planStudioFidelity(read).featurePlans[0]).toMatchObject({
+    expect((await planStudioFidelity(read, { sketchSolver })).featurePlans[0]).toMatchObject({
       tier: "parametric",
       reasonCodes: ["sketch-on-canonical-plane"],
       target: { kind: "sketch", planeKey },
@@ -316,9 +326,9 @@ test.each([
   },
 );
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts absent sketchPlane keeps canonical XY fallback", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts absent sketchPlane keeps canonical XY fallback", async () => {
   const read = readPartStudio(makeSketchMatrixBundle({ includeSketchPlaneQuery: false }), "e1");
-  const sketchPlan = planStudioFidelity(read).featurePlans[0];
+  const sketchPlan = (await planStudioFidelity(read, { sketchSolver })).featurePlans[0];
   expect(sketchPlan).toMatchObject({
     tier: "parametric",
     reasonCodes: ["sketch-on-canonical-plane"],
@@ -326,12 +336,12 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts absent sketchPlane keep
   });
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts empty sketchPlane query list keeps canonical XY fallback", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts empty sketchPlane query list keeps canonical XY fallback", async () => {
   const read = readPartStudio(makeSketchMatrixBundle({
     includeSketchPlaneQuery: true,
     sketchPlaneQueries: [],
   }), "e1");
-  const sketchPlan = planStudioFidelity(read).featurePlans[0];
+  const sketchPlan = (await planStudioFidelity(read, { sketchSolver })).featurePlans[0];
   expect(sketchPlan).toMatchObject({
     tier: "parametric",
     reasonCodes: ["sketch-on-canonical-plane"],
@@ -339,20 +349,20 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts empty sketchPlane query
   });
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts deterministic sketchPlane without queryString stays baked despite sketchMatrix", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts deterministic sketchPlane without queryString stays baked despite sketchMatrix", async () => {
   const read = readPartStudio(makeSketchMatrixBundle({
     sketchMatrix: CAPTURED_SKETCH_MATRIX,
     includeSketchPlaneQuery: true,
     sketchPlaneQuery: { deterministicIds: ["face-id"] },
   }), "e1");
-  expect(planStudioFidelity(read).featurePlans[0]).toMatchObject({
+  expect((await planStudioFidelity(read, { sketchSolver })).featurePlans[0]).toMatchObject({
     tier: "baked",
     reasonCodes: ["needs-history-probe"],
     target: { kind: "suppressed" },
   });
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts cPlane sketchPlane query does not use sketchMatrix fallback", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts cPlane sketchPlane query does not use sketchMatrix fallback", async () => {
   const read = readPartStudio(makeSketchMatrixBundle({
     sketchMatrix: CAPTURED_SKETCH_MATRIX,
     includeSketchPlaneQuery: true,
@@ -360,16 +370,16 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts cPlane sketchPlane quer
       queryString: 'query = qCreatedBy(id + "C_PLANE" + "planeOp", EntityType.FACE);',
     },
   }), "e1");
-  expect(planStudioFidelity(read).featurePlans[0]).toMatchObject({
+  expect((await planStudioFidelity(read, { sketchSolver })).featurePlans[0]).toMatchObject({
     tier: "baked",
     reasonCodes: ["needs-history-probe"],
     target: { kind: "suppressed" },
   });
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts unresolved sketchPlane without valid matrix stays baked", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts unresolved sketchPlane without valid matrix stays baked", async () => {
   const read = readPartStudio(makeSketchMatrixBundle({ includeSketchPlaneQuery: true }), "e1");
-  const sketchPlan = planStudioFidelity(read).featurePlans[0];
+  const sketchPlan = (await planStudioFidelity(read, { sketchSolver })).featurePlans[0];
   expect(sketchPlan).toMatchObject({
     tier: "baked",
     reasonCodes: ["needs-history-probe"],
@@ -377,7 +387,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts unresolved sketchPlane 
   });
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts nonorthogonal sketchMatrix is rejected", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts nonorthogonal sketchMatrix is rejected", async () => {
   const invalidMatrix = [...CAPTURED_SKETCH_MATRIX];
   invalidMatrix[1] = 0.5;
   const read = readPartStudio(makeSketchMatrixBundle({
@@ -385,7 +395,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts nonorthogonal sketchMat
     includeSketchPlaneQuery: true,
   }), "e1");
   expect(read.solvedSketchesByFeatureId.get("S_MATRIX")?.sketchFrame).toBeUndefined();
-  const sketchPlan = planStudioFidelity(read).featurePlans[0];
+  const sketchPlan = (await planStudioFidelity(read, { sketchSolver })).featurePlans[0];
   expect(sketchPlan).toMatchObject({
     tier: "baked",
     reasonCodes: ["needs-history-probe"],
@@ -405,7 +415,8 @@ test.skipIf(!existsSync(MOUNTS_CAPTURE_FIXTURE))(
     if (!parsed.success) throw new Error("Real Mounts capture must validate.");
     const studio = parsed.data.partStudios[0]!;
     const read = readPartStudio(parsed.data, studio.elementId);
-    const plan = planStudioFidelity(read, {
+    const plan = await planStudioFidelity(read, {
+      sketchSolver,
       captureFormatVersion: parsed.data.formatVersion,
       historyProbeAvailable: true,
     });
@@ -419,7 +430,7 @@ test.skipIf(!existsSync(MOUNTS_CAPTURE_FIXTURE))(
 );
 
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts prefers the consuming feature's history-point record", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts prefers the consuming feature's history-point record", async () => {
   const read: StudioReadResult = {
     studio: {
       elementId: "e1",
@@ -465,17 +476,17 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts prefers the consuming f
     diagnostics: [],
   };
 
-  const plan = planStudioFidelity(read);
+  const plan = await planStudioFidelity(read, { sketchSolver });
   expect(plan.featurePlans[0]?.tier).toBe("parametric");
   expect(plan.featurePlans[0]?.target).toMatchObject({ kind: "sketch", planeKey: "xy" });
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts retains v1 final-state planning", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts retains v1 final-state planning", async () => {
   const read = makeStudioRead({
     sketchEntities: [{ entityId: "c1", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 }],
     extrudeOperation: "NEW",
   });
-  const plan = planStudioFidelity(read, { captureFormatVersion: 1 });
+  const plan = await planStudioFidelity(read, { sketchSolver, captureFormatVersion: 1 });
   expect(plan.featurePlans[0]?.tier).toBe("parametric");
   expect(plan.bakeStrategy).toEqual({ kind: "none" });
 });
@@ -583,7 +594,7 @@ function makeStudioRead(input: {
   };
 }
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts relationship-bearing fixture sketch remains parametric", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts relationship-bearing fixture sketch remains parametric", async () => {
   const read = makeStudioRead({
     sketchEntities: [
       {
@@ -627,7 +638,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts relationship-bearing fi
     extrudeOperation: "NEW",
   });
 
-  const plan = planStudioFidelity(read);
+  const plan = await planStudioFidelity(read, { sketchSolver });
   const sketch = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "S1");
   const extrude = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_TARGET");
   expect(
@@ -636,7 +647,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts relationship-bearing fi
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts default-scope cut with a single upstream body plans parametric", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts default-scope cut with a single upstream body plans parametric", async () => {
   const read = makeStudioRead({
     sketchEntities: [
       { entityId: "c1", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 },
@@ -644,7 +655,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts default-scope cut with 
     priorExtrudes: [{ featureId: "E_BASE", operation: "NEW" }],
     extrudeOperation: "REMOVE",
   });
-  const plan = planStudioFidelity(read);
+  const plan = await planStudioFidelity(read, { sketchSolver });
   const cut = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_TARGET");
   expect(
     cut?.tier === "parametric" &&
@@ -654,14 +665,14 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts default-scope cut with 
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts ambiguous default-scope boolean stays probe-gated", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts ambiguous default-scope boolean stays probe-gated", async () => {
   const read = makeStudioRead({
     sketchEntities: [
       { entityId: "c1", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 },
     ],
     extrudeOperation: "REMOVE",
   });
-  const plan = planStudioFidelity(read);
+  const plan = await planStudioFidelity(read, { sketchSolver });
   const cut = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_TARGET");
   expect(
     cut?.tier === "baked" &&
@@ -696,7 +707,7 @@ function rollbackSnapshot(
   };
 }
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts reviewer demotion replans a v2 body run into a segment", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts reviewer demotion replans a v2 body run into a segment", async () => {
   const read = makeStudioRead({
     sketchEntities: [
       { entityId: "c1", entityType: "circle", center3d: [0, 0, 0], radius: 0.005 },
@@ -716,10 +727,11 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts reviewer demotion repla
     rollbackSnapshot("E_TARGET", 2),
   ];
 
-  const baseline = planStudioFidelity(read, { captureFormatVersion: 2 });
+  const baseline = await planStudioFidelity(read, { sketchSolver, captureFormatVersion: 2 });
   expect(baseline.bakeStrategy).toEqual({ kind: "none" });
 
-  const demoted = planStudioFidelity(read, {
+  const demoted = await planStudioFidelity(read, {
+    sketchSolver,
     captureFormatVersion: 2,
     demotedFeatureIds: ["E_TARGET"],
   });
@@ -846,8 +858,8 @@ function makeTwoBranchStudioRead(): StudioReadResult {
   };
 }
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts independent branch stays parametric after a baked branch", () => {
-  const plan = planStudioFidelity(makeTwoBranchStudioRead());
+test("src/domain/import/onshape/fidelity-planner.spec.ts independent branch stays parametric after a baked branch", async () => {
+  const plan = await planStudioFidelity(makeTwoBranchStudioRead(), { sketchSolver });
   const byId = new Map(plan.featurePlans.map((entry) => [entry.onshapeFeatureId, entry]));
   const baked = byId.get("E_BAD");
   const independent = byId.get("E_GOOD");
@@ -869,8 +881,8 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts independent branch stay
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts true dependent of baked body lineage still bakes", () => {
-  const plan = planStudioFidelity(makeTwoBranchStudioRead());
+test("src/domain/import/onshape/fidelity-planner.spec.ts true dependent of baked body lineage still bakes", async () => {
+  const plan = await planStudioFidelity(makeTwoBranchStudioRead(), { sketchSolver });
   const cut = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_CUT");
 
   expect(
@@ -882,10 +894,10 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts true dependent of baked
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts deferred body from a baked lineage propagates downstream-of-baked", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts deferred body from a baked lineage propagates downstream-of-baked", async () => {
   const read = makeTwoBranchStudioRead();
   read.features = read.features.filter((feature) => feature.featureId !== "E_GOOD");
-  const plan = planStudioFidelity(read);
+  const plan = await planStudioFidelity(read, { sketchSolver });
   const cut = plan.featurePlans.find((entry) => entry.onshapeFeatureId === "E_CUT");
 
   expect(
@@ -899,7 +911,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts deferred body from a ba
   ).toBeTruthy();
 });
 
-test("src/domain/import/onshape/fidelity-planner.spec.ts assignVariable label", () => {
+test("src/domain/import/onshape/fidelity-planner.spec.ts assignVariable label", async () => {
   const read: StudioReadResult = {
     studio: {
       elementId: "e1",
@@ -927,7 +939,7 @@ test("src/domain/import/onshape/fidelity-planner.spec.ts assignVariable label", 
     diagnostics: [],
   };
 
-  const plan = planStudioFidelity(read);
+  const plan = await planStudioFidelity(read, { sketchSolver });
   expect(
     plan.featurePlans[0]?.label,
     "An assignVariable feature should be labelled by its authored variable name, not the generic feature name.",

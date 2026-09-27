@@ -3,12 +3,16 @@ import { bench, run, summary } from "mitata";
 
 import {
   evaluateSketchSolverBenchmarkFixture,
+  SKETCH_SOLVER_BENCHMARK_DOCUMENT,
   SKETCH_SOLVER_BENCHMARK_TOLERANCES,
   SKETCH_SOLVER_BENCHMARK_FIXTURES,
   type SketchSolverBenchmarkFixture,
   type SketchSolverBenchmarkEvaluation,
 } from "../src/contracts/sketch/solver-benchmark.ts";
-import { deriveSketchRegionsCore } from "../src/contracts/sketch/region-extraction.ts";
+import type { RequestId } from "../src/contracts/shared/ids.ts";
+import { CONTRACT_VERSION } from "../src/contracts/shared/versioning.ts";
+import { SOLVER_SCHEMA_VERSION } from "../src/contracts/solver/schema.ts";
+import { SketchConstraintSolverAdapter } from "../src/domain/solver/sketch-constraint-solver-adapter.ts";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,
@@ -17,6 +21,9 @@ import {
   type SketchCompiledSolveSession,
 } from "../src/contracts/sketch/solver-core.ts";
 
+const sketchSolver = new SketchConstraintSolverAdapter(
+  SKETCH_SOLVER_BENCHMARK_DOCUMENT,
+);
 let benchmarkSink: { solveState: string } | null = null;
 let interactiveSink: ReturnType<
   typeof updateCompiledSketchSolveSession
@@ -50,7 +57,7 @@ function assertFixtureResult(
 
 function assertFullSolveResult(
   fixture: SketchSolverBenchmarkFixture,
-  result: ReturnType<typeof evaluateFullSolveAndRegions>,
+  result: Awaited<ReturnType<typeof evaluateFullSolveAndRegions>>,
 ) {
   if (result.solveState !== "solved") {
     throw new Error(
@@ -69,10 +76,11 @@ function assertFullSolveResult(
   }
 }
 
-const preflight = SKETCH_SOLVER_BENCHMARK_FIXTURES.map((fixture) => {
-  const result = evaluateSketchSolverBenchmarkFixture(fixture);
+const preflight = [];
+for (const fixture of SKETCH_SOLVER_BENCHMARK_FIXTURES) {
+  const result = await evaluateSketchSolverBenchmarkFixture(fixture, sketchSolver);
   assertFixtureResult(fixture, result);
-  return {
+  preflight.push({
     fixture: result.fixture,
     annotations: result.annotationCount,
     constraints: result.constraintCount,
@@ -86,23 +94,26 @@ const preflight = SKETCH_SOLVER_BENCHMARK_FIXTURES.map((fixture) => {
     diagnostics: result.diagnosticCount,
     fullSolveMs: Number(result.fullSolveMs.toFixed(2)),
     dragFrameMs: Number(result.interactiveDragFrameMs.toFixed(2)),
-  };
-});
+  });
+}
 
 console.table(preflight);
 
-function evaluateFullSolveAndRegions(fixture: SketchSolverBenchmarkFixture) {
+async function evaluateFullSolveAndRegions(fixture: SketchSolverBenchmarkFixture) {
   const solved = solveSketchDefinitionCore({
     definition: fixture.sketch.definition,
     tolerances: SKETCH_SOLVER_BENCHMARK_TOLERANCES,
     partialSolvePolicy: "bestEffort",
   });
-  const extracted = deriveSketchRegionsCore({
-    documentId: "doc_benchmark",
-    revisionId: "rev_benchmark",
+  const extracted = await sketchSolver.deriveSketchRegions({
+    contractVersion: CONTRACT_VERSION,
+    solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+    requestId: `request_benchmark_${fixture.name.replaceAll("-", "_")}` as RequestId,
+    ...SKETCH_SOLVER_BENCHMARK_DOCUMENT,
     sketchId: fixture.sketch.sketchId,
     definition: fixture.sketch.definition,
     solvedSnapshot: solved.solvedSnapshot,
+    projectedReferences: [],
   });
   return {
     solveState: solved.status.solveState,
@@ -159,8 +170,8 @@ function createInteractiveDragBenchmarkState(
 
 summary(() => {
   for (const fixture of SKETCH_SOLVER_BENCHMARK_FIXTURES) {
-    bench(`${fixture.name} full solve + regions`, () => {
-      const result = evaluateFullSolveAndRegions(fixture);
+    bench(`${fixture.name} full solve + regions`, async () => {
+      const result = await evaluateFullSolveAndRegions(fixture);
       assertFullSolveResult(fixture, result);
       benchmarkSink = result;
     });

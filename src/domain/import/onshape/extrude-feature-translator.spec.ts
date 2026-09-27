@@ -5,6 +5,16 @@ import { expect, test } from "vitest";
 import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
+import {
+  IMPORT_VERIFICATION_DOCUMENT_ID,
+  IMPORT_VERIFICATION_REVISION_ID,
+} from "@/domain/import/onshape/profile-resolver";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+
+const sketchSolver = new SketchConstraintSolverAdapter({
+  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+  revisionId: IMPORT_VERIFICATION_REVISION_ID,
+});
 
 const BUNDLE_PATH =
   "test/fixtures/onshape-captures/405fa226bb150016d09afc09.onshape-capture.json";
@@ -19,7 +29,7 @@ test.skipIf(!existsSync(BUNDLE_PATH))(
     expect(validation.success).toBe(true);
     if (!validation.success) return;
 
-    const plan = planStudioFidelity(readPartStudio(validation.data, ELEMENT_ID));
+    const plan = await planStudioFidelity(readPartStudio(validation.data, ELEMENT_ID), { sketchSolver });
     expect(plan.tierCounts).toEqual({ parametric: 6, baked: 0, geometryOnly: 0 });
 
     const twoSide = plan.featurePlans.find(

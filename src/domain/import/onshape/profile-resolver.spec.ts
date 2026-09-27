@@ -3,10 +3,18 @@ import { expect, test } from "vitest";
 import type { OnshapeProfileEvidence } from "@/contracts/import/onshape-capture-bundle";
 import type { OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
 import {
+  IMPORT_VERIFICATION_DOCUMENT_ID,
+  IMPORT_VERIFICATION_REVISION_ID,
   referencedSketchFeatureIdsFromProfileParameter,
   resolveOnshapeOpenSketchCurveProfiles,
   resolveOnshapeSketchProfiles,
 } from "@/domain/import/onshape/profile-resolver";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+
+const sketchSolver = new SketchConstraintSolverAdapter({
+  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+  revisionId: IMPORT_VERIFICATION_REVISION_ID,
+});
 
 const frame = {
   tier: "parametric",
@@ -60,6 +68,7 @@ function resolve(input: {
   solved: OnshapeSolvedSketch[];
 }) {
   return resolveOnshapeSketchProfiles({
+    sketchSolver,
     profileParameter: input.parameter,
     consumerFeatureId: "E_PROFILE",
     featureLabel: "Profile consumer",
@@ -70,8 +79,8 @@ function resolve(input: {
   });
 }
 
-test("profile resolver expands a readable exact region set into closed sketch selectors", () => {
-  const result = resolve({
+test("profile resolver expands a readable exact region set into closed sketch selectors", async () => {
+  const result = await resolve({
     parameter: profileParameter("S_SET"),
     evidence: [{
       consumingFeatureId: "E_PROFILE",
@@ -96,7 +105,7 @@ test("profile resolver expands a readable exact region set into closed sketch se
   });
 });
 
-test("profile resolver expands true qSketchRegion roots for nested circle annuli", () => {
+test("profile resolver expands true qSketchRegion roots for nested circle annuli", async () => {
   const nested = {
     featureId: "S_SET_NESTED",
     entities: [
@@ -104,7 +113,7 @@ test("profile resolver expands true qSketchRegion roots for nested circle annuli
       ...solvedCircle("S_SET_INNER", [0, 0, 0], 0.002).entities,
     ],
   };
-  const result = resolve({
+  const result = await resolve({
     parameter: profileParameter("S_SET_NESTED"),
     evidence: [{
       consumingFeatureId: "E_PROFILE",
@@ -125,7 +134,7 @@ test("profile resolver expands true qSketchRegion roots for nested circle annuli
   });
 });
 
-test("profile resolver derives exact selectors for a sparse layout of thin annuli", () => {
+test("profile resolver derives exact selectors for a sparse layout of thin annuli", async () => {
   const featureId = "S_SET_THIN_ANNULI";
   const centers = Array.from({ length: 6 }, (_, index) => [
     (index % 2) * 0.102,
@@ -136,7 +145,7 @@ test("profile resolver derives exact selectors for a sparse layout of thin annul
     ...solvedCircle(`${featureId}_OUTER_${index}`, center, 0.00375).entities,
     ...solvedCircle(`${featureId}_INNER_${index}`, center, 0.00275).entities,
   ]);
-  const result = resolve({
+  const result = await resolve({
     parameter: profileParameter(featureId),
     evidence: [{
       consumingFeatureId: "E_PROFILE",
@@ -170,7 +179,7 @@ test("profile resolver derives exact selectors for a sparse layout of thin annul
   ).toBe(6);
 });
 
-test("profile resolver fails closed for false qSketchRegion with inner loops", () => {
+test("profile resolver fails closed for false qSketchRegion with inner loops", async () => {
   const nested = {
     featureId: "S_SET_NESTED",
     entities: [
@@ -178,7 +187,7 @@ test("profile resolver fails closed for false qSketchRegion with inner loops", (
       ...solvedCircle("S_SET_INNER", [0, 0, 0], 0.002).entities,
     ],
   };
-  const result = resolve({
+  const result = await resolve({
     parameter: profileParameter("S_SET_NESTED"),
     evidence: [{
       consumingFeatureId: "E_PROFILE",
@@ -199,8 +208,8 @@ test("profile resolver fails closed for false qSketchRegion with inner loops", (
   });
 });
 
-test("profile resolver selects only the captured subset, never all closed regions", () => {
-  const result = resolve({
+test("profile resolver selects only the captured subset, never all closed regions", async () => {
+  const result = await resolve({
     parameter: profileParameter("S_LEFT"),
     evidence: [sketchEvidence({ sketchFeatureId: "S_LEFT", point: [-0.004, 0, 0] })],
     solved: [
@@ -221,8 +230,8 @@ test("profile resolver selects only the captured subset, never all closed region
   });
 });
 
-test("profile resolver preserves ordered exact profiles from multiple source sketches", () => {
-  const result = resolve({
+test("profile resolver preserves ordered exact profiles from multiple source sketches", async () => {
+  const result = await resolve({
     parameter: profileParameter("S_ONE", "S_TWO"),
     evidence: [
       sketchEvidence({ sketchFeatureId: "S_ONE", queryIndex: 0, point: [-0.003, 0, 0] }),
@@ -240,7 +249,7 @@ test("profile resolver preserves ordered exact profiles from multiple source ske
   });
 });
 
-test("profile resolver requires a unique projected witness region for nested profiles", () => {
+test("profile resolver requires a unique projected witness region for nested profiles", async () => {
   const nested = {
     featureId: "S_NESTED",
     entities: [
@@ -248,7 +257,7 @@ test("profile resolver requires a unique projected witness region for nested pro
       ...solvedCircle("S_NESTED_INNER", [0, 0, 0], 0.002).entities,
     ],
   };
-  const result = resolve({
+  const result = await resolve({
     parameter: profileParameter("S_NESTED"),
     evidence: [sketchEvidence({ sketchFeatureId: "S_NESTED", point: [0.004, 0, 0] })],
     solved: [nested],
@@ -257,8 +266,8 @@ test("profile resolver requires a unique projected witness region for nested pro
   expect(result).toMatchObject({ tier: "resolved", profiles: [{ interiorPoint: [4, 0] }] });
 });
 
-test("profile resolver resolves a witness in the odd-depth nested cell", () => {
-  const result = resolve({
+test("profile resolver resolves a witness in the odd-depth nested cell", async () => {
+  const result = await resolve({
     parameter: profileParameter("S_THREE_NESTED"),
     evidence: [sketchEvidence({
       sketchFeatureId: "S_THREE_NESTED",
@@ -280,8 +289,8 @@ test("profile resolver resolves a witness in the odd-depth nested cell", () => {
   });
 });
 
-test("profile resolver verifies a witness in a line-circle cell", () => {
-  const result = resolve({
+test("profile resolver verifies a witness in a line-circle cell", async () => {
+  const result = await resolve({
     parameter: profileParameter("S_LINE_CIRCLE"),
     evidence: [sketchEvidence({
       sketchFeatureId: "S_LINE_CIRCLE",
@@ -309,8 +318,8 @@ test("profile resolver verifies a witness in a line-circle cell", () => {
   });
 });
 
-test("profile resolver ignores open lines that cross a standalone circle", () => {
-  const result = resolve({
+test("profile resolver ignores open lines that cross a standalone circle", async () => {
+  const result = await resolve({
     parameter: profileParameter("S_OPEN_LINES"),
     evidence: [sketchEvidence({
       sketchFeatureId: "S_OPEN_LINES",
@@ -346,8 +355,8 @@ test("profile resolver ignores open lines that cross a standalone circle", () =>
   });
 });
 
-test("profile resolver projects a mirror-derived source witness through the sketch frame", () => {
-  const result = resolve({
+test("profile resolver projects a mirror-derived source witness through the sketch frame", async () => {
+  const result = await resolve({
     parameter: profileParameter("S_MIRROR"),
     evidence: [sketchEvidence({ sketchFeatureId: "S_MIRROR", point: [0.004, 0, 0] })],
     solved: [solvedCircle("S_MIRROR", [0.004, 0, 0])],
@@ -359,8 +368,8 @@ test("profile resolver projects a mirror-derived source witness through the sket
   });
 });
 
-test("profile resolver keeps a selected planar face as an exact deferred topology profile", () => {
-  const result = resolve({
+test("profile resolver keeps a selected planar face as an exact deferred topology profile", async () => {
+  const result = await resolve({
     parameter: profileParameter("S_PROFILE", "S_CAP"),
     evidence: [
       sketchEvidence({ sketchFeatureId: "S_PROFILE", queryIndex: 0, point: [0, 0, 0] }),
@@ -394,8 +403,8 @@ test("profile resolver keeps a selected planar face as an exact deferred topolog
   });
 });
 
-test("profile resolver keeps missing witnesses, ambiguous sources, and unordered evidence unresolved", () => {
-  const unresolvedWitness = resolve({
+test("profile resolver keeps missing witnesses, ambiguous sources, and unordered evidence unresolved", async () => {
+  const unresolvedWitness = await resolve({
     parameter: profileParameter("S1"),
     evidence: [{
       consumingFeatureId: "E_PROFILE",
@@ -410,7 +419,7 @@ test("profile resolver keeps missing witnesses, ambiguous sources, and unordered
     }],
     solved: [solvedCircle("S1", [0, 0, 0])],
   });
-  const unordered = resolve({
+  const unordered = await resolve({
     parameter: profileParameter("S1"),
     evidence: [sketchEvidence({ sketchFeatureId: "S1", resultIndex: 1, point: [0, 0, 0] })],
     solved: [solvedCircle("S1", [0, 0, 0])],
@@ -473,6 +482,7 @@ function resolveOpenCurves(input: {
   tier?: string;
 }) {
   return resolveOnshapeOpenSketchCurveProfiles({
+    sketchSolver,
     profileParameter: { parameterId: "surfaceEntities", queries: input.queries },
     featureKind: "surface extrude",
     featureLabel: "Extrude 4",
@@ -486,8 +496,8 @@ function resolveOpenCurves(input: {
   });
 }
 
-test("profile resolver reads compressed sketch-entity edge queries into durable open-curve profiles", () => {
-  const result = resolveOpenCurves({
+test("profile resolver reads compressed sketch-entity edge queries into durable open-curve profiles", async () => {
+  const result = await resolveOpenCurves({
     queries: [
       compressedEdgeQuery("S_OPEN", "S_OPEN_seg0"),
       compressedEdgeQuery("S_OPEN", "S_OPEN_seg1"),
@@ -505,8 +515,8 @@ test("profile resolver reads compressed sketch-entity edge queries into durable 
   });
 });
 
-test("profile resolver expands a whole-sketch wire query over a region-free sketch", () => {
-  const result = resolveOpenCurves({
+test("profile resolver expands a whole-sketch wire query over a region-free sketch", async () => {
+  const result = await resolveOpenCurves({
     queries: [wireQuery("S_OPEN")],
     solved: [solvedOpenChain("S_OPEN", 3)],
   });
@@ -521,8 +531,8 @@ test("profile resolver expands a whole-sketch wire query over a region-free sket
   });
 });
 
-test("profile resolver rejects a whole-sketch wire query whose sketch derives closed regions", () => {
-  const result = resolveOpenCurves({
+test("profile resolver rejects a whole-sketch wire query whose sketch derives closed regions", async () => {
+  const result = await resolveOpenCurves({
     queries: [wireQuery("S_CLOSED")],
     solved: [solvedCircle("S_CLOSED", [0, 0, 0])],
   });
@@ -533,29 +543,29 @@ test("profile resolver rejects a whole-sketch wire query whose sketch derives cl
   ]);
 });
 
-test("profile resolver rejects unreadable, cross-sketch, unmatched, and disconnected surface profiles", () => {
-  const unreadable = resolveOpenCurves({
+test("profile resolver rejects unreadable, cross-sketch, unmatched, and disconnected surface profiles", async () => {
+  const unreadable = await resolveOpenCurves({
     queries: [{ queryString: 'query = qCreatedBy(id + "S_OPEN", EntityType.EDGE);' }],
     solved: [solvedOpenChain("S_OPEN", 2)],
   });
-  const crossSketch = resolveOpenCurves({
+  const crossSketch = await resolveOpenCurves({
     queries: [
       compressedEdgeQuery("S_OPEN", "S_OPEN_seg0"),
       compressedEdgeQuery("S_OTHER", "S_OTHER_seg0"),
     ],
     solved: [solvedOpenChain("S_OPEN", 2), solvedOpenChain("S_OTHER", 2)],
   });
-  const unmatched = resolveOpenCurves({
+  const unmatched = await resolveOpenCurves({
     queries: [compressedEdgeQuery("S_OPEN", "S_OPEN_missing")],
     solved: [solvedOpenChain("S_OPEN", 2)],
   });
-  const bakedSketch = resolveOpenCurves({
+  const bakedSketch = await resolveOpenCurves({
     queries: [compressedEdgeQuery("S_OPEN", "S_OPEN_seg0")],
     solved: [solvedOpenChain("S_OPEN", 2)],
     tier: "baked",
   });
   // Two segments that share no endpoint cannot be grouped into one wire.
-  const disconnected = resolveOpenCurves({
+  const disconnected = await resolveOpenCurves({
     queries: [
       compressedEdgeQuery("S_SPLIT", "S_SPLIT_seg0"),
       compressedEdgeQuery("S_SPLIT", "S_SPLIT_seg1"),

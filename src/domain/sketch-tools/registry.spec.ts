@@ -1,5 +1,7 @@
 import { test, expect } from "vitest";
-import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import {
   acceptSketchDraw,
@@ -28,6 +30,8 @@ import {
   searchToolDefinitions,
 } from "@/core/tools/tool-registry";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+
+const regionSolver = new SketchConstraintSolverAdapter();
 
 test("src/domain/sketch-tools/registry.spec.ts", async () => {
   function testRegistryContainsCurrentSketchToolSet() {
@@ -750,7 +754,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBeNull();
   }
 
-  function testAdvancedCurveConstructorsCommitDurableIntent() {
+  async function testAdvancedCurveConstructorsCommitDurableIntent() {
     const ellipse = drawSketchTool("ellipse", [
       [0, 0],
       [2, 0],
@@ -805,12 +809,16 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       },
       partialSolvePolicy: "bestEffort",
     });
-    const conicRegions = deriveSketchRegionsCore({
+    const conicRegions = await regionSolver.deriveSketchRegions({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_regions",
       documentId: "doc_workspace",
       revisionId: "rev_0001",
       sketchId: "sketch_draft",
       definition: conic.definition,
       solvedSnapshot: solvedConic.solvedSnapshot,
+      projectedReferences: [],
     });
     expect(
       conicRegions.diagnostics.some(
@@ -890,7 +898,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
     ).toBe("Ellipse requires non-zero major and minor radii.");
   }
 
-  function testProfileTextCommitsEditableTextAndDerivedProfile() {
+  async function testProfileTextCommitsEditableTextAndDerivedProfile() {
     let session = beginSketchTool(
       createNewSketchSessionFromSupport(
         {
@@ -947,12 +955,16 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       },
       partialSolvePolicy: "bestEffort",
     });
-    const regions = deriveSketchRegionsCore({
+    const regions = await regionSolver.deriveSketchRegions({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_regions",
       documentId: "doc_workspace",
       revisionId: "rev_0001",
       sketchId: "sketch_draft",
       definition: session.definition,
       solvedSnapshot: solved.solvedSnapshot,
+      projectedReferences: [],
     });
 
     expect(
@@ -1093,9 +1105,9 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
   testCircleArcAndPolygonConstructorsCommitDurableIntent();
   testSplineCollectsThreePointsAndCommitsDurableGeometry();
   testSplineRetainsInvalidIntentWithoutTransientDuplicatePoints();
-  testAdvancedCurveConstructorsCommitDurableIntent();
+  await testAdvancedCurveConstructorsCommitDurableIntent();
   testAdvancedToolValidationRejectsDegenerateInput();
-  testProfileTextCommitsEditableTextAndDerivedProfile();
+  await testProfileTextCommitsEditableTextAndDerivedProfile();
   testInvalidProfileTextDoesNotCommitPartialEntity();
   testFullSplinePreviewsMatchCommittedGeometry();
   testGenericPresentationAccessFromSession();

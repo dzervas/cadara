@@ -23,7 +23,10 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import type { ModelingCommitSketchResult } from "@/domain/modeling/modeling-service";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
-import { deriveSketchRegionsCore } from "@/contracts/sketch/region-extraction";
+import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+
+const regionSolver = new SketchConstraintSolverAdapter({ revisionId: null });
 
 test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", async () => {
   async function unwrapModelingResult<T>(
@@ -216,7 +219,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     } satisfies CommitSketchRequest["definition"];
   }
 
-  function getFirstDerivedRegionId(
+  async function getFirstDerivedRegionId(
     documentId: "doc_workspace",
     revisionId: `rev_${string}`,
     sketchId: `sketch_${string}`,
@@ -231,13 +234,17 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
       },
       partialSolvePolicy: "failOnConflict",
     });
-    const regions = deriveSketchRegionsCore({
+    const regions = (await regionSolver.deriveSketchRegions({
+      contractVersion: CONTRACT_VERSION,
+      solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+      requestId: "request_regions",
       documentId,
       revisionId,
       sketchId,
       definition,
       solvedSnapshot: solved.solvedSnapshot,
-    }).regions;
+      projectedReferences: [],
+    })).regions;
     const regionId = regions[0]?.regionId;
     expect(
       regionId,
@@ -545,13 +552,17 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
           },
           partialSolvePolicy: "failOnConflict",
         }).solvedSnapshot;
-        const regions = deriveSketchRegionsCore({
+        const regions = (await regionSolver.deriveSketchRegions({
+          contractVersion: CONTRACT_VERSION,
+          solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+          requestId: "request_regions",
           documentId: "doc_workspace",
           revisionId,
           sketchId,
           definition: normalizedDefinition,
           solvedSnapshot,
-        }).regions;
+          projectedReferences: [],
+        })).regions;
         const sketch: SketchSnapshotRecord = {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: revisionId,
@@ -866,7 +877,7 @@ test("src/domain/modeling/modeling-history-persistence.commit-sketch.spec.ts", a
     const recordedSketchId =
       "sketch_550e8400-e29b-41d4-a716-446655440000" as const;
     const draftDefinition = createDraftSketchDefinition(recordedSketchId);
-    const replayRegionId = getFirstDerivedRegionId(
+    const replayRegionId = await getFirstDerivedRegionId(
       "doc_workspace",
       "rev_0002",
       recordedSketchId,

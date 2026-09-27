@@ -16,6 +16,16 @@ import {
 } from "@/domain/import/onshape/extrude-planner";
 import { makeWaveTCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
 import { makeWaveXSurfaceExtrudeCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
+import {
+  IMPORT_VERIFICATION_DOCUMENT_ID,
+  IMPORT_VERIFICATION_REVISION_ID,
+} from "@/domain/import/onshape/profile-resolver";
+import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+
+const sketchSolver = new SketchConstraintSolverAdapter({
+  documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+  revisionId: IMPORT_VERIFICATION_REVISION_ID,
+});
 
 const ELEMENT_ID = "wave-t-extrude-extents";
 
@@ -71,12 +81,13 @@ function profileInput(input: ReturnType<typeof fixtureInput>) {
   };
 }
 
-test("plans two-side extents and active draft angles", () => {
+test("plans two-side extents and active draft angles", async () => {
   const input = fixtureInput("WT_TWO_SIDE");
   ensureParameter(input.feature, "hasDraft").value = true;
   ensureParameter(input.feature, "draftAngle").expression = "5 deg";
 
-  const result = planExtrudeFeature({
+  const result = await planExtrudeFeature({
+    sketchSolver,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
@@ -100,7 +111,7 @@ test("plans two-side extents and active draft angles", () => {
   });
 });
 
-test("plans UP_TO_NEXT with rollback-inferred default scope and compressed profile queries", () => {
+test("plans UP_TO_NEXT with rollback-inferred default scope and compressed profile queries", async () => {
   const input = fixtureInput("WT_UP_TO_NEXT");
   const entities = parameter(input.feature, "entities")!;
   entities.queries = [{
@@ -108,7 +119,8 @@ test("plans UP_TO_NEXT with rollback-inferred default scope and compressed profi
     deterministicIds: ["profile-face"],
   }];
 
-  const result = planExtrudeFeature({
+  const result = await planExtrudeFeature({
+    sketchSolver,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
@@ -132,9 +144,10 @@ test("plans UP_TO_NEXT with rollback-inferred default scope and compressed profi
   });
 });
 
-test("keeps ambiguous default-scope multi-body extrudes honest", () => {
+test("keeps ambiguous default-scope multi-body extrudes honest", async () => {
   const input = fixtureInput("WT_UP_TO_NEXT");
-  const result = planExtrudeFeature({
+  const result = await planExtrudeFeature({
+    sketchSolver,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
@@ -145,7 +158,7 @@ test("keeps ambiguous default-scope multi-body extrudes honest", () => {
   });
 });
 
-test("declares and resolves exact-prefix slots for up-to-face and explicit body scope", () => {
+test("declares and resolves exact-prefix slots for up-to-face and explicit body scope", async () => {
   const input = fixtureInput("WT_UP_TO_NEXT");
   parameter(input.feature, "endBound")!.value = "UP_TO_FACE";
   ensureParameter(input.feature, "endBoundEntityFace").queries = [{
@@ -158,7 +171,8 @@ test("declares and resolves exact-prefix slots for up-to-face and explicit body 
     deterministicIds: ["body-target"],
   }];
 
-  const result = planExtrudeFeature({
+  const result = await planExtrudeFeature({
+    sketchSolver,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE", "WT_TWO_SIDE"],
@@ -228,7 +242,7 @@ test("declares and resolves exact-prefix slots for up-to-face and explicit body 
   });
 });
 
-test("binds an ENTITY start bound over live body topology to a resolved start entity", () => {
+test("binds an ENTITY start bound over live body topology to a resolved start entity", async () => {
   const input = fixtureInput("WT_UP_TO_NEXT");
   ensureParameter(input.feature, "startOffset").value = true;
   ensureParameter(input.feature, "startOffsetBound").value = "ENTITY";
@@ -239,7 +253,8 @@ test("binds an ENTITY start bound over live body topology to a resolved start en
     deterministicIds: ["start-edge"],
   }];
 
-  const result = planExtrudeFeature({
+  const result = await planExtrudeFeature({
+    sketchSolver,
     feature: input.feature,
     ...profileInput(input),
     priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
@@ -310,7 +325,7 @@ test("binds an ENTITY start bound over live body topology to a resolved start en
 // the extrude direction whenever `startOffsetOppositeDirection` equals
 // `oppositeDirection`. The authored expression is preserved, never collapsed to
 // the captured literal.
-test("translates a capture-pinned BLIND start offset and refuses the undiscriminated flag combination", () => {
+test("translates a capture-pinned BLIND start offset and refuses the undiscriminated flag combination", async () => {
   for (const opposite of [false, true]) {
     const input = fixtureInput("WT_UP_TO_NEXT");
     ensureParameter(input.feature, "startOffset").value = true;
@@ -319,7 +334,8 @@ test("translates a capture-pinned BLIND start offset and refuses the undiscrimin
     ensureParameter(input.feature, "startOffsetOppositeDirection").value = opposite;
     ensureParameter(input.feature, "oppositeDirection").value = opposite;
 
-    const result = planExtrudeFeature({
+    const result = await planExtrudeFeature({
+      sketchSolver,
       feature: input.feature,
       ...profileInput(input),
       priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
@@ -347,7 +363,8 @@ test("translates a capture-pinned BLIND start offset and refuses the undiscrimin
   ensureParameter(mismatched.feature, "oppositeDirection").value = false;
 
   expect(
-    planExtrudeFeature({
+    await planExtrudeFeature({
+      sketchSolver,
       feature: mismatched.feature,
       ...profileInput(mismatched),
       priorBodyProducingFeatureIds: ["WT_EXTENT_BASE"],
@@ -390,7 +407,8 @@ test.skipIf(!existsSync(BLIND_START_BUNDLE))(
         parameter(feature, "oppositeDirection")?.value,
       );
 
-      const result = planExtrudeFeature({
+      const result = await planExtrudeFeature({
+        sketchSolver,
         feature,
         profileEvidence: [],
         solvedSketchesByFeatureId: new Map(),
@@ -422,11 +440,12 @@ function surfaceInput(elementId: "wave-x-9841" | "wave-x-d3cd9") {
       ["S_SURFACE", { tier: "parametric", planeKey: "xy" as const }],
     ]),
     priorBodyProducingFeatureIds: [],
+    sketchSolver,
   };
 }
 
-test("plans a SURFACE extrude with open sketch-curve profiles and no boolean state", () => {
-  const result = planExtrudeFeature(surfaceInput("wave-x-9841"));
+test("plans a SURFACE extrude with open sketch-curve profiles and no boolean state", async () => {
+  const result = await planExtrudeFeature(surfaceInput("wave-x-9841"));
 
   expect(result.tier).toBe("parametric");
   if (result.tier !== "parametric") return;
@@ -448,8 +467,8 @@ test("plans a SURFACE extrude with open sketch-curve profiles and no boolean sta
   });
 });
 
-test("halves the authored depth of a symmetric extrude", () => {
-  const literal = planExtrudeFeature(surfaceInput("wave-x-d3cd9"));
+test("halves the authored depth of a symmetric extrude", async () => {
+  const literal = await planExtrudeFeature(surfaceInput("wave-x-d3cd9"));
   expect(literal.tier).toBe("parametric");
   if (literal.tier !== "parametric") return;
   // Pinned by the d3cd capture: a 50 mm symmetric depth spans ±25 mm, and cadara's
@@ -467,18 +486,18 @@ test("halves the authored depth of a symmetric extrude", () => {
   const expression = surfaceInput("wave-x-d3cd9");
   const depth = parameter(expression.feature, "depth")!;
   depth.expression = "#walls";
-  const result = planExtrudeFeature(expression);
+  const result = await planExtrudeFeature(expression);
   expect(result.tier === "parametric" && result.plannedExtrude.extent).toMatchObject({
     mode: "symmetric",
     end: { distance: { source: "expression", valueText: "((walls) / 2)" } },
   });
 });
 
-test("plans a grouped blind depth without an unresolved unit symbol", () => {
+test("plans a grouped blind depth without an unresolved unit symbol", async () => {
   const input = surfaceInput("wave-x-9841");
   parameter(input.feature, "depth")!.expression = "(25/2) mm";
 
-  const result = planExtrudeFeature(input);
+  const result = await planExtrudeFeature(input);
   expect(result.tier).toBe("parametric");
   if (result.tier !== "parametric") return;
   expect(result.plannedExtrude.extent).toMatchObject({
@@ -499,7 +518,7 @@ test("plans a grouped blind depth without an unresolved unit symbol", () => {
   expect(math.evaluate(extent.end.distance.valueText)).toBe(12.5);
 });
 
-test("keeps an UP_TO_SURFACE surface extrude on the topology-slot path", () => {
+test("keeps an UP_TO_SURFACE surface extrude on the topology-slot path", async () => {
   const input = surfaceInput("wave-x-9841");
   const endBound = parameter(input.feature, "endBound")!;
   endBound.value = "UP_TO_SURFACE";
@@ -508,7 +527,7 @@ test("keeps an UP_TO_SURFACE surface extrude on the topology-slot path", () => {
     deterministicIds: ["JQm"],
   }];
 
-  const result = planExtrudeFeature(input);
+  const result = await planExtrudeFeature(input);
 
   expect(result.tier).toBe("topology");
   if (result.tier !== "topology") return;
@@ -519,7 +538,7 @@ test("keeps an UP_TO_SURFACE surface extrude on the topology-slot path", () => {
   expect(hasUnresolvedExtrudeTopology(result.plannedExtrude)).toBe(true);
 });
 
-test("bakes surface extrudes whose boolean operation or draft angle is unrepresentable", () => {
+test("bakes surface extrudes whose boolean operation or draft angle is unrepresentable", async () => {
   const booleanInput = surfaceInput("wave-x-9841");
   parameter(booleanInput.feature, "surfaceOperationType")!.value = "ADD";
 
@@ -532,10 +551,12 @@ test("bakes surface extrudes whose boolean operation or draft angle is unreprese
     queryString: "query = qEverything(EntityType.EDGE);",
   }];
 
-  expect([booleanInput, draftInput, profileInput].map((input) => {
-    const result = planExtrudeFeature(input);
-    return result.tier === "baked" ? result.reason : result.tier;
-  })).toEqual([
+  const outcomes: string[] = [];
+  for (const input of [booleanInput, draftInput, profileInput]) {
+    const result = await planExtrudeFeature(input);
+    outcomes.push(result.tier === "baked" ? result.reason : result.tier);
+  }
+  expect(outcomes).toEqual([
     "extrude-surface-operation-unsupported",
     "extrude-surface-draft-unsupported",
     "extrude-surface-profile-unresolved",
