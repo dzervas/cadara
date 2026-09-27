@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
-import type {
-  EndpointNeutralSegment,
-  NeutralCurve,
-  NeutralCurvePointWitness,
-  NeutralCurveQueryRequest,
+import {
+  neutralCurveWitnessProvesTangency,
+  type EndpointNeutralSegment,
+  type NeutralCurve,
+  type NeutralCurvePointWitness,
+  type NeutralCurveQueryRequest,
 } from "@/contracts/modeling/neutral-curve-query";
 import { reconstructSpline } from "@/contracts/sketch/spline-geometry";
 import { approximateSplineOffset } from "@/contracts/sketch/spline-offset-geometry";
@@ -484,6 +485,49 @@ describe("constructive numeric neutral-curve dispatcher", () => {
         { classification: "unclassified" },
       ]);
     }
+  });
+
+  test("a point-touching circle pair's seam contact carries radical-line multiplicity 2 and is the tangency", () => {
+    // The circles touch at (1, 0), on the line of centres, which is c1's full
+    // turn seam: the certifier leaves that contact unclassified, but its
+    // radical-line root is double, so it is the single common point.
+    const touching = circle("touching", [2, 0], 1);
+    const seamAtContact = circle("seam-at-contact", [0, 0], 1);
+    const seamAway = circle("seam-away", [0, 0], 1, {
+      sourceDomain: { kind: "fullTurn", seam: Math.PI / 2 },
+    });
+    for (const pair of [
+      [seamAtContact, touching],
+      [touching, seamAtContact],
+    ] as const) {
+      const result = verified(query.queryPair(request(...pair)));
+      expect(result.completenessProof).toMatchObject({
+        family: "circlePair",
+        distinctRootCount: 1,
+      });
+      expect(result.points).toMatchObject([
+        {
+          classification: "unclassified",
+          position: [1, 0],
+          proof: {
+            kind: "exactAlgebraicCurveRootSet",
+            family: "circlePair",
+            rootMultiplicity: 2,
+          },
+        },
+      ]);
+      expect(neutralCurveWitnessProvesTangency(result.points[0]!)).toBe(true);
+    }
+    // The same contact away from the seam is classified tangent.
+    expect(
+      verified(query.queryPair(request(seamAway, touching))).points,
+    ).toMatchObject([
+      {
+        classification: "tangent",
+        position: [1, 0],
+        proof: { family: "circlePair", rootMultiplicity: 2 },
+      },
+    ]);
   });
 
   test("uses the exact divided line projection for accepted near-unit directions", () => {

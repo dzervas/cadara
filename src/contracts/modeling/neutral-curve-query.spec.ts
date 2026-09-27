@@ -7,10 +7,12 @@ import {
   checkNeutralCurvePointConsistency,
   evaluateNeutralCurve,
   getNeutralCurveJoinParameter,
+  neutralCurveWitnessProvesTangency,
   validateNeutralCurveJoinRequest,
   validateNeutralCurveQueryRequest,
   type EndpointNeutralSegment,
   type NeutralCurve,
+  type NeutralCurvePointWitness,
   type NeutralCurveQueryRequest,
 } from "@/contracts/modeling/neutral-curve-query";
 
@@ -48,6 +50,165 @@ const analyticCircleWitness = (
     firstParameterBounds: [firstParameter, firstParameter] as const,
     secondParameterBounds: [secondParameter, secondParameter] as const,
   },
+});
+
+const bounds = [0, 0] as const;
+const witnessWith = (
+  classification: NeutralCurvePointWitness["classification"],
+  proof: NeutralCurvePointWitness["proof"],
+): NeutralCurvePointWitness => ({
+  classification,
+  firstParameter: 0,
+  secondParameter: 0,
+  position: [0, 0],
+  proof,
+});
+
+test.each([
+  {
+    clause: "a tangent classification",
+    witness: witnessWith("tangent", {
+      kind: "exactCubicPairRootSet",
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a structural same-support cubic correspondence endpoint",
+    witness: witnessWith("unclassified", {
+      kind: "exactStructuralCubicCorrespondenceEndpoint",
+      poleOrder: "same",
+      firstProvenance: { sourceEntityId: "a", sourceSpanId: "a:0" },
+      secondProvenance: { sourceEntityId: "b", sourceSpanId: "b:0" },
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a line/circle root of multiplicity 2",
+    witness: witnessWith("unclassified", {
+      kind: "exactImplicitLineRootSet",
+      family: "lineCircle",
+      verification: "exactMultiplicity",
+      rootMultiplicity: 2,
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a line/cubic root of multiplicity 2",
+    witness: witnessWith("unclassified", {
+      kind: "exactImplicitLineRootSet",
+      family: "lineCubic",
+      verification: "exactMultiplicity",
+      rootMultiplicity: 2,
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a circle/cubic root of multiplicity 2",
+    witness: witnessWith("unclassified", {
+      kind: "exactAlgebraicCurveRootSet",
+      family: "circleCubic",
+      rootMultiplicity: 2,
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a circle-pair radical-line root of multiplicity 2",
+    witness: witnessWith("unclassified", {
+      kind: "exactAlgebraicCurveRootSet",
+      family: "circlePair",
+      rootMultiplicity: 2,
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+])("tangency proof: $clause proves a shared tangent line", ({ witness }) => {
+  expect(neutralCurveWitnessProvesTangency(witness)).toBe(true);
+});
+
+test.each([
+  {
+    clause: "a line/circle root of multiplicity 1",
+    witness: witnessWith("unclassified", {
+      kind: "exactImplicitLineRootSet",
+      family: "lineCircle",
+      verification: "exactRoot",
+      rootMultiplicity: 1,
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a circle-pair root of multiplicity 1",
+    witness: witnessWith("unclassified", {
+      kind: "exactAlgebraicCurveRootSet",
+      family: "circlePair",
+      rootMultiplicity: 1,
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a line/cubic root with no multiplicity (unknown, never simple)",
+    witness: witnessWith("unclassified", {
+      kind: "exactImplicitLineRootSet",
+      family: "lineCubic",
+      verification: "boundedSignChange",
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a circle/cubic root with no multiplicity",
+    witness: witnessWith("unclassified", {
+      kind: "exactAlgebraicCurveRootSet",
+      family: "circleCubic",
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a cubic/cubic resultant root of multiplicity 2",
+    witness: witnessWith("unclassified", {
+      kind: "exactAlgebraicCurveRootSet",
+      family: "cubicCubic",
+      rootMultiplicity: 2,
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a cubic self resultant root of multiplicity 2",
+    witness: witnessWith("unclassified", {
+      kind: "exactAlgebraicCurveRootSet",
+      family: "cubicSelf",
+      rootMultiplicity: 2,
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "an unclassified cubic-pair root set",
+    witness: witnessWith("unclassified", {
+      kind: "exactCubicPairRootSet",
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+  {
+    clause: "a crossing classification",
+    witness: witnessWith("crossing", {
+      kind: "exactFiniteLineIntersection",
+      firstParameterBounds: bounds,
+      secondParameterBounds: bounds,
+    }),
+  },
+])("tangency proof: $clause proves nothing", ({ witness }) => {
+  expect(neutralCurveWitnessProvesTangency(witness)).toBe(false);
 });
 
 test("point consistency is translation-independent and cannot prove a positive gap", () => {
